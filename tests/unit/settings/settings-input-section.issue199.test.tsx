@@ -51,6 +51,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     }
 
     settingsPagePreferenceState.isTauriWindow = false;
+    settingsPagePreferenceState.isDesktopOperatingSystem = false;
     settingsPagePreferenceState.mainWindowShortcutSelection = ['Ctrl', 'E'];
     settingsPagePreferenceState.mainWindowShortcutQuickFocusEnabled = false;
     isTauriMock.mockReturnValue(false);
@@ -280,8 +281,17 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     });
   });
 
-  it('shows main-window shortcut settings only on desktop tauri', () => {
-    settingsPagePreferenceState.isTauriWindow = true;
+  it('shows main-window shortcut settings on desktop operating systems even in mobile layout', () => {
+    settingsPagePreferenceState.isDesktopOperatingSystem = true;
+
+    render(<SettingsPage />);
+
+    expect(screen.getByText('主窗口全局快捷键')).toBeInTheDocument();
+    expect(screen.getByText('唤起后快速聚焦输入')).toBeInTheDocument();
+  });
+
+  it('shows main-window shortcut settings on desktop web-first layout', () => {
+    settingsPagePreferenceState.isDesktopOperatingSystem = true;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: true,
       media: query,
@@ -300,7 +310,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
   });
 
   it('updates main-window shortcut selection from input section', async () => {
-    settingsPagePreferenceState.isTauriWindow = true;
+    settingsPagePreferenceState.isDesktopOperatingSystem = true;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: true,
       media: query,
@@ -324,7 +334,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
   });
 
   it('toggles main-window quick-focus from input section', () => {
-    settingsPagePreferenceState.isTauriWindow = true;
+    settingsPagePreferenceState.isDesktopOperatingSystem = true;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: true,
       media: query,

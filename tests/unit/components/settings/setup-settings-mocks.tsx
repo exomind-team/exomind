@@ -98,6 +98,7 @@ export const settingsPagePreferenceState = {
   mePageEnabled: false,
   desktopAdaptiveEnabled: true,
   isTauriWindow: false,
+  isDesktopOperatingSystem: false,
   voiceShortcutAsrProvider: 'moss' as string,
   mainWindowShortcutSelection: ['Ctrl', 'E'] as string[],
   mainWindowShortcutQuickFocusEnabled: false,
@@ -200,6 +201,7 @@ vi.mock('@/config/runtime-target', async (importOriginal) => {
   return {
     ...actual,
     isTauriWindow: vi.fn(() => settingsPagePreferenceState.isTauriWindow),
+    isDesktopOperatingSystem: vi.fn(() => settingsPagePreferenceState.isDesktopOperatingSystem),
   };
 });
 

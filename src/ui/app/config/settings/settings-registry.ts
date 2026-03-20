@@ -187,7 +187,6 @@ import {
   updateTimerPreferences,
   type CountdownEndMode,
 } from '@/config/timer-preferences';
-import { isTauriWindow } from '@/config/runtime-target';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
 import {
@@ -196,6 +195,7 @@ import {
 } from '@/lib/media/timer-end-sounds';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import { openExternalUrl } from '@/lib/utils/open-external';
+import { isDesktopOperatingSystem } from '@/config/runtime-target';
 import {
   DataTransferSetting,
   DevInstanceDiagnosticsSetting,
@@ -394,8 +394,8 @@ function mossOnly(ctx: SettingsContext): boolean {
   return ctx.voiceShortcutAsrProvider === 'moss';
 }
 
-function desktopTauriOnly(ctx: SettingsContext): boolean {
-  return Boolean(ctx.isDesktop) && Boolean(ctx.isTauriWindow) && isTauriWindow();
+function desktopOperatingSystemOnly(): boolean {
+  return isDesktopOperatingSystem();
 }
 
 function setDeveloperModeWithSideEffects(enabled: boolean): void {
@@ -746,7 +746,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     rowTestId: 'new-settings-main-window-shortcut-row',
     type: 'enum',
     multiSelect: true,
-    visible: desktopTauriOnly,
+    visible: desktopOperatingSystemOnly,
     options: MAIN_WINDOW_SHORTCUT_OPTION_VALUES.map((value) => ({ label: value, value })),
     optionTestId: (value) => `new-settings-main-window-shortcut-${value.toLowerCase()}`,
     get: () => getMainWindowShortcutSelection(),
@@ -765,7 +765,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     rowTestId: 'new-settings-main-window-shortcut-quick-focus-row',
     controlTestId: 'new-settings-main-window-shortcut-quick-focus-switch',
     type: 'boolean',
-    visible: desktopTauriOnly,
+    visible: desktopOperatingSystemOnly,
     get: () => getMainWindowShortcutQuickFocusEnabled(),
     set: (value: boolean) => setMainWindowShortcutQuickFocusEnabled(value),
     subscribe: subscribeMainWindowShortcutQuickFocusChanges,

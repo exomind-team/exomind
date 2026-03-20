@@ -100,6 +100,32 @@ export function isTauriWindow(): boolean {
   return '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
 }
 
+export function isDesktopOperatingSystem(): boolean {
+  if (isTauriWindow()) {
+    return true;
+  }
+
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent?.toLowerCase() ?? '';
+  if (/(android|iphone|ipad|ipod|mobile|phone)/i.test(userAgent)) {
+    return false;
+  }
+
+  const navigatorWithUserAgentData = navigator as Navigator & {
+    userAgentData?: { platform?: string };
+  };
+  const platform = (
+    navigatorWithUserAgentData.userAgentData?.platform
+    || navigator.platform
+    || userAgent
+  ).toLowerCase();
+
+  return /(win|mac|linux|x11)/i.test(platform);
+}
+
 function resolveEmbeddedHost(): string {
   const cachedStatus = readEmbeddedRuntimeStatus();
   if (cachedStatus) {
