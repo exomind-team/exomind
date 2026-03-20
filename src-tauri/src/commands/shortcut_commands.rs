@@ -36,6 +36,15 @@ static MAIN_WINDOW_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 static VOICE_OVERLAY_BOTTOM_MARGIN: AtomicI32 =
     AtomicI32::new(DEFAULT_VOICE_OVERLAY_BOTTOM_MARGIN);
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MonitorGeometry {
+    position_x: i32,
+    position_y: i32,
+    width: u32,
+    height: u32,
+}
+
 /// Voice shortcut runtime state（运行时快捷键状态）.
 #[derive(Default)]
 pub struct VoiceShortcutState {
@@ -581,36 +590,81 @@ fn cursor_in_monitor(cx: i32, cy: i32, pos_x: i32, pos_y: i32, width: u32, heigh
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn monitor_geometry(monitor: &tauri::Monitor) -> MonitorGeometry {
+    let position = monitor.position();
+    let size = monitor.size();
+    MonitorGeometry {
+        position_x: position.x,
+        position_y: position.y,
+        width: size.width,
+        height: size.height,
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn choose_voice_overlay_anchor(
+    main_monitor: Option<MonitorGeometry>,
+    cursor_monitor: Option<MonitorGeometry>,
+    primary_monitor: Option<MonitorGeometry>,
+) -> Option<MonitorGeometry> {
+    main_monitor.or(cursor_monitor).or(primary_monitor)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn resolve_overlay_monitor(app: &AppHandle) -> Result<Option<tauri::Monitor>, String> {
-    // Prefer the monitor containing the cursor so the overlay appears
-    // on whichever screen the user is currently working on.
-    if let Some((cx, cy)) = cursor_position() {
-        let monitors = app.available_monitors().map_err(|e| e.to_string())?;
-        for monitor in monitors {
-            let pos = monitor.position();
-            let size = monitor.size();
-            if cursor_in_monitor(cx, cy, pos.x, pos.y, size.width, size.height) {
-                return Ok(Some(monitor));
-            }
-        }
-        // Cursor is in a gap between monitors (non-contiguous layout) or
-        // available_monitors() returned an empty list — fall through to main window.
-        log::debug!(
-            "cursor ({cx},{cy}) not within any monitor rect, falling back to main window monitor"
-        );
-    }
-
-    // Fallback: use the monitor that contains the main window.
-    if let Some(main_window) = app.get_webview_window("main") {
-        let current_monitor = main_window
+    let main_monitor = if let Some(main_window) = app.get_webview_window("main") {
+        main_window
             .current_monitor()
-            .map_err(|error| error.to_string())?;
-        if current_monitor.is_some() {
-            return Ok(current_monitor);
+            .map_err(|error| error.to_string())?
+    } else {
+        None
+    };
+
+    let available_monitors = app.available_monitors().map_err(|error| error.to_string())?;
+    let cursor_monitor = if let Some((cx, cy)) = cursor_position() {
+        let matched_monitor = available_monitors.into_iter().find(|monitor| {
+            let geometry = monitor_geometry(monitor);
+            cursor_in_monitor(
+                cx,
+                cy,
+                geometry.position_x,
+                geometry.position_y,
+                geometry.width,
+                geometry.height,
+            )
+        });
+
+        if matched_monitor.is_none() {
+            log::debug!(
+                "cursor ({cx},{cy}) not within any monitor rect, falling back to main window monitor"
+            );
+        }
+
+        matched_monitor
+    } else {
+        None
+    };
+    let primary_monitor = app.primary_monitor().map_err(|error| error.to_string())?;
+
+    let anchor = choose_voice_overlay_anchor(
+        main_monitor.as_ref().map(monitor_geometry),
+        cursor_monitor.as_ref().map(monitor_geometry),
+        primary_monitor.as_ref().map(monitor_geometry),
+    );
+
+    if let Some(anchor_geometry) = anchor {
+        if main_monitor.as_ref().map(monitor_geometry) == Some(anchor_geometry) {
+            return Ok(main_monitor);
+        }
+        if cursor_monitor.as_ref().map(monitor_geometry) == Some(anchor_geometry) {
+            return Ok(cursor_monitor);
+        }
+        if primary_monitor.as_ref().map(monitor_geometry) == Some(anchor_geometry) {
+            return Ok(primary_monitor);
         }
     }
 
-    app.primary_monitor().map_err(|error| error.to_string())
+    Ok(None)
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -854,7 +908,10 @@ pub async fn foreground_window_get() -> Result<ForegroundWindowContext, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::{calculate_overlay_position, cursor_in_monitor};
+    use super::{
+        calculate_overlay_position, choose_voice_overlay_anchor, cursor_in_monitor,
+        MonitorGeometry,
+    };
 
     #[test]
     fn calculate_overlay_position_centers_bottom_on_primary_work_area() {
@@ -868,6 +925,58 @@ mod tests {
         let (x, y) = calculate_overlay_position(1920, 40, 1920, 1040);
         assert_eq!(x, 2600);
         assert_eq!(y, 784);
+    }
+
+    #[test]
+    fn choose_voice_overlay_anchor_prefers_main_window_monitor_over_cursor_monitor() {
+        let main_monitor = MonitorGeometry {
+            position_x: 3840,
+            position_y: -392,
+            width: 3840,
+            height: 2088,
+        };
+        let cursor_monitor = MonitorGeometry {
+            position_x: 0,
+            position_y: 0,
+            width: 3840,
+            height: 2088,
+        };
+        let primary_monitor = MonitorGeometry {
+            position_x: 0,
+            position_y: 0,
+            width: 3840,
+            height: 2088,
+        };
+
+        let anchor =
+            choose_voice_overlay_anchor(Some(main_monitor), Some(cursor_monitor), Some(primary_monitor));
+
+        assert_eq!(anchor, Some(main_monitor));
+    }
+
+    #[test]
+    fn choose_voice_overlay_anchor_falls_back_to_cursor_then_primary() {
+        let cursor_monitor = MonitorGeometry {
+            position_x: 0,
+            position_y: -2160,
+            width: 3840,
+            height: 2088,
+        };
+        let primary_monitor = MonitorGeometry {
+            position_x: 0,
+            position_y: 0,
+            width: 3840,
+            height: 2088,
+        };
+
+        assert_eq!(
+            choose_voice_overlay_anchor(None, Some(cursor_monitor), Some(primary_monitor)),
+            Some(cursor_monitor)
+        );
+        assert_eq!(
+            choose_voice_overlay_anchor(None, None, Some(primary_monitor)),
+            Some(primary_monitor)
+        );
     }
 
     // --- cursor_in_monitor hit-test tests ---
