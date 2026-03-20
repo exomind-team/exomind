@@ -260,17 +260,21 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(screen.getByTestId('task-dag-mode-browse')).toBeEnabled();
     expect(screen.getByTestId('task-dag-mode-connect')).toBeEnabled();
     expect(screen.getByTestId('task-dag-mode-execute')).toBeEnabled();
+    expect(screen.getByText('任务依赖图')).toBeInTheDocument();
+    expect(screen.getByText('依赖图')).toBeInTheDocument();
     expect(screen.getByTestId('task-dag-legend-hard-chip')).toBeInTheDocument();
     expect(screen.getByTestId('task-dag-legend-soft-chip')).toBeInTheDocument();
     expect(screen.queryByTestId('task-dag-current-root-summary')).not.toBeInTheDocument();
     expect(screen.queryByTestId('task-dag-current-root-badge-task-a')).not.toBeInTheDocument();
     expect(screen.queryByTestId('task-dag-selected-panel')).not.toBeInTheDocument();
     expect(screen.getByTestId('task-dag-node-task-a').className).toContain('border-[#16A34A]/60');
+    expect(screen.getByTestId('task-dag-jump-to-root')).toHaveTextContent('聚焦可执行');
 
     fireEvent.click(screen.getByTestId('task-dag-jump-to-root'));
-    expect(flowApiMocks.setCenter).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
-      duration: 250,
-      zoom: 0.12,
+    expect(flowApiMocks.fitView).toHaveBeenCalledWith({
+      nodes: [{ id: 'task-a' }],
+      duration: 300,
+      padding: 0.3,
     });
   });
 
@@ -424,9 +428,9 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
 
     await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-root')).toBeInTheDocument();
       expect(screen.getByTestId('mock-react-flow-node-task-child')).toBeInTheDocument();
       expect(screen.getByTestId('mock-react-flow-node-task-side')).toBeInTheDocument();
-      expect(screen.queryByTestId('mock-react-flow-node-task-root')).not.toBeInTheDocument();
       expect(screen.queryByTestId('mock-react-flow-node-task-grandchild')).not.toBeInTheDocument();
     });
 
@@ -437,7 +441,8 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       return positions;
     }, {});
 
-    expect(afterFilteredUpdate['task-child']).not.toEqual(beforeFilteredUpdate['task-child']);
+    expect(Object.keys(afterFilteredUpdate)).not.toContain('task-grandchild');
+    expect(Object.keys(afterFilteredUpdate).length).toBeLessThan(Object.keys(beforeFilteredUpdate).length);
   });
 
   it('does not auto-fit after nodes finish loading when no saved viewport exists', async () => {
@@ -684,6 +689,65 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
   });
 
+  it('keeps terminal nodes visible when they still carry active downstream work', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '已完成上游', status: 'completed', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: '仍在推进',
+        status: 'pending',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-hide-terminal-toggle'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+  });
+
+  it('hides terminal-only chains when hide terminal is enabled', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '已完成上游', status: 'completed', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: '已完成下游',
+        status: 'completed',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-c', title: '旁支待办', createdAt: 30, updatedAt: 30 }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-hide-terminal-toggle'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-a')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-b')).not.toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+    });
+  });
+
   it('restores hide-terminal and immersive preferences from localStorage on first render', async () => {
     window.localStorage.setItem('exomind:dag-hide-terminal', '1');
     window.localStorage.setItem('exomind:dag-immersive', '1');
@@ -717,6 +781,56 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       expect(screen.getByTestId('task-dag-node-task-a').className).toContain('opacity-35');
     });
     expect(screen.getByTestId('task-dag-node-task-b').className).toContain('ring-[#C75B3A]/35');
+  });
+
+  it('supports description, fuzzy, and filter search options with localStorage persistence', async () => {
+    const view = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('task-dag-search-input'), { target: { value: 'mrkdwn' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-match-count')).toHaveTextContent('0');
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-search-option-description'));
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-match-count')).toHaveTextContent('1');
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-search-option-fuzzy'));
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-match-count')).toHaveTextContent('0');
+    });
+
+    fireEvent.change(screen.getByTestId('task-dag-search-input'), { target: { value: 'Markdown' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-match-count')).toHaveTextContent('1');
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-search-option-filter'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-a')).not.toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-search-options') ?? '{}')).toMatchObject({
+      includeDescription: true,
+      fuzzy: false,
+      filterMode: true,
+    });
+    expect(window.localStorage.getItem('exomind:dag-search-draft')).toBe('Markdown');
+
+    view.unmount();
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-input')).toHaveValue('Markdown');
+      expect(screen.getByTestId('task-dag-search-option-description')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-search-option-filter')).toBeInTheDocument();
+    });
   });
 
   it('switches modes and persists the latest mode to localStorage', async () => {
@@ -777,6 +891,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       expect(screen.getByTestId('task-dag-key-hints')).toBeInTheDocument();
     });
 
+    expect(screen.getByTestId('task-dag-key-hints').className).toContain('max-w-[50%]');
     expect(screen.getByText('切换模式')).toBeInTheDocument();
     expect(screen.getAllByText('长按平移')).toHaveLength(2);
     expect(screen.getByText('长按缩放')).toBeInTheDocument();
@@ -881,6 +996,27 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
+  it('hides the browse-mode control panel while the detail panel is open', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-hide-terminal-toggle')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-detail-panel-desktop')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('task-dag-hide-terminal-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-legend-hard-chip')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+    expect(screen.getByTestId('task-dag-hide-terminal-toggle')).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-legend-hard-chip')).toBeInTheDocument();
+  });
+
   it('toggles immersive mode and hides page chrome plus flow controls', async () => {
     render(<TaskDagPage />);
 
@@ -906,6 +1042,73 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
     expect(window.localStorage.getItem('exomind:dag-immersive')).toBe('0');
     expect(screen.getByTestId('mock-react-flow-controls')).toBeInTheDocument();
+  });
+
+  it('persists collapsed dag visibility state to localStorage and restores it on remount', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '唯一上游', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: '折叠目标',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+    ]);
+
+    const view = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+    fireEvent.keyDown(document, { key: 'F', altKey: true, shiftKey: true });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-a')).not.toBeInTheDocument();
+    });
+
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-visibility') ?? '{}')).toMatchObject({
+      collapsedUpstreamOf: ['task-b'],
+      collapsedDownstreamOf: [],
+    });
+
+    view.unmount();
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-a')).not.toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+  });
+
+  it('updates selected node mode-specific data immediately when switching modes', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      const browseNode = (flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; data: { isSelected?: boolean; showConnectHandles?: boolean } }>;
+      }).nodes.find((node) => node.id === 'task-a');
+      expect(browseNode?.data.isSelected).toBe(true);
+      expect(browseNode?.data.showConnectHandles).toBe(false);
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+
+    await waitFor(() => {
+      const connectNode = (flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; data: { isSelected?: boolean; showConnectHandles?: boolean } }>;
+      }).nodes.find((node) => node.id === 'task-a');
+      expect(connectNode?.data.isSelected).toBe(true);
+      expect(connectNode?.data.showConnectHandles).toBe(true);
+    });
   });
 
   it('opens quick create from pane gestures in connect mode and submits a new task', async () => {

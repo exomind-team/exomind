@@ -144,7 +144,7 @@ describe('TasksPage current layout（任务页当前布局）', () => {
     });
 
     expect(screen.getByText('时间线').closest('a')).toHaveAttribute('to', '/tasks/timeline');
-    expect(screen.getByText('DAG').closest('a')).toHaveAttribute('to', '/tasks/dag');
+    expect(screen.getByText('依赖图').closest('a')).toHaveAttribute('to', '/tasks/dag');
   });
 
   it('keeps quick add input visible on the tasks page', async () => {

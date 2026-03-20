@@ -64,7 +64,7 @@ export function TaskDagKeyHints({
   return (
     <div
       data-testid="task-dag-key-hints"
-      className="pointer-events-none absolute bottom-3 right-3 z-10 flex max-w-[min(32rem,calc(100%-1.5rem))] flex-col gap-1 rounded-xl border border-[#E7E3E0] bg-white/90 px-3 py-2 text-[10px] text-[#78716C] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E]"
+      className="pointer-events-none absolute bottom-3 right-3 z-10 flex max-w-[50%] flex-col gap-1 rounded-xl border border-[#E7E3E0] bg-white/90 px-3 py-2 text-[10px] text-[#78716C] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E]"
     >
       <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
         {hints.map((hint) => (

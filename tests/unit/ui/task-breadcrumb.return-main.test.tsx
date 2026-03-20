@@ -30,7 +30,7 @@ describe('TaskBreadcrumb return to task root', () => {
   it('adds the force-main search flag and clears remembered task sub-routes', () => {
     sessionStorage.setItem(TASKS_LAST_PATH_KEY, '/tasks/dag');
 
-    render(<TaskBreadcrumb segments={[{ label: '任务', to: '/tasks' }]} current={{ label: 'DAG 视图' }} />);
+    render(<TaskBreadcrumb segments={[{ label: '任务', to: '/tasks' }]} current={{ label: '依赖图' }} />);
 
     const link = screen.getByTestId('breadcrumb-link-/tasks');
     expect(link.getAttribute('data-search')).toBe(JSON.stringify({ main: '1' }));

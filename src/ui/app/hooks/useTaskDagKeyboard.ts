@@ -42,6 +42,7 @@ export interface TaskDagKeyboardOptions {
   onModeChange: (mode: TaskDagMode) => void;
   onImmersiveChange: (immersive: boolean) => void;
   onSelectedTaskIdChange: (taskId: string | null) => void;
+  onBrowseActivate?: (nodeId: string) => void;
   onConnectStateChange: (state: { sourceId: string; type: 'hard' | 'soft' } | null) => void;
   onConnectExecute: (sourceId: string, targetId: string, type: 'hard' | 'soft') => void;
   onQuickCreateUpstream: (fromNodeId: string) => void;
@@ -245,6 +246,7 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     onModeChange,
     onImmersiveChange,
     onSelectedTaskIdChange,
+    onBrowseActivate,
     onConnectStateChange,
     onConnectExecute,
     onQuickCreateUpstream,
@@ -446,6 +448,12 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
       return;
     }
 
+    if ((key === 'Enter' || key === ' ') && mode === 'browse' && selectedTaskId) {
+      event.preventDefault();
+      onBrowseActivate?.(selectedTaskId);
+      return;
+    }
+
     if ((key === 'Enter' || key === ' ') && mode === 'connect') {
       event.preventDefault();
 
@@ -523,6 +531,7 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     onModeChange,
     onQuickCreateDownstream,
     onQuickCreateUpstream,
+    onBrowseActivate,
     onSelectedTaskIdChange,
     onConnectExecute,
     onToggleCollapse,

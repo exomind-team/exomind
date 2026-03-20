@@ -36,7 +36,7 @@ function getLongestCommonSubstringLength(left: string, right: string): number {
 
 export function extractTaskTitleSearchQuery(inputValue: string): string {
   const [firstLine = ''] = inputValue.split(/\r?\n/, 1);
-  return normalizeFuzzyText(firstLine.trim());
+  return firstLine.trim();
 }
 
 export function getTaskTitleFuzzyScore(title: string, query: string): number | null {
@@ -71,6 +71,52 @@ export function filterTasksByTitleFuzzySearch(tasks: TaskNode[], query: string):
         task,
         score: getTaskTitleFuzzyScore(normalizedTitle, normalizedQuery),
         longestSubstringLength: getLongestCommonSubstringLength(normalizedTitle, normalizedQuery),
+      };
+    })
+    .filter((entry): entry is { task: TaskNode; score: number; longestSubstringLength: number } => entry.score !== null)
+    .sort((left, right) => (
+      right.longestSubstringLength - left.longestSubstringLength
+      || right.score - left.score
+      || left.task.title.localeCompare(right.task.title, 'zh-CN')
+    ))
+    .map((entry) => entry.task);
+}
+
+export interface TaskDagSearchOptions {
+  includeDescription: boolean;
+  fuzzy: boolean;
+  filterMode: boolean;
+}
+
+function buildSearchText(task: TaskNode, includeDescription: boolean): string {
+  return includeDescription
+    ? `${task.title} ${task.description ?? ''}`
+    : task.title;
+}
+
+export function filterTasksBySearch(
+  tasks: TaskNode[],
+  query: string,
+  options: Pick<TaskDagSearchOptions, 'includeDescription' | 'fuzzy'>,
+): TaskNode[] {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return tasks;
+  }
+
+  if (!options.fuzzy) {
+    const loweredQuery = trimmedQuery.toLocaleLowerCase();
+    return tasks.filter((task) => buildSearchText(task, options.includeDescription).toLocaleLowerCase().includes(loweredQuery));
+  }
+
+  const normalizedQuery = normalizeFuzzyText(trimmedQuery);
+  return tasks
+    .map((task) => {
+      const normalizedText = normalizeFuzzyText(buildSearchText(task, options.includeDescription));
+      return {
+        task,
+        score: getTaskTitleFuzzyScore(normalizedText, normalizedQuery),
+        longestSubstringLength: getLongestCommonSubstringLength(normalizedText, normalizedQuery),
       };
     })
     .filter((entry): entry is { task: TaskNode; score: number; longestSubstringLength: number } => entry.score !== null)

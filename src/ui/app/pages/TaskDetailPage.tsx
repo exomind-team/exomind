@@ -40,7 +40,7 @@ import remarkBreaks from 'remark-breaks';
 
 type DependencyType = 'soft' | 'hard';
 const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
-  dag: { label: 'DAG', to: '/tasks/dag' },
+  dag: { label: '依赖图', to: '/tasks/dag' },
   timeblocks: { label: '时间线', to: '/tasks/timeline' },
   timeline: { label: '时间线', to: '/tasks/timeline' },
 };

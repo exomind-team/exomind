@@ -188,7 +188,7 @@ export function TasksPage() {
             className="inline-flex items-center gap-1 rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
           >
             <Waypoints size={16} />
-            <span className="hidden md:inline">DAG</span>
+            <span className="hidden md:inline">依赖图</span>
           </Link>
           <PageMoreMenu />
         </div>

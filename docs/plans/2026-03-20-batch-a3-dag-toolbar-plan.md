@@ -619,4 +619,19 @@ const flowGraph = useMemo(
 
 ## 完成回填
 
-（Codex 执行完毕后在此填写）
+- 执行日期：2026-03-21
+- 执行结果：#608 #624 #637 #609 #607 #610 #629 #630 #631 #632 已按顺序完成
+- 主要落地：
+  - `TaskDagControlPanel.tsx`：搜索框独立成行，新增描述/模糊/过滤三选项，控制区与图例顺序调整为“搜索行 → 工具框 → 图例”，聚焦按钮改为始终可见并按活跃时间块动态显示“聚焦执行中 / 聚焦可执行”
+  - `TaskDagPage.tsx`：页面标题与 breadcrumb 改为“任务依赖图”；新增搜索选项与折叠状态 localStorage 持久化；搜索过滤模式；终态节点智能隐藏；浏览模式详情打开时隐藏右上角控制区；聚焦逻辑升级为 `fitView` 到执行中/可执行节点集合；`flowGraph` 热更新依赖补入 `mode`
+  - `task-title-fuzzy-search.ts`：扩展为支持标题/描述、模糊/精确两种搜索
+  - `TaskDagKeyHints.tsx`：提示板最大宽度调整为 `max-w-[50%]`
+  - `useTaskDagKeyboard.ts`：仅追加浏览模式 `Enter / Space` 激活回调，未改原有连接/平移/缩放键盘逻辑
+- 验证命令：
+  - `bunx tsc --noEmit`
+  - `bunx vitest run tests/unit/ui/task-dag-page.issue394.test.tsx`
+  - `bunx vitest run tests/unit/ui/task-dag-visibility.issue395.test.ts`
+- 验证结果：
+  - `tsc` 通过
+  - `task-dag-page.issue394`：43/43 通过
+  - `task-dag-visibility.issue395`：9/9 通过
