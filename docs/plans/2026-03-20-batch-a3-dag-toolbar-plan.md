@@ -2,19 +2,28 @@
 
 > **状态**：待执行
 > **分支**：直接在 `dev` 上开发
-> **关联 Issue**：#608, #609, #607, #610
-> **执行顺序**：#608 → #609 → #607 → #610
+> **关联 Issue**：#608, #624, #637, #609, #607, #610, #629, #630, #631, #632
+> **执行顺序**：#608 → #624 → #637 → #609 → #607 → #610 → #629 → #630 → #631 → #632
 
 ---
 
 ## Context
 
-DAG 一期（三模式 + Sugiyama）和二期（键盘 + 交互增强）已全部完成。三期聚焦右上角工具框的布局和功能升级：
+DAG 一期（三模式 + Sugiyama）和二期（键盘 + 交互增强）已全部完成。三期聚焦工具框布局升级和散件打磨：
 
+**核心 4 步**（原计划）：
 1. **#608**（极小）：工具框↔图例上下位置互换
 2. **#609**（大）：搜索框独立成行 + 描述/模糊/过滤三选项 + 持久化
 3. **#607**（中）：隐藏已结束保留承载未结束下游的终态节点
 4. **#610**（中）：跳到根节点升级为按执行状态聚焦节点集合
+
+**追加 6 个极小散件**（每个 1-5 行改动）：
+5. **#624**（极小）：对外命名统一为「任务依赖图」（页面标题、breadcrumb 文案）
+6. **#637**（极小）：右下角提示板最大宽度扩展到页面内容宽度的 1/2
+7. **#629**（极小）：浏览模式下已选中节点的 Enter/Space 等价于鼠标左键点击（触发详情/双击导航）
+8. **#630**（小）：浏览模式节点详情打开时隐藏右上角工具栏与图例
+9. **#631**（极小）：节点折叠状态 localStorage 持久化
+10. **#632**（极小）：选中节点时切换模式，节点样式立即热更新
 
 ---
 
@@ -401,13 +410,164 @@ bunx tsc --noEmit
 
 ---
 
+## 步骤 5：#624 对外命名统一为「任务依赖图」
+
+### 5.1 改动
+
+**文件**：`src/ui/app/pages/TaskDagPage.tsx`
+
+将页面标题和 breadcrumb 中的「任务依赖 DAG」改为「任务依赖图」：
+
+```tsx
+// header h1（约行 967）
+<h1>任务依赖图</h1>  // 原来是「任务依赖 DAG」
+
+// breadcrumb current label（约行 963）
+current={{ label: '依赖图', icon: Waypoints }}  // 原来是「DAG 视图」
+```
+
+**注意**：代码内部变量名（`TaskDagPage`、`task-dag-flow.ts` 等）保持不变，只改用户可见文案。
+
+---
+
+## 步骤 6：#637 提示板最大宽度扩展
+
+### 6.1 改动
+
+**文件**：`src/ui/app/components/TaskDagKeyHints.tsx`
+
+将提示板根 div 的 `max-w` 从当前固定值改为 `max-w-[50%]`（页面内容宽度的 1/2）。
+
+如果当前没有 max-w 限制，新增：
+
+```tsx
+className="... max-w-[50%] ..."
+```
+
+---
+
+## 步骤 7：#629 Enter/Space 等价于左键点击（浏览模式）
+
+### 7.1 改动
+
+**文件**：`src/ui/app/hooks/useTaskDagKeyboard.ts`
+
+在 `handleKeyDown` 中，浏览模式下 Enter/Space 已选中节点时，触发与鼠标单击相同的行为（打开详情面板）。
+
+新增 option callback：
+
+```ts
+onBrowseActivate?: (nodeId: string) => void;  // 浏览模式 Enter/Space 激活节点
+```
+
+在 handleKeyDown 中追加：
+
+```ts
+if ((key === 'Enter' || key === ' ') && mode === 'browse' && selectedTaskId) {
+  event.preventDefault();
+  onBrowseActivate?.(selectedTaskId);
+  return;
+}
+```
+
+TaskDagPage 中传入：
+
+```tsx
+onBrowseActivate={(nodeId) => {
+  // 等价于鼠标单击：确保详情面板打开（selectedTaskId 已设置）
+  // 如果需要双击行为（导航到详情页），可以通过快速连按检测
+}}
+```
+
+---
+
+## 步骤 8：#630 浏览模式详情打开时隐藏工具栏
+
+### 8.1 改动
+
+**文件**：`src/ui/app/pages/TaskDagPage.tsx`
+
+当浏览模式下 `selectedTaskId` 非空（详情面板打开）时，隐藏右上角工具栏和图例，让详情面板获得更多空间。
+
+```tsx
+// TaskDagControlPanel 和图例的渲染条件：
+const hideControlPanel = mode === 'browse' && selectedTaskId !== null;
+
+// 在工具栏/图例外层加条件：
+{hideControlPanel ? null : (
+  <TaskDagControlPanel ... />
+)}
+```
+
+**注意**：只在浏览模式隐藏。连接/执行模式下即使有选中也不隐藏（用户需要工具栏操作）。
+
+---
+
+## 步骤 9：#631 折叠状态 localStorage 持久化
+
+### 9.1 改动
+
+**文件**：`src/ui/app/pages/TaskDagPage.tsx`
+
+当前 `dagVisibility`（含 `collapsedUpstreamOf`、`collapsedDownstreamOf`）是纯内存态。改为 localStorage 持久化：
+
+```ts
+const DAG_VISIBILITY_KEY = 'exomind:dag-visibility';
+
+function readStoredVisibility(): TaskDagVisibilityState {
+  try {
+    const saved = window.localStorage.getItem(DAG_VISIBILITY_KEY);
+    if (saved) return { ...EMPTY_TASK_DAG_VISIBILITY_STATE, ...JSON.parse(saved) };
+  } catch { /* ignore */ }
+  return EMPTY_TASK_DAG_VISIBILITY_STATE;
+}
+
+const [dagVisibility, setDagVisibility] = useState(() => readStoredVisibility());
+
+useEffect(() => {
+  try {
+    window.localStorage.setItem(DAG_VISIBILITY_KEY, JSON.stringify(dagVisibility));
+  } catch { /* ignore */ }
+}, [dagVisibility]);
+```
+
+---
+
+## 步骤 10：#632 选中节点切换模式时样式热更新
+
+### 10.1 问题
+
+当用户选中一个节点后切换模式（浏览→连接），节点的样式（如选中环、执行态高亮）没有立即更新，需要取消选中再重新选中才生效。
+
+### 10.2 改动
+
+**文件**：`src/ui/app/pages/TaskDagPage.tsx`
+
+确保 `flowGraph` 的 `useMemo` 依赖包含 `mode`。如果当前没有包含，追加：
+
+```ts
+const flowGraph = useMemo(
+  () => buildVisibleTaskDagFlow(renderedVisibleGraph, {
+    // ... 已有参数 ...
+    mode,  // ★ 确保 mode 在依赖中
+  }),
+  [renderedVisibleGraph, /* ... */, mode],  // ★ 追加 mode
+);
+```
+
+如果 `buildVisibleTaskDagFlow` 不接受 mode 参数，则检查 `TaskDagNode` 渲染组件是否正确读取了 `nodeData` 中随 mode 变化的字段（如 `executeState`、`showConnectHandles`）。问题可能在于 node data 的引用没有随 mode 变化而更新。
+
+---
+
 ## 关键文件索引
 
 | 文件 | 改动类型 | Issue |
 |------|---------|-------|
 | `src/ui/app/components/TaskDagControlPanel.tsx` | 布局重排 + 搜索独立行 + 聚焦按钮 | #608 #609 #610 |
-| `src/ui/app/pages/TaskDagPage.tsx` | 搜索选项状态 + 过滤模式 + 聚焦逻辑 + 隐藏算法 | #609 #607 #610 |
+| `src/ui/app/pages/TaskDagPage.tsx` | 搜索选项 + 过滤 + 聚焦 + 隐藏算法 + 命名 + 详情隐藏工具栏 + 折叠持久化 | #609 #607 #610 #624 #630 #631 #632 |
 | `src/ui/app/pages/task-title-fuzzy-search.ts` | 扩展搜索匹配逻辑 | #609 |
+| `src/ui/app/components/TaskDagKeyHints.tsx` | 最大宽度扩展 | #637 |
+| `src/ui/app/hooks/useTaskDagKeyboard.ts` | 浏览模式 Enter/Space 激活 | #629 |
 
 ---
 
@@ -446,6 +606,13 @@ bunx tsc --noEmit
 | 全链终态 | A(完成)→B(完成)，开启隐藏 | 都隐藏 | #607 |
 | 聚焦-无时间块 | 点击"聚焦可执行" | 视口覆盖可执行节点 | #610 |
 | 聚焦-有时间块 | 点击"聚焦执行中" | 视口覆盖关联节点 | #610 |
+| 命名 | 页面标题和 breadcrumb | 显示「任务依赖图」而非「DAG」| #624 |
+| 提示板宽度 | 大量提示项 | 最大宽度不超过页面 50% | #637 |
+| Enter 浏览 | 浏览模式选中节点按 Enter | 等价于鼠标单击 | #629 |
+| 详情隐藏工具栏 | 浏览模式选中节点 | 工具栏和图例隐藏 | #630 |
+| 详情隐藏-连接模式 | 连接模式选中节点 | 工具栏仍显示 | #630 |
+| 折叠持久化 | 折叠上游→离开→返回 | 折叠状态保持 | #631 |
+| 切模式样式 | 选中节点后 Ctrl+→ 切模式 | 节点样式立即更新 | #632 |
 | tsc | `bunx tsc --noEmit` | 零错误 | 全部 |
 
 ---
