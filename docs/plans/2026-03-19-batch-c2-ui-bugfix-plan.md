@@ -205,4 +205,14 @@ npx tsc --noEmit
 
 ## 完成回填
 
-（Codex 执行完毕后在此填写）
+- 执行时间：2026-03-20
+- 实施结果：
+  - `#570` 已完成：检查了 `package.json` 与 `src-tauri/Cargo.toml`，当前项目使用的是 `@tauri-apps/plugin-opener` / `tauri-plugin-opener`，未接入 `@tauri-apps/plugin-shell`，因此提取统一工具 [open-external.ts](C:/Users/wzy/A137442/Project/exomind/src/lib/utils/open-external.ts) 复用 `plugin-opener`，Web 端 fallback 到 `window.open`。
+  - `#570` 已完成：统一在 [EventMarkdown.tsx](C:/Users/wzy/A137442/Project/exomind/src/components/Chat/EventMarkdown.tsx) 配置 Markdown 链接处理。外链走默认浏览器/新标签页，内部同源链接走 SPA `navigate`，`javascript:` 等非 `http/https` 协议不再渲染为可点击链接。
+  - `#570` 顺手收敛：设置页原本内联的 `openExternalUrl` 已改为复用统一工具，避免后续重复实现。
+  - `#589` 已完成：将 [SwitchAccountSheet.tsx](C:/Users/wzy/A137442/Project/exomind/src/ui/app/components/SwitchAccountSheet.tsx) 改为 `useIsDesktop()` 控制的双容器，横屏使用 `Dialog`，竖屏保持 `Drawer`。
+  - `#589` 已完成：档案入口面板的文字、背景、边框、按钮与 hover 状态补齐 `dark:` 适配，沿用项目现有深色配色体系。
+- 验证：
+  - `bunx vitest run tests/unit/components/EventMarkdown.external-links.test.tsx tests/unit/components/settings/SwitchAccountSheet.test.tsx`
+  - `bunx tsc --noEmit`
+  - 结果：全部通过。
