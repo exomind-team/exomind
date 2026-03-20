@@ -901,10 +901,18 @@ function VoiceTestActionRow({
   label,
   target,
   icon,
+  requiresDeveloperMode = true,
+  blockedLabel = '需开发者模式',
+  readyLabel = '可用',
+  blockedMessage = '请先开启开发者模式后使用语音测试',
 }: {
   label: string;
   target: '/moss-test' | '/volcano-asr-test';
   icon: ReactNode;
+  requiresDeveloperMode?: boolean;
+  blockedLabel?: string;
+  readyLabel?: string;
+  blockedMessage?: string;
 }) {
   const navigate = useNavigate();
   const [developerMode] = useSettingValue(
@@ -912,7 +920,7 @@ function VoiceTestActionRow({
     subscribeDeveloperModeChanges,
   );
   const [error, setError] = useState<string | null>(null);
-  const statusLabel = developerMode ? '可用' : '需开发者模式';
+  const statusLabel = !requiresDeveloperMode || developerMode ? readyLabel : blockedLabel;
 
   return (
     <div>
@@ -921,8 +929,8 @@ function VoiceTestActionRow({
         label={label}
         onClick={() => {
           setError(null);
-          if (!getDeveloperModeEnabled()) {
-            setError('请先开启开发者模式后使用语音测试');
+          if (requiresDeveloperMode && !getDeveloperModeEnabled()) {
+            setError(blockedMessage);
             return;
           }
           navigate({ to: target });
@@ -939,7 +947,15 @@ export function MossVoiceTestSetting(_props: { ctx: SettingsContext }) {
 }
 
 export function VolcanoVoiceTestSetting(_props: { ctx: SettingsContext }) {
-  return <VoiceTestActionRow label="火山引擎 ASR 测试" target="/volcano-asr-test" icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />} />;
+  return (
+    <VoiceTestActionRow
+      label="火山引擎 API 配置"
+      target="/volcano-asr-test"
+      icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+      requiresDeveloperMode={false}
+      readyLabel="进入"
+    />
+  );
 }
 
 type DataTransferDomain = 'all' | 'eventlog' | 'task' | 'timeblock';

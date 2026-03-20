@@ -195,6 +195,7 @@ import {
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
+import { openExternalUrl } from '@/lib/utils/open-external';
 import {
   DataTransferSetting,
   DevInstanceDiagnosticsSetting,
@@ -375,19 +376,6 @@ function getMainWindowShortcutHelperText(value: string[]): string {
     return `当前生效：${status.hotkey}。按下后显示并聚焦主窗口；若主窗口已聚焦则最小化。`;
   }
   return status.message;
-}
-
-/**
- * 在系统浏览器中打开外部 URL。
- * Tauri 环境优先使用 plugin-opener，Web 环境 fallback 到 window.open。
- */
-async function openExternalUrl(url: string): Promise<void> {
-  try {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(url);
-  } catch {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
 }
 
 function formatVoiceShortcutTestId(value: string): string {
@@ -938,15 +926,15 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: 'MOSS 语音测试',
     category: 'input',
     type: 'custom',
-    visible: devOnly,
+    visible: (ctx) => devOnly(ctx) && mossOnly(ctx),
     component: MossVoiceTestSetting,
   },
   {
     id: 'volcano-asr-test',
-    label: '火山引擎 ASR 测试',
+    label: '火山引擎 API 配置',
     category: 'input',
     type: 'custom',
-    visible: devOnly,
+    visible: volcanoOnly,
     component: VolcanoVoiceTestSetting,
   },
   {

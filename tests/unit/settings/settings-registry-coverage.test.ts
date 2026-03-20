@@ -24,6 +24,8 @@ const AUDITED_SETTINGS_IDS = [
   'input-send-mode',
   'task-page-fuzzy-search',
   'task-create-success-action',
+  'task-dag-pan-speed',
+  'task-dag-zoom-speed',
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
   'voice-shortcut-hotkey',
@@ -103,6 +105,8 @@ const BOOLEAN_IDS = [
 ] as const;
 
 const NUMBER_IDS = [
+  'task-dag-pan-speed',
+  'task-dag-zoom-speed',
   'voice-overlay-opacity',
   'voice-overlay-transcript-lines',
   'voice-overlay-bottom-offset',
@@ -290,12 +294,18 @@ describe('settings registry coverage audit', () => {
       expect(developerIds).toContain(id);
     });
 
-    // 语音测试项现已统一为“仅开发者模式可见”，不再受 provider 限制
+    expect(baseIds).toContain('moss-api-token');
+    expect(developerIds).toContain('moss-api-token');
+    expect(volcanoIds).not.toContain('moss-api-token');
+
+    // MOSS 测试仍需要“开发者模式 + 当前引擎”
     expect(baseIds).not.toContain('moss-voice-test');
     expect(developerIds).toContain('moss-voice-test');
-    expect(volcanoIds).toContain('moss-voice-test');
+    expect(volcanoIds).not.toContain('moss-voice-test');
+
+    // 火山入口现已改为“API 配置”入口，仅受 provider 限制
     expect(baseIds).not.toContain('volcano-asr-test');
-    expect(developerIds).toContain('volcano-asr-test');
+    expect(developerIds).not.toContain('volcano-asr-test');
     expect(volcanoIds).toContain('volcano-asr-test');
 
     // 资源模型仍然只在 volcano provider 下可见

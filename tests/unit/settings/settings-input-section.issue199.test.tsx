@@ -82,17 +82,46 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('仅作用于「当下」页面输入框，默认插入输入框')).toBeInTheDocument();
     expect(screen.getByText('Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束')).toBeInTheDocument();
     expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
+    expect(screen.queryByText('火山引擎 API 配置')).not.toBeInTheDocument();
   });
 
-  it('shows voice test rows only when developer mode is enabled', () => {
+  it('shows provider-matched voice settings rows when developer mode is enabled', async () => {
     vi.mocked(getDeveloperModeEnabled).mockReturnValue(true);
 
     render(<SettingsPage />);
 
+    expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
-    expect(screen.getByText('火山引擎 ASR 测试')).toBeInTheDocument();
-    expect(screen.getAllByText('可用')).toHaveLength(2);
+    expect(screen.queryByText('火山引擎 API 配置')).not.toBeInTheDocument();
+    expect(screen.queryByText('火山资源模型')).not.toBeInTheDocument();
+    expect(screen.getByText('可用')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
+
+    await waitFor(() => {
+      expect(screen.queryByText('MOSS API Token')).not.toBeInTheDocument();
+      expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
+      expect(screen.getByText('火山引擎 API 配置')).toBeInTheDocument();
+      expect(screen.getByText('火山资源模型')).toBeInTheDocument();
+      expect(screen.getByText('进入')).toBeInTheDocument();
+    });
+  });
+
+  it('shows volcano api config entry without developer mode when provider is volcano', async () => {
+    vi.mocked(getDeveloperModeEnabled).mockReturnValue(false);
+
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
+
+    await waitFor(() => {
+      expect(screen.getByText('火山引擎 API 配置')).toBeInTheDocument();
+      expect(screen.getByText('火山资源模型')).toBeInTheDocument();
+      expect(screen.getByText('进入')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('MOSS API Token')).not.toBeInTheDocument();
+    expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
   });
 
   it('switches shortcut voice provider from input section', async () => {
@@ -422,7 +451,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     render(<SettingsPage />);
 
     expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
+    expect(screen.queryByText('火山引擎 API 配置')).not.toBeInTheDocument();
   });
 
   it('renders the new voice settings in desktop layout（桌面布局也包含新增语音设置项）', () => {
