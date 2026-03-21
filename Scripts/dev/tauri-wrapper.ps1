@@ -147,6 +147,66 @@ function Ensure-AndroidReleaseCleartextTraffic {
   }
 }
 
+function Ensure-AndroidDebugCleartextTraffic {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$BuildGradlePath
+  )
+
+  if (-not (Test-Path -LiteralPath $BuildGradlePath)) {
+    return
+  }
+
+  $content = Get-Content -LiteralPath $BuildGradlePath -Raw -Encoding UTF8
+  $targetLine = 'manifestPlaceholders["usesCleartextTraffic"] = "true"'
+  $debugMatch = [regex]::Match($content, 'getByName\("debug"\)\s*\{')
+  if (-not $debugMatch.Success) {
+    return
+  }
+
+  $openBraceIndex = $debugMatch.Index + $debugMatch.Value.LastIndexOf('{')
+  $depth = 0
+  $closeBraceIndex = -1
+
+  for ($index = $openBraceIndex; $index -lt $content.Length; $index++) {
+    $char = $content[$index]
+    if ($char -eq '{') {
+      $depth++
+      continue
+    }
+    if ($char -ne '}') {
+      continue
+    }
+
+    $depth--
+    if ($depth -eq 0) {
+      $closeBraceIndex = $index
+      break
+    }
+  }
+
+  if ($closeBraceIndex -lt 0) {
+    return
+  }
+
+  $debugBlock = $content.Substring($debugMatch.Index, $closeBraceIndex - $debugMatch.Index + 1)
+  if ($debugBlock.Contains($targetLine)) {
+    return
+  }
+
+  $updated = [regex]::Replace(
+    $content,
+    'getByName\("debug"\)\s*\{',
+    "getByName(`"debug`") {`r`n            $targetLine",
+    1
+  )
+
+  if ($updated -ne $content) {
+    Write-TextUtf8NoBom -Path $BuildGradlePath -Content $updated
+    Write-Host "[tauri-wrapper] Enabled debug cleartext traffic in Android build.gradle.kts"
+  }
+}
+
 function Ensure-AndroidLauncherIcons {
   param(
     [Parameter(Mandatory = $true)]
@@ -632,6 +692,7 @@ $buildGradlePath = [System.IO.Path]::GetFullPath($buildGradlePath)
 # Patch before command for existing Android project (已有工程先补权限与 cleartext 配置)
 Ensure-AndroidManifestPermissions -ManifestPath $manifestPath
 Ensure-AndroidReleaseCleartextTraffic -BuildGradlePath $buildGradlePath
+Ensure-AndroidDebugCleartextTraffic -BuildGradlePath $buildGradlePath
 
 # Ensure cargo is resolvable even when rustup shim is partial.
 #（兼容仅安装 rustup、但 PATH 缺少 cargo 代理的环境）
@@ -692,6 +753,7 @@ if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android") {
   Invoke-AndroidGeneratedProjectPatch -ProjectRoot $projectRoot
   Ensure-AndroidManifestPermissions -ManifestPath $manifestPath
   Ensure-AndroidReleaseCleartextTraffic -BuildGradlePath $buildGradlePath
+  Ensure-AndroidDebugCleartextTraffic -BuildGradlePath $buildGradlePath
   if ($androidCommandsNeedIconSync -contains $TauriArgs[1]) {
     Ensure-AndroidLauncherIcons -ProjectRoot $projectRoot
   }

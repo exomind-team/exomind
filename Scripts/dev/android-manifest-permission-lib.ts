@@ -333,6 +333,26 @@ export function ensureReleaseCleartextTrafficInGradle(buildGradleKts: string): G
   return { buildGradleKts: updatedGradle, changed: updatedGradle !== buildGradleKts };
 }
 
+export function ensureDebugCleartextTrafficInGradle(buildGradleKts: string): GradlePatchResult {
+  const debugBlockOpenPattern = /getByName\("debug"\)\s*\{/;
+  const debugBlockRange = findGradleBlockRange(buildGradleKts, debugBlockOpenPattern);
+  if (!debugBlockRange) {
+    return { buildGradleKts, changed: false };
+  }
+
+  const debugBlock = buildGradleKts.slice(debugBlockRange.start, debugBlockRange.end);
+  if (debugBlock.includes(RELEASE_CLEARTEXT_PLACEHOLDER)) {
+    return { buildGradleKts, changed: false };
+  }
+
+  const newline = buildGradleKts.includes('\r\n') ? '\r\n' : '\n';
+  const updatedGradle = buildGradleKts.replace(
+    debugBlockOpenPattern,
+    `getByName("debug") {${newline}            ${RELEASE_CLEARTEXT_PLACEHOLDER}`
+  );
+  return { buildGradleKts: updatedGradle, changed: updatedGradle !== buildGradleKts };
+}
+
 export function ensureDebugNativeLibsAreStrippedInGradle(buildGradleKts: string): GradlePatchResult {
   if (!buildGradleKts.includes(DEBUG_KEEP_SYMBOLS_MARKER)) {
     return { buildGradleKts, changed: false };
@@ -398,10 +418,11 @@ export function ensureReleaseCleartextTrafficInGradleFile(
   try {
     const originalGradle = readFileSync(buildGradlePath, 'utf8');
     const cleartextPatched = ensureReleaseCleartextTrafficInGradle(originalGradle);
-    const patched = ensureDebugNativeLibsAreStrippedInGradle(cleartextPatched.buildGradleKts);
+    const debugCleartextPatched = ensureDebugCleartextTrafficInGradle(cleartextPatched.buildGradleKts);
+    const patched = ensureDebugNativeLibsAreStrippedInGradle(debugCleartextPatched.buildGradleKts);
     const ndkPatched = ensureConfiguredNdkVersionInGradle(patched.buildGradleKts, desiredNdkVersion);
     const updatedGradle = ndkPatched.buildGradleKts;
-    const changed = cleartextPatched.changed || patched.changed || ndkPatched.changed;
+    const changed = cleartextPatched.changed || debugCleartextPatched.changed || patched.changed || ndkPatched.changed;
 
     if (!changed) {
       return originalGradle.includes(RELEASE_CLEARTEXT_PLACEHOLDER)

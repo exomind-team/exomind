@@ -276,3 +276,29 @@ bunx tsc --noEmit
 | 两者都有 | 两个块都有 | 保持不变 |
 | tsc | `bunx tsc --noEmit` | 零错误 |
 | 测试 | `bunx vitest run tests/unit/scripts/android-manifest-permission-lib.test.ts` | 通过 |
+
+---
+
+## 完成回填
+
+- 完成时间：2026-03-22
+- 执行结果：已完成
+- 实际改动：
+  - `Scripts/dev/android-manifest-permission-lib.ts`
+    - 新增 `ensureDebugCleartextTrafficInGradle`
+    - 在 `ensureReleaseCleartextTrafficInGradleFile` 中串入 debug cleartext patch
+    - 额外修正 debug 检测范围，只检查 `debug` 块本身，避免误命中后续 `release` 块中的 cleartext
+  - `Scripts/dev/tauri-wrapper.ps1`
+    - 新增 `Ensure-AndroidDebugCleartextTraffic`
+    - 在两个既有 patch 调用点后追加 debug cleartext patch
+    - 额外修正 PowerShell 侧 debug 检测范围，只检查 `debug` 块本身
+  - `tests/unit/scripts/android-manifest-permission-lib.test.ts`
+    - 新增 `ensureDebugCleartextTrafficInGradle` 的 2 个用例
+  - `.github/workflows/release.yml`
+    - 追加 debug block 的 cleartext 校验
+- 验证结果：
+  - `bunx vitest run tests/unit/scripts/android-manifest-permission-lib.test.ts` 通过（20/20）
+  - `bunx tsc --noEmit` 通过
+- 备注：
+  - 按计划保持了 `RELEASE_CLEARTEXT_PLACEHOLDER`、`ensureReleaseCleartextTrafficInGradle`、入口脚本和 AndroidManifest 模板不变
+  - 工作区中另有未跟踪目录 `docs/analysis/`，本次未触碰

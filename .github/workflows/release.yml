@@ -401,6 +401,10 @@ jobs:
           if (-not ($buildGradleContent -match $releaseCleartextPattern)) {
             throw "Missing usesCleartextTraffic=true in release block."
           }
+          $debugCleartextPattern = 'getByName\("debug"\)\s*\{[\s\S]*manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"'
+          if (-not ($buildGradleContent -match $debugCleartextPattern)) {
+            throw "Missing usesCleartextTraffic=true in debug block."
+          }
 
           Write-Host "Android discovery permissions, multicast lock, and cleartext release placeholder verified."
 

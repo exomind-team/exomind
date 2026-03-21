@@ -10,6 +10,7 @@ import {
   RECORD_AUDIO_PERMISSION,
   RELEASE_CLEARTEXT_PLACEHOLDER,
   ensureConfiguredNdkVersionInGradle,
+  ensureDebugCleartextTrafficInGradle,
   ensureDebugNativeLibsAreStrippedInGradle,
   ensureMdnsMulticastLockInMainActivity,
   ensureReleaseCleartextTrafficInGradle,
@@ -284,6 +285,46 @@ describe('ensureReleaseCleartextTrafficInGradle', () => {
 `;
 
     const result = ensureReleaseCleartextTrafficInGradle(input);
+
+    expect(result.changed).toBe(false);
+    expect(result.buildGradleKts).toBe(input);
+  });
+});
+
+describe('ensureDebugCleartextTrafficInGradle', () => {
+  it('injects cleartext placeholder into debug block when missing（debug 缺失时注入）', () => {
+    const input = `android {
+    buildTypes {
+        getByName("debug") {
+            isDebuggable = true
+        }
+        getByName("release") {
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
+        }
+    }
+}
+`;
+
+    const result = ensureDebugCleartextTrafficInGradle(input);
+
+    expect(result.changed).toBe(true);
+    expect(result.buildGradleKts).toMatch(
+      /getByName\("debug"\)\s*\{[\s\S]*manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"/
+    );
+  });
+
+  it('keeps gradle unchanged when debug cleartext already exists（已存在时保持不变）', () => {
+    const input = `android {
+    buildTypes {
+        getByName("debug") {
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
+            isDebuggable = true
+        }
+    }
+}
+`;
+
+    const result = ensureDebugCleartextTrafficInGradle(input);
 
     expect(result.changed).toBe(false);
     expect(result.buildGradleKts).toBe(input);
