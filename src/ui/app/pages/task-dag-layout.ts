@@ -103,6 +103,24 @@ export function layoutDagNodes(
       continue;
     }
 
+    // Snap intermediate (dummy) waypoints so the corridor points straight
+    // at the target node.  In TB mode the corridor's X aligns to the
+    // target's center X; in LR mode the corridor's Y aligns to the
+    // target's center Y.  This keeps the vast majority of cross-layer
+    // edges clean without a full collision check.
+    if (points.length > 2) {
+      const targetNode = graph.node(edge.w);
+      if (targetNode) {
+        for (let i = 1; i < points.length - 1; i += 1) {
+          if (direction === 'TB') {
+            points[i] = { x: targetNode.x, y: points[i].y };
+          } else {
+            points[i] = { x: points[i].x, y: targetNode.y };
+          }
+        }
+      }
+    }
+
     edgePoints.set(buildDagLayoutEdgeKey(edge.v, edge.w), points);
   }
 
