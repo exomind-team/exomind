@@ -14,13 +14,18 @@ import { setMainWindowShortcutSelection } from '@/config/main-window-shortcut';
 import { setMainWindowShortcutQuickFocusEnabled } from '@/config/main-window-shortcut-focus';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
+import { setVoiceAutoRecordEnabled } from '@/config/voice-auto-record';
 import {
   setVoiceOverlayOpacity,
   setVoiceOverlayBottomOffset,
   setVoiceOverlayShowDiagnostics,
   setVoiceOverlayTranscriptLines,
 } from '@/config/voice-overlay-preferences';
-import { setVolcanoResourceId } from '@/lib/asr/volcano-config';
+import {
+  setVolcanoAccessKey,
+  setVolcanoAppKey,
+  setVolcanoResourceIdSetting,
+} from '@/config/volcano-asr-settings';
 
 const invokeMock = vi.fn();
 const isTauriMock = vi.fn(() => false);
@@ -67,6 +72,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('创建任务后')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
+    expect(screen.getByText('语音输入自动记录')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
     expect(screen.queryByText('主窗口全局快捷键')).not.toBeInTheDocument();
     expect(screen.queryByText('唤起后快速聚焦输入')).not.toBeInTheDocument();
@@ -83,7 +89,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('仅作用于「当下」页面输入框，默认插入输入框')).toBeInTheDocument();
     expect(screen.getByText('Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束')).toBeInTheDocument();
     expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-    expect(screen.queryByText('火山引擎 API 配置')).not.toBeInTheDocument();
+    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
   });
 
   it('shows provider-matched voice settings rows when developer mode is enabled', async () => {
@@ -93,7 +99,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
-    expect(screen.queryByText('火山引擎 API 配置')).not.toBeInTheDocument();
+    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
     expect(screen.queryByText('火山资源模型')).not.toBeInTheDocument();
     expect(screen.getByText('可用')).toBeInTheDocument();
 
@@ -102,13 +108,17 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     await waitFor(() => {
       expect(screen.queryByText('MOSS API Token')).not.toBeInTheDocument();
       expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-      expect(screen.getByText('火山引擎 API 配置')).toBeInTheDocument();
+      expect(screen.getByText('火山引擎 ASR 测试')).toBeInTheDocument();
+      expect(screen.getByText('火山引擎 Key')).toBeInTheDocument();
+      expect(screen.getByText('火山识别模式')).toBeInTheDocument();
       expect(screen.getByText('火山资源模型')).toBeInTheDocument();
+      expect(screen.getByText('火山 Resource ID')).toBeInTheDocument();
+      expect(screen.getByText('火山识别语言')).toBeInTheDocument();
       expect(screen.getByText('进入')).toBeInTheDocument();
     });
   });
 
-  it('shows volcano api config entry without developer mode when provider is volcano', async () => {
+  it('shows volcano config fields without developer mode when provider is volcano', async () => {
     vi.mocked(getDeveloperModeEnabled).mockReturnValue(false);
 
     render(<SettingsPage />);
@@ -116,13 +126,48 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
 
     await waitFor(() => {
-      expect(screen.getByText('火山引擎 API 配置')).toBeInTheDocument();
+      expect(screen.getByText('火山引擎 Key')).toBeInTheDocument();
+      expect(screen.getByText('火山识别模式')).toBeInTheDocument();
       expect(screen.getByText('火山资源模型')).toBeInTheDocument();
-      expect(screen.getByText('进入')).toBeInTheDocument();
+      expect(screen.getByText('火山 Resource ID')).toBeInTheDocument();
+      expect(screen.getByText('火山识别语言')).toBeInTheDocument();
     });
 
+    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
     expect(screen.queryByText('MOSS API Token')).not.toBeInTheDocument();
     expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
+  });
+
+  it('edits volcano engine keys in one dialog', async () => {
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
+
+    await waitFor(() => {
+      expect(screen.getByText('火山引擎 Key')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('new-settings-volcano-engine-key-row'));
+
+    expect(screen.getByTestId('new-settings-volcano-engine-app-key-input')).toHaveAttribute('type', 'password');
+    expect(screen.getByTestId('new-settings-volcano-engine-access-key-input')).toHaveAttribute('type', 'password');
+    expect(screen.getByTestId('new-settings-volcano-engine-app-key-clear')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-volcano-engine-access-key-clear')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-volcano-engine-app-key-visibility')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-volcano-engine-access-key-visibility')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('new-settings-volcano-engine-app-key-input'), {
+      target: { value: ' app-key-1 ' },
+    });
+    fireEvent.change(screen.getByTestId('new-settings-volcano-engine-access-key-input'), {
+      target: { value: ' access-key-1 ' },
+    });
+    fireEvent.click(screen.getByTestId('new-settings-volcano-engine-key-save'));
+
+    await waitFor(() => {
+      expect(setVolcanoAppKey).toHaveBeenCalledWith(' app-key-1 ');
+      expect(setVolcanoAccessKey).toHaveBeenCalledWith(' access-key-1 ');
+    });
   });
 
   it('switches shortcut voice provider from input section', async () => {
@@ -162,9 +207,17 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '1.0 小时版' }));
 
-    expect(setVolcanoResourceId('volc.bigasr.sauc.duration')).toBe('volc.bigasr.sauc.duration');
+    expect(setVolcanoResourceIdSetting('volc.bigasr.sauc.duration')).toBe('volc.bigasr.sauc.duration');
     expect(group).toBeInTheDocument();
     expect(screen.getByText('当前默认资源：1.0 小时版。')).toBeInTheDocument();
+  });
+
+  it('toggles voice auto-record from input section', () => {
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-auto-record-switch'));
+
+    expect(setVoiceAutoRecordEnabled).toHaveBeenCalledWith(false);
   });
 
   it('updates voice overlay opacity from input section', () => {
@@ -461,7 +514,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     render(<SettingsPage />);
 
     expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-    expect(screen.queryByText('火山引擎 API 配置')).not.toBeInTheDocument();
+    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
   });
 
   it('renders the new voice settings in desktop layout（桌面布局也包含新增语音设置项）', () => {

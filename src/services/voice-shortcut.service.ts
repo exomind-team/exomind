@@ -15,6 +15,7 @@ import {
   getVoiceShortcutMicPrewarmEnabled,
   subscribeVoiceShortcutMicPrewarmChanges,
 } from '@/config/voice-shortcut-mic-prewarm';
+import { getVoiceAutoRecordEnabled } from '@/config/voice-auto-record';
 import {
   getDeveloperModeEnabled,
   subscribeDeveloperModeChanges,
@@ -934,16 +935,19 @@ export class VoiceShortcutService {
       ?? null;
     const traceId = this.currentTraceId ?? undefined;
     const targetScope = activeInteractionContext?.targetScope ?? (foregroundWindow ? 'external-window' : 'unknown');
-    const storageEvent = await buildVoiceShortcutStorageEvent({
-      text: result.text,
-      startedAtMs: this.traceStartedAtMs ?? Date.now(),
-      targetScope,
-      window: foregroundWindow ? {
-        title: foregroundWindow.title ?? undefined,
-        processName: foregroundWindow.processName ?? undefined,
-      } : undefined,
-      agentContext: activeInteractionContext?.agentContext,
-    });
+    const shouldAutoRecord = getVoiceAutoRecordEnabled();
+    const storageEvent = shouldAutoRecord
+      ? await buildVoiceShortcutStorageEvent({
+        text: result.text,
+        startedAtMs: this.traceStartedAtMs ?? Date.now(),
+        targetScope,
+        window: foregroundWindow ? {
+          title: foregroundWindow.title ?? undefined,
+          processName: foregroundWindow.processName ?? undefined,
+        } : undefined,
+        agentContext: activeInteractionContext?.agentContext,
+      })
+      : null;
 
     const [clipboardResult, signalPublishResult, eventlogAppendResult] = await Promise.allSettled([
       (async () => {
@@ -966,7 +970,7 @@ export class VoiceShortcutService {
         } : undefined,
         agentContext: activeInteractionContext?.agentContext,
       }),
-      appendEventWithEcsReplication(storageEvent),
+      storageEvent ? appendEventWithEcsReplication(storageEvent) : Promise.resolve(undefined),
     ]);
 
     if (clipboardResult.status === 'rejected') {

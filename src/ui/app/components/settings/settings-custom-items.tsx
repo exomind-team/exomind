@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { Bell, Bot, Check, ChevronRight, Code, Download, Key, Mic, Music4, Timer, Upload, Wifi } from 'lucide-react';
+import { Bell, Bot, Check, ChevronRight, Code, Download, Eye, EyeOff, Key, Mic, Music4, Timer, Upload, Wifi, X } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
@@ -50,6 +50,14 @@ import {
   subscribeLLMSettingsChanges,
 } from '@/config/llm-settings';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
+import {
+  getVolcanoAccessKey,
+  getVolcanoAppKey,
+  setVolcanoAccessKey,
+  setVolcanoAppKey,
+  subscribeVolcanoAccessKeyChanges,
+  subscribeVolcanoAppKeyChanges,
+} from '@/config/volcano-asr-settings';
 import { importTasksFromFile } from '@/services/impl/settings-data-service';
 import {
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
@@ -949,12 +957,263 @@ export function MossVoiceTestSetting(_props: { ctx: SettingsContext }) {
 export function VolcanoVoiceTestSetting(_props: { ctx: SettingsContext }) {
   return (
     <VoiceTestActionRow
-      label="火山引擎 API 配置"
+      label="火山引擎 ASR 测试"
       target="/volcano-asr-test"
       icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
       requiresDeveloperMode={false}
       readyLabel="进入"
     />
+  );
+}
+
+function formatVolcanoEngineKeySummary(appKey: string, accessKey: string): string {
+  const hasAppKey = appKey.trim().length > 0;
+  const hasAccessKey = accessKey.trim().length > 0;
+  if (hasAppKey && hasAccessKey) {
+    return '已配置';
+  }
+  if (hasAppKey || hasAccessKey) {
+    return '部分配置';
+  }
+  return '未配置';
+}
+
+function VolcanoEngineKeyPanel({
+  appKey,
+  accessKey,
+  setAppKey,
+  setAccessKey,
+  appKeyVisible,
+  accessKeyVisible,
+  setAppKeyVisible,
+  setAccessKeyVisible,
+  notice,
+  error,
+  saving,
+  onSave,
+}: {
+  appKey: string;
+  accessKey: string;
+  setAppKey: (value: string) => void;
+  setAccessKey: (value: string) => void;
+  appKeyVisible: boolean;
+  accessKeyVisible: boolean;
+  setAppKeyVisible: (value: boolean) => void;
+  setAccessKeyVisible: (value: boolean) => void;
+  notice: string | null;
+  error: string | null;
+  saving: boolean;
+  onSave: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <NoticeBlock message={notice} tone="success" />
+      <NoticeBlock message={error} tone="error" />
+      <div className="space-y-4">
+        <label className="block space-y-2">
+          <span className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">AppKey</span>
+          <div className="relative">
+            <input
+              data-testid="new-settings-volcano-engine-app-key-input"
+              aria-label="AppKey"
+              type={appKeyVisible ? 'text' : 'password'}
+              value={appKey}
+              onChange={(event) => setAppKey(event.target.value)}
+              placeholder="输入火山 AppKey"
+              className="h-11 w-full rounded-xl border border-[#E7E5E4] bg-white px-4 pr-28 text-sm text-[#1C1917] outline-none transition-colors placeholder:text-[#A8A29E] focus:border-[#C75B3A] dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+            />
+            <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1">
+              <button
+                type="button"
+                data-testid="new-settings-volcano-engine-app-key-clear"
+                aria-label="清空 AppKey"
+                onClick={() => setAppKey('')}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[#DC2626] transition-colors hover:bg-[#FEE2E2] hover:text-[#B91C1C] dark:hover:bg-[#3F1D1D]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                data-testid="new-settings-volcano-engine-app-key-visibility"
+                onClick={() => setAppKeyVisible(!appKeyVisible)}
+                aria-label={appKeyVisible ? '隐藏 AppKey' : '显示 AppKey'}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[#78716C] transition-colors hover:bg-[#F5F0ED] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#292524] dark:hover:text-[#FAFAF9]"
+              >
+                {appKeyVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        </label>
+
+        <label className="block space-y-2">
+          <span className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">AccessKey</span>
+          <div className="relative">
+            <input
+              data-testid="new-settings-volcano-engine-access-key-input"
+              aria-label="AccessKey"
+              type={accessKeyVisible ? 'text' : 'password'}
+              value={accessKey}
+              onChange={(event) => setAccessKey(event.target.value)}
+              placeholder="输入火山 AccessKey"
+              className="h-11 w-full rounded-xl border border-[#E7E5E4] bg-white px-4 pr-28 text-sm text-[#1C1917] outline-none transition-colors placeholder:text-[#A8A29E] focus:border-[#C75B3A] dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+            />
+            <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1">
+              <button
+                type="button"
+                data-testid="new-settings-volcano-engine-access-key-clear"
+                aria-label="清空 AccessKey"
+                onClick={() => setAccessKey('')}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[#DC2626] transition-colors hover:bg-[#FEE2E2] hover:text-[#B91C1C] dark:hover:bg-[#3F1D1D]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                data-testid="new-settings-volcano-engine-access-key-visibility"
+                onClick={() => setAccessKeyVisible(!accessKeyVisible)}
+                aria-label={accessKeyVisible ? '隐藏 AccessKey' : '显示 AccessKey'}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[#78716C] transition-colors hover:bg-[#F5F0ED] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#292524] dark:hover:text-[#FAFAF9]"
+              >
+                {accessKeyVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        </label>
+
+        <div className="flex justify-end">
+          <button
+            type="button"
+            data-testid="new-settings-volcano-engine-key-save"
+            onClick={onSave}
+            disabled={saving}
+            className="rounded-xl bg-[#1C1917] px-4 py-2 text-sm text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#FAFAF9] dark:text-[#1C1917]"
+          >
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function VolcanoEngineKeySetting(props: { ctx: SettingsContext }) {
+  const [open, setOpen] = useState(false);
+  const [appKeyValue, setAppKeyValue] = useSettingValue(
+    () => getVolcanoAppKey(),
+    subscribeVolcanoAppKeyChanges,
+  );
+  const [accessKeyValue, setAccessKeyValue] = useSettingValue(
+    () => getVolcanoAccessKey(),
+    subscribeVolcanoAccessKeyChanges,
+  );
+  const [draftAppKey, setDraftAppKey] = useState('');
+  const [draftAccessKey, setDraftAccessKey] = useState('');
+  const [appKeyVisible, setAppKeyVisible] = useState(false);
+  const [accessKeyVisible, setAccessKeyVisible] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const shouldUseDialog = props.ctx.isDesktop || Boolean(props.ctx.isLandscape);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setDraftAppKey(appKeyValue);
+    setDraftAccessKey(accessKeyValue);
+    setAppKeyVisible(false);
+    setAccessKeyVisible(false);
+    setNotice(null);
+    setError(null);
+  }, [open, appKeyValue, accessKeyValue]);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setAppKeyVisible(false);
+      setAccessKeyVisible(false);
+      setNotice(null);
+      setError(null);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setError(null);
+      const nextAppKeyRaw = setVolcanoAppKey(draftAppKey);
+      const nextAccessKeyRaw = setVolcanoAccessKey(draftAccessKey);
+      const nextAppKey = isPromiseLike<string>(nextAppKeyRaw) ? await nextAppKeyRaw : (nextAppKeyRaw ?? draftAppKey);
+      const nextAccessKey = isPromiseLike<string>(nextAccessKeyRaw) ? await nextAccessKeyRaw : (nextAccessKeyRaw ?? draftAccessKey);
+      setAppKeyValue(nextAppKey);
+      setAccessKeyValue(nextAccessKey);
+      setDraftAppKey(nextAppKey);
+      setDraftAccessKey(nextAccessKey);
+      setNotice('火山引擎 Key 已保存');
+    } catch (nextError) {
+      setNotice(null);
+      setError(nextError instanceof Error ? nextError.message : '保存火山引擎 Key 失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const panel = (
+    <VolcanoEngineKeyPanel
+      appKey={draftAppKey}
+      accessKey={draftAccessKey}
+      setAppKey={setDraftAppKey}
+      setAccessKey={setDraftAccessKey}
+      appKeyVisible={appKeyVisible}
+      accessKeyVisible={accessKeyVisible}
+      setAppKeyVisible={setAppKeyVisible}
+      setAccessKeyVisible={setAccessKeyVisible}
+      notice={notice}
+      error={error}
+      saving={saving}
+      onSave={() => {
+        void handleSave();
+      }}
+    />
+  );
+
+  return (
+    <>
+      <SettingRow
+        testId="new-settings-volcano-engine-key-row"
+        icon={<Key className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="火山引擎 Key"
+        onClick={() => setOpen(true)}
+        right={<SecondaryValue value={formatVolcanoEngineKeySummary(appKeyValue, accessKeyValue)} />}
+      />
+      {shouldUseDialog ? (
+        <Dialog open={open} onOpenChange={handleOpenChange}>
+          <DialogContent className="rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>火山引擎 Key</DialogTitle>
+              <DialogDescription>配置火山语音识别 AppKey 与 AccessKey（仅保存在当前设备）</DialogDescription>
+            </DialogHeader>
+            {panel}
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <Drawer open={open} onOpenChange={handleOpenChange}>
+          <DrawerContent className="dark:bg-[#1C1917]">
+            <DrawerHeader className="pb-0 text-center">
+              <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                火山引擎 Key
+              </DrawerTitle>
+              <DrawerDescription className="text-xs text-[#A8A29E]">
+                配置火山语音识别 AppKey 与 AccessKey（仅保存在当前设备）
+              </DrawerDescription>
+            </DrawerHeader>
+            <div className="px-5 pb-8 pt-2">
+              {panel}
+            </div>
+          </DrawerContent>
+        </Drawer>
+      )}
+    </>
   );
 }
 

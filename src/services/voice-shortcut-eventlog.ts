@@ -1,4 +1,5 @@
 import { sha256 } from '@/adapters/crypto-adapter';
+import { getEventSourceMetadata } from '@/lib/eventlog/source-metadata';
 import type { AgentInteractionContext, TargetScope, WindowContext } from '@/lib/types/normalized-input';
 import type { Event } from '@/lib/storage/event-storage';
 
@@ -93,6 +94,9 @@ export async function buildVoiceShortcutStorageEvent(
     createdAt: new Date(activationBucketMs).toISOString(),
     type: 'voice',
     metadata: {
+      source: getEventSourceMetadata(),
+      inputSource: 'voice',
+      inputMethod: 'recognition',
       voiceShortcut: metadata,
     },
   };

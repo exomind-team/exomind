@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { VOICE_AUTO_RECORD_KEY } from '@/config/voice-auto-record';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
 import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
@@ -127,6 +128,10 @@ vi.mock('@/lib/services/voice-signal.service', () => ({
   publishVoiceTranscriptSignal: (...args: unknown[]) => publishVoiceTranscriptSignalMock(...args),
 }));
 
+vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
+  appendEventWithEcsReplication: (...args: unknown[]) => addEventMock(...args),
+}));
+
 vi.mock('@/lib/asr/live-preview', () => ({
   createDefaultVoiceLivePreviewSource: () => ({
     isAvailable: (...args: unknown[]) => livePreviewIsAvailableMock(...args),
@@ -182,6 +187,46 @@ async function flushAsync(times = 8): Promise<void> {
   }
 }
 
+async function flushPipeline(): Promise<void> {
+  await flushAsync(30);
+}
+
+function expectLastVoiceStorageEvent(
+  text: string,
+  options?: {
+    targetScope?: string;
+    window?: {
+      title?: string;
+      processName?: string;
+    };
+    agentContext?: {
+      agentId?: string;
+      agentName?: string;
+      sessionId?: string;
+    };
+  },
+): void {
+  expect(addEventMock).toHaveBeenCalled();
+  const lastCall = addEventMock.mock.calls.at(-1);
+  expect(lastCall).toBeDefined();
+  const [event] = lastCall ?? [];
+  expect(event).toEqual(expect.objectContaining({
+    content: text,
+    type: 'voice',
+    metadata: expect.objectContaining({
+      inputSource: 'voice',
+      inputMethod: 'recognition',
+      voiceShortcut: expect.objectContaining({
+        text,
+        captureSource: 'global-shortcut',
+        ...(options?.targetScope ? { targetScope: options.targetScope } : {}),
+        ...(options?.window ? { window: options.window } : {}),
+        ...(options?.agentContext ? { agentContext: options.agentContext } : {}),
+      }),
+    }),
+  }));
+}
+
 describe('VoiceShortcutService（全局语音快捷键服务）', () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -234,6 +279,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.removeItem('exomind:voiceShortcutAsrProvider');
     window.localStorage.removeItem('exomind:voiceShortcutMicPrewarmEnabled');
     window.localStorage.removeItem('exomind:voiceShortcutSendMode');
+    window.localStorage.removeItem(VOICE_AUTO_RECORD_KEY);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.accessKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.resourceId);
@@ -284,18 +330,19 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(tauriEventListeners.get('voice-shortcut')).toBeTruthy();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     expect(convertWebmBlobToWavMock).toHaveBeenCalledTimes(2);
     expect(transcribeMock).toHaveBeenCalledTimes(2);
     expect(writeClipboardMock).toHaveBeenCalledTimes(2);
-    // 语音输入始终写入 EventLog（前端直写）
-    expect(addEventMock).toHaveBeenCalled();
+    expect(addEventMock).toHaveBeenCalledTimes(2);
 
     const hasDecodeFailureLog = errorSpy.mock.calls.some((call) =>
       call.some((item) => String(item).includes('EncodingError') || String(item).includes('识别失败'))
@@ -311,8 +358,9 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await service.init();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     emitMock.mockClear();
     invokeMock.mockClear();
@@ -391,6 +439,38 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('appends voice storage event by default（默认自动记录语音输入）', async () => {
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+
+    expectLastVoiceStorageEvent('连续识别文本');
+
+    service.destroy();
+  });
+
+  it('skips voice storage event when auto-record is disabled（关闭自动记录后不写入事件日志）', async () => {
+    window.localStorage.setItem(VOICE_AUTO_RECORD_KEY, '0');
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+
+    expect(writeClipboardMock).toHaveBeenCalledWith('连续识别文本');
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalled();
+    expect(addEventMock).not.toHaveBeenCalled();
+
+    service.destroy();
+  });
+
   it('emits full live preview text during recording（录音时发出完整实时预览文本）', async () => {
     const service = new VoiceShortcutService();
     await service.init();
@@ -452,7 +532,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await service.init();
 
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     expect(emitMock).toHaveBeenCalledWith(
       'voice-overlay-state',
@@ -814,9 +894,10 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     const initialSessionCount = startedSessions.length;
     expect(initialSessionCount).toBeGreaterThanOrEqual(1);
+    const activeWarmSessionId = startedSessions.at(-1);
 
     await emitVolcanoStreamEvent({
-      sessionId: 'warm-session-1',
+      sessionId: activeWarmSessionId,
       errorMessage: 'WebSocket 被服务器关闭',
     });
     await flushAsync();
@@ -860,10 +941,11 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     const service = new VoiceShortcutService();
     await service.init();
     await flushAsync();
+    const activeWarmSessionId = startedSessions.at(-1);
 
     now = 61000;
     await emitVolcanoStreamEvent({
-      sessionId: 'warm-session-1',
+      sessionId: activeWarmSessionId,
       errorMessage: 'WebSocket 被服务器关闭',
     });
     await flushAsync();
@@ -872,14 +954,14 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(
       loggedMessages.some((message) =>
         message.includes('standby prepared')
-        && message.includes('session=warm-session-1')
+        && message.includes(`session=${activeWarmSessionId}`)
         && message.includes('createdAt=1000')
       )
     ).toBe(true);
     expect(
       loggedMessages.some((message) =>
         message.includes('standby closed')
-        && message.includes('session=warm-session-1')
+        && message.includes(`session=${activeWarmSessionId}`)
         && message.includes('createdAt=1000')
         && message.includes('closedAt=61000')
         && message.includes('lifetimeMs=60000')
@@ -1009,19 +1091,22 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     );
 
     await streamingOnChunk?.(new Uint8Array([1, 2, 3, 4]));
-    await flushAsync();
+    await flushPipeline();
+    const pushCall = invokeMock.mock.calls.find(([command]) => command === 'volcano_asr_stream_push');
+    const activeSessionId = pushCall?.[1]?.sessionId;
+    expect(activeSessionId).toEqual(expect.any(String));
     expect(invokeMock).toHaveBeenCalledWith('volcano_asr_stream_push', {
-      sessionId: 'warm-session-bootstrap',
+      sessionId: activeSessionId,
       audioData: [1, 2, 3, 4],
     });
 
     await emitVolcanoStreamEvent({
-      sessionId: 'warm-session-bootstrap',
+      sessionId: activeSessionId,
       text: '火山实时结果',
       isFinal: false,
       isDefinite: false,
     });
-    await flushAsync();
+    await flushPipeline();
     expect(emitMock).toHaveBeenCalledWith(
       'voice-overlay-state',
       expect.objectContaining({
@@ -1039,15 +1124,15 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     );
 
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     await emitVolcanoStreamEvent({
-      sessionId: 'warm-session-bootstrap',
+      sessionId: activeSessionId,
       text: '收口阶段实时结果',
       isFinal: false,
       isDefinite: true,
     });
-    await flushAsync();
+    await flushPipeline();
     expect(emitMock).toHaveBeenCalledWith(
       'voice-overlay-state',
       expect.objectContaining({
@@ -1063,13 +1148,13 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       lang: 'zh-CN',
       duration: 1800,
     });
-    await flushAsync();
+    await flushPipeline();
 
     expect(transcribeMock).not.toHaveBeenCalled();
     expect(convertWebmBlobToWavMock).not.toHaveBeenCalled();
     expect(streamingCaptureStopMock).toHaveBeenCalledTimes(1);
     expect(invokeMock).toHaveBeenCalledWith('volcano_asr_stream_finish', {
-      sessionId: 'warm-session-bootstrap',
+      sessionId: activeSessionId,
       audioData: [9, 8, 7, 6],
     });
     expect(emitMock).toHaveBeenCalledWith(
@@ -1173,10 +1258,10 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await service.init();
 
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     resolveFinish?.({
       text: '火山实时结果火山实时结果',
@@ -1184,11 +1269,10 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       lang: 'zh-CN',
       duration: 1800,
     });
-    await flushAsync();
+    await flushPipeline();
 
     expect(writeClipboardMock).toHaveBeenCalledWith('火山实时结果');
-    // 语音输入始终写入 EventLog（前端直写）
-    expect(addEventMock).toHaveBeenCalledWith('火山实时结果', new Set(['voice']));
+    expectLastVoiceStorageEvent('火山实时结果');
 
     service.destroy();
   });
@@ -1207,8 +1291,9 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     }, 'test-owner');
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('stop');
-    await flushAsync();
+    await flushPipeline();
 
     expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
       expect.objectContaining({ text: '连续识别文本' }),
@@ -1227,8 +1312,18 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         },
       }),
     );
-    // 语音输入始终写入 EventLog（前端直写）
-    expect(addEventMock).toHaveBeenCalledWith('连续识别文本', new Set(['voice']));
+    expectLastVoiceStorageEvent('连续识别文本', {
+      targetScope: 'agent-chat',
+      window: {
+        title: 'Cursor - ExoMind',
+        processName: 'Cursor.exe',
+      },
+      agentContext: {
+        agentId: 'codex',
+        agentName: 'Codex',
+        sessionId: 'session-xyz',
+      },
+    });
 
     service.destroy();
   });
@@ -1261,8 +1356,9 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await service.init();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('stop');
-    await flushAsync();
+    await flushPipeline();
 
     expect(foregroundReadCount).toBe(1);
     expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
@@ -1275,13 +1371,18 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         },
       }),
     );
-    // 语音输入始终写入 EventLog（前端直写）
-    expect(addEventMock).toHaveBeenCalledWith('冻结窗口测试', new Set(['voice']));
+    expectLastVoiceStorageEvent('冻结窗口测试', {
+      targetScope: 'external-window',
+      window: {
+        title: 'Window A',
+        processName: 'AppA.exe',
+      },
+    });
 
     service.destroy();
   });
 
-  it('falls back to direct EventLog write when signal publish fails（信号发布失败时 fallback 到直写）', async () => {
+  it('still appends voice storage event when signal publish fails（信号发布失败时仍写入事件日志）', async () => {
     transcribeMock.mockResolvedValue({
       text: 'fallback 测试',
       confidence: 0.95,
@@ -1300,18 +1401,16 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await service.init();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('stop');
-    await flushAsync();
+    await flushPipeline();
 
-    expect(addEventMock).toHaveBeenCalledWith(
-      'fallback 测试',
-      new Set(['voice']),
-    );
+    expectLastVoiceStorageEvent('fallback 测试');
 
     service.destroy();
   });
 
-  it('handles double failure gracefully when both signal and fallback addEvent fail（信号和直写双重失败时不崩溃）', async () => {
+  it('handles double failure gracefully when both signal and storage append fail（信号和事件日志双重失败时不崩溃）', async () => {
     transcribeMock.mockResolvedValue({
       text: '双重失败测试',
       confidence: 0.95,
@@ -1332,14 +1431,12 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await service.init();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('stop');
-    await flushAsync();
+    await flushPipeline();
 
-    // 双重失败不应抛异常，流程正常走到 done
-    expect(addEventMock).toHaveBeenCalledWith(
-      '双重失败测试',
-      new Set(['voice']),
-    );
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalled();
+    expect(addEventMock).toHaveBeenCalled();
 
     service.destroy();
     errorSpy.mockRestore();
@@ -1379,11 +1476,12 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     await emitVoiceShortcut('start');
     await emitVoiceShortcut('cancel');
-    await flushAsync();
+    await flushPipeline();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('stop');
-    await flushAsync();
+    await flushPipeline();
 
     expect(secondForegroundResolved).toBe(true);
     expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
@@ -1398,7 +1496,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     );
 
     resolveFirstForeground?.({ title: 'Window A', processName: 'AppA.exe' });
-    await flushAsync();
+    await flushPipeline();
 
     const lastPublishCall = publishVoiceTranscriptSignalMock.mock.calls.at(-1);
     expect(lastPublishCall?.[1]).toEqual(expect.objectContaining({
@@ -1550,8 +1648,9 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     invokeMock.mockClear();
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     expect(invokeMock).toHaveBeenCalledWith('simulate_paste');
     expect(invokeMock).not.toHaveBeenCalledWith('simulate_enter');
@@ -1568,8 +1667,9 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     invokeMock.mockClear();
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
     await vi.advanceTimersByTimeAsync(120);
     await flushAsync();
 

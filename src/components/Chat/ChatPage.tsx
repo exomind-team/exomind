@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Play, Pause, Square, FileText, NotepadText, Bot } from 'lucide-react';
+import { Play, Pause, Square, FileText, NotepadText, Bot, Mic } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
@@ -123,6 +123,19 @@ function formatEventSourceLabel(event: Event): string {
 
   const resolvedDeviceName = deviceName ?? (platform ? `${platformLabel} Device` : UNKNOWN_DEVICE_LABEL);
   return `${resolvedDeviceName} · ${platformLabel}`;
+}
+
+function isVoiceInputEvent(event: Event): boolean {
+  return isRecord(event.metadata) && event.metadata.inputSource === 'voice';
+}
+
+function VoiceInputBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+      <Mic size={10} />
+      语音输入
+    </span>
+  );
 }
 
 export function ChatPage({
@@ -566,6 +579,7 @@ export function ChatPage({
             {events.map((event) => {
               const systemEvent = isSystemEvent(event);
               const eventSourceLabel = formatEventSourceLabel(event);
+              const voiceInput = isVoiceInputEvent(event);
               if (systemEvent) {
                 const isAgentFeedback = event.tags.has('agent_feedback');
                 return (
@@ -616,6 +630,7 @@ export function ChatPage({
                       data-testid="new-mobile-message-meta"
                     >
                       <span className="text-muted">{eventSourceLabel}</span>
+                      {voiceInput ? <VoiceInputBadge /> : null}
                       <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       <span className="text-xs font-semibold text-strong">{userDisplayName}</span>
                     </div>
@@ -669,9 +684,12 @@ export function ChatPage({
                           <EventMarkdown content={event.content} />
                         </div>
                         <MessageActions content={event.content} align="start" />
-                        <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                          {formatTime(event.timestamp)}
-                        </p>
+                        <div className="mt-0.5 flex items-center gap-2 sm:mt-1">
+                          <p className="text-xs text-muted-foreground">
+                            {formatTime(event.timestamp)}
+                          </p>
+                          {isVoiceInputEvent(event) ? <VoiceInputBadge /> : null}
+                        </div>
                       </div>
                     </div>
                   ))}

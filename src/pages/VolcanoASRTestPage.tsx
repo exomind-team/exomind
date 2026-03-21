@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -24,6 +25,18 @@ import {
   findVolcanoResourcePreset,
   type VolcanoEndpoint,
 } from '@/lib/asr/volcano-config';
+import {
+  getVolcanoAccessKey,
+  getVolcanoAppKey,
+  getVolcanoEndpointSetting,
+  getVolcanoLanguageSetting,
+  getVolcanoResourceIdSetting,
+  subscribeVolcanoAccessKeyChanges,
+  subscribeVolcanoAppKeyChanges,
+  subscribeVolcanoEndpointChanges,
+  subscribeVolcanoLanguageChanges,
+  subscribeVolcanoResourceIdChanges,
+} from '@/config/volcano-asr-settings';
 import { isTauriWindow } from '@/config/runtime-target';
 
 type RecordingState = 'idle' | 'recording' | 'recognizing';
@@ -39,14 +52,6 @@ interface LogEntry {
   time: string;
   message: string;
   text?: string;
-}
-
-function loadSaved(key: string, fallback: string): string {
-  try {
-    return localStorage.getItem(key) || fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 function loadSavedBoolean(key: string, fallback: boolean): boolean {
@@ -75,19 +80,12 @@ function maskKey(value: string): string {
 }
 
 export function VolcanoASRTestPage() {
-  const [appKey, setAppKey] = useState(() => loadSaved(VOLCANO_STORAGE_KEYS.appKey, ''));
-  const [accessKey, setAccessKey] = useState(() => loadSaved(VOLCANO_STORAGE_KEYS.accessKey, ''));
-  const [resourceId, setResourceId] = useState(() => loadSaved(
-    VOLCANO_STORAGE_KEYS.resourceId,
-    'volc.bigasr.sauc.duration'
-  ));
-  const [endpoint, setEndpoint] = useState<VolcanoEndpoint>(() => {
-    const raw = loadSaved(VOLCANO_STORAGE_KEYS.endpoint, DEFAULT_VOLCANO_ASR_OPTIONS.endpoint);
-    return VOLCANO_ENDPOINT_OPTIONS.some((item) => item.value === raw)
-      ? raw as VolcanoEndpoint
-      : DEFAULT_VOLCANO_ASR_OPTIONS.endpoint;
-  });
-  const [language, setLanguage] = useState(() => loadSaved(VOLCANO_STORAGE_KEYS.language, 'zh-CN'));
+  const navigate = useNavigate();
+  const [appKey, setAppKeyState] = useState(() => getVolcanoAppKey());
+  const [accessKey, setAccessKeyState] = useState(() => getVolcanoAccessKey());
+  const [resourceId, setResourceIdState] = useState(() => getVolcanoResourceIdSetting());
+  const [endpoint, setEndpointState] = useState<VolcanoEndpoint>(() => getVolcanoEndpointSetting());
+  const [language, setLanguageState] = useState(() => getVolcanoLanguageSetting());
   const [enableNonstream, setEnableNonstream] = useState(() => loadSavedBoolean(
     VOLCANO_STORAGE_KEYS.enableNonstream,
     DEFAULT_VOLCANO_ASR_OPTIONS.enableNonstream
@@ -105,7 +103,7 @@ export function VolcanoASRTestPage() {
     DEFAULT_VOLCANO_ASR_OPTIONS.forceToSpeechTime
   ));
   const [showKeys, setShowKeys] = useState(false);
-  const [configSaved, setConfigSaved] = useState(false);
+  const [testOptionsSaved, setTestOptionsSaved] = useState(false);
 
   const [state, setState] = useState<RecordingState>('idle');
   const [duration, setDuration] = useState(0);
@@ -125,9 +123,9 @@ export function VolcanoASRTestPage() {
     () => VOLCANO_ENDPOINT_OPTIONS.find((item) => item.value === endpoint),
     [endpoint]
   );
-  const resourcePresetValue = useMemo(() => {
+  const resourcePresetLabel = useMemo(() => {
     const matched = findVolcanoResourcePreset(resourceId);
-    return VOLCANO_RESOURCE_PRESETS.some((item) => item.value === matched) ? matched : '__custom__';
+    return VOLCANO_RESOURCE_PRESETS.find((item) => item.value === matched)?.label ?? '自定义 Resource ID';
   }, [resourceId]);
 
   const addLog = useCallback((message: string, text?: string) => {
@@ -136,36 +134,30 @@ export function VolcanoASRTestPage() {
   }, []);
 
   useEffect(() => {
-    if (!appKey) {
-      const envKey = (import.meta.env?.VITE_VOLCANO_APP_KEY as string) || '';
-      if (envKey) setAppKey(envKey);
-    }
-    if (!accessKey) {
-      const envAccess = (import.meta.env?.VITE_VOLCANO_ACCESS_KEY as string) || '';
-      if (envAccess) setAccessKey(envAccess);
-    }
-    if (!resourceId) {
-      const envResource = (import.meta.env?.VITE_VOLCANO_RESOURCE_ID as string) || '';
-      if (envResource) setResourceId(envResource);
-    }
-  }, [accessKey, appKey, resourceId]);
+    const unsubscribers = [
+      subscribeVolcanoAppKeyChanges(setAppKeyState),
+      subscribeVolcanoAccessKeyChanges(setAccessKeyState),
+      subscribeVolcanoResourceIdChanges(setResourceIdState),
+      subscribeVolcanoEndpointChanges(setEndpointState),
+      subscribeVolcanoLanguageChanges(setLanguageState),
+    ];
 
-  const handleSaveConfig = () => {
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, []);
+
+  const handleSaveTestOptions = () => {
     try {
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, appKey);
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, accessKey);
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, resourceId);
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.endpoint, endpoint);
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.language, language);
       localStorage.setItem(VOLCANO_STORAGE_KEYS.enableNonstream, String(enableNonstream));
       localStorage.setItem(VOLCANO_STORAGE_KEYS.showUtterances, String(showUtterances));
       localStorage.setItem(VOLCANO_STORAGE_KEYS.endWindowSize, String(endWindowSize));
       localStorage.setItem(VOLCANO_STORAGE_KEYS.forceToSpeechTime, String(forceToSpeechTime));
-      setConfigSaved(true);
-      addLog(`配置已保存，模式=${endpoint}，资源=${resourceId}`);
-      setTimeout(() => setConfigSaved(false), 2000);
+      setTestOptionsSaved(true);
+      addLog(`测试参数已保存，模式=${endpoint}，资源=${resourceId}`);
+      setTimeout(() => setTestOptionsSaved(false), 2000);
     } catch {
-      addLog('保存配置失败');
+      addLog('保存测试参数失败');
     }
   };
 
@@ -351,7 +343,12 @@ export function VolcanoASRTestPage() {
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">API 配置</CardTitle>
+            <div className="space-y-1">
+              <CardTitle className="text-sm">设置页配置（只读）</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                AppKey / AccessKey / 识别模式 / 资源模型 / Resource ID / 识别语言 统一在设置页维护。
+              </p>
+            </div>
             <Button
               type="button"
               variant="ghost"
@@ -364,97 +361,63 @@ export function VolcanoASRTestPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4 pt-0">
-          <div className="space-y-1.5">
-            <label htmlFor="volcano-app-key" className="text-xs text-muted-foreground">App Key</label>
-            <Input
-              id="volcano-app-key"
-              type={showKeys ? 'text' : 'password'}
-              value={appKey}
-              onChange={(event) => setAppKey(event.target.value)}
-              placeholder="火山引擎 App Key"
-              className="h-9 font-mono text-sm"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="volcano-access-key" className="text-xs text-muted-foreground">Access Key</label>
-            <Input
-              id="volcano-access-key"
-              type={showKeys ? 'text' : 'password'}
-              value={accessKey}
-              onChange={(event) => setAccessKey(event.target.value)}
-              placeholder="火山引擎 Access Key"
-              className="h-9 font-mono text-sm"
-            />
-          </div>
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-1.5">
-              <label htmlFor="volcano-endpoint" className="text-xs text-muted-foreground">识别模式</label>
-              <select
-                id="volcano-endpoint"
-                value={endpoint}
-                onChange={(event) => setEndpoint(event.target.value as VolcanoEndpoint)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {VOLCANO_ENDPOINT_OPTIONS.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
+            <div className="space-y-1.5 rounded-lg border border-dashed p-3">
+              <div className="text-xs text-muted-foreground">App Key</div>
+              <div className="font-mono text-sm">{showKeys ? (appKey || '未配置') : (maskKey(appKey) || '未配置')}</div>
+            </div>
+            <div className="space-y-1.5 rounded-lg border border-dashed p-3">
+              <div className="text-xs text-muted-foreground">Access Key</div>
+              <div className="font-mono text-sm">{showKeys ? (accessKey || '未配置') : (maskKey(accessKey) || '未配置')}</div>
+            </div>
+            <div className="space-y-1.5 rounded-lg border border-dashed p-3">
+              <div className="text-xs text-muted-foreground">识别模式</div>
+              <div className="text-sm">{endpointMeta?.label ?? endpoint}</div>
               <p className="text-xs text-muted-foreground">{endpointMeta?.description}</p>
             </div>
-            <div className="space-y-1.5">
-              <label htmlFor="volcano-resource-preset" className="text-xs text-muted-foreground">资源模型</label>
-              <select
-                id="volcano-resource-preset"
-                value={resourcePresetValue}
-                onChange={(event) => {
-                  if (event.target.value !== '__custom__') {
-                    setResourceId(event.target.value);
-                  }
-                }}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {VOLCANO_RESOURCE_PRESETS.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-                <option value="__custom__">自定义 Resource ID</option>
-              </select>
+            <div className="space-y-1.5 rounded-lg border border-dashed p-3">
+              <div className="text-xs text-muted-foreground">资源模型</div>
+              <div className="text-sm">{resourcePresetLabel}</div>
             </div>
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="volcano-resource-id" className="text-xs text-muted-foreground">Resource ID</label>
-            <Input
-              id="volcano-resource-id"
-              value={resourceId}
-              onChange={(event) => setResourceId(event.target.value)}
-              placeholder="volc.seedasr.sauc.duration"
-              className="h-9 font-mono text-sm"
-            />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-1.5">
-              <label htmlFor="volcano-language" className="text-xs text-muted-foreground">识别语言</label>
-              <select
-                id="volcano-language"
-                value={language}
-                onChange={(event) => setLanguage(event.target.value)}
-                disabled={endpoint !== 'bigmodel_nostream'}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60"
-              >
-                {VOLCANO_LANGUAGE_OPTIONS.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
+            <div className="space-y-1.5 rounded-lg border border-dashed p-3">
+              <div className="text-xs text-muted-foreground">Resource ID</div>
+              <div className="font-mono text-sm">{resourceId || '未配置'}</div>
+            </div>
+            <div className="space-y-1.5 rounded-lg border border-dashed p-3">
+              <div className="text-xs text-muted-foreground">识别语言</div>
+              <div className="text-sm">{VOLCANO_LANGUAGE_OPTIONS.find((item) => item.value === language)?.label ?? language}</div>
               <p className="text-xs text-muted-foreground">
                 官方文档说明 `audio.language` 目前仅 `bigmodel_nostream` 支持。
               </p>
             </div>
-            <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+            <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground md:col-span-2">
               <div className="font-medium text-foreground">模型名固定</div>
               <div>request.model_name = {VOLCANO_MODEL_NAME}</div>
               <div>官方当前通过 Resource ID 切换 1.0 / 2.0 资源模型。</div>
             </div>
           </div>
 
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => { void navigate({ to: '/settings' }); }}
+            >
+              前往设置页
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              测试页保留为诊断工具，核心火山配置请在设置页修改。
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">测试参数</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-0">
           <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 md:grid-cols-2">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -502,15 +465,10 @@ export function VolcanoASRTestPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={handleSaveConfig}>
-              保存配置
+            <Button type="button" variant="outline" size="sm" onClick={handleSaveTestOptions}>
+              保存测试参数
             </Button>
-            {configSaved && <span className="text-xs text-green-600">已保存</span>}
-            {isConfigured && !showKeys && (
-              <span className="text-xs text-muted-foreground">
-                AppKey: {maskKey(appKey)}
-              </span>
-            )}
+            {testOptionsSaved && <span className="text-xs text-green-600">已保存</span>}
           </div>
         </CardContent>
       </Card>

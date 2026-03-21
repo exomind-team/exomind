@@ -131,4 +131,30 @@ describe('ChatPage profile placeholder', () => {
     });
     expect(within(row).getByText('A')).toBeInTheDocument();
   });
+
+  it('shows voice input badge for voice-tagged events', async () => {
+    mockUseSyncStore.mockReturnValue({
+      currentUser: 'Alice',
+      isLoggedIn: true,
+      activeProfileId: 'profile-alice',
+    } as never);
+
+    loadEvents.mockResolvedValue([{
+      ...baseEvent,
+      id: 'event-voice-1',
+      content: '这是一条语音输入事件',
+      metadata: {
+        ...baseEvent.metadata,
+        inputSource: 'voice',
+      },
+    }]);
+
+    render(<ChatPage variant="new-mobile" />);
+
+    const row = await screen.findByTestId('new-mobile-user-message-row');
+
+    await waitFor(() => {
+      expect(within(row).getByText('语音输入')).toBeInTheDocument();
+    });
+  });
 });

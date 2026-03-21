@@ -28,6 +28,7 @@ const AUDITED_SETTINGS_IDS = [
   'task-dag-zoom-speed',
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
+  'voice-auto-record',
   'voice-shortcut-hotkey',
   'main-window-shortcut',
   'main-window-shortcut-quick-focus',
@@ -38,7 +39,11 @@ const AUDITED_SETTINGS_IDS = [
   'voice-overlay-transcript-lines',
   'voice-overlay-bottom-offset',
   'now-workbench-overlay-enabled',
+  'volcano-engine-key',
+  'volcano-endpoint',
   'volcano-resource-model',
+  'volcano-resource-id',
+  'volcano-language',
   'moss-api-token',
   'moss-voice-test',
   'volcano-asr-test',
@@ -84,6 +89,8 @@ const INLINE_SINGLE_ENUM_IDS = [
 const DIALOG_ENUM_IDS = [
   'countdown-end-mode',
   'sound-preset',
+  'volcano-endpoint',
+  'volcano-language',
 ] as const;
 
 const SELECT_ENUM_IDS = [] as const;
@@ -94,6 +101,7 @@ const MULTI_ENUM_IDS = [
 ] as const;
 
 const BOOLEAN_IDS = [
+  'voice-auto-record',
   'main-window-shortcut-quick-focus',
   'voice-shortcut-mic-prewarm',
   'task-page-fuzzy-search',
@@ -134,6 +142,7 @@ const BUTTON_ACTION_IDS = [
 
 const CUSTOM_ITEM_IDS = [
   'focus-bgm',
+  'volcano-engine-key',
   'moss-voice-test',
   'volcano-asr-test',
   'ai-registry',
@@ -267,6 +276,14 @@ describe('settings registry coverage audit', () => {
 
     const resetAllSettings = getItem('reset-all-settings', 'action');
     expect(resetAllSettings.confirmMessage).toBe('确认恢复所有默认设置？');
+
+    const aboutVersion = getItem('about-version', 'action');
+    expect(aboutVersion.hideChevron).toBe(true);
+    expect(typeof aboutVersion.copyValue).toBe('function');
+
+    const aboutBuild = getItem('about-build', 'action');
+    expect(aboutBuild.hideChevron).toBe(true);
+    expect(typeof aboutBuild.copyValue).toBe('function');
   });
 
   it('limits custom escape hatches to the explicitly audited special entries', () => {
@@ -303,19 +320,27 @@ describe('settings registry coverage audit', () => {
     expect(developerIds).toContain('moss-voice-test');
     expect(volcanoIds).not.toContain('moss-voice-test');
 
-    // 火山入口现已改为“API 配置”入口，仅受 provider 限制
+    // 火山测试入口需要“开发者模式 + 当前引擎”，配置字段仅受 provider 限制
     expect(baseIds).not.toContain('volcano-asr-test');
     expect(developerIds).not.toContain('volcano-asr-test');
     expect(volcanoIds).toContain('volcano-asr-test');
 
-    // 资源模型仍然只在 volcano provider 下可见
-    expect(baseIds).not.toContain('volcano-resource-model');
-    expect(developerIds).not.toContain('volcano-resource-model');
-    expect(volcanoIds).toContain('volcano-resource-model');
+    [
+      'volcano-engine-key',
+      'volcano-endpoint',
+      'volcano-resource-model',
+      'volcano-resource-id',
+      'volcano-language',
+    ].forEach((id) => {
+      expect(baseIds).not.toContain(id);
+      expect(developerIds).not.toContain(id);
+      expect(volcanoIds).toContain(id);
+    });
   });
 
   it('keeps every registry item reachable across supported settings contexts', () => {
     settingsPagePreferenceState.isTauriWindow = true;
+    settingsPagePreferenceState.isDesktopOperatingSystem = true;
     const contexts: SettingsContext[] = [
       getBaseCtx(),
       {
@@ -341,6 +366,8 @@ describe('settings registry coverage audit', () => {
     );
 
     expect(Array.from(visibleIds).sort()).toEqual([...AUDITED_SETTINGS_IDS].sort());
+    settingsPagePreferenceState.isTauriWindow = false;
+    settingsPagePreferenceState.isDesktopOperatingSystem = false;
   });
 
   it('keeps the feature toggles drawer checklist in sync with its audited child settings', () => {

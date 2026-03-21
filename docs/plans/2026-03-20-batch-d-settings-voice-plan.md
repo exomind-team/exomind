@@ -179,4 +179,16 @@ bunx tsc --noEmit
 
 ## 完成回填
 
-（Codex 执行完毕后在此填写）
+- 执行日期：2026-03-21
+- 执行结果：#611、#612 已按顺序完成
+- 主要落地：
+  - `settings-registry.ts`：新增火山 AppKey / AccessKey / 识别模式 / 资源模型 / Resource ID / 识别语言设置项；原“火山引擎 API 配置”入口改为“火山引擎 ASR 测试”；新增“语音输入自动记录”开关，默认开启
+  - `volcano-asr-settings.ts`：复用 `VolcanoASRTestPage` 原有 `VOLCANO_STORAGE_KEYS` 封装火山配置读写与订阅，无新增 localStorage key
+  - `voice-auto-record.ts`：新增语音自动记录设置模块，默认值保持为 `true`
+  - `VolcanoASRTestPage.tsx`：改为诊断工具形态，核心火山配置只读展示并引导回设置页；测试页保留录音测试与高级测试参数
+  - `voice-shortcut-eventlog.ts` / `voice-shortcut.service.ts`：语音写入 EventLog 时追加 `metadata.source`、`metadata.inputSource = 'voice'`、`metadata.inputMethod = 'recognition'`；自动记录关闭时跳过 EventLog 追加
+  - `ChatPage.tsx`：在事件日志 UI 中按 `event.metadata?.inputSource === 'voice'` 安全展示 `Mic + 语音输入` 标签
+- 验证命令：
+  - `bunx tsc --noEmit`
+- 验证结果：
+  - `tsc` 通过

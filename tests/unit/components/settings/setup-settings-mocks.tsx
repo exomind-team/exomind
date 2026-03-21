@@ -100,8 +100,17 @@ export const settingsPagePreferenceState = {
   isTauriWindow: false,
   isDesktopOperatingSystem: false,
   voiceShortcutAsrProvider: 'moss' as string,
+  voiceAutoRecordEnabled: true,
   mainWindowShortcutSelection: ['Ctrl', 'E'] as string[],
   mainWindowShortcutQuickFocusEnabled: false,
+};
+
+export const settingsPageVolcanoState = {
+  appKey: '',
+  accessKey: '',
+  resourceId: 'volc.seedasr.sauc.duration',
+  endpoint: 'bigmodel_async',
+  language: 'zh-CN',
 };
 
 export const settingsPageDomainBackendState = {
@@ -433,6 +442,48 @@ vi.mock('@/config/voice-shortcut-mic-prewarm', () => ({
   getVoiceShortcutMicPrewarmEnabled: vi.fn(() => true),
   setVoiceShortcutMicPrewarmEnabled: vi.fn(),
   subscribeVoiceShortcutMicPrewarmChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/voice-auto-record', () => ({
+  getVoiceAutoRecordEnabled: vi.fn(() => settingsPagePreferenceState.voiceAutoRecordEnabled),
+  setVoiceAutoRecordEnabled: vi.fn((value: boolean) => {
+    settingsPagePreferenceState.voiceAutoRecordEnabled = value;
+    return value;
+  }),
+  subscribeVoiceAutoRecordChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/volcano-asr-settings', () => ({
+  getVolcanoAppKey: vi.fn(() => settingsPageVolcanoState.appKey),
+  setVolcanoAppKey: vi.fn((value: string) => {
+    settingsPageVolcanoState.appKey = value.trim();
+    return settingsPageVolcanoState.appKey;
+  }),
+  subscribeVolcanoAppKeyChanges: vi.fn(() => () => {}),
+  getVolcanoAccessKey: vi.fn(() => settingsPageVolcanoState.accessKey),
+  setVolcanoAccessKey: vi.fn((value: string) => {
+    settingsPageVolcanoState.accessKey = value.trim();
+    return settingsPageVolcanoState.accessKey;
+  }),
+  subscribeVolcanoAccessKeyChanges: vi.fn(() => () => {}),
+  getVolcanoResourceIdSetting: vi.fn(() => settingsPageVolcanoState.resourceId),
+  setVolcanoResourceIdSetting: vi.fn((value: string) => {
+    settingsPageVolcanoState.resourceId = value.trim() || 'volc.seedasr.sauc.duration';
+    return settingsPageVolcanoState.resourceId;
+  }),
+  subscribeVolcanoResourceIdChanges: vi.fn(() => () => {}),
+  getVolcanoEndpointSetting: vi.fn(() => settingsPageVolcanoState.endpoint),
+  setVolcanoEndpointSetting: vi.fn((value: string) => {
+    settingsPageVolcanoState.endpoint = value;
+    return value;
+  }),
+  subscribeVolcanoEndpointChanges: vi.fn(() => () => {}),
+  getVolcanoLanguageSetting: vi.fn(() => settingsPageVolcanoState.language),
+  setVolcanoLanguageSetting: vi.fn((value: string) => {
+    settingsPageVolcanoState.language = value;
+    return value;
+  }),
+  subscribeVolcanoLanguageChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/services/main-window-shortcut-runtime', () => ({
