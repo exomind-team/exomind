@@ -4,6 +4,7 @@ import { Check, ChevronRight } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { Switch } from '@/components/ui/switch';
+import { getClipboardService } from '@/lib/services';
 import { Divider, SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
 import type {
   ActionSettingsItem,
@@ -1022,6 +1023,27 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
     }
   };
 
+  const handleCopy = async () => {
+    const resolvedCopyValue = typeof item.copyValue === 'function' ? item.copyValue() : item.copyValue;
+    if (!resolvedCopyValue) {
+      return;
+    }
+
+    setNotice(null);
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await getClipboardService().writeText(resolvedCopyValue);
+      if (!result.ok) {
+        setError(result.title);
+        return;
+      }
+      setNotice(resolveMessage(item.copySuccessMessage, resolvedCopyValue) ?? '已复制');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (item.actionMode === 'button') {
     return (
       <div data-testid={item.rowTestId}>
@@ -1052,6 +1074,8 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
   }
 
   const resolvedRightText = typeof item.rightText === 'function' ? item.rightText() : item.rightText;
+  const rowClickable = Boolean(item.copyValue) || !item.hideChevron;
+  const rowTitle = item.disabledReason ?? (item.copyValue ? '点击复制值' : undefined);
 
   return (
     <div>
@@ -1059,11 +1083,15 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
         testId={item.rowTestId}
         icon={renderRowIcon(item.icon)}
         label={item.label}
-        onClick={item.hideChevron ? undefined : () => {
+        onClick={rowClickable ? () => {
+          if (item.copyValue) {
+            void handleCopy();
+            return;
+          }
           handleAction();
-        }}
+        } : undefined}
         disabled={disabled}
-        title={item.disabledReason}
+        title={rowTitle}
         right={item.hideChevron
           ? (resolvedRightText ? <span className="text-sm text-[#A8A29E]">{resolvedRightText}</span> : null)
           : <ChevronRight className="h-4 w-4 text-[#A8A29E]" />}

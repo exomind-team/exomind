@@ -260,6 +260,13 @@ describe('settings registry coverage audit', () => {
     expect(mossApiToken.allowClear).toBe(true);
     expect(mossApiToken.dialogFooterStart?.type).toBe('secret-toggle');
 
+    const volcanoEngineKey = getItem('volcano-engine-key', 'custom');
+    expect(volcanoEngineKey.label).toBe('火山引擎 Key');
+
+    const volcanoResourceId = getItem('volcano-resource-id', 'string');
+    expect(volcanoResourceId.stringStyle).toBe('dialog');
+    expect(volcanoResourceId.dialogFieldKind).toBe('plain');
+
     const syncServerUrl = getItem('sync-server-url', 'string');
     expect(syncServerUrl.stringStyle).toBe('dialog');
     expect(syncServerUrl.dialogFieldKind).toBe('plain');

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Code, Download, Key } from 'lucide-react';
 import { SettingsItemRenderer } from '@/ui/app/components/settings/settings-renderers';
 import { SettingsToneProvider } from '@/ui/app/components/settings-shared';
@@ -15,9 +15,22 @@ import type {
   StringSettingsItem,
 } from '@/ui/app/config/settings/settings-types';
 
+const clipboardWriteTextMock = vi.fn(async () => ({ ok: true as const }));
+
+vi.mock('@/lib/services', () => ({
+  getClipboardService: () => ({
+    writeText: clipboardWriteTextMock,
+  }),
+}));
+
 const ctx: SettingsContext = { isDesktop: false };
 
 describe('SettingsItemRenderer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clipboardWriteTextMock.mockResolvedValue({ ok: true });
+  });
+
   it('renders boolean items with switch behavior', () => {
     let currentValue = true;
     const listeners = new Set<(value: boolean) => void>();
@@ -483,6 +496,27 @@ describe('SettingsItemRenderer', () => {
     fireEvent.click(screen.getByRole('button', { name: '导出备份' }));
     expect(onAction).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('export-backup-row').querySelector('svg')).not.toBeNull();
+  });
+
+  it('copies value when info-only action rows are clicked', async () => {
+    const item: ActionSettingsItem = {
+      id: 'about-build',
+      label: '构建',
+      category: 'about',
+      type: 'action',
+      hideChevron: true,
+      rightText: 'abc1234',
+      copyValue: 'abc1234',
+      copySuccessMessage: '已复制构建号',
+      onAction: vi.fn(),
+    };
+
+    render(<SettingsItemRenderer item={item} ctx={ctx} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /构建/ }));
+
+    expect(clipboardWriteTextMock).toHaveBeenCalledWith('abc1234');
+    expect(await screen.findByText('已复制构建号')).toBeInTheDocument();
   });
 
   it('renders button-mode action items with separate CTA buttons', () => {

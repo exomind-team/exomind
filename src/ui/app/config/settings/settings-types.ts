@@ -145,6 +145,8 @@ export interface ActionSettingsItem extends SettingsItemBase {
   confirmMessage?: string;
   hideChevron?: boolean;
   rightText?: string | (() => string);
+  copyValue?: string | (() => string | null | undefined);
+  copySuccessMessage?: string | ((value: string) => string);
   onAction: () => string | void | Promise<string | void>;
   successMessage?: string;
   errorMessagePrefix?: string;
