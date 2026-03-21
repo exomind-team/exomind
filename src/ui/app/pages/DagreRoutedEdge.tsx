@@ -102,38 +102,6 @@ function extractBezierCommand(fullPath: string): string {
   return cIndex >= 0 ? fullPath.substring(cIndex) : `L ${fullPath}`;
 }
 
-type CornerData = {
-  start: Point;
-  end: Point;
-  cp1: Point;
-  cp2: Point;
-};
-
-function computeCorner(
-  prev: Point,
-  current: Point,
-  next: Point,
-  maxRadius: number,
-): CornerData | null {
-  const inLen = distance(prev, current);
-  const outLen = distance(current, next);
-  const radius = Math.min(maxRadius, inLen / 2, outLen / 2);
-  if (radius <= 0) {
-    return null;
-  }
-
-  const dIn = normalizeVector(prev, current);
-  const dOut = normalizeVector(current, next);
-  const start = { x: current.x - dIn.x * radius, y: current.y - dIn.y * radius };
-  const end = { x: current.x + dOut.x * radius, y: current.y + dOut.y * radius };
-  return {
-    start,
-    end,
-    cp1: { x: start.x + dIn.x * (radius / 3), y: start.y + dIn.y * (radius / 3) },
-    cp2: { x: end.x - dOut.x * (radius / 3), y: end.y - dOut.y * (radius / 3) },
-  };
-}
-
 export function buildDagreRoutedPath(
   sourceX: number,
   sourceY: number,
@@ -155,72 +123,101 @@ export function buildDagreRoutedPath(
     return `M ${formatPoint(keyPoints[0])} L ${formatPoint(keyPoints[keyPoints.length - 1])}`;
   }
 
-  // --- Phase 1: pre-compute corners at each interior key point ---
-  const corners: (CornerData | null)[] = [];
-  for (let i = 1; i < keyPoints.length - 1; i += 1) {
-    corners.push(computeCorner(keyPoints[i - 1], keyPoints[i], keyPoints[i + 1], cornerRadius));
+  // When flow-direction positions are available, render every segment as a
+  // ReactFlow Bezier curve.  Each curve starts/ends with zero slope in the
+  // flow direction, producing consistently smooth transitions at every
+  // waypoint — entry, corridor bends, and exit alike.
+  if (sourcePosition != null && targetPosition != null) {
+    return buildAllBezierPath(keyPoints, sourcePosition, targetPosition);
   }
 
-  const useFlowBezier = sourcePosition != null && targetPosition != null;
-  const commands: string[] = [`M ${formatPoint(keyPoints[0])}`];
+  // Fallback: polyline with rounded corners (used by unit tests without positions).
+  return buildRoundedPolylinePath(keyPoints, cornerRadius);
+}
 
-  // --- Phase 2a: entry segment (source → first corner start) ---
-  const firstCorner = corners[0] ?? null;
-  const entryTarget = firstCorner ? firstCorner.start : keyPoints[1];
+/**
+ * Every segment between consecutive key points is rendered using ReactFlow's
+ * `getBezierPath`, with control points aligned to the layout flow direction.
+ *
+ * For a TB layout every segment uses Bottom → Top; for LR it uses Right → Left.
+ * The result is a chain of smooth S-curves that naturally straighten out when
+ * consecutive points share the same axis (vertical/horizontal corridor).
+ */
+function buildAllBezierPath(
+  keyPoints: Point[],
+  sourcePosition: Position,
+  _targetPosition: Position,
+): string {
+  const tgtPos = oppositePosition(sourcePosition);
+  const segments: string[] = [];
 
-  if (useFlowBezier) {
-    const [entryPath] = getBezierPath({
-      sourceX: keyPoints[0].x,
-      sourceY: keyPoints[0].y,
+  for (let i = 0; i < keyPoints.length - 1; i += 1) {
+    const from = keyPoints[i];
+    const to = keyPoints[i + 1];
+    const [segPath] = getBezierPath({
+      sourceX: from.x,
+      sourceY: from.y,
       sourcePosition,
-      targetX: entryTarget.x,
-      targetY: entryTarget.y,
-      targetPosition: oppositePosition(sourcePosition),
+      targetX: to.x,
+      targetY: to.y,
+      targetPosition: tgtPos,
     });
-    commands.push(extractBezierCommand(entryPath));
-  } else {
-    commands.push(`L ${formatPoint(entryTarget)}`);
-  }
 
-  // --- Phase 2b: corners + corridor straight segments ---
-  for (let i = 0; i < corners.length; i += 1) {
-    const corner = corners[i];
-    if (corner) {
-      commands.push(
-        `C ${formatPoint(corner.cp1)} ${formatPoint(corner.cp2)} ${formatPoint(corner.end)}`,
-      );
+    if (i === 0) {
+      segments.push(segPath);
     } else {
-      // No corner (radius too small) — line through the key point
-      commands.push(`L ${formatPoint(keyPoints[i + 1])}`);
-    }
-
-    // Straight segment to the next corner's start (if not the last corner)
-    if (i < corners.length - 1) {
-      const nextCorner = corners[i + 1];
-      const nextTarget = nextCorner ? nextCorner.start : keyPoints[i + 2];
-      commands.push(`L ${formatPoint(nextTarget)}`);
+      segments.push(extractBezierCommand(segPath));
     }
   }
 
-  // --- Phase 2c: exit segment (last corner end → target) ---
-  const lastCorner = corners[corners.length - 1] ?? null;
-  const exitFrom = lastCorner ? lastCorner.end : keyPoints[keyPoints.length - 2];
-  const target = keyPoints[keyPoints.length - 1];
+  return segments.join(' ');
+}
 
-  if (useFlowBezier) {
-    const [exitPath] = getBezierPath({
-      sourceX: exitFrom.x,
-      sourceY: exitFrom.y,
-      sourcePosition: oppositePosition(targetPosition),
-      targetX: target.x,
-      targetY: target.y,
-      targetPosition,
-    });
-    commands.push(extractBezierCommand(exitPath));
-  } else {
-    commands.push(`L ${formatPoint(target)}`);
+/**
+ * Legacy path builder: straight segments (`L`) with cubic Bézier rounded
+ * corners (`C`) at each bend.  Kept as fallback for contexts where
+ * ReactFlow Position information is unavailable (e.g. pure unit tests).
+ */
+function buildRoundedPolylinePath(keyPoints: Point[], cornerRadius: number): string {
+  const commands = [`M ${formatPoint(keyPoints[0])}`];
+
+  for (let index = 1; index < keyPoints.length - 1; index += 1) {
+    const prev = keyPoints[index - 1];
+    const current = keyPoints[index];
+    const next = keyPoints[index + 1];
+    const incomingLength = distance(prev, current);
+    const outgoingLength = distance(current, next);
+    const radius = Math.min(cornerRadius, incomingLength / 2, outgoingLength / 2);
+
+    if (radius <= 0) {
+      commands.push(`L ${formatPoint(current)}`);
+      continue;
+    }
+
+    const incomingDirection = normalizeVector(prev, current);
+    const outgoingDirection = normalizeVector(current, next);
+    const start = {
+      x: current.x - incomingDirection.x * radius,
+      y: current.y - incomingDirection.y * radius,
+    };
+    const end = {
+      x: current.x + outgoingDirection.x * radius,
+      y: current.y + outgoingDirection.y * radius,
+    };
+    const controlPoint1 = {
+      x: start.x + incomingDirection.x * (radius / 3),
+      y: start.y + incomingDirection.y * (radius / 3),
+    };
+    const controlPoint2 = {
+      x: end.x - outgoingDirection.x * (radius / 3),
+      y: end.y - outgoingDirection.y * (radius / 3),
+    };
+
+    commands.push(`L ${formatPoint(start)}`);
+    commands.push(`C ${formatPoint(controlPoint1)} ${formatPoint(controlPoint2)} ${formatPoint(end)}`);
   }
 
+  commands.push(`L ${formatPoint(keyPoints[keyPoints.length - 1])}`);
   return commands.join(' ');
 }
 
