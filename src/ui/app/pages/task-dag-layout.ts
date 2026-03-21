@@ -91,10 +91,11 @@ export function layoutDagNodes(
     });
   }
 
-  // Build rank → leftmost real-node edge map for corridor X/Y alignment.
-  // In LR mode, collect the minimum left-edge X per rank.
-  // In TB mode, collect the minimum top-edge Y per rank.
+  // Build rank → boundary edge maps for corridor alignment.
+  // Leading edge: leftmost node edge in LR (or topmost in TB).
+  // Trailing edge: rightmost node edge in LR (or bottommost in TB).
   const rankLeadingEdge = new Map<number, number>();
+  const rankTrailingEdge = new Map<number, number>();
   for (const node of nodes) {
     const layoutNode = graph.node(node.id);
     if (!layoutNode) {
@@ -104,12 +105,20 @@ export function layoutDagNodes(
     const size = direction === 'LR'
       ? (node.width ?? TASK_DAG_NODE_WIDTH)
       : (node.height ?? TASK_DAG_NODE_HEIGHT);
-    const leadingEdge = direction === 'LR'
+    const leading = direction === 'LR'
       ? layoutNode.x - size / 2
       : layoutNode.y - size / 2;
-    const existing = rankLeadingEdge.get(layoutNode.rank);
-    if (existing === undefined || leadingEdge < existing) {
-      rankLeadingEdge.set(layoutNode.rank, leadingEdge);
+    const trailing = direction === 'LR'
+      ? layoutNode.x + size / 2
+      : layoutNode.y + size / 2;
+
+    const existingLead = rankLeadingEdge.get(layoutNode.rank);
+    if (existingLead === undefined || leading < existingLead) {
+      rankLeadingEdge.set(layoutNode.rank, leading);
+    }
+    const existingTrail = rankTrailingEdge.get(layoutNode.rank);
+    if (existingTrail === undefined || trailing > existingTrail) {
+      rankTrailingEdge.set(layoutNode.rank, trailing);
     }
   }
 
@@ -125,37 +134,55 @@ export function layoutDagNodes(
       continue;
     }
 
-    // Snap intermediate (dummy) waypoints for cross-layer edges:
-    // 1. Perpendicular-to-flow axis → align to target node center
-    //    (LR: Y → target center Y; TB: X → target center X)
-    // 2. Flow axis → align to the leading edge of the next rank's real nodes
-    //    (LR: X → left edge of source's next rank; TB: Y → top edge)
+    // Snap intermediate (dummy) waypoints for cross-layer edges.
+    // Two candidate corridor waypoints exist (dual symmetry):
+    //   A (entry): flow-coord = next-rank leading edge, cross-coord = target center
+    //   B (exit):  flow-coord = prev-rank trailing edge, cross-coord = source center
+    // Pick whichever produces a shorter total path (source → waypoint → target).
     if (points.length > 2) {
       const sourceNode = graph.node(edge.v);
       const targetNode = graph.node(edge.w);
       if (sourceNode && targetNode) {
-        // Find the next rank after source that has real nodes
-        const sourceRank = sourceNode.rank;
-        let corridorFlowCoord: number | undefined;
-        for (let r = sourceRank + 1; r < targetNode.rank; r += 1) {
-          const edge_pos = rankLeadingEdge.get(r);
-          if (edge_pos !== undefined) {
-            corridorFlowCoord = edge_pos;
-            break;
-          }
+        // Candidate A: entry waypoint near source
+        let flowA: number | undefined;
+        for (let r = sourceNode.rank + 1; r < targetNode.rank; r += 1) {
+          const pos = rankLeadingEdge.get(r);
+          if (pos !== undefined) { flowA = pos; break; }
+        }
+
+        // Candidate B: exit waypoint near target
+        let flowB: number | undefined;
+        for (let r = targetNode.rank - 1; r > sourceNode.rank; r -= 1) {
+          const pos = rankTrailingEdge.get(r);
+          if (pos !== undefined) { flowB = pos; break; }
+        }
+
+        // Use dagre's original corridor coordinate as a referee:
+        // it implicitly encodes crossing-minimisation topology.
+        // If dagre placed dummies closer to the target → entry waypoint (snap to target center).
+        // If dagre placed dummies closer to the source → exit waypoint (snap to source center).
+        const isLR = direction === 'LR';
+        const dagreCorridor = isLR ? points[1].y : points[1].x;
+        const sourceCross = isLR ? sourceNode.y : sourceNode.x;
+        const targetCross = isLR ? targetNode.y : targetNode.x;
+        const closerToTarget = Math.abs(dagreCorridor - targetCross)
+                             <= Math.abs(dagreCorridor - sourceCross);
+
+        let chosenFlow: number;
+        let chosenCross: number;
+        if (closerToTarget) {
+          chosenFlow = flowA ?? (isLR ? points[1].x : points[1].y);
+          chosenCross = targetCross;
+        } else {
+          chosenFlow = flowB ?? (isLR ? points[points.length - 2].x : points[points.length - 2].y);
+          chosenCross = sourceCross;
         }
 
         for (let i = 1; i < points.length - 1; i += 1) {
           if (direction === 'LR') {
-            points[i] = {
-              x: corridorFlowCoord ?? points[i].x,
-              y: targetNode.y,
-            };
+            points[i] = { x: chosenFlow, y: chosenCross };
           } else {
-            points[i] = {
-              x: targetNode.x,
-              y: corridorFlowCoord ?? points[i].y,
-            };
+            points[i] = { x: chosenCross, y: chosenFlow };
           }
         }
       }

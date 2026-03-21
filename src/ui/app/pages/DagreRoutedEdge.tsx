@@ -253,13 +253,22 @@ export function DagreRoutedEdge({
   }
 
   // Snap intermediate dummy points to the actual ReactFlow handle coordinate
-  // so the corridor aligns precisely with the target node — no residual curves.
+  // so the corridor aligns precisely — no residual curves.
+  // The layout layer already chose source vs target alignment based on dagre's
+  // corridor position; here we refine to the exact handle coordinate.
   const isHorizontalFlow = sourcePosition === Position.Right || sourcePosition === Position.Left;
+  const corridorCross = isHorizontalFlow ? points[1].y : points[1].x;
+  const closerToTarget = isHorizontalFlow
+    ? Math.abs(corridorCross - targetY) <= Math.abs(corridorCross - sourceY)
+    : Math.abs(corridorCross - targetX) <= Math.abs(corridorCross - sourceX);
+  const snapCrossValue = isHorizontalFlow
+    ? (closerToTarget ? targetY : sourceY)
+    : (closerToTarget ? targetX : sourceX);
   const snappedPoints = points.map((p, i) => {
     if (i === 0 || i === points.length - 1) return p;
     return isHorizontalFlow
-      ? { x: p.x, y: targetY }
-      : { x: targetX, y: p.y };
+      ? { x: p.x, y: snapCrossValue }
+      : { x: snapCrossValue, y: p.y };
   });
 
   const path = buildDagreRoutedPath(
