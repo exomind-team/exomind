@@ -235,6 +235,7 @@ export function DagreRoutedEdge({
 }: EdgeProps<Edge<DagreRoutedEdgeData>>): JSX.Element {
   const points = data?.points;
 
+
   // Adjacent-layer edges (≤3 dagre points) have no meaningful dummy routing —
   // use ReactFlow's built-in Bezier which produces smoother curves for short edges.
   // Cross-layer edges (≥4 points) carry dummy-node waypoints that must be followed
@@ -251,8 +252,18 @@ export function DagreRoutedEdge({
     return <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />;
   }
 
+  // Snap intermediate dummy points to the actual ReactFlow handle coordinate
+  // so the corridor aligns precisely with the target node — no residual curves.
+  const isHorizontalFlow = sourcePosition === Position.Right || sourcePosition === Position.Left;
+  const snappedPoints = points.map((p, i) => {
+    if (i === 0 || i === points.length - 1) return p;
+    return isHorizontalFlow
+      ? { x: p.x, y: targetY }
+      : { x: targetX, y: p.y };
+  });
+
   const path = buildDagreRoutedPath(
-    sourceX, sourceY, targetX, targetY, points,
+    sourceX, sourceY, targetX, targetY, snappedPoints,
     DAGRE_EDGE_CORNER_RADIUS, sourcePosition, targetPosition,
   );
   return <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />;
