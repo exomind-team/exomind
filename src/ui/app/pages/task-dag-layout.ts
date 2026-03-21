@@ -15,6 +15,28 @@ type DagLayoutEdge = {
   target: string;
 };
 
+export type DagLayoutPoint = { x: number; y: number };
+
+export type DagLayoutResult = {
+  nodePositions: Map<string, DagLayoutPoint>;
+  edgePoints: Map<string, DagLayoutPoint[]>;
+};
+
+export function buildDagLayoutEdgeKey(source: string, target: string): string {
+  return `${source}\0${target}`;
+}
+
+function isDagLayoutPoint(value: unknown): value is DagLayoutPoint {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && 'x' in value
+    && 'y' in value
+    && typeof value.x === 'number'
+    && typeof value.y === 'number'
+  );
+}
+
 export function resolveDagDirection(
   direction: DagDirection,
   isDesktop: boolean,
@@ -30,7 +52,7 @@ export function layoutDagNodes(
   nodes: DagLayoutNode[],
   edges: DagLayoutEdge[],
   direction: ResolvedDagDirection,
-): Map<string, { x: number; y: number }> {
+): DagLayoutResult {
   const graph = new dagre.graphlib.Graph();
   graph.setGraph({
     rankdir: direction,
@@ -54,7 +76,7 @@ export function layoutDagNodes(
 
   dagre.layout(graph);
 
-  const positions = new Map<string, { x: number; y: number }>();
+  const nodePositions = new Map<string, DagLayoutPoint>();
   for (const node of nodes) {
     const layoutNode = graph.node(node.id);
     if (!layoutNode) {
@@ -63,11 +85,26 @@ export function layoutDagNodes(
 
     const width = node.width ?? TASK_DAG_NODE_WIDTH;
     const height = node.height ?? TASK_DAG_NODE_HEIGHT;
-    positions.set(node.id, {
+    nodePositions.set(node.id, {
       x: layoutNode.x - width / 2,
       y: layoutNode.y - height / 2,
     });
   }
 
-  return positions;
+  const edgePoints = new Map<string, DagLayoutPoint[]>();
+  for (const edge of graph.edges()) {
+    const layoutEdge = graph.edge(edge);
+    if (!layoutEdge || !Array.isArray(layoutEdge.points)) {
+      continue;
+    }
+
+    const points = layoutEdge.points.filter(isDagLayoutPoint);
+    if (points.length < 2) {
+      continue;
+    }
+
+    edgePoints.set(buildDagLayoutEdgeKey(edge.v, edge.w), points);
+  }
+
+  return { nodePositions, edgePoints };
 }

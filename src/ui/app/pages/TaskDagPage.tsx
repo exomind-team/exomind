@@ -8,6 +8,7 @@ import {
   Position,
   ReactFlow,
   type NodeProps as FlowNodeProps,
+  type EdgeTypes,
   type NodeTypes,
   type ReactFlowInstance,
 } from '@xyflow/react';
@@ -63,6 +64,7 @@ import {
   type TaskDagFlowNode,
   type TaskDagFlowNodeData,
 } from './task-dag-flow';
+import { DagreRoutedEdge } from './DagreRoutedEdge';
 import { resolveDagDirection, type DagDirection } from './task-dag-layout';
 import {
   extractTaskTitleSearchQuery,
@@ -791,6 +793,10 @@ function TaskDagNode({
 const TASK_DAG_NODE_TYPES = {
   taskDag: TaskDagNode,
 } satisfies NodeTypes;
+
+const TASK_DAG_EDGE_TYPES = {
+  dagreRouted: DagreRoutedEdge,
+} satisfies EdgeTypes;
 
 const TASK_DAG_MIN_ZOOM = 0.01;
 const TASK_DAG_FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: TASK_DAG_MIN_ZOOM } as const;
@@ -1794,6 +1800,7 @@ export function TaskDagPage() {
             nodes={flowGraph.nodes}
             edges={flowGraph.edges}
             nodeTypes={TASK_DAG_NODE_TYPES}
+            edgeTypes={TASK_DAG_EDGE_TYPES}
             proOptions={{ hideAttribution: true }}
             minZoom={TASK_DAG_MIN_ZOOM}
             fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}

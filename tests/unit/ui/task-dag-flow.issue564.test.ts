@@ -19,7 +19,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
 }
 
 describe('task-dag-flow issue #564（Sugiyama 布局）', () => {
-  it('uses left-right layout handles and bezier edges in LR mode', () => {
+  it('uses left-right layout handles and dagre-routed edges in LR mode', () => {
     const graph = buildTaskGraph([
       makeTask({ id: 'task-a', title: 'A' }),
       makeTask({
@@ -42,7 +42,7 @@ describe('task-dag-flow issue #564（Sugiyama 布局）', () => {
       targetPosition: 'left',
     });
     expect(nodeB?.position.x).toBeGreaterThan(nodeA?.position.x ?? 0);
-    expect(flow.edges[0]).toMatchObject({ type: 'default' });
+    expect(flow.edges[0]).toMatchObject({ type: 'dagreRouted' });
   });
 
   it('uses top-bottom layout handles in TB mode', () => {
@@ -68,6 +68,6 @@ describe('task-dag-flow issue #564（Sugiyama 布局）', () => {
       targetPosition: 'top',
     });
     expect(nodeB?.position.y).toBeGreaterThan(nodeA?.position.y ?? 0);
-    expect(flow.edges[0]).toMatchObject({ type: 'default' });
+    expect(flow.edges[0]).toMatchObject({ type: 'dagreRouted' });
   });
 });

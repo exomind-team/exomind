@@ -2,7 +2,12 @@ import { MarkerType, Position, type Edge, type Node } from '@xyflow/react';
 import type { TaskGraph } from '@/lib/task/task-dag-graph';
 import type { VisibleTaskGraph } from '@/lib/task/task-dag-visibility';
 import type { TaskNode } from '@/lib/types/task';
-import { layoutDagNodes, type ResolvedDagDirection } from './task-dag-layout';
+import {
+  buildDagLayoutEdgeKey,
+  layoutDagNodes,
+  type DagLayoutPoint,
+  type ResolvedDagDirection,
+} from './task-dag-layout';
 
 export const TASK_DAG_NODE_WIDTH = 256;
 export const TASK_DAG_NODE_HEIGHT = 140;
@@ -57,7 +62,12 @@ export type TaskDagFlowNodeData = {
 };
 
 export type TaskDagFlowNode = Node<TaskDagFlowNodeData, 'taskDag'>;
-export type TaskDagFlowEdge = Edge;
+export type TaskDagFlowEdgeData = {
+  points?: DagLayoutPoint[] | null;
+  hardEdge?: boolean;
+};
+
+export type TaskDagFlowEdge = Edge<TaskDagFlowEdgeData>;
 
 export interface BuildTaskDagFlowOptions {
   selectedTaskId?: string | null;
@@ -102,23 +112,29 @@ function resolveNodePositions(
   orderedNodeIds: string[],
   edges: Array<{ source: string; target: string }>,
   direction: ResolvedDagDirection,
-): Map<string, { x: number; y: number }> {
+): {
+  nodePositions: Map<string, { x: number; y: number }>;
+  edgePoints: Map<string, DagLayoutPoint[]>;
+} {
   const fallbackPositions = buildFallbackPositions(orderedNodeIds, edges);
 
   try {
-    const layoutPositions = layoutDagNodes(
+    const layoutResult = layoutDagNodes(
       orderedNodeIds.map((id) => ({ id })),
       edges,
       direction,
     );
-    if (layoutPositions.size > 0) {
-      return layoutPositions;
+    if (layoutResult.nodePositions.size > 0) {
+      return layoutResult;
     }
   } catch {
     // Fall back to the old depth-based layout when dagre fails.
   }
 
-  return fallbackPositions;
+  return {
+    nodePositions: fallbackPositions,
+    edgePoints: new Map<string, DagLayoutPoint[]>(),
+  };
 }
 
 function resolveHandlePositions(direction: ResolvedDagDirection): {
@@ -138,14 +154,21 @@ function resolveHandlePositions(direction: ResolvedDagDirection): {
   };
 }
 
-function buildEdges(edges: Array<{ id: string; source: string; target: string; type: 'hard' | 'soft' }>): TaskDagFlowEdge[] {
+function buildEdges(
+  edges: Array<{ id: string; source: string; target: string; type: 'hard' | 'soft' }>,
+  edgePoints: Map<string, DagLayoutPoint[]>,
+): TaskDagFlowEdge[] {
   return edges.map((edge) => {
     const hardEdge = edge.type === 'hard';
     return {
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      type: 'default',
+      type: 'dagreRouted',
+      data: {
+        points: edgePoints.get(buildDagLayoutEdgeKey(edge.source, edge.target)) ?? null,
+        hardEdge,
+      },
       animated: false,
       selectable: false,
       style: hardEdge
@@ -168,7 +191,7 @@ export function buildTaskDagFlow(
 } {
   const direction = options.direction ?? 'LR';
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const positions = resolveNodePositions(graph.topologicalOrder, graph.edges, direction);
+  const { nodePositions, edgePoints } = resolveNodePositions(graph.topologicalOrder, graph.edges, direction);
   const handlePositions = resolveHandlePositions(direction);
 
   const nodes = graph.topologicalOrder
@@ -177,7 +200,7 @@ export function buildTaskDagFlow(
     .map((node) => ({
       id: node.id,
       type: 'taskDag',
-      position: positions.get(node.id) ?? { x: 0, y: 0 },
+      position: nodePositions.get(node.id) ?? { x: 0, y: 0 },
       sourcePosition: handlePositions.sourcePosition,
       targetPosition: handlePositions.targetPosition,
       draggable: false,
@@ -204,7 +227,7 @@ export function buildTaskDagFlow(
       },
     } satisfies TaskDagFlowNode));
 
-  return { nodes, edges: buildEdges(graph.edges) };
+  return { nodes, edges: buildEdges(graph.edges, edgePoints) };
 }
 
 export function buildVisibleTaskDagFlow(
@@ -220,7 +243,7 @@ export function buildVisibleTaskDagFlow(
   const direction = options.direction ?? 'LR';
   const nodeById = new Map(visibleGraph.nodes.map((node) => [node.id, node]));
   const topologicalOrder = visibleGraph.nodes.map((node) => node.id);
-  const positions = resolveNodePositions(topologicalOrder, visibleGraph.edges, direction);
+  const { nodePositions, edgePoints } = resolveNodePositions(topologicalOrder, visibleGraph.edges, direction);
   const handlePositions = resolveHandlePositions(direction);
 
   const nodes = topologicalOrder
@@ -229,7 +252,7 @@ export function buildVisibleTaskDagFlow(
     .map((node) => ({
       id: node.id,
       type: 'taskDag',
-      position: positions.get(node.id) ?? { x: 0, y: 0 },
+      position: nodePositions.get(node.id) ?? { x: 0, y: 0 },
       sourcePosition: handlePositions.sourcePosition,
       targetPosition: handlePositions.targetPosition,
       draggable: false,
@@ -256,5 +279,5 @@ export function buildVisibleTaskDagFlow(
       },
     } satisfies TaskDagFlowNode));
 
-  return { nodes, edges: buildEdges(visibleGraph.edges) };
+  return { nodes, edges: buildEdges(visibleGraph.edges, edgePoints) };
 }
