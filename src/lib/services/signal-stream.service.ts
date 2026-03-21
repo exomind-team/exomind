@@ -9,6 +9,7 @@ import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { SignalEvent, PublishRequest, PublishResponse } from '@/lib/types/signal-pool';
 import {
   buildSignalBaseUrl,
+  buildSignalStreamUrl,
   HttpSseSignalTransport,
   type SignalTransport,
 } from './signal-http-sse-transport';
@@ -36,6 +37,7 @@ export interface SignalStreamServiceOptions {
 // ── Service ──────────────────────────────────────────────────
 
 export class SignalStreamService {
+  private readonly host: RuntimeHostRecord;
   private readonly baseUrl: string;
   private readonly agentId: string;
   private readonly heartbeatInterval: number;
@@ -49,6 +51,7 @@ export class SignalStreamService {
   private lastConnectionErrorLog: string | null = null;
 
   constructor(options: SignalStreamServiceOptions) {
+    this.host = options.host;
     this.baseUrl = buildSignalBaseUrl(options.host);
     this.agentId = options.agentId ?? DEFAULT_AGENT_ID;
     this.heartbeatInterval = options.heartbeatInterval ?? DEFAULT_HEARTBEAT_INTERVAL;
@@ -123,14 +126,30 @@ export class SignalStreamService {
   }
 
   private async connectAndConsume(): Promise<void> {
+    log.info(
+      `[SignalStream] connect:start target=${this.baseUrl} agentId=${this.agentId} heartbeat=${this.heartbeatInterval}s resume=${this.lastEventId ? 'yes' : 'no'}`
+    );
     this.abortController = new AbortController();
 
-    const response = await this.transport.openStream({
-      agentId: this.agentId,
-      heartbeatInterval: this.heartbeatInterval,
-      lastEventId: this.lastEventId,
-      signal: this.abortController.signal,
-    });
+    let response: Response;
+    try {
+      response = await this.transport.openStream({
+        agentId: this.agentId,
+        heartbeatInterval: this.heartbeatInterval,
+        lastEventId: this.lastEventId,
+        signal: this.abortController.signal,
+      });
+    } catch (error) {
+      await this.logFailureProbe('open-stream', error);
+      if (this.shouldFallbackToEventSource(error)) {
+        log.warn(
+          `[SignalStream] fetch SSE failed, falling back to EventSource (target: ${this.baseUrl})`
+        );
+        await this.connectAndConsumeViaEventSource();
+        return;
+      }
+      throw error;
+    }
 
     const body = response.body;
     if (!body) {
@@ -160,6 +179,122 @@ export class SignalStreamService {
     } finally {
       reader.releaseLock();
       this.abortController = null;
+    }
+  }
+
+  private shouldFallbackToEventSource(error: unknown): boolean {
+    if (typeof EventSource === 'undefined') {
+      return false;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('Failed to fetch') || message.includes('NetworkError') || message.includes('fetch');
+  }
+
+  private async connectAndConsumeViaEventSource(): Promise<void> {
+    const streamUrl = buildSignalStreamUrl(
+      this.baseUrl,
+      this.agentId,
+      this.heartbeatInterval,
+      this.host.authToken,
+    );
+    const safeUrl = streamUrl.replace(/([?&]token=)[^&]+/i, '$1***');
+
+    log.info(`[SignalStream] EventSource:start url=${safeUrl} resume=${this.lastEventId ? 'no-header' : 'none'}`);
+
+    await new Promise<void>((_unusedResolve, reject) => {
+      if (!this.abortController) {
+        reject(new DOMException('Signal stream aborted', 'AbortError'));
+        return;
+      }
+
+      let settled = false;
+      const eventSource = new EventSource(streamUrl);
+      let opened = false;
+
+      const cleanup = () => {
+        eventSource.removeEventListener('signal', handleSignal as EventListener);
+        eventSource.removeEventListener('heartbeat', handleHeartbeat as EventListener);
+        eventSource.removeEventListener('warning', handleWarning as EventListener);
+        eventSource.close();
+        this.abortController?.signal.removeEventListener('abort', handleAbort);
+        this.abortController = null;
+      };
+
+      const finish = (callback: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        callback();
+      };
+
+      const handleMessageEvent = (eventType: string, event: MessageEvent<string>) => {
+        if (event.lastEventId) {
+          this.lastEventId = event.lastEventId;
+        }
+
+        if (eventType !== 'signal') {
+          return;
+        }
+
+        try {
+          const payload = JSON.parse(event.data) as SignalEvent;
+          this.emit(payload);
+        } catch {
+          log.warn(`[SignalStream] failed to parse signal event: ${event.data}`);
+        }
+      };
+
+      const handleSignal = ((event: MessageEvent<string>) => {
+        handleMessageEvent('signal', event);
+      }) as EventListener;
+
+      const handleHeartbeat = ((event: MessageEvent<string>) => {
+        handleMessageEvent('heartbeat', event);
+      }) as EventListener;
+
+      const handleWarning = ((event: MessageEvent<string>) => {
+        handleMessageEvent('warning', event);
+      }) as EventListener;
+
+      const handleAbort = () => {
+        finish(() => reject(new DOMException('Signal stream aborted', 'AbortError')));
+      };
+
+      eventSource.onopen = () => {
+        opened = true;
+        log.info(`[SignalStream] EventSource:open url=${safeUrl}`);
+      };
+
+      eventSource.onerror = () => {
+        const message = opened
+          ? 'EventSource stream closed unexpectedly'
+          : 'EventSource failed before open';
+        finish(() => reject(new Error(message)));
+      };
+
+      eventSource.addEventListener('signal', handleSignal);
+      eventSource.addEventListener('heartbeat', handleHeartbeat);
+      eventSource.addEventListener('warning', handleWarning);
+      this.abortController.signal.addEventListener('abort', handleAbort, { once: true });
+    });
+  }
+
+  private async logFailureProbe(stage: string, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(`[SignalStream] ${stage}:error target=${this.baseUrl} error=${message}`);
+
+    try {
+      const events = await this.transport.history(1);
+      log.info(
+        `[SignalStream] probe:history target=${this.baseUrl} ok count=${Array.isArray(events) ? events.length : 0}`
+      );
+    } catch (probeError) {
+      log.warn(
+        `[SignalStream] probe:history-failed target=${this.baseUrl} error=${probeError instanceof Error ? probeError.message : String(probeError)}`
+      );
     }
   }
 

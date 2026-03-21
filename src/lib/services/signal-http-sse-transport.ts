@@ -33,6 +33,18 @@ export function buildSignalStreamUrl(baseUrl: string, agentId: string, heartbeat
   return url;
 }
 
+function redactSignalUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has('token')) {
+      parsed.searchParams.set('token', '***');
+    }
+    return parsed.toString();
+  } catch {
+    return url.replace(/([?&]token=)[^&]+/i, '$1***');
+  }
+}
+
 export class HttpSseSignalTransport implements SignalTransport {
   private readonly baseUrl: string;
   private readonly host: RuntimeHostRecord;
@@ -97,11 +109,26 @@ export class HttpSseSignalTransport implements SignalTransport {
 
     // SSE via fetch: pass auth token as query param as well (EventSource fallback doesn't support headers)
     const url = buildSignalStreamUrl(this.baseUrl, request.agentId, request.heartbeatInterval, this.host.authToken);
+    const safeUrl = redactSignalUrl(url);
 
-    const response = await fetch(url, {
-      headers,
-      signal: request.signal,
-    });
+    log.info(
+      `[SignalTransport] openStream:start url=${safeUrl} lastEventId=${request.lastEventId ? 'present' : 'none'} auth=${this.host.authToken ? 'present' : 'none'}`
+    );
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers,
+        signal: request.signal,
+      });
+    } catch (error) {
+      log.warn(`[SignalTransport] openStream:fetch-error url=${safeUrl} error=${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+
+    log.info(
+      `[SignalTransport] openStream:response url=${safeUrl} status=${response.status} contentType=${response.headers.get('content-type') ?? 'unknown'} body=${response.body ? 'present' : 'missing'}`
+    );
 
     if (!response.ok) {
       throw new Error(`SSE HTTP ${response.status}`);
