@@ -1,5 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::AtomicI32;
 use std::sync::Mutex;
 
 use tauri::{AppHandle, State};
