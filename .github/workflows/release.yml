@@ -108,34 +108,37 @@ jobs:
           bun --version
 
       - name: Rust diagnostics (Rust 诊断输出)
-        shell: powershell
+        shell: pwsh
         run: |
-          Write-Host "=== Rust diagnostics / Rust 诊断输出 ==="
-          Write-Host "event_name=${{ github.event_name }}"
-          Write-Host "ref=${{ github.ref }}"
-          Write-Host "build_scope=${{ github.event.inputs.build_scope || 'n/a' }}"
-          Write-Host "runner=$env:RUNNER_NAME os=$env:RUNNER_OS arch=$env:RUNNER_ARCH"
-          Write-Host "whoami=$(whoami)"
-          Write-Host "USERPROFILE=$env:USERPROFILE"
-          Write-Host "HOME=$env:HOME"
-          Write-Host "CARGO_HOME=$env:CARGO_HOME"
-          Write-Host "RUSTUP_HOME=$env:RUSTUP_HOME"
+          Write-Host '=== Rust diagnostics / Rust 诊断输出 ==='
+          Write-Host ('event_name={0}' -f '${{ github.event_name }}')
+          Write-Host ('ref={0}' -f '${{ github.ref }}')
+          Write-Host ('build_scope={0}' -f '${{ github.event.inputs.build_scope || 'n/a' }}')
+          Write-Host ('runner={0} os={1} arch={2}' -f $env:RUNNER_NAME, $env:RUNNER_OS, $env:RUNNER_ARCH)
+          $currentUser = whoami
+          Write-Host ('whoami={0}' -f $currentUser)
+          Write-Host ('USERPROFILE={0}' -f $env:USERPROFILE)
+          Write-Host ('HOME={0}' -f $env:HOME)
+          Write-Host ('CARGO_HOME={0}' -f $env:CARGO_HOME)
+          Write-Host ('RUSTUP_HOME={0}' -f $env:RUSTUP_HOME)
 
-          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
-          Write-Host "cargoBin=$cargoBin exists=$(Test-Path $cargoBin)"
+          $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+          $cargoBinExists = Test-Path $cargoBin
+          Write-Host ('cargoBin={0} exists={1}' -f $cargoBin, $cargoBinExists)
 
-          foreach ($name in @("rustup.exe", "rustc.exe", "cargo.exe", "rustup", "rustc", "cargo")) {
+          foreach ($name in @('rustup.exe', 'rustc.exe', 'cargo.exe', 'rustup', 'rustc', 'cargo')) {
             $candidate = Join-Path $cargoBin $name
-            Write-Host "candidate=$candidate exists=$(Test-Path $candidate)"
+            $candidateExists = Test-Path $candidate
+            Write-Host ('candidate={0} exists={1}' -f $candidate, $candidateExists)
           }
 
-          Write-Host "Get-Command (before prepend PATH):"
-          foreach ($cmd in @("rustup", "rustc", "cargo")) {
+          Write-Host 'Get-Command (before prepend PATH)'
+          foreach ($cmd in @('rustup', 'rustc', 'cargo')) {
             $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
             if ($resolved) {
-              Write-Host (" - {0}: {1}" -f $cmd, $resolved.Source)
+              Write-Host (' - {0} [{1}]' -f $cmd, $resolved.Source)
             } else {
-              Write-Host (" - {0}: NOT_FOUND" -f $cmd)
+              Write-Host (' - {0} [NOT_FOUND]' -f $cmd)
             }
           }
 
