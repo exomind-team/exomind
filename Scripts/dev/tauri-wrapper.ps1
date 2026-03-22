@@ -90,7 +90,8 @@ function Ensure-AndroidManifestPermissions {
   # Ensure configChanges on <activity> to prevent keyboard-connect crash
   $ns = "http://schemas.android.com/apk/res/android"
   $configChangesValue = "keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|locale|layoutDirection|fontScale|density"
-  $activity = $application.SelectSingleNode("activity") ?? $manifest.SelectSingleNode("//activity")
+  $activity = $application.SelectSingleNode("activity")
+  if (-not $activity) { $activity = $manifest.SelectSingleNode("//activity") }
   if ($activity -and $activity.GetAttribute("configChanges", $ns) -ne $configChangesValue) {
     $activity.SetAttribute("configChanges", $ns, $configChangesValue)
     Write-Host "[tauri-wrapper] Set configChanges on Activity in AndroidManifest.xml"
