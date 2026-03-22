@@ -447,6 +447,61 @@ function resolveBuildText(): string {
   return resolveVersionBuildInfo(envMap, '0.3.6').buildHash || 'dev';
 }
 
+function clearExomindLocalCache(): string {
+  if (typeof window === 'undefined') {
+    return '当前环境不支持清空本地缓存';
+  }
+
+  const keysToRemove: string[] = [];
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith('exomind:')) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // Ignore localStorage cleanup failures.
+  }
+
+  try {
+    window.sessionStorage.clear();
+  } catch {
+    // Ignore sessionStorage cleanup failures.
+  }
+
+  window.setTimeout(() => {
+    window.location.reload();
+  }, 0);
+
+  return '已清空本地缓存，页面正在刷新。';
+}
+
+function resetAllSettings(): string {
+  if (typeof window === 'undefined') {
+    return '当前环境不支持重置设置';
+  }
+
+  try {
+    window.localStorage.clear();
+  } catch {
+    // Ignore localStorage cleanup failures.
+  }
+
+  try {
+    window.sessionStorage.clear();
+  } catch {
+    // Ignore sessionStorage cleanup failures.
+  }
+
+  window.setTimeout(() => {
+    window.location.reload();
+  }, 0);
+
+  return '已重置所有设置，页面正在刷新。';
+}
+
 export const FEATURE_TOGGLE_SETTING_IDS = [
   'me-page-enabled',
   'agent-page-enabled',
@@ -1327,23 +1382,24 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'clear-local-cache',
     label: '清空本地缓存',
-    description: '将清除设备上的临时设置与缓存',
+    description: '清除 UI 偏好与临时缓存，不影响事件日志、任务和时间块数据',
     category: 'danger',
     type: 'action',
     actionMode: 'button',
     buttonLabel: '立即清空',
-    onAction: () => '敬请期待',
+    confirmMessage: '确认清空本地缓存？UI 偏好（DAG 布局、搜索选项、模式记忆等）将恢复默认。事件日志、任务和时间块数据不受影响。',
+    onAction: clearExomindLocalCache,
   },
   {
     id: 'reset-all-settings',
     label: '重置所有设置',
-    description: '恢复默认配置，不影响历史事件数据',
+    description: '将所有设置项恢复为默认值，不影响事件日志、任务和时间块数据',
     category: 'danger',
     type: 'action',
     actionMode: 'button',
     buttonLabel: '恢复默认',
-    confirmMessage: '确认恢复所有默认设置？',
-    onAction: () => '敬请期待',
+    confirmMessage: '确认重置所有设置？所有配置（含 API Key、快捷键、UI 偏好）将恢复默认。事件日志、任务和时间块数据不受影响。',
+    onAction: resetAllSettings,
   },
 ];
 

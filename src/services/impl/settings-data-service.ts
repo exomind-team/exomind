@@ -10,6 +10,7 @@ type PickedJsonFile = {
 
 type CombinedBackupPayload = {
   version?: number;
+  exportedAt?: string;
   events?: unknown[];
   tasks?: unknown[];
   time_blocks?: unknown[];
@@ -114,14 +115,27 @@ export async function importBackupFromContent(
   strategy: ImportStrategy = 'merge',
 ): Promise<string> {
   const parsed = JSON.parse(content) as CombinedBackupPayload;
-  const result = await getEventLogService().importEventsFromJson(content, strategy);
+  const eventLogService = getEventLogService();
+  const taskBackupService = getTaskBackupService();
+  const timeBlockBackupService = getTimeBlockBackupService();
+
+  const isCombinedBundleV3 = parsed.version === 3;
+  const eventPayload = isCombinedBundleV3
+    ? JSON.stringify({
+        version: 2,
+        exportedAt: parsed.exportedAt,
+        events: Array.isArray(parsed.events) ? parsed.events : [],
+      })
+    : content;
+
+  const result = await eventLogService.importEventsFromJson(eventPayload, strategy);
   let taskSummary = '';
   let timeBlockSummary = '';
 
   try {
-    if (Array.isArray(parsed.tasks)) {
+    if (isCombinedBundleV3 && Array.isArray(parsed.tasks)) {
       const taskJson = JSON.stringify({ version: 1, tasks: parsed.tasks });
-      const taskResult = await getTaskBackupService().importTasksFromJson(taskJson, strategy);
+      const taskResult = await taskBackupService.importTasksFromJson(taskJson, strategy);
       taskSummary = `；任务新增 ${taskResult.imported} 条，跳过 ${taskResult.skipped} 条`;
     }
   } catch {
@@ -129,13 +143,13 @@ export async function importBackupFromContent(
   }
 
   try {
-    if (Array.isArray(parsed.time_blocks) || parsed.active_block) {
+    if (isCombinedBundleV3 && (Array.isArray(parsed.time_blocks) || parsed.active_block !== undefined)) {
       const timeBlockJson = JSON.stringify({
         version: 1,
         time_blocks: Array.isArray(parsed.time_blocks) ? parsed.time_blocks : [],
         active_block: parsed.active_block ?? null,
       });
-      const timeBlockResult = await getTimeBlockBackupService().importTimeBlocksFromJson(timeBlockJson, strategy);
+      const timeBlockResult = await timeBlockBackupService.importTimeBlocksFromJson(timeBlockJson, strategy);
       timeBlockSummary = `；时间块新增 ${timeBlockResult.imported} 条，跳过 ${timeBlockResult.skipped} 条`;
     }
   } catch {

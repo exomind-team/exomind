@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   exportBackup,
   importBackup,
+  importBackupFromContent,
   exportTasksJson,
   exportTasksSqlite,
   importTasksFromFile,
@@ -148,6 +149,51 @@ describe('settings-data-service', () => {
     expect(message).toContain('事件新增 1 条');
     expect(message).toContain('任务新增 2 条，跳过 1 条');
     expect(message).toContain('时间块新增 1 条，跳过 0 条');
+  });
+
+  it('routes version:3 bundle through per-domain imports instead of passing it directly to eventlog parser', async () => {
+    const bundle = JSON.stringify({
+      version: 3,
+      exportedAt: '2026-03-22T00:00:00.000Z',
+      events: [{ id: 'evt-1', type: 'created' }],
+      tasks: [{ id: 'task-1' }],
+      time_blocks: [{ id: 'tb-1' }],
+      active_block: { startId: 'active-1' },
+    });
+
+    const message = await importBackupFromContent(bundle, 'bundle.json', 'merge');
+
+    expect(mocks.importEventsFromJson).toHaveBeenCalledWith(
+      JSON.stringify({
+        version: 2,
+        exportedAt: '2026-03-22T00:00:00.000Z',
+        events: [{ id: 'evt-1', type: 'created' }],
+      }),
+      'merge',
+    );
+    expect(mocks.importTasksFromJson).toHaveBeenCalledWith(
+      JSON.stringify({ version: 1, tasks: [{ id: 'task-1' }] }),
+      'merge',
+    );
+    expect(mocks.importTimeBlocksFromJson).toHaveBeenCalledWith(
+      JSON.stringify({ version: 1, time_blocks: [{ id: 'tb-1' }], active_block: { startId: 'active-1' } }),
+      'merge',
+    );
+    expect(message).toContain('来源：bundle.json');
+  });
+
+  it('keeps version:2 event import on the original path', async () => {
+    const payload = JSON.stringify({
+      version: 2,
+      exportedAt: '2026-03-22T00:00:00.000Z',
+      events: [{ id: 'evt-1', type: 'created' }],
+    });
+
+    await importBackupFromContent(payload, 'events.json', 'overwrite');
+
+    expect(mocks.importEventsFromJson).toHaveBeenCalledWith(payload, 'overwrite');
+    expect(mocks.importTasksFromJson).not.toHaveBeenCalled();
+    expect(mocks.importTimeBlocksFromJson).not.toHaveBeenCalled();
   });
 
   it('overwrite import still clears task/timeblock domains when bundle contains empty arrays', async () => {

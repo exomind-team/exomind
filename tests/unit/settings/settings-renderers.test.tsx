@@ -573,13 +573,7 @@ describe('SettingsItemRenderer', () => {
     expect(screen.getByText('桌面端适配')).toBeInTheDocument();
   });
 
-  it('keeps confirmMessage behavior for button-mode action items', () => {
-    const confirmSpy = vi.fn(() => false);
-    Object.defineProperty(window, 'confirm', {
-      configurable: true,
-      writable: true,
-      value: confirmSpy,
-    });
+  it('shows a confirmation dialog for button-mode action items before running them', () => {
     const onAction = vi.fn();
     const item: ActionSettingsItem = {
       id: 'reset-all-settings',
@@ -597,8 +591,12 @@ describe('SettingsItemRenderer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
 
-    expect(confirmSpy).toHaveBeenCalledWith('确认恢复所有默认设置？');
+    expect(screen.getByRole('dialog', { name: '重置所有设置' })).toBeInTheDocument();
+    expect(screen.getByText('确认恢复所有默认设置？')).toBeInTheDocument();
     expect(onAction).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '确认重置所有设置' }));
+    expect(onAction).toHaveBeenCalledTimes(1);
   });
 
   it('renders inline enum helper text as a separate indented block', () => {

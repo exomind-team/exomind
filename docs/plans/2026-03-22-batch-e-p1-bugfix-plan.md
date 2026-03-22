@@ -1,6 +1,6 @@
 # 批次 E：P1 Bug 急修
 
-> **状态**：待执行
+> **状态**：已完成
 > **分支**：直接在 `dev` 上开发
 > **关联 Issue**：#656, #654, #648
 > **执行顺序**：#656 → #654 → #648
@@ -343,4 +343,15 @@ bunx tsc --noEmit
 
 ## 完成回填
 
-（Codex 执行完毕后在此填写）
+- 已完成 #656 / #654 / #648 三项修复，并保持 `eventlog/transfer.ts` 的 `SUPPORTED_VERSIONS` 不变。
+- #656：`src/services/impl/settings-data-service.ts` 现会先解析 `version`；当 `version === 3` 时，按真实 bundle 字段 `events / tasks / time_blocks / active_block` 分别导入，事件域会被重写为 version:2 payload 后再交给 EventLog 导入器；version:1/2 仍走原有单域事件导入路径。
+- #654：`src/ui/components/MigrationDialog.tsx` 错误态已改为 `max-h-[40vh]` 滚动错误容器，`DialogFooter` 固定可达，并允许错误态通过 Esc / 点外退出；非错误态仍保持点外不可关闭。
+- #648：`src/ui/app/config/settings/settings-registry.ts` 已实现「清空本地缓存」与「重置所有设置」真实逻辑：前者只删除 `exomind:*` localStorage key 并清空 sessionStorage，后者清空全部 localStorage 与 sessionStorage；两者都不会触碰 RT SQLite 数据。`src/ui/app/components/settings/settings-renderers.tsx` 已为危险 action 改为二次确认 Dialog。
+- 新增/更新测试：
+  - `tests/unit/services/settings-data-service.test.ts`
+  - `tests/unit/ui/migration-dialog.test.tsx`
+  - `tests/unit/settings/settings-renderers.test.tsx`
+  - `tests/unit/settings/settings-registry-coverage.test.ts`
+- 验证命令：
+  - `bunx tsc --noEmit`
+  - `bunx vitest run tests/unit/services/settings-data-service.test.ts tests/unit/ui/migration-dialog.test.tsx tests/unit/settings/settings-renderers.test.tsx tests/unit/settings/settings-registry-coverage.test.ts`

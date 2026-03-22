@@ -150,6 +150,7 @@ describe('MigrationDialog（旧数据迁移弹窗）', () => {
 
     expect(screen.getByText('迁移失败')).toBeInTheDocument();
     expect(screen.getByText(/RT connection refused/)).toBeInTheDocument();
+    expect(screen.getByText('RT connection refused').tagName).toBe('PRE');
     expect(screen.getByRole('button', { name: '继续使用旧版存储' })).toBeInTheDocument();
   });
 
@@ -167,6 +168,24 @@ describe('MigrationDialog（旧数据迁移弹窗）', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '继续使用旧版存储' }));
     expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows dismissing error state with Escape（错误态允许按 Esc 退出）', () => {
+    const onErrorDismiss = vi.fn();
+    render(
+      <MigrationDialog
+        open
+        summary={makeSummary()}
+        onMigrate={vi.fn()}
+        onSkip={vi.fn()}
+        onErrorDismiss={onErrorDismiss}
+        error={'x'.repeat(600)}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onErrorDismiss).toHaveBeenCalledTimes(1);
   });
 
   it('shows hasActiveBlock annotation in timeblock line（有活跃时间块时显示注记）', () => {

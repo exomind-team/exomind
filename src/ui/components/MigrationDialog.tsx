@@ -34,14 +34,33 @@ export function MigrationDialog({
     progress && progress.totalSteps > 0
       ? Math.round((progress.step / progress.totalSteps) * 100)
       : 0;
+  const dismissErrorState = onErrorDismiss ?? onSkip;
 
   return (
-    <Dialog open={open}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          return;
+        }
+        if (error) {
+          dismissErrorState();
+        }
+      }}
+    >
       <DialogContent
         hideCloseButton
-        className="max-w-sm sm:max-w-md dark:border-[#FFFFFF15] dark:bg-[rgba(28,25,23,0.92)]"
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => migrating && e.preventDefault()}
+        className="max-h-[85vh] max-w-sm overflow-hidden sm:max-w-md dark:border-[#FFFFFF15] dark:bg-[rgba(28,25,23,0.92)]"
+        onInteractOutside={(e) => {
+          if (!error) {
+            e.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          if (!error && migrating) {
+            e.preventDefault();
+          }
+        }}
       >
         {/* ── Error State ── */}
         {error ? (
@@ -53,14 +72,14 @@ export function MigrationDialog({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400">
-              {error}
+            <div className="max-h-[40vh] overflow-y-auto rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400">
+              <pre className="whitespace-pre-wrap break-all font-mono">{error}</pre>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="mt-4 flex-shrink-0">
               <button
                 type="button"
-                onClick={onErrorDismiss ?? onSkip}
+                onClick={dismissErrorState}
                 className="w-full rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
               >
                 继续使用旧版存储

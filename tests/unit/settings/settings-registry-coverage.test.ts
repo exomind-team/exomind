@@ -281,8 +281,11 @@ describe('settings registry coverage audit', () => {
       'command-palette-enabled',
     ]);
 
+    const clearLocalCache = getItem('clear-local-cache', 'action');
+    expect(clearLocalCache.confirmMessage).toContain('确认清空本地缓存');
+
     const resetAllSettings = getItem('reset-all-settings', 'action');
-    expect(resetAllSettings.confirmMessage).toBe('确认恢复所有默认设置？');
+    expect(resetAllSettings.confirmMessage).toContain('确认重置所有设置');
 
     const aboutVersion = getItem('about-version', 'action');
     expect(aboutVersion.hideChevron).toBe(true);

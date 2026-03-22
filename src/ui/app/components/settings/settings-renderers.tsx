@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Check, ChevronRight } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { Switch } from '@/components/ui/switch';
 import { getClipboardService } from '@/lib/services';
@@ -985,19 +985,10 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const disabled = loading || (typeof item.disabled === 'function' ? item.disabled() : item.disabled);
 
-  const handleAction = () => {
-    const confirmFn = typeof window !== 'undefined' && typeof window.confirm === 'function'
-      ? window.confirm.bind(window)
-      : typeof globalThis.confirm === 'function'
-        ? globalThis.confirm.bind(globalThis)
-        : undefined;
-
-    if (item.confirmMessage && confirmFn && !confirmFn(item.confirmMessage)) {
-      return;
-    }
-
+  const runAction = () => {
     setNotice(null);
     setError(null);
     try {
@@ -1021,6 +1012,15 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
     } catch (nextError) {
       setError(formatErrorMessage(item.errorMessagePrefix, nextError));
     }
+  };
+
+  const handleAction = () => {
+    if (item.confirmMessage) {
+      setConfirmOpen(true);
+      return;
+    }
+
+    runAction();
   };
 
   const handleCopy = async () => {
@@ -1058,9 +1058,7 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
             type="button"
             disabled={disabled}
             title={item.disabledReason}
-            onClick={() => {
-              handleAction();
-            }}
+            onClick={handleAction}
             className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             style={{ backgroundColor: 'var(--settings-tone-color, #C75B3A)' }}
           >
@@ -1069,6 +1067,33 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
         </div>
         <NoticeBlock message={notice} tone="success" />
         <NoticeBlock message={error} tone="error" />
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogContent className="rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>{item.label}</DialogTitle>
+              <DialogDescription>{item.confirmMessage}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="mt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                className="settings-dialog-secondary-button"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmOpen(false);
+                  runAction();
+                }}
+                className="rounded-xl bg-[#DC2626] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B91C1C]"
+              >
+                确认{item.label}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -1099,6 +1124,33 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
       <HelperBlock message={item.description ?? null} />
       <NoticeBlock message={notice} tone="success" />
       <NoticeBlock message={error} tone="error" />
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>{item.label}</DialogTitle>
+            <DialogDescription>{item.confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-2">
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(false)}
+              className="settings-dialog-secondary-button"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmOpen(false);
+                runAction();
+              }}
+              className="rounded-xl bg-[#DC2626] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B91C1C]"
+            >
+              确认{item.label}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
