@@ -7,6 +7,30 @@ description: Teach an AI Agent to connect to ExoMind Runtime via curl, read/writ
 
 > **核心约束**：Agent 接入外心的目标是**辅助人类、引导人类成长**，不是替代人类做决策。
 
+## 版本与时效性
+
+- 最后更新日期：`2026-03-22`
+- 基线提交：`0b771fc` `feat(skill): add ExoMind RT Agent access skill (#666)`
+- 当前覆盖范围：
+  - 已覆盖：当前 raw RT 接入方式、eventlog 写入、`profile-<slug>` scope 规则、现阶段零认证现状
+  - 设计前瞻：per-agent token、watch/长轮询、`/act` feature API、bootstrap/discovery
+- 相关追踪：
+  - `#666` identity / profile scope / session / permission scopes
+  - `#676` `/act` feature API 与 bootstrap/discovery
+  - `docs/development/curl-access-exomind-runtime.md`
+
+如果你发现下列任一情况，应优先怀疑本 skill 可能已部分过时，并回看相关 issue / 文档，而不是继续机械照抄：
+
+- RT 已引入 `/act/*` 或 `bootstrap`，但本 skill 仍主要在教 raw 路由
+- token / session / profile discovery 字段与这里描述不一致
+- `eventlog`、`tasks`、`timeblocks` 的写入契约或认证方式发生变化
+- 用户明确说明“最新 API”“刚改过契约”“请按最新实现处理”
+
+判断原则：
+
+- 这份 skill 是 Agent-facing 快速上手材料，不是最终真相源
+- 真相源优先级应为：最新代码 / 当前 issue 决策 / 开发文档 / 本 skill
+
 ## 章节索引
 
 1. [最小接入三步](#最小接入三步) — 连接 RT、确认档案、发送消息
