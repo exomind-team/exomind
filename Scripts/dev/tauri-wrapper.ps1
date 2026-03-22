@@ -87,6 +87,15 @@ function Ensure-AndroidManifestPermissions {
     Write-Host "[tauri-wrapper] Enabled cleartext traffic in AndroidManifest.xml"
   }
 
+  # Ensure configChanges on <activity> to prevent keyboard-connect crash
+  $ns = "http://schemas.android.com/apk/res/android"
+  $configChangesValue = "keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|locale|layoutDirection|fontScale|density"
+  $activity = $application.SelectSingleNode("activity") ?? $manifest.SelectSingleNode("//activity")
+  if ($activity -and $activity.GetAttribute("configChanges", $ns) -ne $configChangesValue) {
+    $activity.SetAttribute("configChanges", $ns, $configChangesValue)
+    Write-Host "[tauri-wrapper] Set configChanges on Activity in AndroidManifest.xml"
+  }
+
   $requiredPermissions = @(
     "android.permission.RECORD_AUDIO",
     "android.permission.MODIFY_AUDIO_SETTINGS",

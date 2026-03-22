@@ -101,15 +101,12 @@ export function isTauriWindow(): boolean {
 }
 
 export function isDesktopOperatingSystem(): boolean {
-  if (isTauriWindow()) {
-    return true;
-  }
-
   if (typeof navigator === 'undefined') {
     return false;
   }
 
   const userAgent = navigator.userAgent?.toLowerCase() ?? '';
+  // 先排除移动端 UA——Android Tauri 的 WebView UA 包含 "android"
   if (/(android|iphone|ipad|ipod|mobile|phone)/i.test(userAgent)) {
     return false;
   }

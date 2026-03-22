@@ -13,6 +13,7 @@ export const REQUIRED_NETWORK_DISCOVERY_PERMISSIONS = [
   CHANGE_WIFI_MULTICAST_STATE_PERMISSION,
 ] as const;
 export const ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE = 'android:usesCleartextTraffic="true"';
+export const ANDROID_CONFIG_CHANGES_VALUE = 'keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|locale|layoutDirection|fontScale|density';
 export const RELEASE_CLEARTEXT_PLACEHOLDER = 'manifestPlaceholders["usesCleartextTraffic"] = "true"';
 const DEBUG_KEEP_SYMBOLS_MARKER = 'jniLibs.keepDebugSymbols.add(';
 
@@ -279,6 +280,39 @@ export function ensureCleartextTrafficInManifest(manifestXml: string): ManifestP
   return { manifestXml: updatedManifest, changed: updatedManifest !== manifestXml };
 }
 
+export function ensureConfigChangesInManifest(manifestXml: string): ManifestPatchResult {
+  const expectedAttribute = `android:configChanges="${ANDROID_CONFIG_CHANGES_VALUE}"`;
+
+  if (manifestXml.includes(expectedAttribute)) {
+    return { manifestXml, changed: false };
+  }
+
+  // Match the main <activity> tag (the one with TauriActivity or MainActivity)
+  const activityTagPattern = /<activity\b[\s\S]*?>/;
+  const match = manifestXml.match(activityTagPattern);
+  if (!match) {
+    return { manifestXml, changed: false };
+  }
+
+  const updatedManifest = manifestXml.replace(
+    activityTagPattern,
+    (activityTag) => {
+      if (activityTag.includes('android:configChanges=')) {
+        // Replace existing configChanges value
+        return activityTag.replace(
+          /android:configChanges\s*=\s*["'][^"']*["']/,
+          expectedAttribute,
+        );
+      }
+
+      // Insert configChanges before the closing >
+      return activityTag.replace(/>$/, ` ${expectedAttribute}>`);
+    },
+  );
+
+  return { manifestXml: updatedManifest, changed: updatedManifest !== manifestXml };
+}
+
 export function ensureMdnsMulticastLockInMainActivity(activityKotlin: string): KotlinPatchResult {
   if (activityKotlin.includes(MDNS_MULTICAST_LOCK_MARKER)) {
     return { activityKotlin, changed: false };
@@ -302,14 +336,16 @@ export function ensureRequiredAudioPermissionsInManifestFile(manifestPath: strin
     const originalManifest = readFileSync(manifestPath, 'utf8');
     const permissionPatched = ensureRequiredAudioPermissionsInManifest(originalManifest);
     const cleartextPatched = ensureCleartextTrafficInManifest(permissionPatched.manifestXml);
+    const configChangesPatched = ensureConfigChangesInManifest(cleartextPatched.manifestXml);
     const patched = {
-      manifestXml: cleartextPatched.manifestXml,
-      changed: permissionPatched.changed || cleartextPatched.changed,
+      manifestXml: configChangesPatched.manifestXml,
+      changed: permissionPatched.changed || cleartextPatched.changed || configChangesPatched.changed,
     };
 
     if (!patched.changed) {
       return REQUIRED_AUDIO_PERMISSIONS.every((permission) => originalManifest.includes(permission))
         && originalManifest.includes(ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE)
+        && originalManifest.includes(`android:configChanges="${ANDROID_CONFIG_CHANGES_VALUE}"`)
         ? { status: 'already-present', changed: false }
         : { status: 'invalid-manifest', changed: false };
     }
