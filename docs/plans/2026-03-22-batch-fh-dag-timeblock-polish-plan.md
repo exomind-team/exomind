@@ -117,14 +117,38 @@ const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
 
 ---
 
-### 步骤 5：#640 滚轮切换模式
+### 步骤 5：#640 滚轮 + 快捷键切换模式
 
-**文件**：`src/ui/app/hooks/useTaskDagKeyboard.ts`（或新增 wheel 监听）
+**两种触发方式**：
 
-在画布上监听 `Ctrl+Alt+wheel` 事件（或 `Ctrl+wheel`）：
+| 触发方式 | 修饰键要求 | 说明 |
+|---------|-----------|------|
+| 鼠标悬浮在模式切换条上滚轮 | **无需修饰键** | 鼠标已明确指向模式切换控件，无歧义 |
+| 画布任意位置滚轮 | **Ctrl+Alt+滚轮** | 需要修饰键避免与浏览器缩放/ReactFlow 缩放冲突 |
+| 键盘快捷键 | **Ctrl+Alt+←/→** | 与画布滚轮修饰键一致（原 Ctrl+←/→ 改为 Ctrl+Alt+←/→） |
+
+**文件 1**：`src/ui/app/components/TaskDagModeSelector.tsx`
+
+模式切换条新增 `onWheel` 监听（无需修饰键）：
 
 ```tsx
-// 在 TaskDagPage 的画布 div 上：
+<div
+  className={[...].join(' ')}
+  onWheel={(event) => {
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? 1 : -1;
+    const currentIndex = MODE_OPTIONS.findIndex((o) => o.key === mode);
+    const nextIndex = (currentIndex + delta + MODE_OPTIONS.length) % MODE_OPTIONS.length;
+    onChange(MODE_OPTIONS[nextIndex].key);
+  }}
+>
+```
+
+**文件 2**：`src/ui/app/pages/TaskDagPage.tsx`
+
+画布 div 新增 `onWheel`（需要 Ctrl+Alt）：
+
+```tsx
 onWheel={(event) => {
   if (!event.ctrlKey || !event.altKey) return;
   event.preventDefault();
@@ -135,7 +159,18 @@ onWheel={(event) => {
 }}
 ```
 
-**注意**：`Ctrl+wheel` 在浏览器中默认是缩放，必须用 `Ctrl+Alt+wheel` 避免冲突，或者在 ReactFlow 内部阻止默认行为。
+**文件 3**：`src/ui/app/hooks/useTaskDagKeyboard.ts`
+
+将模式切换快捷键从 `Ctrl+←/→` 改为 `Ctrl+Alt+←/→`（与画布滚轮修饰键一致）：
+
+```ts
+// 原来：
+// if (event.ctrlKey && (key === 'ArrowLeft' || key === 'ArrowRight'))
+// 改为：
+if (event.ctrlKey && event.altKey && (key === 'ArrowLeft' || key === 'ArrowRight'))
+```
+
+**注意**：`Ctrl+←/→` 释放后，浏览器默认行为（光标跳词）不再被拦截，键盘输入体验更自然。
 
 ---
 
@@ -303,7 +338,7 @@ const [terminalFilter, setTerminalFilter] = useState<TerminalFilterMode>('smart'
 
 1. **#643 execute 模式的 onPaneClick**：注意不要影响 connect 模式的空白单击建任务逻辑
 2. **#665 useIsDesktop**：竖屏折叠状态是临时的（不持久化），每次进入 DAG 默认收起
-3. **#640 Ctrl+wheel 冲突**：浏览器默认 Ctrl+wheel = 页面缩放，必须用 Ctrl+Alt 或其他组合避免冲突
+3. **#640 模式切换修饰键统一**：画布滚轮和键盘快捷键都用 `Ctrl+Alt`；模式切换条上悬浮滚轮无需修饰键。同时把 useTaskDagKeyboard 中的 `Ctrl+←/→` 改为 `Ctrl+Alt+←/→`
 4. **#650 三级过滤需要改 localStorage key**：原 `exomind:dag-hide-terminal` 存的是 boolean，新格式是 enum string，需要向后兼容
 5. **#633 状态描述可选**：用户可以跳过不填，不应阻塞状态变更
 6. **#634 预选任务列表**：只显示 pending/in_progress 的任务，不显示终态
@@ -321,7 +356,9 @@ const [terminalFilter, setTerminalFilter] = useState<TerminalFilterMode>('smart'
 | Key 保存 | 保存火山 Key | 对话框关闭 | #663 |
 | 竖屏工具栏 | 窄屏查看 DAG | 搜索+工具收起为图标 | #665 |
 | 竖屏展开 | 点击 🔍 图标 | 搜索面板展开 | #665 |
-| 滚轮切模式 | Ctrl+Alt+滚轮 | 模式循环切换 | #640 |
+| 滚轮切模式-悬浮 | 鼠标悬浮模式切换条+滚轮 | 无需修饰键，模式循环 | #640 |
+| 滚轮切模式-画布 | 画布上 Ctrl+Alt+滚轮 | 模式循环切换 | #640 |
+| 滚轮切模式-无修饰 | 画布上纯滚轮 | 不触发（正常缩放） | #640 |
 | 背景切换 | 选择"网格" | 背景变为网格线 | #636 |
 | 三级过滤-智能 | 选择"智能隐藏" | 保留承载下游的终态 | #650 |
 | 三级过滤-严格 | 选择"严格隐藏" | 隐藏所有终态 | #650 |
