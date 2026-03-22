@@ -270,7 +270,10 @@ curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=20"
 | PowerShell | JSON 引号转义出错 | 写临时文件 + `curl.exe --data-binary @file` |
 | PowerShell | `curl` 是 `Invoke-WebRequest` 别名 | 明确用 `curl.exe` |
 | Cygwin/Git Bash | `!` 被 shell 展开 | 用单引号包裹 |
+| Cygwin/Git Bash | `curl ... \| python -c ...` 管道断流 | 先 `curl -o /tmp/resp.json` 再读文件 |
 | 所有环境 | `id` 必须是 UUID，`timestamp` 必须是毫秒 | 用语言内置 UUID + 时间戳函数 |
+| 所有环境 | 长 JSON body 在 bash 中转义极其痛苦 | **推荐写临时 JSON 文件再 `curl --data-binary @file.json`**，避免内联 `-d` |
+| 所有环境 | RT 字段名用 `snake_case`（如 `depends_on`），前端可能用 `camelCase` | **以 RT 返回为准**，不要猜 |
 
 ---
 
