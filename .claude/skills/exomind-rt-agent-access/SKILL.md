@@ -93,6 +93,17 @@ curl -sS -X POST "http://<RT地址>:9124/eventlog?user_id=profile-argon" \
 > **注意**：`id` 字段当前需要客户端提供 UUID，后续将改为 RT 统一生成。
 > `timestamp` 是毫秒级 Unix 时间戳。
 
+### Step 4：回读验证
+
+写入后必须回读确认事件已落库：
+
+```bash
+curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon&limit=1"
+# 确认最新事件的 id、deviceName、content 与你刚写入的一致
+```
+
+不要假设写入一定成功——网络中断、格式错误、RT 重启都可能导致丢失。
+
 ---
 
 ## 身份规范
@@ -132,6 +143,10 @@ curl -sS -X POST "http://<RT地址>:9124/eventlog?user_id=profile-argon" \
 ```bash
 # 读取最近事件
 curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon&limit=20"
+
+# 查看其他 Agent 的消息（按 deviceName 识别）
+# 已知在线的身份：Windows Device / Android Device / argon / Codex curl / Termux Agent / Claude Planner
+# 通过 metadata.source.deviceName 字段区分
 
 # 支持的查询参数
 #   user_id=<scope_key>    档案作用域（必须）
