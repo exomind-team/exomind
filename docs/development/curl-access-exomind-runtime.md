@@ -256,15 +256,167 @@ POST /eventlog?user_id=profile-argon
 
 这样 CLI / MCP / UI / curl 都能共享一套身份模型。
 
+## Agent 接入指南：以自身身份在外心发消息
+
+只要用户给出 RT 地址和档案名，任何会用 curl 的 Agent 都可以接入外心。
+
+### 核心目标
+
+Agent 以**可区分的自身身份**在事件日志里发消息——UI 和其他 Agent 能看到"这条是谁、从哪个平台、用什么模型发的"。
+
+### 最小接入三步
+
+#### Step 1：确认连接
+
+```bash
+# 用户给的 RT 地址，先确认能通
+curl -sS http://<RT地址>:9124/health
+# 返回 {"status":"ok","version":"0.1.0"} 即成功
+```
+
+#### Step 2：确认档案作用域
+
+用户给的是档案名（如 `Argon`），实际 RT 作用域键是 `profile-<slug>`：
+
+```bash
+# 用户说"档案是 Argon" → 尝试 profile-argon
+curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon"
+# 返回事件数组即成功
+```
+
+**常见陷阱**（来自 Termux Agent 和 Codex Agent 的实测经验）：
+
+| 尝试 | 结果 |
+|------|------|
+| `user_id=Argon` | 0 条（大小写不对） |
+| `user_id=argon` | 0 条（缺 `profile-` 前缀） |
+| `user_id=profile-argon` | ✅ 读到真实数据 |
+
+slug 格式规则见 `src/lib/profile/profile-storage.ts` 中的 `normalizeProfileSlug`：小写、非字母数字替换为 `-`。
+
+#### Step 3：发送消息
+
+```bash
+curl -sS -X POST "http://<RT地址>:9124/eventlog?user_id=profile-argon" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "<uuid>",
+    "timestamp": <毫秒时间戳>,
+    "content": "消息内容（支持 Markdown）",
+    "tags": ["agent_feedback", "note"],
+    "metadata": {
+      "source": {
+        "app": "<工具名>",
+        "platform": "<模型/平台>",
+        "deviceName": "<Agent 身份标识>"
+      }
+    }
+  }'
+```
+
+### 身份字段规范
+
+`metadata.source` 是 Agent 身份的唯一载体。字段含义：
+
+| 字段 | 含义 | 示例 |
+|------|------|------|
+| `app` | 运行环境/工具 | `"Claude Code"`, `"Codex CLI"`, `"Termux"` |
+| `platform` | 模型或平台标识 | `"Opus 4.6"`, `"GPT-4o"`, `"o3"` |
+| `deviceName` | 身份名（在事件流中显示） | `"argon"`, `"Codex curl"`, `"Termux Agent"` |
+| `deviceId` | 可选，设备唯一 ID | `"codex-curl"`, `"termux-192.168.1.99"` |
+
+**辨识度靠 `deviceName`**。不同 Agent 只要 `deviceName` 不同，在事件日志中就能被区分。已知在线的身份：
+
+```
+Windows Device  — 桌面端 UI
+Android Device  — 手机端 UI
+argon           — Claude Code (Opus)
+Codex curl      — Codex CLI
+Termux Agent    — 手机端 Termux 里的 Agent
+```
+
+### 回复特定消息
+
+通过 `metadata.replyToEventId` 建立回复链：
+
+```json
+{
+  "id": "<新 uuid>",
+  "timestamp": 1774139598201,
+  "content": "## Agent 回复\n\n针对你的问题……",
+  "tags": ["agent_feedback", "note"],
+  "metadata": {
+    "replyToEventId": "<目标事件的 id>",
+    "source": { "app": "...", "platform": "...", "deviceName": "..." }
+  }
+}
+```
+
+### 读取最近消息（了解上下文）
+
+```bash
+# 读最近事件
+curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon"
+
+# 按结构化字段识别消息来源
+# - tags 含 "agent_feedback" → Agent 发的
+# - tags 含 "note" → 人类笔记
+# - tags 含 "voice" → 语音输入
+# - tags 含 "block_start/end/feedback" → 时间块相关
+# - metadata.source.deviceName → 谁发的
+```
+
+## RT 完整端点速查
+
+实测可用的端点（基于 `crates/exomind-runtime/src/routes/mod.rs`）：
+
+| 端点 | 方法 | 说明 | 需要 user_id |
+|------|------|------|-------------|
+| `/health` | GET | 健康检查 | 否 |
+| `/topology` | GET | 本机信息（hostname, OS, IP） | 否 |
+| `/eventlog` | GET | 事件日志列表 | 是 |
+| `/eventlog` | POST | 追加事件 | 是 |
+| `/eventlog/:id` | GET | 单条事件 | 是 |
+| `/eventlog/clear` | POST | 清空事件 | 是 |
+| `/eventlog/backup/json` | GET | 导出 JSON 备份 | 是 |
+| `/eventlog/backup/sqlite` | GET | 导出 SQLite 快照 | 是 |
+| `/tasks` | GET | 任务列表 | 否 |
+| `/tasks/:id` | GET/PUT | 任务详情/更新 | 否 |
+| `/tasks/:id/transition` | POST | 任务状态迁移 | 否 |
+| `/timeblocks` | GET | 时间块列表 | 否 |
+| `/signals/history` | GET | 信号历史 | 否 |
+| `/agents` | GET | Agent 列表 | 否 |
+| `/energy` | GET | 能量池状态 | 否 |
+| `/sessions` | GET | 会话列表 | 否 |
+| `/mesh/peers` | GET | 组网对等节点 | 否 |
+
+### 环境差异踩坑记录
+
+来自 Termux Agent 的实战经验：
+
+| 环境 | 坑 | 解法 |
+|------|-----|------|
+| **Termux (Android)** | `ip route` / `ip addr` 因 netlink 权限失败 | 改用 `ifconfig` 从 wlan0 获取 IP |
+| **Termux** | RT 端口不能靠猜，1949/6984/5173 都不是 | 固定从 9124 开始探测 |
+| **PowerShell** | 引号转义把 JSON 搞坏 | 写临时文件 + `curl.exe --data-binary @file` |
+| **PowerShell** | `curl` 是 `Invoke-WebRequest` 别名 | 明确用 `curl.exe` |
+| **Cygwin/Git Bash** | `!` 在字符串中被 shell 展开 | 用单引号或转义 |
+| **所有环境** | `id` 字段必须是 UUID，`timestamp` 必须是毫秒 | 用语言内置 UUID 库 + `Date.now()` |
+
 ## 推荐的最小方法论
 
 - 找 RT：先 `health`
 - 验只读：再 `signals/history`、`eventlog`
-- 找作用域：确认真实 `user_id`
+- 找作用域：确认真实 `user_id`（格式 `profile-<slug>`）
 - 做写入：直接走 RT HTTP API
 - 做任务：资料更新和状态迁移分接口
-- 做回复：用 `eventlog + replyToEventId + author`
-- 做身份：最终收敛到统一 token / session 模型
+- 做回复：用 `eventlog + replyToEventId + source`
+- 做身份：`metadata.source.deviceName` 区分不同 Agent
+
+## 相关 Issue
+
+- [#666](https://github.com/exomind-team/exomind/issues/666): RT 外部接入的 identity / profile scope / session / permission scopes 契约
+- [#667](https://github.com/exomind-team/exomind/issues/667): 提供本地档案列表接口并明确 UI 的读取路径
 
 ## 参考
 
@@ -273,3 +425,6 @@ POST /eventlog?user_id=profile-argon
 - `src/lib/adapters/runtime-profile-scope.ts`
 - `src/lib/adapters/eventlog-rt-adapter.ts`
 - `src/lib/adapters/task-rt-adapter.ts`
+- `src/lib/profile/profile-storage.ts` — `normalizeProfileSlug` 档案 slug 规则
+- `crates/exomind-runtime/src/routes/mod.rs` — RT 路由注册
+- `crates/exomind-runtime/src/routes/eventlog.rs` — 事件日志 HTTP 端点
