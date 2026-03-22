@@ -103,6 +103,10 @@ const DEFAULT_TASK_DAG_SEARCH_OPTIONS: TaskDagSearchOptions = {
   filterMode: false,
 };
 const TASK_DAG_MODE_ORDER: TaskDagMode[] = ['browse', 'connect', 'execute'];
+const TASK_DAG_BACKGROUND_DOT_COLOR_LIGHT = 'rgba(168,162,158,0.42)';
+const TASK_DAG_BACKGROUND_LINE_COLOR_LIGHT = 'rgba(168,162,158,0.24)';
+const TASK_DAG_BACKGROUND_DOT_COLOR_DARK = 'rgba(68,64,60,0.8)';
+const TASK_DAG_BACKGROUND_LINE_COLOR_DARK = 'rgba(68,64,60,0.45)';
 
 export function getNextTaskDagMode(current: TaskDagMode, delta: 1 | -1): TaskDagMode {
   const currentIndex = TASK_DAG_MODE_ORDER.indexOf(current);
@@ -868,6 +872,9 @@ const TASK_DAG_MIN_ZOOM = 0.01;
 const TASK_DAG_FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: TASK_DAG_MIN_ZOOM } as const;
 
 export function TaskDagPage() {
+  const isDarkMode = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const backgroundDotColor = isDarkMode ? TASK_DAG_BACKGROUND_DOT_COLOR_DARK : TASK_DAG_BACKGROUND_DOT_COLOR_LIGHT;
+  const backgroundLineColor = isDarkMode ? TASK_DAG_BACKGROUND_LINE_COLOR_DARK : TASK_DAG_BACKGROUND_LINE_COLOR_LIGHT;
   const location = useLocation();
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
@@ -2045,9 +2052,9 @@ export function TaskDagPage() {
             }}
           >
             {backgroundMode === 'dots' ? (
-              <Background gap={20} color="#E7E5E4" variant={BackgroundVariant.Dots} />
+              <Background gap={20} color={backgroundDotColor} variant={BackgroundVariant.Dots} />
             ) : backgroundMode === 'lines' ? (
-              <Background gap={20} color="#E7E5E4" variant={BackgroundVariant.Lines} />
+              <Background gap={20} color={backgroundLineColor} variant={BackgroundVariant.Lines} />
             ) : null}
             {immersive ? null : (
               <Controls className="!rounded-lg !border-[#E7E3E0] !bg-white/90 !shadow-sm dark:!border-[#3C3836] dark:!bg-[#1C1917]/90 [&>button]:!border-[#E7E3E0] [&>button]:!bg-transparent [&>button]:!fill-[#57534E] dark:[&>button]:!border-[#3C3836] dark:[&>button]:!fill-[#A8A29E] [&>button:hover]:!bg-[#F5F0ED] dark:[&>button:hover]:!bg-[#292524]" />
