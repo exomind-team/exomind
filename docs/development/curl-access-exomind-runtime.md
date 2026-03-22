@@ -1,6 +1,30 @@
 # 通过 curl 接入 ExoMind Runtime（外心）的经验总结
 
-## 结论先行
+> 状态：
+> - “当前可用实践”部分是已实测、可直接联调的经验
+> - “目标设计模型”部分是正在收敛的外部接入方向，不代表当前已实现
+>
+> 相关追踪：
+> - [#666](https://github.com/exomind-team/exomind/issues/666): RT 外部接入的 identity / profile scope / session / permission scopes 契约
+> - [#667](https://github.com/exomind-team/exomind/issues/667): 提供本地档案列表接口并明确 UI 的读取路径
+> - [#676](https://github.com/exomind-team/exomind/issues/676): 引入 `/act` feature API 根路径并以时间块工作流作为首批样板
+> - [#677](https://github.com/exomind-team/exomind/issues/677): 外部 Agent 登录审批、客户端身份登记与请求箱入口
+
+## 文档定位
+
+这份文档分两层：
+
+- 第一层：**当前可用实践**
+  - 目标是让人类或 Agent 现在就能稳定通过 `curl` 接入外心
+- 第二层：**目标设计模型**
+  - 目标是把今天的经验反过来沉淀成 RT 自身的外部契约
+  - 避免未来客户端继续靠猜 `user_id`、搜源码、背字面量路由来接入
+
+如果你只是要联调，优先看“当前可用实践”。
+
+如果你在参与 RT API 设计，务必同时看“目标设计模型”。
+
+## 当前可用实践：结论先行
 
 ExoMind 更适合走一条 `RT-first` 路线：
 
@@ -21,7 +45,7 @@ ExoMind 更适合走一条 `RT-first` 路线：
 
 不要把所有东西都塞进 RT。`hover / drawer open / 搜索输入中 / 本地动画过渡` 这类纯表现态不值得上 RT。
 
-## 为什么这条路是对的
+## 当前可用实践：为什么这条路是对的
 
 结合这次实测，几个判断已经很清楚：
 
@@ -39,7 +63,7 @@ ExoMind 更适合走一条 `RT-first` 路线：
 
 只要它们都操作同一份 RT 契约，系统就会稳定得多。
 
-## 一套实用的接入顺序
+## 当前可用实践：一套实用的接入顺序
 
 不要一上来就写数据。顺序固定如下。
 
@@ -90,7 +114,7 @@ curl.exe -sS "http://192.168.1.204:9124/eventlog?user_id=profile-argon"
 
 - `src/lib/adapters/runtime-profile-scope.ts`
 
-## 任务接口经验
+## 当前可用实践：任务接口经验
 
 任务系统不能“全靠猜 JSON”。
 
@@ -135,7 +159,7 @@ curl.exe -sS "http://192.168.1.204:9124/eventlog?user_id=profile-argon"
 
 - `src/lib/adapters/task-rt-adapter.ts`
 
-## 事件日志经验
+## 当前可用实践：事件日志经验
 
 `eventlog` 很适合作为一层“面向人类与 Agent 的统一交互记录”。
 
@@ -187,7 +211,7 @@ POST /eventlog?user_id=profile-argon
 
 这次已经实测成功。
 
-## Windows / PowerShell 下的 curl 经验
+## 当前可用实践：Windows / PowerShell 下的 curl 经验
 
 复杂 JSON 请求体，最稳妥的方式仍然是：
 
@@ -207,7 +231,7 @@ POST /eventlog?user_id=profile-argon
 - `user_id` 对
 - JSON 结构对
 
-## 关于“逻辑都写在 RT，UI 只负责呈现”的评价
+## 目标设计模型：RT-first 的边界
 
 这个方向是对的，但要避免走极端。
 
@@ -232,7 +256,47 @@ POST /eventlog?user_id=profile-argon
 - 正在输入但尚未提交的本地草稿
 - 动画过程中的中间态
 
-## 关于会话令牌的判断
+## 目标设计模型：feature API、而不是只靠 raw API
+
+当前通过 `curl` 接入外心，主要还是直接打 raw 资源接口，例如：
+
+- `/eventlog`
+- `/tasks`
+- `/timeblocks`
+- `/signals/history`
+
+这在今天是可行的，也是我们拿来排障和验证 RT 真值的必要手段。
+
+但长期看，这些 raw API 不应继续承担“外部客户端默认入口”的角色。
+
+更合理的方向是：
+
+- RT 对外新增一层 `feature/capability API`
+- 默认通过一个新的根路径暴露，例如 `/act/...`
+- 让外部客户端优先走完整语义动作，而不是自己拼接底层状态改写
+
+例如时间块更适合外部看见的是：
+
+- `POST /act/timeblocks/start`
+- `POST /act/timeblocks/pause`
+- `POST /act/timeblocks/resume`
+- `POST /act/timeblocks/prepare-end`
+- `POST /act/timeblocks/end`
+
+而不是要求外部客户端自己去：
+
+- 改 active block JSON
+- 自己补事件日志
+- 自己猜哪些联动副作用必须一起发生
+
+> **以下为设计方向（未实现），不是已验证事实。**
+>
+> 目标模型应是：
+> - 外部默认走 `/act/*`
+> - raw `/eventlog`、`/tasks`、`/timeblocks` 继续保留，但更偏内部/调试/兼容层
+> - 某些 token 甚至不应直接拥有 raw API 权限
+
+## 目标设计模型：会话、身份与授权
 
 > **以下为设计方向（未实现），不是已验证事实。** 相关追踪见 [#666](https://github.com/exomind-team/exomind/issues/666)。
 
@@ -260,7 +324,27 @@ POST /eventlog?user_id=profile-argon
 
 > **注意**：一旦 RT 对外提供 profile discovery（如列出可用档案），它就进入权限问题域——谁能列出 profiles、能看到哪些字段、看到的是本机本地档案还是当前 RT 可访问的 scopes。外部 RT 看到的 profile 列表，与本机 UI 的本地档案列表，不应默认 1:1 等价。
 
-## Agent 接入指南：以自身身份在外心发消息
+## 目标设计模型：机器可读 discovery，而不是背路由
+
+今天外部客户端接入外心，仍然有几个明显的人肉步骤：
+
+- 先猜 RT 地址
+- 再猜档案作用域键
+- 再猜哪些路由应该调用
+
+长期不应继续依赖这套方式。
+
+更合理的方向是让 RT 提供一层机器可读的 bootstrap/discovery 信息，例如：
+
+- 哪些入口是公开的
+- 哪些入口需要授权
+- 当前可发现哪些档案
+- 外部客户端下一步该去哪里建立会话
+- 当前版本支持哪些 `/act/*` feature
+
+这类 bootstrap 信息应来自 RT 自身，而不是让 Agent 每次都搜索仓库或背 skill 里的字面量路由。
+
+## 当前可用实践：Agent 接入指南
 
 只要用户给出 RT 地址和档案名，任何会用 curl 的 Agent 都可以接入外心。
 
@@ -381,7 +465,11 @@ curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon"
 # - metadata.source.deviceName → 谁发的
 ```
 
-## RT 完整端点速查
+## 当前 raw 路由速查（现状，不等于未来默认外部契约）
+
+下表是**当前 raw 路由现状**，方便联调与排障。
+
+它们不等于未来推荐给外部客户端的最终默认入口。
 
 实测可用的端点（基于 `crates/exomind-runtime/src/routes/mod.rs`）：
 
@@ -418,7 +506,7 @@ curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon"
 | **Cygwin/Git Bash** | `!` 在字符串中被 shell 展开 | 用单引号或转义 |
 | **所有环境** | `id` 字段必须是 UUID，`timestamp` 必须是毫秒 | 用语言内置 UUID 库 + `Date.now()` |
 
-## 推荐的最小方法论
+## 当前可用实践：推荐的最小方法论
 
 - 找 RT：先 `health`
 - 验只读：再 `signals/history`、`eventlog`
@@ -428,15 +516,11 @@ curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon"
 - 做回复：用 `eventlog + replyToEventId + source`
 - 做身份：`metadata.source.deviceName` 区分不同 Agent
 
-## 相关 Issue
-
-- [#666](https://github.com/exomind-team/exomind/issues/666): RT 外部接入的 identity / profile scope / session / permission scopes 契约
-- [#667](https://github.com/exomind-team/exomind/issues/667): 提供本地档案列表接口并明确 UI 的读取路径
-
 ## 参考
 
 - `docs/development/signal-pool-timeblock-feedback.md`
 - `docs/development/exomind-runtime-agents-api.md`
+- `docs/development/runtime-external-access-contract.md`
 - `src/lib/adapters/runtime-profile-scope.ts`
 - `src/lib/adapters/eventlog-rt-adapter.ts`
 - `src/lib/adapters/task-rt-adapter.ts`
