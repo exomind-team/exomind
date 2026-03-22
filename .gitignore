@@ -120,6 +120,7 @@ pencil/.claude/settings.local.json
 agent.test.local.state.json
 runtime-data/
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 .exomind/
 
 # 临时截图和备份
