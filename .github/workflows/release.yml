@@ -133,9 +133,9 @@ jobs:
           foreach ($cmd in @("rustup", "rustc", "cargo")) {
             $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
             if ($resolved) {
-              Write-Host " - $cmd => $($resolved.Source)"
+              Write-Host (" - {0} => {1}" -f $cmd, $resolved.Source)
             } else {
-              Write-Host " - $cmd => NOT_FOUND"
+              Write-Host (" - {0} => NOT_FOUND" -f $cmd)
             }
           }
 
