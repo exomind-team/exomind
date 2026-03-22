@@ -152,18 +152,26 @@ curl -sS "http://127.0.0.1:9124/eventlog?user_id=profile-argon&since_timestamp=1
 **新增端点**：`GET /eventlog/watch`
 
 **行为**：
-- 接受 `user_id`、`since_id`（可选）参数
+- 接受 `user_id`、`since_id`（可选）、`timeout`（可选，秒，默认 60，上限 300）参数
 - 如果有新事件（since_id 之后），立即返回
-- 如果没有新事件，阻塞等待最多 30 秒
+- 如果没有新事件，阻塞等待最多 `timeout` 秒
 - 超时后返回空数组 `[]`
 - 客户端循环调用实现持续监听
 
 ```rust
+#[derive(Deserialize)]
+struct WatchQuery {
+    user_id: String,
+    since_id: Option<String>,
+    timeout: Option<u64>,  // 秒，默认 60，上限 300
+}
+
 async fn watch_events(
     Query(query): Query<WatchQuery>,
     state: State<AppState>,
 ) -> Json<Vec<Event>> {
-    let timeout = Duration::from_secs(30);
+    let timeout_secs = query.timeout.unwrap_or(60).min(300);
+    let timeout = Duration::from_secs(timeout_secs);
     let start = Instant::now();
 
     loop {
@@ -293,7 +301,9 @@ curl -sS "http://127.0.0.1:9124/profiles"
 | 时间过滤 | since_timestamp 查询 | 只返回之后的事件 | #669 |
 | tag 过滤 | tags=agent_feedback | 只返回含该 tag 的 | #669 |
 | watch 有新事件 | watch 后写入新事件 | 立即返回 | #671 |
-| watch 超时 | watch 30 秒无新事件 | 返回空数组 | #671 |
+| watch 超时 | watch 默认 60 秒无新事件 | 返回空数组 | #671 |
+| watch 自定义超时 | timeout=10 | 10 秒后返回空数组 | #671 |
+| watch 超时上限 | timeout=999 | 实际 cap 到 300 秒 | #671 |
 | 档案列表 | GET /profiles | 返回已知档案 | #667 |
 | cargo test | `cargo test -p exomind-runtime` | 通过 | 全部 |
 
