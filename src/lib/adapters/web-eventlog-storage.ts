@@ -27,8 +27,9 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     return events.map((event) => this.fromStorageEvent(event));
   }
 
-  async appendEvent(event: EventData): Promise<void> {
-    await appendEventWithEcsReplication(this.toStorageEvent(event), this.userId);
+  async appendEvent(event: EventData): Promise<EventData> {
+    const persisted = await appendEventWithEcsReplication(this.toStorageEvent(event), this.userId);
+    return this.fromStorageEvent(persisted);
   }
 
   async getEvent(id: string): Promise<EventData | null> {

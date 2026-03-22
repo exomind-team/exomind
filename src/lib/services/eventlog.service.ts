@@ -78,9 +78,8 @@ export class EventLogServiceImpl implements EventLogService {
       },
     };
 
-    await this.port.appendEvent(eventData);
-
-    const event = this.deserializeEvent(eventData);
+    const persisted = await this.port.appendEvent(eventData);
+    const event = this.deserializeEvent(persisted);
 
     // 通知监听者
     this.listeners.forEach((cb) => cb(event));
@@ -89,9 +88,8 @@ export class EventLogServiceImpl implements EventLogService {
   }
 
   async appendEventData(eventData: EventData): Promise<Event> {
-    await this.port.appendEvent(eventData);
-
-    const event = this.deserializeEvent(eventData);
+    const persisted = await this.port.appendEvent(eventData);
+    const event = this.deserializeEvent(persisted);
     this.listeners.forEach((cb) => cb(event));
 
     return event;

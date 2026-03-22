@@ -6,7 +6,7 @@ import {
   type Event as StorageEvent,
   type ProjectReplicatedEventResult,
 } from '@/lib/storage/event-storage';
-import type { EventData } from '@/lib/types/event';
+import type { Event as EventLogEvent, EventData } from '@/lib/types/event';
 import { getEventLogService } from './eventlog.service';
 import { SignalStreamService } from './signal-stream.service';
 import { log } from '@/lib/logger';
@@ -24,6 +24,8 @@ export interface EventLogReplicationAppendedPayload {
   cursor: EventLogReplicationCursor;
   event: StorageEvent;
 }
+
+export type AppendableStorageEvent = Omit<StorageEvent, 'id'> & { id?: string };
 
 function buildRuntimeHostRecord() {
   const runtimeTarget = getSelectedRuntimeTarget();
@@ -58,14 +60,40 @@ function buildReplicationPayload(event: StorageEvent): EventLogReplicationAppend
   };
 }
 
-function storageEventToEventData(event: StorageEvent): EventData {
-  const parsedTimestamp = Date.parse(event.createdAt);
+function ensureStorageEventId(event: AppendableStorageEvent): StorageEvent {
+  if (typeof event.id === 'string' && event.id.length > 0) {
+    return {
+      ...event,
+      id: event.id,
+    };
+  }
+
+  return {
+    ...event,
+    id: crypto.randomUUID(),
+  };
+}
+
+function storageEventToEventData(event: AppendableStorageEvent): EventData {
+  const normalized = ensureStorageEventId(event);
+  const parsedTimestamp = Date.parse(normalized.createdAt);
+  return {
+    id: normalized.id,
+    timestamp: Number.isNaN(parsedTimestamp) ? Date.now() : parsedTimestamp,
+    content: normalized.content,
+    tags: typeof normalized.type === 'string' && normalized.type.length > 0 ? [normalized.type] : ['note'],
+    metadata: normalized.metadata,
+  };
+}
+
+function eventLogEventToStorageEvent(event: EventLogEvent): StorageEvent {
+  const firstTag = Array.from(event.tags)[0];
   return {
     id: event.id,
-    timestamp: Number.isNaN(parsedTimestamp) ? Date.now() : parsedTimestamp,
     content: event.content,
-    tags: typeof event.type === 'string' && event.type.length > 0 ? [event.type] : ['note'],
-    metadata: event.metadata,
+    createdAt: new Date(event.timestamp).toISOString(),
+    type: typeof firstTag === 'string' && firstTag.length > 0 ? firstTag : 'note',
+    metadata: event.metadata as Record<string, unknown> | undefined,
   };
 }
 
@@ -82,23 +110,24 @@ export async function publishEventLogReplicationAppend(event: StorageEvent): Pro
   });
 }
 
-export async function appendEventWithEcsReplication(event: StorageEvent, userId?: string): Promise<StorageEvent> {
+export async function appendEventWithEcsReplication(event: AppendableStorageEvent, userId?: string): Promise<StorageEvent> {
   const environment = ExoMindEnvironment.getInstance();
   if (environment.runtime === 'tauri' && getEventlogBackendMode() === 'rt-sqlite') {
-    await getEventLogService().appendEventData(storageEventToEventData(event));
-    return event;
+    const persisted = await getEventLogService().appendEventData(storageEventToEventData(event));
+    return eventLogEventToStorageEvent(persisted);
   }
 
+  const normalized = ensureStorageEventId(event);
   const storage = getEventStorage(userId);
-  await storage.addEvent(event);
+  await storage.addEvent(normalized);
 
   if (typeof (storage as { getEvent?: unknown }).getEvent !== 'function') {
-    return event;
+    return normalized;
   }
 
-  const persisted = await storage.getEvent(event.id);
+  const persisted = await storage.getEvent(normalized.id);
   if (!persisted) {
-    throw new Error(`eventlog append succeeded but reload failed（写入后重读失败）: ${event.id}`);
+    throw new Error(`eventlog append succeeded but reload failed（写入后重读失败）: ${normalized.id}`);
   }
 
   try {

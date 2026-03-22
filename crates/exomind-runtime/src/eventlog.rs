@@ -16,7 +16,7 @@ const MIRROR_HEADER: &str = "# EventLog Mirror\n\n";
 
 // ── Public types ────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventRecord {
     pub id: String,
@@ -25,6 +25,13 @@ pub struct EventRecord {
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EventListFilter {
+    pub since_timestamp: Option<i64>,
+    pub until_timestamp: Option<i64>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,23 +95,28 @@ impl EventLogStore {
     // ── public API ──────────────────────────────────────────────
 
     pub fn list_events(&self, user_id: Option<&str>) -> Result<Vec<EventRecord>, String> {
+        self.list_events_filtered(user_id, &EventListFilter::default())
+    }
+
+    pub fn list_events_filtered(
+        &self,
+        user_id: Option<&str>,
+        filter: &EventListFilter,
+    ) -> Result<Vec<EventRecord>, String> {
         let normalized_user = sanitize_user_id(user_id);
         match &self.backend {
             EventLogBackend::JsonFiles => {
                 let paths = self.resolve_paths(user_id)?;
                 let mut events = read_events(&paths.events)?;
                 sort_events_desc(&mut events);
+                apply_event_filters(&mut events, filter);
                 Ok(events)
             }
-            EventLogBackend::Sqlite(store) => store.list_events(&normalized_user),
+            EventLogBackend::Sqlite(store) => store.list_events_filtered(&normalized_user, filter),
         }
     }
 
-    pub fn append_event(
-        &self,
-        user_id: Option<&str>,
-        event: EventRecord,
-    ) -> Result<(), String> {
+    pub fn append_event(&self, user_id: Option<&str>, event: EventRecord) -> Result<(), String> {
         let normalized_user = sanitize_user_id(user_id);
         match &self.backend {
             EventLogBackend::JsonFiles => {
@@ -230,6 +242,13 @@ impl EventLogStore {
         }
     }
 
+    pub fn list_known_user_ids(&self) -> Result<Vec<String>, String> {
+        match &self.backend {
+            EventLogBackend::JsonFiles => self.list_known_user_ids_from_json(),
+            EventLogBackend::Sqlite(store) => store.list_known_user_ids(),
+        }
+    }
+
     // ── internal helpers ────────────────────────────────────────
 
     fn resolve_paths(&self, user_id: Option<&str>) -> Result<EventLogPaths, String> {
@@ -246,6 +265,35 @@ impl EventLogStore {
             mirror: eventlog_dir.join(format!("{normalized_user}.md")),
             checkpoint: eventlog_dir.join(format!("{normalized_user}.checkpoint.json")),
         })
+    }
+
+    fn list_known_user_ids_from_json(&self) -> Result<Vec<String>, String> {
+        let eventlog_dir = self.data_dir.join(EVENTLOG_DIR_NAME);
+        if !eventlog_dir.exists() {
+            return Ok(vec![]);
+        }
+
+        let mut users = fs::read_dir(&eventlog_dir)
+            .map_err(|error| format!("failed to read eventlog dir: {error}"))?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| {
+                let path = entry.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                    return None;
+                }
+                let name = path.file_name()?.to_str()?;
+                if name.ends_with(".checkpoint.json") {
+                    return None;
+                }
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+
+        users.sort();
+        users.dedup();
+        Ok(users)
     }
 }
 
@@ -266,6 +314,25 @@ pub fn sanitize_user_id(user_id: Option<&str>) -> String {
             }
         })
         .collect()
+}
+
+fn apply_event_filters(events: &mut Vec<EventRecord>, filter: &EventListFilter) {
+    if let Some(since_timestamp) = filter.since_timestamp {
+        events.retain(|event| event.timestamp >= since_timestamp);
+    }
+
+    if let Some(until_timestamp) = filter.until_timestamp {
+        events.retain(|event| event.timestamp <= until_timestamp);
+    }
+
+    if !filter.tags.is_empty() {
+        events.retain(|event| {
+            filter
+                .tags
+                .iter()
+                .all(|tag| event.tags.iter().any(|event_tag| event_tag == tag))
+        });
+    }
 }
 
 fn read_events(path: &Path) -> Result<Vec<EventRecord>, String> {
@@ -439,7 +506,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("eventlog.sqlite");
 
-        let store = EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
+        let store =
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
         let event = EventRecord {
             id: "evt-sql-1".to_string(),
             timestamp: 1700000000000,
@@ -450,7 +518,8 @@ mod tests {
         store.append_event(None, event.clone()).unwrap();
         drop(store);
 
-        let reopened = EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
+        let reopened =
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
         let events = reopened.list_events(None).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].id, "evt-sql-1");

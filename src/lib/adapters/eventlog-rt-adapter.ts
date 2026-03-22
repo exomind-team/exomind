@@ -17,6 +17,13 @@ interface RuntimeEventPayload {
   metadata?: Record<string, unknown>;
 }
 
+interface RuntimeAppendEventPayload {
+  timestamp: number;
+  content: string;
+  tags: string[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface EventLogRtAdapterOptions {
   fetchImpl?: RuntimeFetch;
   resolveTarget?: () => RuntimeTarget;
@@ -65,25 +72,26 @@ export class EventLogRtAdapter implements IEventLogPort {
     return payload.map(toEventData);
   }
 
-  async appendEvent(event: EventData): Promise<void> {
+  async appendEvent(event: EventData): Promise<EventData> {
     const target = this.resolveTarget();
+    const payload: RuntimeAppendEventPayload = {
+      timestamp: event.timestamp,
+      content: event.content,
+      tags: event.tags,
+      ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
+    };
     const response = await this.fetchImpl(this.url('/eventlog', target), {
       method: 'POST',
       headers: buildRuntimeAuthHeaders(target, {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       }),
-      body: JSON.stringify({
-        id: event.id,
-        timestamp: event.timestamp,
-        content: event.content,
-        tags: event.tags,
-        ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
-      }),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) {
       throw new Error(`RT eventlog append failed: ${response.status}`);
     }
+    return toEventData(await response.json() as RuntimeEventPayload);
   }
 
   async getEvent(id: string): Promise<EventData | null> {

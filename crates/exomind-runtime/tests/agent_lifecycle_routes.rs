@@ -34,6 +34,10 @@ fn test_app_state(port: u16, host_id: &str, signal_pool: Arc<SignalPool>) -> App
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         session_store: Arc::new(exomind_runtime::session::SessionStore::new()),
         session_event_tx: None,
+        eventlog_watch_tx: {
+            let (tx, _rx) = exomind_runtime::routes::eventlog::eventlog_watch_channel();
+            tx
+        },
         timeblock_store: Arc::new(exomind_runtime::timeblock::TimeBlockStore::new()),
         energy_registry: energy_registry.clone(),
         tick_manager: Arc::new(exomind_runtime::tick::TickManager::new(
@@ -275,7 +279,11 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
     assert!(body_text.contains(r#""type":"done""#), "{body_text}");
 
     let sessions = session_store.list().unwrap();
-    assert_eq!(sessions.len(), 1, "agent chat should register a unified session");
+    assert_eq!(
+        sessions.len(),
+        1,
+        "agent chat should register a unified session"
+    );
     let session = &sessions[0];
     assert_eq!(session.agent_kind, "codex");
     assert_eq!(session.interaction_mode.as_str(), "structured");

@@ -467,9 +467,11 @@ pub async fn start_with_options(
                 state.registry.clone(),
             ),
         );
-        actor_tasks.push(signal::actors::input_ingest_actor::spawn_input_ingest_actor(
-            Arc::clone(&state.signal_pool),
-        ));
+        actor_tasks.push(
+            signal::actors::input_ingest_actor::spawn_input_ingest_actor(Arc::clone(
+                &state.signal_pool,
+            )),
+        );
         actor_tasks.push(
             signal::actors::external_input_actor::spawn_external_input_actor(Arc::clone(
                 &state.signal_pool,
@@ -735,6 +737,7 @@ pub struct AppState {
     pub task_store: Arc<task::TaskStore>,
     pub session_store: Arc<session::SessionStore>,
     pub session_event_tx: Option<tokio::sync::broadcast::Sender<routes::sessions::SessionEvent>>,
+    pub eventlog_watch_tx: tokio::sync::broadcast::Sender<String>,
     pub timeblock_store: Arc<timeblock::TimeBlockStore>,
     pub energy_registry: energy::EnergyRegistry,
     pub tick_manager: Arc<tick::TickManager>,
@@ -881,6 +884,10 @@ impl AppState {
                 let (tx, _rx) = routes::sessions::session_event_channel();
                 Some(tx)
             },
+            eventlog_watch_tx: {
+                let (tx, _rx) = routes::eventlog::eventlog_watch_channel();
+                tx
+            },
             timeblock_store: Arc::new(timeblock_store),
             energy_registry,
             tick_manager,
@@ -980,6 +987,10 @@ mod tests {
             task_store: Arc::new(task::TaskStore::new()),
             session_store: Arc::new(session::SessionStore::new()),
             session_event_tx: None,
+            eventlog_watch_tx: {
+                let (tx, _rx) = routes::eventlog::eventlog_watch_channel();
+                tx
+            },
             timeblock_store: Arc::new(timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(tick::TickManager::new(

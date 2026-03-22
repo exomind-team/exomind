@@ -9,9 +9,11 @@ use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
+use tokio::time::{Duration, Instant};
 
 use crate::AppState;
-use crate::eventlog::{EventRecord, MirrorStatus};
+use crate::eventlog::{EventListFilter, EventRecord, MirrorStatus, sanitize_user_id};
 use crate::signal::types::SignalEvent;
 
 // ── Request / query types ───────────────────────────────────────
@@ -21,6 +23,29 @@ struct EventLogQuery {
     user_id: Option<String>,
     limit: Option<usize>,
     since_id: Option<String>,
+    since_timestamp: Option<i64>,
+    until_timestamp: Option<i64>,
+    tags: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WatchEventsQuery {
+    user_id: Option<String>,
+    since_id: Option<String>,
+    since_timestamp: Option<i64>,
+    until_timestamp: Option<i64>,
+    tags: Option<String>,
+    timeout: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AppendEventPayload {
+    id: Option<String>,
+    timestamp: i64,
+    content: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +82,11 @@ struct EventLogImportResult {
     total: usize,
 }
 
+struct EventLogImportOutcome {
+    result: EventLogImportResult,
+    changed: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct EventLogBackendStatusResponse {
     backend: &'static str,
@@ -79,6 +109,69 @@ fn internal_error(msg: String) -> (StatusCode, Json<ErrorResponse>) {
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ErrorResponse { error: msg }),
     )
+}
+
+pub fn eventlog_watch_channel() -> (broadcast::Sender<String>, broadcast::Receiver<String>) {
+    broadcast::channel(128)
+}
+
+fn parse_tag_filter(raw: Option<&str>) -> Vec<String> {
+    raw.unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn build_event_list_filter(
+    since_timestamp: Option<i64>,
+    until_timestamp: Option<i64>,
+    tags: Option<&str>,
+) -> EventListFilter {
+    EventListFilter {
+        since_timestamp,
+        until_timestamp,
+        tags: parse_tag_filter(tags),
+    }
+}
+
+fn apply_since_id_and_limit(
+    mut events: Vec<EventRecord>,
+    since_id: Option<&str>,
+    limit: Option<usize>,
+) -> Vec<EventRecord> {
+    if let Some(since_id) = since_id {
+        if let Some(pos) = events.iter().position(|event| event.id == since_id) {
+            events.truncate(pos);
+        }
+    }
+
+    if let Some(limit) = limit {
+        events.truncate(limit);
+    }
+
+    events
+}
+
+fn load_events_for_query(
+    state: &AppState,
+    user_id: Option<&str>,
+    since_id: Option<&str>,
+    limit: Option<usize>,
+    since_timestamp: Option<i64>,
+    until_timestamp: Option<i64>,
+    tags: Option<&str>,
+) -> Result<Vec<EventRecord>, String> {
+    let filter = build_event_list_filter(since_timestamp, until_timestamp, tags);
+    let events = state
+        .eventlog_store
+        .list_events_filtered(user_id, &filter)?;
+    Ok(apply_since_id_and_limit(events, since_id, limit))
+}
+
+fn notify_eventlog_watchers(state: &AppState, user_id: Option<&str>) {
+    let _ = state.eventlog_watch_tx.send(sanitize_user_id(user_id));
 }
 
 fn eventlog_replication_seq(event: &EventRecord) -> i64 {
@@ -148,25 +241,16 @@ async fn list_events(
     State(state): State<AppState>,
     Query(query): Query<EventLogQuery>,
 ) -> Result<Json<Vec<EventRecord>>, (StatusCode, Json<ErrorResponse>)> {
-    let mut events = state
-        .eventlog_store
-        .list_events(query.user_id.as_deref())
-        .map_err(internal_error)?;
-
-    // Filter by since_id: keep only events that come *after* the given ID
-    // (i.e., newer events — list is sorted desc by timestamp).
-    if let Some(ref since_id) = query.since_id {
-        if let Some(pos) = events.iter().position(|e| e.id == *since_id) {
-            // Events before `pos` are newer (desc order).
-            events.truncate(pos);
-        }
-        // If since_id not found, return all events.
-    }
-
-    if let Some(limit) = query.limit {
-        events.truncate(limit);
-    }
-
+    let events = load_events_for_query(
+        &state,
+        query.user_id.as_deref(),
+        query.since_id.as_deref(),
+        query.limit,
+        query.since_timestamp,
+        query.until_timestamp,
+        query.tags.as_deref(),
+    )
+    .map_err(internal_error)?;
     Ok(Json(events))
 }
 
@@ -174,14 +258,87 @@ async fn list_events(
 async fn append_event(
     State(state): State<AppState>,
     Query(query): Query<EventLogQuery>,
-    Json(event): Json<EventRecord>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    Json(payload): Json<AppendEventPayload>,
+) -> Result<(StatusCode, Json<EventRecord>), (StatusCode, Json<ErrorResponse>)> {
+    let event = EventRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp: payload.timestamp,
+        content: payload.content,
+        tags: payload.tags,
+        metadata: payload.metadata,
+    };
+
+    if payload.id.is_some() {
+        tracing::info!(
+            user_id = ?query.user_id,
+            "ignoring deprecated client-provided eventlog id; runtime will generate id"
+        );
+    }
+
     state
         .eventlog_store
         .append_event(query.user_id.as_deref(), event.clone())
         .map_err(internal_error)?;
+    notify_eventlog_watchers(&state, query.user_id.as_deref());
     publish_eventlog_replication_append(&state, &event).await;
-    Ok(StatusCode::CREATED)
+    Ok((StatusCode::CREATED, Json(event)))
+}
+
+async fn watch_events(
+    State(state): State<AppState>,
+    Query(query): Query<WatchEventsQuery>,
+) -> Result<Json<Vec<EventRecord>>, (StatusCode, Json<ErrorResponse>)> {
+    let timeout_secs = query.timeout.unwrap_or(60).min(300);
+    let user_key = sanitize_user_id(query.user_id.as_deref());
+    let started_at = Instant::now();
+    let timeout_duration = Duration::from_secs(timeout_secs);
+
+    let initial = load_events_for_query(
+        &state,
+        query.user_id.as_deref(),
+        query.since_id.as_deref(),
+        None,
+        query.since_timestamp,
+        query.until_timestamp,
+        query.tags.as_deref(),
+    )
+    .map_err(internal_error)?;
+    if !initial.is_empty() {
+        return Ok(Json(initial));
+    }
+
+    let mut rx = state.eventlog_watch_tx.subscribe();
+    loop {
+        let Some(remaining) = timeout_duration.checked_sub(started_at.elapsed()) else {
+            return Ok(Json(vec![]));
+        };
+
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Err(_) => return Ok(Json(vec![])),
+            Ok(Err(broadcast::error::RecvError::Closed)) => return Ok(Json(vec![])),
+            Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Ok(changed_user_key)) => {
+                if changed_user_key != user_key {
+                    continue;
+                }
+
+                let events = load_events_for_query(
+                    &state,
+                    query.user_id.as_deref(),
+                    query.since_id.as_deref(),
+                    None,
+                    query.since_timestamp,
+                    query.until_timestamp,
+                    query.tags.as_deref(),
+                )
+                .map_err(internal_error)?;
+
+                if !events.is_empty() {
+                    return Ok(Json(events));
+                }
+            }
+        }
+    }
 }
 
 /// GET /eventlog/:id — get a single event by ID.
@@ -281,9 +438,12 @@ async fn import_eventlog_json(
     Json(payload): Json<EventLogBackupJsonPayload>,
 ) -> Result<Json<EventLogImportResult>, (StatusCode, Json<ErrorResponse>)> {
     let strategy = parse_import_strategy(query.strategy.as_deref()).map_err(internal_error)?;
-    let result = apply_event_import(&state, query.user_id.as_deref(), payload.events, strategy)
+    let outcome = apply_event_import(&state, query.user_id.as_deref(), payload.events, strategy)
         .map_err(internal_error)?;
-    Ok(Json(result))
+    if outcome.changed {
+        notify_eventlog_watchers(&state, query.user_id.as_deref());
+    }
+    Ok(Json(outcome.result))
 }
 
 async fn import_eventlog_sqlite(
@@ -297,9 +457,12 @@ async fn import_eventlog_sqlite(
         .map_err(|error| internal_error(format!("invalid sqlite snapshot: {error}")))?;
     let imported_events = read_events_from_sqlite_snapshot(&bytes, query.user_id.as_deref())
         .map_err(internal_error)?;
-    let result = apply_event_import(&state, query.user_id.as_deref(), imported_events, strategy)
+    let outcome = apply_event_import(&state, query.user_id.as_deref(), imported_events, strategy)
         .map_err(internal_error)?;
-    Ok(Json(result))
+    if outcome.changed {
+        notify_eventlog_watchers(&state, query.user_id.as_deref());
+    }
+    Ok(Json(outcome.result))
 }
 
 async fn eventlog_backend_status(
@@ -325,6 +488,7 @@ async fn eventlog_backend_status(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/eventlog/backend/status", get(eventlog_backend_status))
+        .route("/eventlog/watch", get(watch_events))
         .route(
             "/eventlog",
             get(list_events).post(append_event).delete(clear_events),
@@ -353,17 +517,21 @@ fn apply_event_import(
     user_id: Option<&str>,
     incoming: Vec<EventRecord>,
     strategy: EventLogImportStrategy,
-) -> Result<EventLogImportResult, String> {
+) -> Result<EventLogImportOutcome, String> {
     let existing = state.eventlog_store.list_events(user_id)?;
-    let result = match strategy {
+    let outcome = match strategy {
         EventLogImportStrategy::Overwrite => {
+            let changed = existing != incoming;
             state
                 .eventlog_store
                 .replace_all_events(user_id, &incoming)?;
-            EventLogImportResult {
-                imported: incoming.len(),
-                skipped: 0,
-                total: incoming.len(),
+            EventLogImportOutcome {
+                result: EventLogImportResult {
+                    imported: incoming.len(),
+                    skipped: 0,
+                    total: incoming.len(),
+                },
+                changed,
             }
         }
         EventLogImportStrategy::Merge => {
@@ -385,15 +553,18 @@ fn apply_event_import(
 
             let next = merged.into_values().collect::<Vec<_>>();
             state.eventlog_store.replace_all_events(user_id, &next)?;
-            EventLogImportResult {
-                imported,
-                skipped,
-                total: next.len(),
+            EventLogImportOutcome {
+                result: EventLogImportResult {
+                    imported,
+                    skipped,
+                    total: next.len(),
+                },
+                changed: imported > 0,
             }
         }
     };
 
-    Ok(result)
+    Ok(outcome)
 }
 
 fn build_eventlog_sqlite_snapshot_bytes(
@@ -485,6 +656,10 @@ mod tests {
             task_store: Arc::new(crate::task::TaskStore::new()),
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
+            eventlog_watch_tx: {
+                let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+                tx
+            },
             timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(crate::tick::TickManager::new(
@@ -507,6 +682,24 @@ mod tests {
         router().with_state(state)
     }
 
+    async fn append_event_via_api(app: &Router, body: &str, uri: &str) -> Value {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&body).unwrap()
+    }
+
     #[tokio::test]
     async fn append_and_list() {
         let dir = tempdir().unwrap();
@@ -514,22 +707,13 @@ mod tests {
         let state = test_state_with_eventlog(store);
         let app = test_router(state);
 
-        // Append an event.
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/eventlog")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"id":"e1","timestamp":1700000000000,"content":"hello","tags":["note"]}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::CREATED);
+        let appended = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000000000,"content":"hello","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+        let appended_id = appended["id"].as_str().unwrap();
 
         // List events.
         let resp = app
@@ -546,8 +730,29 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let events: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0]["id"], "e1");
+        assert_eq!(events[0]["id"], appended_id);
         assert_eq!(events[0]["content"], "hello");
+    }
+
+    #[tokio::test]
+    async fn append_ignores_client_provided_id_and_returns_runtime_id() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let app = test_router(test_state_with_eventlog(store.clone()));
+
+        let appended = append_event_via_api(
+            &app,
+            r#"{"id":"client-id","timestamp":1700000000001,"content":"runtime id","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let runtime_id = appended["id"].as_str().unwrap();
+        assert_ne!(runtime_id, "client-id");
+
+        let stored = store.list_events(None).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, runtime_id);
     }
 
     #[tokio::test]
@@ -557,26 +762,18 @@ mod tests {
         let state = test_state_with_eventlog(store);
         let app = test_router(state.clone());
 
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/eventlog")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{
-                            "id":"rep-1",
-                            "timestamp":1700000000000,
-                            "content":"hello replication",
-                            "tags":["note"],
-                            "metadata":{"source":{"deviceId":"desktop-1"}}
-                        }"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::CREATED);
+        let appended = append_event_via_api(
+            &app,
+            r#"{
+                "timestamp":1700000000000,
+                "content":"hello replication",
+                "tags":["note"],
+                "metadata":{"source":{"deviceId":"desktop-1"}}
+            }"#,
+            "/eventlog",
+        )
+        .await;
+        let appended_id = appended["id"].as_str().unwrap();
 
         let replication = state
             .signal_pool
@@ -592,7 +789,11 @@ mod tests {
 
         let replication = replication.unwrap();
         assert_eq!(replication.source, "runtime:eventlog");
-        assert_eq!(replication.trace_id.as_deref(), Some("eventlog:rep-1"));
+        let expected_trace_id = format!("eventlog:{appended_id}");
+        assert_eq!(
+            replication.trace_id.as_deref(),
+            Some(expected_trace_id.as_str())
+        );
         assert_eq!(replication.payload["schemaVersion"], serde_json::json!(1));
         assert_eq!(
             replication.payload["replicationSeq"],
@@ -608,7 +809,7 @@ mod tests {
         );
         assert_eq!(
             replication.payload["event"]["id"],
-            serde_json::json!("rep-1")
+            serde_json::json!(appended_id)
         );
         assert_eq!(
             replication.payload["event"]["content"],
@@ -633,6 +834,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_events_supports_timestamp_and_tag_filters() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        store
+            .append_event(
+                Some("profile-argon"),
+                EventRecord {
+                    id: "e-1".to_string(),
+                    timestamp: 1000,
+                    content: "note one".to_string(),
+                    tags: vec!["note".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        store
+            .append_event(
+                Some("profile-argon"),
+                EventRecord {
+                    id: "e-2".to_string(),
+                    timestamp: 2000,
+                    content: "agent note".to_string(),
+                    tags: vec!["note".to_string(), "agent_feedback".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        store
+            .append_event(
+                Some("profile-argon"),
+                EventRecord {
+                    id: "e-3".to_string(),
+                    timestamp: 3000,
+                    content: "agent only".to_string(),
+                    tags: vec!["agent_feedback".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
+
+        let app = test_router(test_state_with_eventlog(store));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog?user_id=profile-argon&since_timestamp=1500&until_timestamp=3000&tags=agent_feedback,note")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.len(), 1);
+        assert_eq!(payload[0]["id"], "e-2");
+    }
+
+    #[tokio::test]
+    async fn watch_events_returns_new_events_without_polling() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let app = test_router(test_state_with_eventlog(store));
+
+        let first = append_event_via_api(
+            &app,
+            r#"{"timestamp":1000,"content":"first","tags":["note"]}"#,
+            "/eventlog?user_id=profile-argon",
+        )
+        .await;
+        let first_id = first["id"].as_str().unwrap().to_string();
+
+        let watch_app = app.clone();
+        let watch_handle = tokio::spawn(async move {
+            watch_app
+                .oneshot(
+                    Request::builder()
+                        .uri(format!(
+                            "/eventlog/watch?user_id=profile-argon&since_id={first_id}&timeout=2"
+                        ))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let appended = append_event_via_api(
+            &app,
+            r#"{"timestamp":2000,"content":"second","tags":["note"]}"#,
+            "/eventlog?user_id=profile-argon",
+        )
+        .await;
+
+        let response = watch_handle.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.len(), 1);
+        assert_eq!(payload[0]["id"], appended["id"]);
+    }
+
+    #[tokio::test]
     async fn get_by_id() {
         let dir = tempdir().unwrap();
         let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
@@ -640,26 +946,19 @@ mod tests {
         let app = test_router(state);
 
         // Append.
-        let _ = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/eventlog")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"id":"g1","timestamp":1000,"content":"get-me","tags":[]}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let appended = append_event_via_api(
+            &app,
+            r#"{"timestamp":1000,"content":"get-me","tags":[]}"#,
+            "/eventlog",
+        )
+        .await;
+        let appended_id = appended["id"].as_str().unwrap();
 
         // Get by ID.
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri("/eventlog/events/g1")
+                    .uri(format!("/eventlog/events/{appended_id}"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -670,7 +969,7 @@ mod tests {
 
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let event: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(event["id"], "g1");
+        assert_eq!(event["id"], appended_id);
         assert_eq!(event["content"], "get-me");
     }
 

@@ -488,6 +488,10 @@ mod tests {
             task_store,
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
+            eventlog_watch_tx: {
+                let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+                tx
+            },
             timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(crate::tick::TickManager::new(

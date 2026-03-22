@@ -1,11 +1,9 @@
 import { getEventSourceMetadata } from '@/lib/eventlog/source-metadata'
 import { SYSTEM_TAGS } from '@/lib/types/event'
-import { createUuidV4 } from '@/lib/utils/uuid'
 import { appendEventWithEcsReplication } from './ecs-eventlog-replication.service'
 
 function tryEmit(type: string, content: string, metadata: Record<string, unknown>): void {
   void appendEventWithEcsReplication({
-    id: createUuidV4(),
     content,
     createdAt: new Date().toISOString(),
     type,

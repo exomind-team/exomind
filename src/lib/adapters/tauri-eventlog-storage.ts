@@ -49,19 +49,19 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
     }
   }
 
-  async appendEvent(event: EventData): Promise<void> {
+  async appendEvent(event: EventData): Promise<EventData> {
     const invoke = await getTauriInvoke();
     if (!invoke) {
-      await this.fallback.appendEvent(event);
-      return;
+      return this.fallback.appendEvent(event);
     }
 
     const userId = this.resolveUserId();
     try {
       await invoke<void>('eventlog_append', { userId, event });
+      return event;
     } catch (error) {
       log.warn(`[TauriEventLogStorageAdapter] eventlog_append failed, fallback to web storage: ${error instanceof Error ? error.message : String(error)}`);
-      await this.fallback.appendEvent(event);
+      return this.fallback.appendEvent(event);
     }
   }
 

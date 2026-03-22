@@ -24,7 +24,11 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         host_id: host_id.clone(),
         registry: registry.clone(),
         signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
+        mesh: Arc::new(MeshState::new(
+            host_id.clone(),
+            Arc::clone(&signal_pool),
+            None,
+        )),
         mesh_relay: None,
         auth_secret: None,
         mdns: None,
@@ -32,6 +36,10 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         session_store: Arc::new(exomind_runtime::session::SessionStore::new()),
         session_event_tx: None,
+        eventlog_watch_tx: {
+            let (tx, _rx) = exomind_runtime::routes::eventlog::eventlog_watch_channel();
+            tx
+        },
         timeblock_store,
         energy_registry: energy_registry.clone(),
         tick_manager: Arc::new(exomind_runtime::tick::TickManager::new(
@@ -45,7 +53,10 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
             std::env::temp_dir().join("exomind-test-timeblocks"),
         )),
         #[cfg(not(target_os = "android"))]
-        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
+        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(
+            Arc::clone(&signal_pool),
+            host_id,
+        )),
     }
 }
 
@@ -56,7 +67,8 @@ fn test_router(state: AppState) -> Router {
 #[tokio::test]
 async fn put_and_get_active_timeblock() {
     let dir = tempdir().unwrap();
-    let store = Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
+    let store =
+        Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
     let app = test_router(test_state_with_timeblock_store(store));
 
     let payload = json!({
@@ -110,7 +122,12 @@ async fn put_and_get_active_timeblock() {
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
     let get_response = app
-        .oneshot(Request::builder().uri("/timeblocks/active").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/active")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -120,8 +137,16 @@ async fn put_and_get_active_timeblock() {
     assert_eq!(parsed["startId"], "active-1");
     assert_eq!(parsed["mode"], "countdown");
     assert_eq!(parsed["taskIds"], json!(["task-1", "task-2"]));
-    assert_eq!(parsed["taskAssociationLog"].as_array().map(|items| items.len()), Some(2));
-    assert!(parsed.get("taskId").is_none(), "legacy taskId should not be serialized");
+    assert_eq!(
+        parsed["taskAssociationLog"]
+            .as_array()
+            .map(|items| items.len()),
+        Some(2)
+    );
+    assert!(
+        parsed.get("taskId").is_none(),
+        "legacy taskId should not be serialized"
+    );
 }
 
 #[tokio::test]
@@ -140,7 +165,10 @@ async fn exports_sqlite_snapshot_and_backend_status() {
             start_time: 1700000000000,
             end_time: 1700000060000,
             task_ids: vec!["task-1".to_string()],
-            task_status_outcomes: Some(std::collections::HashMap::from([("task-1".to_string(), "completed".to_string())])),
+            task_status_outcomes: Some(std::collections::HashMap::from([(
+                "task-1".to_string(),
+                "completed".to_string(),
+            )])),
             task_association_log: vec![exomind_runtime::timeblock::BlockTaskAssociationEvent {
                 block_id: "tb-1".to_string(),
                 task_id: "task-1".to_string(),
@@ -154,22 +182,41 @@ async fn exports_sqlite_snapshot_and_backend_status() {
 
     let status_response = app
         .clone()
-        .oneshot(Request::builder().uri("/timeblocks/backend/status").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/backend/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(status_response.status(), StatusCode::OK);
 
     let export_response = app
-        .oneshot(Request::builder().uri("/timeblocks/backup/sqlite").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/backup/sqlite")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
     assert_eq!(export_response.status(), StatusCode::OK);
-    let body = export_response.into_body().collect().await.unwrap().to_bytes();
+    let body = export_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let parsed: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(parsed["version"], 1);
     assert_eq!(parsed["timeblock_count"], 1);
-    assert!(parsed["content_base64"].as_str().is_some_and(|value| !value.is_empty()));
+    assert!(
+        parsed["content_base64"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
 
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(parsed["content_base64"].as_str().unwrap())
@@ -178,13 +225,18 @@ async fn exports_sqlite_snapshot_and_backend_status() {
     let import_sqlite_path = import_dir.path().join("snapshot.sqlite");
     std::fs::write(&import_sqlite_path, bytes).unwrap();
     let imported_store = TimeBlockStore::with_sqlite_path(&import_sqlite_path).unwrap();
-    assert_eq!(imported_store.len_completed().unwrap(), 1, "sqlite snapshot should reopen with latest completed blocks");
+    assert_eq!(
+        imported_store.len_completed().unwrap(),
+        1,
+        "sqlite snapshot should reopen with latest completed blocks"
+    );
 }
 
 #[tokio::test]
 async fn imports_json_backup_with_overwrite() {
     let dir = tempdir().unwrap();
-    let store = Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
+    let store =
+        Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
     store
         .replace_completed(&[TimeBlockData {
             id: "old-block".to_string(),
@@ -260,19 +312,39 @@ async fn imports_json_backup_with_overwrite() {
 
     let list_response = app
         .clone()
-        .oneshot(Request::builder().uri("/timeblocks").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
-    let list_body = list_response.into_body().collect().await.unwrap().to_bytes();
+    let list_body = list_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let list_payload: Value = serde_json::from_slice(&list_body).unwrap();
     assert_eq!(list_payload.as_array().unwrap().len(), 1);
     assert_eq!(list_payload[0]["id"], "new-block");
 
     let active_response = app
-        .oneshot(Request::builder().uri("/timeblocks/active").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/active")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
-    let active_body = active_response.into_body().collect().await.unwrap().to_bytes();
+    let active_body = active_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let active_payload: Value = serde_json::from_slice(&active_body).unwrap();
     assert_eq!(active_payload["startId"], "active-new");
     assert_eq!(active_payload["taskIds"], json!(["task-new"]));

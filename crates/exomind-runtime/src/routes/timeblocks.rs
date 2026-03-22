@@ -157,7 +157,11 @@ async fn timeblock_backend_status(
         crate::timeblock::TimeBlockStoreBackendKind::Sqlite
     );
     Json(TimeBlockBackendStatusResponse {
-        backend: if supports_sqlite_snapshot { "rt-sqlite" } else { "memory" },
+        backend: if supports_sqlite_snapshot {
+            "rt-sqlite"
+        } else {
+            "memory"
+        },
         supports_json_backup: true,
         supports_sqlite_snapshot,
     })
@@ -216,7 +220,13 @@ async fn import_timeblocks_json(
 ) -> Result<Json<TimeBlockImportResult>, (StatusCode, Json<ErrorResponse>)> {
     let strategy = parse_import_strategy(query.strategy.as_deref())?;
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let result = apply_timeblock_import(&state, scope_key, payload.time_blocks, payload.active_block, strategy)?;
+    let result = apply_timeblock_import(
+        &state,
+        scope_key,
+        payload.time_blocks,
+        payload.active_block,
+        strategy,
+    )?;
     Ok(Json(result))
 }
 
@@ -226,16 +236,14 @@ async fn import_timeblocks_sqlite(
     Json(payload): Json<TimeBlockBackupSqliteImportPayload>,
 ) -> Result<Json<TimeBlockImportResult>, (StatusCode, Json<ErrorResponse>)> {
     let strategy = parse_import_strategy(query.strategy.as_deref())?;
-    let bytes = STANDARD
-        .decode(payload.content_base64)
-        .map_err(|error| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("invalid sqlite snapshot: {error}"),
-                }),
-            )
-        })?;
+    let bytes = STANDARD.decode(payload.content_base64).map_err(|error| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("invalid sqlite snapshot: {error}"),
+            }),
+        )
+    })?;
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let (time_blocks, active_block) = read_timeblocks_from_sqlite_snapshot(&bytes, scope_key)
         .map_err(|error| internal_error(error.to_string()))?;
@@ -297,7 +305,12 @@ fn apply_timeblock_import(
                     merged.push(block);
                 }
             }
-            merged.sort_by(|left, right| right.end_time.cmp(&left.end_time).then_with(|| right.id.cmp(&left.id)));
+            merged.sort_by(|left, right| {
+                right
+                    .end_time
+                    .cmp(&left.end_time)
+                    .then_with(|| right.id.cmp(&left.id))
+            });
             (merged, imported, skipped)
         }
     };
@@ -337,7 +350,10 @@ fn build_timeblocks_sqlite_snapshot_bytes(
     scope_key: Option<&str>,
     time_blocks: &[TimeBlockData],
 ) -> Result<Vec<u8>, crate::timeblock::TimeBlockStoreError> {
-    let temp_root = std::env::temp_dir().join(format!("exomind-timeblocks-export-{}", uuid::Uuid::new_v4()));
+    let temp_root = std::env::temp_dir().join(format!(
+        "exomind-timeblocks-export-{}",
+        uuid::Uuid::new_v4()
+    ));
     std::fs::create_dir_all(&temp_root)?;
     let sqlite_path = temp_root.join("timeblocks-export.sqlite");
     let store = crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path)?;
@@ -345,7 +361,11 @@ fn build_timeblocks_sqlite_snapshot_bytes(
     if let Some(active_block) = state.timeblock_store.get_active_scoped(scope_key)? {
         store.put_active_scoped(scope_key, active_block)?;
     }
-    let bytes = store.sqlite_snapshot_bytes()?.ok_or_else(|| crate::timeblock::TimeBlockStoreError::Io(std::io::Error::other("failed to produce scoped timeblock snapshot")))?;
+    let bytes = store.sqlite_snapshot_bytes()?.ok_or_else(|| {
+        crate::timeblock::TimeBlockStoreError::Io(std::io::Error::other(
+            "failed to produce scoped timeblock snapshot",
+        ))
+    })?;
     drop(store);
     let _ = std::fs::remove_file(&sqlite_path);
     let _ = std::fs::remove_dir_all(&temp_root);
@@ -356,7 +376,10 @@ fn read_timeblocks_from_sqlite_snapshot(
     bytes: &[u8],
     scope_key: Option<&str>,
 ) -> Result<(Vec<TimeBlockData>, Option<ActiveBlockData>), crate::timeblock::TimeBlockStoreError> {
-    let temp_root = std::env::temp_dir().join(format!("exomind-timeblocks-import-{}", uuid::Uuid::new_v4()));
+    let temp_root = std::env::temp_dir().join(format!(
+        "exomind-timeblocks-import-{}",
+        uuid::Uuid::new_v4()
+    ));
     std::fs::create_dir_all(&temp_root)?;
     let sqlite_path = temp_root.join("timeblocks-import.sqlite");
     std::fs::write(&sqlite_path, bytes)?;
@@ -371,7 +394,12 @@ fn read_timeblocks_from_sqlite_snapshot(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/timeblocks", get(list_timeblocks).put(replace_timeblocks))
-        .route("/timeblocks/active", get(get_active_timeblock).put(put_active_timeblock).delete(delete_active_timeblock))
+        .route(
+            "/timeblocks/active",
+            get(get_active_timeblock)
+                .put(put_active_timeblock)
+                .delete(delete_active_timeblock),
+        )
         .route("/timeblocks/backend/status", get(timeblock_backend_status))
         .route("/timeblocks/backup/json", get(export_timeblocks_json))
         .route("/timeblocks/backup/sqlite", get(export_timeblocks_sqlite))
@@ -391,7 +419,9 @@ mod tests {
     use tempfile::tempdir;
     use tower::util::ServiceExt;
 
-    fn test_state_with_timeblock_store(timeblock_store: Arc<crate::timeblock::TimeBlockStore>) -> AppState {
+    fn test_state_with_timeblock_store(
+        timeblock_store: Arc<crate::timeblock::TimeBlockStore>,
+    ) -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
         let host_id = "timeblocks-test-host".to_string();
         let registry = crate::agent::AgentRegistry::new();
@@ -401,7 +431,11 @@ mod tests {
             host_id: host_id.clone(),
             registry: registry.clone(),
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(crate::mesh::MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(crate::mesh::MeshState::new(
+                host_id.clone(),
+                Arc::clone(&signal_pool),
+                None,
+            )),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
@@ -409,6 +443,10 @@ mod tests {
             task_store: Arc::new(crate::task::TaskStore::new()),
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
+            eventlog_watch_tx: {
+                let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+                tx
+            },
             timeblock_store,
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(crate::tick::TickManager::new(
@@ -422,7 +460,10 @@ mod tests {
                 std::env::temp_dir().join("exomind-test-timeblocks"),
             )),
             #[cfg(not(target_os = "android"))]
-            pty_manager: Arc::new(crate::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
+            pty_manager: Arc::new(crate::pty::PtyManager::new(
+                Arc::clone(&signal_pool),
+                host_id,
+            )),
         }
     }
 
@@ -434,7 +475,8 @@ mod tests {
     async fn timeblock_routes_isolate_profile_id_scope_and_keep_default_anonymous() {
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("timeblocks-scoped.sqlite");
-        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
+        let timeblock_store =
+            Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
         let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
 
         let response = app
@@ -488,13 +530,15 @@ mod tests {
                                 "task-profile-a".to_string(),
                                 "continue".to_string(),
                             )])),
-                            task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
-                                block_id: "tb-profile-a".to_string(),
-                                task_id: "task-profile-a".to_string(),
-                                action: "associated".to_string(),
-                                timestamp: 1_700_000_100_000,
-                                source: "block_start".to_string(),
-                            }],
+                            task_association_log: vec![
+                                crate::timeblock::BlockTaskAssociationEvent {
+                                    block_id: "tb-profile-a".to_string(),
+                                    task_id: "task-profile-a".to_string(),
+                                    action: "associated".to_string(),
+                                    timestamp: 1_700_000_100_000,
+                                    source: "block_start".to_string(),
+                                },
+                            ],
                         }])
                         .unwrap(),
                     ))
@@ -533,13 +577,15 @@ mod tests {
                             paused: false,
                             paused_at: None,
                             task_ids: vec!["task-profile-a".to_string()],
-                            task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
-                                block_id: "active-profile-a".to_string(),
-                                task_id: "task-profile-a".to_string(),
-                                action: "associated".to_string(),
-                                timestamp: 1_700_000_100_000,
-                                source: "block_start".to_string(),
-                            }],
+                            task_association_log: vec![
+                                crate::timeblock::BlockTaskAssociationEvent {
+                                    block_id: "active-profile-a".to_string(),
+                                    task_id: "task-profile-a".to_string(),
+                                    action: "associated".to_string(),
+                                    timestamp: 1_700_000_100_000,
+                                    source: "block_start".to_string(),
+                                },
+                            ],
                             task_id: Some("task-profile-a".to_string()),
                         })
                         .unwrap(),
@@ -595,18 +641,31 @@ mod tests {
         assert_eq!(anonymous_blocks[0]["id"], "tb-anonymous");
         assert_eq!(profile_a_blocks.len(), 1);
         assert_eq!(profile_a_blocks[0]["id"], "tb-profile-a");
-        assert_eq!(profile_a_blocks[0]["taskIds"], serde_json::json!(["task-profile-a"]));
-        assert_eq!(profile_a_active["taskIds"], serde_json::json!(["task-profile-a"]));
+        assert_eq!(
+            profile_a_blocks[0]["taskIds"],
+            serde_json::json!(["task-profile-a"])
+        );
+        assert_eq!(
+            profile_a_active["taskIds"],
+            serde_json::json!(["task-profile-a"])
+        );
         assert!(profile_a_active.get("taskId").is_none());
         assert_eq!(timeblock_store.list_completed().unwrap().len(), 1);
-        assert_eq!(timeblock_store.list_completed_in_scope(Some("profile-a")).unwrap().len(), 1);
+        assert_eq!(
+            timeblock_store
+                .list_completed_in_scope(Some("profile-a"))
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
     async fn timeblock_routes_accept_user_id_alias_for_scoped_queries() {
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("timeblocks-user-id-scoped.sqlite");
-        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
+        let timeblock_store =
+            Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
         let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
 
         let response = app
@@ -631,13 +690,15 @@ mod tests {
                                 "task-user-a".to_string(),
                                 "continue".to_string(),
                             )])),
-                            task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
-                                block_id: "tb-user-a".to_string(),
-                                task_id: "task-user-a".to_string(),
-                                action: "associated".to_string(),
-                                timestamp: 1_700_000_100_000,
-                                source: "block_start".to_string(),
-                            }],
+                            task_association_log: vec![
+                                crate::timeblock::BlockTaskAssociationEvent {
+                                    block_id: "tb-user-a".to_string(),
+                                    task_id: "task-user-a".to_string(),
+                                    action: "associated".to_string(),
+                                    timestamp: 1_700_000_100_000,
+                                    source: "block_start".to_string(),
+                                },
+                            ],
                         }])
                         .unwrap(),
                     ))
@@ -676,13 +737,15 @@ mod tests {
                             paused: false,
                             paused_at: None,
                             task_ids: vec!["task-user-a".to_string()],
-                            task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
-                                block_id: "active-user-a".to_string(),
-                                task_id: "task-user-a".to_string(),
-                                action: "associated".to_string(),
-                                timestamp: 1_700_000_100_000,
-                                source: "block_start".to_string(),
-                            }],
+                            task_association_log: vec![
+                                crate::timeblock::BlockTaskAssociationEvent {
+                                    block_id: "active-user-a".to_string(),
+                                    task_id: "task-user-a".to_string(),
+                                    action: "associated".to_string(),
+                                    timestamp: 1_700_000_100_000,
+                                    source: "block_start".to_string(),
+                                },
+                            ],
                             task_id: Some("task-user-a".to_string()),
                         })
                         .unwrap(),
@@ -722,10 +785,22 @@ mod tests {
 
         assert_eq!(scoped_blocks.len(), 1);
         assert_eq!(scoped_blocks[0]["id"], "tb-user-a");
-        assert_eq!(scoped_blocks[0]["taskIds"], serde_json::json!(["task-user-a"]));
+        assert_eq!(
+            scoped_blocks[0]["taskIds"],
+            serde_json::json!(["task-user-a"])
+        );
         assert_eq!(scoped_active["taskIds"], serde_json::json!(["task-user-a"]));
         assert!(scoped_active.get("taskId").is_none());
-        assert!(timeblock_store.list_completed().unwrap().is_empty(), "default anonymous scope should stay isolated");
-        assert_eq!(timeblock_store.list_completed_in_scope(Some("user-a")).unwrap().len(), 1);
+        assert!(
+            timeblock_store.list_completed().unwrap().is_empty(),
+            "default anonymous scope should stay isolated"
+        );
+        assert_eq!(
+            timeblock_store
+                .list_completed_in_scope(Some("user-a"))
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }

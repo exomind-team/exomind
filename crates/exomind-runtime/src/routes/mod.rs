@@ -6,6 +6,7 @@ pub mod agents;
 pub mod energy;
 pub mod eventlog;
 pub mod mesh;
+pub mod profiles;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod sessions;
@@ -23,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .merge(energy::router())
         .merge(eventlog::router())
         .merge(mesh::router())
+        .merge(profiles::router())
         .merge(sessions::router())
         .merge(signals::router())
         .merge(tasks::router())

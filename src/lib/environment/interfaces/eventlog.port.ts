@@ -15,7 +15,7 @@ export interface IEventLogPort {
   /**
    * 追加一条事件
    */
-  appendEvent(event: EventData): Promise<void>;
+  appendEvent(event: EventData): Promise<EventData>;
 
   /**
    * 读取单条事件

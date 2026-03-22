@@ -162,7 +162,7 @@ async fn eventlog_append_route_relays_replication_signal_between_two_runtimes() 
     )
     .await;
 
-    client
+    let appended_event = client
         .post(format!("{a_url}/eventlog"))
         .json(&json!({
             "id": "relay-rep-1",
@@ -179,7 +179,14 @@ async fn eventlog_append_route_relays_replication_signal_between_two_runtimes() 
         .await
         .unwrap()
         .error_for_status()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
         .unwrap();
+    let runtime_event_id = appended_event["id"]
+        .as_str()
+        .expect("runtime append should return event id")
+        .to_string();
 
     let relayed = wait_until(Duration::from_secs(5), || {
         rt_b.clone_signal_pool()
@@ -189,7 +196,7 @@ async fn eventlog_append_route_relays_replication_signal_between_two_runtimes() 
             .any(|event| {
                 event.topic == "eventlog.replication.appended"
                     && event.hop == 1
-                    && event.payload["event"]["id"] == json!("relay-rep-1")
+                    && event.payload["event"]["id"] == json!(runtime_event_id)
             })
     })
     .await;

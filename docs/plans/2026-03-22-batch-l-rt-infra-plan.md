@@ -311,4 +311,16 @@ curl -sS "http://127.0.0.1:9124/profiles"
 
 ## 完成回填
 
-（Codex 执行完毕后在此填写）
+- 完成时间：2026-03-23
+- 实际落地：
+  - `#668`：`POST /eventlog` 改为忽略客户端 `id`，由 RT 统一生成 UUID v4，并返回完整事件；前端 RT 适配器不再向 `/eventlog` 发送 `id`
+  - `#669`：`GET /eventlog` 新增 `since_timestamp` / `until_timestamp` / `tags` 过滤，SQLite 路径按 `tags_json` 做 AND 语义过滤
+  - `#671`：新增 `GET /eventlog/watch` 长轮询端点，使用 `tokio::sync::broadcast` 做变更通知，避免 sleep 轮询
+  - `#667`：新增 `GET /profiles`，最小方案基于 RT eventlog 已知 scope 返回本地档案列表
+- 额外修正：
+  - RT 适配器现在会把 RT 返回的真实事件对象回传给前端服务层，避免“客户端临时 id”和“RT 最终 id”不一致
+  - 修正了 `mesh_relay_integration` 中依赖旧 event id 的测试断言，使其适配 RT 新协议
+- 验证结果：
+  - `bunx tsc --noEmit` ✅
+  - `bunx vitest run tests/unit/adapters/eventlog-rt-adapter.test.ts tests/unit/eventlog/tauri-eventlog-invoke.test.ts` ✅
+  - `cargo test -p exomind-runtime` ✅
