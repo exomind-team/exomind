@@ -4,12 +4,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ACCESS_NETWORK_STATE_PERMISSION,
+  ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE,
   ACCESS_WIFI_STATE_PERMISSION,
   CHANGE_WIFI_MULTICAST_STATE_PERMISSION,
   MODIFY_AUDIO_SETTINGS_PERMISSION,
   RECORD_AUDIO_PERMISSION,
   RELEASE_CLEARTEXT_PLACEHOLDER,
   ensureConfiguredNdkVersionInGradle,
+  ensureCleartextTrafficInManifest,
   ensureDebugCleartextTrafficInGradle,
   ensureDebugNativeLibsAreStrippedInGradle,
   ensureMdnsMulticastLockInMainActivity,
@@ -48,7 +50,7 @@ describe('ensureRequiredAudioPermissionsInManifest', () => {
     <uses-permission android:name="${ACCESS_NETWORK_STATE_PERMISSION}" />
     <uses-permission android:name="${ACCESS_WIFI_STATE_PERMISSION}" />
     <uses-permission android:name="${CHANGE_WIFI_MULTICAST_STATE_PERMISSION}" />
-    <application android:label="@string/app_name" />
+    <application android:label="@string/app_name" android:usesCleartextTraffic="true" />
 </manifest>
 `;
 
@@ -162,6 +164,35 @@ describe('ensureRequiredAudioPermissionsInManifest', () => {
     expect(result.manifestXml.indexOf(MODIFY_AUDIO_SETTINGS_PERMISSION)).toBeLessThan(
       result.manifestXml.indexOf('</manifest>')
     );
+  });
+});
+
+describe('ensureCleartextTrafficInManifest', () => {
+  it('injects usesCleartextTraffic on application when missing（缺失时注入 cleartext）', () => {
+    const input = `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="@string/app_name" />
+</manifest>
+`;
+
+    const result = ensureCleartextTrafficInManifest(input);
+
+    expect(result.changed).toBe(true);
+    expect(result.manifestXml).toContain(ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE);
+  });
+
+  it('replaces existing usesCleartextTraffic value with true（已有值时强制改为 true）', () => {
+    const input = `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="@string/app_name" android:usesCleartextTraffic="false" />
+</manifest>
+`;
+
+    const result = ensureCleartextTrafficInManifest(input);
+
+    expect(result.changed).toBe(true);
+    expect(result.manifestXml).toContain(ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE);
+    expect(result.manifestXml).not.toContain('android:usesCleartextTraffic="false"');
   });
 });
 

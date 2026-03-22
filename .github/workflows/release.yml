@@ -375,6 +375,9 @@ jobs:
               throw "Missing $permission in AndroidManifest.xml"
             }
           }
+          if (-not (Select-String -Path $manifestPath -Pattern 'android:usesCleartextTraffic="true"' -SimpleMatch -Quiet)) {
+            throw 'Missing android:usesCleartextTraffic="true" in AndroidManifest.xml'
+          }
 
           $mainActivityPath = "src-tauri/gen/android/app/src/main/java/com/exomind/app/MainActivity.kt"
           if (-not (Test-Path $mainActivityPath)) {

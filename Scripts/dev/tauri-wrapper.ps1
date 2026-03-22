@@ -81,6 +81,12 @@ function Ensure-AndroidManifestPermissions {
     return
   }
 
+  $application = $manifest.SelectSingleNode("application")
+  if ($application -and $application.GetAttribute("usesCleartextTraffic", "http://schemas.android.com/apk/res/android") -ne "true") {
+    $application.SetAttribute("usesCleartextTraffic", "http://schemas.android.com/apk/res/android", "true")
+    Write-Host "[tauri-wrapper] Enabled cleartext traffic in AndroidManifest.xml"
+  }
+
   $requiredPermissions = @(
     "android.permission.RECORD_AUDIO",
     "android.permission.MODIFY_AUDIO_SETTINGS",

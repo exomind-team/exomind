@@ -12,6 +12,7 @@ export const REQUIRED_NETWORK_DISCOVERY_PERMISSIONS = [
   ACCESS_WIFI_STATE_PERMISSION,
   CHANGE_WIFI_MULTICAST_STATE_PERMISSION,
 ] as const;
+export const ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE = 'android:usesCleartextTraffic="true"';
 export const RELEASE_CLEARTEXT_PLACEHOLDER = 'manifestPlaceholders["usesCleartextTraffic"] = "true"';
 const DEBUG_KEEP_SYMBOLS_MARKER = 'jniLibs.keepDebugSymbols.add(';
 
@@ -250,6 +251,34 @@ export function ensureRequiredAudioPermissionsInManifest(manifestXml: string): M
   return { manifestXml: updatedManifest, changed };
 }
 
+export function ensureCleartextTrafficInManifest(manifestXml: string): ManifestPatchResult {
+  if (manifestXml.includes(ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE)) {
+    return { manifestXml, changed: false };
+  }
+
+  const applicationOpenTagPattern = /<application\b[\s\S]*?>/;
+  const match = manifestXml.match(applicationOpenTagPattern);
+  if (!match) {
+    return { manifestXml, changed: false };
+  }
+
+  const updatedManifest = manifestXml.replace(
+    applicationOpenTagPattern,
+    (applicationTag) => {
+      if (applicationTag.includes('android:usesCleartextTraffic=')) {
+        return applicationTag.replace(
+          /android:usesCleartextTraffic\s*=\s*["'][^"']*["']/,
+          ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE,
+        );
+      }
+
+      return applicationTag.replace(/>$/, ` ${ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE}>`);
+    },
+  );
+
+  return { manifestXml: updatedManifest, changed: updatedManifest !== manifestXml };
+}
+
 export function ensureMdnsMulticastLockInMainActivity(activityKotlin: string): KotlinPatchResult {
   if (activityKotlin.includes(MDNS_MULTICAST_LOCK_MARKER)) {
     return { activityKotlin, changed: false };
@@ -271,10 +300,16 @@ export function ensureMdnsMulticastLockInMainActivity(activityKotlin: string): K
 export function ensureRequiredAudioPermissionsInManifestFile(manifestPath: string): ManifestFilePatchResult {
   try {
     const originalManifest = readFileSync(manifestPath, 'utf8');
-    const patched = ensureRequiredAudioPermissionsInManifest(originalManifest);
+    const permissionPatched = ensureRequiredAudioPermissionsInManifest(originalManifest);
+    const cleartextPatched = ensureCleartextTrafficInManifest(permissionPatched.manifestXml);
+    const patched = {
+      manifestXml: cleartextPatched.manifestXml,
+      changed: permissionPatched.changed || cleartextPatched.changed,
+    };
 
     if (!patched.changed) {
       return REQUIRED_AUDIO_PERMISSIONS.every((permission) => originalManifest.includes(permission))
+        && originalManifest.includes(ANDROID_USES_CLEARTEXT_TRAFFIC_ATTRIBUTE)
         ? { status: 'already-present', changed: false }
         : { status: 'invalid-manifest', changed: false };
     }
