@@ -133,9 +133,9 @@ jobs:
           foreach ($cmd in @("rustup", "rustc", "cargo")) {
             $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
             if ($resolved) {
-              Write-Host (" - {0} => {1}" -f $cmd, $resolved.Source)
+              Write-Host (" - {0}: {1}" -f $cmd, $resolved.Source)
             } else {
-              Write-Host (" - {0} => NOT_FOUND" -f $cmd)
+              Write-Host (" - {0}: NOT_FOUND" -f $cmd)
             }
           }
 
@@ -881,7 +881,7 @@ jobs:
           foreach ($file in $preparedFiles) {
             $contentType = Get-ContentType $file.Name
             $r2Key = "$channel/$versionDir/$($file.Name)"
-            Write-Host "Uploading (上传) $($file.Name) => $r2Key (Content-Type=$contentType)"
+            Write-Host "Uploading (上传) $($file.Name) : $r2Key (Content-Type=$contentType)"
             & npx wrangler r2 object put "$bucket/$r2Key" --file "$($file.FullName)" --content-type "$contentType" --remote
             if ($LASTEXITCODE -ne 0) {
               throw "Failed to upload file to R2: $($file.Name)"
