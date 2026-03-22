@@ -93,7 +93,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     resetSkipFeedbackConfirm,
     skipFeedbackConfirmState,
     skipFeedbackCountdownSec,
-  } = useFeedbackSubmitControls();
+  } = useFeedbackSubmitControls({ submitMode: 'ctrl-enter-only' });
 
   // 倒计时结束动作（纯前端配置，不持久化）
   const [countdownEndSoundEnabled, setCountdownEndSoundEnabled] = useState(true);

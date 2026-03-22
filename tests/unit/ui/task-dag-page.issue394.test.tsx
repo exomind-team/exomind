@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { TaskDagPage } from '@/ui/app/pages/TaskDagPage';
+import { TaskDagPage, getNextTaskDagMode } from '@/ui/app/pages/TaskDagPage';
 import type { TaskNode } from '@/lib/types/task';
 
 const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
@@ -19,6 +19,7 @@ const calculateSpentMinutesMock = vi.fn();
 const addTaskToBlockMock = vi.fn();
 const removeTaskFromBlockMock = vi.fn();
 const onBlockEndForTasksMock = vi.fn();
+const appendEventDataMock = vi.fn();
 
 const flowApiMocks = vi.hoisted(() => ({
   setCenter: vi.fn(),
@@ -60,6 +61,9 @@ vi.mock('@/lib/services', () => ({
     addTaskToBlock: addTaskToBlockMock,
     removeTaskFromBlock: removeTaskFromBlockMock,
     onBlockEndForTasks: onBlockEndForTasksMock,
+  }),
+  getEventLogService: () => ({
+    appendEventData: appendEventDataMock,
   }),
 }));
 
@@ -157,7 +161,10 @@ vi.mock('@xyflow/react', () => ({
       </div>
     );
   },
-  Background: () => <div data-testid="mock-react-flow-background" />,
+  Background: ({ variant }: { variant?: string }) => (
+    <div data-testid="mock-react-flow-background" data-variant={variant ?? 'default'} />
+  ),
+  BackgroundVariant: { Dots: 'dots', Lines: 'lines' },
   Controls: () => <div data-testid="mock-react-flow-controls" />,
   Handle: () => null,
   MarkerType: { ArrowClosed: 'arrowclosed' },
@@ -211,6 +218,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     addTaskToBlockMock.mockReset();
     removeTaskFromBlockMock.mockReset();
     onBlockEndForTasksMock.mockReset();
+    appendEventDataMock.mockReset();
 
     loadActiveBlockMock.mockResolvedValue(null);
     markEndingMock.mockResolvedValue(undefined);
@@ -220,6 +228,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     addTaskToBlockMock.mockResolvedValue(undefined);
     removeTaskFromBlockMock.mockResolvedValue(undefined);
     onBlockEndForTasksMock.mockResolvedValue(undefined);
+    appendEventDataMock.mockResolvedValue(undefined);
     transitionTaskMock.mockResolvedValue(null);
     createTaskMock.mockResolvedValue(null);
     addDependencyMock.mockResolvedValue(null);
@@ -520,7 +529,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       sourcePosition: 'bottom',
       targetPosition: 'top',
     });
-    expect(lastProps.edges[0]).toMatchObject({ type: 'default' });
+    expect(lastProps.edges[0]).toMatchObject({ type: 'dagreRouted' });
   });
 
   it('uses top-bottom auto layout on mobile viewports', async () => {
@@ -684,7 +693,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     await waitFor(() => {
       expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
     });
-    expect(window.localStorage.getItem('exomind:dag-hide-terminal')).toBe('1');
+    expect(window.localStorage.getItem('exomind:dag-hide-terminal')).toBe('smart');
     expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
     expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
   });
@@ -833,6 +842,80 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
+  it('cycles terminal filtering through smart, strict, and show modes', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+    });
+
+    const toggle = screen.getByTestId('task-dag-hide-terminal-toggle');
+    expect(toggle).toHaveTextContent('显示全部');
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem('exomind:dag-hide-terminal')).toBe('smart');
+
+    fireEvent.click(toggle);
+    expect(window.localStorage.getItem('exomind:dag-hide-terminal')).toBe('hide');
+
+    fireEvent.click(toggle);
+    expect(window.localStorage.getItem('exomind:dag-hide-terminal')).toBe('show');
+  });
+
+  it('switches background mode and persists the variant', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-background')).toHaveAttribute('data-variant', 'dots');
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-background-lines'));
+    expect(screen.getByTestId('mock-react-flow-background')).toHaveAttribute('data-variant', 'lines');
+    expect(window.localStorage.getItem('exomind:dag-background-mode')).toBe('lines');
+
+    fireEvent.click(screen.getByTestId('task-dag-background-none'));
+    expect(screen.queryByTestId('mock-react-flow-background')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('exomind:dag-background-mode')).toBe('none');
+  });
+
+  it('clears execute selection on pane click', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      const node = (flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; data: { isSelected?: boolean } }>;
+      }).nodes.find((entry) => entry.id === 'task-a');
+      expect(node?.data.isSelected).toBe(true);
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-pane'));
+
+    await waitFor(() => {
+      const node = (flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; data: { isSelected?: boolean } }>;
+      }).nodes.find((entry) => entry.id === 'task-a');
+      expect(node?.data.isSelected).toBe(false);
+    });
+  });
+
+  it('uses the same mode cycle order for Ctrl+Alt+wheel and related shortcuts', () => {
+    expect(getNextTaskDagMode('browse', 1)).toBe('connect');
+    expect(getNextTaskDagMode('connect', 1)).toBe('execute');
+    expect(getNextTaskDagMode('execute', 1)).toBe('browse');
+    expect(getNextTaskDagMode('browse', -1)).toBe('execute');
+    expect(getNextTaskDagMode('execute', -1)).toBe('connect');
+  });
+
   it('switches modes and persists the latest mode to localStorage', async () => {
     render(<TaskDagPage />);
 
@@ -918,6 +1001,28 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     await waitFor(() => {
       expect(screen.queryByTestId('task-dag-key-hints')).not.toBeInTheDocument();
     });
+  });
+
+  it('collapses control panels into mobile toggles on narrow screens', async () => {
+    isDesktopMock.mockReturnValue(false);
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('task-dag-search-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-tools-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-key-hints')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-mobile-search-toggle'));
+    expect(screen.getByTestId('task-dag-search-panel')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-mobile-tools-toggle'));
+    expect(screen.getByTestId('task-dag-tools-panel')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-key-hints-toggle'));
+    expect(screen.getByTestId('task-dag-key-hints')).toBeInTheDocument();
   });
 
   it('supports connect mode dependency toggle rules and surfaces cycle rejection', async () => {

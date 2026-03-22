@@ -1,6 +1,6 @@
 ﻿import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearRitualSession, getTodayRitualDayKey, saveRitualSession } from '@/ui/app/ritual/ritual-session-storage';
 import { setInputSendMode } from '@/config/input-send-mode';
 
@@ -30,6 +30,7 @@ const onBlockChangeMock = vi.fn();
 const listTasksMock = vi.fn();
 const transitionTaskMock = vi.fn();
 const addEventMock = vi.fn();
+const appendEventDataMock = vi.fn();
 const endBlockMock = vi.fn();
 const markEndingMock = vi.fn();
 const onBlockEndForTasksMock = vi.fn();
@@ -80,8 +81,8 @@ vi.mock('@/ui/app/components/FocusTimerWidget', async () => {
       | { mode?: string; name?: string };
 
     React.useImperativeHandle(ref, () => ({
-      openTaskConfig: (taskTitle: string) => {
-        setConfigTaskTitle(taskTitle);
+      openTaskConfig: (taskConfig: string | { title: string }) => {
+        setConfigTaskTitle(typeof taskConfig === 'string' ? taskConfig : taskConfig.title);
       },
     }), []);
 
@@ -142,6 +143,7 @@ vi.mock('@/lib/services', () => ({
   }),
   getEventLogService: () => ({
     addEvent: (...args: unknown[]) => addEventMock(...args),
+    appendEventData: (...args: unknown[]) => appendEventDataMock(...args),
   }),
 }));
 
@@ -189,6 +191,8 @@ vi.mock('@tauri-apps/api/window', () => ({
 
 describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运行时接线）', () => {
   beforeEach(() => {
+    cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.resetModules();
     clearRitualSession();
@@ -221,6 +225,8 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     transitionTaskMock.mockResolvedValue(undefined);
     addEventMock.mockReset();
     addEventMock.mockResolvedValue(undefined);
+    appendEventDataMock.mockReset();
+    appendEventDataMock.mockResolvedValue(undefined);
     markEndingMock.mockReset();
     markEndingMock.mockResolvedValue(undefined);
     endBlockMock.mockReset();
@@ -250,6 +256,17 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     focusMainWindowMock.mockResolvedValue(undefined);
     overlaySetSizeMock.mockReset();
     overlaySetSizeMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+    clearRitualSession();
+    blockListener = null;
+    taskStorageListener = null;
+    eventStorageListener = null;
+    focusChangedListener = null;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('shows shutdown-ready nudge from ritual session storage（待收工会话会驱动悬浮窗提醒）', async () => {

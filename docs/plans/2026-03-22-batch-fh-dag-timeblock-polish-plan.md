@@ -375,4 +375,18 @@ const [terminalFilter, setTerminalFilter] = useState<TerminalFilterMode>('smart'
 
 ## 完成回填
 
-（Codex 执行完毕后在此填写）
+已按顺序完成 F/H 两组 12 个步骤的实现，覆盖：
+- DAG 执行空白点击取消选中、结束反馈快捷键语义、火山 Key 保存后自动关闭。
+- 窄屏工具栏/提示板折叠、`Ctrl+Alt+滚轮` 循环切模式、背景模式切换持久化、终态节点三级过滤并兼容旧 boolean 存储值。
+- 时间块详情 sticky breadcrumb、关联任务详情/DAG 快速入口、任务状态变化可选说明追加到事件记录。
+- 时间块启动前预选 `pending` / `in_progress` 关联任务、悬浮窗计时器整合与黑褐色玻璃风格。
+
+另外修复了 `NowWorkbenchOverlayPage` 相关单测在合并执行下的环境串扰：
+- 在 `tests/unit/pages/NowWorkbenchOverlayPage.runtime.test.tsx` 的 `beforeEach/afterEach` 中补强 `cleanup()`、`vi.useRealTimers()`、session/listener 清理与 mock 恢复，避免其它测试遗留 fake timers 导致 overlay 用例超时或 DOM 残留。
+
+验证结果：
+- `bunx tsc --noEmit` ✅
+- `bunx vitest run tests/unit/ui/task-dag-page.issue394.test.tsx tests/unit/settings/settings-input-section.issue199.test.tsx tests/unit/ui/timeblock-detail-domain.issue583.test.tsx tests/unit/components/FocusTimerWidget.state-machine.issue175.test.tsx tests/unit/pages/NowWorkbenchOverlayPage.runtime.test.tsx` ✅
+
+备注：
+- 相关设置页测试仍会输出若干 `act(...)` warning，但本批相关测试已全部通过，未形成失败。

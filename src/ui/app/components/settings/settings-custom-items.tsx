@@ -1150,6 +1150,7 @@ export function VolcanoEngineKeySetting(props: { ctx: SettingsContext }) {
       setDraftAppKey(nextAppKey);
       setDraftAccessKey(nextAccessKey);
       setNotice('火山引擎 Key 已保存');
+      setOpen(false);
     } catch (nextError) {
       setNotice(null);
       setError(nextError instanceof Error ? nextError.message : '保存火山引擎 Key 失败');

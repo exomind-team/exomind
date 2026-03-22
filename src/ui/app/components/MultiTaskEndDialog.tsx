@@ -33,7 +33,7 @@ export function MultiTaskEndDialog({
     resetSkipFeedbackConfirm,
     skipFeedbackConfirmState,
     skipFeedbackCountdownSec,
-  } = useFeedbackSubmitControls();
+  } = useFeedbackSubmitControls({ submitMode: 'ctrl-enter-only' });
 
   const normalizedTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
 

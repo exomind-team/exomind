@@ -25,10 +25,12 @@ const startSyncMock = vi.fn().mockResolvedValue(undefined);
 const stopSyncMock = vi.fn().mockResolvedValue(undefined);
 const getTaskMock = vi.fn();
 const listTasksMock = vi.fn();
+const onTaskChangeMock = vi.fn(() => () => {});
 const transitionTaskMock = vi.fn();
 const addTaskToBlockMock = vi.fn();
 const removeTaskToBlockMock = vi.fn();
 const onBlockEndForTasksMock = vi.fn();
+const appendEventDataMock = vi.fn();
 let onBlockChangeHandler: ((block: unknown) => void) | null = null;
 let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | undefined;
 let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
@@ -49,12 +51,16 @@ vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     getTask: getTaskMock,
     listTasks: listTasksMock,
+    onTaskChange: onTaskChangeMock,
     transitionTask: transitionTaskMock,
   }),
   getTaskTimerService: () => ({
     addTaskToBlock: addTaskToBlockMock,
     removeTaskFromBlock: removeTaskToBlockMock,
     onBlockEndForTasks: onBlockEndForTasksMock,
+  }),
+  getEventLogService: () => ({
+    appendEventData: appendEventDataMock,
   }),
 }));
 
@@ -83,16 +89,20 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     updateElapsedMock.mockResolvedValue(undefined);
     getTaskMock.mockReset();
     listTasksMock.mockReset();
+    onTaskChangeMock.mockReset();
     transitionTaskMock.mockReset();
     addTaskToBlockMock.mockReset();
     removeTaskToBlockMock.mockReset();
     onBlockEndForTasksMock.mockReset();
+    appendEventDataMock.mockReset();
     getTaskMock.mockResolvedValue(null);
     listTasksMock.mockResolvedValue([]);
+    onTaskChangeMock.mockImplementation(() => () => {});
     transitionTaskMock.mockResolvedValue(null);
     addTaskToBlockMock.mockResolvedValue(undefined);
     removeTaskToBlockMock.mockResolvedValue(undefined);
     onBlockEndForTasksMock.mockResolvedValue(undefined);
+    appendEventDataMock.mockResolvedValue(undefined);
     onBlockChangeHandler = null;
     onBlockChangeMock.mockReset();
     onBlockChangeMock.mockImplementation((handler: (block: unknown) => void) => {
@@ -388,6 +398,35 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     expect(screen.getByTestId('new-focus-task-input')).toHaveValue('来自悬浮窗的任务');
   });
 
+  it('preselects pending or in-progress linked tasks before start', async () => {
+    const ref = createRef<FocusTimerWidgetHandle>();
+    listTasksMock.mockResolvedValue([
+      { id: 'task-1', title: '待办任务', status: 'pending' },
+      { id: 'task-2', title: '进行中任务', status: 'in_progress' },
+      { id: 'task-3', title: '已完成任务', status: 'completed' },
+    ]);
+
+    render(<FocusTimerWidget ref={ref} />);
+
+    await act(async () => {
+      ref.current?.openTaskConfig({
+        title: '来自悬浮窗的任务',
+        preselectedTaskIds: ['task-2'],
+      });
+    });
+
+    expect(screen.getByTestId('new-focus-task-input')).toHaveValue('来自悬浮窗的任务');
+    expect(screen.getByTestId('new-focus-prestart-task-task-1')).toBeInTheDocument();
+    expect(screen.getByTestId('new-focus-prestart-task-task-2')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('new-focus-prestart-task-task-3')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(addTaskToBlockMock).toHaveBeenCalledWith('task-2');
+    });
+  });
+
   it('restores countdown overtime after remount（倒计时超时在重载后可恢复）', async () => {
     const now = Date.now();
     const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
@@ -468,7 +507,7 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     await waitFor(() => expect(screen.queryByTestId('new-focus-feedback-textarea')).toBeNull());
   });
 
-  it('confirms feedback end with Enter in enter-send mode（反馈弹窗 Enter 模式确认结束）', async () => {
+  it('still requires Ctrl+Enter to confirm feedback in enter-send mode（反馈弹窗在 Enter 模式下仍需 Ctrl+Enter 确认结束）', async () => {
     setInputSendMode('enter-send');
     render(<FocusTimerWidget />);
 
@@ -486,6 +525,10 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     const feedback = await screen.findByTestId('new-focus-feedback-textarea');
     fireEvent.change(feedback, { target: { value: 'Enter 提交反馈' } });
     fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter' });
+
+    expect(endBlockMock).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
     await waitFor(() => {
       expect(endBlockMock).toHaveBeenCalledWith('Enter 提交反馈');

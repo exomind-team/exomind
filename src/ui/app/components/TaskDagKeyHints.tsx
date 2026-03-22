@@ -1,18 +1,24 @@
-import { MousePointerClick } from 'lucide-react';
+import { Keyboard, MousePointerClick } from 'lucide-react';
 import type { TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 
 interface TaskDagKeyHintsProps {
+  isDesktop: boolean;
   mode: TaskDagMode;
   hasSelectedNode: boolean;
   hasConnectSource: boolean;
   immersive: boolean;
+  mobileOpen: boolean;
+  onMobileOpenChange: (open: boolean) => void;
 }
 
 export function TaskDagKeyHints({
+  isDesktop,
   mode,
   hasSelectedNode,
   hasConnectSource,
   immersive,
+  mobileOpen,
+  onMobileOpenChange,
 }: TaskDagKeyHintsProps) {
   if (immersive) {
     return null;
@@ -61,10 +67,14 @@ export function TaskDagKeyHints({
     mouseHints.push({ label: '右击节点 结束或折叠' });
   }
 
-  return (
+  const contentClassName = isDesktop
+    ? 'pointer-events-none absolute bottom-3 right-3 z-10 flex max-w-[50%] flex-col gap-1 rounded-xl border border-[#E7E3E0] bg-white/90 px-3 py-2 text-[10px] text-[#78716C] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E]'
+    : 'pointer-events-none absolute bottom-16 right-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-col gap-1 rounded-xl border border-[#E7E3E0] bg-white/90 px-3 py-2 text-[10px] text-[#78716C] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E]';
+
+  const content = (
     <div
       data-testid="task-dag-key-hints"
-      className="pointer-events-none absolute bottom-3 right-3 z-10 flex max-w-[50%] flex-col gap-1 rounded-xl border border-[#E7E3E0] bg-white/90 px-3 py-2 text-[10px] text-[#78716C] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E]"
+      className={contentClassName}
     >
       <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
         {hints.map((hint) => (
@@ -84,5 +94,25 @@ export function TaskDagKeyHints({
         ))}
       </div>
     </div>
+  );
+
+  if (isDesktop) {
+    return content;
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="task-dag-key-hints-toggle"
+        onClick={() => onMobileOpenChange(!mobileOpen)}
+        className="pointer-events-auto absolute bottom-3 right-3 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#E7E3E0] bg-white/90 text-[#57534E] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]"
+        aria-expanded={mobileOpen}
+        aria-label="切换键盘提示"
+      >
+        <Keyboard size={16} />
+      </button>
+      {mobileOpen ? content : null}
+    </>
   );
 }

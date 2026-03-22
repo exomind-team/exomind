@@ -168,6 +168,9 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
       expect(setVolcanoAppKey).toHaveBeenCalledWith(' app-key-1 ');
       expect(setVolcanoAccessKey).toHaveBeenCalledWith(' access-key-1 ');
     });
+    await waitFor(() => {
+      expect(screen.queryByTestId('new-settings-volcano-engine-app-key-input')).not.toBeInTheDocument();
+    });
   });
 
   it('switches shortcut voice provider from input section', async () => {

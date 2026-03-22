@@ -8,6 +8,7 @@ import {
   getTaskTimerService,
   getTimeBlockService,
 } from '@/lib/services';
+import { appendTaskStatusChangeDescription } from '@/lib/task/task-status-change-description';
 import { resolveActiveBlockTaskIds, type ActiveBlockData, type Event as UiEvent } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
@@ -413,7 +414,17 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
           for (const taskId of taskIdsSnapshot) {
             const taskStatusChoice = taskStatusChoices[taskId] ?? 'continue';
             if (taskStatusChoice !== 'continue') {
+              const task = activeBlockTasks.find((candidate) => candidate.id === taskId);
               await taskService.transitionTask(taskId, taskStatusChoice as TaskStatus);
+              if (task) {
+                await appendTaskStatusChangeDescription({
+                  taskId,
+                  taskTitle: task.title,
+                  fromStatus: task.status,
+                  toStatus: taskStatusChoice as TaskStatus,
+                  description: feedback,
+                });
+              }
             }
           }
         } catch (transitionError) {

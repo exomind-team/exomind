@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   Position,
@@ -24,6 +25,7 @@ import {
 } from '@/components/ui/dialog';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
+import { appendTaskStatusChangeDescription } from '@/lib/task/task-status-change-description';
 import {
   calculateTaskDagCollapseScope,
   type TaskDagVisibilityState,
@@ -34,7 +36,11 @@ import {
 import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimerConfig } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { MultiTaskEndDialog } from '@/ui/app/components/MultiTaskEndDialog';
-import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
+import {
+  TaskDagControlPanel,
+  type TaskDagBackgroundMode,
+  type TaskDagTerminalFilterMode,
+} from '@/ui/app/components/TaskDagControlPanel';
 import { TaskDagKeyHints } from '@/ui/app/components/TaskDagKeyHints';
 import { TaskQuickCreateDialog } from '@/ui/app/components/TaskQuickCreateDialog';
 import {
@@ -84,6 +90,7 @@ type QuickCreateDependencyContext = {
 const TASK_DAG_MODE_STORAGE_KEY = 'exomind:dag-mode';
 const TASK_DAG_DIRECTION_STORAGE_KEY = 'exomind:dag-direction';
 const TASK_DAG_HIDE_TERMINAL_KEY = 'exomind:dag-hide-terminal';
+const TASK_DAG_BACKGROUND_KEY = 'exomind:dag-background-mode';
 const TASK_DAG_IMMERSIVE_KEY = 'exomind:dag-immersive';
 const TASK_DAG_VIEWPORT_KEY = 'exomind:dag-viewport';
 const TASK_DAG_SEARCH_DRAFT_KEY = 'exomind:dag-search-draft';
@@ -95,6 +102,13 @@ const DEFAULT_TASK_DAG_SEARCH_OPTIONS: TaskDagSearchOptions = {
   fuzzy: true,
   filterMode: false,
 };
+const TASK_DAG_MODE_ORDER: TaskDagMode[] = ['browse', 'connect', 'execute'];
+
+export function getNextTaskDagMode(current: TaskDagMode, delta: 1 | -1): TaskDagMode {
+  const currentIndex = TASK_DAG_MODE_ORDER.indexOf(current);
+  const nextIndex = (currentIndex + delta + TASK_DAG_MODE_ORDER.length) % TASK_DAG_MODE_ORDER.length;
+  return TASK_DAG_MODE_ORDER[nextIndex] ?? 'browse';
+}
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   pending: '待办',
@@ -353,14 +367,42 @@ function readStoredDagDirection(): DagDirection {
   return 'auto';
 }
 
-function readStoredHideTerminal(): boolean {
-  if (typeof window === 'undefined') return false;
+function readStoredTerminalFilterMode(): TaskDagTerminalFilterMode {
+  if (typeof window === 'undefined') return 'show';
 
   try {
-    return window.localStorage.getItem(TASK_DAG_HIDE_TERMINAL_KEY) === '1';
+    const saved = window.localStorage.getItem(TASK_DAG_HIDE_TERMINAL_KEY);
+    if (saved === 'show' || saved === 'smart' || saved === 'hide') {
+      return saved;
+    }
+    if (saved === '1' || saved === 'true') {
+      return 'smart';
+    }
+    if (saved === '0' || saved === 'false') {
+      return 'show';
+    }
   } catch {
-    return false;
+    return 'show';
   }
+
+  return 'show';
+}
+
+function readStoredBackgroundMode(): TaskDagBackgroundMode {
+  if (typeof window === 'undefined') {
+    return 'dots';
+  }
+
+  try {
+    const saved = window.localStorage.getItem(TASK_DAG_BACKGROUND_KEY);
+    if (saved === 'none' || saved === 'dots' || saved === 'lines') {
+      return saved;
+    }
+  } catch {
+    return 'dots';
+  }
+
+  return 'dots';
 }
 
 function readStoredImmersive(): boolean {
@@ -685,6 +727,30 @@ function filterTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGraph): Vi
   );
 }
 
+function filterStrictTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGraph): VisibleTaskGraph {
+  const visibleNodeIds = new Set(
+    visibleGraph.nodes
+      .filter((node) => !isTerminalStatus(node.status))
+      .map((node) => node.id),
+  );
+
+  if (visibleNodeIds.size === visibleGraph.nodes.length) {
+    return visibleGraph;
+  }
+
+  const hiddenNodeIds = visibleGraph.nodes
+    .filter((node) => !visibleNodeIds.has(node.id))
+    .map((node) => node.id);
+
+  return filterVisibleGraphByNodeIds(
+    {
+      ...visibleGraph,
+      hiddenNodeIds: Array.from(new Set([...visibleGraph.hiddenNodeIds, ...hiddenNodeIds])),
+    },
+    visibleNodeIds,
+  );
+}
+
 function TaskDagNode({
   id,
   data,
@@ -811,8 +877,12 @@ export function TaskDagPage() {
   const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(() => readStoredDagVisibility());
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const [paneContextMenu, setPaneContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [hideTerminal, setHideTerminal] = useState(() => readStoredHideTerminal());
+  const [terminalFilterMode, setTerminalFilterMode] = useState<TaskDagTerminalFilterMode>(() => readStoredTerminalFilterMode());
+  const [backgroundMode, setBackgroundMode] = useState<TaskDagBackgroundMode>(() => readStoredBackgroundMode());
   const [immersive, setImmersive] = useState(() => readStoredImmersive());
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [mobileHintsOpen, setMobileHintsOpen] = useState(false);
   const [searchDraft, setSearchDraft] = useState(() => readStoredSearchDraft());
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOptions, setSearchOptions] = useState<TaskDagSearchOptions>(() => readStoredSearchOptions());
@@ -829,13 +899,20 @@ export function TaskDagPage() {
   const [disassociateDialogOpen, setDisassociateDialogOpen] = useState(false);
   const [disassociateTargetTaskId, setDisassociateTargetTaskId] = useState<string | null>(null);
   const [disassociateChoice, setDisassociateChoice] = useState<TaskStatusChoice>('suspended');
+  const [disassociateDescription, setDisassociateDescription] = useState('');
   const [panSpeed, setPanSpeed] = useState(() => getTaskDagPanSpeed());
   const [zoomSpeed, setZoomSpeed] = useState(() => getTaskDagZoomSpeed());
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
   const hasMountedDirectionRef = useRef(false);
   const hasAppliedInitialViewportRef = useRef(false);
+  const lastHandledFocusSearchRef = useRef<string | null>(null);
   const taskLoadRequestIdRef = useRef(0);
+  const focusTaskIdFromSearch = useMemo(() => {
+    const params = new URLSearchParams(location.searchStr ?? '');
+    const focusTaskId = params.get('focus');
+    return focusTaskId?.trim() || null;
+  }, [location.searchStr]);
 
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
@@ -862,11 +939,19 @@ export function TaskDagPage() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(TASK_DAG_HIDE_TERMINAL_KEY, hideTerminal ? '1' : '0');
+      window.localStorage.setItem(TASK_DAG_HIDE_TERMINAL_KEY, terminalFilterMode);
     } catch {
       // Ignore storage failures and keep hide-terminal state in-memory only.
     }
-  }, [hideTerminal]);
+  }, [terminalFilterMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TASK_DAG_BACKGROUND_KEY, backgroundMode);
+    } catch {
+      // Ignore storage failures and keep background state in-memory only.
+    }
+  }, [backgroundMode]);
 
   useEffect(() => {
     try {
@@ -899,6 +984,14 @@ export function TaskDagPage() {
       // Ignore storage failures and keep visibility state in-memory only.
     }
   }, [dagVisibility]);
+
+  useEffect(() => {
+    if (isDesktop) {
+      setMobileSearchOpen(false);
+      setMobileToolsOpen(false);
+      setMobileHintsOpen(false);
+    }
+  }, [isDesktop]);
 
   useEffect(() => {
     let disposed = false;
@@ -1057,14 +1150,18 @@ export function TaskDagPage() {
   const activeTaskIds = useMemo(() => resolveActiveBlockTaskIds(activeBlock), [activeBlock]);
   const activeTaskIdSet = useMemo(() => new Set(activeTaskIds), [activeTaskIds]);
   const interactionGraph = useMemo(() => (
-    hideTerminal
+    terminalFilterMode === 'hide'
       ? buildTaskGraph(tasks.filter((task) => !isTerminalStatus(task.status)))
       : graph
-  ), [graph, hideTerminal, tasks]);
+  ), [graph, terminalFilterMode, tasks]);
   const visibleGraph = useMemo(() => projectVisibleTaskGraph(graph, dagVisibility), [graph, dagVisibility]);
   const terminalFilteredVisibleGraph = useMemo(() => (
-    hideTerminal ? filterTerminalNodesFromVisibleGraph(visibleGraph) : visibleGraph
-  ), [hideTerminal, visibleGraph]);
+    terminalFilterMode === 'smart'
+      ? filterTerminalNodesFromVisibleGraph(visibleGraph)
+      : terminalFilterMode === 'hide'
+        ? filterStrictTerminalNodesFromVisibleGraph(visibleGraph)
+        : visibleGraph
+  ), [terminalFilterMode, visibleGraph]);
   const renderedVisibleNodeById = useMemo(
     () => new Map(terminalFilteredVisibleGraph.nodes.map((node) => [node.id, node])),
     [terminalFilteredVisibleGraph.nodes],
@@ -1208,6 +1305,10 @@ export function TaskDagPage() {
     };
   }, [flowGraph.edges, flowGraph.nodes, resolvedDirection]);
 
+  const cycleTaskDagMode = useCallback((delta: 1 | -1) => {
+    setMode((current) => getNextTaskDagMode(current, delta));
+  }, []);
+
   useEffect(() => {
     if (!pendingFocusTaskId || !visibleNodeIdSet.has(pendingFocusTaskId)) {
       return;
@@ -1225,6 +1326,18 @@ export function TaskDagPage() {
       window.clearTimeout(timeoutId);
     };
   }, [flowGraph.nodes, pendingFocusTaskId, visibleNodeIdSet]);
+
+  useEffect(() => {
+    if (!focusTaskIdFromSearch) {
+      lastHandledFocusSearchRef.current = null;
+      return;
+    }
+    if (lastHandledFocusSearchRef.current === focusTaskIdFromSearch) {
+      return;
+    }
+    lastHandledFocusSearchRef.current = focusTaskIdFromSearch;
+    setPendingFocusTaskId(focusTaskIdFromSearch);
+  }, [focusTaskIdFromSearch]);
 
   useEffect(() => {
     if (flowGraph.nodes.length === 0) {
@@ -1450,10 +1563,18 @@ export function TaskDagPage() {
       await getTaskTimerService().removeTaskFromBlock(disassociateTargetTask.id);
       if (disassociateChoice !== 'continue') {
         await getTaskService().transitionTask(disassociateTargetTask.id, disassociateChoice as TaskStatus);
+        await appendTaskStatusChangeDescription({
+          taskId: disassociateTargetTask.id,
+          taskTitle: disassociateTargetTask.title,
+          fromStatus: disassociateTargetTask.status,
+          toStatus: disassociateChoice as TaskStatus,
+          description: disassociateDescription,
+        });
       }
       setDisassociateDialogOpen(false);
       setDisassociateTargetTaskId(null);
       setDisassociateChoice('suspended');
+      setDisassociateDescription('');
     } catch (error) {
       toast({
         title: '取消任务关联失败',
@@ -1703,6 +1824,16 @@ export function TaskDagPage() {
 
       for (const [taskId, status] of Object.entries(taskStatusOutcomes)) {
         await getTaskService().transitionTask(taskId, status as TaskStatus);
+        const task = taskById.get(taskId);
+        if (task) {
+          await appendTaskStatusChangeDescription({
+            taskId,
+            taskTitle: task.title,
+            fromStatus: task.status,
+            toStatus: status as TaskStatus,
+            description: payload.feedback,
+          });
+        }
       }
 
       setEndingTaskIds([]);
@@ -1747,13 +1878,17 @@ export function TaskDagPage() {
         />
         {hideControlPanel ? null : (
           <TaskDagControlPanel
+            isDesktop={isDesktop}
             direction={dagDirection}
             searchValue={searchDraft}
             searchMatchCount={searchMatchCount}
             searchOptions={searchOptions}
-            hideTerminal={hideTerminal}
+            terminalFilterMode={terminalFilterMode}
+            backgroundMode={backgroundMode}
             hasActiveBlock={activeTaskIds.length > 0}
             immersive={immersive}
+            mobileSearchOpen={mobileSearchOpen}
+            mobileToolsOpen={mobileToolsOpen}
             onDirectionChange={setDagDirection}
             onSearchValueChange={setSearchDraft}
             onSearchOptionToggle={(key) => {
@@ -1762,7 +1897,14 @@ export function TaskDagPage() {
                 [key]: !current[key],
               }));
             }}
-            onToggleHideTerminal={() => setHideTerminal((value) => !value)}
+            onCycleTerminalFilterMode={() => {
+              setTerminalFilterMode((current) => {
+                if (current === 'show') return 'smart';
+                if (current === 'smart') return 'hide';
+                return 'show';
+              });
+            }}
+            onBackgroundModeChange={setBackgroundMode}
             onToggleImmersive={() => setImmersive((value) => !value)}
             onFitView={() => {
               debugTaskDagExecute('viewport:fitView:manual', {
@@ -1771,11 +1913,22 @@ export function TaskDagPage() {
               void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
             }}
             onJumpToCurrentRoot={handleJumpToCurrentRoot}
+            onMobileSearchOpenChange={setMobileSearchOpen}
+            onMobileToolsOpenChange={setMobileToolsOpen}
           />
         )}
 
         <div
+          data-testid="task-dag-wheel-listener"
           className="h-full w-full"
+          onWheel={(event) => {
+            if (!event.ctrlKey || !event.altKey) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            cycleTaskDagMode(event.deltaY > 0 ? 1 : -1);
+          }}
           onDoubleClick={(event) => {
             if (mode !== 'connect' || !isPaneInteractionTarget(event.target)) {
               return;
@@ -1841,6 +1994,9 @@ export function TaskDagPage() {
               if (mode === 'browse') {
                 setSelectedTaskId(null);
               }
+              if (mode === 'execute') {
+                setSelectedTaskId(null);
+              }
               if (mode === 'connect') {
                 if (connectState) {
                   setQuickCreateDirection(null);
@@ -1855,6 +2011,8 @@ export function TaskDagPage() {
               }
               setContextMenu(null);
               setPaneContextMenu(null);
+              setMobileSearchOpen(false);
+              setMobileToolsOpen(false);
             }}
             onNodeClick={handleNodeClick}
             onNodeDoubleClick={(_event, node) => {
@@ -1886,7 +2044,11 @@ export function TaskDagPage() {
               setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
             }}
           >
-            <Background gap={20} color="#E7E5E4" />
+            {backgroundMode === 'dots' ? (
+              <Background gap={20} color="#E7E5E4" variant={BackgroundVariant.Dots} />
+            ) : backgroundMode === 'lines' ? (
+              <Background gap={20} color="#E7E5E4" variant={BackgroundVariant.Lines} />
+            ) : null}
             {immersive ? null : (
               <Controls className="!rounded-lg !border-[#E7E3E0] !bg-white/90 !shadow-sm dark:!border-[#3C3836] dark:!bg-[#1C1917]/90 [&>button]:!border-[#E7E3E0] [&>button]:!bg-transparent [&>button]:!fill-[#57534E] dark:[&>button]:!border-[#3C3836] dark:[&>button]:!fill-[#A8A29E] [&>button:hover]:!bg-[#F5F0ED] dark:[&>button:hover]:!bg-[#292524]" />
             )}
@@ -1894,10 +2056,13 @@ export function TaskDagPage() {
         </div>
 
         <TaskDagKeyHints
+          isDesktop={isDesktop}
           mode={mode}
           hasSelectedNode={Boolean(selectedTaskId)}
           hasConnectSource={Boolean(connectState)}
           immersive={immersive}
+          mobileOpen={mobileHintsOpen}
+          onMobileOpenChange={setMobileHintsOpen}
         />
 
         {contextMenu ? (
@@ -2006,6 +2171,7 @@ export function TaskDagPage() {
             if (!open) {
               setDisassociateTargetTaskId(null);
               setDisassociateChoice('suspended');
+              setDisassociateDescription('');
             }
           }}
         >
@@ -2029,6 +2195,13 @@ export function TaskDagPage() {
               optionTestIdPrefix="task-dag-disassociate-status"
               data-testid="task-dag-disassociate-status-selector"
             />
+            <textarea
+              data-testid="task-dag-disassociate-description"
+              value={disassociateDescription}
+              onChange={(event) => setDisassociateDescription(event.target.value)}
+              placeholder="补充状态变化说明（可选）..."
+              className="min-h-[88px] resize-none rounded-xl border border-[#E7E5E4] bg-transparent px-3 py-2 text-sm text-[#1C1917] outline-none focus:border-[#C75B3A] dark:border-[#292524] dark:text-[#FAFAF9]"
+            />
             <DialogFooter>
               <button
                 type="button"
@@ -2037,6 +2210,7 @@ export function TaskDagPage() {
                   setDisassociateDialogOpen(false);
                   setDisassociateTargetTaskId(null);
                   setDisassociateChoice('suspended');
+                  setDisassociateDescription('');
                 }}
                 className="rounded-full px-4 py-2 text-sm font-medium text-[#78716C] transition-colors hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
               >

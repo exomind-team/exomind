@@ -1,4 +1,5 @@
 import { Link, useLocation, useParams } from '@tanstack/react-router';
+import { FileText, Waypoints } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
 import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
@@ -86,12 +87,16 @@ export function TimeBlockDetailPage() {
 
   return (
     <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
-      <div className="mx-auto max-w-4xl space-y-4">
-        <TaskBreadcrumb
-          segments={[backLink]}
-          current={{ label: '时间块详情' }}
-        />
+      <header className="sticky top-0 z-10 -mx-6 mb-4 border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-6 py-4 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95">
+        <div className="mx-auto max-w-4xl">
+          <TaskBreadcrumb
+            segments={[backLink]}
+            current={{ label: '时间块详情' }}
+          />
+        </div>
+      </header>
 
+      <div className="mx-auto max-w-4xl space-y-4">
         <section className="rounded-2xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">
           <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{view.summary.title}</h1>
           <div className="mt-3 grid gap-3 text-sm text-[#57534E] dark:text-[#D6D3D1] md:grid-cols-3">
@@ -120,8 +125,30 @@ export function TimeBlockDetailPage() {
           <div className="mt-3 space-y-2">
             {view.linkedTasks.length > 0 ? view.linkedTasks.map((task) => (
               <div key={task.taskId} className="rounded-xl border border-[#E7E5E4] px-3 py-2 dark:border-[#3F3F46]">
-                <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
-                <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{task.outcome ?? '未记录结果'}</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+                    <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{task.outcome ?? '未记录结果'}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Link
+                      to="/tasks/$taskId"
+                      params={{ taskId: task.taskId }}
+                      aria-label={`打开任务详情：${task.title}`}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#57534E] transition-colors hover:bg-[#E7E3E0] dark:bg-[#292524] dark:text-[#D6D3D1] dark:hover:bg-[#3C3836]"
+                    >
+                      <FileText size={14} />
+                    </Link>
+                    <Link
+                      to="/tasks/dag"
+                      search={{ focus: task.taskId } as never}
+                      aria-label={`在任务依赖图中定位：${task.title}`}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#57534E] transition-colors hover:bg-[#E7E3E0] dark:bg-[#292524] dark:text-[#D6D3D1] dark:hover:bg-[#3C3836]"
+                    >
+                      <Waypoints size={14} />
+                    </Link>
+                  </div>
+                </div>
               </div>
             )) : (
               <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">这个时间块没有关联任务。</p>

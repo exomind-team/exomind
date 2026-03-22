@@ -8,6 +8,7 @@ import {
 } from '@/config/input-send-mode';
 
 export type FeedbackSkipConfirmState = 'idle' | 'cooldown' | 'armed';
+export type FeedbackSubmitMode = 'respect-user-preference' | 'ctrl-enter-only';
 
 export function resolveFeedbackSubmitLabel(params: {
   feedback: string;
@@ -41,13 +42,14 @@ export function resolveFeedbackSubmitLabel(params: {
   return defaultLabel;
 }
 
-export function resolveFeedbackShortcutHint(mode: InputSendMode): string {
+export function resolveFeedbackShortcutHint(mode: InputSendMode | FeedbackSubmitMode): string {
   return mode === 'enter-send'
     ? 'Enter 提交 · Ctrl+Enter / Shift+Enter 换行'
     : 'Ctrl+Enter 提交 · Enter / Shift+Enter 换行';
 }
 
-export function useFeedbackSubmitControls() {
+export function useFeedbackSubmitControls(options: { submitMode?: FeedbackSubmitMode } = {}) {
+  const submitMode = options.submitMode ?? 'respect-user-preference';
   const [inputSendMode, setInputSendMode] = useState<InputSendMode>(() => getInputSendMode());
   const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<FeedbackSkipConfirmState>('idle');
   const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
@@ -133,6 +135,14 @@ export function useFeedbackSubmitControls() {
     onChangeValue?: (nextValue: string) => void,
   ) => {
     if (event.nativeEvent.isComposing) return;
+    if (submitMode === 'ctrl-enter-only') {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') {
+        event.preventDefault();
+        void onSubmit();
+      }
+      return;
+    }
+
     if (shouldSubmitOnEnter(inputSendMode, event)) {
       event.preventDefault();
       void onSubmit();
@@ -149,10 +159,11 @@ export function useFeedbackSubmitControls() {
       event.preventDefault();
       insertTextareaNewline(event.currentTarget, onChangeValue);
     }
-  }, [inputSendMode, insertTextareaNewline]);
+  }, [inputSendMode, insertTextareaNewline, submitMode]);
 
   return {
     inputSendMode,
+    shortcutHint: resolveFeedbackShortcutHint(submitMode === 'ctrl-enter-only' ? submitMode : inputSendMode),
     skipFeedbackConfirmState,
     skipFeedbackCountdownSec,
     isSkipFeedbackCoolingDown: skipFeedbackConfirmState === 'cooldown',
