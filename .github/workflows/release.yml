@@ -43,7 +43,7 @@ jobs:
 
       - name: Determine build targets (确定构建目标)
         id: targets
-        shell: powershell
+        shell: pwsh
         run: |
           $scope = "${{ github.event.inputs.build_scope }}"
           $isDispatch = "${{ github.event_name }}" -eq "workflow_dispatch"
@@ -71,7 +71,7 @@ jobs:
           toolchain: stable
 
       - name: Ensure local Bun is available (确保本机 Bun 可用，版本锁定)
-        shell: powershell
+        shell: pwsh
         run: |
           $requiredVersion = "${{ env.BUN_VERSION }}"
           $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
@@ -143,7 +143,7 @@ jobs:
           }
 
       - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
-        shell: powershell
+        shell: pwsh
         run: |
           $preferredCargoHome = "D:\actions-runner\rust\cargo"
           $preferredRustupHome = "D:\actions-runner\rust\rustup"
@@ -185,14 +185,14 @@ jobs:
 
       - name: Get short commit hash
         id: hash
-        shell: powershell
+        shell: pwsh
         run: |
           $short = $env:GITHUB_SHA.Substring(0, 7)
           "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Resolve app version (解析应用版本)
         id: app_version
-        shell: powershell
+        shell: pwsh
         run: |
           $refName = "${{ github.ref_name }}"
           $appVersion = ""
@@ -220,7 +220,7 @@ jobs:
           Write-Host "Resolved app version: $appVersion"
 
       - name: Clean stale node_modules (清理残留依赖，避免 bun 校验卡死)
-        shell: powershell
+        shell: pwsh
         run: |
           if (Test-Path node_modules) {
             Write-Host "Removing stale node_modules from previous run..."
@@ -228,7 +228,7 @@ jobs:
           }
 
       - name: Clear bun global cache (清理 bun 全局缓存)
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
           try {
@@ -251,7 +251,7 @@ jobs:
           }
 
       - name: Install dependencies with isolated cache and retry (安装依赖：隔离缓存 + 重试)
-        shell: powershell
+        shell: pwsh
         timeout-minutes: 10
         run: |
           $ErrorActionPreference = "Stop"
@@ -310,7 +310,7 @@ jobs:
 
       - name: Configure local Android toolchain (配置本地 Android 工具链)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           $defaultJavaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
           $javaHome = $env:JAVA_HOME
@@ -356,7 +356,7 @@ jobs:
 
       - name: Validate Android signing secrets early (提前校验 Android 签名密钥)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -371,7 +371,7 @@ jobs:
 
       - name: Ensure Rust Android targets (确保 Rust Android 目标)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         run: rustup target add aarch64-linux-android i686-linux-android
 
       - name: Init Android
@@ -382,13 +382,13 @@ jobs:
 
       - name: Patch Android network discovery prerequisites（注入 Android 发现权限 / 组播锁 / release cleartext）
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           bun Scripts/dev/android-manifest-permission.ts
 
       - name: Verify Android discovery patch persisted（校验 Android 发现权限 / 组播锁 / cleartext 配置）
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           $manifestPath = "src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           if (-not (Test-Path $manifestPath)) {
@@ -459,7 +459,7 @@ jobs:
 
       - name: Prepare Android signing keystore (准备签名密钥库)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -477,7 +477,7 @@ jobs:
 
       - name: Sign Android APK artifacts (签名 APK 产物)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -562,7 +562,7 @@ jobs:
 
       - name: Build Windows EXE binary (构建 Windows EXE 可执行文件)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           # Build EXE via cargo to avoid a second tauri beforeBuild bun install in CI.
@@ -576,7 +576,7 @@ jobs:
       - name: Prepare MSI prerequisites (准备 MSI 前置检查)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         id: msi_prereq
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
           $msiReady = $true
@@ -646,7 +646,7 @@ jobs:
 
       - name: Recover Windows MSI artifact via WiX light fallback (通过 WiX light 回退恢复 MSI)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -730,18 +730,18 @@ jobs:
 
       - name: Skip MSI build when prerequisites are unavailable (前置检查失败时跳过 MSI)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY != 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           Write-Warning "MSI prerequisites are unavailable on this runner. Skipping MSI build to keep EXE/APK pipeline stable."
 
       - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        shell: powershell
+        shell: pwsh
         run: cargo build --release -p exomind-runtime
 
       - name: Package exomind-rt runtime (打包 exomind-rt 运行时产物)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/runtime | Out-Null
           Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
@@ -753,7 +753,7 @@ jobs:
             (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/build/'))
           ) &&
           (steps.targets.outputs.BUILD_WINDOWS == 'true' || steps.targets.outputs.BUILD_ANDROID == 'true')
-        shell: powershell
+        shell: pwsh
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
