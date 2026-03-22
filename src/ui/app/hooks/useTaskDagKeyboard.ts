@@ -427,7 +427,7 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
       return;
     }
 
-    if (event.ctrlKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+    if (event.ctrlKey && event.altKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
       event.preventDefault();
       const currentIndex = MODE_ORDER.indexOf(mode);
       const delta = key === 'ArrowRight' ? 1 : -1;

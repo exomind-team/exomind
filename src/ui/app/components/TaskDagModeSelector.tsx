@@ -24,14 +24,26 @@ export function TaskDagModeSelector({
 }: TaskDagModeSelectorProps) {
   const enabledModeSet = new Set(enabledModes);
   const activeIndex = MODE_OPTIONS.findIndex((option) => option.key === mode);
+  const enabledOptions = MODE_OPTIONS.filter((option) => enabledModeSet.has(option.key));
 
   return (
     <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2">
       <div
+        data-testid="task-dag-mode-selector"
         className={[
           'pointer-events-auto relative overflow-hidden rounded-full border border-[#E7E3E0] bg-white/90 p-1 shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90',
           immersive ? 'opacity-0 hover:opacity-100 focus-within:opacity-100' : '',
         ].join(' ')}
+        onWheel={(event) => {
+          if (enabledOptions.length <= 1) {
+            return;
+          }
+          event.preventDefault();
+          const delta = event.deltaY > 0 ? 1 : -1;
+          const currentIndex = enabledOptions.findIndex((option) => option.key === mode);
+          const nextIndex = (currentIndex + delta + enabledOptions.length) % enabledOptions.length;
+          onChange(enabledOptions[nextIndex].key);
+        }}
       >
         <div
           data-testid="task-dag-mode-active-indicator"

@@ -25,7 +25,7 @@ export function TaskDagKeyHints({
   }
 
   const hints: Array<{ keys: string; label: string }> = [
-    { keys: 'Ctrl+←/→', label: '切换模式' },
+    { keys: 'Ctrl+Alt+←/→', label: '切换模式' },
     { keys: '↑↓←→', label: '长按平移' },
     { keys: 'WASD', label: hasSelectedNode ? '导航节点' : '长按平移' },
     { keys: 'Z / Shift+Z', label: '长按缩放' },

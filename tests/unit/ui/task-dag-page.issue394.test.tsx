@@ -938,6 +938,25 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
+  it('cycles enabled dag modes when the mode selector is wheeled', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    const selector = screen.getByTestId('task-dag-mode-selector');
+
+    fireEvent.wheel(selector, { deltaY: 120 });
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
+
+    fireEvent.wheel(selector, { deltaY: 120 });
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('execute');
+
+    fireEvent.wheel(selector, { deltaY: -120 });
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
+  });
+
   it('supports keyboard mode switching, escape cleanup, and pan shortcuts from the centralized dag hook', async () => {
     render(<TaskDagPage />);
 
@@ -946,6 +965,9 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
 
     fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true });
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('browse');
+
+    fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true, altKey: true });
     expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
 
     fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
@@ -956,7 +978,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       expect(screen.queryByText('准备硬依赖')).not.toBeInTheDocument();
     });
 
-    fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true });
+    fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true, altKey: true });
     expect(window.localStorage.getItem('exomind:dag-mode')).toBe('execute');
 
     fireEvent.keyDown(document, { key: 'ArrowLeft' });
@@ -975,6 +997,8 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
 
     expect(screen.getByTestId('task-dag-key-hints').className).toContain('max-w-[50%]');
+    expect(screen.getByText('Ctrl+Alt+←/→')).toBeInTheDocument();
+    expect(screen.queryByText('Ctrl+←/→')).not.toBeInTheDocument();
     expect(screen.getByText('切换模式')).toBeInTheDocument();
     expect(screen.getAllByText('长按平移')).toHaveLength(2);
     expect(screen.getByText('长按缩放')).toBeInTheDocument();
