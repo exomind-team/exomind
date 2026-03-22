@@ -63,6 +63,12 @@ export interface ReviewCompletedPayload {
   block_name?: string;
 }
 
+/** Payload shape for device.keyboard.state signals. */
+export interface KeyboardStatePayload {
+  hasHardwareKeyboard: boolean;
+  keyboardType: string;
+}
+
 /** Options for creating a signal handler dispatcher. */
 export interface SignalHandlerOptions {
   onTaskAutoCreated?: (payload: TaskAutoCreatedPayload) => Promise<void>;
@@ -70,6 +76,7 @@ export interface SignalHandlerOptions {
   onEventLogReplicationAppended?: (payload: EventLogReplicationAppendedPayload) => Promise<void>;
   onActiveBlockReplicationSnapshot?: (payload: ActiveBlockReplicationSnapshotPayload) => Promise<void>;
   onReviewCompleted?: (payload: ReviewCompletedPayload) => Promise<void>;
+  onKeyboardStateChanged?: (payload: KeyboardStatePayload) => Promise<void>;
 }
 
 /**
@@ -121,6 +128,12 @@ export function startSignalHandlers(
       case 'review.completed':
         if (options.onReviewCompleted) {
           await options.onReviewCompleted(event.payload as ReviewCompletedPayload);
+        }
+        break;
+
+      case 'device.keyboard.state':
+        if (options.onKeyboardStateChanged) {
+          await options.onKeyboardStateChanged(event.payload as KeyboardStatePayload);
         }
         break;
     }

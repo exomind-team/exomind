@@ -14,8 +14,10 @@ import {
   startSignalHandlers,
   type EventLogAppendedPayload,
   type EventLogReplicationAppendedPayload,
+  type KeyboardStatePayload,
   type ReviewCompletedPayload,
 } from '@/lib/services/signal-handlers';
+import { applyKeyboardStateFromSignal } from '@/config/hardware-keyboard';
 import { getEventSourceMetadata } from '@/lib/eventlog/source-metadata';
 import { createUuidV4 } from '@/lib/utils/uuid';
 import {
@@ -287,6 +289,10 @@ export function useSignalStream(): void {
           },
         });
         log.info('[SignalStream] review.completed → EventStorage (agent_feedback)');
+      },
+      onKeyboardStateChanged: async (payload: KeyboardStatePayload) => {
+        applyKeyboardStateFromSignal(payload as unknown as Record<string, unknown>);
+        log.info(`[SignalStream] device.keyboard.state → hasKeyboard=${payload.hasHardwareKeyboard} type=${payload.keyboardType}`);
       },
     });
 
