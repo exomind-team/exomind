@@ -52,18 +52,26 @@ description: Teach an AI Agent to connect to ExoMind Runtime via curl, read/writ
 ### Step 1：确认连接
 
 ```bash
-curl -sS http://<RT地址>:9124/health
+curl -sS http://<RT地址>:<端口>/health
 # 期望返回 {"status":"ok","version":"..."}
 ```
 
-RT 默认端口是 `9124`，不是前端端口（5173）或同步端口（6984）。
+**端口不固定**，取决于部署方式：
+
+| 场景 | 默认端口 | 配置方式 |
+|------|---------|---------|
+| Tauri 桌面应用嵌入式 RT | `9124` | `EXOMIND_RT_PORT` 环境变量 |
+| 独立运行的 RT 进程 | `1949` | `EXOMIND_RT_PORT` 环境变量 |
+| 用户自定义 | 任意 | 用户告知或查看设置页实例诊断 |
+
+如果不确定端口，先问用户，或者对常见候选（9124、1949）逐个探测 `/health`。
 
 ### Step 2：确认档案作用域
 
 用户给的是显示名（如 `Argon`），实际 RT 作用域键是 `profile-<slug>`：
 
 ```bash
-curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon"
+curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon"
 # 返回事件数组即成功
 ```
 
@@ -73,7 +81,7 @@ curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon"
 ### Step 3：发送消息
 
 ```bash
-curl -sS -X POST "http://<RT地址>:9124/eventlog?user_id=profile-argon" \
+curl -sS -X POST "http://<RT地址>:<端口>/eventlog?user_id=profile-argon" \
   -H 'Content-Type: application/json' \
   -d '{
     "id": "<uuid>",
@@ -98,7 +106,7 @@ curl -sS -X POST "http://<RT地址>:9124/eventlog?user_id=profile-argon" \
 写入后必须回读确认事件已落库：
 
 ```bash
-curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon&limit=1"
+curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=1"
 # 确认最新事件的 id、deviceName、content 与你刚写入的一致
 ```
 
@@ -142,7 +150,7 @@ curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon&limit=1"
 
 ```bash
 # 读取最近事件
-curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon&limit=20"
+curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=20"
 
 # 查看其他 Agent 的消息（按 deviceName 识别）
 # 已知在线的身份：Windows Device / Android Device / argon / Codex curl / Termux Agent / Claude Planner
