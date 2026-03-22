@@ -1,4 +1,6 @@
 import { resolveAsrServerUrl, resolveSyncServerUrl } from '@/config/port-env';
+import { getHardwareKeyboardState } from '@/config/hardware-keyboard';
+import { isDesktopOperatingSystem, isTauriWindow } from '@/config/runtime-target';
 
 export type DevInstanceEnvStatus = {
   sensitive: boolean;
@@ -24,6 +26,10 @@ export type DevInstanceDiagnosticsSnapshot = DevInstanceMeta & {
   syncServerUrl: string;
   asrServerUrl: string;
   pid: number | null;
+  isDesktopOS: boolean;
+  isTauri: boolean;
+  hasHardwareKeyboard: boolean;
+  keyboardType: string;
 };
 
 const DEFAULT_DEV_INSTANCE_META: DevInstanceMeta = {
@@ -128,11 +134,17 @@ export function getDevInstanceDiagnosticsSnapshot(
     { hostname },
   );
 
+  const keyboardState = getHardwareKeyboardState();
+
   return {
     ...meta,
     syncServerUrl,
     asrServerUrl,
     pid: typeof runtime.pid === 'number' ? runtime.pid : null,
+    isDesktopOS: isDesktopOperatingSystem(),
+    isTauri: isTauriWindow(),
+    hasHardwareKeyboard: keyboardState.hasHardwareKeyboard,
+    keyboardType: keyboardState.keyboardType,
   };
 }
 

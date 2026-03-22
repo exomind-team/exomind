@@ -799,6 +799,9 @@ export function DevInstanceDiagnosticsSetting(props: { ctx: SettingsContext }) {
       <DiagnosticsValue label="PID" value={diagnostics.pid ? String(diagnostics.pid) : 'N/A'} />
       <DiagnosticsValue label="Sync URL" value={diagnostics.syncServerUrl} />
       <DiagnosticsValue label="ASR URL" value={diagnostics.asrServerUrl} />
+      <DiagnosticsValue label="Desktop OS" value={String(diagnostics.isDesktopOS)} />
+      <DiagnosticsValue label="Tauri" value={String(diagnostics.isTauri)} />
+      <DiagnosticsValue label="Hardware Keyboard" value={`${diagnostics.hasHardwareKeyboard} (${diagnostics.keyboardType})`} />
 
       <div className="space-y-2 pt-2">
         <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">环境变量 / 配置状态</p>
