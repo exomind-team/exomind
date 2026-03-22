@@ -78,6 +78,8 @@ curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon"
 **slug 规则**：小写，非字母数字替换为 `-`。
 例如：显示名 `My Profile` → slug `my-profile` → scope key `profile-my-profile`
 
+> **红线**：前端页面路由（如 `/profile-argon/...`）**不等于** RT HTTP 资源路由。档案作用域统一通过 `?user_id=profile-argon` 查询参数进入，不要把 profile 路径拼到 RT URL 前缀上。
+
 ### Step 3：发送消息
 
 ```bash
@@ -237,6 +239,19 @@ curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=20"
 
 ---
 
+## 信号与事件日志的归属区别
+
+RT 有两个数据源容易混淆：
+
+| 端点 | 作用域 | 说明 |
+|------|--------|------|
+| `/signals/history` | **全局**，无档案隔离 | 看"RT 最近发生了什么"，但不区分属于哪个档案 |
+| `/eventlog?user_id=...` | **档案级**，按 user_id 隔离 | 看"某个档案下的事件"，这才是你的工作目标 |
+
+> **规则**：在 `signals/history` 看到某条消息后，不要假设它属于你正在操作的档案。必须回到 `/eventlog?user_id=profile-xxx` 复核归属。
+
+---
+
 ## 实时性
 
 当前 Agent 接入以**轮询**为主：定期 GET `/eventlog` 检查新消息。
@@ -271,6 +286,7 @@ curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=20"
 | PowerShell | `curl` 是 `Invoke-WebRequest` 别名 | 明确用 `curl.exe` |
 | Cygwin/Git Bash | `!` 被 shell 展开 | 用单引号包裹 |
 | Cygwin/Git Bash | `curl ... \| python -c ...` 管道断流 | 先 `curl -o /tmp/resp.json` 再读文件 |
+| Termux | `/tmp` 可能不可写或路径不一致 | 用当前工作目录或 `$TMPDIR` 代替 `/tmp` |
 | 所有环境 | `id` 必须是 UUID，`timestamp` 必须是毫秒 | 用语言内置 UUID + 时间戳函数 |
 | 所有环境 | 长 JSON body 在 bash 中转义极其痛苦 | **推荐写临时 JSON 文件再 `curl --data-binary @file.json`**，避免内联 `-d` |
 | 所有环境 | RT 字段名用 `snake_case`（如 `depends_on`），前端可能用 `camelCase` | **以 RT 返回为准**，不要猜 |
