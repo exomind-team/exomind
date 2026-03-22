@@ -234,6 +234,8 @@ POST /eventlog?user_id=profile-argon
 
 ## 关于会话令牌的判断
 
+> **以下为设计方向（未实现），不是已验证事实。** 相关追踪见 [#666](https://github.com/exomind-team/exomind/issues/666)。
+
 “状态持久化可以借鉴会话令牌”这个方向是成立的。
 
 更具体地说，建议把下面几层拆开：
@@ -255,6 +257,8 @@ POST /eventlog?user_id=profile-argon
 - `permission scopes`
 
 这样 CLI / MCP / UI / curl 都能共享一套身份模型。
+
+> **注意**：一旦 RT 对外提供 profile discovery（如列出可用档案），它就进入权限问题域——谁能列出 profiles、能看到哪些字段、看到的是本机本地档案还是当前 RT 可访问的 scopes。外部 RT 看到的 profile 列表，与本机 UI 的本地档案列表，不应默认 1:1 等价。
 
 ## Agent 接入指南：以自身身份在外心发消息
 
@@ -293,6 +297,17 @@ curl -sS "http://<RT地址>:9124/eventlog?user_id=profile-argon"
 | `user_id=profile-argon` | ✅ 读到真实数据 |
 
 slug 格式规则见 `src/lib/profile/profile-storage.ts` 中的 `normalizeProfileSlug`：小写、非字母数字替换为 `-`。
+
+> **⚠️ 四个名称不是同一个东西，不要混用：**
+>
+> | 概念 | 示例 | 来源 |
+> |------|------|------|
+> | **显示名**（displayName） | `Argon` | UI 展示用，可随时修改 |
+> | **slug** | `argon` | 归一化标识，小写+连字符 |
+> | **profileId** | `profile-argon` | 存储键，`profile-` + slug |
+> | **RT scope key**（user_id） | `profile-argon` | RT API 的作用域参数，当前等于 profileId |
+>
+> 目前 profileId 和 RT scope key 恰好相同，但这是实现巧合而非契约保证。
 
 #### Step 3：发送消息
 
