@@ -31,7 +31,10 @@ pub async fn start_test_runtime(host_id: &str) -> RuntimeHandle {
     .unwrap_or_else(|error| panic!("runtime {host_id} should start: {error}"))
 }
 
-pub async fn start_test_runtime_with_secret(host_id: &str, secret: Option<String>) -> RuntimeHandle {
+pub async fn start_test_runtime_with_secret(
+    host_id: &str,
+    secret: Option<String>,
+) -> RuntimeHandle {
     start_with_options(RuntimeStartOptions {
         bind_host: "127.0.0.1".to_string(),
         port: 0,
@@ -103,9 +106,13 @@ pub async fn create_route(
         }))
         .send()
         .await
-        .unwrap_or_else(|error| panic!("route {topic} -> {target_type}:{target_ref} should be created: {error}"))
+        .unwrap_or_else(|error| {
+            panic!("route {topic} -> {target_type}:{target_ref} should be created: {error}")
+        })
         .error_for_status()
-        .unwrap_or_else(|error| panic!("route {topic} -> {target_type}:{target_ref} should succeed: {error}"));
+        .unwrap_or_else(|error| {
+            panic!("route {topic} -> {target_type}:{target_ref} should succeed: {error}")
+        });
 }
 
 pub async fn set_peer_interests(
@@ -115,7 +122,11 @@ pub async fn set_peer_interests(
     topics: &[&str],
 ) {
     client
-        .put(format!("{}/mesh/interests/{}", runtime_base_url(runtime), peer_id))
+        .put(format!(
+            "{}/mesh/interests/{}",
+            runtime_base_url(runtime),
+            peer_id
+        ))
         .json(&json!({ "topics": topics }))
         .send()
         .await

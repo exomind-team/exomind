@@ -5,7 +5,7 @@
 //! Gate the entire file to keep the test suite green on Android / Termux.
 #![cfg(not(target_os = "android"))]
 
-use exomind_runtime::{start_with_options, RuntimeStartOptions};
+use exomind_runtime::{RuntimeStartOptions, start_with_options};
 use serde_json::Value;
 use std::time::Duration;
 
@@ -86,16 +86,18 @@ async fn pty_spawn_and_interact() {
     let sessions = sessions_payload
         .as_array()
         .expect("sessions response should be an array");
-    let linked_session = sessions.iter().find(|session| {
-        session["pty_id"].as_str() == Some(pty_id)
-    });
+    let linked_session = sessions
+        .iter()
+        .find(|session| session["pty_id"].as_str() == Some(pty_id));
     assert!(
         linked_session.is_some(),
         "spawning a PTY should auto-create a unified session record, got {sessions_payload}"
     );
     let linked_session = linked_session.expect("linked session should exist");
     assert!(
-        linked_session["source_host_id"].as_str().is_some_and(|value| !value.is_empty()),
+        linked_session["source_host_id"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
         "spawning a PTY should stamp source_host_id, got {linked_session}"
     );
     assert!(
@@ -114,7 +116,10 @@ async fn pty_spawn_and_interact() {
         .expect("list request should succeed");
 
     assert_eq!(list_resp.status().as_u16(), 200);
-    let list_payload: Value = list_resp.json().await.expect("list response should be JSON");
+    let list_payload: Value = list_resp
+        .json()
+        .await
+        .expect("list response should be JSON");
     let list_arr = list_payload.as_array().expect("list should be an array");
     assert!(
         !list_arr.is_empty(),
@@ -150,7 +155,11 @@ async fn pty_spawn_and_interact() {
         .expect("sessions after stop should be JSON");
     let completed_after_stop = sessions_after_stop
         .as_array()
-        .and_then(|sessions| sessions.iter().find(|session| session["id"].as_str() == Some(pty_id)))
+        .and_then(|sessions| {
+            sessions
+                .iter()
+                .find(|session| session["id"].as_str() == Some(pty_id))
+        })
         .expect("session should still exist after stop");
     assert_eq!(completed_after_stop["status"], "completed");
 
@@ -184,7 +193,11 @@ async fn pty_spawn_and_interact() {
         .expect("sessions after delete should be JSON");
     let completed_after_delete = sessions_after_delete
         .as_array()
-        .and_then(|sessions| sessions.iter().find(|session| session["id"].as_str() == Some(pty_id)))
+        .and_then(|sessions| {
+            sessions
+                .iter()
+                .find(|session| session["id"].as_str() == Some(pty_id))
+        })
         .expect("session history should remain after deleting PTY record");
     assert_eq!(completed_after_delete["status"], "completed");
 
@@ -197,7 +210,9 @@ async fn pty_spawn_and_interact() {
     let list_after_payload: Value = list_after.json().await.unwrap();
     let list_after_arr = list_after_payload.as_array().unwrap();
     assert!(
-        !list_after_arr.iter().any(|v| v["id"].as_str() == Some(pty_id)),
+        !list_after_arr
+            .iter()
+            .any(|v| v["id"].as_str() == Some(pty_id)),
         "PTY list should no longer contain the deleted instance"
     );
 
@@ -323,7 +338,10 @@ async fn pty_natural_exit_completes_session_and_stop_remains_idempotent() {
         .expect("spawn request should succeed");
     assert_eq!(spawn_resp.status().as_u16(), 201);
 
-    let spawn_payload: Value = spawn_resp.json().await.expect("spawn response should be JSON");
+    let spawn_payload: Value = spawn_resp
+        .json()
+        .await
+        .expect("spawn response should be JSON");
     let pty_id = spawn_payload["id"]
         .as_str()
         .expect("spawn response should include PTY id")
@@ -355,7 +373,10 @@ async fn pty_natural_exit_completes_session_and_stop_remains_idempotent() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    assert!(completed, "short-lived PTY should auto-complete unified session after natural exit");
+    assert!(
+        completed,
+        "short-lived PTY should auto-complete unified session after natural exit"
+    );
 
     let stop_resp = client
         .post(format!("{base_url}/pty/{pty_id}/stop"))

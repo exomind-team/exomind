@@ -3,8 +3,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use futures_util::stream::{self, Stream};
 use futures_util::StreamExt;
+use futures_util::stream::{self, Stream};
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -326,8 +326,7 @@ pub fn router() -> Router<AppState> {
 /// Only `respond` is public — the remote device calls this before it has any token.
 /// The PIN provides single-use, time-limited, out-of-band authentication.
 pub fn public_router() -> Router<AppState> {
-    Router::new()
-        .route("/mesh/pairing/respond", post(pairing_respond))
+    Router::new().route("/mesh/pairing/respond", post(pairing_respond))
 }
 
 struct MeshSseStream {
@@ -361,7 +360,10 @@ impl Stream for MeshSseStream {
 
         match this.rx.try_recv() {
             Ok(event) => {
-                if this.state.mesh.should_stream_event_to_peer(&this.peer_id, &event)
+                if this
+                    .state
+                    .mesh
+                    .should_stream_event_to_peer(&this.peer_id, &event)
                     && let Ok(json) = serde_json::to_string(&event)
                 {
                     return Poll::Ready(Some(Ok(Event::default()
@@ -393,7 +395,10 @@ impl Stream for MeshSseStream {
 
         match Pin::new(&mut recv_fut).poll(cx) {
             Poll::Ready(Ok(event)) => {
-                if this.state.mesh.should_stream_event_to_peer(&this.peer_id, &event)
+                if this
+                    .state
+                    .mesh
+                    .should_stream_event_to_peer(&this.peer_id, &event)
                     && let Ok(json) = serde_json::to_string(&event)
                 {
                     return Poll::Ready(Some(Ok(Event::default()

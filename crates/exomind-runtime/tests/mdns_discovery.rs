@@ -1,7 +1,7 @@
 mod support;
 
 use std::time::Duration;
-use support::{start_test_runtime_with_mdns, stop_runtime, runtime_base_url};
+use support::{runtime_base_url, start_test_runtime_with_mdns, stop_runtime};
 
 /// Two MdnsDiscovery instances on the same machine should discover each other.
 ///
@@ -39,13 +39,17 @@ async fn two_runtimes_discover_each_other_via_mdns() {
 
     // rt_a should see rt_b.
     assert!(
-        discovered_by_a.iter().any(|peer| peer["host_id"] == "mdns-test-b"),
+        discovered_by_a
+            .iter()
+            .any(|peer| peer["host_id"] == "mdns-test-b"),
         "rt_a should discover rt_b, got: {discovered_by_a:?}"
     );
 
     // rt_b should see rt_a.
     assert!(
-        discovered_by_b.iter().any(|peer| peer["host_id"] == "mdns-test-a"),
+        discovered_by_b
+            .iter()
+            .any(|peer| peer["host_id"] == "mdns-test-a"),
         "rt_b should discover rt_a, got: {discovered_by_b:?}"
     );
 

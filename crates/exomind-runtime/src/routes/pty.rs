@@ -3,22 +3,22 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::routes::sessions::{
-    broadcast_session_created, broadcast_session_updated,
-};
+use crate::AppState;
 use crate::pty::{
     ClaudeSessionInfo, PtyAgentInfo, PtyAgentType, PtyError, PtyHistoricalSessionInfo,
     PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
 };
-use crate::session::{CreateSessionInput, InteractionMode, SessionStatus, UpdateSessionInput, WorkContext};
-use crate::AppState;
+use crate::routes::sessions::{broadcast_session_created, broadcast_session_updated};
+use crate::session::{
+    CreateSessionInput, InteractionMode, SessionStatus, UpdateSessionInput, WorkContext,
+};
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -72,10 +72,7 @@ fn build_pty_context(info: &PtyAgentInfo) -> WorkContext {
     }
 }
 
-fn register_pty_session(
-    state: &AppState,
-    info: &PtyAgentInfo,
-) -> Result<(), (StatusCode, String)> {
+fn register_pty_session(state: &AppState, info: &PtyAgentInfo) -> Result<(), (StatusCode, String)> {
     let session = state
         .session_store
         .create(CreateSessionInput {
@@ -150,7 +147,10 @@ fn watch_pty_lifecycle(state: AppState, id: String) {
                     crate::pty::PtyAgentStatus::Exited { .. } => {
                         match complete_pty_session(&state, &id) {
                             Ok(Some(updated)) => {
-                                broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+                                broadcast_session_updated(
+                                    state.session_event_tx.as_ref(),
+                                    &updated,
+                                );
                             }
                             Ok(None) => {}
                             Err((status, error)) => {
@@ -237,8 +237,7 @@ async fn stream_pty_output(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Sse<ReceiverStream<Result<Event, Infallible>>>, (StatusCode, String)> {
-    let (event_tx, event_rx) =
-        tokio::sync::mpsc::channel::<Result<Event, Infallible>>(1024);
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(1024);
 
     let (buffer_snapshot, mut rx) = state
         .pty_manager
@@ -260,8 +259,7 @@ async fn stream_pty_output(
         }
 
         // 2. Stream live output from the broadcast channel.
-        let mut keep_alive_interval =
-            tokio::time::interval(std::time::Duration::from_secs(15));
+        let mut keep_alive_interval = tokio::time::interval(std::time::Duration::from_secs(15));
         keep_alive_interval.tick().await;
 
         loop {
@@ -362,11 +360,7 @@ async fn remove_pty_agent(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<PtyRemoveResponse>, (StatusCode, String)> {
-    state
-        .pty_manager
-        .remove(&id)
-        .await
-        .map_err(map_pty_error)?;
+    state.pty_manager.remove(&id).await.map_err(map_pty_error)?;
 
     if let Some(updated) = complete_pty_session(&state, &id)? {
         broadcast_session_updated(state.session_event_tx.as_ref(), &updated);

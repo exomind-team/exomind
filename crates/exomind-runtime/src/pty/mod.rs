@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 
 use crate::signal::SignalPool;
 use crate::signal::types::SignalEvent;
@@ -429,7 +429,10 @@ impl PtyManager {
             let instance = instances
                 .get(id)
                 .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
-            (Arc::clone(&instance.output_buffer), instance.output_tx.subscribe())
+            (
+                Arc::clone(&instance.output_buffer),
+                instance.output_tx.subscribe(),
+            )
         };
 
         let buffer_snapshot = output_buffer.lock().await.clone();
@@ -591,10 +594,7 @@ fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<PtyHistoricalSessionI
         }
 
         // The directory name is the encoded project path.
-        let project_name = project_entry
-            .file_name()
-            .to_string_lossy()
-            .to_string();
+        let project_name = project_entry.file_name().to_string_lossy().to_string();
 
         let session_entries = match std::fs::read_dir(&project_path) {
             Ok(entries) => entries,
@@ -721,7 +721,12 @@ fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
     let mut args = Vec::new();
     match request.agent_type {
         PtyAgentType::Claude => {
-            if let Some(model) = request.model.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            if let Some(model) = request
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
                 args.push("--model".to_string());
                 args.push(model.to_string());
             }
@@ -731,7 +736,12 @@ fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
         PtyAgentType::Codex => {
             args.push("exec".to_string());
             args.push("resume".to_string());
-            if let Some(model) = request.model.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            if let Some(model) = request
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
                 args.push("-m".to_string());
                 args.push(model.to_string());
             }
@@ -832,9 +842,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let day_dir = dir.path().join("2026").join("03").join("18");
         fs::create_dir_all(&day_dir).unwrap();
-        let session_path = day_dir.join(
-            "rollout-2026-03-18T10-20-30-019d0011-aaaa-bbbb-cccc-1234567890ab.jsonl",
-        );
+        let session_path =
+            day_dir.join("rollout-2026-03-18T10-20-30-019d0011-aaaa-bbbb-cccc-1234567890ab.jsonl");
         fs::write(
             &session_path,
             concat!(
@@ -848,7 +857,10 @@ mod tests {
         let sessions = discover_codex_sessions(&day_dir);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].agent_type, PtyAgentType::Codex);
-        assert_eq!(sessions[0].session_id, "019d0011-aaaa-bbbb-cccc-1234567890ab");
+        assert_eq!(
+            sessions[0].session_id,
+            "019d0011-aaaa-bbbb-cccc-1234567890ab"
+        );
         assert_eq!(sessions[0].project_path, "D:\\project\\exomind");
     }
 

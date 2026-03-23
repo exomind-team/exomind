@@ -21,7 +21,10 @@ async fn pairing_full_flow_correct_pin() {
     let session_id = initiate_body["session_id"].as_str().unwrap();
     let pin = initiate_body["pin"].as_str().unwrap();
     assert_eq!(pin.len(), 6, "PIN should be 6 digits");
-    assert!(pin.chars().all(|c| c.is_ascii_digit()), "PIN should be numeric");
+    assert!(
+        pin.chars().all(|c| c.is_ascii_digit()),
+        "PIN should be numeric"
+    );
 
     // 2. Respond with correct PIN.
     let respond_resp = client
@@ -40,7 +43,11 @@ async fn pairing_full_flow_correct_pin() {
     let respond_body: Value = respond_resp.json().await.unwrap();
     assert_eq!(respond_body["paired"], json!(true));
     let peer_token = respond_body["peer_token"].as_str().unwrap();
-    assert_eq!(peer_token.len(), 64, "peer_token should be SHA-256 hex (64 chars)");
+    assert_eq!(
+        peer_token.len(),
+        64,
+        "peer_token should be SHA-256 hex (64 chars)"
+    );
 
     // 3. Verify peer was auto-registered.
     let peers_resp = client
@@ -106,7 +113,11 @@ async fn pairing_wrong_pin_returns_403() {
         .unwrap();
     let peers: Value = peers_resp.json().await.unwrap();
     assert!(
-        !peers.as_array().unwrap().iter().any(|p| p["id"] == "device-b"),
+        !peers
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == "device-b"),
         "no peer should be registered after wrong PIN"
     );
 
@@ -176,7 +187,11 @@ async fn pairing_nonexistent_session_returns_403() {
         .send()
         .await
         .unwrap();
-    assert_eq!(respond_resp.status(), 403, "nonexistent session should return 403");
+    assert_eq!(
+        respond_resp.status(),
+        403,
+        "nonexistent session should return 403"
+    );
 
     stop_runtime(&mut rt, "pairing-4").await;
 }
@@ -222,7 +237,11 @@ async fn pairing_wrong_pin_destroys_session() {
         .send()
         .await
         .unwrap();
-    assert_eq!(retry.status(), 403, "session should be destroyed after wrong PIN attempt");
+    assert_eq!(
+        retry.status(),
+        403,
+        "session should be destroyed after wrong PIN attempt"
+    );
 
     stop_runtime(&mut rt, "pairing-5").await;
 }

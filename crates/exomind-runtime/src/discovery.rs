@@ -102,7 +102,7 @@ impl MdnsDiscovery {
             SERVICE_TYPE,
             &instance_name,
             &host_name,
-            "",        // empty IP — will be auto-filled
+            "", // empty IP — will be auto-filled
             self.port,
             &properties[..],
         )

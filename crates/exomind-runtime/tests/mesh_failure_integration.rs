@@ -1,13 +1,13 @@
 mod support;
 
 use axum::{
+    Json, Router,
     extract::{Query, State},
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse,
+        sse::{Event, KeepAlive, Sse},
     },
     routing::get,
-    Json, Router,
 };
 use exomind_runtime::RuntimePublishRequest;
 use futures_util::stream;
@@ -15,13 +15,15 @@ use serde::Deserialize;
 use serde_json::json;
 use std::convert::Infallible;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 use std::time::Duration;
+use support::{
+    create_peer, create_route, set_peer_interests, start_test_runtime, stop_runtime, wait_until,
+};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use support::{create_peer, create_route, set_peer_interests, start_test_runtime, stop_runtime, wait_until};
 
 #[tokio::test]
 async fn marks_peer_error_when_remote_delivery_endpoint_is_unreachable() {
@@ -40,8 +42,7 @@ async fn marks_peer_error_when_remote_delivery_endpoint_is_unreachable() {
     });
 
     let errored = wait_until(Duration::from_secs(5), || {
-        rt_a
-            .clone_mesh_state()
+        rt_a.clone_mesh_state()
             .get_peer("rt-b")
             .and_then(|peer| peer.last_error)
             .is_some()
@@ -76,9 +77,17 @@ async fn flaky_mesh_stream(
         .and_then(|value| value.to_str().ok())
         .map(|value| value.to_string());
 
-    state.last_event_ids.lock().await.push(last_event_id.clone());
+    state
+        .last_event_ids
+        .lock()
+        .await
+        .push(last_event_id.clone());
 
-    let event_id = if call_index == 0 { "evt-replay-1" } else { "evt-replay-2" };
+    let event_id = if call_index == 0 {
+        "evt-replay-1"
+    } else {
+        "evt-replay-2"
+    };
     let event_value = if call_index == 0 { 1 } else { 2 };
 
     let payload = json!({
@@ -123,7 +132,9 @@ async fn reconnects_mesh_stream_and_replays_from_last_event_id() {
         .expect("mock peer listener should bind");
     let mock_addr = listener.local_addr().expect("mock peer local addr");
     let mock_server = tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("mock peer server should run");
+        axum::serve(listener, app)
+            .await
+            .expect("mock peer server should run");
     });
 
     let mut rt_b = start_test_runtime("rt-b").await;
@@ -135,12 +146,18 @@ async fn reconnects_mesh_stream_and_replays_from_last_event_id() {
 
     let recovered = wait_until(Duration::from_secs(5), || {
         let events = rt_b.clone_signal_pool().window().recent(20);
-        let ids = events.iter().map(|event| event.id.as_str()).collect::<Vec<_>>();
+        let ids = events
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect::<Vec<_>>();
         ids.contains(&"evt-replay-1") && ids.contains(&"evt-replay-2")
     })
     .await;
 
-    assert!(recovered, "runtime should reconnect and receive replayed event");
+    assert!(
+        recovered,
+        "runtime should reconnect and receive replayed event"
+    );
 
     let observed_last_event_ids = flaky_state.last_event_ids.lock().await.clone();
     assert!(

@@ -120,7 +120,11 @@ pub struct MeshState {
 }
 
 impl MeshState {
-    pub fn new(host_id: String, signal_pool: Arc<SignalPool>, persist_path: Option<PathBuf>) -> Self {
+    pub fn new(
+        host_id: String,
+        signal_pool: Arc<SignalPool>,
+        persist_path: Option<PathBuf>,
+    ) -> Self {
         let persisted = persist_path
             .as_ref()
             .and_then(|path| load_persisted_state(path));
@@ -173,7 +177,9 @@ impl MeshState {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        peers.values().any(|p| p.enabled && p.inbound_secret.as_deref() == Some(secret))
+        peers
+            .values()
+            .any(|p| p.enabled && p.inbound_secret.as_deref() == Some(secret))
     }
 
     pub fn get_peer(&self, peer_id: &str) -> Option<PeerInfo> {
@@ -283,7 +289,12 @@ impl MeshState {
 
     pub fn peer_accepts_topic(&self, peer_id: &str, topic: &str) -> bool {
         self.get_peer_interests(peer_id)
-            .map(|snapshot| snapshot.topics.iter().any(|item| item == "*" || item == topic))
+            .map(|snapshot| {
+                snapshot
+                    .topics
+                    .iter()
+                    .any(|item| item == "*" || item == topic)
+            })
             .unwrap_or(false)
     }
 
@@ -314,7 +325,9 @@ impl MeshState {
             .routes()
             .match_routes(&event.topic)
             .iter()
-            .any(|route| matches!(route.target_type, TargetType::Remote) && route.target_ref == peer_id);
+            .any(|route| {
+                matches!(route.target_type, TargetType::Remote) && route.target_ref == peer_id
+            });
 
         targeted_by_remote_route || self.peer_accepts_topic(peer_id, &event.topic)
     }
@@ -325,12 +338,22 @@ impl MeshState {
         mut event: SignalEvent,
     ) -> Result<bool, Infallible> {
         if event.origin_host_id == self.host_id {
-            self.record_mesh_delivery(&event.id, from_peer_id, DeliveryStatus::Skipped, Some("origin bounce".to_string()));
+            self.record_mesh_delivery(
+                &event.id,
+                from_peer_id,
+                DeliveryStatus::Skipped,
+                Some("origin bounce".to_string()),
+            );
             return Ok(false);
         }
 
         if event.hop >= MAX_HOP {
-            self.record_mesh_delivery(&event.id, from_peer_id, DeliveryStatus::Skipped, Some("hop limit".to_string()));
+            self.record_mesh_delivery(
+                &event.id,
+                from_peer_id,
+                DeliveryStatus::Skipped,
+                Some("hop limit".to_string()),
+            );
             return Ok(false);
         }
 
@@ -514,10 +537,7 @@ impl MeshRelayManager {
         }
     }
 
-    pub async fn sync_local_interests_to_peer(
-        &self,
-        peer_id: &str,
-    ) -> Result<(), reqwest::Error> {
+    pub async fn sync_local_interests_to_peer(&self, peer_id: &str) -> Result<(), reqwest::Error> {
         let Some(peer) = self.mesh.get_peer(peer_id) else {
             return Ok(());
         };
@@ -551,14 +571,14 @@ impl MeshRelayManager {
             }
 
             let url = format!("{}/mesh/events", peer.base_url.trim_end_matches('/'));
-            let mut request = self
-                .client
-                .post(url)
-                .timeout(Duration::from_secs(3))
-                .json(&serde_json::json!({
-                    "from_peer_id": self.mesh.host_id(),
-                    "event": event.clone(),
-                }));
+            let mut request =
+                self.client
+                    .post(url)
+                    .timeout(Duration::from_secs(3))
+                    .json(&serde_json::json!({
+                        "from_peer_id": self.mesh.host_id(),
+                        "event": event.clone(),
+                    }));
             if let Some(token) = &peer.auth_token {
                 request = request.header("Authorization", format!("Bearer {token}"));
             }
@@ -582,7 +602,10 @@ impl MeshRelayManager {
     pub async fn shutdown(&self) {
         let handles = {
             let mut workers = self.workers.lock().await;
-            workers.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
+            workers
+                .drain()
+                .map(|(_, handle)| handle)
+                .collect::<Vec<_>>()
         };
 
         for handle in handles {

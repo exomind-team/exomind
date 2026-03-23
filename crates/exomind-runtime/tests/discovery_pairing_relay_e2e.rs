@@ -125,8 +125,7 @@ async fn pairing_then_relay() {
     let b_url = runtime_base_url(&rt_b);
 
     // ---- Step 1-4: Pair RT-A with RT-B --------------------------------
-    let (_session_id, _pin, _peer_token) =
-        do_pairing(&client, &a_url, "e2e-pair-b", &b_url).await;
+    let (_session_id, _pin, _peer_token) = do_pairing(&client, &a_url, "e2e-pair-b", &b_url).await;
 
     // Verify RT-A's peers list contains RT-B.
     let peers: Value = client
@@ -210,10 +209,8 @@ async fn pairing_then_relay() {
 
 #[tokio::test]
 async fn auth_pairing_relay() {
-    let mut rt_a =
-        start_test_runtime_with_secret("e2e-auth-a", Some("secret-a".to_string())).await;
-    let mut rt_b =
-        start_test_runtime_with_secret("e2e-auth-b", Some("secret-b".to_string())).await;
+    let mut rt_a = start_test_runtime_with_secret("e2e-auth-a", Some("secret-a".to_string())).await;
+    let mut rt_b = start_test_runtime_with_secret("e2e-auth-b", Some("secret-b".to_string())).await;
     let client = reqwest::Client::new();
     let a_url = runtime_base_url(&rt_a);
     let b_url = runtime_base_url(&rt_b);
@@ -233,16 +230,15 @@ async fn auth_pairing_relay() {
     // ---- Step 2-3: Pair RT-A with RT-B, exchanging per-peer tokens ----
     // Responder (RT-B) generates an inbound token for the initiator (RT-A).
     let responder_inbound_token = "responder-token-for-a";
-    let (_session_id, _pin, _peer_token, initiator_inbound_token) =
-        do_pairing_with_tokens(
-            &client,
-            &a_url,
-            "secret-a",
-            "e2e-auth-b",
-            &b_url,
-            Some(responder_inbound_token),
-        )
-        .await;
+    let (_session_id, _pin, _peer_token, initiator_inbound_token) = do_pairing_with_tokens(
+        &client,
+        &a_url,
+        "secret-a",
+        "e2e-auth-b",
+        &b_url,
+        Some(responder_inbound_token),
+    )
+    .await;
 
     // Verify per-peer token exchange: initiator returns its inbound_token (NOT global secret).
     assert!(

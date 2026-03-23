@@ -26,7 +26,9 @@ async fn topology_exposes_host_id() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert!(
-        payload["host_id"].as_str().is_some_and(|value| !value.is_empty()),
+        payload["host_id"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
         "topology should expose host_id"
     );
 }
@@ -75,7 +77,13 @@ async fn mesh_peers_crud_roundtrip() {
     assert_eq!(list.status(), StatusCode::OK);
     let list_body = list.into_body().collect().await.unwrap().to_bytes();
     let peers: Value = serde_json::from_slice(&list_body).unwrap();
-    assert!(peers.as_array().unwrap().iter().any(|peer| peer["id"] == "rt-b"));
+    assert!(
+        peers
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|peer| peer["id"] == "rt-b")
+    );
 
     let update = app
         .clone()
@@ -125,11 +133,13 @@ async fn mesh_peers_crud_roundtrip() {
         .unwrap();
     let list_after_body = list_after.into_body().collect().await.unwrap().to_bytes();
     let peers_after: Value = serde_json::from_slice(&list_after_body).unwrap();
-    assert!(!peers_after
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|peer| peer["id"] == "rt-b"));
+    assert!(
+        !peers_after
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|peer| peer["id"] == "rt-b")
+    );
 }
 
 #[tokio::test]

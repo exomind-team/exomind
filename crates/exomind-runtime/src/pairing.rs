@@ -95,7 +95,9 @@ impl PairingManager {
                 Err(poisoned) => poisoned.into_inner(),
             };
 
-            let session = sessions.remove(session_id).ok_or(PairingError::SessionNotFound)?;
+            let session = sessions
+                .remove(session_id)
+                .ok_or(PairingError::SessionNotFound)?;
 
             // Check expiry even if found (belt-and-suspenders).
             if session.created_at.elapsed() > SESSION_TTL {
@@ -141,7 +143,10 @@ impl PairingManager {
             };
             sessions
                 .values()
-                .find(|s| s.initiator_host_id == initiator_host_id && s.created_at.elapsed() <= SESSION_TTL)
+                .find(|s| {
+                    s.initiator_host_id == initiator_host_id
+                        && s.created_at.elapsed() <= SESSION_TTL
+                })
                 .map(|s| s.session_id.clone())
                 .ok_or(PairingError::SessionNotFound)?
         };
@@ -172,9 +177,7 @@ impl PairingManager {
 /// Generate a 6-digit PIN by sampling each digit independently.
 fn generate_pin() -> String {
     let mut rng = rand::thread_rng();
-    (0..6)
-        .map(|_| rng.gen_range(0..10).to_string())
-        .collect()
+    (0..6).map(|_| rng.gen_range(0..10).to_string()).collect()
 }
 
 /// Generate a peer_token as SHA-256 hex digest of session material + random UUID.
