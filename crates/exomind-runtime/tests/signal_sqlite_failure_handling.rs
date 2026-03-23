@@ -236,7 +236,11 @@ fn snapshot_import_rolls_back_routes_when_journal_insert_fails() {
     let reopened = open_signal_pool(&sqlite_path);
     let import_result = reopened.import_snapshot(SignalPoolSnapshot {
         routes: vec![make_route("incoming.topic", "incoming-agent")],
-        journal: vec![make_record("evt-incoming", "route-incoming", "incoming-agent")],
+        journal: vec![make_record(
+            "evt-incoming",
+            "route-incoming",
+            "incoming-agent",
+        )],
     });
 
     assert!(

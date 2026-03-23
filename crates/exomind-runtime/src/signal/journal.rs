@@ -31,7 +31,9 @@ impl Journal {
         }
     }
 
-    pub(crate) fn with_sqlite_store(store: Arc<SqliteSignalStore>) -> Result<Self, SignalStoreError> {
+    pub(crate) fn with_sqlite_store(
+        store: Arc<SqliteSignalStore>,
+    ) -> Result<Self, SignalStoreError> {
         let initial = store.load_recent_journal(DEFAULT_CAPACITY)?;
         let mut records = VecDeque::with_capacity(DEFAULT_CAPACITY);
         for record in initial {

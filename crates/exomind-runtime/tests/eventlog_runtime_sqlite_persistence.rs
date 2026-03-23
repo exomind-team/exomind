@@ -1,5 +1,5 @@
-use exomind_runtime::eventlog::{EventLogBackendKind, EventRecord};
 use exomind_runtime::AppState;
+use exomind_runtime::eventlog::{EventLogBackendKind, EventRecord};
 use tempfile::tempdir;
 
 #[test]
@@ -53,7 +53,10 @@ fn app_state_runtime_reuses_eventlog_sqlite_storage() {
         std::env::remove_var("EXOMIND_RT_DATA_DIR");
     }
 
-    assert_eq!(reopened.eventlog_store.backend_kind(), EventLogBackendKind::Sqlite);
+    assert_eq!(
+        reopened.eventlog_store.backend_kind(),
+        EventLogBackendKind::Sqlite
+    );
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].id, "evt-runtime-1");
 }

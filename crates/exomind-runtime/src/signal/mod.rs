@@ -1,4 +1,4 @@
-﻿pub mod actors;
+pub mod actors;
 pub mod bus;
 pub mod journal;
 pub mod route_table;
@@ -161,16 +161,17 @@ mod tests {
     fn full_publish_flow() {
         let pool = SignalPool::new(None);
         let now = chrono::Utc::now().to_rfc3339();
-        pool.routes().add(SignalRoute {
-            id: "r1".to_string(),
-            enabled: true,
-            topic: "test.topic".to_string(),
-            target_type: TargetType::Agent,
-            target_ref: "echo".to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-        })
-        .unwrap();
+        pool.routes()
+            .add(SignalRoute {
+                id: "r1".to_string(),
+                enabled: true,
+                topic: "test.topic".to_string(),
+                target_type: TargetType::Agent,
+                target_ref: "echo".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
 
         let _rx = pool.subscribe();
         let event = make_event("test.topic");

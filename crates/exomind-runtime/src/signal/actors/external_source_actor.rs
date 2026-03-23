@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
-use crate::signal::types::SignalEvent;
 use crate::signal::SignalPool;
+use crate::signal::types::SignalEvent;
 
 const EXTERNAL_INPUT_RECEIVED_TOPIC: &str = "external.input.received";
 const EXTERNAL_SOURCE_NAME: &str = "actor:external_source";
@@ -110,9 +110,14 @@ pub fn spawn_external_source_actor(
 
         loop {
             for chatroom in &config.watched_chatrooms {
-                if let Err(error) =
-                    poll_chatroom_once(&client, &pool, &config.weflow_base_url, chatroom, &mut dedup)
-                        .await
+                if let Err(error) = poll_chatroom_once(
+                    &client,
+                    &pool,
+                    &config.weflow_base_url,
+                    chatroom,
+                    &mut dedup,
+                )
+                .await
                 {
                     warn!(
                         chatroom = %chatroom.id,
@@ -135,7 +140,10 @@ async fn fetch_weflow_messages(
     offset: usize,
 ) -> Result<WeFlowMessagesResponse, reqwest::Error> {
     let response = client
-        .get(format!("{}/api/v1/messages", base_url.trim_end_matches('/')))
+        .get(format!(
+            "{}/api/v1/messages",
+            base_url.trim_end_matches('/')
+        ))
         .query(&[
             ("talker", chatroom_id),
             ("limit", &limit.min(500).to_string()),
@@ -265,7 +273,11 @@ async fn poll_chatroom_once(
 fn message_timestamp_ms(message: &WeFlowMessage) -> u64 {
     message
         .sort_seq
-        .or_else(|| message.create_time.map(|seconds| seconds.saturating_mul(1000)))
+        .or_else(|| {
+            message
+                .create_time
+                .map(|seconds| seconds.saturating_mul(1000))
+        })
         .unwrap_or(0)
 }
 
@@ -334,7 +346,7 @@ fn remember_dedup_key(dedup: &mut DedupState, key: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{extract::Query, routing::get, Json, Router};
+    use axum::{Json, Router, extract::Query, routing::get};
     use serde::Deserialize;
     use serde_json::json;
     use tokio::net::TcpListener;
@@ -354,8 +366,14 @@ mod tests {
             get(move |query: Query<MessageQuery>| {
                 let response = response.clone();
                 async move {
-                    assert!(!query.talker.is_empty(), "talker query param should be present");
-                    assert!(query.limit.unwrap_or_default() > 0, "limit should be positive");
+                    assert!(
+                        !query.talker.is_empty(),
+                        "talker query param should be present"
+                    );
+                    assert!(
+                        query.limit.unwrap_or_default() > 0,
+                        "limit should be positive"
+                    );
                     let limit = query.limit.unwrap_or(20);
                     let offset = query.offset.unwrap_or(0);
                     let source_messages = response
@@ -385,7 +403,9 @@ mod tests {
             .expect("should bind test server");
         let addr = listener.local_addr().expect("should read local addr");
         let handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.expect("test server should run");
+            axum::serve(listener, app)
+                .await
+                .expect("test server should run");
         });
         (format!("http://{}", addr), handle)
     }
@@ -395,9 +415,7 @@ mod tests {
         tokio::task::yield_now().await;
     }
 
-    async fn recv_next(
-        rx: &mut tokio::sync::broadcast::Receiver<SignalEvent>,
-    ) -> SignalEvent {
+    async fn recv_next(rx: &mut tokio::sync::broadcast::Receiver<SignalEvent>) -> SignalEvent {
         tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
             .expect("timeout waiting for signal")
@@ -458,10 +476,9 @@ mod tests {
         };
         let mut rx = pool.subscribe();
 
-        let published =
-            poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
-                .await
-                .expect("poll should succeed");
+        let published = poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
+            .await
+            .expect("poll should succeed");
 
         assert_eq!(published, 2, "image placeholder should be skipped");
 
@@ -513,22 +530,26 @@ mod tests {
         };
         let mut rx = pool.subscribe();
 
-        let first_count =
-            poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
-                .await
-                .expect("first poll should succeed");
+        let first_count = poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
+            .await
+            .expect("first poll should succeed");
         assert_eq!(first_count, 1);
         let first = recv_next(&mut rx).await;
         assert_eq!(first.payload["dedup_key"], "room-2:201:11");
 
-        let second_count =
-            poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
-                .await
-                .expect("second poll should succeed");
-        assert_eq!(second_count, 0, "same payload should not be published twice");
+        let second_count = poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
+            .await
+            .expect("second poll should succeed");
+        assert_eq!(
+            second_count, 0,
+            "same payload should not be published twice"
+        );
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
-        assert!(result.is_err(), "second poll should not publish more events");
+        assert!(
+            result.is_err(),
+            "second poll should not publish more events"
+        );
     }
 
     #[tokio::test]
@@ -567,27 +588,36 @@ mod tests {
         };
         let mut rx = pool.subscribe();
 
-        let published =
-            poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
-                .await
-                .expect("burst poll should succeed");
+        let published = poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
+            .await
+            .expect("burst poll should succeed");
 
-        assert_eq!(published, 25, "poll should page through all unseen messages");
+        assert_eq!(
+            published, 25,
+            "poll should page through all unseen messages"
+        );
 
         let mut received_texts = Vec::new();
         for _ in 0..25 {
             let event = recv_next(&mut rx).await;
-            received_texts.push(event.payload["text"].as_str().unwrap_or_default().to_string());
+            received_texts.push(
+                event.payload["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            );
         }
 
         assert!(received_texts.contains(&"burst-message-1".to_string()));
         assert!(received_texts.contains(&"burst-message-25".to_string()));
 
-        let second_count =
-            poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
-                .await
-                .expect("second burst poll should succeed");
-        assert_eq!(second_count, 0, "cursor should advance only after full backlog is consumed");
+        let second_count = poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
+            .await
+            .expect("second burst poll should succeed");
+        assert_eq!(
+            second_count, 0,
+            "cursor should advance only after full backlog is consumed"
+        );
     }
 
     #[tokio::test]

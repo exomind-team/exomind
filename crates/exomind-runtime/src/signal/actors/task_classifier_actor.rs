@@ -37,7 +37,10 @@ pub fn spawn_task_actor(pool: Arc<SignalPool>) -> tokio::task::JoinHandle<()> {
                     handle_classified_event(&pool, &event);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    warn!(skipped = n, "task_actor: broadcast receiver lagged, skipped {n} events");
+                    warn!(
+                        skipped = n,
+                        "task_actor: broadcast receiver lagged, skipped {n} events"
+                    );
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     warn!("task_actor: broadcast channel closed, shutting down");
@@ -160,26 +163,20 @@ mod tests {
         let first = rx.recv().await.expect("should receive original event");
         assert_eq!(first.topic, "input.classified");
 
-        let second = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            rx.recv(),
-        )
-        .await
-        .expect("timeout waiting for first task")
-        .expect("should receive first task");
+        let second = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for first task")
+            .expect("should receive first task");
         assert_eq!(second.topic, "task.auto-created");
         assert_eq!(second.source, "actor:task");
         assert_eq!(second.payload["title"], "Buy milk");
         assert_eq!(second.payload["note"], "2%");
         assert_eq!(second.trace_id, Some("trace-1".to_string()));
 
-        let third = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            rx.recv(),
-        )
-        .await
-        .expect("timeout waiting for second task")
-        .expect("should receive second task");
+        let third = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for second task")
+            .expect("should receive second task");
         assert_eq!(third.topic, "task.auto-created");
         assert_eq!(third.payload["title"], "Call dentist");
         assert!(third.payload["note"].is_null());
@@ -203,11 +200,7 @@ mod tests {
         let first = rx.recv().await.expect("should receive original event");
         assert_eq!(first.topic, "input.classified");
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(result.is_err(), "should not receive any more events");
     }
 
@@ -220,20 +213,13 @@ mod tests {
 
         let mut rx = pool.subscribe();
 
-        let event = make_classified_event(
-            "log",
-            serde_json::json!([{ "text": "woke up at 7am" }]),
-        );
+        let event = make_classified_event("log", serde_json::json!([{ "text": "woke up at 7am" }]));
         pool.publish(event);
 
         let first = rx.recv().await.expect("should receive original event");
         assert_eq!(first.topic, "input.classified");
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(result.is_err(), "should not receive any more events");
     }
 
@@ -262,11 +248,7 @@ mod tests {
         let first = rx.recv().await.expect("should receive original event");
         assert_eq!(first.topic, "input.classified");
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(result.is_err(), "should not receive any more events");
     }
 
@@ -295,11 +277,7 @@ mod tests {
         let first = rx.recv().await.expect("should receive original event");
         assert_eq!(first.topic, "user.input.text");
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(result.is_err(), "should not receive any more events");
     }
 }

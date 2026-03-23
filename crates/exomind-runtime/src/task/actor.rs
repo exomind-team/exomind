@@ -42,7 +42,10 @@ pub fn spawn_task_store_actor(
                     handle_auto_created(&pool, &store, &event);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    warn!(skipped = n, "task_store_actor: broadcast receiver lagged, skipped {n} events");
+                    warn!(
+                        skipped = n,
+                        "task_store_actor: broadcast receiver lagged, skipped {n} events"
+                    );
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     warn!("task_store_actor: broadcast channel closed, shutting down");
@@ -138,13 +141,10 @@ mod tests {
         let first = rx.recv().await.unwrap();
         assert_eq!(first.topic, "task.auto-created");
 
-        let second = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            rx.recv(),
-        )
-        .await
-        .expect("timeout")
-        .expect("recv");
+        let second = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout")
+            .expect("recv");
         assert_eq!(second.topic, "task.created");
         assert_eq!(second.source, "actor:task_store");
 

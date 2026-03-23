@@ -107,26 +107,28 @@ mod tests {
     fn make_route_table_with_routes() -> RouteTable {
         let table = RouteTable::new(None, None);
         let now = chrono::Utc::now().to_rfc3339();
-        table.add(crate::signal::types::SignalRoute {
-            id: "route-classifier".to_string(),
-            enabled: true,
-            topic: "user.input.text".to_string(),
-            target_type: TargetType::Agent,
-            target_ref: "classifier".to_string(),
-            created_at: now.clone(),
-            updated_at: now.clone(),
-        })
-        .unwrap();
-        table.add(crate::signal::types::SignalRoute {
-            id: "route-ui".to_string(),
-            enabled: true,
-            topic: "*".to_string(),
-            target_type: TargetType::Frontend,
-            target_ref: "ui".to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-        })
-        .unwrap();
+        table
+            .add(crate::signal::types::SignalRoute {
+                id: "route-classifier".to_string(),
+                enabled: true,
+                topic: "user.input.text".to_string(),
+                target_type: TargetType::Agent,
+                target_ref: "classifier".to_string(),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        table
+            .add(crate::signal::types::SignalRoute {
+                id: "route-ui".to_string(),
+                enabled: true,
+                topic: "*".to_string(),
+                target_type: TargetType::Frontend,
+                target_ref: "ui".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
         table
     }
 

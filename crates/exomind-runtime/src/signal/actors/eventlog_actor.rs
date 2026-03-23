@@ -118,23 +118,17 @@ mod tests {
         pool.publish(event);
 
         // 1. The original user.input.normalized event (broadcast)
-        let first = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            rx.recv(),
-        )
-        .await
-        .expect("timeout waiting for original event")
-        .expect("should receive original event");
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for original event")
+            .expect("should receive original event");
         assert_eq!(first.topic, "user.input.normalized");
 
         // 2. eventlog.appended
-        let second = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            rx.recv(),
-        )
-        .await
-        .expect("timeout waiting for eventlog.appended")
-        .expect("should receive eventlog.appended");
+        let second = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for eventlog.appended")
+            .expect("should receive eventlog.appended");
         assert_eq!(second.topic, "eventlog.appended");
         assert_eq!(second.source, "actor:eventlog");
         assert_eq!(second.payload["text"], "hello world");
@@ -172,11 +166,7 @@ mod tests {
         assert_eq!(first.topic, "input.classified");
 
         // No more events
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(result.is_err(), "should not receive any more events");
     }
 
@@ -207,11 +197,7 @@ mod tests {
         let first = rx.recv().await.expect("should receive original event");
         assert_eq!(first.topic, "user.input.normalized");
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(result.is_err(), "should not receive any more events");
     }
 
@@ -235,11 +221,8 @@ mod tests {
         let mut appended_count = 0;
         let mut total = 0;
         loop {
-            let result = tokio::time::timeout(
-                std::time::Duration::from_millis(500),
-                rx.recv(),
-            )
-            .await;
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
             match result {
                 Ok(Ok(ev)) => {
                     total += 1;
@@ -251,8 +234,7 @@ mod tests {
             }
         }
         assert_eq!(
-            appended_count,
-            2,
+            appended_count, 2,
             "identical inputs should remain appendable, got {appended_count} appended events (total events: {total})"
         );
     }

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use tracing::warn;
 
-use crate::signal::types::SignalEvent;
 use crate::signal::SignalPool;
+use crate::signal::types::SignalEvent;
 
 const EXTERNAL_INPUT_RECEIVED_TOPIC: &str = "external.input.received";
 const USER_INPUT_NORMALIZED_TOPIC: &str = "user.input.normalized";
@@ -167,9 +167,7 @@ mod tests {
         tokio::task::yield_now().await;
     }
 
-    async fn recv_next(
-        rx: &mut tokio::sync::broadcast::Receiver<SignalEvent>,
-    ) -> SignalEvent {
+    async fn recv_next(rx: &mut tokio::sync::broadcast::Receiver<SignalEvent>) -> SignalEvent {
         tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
             .expect("timeout waiting for signal")
@@ -216,7 +214,10 @@ mod tests {
         );
         assert_eq!(second.payload["externalMeta"]["chatroomId"], "room-1");
         assert_eq!(second.payload["externalMeta"]["mediaType"], "text");
-        assert_eq!(second.payload["externalMeta"]["dedupKey"], "wechat-room-1-1");
+        assert_eq!(
+            second.payload["externalMeta"]["dedupKey"],
+            "wechat-room-1-1"
+        );
 
         let third = recv_next(&mut rx).await;
         assert_eq!(third.topic, EXTERNAL_INPUT_INGESTED_TOPIC);
@@ -253,7 +254,10 @@ mod tests {
         assert_eq!(second.payload["text"], "https://example.com/hello");
         assert_eq!(second.payload["rawText"], "https://example.com/hello");
         assert_eq!(second.payload["captureSource"], "telegram:Bob");
-        assert_eq!(second.payload["externalMeta"]["url"], "https://example.com/hello");
+        assert_eq!(
+            second.payload["externalMeta"]["url"],
+            "https://example.com/hello"
+        );
     }
 
     #[tokio::test]
@@ -277,7 +281,10 @@ mod tests {
         assert_eq!(first.topic, EXTERNAL_INPUT_RECEIVED_TOPIC);
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
-        assert!(result.is_err(), "missing text/url should not publish any derived signal");
+        assert!(
+            result.is_err(),
+            "missing text/url should not publish any derived signal"
+        );
     }
 
     #[tokio::test]
@@ -298,6 +305,9 @@ mod tests {
         assert_eq!(first.topic, "user.input.text");
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
-        assert!(result.is_err(), "non external topic should not publish any derived signal");
+        assert!(
+            result.is_err(),
+            "non external topic should not publish any derived signal"
+        );
     }
 }

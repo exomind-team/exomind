@@ -13,8 +13,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures_util::StreamExt;
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
-use tokio::time::{timeout, Duration};
+use serde_json::{Value, json};
+use tokio::time::{Duration, timeout};
 use tower::util::ServiceExt;
 
 /// Helper: 构建带 Signal 路由的测试 app
@@ -202,7 +202,12 @@ async fn stream_replays_frontend_ui_targeted_events_for_ui_agent() {
         .await
         .unwrap();
     assert_eq!(first_publish.status(), StatusCode::OK);
-    let first_body = first_publish.into_body().collect().await.unwrap().to_bytes();
+    let first_body = first_publish
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let first_payload: Value = serde_json::from_slice(&first_body).unwrap();
     let last_event_id = first_payload["event_id"]
         .as_str()
@@ -521,12 +526,7 @@ async fn route_crud_lifecycle() {
         .await
         .unwrap();
 
-    let list_after_body = list_after
-        .into_body()
-        .collect()
-        .await
-        .unwrap()
-        .to_bytes();
+    let list_after_body = list_after.into_body().collect().await.unwrap().to_bytes();
     let routes_after: Value = serde_json::from_slice(&list_after_body).unwrap();
     assert!(
         !routes_after
@@ -574,8 +574,7 @@ async fn delete_nonexistent_route_returns_not_found() {
 
     // 删除不存在的路由应返回 404 或 204（幂等）
     assert!(
-        response.status() == StatusCode::NOT_FOUND
-            || response.status() == StatusCode::NO_CONTENT,
+        response.status() == StatusCode::NOT_FOUND || response.status() == StatusCode::NO_CONTENT,
         "删除不存在的路由应返回 404 或 204，实际: {}",
         response.status()
     );
@@ -629,7 +628,9 @@ async fn default_signal_routes_include_voice_input_ingest_and_normalized_routes(
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let routes: Value = serde_json::from_slice(&body).unwrap();
-    let route_list = routes.as_array().expect("/signal-routes should return array");
+    let route_list = routes
+        .as_array()
+        .expect("/signal-routes should return array");
 
     let voice_route = route_list.iter().find(|route| {
         route["topic"] == "voice.input.transcript"

@@ -51,20 +51,16 @@ fn handle_input_event(pool: &SignalPool, event: &SignalEvent) {
         }
     };
 
-    let input_mode = event
-        .payload
-        .get("inputMode")
-        .cloned()
-        .unwrap_or_else(|| {
-            serde_json::Value::String(
-                if event.topic == VOICE_INPUT_TRANSCRIPT_TOPIC {
-                    "voice"
-                } else {
-                    "text"
-                }
-                .to_string(),
-            )
-        });
+    let input_mode = event.payload.get("inputMode").cloned().unwrap_or_else(|| {
+        serde_json::Value::String(
+            if event.topic == VOICE_INPUT_TRANSCRIPT_TOPIC {
+                "voice"
+            } else {
+                "text"
+            }
+            .to_string(),
+        )
+    });
 
     let raw_text = event
         .payload
@@ -80,7 +76,10 @@ fn handle_input_event(pool: &SignalPool, event: &SignalEvent) {
         .unwrap_or_else(|| serde_json::Value::String(event.source.clone()));
 
     let mut payload = serde_json::Map::new();
-    payload.insert("text".to_string(), serde_json::Value::String(text.to_string()));
+    payload.insert(
+        "text".to_string(),
+        serde_json::Value::String(text.to_string()),
+    );
     payload.insert("rawText".to_string(), raw_text);
     payload.insert("inputMode".to_string(), input_mode);
     payload.insert("captureSource".to_string(), capture_source);
@@ -156,7 +155,10 @@ mod tests {
             }),
         ));
 
-        let first = rx.recv().await.expect("should receive original voice transcript");
+        let first = rx
+            .recv()
+            .await
+            .expect("should receive original voice transcript");
         assert_eq!(first.topic, VOICE_INPUT_TRANSCRIPT_TOPIC);
 
         let second = rx.recv().await.expect("should receive normalized input");

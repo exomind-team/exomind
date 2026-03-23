@@ -12,10 +12,10 @@
 //!   session.end              -> { events: [...] }
 //!   review.completed         -> { effective: string, stuck: string, improve: string, avoid: string }
 
-use exomind_runtime::signal::types::{SignalEvent, SignalRoute, TargetType};
 use exomind_runtime::signal::SignalPool;
-use std::sync::Arc;
+use exomind_runtime::signal::types::{SignalEvent, SignalRoute, TargetType};
 use serde_json::json;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Helper: construct a test SignalEvent with the given topic and payload.
@@ -39,15 +39,17 @@ fn make_event(topic: &str, payload: serde_json::Value) -> SignalEvent {
 /// Helper: add a route to the pool's route table.
 fn add_route(pool: &SignalPool, id: &str, topic: &str, target_type: TargetType, target_ref: &str) {
     let now = chrono::Utc::now().to_rfc3339();
-    pool.routes().add(SignalRoute {
-        id: id.to_string(),
-        enabled: true,
-        topic: topic.to_string(),
-        target_type,
-        target_ref: target_ref.to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-    }).unwrap();
+    pool.routes()
+        .add(SignalRoute {
+            id: id.to_string(),
+            enabled: true,
+            topic: topic.to_string(),
+            target_type,
+            target_ref: target_ref.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        })
+        .unwrap();
 }
 
 async fn yield_for_actor() {
@@ -68,7 +70,13 @@ async fn yield_for_actor() {
 async fn task_actor_transforms_classified_task_to_auto_created() {
     // 1. Create SignalPool with route for task actor
     let pool = SignalPool::new(None);
-    add_route(&pool, "r-task", "input.classified", TargetType::Actor, "task_actor");
+    add_route(
+        &pool,
+        "r-task",
+        "input.classified",
+        TargetType::Actor,
+        "task_actor",
+    );
 
     // 2. Subscribe to pool to capture output signals
     let mut rx = pool.subscribe();
@@ -92,13 +100,12 @@ async fn task_actor_transforms_classified_task_to_auto_created() {
     // 4. Verify: when task_actor is implemented, it should produce
     //    a task.auto-created signal. For now, verify the input signal
     //    is received by the subscriber (actor not yet wired).
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
 
-    assert!(received.is_ok(), "subscriber should receive the published event");
+    assert!(
+        received.is_ok(),
+        "subscriber should receive the published event"
+    );
     let received_event = received.unwrap().unwrap();
     assert_eq!(received_event.topic, "input.classified");
 
@@ -114,7 +121,13 @@ async fn task_actor_transforms_classified_task_to_auto_created() {
 #[tokio::test]
 async fn task_actor_ignores_non_task_classification() {
     let pool = SignalPool::new(None);
-    add_route(&pool, "r-task", "input.classified", TargetType::Actor, "task_actor");
+    add_route(
+        &pool,
+        "r-task",
+        "input.classified",
+        TargetType::Actor,
+        "task_actor",
+    );
 
     let mut rx = pool.subscribe();
 
@@ -134,11 +147,7 @@ async fn task_actor_ignores_non_task_classification() {
     pool.publish(event);
 
     // The input.classified event itself is broadcast
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received.is_ok());
     assert_eq!(received.unwrap().unwrap().topic, "input.classified");
 
@@ -182,11 +191,7 @@ async fn eventlog_actor_transforms_user_input_to_appended() {
     pool.publish(event);
 
     // Verify input event is received
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received.is_ok());
     let received_event = received.unwrap().unwrap();
     assert_eq!(received_event.topic, "user.input.text");
@@ -227,11 +232,7 @@ async fn eventlog_actor_ignores_other_topics() {
     // TODO(Phase 2): When eventlog_actor is wired:
     //   - Verify no eventlog.appended signal is produced
     //   - Only the original input.classified should be in the stream
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
 
     // If received, it should be the original event, not an eventlog.appended
     if let Ok(Ok(evt)) = received {
@@ -280,11 +281,7 @@ async fn full_chain_input_to_task_and_eventlog() {
     );
     pool.publish(input_event);
 
-    let received1 = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received1 = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received1.is_ok(), "should receive user.input.text event");
     assert_eq!(received1.unwrap().unwrap().topic, "user.input.text");
 
@@ -301,11 +298,7 @@ async fn full_chain_input_to_task_and_eventlog() {
     );
     pool.publish(classified_event);
 
-    let received2 = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received2 = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received2.is_ok(), "should receive input.classified event");
     assert_eq!(received2.unwrap().unwrap().topic, "input.classified");
 
@@ -318,8 +311,11 @@ async fn full_chain_input_to_task_and_eventlog() {
 #[tokio::test]
 async fn voice_transcript_is_normalized_before_eventlog_append() {
     let pool = Arc::new(SignalPool::new(None));
-    let _ingest = exomind_runtime::signal::actors::input_ingest_actor::spawn_input_ingest_actor(Arc::clone(&pool));
-    let _eventlog = exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(Arc::clone(&pool));
+    let _ingest = exomind_runtime::signal::actors::input_ingest_actor::spawn_input_ingest_actor(
+        Arc::clone(&pool),
+    );
+    let _eventlog =
+        exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(Arc::clone(&pool));
     yield_for_actor().await;
 
     let mut rx = pool.subscribe();
@@ -365,9 +361,8 @@ async fn external_input_is_normalized_before_eventlog_append() {
         exomind_runtime::signal::actors::external_input_actor::spawn_external_input_actor(
             Arc::clone(&pool),
         );
-    let _eventlog = exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(
-        Arc::clone(&pool),
-    );
+    let _eventlog =
+        exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(Arc::clone(&pool));
     yield_for_actor().await;
 
     let mut rx = pool.subscribe();
@@ -403,9 +398,17 @@ async fn external_input_is_normalized_before_eventlog_append() {
         }
     }
 
-    assert!(topics.iter().any(|topic| topic == "external.input.received"));
+    assert!(
+        topics
+            .iter()
+            .any(|topic| topic == "external.input.received")
+    );
     assert!(topics.iter().any(|topic| topic == "user.input.normalized"));
-    assert!(topics.iter().any(|topic| topic == "external.input.ingested"));
+    assert!(
+        topics
+            .iter()
+            .any(|topic| topic == "external.input.ingested")
+    );
     assert!(topics.iter().any(|topic| topic == "eventlog.appended"));
 }
 
@@ -436,11 +439,7 @@ async fn session_end_routes_to_reviewer() {
     );
     pool.publish(event);
 
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received.is_ok());
     let evt = received.unwrap().unwrap();
     assert_eq!(evt.topic, "session.end");
