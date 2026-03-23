@@ -257,6 +257,16 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
   }
 
   const searchParams = new URLSearchParams(window.location.search);
+  const returnTo = searchParams.get('returnTo')?.trim();
+  const returnLabel = searchParams.get('returnLabel')?.trim();
+  if (returnTo) {
+    const label = returnLabel || '上一页';
+    return {
+      to: returnTo,
+      label: `← 返回${label}`,
+      sourceLabel: label,
+    };
+  }
   const from = searchParams.get('from')?.trim();
   const sourceConfig = from ? SOURCE_CONFIG[from] : undefined;
 
@@ -1167,11 +1177,16 @@ function DesktopTimeblockDetail({
 }) {
   return (
     <div className="scrollbar-none h-full overflow-y-auto bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
-      <TaskBreadcrumb
-        segments={buildDetailBreadcrumbSegments(backLink)}
-        current={{ label: '任务详情', icon: NotepadText }}
-      />
-      <header className="mt-3 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+      <header
+        data-testid="task-detail-desktop-breadcrumb"
+        className="sticky top-0 z-10 -mx-8 mb-4 border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-8 py-4 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95"
+      >
+        <TaskBreadcrumb
+          segments={buildDetailBreadcrumbSegments(backLink)}
+          current={{ label: '任务详情', icon: NotepadText }}
+        />
+      </header>
+      <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>

@@ -87,6 +87,11 @@ describe('buildTimeBlockDetailView（时间块详情视图模型）', () => {
       'associated',
       'disassociated',
     ])
+    expect(view.associationTimeline.map((item: { description: string }) => item.description)).toEqual([
+      '关联任务 · 时间块启动',
+      '关联任务 · 手动调整',
+      '移除关联任务 · 手动调整',
+    ])
   })
 
   it('falls back to task id when task title is missing（缺少任务标题时回退到 taskId）', async () => {

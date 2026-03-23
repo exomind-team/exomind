@@ -19,9 +19,13 @@ export interface TimeBlockDetailAssociationItem {
   id: string;
   taskId: string;
   title: string;
+  description: string;
   action: string;
+  actionLabel: string;
   source: string;
+  sourceLabel: string;
   timestampLabel: string;
+  tone: 'neutral' | 'success' | 'warning';
 }
 
 export interface TimeBlockDetailView {
@@ -33,6 +37,25 @@ export interface TimeBlockDetailView {
 export interface BuildTimeBlockDetailViewInput {
   block: TimeBlock;
   tasksById: Map<string, TaskNode>;
+}
+
+function resolveAssociationActionLabel(action: string): string {
+  if (action === 'associated') return '关联任务';
+  if (action === 'disassociated') return '移除关联任务';
+  return action;
+}
+
+function resolveAssociationSourceLabel(source: string): string {
+  if (source === 'block_start') return '时间块启动';
+  if (source === 'manual') return '手动调整';
+  if (source === 'block_end') return '结束时间块';
+  return source;
+}
+
+function resolveAssociationTone(action: string): 'neutral' | 'success' | 'warning' {
+  if (action === 'associated') return 'success';
+  if (action === 'disassociated') return 'warning';
+  return 'neutral';
 }
 
 function formatDateTime(timestamp: number): string {
@@ -78,9 +101,13 @@ export function buildTimeBlockDetailView(input: BuildTimeBlockDetailViewInput): 
         id: `${item.taskId}-${item.action}-${item.timestamp}`,
         taskId: item.taskId,
         title: tasksById.get(item.taskId)?.title ?? item.taskId,
+        description: `${resolveAssociationActionLabel(item.action)} · ${resolveAssociationSourceLabel(item.source)}`,
         action: item.action,
+        actionLabel: resolveAssociationActionLabel(item.action),
         source: item.source,
+        sourceLabel: resolveAssociationSourceLabel(item.source),
         timestampLabel: formatDateTime(item.timestamp),
+        tone: resolveAssociationTone(item.action),
       })),
   };
 }

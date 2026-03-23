@@ -277,6 +277,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     expect(await screen.findByText('任务')).toBeInTheDocument();
     expect(screen.getByText('任务详情')).toBeInTheDocument();
+    expect(screen.getByTestId('task-detail-desktop-breadcrumb')).toHaveClass('sticky', 'top-0');
     expect(screen.getAllByText('深度工作：EventLog 模块实现').length).toBeGreaterThan(0);
     expect(screen.getByText('事件时间线')).toBeInTheDocument();
     expect(screen.getByText('AI 总结')).toBeInTheDocument();
@@ -658,6 +659,20 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
       expect(pauseBlockMock).toHaveBeenCalled();
       expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
     });
+  });
+
+  it('uses the originating timeblock detail as the back target when return context is provided', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/tasks/task-1?blockId=block-1&returnTo=%2Ftasks%2Fblock%2Fblock-1&returnLabel=%E6%97%B6%E9%97%B4%E5%9D%97%E8%AF%A6%E6%83%85',
+    );
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByLabelText('返回时间块详情')).toHaveAttribute('to', '/tasks/block/block-1');
   });
 
   it('pressing Escape should cancel description editing and restore persisted text（Esc 取消描述编辑并恢复原值）', async () => {

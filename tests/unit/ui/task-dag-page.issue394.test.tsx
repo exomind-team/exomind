@@ -33,10 +33,11 @@ const flowApiMocks = vi.hoisted(() => ({
 const navigateMock = vi.hoisted(() => vi.fn());
 const isDesktopMock = vi.hoisted(() => vi.fn(() => true));
 const toastMock = vi.hoisted(() => vi.fn());
+const locationState = vi.hoisted(() => ({ pathname: '/tasks/dag', searchStr: '' }));
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
-  useLocation: () => ({ pathname: '/tasks/dag', searchStr: '' }),
+  useLocation: () => locationState,
   useNavigate: () => navigateMock,
 }));
 
@@ -192,6 +193,8 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
 
 describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () => {
   beforeEach(() => {
+    locationState.pathname = '/tasks/dag';
+    locationState.searchStr = '';
     flowApiMocks.setCenter.mockReset();
     flowApiMocks.fitView.mockReset();
     flowApiMocks.setViewport.mockReset();
@@ -955,6 +958,35 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     fireEvent.wheel(selector, { deltaY: -120 });
     expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
+  });
+
+  it('switches to browse and reveals the target when opened with locate search params', async () => {
+    locationState.searchStr = '?focus=task-b&locate=1';
+    window.localStorage.setItem('exomind:dag-mode', 'execute');
+    window.localStorage.setItem('exomind:dag-hide-terminal', 'hide');
+    window.localStorage.setItem('exomind:dag-search-draft', '别的任务');
+
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '进行中的主线', status: 'pending', createdAt: 10, updatedAt: 10 }),
+      makeTask({ id: 'task-b', title: '2026-03-22 洗澡', status: 'completed', createdAt: 20, updatedAt: 20 }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('exomind:dag-mode')).toBe('browse');
+    });
+    expect(window.localStorage.getItem('exomind:dag-hide-terminal')).toBe('show');
+    await waitFor(() => {
+      const nodes = (flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; data?: { isSelected?: boolean } }>;
+      }).nodes;
+      const targetNode = nodes.find((node) => node.id === 'task-b');
+      expect(targetNode?.data?.isSelected).toBe(true);
+    });
+    await waitFor(() => {
+      expect(flowApiMocks.setCenter).toHaveBeenCalled();
+    });
   });
 
   it('supports keyboard mode switching, escape cleanup, and pan shortcuts from the centralized dag hook', async () => {

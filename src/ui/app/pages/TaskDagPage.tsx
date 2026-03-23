@@ -299,6 +299,29 @@ function summarizeRenderedFlowNodes(): {
   };
 }
 
+function focusNodeInViewport(
+  nodeId: string,
+  flowInstance: ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null,
+  nodes: TaskDagFlowNode[],
+): void {
+  if (!flowInstance) {
+    return;
+  }
+
+  const node = nodes.find((entry) => entry.id === nodeId);
+  if (!node) {
+    return;
+  }
+
+  const nodeWidth = node.measured?.width ?? TASK_DAG_NODE_WIDTH;
+  const nodeHeight = node.measured?.height ?? TASK_DAG_NODE_HEIGHT;
+  flowInstance.setCenter(
+    node.position.x + nodeWidth / 2,
+    node.position.y + nodeHeight / 2,
+    { duration: 180 },
+  );
+}
+
 function buildExecutionHint(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
   if (task.status === 'completed') {
     return '该任务已经完成，可双击进入详情页回顾依赖关系与时间记录。';
@@ -910,6 +933,7 @@ export function TaskDagPage() {
   const [panSpeed, setPanSpeed] = useState(() => getTaskDagPanSpeed());
   const [zoomSpeed, setZoomSpeed] = useState(() => getTaskDagZoomSpeed());
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
+  const wheelListenerRef = useRef<HTMLDivElement | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
   const hasMountedDirectionRef = useRef(false);
   const hasAppliedInitialViewportRef = useRef(false);
@@ -919,6 +943,10 @@ export function TaskDagPage() {
     const params = new URLSearchParams(location.searchStr ?? '');
     const focusTaskId = params.get('focus');
     return focusTaskId?.trim() || null;
+  }, [location.searchStr]);
+  const locateTaskFromSearch = useMemo(() => {
+    const params = new URLSearchParams(location.searchStr ?? '');
+    return params.get('locate')?.trim() === '1';
   }, [location.searchStr]);
 
   useEffect(() => {
@@ -1317,16 +1345,47 @@ export function TaskDagPage() {
   }, []);
 
   useEffect(() => {
-    if (!pendingFocusTaskId || !visibleNodeIdSet.has(pendingFocusTaskId)) {
+    const wheelRegion = wheelListenerRef.current;
+    if (!wheelRegion) {
       return;
     }
 
-    setSelectedTaskId(pendingFocusTaskId);
+    const handleWheel = (event: WheelEvent) => {
+      if (!(event.target instanceof Node) || !wheelRegion.contains(event.target)) {
+        return;
+      }
+      if (!event.ctrlKey || !event.altKey || event.deltaY === 0) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      cycleTaskDagMode(event.deltaY > 0 ? 1 : -1);
+    };
+
+    document.addEventListener('wheel', handleWheel, {
+      capture: true,
+      passive: false,
+    });
+
+    return () => {
+      document.removeEventListener('wheel', handleWheel, {
+        capture: true,
+      });
+    };
+  }, [cycleTaskDagMode]);
+
+  useEffect(() => {
+    if (!pendingFocusTaskId || !visibleNodeIdSet.has(pendingFocusTaskId) || !flowInstanceRef.current) {
+      return;
+    }
+
     const focusTaskId = pendingFocusTaskId;
-    setPendingFocusTaskId(null);
+    setSelectedTaskId(focusTaskId);
 
     const timeoutId = window.setTimeout(() => {
+      focusNodeInViewport(focusTaskId, flowInstanceRef.current, flowGraph.nodes);
       ensureNodeVisible(focusTaskId, flowInstanceRef.current, flowGraph.nodes);
+      setPendingFocusTaskId((current) => (current === focusTaskId ? null : current));
     }, 50);
 
     return () => {
@@ -1342,9 +1401,16 @@ export function TaskDagPage() {
     if (lastHandledFocusSearchRef.current === focusTaskIdFromSearch) {
       return;
     }
+    if (locateTaskFromSearch) {
+      setMode('browse');
+      setTerminalFilterMode('show');
+      setDagVisibility(EMPTY_TASK_DAG_VISIBILITY_STATE);
+      setSearchDraft('');
+      setSearchQuery('');
+    }
     lastHandledFocusSearchRef.current = focusTaskIdFromSearch;
     setPendingFocusTaskId(focusTaskIdFromSearch);
-  }, [focusTaskIdFromSearch]);
+  }, [focusTaskIdFromSearch, locateTaskFromSearch]);
 
   useEffect(() => {
     if (flowGraph.nodes.length === 0) {
@@ -1927,15 +1993,8 @@ export function TaskDagPage() {
 
         <div
           data-testid="task-dag-wheel-listener"
+          ref={wheelListenerRef}
           className="h-full w-full"
-          onWheel={(event) => {
-            if (!event.ctrlKey || !event.altKey) {
-              return;
-            }
-            event.preventDefault();
-            event.stopPropagation();
-            cycleTaskDagMode(event.deltaY > 0 ? 1 : -1);
-          }}
           onDoubleClick={(event) => {
             if (mode !== 'connect' || !isPaneInteractionTarget(event.target)) {
               return;
