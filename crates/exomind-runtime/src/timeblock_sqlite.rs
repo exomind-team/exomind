@@ -32,7 +32,10 @@ impl SqliteTimeBlockStore {
         self.list_completed_scoped(DEFAULT_SCOPE_KEY)
     }
 
-    pub fn list_completed_scoped(&self, scope_key: &str) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
+    pub fn list_completed_scoped(
+        &self,
+        scope_key: &str,
+    ) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT id, name, start_id, end_id, note, tags_json, start_time, end_time,
@@ -64,14 +67,19 @@ impl SqliteTimeBlockStore {
             })
         })?;
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(TimeBlockStoreError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(TimeBlockStoreError::from)
     }
 
     pub fn replace_completed(&self, blocks: &[TimeBlockData]) -> Result<(), TimeBlockStoreError> {
         self.replace_completed_scoped(DEFAULT_SCOPE_KEY, blocks)
     }
 
-    pub fn replace_completed_scoped(&self, scope_key: &str, blocks: &[TimeBlockData]) -> Result<(), TimeBlockStoreError> {
+    pub fn replace_completed_scoped(
+        &self,
+        scope_key: &str,
+        blocks: &[TimeBlockData],
+    ) -> Result<(), TimeBlockStoreError> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
         tx.execute(
@@ -95,7 +103,8 @@ impl SqliteTimeBlockStore {
                     block.start_time,
                     block.end_time,
                     serde_json::to_string(&block.task_ids)?,
-                    block.task_status_outcomes
+                    block
+                        .task_status_outcomes
                         .as_ref()
                         .map(serde_json::to_string)
                         .transpose()?,
@@ -111,7 +120,10 @@ impl SqliteTimeBlockStore {
         self.get_active_scoped(DEFAULT_SCOPE_KEY)
     }
 
-    pub fn get_active_scoped(&self, scope_key: &str) -> Result<Option<ActiveBlockData>, TimeBlockStoreError> {
+    pub fn get_active_scoped(
+        &self,
+        scope_key: &str,
+    ) -> Result<Option<ActiveBlockData>, TimeBlockStoreError> {
         let connection = self.connection();
         let payload = connection
             .query_row(
@@ -134,7 +146,11 @@ impl SqliteTimeBlockStore {
         self.put_active_scoped(DEFAULT_SCOPE_KEY, block)
     }
 
-    pub fn put_active_scoped(&self, scope_key: &str, block: &ActiveBlockData) -> Result<(), TimeBlockStoreError> {
+    pub fn put_active_scoped(
+        &self,
+        scope_key: &str,
+        block: &ActiveBlockData,
+    ) -> Result<(), TimeBlockStoreError> {
         let connection = self.connection();
         connection.execute(
             "INSERT INTO active_timeblock (scope_key, singleton_key, payload_json)
@@ -177,7 +193,10 @@ impl SqliteTimeBlockStore {
     }
 
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>, TimeBlockStoreError> {
-        let temp_root = std::env::temp_dir().join(format!("exomind-timeblocks-snapshot-{}", uuid::Uuid::new_v4()));
+        let temp_root = std::env::temp_dir().join(format!(
+            "exomind-timeblocks-snapshot-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&temp_root)?;
         let snapshot_path = temp_root.join("timeblocks-snapshot.sqlite");
         let escaped_snapshot_path = snapshot_path.to_string_lossy().replace('\'', "''");
@@ -241,14 +260,20 @@ impl SqliteTimeBlockStore {
                 )?;
             }
 
-            if !columns.iter().any(|column| column == "task_status_outcomes_json") {
+            if !columns
+                .iter()
+                .any(|column| column == "task_status_outcomes_json")
+            {
                 connection.execute(
                     "ALTER TABLE completed_timeblocks ADD COLUMN task_status_outcomes_json TEXT NULL",
                     [],
                 )?;
             }
 
-            if !columns.iter().any(|column| column == "task_association_log_json") {
+            if !columns
+                .iter()
+                .any(|column| column == "task_association_log_json")
+            {
                 connection.execute(
                     "ALTER TABLE completed_timeblocks ADD COLUMN task_association_log_json TEXT NOT NULL DEFAULT '[]'",
                     [],
@@ -325,7 +350,9 @@ fn normalize_scope_key(scope_key: &str) -> &str {
     }
 }
 
-fn completed_timeblock_columns(connection: &Connection) -> Result<Vec<String>, TimeBlockStoreError> {
+fn completed_timeblock_columns(
+    connection: &Connection,
+) -> Result<Vec<String>, TimeBlockStoreError> {
     let mut statement = connection.prepare("PRAGMA table_info(completed_timeblocks)")?;
     statement
         .query_map([], |row| row.get::<_, String>(1))?
@@ -334,9 +361,5 @@ fn completed_timeblock_columns(connection: &Connection) -> Result<Vec<String>, T
 }
 
 fn to_sqlite_conversion_error(error: serde_json::Error) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        0,
-        rusqlite::types::Type::Text,
-        Box::new(error),
-    )
+    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
 }

@@ -1,5 +1,5 @@
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
@@ -173,7 +173,10 @@ impl TimeBlockStore {
         self.list_completed_scoped(None)
     }
 
-    pub fn list_completed_scoped(&self, scope_key: Option<&str>) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
+    pub fn list_completed_scoped(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
         match &self.backend {
             TimeBlockStoreBackend::Memory(state) => Ok(state
                 .read()
@@ -181,11 +184,16 @@ impl TimeBlockStore {
                 .get(normalize_scope_key(scope_key))
                 .map(|scope| scope.completed.clone())
                 .unwrap_or_default()),
-            TimeBlockStoreBackend::Sqlite(store) => store.list_completed_scoped(normalize_scope_key(scope_key)),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.list_completed_scoped(normalize_scope_key(scope_key))
+            }
         }
     }
 
-    pub fn list_completed_in_scope(&self, scope_key: Option<&str>) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
+    pub fn list_completed_in_scope(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
         self.list_completed_scoped(scope_key)
     }
 
@@ -193,7 +201,11 @@ impl TimeBlockStore {
         self.replace_completed_scoped(None, blocks)
     }
 
-    pub fn replace_completed_scoped(&self, scope_key: Option<&str>, blocks: &[TimeBlockData]) -> Result<(), TimeBlockStoreError> {
+    pub fn replace_completed_scoped(
+        &self,
+        scope_key: Option<&str>,
+        blocks: &[TimeBlockData],
+    ) -> Result<(), TimeBlockStoreError> {
         match &self.backend {
             TimeBlockStoreBackend::Memory(state) => {
                 state
@@ -204,11 +216,17 @@ impl TimeBlockStore {
                     .completed = blocks.to_vec();
                 Ok(())
             }
-            TimeBlockStoreBackend::Sqlite(store) => store.replace_completed_scoped(normalize_scope_key(scope_key), blocks),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.replace_completed_scoped(normalize_scope_key(scope_key), blocks)
+            }
         }
     }
 
-    pub fn replace_completed_in_scope(&self, scope_key: Option<&str>, blocks: &[TimeBlockData]) -> Result<(), TimeBlockStoreError> {
+    pub fn replace_completed_in_scope(
+        &self,
+        scope_key: Option<&str>,
+        blocks: &[TimeBlockData],
+    ) -> Result<(), TimeBlockStoreError> {
         self.replace_completed_scoped(scope_key, blocks)
     }
 
@@ -216,18 +234,31 @@ impl TimeBlockStore {
         self.get_active_scoped(None)
     }
 
-    pub fn get_active_scoped(&self, scope_key: Option<&str>) -> Result<Option<ActiveBlockData>, TimeBlockStoreError> {
+    pub fn get_active_scoped(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<Option<ActiveBlockData>, TimeBlockStoreError> {
         match &self.backend {
             TimeBlockStoreBackend::Memory(state) => Ok(state
                 .read()
                 .unwrap()
                 .get(normalize_scope_key(scope_key))
-                .and_then(|scope| scope.active.clone().map(ActiveBlockData::normalize_task_ids))),
-            TimeBlockStoreBackend::Sqlite(store) => store.get_active_scoped(normalize_scope_key(scope_key)),
+                .and_then(|scope| {
+                    scope
+                        .active
+                        .clone()
+                        .map(ActiveBlockData::normalize_task_ids)
+                })),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.get_active_scoped(normalize_scope_key(scope_key))
+            }
         }
     }
 
-    pub fn get_active_in_scope(&self, scope_key: Option<&str>) -> Result<Option<ActiveBlockData>, TimeBlockStoreError> {
+    pub fn get_active_in_scope(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<Option<ActiveBlockData>, TimeBlockStoreError> {
         self.get_active_scoped(scope_key)
     }
 
@@ -235,7 +266,11 @@ impl TimeBlockStore {
         self.put_active_scoped(None, block)
     }
 
-    pub fn put_active_scoped(&self, scope_key: Option<&str>, block: ActiveBlockData) -> Result<(), TimeBlockStoreError> {
+    pub fn put_active_scoped(
+        &self,
+        scope_key: Option<&str>,
+        block: ActiveBlockData,
+    ) -> Result<(), TimeBlockStoreError> {
         let normalized_block = block.normalize_task_ids();
         match &self.backend {
             TimeBlockStoreBackend::Memory(state) => {
@@ -247,11 +282,17 @@ impl TimeBlockStore {
                     .active = Some(normalized_block.clone());
                 Ok(())
             }
-            TimeBlockStoreBackend::Sqlite(store) => store.put_active_scoped(normalize_scope_key(scope_key), &normalized_block),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.put_active_scoped(normalize_scope_key(scope_key), &normalized_block)
+            }
         }
     }
 
-    pub fn put_active_in_scope(&self, scope_key: Option<&str>, block: ActiveBlockData) -> Result<(), TimeBlockStoreError> {
+    pub fn put_active_in_scope(
+        &self,
+        scope_key: Option<&str>,
+        block: ActiveBlockData,
+    ) -> Result<(), TimeBlockStoreError> {
         self.put_active_scoped(scope_key, block)
     }
 
@@ -262,16 +303,25 @@ impl TimeBlockStore {
     pub fn delete_active_scoped(&self, scope_key: Option<&str>) -> Result<(), TimeBlockStoreError> {
         match &self.backend {
             TimeBlockStoreBackend::Memory(state) => {
-                if let Some(scope) = state.write().unwrap().get_mut(normalize_scope_key(scope_key)) {
+                if let Some(scope) = state
+                    .write()
+                    .unwrap()
+                    .get_mut(normalize_scope_key(scope_key))
+                {
                     scope.active = None;
                 }
                 Ok(())
             }
-            TimeBlockStoreBackend::Sqlite(store) => store.delete_active_scoped(normalize_scope_key(scope_key)),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.delete_active_scoped(normalize_scope_key(scope_key))
+            }
         }
     }
 
-    pub fn delete_active_in_scope(&self, scope_key: Option<&str>) -> Result<(), TimeBlockStoreError> {
+    pub fn delete_active_in_scope(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<(), TimeBlockStoreError> {
         self.delete_active_scoped(scope_key)
     }
 
@@ -279,7 +329,10 @@ impl TimeBlockStore {
         self.len_completed_scoped(None)
     }
 
-    pub fn len_completed_scoped(&self, scope_key: Option<&str>) -> Result<usize, TimeBlockStoreError> {
+    pub fn len_completed_scoped(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<usize, TimeBlockStoreError> {
         match &self.backend {
             TimeBlockStoreBackend::Memory(state) => Ok(state
                 .read()
@@ -287,11 +340,16 @@ impl TimeBlockStore {
                 .get(normalize_scope_key(scope_key))
                 .map(|scope| scope.completed.len())
                 .unwrap_or(0)),
-            TimeBlockStoreBackend::Sqlite(store) => store.len_completed_scoped(normalize_scope_key(scope_key)),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.len_completed_scoped(normalize_scope_key(scope_key))
+            }
         }
     }
 
-    pub fn len_completed_in_scope(&self, scope_key: Option<&str>) -> Result<usize, TimeBlockStoreError> {
+    pub fn len_completed_in_scope(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<usize, TimeBlockStoreError> {
         self.len_completed_scoped(scope_key)
     }
 
@@ -328,69 +386,87 @@ mod tests {
         let sqlite_path = dir.path().join("timeblocks.sqlite");
         let store = TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap();
 
-        store.replace_completed_scoped(Some("profile-a"), &[TimeBlockData {
-            id: "tb-a".to_string(),
-            name: "A".to_string(),
-            start_id: "start-a".to_string(),
-            end_id: "end-a".to_string(),
-            note: None,
-            tags: vec!["block_feedback".to_string()],
-            start_time: 1,
-            end_time: 2,
-            task_ids: vec!["task-a".to_string()],
-            task_status_outcomes: Some(HashMap::from([("task-a".to_string(), "continue".to_string())])),
-            task_association_log: vec![BlockTaskAssociationEvent {
-                block_id: "tb-a".to_string(),
-                task_id: "task-a".to_string(),
-                action: "associated".to_string(),
-                timestamp: 1,
-                source: "block_start".to_string(),
-            }],
-        }]).unwrap();
-        store.replace_completed_scoped(Some("profile-b"), &[TimeBlockData {
-            id: "tb-b".to_string(),
-            name: "B".to_string(),
-            start_id: "start-b".to_string(),
-            end_id: "end-b".to_string(),
-            note: None,
-            tags: vec!["block_feedback".to_string()],
-            start_time: 3,
-            end_time: 4,
-            task_ids: vec![],
-            task_status_outcomes: None,
-            task_association_log: vec![],
-        }]).unwrap();
+        store
+            .replace_completed_scoped(
+                Some("profile-a"),
+                &[TimeBlockData {
+                    id: "tb-a".to_string(),
+                    name: "A".to_string(),
+                    start_id: "start-a".to_string(),
+                    end_id: "end-a".to_string(),
+                    note: None,
+                    tags: vec!["block_feedback".to_string()],
+                    start_time: 1,
+                    end_time: 2,
+                    task_ids: vec!["task-a".to_string()],
+                    task_status_outcomes: Some(HashMap::from([(
+                        "task-a".to_string(),
+                        "continue".to_string(),
+                    )])),
+                    task_association_log: vec![BlockTaskAssociationEvent {
+                        block_id: "tb-a".to_string(),
+                        task_id: "task-a".to_string(),
+                        action: "associated".to_string(),
+                        timestamp: 1,
+                        source: "block_start".to_string(),
+                    }],
+                }],
+            )
+            .unwrap();
+        store
+            .replace_completed_scoped(
+                Some("profile-b"),
+                &[TimeBlockData {
+                    id: "tb-b".to_string(),
+                    name: "B".to_string(),
+                    start_id: "start-b".to_string(),
+                    end_id: "end-b".to_string(),
+                    note: None,
+                    tags: vec!["block_feedback".to_string()],
+                    start_time: 3,
+                    end_time: 4,
+                    task_ids: vec![],
+                    task_status_outcomes: None,
+                    task_association_log: vec![],
+                }],
+            )
+            .unwrap();
 
-        store.put_active_scoped(Some("profile-a"), ActiveBlockData {
-            start_id: "active-a".to_string(),
-            name: "Active A".to_string(),
-            mode: "countup".to_string(),
-            target_minutes: None,
-            elapsed: 100,
-            updated_at: None,
-            phase: Some("running".to_string()),
-            version: Some(1),
-            actor_id: None,
-            last_transition_at: None,
-            last_resumed_at: None,
-            accumulated_run_ms: None,
-            start_time: 10,
-            action_ended_at: None,
-            feedback_started_at: None,
-            feedback_submitted_at: None,
-            pause_accumulated_ms: None,
-            paused: false,
-            paused_at: None,
-            task_ids: vec!["task-a".to_string()],
-            task_association_log: vec![BlockTaskAssociationEvent {
-                block_id: "active-a".to_string(),
-                task_id: "task-a".to_string(),
-                action: "associated".to_string(),
-                timestamp: 10,
-                source: "block_start".to_string(),
-            }],
-            task_id: None,
-        }).unwrap();
+        store
+            .put_active_scoped(
+                Some("profile-a"),
+                ActiveBlockData {
+                    start_id: "active-a".to_string(),
+                    name: "Active A".to_string(),
+                    mode: "countup".to_string(),
+                    target_minutes: None,
+                    elapsed: 100,
+                    updated_at: None,
+                    phase: Some("running".to_string()),
+                    version: Some(1),
+                    actor_id: None,
+                    last_transition_at: None,
+                    last_resumed_at: None,
+                    accumulated_run_ms: None,
+                    start_time: 10,
+                    action_ended_at: None,
+                    feedback_started_at: None,
+                    feedback_submitted_at: None,
+                    pause_accumulated_ms: None,
+                    paused: false,
+                    paused_at: None,
+                    task_ids: vec!["task-a".to_string()],
+                    task_association_log: vec![BlockTaskAssociationEvent {
+                        block_id: "active-a".to_string(),
+                        task_id: "task-a".to_string(),
+                        action: "associated".to_string(),
+                        timestamp: 10,
+                        source: "block_start".to_string(),
+                    }],
+                    task_id: None,
+                },
+            )
+            .unwrap();
 
         let completed_a = store.list_completed_scoped(Some("profile-a")).unwrap();
         let completed_b = store.list_completed_scoped(Some("profile-b")).unwrap();
@@ -402,8 +478,14 @@ mod tests {
         assert_eq!(completed_a[0].task_ids, vec!["task-a".to_string()]);
         assert_eq!(completed_b.len(), 1);
         assert_eq!(completed_b[0].id, "tb-b");
-        assert_eq!(active_a.as_ref().map(|block| block.start_id.as_str()), Some("active-a"));
-        assert_eq!(active_a.as_ref().map(|block| block.task_ids.clone()), Some(vec!["task-a".to_string()]));
+        assert_eq!(
+            active_a.as_ref().map(|block| block.start_id.as_str()),
+            Some("active-a")
+        );
+        assert_eq!(
+            active_a.as_ref().map(|block| block.task_ids.clone()),
+            Some(vec!["task-a".to_string()])
+        );
         assert!(active_b.is_none());
     }
 

@@ -2,9 +2,9 @@ use exomind_runtime::{
     AppState,
     timeblock::{ActiveBlockData, BlockTaskAssociationEvent, TimeBlockData, TimeBlockStore},
 };
-use tempfile::tempdir;
-use std::sync::Mutex;
 use std::collections::HashMap;
+use std::sync::Mutex;
+use tempfile::tempdir;
 
 static TIMEBLOCK_SQLITE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -40,7 +40,10 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_for_completed_and_active() 
             start_time: 1_700_000_000_000,
             end_time: 1_700_000_060_000,
             task_ids: vec!["task-1".to_string()],
-            task_status_outcomes: Some(HashMap::from([("task-1".to_string(), "continue".to_string())])),
+            task_status_outcomes: Some(HashMap::from([(
+                "task-1".to_string(),
+                "continue".to_string(),
+            )])),
             task_association_log: vec![BlockTaskAssociationEvent {
                 block_id: "tb-1".to_string(),
                 task_id: "task-1".to_string(),
@@ -102,11 +105,21 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_for_completed_and_active() 
         std::env::remove_var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH");
     }
 
-    assert_eq!(completed.len(), 1, "completed blocks should persist across runtime restarts");
+    assert_eq!(
+        completed.len(),
+        1,
+        "completed blocks should persist across runtime restarts"
+    );
     assert_eq!(completed[0].id, "tb-1");
     assert_eq!(completed[0].task_ids, vec!["task-1".to_string()]);
-    assert_eq!(active.as_ref().map(|block| block.start_id.as_str()), Some("start-active"));
-    assert_eq!(active.as_ref().map(|block| block.task_ids.clone()), Some(vec!["task-1".to_string()]));
+    assert_eq!(
+        active.as_ref().map(|block| block.start_id.as_str()),
+        Some("start-active")
+    );
+    assert_eq!(
+        active.as_ref().map(|block| block.task_ids.clone()),
+        Some(vec!["task-1".to_string()])
+    );
 }
 
 #[test]
@@ -160,7 +173,10 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
                 start_time: 1_700_000_100_000,
                 end_time: 1_700_000_160_000,
                 task_ids: vec!["task-profile-a".to_string()],
-                task_status_outcomes: Some(HashMap::from([("task-profile-a".to_string(), "completed".to_string())])),
+                task_status_outcomes: Some(HashMap::from([(
+                    "task-profile-a".to_string(),
+                    "completed".to_string(),
+                )])),
                 task_association_log: vec![BlockTaskAssociationEvent {
                     block_id: "tb-profile-a".to_string(),
                     task_id: "task-profile-a".to_string(),
@@ -237,17 +253,33 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
         std::env::remove_var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH");
     }
 
-    assert_eq!(anonymous_completed.len(), 1, "default scope should remain anonymous");
-    assert_eq!(anonymous_completed[0].id, "tb-anonymous");
-    assert_eq!(profile_a_completed.len(), 1, "profile scope should persist its own completed blocks");
-    assert_eq!(profile_a_completed[0].id, "tb-profile-a");
-    assert_eq!(profile_a_completed[0].task_ids, vec!["task-profile-a".to_string()]);
     assert_eq!(
-        profile_a_active.as_ref().map(|block| block.task_ids.clone()),
+        anonymous_completed.len(),
+        1,
+        "default scope should remain anonymous"
+    );
+    assert_eq!(anonymous_completed[0].id, "tb-anonymous");
+    assert_eq!(
+        profile_a_completed.len(),
+        1,
+        "profile scope should persist its own completed blocks"
+    );
+    assert_eq!(profile_a_completed[0].id, "tb-profile-a");
+    assert_eq!(
+        profile_a_completed[0].task_ids,
+        vec!["task-profile-a".to_string()]
+    );
+    assert_eq!(
+        profile_a_active
+            .as_ref()
+            .map(|block| block.task_ids.clone()),
         Some(vec!["task-profile-a".to_string()]),
         "profile scope should persist its own active block",
     );
-    assert!(profile_b_completed.is_empty(), "other profiles should not see scoped blocks");
+    assert!(
+        profile_b_completed.is_empty(),
+        "other profiles should not see scoped blocks"
+    );
 }
 
 #[test]
@@ -304,6 +336,13 @@ fn timeblock_store_clearing_active_block_preserves_completed_blocks() {
     let completed = store.list_completed().unwrap();
     let active = store.get_active().unwrap();
 
-    assert_eq!(completed.len(), 1, "completed blocks should remain after active block deletion");
-    assert!(active.is_none(), "active block should be cleared independently");
+    assert_eq!(
+        completed.len(),
+        1,
+        "completed blocks should remain after active block deletion"
+    );
+    assert!(
+        active.is_none(),
+        "active block should be cleared independently"
+    );
 }
