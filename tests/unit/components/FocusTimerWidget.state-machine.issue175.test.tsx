@@ -25,6 +25,7 @@ const startSyncMock = vi.fn().mockResolvedValue(undefined);
 const stopSyncMock = vi.fn().mockResolvedValue(undefined);
 const getTaskMock = vi.fn();
 const listTasksMock = vi.fn();
+const checkDependenciesMetMock = vi.fn();
 const onTaskChangeMock = vi.fn(() => () => {});
 const transitionTaskMock = vi.fn();
 const addTaskToBlockMock = vi.fn();
@@ -51,6 +52,7 @@ vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     getTask: getTaskMock,
     listTasks: listTasksMock,
+    checkDependenciesMet: checkDependenciesMetMock,
     onTaskChange: onTaskChangeMock,
     transitionTask: transitionTaskMock,
   }),
@@ -89,6 +91,7 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     updateElapsedMock.mockResolvedValue(undefined);
     getTaskMock.mockReset();
     listTasksMock.mockReset();
+    checkDependenciesMetMock.mockReset();
     onTaskChangeMock.mockReset();
     transitionTaskMock.mockReset();
     addTaskToBlockMock.mockReset();
@@ -97,6 +100,7 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     appendEventDataMock.mockReset();
     getTaskMock.mockResolvedValue(null);
     listTasksMock.mockResolvedValue([]);
+    checkDependenciesMetMock.mockResolvedValue({ met: true, blocking: [] });
     onTaskChangeMock.mockImplementation(() => () => {});
     transitionTaskMock.mockResolvedValue(null);
     addTaskToBlockMock.mockResolvedValue(undefined);
@@ -152,7 +156,7 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
       );
     });
 
-    expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    expect(await screen.findByTestId('new-focus-state-running')).toBeInTheDocument();
   });
 
   it('starts block via Ctrl+Enter on task input（任务输入框 Ctrl+Enter 快速开始）', async () => {
@@ -244,16 +248,51 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
 
     const configContainer = screen.getByTestId('new-focus-state-config');
     const glowNode = configContainer.querySelector("div[aria-hidden='true']");
-    expect(configContainer.className).not.toContain('h-[253px]');
-    expect(glowNode?.className).not.toContain('h-[227px]');
+    const configPanel = screen.getByTestId('new-focus-config-collapse-button').closest('#new-focus-config-panel');
+    expect(configContainer.className).toContain('min-h-[276px]');
+    expect(configContainer.className).toContain('pb-4');
+    expect(glowNode?.className).toContain('bottom-4');
+    expect(configPanel?.className).toContain('min-h-[246px]');
+    expect(configPanel?.className).not.toContain('overflow-y-auto');
 
     expect(screen.getByText('预期时长')).toBeInTheDocument();
     expect(screen.queryByText('计时模式')).toBeNull();
     expect(screen.queryByText('倒计时时长')).toBeNull();
     fireEvent.click(screen.getByTestId('new-focus-expected-countup'));
 
-    expect(configContainer.className).toContain('pb-3');
-    expect(glowNode?.className).toContain('bottom-[10px]');
+    expect(configContainer.className).toContain('min-h-[276px]');
+    expect(glowNode?.className).toContain('bottom-4');
+  });
+
+  it('keeps config and running cards on the same base frame when no linked tasks（准备态与运行态在无关联任务时复用同一尺寸骨架）', async () => {
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+
+    const configContainer = screen.getByTestId('new-focus-state-config');
+    const configGlow = configContainer.querySelector("div[aria-hidden='true']");
+    const configPanel = screen.getByTestId('new-focus-config-collapse-button').closest('#new-focus-config-panel');
+
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '骨架对齐检查' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    const runningSection = screen.getByTestId('new-focus-state-running');
+    const runningContainer = runningSection.firstElementChild;
+    const runningGlow = runningSection.querySelector("div[aria-hidden='true']");
+    const runningCard = screen.getByTestId('new-focus-running-task-card');
+
+    expect(configContainer.className).toContain('min-h-[276px]');
+    expect(runningContainer?.className).toContain('min-h-[276px]');
+    expect(configGlow?.className).toContain('bottom-4');
+    expect(runningGlow?.className).toContain('bottom-4');
+    expect(configPanel?.className).toContain('min-h-[246px]');
+    expect(runningCard.className).toContain('min-h-[246px]');
   });
 
   it('adds a11y attrs and forbids collapse from running（可访问性与运行态禁收起）', async () => {
@@ -386,6 +425,42 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     expect(runningCard).toContainElement(screen.getByTestId('new-focus-end-button'));
   });
 
+  it('renders linked tasks as a markdown-like unordered list in running state（运行态以下方无序列表展示关联任务）', async () => {
+    const now = Date.now();
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'block-linked-tasks',
+      name: '运行态关联任务展示',
+      startTime: now - 10_000,
+      elapsed: 10_000,
+      mode: 'countup',
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-1', 'task-2'],
+      taskAssociationLog: [],
+    });
+    getTaskMock.mockImplementation(async (taskId: string) => ({
+      id: taskId,
+      title: taskId === 'task-1' ? '整理会议记录' : '补充验收说明',
+      status: 'in_progress',
+      priority: 'medium',
+      dependsOn: [],
+      tags: [],
+      createdAt: now - 20_000,
+      updatedAt: now - 5_000,
+    }));
+
+    render(<FocusTimerWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+      expect(screen.getByTestId('new-focus-running-linked-tasks')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('关联任务')).toBeInTheDocument();
+    expect(screen.getByTestId('new-focus-running-linked-task-task-1')).toHaveTextContent('整理会议记录');
+    expect(screen.getByTestId('new-focus-running-linked-task-task-2')).toHaveTextContent('补充验收说明');
+  });
+
   it('supports prefilling a task from external launcher and opening config（支持外部任务入口预填并打开配置）', async () => {
     const ref = createRef<FocusTimerWidgetHandle>();
     render(<FocusTimerWidget ref={ref} />);
@@ -416,15 +491,54 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     });
 
     expect(screen.getByTestId('new-focus-task-input')).toHaveValue('来自悬浮窗的任务');
-    expect(screen.getByTestId('new-focus-prestart-task-task-1')).toBeInTheDocument();
-    expect(screen.getByTestId('new-focus-prestart-task-task-2')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByTestId('new-focus-prestart-task-task-3')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
 
     await waitFor(() => {
-      expect(addTaskToBlockMock).toHaveBeenCalledWith('task-2');
+      expect(startBlockMock).toHaveBeenCalledWith(
+        '来自悬浮窗的任务',
+        expect.objectContaining({ mode: 'countdown', minutes: 25 }),
+        undefined,
+        { taskIds: ['task-2'] },
+      );
     });
+    expect(addTaskToBlockMock).not.toHaveBeenCalled();
+  });
+
+  it('starts with multiple preselected tasks without losing associations（启动前多选任务会一次性绑定而不是只留下一个）', async () => {
+    listTasksMock.mockResolvedValue([
+      { id: 'task-1', title: '任务一', status: 'pending' },
+      { id: 'task-2', title: '任务二', status: 'pending' },
+    ]);
+
+    render(
+      <FocusTimerWidget
+        prestartSelectedTaskIds={['task-1', 'task-2']}
+        onPrestartSelectedTaskIdsChange={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(checkDependenciesMetMock).toHaveBeenCalledWith('task-1');
+      expect(checkDependenciesMetMock).toHaveBeenCalledWith('task-2');
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '多任务启动' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(startBlockMock).toHaveBeenCalledWith(
+        '多任务启动',
+        expect.objectContaining({ mode: 'countdown', minutes: 25 }),
+        undefined,
+        { taskIds: ['task-1', 'task-2'] },
+      );
+    });
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-1', 'in_progress');
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-2', 'in_progress');
   });
 
   it('restores countdown overtime after remount（倒计时超时在重载后可恢复）', async () => {

@@ -58,12 +58,14 @@ vi.mock('@/components/ui/tabs', () => ({
   TabsContent: ({
     value,
     children,
+    className,
   }: {
     value: string;
     children: ReactNode;
+    className?: string;
   }) => {
     const context = useContext(TabsContext);
-    return context?.value === value ? <div>{children}</div> : null;
+    return context?.value === value ? <div data-testid={`tab-content-${value}`} className={className}>{children}</div> : null;
   },
 }));
 
@@ -100,6 +102,14 @@ describe('NowPage tab routing', () => {
     expect(screen.getByTestId('now-page-association-list')).toBeInTheDocument();
     expect(screen.queryByTestId('now-page-record')).toBeNull();
     expect(screen.queryByTestId('now-page-today')).toBeNull();
+  });
+
+  it('lets the focus tab own page scrolling instead of clipping children（专注页由页面容器滚动而非截断子组件）', () => {
+    render(<NowPage />);
+
+    const focusContent = screen.getByTestId('tab-content-focus');
+    expect(focusContent.className).toContain('overflow-y-auto');
+    expect(focusContent.className).not.toContain('overflow-hidden');
   });
 
   it('reads tab from search and routes tab switch through navigate（读取 search 并通过路由切换页签）', () => {

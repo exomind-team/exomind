@@ -196,6 +196,7 @@ describe('NowWorkbenchOverlayPage', () => {
     );
 
     expect(screen.getByTestId('now-overlay-task-choice-list')).toBeInTheDocument();
+    expect(screen.getByTestId('now-overlay-task-choice-list').className).toContain('overflow-y-auto');
     expect(screen.getByRole('button', { name: '先补测试' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '整理输入区' })).toBeInTheDocument();
   });

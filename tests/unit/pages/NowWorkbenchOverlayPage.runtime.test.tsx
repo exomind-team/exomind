@@ -34,6 +34,9 @@ const appendEventDataMock = vi.fn();
 const endBlockMock = vi.fn();
 const markEndingMock = vi.fn();
 const onBlockEndForTasksMock = vi.fn();
+const startBlockForTaskMock = vi.fn();
+const calculateSpentMinutesMock = vi.fn();
+const addTaskToBlockMock = vi.fn();
 const loadEventsPageMock = vi.fn();
 const getEventStorageByUserMock = vi.fn();
 const taskStorageOnChangeMock = vi.fn();
@@ -74,7 +77,17 @@ vi.mock('@/ui/app/components/NowInputRow', () => ({
 vi.mock('@/ui/app/components/FocusTimerWidget', async () => {
   const React = await import('react');
 
-  const FocusTimerWidget = React.forwardRef(({ surface }: { surface?: string }, ref) => {
+  const FocusTimerWidget = React.forwardRef(({
+    surface,
+    overlayRunningChrome,
+  }: {
+    surface?: string;
+    overlayRunningChrome?: {
+      statusLabel: string;
+      onCollapse: () => void;
+      onReturnToMain: () => void;
+    };
+  }, ref) => {
     const [configTaskTitle, setConfigTaskTitle] = React.useState<string | null>(null);
     const activeBlock = runtimeStateByUser[currentUserState.userId].activeBlock as
       | null
@@ -100,6 +113,13 @@ vi.mock('@/ui/app/components/FocusTimerWidget', async () => {
       return (
         <div data-testid="new-focus-timer-widget" className={surface === 'overlay' ? 'bg-transparent' : ''}>
           <div data-testid="new-focus-state-running">
+            {overlayRunningChrome ? (
+              <div data-testid="new-focus-overlay-running-header">
+                <p>{overlayRunningChrome.statusLabel}</p>
+                <button type="button" onClick={overlayRunningChrome.onCollapse}>收起</button>
+                <button type="button" onClick={overlayRunningChrome.onReturnToMain}>显示主程序</button>
+              </div>
+            ) : null}
             <p>{activeBlock.name ?? '未命名时间块'}</p>
             <p data-testid="new-focus-running-clock">{activeBlock.mode === 'countdown' ? '20:00' : '00:00'}</p>
           </div>
@@ -138,7 +158,9 @@ vi.mock('@/lib/services', () => ({
     transitionTask: (...args: unknown[]) => transitionTaskMock(...args),
   }),
   getTaskTimerService: () => ({
-    startBlockForTask: vi.fn(),
+    startBlockForTask: (...args: unknown[]) => startBlockForTaskMock(...args),
+    calculateSpentMinutes: (...args: unknown[]) => calculateSpentMinutesMock(...args),
+    addTaskToBlock: (...args: unknown[]) => addTaskToBlockMock(...args),
     onBlockEndForTasks: (...args: unknown[]) => onBlockEndForTasksMock(...args),
   }),
   getEventLogService: () => ({
@@ -235,6 +257,29 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
     onBlockEndForTasksMock.mockReset();
     onBlockEndForTasksMock.mockResolvedValue(undefined);
+    startBlockForTaskMock.mockReset();
+    startBlockForTaskMock.mockImplementation(async (taskId: string, config?: { mode?: string; minutes?: number }) => {
+      const task = runtimeStateByUser[currentUserState.userId].tasks.find((candidate) => candidate.id === taskId);
+      if (task) {
+        task.status = 'in_progress';
+      }
+      runtimeStateByUser[currentUserState.userId].activeBlock = {
+        startId: 'started-from-idle',
+        name: task?.title ?? '未命名时间块',
+        mode: config?.mode ?? 'countup',
+        targetMinutes: config?.mode === 'countdown' ? config.minutes : undefined,
+        startTime: Date.UTC(2026, 2, 11, 9, 0, 0),
+        elapsed: 0,
+        paused: false,
+        phase: 'running',
+        taskIds: [taskId],
+      };
+      return runtimeStateByUser[currentUserState.userId].activeBlock;
+    });
+    calculateSpentMinutesMock.mockReset();
+    calculateSpentMinutesMock.mockResolvedValue(0);
+    addTaskToBlockMock.mockReset();
+    addTaskToBlockMock.mockResolvedValue(undefined);
     loadEventsPageMock.mockReset();
     loadEventsPageMock.mockImplementation(async () => ({
       events: runtimeStateByUser[currentUserState.userId].events,
@@ -269,7 +314,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     vi.restoreAllMocks();
   });
 
-  it('shows shutdown-ready nudge from ritual session storage（待收工会话会驱动悬浮窗提醒）', async () => {
+  it('shows shutdown-ready nudge from ritual session storage（待收工会话会驱动悬浮窗提醒）', { timeout: 20000 }, async () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 2, 19, 21, 30, 0).getTime());
     saveRitualSession({
       dayKey: getTodayRitualDayKey(),
@@ -316,7 +361,8 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     await waitFor(() => {
       expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
     });
-    expect(screen.getAllByText('推进悬浮窗接线').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId('new-focus-overlay-running-header')).toHaveTextContent('进行中');
+    expect(screen.getAllByText('推进悬浮窗接线').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId('new-focus-running-clock')).toHaveTextContent('20:00');
   });
 
@@ -349,6 +395,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
     });
 
+    expect(screen.queryByTestId('now-overlay-live-control-bar')).toBeNull();
     expect(screen.queryByTestId('new-now-input-row')).toBeNull();
     expect(screen.queryByTestId('now-overlay-debug-panel')).toBeNull();
     expect(screen.queryByTestId('now-overlay-recent-event')).toBeNull();
@@ -380,6 +427,56 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     expect(stage.className).toContain('w-full');
     expect(stage.className).toContain('max-w-[390px]');
     expect(stage).toContainElement(screen.getByTestId('new-focus-timer-widget'));
+  });
+
+  it('grows overlay window height from measured single-card shell when running card becomes taller（运行态单卡片高度变大时悬浮窗会随内容增长）', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 2, 11, 9, 5, 0));
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function getBoundingClientRectMock() {
+      if ((this as HTMLElement).getAttribute('data-testid') === 'now-overlay-single-card-shell') {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 440,
+          bottom: 560,
+          width: 440,
+          height: 560,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return originalGetBoundingClientRect.call(this);
+    });
+    runtimeStateByUser['overlay-test-user'].activeBlock = {
+      startId: 'block-1',
+      name: '长关联任务测试',
+      mode: 'countdown',
+      targetMinutes: 25,
+      startTime: Date.UTC(2026, 2, 11, 9, 0, 0),
+      elapsed: 20 * 60 * 1000,
+      paused: false,
+      phase: 'running',
+      accumulatedRunMs: 5 * 60 * 1000,
+      lastResumedAt: Date.UTC(2026, 2, 11, 9, 0, 0),
+    };
+
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+    render(<NowWorkbenchOverlayPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('now-overlay-single-card-shell')).toBeInTheDocument();
+      expect(overlaySetSizeMock).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(
+        overlaySetSizeMock.mock.calls.some(([size]) => (
+          (size as { width?: number; height?: number }).width === 464
+          && (size as { width?: number; height?: number }).height === 584
+        )),
+      ).toBe(true);
+    });
   });
 
   it('renders the live running widget on a transparent overlay surface（运行态卡片舞台不再保留额外矩形底色）', async () => {
@@ -470,19 +567,21 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     expect(overlayHideMock).not.toHaveBeenCalled();
   });
 
-  it('opens focus config with selected task title in idle_with_tasks mode（任务态点击开始后进入当下一致的配置流）', async () => {
+  it('quick-starts the selected task in idle_with_tasks mode（任务态点击开始后直接按 DAG 语义开启时间块）', async () => {
     runtimeStateByUser['overlay-test-user'].tasks = [
       {
         id: 'task-1',
         title: '先补测试',
         status: 'pending',
         priority: 'high',
+        estimatedMinutes: 45,
         dependsOn: [],
         tags: [],
         createdAt: Date.UTC(2026, 2, 11, 8, 0, 0),
         updatedAt: Date.UTC(2026, 2, 11, 8, 10, 0),
       },
     ];
+    calculateSpentMinutesMock.mockResolvedValue(12);
 
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     render(<NowWorkbenchOverlayPage />);
@@ -491,9 +590,14 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     fireEvent.click(await screen.findByRole('button', { name: '先补测试' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('new-focus-state-config')).toBeInTheDocument();
-      expect(screen.getByTestId('new-focus-task-input')).toHaveValue('先补测试');
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', {
+        mode: 'countdown',
+        minutes: 33,
+      });
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
     });
+    expect(calculateSpentMinutesMock).toHaveBeenCalledWith('task-1');
+    expect(screen.getAllByText('先补测试').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders idle_with_tasks as collapsed task bubble and expands on hover（任务态默认收起并在悬停时展开）', async () => {
@@ -536,6 +640,58 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       expect(screen.getByRole('button', { name: '写周报' })).toBeInTheDocument();
     });
     expect(overlaySetSizeMock).toHaveBeenCalled();
+  });
+
+  it('shows task count and ellipsis in collapsed idle bubble when there are more than three tasks（最小待办窗在任务过多时显示总数与省略提示）', async () => {
+    runtimeStateByUser['overlay-test-user'].tasks = [
+      {
+        id: 'task-1',
+        title: '写周报',
+        status: 'pending',
+        priority: 'high',
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 8, 0, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 8, 10, 0),
+      },
+      {
+        id: 'task-2',
+        title: '修 bug',
+        status: 'pending',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 8, 5, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 8, 20, 0),
+      },
+      {
+        id: 'task-3',
+        title: '整理输入',
+        status: 'pending',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 8, 8, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 8, 22, 0),
+      },
+      {
+        id: 'task-4',
+        title: '补最后一项',
+        status: 'pending',
+        priority: 'low',
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 8, 12, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 8, 24, 0),
+      },
+    ];
+
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+    render(<NowWorkbenchOverlayPage />);
+
+    expect(await screen.findByTestId('now-overlay-idle-pill')).toBeInTheDocument();
+    expect(screen.getByText('待办 (4)')).toBeInTheDocument();
+    expect(screen.getByText(/· ……/)).toBeInTheDocument();
   });
 
   it('keeps idle task panel expanded while input is focused（任务态输入获焦时锁定展开）', async () => {

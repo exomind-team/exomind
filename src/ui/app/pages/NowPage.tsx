@@ -4,7 +4,7 @@ import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociati
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
 import { useLocation, useNavigate } from '@tanstack/react-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   EVENTLOG_TAB_VALUES,
   normalizeEventlogTab,
@@ -25,6 +25,7 @@ function resolveNowTab(searchStr: string): NowTabValue {
 export function NowPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [prestartSelectedTaskIds, setPrestartSelectedTaskIds] = useState<string[]>([]);
   const activeTab = resolveNowTab(location.searchStr ?? '');
   const currentPath = location.pathname === '/' ? '/' : '/eventlog';
   const explicitTab = readExplicitNowTab(location.searchStr ?? '');
@@ -60,8 +61,15 @@ export function NowPage() {
 
         <TabsContent value="focus" className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-            <FocusTimerWidget />
-            <BlockTaskAssociationList />
+            <FocusTimerWidget
+              prestartSelectedTaskIds={prestartSelectedTaskIds}
+              onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
+              showRunningLinkedTasks={false}
+            />
+            <BlockTaskAssociationList
+              prestartSelectedTaskIds={prestartSelectedTaskIds}
+              onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
+            />
           </div>
         </TabsContent>
 

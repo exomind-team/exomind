@@ -9,7 +9,7 @@ import {
   getTimeBlockService,
 } from '@/lib/services';
 import { appendTaskStatusChangeDescription } from '@/lib/task/task-status-change-description';
-import { resolveActiveBlockTaskIds, type ActiveBlockData, type Event as UiEvent } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData, type Event as UiEvent, type TimerConfig } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { buildNowWorkbenchOverlayModel, type NowWorkbenchOverlayMode } from './now-workbench-overlay-model';
@@ -70,6 +70,21 @@ function isFeedbackStage(block: ActiveBlockData | null): boolean {
   return block.phase === 'feedback_in_progress'
     || block.phase === 'action_ended'
     || Boolean(block.actionEndedAt || block.feedbackStartedAt);
+}
+
+function isTerminalTask(task: TaskNode): boolean {
+  return task.status === 'completed' || task.status === 'cancelled';
+}
+
+function buildQuickStartTimerConfig(task: TaskNode, spentMinutes: number): TimerConfig {
+  if (task.estimatedMinutes == null) {
+    return { mode: 'countup' };
+  }
+
+  return {
+    mode: 'countdown',
+    minutes: Math.max(1, Math.round(task.estimatedMinutes - spentMinutes)),
+  };
 }
 
 const EMPTY_MODEL = buildNowWorkbenchOverlayModel({
@@ -447,8 +462,30 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   }, [activeBlock, activeBlockTasks, feedback, reloadAll, taskService, taskStatusChoices, taskTimerService, timeBlockService, updateDebugInfo]);
 
   const handleStartTask = useCallback(async (task: TaskNode) => {
-    updateDebugInfo({ lastAction: `task-select:open-config:${task.id}` });
-  }, [updateDebugInfo]);
+    if (isTerminalTask(task)) {
+      updateDebugInfo({ lastAction: `task-select:skip-terminal:${task.id}` });
+      return;
+    }
+
+    try {
+      if (activeBlock) {
+        await taskTimerService.addTaskToBlock(task.id);
+        updateDebugInfo({ lastAction: `task-select:add-to-block:${task.id}` });
+      } else {
+        const spentMinutes = task.estimatedMinutes != null
+          ? await taskTimerService.calculateSpentMinutes(task.id)
+          : 0;
+        await taskTimerService.startBlockForTask(task.id, buildQuickStartTimerConfig(task, spentMinutes));
+        updateDebugInfo({ lastAction: `task-select:start-block:${task.id}` });
+      }
+      await reloadAll();
+    } catch (error) {
+      updateDebugInfo({
+        lastAction: `task-select:error:${task.id}:${error instanceof Error ? error.message : String(error)}`,
+      });
+      throw error;
+    }
+  }, [activeBlock, reloadAll, taskTimerService, updateDebugInfo]);
 
   const handleSend = useCallback(async (content: string, tags?: string[]) => {
     try {

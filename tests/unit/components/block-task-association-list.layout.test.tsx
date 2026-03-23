@@ -58,7 +58,7 @@ describe('BlockTaskAssociationList layout', () => {
   it('keeps the select shrinkable and the action button single-line with a minimum width（选择框可收缩且按钮单行保底宽度）', async () => {
     render(<BlockTaskAssociationList />);
 
-    await screen.findByText('任务关联');
+    await screen.findByTestId('task-association-content');
 
     const select = screen.getByRole('combobox');
     const button = screen.getByRole('button', { name: '关联任务' });
@@ -84,5 +84,25 @@ describe('BlockTaskAssociationList layout', () => {
     expect(detailButton.className).toContain('h-[32px]');
     expect(removeButton.className).toContain('w-[32px]');
     expect(actionGroup?.className).toContain('gap-2');
+  });
+
+  it('renders prestart task selection at natural height without inner scrolling（准备态预选列表自然撑开且不自带内部滚动）', async () => {
+    loadActiveBlockMock.mockResolvedValue(null);
+    listTasksMock.mockResolvedValue([
+      { id: 'task-1', title: '预选任务一', status: 'pending' },
+      { id: 'task-2', title: '预选任务二', status: 'in_progress' },
+    ]);
+
+    render(
+      <BlockTaskAssociationList
+        prestartSelectedTaskIds={[]}
+        onPrestartSelectedTaskIdsChange={() => {}}
+      />,
+    );
+
+    const prestartList = await screen.findByTestId('task-association-prestart-list');
+    expect(prestartList.className).not.toContain('overflow-y-auto');
+    expect(prestartList.className).not.toContain('flex-1');
+    expect(prestartList.className).not.toContain('min-h-0');
   });
 });

@@ -1,14 +1,13 @@
-﻿import {
+import {
   forwardRef,
   type KeyboardEvent,
   useCallback,
   useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState,
 } from 'react';
-import { ChevronDown, ChevronRight, Music4, NotepadText, Pause, Play, Square, Target } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, ChevronRight, Music4, NotepadText, Pause, Play, Shrink, Square, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -42,6 +41,9 @@ import {
   resolveFeedbackSubmitLabel,
   useFeedbackSubmitControls,
 } from '@/ui/app/components/useFeedbackSubmitControls';
+import {
+  usePrestartSelectableTasks,
+} from '@/ui/app/components/prestart-task-selection';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
@@ -51,6 +53,14 @@ type FocusTaskConfigContext = string | { title: string; preselectedTaskIds?: str
 
 interface FocusTimerWidgetProps {
   surface?: FocusTimerSurface;
+  overlayRunningChrome?: {
+    statusLabel: string;
+    onCollapse: () => void;
+    onReturnToMain: () => void;
+  };
+  prestartSelectedTaskIds?: string[];
+  onPrestartSelectedTaskIdsChange?: (taskIds: string[]) => void;
+  showRunningLinkedTasks?: boolean;
 }
 
 export interface FocusTimerWidgetHandle {
@@ -128,12 +138,14 @@ function normalizePreselectedTaskIds(taskIds: string[] | undefined): string[] {
   return Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)));
 }
 
-function isPrestartSelectableTask(task: TaskNode): boolean {
-  return task.status === 'pending' || task.status === 'in_progress';
-}
-
 export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWidgetProps>(function FocusTimerWidget(
-  { surface = 'default' },
+  {
+    surface = 'default',
+    overlayRunningChrome,
+    prestartSelectedTaskIds,
+    onPrestartSelectedTaskIdsChange,
+    showRunningLinkedTasks = true,
+  },
   ref,
 ) {
   const timeBlockServiceRef = useRef(getTimeBlockService());
@@ -165,8 +177,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const [feedback, setFeedback] = useState('');
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const [selectableTasks, setSelectableTasks] = useState<TaskNode[]>([]);
-  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const selectableTasks = usePrestartSelectableTasks();
+  const [internalSelectedTaskIds, setInternalSelectedTaskIds] = useState<string[]>([]);
   const {
     canSubmitFeedback,
     handleFeedbackKeyDown,
@@ -203,8 +215,17 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       now: Date.now(),
     })
     : null;
-  const selectedTaskIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
-
+  const selectedTaskIds = prestartSelectedTaskIds ?? internalSelectedTaskIds;
+  const setSelectedTaskIds = useCallback((nextValue: string[] | ((current: string[]) => string[])) => {
+    const resolvedValue = normalizePreselectedTaskIds(
+      typeof nextValue === 'function' ? nextValue(selectedTaskIds) : nextValue,
+    );
+    if (onPrestartSelectedTaskIdsChange) {
+      onPrestartSelectedTaskIdsChange(resolvedValue);
+      return;
+    }
+    setInternalSelectedTaskIds(resolvedValue);
+  }, [onPrestartSelectedTaskIdsChange, selectedTaskIds]);
   const syncIdleElapsedFromMode = useCallback((mode: TimerMode, minutes: number) => {
     setElapsedMs(mode === 'countdown' ? minutes * 60 * 1000 : 0);
   }, []);
@@ -218,32 +239,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const enterConfigState = useCallback(() => {
     if (isRunningUi) return;
     setUiState('config');
-    setSelectedTaskIds([]);
     focusTaskInput();
   }, [focusTaskInput, isRunningUi]);
-
-  useEffect(() => {
-    let disposed = false;
-    const taskService = getTaskService();
-
-    const loadSelectableTasks = async () => {
-      const tasks = await taskService.listTasks(true);
-      if (disposed) {
-        return;
-      }
-      setSelectableTasks(tasks.filter(isPrestartSelectableTask));
-    };
-
-    void loadSelectableTasks();
-    const unsubscribe = taskService.onTaskChange(() => {
-      void loadSelectableTasks();
-    });
-
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     const selectableTaskIdSet = new Set(selectableTasks.map((task) => task.id));
@@ -487,19 +484,23 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     hardEndTriggeredRef.current = false;
     setCountdownOvertimeMs(0);
 
-    const block = await timeBlockServiceRef.current.startBlock(name, config, description || undefined);
-    if (selectedTaskIds.length > 0) {
-      const taskTimerService = getTaskTimerService();
-      const associationResults = await Promise.allSettled(
-        selectedTaskIds.map((taskId) => taskTimerService.addTaskToBlock(taskId)),
-      );
-      const failedTaskIds = associationResults.flatMap((result, index) => (
-        result.status === 'rejected' ? [selectedTaskIds[index]] : []
-      ));
-      if (failedTaskIds.length > 0) {
-        log.warn(`[TB-UI] preselect association failed ${JSON.stringify({ failedTaskIds })}`);
+    const selectedTasks = selectedTaskIds
+      .map((taskId) => selectableTasks.find((task) => task.id === taskId))
+      .filter((task): task is TaskNode => Boolean(task));
+    const selectedIdsForStart = selectedTasks.map((task) => task.id);
+    const skippedTaskIds = selectedTaskIds.filter((taskId) => !selectedIdsForStart.includes(taskId));
+    if (skippedTaskIds.length > 0) {
+      log.warn(`[TB-UI] prestart selection skipped ${JSON.stringify({ skippedTaskIds })}`);
+    }
+    for (const task of selectedTasks) {
+      if (task.status === 'pending') {
+        await getTaskService().transitionTask(task.id, 'in_progress');
       }
     }
+
+    const block = selectedIdsForStart.length > 0
+      ? await timeBlockServiceRef.current.startBlock(name, config, description || undefined, { taskIds: selectedIdsForStart })
+      : await timeBlockServiceRef.current.startBlock(name, config, description || undefined);
     activeBlockDataRef.current = block;
     setTaskName(name);
     setTaskNameDraft(name);
@@ -507,7 +508,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     setFeedbackInProgress(false);
     setRunningSubState('running');
     setUiState('running');
-  }, [countdownMinutes, focusTaskInput, selectedTaskIds, taskNameDraft, timerMode]);
+  }, [countdownMinutes, focusTaskInput, selectableTasks, selectedTaskIds, taskNameDraft, timerMode]);
 
   const handleTaskInputKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -776,6 +777,35 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   );
 
   const isOverlaySurface = surface === 'overlay';
+  const overlayChrome = isOverlaySurface ? overlayRunningChrome ?? null : null;
+  const hasIntegratedOverlayChrome = overlayChrome !== null;
+  const hasRunningLinkedTasks = showRunningLinkedTasks && linkedTasks.length > 0;
+  const useAutoHeightConfigLayout = !isOverlaySurface;
+  const useAutoHeightRunningLayout = !isOverlaySurface || (hasIntegratedOverlayChrome && hasRunningLinkedTasks);
+  const baseStageHeightClass = useAutoHeightConfigLayout
+    ? 'min-h-[200px] pb-4 pt-4'
+    : hasIntegratedOverlayChrome ? 'h-[222px]' : 'h-[200px]';
+  const baseGlowHeightClass = useAutoHeightConfigLayout
+    ? 'bottom-4'
+    : hasIntegratedOverlayChrome ? 'h-[186px]' : 'h-[163px]';
+  const baseCardHeightClass = useAutoHeightConfigLayout
+    ? 'min-h-[169px]'
+    : hasIntegratedOverlayChrome ? 'h-[192px]' : 'h-[169px]';
+  const runningStageHeightClass = useAutoHeightRunningLayout
+    ? useAutoHeightConfigLayout ? 'min-h-[200px] pb-4 pt-4' : 'min-h-[276px] pb-4 pt-4'
+    : hasRunningLinkedTasks
+    ? hasIntegratedOverlayChrome ? 'h-[276px]' : 'h-[252px]'
+    : baseStageHeightClass;
+  const runningGlowHeightClass = useAutoHeightRunningLayout
+    ? 'bottom-4'
+    : hasRunningLinkedTasks
+    ? hasIntegratedOverlayChrome ? 'h-[240px]' : 'h-[215px]'
+    : baseGlowHeightClass;
+  const runningCardHeightClass = useAutoHeightRunningLayout
+    ? useAutoHeightConfigLayout ? 'min-h-[169px]' : 'min-h-[246px]'
+    : hasRunningLinkedTasks
+    ? hasIntegratedOverlayChrome ? 'h-[246px]' : 'h-[221px]'
+    : baseCardHeightClass;
 
   return (
     <div
@@ -788,7 +818,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
             <div
               className={`absolute left-1/2 top-[18px] h-[74px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] blur-[8px] ${
                 isOverlaySurface
-                  ? 'bg-gradient-to-br from-[#6B4B3E] via-[#4A332B] to-[#241A16]'
+                  ? 'bg-[rgba(12,10,9,0.24)]'
                   : 'bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14]'
               }`}
               aria-hidden
@@ -803,7 +833,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
               aria-label="展开专注配置（Expand focus configuration）"
               className={`absolute left-4 right-4 top-4 flex h-[68px] items-center justify-between rounded-[24px] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()} ${
                 isOverlaySurface
-                  ? 'border border-white/10 bg-[linear-gradient(180deg,rgba(43,31,26,0.86)_0%,rgba(25,18,15,0.78)_100%)] text-[#F5EDE7]'
+                  ? 'border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9]'
                   : 'border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:border-[#FFFFFF15] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)]'
               }`}
             >
@@ -824,11 +854,11 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
       {uiState === 'config' && (
         <section className={isOverlaySurface ? 'pt-0' : 'pt-[10px]'}>
-          <div className="relative mx-auto w-full max-w-[390px] px-4 pb-3 pt-4" data-testid="new-focus-state-config">
+          <div className={`relative mx-auto w-full max-w-[390px] ${baseStageHeightClass}`} data-testid="new-focus-state-config">
             <div
-              className={`absolute inset-x-4 bottom-[10px] top-[14px] rounded-[22px] blur-[8px] ${
+              className={`absolute left-1/2 top-[20px] ${baseGlowHeightClass} w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] blur-[8px] ${
                 isOverlaySurface
-                  ? 'bg-gradient-to-br from-[#6B4B3E] via-[#4A332B] to-[#241A16]'
+                  ? 'bg-[rgba(12,10,9,0.24)]'
                   : 'bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14]'
               }`}
               aria-hidden
@@ -836,9 +866,9 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
             <div
               id="new-focus-config-panel"
-              className={`relative flex w-full flex-col gap-3 rounded-[24px] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()} ${
+              className={`${useAutoHeightConfigLayout ? 'relative mx-4' : 'absolute left-4 right-4 top-4'} flex ${baseCardHeightClass} flex-col gap-3 ${isOverlaySurface ? 'overflow-y-auto' : ''} rounded-[24px] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()} ${
                 isOverlaySurface
-                  ? 'border border-white/10 bg-[linear-gradient(180deg,rgba(43,31,26,0.86)_0%,rgba(25,18,15,0.8)_100%)] text-[#F5EDE7]'
+                  ? 'border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9]'
                   : 'border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:border-[#FFFFFF15] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)]'
               }`}
             >
@@ -952,52 +982,6 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
                 </div>
               </div>
 
-              <div className="flex min-w-0 flex-col gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">关联任务（可选）</span>
-                  <span className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">仅显示待办 / 进行中</span>
-                </div>
-                {selectableTasks.length > 0 ? (
-                  <div
-                    data-testid="new-focus-prestart-task-list"
-                    className="max-h-32 space-y-2 overflow-y-auto rounded-[12px] border border-[#E7E5E4] bg-white/55 p-2 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
-                  >
-                    {selectableTasks.map((task) => {
-                      const selected = selectedTaskIdSet.has(task.id);
-                      return (
-                        <button
-                          key={task.id}
-                          type="button"
-                          data-testid={`new-focus-prestart-task-${task.id}`}
-                          aria-pressed={selected}
-                          onClick={() => {
-                            setSelectedTaskIds((current) => (
-                              current.includes(task.id)
-                                ? current.filter((taskId) => taskId !== task.id)
-                                : [...current, task.id]
-                            ));
-                          }}
-                          className={`flex w-full items-center justify-between rounded-[10px] px-3 py-2 text-left text-[12px] transition-colors ${
-                            selected
-                              ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
-                              : 'bg-white/70 text-[#57534E] hover:bg-[#F5F0ED] dark:bg-[#120F0D]/70 dark:text-[#D6D3D1] dark:hover:bg-[#292524]'
-                          }`}
-                        >
-                          <span className="truncate">{task.title}</span>
-                          <span className="ml-3 shrink-0 text-[11px]">
-                            {selected ? '已选' : task.status === 'in_progress' ? '进行中' : '待办'}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-[12px] border border-dashed border-[#E7E5E4] bg-white/40 px-3 py-2 text-[12px] text-[#78716C] dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08] dark:text-[#A8A29E]">
-                    当前没有可预选的关联任务。
-                  </div>
-                )}
-              </div>
-
               <Button
                 type="button"
                 data-testid="new-focus-start-button"
@@ -1016,45 +1000,105 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
       {uiState === 'running' && (
         <section className={isOverlaySurface ? 'pt-0' : 'pt-[10px]'} data-testid="new-focus-state-running">
-          <div className="relative mx-auto h-[200px] w-full max-w-[390px]">
+          <div className={`relative mx-auto w-full max-w-[390px] ${runningStageHeightClass}`}>
             <div
-              className={`absolute left-1/2 top-[20px] h-[163px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] blur-[8px] ${
+              className={`absolute left-1/2 top-[20px] ${runningGlowHeightClass} w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] blur-[8px] ${
                 isOverlaySurface
-                  ? 'bg-gradient-to-br from-[#6B4B3E] via-[#4A332B] to-[#241A16]'
+                  ? 'bg-[rgba(12,10,9,0.24)]'
                   : 'bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14]'
               }`}
               aria-hidden
             />
             <div
               data-testid="new-focus-running-task-card"
-              className={`absolute left-4 right-4 top-4 flex h-[169px] flex-col gap-3 rounded-[24px] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()} ${
+              className={`${useAutoHeightRunningLayout ? 'relative mx-4' : 'absolute left-4 right-4 top-4'} flex ${runningCardHeightClass} flex-col gap-3 rounded-[24px] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()} ${
                 isOverlaySurface
-                  ? 'border border-white/10 bg-[linear-gradient(180deg,rgba(43,31,26,0.88)_0%,rgba(25,18,15,0.82)_100%)] text-[#F5EDE7]'
+                  ? 'border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9]'
                   : 'border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:border-[#FFFFFF15] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)]'
               }`}
             >
-              <div className="flex min-w-0 items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
-                    <Target size={20} />
-                  </div>
-                  <p className="truncate text-[20px] font-semibold leading-[1.4] text-[#1C1917] dark:text-[#FAFAF9]">{taskName || '未命名任务'}</p>
-                </div>
-                {hasFocusBgmConfigured ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    data-testid="new-focus-bgm-toggle-button"
-                    aria-label={focusBgmToggleAriaLabel}
-                    className="h-9 w-9 rounded-[10px] border border-[#E7E5E4] bg-white/50 p-0 text-[#C75B3A] hover:bg-white/70 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF10] dark:text-[#E8734E]"
-                    onClick={() => {
-                      setFocusBgmDialogOpen(true);
-                    }}
+              {overlayChrome ? (
+                <div className="flex min-w-0 items-start justify-between gap-3" data-testid="new-focus-overlay-running-header">
+                  <div
+                    data-testid="new-focus-overlay-drag-handle"
+                    data-tauri-drag-region
+                    title="按住这里拖动窗口"
+                    className="min-w-0 cursor-grab select-none active:cursor-grabbing"
                   >
-                    {focusBgmToggleIcon}
-                  </Button>
-                ) : null}
-              </div>
+                    <p className="truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[#D6C2B8]" data-tauri-drag-region>
+                      {overlayChrome.statusLabel}
+                    </p>
+                    <p className="truncate pt-0.5 text-[18px] font-semibold leading-[1.35] text-[#F5EDE7]" data-tauri-drag-region>
+                      {taskName || '未命名任务'}
+                    </p>
+                  </div>
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    {hasFocusBgmConfigured ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        data-testid="new-focus-bgm-toggle-button"
+                        aria-label={focusBgmToggleAriaLabel}
+                        className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
+                        onClick={() => {
+                          setFocusBgmDialogOpen(true);
+                        }}
+                      >
+                        {focusBgmToggleIcon}
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={overlayChrome.onCollapse}
+                      aria-label="收起"
+                      title="收起"
+                      className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
+                    >
+                      <Shrink size={15} />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={overlayChrome.onReturnToMain}
+                      aria-label="显示主程序"
+                      title="显示主程序"
+                      className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
+                    >
+                      <ArrowUpRight size={15} />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
+                      <Target size={20} />
+                    </div>
+                    <p className={`truncate text-[20px] font-semibold leading-[1.4] ${isOverlaySurface ? 'text-[#F5EDE7]' : 'text-[#1C1917] dark:text-[#FAFAF9]'}`}>{taskName || '未命名任务'}</p>
+                  </div>
+                  {hasFocusBgmConfigured ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      data-testid="new-focus-bgm-toggle-button"
+                      aria-label={focusBgmToggleAriaLabel}
+                      className={`h-9 w-9 rounded-[10px] p-0 ${
+                        isOverlaySurface
+                          ? 'border border-white/10 bg-white/8 text-[#E7D7CF] hover:bg-white/15'
+                          : 'border border-[#E7E5E4] bg-white/50 text-[#C75B3A] hover:bg-white/70 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF10] dark:text-[#E8734E]'
+                      }`}
+                      onClick={() => {
+                        setFocusBgmDialogOpen(true);
+                      }}
+                    >
+                      {focusBgmToggleIcon}
+                    </Button>
+                  ) : null}
+                </div>
+              )}
               <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />
               <div className="flex items-center justify-between px-1 pt-1">
                 <Button
@@ -1105,6 +1149,28 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
                   {endActionIcon}
                 </Button>
               </div>
+              {hasRunningLinkedTasks && (
+                <>
+                  <div className="h-px w-full bg-[#D4785F24] dark:bg-[#D4785F18]" />
+                  <div data-testid="new-focus-running-linked-tasks" className="min-h-0 px-1">
+                    <p className={`pb-1 text-[11px] font-medium ${isOverlaySurface ? 'text-[#D6C2B8]' : 'text-[#78716C] dark:text-[#A8A29E]'}`}>
+                      关联任务
+                    </p>
+                    <ul className={`list-disc space-y-1 pl-4 text-[12px] leading-[1.35] ${isOverlaySurface ? 'text-[#F5EDE7]' : 'text-[#44403C] dark:text-[#E7E5E4]'}`}>
+                      {linkedTasks.map((task) => (
+                        <li
+                          key={task.id}
+                          data-testid={`new-focus-running-linked-task-${task.id}`}
+                          className={useAutoHeightRunningLayout || !isOverlaySurface ? 'break-words whitespace-normal marker:text-[#C75B3A]' : 'truncate marker:text-[#C75B3A]'}
+                          title={task.title}
+                        >
+                          {task.title}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </section>

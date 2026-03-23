@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
+import { PrestartTaskSelectionList, usePrestartSelectableTasks } from '@/ui/app/components/prestart-task-selection';
 
 function hasHardBlockingDependency(
   dependencyCheck: { blocking: Array<{ type: 'soft' | 'hard' }> },
@@ -19,13 +20,19 @@ function formatAssociationError(error: unknown): string {
   return '关联任务失败，请稍后重试。';
 }
 
-export function BlockTaskAssociationList() {
+interface BlockTaskAssociationListProps {
+  prestartSelectedTaskIds?: string[];
+  onPrestartSelectedTaskIdsChange?: (taskIds: string[]) => void;
+}
+
+export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = {}) {
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [tasksById, setTasksById] = useState<Map<string, TaskNode>>(new Map());
   const [hardBlockedTaskIds, setHardBlockedTaskIds] = useState<Set<string>>(new Set());
   const [selectedTaskId, setSelectedTaskId] = useState('');
   const [associationError, setAssociationError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
+  const prestartSelectableTasks = usePrestartSelectableTasks();
 
   useEffect(() => {
     let disposed = false;
@@ -120,8 +127,23 @@ export function BlockTaskAssociationList() {
   if (!activeBlock) {
     return (
       <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务关联</h3>
-        <p className="mt-2 text-sm text-[#78716C] dark:text-[#A8A29E]">开始时间块后可在这里增删关联任务。</p>
+        <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">关联任务</h3>
+        {props.onPrestartSelectedTaskIdsChange ? (
+          <div className="mt-2 flex flex-col gap-3">
+            <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">时间块开始前即可选择可执行任务，开始后会自动关联到本次时间块。</p>
+            <PrestartTaskSelectionList
+              tasks={prestartSelectableTasks}
+              selectedTaskIds={props.prestartSelectedTaskIds ?? []}
+              onSelectedTaskIdsChange={props.onPrestartSelectedTaskIdsChange}
+              listTestId="task-association-prestart-list"
+              itemTestIdPrefix="task-association-prestart-task-"
+              emptyLabel="当前没有可预选的关联任务。"
+              className="space-y-2 rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] p-2 dark:border-[#3F3F46] dark:bg-[#120F0D]/70"
+            />
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-[#78716C] dark:text-[#A8A29E]">开始时间块后可在这里增删关联任务。</p>
+        )}
       </section>
     );
   }
@@ -130,7 +152,7 @@ export function BlockTaskAssociationList() {
     <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务关联</h3>
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">关联任务</h3>
         </div>
         <span className="rounded-full bg-[#F5F0ED] px-2 py-1 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
           {linkedTasks.length} 个任务

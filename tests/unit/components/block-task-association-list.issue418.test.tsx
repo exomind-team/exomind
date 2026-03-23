@@ -105,7 +105,7 @@ describe('BlockTaskAssociationList issue-418', () => {
 
     render(<BlockTaskAssociationList />);
 
-    await screen.findByText('任务关联');
+    await screen.findByText('关联任务');
     expect(screen.getByText('1 个任务')).toBeInTheDocument();
     expect(screen.getByText('任务一')).toBeInTheDocument();
     expect(screen.queryByText('运行中可追加或移除关联任务。')).toBeNull();
@@ -113,7 +113,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     expect(screen.getByRole('link', { name: '打开任务详情：任务一' })).toHaveAttribute('href', '/tasks/task-1');
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
-    fireEvent.click(screen.getByText('关联任务'));
+    fireEvent.click(screen.getByRole('button', { name: '关联任务' }));
     await waitFor(() => {
       expect(addTaskToBlockMock).toHaveBeenCalledWith('task-2');
     });
@@ -166,7 +166,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     await screen.findByText('1 个任务');
     await screen.findByText('任务一');
 
-    fireEvent.click(screen.getByText('关联任务'));
+    fireEvent.click(screen.getByRole('button', { name: '关联任务' }));
 
     await waitFor(() => {
       expect(screen.getByText('2 个任务')).toBeInTheDocument();
@@ -209,7 +209,11 @@ describe('BlockTaskAssociationList issue-418', () => {
 
     render(<BlockTaskAssociationList />);
 
-    await screen.findByRole('combobox');
+    await waitFor(() => {
+      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(
+        expect.arrayContaining(['选择任务', '可追加任务']),
+      );
+    });
 
     const options = screen.getAllByRole('option').map((option) => option.textContent);
     expect(options).toEqual(expect.arrayContaining(['选择任务', '可追加任务']));
@@ -236,10 +240,35 @@ describe('BlockTaskAssociationList issue-418', () => {
 
     render(<BlockTaskAssociationList />);
 
-    await screen.findByText('任务关联');
+    await screen.findByText('关联任务');
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
-    fireEvent.click(screen.getByText('关联任务'));
+    fireEvent.click(screen.getByRole('button', { name: '关联任务' }));
 
     expect(await screen.findByText('所选任务存在未完成的硬依赖，当前不能关联。')).toBeInTheDocument();
+  });
+
+  it('shows prestart selectable tasks when no active block and external selection is provided', async () => {
+    const onPrestartSelectedTaskIdsChange = vi.fn();
+    loadActiveBlockMock.mockResolvedValue(null);
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-1', title: '任务一', status: 'pending' }),
+      makeTask({ id: 'task-2', title: '任务二', status: 'in_progress' }),
+      makeTask({ id: 'task-3', title: '任务三', status: 'completed' }),
+    ]);
+
+    render(
+      <BlockTaskAssociationList
+        prestartSelectedTaskIds={['task-2']}
+        onPrestartSelectedTaskIdsChange={onPrestartSelectedTaskIdsChange}
+      />,
+    );
+
+    expect(await screen.findByText('时间块开始前即可选择可执行任务，开始后会自动关联到本次时间块。')).toBeInTheDocument();
+    expect(screen.getByTestId('task-association-prestart-task-task-1')).toBeInTheDocument();
+    expect(screen.getByTestId('task-association-prestart-task-task-2')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('task-association-prestart-task-task-3')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('task-association-prestart-task-task-1'));
+    expect(onPrestartSelectedTaskIdsChange).toHaveBeenCalledWith(['task-2', 'task-1']);
   });
 });

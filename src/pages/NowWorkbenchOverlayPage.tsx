@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { ArrowUpRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowUpRight, Expand, Shrink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { FocusTimerWidget, type FocusTimerWidgetHandle } from '@/ui/app/components/FocusTimerWidget';
@@ -48,7 +48,7 @@ interface NowWorkbenchOverlayPageContentProps {
   onReturnToMain: () => void;
   onPauseOrResume: () => void;
   onEndBlock: () => void | Promise<void>;
-  onStartTask: (task: TaskNode) => void;
+  onStartTask: (task: TaskNode) => void | Promise<void>;
   onSend: (content: string, tags?: string[]) => void;
   feedbackOpen: boolean;
   feedback: string;
@@ -59,17 +59,27 @@ interface NowWorkbenchOverlayPageContentProps {
   onConfirmEnd: () => void | Promise<void>;
 }
 
-type PendingIdleTaskConfig = {
-  title: string;
-  preselectedTaskIds: string[];
-};
-
 const NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE = { width: 412, height: 490 };
 const NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE = { width: 464, height: 470 };
 const NOW_WORKBENCH_OVERLAY_MINI_SIZE = { width: 248, height: 120 };
 const NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE = { width: 352, height: 200 };
 const NOW_WORKBENCH_OVERLAY_IDLE_COLLAPSED_SIZE = { width: 276, height: 156 };
 const NOW_WORKBENCH_OVERLAY_IDLE_EXPANDED_SIZE = { width: 428, height: 360 };
+const NOW_WORKBENCH_OVERLAY_SINGLE_CARD_ROOT_PADDING_Y = 24;
+
+function resolveRunningSingleCardOverlaySize(measuredShellHeight: number | null): { width: number; height: number } {
+  if (!measuredShellHeight || !Number.isFinite(measuredShellHeight)) {
+    return NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE;
+  }
+
+  return {
+    width: NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE.width,
+    height: Math.max(
+      NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE.height,
+      Math.ceil(measuredShellHeight + NOW_WORKBENCH_OVERLAY_SINGLE_CARD_ROOT_PADDING_Y),
+    ),
+  };
+}
 
 function formatEventTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', {
@@ -216,15 +226,17 @@ function renderTaskChoiceList(props: Pick<NowWorkbenchOverlayPageContentProps, '
     <section className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-[13px] font-semibold text-[#57534E] dark:text-[#D6D3D1]">可开始的任务</h2>
-        <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">从这里进入时间块</span>
+        <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">点任务后直接开始</span>
       </div>
-      <div data-testid="now-overlay-task-choice-list" className="grid gap-2">
+      <div data-testid="now-overlay-task-choice-list" className="grid max-h-[220px] gap-2 overflow-y-auto pr-1">
         {model.visibleTasks.map((task) => (
           <button
             key={task.id}
             type="button"
             aria-label={task.title}
-            onClick={() => onStartTask?.(task)}
+            onClick={() => {
+              void onStartTask?.(task);
+            }}
             className="flex w-full items-center justify-between rounded-[18px] border border-[#E7E5E4] bg-white/85 px-4 py-3 text-left shadow-sm transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]/85 dark:hover:bg-[#292524]"
           >
             <span className="truncate text-[14px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</span>
@@ -343,14 +355,14 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   } = props;
   const now = Date.now();
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
+  const singleCardShellRef = useRef<HTMLDivElement | null>(null);
   const recentEventsRef = useRef<HTMLElement | null>(null);
   const [isMiniCollapsed, setIsMiniCollapsed] = useState(false);
   const [isMiniHovered, setIsMiniHovered] = useState(false);
   const [isIdleHovered, setIsIdleHovered] = useState(false);
   const [isIdleInputFocused, setIsIdleInputFocused] = useState(false);
-  const [isIdleConfigVisible, setIsIdleConfigVisible] = useState(false);
-  const [pendingIdleTaskConfig, setPendingIdleTaskConfig] = useState<PendingIdleTaskConfig | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [runningSingleCardShellHeight, setRunningSingleCardShellHeight] = useState<number | null>(null);
   const {
     canSubmitFeedback,
     handleFeedbackKeyDown,
@@ -411,8 +423,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     }
     setIsIdleHovered(false);
     setIsIdleInputFocused(false);
-    setIsIdleConfigVisible(false);
-    setPendingIdleTaskConfig(null);
   }, [model.mode]);
 
   useEffect(() => {
@@ -425,15 +435,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     resetSkipFeedbackConfirm();
     setFeedbackSubmitting(false);
   }, [feedbackOpen, resetSkipFeedbackConfirm]);
-
-  useEffect(() => {
-    if (!isIdleConfigVisible || !pendingIdleTaskConfig || !focusTimerWidgetRef.current) {
-      return;
-    }
-
-    focusTimerWidgetRef.current.openTaskConfig(pendingIdleTaskConfig);
-    setPendingIdleTaskConfig(null);
-  }, [isIdleConfigVisible, pendingIdleTaskConfig]);
 
   // 新事件加入后自动滚到"最近事件"区域
   useEffect(() => {
@@ -455,8 +456,55 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   const isLiveIdleBubbleMode = !isStaticPreview
     && (model.mode === 'idle_with_tasks' || model.mode === 'idle_input_only');
   const isIdleExpanded = isLiveIdleBubbleMode
-    && (isIdleHovered || isIdleInputFocused || isIdleConfigVisible);
+    && (isIdleHovered || isIdleInputFocused);
   const miniClock = resolveRunningClock(model.activeBlock, now);
+  useEffect(() => {
+    if (!isLiveRunningSingleCardMode) {
+      setRunningSingleCardShellHeight(null);
+      return;
+    }
+
+    const shell = singleCardShellRef.current;
+    if (!shell) {
+      return;
+    }
+
+    let frameId: number | null = null;
+    let observer: ResizeObserver | undefined;
+
+    const measure = () => {
+      const nextHeight = Math.ceil(shell.getBoundingClientRect().height);
+      if (nextHeight > 0) {
+        setRunningSingleCardShellHeight((current) => (current === nextHeight ? current : nextHeight));
+      }
+    };
+
+    const scheduleMeasure = () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+      frameId = requestAnimationFrame(() => {
+        frameId = null;
+        measure();
+      });
+    };
+
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        scheduleMeasure();
+      });
+      observer.observe(shell);
+    }
+
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+      observer?.disconnect();
+    };
+  }, [isLiveRunningSingleCardMode]);
+
   const targetOverlaySize = isLiveRunningMiniPeekMode
     ? NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE
     : isLiveRunningMiniMode
@@ -466,7 +514,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
         : isLiveIdleBubbleMode
           ? NOW_WORKBENCH_OVERLAY_IDLE_COLLAPSED_SIZE
       : isLiveRunningSingleCardMode
-        ? NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE
+        ? resolveRunningSingleCardOverlaySize(runningSingleCardShellHeight)
         : NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE;
 
   useEffect(() => {
@@ -559,16 +607,12 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   }, []);
 
   const handleIdleTaskStart = useCallback((task: TaskNode) => {
-    setIsIdleConfigVisible(true);
-    setPendingIdleTaskConfig({ title: task.title, preselectedTaskIds: [task.id] });
-    onStartTask(task);
+    void onStartTask(task);
   }, [onStartTask]);
 
   const handleIdleCollapse = useCallback(() => {
     setIsIdleHovered(false);
     setIsIdleInputFocused(false);
-    setIsIdleConfigVisible(false);
-    setPendingIdleTaskConfig(null);
   }, []);
 
   if (isLiveRunningMiniMode) {
@@ -612,7 +656,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                       title="展开"
                       className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
                     >
-                      <ChevronUp size={16} />
+                      <Expand size={16} />
                     </Button>
                     <Button
                       type="button"
@@ -681,7 +725,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                     title="展开"
                     className="h-7 w-7 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
                   >
-                    <ChevronUp size={14} />
+                    <Expand size={14} />
                   </Button>
                   <Button
                     type="button"
@@ -708,6 +752,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
 
   if (isLiveIdleBubbleMode) {
     const previewTasks = model.visibleTasks.slice(0, 3);
+    const hasOverflowTasks = model.visibleTasks.length > previewTasks.length;
 
     return (
       <div className="now-workbench-overlay-root now-workbench-overlay-root--mini">
@@ -772,7 +817,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                     title="收起"
                     className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
                   >
-                    <ChevronDown size={15} />
+                    <Shrink size={15} />
                   </Button>
                   <Button
                     type="button"
@@ -788,9 +833,9 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                 </div>
               </div>
 
-              {model.mode === 'idle_with_tasks' && !isIdleConfigVisible ? (
+              {model.mode === 'idle_with_tasks' ? (
                 <div className="mt-4 space-y-3">
-                  <div data-testid="now-overlay-task-choice-list" className="grid gap-2">
+                  <div data-testid="now-overlay-task-choice-list" className="grid max-h-[188px] gap-2 overflow-y-auto pr-1">
                     {model.visibleTasks.map((task) => (
                       <button
                         key={task.id}
@@ -824,12 +869,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                   </section>
                 </div>
               ) : null}
-
-              {isIdleConfigVisible ? (
-                <div className="mt-4 rounded-[18px] border border-white/10 bg-white/8 px-2 py-2">
-                  <FocusTimerWidget ref={focusTimerWidgetRef} surface="overlay" />
-                </div>
-              ) : null}
             </div>
           ) : (
             <div
@@ -846,8 +885,8 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               >
                 <div className="flex items-center gap-2" data-tauri-drag-region>
                   <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
-                  <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
-                    待办
+                  <span className="text-[15px] font-semibold text-[#D6D3D1] dark:text-[#E7E5E4]" data-tauri-drag-region>
+                    {hasOverflowTasks ? `待办 (${model.visibleTasks.length})` : '待办'}
                   </span>
                 </div>
                 {previewTasks.length > 0 ? (
@@ -857,6 +896,11 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                         · {task.title}
                       </p>
                     ))}
+                    {hasOverflowTasks ? (
+                      <p className="truncate text-[13px] font-medium text-[#D6D3D1]/75" data-tauri-drag-region>
+                        · ……
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="mt-2 text-[13px] font-medium text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
@@ -877,62 +921,25 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   if (isLiveRunningSingleCardMode) {
     return (
       <div className="now-workbench-overlay-root now-workbench-overlay-root--single-card">
-        <div className="now-workbench-overlay-shell now-workbench-overlay-shell--single-card">
-          <header
-            data-testid="now-overlay-drag-bar"
-            className="absolute left-1/2 top-0 z-10 w-full -translate-x-1/2 px-2"
-          >
-            <div
-              data-testid="now-overlay-live-control-bar"
-              className="flex items-center gap-3 rounded-[22px] border border-white/10 bg-[rgba(33,24,20,0.88)] px-3 py-2 text-[#F5EDE7] shadow-[0_12px_30px_-18px_rgba(0,0,0,0.55)] backdrop-blur-[18px]"
-            >
-              <div
-                data-testid="now-overlay-drag-handle"
-                data-tauri-drag-region
-
-                className="min-w-0 cursor-grab select-none active:cursor-grabbing"
-                title="按住这里拖动窗口"
-              >
-                <p className="truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[#A8A29E] dark:text-[#78716C]" data-tauri-drag-region>
-                  {model.statusLabel}
-                </p>
-                <p className="truncate text-[14px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]" data-tauri-drag-region>
-                  {model.title}
-                </p>
-              </div>
-              <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsMiniCollapsed(true)}
-                  aria-label="收起"
-                  title="收起"
-                    className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
-                  >
-                  <ChevronDown size={15} />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={onReturnToMain}
-                  aria-label="显示主程序"
-                  title="显示主程序"
-                    className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
-                  >
-                  <ArrowUpRight size={15} />
-                </Button>
-              </div>
-            </div>
-          </header>
-
+        <div
+          ref={singleCardShellRef}
+          data-testid="now-overlay-single-card-shell"
+          className="now-workbench-overlay-shell now-workbench-overlay-shell--single-card"
+        >
           <main className="flex min-h-0 flex-1 items-center justify-center">
             <div
               data-testid="now-overlay-single-card-stage"
               className="w-full max-w-[390px]"
             >
-              <FocusTimerWidget ref={focusTimerWidgetRef} surface="overlay" />
+              <FocusTimerWidget
+                ref={focusTimerWidgetRef}
+                surface="overlay"
+                overlayRunningChrome={{
+                  statusLabel: model.statusLabel,
+                  onCollapse: () => setIsMiniCollapsed(true),
+                  onReturnToMain,
+                }}
+              />
             </div>
           </main>
         </div>
@@ -1044,20 +1051,16 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                   <section className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h2 className="text-[13px] font-semibold text-[#57534E] dark:text-[#D6D3D1]">可开始的任务</h2>
-                      <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">点任务后进入和当下一致的配置流</span>
+                      <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">点任务后直接开始</span>
                     </div>
-                    <div data-testid="now-overlay-task-choice-list" className="grid gap-2">
+                    <div data-testid="now-overlay-task-choice-list" className="grid max-h-[220px] gap-2 overflow-y-auto pr-1">
                       {model.visibleTasks.map((task) => (
                         <button
                           key={task.id}
                           type="button"
                           aria-label={task.title}
                           onClick={() => {
-                            focusTimerWidgetRef.current?.openTaskConfig({
-                              title: task.title,
-                              preselectedTaskIds: [task.id],
-                            });
-                            onStartTask(task);
+                            void onStartTask(task);
                           }}
                           className="flex w-full items-center justify-between rounded-[18px] border border-[#E7E5E4] bg-white/85 px-4 py-3 text-left shadow-sm transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]/85 dark:hover:bg-[#292524]"
                         >
