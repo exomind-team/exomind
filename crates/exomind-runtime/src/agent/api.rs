@@ -204,12 +204,8 @@ impl ApiAgent {
         }
 
         let stream_result = match self.profile.provider.as_str() {
-            "openai" => self
-                .stream_openai_turn(&sender, &history)
-                .await,
-            "anthropic" => self
-                .stream_anthropic_turn(&sender, &history)
-                .await,
+            "openai" => self.stream_openai_turn(&sender, &history).await,
+            "anthropic" => self.stream_anthropic_turn(&sender, &history).await,
             other => Err(format!("不支持的 API provider: {other}")),
         };
 
@@ -268,11 +264,7 @@ impl ApiAgent {
                 }
                 if let Some(delta) = extract_openai_content_delta(&data) {
                     assistant_content.push_str(&delta);
-                    if sender
-                        .send(ChatChunk::content_only(delta))
-                        .await
-                        .is_err()
-                    {
+                    if sender.send(ChatChunk::content_only(delta)).await.is_err() {
                         return Ok(assistant_content);
                     }
                 }
@@ -341,11 +333,7 @@ impl ApiAgent {
                 };
                 if let Some(delta) = extract_anthropic_content_delta(&data) {
                     assistant_content.push_str(&delta);
-                    if sender
-                        .send(ChatChunk::content_only(delta))
-                        .await
-                        .is_err()
-                    {
+                    if sender.send(ChatChunk::content_only(delta)).await.is_err() {
                         return Ok(assistant_content);
                     }
                 }

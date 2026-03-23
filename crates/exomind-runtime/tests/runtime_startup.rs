@@ -6,8 +6,8 @@
 //! - runtime can start/stop via lib API（可通过库 API 启停）
 
 use exomind_runtime::{
-    configured_port_from_env, spawn_ts_agents_default_for_platform, start_with_options,
-    RuntimeStartOptions, DEFAULT_RT_PORT,
+    DEFAULT_RT_PORT, RuntimeStartOptions, configured_port_from_env,
+    spawn_ts_agents_default_for_platform, start_with_options,
 };
 use std::sync::Mutex;
 

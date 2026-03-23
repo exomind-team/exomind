@@ -13,7 +13,11 @@ async fn auth_with_secret_no_token_returns_401() {
         .await
         .expect("request should send");
 
-    assert_eq!(response.status(), 401, "should reject request without token");
+    assert_eq!(
+        response.status(),
+        401,
+        "should reject request without token"
+    );
 
     stop_runtime(&mut rt, "auth-test-1").await;
 }
@@ -30,7 +34,11 @@ async fn auth_with_secret_correct_token_returns_200() {
         .await
         .expect("request should send");
 
-    assert_eq!(response.status(), 200, "should allow request with correct token");
+    assert_eq!(
+        response.status(),
+        200,
+        "should allow request with correct token"
+    );
 
     stop_runtime(&mut rt, "auth-test-2").await;
 }
@@ -47,7 +55,11 @@ async fn auth_with_secret_wrong_token_returns_401() {
         .await
         .expect("request should send");
 
-    assert_eq!(response.status(), 401, "should reject request with wrong token");
+    assert_eq!(
+        response.status(),
+        401,
+        "should reject request with wrong token"
+    );
 
     stop_runtime(&mut rt, "auth-test-3").await;
 }
@@ -63,7 +75,11 @@ async fn auth_without_secret_allows_all_requests() {
         .await
         .expect("request should send");
 
-    assert_eq!(response.status(), 200, "should allow request when no secret configured");
+    assert_eq!(
+        response.status(),
+        200,
+        "should allow request when no secret configured"
+    );
 
     stop_runtime(&mut rt, "auth-test-4").await;
 }
@@ -96,7 +112,11 @@ async fn auth_via_query_param_token() {
         .await
         .expect("request should send");
 
-    assert_eq!(response.status(), 200, "should allow request with correct query param token");
+    assert_eq!(
+        response.status(),
+        200,
+        "should allow request with correct query param token"
+    );
 
     // Wrong query param token
     let response = client
@@ -105,7 +125,11 @@ async fn auth_via_query_param_token() {
         .await
         .expect("request should send");
 
-    assert_eq!(response.status(), 401, "should reject request with wrong query param token");
+    assert_eq!(
+        response.status(),
+        401,
+        "should reject request with wrong query param token"
+    );
 
     stop_runtime(&mut rt, "auth-test-6").await;
 }

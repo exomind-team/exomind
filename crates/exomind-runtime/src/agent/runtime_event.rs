@@ -7,9 +7,7 @@ use crate::session::types::QuickAction;
 #[serde(tag = "type")]
 pub enum RuntimeAgentEvent {
     #[serde(rename = "session.started")]
-    SessionStarted {
-        session_id: String,
-    },
+    SessionStarted { session_id: String },
     #[serde(rename = "output.delta")]
     OutputDelta {
         content: String,

@@ -47,11 +47,7 @@ pub struct ManagedEchoAgent {
 }
 
 impl ManagedEchoAgent {
-    pub fn new(
-        id: impl Into<String>,
-        name: Option<String>,
-        description: Option<String>,
-    ) -> Self {
+    pub fn new(id: impl Into<String>, name: Option<String>, description: Option<String>) -> Self {
         fn leak_owned(value: String) -> &'static str {
             Box::leak(value.into_boxed_str())
         }

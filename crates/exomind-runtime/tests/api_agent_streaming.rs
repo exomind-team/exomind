@@ -11,7 +11,10 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
 async fn openai_handler(Json(payload): Json<Value>) -> Response {
-    let model = payload.get("model").and_then(Value::as_str).unwrap_or_default();
+    let model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let body = format!(
         "data: {{\"choices\":[{{\"delta\":{{\"content\":\"hello from {model}\"}}}}]}}\n\n\
          data: [DONE]\n\n"
@@ -24,7 +27,10 @@ async fn openai_handler(Json(payload): Json<Value>) -> Response {
 }
 
 async fn anthropic_handler(Json(payload): Json<Value>) -> Response {
-    let model = payload.get("model").and_then(Value::as_str).unwrap_or_default();
+    let model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let body = format!(
         "event: content_block_delta\n\
          data: {{\"type\":\"content_block_delta\",\"delta\":{{\"text\":\"hello from {model}\"}}}}\n\n\
@@ -74,7 +80,9 @@ async fn openai_api_agent_streams_text_and_assigns_session() {
         .await;
 
     assert!(
-        chunks.iter().any(|chunk| chunk.content.contains("hello from gpt-5")),
+        chunks
+            .iter()
+            .any(|chunk| chunk.content.contains("hello from gpt-5")),
         "chunks={chunks:?}"
     );
     assert!(

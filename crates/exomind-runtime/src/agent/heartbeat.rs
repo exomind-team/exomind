@@ -46,9 +46,15 @@ impl HeartbeatAgent {
 }
 
 impl Agent for HeartbeatAgent {
-    fn id(&self) -> &str { &self.id }
-    fn name(&self) -> &str { "Heartbeat Agent" }
-    fn description(&self) -> &str { "最小生命体 — 心跳、能量消耗、降频、可死亡" }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        "Heartbeat Agent"
+    }
+    fn description(&self) -> &str {
+        "最小生命体 — 心跳、能量消耗、降频、可死亡"
+    }
 
     fn chat_stream(&self, _request: ChatRequest) -> BoxStream<'static, ChatChunk> {
         stream::iter(vec![ChatChunk::content_only(
@@ -56,13 +62,17 @@ impl Agent for HeartbeatAgent {
         )]).boxed()
     }
 
-    fn subscriptions(&self) -> Vec<String> { vec![] }
+    fn subscriptions(&self) -> Vec<String> {
+        vec![]
+    }
 
     fn publications(&self) -> Vec<String> {
         vec!["heartbeat.pulse".to_string()]
     }
 
-    fn tick_interval_secs(&self) -> u64 { 300 }
+    fn tick_interval_secs(&self) -> u64 {
+        300
+    }
 
     fn on_tick(&self, energy: &AgentEnergySnapshot) -> BoxFuture<'_, Vec<SignalEvent>> {
         let agent_id = self.id.clone();

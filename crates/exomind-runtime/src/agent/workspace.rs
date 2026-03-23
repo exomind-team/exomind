@@ -253,8 +253,7 @@ impl AgentWorkspace {
 
     pub fn load_state(&self) -> io::Result<serde_json::Value> {
         let content = fs::read_to_string(self.root.join("agent.state.json"))?;
-        serde_json::from_str(&content)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     pub fn save_state(&self, state: &serde_json::Value) -> io::Result<()> {
@@ -317,8 +316,7 @@ mod tests {
     fn knowledge_crud() {
         let (_tmp, ws) = temp_workspace("alpha");
 
-        ws.write_knowledge("diary.md", "Day 1: I exist.")
-            .unwrap();
+        ws.write_knowledge("diary.md", "Day 1: I exist.").unwrap();
         assert_eq!(ws.read_knowledge("diary.md").unwrap(), "Day 1: I exist.");
         assert_eq!(ws.list_knowledge().unwrap(), vec!["diary.md"]);
 

@@ -89,7 +89,8 @@ pub fn router() -> Router<AppState> {
 fn get_life_agent(
     state: &AppState,
     agent_id: &str,
-) -> Result<std::sync::Arc<crate::agent::life::CognitiveLifeAgent>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<std::sync::Arc<crate::agent::life::CognitiveLifeAgent>, (StatusCode, Json<ErrorResponse>)>
+{
     state.life_agents.get(agent_id).cloned().ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
@@ -139,7 +140,9 @@ async fn list_knowledge(
     // Build file info with sizes
     let mut files = Vec::with_capacity(filenames.len());
     for name in filenames {
-        let size_bytes = ws.knowledge_dir().join(&name)
+        let size_bytes = ws
+            .knowledge_dir()
+            .join(&name)
             .metadata()
             .map(|m| m.len())
             .unwrap_or(0);

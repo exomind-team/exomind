@@ -89,17 +89,17 @@ impl CodexAgent {
         name: Option<String>,
         description: Option<String>,
     ) -> Self {
-        Self::with_metadata_and_command(id.into(), name, description, resolve_codex_command(), vec![])
+        Self::with_metadata_and_command(
+            id.into(),
+            name,
+            description,
+            resolve_codex_command(),
+            vec![],
+        )
     }
 
     pub fn with_command_and_args(command: impl Into<String>, base_args: Vec<String>) -> Self {
-        Self::with_metadata_and_command(
-            "codex".to_string(),
-            None,
-            None,
-            command.into(),
-            base_args,
-        )
+        Self::with_metadata_and_command("codex".to_string(), None, None, command.into(), base_args)
     }
 
     fn with_metadata_and_command(

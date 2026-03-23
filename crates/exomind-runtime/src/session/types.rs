@@ -24,7 +24,11 @@ impl SessionStatus {
             ],
             SessionStatus::WaitingInput => &[SessionStatus::Running, SessionStatus::Paused],
             SessionStatus::Completed => &[SessionStatus::Archived],
-            SessionStatus::Error => &[SessionStatus::Running, SessionStatus::Paused, SessionStatus::Archived],
+            SessionStatus::Error => &[
+                SessionStatus::Running,
+                SessionStatus::Paused,
+                SessionStatus::Archived,
+            ],
             SessionStatus::Paused => &[SessionStatus::Running, SessionStatus::Archived],
             SessionStatus::Archived => &[],
         }
@@ -125,12 +129,8 @@ impl WorkContext {
     pub fn merge_patch(&self, patch: WorkContextPatch) -> Self {
         Self {
             git_branch: patch.git_branch.or_else(|| self.git_branch.clone()),
-            worktree_path: patch
-                .worktree_path
-                .or_else(|| self.worktree_path.clone()),
-            issue_refs: patch
-                .issue_refs
-                .unwrap_or_else(|| self.issue_refs.clone()),
+            worktree_path: patch.worktree_path.or_else(|| self.worktree_path.clone()),
+            issue_refs: patch.issue_refs.unwrap_or_else(|| self.issue_refs.clone()),
             pr_ref: patch.pr_ref.or_else(|| self.pr_ref.clone()),
             work_dir: patch.work_dir.or_else(|| self.work_dir.clone()),
             labels: patch.labels.unwrap_or_else(|| self.labels.clone()),

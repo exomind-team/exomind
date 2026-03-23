@@ -24,7 +24,8 @@ fn reply_for(prompt: &str, thread_id: &str) -> String {
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
-    let thread_id = parse_resume_thread_id(&args).unwrap_or_else(|| "fake-codex-thread-1".to_string());
+    let thread_id =
+        parse_resume_thread_id(&args).unwrap_or_else(|| "fake-codex-thread-1".to_string());
 
     let mut input = String::new();
     let _ = io::stdin().read_to_string(&mut input);

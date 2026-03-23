@@ -7,13 +7,13 @@ use futures_util::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::AppState;
 use crate::session::{
-    AgentSession, CreateSessionInput, Participant, QuickActionResponse,
-    SendMessageInput, SessionMessage, SessionStatus, UpdateSessionInput,
+    AgentSession, CreateSessionInput, Participant, QuickActionResponse, SendMessageInput,
+    SessionMessage, SessionStatus, UpdateSessionInput,
 };
 
 // ── Query types ─────────────────────────────────────────────────
@@ -43,7 +43,10 @@ pub enum SessionEvent {
 
 /// Broadcast channel for session SSE events.
 /// Capacity 256 should be enough — events are small and infrequent.
-pub fn session_event_channel() -> (broadcast::Sender<SessionEvent>, broadcast::Receiver<SessionEvent>) {
+pub fn session_event_channel() -> (
+    broadcast::Sender<SessionEvent>,
+    broadcast::Receiver<SessionEvent>,
+) {
     broadcast::channel(256)
 }
 
@@ -89,10 +92,7 @@ fn fill_source_host_id(mut session: AgentSession, host_id: &str) -> AgentSession
 }
 
 #[cfg(not(target_os = "android"))]
-fn map_pty_delivery_error(
-    pty_id: &str,
-    error: crate::pty::PtyError,
-) -> (StatusCode, String) {
+fn map_pty_delivery_error(pty_id: &str, error: crate::pty::PtyError) -> (StatusCode, String) {
     let status = match error {
         crate::pty::PtyError::NotFound { .. } | crate::pty::PtyError::IoError(_) => {
             StatusCode::CONFLICT
@@ -147,16 +147,13 @@ async fn create_session(
     if input.source_host_id.is_none() {
         input.source_host_id = Some(state.host_id.clone());
     }
-    let session = state
-        .session_store
-        .create(input)
-        .map_err(|e| {
-            let status = match e {
-                crate::session::SessionStoreError::AlreadyExists(_) => StatusCode::CONFLICT,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            (status, e.to_string())
-        })?;
+    let session = state.session_store.create(input).map_err(|e| {
+        let status = match e {
+            crate::session::SessionStoreError::AlreadyExists(_) => StatusCode::CONFLICT,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        (status, e.to_string())
+    })?;
     let session = fill_source_host_id(session, &state.host_id);
 
     // Broadcast creation event
@@ -170,8 +167,12 @@ async fn list_sessions(
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<AgentSession>>, (StatusCode, String)> {
     let sessions = if let Some(status_str) = query.status {
-        let status = SessionStatus::from_str(&status_str)
-            .ok_or_else(|| (StatusCode::BAD_REQUEST, format!("invalid status: {status_str}")))?;
+        let status = SessionStatus::from_str(&status_str).ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("invalid status: {status_str}"),
+            )
+        })?;
         state
             .session_store
             .list_by_status(&status)
@@ -209,19 +210,16 @@ async fn update_session(
     Path(id): Path<String>,
     Json(input): Json<UpdateSessionInput>,
 ) -> Result<Json<AgentSession>, (StatusCode, String)> {
-    let session = state
-        .session_store
-        .update(&id, input)
-        .map_err(|e| {
-            let status = if e.to_string().contains("not found") {
-                StatusCode::NOT_FOUND
-            } else if e.to_string().contains("invalid transition") {
-                StatusCode::CONFLICT
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status, e.to_string())
-        })?;
+    let session = state.session_store.update(&id, input).map_err(|e| {
+        let status = if e.to_string().contains("not found") {
+            StatusCode::NOT_FOUND
+        } else if e.to_string().contains("invalid transition") {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        (status, e.to_string())
+    })?;
     let session = fill_source_host_id(session, &state.host_id);
 
     // Broadcast update event
@@ -260,19 +258,18 @@ async fn session_stream(
             rx
         });
 
-    let stream = BroadcastStream::new(rx)
-        .filter_map(|result| match result {
-            Ok(event) => {
-                let json = serde_json::to_string(&event).ok()?;
-                let event_type = match &event {
-                    SessionEvent::Created { .. } => "session.created",
-                    SessionEvent::Updated { .. } => "session.updated",
-                    SessionEvent::Deleted { .. } => "session.deleted",
-                };
-                Some(Ok(Event::default().event(event_type).data(json)))
-            }
-            Err(_) => None,
-        });
+    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok(event) => {
+            let json = serde_json::to_string(&event).ok()?;
+            let event_type = match &event {
+                SessionEvent::Created { .. } => "session.created",
+                SessionEvent::Updated { .. } => "session.updated",
+                SessionEvent::Deleted { .. } => "session.deleted",
+            };
+            Some(Ok(Event::default().event(event_type).data(json)))
+        }
+        Err(_) => None,
+    });
 
     Sse::new(stream)
 }
@@ -297,13 +294,19 @@ async fn submit_quick_action(
     if session.status != SessionStatus::WaitingInput {
         return Err((
             StatusCode::CONFLICT,
-            format!("session is not waiting for input (current status: {})", session.status.as_str()),
+            format!(
+                "session is not waiting for input (current status: {})",
+                session.status.as_str()
+            ),
         ));
     }
 
     // Validate action_id exists (if quick_actions are defined)
     if !session.quick_actions.is_empty() {
-        let action_exists = session.quick_actions.iter().any(|a| a.id == response.action_id);
+        let action_exists = session
+            .quick_actions
+            .iter()
+            .any(|a| a.id == response.action_id);
         if !action_exists {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -344,19 +347,16 @@ async fn mark_waiting(
         ..Default::default()
     };
 
-    let updated = state
-        .session_store
-        .update(&id, update)
-        .map_err(|e| {
-            let status = if e.to_string().contains("not found") {
-                StatusCode::NOT_FOUND
-            } else if e.to_string().contains("invalid transition") {
-                StatusCode::CONFLICT
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status, e.to_string())
-        })?;
+    let updated = state.session_store.update(&id, update).map_err(|e| {
+        let status = if e.to_string().contains("not found") {
+            StatusCode::NOT_FOUND
+        } else if e.to_string().contains("invalid transition") {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        (status, e.to_string())
+    })?;
     let updated = fill_source_host_id(updated, &state.host_id);
 
     // Broadcast update event
@@ -434,7 +434,9 @@ pub fn router() -> Router<AppState> {
         .route("/sessions", post(create_session).get(list_sessions))
         .route(
             "/sessions/{id}",
-            get(get_session).patch(update_session).delete(delete_session),
+            get(get_session)
+                .patch(update_session)
+                .delete(delete_session),
         )
         .route("/sessions/{id}/quick-action", post(submit_quick_action))
         .route("/sessions/{id}/mark-waiting", post(mark_waiting))
@@ -651,7 +653,10 @@ mod tests {
         let _ = state.pty_manager.stop(&pty.id).await;
         let _ = state.pty_manager.remove(&pty.id).await;
 
-        assert!(bridged, "session message should be forwarded into PTY stdin");
+        assert!(
+            bridged,
+            "session message should be forwarded into PTY stdin"
+        );
     }
 
     #[tokio::test]

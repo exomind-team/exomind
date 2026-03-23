@@ -165,8 +165,10 @@ impl CognitionEngine for LlmCognition {
                 }
                 "conserving" => {
                     // Respond to incoming signals but don't write knowledge.
-                    output.action_description =
-                        format!("Tick {tick}: Conserving — responding to {} signal(s).", ctx.signals.len());
+                    output.action_description = format!(
+                        "Tick {tick}: Conserving — responding to {} signal(s).",
+                        ctx.signals.len()
+                    );
                     if !ctx.signals.is_empty() {
                         output.signals_to_emit.push(Self::build_response_signal(
                             &self.agent_id,

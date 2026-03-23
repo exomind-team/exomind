@@ -19,7 +19,9 @@ async fn codex_exec_streams_output_and_reuses_thread_id() {
         .await;
 
     assert!(
-        first_chunks.iter().any(|chunk| chunk.content.contains("codex:hello my name is xiaoming")),
+        first_chunks
+            .iter()
+            .any(|chunk| chunk.content.contains("codex:hello my name is xiaoming")),
         "first_chunks={first_chunks:?}"
     );
 

@@ -1,9 +1,9 @@
+use async_stream::stream;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use async_stream::stream;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -12,8 +12,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::agent::{
+    self, Agent, AgentSummary, ChatChunk, ChatRequest, RuntimeAgentEvent, SessionInfo,
+};
 use crate::routes::sessions::{broadcast_session_created, broadcast_session_updated};
-use crate::agent::{self, Agent, AgentSummary, ChatChunk, ChatRequest, RuntimeAgentEvent, SessionInfo};
 use crate::session::{CreateSessionInput, InteractionMode, UpdateSessionInput, WorkContext};
 
 #[derive(Debug, Deserialize)]
@@ -231,7 +233,10 @@ fn create_echo_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, Stat
     )))
 }
 
-fn create_claude_agent(payload: CreateAgentPayload, dynamic_id: bool) -> Result<Arc<dyn Agent>, StatusCode> {
+fn create_claude_agent(
+    payload: CreateAgentPayload,
+    dynamic_id: bool,
+) -> Result<Arc<dyn Agent>, StatusCode> {
     let requested_id = normalize_optional_text(payload.id);
     let id = if dynamic_id {
         requested_id.unwrap_or_else(|| generate_runtime_agent_id("claude"))
@@ -252,7 +257,10 @@ fn create_claude_agent(payload: CreateAgentPayload, dynamic_id: bool) -> Result<
     )))
 }
 
-fn create_codex_agent(payload: CreateAgentPayload, dynamic_id: bool) -> Result<Arc<dyn Agent>, StatusCode> {
+fn create_codex_agent(
+    payload: CreateAgentPayload,
+    dynamic_id: bool,
+) -> Result<Arc<dyn Agent>, StatusCode> {
     let requested_id = normalize_optional_text(payload.id);
     let id = if dynamic_id {
         requested_id.unwrap_or_else(|| generate_runtime_agent_id("codex"))

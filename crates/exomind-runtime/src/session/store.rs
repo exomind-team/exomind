@@ -114,11 +114,15 @@ impl SessionStore {
         }
     }
 
-    pub fn list_by_status(&self, status: &SessionStatus) -> Result<Vec<AgentSession>, SessionStoreError> {
+    pub fn list_by_status(
+        &self,
+        status: &SessionStatus,
+    ) -> Result<Vec<AgentSession>, SessionStoreError> {
         match &self.backend {
             SessionStoreBackend::Sqlite(store) => store.list_by_status(status),
             SessionStoreBackend::Memory(_) => {
-                let sessions = self.list()?
+                let sessions = self
+                    .list()?
                     .into_iter()
                     .filter(|s| &s.status == status)
                     .collect();
@@ -127,56 +131,58 @@ impl SessionStore {
         }
     }
 
-    pub fn update(&self, id: &str, input: UpdateSessionInput) -> Result<AgentSession, SessionStoreError> {
+    pub fn update(
+        &self,
+        id: &str,
+        input: UpdateSessionInput,
+    ) -> Result<AgentSession, SessionStoreError> {
         match &self.backend {
             SessionStoreBackend::Sqlite(store) => store.update(id, input),
-            SessionStoreBackend::Memory(_) => {
-                self.with_memory_mut(|sessions| {
-                    let session = sessions
-                        .get_mut(id)
-                        .ok_or_else(|| SessionStoreError::NotFound(id.to_string()))?;
+            SessionStoreBackend::Memory(_) => self.with_memory_mut(|sessions| {
+                let session = sessions
+                    .get_mut(id)
+                    .ok_or_else(|| SessionStoreError::NotFound(id.to_string()))?;
 
-                    if let Some(role) = input.role {
-                        session.role = role;
+                if let Some(role) = input.role {
+                    session.role = role;
+                }
+                if input.agent_id.is_some() {
+                    session.agent_id = input.agent_id;
+                }
+                if input.source_host_id.is_some() {
+                    session.source_host_id = input.source_host_id;
+                }
+                if let Some(summary) = input.summary {
+                    session.summary = summary;
+                }
+                if let Some(status) = input.status {
+                    if !session.status.can_transition_to(&status) {
+                        return Err(SessionStoreError::InvalidTransition {
+                            from: session.status.clone(),
+                            to: status,
+                        });
                     }
-                    if input.agent_id.is_some() {
-                        session.agent_id = input.agent_id;
-                    }
-                    if input.source_host_id.is_some() {
-                        session.source_host_id = input.source_host_id;
-                    }
-                    if let Some(summary) = input.summary {
-                        session.summary = summary;
-                    }
-                    if let Some(status) = input.status {
-                        if !session.status.can_transition_to(&status) {
-                            return Err(SessionStoreError::InvalidTransition {
-                                from: session.status.clone(),
-                                to: status,
-                            });
-                        }
-                        session.status = status;
-                    }
-                    if let Some(context) = input.context {
-                        session.context = session.context.merge_patch(context);
-                    }
-                    if let Some(preview) = input.last_output_preview {
-                        session.last_output_preview = Some(preview);
-                    }
-                    if let Some(error_message) = input.error_message {
-                        session.error_message = Some(error_message);
-                    }
-                    if let Some(inner_session_id) = input.inner_session_id {
-                        session.inner_session_id = Some(inner_session_id);
-                    }
-                    if let Some(quick_actions) = input.quick_actions {
-                        session.quick_actions = quick_actions;
-                    }
+                    session.status = status;
+                }
+                if let Some(context) = input.context {
+                    session.context = session.context.merge_patch(context);
+                }
+                if let Some(preview) = input.last_output_preview {
+                    session.last_output_preview = Some(preview);
+                }
+                if let Some(error_message) = input.error_message {
+                    session.error_message = Some(error_message);
+                }
+                if let Some(inner_session_id) = input.inner_session_id {
+                    session.inner_session_id = Some(inner_session_id);
+                }
+                if let Some(quick_actions) = input.quick_actions {
+                    session.quick_actions = quick_actions;
+                }
 
-                    session.last_active_at = chrono::Utc::now().to_rfc3339();
-                    Ok(session.clone())
-                })
-            }
+                session.last_active_at = chrono::Utc::now().to_rfc3339();
+                Ok(session.clone())
+            }),
         }
     }
 
@@ -209,7 +215,9 @@ impl SessionStore {
                 let mut guard = map.write().unwrap();
                 f(&mut guard)
             }
-            SessionStoreBackend::Sqlite(_) => unreachable!("with_memory_mut called on sqlite backend"),
+            SessionStoreBackend::Sqlite(_) => {
+                unreachable!("with_memory_mut called on sqlite backend")
+            }
         }
     }
 }
@@ -316,7 +324,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(matches!(result, Err(SessionStoreError::InvalidTransition { .. })));
+        assert!(matches!(
+            result,
+            Err(SessionStoreError::InvalidTransition { .. })
+        ));
     }
 
     #[test]
@@ -338,7 +349,10 @@ mod tests {
         drop(store);
 
         let reopened = SessionStore::with_sqlite_path(&sqlite_path).unwrap();
-        let loaded = reopened.get(&created.id).unwrap().expect("session should persist");
+        let loaded = reopened
+            .get(&created.id)
+            .unwrap()
+            .expect("session should persist");
         assert_eq!(loaded.role, "Persist me");
         assert_eq!(loaded.agent_kind, "claude");
         assert_eq!(loaded.context.git_branch.as_deref(), Some("dev"));
@@ -524,23 +538,43 @@ mod tests {
         drop(store);
 
         let reopened = SessionStore::with_sqlite_path(&sqlite_path).unwrap();
-        let loaded = reopened.get(&created.id).unwrap().expect("session should persist");
+        let loaded = reopened
+            .get(&created.id)
+            .unwrap()
+            .expect("session should persist");
         assert_eq!(loaded.agent_id.as_deref(), Some("claude-runtime-1"));
         assert_eq!(loaded.source_host_id.as_deref(), Some("desktop-host"));
 
         // Test updating these fields
-        let updated = reopened.update(&created.id, UpdateSessionInput {
-            agent_id: Some("claude-runtime-updated".to_string()),
-            source_host_id: Some("server-host-updated".to_string()),
-            ..Default::default()
-        }).unwrap();
+        let updated = reopened
+            .update(
+                &created.id,
+                UpdateSessionInput {
+                    agent_id: Some("claude-runtime-updated".to_string()),
+                    source_host_id: Some("server-host-updated".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         assert_eq!(updated.agent_id.as_deref(), Some("claude-runtime-updated"));
-        assert_eq!(updated.source_host_id.as_deref(), Some("server-host-updated"));
+        assert_eq!(
+            updated.source_host_id.as_deref(),
+            Some("server-host-updated")
+        );
 
         drop(reopened);
         let reopened_again = SessionStore::with_sqlite_path(&sqlite_path).unwrap();
-        let loaded_again = reopened_again.get(&created.id).unwrap().expect("session should persist after update");
-        assert_eq!(loaded_again.agent_id.as_deref(), Some("claude-runtime-updated"));
-        assert_eq!(loaded_again.source_host_id.as_deref(), Some("server-host-updated"));
+        let loaded_again = reopened_again
+            .get(&created.id)
+            .unwrap()
+            .expect("session should persist after update");
+        assert_eq!(
+            loaded_again.agent_id.as_deref(),
+            Some("claude-runtime-updated")
+        );
+        assert_eq!(
+            loaded_again.source_host_id.as_deref(),
+            Some("server-host-updated")
+        );
     }
 }
