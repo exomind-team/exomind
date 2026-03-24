@@ -18,6 +18,9 @@ Local-first · Event-driven · AI-powered · Cross-platform
 
 </div>
 
+> [!WARNING]
+> **Pre-1.0 — Expect breaking changes.** ExoMind is under active development with daily updates. APIs, data formats, and features may change without notice. We welcome contributors — come build with us!
+
 ---
 
 ## What is ExoMind
