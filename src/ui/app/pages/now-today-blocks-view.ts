@@ -1,4 +1,4 @@
-import { resolveActiveBlockTaskIds, type TimeBlock } from '@/lib/types/event';
+import { resolveTimeBlockRelatedTaskIds, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
 export interface NowTodayLinkedTask {
@@ -39,7 +39,7 @@ function formatClock(timestamp: number): string {
 }
 
 function buildLinkedTasks(block: TimeBlock, tasksById: Map<string, TaskNode>): NowTodayLinkedTask[] {
-  return resolveActiveBlockTaskIds(block).map((taskId) => ({
+  return resolveTimeBlockRelatedTaskIds(block).map((taskId) => ({
     taskId,
     title: tasksById.get(taskId)?.title ?? taskId,
     outcome: block.taskStatusOutcomes?.[taskId],

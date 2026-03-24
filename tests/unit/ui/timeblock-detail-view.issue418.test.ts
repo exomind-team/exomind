@@ -142,4 +142,23 @@ describe('buildTimeBlockDetailView（时间块详情视图模型）', () => {
       { taskId: 'task-2', title: '任务二', outcome: 'continue' },
     ])
   })
+
+  it('keeps historically linked tasks even if taskIds snapshot no longer contains them（历史关联任务不应被结束快照裁掉）', async () => {
+    const module = await import('@/ui/app/pages/timeblock-detail-view')
+    const view = module.buildTimeBlockDetailView({
+      block: {
+        ...createBlock(),
+        taskIds: ['task-1'],
+      },
+      tasksById: new Map([
+        ['task-1', createTask({ id: 'task-1', title: '任务一', status: 'completed' })],
+        ['task-2', createTask({ id: 'task-2', title: '任务二', status: 'in_progress' })],
+      ]),
+    })
+
+    expect(view.linkedTasks).toEqual([
+      { taskId: 'task-1', title: '任务一', outcome: 'completed' },
+      { taskId: 'task-2', title: '任务二', outcome: 'continue' },
+    ])
+  })
 })

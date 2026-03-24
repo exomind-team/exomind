@@ -178,4 +178,50 @@ describe('TimeBlockDetailPage issue #583 domain routing', () => {
     expect(screen.getByText('已完成主链路验证')).toBeInTheDocument()
     expect(screen.queryByText('事件记录')).toBeNull()
   })
+
+  it('loads historically related tasks from association log instead of only the final taskIds snapshot', async () => {
+    loadTimeBlocksMock.mockResolvedValue([
+      makeBlock({
+        taskIds: ['task-1'],
+        taskAssociationLog: [
+          {
+            blockId: 'block-1',
+            taskId: 'task-1',
+            action: 'associated',
+            timestamp: new Date('2026-03-19T09:00:00+08:00').getTime(),
+            source: 'block_start',
+          },
+          {
+            blockId: 'block-1',
+            taskId: 'task-2',
+            action: 'associated',
+            timestamp: new Date('2026-03-19T09:10:00+08:00').getTime(),
+            source: 'manual',
+          },
+          {
+            blockId: 'block-1',
+            taskId: 'task-2',
+            action: 'disassociated',
+            timestamp: new Date('2026-03-19T09:20:00+08:00').getTime(),
+            source: 'manual',
+          },
+        ],
+      }),
+    ])
+    getTaskMock.mockImplementation(async (id: string) => {
+      if (id === 'task-1') {
+        return { id: 'task-1', title: '主任务', status: 'completed' }
+      }
+      if (id === 'task-2') {
+        return { id: 'task-2', title: '临时任务', status: 'pending' }
+      }
+      return null
+    })
+    window.history.replaceState({}, '', '/tasks/block/block-1')
+
+    render(<TimeBlockDetailPage />)
+
+    expect(await screen.findByRole('link', { name: '打开任务详情：主任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: '打开任务详情：临时任务' })).toBeInTheDocument()
+  })
 })

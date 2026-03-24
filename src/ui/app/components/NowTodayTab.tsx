@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
-import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, resolveTimeBlockRelatedTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 import { buildNowTodayBlocksView } from '@/ui/app/pages/now-today-blocks-view';
 
@@ -55,7 +55,7 @@ function buildTimeBlockSignature(block: TimeBlock): string {
     block.startTime,
     block.endTime,
     block.note ?? '',
-    resolveActiveBlockTaskIds(block).join(','),
+    resolveTimeBlockRelatedTaskIds(block).join(','),
     JSON.stringify(block.taskStatusOutcomes ?? {}),
     JSON.stringify(block.taskAssociationLog ?? []),
   ].join('|');
@@ -68,7 +68,7 @@ function buildTimeBlocksSignature(blocks: TimeBlock[]): string {
 function collectRelevantTaskIds(blocks: TimeBlock[], activeBlock: ActiveBlockData | null): string[] {
   const ids = new Set<string>();
   for (const block of blocks) {
-    for (const taskId of resolveActiveBlockTaskIds(block)) {
+    for (const taskId of resolveTimeBlockRelatedTaskIds(block)) {
       ids.add(taskId);
     }
   }

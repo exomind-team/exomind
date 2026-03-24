@@ -1,4 +1,4 @@
-import { resolveActiveBlockTaskIds, type TimeBlock } from '@/lib/types/event';
+import { resolveTimeBlockRelatedTaskIds, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
 export interface TimeBlockDetailSummary {
@@ -80,7 +80,7 @@ function formatDuration(startTime: number, endTime: number): string {
 
 export function buildTimeBlockDetailView(input: BuildTimeBlockDetailViewInput): TimeBlockDetailView {
   const { block, tasksById } = input;
-  const taskIds = resolveActiveBlockTaskIds(block);
+  const taskIds = resolveTimeBlockRelatedTaskIds(block);
 
   return {
     summary: {

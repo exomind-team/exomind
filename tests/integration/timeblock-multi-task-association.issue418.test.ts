@@ -166,7 +166,7 @@ describe('TimeBlock multi-task association integration（#418 多任务时间块
     vi.unstubAllGlobals();
   });
 
-  it('keeps only final associated tasks in completed block and task timeBlockIds（只为结束时仍关联的任务回写）', async () => {
+  it('keeps final associated tasks in completed block snapshot but writes timeBlockIds for all historically related tasks', async () => {
     const taskPort = createMemoryTaskPort([
       makeTask({ id: 'task-1', title: '任务一', status: 'pending' }),
       makeTask({ id: 'task-2', title: '任务二', status: 'suspended' }),
@@ -222,7 +222,7 @@ describe('TimeBlock multi-task association integration（#418 多任务时间块
 
     expect((await taskService.getTask('task-1'))?.timeBlockIds).toEqual([block!.startId]);
     expect((await taskService.getTask('task-3'))?.timeBlockIds).toEqual([block!.startId]);
-    expect((await taskService.getTask('task-2'))?.timeBlockIds ?? []).toEqual([]);
+    expect((await taskService.getTask('task-2'))?.timeBlockIds).toEqual([block!.startId]);
     expect((await taskService.getTask('task-1'))?.status).toBe('completed');
     expect((await taskService.getTask('task-3'))?.status).toBe('suspended');
     expect((await taskService.getTask('task-2'))?.status).toBe('in_progress');

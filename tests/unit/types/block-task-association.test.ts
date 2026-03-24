@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  calculateTaskAssociationDurationMs,
   normalizeActiveBlockTaskIds,
   normalizeTimeBlockTaskIds,
   resolveActiveBlockTaskIds,
+  resolveTimeBlockRelatedTaskIds,
   type BlockTaskAssociationEvent,
 } from '@/lib/types/event'
 
@@ -74,6 +76,47 @@ describe('resolveActiveBlockTaskIds', () => {
 
   it('falls back to legacy taskId when no array or log exists', () => {
     expect(resolveActiveBlockTaskIds({ taskId: 'task-legacy' })).toEqual(['task-legacy'])
+  })
+})
+
+describe('resolveTimeBlockRelatedTaskIds', () => {
+  it('keeps tasks that were ever associated even if later disassociated', () => {
+    expect(resolveTimeBlockRelatedTaskIds({
+      taskIds: ['task-1'],
+      taskAssociationLog: [
+        { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 1, source: 'block_start' },
+        { blockId: 'block-1', taskId: 'task-2', action: 'associated', timestamp: 2, source: 'manual' },
+        { blockId: 'block-1', taskId: 'task-2', action: 'disassociated', timestamp: 3, source: 'manual' },
+      ],
+    })).toEqual(['task-1', 'task-2'])
+  })
+
+  it('falls back to taskIds snapshot when no association log exists', () => {
+    expect(resolveTimeBlockRelatedTaskIds({ taskIds: ['task-1', 'task-2'] })).toEqual(['task-1', 'task-2'])
+  })
+})
+
+describe('calculateTaskAssociationDurationMs', () => {
+  it('returns only the intervals where the task was actually associated', () => {
+    expect(calculateTaskAssociationDurationMs({
+      startTime: 0,
+      endTime: 60 * 60_000,
+      taskAssociationLog: [
+        { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 0, source: 'block_start' },
+        { blockId: 'block-1', taskId: 'task-1', action: 'disassociated', timestamp: 10 * 60_000, source: 'manual' },
+        { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 25 * 60_000, source: 'manual' },
+        { blockId: 'block-1', taskId: 'task-1', action: 'disassociated', timestamp: 40 * 60_000, source: 'manual' },
+      ],
+    }, 'task-1')).toBe(25 * 60_000)
+  })
+
+  it('falls back to the whole block duration when only legacy related-task data exists', () => {
+    expect(calculateTaskAssociationDurationMs({
+      startTime: 0,
+      endTime: 30 * 60_000,
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    }, 'task-1')).toBe(30 * 60_000)
   })
 })
 

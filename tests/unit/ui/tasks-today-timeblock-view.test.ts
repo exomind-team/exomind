@@ -28,6 +28,9 @@ function makeBlock(overrides: Partial<TimeBlock> & { id: string; name: string; s
     tags: overrides.tags ?? new Set(['block_feedback']),
     startTime: overrides.startTime,
     endTime: overrides.endTime,
+    taskIds: overrides.taskIds,
+    taskStatusOutcomes: overrides.taskStatusOutcomes,
+    taskAssociationLog: overrides.taskAssociationLog,
   };
 }
 
@@ -130,6 +133,51 @@ describe('buildTasksTodayViewModel（任务页 today 时间块视图模型）', 
       timeLabel: '09:00 - 10:30',
       note: '顺利完成，比预期快 30 分钟',
       meta: '预计 2h',
+    });
+  });
+
+  it('treats partially-associated tasks as related tasks for completed blocks（已结束时间块应保留中途关联过的任务）', () => {
+    const model = buildTasksTodayViewModel({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          title: '主任务',
+          status: 'completed',
+          estimatedMinutes: 120,
+        }),
+        makeTask({
+          id: 'task-2',
+          title: '临时插入任务',
+          status: 'pending',
+          estimatedMinutes: 30,
+        }),
+      ],
+      blocks: [
+        makeBlock({
+          id: 'block-history',
+          name: '多任务专注块',
+          startTime: morning,
+          endTime: morning + 90 * 60_000,
+          taskIds: ['task-1'],
+          taskAssociationLog: [
+            { blockId: 'block-history', taskId: 'task-1', action: 'associated', timestamp: morning, source: 'block_start' },
+            { blockId: 'block-history', taskId: 'task-2', action: 'associated', timestamp: morning + 10 * 60_000, source: 'manual' },
+            { blockId: 'block-history', taskId: 'task-2', action: 'disassociated', timestamp: morning + 30 * 60_000, source: 'manual' },
+          ],
+        }),
+      ],
+      now: today,
+      activeBlock: null,
+    });
+
+    expect(model.timelineSections[0].items[0]).toMatchObject({
+      taskIds: ['task-1', 'task-2'],
+      linkedTasks: [
+        { taskId: 'task-1', title: '主任务' },
+        { taskId: 'task-2', title: '临时插入任务' },
+      ],
+      title: '主任务 / 临时插入任务',
+      meta: '2 个关联任务',
     });
   });
 

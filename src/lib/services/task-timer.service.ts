@@ -5,13 +5,15 @@
  * 架构不变量：任务必须通过时间块推进
  *
  * 职责：
- * - 从任务快速启动时间块（自动关联 blockId 到 task.timeBlockIds）
- * - 时间块结束时记录关联
+ * - 从任务快速启动时间块（建立任务 ↔ 时间块关联）
+ * - 时间块结束时把该时间块写回所有历史上关联过它的任务
  * - 关联查询与动态时长计算（spentMinutes 不持久化）
  */
 
 import {
+  calculateTaskAssociationDurationMs,
   resolveActiveBlockTaskIds,
+  resolveTimeBlockRelatedTaskIds,
   type ActiveBlockData,
   type BlockTaskAssociationEvent,
   type TimerConfig,
@@ -37,13 +39,13 @@ export interface TaskTimerService {
   /** 时间块结束时回调：记录 blockId 关联（spentMinutes 动态计算，不持久化） */
   onBlockEndForTask(taskId: string, blockId: string): Promise<void>
 
-  /** 时间块结束时回调：只为结束时仍关联的任务记录 blockId */
+  /** 时间块结束时回调：为时间块历史上关联过的所有任务记录 blockId */
   onBlockEndForTasks(taskIds: string[], blockId: string): Promise<void>
 
   /** 获取任务关联的所有时间块 ID */
   getBlockIdsForTask(taskId: string): Promise<string[]>
 
-  /** 计算任务已花费总时间（从关联时间块累计） */
+  /** 计算任务已花费总时间（按任务在各关联时间块中的实际关联时长累计） */
   calculateSpentMinutes(taskId: string): Promise<number>
 
   /** 计算剩余预期分钟数（至少 1 分钟） */
@@ -173,7 +175,13 @@ export class TaskTimerServiceImpl implements TaskTimerService {
 
   async onBlockEndForTasks(taskIds: string[], blockId: string): Promise<void> {
     const normalizedTaskIds = Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)))
-    for (const taskId of normalizedTaskIds) {
+    const allBlocks = await this.tbSvc.loadTimeBlocks()
+    const completedBlock = allBlocks.find((block) => block.id === blockId || block.startId === blockId) ?? null
+    const relatedTaskIds = completedBlock
+      ? resolveTimeBlockRelatedTaskIds(completedBlock)
+      : normalizedTaskIds
+
+    for (const taskId of relatedTaskIds) {
       const task = await this.taskSvc.getTask(taskId)
       if (!task) continue
 
@@ -203,12 +211,11 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     const blockIds = task.timeBlockIds ?? []
     if (blockIds.length === 0) return 0
 
-    // 从已完成时间块列表中查找匹配的块
     const allBlocks = await this.tbSvc.loadTimeBlocks()
     let totalMs = 0
     for (const block of allBlocks) {
       if (blockIds.includes(block.startId)) {
-        totalMs += Math.max(0, block.endTime - block.startTime)
+        totalMs += calculateTaskAssociationDurationMs(block, taskId)
       }
     }
 

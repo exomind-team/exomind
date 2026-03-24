@@ -23,7 +23,7 @@ export interface TaskNode {
   dependsOn: Dependency[]         // 依赖关系列表
   tags: string[]
   estimatedMinutes?: number
-  timeBlockIds?: string[]         // Phase4: 关联时间块 ID 列表（1:N）
+  timeBlockIds?: string[]         // Phase4: 历史关联时间块 ID 列表（1:N，曾在任意时段关联过即成立）
   createdAt: number               // UTC timestamp，毫秒
   updatedAt: number
   completedAt?: number

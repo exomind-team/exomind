@@ -1,4 +1,4 @@
-import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, resolveTimeBlockRelatedTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
 export type TodayTimelineBucketId = 'morning' | 'noon' | 'afternoon' | 'night';
@@ -143,9 +143,9 @@ function buildTaskLookup(tasks: TaskNode[]): Map<string, string[]> {
 }
 
 function resolveBlockTaskIds(block: TimeBlock, taskLookup: Map<string, string[]>): string[] {
-  const explicitTaskIds = normalizeTaskIds(block.taskIds);
-  if (explicitTaskIds.length > 0) {
-    return explicitTaskIds;
+  const relatedTaskIds = resolveTimeBlockRelatedTaskIds(block);
+  if (relatedTaskIds.length > 0) {
+    return relatedTaskIds;
   }
 
   return normalizeTaskIds(taskLookup.get(block.id) ?? taskLookup.get(block.startId));

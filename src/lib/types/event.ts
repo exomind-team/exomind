@@ -92,8 +92,10 @@ export interface TimeBlockData {
   tags: string[];
   startTime: Timestamp;
   endTime: Timestamp;
+  /** 结束时仍关联的任务快照；历史全集请看 taskAssociationLog */
   taskIds?: UUID[];
   taskStatusOutcomes?: Record<string, string>;
+  /** 关联历史日志：可回放“曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
 }
 
@@ -107,8 +109,10 @@ export interface TimeBlock {
   tags: Set<Tag>;
   startTime: Timestamp;
   endTime: Timestamp;
+  /** 结束时仍关联的任务快照；历史全集请看 taskAssociationLog */
   taskIds?: UUID[];
   taskStatusOutcomes?: Record<string, string>;
+  /** 关联历史日志：可回放“曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
 }
 
@@ -153,7 +157,9 @@ export interface ActiveBlockData {
   pauseAccumulatedMs?: number;
   paused: boolean;
   pausedAt?: Timestamp;
+  /** 当前仍关联的任务快照 */
   taskIds: UUID[];
+  /** 运行期关联历史：不仅能恢复当前关联，也能保留“曾经关联过”的任务全集 */
   taskAssociationLog: BlockTaskAssociationEvent[];
   /** @deprecated Use taskIds. Kept for deserialization compat only. */
   taskId?: UUID;
@@ -177,6 +183,39 @@ function normalizeTaskIdList(taskIds: UUID[]): UUID[] {
   return Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)));
 }
 
+/**
+ * 历史语义：只要任务曾在该时间块内被关联过一次，就属于时间块的“关联任务全集”。
+ * 这组数据适用于时间块详情、历史回顾、统计等“曾经关联过哪些任务”的场景。
+ *
+ * 注意：它不同于 taskIds / 当前关联快照。一个任务即使后来被移除，
+ * 仍然应该保留在这个历史全集里，后续才能进一步计算“出现程度”。
+ */
+export function resolveEverAssociatedTaskIdsFromLog(
+  taskAssociationLog: BlockTaskAssociationEvent[] | undefined,
+): UUID[] {
+  if (!taskAssociationLog?.length) return [];
+
+  const orderedTaskIds: UUID[] = [];
+  const seenTaskIds = new Set<UUID>();
+  for (const event of taskAssociationLog) {
+    if (event.action !== 'associated') {
+      continue;
+    }
+    const normalizedTaskId = event.taskId.trim();
+    if (!normalizedTaskId || seenTaskIds.has(normalizedTaskId)) {
+      continue;
+    }
+    seenTaskIds.add(normalizedTaskId);
+    orderedTaskIds.push(normalizedTaskId);
+  }
+
+  return orderedTaskIds;
+}
+
+/**
+ * 快照语义：返回当前仍关联 / 结束时仍关联的任务集合。
+ * 这组数据适用于 active block 当前状态、结束时状态回写、运行中增删关联等场景。
+ */
 export function resolveAssociatedTaskIdsFromLog(
   taskAssociationLog: BlockTaskAssociationEvent[] | undefined,
 ): UUID[] {
@@ -200,6 +239,27 @@ export function resolveAssociatedTaskIdsFromLog(
   return orderedTaskIds.filter((taskId) => activeTaskIds.has(taskId));
 }
 
+/**
+ * 历史语义：返回时间块历史上曾关联过的所有任务。
+ *
+ * 优先使用 taskAssociationLog，因为它保留了完整的关联历史；
+ * 如果没有日志，再退回到 taskIds / legacy taskId 快照。
+ */
+export function resolveTimeBlockRelatedTaskIds(
+  block: { taskId?: UUID; taskIds?: UUID[]; taskAssociationLog?: BlockTaskAssociationEvent[] } | null | undefined,
+): UUID[] {
+  if (!block) return [];
+
+  const taskIdsFromLog = resolveEverAssociatedTaskIdsFromLog(block.taskAssociationLog);
+  if (taskIdsFromLog.length > 0) {
+    return taskIdsFromLog;
+  }
+  if (block.taskIds?.length) {
+    return normalizeTaskIdList(block.taskIds);
+  }
+  return block.taskId ? normalizeTaskIdList([block.taskId]) : [];
+}
+
 export function resolveActiveBlockTaskIds(
   block: { taskId?: UUID; taskIds?: UUID[]; taskAssociationLog?: BlockTaskAssociationEvent[] } | null | undefined,
 ): UUID[] {
@@ -212,6 +272,55 @@ export function resolveActiveBlockTaskIds(
     return taskIdsFromLog;
   }
   return block.taskId ? normalizeTaskIdList([block.taskId]) : [];
+}
+
+/**
+ * 返回某个任务在时间块中“实际处于关联状态”的时长。
+ *
+ * - 若存在 taskAssociationLog，则以关联/取消关联事件回放区间
+ * - 若不存在日志，则退回为“只要被认为相关联，就记整段时间块时长”
+ */
+export function calculateTaskAssociationDurationMs(
+  block: { startTime: number; endTime: number; taskId?: UUID; taskIds?: UUID[]; taskAssociationLog?: BlockTaskAssociationEvent[] } | null | undefined,
+  taskId: UUID,
+): number {
+  if (!block) return 0;
+
+  const normalizedTaskId = taskId.trim();
+  if (!normalizedTaskId) return 0;
+
+  const totalBlockMs = Math.max(0, block.endTime - block.startTime);
+  if (totalBlockMs === 0) return 0;
+
+  const relevantEvents = (block.taskAssociationLog ?? [])
+    .filter((event) => event.taskId.trim() === normalizedTaskId)
+    .sort((left, right) => left.timestamp - right.timestamp);
+
+  if (relevantEvents.length === 0) {
+    return resolveTimeBlockRelatedTaskIds(block).includes(normalizedTaskId) ? totalBlockMs : 0;
+  }
+
+  let activeSince: number | null = null;
+  let totalMs = 0;
+  for (const event of relevantEvents) {
+    if (event.action === 'associated') {
+      if (activeSince === null) {
+        activeSince = Math.max(block.startTime, event.timestamp);
+      }
+      continue;
+    }
+
+    if (activeSince !== null) {
+      totalMs += Math.max(0, Math.min(block.endTime, event.timestamp) - activeSince);
+      activeSince = null;
+    }
+  }
+
+  if (activeSince !== null) {
+    totalMs += Math.max(0, block.endTime - activeSince);
+  }
+
+  return Math.min(totalMs, totalBlockMs);
 }
 
 export function normalizeActiveBlockTaskIds<T extends { taskId?: UUID; taskIds?: UUID[]; taskAssociationLog?: BlockTaskAssociationEvent[] }>(

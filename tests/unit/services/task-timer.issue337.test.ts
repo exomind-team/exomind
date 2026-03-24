@@ -336,9 +336,25 @@ describe('TaskTimerService: calculateSpentMinutes', () => {
   it('calculates total from matching completed blocks', async () => {
     const now = Date.now()
     const blocks: TimeBlock[] = [
-      makeTimeBlock({ startId: 'b1', startTime: now - 60 * 60_000, endTime: now - 30 * 60_000 }), // 30 min
-      makeTimeBlock({ startId: 'b2', startTime: now - 25 * 60_000, endTime: now }),                // 25 min
-      makeTimeBlock({ startId: 'b3', startTime: now - 10 * 60_000, endTime: now }),                // 10 min (not linked)
+      makeTimeBlock({
+        startId: 'b1',
+        startTime: now - 60 * 60_000,
+        endTime: now - 30 * 60_000,
+        taskIds: ['t1'],
+        taskAssociationLog: [
+          { blockId: 'b1', taskId: 't1', action: 'associated', timestamp: now - 60 * 60_000, source: 'block_start' },
+        ],
+      }), // 30 min
+      makeTimeBlock({
+        startId: 'b2',
+        startTime: now - 25 * 60_000,
+        endTime: now,
+        taskIds: ['t1'],
+        taskAssociationLog: [
+          { blockId: 'b2', taskId: 't1', action: 'associated', timestamp: now - 25 * 60_000, source: 'block_start' },
+        ],
+      }), // 25 min
+      makeTimeBlock({ startId: 'b3', startTime: now - 10 * 60_000, endTime: now, taskIds: ['other-task'] }),        // 10 min (not linked)
     ]
     const tasks = new Map([['t1', makeTask({
       id: 't1',
@@ -500,13 +516,31 @@ describe('#418 multi-task association', () => {
     expect(emitTaskUnlinked).toHaveBeenCalledWith('task-2', 'Test Task', 'block-live', 'Test Task')
   })
 
-  it('onBlockEndForTasks only writes timeBlockIds for tasks still associated at end', async () => {
+  it('onBlockEndForTasks writes timeBlockIds for every task that was ever associated with the block', async () => {
     const tasks = new Map([
       ['task-1', makeTask({ id: 'task-1', timeBlockIds: [] })],
       ['task-2', makeTask({ id: 'task-2', timeBlockIds: [] })],
     ])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService()
+    ;(tbSvc.loadTimeBlocks as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 'block-1',
+        startId: 'block-1',
+        endId: 'block-1-end',
+        name: 'Test Block',
+        note: undefined,
+        tags: new Set(['block_feedback']),
+        startTime: 0,
+        endTime: 60_000,
+        taskIds: ['task-1'],
+        taskAssociationLog: [
+          { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 0, source: 'block_start' },
+          { blockId: 'block-1', taskId: 'task-2', action: 'associated', timestamp: 10, source: 'manual' },
+          { blockId: 'block-1', taskId: 'task-2', action: 'disassociated', timestamp: 20, source: 'manual' },
+        ],
+      },
+    ])
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
     await svc.onBlockEndForTasks(['task-1'], 'block-1')
@@ -514,7 +548,38 @@ describe('#418 multi-task association', () => {
     expect(taskSvc.updateTask).toHaveBeenCalledWith('task-1', {
       timeBlockIds: ['block-1'],
     })
-    expect(taskSvc.updateTask).not.toHaveBeenCalledWith('task-2', expect.anything())
+    expect(taskSvc.updateTask).toHaveBeenCalledWith('task-2', {
+      timeBlockIds: ['block-1'],
+    })
+  })
+
+  it('calculateSpentMinutes sums only the time slices where the task was actually associated', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', timeBlockIds: ['block-1'] })],
+    ])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    ;(tbSvc.loadTimeBlocks as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 'block-1',
+        startId: 'block-1',
+        endId: 'block-1-end',
+        name: 'Test Block',
+        note: undefined,
+        tags: new Set(['block_feedback']),
+        startTime: 0,
+        endTime: 60 * 60_000,
+        taskIds: ['task-1'],
+        taskAssociationLog: [
+          { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 0, source: 'block_start' },
+          { blockId: 'block-1', taskId: 'task-1', action: 'disassociated', timestamp: 15 * 60_000, source: 'manual' },
+          { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 30 * 60_000, source: 'manual' },
+        ],
+      },
+    ])
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.calculateSpentMinutes('task-1')).resolves.toBe(45)
   })
 
   it('startBlockForTask delegates to startBlockForTasks', async () => {
