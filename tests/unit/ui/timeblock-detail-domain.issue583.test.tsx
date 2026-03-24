@@ -98,6 +98,8 @@ describe('TimeBlockDetailPage issue #583 domain routing', () => {
   })
 
   it('uses 当下 breadcrumb when entered from eventlog domain', async () => {
+    useIsDesktopMock.mockReturnValue(true)
+    getDesktopAdaptiveEnabledMock.mockReturnValue(true)
     window.history.replaceState({}, '', '/eventlog/timeblocks/block-1')
 
     render(<TimeBlockDetailPage />)
@@ -111,6 +113,8 @@ describe('TimeBlockDetailPage issue #583 domain routing', () => {
   })
 
   it('keeps 任务 breadcrumb when entered from tasks domain', async () => {
+    useIsDesktopMock.mockReturnValue(true)
+    getDesktopAdaptiveEnabledMock.mockReturnValue(true)
     window.history.replaceState({}, '', '/tasks/block/block-1')
 
     render(<TimeBlockDetailPage />)

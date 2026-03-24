@@ -27,6 +27,14 @@ ExoMind 是一个基于 Tauri v2 的跨平台应用（Windows/macOS/Linux/Androi
 | Voice / ASR（语音/识别） | 实验中   | 提供语音聊天、ASR 测试与 MOSS 测试页面              |
 | User Manage（用户管理）  | 实验中   | 本地注册/登录流程，用于同步能力联调                 |
 
+## 版本控制：兼容 Jujutsu (jj)
+
+本项目兼容 [Jujutsu (jj)](https://github.com/jj-vcs/jj) 版本控制系统。开发者本机安装了 jj 时优先使用 jj，否则沿用 Git。两者通过 colocated 模式共存。
+
+- **配置模板**：[`jj-config.toml`](jj-config.toml)
+- **规范细节**：[`CLAUDE.md` > jj 兼容规范](CLAUDE.md)
+- **核心规则**：已推送到远端的提交视为不可变，不允许 force push
+
 ## 技术栈（Tech Stack / 技术栈）
 
 | 分类                        | 技术                             |

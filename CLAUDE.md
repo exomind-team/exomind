@@ -126,6 +126,42 @@ L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
 8. 允许一个 PR 同时解决两个相关 Issue；此时必须同步更新 PR 描述，明确覆盖范围与验收状态。
 9. 合并前再次检查是否存在新的 blocking review；若无阻塞且关键回归通过，合并到 `dev`，并切回 `dev` 继续后续工作。
 
+#### jj (Jujutsu) 兼容规范
+
+**优先级**：开发者本机安装了 jj 时优先使用 jj 管理版本，否则沿用 Git。两者 colocated 共存，操作同一个 `.git` 仓库。
+
+**不可变原则**：已推送到远端的提交视为不可变。不允许修改远端 bookmark（含）之前的修订。这确保了：
+- 与 GitHub PR 工作流兼容——推送后不 force push
+- review 进度不会因为历史重写而丢失
+- 符合生命判据"操作生效=留下痕迹"
+
+**配置方式**：项目根目录的 `jj-config.toml` 是配置模板。首次使用时需手动应用到 jj 仓库配置：
+
+```bash
+jj config set --repo revset-aliases.'"immutable_heads()"' '"present(main@origin) | remote_bookmarks()"'
+jj config set --repo revset-aliases.'"trunk()"' '"main@origin"'
+```
+
+**日常工作流**：
+
+```bash
+# 查看状态（替代 git status + git log）
+jj st
+jj log
+
+# 创建新修订（替代 git commit）
+jj new -m "feat: 新功能"
+
+# 描述当前修订（替代 git commit --amend 的消息部分）
+jj describe -m "fix: 修复 bug"
+
+# 推送到远端
+jj git push
+
+# 撤销上一步操作
+jj undo
+```
+
 ---
 
 ### GitHub Issue 依赖管理 ⭐
