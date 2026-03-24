@@ -80,6 +80,9 @@ htmlcov/
 # === Website build artifacts ===
 website/preview/
 
+# === Agent output (local cache) ===
+agent-output/
+
 # === Jujutsu metadata ===
 /.jj/
 website/package-lock.json
