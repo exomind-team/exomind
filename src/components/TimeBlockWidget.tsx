@@ -123,13 +123,16 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     if (!countdownEndSoundEnabled) return;
 
     const preset = getTimerEndSoundPresetById(countdownEndSoundPresetId);
+    console.warn(`[TimerSound] play preset=${preset.id} url=${preset.url}`);
     try {
       const audio = new Audio(preset.url);
       audio.loop = false;
       audio.preload = 'auto';
       audio.currentTime = 0;
       await audio.play();
+      console.warn(`[TimerSound] play:ok preset=${preset.id}`);
     } catch (e) {
+      console.warn(`[TimerSound] play:error preset=${preset.id} error=${e instanceof Error ? e.message : String(e)}`);
       toast({
         title: '提示音播放失败',
         description: e instanceof Error ? e.message : String(e),

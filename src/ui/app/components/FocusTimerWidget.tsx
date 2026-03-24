@@ -269,14 +269,16 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const playCountdownEndSound = useCallback(async () => {
     if (!timerPreferences.countdownEndSoundEnabled) return;
     const preset = getTimerEndSoundPresetById(timerPreferences.countdownEndSoundPresetId);
+    log.warn(`[TimerSound] play preset=${preset.id} url=${preset.url}`);
     try {
       const audio = new Audio(preset.url);
       audio.loop = false;
       audio.preload = 'auto';
       audio.currentTime = 0;
       await audio.play();
-    } catch {
-      // Ignore sound playback failures（忽略浏览器自动播放限制等失败）
+      log.warn(`[TimerSound] play:ok preset=${preset.id}`);
+    } catch (e) {
+      log.warn(`[TimerSound] play:error preset=${preset.id} error=${e instanceof Error ? e.message : String(e)}`);
     }
   }, [timerPreferences.countdownEndSoundEnabled, timerPreferences.countdownEndSoundPresetId]);
 
