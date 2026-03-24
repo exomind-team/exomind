@@ -1081,6 +1081,24 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(screen.getByTestId('task-dag-key-hints')).toBeInTheDocument();
   });
 
+  it('keeps mobile immersive search and tools panels visible after opening them', async () => {
+    isDesktopMock.mockReturnValue(false);
+    window.localStorage.setItem('exomind:dag-immersive', '1');
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mobile-search-toggle'));
+    expect(screen.getByTestId('task-dag-search-panel').className).not.toContain('opacity-0');
+
+    fireEvent.click(screen.getByTestId('task-dag-mobile-tools-toggle'));
+    expect(screen.getByTestId('task-dag-tools-panel').className).not.toContain('opacity-0');
+    expect(screen.getByTestId('task-dag-legend-panel').className).not.toContain('opacity-0');
+  });
+
   it('supports connect mode dependency toggle rules and surfaces cycle rejection', async () => {
     render(<TaskDagPage />);
 

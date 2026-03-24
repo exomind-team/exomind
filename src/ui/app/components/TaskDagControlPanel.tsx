@@ -76,6 +76,9 @@ export function TaskDagControlPanel({
   onMobileSearchOpenChange,
   onMobileToolsOpenChange,
 }: TaskDagControlPanelProps) {
+  const immersiveFadeClass = immersive && isDesktop
+    ? 'opacity-0 hover:opacity-100 focus-within:opacity-100'
+    : '';
   const hasSearch = searchValue.trim().length > 0;
   const searchOptionLabels: Array<{ key: keyof TaskDagSearchOptions; label: string; testId: string }> = [
     { key: 'includeDescription', label: '描述', testId: 'task-dag-search-option-description' },
@@ -98,7 +101,7 @@ export function TaskDagControlPanel({
       data-testid="task-dag-search-panel"
       className={[
         'pointer-events-auto flex w-full items-center gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 text-[11px] text-[#57534E] shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]',
-        immersive ? 'opacity-0 hover:opacity-100 focus-within:opacity-100' : '',
+        immersiveFadeClass,
       ].join(' ')}
     >
       <label className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/80 px-3 py-2 text-[11px] text-[#57534E] dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E]">
@@ -148,7 +151,7 @@ export function TaskDagControlPanel({
       data-testid="task-dag-tools-panel"
       className={[
         'pointer-events-auto flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90',
-        immersive ? 'opacity-0 hover:opacity-100 focus-within:opacity-100' : '',
+        immersiveFadeClass,
       ].join(' ')}
     >
       <button
@@ -224,7 +227,7 @@ export function TaskDagControlPanel({
       data-testid="task-dag-legend-panel"
       className={[
         'pointer-events-auto flex items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/90 px-2 py-1 text-[11px] text-[#57534E] shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]',
-        immersive ? 'opacity-0 hover:opacity-100 focus-within:opacity-100' : '',
+        immersiveFadeClass,
       ].join(' ')}
     >
       {legendChip('H', '硬依赖：前置必须完成后才能开始', 'bg-[#FDE7DC] text-[#C75B3A]', 'task-dag-legend-hard-chip')}
