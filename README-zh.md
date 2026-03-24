@@ -13,6 +13,9 @@
 
 [English](./README.md) · [官网](https://exo-mind.ai) · [下载](https://exo-mind.ai/download)
 
+[![QQ群](https://img.shields.io/badge/QQ群-外心ExoMind-blue?logo=tencentqq)](https://qm.qq.com/q/cmPIiH5BpS)
+[![微信](https://img.shields.io/badge/微信-扫码加群-green?logo=wechat)](./docs/wechat.md)
+
 </div>
 
 ---
@@ -152,6 +155,17 @@ bun run build:tag
 # 正式发版
 git tag release/v0.3.3 && git push origin release/v0.3.3
 ```
+
+## 社区
+
+| 平台 | 链接 |
+|------|------|
+| **QQ 群** | [外心 ExoMind 用户交流群](https://qm.qq.com/q/cmPIiH5BpS) |
+| **微信** | [扫码加群](./docs/wechat.md) |
+
+## 贡献
+
+欢迎参与贡献！请阅读 [CLAUDE.md](CLAUDE.md) 了解开发规范和工作流程。
 
 ## 许可证
 

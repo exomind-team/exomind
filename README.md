@@ -13,6 +13,9 @@ Local-first · Event-driven · AI-powered · Cross-platform
 
 [中文文档](./README-zh.md) · [Website](https://exo-mind.ai) · [Download](https://exo-mind.ai/download)
 
+[![QQ Group](https://img.shields.io/badge/QQ群-外心ExoMind-blue?logo=tencentqq)](https://qm.qq.com/q/cmPIiH5BpS)
+[![WeChat](https://img.shields.io/badge/WeChat-join-green?logo=wechat)](./docs/wechat.md)
+
 </div>
 
 ---
@@ -152,6 +155,13 @@ bun run build:tag
 # Formal release
 git tag release/v0.3.3 && git push origin release/v0.3.3
 ```
+
+## Community
+
+| Platform | Link |
+|----------|------|
+| **QQ Group** | [外心 ExoMind 用户交流群](https://qm.qq.com/q/cmPIiH5BpS) |
+| **WeChat** | [Scan QR to join](./docs/wechat.md) |
 
 ## Contributing
 
