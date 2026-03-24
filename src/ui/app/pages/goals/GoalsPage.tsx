@@ -634,8 +634,8 @@ function buildFlowElements(
       type: 'goalNode',
       position: { x: center.x - size / 2, y: center.y - size / 2 },
       data: { ...g, _editMode: editMode } as Record<string, unknown>,
-      // Browse mode: nodes are draggable. Edit mode: drag starts connections.
-      draggable: !editMode,
+      // Browse mode: nodes are draggable (except Me). Edit mode: drag starts connections.
+      draggable: !editMode && !g.isMe,
     };
   });
 
@@ -877,6 +877,7 @@ export function GoalsPage() {
         fitView
         fitViewOptions={{ padding: 0.3 }}
         defaultEdgeOptions={{ type: 'taskEdge' }}
+        connectionLineStyle={{ stroke: 'rgba(120,113,108,0.6)', strokeWidth: 1.5 }}
         zoomOnDoubleClick={false}
         nodesDraggable={!editMode}
         nodesConnectable={editMode}

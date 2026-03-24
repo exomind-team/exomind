@@ -50,12 +50,13 @@ export class GoalForceSimulation {
 
   constructor(
     data: GoalGraphData,
-    width: number,
-    height: number,
+    _width: number,
+    _height: number,
     onTick: TickCallback,
   ) {
-    this.cx = width / 2;
-    this.cy = height / 2;
+    // Me is the origin (0, 0). Other nodes orbit around it.
+    this.cx = 0;
+    this.cy = 0;
     this.onTick = onTick;
 
     this.buildNodesAndLinks(data, true);
@@ -157,10 +158,10 @@ export class GoalForceSimulation {
 
   // ---- Drag interaction ----
 
-  /** Pin a node to a specific position (during drag). */
+  /** Pin a node to a specific position (during drag). Me cannot be pinned. */
   pinNode(id: string, x: number, y: number): void {
     const node = this.nodes.find((n) => n.id === id);
-    if (!node) return;
+    if (!node || node.isMe) return;
     node.fx = x;
     node.fy = y;
     // Gentle reheat so other nodes react
