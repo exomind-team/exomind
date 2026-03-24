@@ -381,7 +381,7 @@ describe('EventStorage', () => {
   describe('storage partition key（存储分区键）', () => {
     it('应该优先使用 active profileId 作为默认存储键', () => {
       const profile = createLocalProfile({
-        slug: 'hailay',
+        slug: 'exomind',
         displayName: 'Hailay',
       });
       setProfileSession({
@@ -408,7 +408,7 @@ describe('EventStorage', () => {
 
     it('显式传入 userId 时应该优先于默认 profile key', () => {
       const profile = createLocalProfile({
-        slug: 'hailay',
+        slug: 'exomind',
         displayName: 'Hailay',
       });
       setProfileSession({

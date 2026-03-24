@@ -39,26 +39,26 @@ describe('identity-link-storage（远端身份绑定存储）', () => {
     const module = await import('@/lib/profile/identity-link-storage');
 
     const link = module.createIdentityLink({
-      profileId: 'profile-hailay',
+      profileId: 'profile-exomind',
       providerId: 'self-hosted-sync',
-      remoteIdentityId: 'rid-hailay',
-      remoteIdentityKey: 'space-hailay',
+      remoteIdentityId: 'rid-exomind',
+      remoteIdentityKey: 'space-exomind',
       displayName: 'Hailay Cloud',
       authType: 'basic',
-      authUsername: 'hailay-cloud',
+      authUsername: 'exomind-cloud',
       authSecret: 'remote-secret',
     });
 
-    expect(link.profileId).toBe('profile-hailay');
+    expect(link.profileId).toBe('profile-exomind');
     expect(link.providerId).toBe('self-hosted-sync');
-    expect(link.remoteIdentityKey).toBe('space-hailay');
+    expect(link.remoteIdentityKey).toBe('space-exomind');
     expect(link.status).toBe('linked');
 
-    const links = module.listIdentityLinks('profile-hailay');
+    const links = module.listIdentityLinks('profile-exomind');
     expect(links).toHaveLength(1);
 
     const storedSecret = module.getIdentityLinkSecret(link.linkId);
-    expect(storedSecret?.authUsername).toBe('hailay-cloud');
+    expect(storedSecret?.authUsername).toBe('exomind-cloud');
     expect(storedSecret?.authSecret).toBe('remote-secret');
   });
 
@@ -66,10 +66,10 @@ describe('identity-link-storage（远端身份绑定存储）', () => {
     const module = await import('@/lib/profile/identity-link-storage');
 
     const link = module.createIdentityLink({
-      profileId: 'profile-hailay',
+      profileId: 'profile-exomind',
       providerId: 'self-hosted-sync',
-      remoteIdentityId: 'rid-hailay',
-      remoteIdentityKey: 'space-hailay',
+      remoteIdentityId: 'rid-exomind',
+      remoteIdentityKey: 'space-exomind',
       authType: 'token',
       authSecret: 'token-123',
     });
@@ -85,7 +85,7 @@ describe('identity-link-storage（远端身份绑定存储）', () => {
     const module = await import('@/lib/profile/identity-link-storage');
 
     const first = module.createIdentityLink({
-      profileId: 'profile-hailay',
+      profileId: 'profile-exomind',
       providerId: 'self-hosted-sync',
       remoteIdentityId: 'rid-old',
       remoteIdentityKey: 'space-old',
@@ -95,7 +95,7 @@ describe('identity-link-storage（远端身份绑定存储）', () => {
     });
 
     const second = module.createIdentityLink({
-      profileId: 'profile-hailay',
+      profileId: 'profile-exomind',
       providerId: 'self-hosted-sync',
       remoteIdentityId: 'rid-new',
       remoteIdentityKey: 'space-new',
@@ -105,8 +105,8 @@ describe('identity-link-storage（远端身份绑定存储）', () => {
     });
 
     expect(second.linkId).toBe(first.linkId);
-    expect(module.listIdentityLinks('profile-hailay')).toHaveLength(1);
-    expect(module.getPreferredIdentityLink('profile-hailay')?.remoteIdentityKey).toBe('space-new');
+    expect(module.listIdentityLinks('profile-exomind')).toHaveLength(1);
+    expect(module.getPreferredIdentityLink('profile-exomind')?.remoteIdentityKey).toBe('space-new');
     expect(module.getIdentityLinkSecret(second.linkId)?.authSecret).toBe('new-secret');
   });
 });

@@ -48,7 +48,7 @@ describe('DesktopSidebarAccountEntry', () => {
     } as any);
     mockGetLocalProfile.mockReturnValue({
       profileId: 'profile-1',
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
       createdAt: '2026-03-07T00:00:00.000Z',
       updatedAt: '2026-03-07T00:00:00.000Z',
@@ -61,7 +61,7 @@ describe('DesktopSidebarAccountEntry', () => {
       profileId: 'profile-1',
       providerId: 'pouchdb',
       remoteIdentityId: 'remote-1',
-      remoteIdentityKey: 'hailay@example.com',
+      remoteIdentityKey: 'user@example.com',
       displayName: 'Hailay Cloud',
       authMode: 'basic',
       status: 'linked',
@@ -84,7 +84,7 @@ describe('DesktopSidebarAccountEntry', () => {
     } as any);
     mockGetLocalProfile.mockReturnValue({
       profileId: 'profile-1',
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
       createdAt: '2026-03-07T00:00:00.000Z',
       updatedAt: '2026-03-07T00:00:00.000Z',
@@ -97,7 +97,7 @@ describe('DesktopSidebarAccountEntry', () => {
       profileId: 'profile-1',
       providerId: 'pouchdb',
       remoteIdentityId: 'remote-1',
-      remoteIdentityKey: 'hailay@example.com',
+      remoteIdentityKey: 'user@example.com',
       authMode: 'basic',
       status: 'linked',
       syncMode: 'realtime',
@@ -107,7 +107,7 @@ describe('DesktopSidebarAccountEntry', () => {
     render(<DesktopSidebarAccountEntry />);
 
     expect(screen.getByText('已连接远端同步身份')).toBeInTheDocument();
-    expect(screen.queryByText('hailay@example.com')).not.toBeInTheDocument();
+    expect(screen.queryByText('user@example.com')).not.toBeInTheDocument();
   });
 
   it('hides raw remote key when linked display name equals remote key（显示名等于远端标识时仍隐藏原始远端键）', () => {
@@ -118,7 +118,7 @@ describe('DesktopSidebarAccountEntry', () => {
     } as any);
     mockGetLocalProfile.mockReturnValue({
       profileId: 'profile-1',
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
       createdAt: '2026-03-07T00:00:00.000Z',
       updatedAt: '2026-03-07T00:00:00.000Z',
@@ -131,8 +131,8 @@ describe('DesktopSidebarAccountEntry', () => {
       profileId: 'profile-1',
       providerId: 'pouchdb',
       remoteIdentityId: 'remote-1',
-      remoteIdentityKey: 'hailay@example.com',
-      displayName: 'hailay@example.com',
+      remoteIdentityKey: 'user@example.com',
+      displayName: 'user@example.com',
       authMode: 'basic',
       status: 'linked',
       syncMode: 'realtime',
@@ -142,7 +142,7 @@ describe('DesktopSidebarAccountEntry', () => {
     render(<DesktopSidebarAccountEntry />);
 
     expect(screen.getByText('已连接远端同步身份')).toBeInTheDocument();
-    expect(screen.queryByText('hailay@example.com')).not.toBeInTheDocument();
+    expect(screen.queryByText('user@example.com')).not.toBeInTheDocument();
   });
 
   it('falls back to local-only subtitle（未绑定远端身份时回退到本地说明）', () => {
@@ -153,7 +153,7 @@ describe('DesktopSidebarAccountEntry', () => {
     } as any);
     mockGetLocalProfile.mockReturnValue({
       profileId: 'profile-1',
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
       createdAt: '2026-03-07T00:00:00.000Z',
       updatedAt: '2026-03-07T00:00:00.000Z',
@@ -165,7 +165,7 @@ describe('DesktopSidebarAccountEntry', () => {
 
     render(<DesktopSidebarAccountEntry />);
 
-    expect(screen.getByText('仅本地档案 · hailay')).toBeInTheDocument();
+    expect(screen.getByText('仅本地档案 · exomind')).toBeInTheDocument();
   });
 
   it('opens switch sheet in switch mode when logged in（已登录时打开切换档案）', () => {
@@ -176,7 +176,7 @@ describe('DesktopSidebarAccountEntry', () => {
     } as any);
     mockGetLocalProfile.mockReturnValue({
       profileId: 'profile-1',
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
       createdAt: '2026-03-07T00:00:00.000Z',
       updatedAt: '2026-03-07T00:00:00.000Z',
@@ -215,7 +215,7 @@ describe('DesktopSidebarAccountEntry', () => {
     } as any);
     mockGetLocalProfile.mockReturnValue({
       profileId: 'profile-1',
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
       createdAt: '2026-03-07T00:00:00.000Z',
       updatedAt: '2026-03-07T00:00:00.000Z',
@@ -226,14 +226,14 @@ describe('DesktopSidebarAccountEntry', () => {
     mockGetPreferredIdentityLink.mockReturnValue(null);
 
     const { rerender } = render(<DesktopSidebarAccountEntry />);
-    expect(screen.getByText('仅本地档案 · hailay')).toBeInTheDocument();
+    expect(screen.getByText('仅本地档案 · exomind')).toBeInTheDocument();
 
     mockGetPreferredIdentityLink.mockReturnValue({
       linkId: 'link-1',
       profileId: 'profile-1',
       providerId: 'pouchdb',
       remoteIdentityId: 'remote-1',
-      remoteIdentityKey: 'hailay@example.com',
+      remoteIdentityKey: 'user@example.com',
       authMode: 'basic',
       status: 'linked',
       syncMode: 'realtime',

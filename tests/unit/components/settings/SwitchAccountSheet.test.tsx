@@ -42,7 +42,7 @@ describe('SwitchAccountSheet', () => {
     mockListLocalProfiles.mockReturnValue([
       {
         profileId: 'profile-1',
-        slug: 'hailay',
+        slug: 'exomind',
         displayName: 'Hailay',
         createdAt: '2026-03-07T00:00:00.000Z',
         updatedAt: '2026-03-07T00:00:00.000Z',

@@ -148,7 +148,7 @@ describe('Issue #104 ActiveBlockStorage', () => {
 
   it('prefers active profileId over legacy currentUser as default storage key', () => {
     const profile = createLocalProfile({
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
     });
     setProfileSession({
@@ -175,7 +175,7 @@ describe('Issue #104 ActiveBlockStorage', () => {
 
   it('keeps explicit userId higher priority than derived profile key', () => {
     const profile = createLocalProfile({
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
     });
     setProfileSession({

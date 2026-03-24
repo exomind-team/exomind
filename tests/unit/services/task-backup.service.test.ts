@@ -4,7 +4,7 @@ import { createLocalProfile, setProfileSession } from '@/lib/profile/profile-sto
 
 function activateProfileScope(): string {
   const profile = createLocalProfile({
-    slug: 'hailay',
+    slug: 'exomind',
     displayName: 'Hailay',
   });
   setProfileSession({

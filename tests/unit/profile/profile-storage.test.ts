@@ -80,7 +80,7 @@ describe('profile-storage（本地档案存储）', () => {
     const module = await import('@/lib/profile/profile-storage');
 
     const profile = module.createLocalProfile({
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
       localPasswordHash: 'pbkdf2-hash',
     });
@@ -89,7 +89,7 @@ describe('profile-storage（本地档案存储）', () => {
     expect(module.listLocalProfiles()).toHaveLength(1);
 
     const storedProfile = module.getLocalProfile(profile.profileId);
-    expect(storedProfile?.slug).toBe('hailay');
+    expect(storedProfile?.slug).toBe('exomind');
     expect(storedProfile?.displayName).toBe('Hailay');
 
     const secret = module.getProfileSecret(profile.profileId);

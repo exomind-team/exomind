@@ -368,14 +368,14 @@ describe('同步类型定义', () => {
       const result = module.resolveRemoteSyncTarget('http://localhost:6984', {
         username: 'legacy-user',
         passwordHash: 'legacy-hash',
-        remoteIdentityKey: 'space-hailay',
+        remoteIdentityKey: 'space-exomind',
         authType: 'basic',
         authUsername: 'remote-user',
         authSecret: 'remote-secret',
       } as SyncCredentials);
 
-      expect(result.remoteDbKey).toBe('space-hailay');
-      expect(result.remoteUrl).toContain('/space-hailay');
+      expect(result.remoteDbKey).toBe('space-exomind');
+      expect(result.remoteUrl).toContain('/space-exomind');
       expect(result.remoteConfig).toEqual({
         auth: {
           username: 'remote-user',
@@ -387,12 +387,12 @@ describe('同步类型定义', () => {
     it('本地同步库名应优先使用 localProfileId（prefer local profile for local db name）', async () => {
       const module = await import('@/adapters/pouch-sync');
       const dbName = module.resolveLocalSyncDbName({
-        localProfileId: 'profile-hailay',
-        username: 'space-hailay',
+        localProfileId: 'profile-exomind',
+        username: 'space-exomind',
         passwordHash: 'remote-secret',
       } as SyncCredentials);
 
-      expect(dbName).toBe('local_profile-hailay');
+      expect(dbName).toBe('local_profile-exomind');
     });
   });
 });

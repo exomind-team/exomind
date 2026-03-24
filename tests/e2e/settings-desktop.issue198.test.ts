@@ -16,14 +16,14 @@ async function getTestIdWidth(page: Page, testId: string): Promise<number> {
 
 async function seedLoggedInDesktopProfile(page: Page) {
   await page.addInitScript(() => {
-    const profileId = 'profile-hailay';
-    const linkId = 'link-hailay';
+    const profileId = 'profile-exomind';
+    const linkId = 'link-exomind';
     const now = '2026-03-07T00:00:00.000Z';
 
     localStorage.setItem('exomind:profiles:index', JSON.stringify([profileId]));
     localStorage.setItem(`exomind:profiles:${profileId}:meta`, JSON.stringify({
       profileId,
-      slug: 'hailay',
+      slug: 'exomind',
       displayName: 'Hailay',
       createdAt: now,
       updatedAt: now,
@@ -41,8 +41,8 @@ async function seedLoggedInDesktopProfile(page: Page) {
       linkId,
       profileId,
       providerId: 'pouchdb',
-      remoteIdentityId: 'remote-hailay',
-      remoteIdentityKey: 'hailay@example.com',
+      remoteIdentityId: 'remote-exomind',
+      remoteIdentityKey: 'user@example.com',
       authMode: 'basic',
       status: 'linked',
       syncMode: 'realtime',
@@ -51,7 +51,7 @@ async function seedLoggedInDesktopProfile(page: Page) {
     localStorage.setItem(`exomind:identity-links:secret:${linkId}`, JSON.stringify({
       linkId,
       authType: 'basic',
-      authUsername: 'hailay',
+      authUsername: 'exomind',
       authSecret: 'issue198-secret',
       updatedAt: now,
     }));
@@ -258,7 +258,7 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(footerEntry).toBeVisible();
     await expect(footerEntry).toContainText('Hailay');
     await expect(footerEntry).toContainText('已连接远端同步身份');
-    await expect(footerEntry).not.toContainText('hailay@example.com');
+    await expect(footerEntry).not.toContainText('user@example.com');
 
     await footerEntry.click();
 

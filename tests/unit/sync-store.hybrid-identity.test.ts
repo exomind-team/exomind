@@ -47,13 +47,13 @@ describe('sync-store hybrid identity（混合式身份兼容门面）', () => {
     const syncModule = await import('@/ui/stores/sync-store');
     const profileModule = await import('@/lib/profile/profile-storage');
 
-    await syncModule.useSyncStore.getState().register('hailay', 'password123');
-    await syncModule.useSyncStore.getState().login('hailay', 'password123');
+    await syncModule.useSyncStore.getState().register('exomind', 'password123');
+    await syncModule.useSyncStore.getState().login('exomind', 'password123');
 
     const state = syncModule.useSyncStore.getState();
     expect(state.isLoggedIn).toBe(true);
-    expect(state.currentUser).toBe('hailay');
-    expect(profileModule.getActiveProfile()?.slug).toBe('hailay');
+    expect(state.currentUser).toBe('exomind');
+    expect(profileModule.getActiveProfile()?.slug).toBe('exomind');
   });
 
   it('connect fails when active profile has no linked remote identity（未绑定远端身份时禁止连接）', async () => {

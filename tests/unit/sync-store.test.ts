@@ -73,7 +73,7 @@ describe('SyncStore', () => {
     it('没有激活档案 session 时不应保留旧 currentUser', async () => {
       const profileModule = await import('@/lib/profile/profile-storage');
       profileModule.createLocalProfile({
-        slug: 'hailay',
+        slug: 'exomind',
         displayName: 'Hailay',
       });
       profileModule.setProfileSession({
