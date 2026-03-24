@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { Bell, Bot, Check, ChevronRight, Code, Download, Eye, EyeOff, Key, Mic, Music4, Timer, Upload, Wifi, X } from 'lucide-react';
+import { Bell, Bot, Check, ChevronRight, Code, Download, Eye, EyeOff, Key, Mic, Music4, Play, Timer, Upload, Wifi, X } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
@@ -531,15 +531,28 @@ export function SoundPresetSetting(_props: { ctx: SettingsContext }) {
               const selected = timerPreferences.countdownEndSoundEnabled
                 && timerPreferences.countdownEndSoundPresetId === preset.id;
               return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => handleSelect(preset.id)}
-                  className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm"
-                >
-                  <span>{preset.label}</span>
-                  {selected ? <Check className="h-4 w-4 text-[#C75B3A]" /> : null}
-                </button>
+                <div key={preset.id} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(preset.id)}
+                    className="flex flex-1 items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm dark:border-[#292524]"
+                  >
+                    <span>{preset.label}</span>
+                    {selected ? <Check className="h-4 w-4 text-[#C75B3A]" /> : null}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`试听 ${preset.label}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const audio = new Audio(preset.url);
+                      audio.play().catch(() => {});
+                    }}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#F0ECE8] text-[#78716C] transition-colors hover:bg-[#F5F0ED] hover:text-[#1C1917] dark:border-[#292524] dark:hover:bg-[#292524] dark:hover:text-[#FAFAF9]"
+                  >
+                    <Play className="h-4 w-4" />
+                  </button>
+                </div>
               );
             })}
           </div>

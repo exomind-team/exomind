@@ -205,10 +205,6 @@ import {
 } from '@/config/timer-preferences';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
-import {
-  TIMER_END_SOUND_PRESETS,
-  type TimerEndSoundPresetId,
-} from '@/lib/media/timer-end-sounds';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import { openExternalUrl } from '@/lib/utils/open-external';
 import { isDesktopOperatingSystem } from '@/config/runtime-target';
@@ -217,6 +213,7 @@ import {
   DevInstanceDiagnosticsSetting,
   DevicePairingSetting,
   FocusBgmSetting,
+  SoundPresetSetting,
   MossVoiceTestSetting,
   VolcanoEngineKeySetting,
   VolcanoVoiceTestSetting,
@@ -608,41 +605,9 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'sound-preset',
     label: '提示音',
-    icon: Bell,
     category: 'timer',
-    type: 'enum',
-    enumStyle: 'dialog',
-    dialogTitle: '选择提示音',
-    dialogDescription: '倒计时结束时播放的提示音',
-    options: [
-      {
-        label: '关闭提示音',
-        summaryLabel: '已关闭',
-        value: 'off',
-      },
-      ...TIMER_END_SOUND_PRESETS.map((preset) => ({
-        label: preset.label,
-        value: preset.id,
-      })),
-    ],
-    get: () => {
-      const preferences = getTimerPreferences();
-      return preferences.countdownEndSoundEnabled ? preferences.countdownEndSoundPresetId : 'off';
-    },
-    set: (value: string) => {
-      if (value === 'off') {
-        updateTimerPreferences({ countdownEndSoundEnabled: false });
-        return 'off';
-      }
-
-      return updateTimerPreferences({
-        countdownEndSoundEnabled: true,
-        countdownEndSoundPresetId: value as TimerEndSoundPresetId,
-      }).countdownEndSoundPresetId;
-    },
-    subscribe: (cb: (value: string) => void) => subscribeTimerPreferencesChanges((preferences) => {
-      cb(preferences.countdownEndSoundEnabled ? preferences.countdownEndSoundPresetId : 'off');
-    }),
+    type: 'custom',
+    component: SoundPresetSetting,
   },
   {
     id: 'focus-bgm',
