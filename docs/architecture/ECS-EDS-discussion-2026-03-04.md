@@ -2,7 +2,7 @@
 
 > **状态**: 讨论草稿，未定稿
 > **日期**: 2026-03-04
-> **参与者**: @HailayLin (用户) + @ARCJ137442 (开发伙伴) + Architect Agent
+> **参与者**: @HailayLin (集体成员) + @ARCJ137442 (集体成员) + Architect Agent
 > **关联文档**: [[ECS-communication-stack|ECS 通信协议栈 v1.0]]、[[ARCH-SYNC|同步模块架构分析]]、[[holochain-agent-centric-research-2026-03-04|Holochain 调研报告]]
 > **讨论模式**: 只读+讨论，不修改现有文档，等架构稳定后再改
 
