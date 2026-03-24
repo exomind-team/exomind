@@ -83,6 +83,9 @@ website/preview/
 # === Agent output (local cache) ===
 agent-output/
 
+# === Build artifacts (local cache) ===
+artifacts/
+
 # === Jujutsu metadata ===
 /.jj/
 website/package-lock.json
