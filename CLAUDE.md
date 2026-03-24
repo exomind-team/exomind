@@ -123,6 +123,25 @@ jj config set --repo revset-aliases.'"immutable_heads()"' '"present(main@origin)
 jj config set --repo revset-aliases.'"trunk()"' '"main@origin"'
 ```
 
+**用户指令 → jj 命令速查**：
+
+| 用户说 | jj 命令 | Git 等价 | 说明 |
+|--------|---------|---------|------|
+| 拆分 | `jj split` | `git rebase -i`（拆 commit） | 将当前 change 拆成多个 |
+| 描述 | `jj describe -m "..."` | `git commit -m "..."` | 给已有 change 写描述（不是"创建"） |
+| 推送 | `jj git push` | `git push` | 推送 bookmark 到远端 |
+| 撤销 | `jj undo` | `git reset`（但更安全） | 撤销上一步操作 |
+| 查看状态 | `jj st` / `jj log` | `git status` / `git log` | 查看工作区 / 历史 |
+| 新建修订 | `jj new -m "..."` | `git commit`（空提交） | 封存当前 change，开始新 change |
+
+**常用组合指令**：
+
+- 「描述并推送」= `jj describe -m "..." && jj git push`
+- 「拆分描述推送」= `jj split` → `jj describe -m "..."` → `jj git push`
+- 「新建并描述」= `jj new -m "feat: 新功能"`
+
+**核心心智模型**：jj 中修改即提交——文件一改就自动成为当前 change 的一部分，不需要 `add` 或 `commit`。「描述」不是创建快照，而是给已存在的 change 盖章定性。
+
 **日常工作流**：
 
 ```bash
@@ -130,11 +149,14 @@ jj config set --repo revset-aliases.'"trunk()"' '"main@origin"'
 jj st
 jj log
 
-# 创建新修订（替代 git commit）
-jj new -m "feat: 新功能"
-
 # 描述当前修订（替代 git commit --amend 的消息部分）
 jj describe -m "fix: 修复 bug"
+
+# 创建新修订（封存当前 change，开始新 change）
+jj new -m "feat: 新功能"
+
+# 拆分当前修订为多个
+jj split
 
 # 推送到远端
 jj git push
