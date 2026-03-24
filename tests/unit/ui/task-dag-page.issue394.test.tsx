@@ -961,7 +961,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
   });
 
   it('switches to browse and reveals the target when opened with locate search params', async () => {
-    locationState.searchStr = '?focus=task-b&locate=1';
+    locationState.searchStr = '?focus=%22task-b%22&locate=%221%22';
     window.localStorage.setItem('exomind:dag-mode', 'execute');
     window.localStorage.setItem('exomind:dag-hide-terminal', 'hide');
     window.localStorage.setItem('exomind:dag-search-draft', '别的任务');

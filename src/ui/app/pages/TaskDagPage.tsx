@@ -322,6 +322,32 @@ function focusNodeInViewport(
   );
 }
 
+function decodeDagSearchParam(rawValue: string | null): string | null {
+  const trimmed = rawValue?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === 'string') {
+      return parsed.trim() || null;
+    }
+    if (typeof parsed === 'number' || typeof parsed === 'boolean') {
+      return String(parsed);
+    }
+  } catch {
+    // Fall back to the raw query string when it isn't JSON-encoded.
+  }
+
+  return trimmed;
+}
+
+function parseDagLocateSearchParam(rawValue: string | null): boolean {
+  const normalized = decodeDagSearchParam(rawValue)?.toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
 function buildExecutionHint(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
   if (task.status === 'completed') {
     return '该任务已经完成，可双击进入详情页回顾依赖关系与时间记录。';
@@ -941,12 +967,11 @@ export function TaskDagPage() {
   const taskLoadRequestIdRef = useRef(0);
   const focusTaskIdFromSearch = useMemo(() => {
     const params = new URLSearchParams(location.searchStr ?? '');
-    const focusTaskId = params.get('focus');
-    return focusTaskId?.trim() || null;
+    return decodeDagSearchParam(params.get('focus'));
   }, [location.searchStr]);
   const locateTaskFromSearch = useMemo(() => {
     const params = new URLSearchParams(location.searchStr ?? '');
-    return params.get('locate')?.trim() === '1';
+    return parseDagLocateSearchParam(params.get('locate'));
   }, [location.searchStr]);
 
   useEffect(() => {
