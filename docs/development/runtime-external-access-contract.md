@@ -41,11 +41,21 @@ ExoMind RT 的长期定位不是“只服务 UI 的后端”。
 当前外部接入主要依赖 raw 资源路由，例如：
 
 - `/eventlog`
+- `/eventlog/watch`
 - `/tasks`
 - `/timeblocks`
 - `/signals/history`
 
 这层 raw API 已经足够让人类或 Agent 用 `curl` 做排障、读写和旁路验证。
+
+其中需要特别区分：
+
+- `GET /eventlog`：读取历史事件列表，适合拉取上下文、分页和按条件过滤
+- `GET /eventlog/watch`：长轮询观察事件变化，默认从调用时刻开始等未来新事件
+
+`watch` 的默认语义应保持为“watch from now”，而不是“无 cursor 时先回放历史 backlog”。
+
+只有在显式提供 `since_id` 或 `since_timestamp` 时，`GET /eventlog/watch` 才进入 catch-up 模式，允许先返回 cursor 之后已经存在的事件。
 
 ### 目标分层
 

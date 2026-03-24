@@ -269,3 +269,65 @@ curl.exe -N -X POST "http://127.0.0.1:1919/agents/claude/chat" `
 - Claude 会话管理与复用逻辑: `crates/exomind-runtime/src/agent/claude.rs`
 - CORS 方法配置（含 `DELETE`）: `crates/exomind-runtime/src/lib.rs`
 
+---
+
+## 12. `GET /eventlog/watch`（Raw Event Watch，原始事件监听）
+
+### 12.1 作用（Purpose，用途）
+
+对指定事件流做长轮询监听。
+
+默认语义不是“补发全部历史事件”，而是：
+
+- 未提供 `since_id` / `since_timestamp`：以调用时刻的当前尾事件为基线，只等待之后的新事件
+- 提供了 `since_id` 或 `since_timestamp`：允许先返回 cursor 之后已存在的 backlog；若没有，再继续等新事件
+
+这使得两类用法可以明确分离：
+
+- `GET /eventlog`：查历史
+- `GET /eventlog/watch`：默认看未来变化
+
+### 12.2 查询参数（Query Parameters，查询参数）
+
+- `user_id`（建议显式传入）: 指定档案作用域，例如 `profile-argon`
+- `since_id`（可选）: 只关心该事件 ID 之后的事件
+- `since_timestamp`（可选）: 只关心该时间戳之后的事件
+- `until_timestamp`（可选）: 上界过滤
+- `tags`（可选）: 逗号分隔标签过滤
+- `timeout`（可选）: 超时时间，单位秒，默认 `60`，最大 `300`
+
+### 12.3 响应语义（Response Semantics，响应语义）
+
+- 有匹配的新事件时：立即返回 JSON 数组
+- 在 `timeout` 内没有匹配事件时：返回空数组 `[]`
+- 返回数组中的事件 `id` 可直接作为下次 `since_id`
+
+### 12.4 cURL 验证（Examples，示例）
+
+终端 A：
+
+```bash
+curl -sS "http://127.0.0.1:9124/eventlog/watch?user_id=profile-argon&timeout=30"
+```
+
+终端 B：
+
+```bash
+curl -sS -X POST "http://127.0.0.1:9124/eventlog?user_id=profile-argon" \
+  -H "Content-Type: application/json" \
+  -d '{"timestamp": 1774334181683, "content": "watch test", "tags": ["note"]}'
+```
+
+预期：
+
+- 终端 A 在 POST 之前不应提前返回
+- POST 之后终端 A 应立即返回包含新事件的数组
+- 若本次 watch 未提供 cursor，返回结果应只包含这条刚写入的新事件
+- 返回事件的 `id` 应与 POST 响应中的 `id` 一致
+
+### 12.5 使用建议（Usage Notes，使用建议）
+
+- 需要历史上下文时，先调 `GET /eventlog`
+- 需要“从现在开始等变化”时，直接调 `GET /eventlog/watch`
+- 需要“从某个已知位置补齐并继续等”时，给 `watch` 传 `since_id` 或 `since_timestamp`
+

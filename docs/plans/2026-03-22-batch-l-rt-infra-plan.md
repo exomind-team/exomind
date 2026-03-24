@@ -152,42 +152,13 @@ curl -sS "http://127.0.0.1:9124/eventlog?user_id=profile-argon&since_timestamp=1
 **新增端点**：`GET /eventlog/watch`
 
 **行为**：
-- 接受 `user_id`、`since_id`（可选）、`timeout`（可选，秒，默认 60，上限 300）参数
-- 如果有新事件（since_id 之后），立即返回
-- 如果没有新事件，阻塞等待最多 `timeout` 秒
+- 接受 `user_id`、`since_id`（可选）、`since_timestamp`（可选）、`tags`（可选）、`timeout`（可选，秒，默认 60，上限 300）参数
+- 未提供 `since_id` / `since_timestamp` 时，默认以调用时刻的当前尾事件为基线，只等待之后的新事件
+- 显式提供 `since_id` 或 `since_timestamp` 时，允许先返回 cursor 之后已有的 backlog；若没有，再阻塞等待
 - 超时后返回空数组 `[]`
 - 客户端循环调用实现持续监听
 
-```rust
-#[derive(Deserialize)]
-struct WatchQuery {
-    user_id: String,
-    since_id: Option<String>,
-    timeout: Option<u64>,  // 秒，默认 60，上限 300
-}
-
-async fn watch_events(
-    Query(query): Query<WatchQuery>,
-    state: State<AppState>,
-) -> Json<Vec<Event>> {
-    let timeout_secs = query.timeout.unwrap_or(60).min(300);
-    let timeout = Duration::from_secs(timeout_secs);
-    let start = Instant::now();
-
-    loop {
-        let events = state.eventlog.get_events_since(&query.user_id, query.since_id.as_deref()).await;
-        if !events.is_empty() {
-            return Json(events);
-        }
-        if start.elapsed() > timeout {
-            return Json(vec![]);
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-}
-```
-
-**注意**：检查 RT 是否已有 SSE 基础设施（如 signal stream），如果有可以复用 channel/notify 机制而非轮询 sleep。
+**实现说明**：最终实现使用 `tokio::sync::broadcast` 做变更通知，而不是 `sleep` 轮询。
 
 ### 3.2 验证
 
@@ -198,7 +169,7 @@ cargo test -p exomind-runtime -- eventlog
 **curl 验证**：
 
 ```bash
-# 终端 1：watch（会阻塞）
+# 终端 1：watch（默认 watch from now，不应立即吐历史事件）
 curl -sS "http://127.0.0.1:9124/eventlog/watch?user_id=profile-argon"
 
 # 终端 2：写入新事件
@@ -206,7 +177,7 @@ curl -sS -X POST "http://127.0.0.1:9124/eventlog?user_id=profile-argon" \
   -H 'Content-Type: application/json' \
   -d '{"timestamp": ..., "content": "watch test", "tags": ["note"]}'
 
-# 终端 1 应立即返回新事件
+# 终端 1 应在 POST 后立即返回新事件，且返回数组只包含这条新事件
 ```
 
 ---

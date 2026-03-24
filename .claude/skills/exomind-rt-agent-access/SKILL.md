@@ -200,6 +200,7 @@ curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=20"
 | `/topology` | GET | 本机信息 | 稳定 |
 | `/eventlog` | GET | 事件日志列表 | 稳定 |
 | `/eventlog` | POST | 追加事件 | 稳定（ID 字段即将改为 RT 生成） |
+| `/eventlog/watch` | GET | 事件长轮询；默认只看调用后的新事件 | 稳定 |
 | `/eventlog/:id` | GET | 单条事件 | 稳定 |
 | `/eventlog/clear` | POST | 清空事件 | 稳定（高风险操作） |
 | `/tasks` | GET | 任务列表 | 稳定 |
@@ -254,13 +255,28 @@ RT 有两个数据源容易混淆：
 
 ## 实时性
 
-当前 Agent 接入以**轮询**为主：定期 GET `/eventlog` 检查新消息。
+当前已支持两种方式：
 
-未来方向（尚未实现）：
-- `GET /eventlog/watch` — 长轮询，有新事件时响应
-- SSE 端点 — 通过后台命令订阅实时事件流
+- 轮询：定期 GET `/eventlog` 检查新消息
+- 长轮询：GET `/eventlog/watch`
 
-在这些功能落地前，请自行实现轮询逻辑。
+`GET /eventlog/watch` 的默认语义是：
+
+- 未提供 `since_id` / `since_timestamp`：从调用时刻开始观察未来新事件，不回放旧 backlog
+- 提供 `since_id` / `since_timestamp`：允许先返回 cursor 之后已存在的 backlog；若没有，再继续等
+
+示例：
+
+```bash
+# 默认 watch from now：只等后续新事件
+curl -sS "http://<RT地址>:<端口>/eventlog/watch?user_id=profile-argon&timeout=30"
+
+# 从某个已知事件之后 catch up
+curl -sS "http://<RT地址>:<端口>/eventlog/watch?user_id=profile-argon&since_id=<event_id>&timeout=30"
+```
+
+未来方向：
+- SSE 端点：通过后台命令订阅实时事件流
 
 ---
 
