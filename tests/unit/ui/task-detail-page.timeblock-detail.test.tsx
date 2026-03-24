@@ -675,6 +675,27 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     expect(screen.getByLabelText('返回时间块详情')).toHaveAttribute('to', '/tasks/block/block-1');
   });
 
+  it('keeps the task title as the primary heading when entered from a timeblock detail page', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/tasks/task-1?blockId=block-1&returnTo=%2Ftasks%2Fblock%2Fblock-1&returnLabel=%E6%97%B6%E9%97%B4%E5%9D%97%E8%AF%A6%E6%83%85',
+    );
+    loadTimeBlocksMock.mockResolvedValue([
+      makeBlock({
+        name: '2026-03-22 洗澡',
+      }),
+    ]);
+    mockMatchMedia(true);
+
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByRole('heading', { level: 1, name: '深度工作：EventLog 模块实现' })).toBeInTheDocument();
+    expect(screen.getByText('关联时间块：2026-03-22 洗澡')).toBeInTheDocument();
+  });
+
   it('pressing Escape should cancel description editing and restore persisted text（Esc 取消描述编辑并恢复原值）', async () => {
     mockMatchMedia(false);
     const { container } = render(<TaskDetailPage />);

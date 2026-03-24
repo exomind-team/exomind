@@ -214,17 +214,17 @@ export function TimeBlockDetailPage() {
                     } as never : undefined,
                   });
                 }}
-                className="group relative overflow-hidden rounded-xl border border-[#E7E5E4] px-3 py-2 transition-colors hover:bg-[#F8F5F2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C75B3A]/40 dark:border-[#3F3F46] dark:hover:bg-[#292524]"
+                className="group relative cursor-pointer overflow-hidden rounded-xl border border-[#E7E5E4] px-3 py-2 transition-colors hover:bg-[#F8F5F2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C75B3A]/40 dark:border-[#3F3F46] dark:hover:bg-[#292524]"
               >
                 <div className="relative flex items-center justify-between gap-3">
                   <div
                     aria-hidden="true"
-                    className="min-w-0 flex-1 rounded-lg px-1 py-0.5"
+                    className="pointer-events-none min-w-0 flex-1 rounded-lg px-1 py-0.5"
                   >
                     <p className="truncate text-sm text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
                     <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{task.outcome ?? '未记录结果'}</p>
                   </div>
-                  <div className="relative z-10 flex shrink-0 items-center self-center">
+                  <div className="relative z-10 flex shrink-0 items-center self-center pointer-events-auto">
                     <Link
                       to="/tasks/dag"
                       search={{ focus: task.taskId, locate: '1' } as never}

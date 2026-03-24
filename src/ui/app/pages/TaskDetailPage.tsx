@@ -805,6 +805,7 @@ function MobileTimeblockDetail({
 }) {
   const [activeAnchorId, setActiveAnchorId] = useState<MobileAnchorId>('overview');
   const showTimerCard = !isTerminalTaskStatus(task.status);
+  const showBlockName = model.summary.blockName.trim() !== task.title.trim();
   const mobileAnchors = useMemo<MobileSectionAnchor[]>(() => {
     const anchors: MobileSectionAnchor[] = [
       { id: 'overview', label: '概览' },
@@ -896,8 +897,10 @@ function MobileTimeblockDetail({
               </span>
             ))}
           </div>
-          <h2 className="mt-3 text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h2>
-          <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联任务：{task.title}</p>
+          <h2 className="mt-3 text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</h2>
+          {showBlockName ? (
+            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联时间块：{model.summary.blockName}</p>
+          ) : null}
           {descriptionBlock}
         </section>
 
@@ -1175,6 +1178,8 @@ function DesktopTimeblockDetail({
   onToggleCollapseUpstream: (taskId: string) => void;
   onToggleCollapseDownstream: (taskId: string) => void;
 }) {
+  const showBlockName = model.summary.blockName.trim() !== task.title.trim();
+
   return (
     <div className="scrollbar-none h-full overflow-y-auto bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
       <header
@@ -1189,7 +1194,10 @@ function DesktopTimeblockDetail({
       <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
+            <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</h1>
+            {showBlockName ? (
+              <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">关联时间块：{model.summary.blockName}</p>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {model.summary.badges.map((badge) => (
