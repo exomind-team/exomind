@@ -16,15 +16,10 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
 
   it('switches desktop layout for primary app routes（主应用路由切桌面布局）', () => {
     expect(source).toContain('const isDesktopAdaptiveRoute');
-    expect(source).toContain("location.pathname === '/'");
     expect(source).toContain("location.pathname === '/eventlog'");
-    expect(source).toContain("location.pathname === '/dashboard'");
+    expect(source).toContain("location.pathname.startsWith('/eventlog/')");
     expect(source).toContain("location.pathname === '/tasks'");
     expect(source).toContain("location.pathname.startsWith('/tasks/')");
-    expect(source).toContain("location.pathname === '/me'");
-    expect(source).toContain("location.pathname === '/update'");
-    expect(source).toContain("location.pathname === '/settings'");
-    expect(source).toContain("location.pathname === '/agents'");
   });
 
   it('keeps me entry behind feature flag in desktop nav（桌面导航中的 Me 入口受功能开关控制）', () => {

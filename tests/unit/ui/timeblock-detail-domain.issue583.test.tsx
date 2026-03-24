@@ -9,6 +9,9 @@ const loadActiveBlockMock = vi.fn<() => Promise<ActiveBlockData | null>>()
 const loadEventsMock = vi.fn<() => Promise<Array<{ id: string; timestamp: number; content: string; tags: Set<string> }>>>()
 const getTaskMock = vi.fn()
 const navigateMock = vi.fn()
+const useIsDesktopMock = vi.fn(() => false)
+const getDesktopAdaptiveEnabledMock = vi.fn(() => true)
+const subscribeDesktopAdaptiveChangesMock = vi.fn(() => () => {})
 
 function resolveHref(to?: string, params?: Record<string, string>): string {
   return appendSearchParams(resolvePath(to, params))
@@ -66,6 +69,15 @@ vi.mock('@/lib/services', () => ({
   }),
 }))
 
+vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
+  useIsDesktop: () => useIsDesktopMock(),
+}))
+
+vi.mock('@/config/desktop-adaptive', () => ({
+  getDesktopAdaptiveEnabled: () => getDesktopAdaptiveEnabledMock(),
+  subscribeDesktopAdaptiveChanges: (listener: (enabled: boolean) => void) => subscribeDesktopAdaptiveChangesMock(listener),
+}))
+
 function makeBlock(overrides: Partial<TimeBlock> = {}): TimeBlock {
   const start = new Date('2026-03-19T09:00:00+08:00').getTime()
   const end = new Date('2026-03-19T10:00:00+08:00').getTime()
@@ -90,11 +102,17 @@ describe('TimeBlockDetailPage issue #583 domain routing', () => {
     loadActiveBlockMock.mockReset()
     getTaskMock.mockReset()
     navigateMock.mockReset()
+    useIsDesktopMock.mockReset()
+    getDesktopAdaptiveEnabledMock.mockReset()
+    subscribeDesktopAdaptiveChangesMock.mockReset()
 
     loadTimeBlocksMock.mockResolvedValue([makeBlock()])
     loadActiveBlockMock.mockResolvedValue(null)
     loadEventsMock.mockResolvedValue([])
     getTaskMock.mockResolvedValue(null)
+    useIsDesktopMock.mockReturnValue(false)
+    getDesktopAdaptiveEnabledMock.mockReturnValue(true)
+    subscribeDesktopAdaptiveChangesMock.mockImplementation(() => () => {})
   })
 
   it('uses 当下 breadcrumb when entered from eventlog domain', async () => {
