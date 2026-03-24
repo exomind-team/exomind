@@ -10,10 +10,9 @@ import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from 
 import { getCommandRegistryService } from '@/lib/services/command-registry.service';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
-import { warn as logWarn } from '@/lib/logger';
 import { useTauriFullscreenShortcut } from '@/ui/app/hooks/useTauriFullscreenShortcut';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
-import { isDesktopAdaptiveShellPath, resolveAppShellMode } from '@/ui/app/layout/shell-mode';
+import { resolveAppShellMode } from '@/ui/app/layout/shell-mode';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
@@ -28,29 +27,6 @@ import {
 import { resolveEventlogRestoreTab } from '@/ui/app/pages/eventlog-route-memory';
 
 const DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY = 'exomind:desktop-sidebar-collapsed';
-const DESKTOP_ADAPTIVE_STORAGE_KEY = 'exomind:desktopAdaptiveEnabled';
-const NEW_LAYOUT_DEBUG_TAG = '[NewLayout][ModeDebug]';
-const DESKTOP_LAYOUT_DEBUG_TAG = '[DesktopLayout][ModeDebug]';
-const MOBILE_SHELL_DEBUG_TAG = '[MobileShell][ModeDebug]';
-
-function warnModeDebug(tag: string, message: string, payload?: Record<string, unknown>): void {
-  const serializedPayload = payload ? ` ${JSON.stringify(payload)}` : '';
-  logWarn(`${tag} ===== BEGIN ${message} =====`);
-  logWarn(`${tag} ${message}${serializedPayload}`);
-  logWarn(`${tag} ===== END ${message} =====`);
-}
-
-function readRawDesktopAdaptiveValue(): string | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  try {
-    return window.localStorage.getItem(DESKTOP_ADAPTIVE_STORAGE_KEY);
-  } catch {
-    return '__storage_error__';
-  }
-}
 
 function readStoredDesktopSidebarCollapsed(): boolean {
   if (typeof window === 'undefined') {
@@ -235,33 +211,6 @@ function MobileShell({
 }) {
   const previewFrame = desktopFrame && resolveRuntimePlatform() !== 'tauri';
   const fullscreenRoute = isMobileFullscreenRoute(locationPath);
-
-  useEffect(() => {
-    warnModeDebug(MOBILE_SHELL_DEBUG_TAG, 'shell:update', {
-      locationPath,
-      desktopFrame,
-      previewFrame,
-      fullscreenRoute,
-      runtimePlatform: resolveRuntimePlatform(),
-      commandPaletteActive,
-      navItemPaths: navItems.map((item) => item.path),
-      rawDesktopAdaptive: readRawDesktopAdaptiveValue(),
-      windowInnerWidth: typeof window === 'undefined' ? null : window.innerWidth,
-      windowOuterWidth: typeof window === 'undefined' ? null : window.outerWidth,
-      documentClientWidth: typeof document === 'undefined' ? null : document.documentElement.clientWidth,
-      timestamp: new Date().toISOString(),
-    });
-
-    return () => {
-      warnModeDebug(MOBILE_SHELL_DEBUG_TAG, 'shell:cleanup', {
-        locationPath,
-        desktopFrame,
-        previewFrame,
-        fullscreenRoute,
-        timestamp: new Date().toISOString(),
-      });
-    };
-  }, [commandPaletteActive, desktopFrame, fullscreenRoute, locationPath, navItems, previewFrame]);
 
   return (
     <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', previewFrame && 'p-6')}>
@@ -454,28 +403,6 @@ function DesktopLayout({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
-  useEffect(() => {
-    warnModeDebug(DESKTOP_LAYOUT_DEBUG_TAG, 'shell:update', {
-      activePath,
-      agentPageEnabled,
-      mePageEnabled,
-      collapsed,
-      rawDesktopAdaptive: readRawDesktopAdaptiveValue(),
-      windowInnerWidth: typeof window === 'undefined' ? null : window.innerWidth,
-      windowOuterWidth: typeof window === 'undefined' ? null : window.outerWidth,
-      documentClientWidth: typeof document === 'undefined' ? null : document.documentElement.clientWidth,
-      timestamp: new Date().toISOString(),
-    });
-
-    return () => {
-      warnModeDebug(DESKTOP_LAYOUT_DEBUG_TAG, 'shell:cleanup', {
-        activePath,
-        collapsed,
-        timestamp: new Date().toISOString(),
-      });
-    };
-  }, [activePath, agentPageEnabled, collapsed, mePageEnabled]);
-
   return (
     <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
       <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
@@ -614,50 +541,11 @@ function NewLayout() {
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
-  const isDesktopAdaptiveRoute = isDesktopAdaptiveShellPath(location.pathname);
   const selectedShell = resolveAppShellMode({
     pathname: location.pathname,
     isDesktop,
     desktopAdaptiveEnabled,
   });
-
-  useEffect(() => {
-    const matchMediaDesktop = typeof window === 'undefined' || typeof window.matchMedia !== 'function'
-      ? null
-      : window.matchMedia('(min-width: 768px)').matches;
-    warnModeDebug(NEW_LAYOUT_DEBUG_TAG, 'layout:decision', {
-      pathname: location.pathname,
-      isDesktop,
-      desktopAdaptiveEnabled,
-      rawDesktopAdaptive: readRawDesktopAdaptiveValue(),
-      isDesktopAdaptiveRoute,
-      selectedShell,
-      runtimePlatform: resolveRuntimePlatform(),
-      agentPageEnabled,
-      mePageEnabled,
-      developerModeEnabled,
-      commandPaletteEnabled,
-      commandPaletteActive,
-      desktopSidebarCollapsed,
-      windowInnerWidth: typeof window === 'undefined' ? null : window.innerWidth,
-      windowOuterWidth: typeof window === 'undefined' ? null : window.outerWidth,
-      documentClientWidth: typeof document === 'undefined' ? null : document.documentElement.clientWidth,
-      matchMediaDesktop,
-      timestamp: new Date().toISOString(),
-    });
-  }, [
-    agentPageEnabled,
-    commandPaletteActive,
-    commandPaletteEnabled,
-    desktopAdaptiveEnabled,
-    desktopSidebarCollapsed,
-    developerModeEnabled,
-    isDesktop,
-    isDesktopAdaptiveRoute,
-    location.pathname,
-    mePageEnabled,
-    selectedShell,
-  ]);
 
   if (selectedShell === 'desktop') {
     return (

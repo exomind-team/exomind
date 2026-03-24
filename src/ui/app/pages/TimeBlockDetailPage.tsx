@@ -6,21 +6,11 @@ import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getEventLogService, getTaskService, getTimeBlockService } from '@/lib/services';
-import { warn as logWarn } from '@/lib/logger';
 import { resolveActiveBlockTaskIds, resolveTimeBlockRelatedTaskIds, type ActiveBlockData, type Event, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 import { buildTimeBlockDetailView } from './timeblock-detail-view';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
-
-const TIMEBLOCK_DETAIL_DEBUG_TAG = '[TimeBlockDetail][ModeDebug]';
-
-function debugTimeBlockDetailMode(message: string, payload?: Record<string, unknown>): void {
-  const serializedPayload = payload ? ` ${JSON.stringify(payload)}` : '';
-  logWarn(`${TIMEBLOCK_DETAIL_DEBUG_TAG} ===== BEGIN ${message} =====`);
-  logWarn(`${TIMEBLOCK_DETAIL_DEBUG_TAG} ${message}${serializedPayload}`);
-  logWarn(`${TIMEBLOCK_DETAIL_DEBUG_TAG} ===== END ${message} =====`);
-}
 
 function resolveActiveTaskIds(block: ActiveBlockData): string[] {
   return resolveActiveBlockTaskIds(block);
@@ -112,42 +102,6 @@ export function TimeBlockDetailPage() {
   }, []);
 
   useEffect(() => {
-    const rawDesktopAdaptive = typeof window === 'undefined'
-      ? null
-      : window.localStorage.getItem('exomind:desktopAdaptiveEnabled');
-    const matchMediaDesktop = typeof window === 'undefined' || typeof window.matchMedia !== 'function'
-      ? null
-      : window.matchMedia('(min-width: 768px)').matches;
-    debugTimeBlockDetailMode('presentation:update', {
-      pathname: location.pathname,
-      blockId: blockId ?? null,
-      isNowDomain,
-      isDesktop,
-      desktopAdaptiveEnabled,
-      useDesktopPresentation,
-      rawDesktopAdaptive,
-      windowInnerWidth: typeof window === 'undefined' ? null : window.innerWidth,
-      windowOuterWidth: typeof window === 'undefined' ? null : window.outerWidth,
-      matchMediaDesktop,
-      documentClientWidth: typeof document === 'undefined' ? null : document.documentElement.clientWidth,
-      backLinkLabel: backLink.label,
-      backLinkTo: backLink.to,
-      returnTo: returnTo ?? null,
-      timestamp: new Date().toISOString(),
-    });
-  }, [
-    backLink.label,
-    backLink.to,
-    blockId,
-    desktopAdaptiveEnabled,
-    isDesktop,
-    isNowDomain,
-    location.pathname,
-    returnTo,
-    useDesktopPresentation,
-  ]);
-
-  useEffect(() => {
     let disposed = false;
     const load = async () => {
       setLoading(true);
@@ -172,20 +126,6 @@ export function TimeBlockDetailPage() {
       setTasksById(new Map(tasks.filter((task): task is TaskNode => Boolean(task)).map((task) => [task.id, task])));
       setEventLogs(events);
       setLoading(false);
-      debugTimeBlockDetailMode('load:apply', {
-        pathname: location.pathname,
-        blockId: blockId ?? null,
-        matchedBlockId: matchedBlock?.id ?? null,
-        matchedBlockStartId: matchedBlock?.startId ?? null,
-        matchedBlockName: matchedBlock?.name ?? null,
-        completedBlockCount: blocks.length,
-        hasActiveBlock: Boolean(activeBlock),
-        activeBlockStartId: activeBlock?.startId ?? null,
-        resolvedTaskIds: taskIds,
-        resolvedTaskCount: taskIds.length,
-        eventCount: events.length,
-        timestamp: new Date().toISOString(),
-      });
     };
 
     void load();
