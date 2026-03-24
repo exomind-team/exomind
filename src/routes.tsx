@@ -12,6 +12,8 @@ import { getCommandPaletteService } from '@/lib/services/command-palette.service
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
 import { warn as logWarn } from '@/lib/logger';
 import { useTauriFullscreenShortcut } from '@/ui/app/hooks/useTauriFullscreenShortcut';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { isDesktopAdaptiveShellPath, resolveAppShellMode } from '@/ui/app/layout/shell-mode';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
@@ -199,34 +201,6 @@ function PageFallback() {
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
-}
-
-function useIsDesktop(minWidth = 768): boolean {
-  const [isDesktop, setIsDesktop] = useState(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return false;
-    }
-    return window.matchMedia(`(min-width: ${minWidth}px)`).matches;
-  });
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return;
-    }
-
-    const mediaQueryList = window.matchMedia(`(min-width: ${minWidth}px)`);
-    const onChange = (event: MediaQueryListEvent) => {
-      setIsDesktop(event.matches);
-    };
-
-    setIsDesktop(mediaQueryList.matches);
-    mediaQueryList.addEventListener('change', onChange);
-    return () => {
-      mediaQueryList.removeEventListener('change', onChange);
-    };
-  }, [minWidth]);
-
-  return isDesktop;
 }
 
 function resolveRuntimePlatform(): 'web' | 'tauri' | 'unknown' {
@@ -640,21 +614,12 @@ function NewLayout() {
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
-  const isDesktopAdaptiveRoute =
-    location.pathname === '/'
-    || location.pathname === '/eventlog'
-    || location.pathname.startsWith('/eventlog/')
-    || location.pathname === '/dashboard'
-    || location.pathname === '/tasks'
-    || location.pathname.startsWith('/tasks/')
-    || location.pathname === '/reminders'
-    || location.pathname === '/me'
-    || location.pathname === '/update'
-    || location.pathname === '/settings'
-    || location.pathname.startsWith('/settings/')
-    || location.pathname === '/agents'
-    || location.pathname.startsWith('/agents/');
-  const selectedShell = isDesktop && desktopAdaptiveEnabled && isDesktopAdaptiveRoute ? 'desktop' : 'mobile';
+  const isDesktopAdaptiveRoute = isDesktopAdaptiveShellPath(location.pathname);
+  const selectedShell = resolveAppShellMode({
+    pathname: location.pathname,
+    isDesktop,
+    desktopAdaptiveEnabled,
+  });
 
   useEffect(() => {
     const matchMediaDesktop = typeof window === 'undefined' || typeof window.matchMedia !== 'function'
