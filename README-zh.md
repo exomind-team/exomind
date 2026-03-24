@@ -1,8 +1,19 @@
+<div align="center">
+
 # ExoMind
 
-> 你的生命成长助手。本地优先、事件驱动、AI 赋能。
+**你的生命成长助手。**
 
-[English](./README.md) | [官网](https://exo-mind.ai) | [下载](https://exo-mind.ai/download)
+本地优先 · 事件驱动 · AI 赋能 · 全平台
+
+[![License: CCOPL-1.0](https://img.shields.io/badge/许可证-CCOPL--1.0-blue.svg)](https://github.com/exomind-team/ccopl)
+[![Build](https://img.shields.io/github/actions/workflow/status/exomind-team/exomind/release.yml?branch=dev&label=构建)](https://github.com/exomind-team/exomind/actions)
+[![Website](https://img.shields.io/badge/官网-exo--mind.ai-orange)](https://exo-mind.ai)
+[![Download](https://img.shields.io/badge/下载-最新版-green)](https://exo-mind.ai/download)
+
+[English](./README.md) · [官网](https://exo-mind.ai) · [下载](https://exo-mind.ai/download)
+
+</div>
 
 ---
 

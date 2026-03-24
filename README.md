@@ -1,8 +1,19 @@
+<div align="center">
+
 # ExoMind
 
-> Your life growth assistant. Local-first, event-driven, AI-powered.
+**Your life growth assistant.**
 
-[中文文档](./README-zh.md) | [Website](https://exo-mind.ai) | [Download](https://exo-mind.ai/download)
+Local-first · Event-driven · AI-powered · Cross-platform
+
+[![License: CCOPL-1.0](https://img.shields.io/badge/License-CCOPL--1.0-blue.svg)](https://github.com/exomind-team/ccopl)
+[![Build](https://img.shields.io/github/actions/workflow/status/exomind-team/exomind/release.yml?branch=dev&label=build)](https://github.com/exomind-team/exomind/actions)
+[![Website](https://img.shields.io/badge/website-exo--mind.ai-orange)](https://exo-mind.ai)
+[![Download](https://img.shields.io/badge/download-latest-green)](https://exo-mind.ai/download)
+
+[中文文档](./README-zh.md) · [Website](https://exo-mind.ai) · [Download](https://exo-mind.ai/download)
+
+</div>
 
 ---
 
@@ -126,6 +137,10 @@ bun run build:tag
 # Formal release
 git tag release/v0.3.3 && git push origin release/v0.3.3
 ```
+
+## Contributing
+
+We welcome contributions! Please read our development guide in [CLAUDE.md](CLAUDE.md) for coding conventions and workflow.
 
 ## License
 
