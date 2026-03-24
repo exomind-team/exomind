@@ -133,10 +133,15 @@ exomind/
 
 ## 文档
 
-- [文档索引](docs/README.md)
-- [架构概览](docs/architecture/overview.md)
-- [开发指南](CLAUDE.md)
-- [脚本指南](Scripts/README.md)
+> 文档以中文为主，部分内容提供英文版本。
+
+- [文档索引](docs/README.md) — 全部文档导航
+- [架构概览](docs/architecture/overview.md) — 系统架构设计
+- [产品需求](docs/product/PRD.md) — 产品需求文档
+- [产品路线图](docs/product/roadmap.md) — 版本规划
+- [开发指南](CLAUDE.md) — 开发规范与工作流
+- [脚本指南](Scripts/README.md) — 脚本使用说明
+- [Git 工作流](docs/development/git-spec.md) — Git 分支与提交规范
 
 ## 构建与发布
 
