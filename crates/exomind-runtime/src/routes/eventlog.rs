@@ -170,6 +170,27 @@ fn load_events_for_query(
     Ok(apply_since_id_and_limit(events, since_id, limit))
 }
 
+fn resolve_watch_since_id(
+    state: &AppState,
+    query: &WatchEventsQuery,
+) -> Result<Option<String>, String> {
+    if query.since_id.is_some() || query.since_timestamp.is_some() {
+        return Ok(query.since_id.clone());
+    }
+
+    let latest = load_events_for_query(
+        state,
+        query.user_id.as_deref(),
+        None,
+        Some(1),
+        None,
+        query.until_timestamp,
+        query.tags.as_deref(),
+    )?;
+
+    Ok(latest.first().map(|event| event.id.clone()))
+}
+
 fn notify_eventlog_watchers(state: &AppState, user_id: Option<&str>) {
     let _ = state.eventlog_watch_tx.send(sanitize_user_id(user_id));
 }
@@ -292,19 +313,22 @@ async fn watch_events(
     let user_key = sanitize_user_id(query.user_id.as_deref());
     let started_at = Instant::now();
     let timeout_duration = Duration::from_secs(timeout_secs);
+    let effective_since_id = resolve_watch_since_id(&state, &query).map_err(internal_error)?;
 
-    let initial = load_events_for_query(
-        &state,
-        query.user_id.as_deref(),
-        query.since_id.as_deref(),
-        None,
-        query.since_timestamp,
-        query.until_timestamp,
-        query.tags.as_deref(),
-    )
-    .map_err(internal_error)?;
-    if !initial.is_empty() {
-        return Ok(Json(initial));
+    if query.since_id.is_some() || query.since_timestamp.is_some() {
+        let initial = load_events_for_query(
+            &state,
+            query.user_id.as_deref(),
+            effective_since_id.as_deref(),
+            None,
+            query.since_timestamp,
+            query.until_timestamp,
+            query.tags.as_deref(),
+        )
+        .map_err(internal_error)?;
+        if !initial.is_empty() {
+            return Ok(Json(initial));
+        }
     }
 
     let mut rx = state.eventlog_watch_tx.subscribe();
@@ -325,7 +349,7 @@ async fn watch_events(
                 let events = load_events_for_query(
                     &state,
                     query.user_id.as_deref(),
-                    query.since_id.as_deref(),
+                    effective_since_id.as_deref(),
                     None,
                     query.since_timestamp,
                     query.until_timestamp,
@@ -936,6 +960,51 @@ mod tests {
         let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.len(), 1);
         assert_eq!(payload[0]["id"], appended["id"]);
+    }
+
+    #[tokio::test]
+    async fn watch_events_without_cursor_waits_for_future_events_only() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let app = test_router(test_state_with_eventlog(store));
+
+        let existing = append_event_via_api(
+            &app,
+            r#"{"timestamp":1000,"content":"existing","tags":["note"]}"#,
+            "/eventlog?user_id=profile-argon",
+        )
+        .await;
+
+        let watch_app = app.clone();
+        let watch_handle = tokio::spawn(async move {
+            watch_app
+                .oneshot(
+                    Request::builder()
+                        .uri("/eventlog/watch?user_id=profile-argon&timeout=2")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        assert!(!watch_handle.is_finished(), "watch should not return existing backlog without cursor");
+
+        let appended = append_event_via_api(
+            &app,
+            r#"{"timestamp":2000,"content":"future","tags":["note"]}"#,
+            "/eventlog?user_id=profile-argon",
+        )
+        .await;
+
+        let response = watch_handle.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.len(), 1);
+        assert_eq!(payload[0]["id"], appended["id"]);
+        assert_ne!(payload[0]["id"], existing["id"]);
     }
 
     #[tokio::test]
