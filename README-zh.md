@@ -25,6 +25,10 @@ ExoMind 是一个基于 Tauri v2 的跨平台个人 AI 助手（Windows/macOS/Li
 <img src="docs/assets/signal-network.png" alt="ExoMind 信号网络" width="800">
 <br>
 <em>信号网络 — Agent、Actor 与信号主题协同工作</em>
+<br><br>
+<img src="docs/assets/voice-input.png" alt="ExoMind 语音输入" width="800">
+<br>
+<em>语音输入 — 实时语音识别与事件日志记录</em>
 </div>
 
 ## 技术栈

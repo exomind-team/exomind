@@ -25,6 +25,10 @@ ExoMind is a cross-platform personal AI assistant built with Tauri v2 (Windows/m
 <img src="docs/assets/signal-network.png" alt="ExoMind Signal Network" width="800">
 <br>
 <em>Signal Network — agents, actors, and signal topics working together</em>
+<br><br>
+<img src="docs/assets/voice-input.png" alt="ExoMind Voice Input" width="800">
+<br>
+<em>Voice Input — real-time speech recognition with event logging</em>
 </div>
 
 ## Tech Stack
