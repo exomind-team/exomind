@@ -295,7 +295,7 @@ jj 的 undo 并非真正的撤销——它创建一个**新操作**来恢复之�
 补偿操作方案：
   → 创建补偿事件：{ type: "block_correction", originalBlockId: "b-123",
                      reason: "误操作结束", correction: "reopen_as_new_block" }
-  → 基于原始 block 的状态创建一个新的活跃 block，继承 name、taskIds
+  → 基于原始 block 的状态创建一个新的活跃 block，继承 name、当前 taskIds 快照，并保留 taskAssociationLog 历史
   → 原始 block 保留在已完成列表中（留痕）
   → 新 block 的 metadata 引用原始 block（可追溯）
 ```
