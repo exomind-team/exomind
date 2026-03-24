@@ -13,7 +13,9 @@ export function isDesktopAdaptiveShellPath(pathname: string): boolean {
     || pathname === '/settings'
     || pathname.startsWith('/settings/')
     || pathname === '/agents'
-    || pathname.startsWith('/agents/');
+    || pathname.startsWith('/agents/')
+    || pathname === '/goals'
+    || pathname.startsWith('/goals/');
 }
 
 export function resolveAppShellMode({
