@@ -3,9 +3,9 @@
 # Top-most EditorConfig file
 root = true
 
-# Unix-style newlines with a newline ending every file
+# Default to LF across the repo; keep explicit Windows-only exceptions in .gitattributes
 [*]
-end_of_line = crlf
+end_of_line = lf
 insert_final_newline = true
 charset = utf-8
 trim_trailing_whitespace = true
