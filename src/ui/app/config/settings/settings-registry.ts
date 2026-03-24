@@ -18,6 +18,7 @@ import {
   Monitor,
   Moon,
   MoonStar,
+  Orbit,
   Search,
   RefreshCw,
   ScrollText,
@@ -56,6 +57,11 @@ import {
   setMePageEnabled,
   subscribeMePageEnabledChanges,
 } from '@/config/me-page-enabled';
+import {
+  getGoalsPageEnabled,
+  setGoalsPageEnabled,
+  subscribeGoalsPageEnabledChanges,
+} from '@/config/goals-page-enabled';
 import {
   getDesktopAdaptiveEnabled,
   setDesktopAdaptiveEnabled,
@@ -502,6 +508,7 @@ function resetAllSettings(): string {
 export const FEATURE_TOGGLE_SETTING_IDS = [
   'me-page-enabled',
   'agent-page-enabled',
+  'goals-page-enabled',
   'desktop-adaptive',
   'command-palette-enabled',
 ] as const;
@@ -526,6 +533,16 @@ export const FEATURE_TOGGLE_SETTINGS = [
     get: getAgentPageEnabled,
     set: setAgentPageEnabled,
     subscribe: subscribeAgentPageEnabledChanges,
+  },
+  {
+    id: 'goals-page-enabled',
+    label: '目标页面',
+    icon: Orbit,
+    rowTestId: 'feature-toggle-goals-page-row',
+    controlTestId: 'feature-toggle-goals-page-switch',
+    get: getGoalsPageEnabled,
+    set: setGoalsPageEnabled,
+    subscribe: subscribeGoalsPageEnabledChanges,
   },
   {
     id: 'desktop-adaptive',

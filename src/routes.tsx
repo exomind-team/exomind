@@ -1,9 +1,10 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { House, Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, type LucideIcon } from 'lucide-react';
+import { House, Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
+import { getGoalsPageEnabled, subscribeGoalsPageEnabledChanges } from '@/config/goals-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
@@ -137,6 +138,11 @@ const AgentsPage = lazy(async () => {
   return { default: module.AgentsPage };
 });
 
+const GoalsPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/goals/GoalsPage');
+  return { default: module.GoalsPage };
+});
+
 const UpdatePage = lazy(async () => {
   const module = await import('@/ui/app/pages/UpdatePage');
   return { default: module.UpdatePage };
@@ -249,6 +255,7 @@ function MobileShell({
                 const active = locationPath === item.path
                   || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
                   || (item.path === '/me' && locationPath.startsWith('/me'))
+                  || (item.path === '/goals' && locationPath.startsWith('/goals'))
                   || (item.path === '/agents' && locationPath.startsWith('/agents'))
                   || (item.path === '/settings' && locationPath.startsWith('/settings'));
                 return (
@@ -277,12 +284,14 @@ function DesktopSidebar({
   activePath,
   agentPageEnabled,
   mePageEnabled,
+  goalsPageEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
   activePath: string;
   agentPageEnabled: boolean;
   mePageEnabled: boolean;
+  goalsPageEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -290,6 +299,13 @@ function DesktopSidebar({
     { key: 'home', title: '首页', path: '/', icon: House, match: (path: string) => path === '/' },
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
+    ...(goalsPageEnabled ? [{
+      key: 'goals',
+      title: '目标',
+      path: '/goals',
+      icon: Orbit,
+      match: (path: string) => path === '/goals' || path.startsWith('/goals/'),
+    }] : []),
     ...(mePageEnabled ? [{
       key: 'me',
       title: 'Me',
@@ -394,12 +410,14 @@ function DesktopLayout({
   activePath,
   agentPageEnabled,
   mePageEnabled,
+  goalsPageEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
   activePath: string;
   agentPageEnabled: boolean;
   mePageEnabled: boolean;
+  goalsPageEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -410,6 +428,7 @@ function DesktopLayout({
           activePath={activePath}
           agentPageEnabled={agentPageEnabled}
           mePageEnabled={mePageEnabled}
+          goalsPageEnabled={goalsPageEnabled}
           collapsed={collapsed}
           onToggleCollapsed={onToggleCollapsed}
         />
@@ -446,6 +465,31 @@ function MeRouteGate() {
   );
 }
 
+function GoalsRouteGate() {
+  const navigate = useNavigate();
+  const [goalsPageEnabled, setGoalsPageEnabled] = useState(() => getGoalsPageEnabled());
+
+  useEffect(() => {
+    return subscribeGoalsPageEnabledChanges(setGoalsPageEnabled);
+  }, []);
+
+  useEffect(() => {
+    if (!goalsPageEnabled) {
+      void navigate({ to: '/settings', replace: true });
+    }
+  }, [goalsPageEnabled, navigate]);
+
+  if (!goalsPageEnabled) {
+    return <PageFallback />;
+  }
+
+  return (
+    <LazyPage>
+      <GoalsPage />
+    </LazyPage>
+  );
+}
+
 function NewLayout() {
   const location = useLocation();
   useTauriFullscreenShortcut();
@@ -454,6 +498,7 @@ function NewLayout() {
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
   const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
+  const [goalsPageEnabled, setGoalsPageEnabled] = useState(() => getGoalsPageEnabled());
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => readStoredDesktopSidebarCollapsed());
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
@@ -467,6 +512,9 @@ function NewLayout() {
   }, []);
   useEffect(() => {
     return subscribeMePageEnabledChanges(setMePageEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeGoalsPageEnabledChanges(setGoalsPageEnabled);
   }, []);
   useEffect(() => {
     return subscribeDesktopAdaptiveChanges(setDesktopAdaptiveEnabledState);
@@ -537,6 +585,7 @@ function NewLayout() {
     { title: '首页', path: '/', icon: House },
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
+    ...(goalsPageEnabled ? [{ title: '目标', path: '/goals', icon: Orbit }] : []),
     ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
     { title: '设置', path: '/settings', icon: Settings },
@@ -554,6 +603,7 @@ function NewLayout() {
           activePath={location.pathname}
           agentPageEnabled={agentPageEnabled}
           mePageEnabled={mePageEnabled}
+          goalsPageEnabled={goalsPageEnabled}
           collapsed={desktopSidebarCollapsed}
           onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
         />
@@ -802,6 +852,14 @@ const newMeRoute = createRoute({
   },
 });
 
+const newGoalsRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/goals',
+  component: function NewGoals() {
+    return <GoalsRouteGate />;
+  },
+});
+
 const newSettingsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/settings',
@@ -974,6 +1032,7 @@ const newRouteTree = newRootRoute.addChildren([
   newTimeblockDetailRoute,
   newTaskDetailRoute,
   newMeRoute,
+  newGoalsRoute,
   newSettingsRoute,
   newLegalSupportRoute,
   newUserManageRoute,
