@@ -135,13 +135,13 @@ exomind/
 
 > Documentation is primarily written in Chinese. English translations are provided where available.
 
-- [Docs index](docs/README.md) — 文档导航索引
-- [Architecture overview](docs/architecture/overview.md) — 架构概览
-- [Product requirements](docs/product/PRD.md) — 产品需求文档
-- [Product roadmap](docs/product/roadmap.md) — 产品路线图
-- [Development guide](CLAUDE.md) — 开发规范与工作流
-- [Scripts guide](Scripts/README.md) — 脚本使用指南
-- [Git workflow](docs/development/git-spec.md) — Git 工作流规范
+- [Docs index](docs/README.md)
+- [Architecture overview](docs/architecture/overview.md)
+- [Product requirements](docs/product/PRD.md)
+- [Product roadmap](docs/product/roadmap.md)
+- [Development guide](CLAUDE.md)
+- [Scripts guide](Scripts/README.md)
+- [Git workflow](docs/development/git-spec.md)
 
 ## Build & Release
 
