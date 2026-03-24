@@ -21,6 +21,12 @@
 
 ExoMind 是一个基于 Tauri v2 的跨平台个人 AI 助手（Windows/macOS/Linux/Android），聚焦事件日志、时间块与多端同步 — 帮助你记录、反思、成长。
 
+<div align="center">
+<img src="docs/assets/signal-network.png" alt="ExoMind 信号网络" width="800">
+<br>
+<em>信号网络 — Agent、Actor 与信号主题协同工作</em>
+</div>
+
 ## 技术栈
 
 | 分类 | 技术 |

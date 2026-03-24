@@ -21,6 +21,12 @@ Local-first · Event-driven · AI-powered · Cross-platform
 
 ExoMind is a cross-platform personal AI assistant built with Tauri v2 (Windows/macOS/Linux/Android). It focuses on event logging, time blocks, and multi-device sync — helping you record, reflect, and grow.
 
+<div align="center">
+<img src="docs/assets/signal-network.png" alt="ExoMind Signal Network" width="800">
+<br>
+<em>Signal Network — agents, actors, and signal topics working together</em>
+</div>
+
 ## Tech Stack
 
 | Category | Technology |
