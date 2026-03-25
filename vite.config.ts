@@ -39,6 +39,10 @@ export default defineConfig(({ mode }) => {
     "**/.tmp/**",
     "**/*.log",
     "**/.worktrees/**",
+    "**/temp/worktrees/**",
+    "**/node_modules.stale-*/**",
+    "**/test-results/**",
+    "**/playwright-report/**",
     "**/website/**",
     "**/packages/ts-agent-cli/**",
   ];
