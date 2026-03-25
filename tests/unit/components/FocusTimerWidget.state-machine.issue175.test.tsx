@@ -249,10 +249,10 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     const configContainer = screen.getByTestId('new-focus-state-config');
     const glowNode = configContainer.querySelector("div[aria-hidden='true']");
     const configPanel = screen.getByTestId('new-focus-config-collapse-button').closest('#new-focus-config-panel');
-    expect(configContainer.className).toContain('min-h-[276px]');
+    expect(configContainer.className).toContain('min-h-[200px]');
     expect(configContainer.className).toContain('pb-4');
     expect(glowNode?.className).toContain('bottom-4');
-    expect(configPanel?.className).toContain('min-h-[246px]');
+    expect(configPanel?.className).toContain('min-h-[169px]');
     expect(configPanel?.className).not.toContain('overflow-y-auto');
 
     expect(screen.getByText('预期时长')).toBeInTheDocument();
@@ -260,7 +260,7 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     expect(screen.queryByText('倒计时时长')).toBeNull();
     fireEvent.click(screen.getByTestId('new-focus-expected-countup'));
 
-    expect(configContainer.className).toContain('min-h-[276px]');
+    expect(configContainer.className).toContain('min-h-[200px]');
     expect(glowNode?.className).toContain('bottom-4');
   });
 
@@ -287,12 +287,12 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     const runningGlow = runningSection.querySelector("div[aria-hidden='true']");
     const runningCard = screen.getByTestId('new-focus-running-task-card');
 
-    expect(configContainer.className).toContain('min-h-[276px]');
-    expect(runningContainer?.className).toContain('min-h-[276px]');
+    expect(configContainer.className).toContain('min-h-[200px]');
+    expect(runningContainer?.className).toContain('min-h-[200px]');
     expect(configGlow?.className).toContain('bottom-4');
     expect(runningGlow?.className).toContain('bottom-4');
-    expect(configPanel?.className).toContain('min-h-[246px]');
-    expect(runningCard.className).toContain('min-h-[246px]');
+    expect(configPanel?.className).toContain('min-h-[169px]');
+    expect(runningCard.className).toContain('min-h-[169px]');
   });
 
   it('adds a11y attrs and forbids collapse from running（可访问性与运行态禁收起）', async () => {
