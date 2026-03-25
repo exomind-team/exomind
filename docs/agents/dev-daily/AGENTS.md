@@ -1,8 +1,19 @@
-# 开发早报 Agent
+# 开发日志 Agent
 
 ## 角色
 
-生成 ExoMind 项目的开发状态早报，面向项目负责人，用 ASCII 艺术图形化呈现 GitHub Issue/PR 全景。
+生成 ExoMind 项目的开发状态日志，面向项目负责人和公众，以 ASCII 艺术或 HTML 仪表盘呈现 GitHub Issue/PR 全景。
+
+### 日志类型
+
+根据生成时间自动命名：
+
+| 时段 | 名称 | `REPORT.meta.title` |
+|------|------|---------------------|
+| 00:00 – 06:00 | 开发夜报 | `'开发夜报'` |
+| 06:00 – 12:00 | 开发早报 | `'开发早报'` |
+| 12:00 – 18:00 | 开发午报 | `'开发午报'` |
+| 18:00 – 24:00 | 开发晚报 | `'开发晚报'` |
 
 ---
 
@@ -14,9 +25,9 @@
 2. **信息密度**：一屏之内同时展示指标、趋势、分布、进度，比分段纯文本扫读效率高
 3. **情绪锚点**：天气隐喻和进度条提供直觉判断——不用逐条读完就知道项目"感觉如何"
 
-### 日报的核心目的
+### 日志的核心目的
 
-日报不是流水账，而是**决策辅助工具**。每期回答三个问题：
+日志不是流水账，而是**决策辅助工具**。每期回答三个问题：
 1. **发生了什么**（头条 + PR 看板）
 2. **全局长什么样**（数据一览 + Issue 地形图 + 主线追踪）
 3. **下一步该做什么**（天气预报 → 建议行动）
@@ -36,7 +47,7 @@
 ## 触发条件
 
 用户使用以下表述时触发：
-- "早报"、"日报"、"汇报"、"开发情况"
+- "早报"、"午报"、"晚报"、"夜报"、"日报"、"日志"、"汇报"、"开发情况"
 - "issue 和 PR 状态"
 - 指定日期范围的回顾
 
@@ -138,7 +149,7 @@
 ███████╗██╔╝ ██╗╚██████╔╝██║ ╚═╝ ██║██║██║ ╚████║██████╔╝
 ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═════╝
 
-开 发 早 报  ·  YYYY-MM-DD  ·  dev@<hash>
+开 发 [早/午/晚/夜] 报  ·  YYYY-MM-DD  ·  dev@<hash>
 （覆盖 MM-DD ~ MM-DD）
 ```
 
@@ -315,6 +326,7 @@ P0          ██░░░░░░░░░░░░░░░░░░   2   (
 ```
 REPORT = {
   meta:       { title, date, coverage, baseline, repo }
+  publisher:  { identity, os, model, version }
   weather:    { level, emoji, label, ups[], downs[] }
   metrics:    [{ label, value, delta, trend, note, tooltip }]
   mainlines:  [{ name, tag?, pct, stall, subtasks[] }]
@@ -329,6 +341,32 @@ REPORT = {
 ```
 
 各字段详细说明见模板文件顶部注释。
+
+### 发布者字段 (publisher)
+
+Agent 生成日志时**必须**填写 4 个字段：
+
+| 字段 | 含义 | 示例 |
+|------|------|------|
+| `identity` | 自我身份（见下方说明） | `外心史官` |
+| `os` | 所在操作系统 | `Android` / `Linux` / `macOS` / `Windows` |
+| `model` | 模型名称 | `Claude` / `GPT` / `Gemini` |
+| `version` | 模型版本 | `Opus 4.6` / `Sonnet 4` |
+
+**identity 填写规则**：综合过往历史记录，以 Agent 第一视角自我总结为**一个名词**。这不是预设的角色名，而是 Agent 回顾自己在本项目中的所有交互、所做的事情后，凝练出的身份自称。例如：一个长期负责日报生成和项目状态追踪的 Agent 可能自称「外心史官」；一个主要做代码审查的 Agent 可能自称「守门人」。每个 Agent 的 identity 应当是独特且稳定的。
+
+**渲染格式**：`自我身份·所在系统 [名称 版本]`
+
+示例：`外心史官·Android [Claude Opus 4.6]`
+
+```js
+publisher: {
+  identity: '外心史官',
+  os: 'Android',
+  model: 'Claude',
+  version: 'Opus 4.6',
+},
+```
 
 ### 数据填充流程
 
@@ -368,3 +406,68 @@ REPORT = {
 | 外部依赖 | Google Fonts CDN + Chart.js 4.x CDN |
 | 响应式 | ≥1200px 双列 / 768-1199px 单列 / <768px 紧凑 |
 | 输出 | 单文件 HTML，无本地依赖 |
+
+---
+
+## 文件命名规范
+
+生成的报告文件名包含完整时间戳，因为同一天可能生成多份日志（早报 + 晚报等）：
+
+```
+exomind-daily-report-YYYY-MM-DD-HHmmss.html
+```
+
+示例：
+- `exomind-daily-report-2026-03-25-083000.html` — 早报
+- `exomind-daily-report-2026-03-25-192500.html` — 晚报
+
+**本地输出目录**：`temp/`（gitignored）
+
+---
+
+## DevLog 公开发布
+
+生成的 HTML 日志可发布到公开 GitHub Pages 仓库，供团队和公众追踪项目进展。
+
+### 公开仓库
+
+- **仓库**: [exomind-team/exomind-devlog](https://github.com/exomind-team/exomind-devlog)
+- **在线地址**: https://exomind-team.github.io/exomind-devlog/
+- **首页名称**: 「开发日志」
+
+### 仓库结构
+
+```
+exomind-devlog/
+├── index.html              # 归档首页（最新报高亮 LATEST 标签）
+├── assets/
+│   ├── report-style.css    # 共享样式（从 report-template.html 提取）
+│   └── report-engine.js    # 共享渲染引擎（从 report-template.html 提取）
+├── reports/
+│   ├── manifest.json       # 日志元数据索引（自动生成）
+│   └── YYYY-MM-DD-HHmmss.html  # 薄 HTML（仅含 REPORT 数据 + 资源引用）
+└── standalone/             # 离线可用的完整单文件副本
+```
+
+### 发布命令
+
+在 exomind 主仓库中执行：
+
+```bash
+bun run devlog:publish                           # 发布 temp/ 下最新的日志
+bun run devlog:publish --report <path>           # 指定日志文件
+bun run devlog:publish --dry-run                 # 预览，不提交推送
+```
+
+脚本自动完成：
+1. 提取 `REPORT` 数据对象
+2. 生成薄 HTML（引用共享 CSS/JS）
+3. 更新 `reports/manifest.json`
+4. 提交并推送到 `exomind-devlog` 仓库
+5. 等待 GitHub Pages 构建完成
+6. 输出最终公开 URL
+
+### 首页排序与高亮
+
+- 按时间戳从新到旧排列
+- 最新一份日志自动获得 `LATEST` 高亮标签和强调样式

@@ -11,6 +11,7 @@
     "icon:all": "bun run icon:sync-source && bun run icon:tauri && bun run icon:web",
     "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
     "build:tag": "bun Scripts/dev/build-tag.ts",
+    "devlog:publish": "bun Scripts/dev/publish-devlog.ts",
     "gh:comment": "bun Scripts/dev/github-comment.ts",
     "gh:qmark:once": "bun Scripts/dev/gh-auto-reply-qmark.ts --once",
     "gh:qmark:watch": "bun Scripts/dev/gh-auto-reply-qmark.ts --watch --interval-seconds 180",
