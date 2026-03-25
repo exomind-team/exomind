@@ -163,7 +163,7 @@ interface GoalGraph {
 - 边的两端不能是同一个节点（无自环）
 - 边的起止节点可修改，修改后须通过 DAG 检测
 - **入边冻结**：已完成（completed）目标的入边——禁止新增、修改 target（reconnect target）、删除、修改 taskNodeRef、修改 title/description；但**允许修改 source**（不影响 target 的完成判定）。已取消的目标入边不冻结
-- **出边约束**：已取消（cancelled）的目标，禁止新增出边，但已有出边可修改/删除
+- **出边约束**：已取消（cancelled）的目标，禁止新增出边，但已有出边可修改/删除。从 cancelled 目标出发的空槽位边成为僵尸边（永远 pending），留给 UI 层隐藏或提示用户删除
 
 ### 2.3 实体删除策略
 
@@ -272,7 +272,7 @@ API 层面暴露嵌套数组 `TaskEdgeId[][]`，RT 内部去重转为 `Set<Set<>
 ### 4.3 推导规则
 
 ```typescript
-function evaluateCompletion(rule: CompletionRule, edges: TaskEdge[]): boolean {
+function evaluateCompletion(rule: CompletionRule): boolean {
   // 外层为空 → 永不完成
   if (rule.size === 0) return false
   // 外层 OR：任一子集满足即为 true
@@ -362,7 +362,7 @@ createEdge(params: {
   title?: string
   description?: string
   taskNodeRef?: TaskNodeId  // 可选：关联已有任务
-  rulePosition?: { clauseIndex: number }  // 加入 target completionRule 的位置（由 UI 层决定）
+  rulePosition: { clauseIndex: number }   // 加入 target completionRule 的位置（必填，由 UI 层决定）
 }): TaskEdge
 ```
 
@@ -375,7 +375,7 @@ createEdge(params: {
 
 **副作用**：
 - 创建 TaskEdge
-- 按 `rulePosition` 将新边加入 target 的 completionRule（省略则由逻辑层根据当前规则结构决定）
+- 按 `rulePosition` 将新边加入 target 的 completionRule（必填）
 - 触发 target 的完成重算
 
 ### 5.3 cancelGoal — 取消目标
@@ -395,8 +395,8 @@ cancelGoal(params: {
 **行为**：
 1. 设 goalNode.status = cancelled（目标完全冻结）
 2. **边不删除**：取消目标不删除任何边（目标不可删除，边也保留以记录历史）
-3. 若 `cascadeInTasks = true`：入边中有关联任务的 → 通过任务系统 API 取消关联任务
-4. 若 `cascadeOutTasks = true`：出边中有关联任务的 → 通过任务系统 API 取消关联任务
+3. 若 `cascadeInTasks = true`：入边中有关联任务的 → 通过任务系统 API 取消关联任务（空槽位边无 taskNodeRef，不受影响）
+4. 若 `cascadeOutTasks = true`：出边中有关联任务的 → 通过任务系统 API 取消关联任务（空槽位边不受影响）
 5. 若 cascadeOutTasks 触发了出边关联任务的取消 → 重算这些出边的 target 目标（被取消目标自身已为终态，跳过重算）
 
 ### 5.4 deleteEdge — 删除任务边
@@ -423,7 +423,7 @@ reconnectEdge(params: {
   edgeId: TaskEdgeId
   newSource?: NodeId      // 新源节点，省略则不变
   newTarget?: GoalId      // 新目标节点，省略则不变
-  rulePosition?: { clauseIndex: number }  // 加入新 target completionRule 的位置
+  rulePosition: { clauseIndex: number }   // 加入新 target completionRule 的位置（必填）
 }): void
 ```
 
@@ -431,15 +431,15 @@ reconnectEdge(params: {
 - 新端点必须存在
 - 新 source ≠ 新 target（无自环）
 - 修改后不得形成环（C6）
-- 旧 target 若为 completed → 拒绝（入边冻结）
+- 旧 target 若为 completed **且 newTarget 有值**（即要改 target）→ 拒绝（入边冻结）。仅改 source 时不拒绝（§2.2 允许）
 - 新 target 若为 completed → 拒绝（入边冻结）
-- 新 source 若为 cancelled → 拒绝（禁止新增出边）。注：newSource 省略时不检查旧 source 状态（这是修改已有边，非新增出边）
+- 新 source 若为 cancelled → 拒绝（禁止新增出边）。注：newSource 省略时不检查旧 source 状态（修改已有边，非新增出边）
 
 **副作用**：
 - 若仅 source 变更：无 completionRule 变更，无重算触发（source 不影响 target 的完成判定）
 - 若 target 变更：
   - 从旧 target 的 completionRule 移除引用（§4.4），触发旧 target 重算
-  - 按 `rulePosition` 将边加入新 target 的 completionRule（**强制指定位置**，不允许幽灵边）
+  - 按 `rulePosition` 将边加入新 target 的 completionRule（必填，不允许幽灵边）
 - C5 检查（旧 target 可能变孤立）
 
 ### 5.6 splitEdge — 拆解边（复合操作）
@@ -461,6 +461,7 @@ splitEdge(params: {
 3. 另一段创建新空槽位边
 4. 统一 DAG 检测（C6），失败则全部回滚
 5. B 的 completionRule 中对原边的引用迁移到新的指向 B 的边（默认行为；调用方可覆盖指定其他位置）
+6. 若使用已有目标 middleGoalId 作为中间节点，新入边加入 C 的 completionRule（位置由调用方指定或默认加入第一个子集）
 
 ### 5.7 updateGoal — 更新目标属性
 
