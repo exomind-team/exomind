@@ -5,6 +5,7 @@
  */
 
 import PouchDB from 'pouchdb';
+import { mkdirSync } from 'node:fs';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { TaskStorage } from '@/lib/storage/task-storage';
 import type { TaskNode } from '@/lib/types/task';
@@ -150,6 +151,7 @@ describe('TaskStorage wire format migration', () => {
     const userId = `task-mig-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const prefix = `.tmp/pouchdb-task-mig-${Date.now()}-${Math.random().toString(36).slice(2, 8)}/`;
     const dbName = `tasks_${userId}`;
+    mkdirSync(prefix, { recursive: true });
 
     {
       const seedDb = new PouchDB(dbName, { prefix });

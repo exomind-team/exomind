@@ -92,7 +92,9 @@ export function resolveInstalledNdkVersion(env: NodeJS.ProcessEnv = process.env)
     }
   }
 
-  return normalizeNdkVersion(basename(ndkHome.replace(/[\\/]+$/, '')));
+  const normalizedPath = ndkHome.replace(/[\\/]+$/, '');
+  const pathSegments = normalizedPath.split(/[\\/]/).filter(Boolean);
+  return normalizeNdkVersion(pathSegments[pathSegments.length - 1] ?? null);
 }
 
 const MDNS_MULTICAST_LOCK_MARKER = 'createMulticastLock("exomind-mdns-lock")';
