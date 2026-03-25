@@ -207,6 +207,16 @@ function deriveGoalDisplayStatus(goal: GoalNode, inEdges: TaskEdge[]): GoalDispl
   // goal.status === 'pending' 时，看入边：
   if (inEdges.some(e => getEdgeStatus(e) === 'in_progress')) return 'in_progress'
   if (inEdges.some(e => getEdgeStatus(e) === 'suspended')) return 'suspended'
+  // 所有入边都已终结（completed/cancelled）但规则未满足 → 挂起（等待新手段）
+  const allTerminal = inEdges.length > 0 && inEdges.every(e => {
+    const s = getEdgeStatus(e)
+    return s === 'completed' || s === 'cancelled'
+  })
+  if (allTerminal) return 'suspended'
+  return 'pending'
+}
+  if (inEdges.some(e => getEdgeStatus(e) === 'in_progress')) return 'in_progress'
+  if (inEdges.some(e => getEdgeStatus(e) === 'suspended')) return 'suspended'
   return 'pending'
 }
 ```
@@ -215,7 +225,7 @@ function deriveGoalDisplayStatus(goal: GoalNode, inEdges: TaskEdge[]): GoalDispl
 |----------|------|------|
 | pending | 存储 | 默认 |
 | in_progress | **派生** | 有任何入边处于 in_progress |
-| suspended | **派生** | 无 in_progress 入边，但有 suspended 入边 |
+| suspended | **派生** | 无 in_progress 入边，但有 suspended 入边；或所有入边已终结但规则未满足（等待新手段） |
 | completed | 存储 | 由完成规则推导写入（C8） |
 | cancelled | 存储 | 由 cancelGoal 操作写入 |
 
@@ -363,7 +373,7 @@ createEdge(params: {
 - source ≠ target（无自环）
 - 创建后不得形成环（C6）
 - target 不是 completed（入边冻结）
-- source 不是 cancelled（禁止新增出边）
+- source 不是 cancelled（禁止新增出边；注：completed 目标允许新增出边，出边不冻结）
 
 **副作用**：
 - 创建 TaskEdge
@@ -375,7 +385,8 @@ createEdge(params: {
 ```typescript
 cancelGoal(params: {
   goalId: GoalId
-  cascadeEdges?: boolean  // 是否同时处理所有关联边，默认 false
+  cascadeInEdges?: boolean   // 是否处理入边（达成手段），默认 false
+  cascadeOutEdges?: boolean  // 是否处理出边（后续路径），默认 false
 }): void
 ```
 
@@ -385,10 +396,13 @@ cancelGoal(params: {
 
 **行为**：
 1. 设 goalNode.status = cancelled（目标完全冻结）
-2. 若 `cascadeEdges = true`：
-   - 空槽位边（taskNodeRef 为空）→ 直接删除
-   - 有关联任务的边 → 通过任务系统 API 取消关联任务（联动操作，见 §0.2）
-3. 触发受影响目标的完成重算
+2. 若 `cascadeInEdges = true`：
+   - 入边中空槽位边 → 直接删除
+   - 入边中有关联任务的边 → 通过任务系统 API 取消关联任务（联动操作，见 §0.2）
+3. 若 `cascadeOutEdges = true`：
+   - 出边中空槽位边 → 直接删除
+   - 出边中有关联任务的边 → 通过任务系统 API 取消关联任务
+4. 触发受影响目标的完成重算
 
 ### 5.4 deleteEdge — 删除任务边
 
@@ -423,6 +437,7 @@ reconnectEdge(params: {
 - 新 source ≠ 新 target（无自环）
 - 修改后不得形成环（C6）
 - 旧 target 若为 completed → 拒绝（入边冻结）
+- 新 target 若为 completed → 拒绝（入边冻结）
 - 新 source 若为 cancelled → 拒绝（禁止新增出边）
 
 **副作用**：
@@ -449,7 +464,7 @@ splitEdge(params: {
 2. 原边通过 `reconnectEdge` 重定向到前半段（A→C）或后半段（C→B），由 `assignOriginalTo` 决定
 3. 另一段创建新匿名边
 4. 统一 DAG 检测（C6），失败则全部回滚
-5. B 的 completionRule 中对原边的引用可选迁移到新的两条边之一（由调用方决定）
+5. B 的 completionRule 中对原边的引用迁移到新的指向 B 的边（默认行为；调用方可覆盖指定其他位置）
 
 ### 5.7 updateGoal — 更新目标属性
 
@@ -464,6 +479,7 @@ updateGoal(params: {
 
 **前置检查**：
 - 目标不是终态（completed/cancelled 的目标完全冻结，不可修改任何字段）
+- completionRule 中不允许存在空内层子集（写入时自动过滤空子集）
 
 **副作用**：
 - 若 completionRule 变更 → 触发完成重算
@@ -479,6 +495,9 @@ updateEdge(params: {
 }): void
 ```
 
+**前置检查**：
+- 若 edge.target 为 completed → 禁止修改 taskNodeRef（入边冻结；title/description 也冻结）
+
 ---
 
 ## 6. 查询接口
@@ -492,10 +511,13 @@ updateEdge(params: {
 | getOutEdges | NodeId | TaskEdge[] | 节点的所有出边 |
 | getEdgeStatus | TaskEdgeId | TaskEdgeStatus | 派生状态（空槽位=pending，有关联=同步任务状态） |
 | deriveGoalDisplayStatus | GoalId | GoalDisplayStatus | 5 种展示状态 |
+| getEdgesByTaskRef | TaskNodeId | TaskEdge[] | 按关联任务反查边（事件处理用） |
 | getShortestPath | NodeId, NodeId | NodeId[] | 最短有向路径（排除 cancelled 边） |
 | getHopDistance | GoalId | number | Me 到目标的最短跳数（排除 cancelled 边） |
 
-**索引需求**：`getInEdges` 是完成推导的核心查询，需要 O(1) 或 O(k) 级别的访问效率（k = 入边数量）。建议维护 `targetIndex: Map<GoalId, Set<TaskEdgeId>>`。
+**索引需求**：
+- `targetIndex: Map<GoalId, Set<TaskEdgeId>>` — getInEdges 用，完成推导核心
+- `taskRefIndex: Map<TaskNodeId, Set<TaskEdgeId>>` — getEdgesByTaskRef 用，事件处理核心
 
 **路径计算过滤**：getShortestPath 和 getHopDistance 排除 cancelled 边（已取消的边不是有效路径）。
 
@@ -560,6 +582,8 @@ interface TaskStatusChangedEvent {
 | C9 空槽位限制 | 不限制 | 限制 |
 | completionRule | UI 用 AND/OR 简化 | 完整 DNF |
 
+| 级联传播 | 无深度限制，同步执行 | 引入批量重算/事件合并机制 |
+
 放宽的约束标注为 `prototype-only`。
 
 ---
@@ -595,4 +619,4 @@ interface TaskStatusChangedEvent {
 |------|------|----------|------|
 | 2026-03-24 | 0.1 | 初稿（v0.1） | Claude + 用户 |
 | 2026-03-24 | 0.2 | 统一设计（v0.2） | Claude + 用户 |
-| 2026-03-25 | 0.3-draft | 拆分逻辑模型；吸纳十条原则 + 审查修正（TaskEdgeStatus 显式定义、删除边规则维护、终态跳过重算、createGoal 基于节点派生、终态完全冻结、出边约束、路径排除 cancelled、splitEdge 复合操作回滚） | Claude + 用户 |
+| 2026-03-25 | 0.3-draft | 拆分逻辑模型；吸纳十条原则 + 两轮审查修正（共 24 项：空子集防御、reconnect 补检、updateEdge 冻结、cascade 拆分入边/出边、suspended 含全终结场景、taskRefIndex 反向索引、splitEdge 默认迁移、级联深度注记） | Claude + 用户 |
