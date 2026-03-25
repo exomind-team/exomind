@@ -16,6 +16,7 @@ const onTaskChangeMock = vi.fn(() => () => {});
 const getEventsMock = vi.fn<
   () => Promise<Array<{ id: string; content: string; createdAt: string; type?: string }>>
 >();
+const loadEventsMock = vi.fn<() => Promise<Array<{ id: string; content: string; timestamp: number; tags?: Set<string> }>>>();
 
 function resolveHref(
   to: string | undefined,
@@ -61,6 +62,12 @@ vi.mock('@tanstack/react-router', () => ({
   ),
   useParams: () => ({ blockId: 'block-1' }),
   useNavigate: () => navigateMock,
+  useLocation: () => ({
+    pathname: '/tasks/block/block-1',
+    search: typeof window !== 'undefined' ? window.location.search : '',
+    hash: '',
+    href: typeof window !== 'undefined' ? window.location.href : '/tasks/block/block-1',
+  }),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -86,6 +93,9 @@ vi.mock('@/lib/services', () => ({
   getTaskTimerService: () => ({
     calculateSpentMinutes: vi.fn(async () => 90),
     startBlockForTask: vi.fn(),
+  }),
+  getEventLogService: () => ({
+    loadEvents: loadEventsMock,
   }),
 }));
 
@@ -157,14 +167,15 @@ describe('timeblock detail back link issue #406', () => {
     loadTimeBlocksMock.mockResolvedValue([makeBlock()]);
     loadActiveBlockMock.mockResolvedValue(null);
     getEventsMock.mockResolvedValue([]);
+    loadEventsMock.mockResolvedValue([]);
   });
 
   it.each([
-    ['today', '今日'],
-    ['now', '当下'],
-    ['week', '一周'],
-    ['month', '本月'],
-  ])('renders mobile back link for from=%s', async (from, label) => {
+    'today',
+    'now',
+    'week',
+    'month',
+  ])('falls back to task main entry for legacy from=%s on mobile', async (from) => {
     renderDetail(`?from=${from}`, false);
 
     await waitFor(() => {
@@ -172,8 +183,8 @@ describe('timeblock detail back link issue #406', () => {
     });
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
-    expect(backLink).toHaveAttribute('aria-label', `返回${label}`);
-    expect(backLink).toHaveAttribute('href', `/tasks?tab=${from}`);
+    expect(backLink).toHaveAttribute('aria-label', '返回任务');
+    expect(backLink).toHaveAttribute('href', '/tasks?main=1');
   });
 
   it('falls back to generic tasks link when source is missing', async () => {
@@ -185,7 +196,7 @@ describe('timeblock detail back link issue #406', () => {
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
     expect(backLink).toHaveAttribute('aria-label', '返回任务');
-    expect(backLink).toHaveAttribute('href', '/tasks');
+    expect(backLink).toHaveAttribute('href', '/tasks?main=1');
   });
 
   it.each(['toString', 'constructor'])('falls back to generic tasks link for prototype key source=%s', async (from) => {
@@ -197,23 +208,34 @@ describe('timeblock detail back link issue #406', () => {
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
     expect(backLink).toHaveAttribute('aria-label', '返回任务');
-    expect(backLink).toHaveAttribute('href', '/tasks');
+    expect(backLink).toHaveAttribute('href', '/tasks?main=1');
   });
 
-  it('renders desktop back link and contextual breadcrumb', async () => {
+  it('renders desktop breadcrumb with task main fallback for legacy source', async () => {
     renderDetail('?from=today', true);
 
     await waitFor(() => {
       expect(loadTimeBlocksMock).toHaveBeenCalled();
     });
 
-    const breadcrumb = await screen.findByText((_content, element) =>
-      element?.tagName === 'P' && element.textContent === '任务 > 今日 > 任务详情',
-    );
-    expect(breadcrumb).toBeInTheDocument();
-    const backLink = screen.getByTestId('timeblock-back-link-desktop');
-    expect(backLink).toHaveTextContent('← 返回今日');
-    expect(backLink).toHaveAttribute('href', '/tasks?tab=today');
+    const breadcrumb = screen.getByTestId('task-detail-desktop-breadcrumb');
+    expect(breadcrumb).toHaveTextContent('任务');
+    expect(breadcrumb).toHaveTextContent('任务详情');
+    const backLink = breadcrumb.querySelector('a');
+    expect(backLink).not.toBeNull();
+    expect(backLink).toHaveAttribute('href', '/tasks?main=1');
+  });
+
+  it('uses explicit returnTo context when provided', async () => {
+    renderDetail('?returnTo=%2Ftasks%2Fblock%2Fblock-1&returnLabel=%E6%97%B6%E9%97%B4%E5%9D%97%E8%AF%A6%E6%83%85', false);
+
+    await waitFor(() => {
+      expect(loadTimeBlocksMock).toHaveBeenCalled();
+    });
+
+    const backLink = await screen.findByTestId('timeblock-back-link-mobile');
+    expect(backLink).toHaveAttribute('aria-label', '返回时间块详情');
+    expect(backLink).toHaveAttribute('href', '/tasks/block/block-1');
   });
 
   it('does not include a back-source action in the view model (navigation via breadcrumb)', () => {
