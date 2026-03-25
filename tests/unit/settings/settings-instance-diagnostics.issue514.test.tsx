@@ -199,12 +199,16 @@ vi.mock('@/config/voice-shortcut-asr-provider', () => ({
   subscribeVoiceShortcutAsrProviderChanges: () => () => {},
 }));
 
-vi.mock('@/lib/asr/volcano-config', () => ({
-  DEFAULT_VOLCANO_RESOURCE_ID: 'volc.default',
-  VOLCANO_RESOURCE_PRESETS: [{ value: 'volc.default', label: 'Volcano Default' }],
-  getVolcanoResourceId: () => 'volc.default',
-  setVolcanoResourceId: vi.fn((value: string) => value),
-}));
+vi.mock('@/lib/asr/volcano-config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/asr/volcano-config')>();
+  return {
+    ...actual,
+    DEFAULT_VOLCANO_RESOURCE_ID: 'volc.default',
+    VOLCANO_RESOURCE_PRESETS: [{ value: 'volc.default', label: 'Volcano Default' }],
+    getVolcanoResourceId: () => 'volc.default',
+    setVolcanoResourceId: vi.fn((value: string) => value),
+  };
+});
 
 vi.mock('@/config/feedback-preferences', () => ({
   getFeedbackPreferences: () => ({

@@ -38,6 +38,7 @@ describe('SettingsPage eventlog import/export (issue-484)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     settingsPagePreferenceState.developerMode = false;
+    settingsPagePreferenceState.isTauriWindow = true;
     settingsPageDomainBackendState.eventlog = 'rt-sqlite';
     settingsPageDomainBackendState.task = 'rt-sqlite';
     settingsPageDomainBackendState.timeblock = 'legacy';

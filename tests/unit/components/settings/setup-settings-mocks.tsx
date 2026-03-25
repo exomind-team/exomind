@@ -285,6 +285,21 @@ vi.mock('@/config/input-send-mode', () => ({
   getInputSendMode: vi.fn(() => 'ctrl-enter-send'),
   setInputSendMode: vi.fn((value: string) => value),
   subscribeInputSendModeChanges: vi.fn(() => () => {}),
+  shouldSubmitOnEnter: vi.fn((mode: 'enter-send' | 'ctrl-enter-send', event: {
+    key: string;
+    altKey: boolean;
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+  }) => {
+    if (event.key !== 'Enter') return false;
+    if (event.altKey) return false;
+    if (mode === 'enter-send') {
+      return !event.shiftKey && !event.ctrlKey && !event.metaKey;
+    }
+    if (event.shiftKey) return false;
+    return event.ctrlKey || event.metaKey;
+  }),
 }));
 
 vi.mock('@/config/task-page-fuzzy-search', () => ({
@@ -541,6 +556,12 @@ vi.mock('@/ui/app/config/settings/LogPanelDialog', () => ({
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: vi.fn(() => vi.fn()),
+  useLocation: vi.fn(() => ({
+    pathname: '/settings',
+    search: '',
+    hash: '',
+    href: '/settings',
+  })),
 }));
 
 vi.mock('@/components/ui/dialog', () => {
@@ -560,6 +581,7 @@ vi.mock('@/components/ui/dialog', () => {
       return <div role="dialog" ref={ref} className={className} {...props}>{children}</div>;
     },
     DialogHeader: ({ children }: any) => <div>{children}</div>,
+    DialogFooter: ({ children, className, ...props }: any) => <div className={className} {...props}>{children}</div>,
     DialogTitle: ({ children }: any) => {
       dialogTitleText = String(children);
       return <div role="heading">{children}</div>;

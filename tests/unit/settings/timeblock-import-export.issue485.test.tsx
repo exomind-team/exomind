@@ -38,6 +38,7 @@ describe('SettingsPage timeblock import/export (issue-485)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     settingsPagePreferenceState.developerMode = false;
+    settingsPagePreferenceState.isTauriWindow = true;
     settingsPageDomainBackendState.eventlog = 'rt-sqlite';
     settingsPageDomainBackendState.task = 'rt-sqlite';
     settingsPageDomainBackendState.timeblock = 'rt-sqlite';

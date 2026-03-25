@@ -98,6 +98,21 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
 vi.mock('@/config/input-send-mode', () => ({
   getInputSendMode,
   subscribeInputSendModeChanges,
+  shouldSubmitOnEnter: (mode: 'enter-send' | 'ctrl-enter-send', event: {
+    key: string;
+    altKey: boolean;
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+  }) => {
+    if (event.key !== 'Enter') return false;
+    if (event.altKey) return false;
+    if (mode === 'enter-send') {
+      return !event.shiftKey && !event.ctrlKey && !event.metaKey;
+    }
+    if (event.shiftKey) return false;
+    return event.ctrlKey || event.metaKey;
+  },
 }));
 
 vi.mock('@/lib/services/voice-signal.service', () => ({
