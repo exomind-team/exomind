@@ -163,7 +163,7 @@ interface GoalGraph {
 - 边的两端不能是同一个节点（无自环）
 - 边的起止节点可修改，修改后须通过 DAG 检测
 - **入边冻结**：已完成（completed）目标的入边——禁止新增、修改 target（reconnect target）、删除、修改 taskNodeRef、修改 title/description；但**允许修改 source**（不影响 target 的完成判定）。已取消的目标入边不冻结
-- **出边约束**：已取消（cancelled）的目标，禁止新增出边，但已有出边可修改/删除。从 cancelled 目标出发的空槽位边成为僵尸边（永远 pending），留给 UI 层隐藏或提示用户删除
+- **出边约束**：已取消（cancelled）的目标，禁止新增出边（包括通过 reconnectEdge 将其他边的 source 改为该节点），但已有出边可修改/删除。从 cancelled 目标出发的空槽位边成为僵尸边（永远 pending），留给 UI 层隐藏或提示用户删除
 
 ### 2.3 实体删除策略
 
@@ -277,6 +277,7 @@ function evaluateCompletion(rule: CompletionRule): boolean {
   if (rule.size === 0) return false
   // 外层 OR：任一子集满足即为 true
   for (const clause of rule) {
+    if (clause.size === 0) continue  // 防御性跳过空子集（§5.7 保证不会写入，此处防御 bug/竞态）
     // 内层 AND：子集内所有边须为 completed
     const allCompleted = [...clause].every(edgeId => {
       const edge = getEdge(edgeId)  // 返回 null 若边不存在
@@ -339,6 +340,7 @@ createGoal(params: {
   direction: 'upstream' | 'downstream'  // 新目标在 fromNode 的上游还是下游
   title?: string
   description?: string
+  rulePosition?: { clauseIndex: number }  // upstream 时指定新边加入 fromNode completionRule 的位置，默认 clauseIndex=0
 }): { goal: GoalNode; edge: TaskEdge }
 ```
 
@@ -362,7 +364,7 @@ createEdge(params: {
   title?: string
   description?: string
   taskNodeRef?: TaskNodeId  // 可选：关联已有任务
-  rulePosition: { clauseIndex: number }   // 加入 target completionRule 的位置（必填，由 UI 层决定）
+  rulePosition: { clauseIndex: number }   // 加入 target completionRule 的位置（必填）。clauseIndex 越界时创建新子集
 }): TaskEdge
 ```
 
@@ -423,7 +425,7 @@ reconnectEdge(params: {
   edgeId: TaskEdgeId
   newSource?: NodeId      // 新源节点，省略则不变
   newTarget?: GoalId      // 新目标节点，省略则不变
-  rulePosition: { clauseIndex: number }   // 加入新 target completionRule 的位置（必填）
+  rulePosition: { clauseIndex: number }   // 加入新 target completionRule 的位置（必填）。clauseIndex 越界时创建新子集
 }): void
 ```
 
@@ -460,7 +462,9 @@ splitEdge(params: {
 2. 原边通过 `reconnectEdge` 重定向到前半段（A→C）或后半段（C→B），由 `assignOriginalTo` 决定
 3. 另一段创建新空槽位边
 4. 统一 DAG 检测（C6），失败则全部回滚
-5. B 的 completionRule 中对原边的引用迁移到新的指向 B 的边（默认行为；调用方可覆盖指定其他位置）
+5. completionRule 维护：
+   - 若 `assignOriginalTo='first'`：原边重定向到 A→C，新建 C→B 边替代原边在 B 的 completionRule 中的位置
+   - 若 `assignOriginalTo='second'`：原边保留为 C→B，completionRule 无需变更（原边引用仍然有效）
 6. 若使用已有目标 middleGoalId 作为中间节点，新入边加入 C 的 completionRule（位置由调用方指定或默认加入第一个子集）
 
 ### 5.7 updateGoal — 更新目标属性
