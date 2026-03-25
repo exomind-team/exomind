@@ -66,6 +66,7 @@ git log --oneline -15 dev
 - [ ] 标签分布各项数字之和是否合理？（同一 Issue 可有多个标签，所以标签总数 >= Issue 总数）
 - [ ] 新增 Issue 数 = Open Issues 中 `createdAt > 覆盖区间起点` 的条目数？
 - [ ] 合并 PR 数 = merged PRs 中 `mergedAt > 覆盖区间起点` 的条目数？
+- [ ] truth 表继承检查：读取 `reports/manifest.json` 或上一期报告的 `truth.stillOpen`，逐条用 `gh issue view <num> --json state` 确认是否仍 OPEN。已合并的 PR 对应的 Issue 如果仍 OPEN，必须出现在本期 `truth.stillOpen` 中。
 
 **如果任何一项对不上，重新执行对应查询，不要猜测或推算。**
 

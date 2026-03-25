@@ -77,9 +77,17 @@
 
 ### 覆盖区间计算
 
-- 默认覆盖"上次报告日期 ~ 今天"
+- 默认覆盖"上次报告日期 ~ 当前时间"
 - 若无上次报告，覆盖最近 3 天
 - 用户指定区间时从其指定
+
+### 同时段冲突规则
+
+同一个 6h 时段（夜/早/午/晚）内若已有其他 Agent 发布了报告：
+
+1. **检查方法**：读取 `reports/manifest.json`，检查是否存在同日同时段（按 `time` 前两位判断 00-05/06-11/12-17/18-23）的已有条目
+2. **若已有**：在 `meta.coverage` 中追加 `（补充报告）` 标识，避免读者混淆哪份是首发
+3. **scorecard 对标**：记分卡应对标最近一份**非本 Agent** 生成的报告的建议行动，而非同时段的自己人
 
 ---
 
@@ -350,10 +358,19 @@ Agent 生成日志时**必须**填写 4 个字段：
 |------|------|------|
 | `identity` | 自我身份（见下方说明） | `外心史官` |
 | `os` | 所在操作系统 | `Android` / `Linux` / `macOS` / `Windows` |
-| `model` | 模型名称 | `Claude` / `GPT` / `Gemini` |
-| `version` | 模型版本 | `Opus 4.6` / `Sonnet 4` |
+| `model` | 面向用户的产品/品牌名 | `Claude` / `Codex` / `Gemini` |
+| `version` | 具体版本号或底层模型标识 | `Opus 4.6` / `GPT-5` / `2.5 Pro` |
 
 **identity 填写规则**：综合过往历史记录，以 Agent 第一视角自我总结为**一个名词**。这不是预设的角色名，而是 Agent 回顾自己在本项目中的所有交互、所做的事情后，凝练出的身份自称。例如：一个长期负责日报生成和项目状态追踪的 Agent 可能自称「外心史官」；一个主要做代码审查的 Agent 可能自称「守门人」。每个 Agent 的 identity 应当是独特且稳定的。
+
+**model / version 填写参考**：`model` 是用户直接交互的产品名，`version` 是该产品的具体版本或底层模型。
+
+| 产品 | model | version |
+|------|-------|---------|
+| Claude Code (Opus) | `Claude` | `Opus 4.6` |
+| Claude Code (Sonnet) | `Claude` | `Sonnet 4` |
+| OpenAI Codex CLI | `Codex` | `GPT-5` |
+| Gemini CLI | `Gemini` | `2.5 Pro` |
 
 **渲染格式**：`自我身份·所在系统 [名称 版本]`
 
