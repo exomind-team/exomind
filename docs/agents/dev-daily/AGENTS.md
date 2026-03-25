@@ -291,3 +291,80 @@ P0          ██░░░░░░░░░░░░░░░░░░   2   (
 | 头条不空洞 | 每条头条必须包含具体的 PR/Issue/commit 编号 |
 | 天气有依据 | 天气判定必须列出对应信号，不凭感觉 |
 | 建议可执行 | "建议行动"必须是具体操作（如"关闭 #452"），不写"持续关注" |
+
+---
+
+## HTML 可视化报告
+
+除 ASCII 纯文本输出外，支持生成交互式 HTML 仪表盘报告。
+
+### 模板位置
+
+同目录下 `report-template.html` 是可直接套用的单文件 HTML 模板。
+
+### 使用方法
+
+1. **复制模板**到输出目录（如 `temp/exomind-daily-report-YYYY-MM-DD.html`）
+2. **修改顶部 `REPORT` 数据对象**——只需改数据，不改渲染代码
+3. **在浏览器中打开**即可查看
+
+### 数据对象结构 (REPORT)
+
+模板顶部的 `REPORT` 对象是唯一需要修改的部分，结构如下：
+
+```
+REPORT = {
+  meta:       { title, date, coverage, baseline, repo }
+  weather:    { level, emoji, label, ups[], downs[] }
+  metrics:    [{ label, value, delta, trend, note, tooltip }]
+  mainlines:  [{ name, tag?, pct, stall, subtasks[] }]
+  headlines:  [{ emoji, title, color?, body }]
+  scorecard:  [{ text, result, note }]
+  prs:        { open[], merged[] }
+  terrain:    { labels[], data[], deltas[], highlights{} }
+  truth:      { closed[], stillOpen[] }
+  actions:    [{ text, detail }]
+  insight:    { text, author }
+}
+```
+
+各字段详细说明见模板文件顶部注释。
+
+### 数据填充流程
+
+```
+采集(gh/git)  →  分析(同 ASCII 流程)  →  填充 REPORT 对象  →  保存 HTML  →  浏览器打开
+```
+
+**关键原则**：
+1. 数据采集和分析方法论与 ASCII 报告完全一致（见上方章节）
+2. `REPORT` 对象中的数据必须来自本次查询，禁止搬运
+3. `#xxx` 编号在 body/text 字段中直接写入即可，渲染引擎会自动生成 GitHub 链接
+4. `weather.level` 决定天气卡渐变色：`sun`=金橙、`cloudy`=蓝紫、`overcast`=灰、`rain`=紫红、`storm`=红
+5. `metrics[].trend` 决定趋势颜色：`up`=警告橙、`down`=好转绿、`neutral`=灰
+6. `mainlines[].tag` 可选：`new`=绿色NEW标签、`stall`=红色STALL标签、`null`=无标签
+
+### 交互功能
+
+模板内置以下交互，无需额外代码：
+
+| 交互 | 行为 |
+|------|------|
+| 天气卡点击 | 展开/折叠 ▲利好 / ▼关注 详情 |
+| 数据卡 hover | 显示上期对比 tooltip |
+| 主线进度条点击 | 展开/折叠 ✓/○ 子任务列表 |
+| 折叠区块标题点击 | 展开/折叠（记分卡/PR/地形图/真相表） |
+| Issue 地形图 hover | Chart.js tooltip 显示数量 + P0/P1 编号 |
+| 所有 #xxx 编号 | 点击跳转 GitHub Issue/PR |
+| 建议行动 checkbox | 勾选状态 localStorage 持久化 |
+
+### 视觉规格
+
+| 项目 | 规格 |
+|------|------|
+| 风格 | 暗色科技仪表盘（深空指挥中心） |
+| 字体 | JetBrains Mono (数据) + Outfit (标题/正文) |
+| 最小字号 | 12px（基准 16px × 0.75rem） |
+| 外部依赖 | Google Fonts CDN + Chart.js 4.x CDN |
+| 响应式 | ≥1200px 双列 / 768-1199px 单列 / <768px 紧凑 |
+| 输出 | 单文件 HTML，无本地依赖 |
