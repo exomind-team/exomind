@@ -162,7 +162,7 @@ interface GoalGraph {
 - 边必须有两个端点（不允许悬空边）
 - 边的两端不能是同一个节点（无自环）
 - 边的起止节点可修改，修改后须通过 DAG 检测
-- **入边冻结**：已完成（completed）目标的入边——禁止新增、修改 target（reconnect target）、删除、修改 taskNodeRef；但**允许修改 source**（不影响 target 的完成判定）。已取消的目标入边不冻结
+- **入边冻结**：已完成（completed）目标的入边——禁止新增、修改 target（reconnect target）、删除、修改 taskNodeRef、修改 title/description；但**允许修改 source**（不影响 target 的完成判定）。已取消的目标入边不冻结
 - **出边约束**：已取消（cancelled）的目标，禁止新增出边，但已有出边可修改/删除
 
 ### 2.3 实体删除策略
@@ -213,6 +213,7 @@ function deriveGoalDisplayStatus(goal: GoalNode, inEdges: TaskEdge[]): GoalDispl
     return s === 'completed' || s === 'cancelled'
   })
   if (allTerminal) return 'suspended'
+  // 注：inEdges 为空时返回 pending。原型阶段 C5 可选实现，可能出现无入边目标；完整实现中 C5 保证不会出现
   return 'pending'
 }
 ```
@@ -278,8 +279,8 @@ function evaluateCompletion(rule: CompletionRule, edges: TaskEdge[]): boolean {
   for (const clause of rule) {
     // 内层 AND：子集内所有边须为 completed
     const allCompleted = [...clause].every(edgeId => {
-      const edge = findEdge(edgeId)
-      return edge && getEdgeStatus(edge) === 'completed'
+      const edge = getEdge(edgeId)  // 返回 null 若边不存在
+      return edge && getEdgeStatus(edge.id) === 'completed'
     })
     if (allCompleted) return true
   }
@@ -345,7 +346,7 @@ createGoal(params: {
 - 创建 GoalNode，status = pending，completionRule 自动填充为 AND（`{ {新边} }`）
 - 根据 direction 创建配套 TaskEdge：
   - `downstream`：fromNode → 新目标（新目标在下游，需要从 fromNode 出发达成）
-  - `upstream`：新目标 → fromNode（新目标是 fromNode 的前置条件）
+  - `upstream`：新目标 → fromNode（新目标是 fromNode 的前置条件）。新边加入 fromNode 的 completionRule；新目标自身 completionRule 初始化为 `{}`（无入边→永不自动完成，等待后续添加入边）
 - **限制**：若 fromNode 是 Me 且 direction 是 upstream → 拒绝（Me 不能作为边的 target，target 类型为 GoalId）
 - DAG 检测（C6）
 - 返回创建的目标和边
@@ -396,7 +397,7 @@ cancelGoal(params: {
 2. **边不删除**：取消目标不删除任何边（目标不可删除，边也保留以记录历史）
 3. 若 `cascadeInTasks = true`：入边中有关联任务的 → 通过任务系统 API 取消关联任务
 4. 若 `cascadeOutTasks = true`：出边中有关联任务的 → 通过任务系统 API 取消关联任务
-5. 触发受影响目标的完成重算（入边任务被取消可能影响其他目标的规则判定）
+5. 若 cascadeOutTasks 触发了出边关联任务的取消 → 重算这些出边的 target 目标（被取消目标自身已为终态，跳过重算）
 
 ### 5.4 deleteEdge — 删除任务边
 
@@ -412,7 +413,7 @@ deleteEdge(params: {
 **副作用**：
 - 从图中移除该 TaskEdge
 - 从 target 的 completionRule 中移除引用（§4.4 规则维护）
-- C5 检查：若 target 目标因此无入边，自动补充 Me→目标匿名边
+- C5 检查：若 target 目标因此无入边，自动补充 Me→目标空槽位边
 - 触发 target 的完成重算
 
 ### 5.5 reconnectEdge — 修改边的起止节点
@@ -432,7 +433,7 @@ reconnectEdge(params: {
 - 修改后不得形成环（C6）
 - 旧 target 若为 completed → 拒绝（入边冻结）
 - 新 target 若为 completed → 拒绝（入边冻结）
-- 新 source 若为 cancelled → 拒绝（禁止新增出边）
+- 新 source 若为 cancelled → 拒绝（禁止新增出边）。注：newSource 省略时不检查旧 source 状态（这是修改已有边，非新增出边）
 
 **副作用**：
 - 若仅 source 变更：无 completionRule 变更，无重算触发（source 不影响 target 的完成判定）
@@ -452,7 +453,7 @@ splitEdge(params: {
 }): { middleGoal: GoalNode; firstEdge: TaskEdge; secondEdge: TaskEdge }
 ```
 
-**性质**：复合操作，底层调用 reconnectEdge + createGoal + createEdge 等原子操作。全部成功才生效，任一步失败则整体回滚。
+**性质**：复合操作，底层调用 reconnectEdge + createGoal + createEdge 等原子操作。全部成功才生效，任一步失败则整体回滚。边界场景（如 B 为 cancelled、A 为 cancelled）的前置检查委托给底层原子操作。
 
 **行为**：将边 A→B 拆为 A→C→B
 1. 确定中间节点 C（已有或新建）
@@ -502,7 +503,7 @@ updateEdge(params: {
 |------|------|------|------|
 | getGraph | — | GoalGraph | 完整图数据 |
 | getGoal | GoalId | GoalNode | 单个目标 |
-| getEdge | TaskEdgeId | TaskEdge | 单条边 |
+| getEdge | TaskEdgeId | TaskEdge \| null | 单条边，不存在时返回 null（防御性处理） |
 | **getInEdges** | GoalId | TaskEdge[] | 目标的所有入边（高频查询，需索引优化） |
 | getOutEdges | NodeId | TaskEdge[] | 节点的所有出边 |
 | getEdgeStatus | TaskEdgeId | TaskEdgeStatus | 派生状态（空槽位=pending，有关联=同步任务状态）。§3 代码中的 `getEdgeStatus(edge)` 是内部便捷形式 |
@@ -554,7 +555,7 @@ interface GoalOpLog {
 目标系统订阅任务系统的状态变更事件：
 
 ```typescript
-// 任务系统发出
+// 任务系统发出（此处 TaskEdgeStatus 仅为文档表述方便，实际应使用任务系统原生状态枚举，目标系统做映射）
 interface TaskStatusChangedEvent {
   taskNodeId: TaskNodeId
   oldStatus: TaskEdgeStatus
