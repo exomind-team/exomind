@@ -100,7 +100,7 @@ interface TaskEdge {
 
 **槽位抽象**：
 - TaskEdge 更像是一个**任务的槽位**，而非任务本身
-- `taskNodeRef` 为空 = 匿名边 = 空槽位，表示「要达成目标需要定义一个任务」
+- `taskNodeRef` 为空 = **空槽位边**（又称匿名边），表示「要达成目标需要定义一个任务」。全文统一使用「空槽位边」
 - 空槽位不占用任务系统资源，不会产生匿名任务
 - 边的状态**派生自** `taskNodeRef` 所指任务的状态（见 §3.1）
 
@@ -162,7 +162,7 @@ interface GoalGraph {
 - 边必须有两个端点（不允许悬空边）
 - 边的两端不能是同一个节点（无自环）
 - 边的起止节点可修改，修改后须通过 DAG 检测
-- **入边冻结**：已完成（completed）的目标，其入边不允许新增、修改（reconnect）、删除；出边仍可操作。已取消的目标入边不冻结
+- **入边冻结**：已完成（completed）目标的入边——禁止新增、修改 target（reconnect target）、删除、修改 taskNodeRef；但**允许修改 source**（不影响 target 的完成判定）。已取消的目标入边不冻结
 - **出边约束**：已取消（cancelled）的目标，禁止新增出边，但已有出边可修改/删除
 
 ### 2.3 实体删除策略
@@ -172,7 +172,7 @@ interface GoalGraph {
 | GoalNode | **否**（C3） | 目的不变，取消 ≈ 删除 |
 | TaskEdge | **是** | 手段可变，可替换/移除/重新规划 |
 
-删除 TaskEdge 后需触发 C5 检查：若 target 目标因此无任何入边（只看入边，不看出边），系统自动补充 Me→目标匿名边。
+删除 TaskEdge 后需触发 C5 检查：若 target 目标因此无任何入边（只看入边，不看出边），系统自动补充 Me→目标空槽位边。
 
 **deleteEdge 前置检查**：若 edge.target 为 completed 目标，拒绝删除（入边冻结）。
 
@@ -213,10 +213,6 @@ function deriveGoalDisplayStatus(goal: GoalNode, inEdges: TaskEdge[]): GoalDispl
     return s === 'completed' || s === 'cancelled'
   })
   if (allTerminal) return 'suspended'
-  return 'pending'
-}
-  if (inEdges.some(e => getEdgeStatus(e) === 'in_progress')) return 'in_progress'
-  if (inEdges.some(e => getEdgeStatus(e) === 'suspended')) return 'suspended'
   return 'pending'
 }
 ```
@@ -350,6 +346,7 @@ createGoal(params: {
 - 根据 direction 创建配套 TaskEdge：
   - `downstream`：fromNode → 新目标（新目标在下游，需要从 fromNode 出发达成）
   - `upstream`：新目标 → fromNode（新目标是 fromNode 的前置条件）
+- **限制**：若 fromNode 是 Me 且 direction 是 upstream → 拒绝（Me 不能作为边的 target，target 类型为 GoalId）
 - DAG 检测（C6）
 - 返回创建的目标和边
 
@@ -385,8 +382,8 @@ createEdge(params: {
 ```typescript
 cancelGoal(params: {
   goalId: GoalId
-  cascadeInEdges?: boolean   // 是否处理入边（达成手段），默认 false
-  cascadeOutEdges?: boolean  // 是否处理出边（后续路径），默认 false
+  cascadeInTasks?: boolean   // 是否取消入边关联的任务，默认 false
+  cascadeOutTasks?: boolean  // 是否取消出边关联的任务，默认 false
 }): void
 ```
 
@@ -396,13 +393,10 @@ cancelGoal(params: {
 
 **行为**：
 1. 设 goalNode.status = cancelled（目标完全冻结）
-2. 若 `cascadeInEdges = true`：
-   - 入边中空槽位边 → 直接删除
-   - 入边中有关联任务的边 → 通过任务系统 API 取消关联任务（联动操作，见 §0.2）
-3. 若 `cascadeOutEdges = true`：
-   - 出边中空槽位边 → 直接删除
-   - 出边中有关联任务的边 → 通过任务系统 API 取消关联任务
-4. 触发受影响目标的完成重算
+2. **边不删除**：取消目标不删除任何边（目标不可删除，边也保留以记录历史）
+3. 若 `cascadeInTasks = true`：入边中有关联任务的 → 通过任务系统 API 取消关联任务
+4. 若 `cascadeOutTasks = true`：出边中有关联任务的 → 通过任务系统 API 取消关联任务
+5. 触发受影响目标的完成重算（入边任务被取消可能影响其他目标的规则判定）
 
 ### 5.4 deleteEdge — 删除任务边
 
@@ -441,6 +435,7 @@ reconnectEdge(params: {
 - 新 source 若为 cancelled → 拒绝（禁止新增出边）
 
 **副作用**：
+- 若仅 source 变更：无 completionRule 变更，无重算触发（source 不影响 target 的完成判定）
 - 若 target 变更：
   - 从旧 target 的 completionRule 移除引用（§4.4），触发旧 target 重算
   - 按 `rulePosition` 将边加入新 target 的 completionRule（**强制指定位置**，不允许幽灵边）
@@ -462,7 +457,7 @@ splitEdge(params: {
 **行为**：将边 A→B 拆为 A→C→B
 1. 确定中间节点 C（已有或新建）
 2. 原边通过 `reconnectEdge` 重定向到前半段（A→C）或后半段（C→B），由 `assignOriginalTo` 决定
-3. 另一段创建新匿名边
+3. 另一段创建新空槽位边
 4. 统一 DAG 检测（C6），失败则全部回滚
 5. B 的 completionRule 中对原边的引用迁移到新的指向 B 的边（默认行为；调用方可覆盖指定其他位置）
 
@@ -480,6 +475,7 @@ updateGoal(params: {
 **前置检查**：
 - 目标不是终态（completed/cancelled 的目标完全冻结，不可修改任何字段）
 - completionRule 中不允许存在空内层子集（写入时自动过滤空子集）
+- completionRule 中的所有 edgeId 必须是该目标的实际入边（严格校验，节省后续判定开销）
 
 **副作用**：
 - 若 completionRule 变更 → 触发完成重算
@@ -509,13 +505,13 @@ updateEdge(params: {
 | getEdge | TaskEdgeId | TaskEdge | 单条边 |
 | **getInEdges** | GoalId | TaskEdge[] | 目标的所有入边（高频查询，需索引优化） |
 | getOutEdges | NodeId | TaskEdge[] | 节点的所有出边 |
-| getEdgeStatus | TaskEdgeId | TaskEdgeStatus | 派生状态（空槽位=pending，有关联=同步任务状态） |
+| getEdgeStatus | TaskEdgeId | TaskEdgeStatus | 派生状态（空槽位=pending，有关联=同步任务状态）。§3 代码中的 `getEdgeStatus(edge)` 是内部便捷形式 |
 | deriveGoalDisplayStatus | GoalId | GoalDisplayStatus | 5 种展示状态 |
 | getEdgesByTaskRef | TaskNodeId | TaskEdge[] | 按关联任务反查边（事件处理用） |
 | getShortestPath | NodeId, NodeId | NodeId[] | 最短有向路径（排除 cancelled 边） |
 | getHopDistance | GoalId | number | Me 到目标的最短跳数（排除 cancelled 边） |
 
-**索引需求**：
+**索引需求**（运行时派生，不参与序列化）：
 - `targetIndex: Map<GoalId, Set<TaskEdgeId>>` — getInEdges 用，完成推导核心
 - `taskRefIndex: Map<TaskNodeId, Set<TaskEdgeId>>` — getEdgesByTaskRef 用，事件处理核心
 
@@ -576,7 +572,7 @@ interface TaskStatusChangedEvent {
 
 | 约束 | 原型行为 | 完整行为 |
 |------|---------|---------|
-| C5 自动匿名边 | 可选实现 | 必须 |
+| C5 自动空槽位边 | 可选实现 | 必须 |
 | C6 DAG 检测 | 可选实现 | 必须 |
 | C8 完成纯推导 | 用户可直接改 | 只能推导 |
 | C9 空槽位限制 | 不限制 | 限制 |
