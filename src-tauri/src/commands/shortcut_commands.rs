@@ -608,7 +608,7 @@ fn choose_voice_overlay_anchor(
     cursor_monitor: Option<MonitorGeometry>,
     primary_monitor: Option<MonitorGeometry>,
 ) -> Option<MonitorGeometry> {
-    main_monitor.or(cursor_monitor).or(primary_monitor)
+    cursor_monitor.or(main_monitor).or(primary_monitor)
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
