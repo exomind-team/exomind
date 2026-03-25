@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { House, Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
@@ -56,11 +56,6 @@ function writeStoredDesktopSidebarCollapsed(collapsed: boolean): void {
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
   return { default: module.FocusPage };
-});
-
-const RitualHomePage = lazy(async () => {
-  const module = await import('@/ui/app/pages/RitualHomePage');
-  return { default: module.RitualHomePage };
 });
 
 const SettingsPage = lazy(async () => {
@@ -296,8 +291,7 @@ function DesktopSidebar({
   onToggleCollapsed: () => void;
 }) {
   const desktopNavItems = [
-    { key: 'home', title: '首页', path: '/', icon: House, match: (path: string) => path === '/' },
-    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' },
+    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/' || path === '/eventlog' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
     ...(goalsPageEnabled ? [{
       key: 'goals',
@@ -582,7 +576,6 @@ function NewLayout() {
   }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname, mePageEnabled]);
 
   const navItems = [
-    { title: '首页', path: '/', icon: House },
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
     ...(goalsPageEnabled ? [{ title: '目标', path: '/goals', icon: Orbit }] : []),
@@ -673,11 +666,11 @@ const newHomeRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/',
   component: function NewHome() {
-    return (
-      <LazyPage>
-        <RitualHomePage />
-      </LazyPage>
-    );
+    const navigate = useNavigate();
+    useEffect(() => {
+      navigate({ to: '/eventlog', replace: true });
+    }, [navigate]);
+    return null;
   },
 });
 
