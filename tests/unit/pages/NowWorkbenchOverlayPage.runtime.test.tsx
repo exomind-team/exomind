@@ -1,7 +1,6 @@
 ﻿import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearRitualSession, getTodayRitualDayKey, saveRitualSession } from '@/ui/app/ritual/ritual-session-storage';
 import { setInputSendMode } from '@/config/input-send-mode';
 
 const currentUserState = {
@@ -217,7 +216,6 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.resetModules();
-    clearRitualSession();
     setInputSendMode('ctrl-enter-send');
     blockListener = null;
     taskStorageListener = null;
@@ -305,7 +303,6 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
 
   afterEach(() => {
     cleanup();
-    clearRitualSession();
     blockListener = null;
     taskStorageListener = null;
     eventStorageListener = null;
@@ -314,18 +311,26 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     vi.restoreAllMocks();
   });
 
-  it('shows shutdown-ready nudge from ritual session storage（待收工会话会驱动悬浮窗提醒）', { timeout: 20000 }, async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 2, 19, 21, 30, 0).getTime());
-    saveRitualSession({
-      dayKey: getTodayRitualDayKey(),
-      bootedAt: new Date(2026, 2, 19, 9, 0, 0).getTime(),
-      selectedPlanId: 'carry-over',
-      mainTaskCompletedAt: new Date(2026, 2, 19, 20, 30, 0).getTime(),
-      shutdownCompletedAt: null,
-    });
-
+  it('renders shutdown-ready nudge when runtime model carries it（待收工提醒按当前 model 语义渲染）', { timeout: 20000 }, async () => {
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
-    render(<NowWorkbenchOverlayPage />);
+    render(
+      <NowWorkbenchOverlayPage
+        model={{
+          mode: 'idle_input_only',
+          title: '当下工作台',
+          statusLabel: '随时记录',
+          activeBlock: null,
+          visibleTasks: [],
+          recentEvents: [],
+          nudge: {
+            kind: 'shutdown_ready',
+            title: '准备收工',
+            body: '今天已经可以先收住了，回主程序完成正式收工。',
+            ctaLabel: '回主程序收工',
+          },
+        }}
+      />,
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId('now-overlay-ritual-nudge')).toBeInTheDocument();
