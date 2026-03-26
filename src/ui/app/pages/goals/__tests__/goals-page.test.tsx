@@ -309,6 +309,31 @@ describe('GoalsPage', () => {
     });
   });
 
+  it('highlights inbound edges when a goal display status changes', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    const view = render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+    act(() => {
+      useGoalStore.getState().setEdgeStatusOverride(edgeId, 'completed');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const edges = flowApiMocks.lastProps?.edges as Array<{ id: string; data?: { highlighted?: boolean } }>;
+    expect(edges.find((edge) => edge.id === edgeId)?.data?.highlighted).toBe(true);
+
+    view.unmount();
+  });
+
   it('shows connect preview while connect mode is active and clears it on pane click', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);

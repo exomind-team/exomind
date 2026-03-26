@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -172,6 +172,7 @@ export function GoalsPage() {
   const pageRef = useRef<HTMLDivElement | null>(null);
   const simulationRef = useRef<GoalForceSimulation | null>(null);
   const highlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const previousGoalStatusesRef = useRef<Map<string, string>>(new Map());
 
   const updateConnectPreview = useCallback((clientX: number, clientY: number) => {
     const bounds = pageRef.current?.getBoundingClientRect();
@@ -355,6 +356,17 @@ export function GoalsPage() {
     };
   }, [getHopDistance, graph.me.id, positions, visibleGraph.goals]);
 
+  const goalStatusSnapshot = useMemo(
+    () => visibleGraph.goals.map((goal) => ({
+      id: goal.id,
+      status: deriveGoalDisplayStatus(goal.id),
+      inboundEdgeIds: visibleGraph.edges
+        .filter((edge) => edge.target === goal.id)
+        .map((edge) => edge.id),
+    })),
+    [deriveGoalDisplayStatus, edgeOverrides, visibleGraph.edges, visibleGraph.goals],
+  );
+
   const selectedGoal = selected?.kind === 'goal'
     ? graph.goals.find((goal) => goal.id === selected.id) ?? null
     : null;
@@ -409,6 +421,41 @@ export function GoalsPage() {
     }, 1000);
     highlightTimeoutsRef.current.set(edgeId, timeoutId);
   }
+
+  useLayoutEffect(() => {
+    const currentStatuses = new Map<string, string>();
+    for (const item of goalStatusSnapshot) {
+      currentStatuses.set(item.id, item.status);
+    }
+
+    if (previousGoalStatusesRef.current.size === 0) {
+      previousGoalStatusesRef.current = currentStatuses;
+      return;
+    }
+
+    const edgesToFlash = new Set<string>();
+    for (const item of goalStatusSnapshot) {
+      const previousStatus = previousGoalStatusesRef.current.get(item.id);
+      const nextStatus = currentStatuses.get(item.id);
+      if (!previousStatus || !nextStatus || previousStatus === nextStatus) continue;
+      for (const edgeId of item.inboundEdgeIds) {
+        edgesToFlash.add(edgeId);
+      }
+    }
+
+    edgesToFlash.forEach((edgeId) => {
+      setHighlightedEdgeIds((current) => (current.includes(edgeId) ? current : [...current, edgeId]));
+      const existing = highlightTimeoutsRef.current.get(edgeId);
+      if (existing) clearTimeout(existing);
+      const timeoutId = setTimeout(() => {
+        setHighlightedEdgeIds((current) => current.filter((candidate) => candidate !== edgeId));
+        highlightTimeoutsRef.current.delete(edgeId);
+      }, 320);
+      highlightTimeoutsRef.current.set(edgeId, timeoutId);
+    });
+
+    previousGoalStatusesRef.current = currentStatuses;
+  }, [goalStatusSnapshot]);
 
   const contextItems = useMemo(() => {
     if (!contextMenu) return [];
