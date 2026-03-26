@@ -151,6 +151,9 @@ describe('TaskFlowEdge', () => {
     );
 
     const emptySlotCall = baseEdgeCalls[baseEdgeCalls.length - 1] as { style: { strokeWidth: number; strokeDasharray: string } };
+    const emptySlotLabel = screen.getByTestId('task-flow-edge-label-edge-empty-slot');
+    expect(emptySlotLabel.className).toContain('italic');
+    expect(emptySlotLabel.className).toContain('opacity-75');
 
     rerender(
       <svg>

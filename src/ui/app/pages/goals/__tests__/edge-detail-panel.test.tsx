@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { EdgeDetailPanel } from '../components/EdgeDetailPanel';
 
 describe('EdgeDetailPanel', () => {
-  it('keeps developer controls collapsed by default', () => {
+  it('hides developer controls when developer mode is unavailable', () => {
     render(
       <EdgeDetailPanel
         edge={{
@@ -20,6 +20,37 @@ describe('EdgeDetailPanel', () => {
         taskTitle={undefined}
         sourceLabel="Me"
         targetLabel="Goal"
+        showDeveloperControls={false}
+        onClose={vi.fn()}
+        onUpdate={() => true}
+        onJumpNode={vi.fn()}
+        onSetOverride={vi.fn()}
+        onClearOverride={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '⚙ 开发者' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'pending' })).toBeNull();
+  });
+
+  it('keeps developer controls collapsed by default when developer mode is enabled', () => {
+    render(
+      <EdgeDetailPanel
+        edge={{
+          id: 'edge-1',
+          title: '',
+          description: '',
+          source: 'me',
+          target: 'goal-1',
+          createdAt: 1,
+          updatedAt: 1,
+        }}
+        status="pending"
+        targetStatus="pending"
+        taskTitle={undefined}
+        sourceLabel="Me"
+        targetLabel="Goal"
+        showDeveloperControls
         onClose={vi.fn()}
         onUpdate={() => true}
         onJumpNode={vi.fn()}
@@ -55,6 +86,7 @@ describe('EdgeDetailPanel', () => {
         taskTitle="真实任务"
         sourceLabel="Me"
         targetLabel="Goal"
+        showDeveloperControls
         onClose={vi.fn()}
         onUpdate={() => true}
         onJumpNode={vi.fn()}
@@ -84,6 +116,7 @@ describe('EdgeDetailPanel', () => {
         taskTitle="真实任务"
         sourceLabel="Me"
         targetLabel="Goal"
+        showDeveloperControls
         onClose={vi.fn()}
         onUpdate={() => true}
         onJumpNode={vi.fn()}
@@ -118,6 +151,7 @@ describe('EdgeDetailPanel', () => {
         taskTitle="真实任务"
         sourceLabel="Me"
         targetLabel="Goal"
+        showDeveloperControls
         onClose={vi.fn()}
         onUpdate={onUpdate}
         onJumpNode={vi.fn()}
@@ -146,6 +180,7 @@ describe('EdgeDetailPanel', () => {
         taskTitle="真实任务"
         sourceLabel="Me"
         targetLabel="Goal"
+        showDeveloperControls
         onClose={vi.fn()}
         onUpdate={onUpdate}
         onJumpNode={vi.fn()}

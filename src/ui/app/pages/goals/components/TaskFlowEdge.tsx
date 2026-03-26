@@ -241,6 +241,7 @@ export function TaskFlowEdge({
   const highlighted = Boolean(data?.highlighted);
   const isEmptySlot = Boolean(data?.isEmptySlot);
   const isZombie = Boolean(data?.isZombie);
+  const hasPlaceholderLabel = isEmptySlot && label.trim() === '待定义';
   const style = getEdgeStyle(status, Boolean(selected), highlighted, isEmptySlot, isZombie);
   const markerId = `goal-task-arrow-${id}`;
   const markerColor = getEdgeColor(status, highlighted, isZombie);
@@ -296,6 +297,7 @@ export function TaskFlowEdge({
             data-testid={`task-flow-edge-label-${id}`}
             className={cn(
               'absolute rounded bg-white/90 px-1.5 py-0.5 text-[10px] text-stone-600 shadow-sm dark:bg-stone-900/90 dark:text-stone-300',
+              hasPlaceholderLabel && 'italic opacity-75',
               highlighted && 'bg-[#FFF7ED] text-[#C75B3A] ring-1 ring-[#F5C7B8]',
               status === 'cancelled' && 'line-through opacity-60',
               isZombie && 'opacity-60',

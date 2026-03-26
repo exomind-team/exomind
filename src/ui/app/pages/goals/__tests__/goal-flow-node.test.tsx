@@ -66,6 +66,27 @@ describe('GoalFlowNode', () => {
     expect(inProgressNode.className).toContain('from-sky-400');
     expect(inProgressNode.className).toContain('border-[#C75B3A]');
     expect(inProgressNode.className).toContain('ring-[#C75B3A]/25');
+    expect(screen.getByTestId('goal-flow-node-progress-pulse-goal-progress')).toBeInTheDocument();
+  });
+
+  it('renders empty titles as a softened placeholder instead of a normal title label', async () => {
+    const { GoalFlowNode } = await import('../components/GoalFlowNode');
+
+    render(
+      <GoalFlowNode
+        {...buildNodeProps(GoalFlowNode, {
+          id: 'goal-empty-title',
+          data: {
+            title: '',
+            status: 'pending',
+          },
+        })}
+      />,
+    );
+
+    const placeholder = screen.getByText('待命名');
+    expect(placeholder.className).toContain('italic');
+    expect(placeholder.className).toContain('opacity-75');
   });
 
   it('opens the node context callback on long press', async () => {

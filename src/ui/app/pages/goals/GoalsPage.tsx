@@ -13,6 +13,7 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { toast } from '@/components/ui/toast-hook';
 import { getTaskService } from '@/lib/services/task.service';
 import { cn } from '@/lib/utils';
@@ -373,6 +374,7 @@ export function GoalsPage() {
   const [taskMetaById, setTaskMetaById] = useState<Map<string, { title: string; status: TaskEdgeStatus }>>(() => new Map());
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
+  const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [mode, setMode] = useState<GoalPageMode>(() => readModeStorage());
   const [showCancelled, setShowCancelled] = useState(() => readBooleanStorage(SHOW_CANCELLED_STORAGE_KEY, false));
   const [guideHidden, setGuideHidden] = useState(() => readBooleanStorage(GUIDE_HIDDEN_STORAGE_KEY, false));
@@ -432,6 +434,10 @@ export function GoalsPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [closeContextMenu, connectMode]);
+
+  useEffect(() => (
+    subscribeDeveloperModeChanges(setDeveloperModeEnabled)
+  ), []);
 
   useLayoutEffect(() => {
     const element = pageRef.current;
@@ -1494,6 +1500,7 @@ export function GoalsPage() {
           taskTitle={selectedEdge.taskNodeRef ? getTaskTitleByRef(selectedEdge.taskNodeRef) : undefined}
           sourceLabel={selectedEdge.source === graph.me.id ? graph.me.name : graph.goals.find((goal) => goal.id === selectedEdge.source)?.title || '待命名'}
           targetLabel={graph.goals.find((goal) => goal.id === selectedEdge.target)?.title || '待命名'}
+          showDeveloperControls={developerModeEnabled}
           onClose={() => setSelected(null)}
           onJumpNode={(nodeId) => setSelected(nodeId === graph.me.id ? { kind: 'me', id: nodeId } : { kind: 'goal', id: nodeId })}
           onUpdate={(patch) => notifyResult(updateEdge({ edgeId: selectedEdge.id, ...patch }), '已更新路径', '保存失败')}

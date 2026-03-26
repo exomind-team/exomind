@@ -20,6 +20,13 @@ const taskServiceMocks = vi.hoisted(() => ({
 const forceLayoutMocks = vi.hoisted(() => ({
   emitEnabled: true,
 }));
+const developerModeMocks = vi.hoisted(() => ({
+  enabled: false,
+  subscribe: vi.fn<(listener: (enabled: boolean) => void) => () => void>((listener) => {
+    listener(developerModeMocks.enabled);
+    return () => {};
+  }),
+}));
 
 vi.mock('@/components/ui/toast-hook', () => ({
   toast: toastMock,
@@ -31,6 +38,11 @@ vi.mock('@/lib/services/task.service', () => ({
 
 vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
   useIsDesktop: () => isDesktopMock(),
+}));
+
+vi.mock('@/config/developer-mode', () => ({
+  getDeveloperModeEnabled: () => developerModeMocks.enabled,
+  subscribeDeveloperModeChanges: developerModeMocks.subscribe,
 }));
 
 vi.mock('../goal-force-layout', () => ({
@@ -177,6 +189,8 @@ describe('GoalsPage', () => {
   beforeEach(() => {
     window.localStorage.clear();
     forceLayoutMocks.emitEnabled = true;
+    developerModeMocks.enabled = false;
+    developerModeMocks.subscribe.mockClear();
     toastMock.mockReset();
     isDesktopMock.mockReset();
     isDesktopMock.mockReturnValue(true);
@@ -694,6 +708,7 @@ describe('GoalsPage', () => {
   });
 
   it('includes the edge label in developer override toasts', async () => {
+    developerModeMocks.enabled = true;
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);
 
@@ -713,6 +728,24 @@ describe('GoalsPage', () => {
     expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
       title: "[开发者] 边'待定义'状态已设为 completed",
     }));
+  });
+
+  it('hides developer override controls on the page when developer mode is disabled', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+    fireEvent.click(screen.getByTestId(`mock-react-flow-edge-${edgeId}`));
+
+    expect(screen.queryByRole('button', { name: '⚙ 开发者' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'completed' })).toBeNull();
   });
 
   it('reconnects an edge through React Flow and updates its source endpoint', async () => {

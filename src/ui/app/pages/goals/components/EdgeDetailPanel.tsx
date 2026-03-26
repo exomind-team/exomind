@@ -10,6 +10,7 @@ interface EdgeDetailPanelProps {
   taskTitle?: string;
   sourceLabel: string;
   targetLabel: string;
+  showDeveloperControls?: boolean;
   onClose: () => void;
   onUpdate: (patch: { title?: string; description?: string; taskNodeRef?: string }) => boolean;
   onJumpNode: (nodeId: string) => void;
@@ -24,6 +25,7 @@ export function EdgeDetailPanel({
   taskTitle,
   sourceLabel,
   targetLabel,
+  showDeveloperControls = false,
   onClose,
   onUpdate,
   onJumpNode,
@@ -132,34 +134,36 @@ export function EdgeDetailPanel({
           </button>
         </section>
 
-        <section className="rounded-2xl border border-amber-300/50 bg-amber-50/70 p-3 dark:bg-amber-950/20">
-          <button
-            type="button"
-            aria-label="⚙ 开发者"
-            onClick={() => setDeveloperOpen((current) => !current)}
-            className="flex w-full items-center justify-between text-left text-xs font-semibold uppercase tracking-[0.08em] text-amber-700 dark:text-amber-300"
-          >
-            <span>⚙ 开发者</span>
-            <span>{developerOpen ? '收起' : '展开'}</span>
-          </button>
-          {developerOpen ? (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {(['pending', 'in_progress', 'suspended', 'completed', 'cancelled'] as TaskEdgeStatus[]).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => onSetOverride(item)}
-                  className="rounded-full border border-amber-300 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-100"
-                >
-                  {item}
+        {showDeveloperControls ? (
+          <section className="rounded-2xl border border-amber-300/50 bg-amber-50/70 p-3 dark:bg-amber-950/20">
+            <button
+              type="button"
+              aria-label="⚙ 开发者"
+              onClick={() => setDeveloperOpen((current) => !current)}
+              className="flex w-full items-center justify-between text-left text-xs font-semibold uppercase tracking-[0.08em] text-amber-700 dark:text-amber-300"
+            >
+              <span>⚙ 开发者</span>
+              <span>{developerOpen ? '收起' : '展开'}</span>
+            </button>
+            {developerOpen ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(['pending', 'in_progress', 'suspended', 'completed', 'cancelled'] as TaskEdgeStatus[]).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => onSetOverride(item)}
+                    className="rounded-full border border-amber-300 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-100"
+                  >
+                    {item}
+                  </button>
+                ))}
+                <button type="button" onClick={onClearOverride} className="rounded-full border border-stone-300 px-2 py-1 text-[11px]">
+                  清除覆盖
                 </button>
-              ))}
-              <button type="button" onClick={onClearOverride} className="rounded-full border border-stone-300 px-2 py-1 text-[11px]">
-                清除覆盖
-              </button>
-            </div>
-          ) : null}
-        </section>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
       </div>
     </DetailPanelShell>
   );

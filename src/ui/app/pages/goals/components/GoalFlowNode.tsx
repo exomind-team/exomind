@@ -68,6 +68,7 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
   const editMode = Boolean(data.editMode);
   const size = isMe ? ME_NODE_SIZE : GOAL_NODE_SIZE;
   const status = data.status;
+  const hasPlaceholderTitle = !data.title;
   const longPressHandlers = useLongPress((event) => {
     data.onOpenContextMenu?.(id, event.clientX, event.clientY);
   });
@@ -100,7 +101,19 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
     >
       <Handle type="target" position={Position.Top} style={getHandleStyle(editMode)} />
       <Handle type="source" position={Position.Bottom} style={getHandleStyle(editMode)} />
-      <span className={cn('px-1 text-center leading-tight select-none', isMe ? 'text-sm font-bold' : 'text-xs font-medium')}>
+      {status === 'in_progress' && !isMe ? (
+        <span
+          data-testid={`goal-flow-node-progress-pulse-${id}`}
+          className="pointer-events-none absolute inset-[-5px] rounded-full border border-[#F5C7B8]/80 opacity-80 animate-pulse"
+        />
+      ) : null}
+      <span
+        className={cn(
+          'px-1 text-center leading-tight select-none',
+          isMe ? 'text-sm font-bold' : 'text-xs font-medium',
+          hasPlaceholderTitle && 'italic opacity-75',
+        )}
+      >
         {data.title || '待命名'}
       </span>
 
