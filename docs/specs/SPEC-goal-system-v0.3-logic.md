@@ -55,10 +55,7 @@ type NodeId = GoalId | MeId // 图中任意节点 ID
 // 边的派生状态（继承自任务系统状态枚举）
 type TaskEdgeStatus = 'pending' | 'in_progress' | 'suspended' | 'completed' | 'cancelled'
 
-// 目标的存储状态
-type GoalStatus = 'pending' | 'completed' | 'cancelled'
-
-// 目标的展示状态（含派生）
+// 目标的展示状态（全部为派生，见 §3.2 deriveGoalDisplayStatus）
 type GoalDisplayStatus = 'pending' | 'in_progress' | 'suspended' | 'completed' | 'cancelled'
 ```
 
@@ -69,7 +66,7 @@ interface GoalNode {
   id: GoalId
   title: string           // 空字符串 = 待命名
   description: string
-  status: GoalStatus      // 存储态，见 §3.2
+  cancelled: boolean      // 唯一存储态标记，默认 false
   completionRule: Set<Set<TaskEdgeId>>  // 最简与或式（DNF），见 §4
   createdAt: Timestamp
   updatedAt: Timestamp
@@ -77,11 +74,10 @@ interface GoalNode {
 ```
 
 **状态说明**：
-- `in_progress`、`suspended` 是**派生状态**，由关联入边状态决定（见 §3.2）
-- 存储时只持久化 `pending` | `completed` | `cancelled`
+GoalNode 不存储 completed 状态。所有 5 种展示状态均由 `deriveGoalDisplayStatus`（§3.2）实时派生。`cancelled` 是唯一的存储态标记。
 
-**终态冻结**：
-- `completed` 或 `cancelled` 的目标**完全冻结**：title、description、completionRule、status 均不可修改
+**派生冻结**：
+当 `deriveGoalDisplayStatus` 返回 `completed` 时，目标的 title、description、completionRule **不可修改**，入边冻结（§2.2）。`cancelled` 目标完全冻结。
 
 ### 1.2 TaskEdge — 任务边（槽位抽象）
 
@@ -144,14 +140,13 @@ interface GoalGraph {
 
 | 编号 | 不变量 | 行为语义 | 说明 |
 |------|--------|---------|------|
-| **C1** | 已完成不可逆 | 完成了就是完成了 | `completed` 是终态，目标完全冻结，入边冻结 |
-| **C2** | 已取消不可逆 | 取消了就是取消了 | `cancelled` 是终态，目标完全冻结 |
+| **C2** | cancelled 是唯一的存储态终态 | 取消了就是取消了 | `cancelled` 不可逆，目标完全冻结 |
 | **C3** | 不可删除 | 取消 ≈ 删除（逻辑保留，UI 隐藏） | 目标节点无 delete 操作 |
 | **C4** | Me 永驻 | 自我是起点 | Me 不可取消/完成 |
 | **C5** | 无孤立目标 | 每个目标都有路可达 | 创建目标时必须基于已有节点，自动配套任务边 |
 | **C6** | DAG 约束 | 目标网络不能形成环 | 创建/修改边时检测 |
 | **C7** | 有向边 | source 是前提条件，target 是要达成的目标 | source→target = 通过此边可达 target |
-| **C8** | 目标完成纯推导 | 目标不能手动标记完成 | completed 只能由完成规则推导得出 |
+| **C8** | 目标完成纯派生 | 目标不能手动标记完成 | completed 不存储，实时计算（§3.2 deriveGoalDisplayStatus） |
 | **C9** | 空槽位不可完成 | 没做具体事不算达成 | taskNodeRef 为空 → 边状态锁定为 pending |
 | **C10** | 任务独立性 | 任务系统不依赖目标系统存在 | 架构解耦；联动操作是用户意愿传递，不算违反 |
 
@@ -162,19 +157,19 @@ interface GoalGraph {
 - 边必须有两个端点（不允许悬空边）
 - 边的两端不能是同一个节点（无自环）
 - 边的起止节点可修改，修改后须通过 DAG 检测
-- **入边冻结**：已完成（completed）目标的入边——禁止新增、修改 target（reconnect target）、删除、修改 taskNodeRef、修改 title/description；但**允许修改 source**（不影响 target 的完成判定）。已取消的目标入边不冻结
-- **出边约束**：已取消（cancelled）的目标，禁止新增出边（包括通过 reconnectEdge 将其他边的 source 改为该节点），但已有出边可修改/删除。从 cancelled 目标出发的空槽位边成为僵尸边（永远 pending），留给 UI 层隐藏或提示用户删除
+- **入边冻结**：派生状态为 completed 的目标的入边——禁止新增、修改 target（reconnect target）、删除、修改 taskNodeRef、修改 title/description；但**允许修改 source**（不影响 target 的完成判定）。cancelled 的目标入边不冻结
+- **出边约束**：cancelled 的目标，禁止新增出边（包括通过 reconnectEdge 将其他边的 source 改为该节点），但已有出边可修改/删除。从 cancelled 目标出发的空槽位边成为僵尸边（永远 pending），留给 UI 层隐藏或提示用户删除
 
 ### 2.3 实体删除策略
 
 | 实体 | 可删除？ | 理由 |
 |------|---------|------|
-| GoalNode | **否**（C3） | 目的不变，取消 ≈ 删除 |
+| GoalNode | **否**（C3） | 目的不变，取消 ≈ 删除。cancelled 目标完全冻结；派生状态为 completed 的目标 title/description/completionRule 不可修改（派生冻结） |
 | TaskEdge | **是** | 手段可变，可替换/移除/重新规划 |
 
 删除 TaskEdge 后需触发 C5 检查：若 target 目标因此无任何入边（只看入边，不看出边），系统自动补充 Me→目标空槽位边。
 
-**deleteEdge 前置检查**：若 edge.target 为 completed 目标，拒绝删除（入边冻结）。
+**deleteEdge 前置检查**：若 edge.target 的派生状态为 completed，拒绝删除（入边冻结）。
 
 ---
 
@@ -196,15 +191,12 @@ TaskEdge 自身**不存储**独立状态。其状态由 `taskNodeRef` 决定，�
 
 ### 3.2 GoalNode 状态（派生）
 
-存储状态只有三种：`pending` | `completed` | `cancelled`
-
-展示状态增加两种派生状态：
+GoalNode 没有存储状态。所有 5 种展示状态均由 `deriveGoalDisplayStatus` 实时派生：
 
 ```typescript
 function deriveGoalDisplayStatus(goal: GoalNode, inEdges: TaskEdge[]): GoalDisplayStatus {
-  if (goal.status === 'completed') return 'completed'
-  if (goal.status === 'cancelled') return 'cancelled'
-  // goal.status === 'pending' 时，看入边：
+  if (goal.cancelled) return 'cancelled'
+  if (evaluateCompletion(goal.completionRule)) return 'completed'
   if (inEdges.some(e => getEdgeStatus(e) === 'in_progress')) return 'in_progress'
   if (inEdges.some(e => getEdgeStatus(e) === 'suspended')) return 'suspended'
   // 所有入边都已终结（completed/cancelled）但规则未满足 → 挂起（等待新手段）
@@ -218,19 +210,19 @@ function deriveGoalDisplayStatus(goal: GoalNode, inEdges: TaskEdge[]): GoalDispl
 }
 ```
 
-| 展示状态 | 来源 | 规则 |
-|----------|------|------|
-| pending | 存储 | 默认 |
-| in_progress | **派生** | 有任何入边处于 in_progress |
-| suspended | **派生** | 无 in_progress 入边，但有 suspended 入边；或所有入边已终结但规则未满足（等待新手段） |
-| completed | 存储 | 由完成规则推导写入（C8） |
-| cancelled | 存储 | 由 cancelGoal 操作写入 |
+优先级：`cancelled > completed > in_progress > suspended > pending`
 
-状态转移：
-- `pending → completed`：仅由完成规则推导触发（§4）
-- `pending → cancelled`：通过 `cancelGoal` 操作
-- `completed` 和 `cancelled` 是终态，不可转出
-- 已完成的目标不可取消
+| 展示状态 | 规则 |
+|----------|------|
+| cancelled | `goal.cancelled === true`（唯一存储态标记） |
+| completed | `evaluateCompletion(goal.completionRule)` 为 true（纯派生，C8） |
+| in_progress | 有任何入边处于 in_progress |
+| suspended | 无 in_progress 入边，但有 suspended 入边；或所有入边已终结但规则未满足（等待新手段） |
+| pending | 默认（以上条件均不满足） |
+
+状态变更：
+- `cancelled` 通过 `cancelGoal` 设置（不可逆）
+- 其他状态完全实时派生，无状态转移图
 
 ---
 
@@ -256,7 +248,7 @@ type CompletionRule = Set<Set<TaskEdgeId>>
 
 **边界语义**：
 - 外层空 `{}` = **永不自动完成**，需要用户重新配置完成条件
-- 含空子集 `{ {} }` = trivially satisfied（空 AND = true）→ 目标自动完成
+- 含空子集 `{ {} }`：写入时自动过滤空子集（§5.7），运行时防御性跳过（§4.3）。过滤后若外层为空则永不完成
 - 新建目标时自动填充为 AND 模式（`{ {所有入边} }`），默认从最严格开始
 
 ### 4.2 UI 层兼容
@@ -297,34 +289,34 @@ function evaluateCompletion(rule: CompletionRule): boolean {
 
 删除边时从 completionRule 中移除该边的引用：
 1. 从每个内层子集中移除该 edgeId
-2. **若内层子集因此变空 → 整个子集移除**（防止空子集 trivially satisfied 导致意外完成）
+2. **若内层子集因此变空 → 整个子集移除**（防止空子集被防御性跳过后导致语义歧义）
 3. 若外层因此变空 → 规则变为 `{}`（永不完成，需用户重新配置）
 
 ### 4.5 触发时机
 
-完成推导在以下操作后触发：
+完成状态是实时派生的（§3.2 `deriveGoalDisplayStatus`），每次查询时计算。以下操作会导致派生结果变化：
 
 1. 关联任务状态变更（通过事件订阅感知，见 §7.3）
 2. TaskEdge 被删除（影响规则中的引用）
 3. TaskEdge 被创建且被加入完成规则
 4. 完成规则本身被修改
 
-**任务系统集成**：目标系统通过事件订阅（如 `task.statusChanged`）感知关联任务的状态变化。懒计算无法可靠处理级联传播，因此采用事件驱动。
+**任务系统集成**：目标系统通过事件订阅（如 `task.statusChanged`）感知关联任务的状态变化。级联传播（§4.6）需要事件驱动通知下游目标重新查询。
 
 ### 4.6 级联传播
 
 ```
-入边 E 对应任务完成 → 重算 E.target 目标 G
-  → 若 G 已处于终态（completed/cancelled）→ 跳过，不触发任何变更
-  → 若 G 变为 completed
+入边 E 对应任务完成 → 重新查询 E.target 目标 G 的派生状态
+  → 若 G 为 cancelled → 跳过，不触发任何变更
+  → 若 G 的派生状态变为 completed
     → 找到所有以 G 为 source 的边 E'
       → 边 E' 保持各自状态（C10：任务独立性）
-      → 重算 E'.target（沿 DAG 向下游传播，遇终态跳过）
+      → 通知 E'.target 重新查询派生状态（沿 DAG 向下游传播，遇 cancelled 跳过）
 ```
 
 关键：
-- **目标完成不联动边的状态**。级联只传播重算，不传播状态变更
-- **终态目标跳过重算**。completed/cancelled 不可逆，重算无意义
+- **目标完成不联动边的状态**。级联只传播重新查询，不传播状态变更
+- **cancelled 目标跳过**。cancelled 是唯一的存储态终态，不可逆
 
 ---
 
@@ -345,7 +337,7 @@ createGoal(params: {
 ```
 
 **行为**：
-- 创建 GoalNode，status = pending，completionRule 自动填充为 AND（`{ {新边} }`）
+- 创建 GoalNode，cancelled = false，completionRule 自动填充为 AND（`{ {新边} }`）
 - 根据 direction 创建配套 TaskEdge：
   - `downstream`：fromNode → 新目标（新目标在下游，需要从 fromNode 出发达成）
   - `upstream`：新目标 → fromNode（新目标是 fromNode 的前置条件）。新边加入 fromNode 的 completionRule；新目标自身 completionRule 初始化为 `{}`（无入边→永不自动完成，等待后续添加入边）
@@ -372,8 +364,8 @@ createEdge(params: {
 - source 和 target 必须存在
 - source ≠ target（无自环）
 - 创建后不得形成环（C6）
-- target 不是 completed（入边冻结）
-- source 不是 cancelled（禁止新增出边；注：completed 目标允许新增出边，出边不冻结）
+- target 的派生状态不是 completed（入边冻结）
+- source 不是 cancelled（禁止新增出边；注：派生状态为 completed 的目标允许新增出边，出边不冻结）
 
 **副作用**：
 - 创建 TaskEdge
@@ -392,10 +384,10 @@ cancelGoal(params: {
 
 **前置检查**：
 - 不是 Me（C4）
-- 当前 status = pending（不能取消已完成的）
+- 当前未 cancelled 且派生状态非 completed（不能取消已完成的目标）
 
 **行为**：
-1. 设 goalNode.status = cancelled（目标完全冻结）
+1. 设 goalNode.cancelled = true（目标完全冻结）
 2. **边不删除**：取消目标不删除任何边（目标不可删除，边也保留以记录历史）
 3. 若 `cascadeInTasks = true`：入边中有关联任务的 → 通过任务系统 API 取消关联任务（空槽位边无 taskNodeRef，不受影响）
 4. 若 `cascadeOutTasks = true`：出边中有关联任务的 → 通过任务系统 API 取消关联任务（空槽位边不受影响）
@@ -410,13 +402,13 @@ deleteEdge(params: {
 ```
 
 **前置检查**：
-- edge.target 不是 completed（入边冻结）
+- edge.target 的派生状态不是 completed（入边冻结）
 
 **副作用**：
 - 从图中移除该 TaskEdge
 - 从 target 的 completionRule 中移除引用（§4.4 规则维护）
 - C5 检查：若 target 目标因此无入边，自动补充 Me→目标空槽位边
-- 触发 target 的完成重算
+- target 的派生状态可能因此变化
 
 ### 5.5 reconnectEdge — 修改边的起止节点
 
@@ -433,8 +425,8 @@ reconnectEdge(params: {
 - 新端点必须存在
 - 新 source ≠ 新 target（无自环）
 - 修改后不得形成环（C6）
-- 旧 target 若为 completed **且 newTarget 有值**（即要改 target）→ 拒绝（入边冻结）。仅改 source 时不拒绝（§2.2 允许）
-- 新 target 若为 completed → 拒绝（入边冻结）
+- 旧 target 的派生状态若为 completed **且 newTarget 有值**（即要改 target）→ 拒绝（入边冻结）。仅改 source 时不拒绝（§2.2 允许）
+- 新 target 的派生状态若为 completed → 拒绝（入边冻结）
 - 新 source 若为 cancelled → 拒绝（禁止新增出边）。注：newSource 省略时不检查旧 source 状态（修改已有边，非新增出边）
 
 **副作用**：
@@ -479,12 +471,12 @@ updateGoal(params: {
 ```
 
 **前置检查**：
-- 目标不是终态（completed/cancelled 的目标完全冻结，不可修改任何字段）
+- 目标未 cancelled 且派生状态非 completed（派生冻结：cancelled 目标完全冻结，派生 completed 的目标 title/description/completionRule 不可修改）
 - completionRule 中不允许存在空内层子集（写入时自动过滤空子集）
 - completionRule 中的所有 edgeId 必须是该目标的实际入边（严格校验，节省后续判定开销）
 
 **副作用**：
-- 若 completionRule 变更 → 触发完成重算
+- 若 completionRule 变更 → 派生状态可能因此变化
 
 ### 5.8 updateEdge — 更新任务边属性
 
@@ -498,7 +490,7 @@ updateEdge(params: {
 ```
 
 **前置检查**：
-- 若 edge.target 为 completed → 禁止修改 taskNodeRef（入边冻结；title/description 也冻结）
+- 若 edge.target 的派生状态为 completed → 禁止修改 taskNodeRef（入边冻结；title/description 也冻结）
 
 ---
 
@@ -578,15 +570,57 @@ interface TaskStatusChangedEvent {
 
 | 约束 | 原型行为 | 完整行为 |
 |------|---------|---------|
+| C2 cancelled 唯一存储态终态 | cancelled 仍为不可逆终态（保持） | 不可逆 |
 | C5 自动空槽位边 | 可选实现 | 必须 |
 | C6 DAG 检测 | 可选实现 | 必须 |
-| C8 完成纯推导 | 用户可直接改 | 只能推导 |
+| C8 完成纯派生 | completed 为纯派生，原型阶段通过 override 间接影响派生结果 | 只能派生 |
 | C9 空槽位限制 | 不限制 | 限制 |
 | completionRule | UI 用 AND/OR 简化 | 完整 DNF |
 
 | 级联传播 | 无深度限制，同步执行 | 引入批量重算/事件合并机制 |
 
 放宽的约束标注为 `prototype-only`。
+
+### 8.1 原型专属操作（prototype-only）
+
+以下操作仅存在于原型阶段，正式版移除。
+
+#### setEdgeStatusOverride — 临时覆盖边状态
+
+```typescript
+setEdgeStatusOverride(params: {
+  edgeId: TaskEdgeId
+  status: TaskEdgeStatus    // 覆盖值
+}): void
+```
+
+**行为**：
+- 在内存中维护 `edgeOverrides: Map<TaskEdgeId, TaskEdgeStatus>`
+- `getEdgeStatus` 优先返回 override 值，无 override 时按正常派生（§3.1）
+- **override 可穿透入边冻结**：即使目标的派生状态为 completed，仍可设置 override（因为 override 不走正常的边修改路径，属于原型调试用途）
+- 修改后影响 `deriveGoalDisplayStatus` 的派生结果（§3.2）
+
+**存储**：内存 Map，不参与 localStorage 序列化。页面刷新后 override 丢失。
+
+#### clearEdgeStatusOverride — 清除边状态覆盖
+
+```typescript
+clearEdgeStatusOverride(params: {
+  edgeId: TaskEdgeId
+}): void
+```
+
+**行为**：从 `edgeOverrides` 中移除该边的覆盖值。边状态恢复为正常派生。关联目标的派生状态可能因此变化。
+
+#### clearAllEdgeStatusOverrides — 清除所有边状态覆盖
+
+```typescript
+clearAllEdgeStatusOverrides(): void
+```
+
+**行为**：清空 `edgeOverrides` Map。所有受影响目标的派生状态可能因此变化。
+
+**UI 入口**：无。仅供代码调用。页面刷新自动清除（内存 Map 不参与序列化）。
 
 ---
 
@@ -605,13 +639,15 @@ interface TaskStatusChangedEvent {
 | 任务关联 | 隐含状态 | 显式槽位抽象（空槽位=pending，不占用任务系统） |
 | 平行边 | 允许 | 允许（明确用途：绑定多个任务） |
 | 创建目标 | 凭空创建 | 基于已有节点派生（§5.1） |
-| 终态冻结 | 部分 | 完全冻结（所有字段不可改） |
+| 终态冻结 | 部分 | cancelled 完全冻结；派生 completed 冻结 title/description/completionRule + 入边 |
 | 入边冻结 | 无 | completed 目标入边冻结 |
 | 出边约束 | 无 | cancelled 目标禁止新增出边 |
 | 删除边规则维护 | 无 | §4.4 内层清空则整个子集移除 |
 | 级联重算 | 未说明终态处理 | 终态目标跳过重算 |
 | 操作日志 | 无 | §7.2 原型阶段操作日志数组 |
 | 事件集成 | 无 | §7.3 任务状态变更事件订阅 |
+| 目标 completed 状态 | 存储态 | 纯派生（§3.2） |
+| GoalNode.status | 3 种存储态 | cancelled: boolean 单一标记 |
 
 ---
 
@@ -621,4 +657,6 @@ interface TaskStatusChangedEvent {
 |------|------|----------|------|
 | 2026-03-24 | 0.1 | 初稿（v0.1） | Claude + 用户 |
 | 2026-03-24 | 0.2 | 统一设计（v0.2） | Claude + 用户 |
-| 2026-03-25 | 0.3-draft | 拆分逻辑模型；吸纳十条原则 + 两轮审查修正（共 24 项：空子集防御、reconnect 补检、updateEdge 冻结、cascade 拆分入边/出边、suspended 含全终结场景、taskRefIndex 反向索引、splitEdge 默认迁移、级联深度注记） | Claude + 用户 |
+| 2026-03-25 | 0.3-draft | 拆分逻辑模型；吸纳十条原则 + 两轮审查修正（共 24 项） | Claude + 用户 |
+| 2026-03-26 | 0.3-r1 | §8.1 新增原型专属操作：setEdgeStatusOverride（不受入边冻结约束）、clearEdgeStatusOverride、clearAllEdgeStatusOverrides、uncancelGoal。C1/C2 原型放宽（completed 可回退、cancelled 可撤销）。双向推导机制 | Claude + 用户 |
+| 2026-03-26 | 0.3-r2 | 架构简化：completed 从存储态改为纯派生；GoalNode.status 简化为 cancelled: boolean；消除 C1；重写 §3.2 状态派生；更新 §5 操作前置检查；§8.1 删除 uncancelGoal 和双向推导 | Claude + 用户 |
