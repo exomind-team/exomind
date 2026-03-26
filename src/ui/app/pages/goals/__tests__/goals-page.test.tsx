@@ -328,4 +328,28 @@ describe('GoalsPage', () => {
       expect(edges.map((edge) => edge.data?.parallelIndex)).toEqual([0, 1]);
     });
   });
+
+  it('renders hop-distance rings around Me when the graph extends outward', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const firstGoalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${firstGoalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    expect(screen.getByTestId('goals-hop-rings')).toBeInTheDocument();
+    expect(screen.getByTestId('goals-hop-ring-1')).toBeInTheDocument();
+    expect(screen.getByTestId('goals-hop-ring-2')).toBeInTheDocument();
+  });
 });

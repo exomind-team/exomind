@@ -83,6 +83,62 @@ function buildVisibleEdges(graph: ReturnType<typeof useGoalStore.getState>['grap
   });
 }
 
+const HOP_RING_SPACING = 152;
+
+function GoalHopRings({
+  centerX,
+  centerY,
+  maxHop,
+}: {
+  centerX: number;
+  centerY: number;
+  maxHop: number;
+}) {
+  if (maxHop < 1) return null;
+
+  return (
+    <svg
+      data-testid="goals-hop-rings"
+      className="pointer-events-none absolute inset-0 z-[1] h-full w-full"
+    >
+      <defs>
+        <radialGradient id="goal-hop-ring-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="rgba(199,91,58,0.10)" />
+          <stop offset="70%" stopColor="rgba(199,91,58,0.03)" />
+          <stop offset="100%" stopColor="rgba(199,91,58,0)" />
+        </radialGradient>
+      </defs>
+      <circle cx={centerX} cy={centerY} r={Math.max(HOP_RING_SPACING * maxHop, 120)} fill="url(#goal-hop-ring-glow)" />
+      {Array.from({ length: maxHop }, (_, index) => {
+        const hop = index + 1;
+        const radius = hop * HOP_RING_SPACING;
+        return (
+          <g key={hop} data-testid={`goals-hop-ring-${hop}`}>
+            <circle
+              cx={centerX}
+              cy={centerY}
+              r={radius}
+              fill="none"
+              stroke={hop === 1 ? 'rgba(199,91,58,0.22)' : 'rgba(168,162,158,0.26)'}
+              strokeWidth={hop === 1 ? 1.6 : 1}
+              strokeDasharray={hop === 1 ? '0' : '5 10'}
+            />
+            <text
+              x={centerX}
+              y={Math.max(centerY - radius + 18, 24)}
+              fill="rgba(120,113,108,0.8)"
+              fontSize="11"
+              textAnchor="middle"
+            >
+              {hop} 跳
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export function GoalsPage() {
   const graph = useGoalStore((state) => state.graph);
   const edgeOverrides = useGoalStore((state) => state.edgeOverrides);
@@ -280,6 +336,21 @@ export function GoalsPage() {
     };
   }, [connectMode, graph.me.id, positions]);
 
+  const hopRingMetrics = useMemo(() => {
+    const finiteDistances = visibleGraph.goals
+      .map((goal) => getHopDistance(goal.id))
+      .filter((distance) => Number.isFinite(distance));
+
+    if (finiteDistances.length === 0) return null;
+
+    const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
+    return {
+      centerX: mePosition.x + ME_NODE_SIZE / 2,
+      centerY: mePosition.y + ME_NODE_SIZE / 2,
+      maxHop: Math.max(...finiteDistances),
+    };
+  }, [getHopDistance, graph.me.id, positions, visibleGraph.goals]);
+
   const selectedGoal = selected?.kind === 'goal'
     ? graph.goals.find((goal) => goal.id === selected.id) ?? null
     : null;
@@ -418,6 +489,14 @@ export function GoalsPage() {
         <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-[#1C1917] px-4 py-2 text-xs text-white">
           连线模式：点击目标节点完成连接，点击空白或 ESC 取消
         </div>
+      ) : null}
+
+      {hopRingMetrics ? (
+        <GoalHopRings
+          centerX={hopRingMetrics.centerX}
+          centerY={hopRingMetrics.centerY}
+          maxHop={hopRingMetrics.maxHop}
+        />
       ) : null}
 
       {connectPreview ? (
