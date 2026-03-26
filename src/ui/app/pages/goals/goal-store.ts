@@ -64,6 +64,7 @@ export interface GoalStoreState {
   graph: GoalGraph;
   edgeOverrides: Map<string, TaskEdgeStatus>;
   opLog: GoalOpLog[];
+  updateMe: (name: string) => Result<void>;
   getEdgeStatus: (edgeId: string) => TaskEdgeStatus;
   deriveGoalDisplayStatus: (goalId: string) => GoalDisplayStatus;
   getInEdges: (goalId: string) => TaskEdge[];
@@ -236,6 +237,21 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
   graph: initialState.graph,
   opLog: initialState.opLog,
   edgeOverrides: initialState.edgeOverrides,
+  updateMe: (name) => {
+    const state = get();
+    const normalized = name.trim() || 'Me';
+    const nextGraph: GoalGraph = {
+      ...state.graph,
+      me: {
+        ...state.graph.me,
+        name: normalized,
+      },
+    };
+    const nextOpLog = appendOpLog(state.opLog, 'updateMe', { name: normalized });
+    persistGoalState(nextGraph, nextOpLog);
+    set({ graph: nextGraph, opLog: nextOpLog });
+    return { ok: true, value: undefined };
+  },
   getEdgeStatus: (edgeId) => {
     const edge = get().graph.edges.find((candidate) => candidate.id === edgeId);
     if (!edge) return 'pending';

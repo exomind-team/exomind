@@ -29,6 +29,21 @@ describe('goal-store', () => {
     expect(state.graph.edges).toEqual([]);
   });
 
+  it('persists Me name updates', async () => {
+    const {
+      GOAL_GRAPH_STORAGE_KEY,
+      useGoalStore,
+    } = await loadStoreModule();
+
+    const result = useGoalStore.getState().updateMe('Core Self');
+
+    expect(result.ok).toBe(true);
+    expect(useGoalStore.getState().graph.me.name).toBe('Core Self');
+
+    const storedGraph = JSON.parse(window.localStorage.getItem(GOAL_GRAPH_STORAGE_KEY) ?? 'null');
+    expect(storedGraph.me.name).toBe('Core Self');
+  });
+
   it('persists graph and opLog when actions succeed', async () => {
     const {
       GOAL_GRAPH_STORAGE_KEY,

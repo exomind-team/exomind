@@ -13,6 +13,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { toast } from '@/components/ui/toast-hook';
 import { cn } from '@/lib/utils';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { GoalForceSimulation, type PositionMap } from './goal-force-layout';
 import { useGoalStore } from './goal-store';
 import { CancelGoalDialog } from './components/CancelGoalDialog';
@@ -98,6 +99,8 @@ export function GoalsPage() {
   const updateEdge = useGoalStore((state) => state.updateEdge);
   const setEdgeStatusOverride = useGoalStore((state) => state.setEdgeStatusOverride);
   const clearEdgeStatusOverride = useGoalStore((state) => state.clearEdgeStatusOverride);
+  const updateMe = useGoalStore((state) => state.updateMe);
+  const isDesktop = useIsDesktop();
 
   const [positions, setPositions] = useState<PositionMap>(new Map());
   const [mode, setMode] = useState<GoalPageMode>(() => readModeStorage());
@@ -270,6 +273,14 @@ export function GoalsPage() {
     if (contextMenu.kind === 'goal') {
       const goal = graph.goals.find((item) => item.id === contextMenu.id);
       if (!goal || goal.cancelled) return [];
+      const goalStatus = deriveGoalDisplayStatus(contextMenu.id);
+      if (goalStatus === 'completed') {
+        return [
+          { key: 'detail', label: '详情', onSelect: () => setSelected({ kind: 'goal', id: contextMenu.id }) },
+          { key: 'downstream', label: '添加下游目标', onSelect: () => handleCreateGoal(contextMenu.id, 'downstream') },
+          { key: 'connect', label: '连接到...', onSelect: () => connectMode.start(contextMenu.id) },
+        ];
+      }
       return [
         { key: 'detail', label: '详情', onSelect: () => setSelected({ kind: 'goal', id: contextMenu.id }) },
         { key: 'downstream', label: '添加下游目标', onSelect: () => handleCreateGoal(contextMenu.id, 'downstream') },
@@ -292,7 +303,7 @@ export function GoalsPage() {
         },
       },
     ];
-  }, [connectMode, contextMenu, createGoal, deleteEdge, graph.goals]);
+  }, [connectMode, contextMenu, deleteEdge, deriveGoalDisplayStatus, graph.goals]);
 
   return (
     <div data-testid="goals-page" className="relative h-[calc(100vh-5rem)] overflow-hidden rounded-[32px] border border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]">
@@ -313,7 +324,7 @@ export function GoalsPage() {
 
       {!guideHidden && graph.goals.length === 0 ? (
         <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 px-4 py-2 text-sm text-[#57534E] shadow-sm">
-          {mode === 'edit' ? '右键或长按 Me 添加你的第一个目标' : '右键 Me 添加你的第一个目标'}
+          {isDesktop ? '右键 Me 添加你的第一个目标' : '长按 Me 添加你的第一个目标'}
         </div>
       ) : null}
 
@@ -428,7 +439,12 @@ export function GoalsPage() {
       ) : null}
 
       {selected?.kind === 'me' ? (
-        <MeDetailPanel name={graph.me.name} goalsCount={graph.goals.length} onClose={() => setSelected(null)} />
+        <MeDetailPanel
+          name={graph.me.name}
+          goalsCount={graph.goals.length}
+          onClose={() => setSelected(null)}
+          onUpdate={(name) => notifyResult(updateMe(name), '已更新 Me')}
+        />
       ) : null}
 
       <CancelGoalDialog

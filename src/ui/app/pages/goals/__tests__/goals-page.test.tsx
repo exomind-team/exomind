@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const flowApiMocks = vi.hoisted(() => ({
   lastProps: null as null | Record<string, unknown>,
@@ -189,5 +189,49 @@ describe('GoalsPage', () => {
     expect(screen.queryByTestId(`mock-react-flow-node-${goalId}`)).toBeNull();
     fireEvent.click(screen.getByRole('checkbox'));
     expect(screen.getByTestId(`mock-react-flow-node-${goalId}`)).toBeInTheDocument();
+  });
+
+  it('uses touch-first empty-state copy on mobile and lets Me name be edited', async () => {
+    isDesktopMock.mockReturnValue(false);
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    expect(screen.getByText('长按 Me 添加你的第一个目标')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-me'));
+
+    const nameInput = await screen.findByDisplayValue('Me');
+    fireEvent.change(nameInput, { target: { value: 'Core Self' } });
+    fireEvent.blur(nameInput);
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.me.name).toBe('Core Self');
+    });
+  });
+
+  it('limits completed goal context menu to read-only actions', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const inboundEdgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+    act(() => {
+      useGoalStore.getState().setEdgeStatusOverride(inboundEdgeId, 'completed');
+    });
+
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+
+    expect(screen.getByTestId('goal-context-item-detail')).toBeInTheDocument();
+    expect(screen.getByTestId('goal-context-item-downstream')).toBeInTheDocument();
+    expect(screen.getByTestId('goal-context-item-connect')).toBeInTheDocument();
+    expect(screen.queryByTestId('goal-context-item-upstream')).toBeNull();
+    expect(screen.queryByTestId('goal-context-item-cancel')).toBeNull();
   });
 });
