@@ -28,9 +28,15 @@ function resolveEdgeLabel(edge: TaskEdge, edgeLabelById: Record<string, string>)
 
 function formatRule(goal: GoalNode, inEdges: TaskEdge[], edgeLabelById: Record<string, string>): string {
   const labelByEdgeId = new Map(inEdges.map((edge) => [edge.id, resolveEdgeLabel(edge, edgeLabelById)]));
-  if (goal.completionRule.length === 0) return '无完成条件，请添加任务边';
+  if (goal.completionRule.length === 0) return '⚠ 无完成条件，请添加任务边';
   return goal.completionRule
-    .map((clause) => clause.map((edgeId) => labelByEdgeId.get(edgeId) ?? edgeId).join(' 且 '))
+    .map((clause) => {
+      const clauseText = clause.map((edgeId) => labelByEdgeId.get(edgeId) ?? edgeId).join(' 且 ');
+      if (goal.completionRule.length > 1 && clause.length > 1) {
+        return `(${clauseText})`;
+      }
+      return clauseText;
+    })
     .join(' 或 ');
 }
 

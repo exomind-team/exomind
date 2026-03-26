@@ -31,6 +31,7 @@ describe('GoalDetailPanel', () => {
     );
 
     expect(screen.getByText('当前模式：空规则')).toBeInTheDocument();
+    expect(screen.getByText('⚠ 无完成条件，请添加任务边')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'AND' }).className).not.toContain('bg-[#C75B3A]');
     expect(screen.getByRole('button', { name: 'OR' }).className).not.toContain('bg-[#C75B3A]');
   });
@@ -88,6 +89,7 @@ describe('GoalDetailPanel', () => {
     );
 
     expect(screen.getByText('当前模式：自定义')).toBeInTheDocument();
+    expect(screen.getByText('(A 且 B) 或 C')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'AND' }).className).not.toContain('bg-[#C75B3A]');
     expect(screen.getByRole('button', { name: 'OR' }).className).not.toContain('bg-[#C75B3A]');
   });

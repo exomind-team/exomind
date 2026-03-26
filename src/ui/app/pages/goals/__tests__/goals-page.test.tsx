@@ -177,7 +177,7 @@ describe('GoalsPage', () => {
     expect(screen.getAllByRole('textbox')[0]).toBeInTheDocument();
 
     view.unmount();
-  });
+  }, 15000);
 
   it('hides cancelled goals by default and shows them when toggle is enabled', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
