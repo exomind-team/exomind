@@ -1,21 +1,47 @@
-// ---------------------------------------------------------------------------
-// Goal Graph Data Model + localStorage Persistence
-// ---------------------------------------------------------------------------
+import { create } from 'zustand';
+import {
+  cancelGoal as cancelGoalLogic,
+  clearAllEdgeStatusOverrides as clearAllEdgeStatusOverridesLogic,
+  clearEdgeStatusOverride as clearEdgeStatusOverrideLogic,
+  createEdge as createEdgeLogic,
+  createGoal as createGoalLogic,
+  deleteEdge as deleteEdgeLogic,
+  deriveGoalDisplayStatus as deriveGoalDisplayStatusLogic,
+  getEdgeStatus as getEdgeStatusLogic,
+  getHopDistance as getHopDistanceLogic,
+  getInEdges as getInEdgesLogic,
+  getOutEdges as getOutEdgesLogic,
+  setEdgeStatusOverride as setEdgeStatusOverrideLogic,
+  updateEdge as updateEdgeLogic,
+  updateGoal as updateGoalLogic,
+} from './goal-logic';
+import type {
+  CancelGoalParams,
+  CreateEdgeParams,
+  CreateGoalParams,
+  GoalDisplayStatus,
+  GoalGraph,
+  GoalNode,
+  GoalOpLog,
+  Result,
+  TaskEdge,
+  TaskEdgeStatus,
+  UpdateEdgeParams,
+  UpdateGoalParams,
+} from './goal-types';
 
-export type GoalStatus = 'pending' | 'completed' | 'cancelled';
-export type AchieveMode = 'AND' | 'OR';
+export const GOAL_GRAPH_STORAGE_KEY = 'exomind:goal-graph';
+export const GOAL_OPLOG_STORAGE_KEY = 'exomind:goal-oplog';
 
-export interface GoalNode {
+interface LegacyGoalNode {
   id: string;
   name: string;
-  status: GoalStatus;
-  achieveMode: AchieveMode;
+  status: 'pending' | 'completed' | 'cancelled';
+  achieveMode: 'AND' | 'OR';
   isMe: boolean;
 }
 
-export type TaskEdgeStatus = 'pending' | 'in_progress' | 'suspended' | 'completed' | 'cancelled';
-
-export interface TaskEdge {
+interface LegacyTaskEdge {
   id: string;
   name: string;
   source: string;
@@ -23,74 +49,288 @@ export interface TaskEdge {
   status: TaskEdgeStatus;
 }
 
-export interface GoalGraphData {
-  goals: GoalNode[];
-  tasks: TaskEdge[];
+interface LegacyGoalGraphData {
+  goals: LegacyGoalNode[];
+  tasks: LegacyTaskEdge[];
 }
 
-// ---------------------------------------------------------------------------
-// localStorage persistence
-// ---------------------------------------------------------------------------
-
-const GOAL_GRAPH_STORAGE_KEY = 'exomind:goal-graph';
-
-export function loadGoalGraph(): GoalGraphData {
-  if (typeof window === 'undefined') return createExampleData();
-  try {
-    const raw = window.localStorage.getItem(GOAL_GRAPH_STORAGE_KEY);
-    if (!raw) return createExampleData();
-    const parsed = JSON.parse(raw) as GoalGraphData;
-    if (!Array.isArray(parsed.goals) || !Array.isArray(parsed.tasks)) {
-      return createExampleData();
-    }
-    return parsed;
-  } catch {
-    return createExampleData();
-  }
+interface LoadedGoalState {
+  graph: GoalGraph;
+  opLog: GoalOpLog[];
+  edgeOverrides: Map<string, TaskEdgeStatus>;
 }
 
-export function saveGoalGraph(data: GoalGraphData): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(GOAL_GRAPH_STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    // Ignore storage quota errors.
-  }
+export interface GoalStoreState {
+  graph: GoalGraph;
+  edgeOverrides: Map<string, TaskEdgeStatus>;
+  opLog: GoalOpLog[];
+  getEdgeStatus: (edgeId: string) => TaskEdgeStatus;
+  deriveGoalDisplayStatus: (goalId: string) => GoalDisplayStatus;
+  getInEdges: (goalId: string) => TaskEdge[];
+  getOutEdges: (nodeId: string) => TaskEdge[];
+  getHopDistance: (goalId: string) => number;
+  createGoal: (params: CreateGoalParams) => Result<{ goal: GoalNode; edge: TaskEdge }>;
+  createEdge: (params: CreateEdgeParams) => Result<TaskEdge>;
+  cancelGoal: (params: CancelGoalParams) => Result<void>;
+  deleteEdge: (params: { edgeId: string }) => Result<void>;
+  updateGoal: (params: UpdateGoalParams) => Result<void>;
+  updateEdge: (params: UpdateEdgeParams) => Result<void>;
+  setEdgeStatusOverride: (edgeId: string, status: TaskEdgeStatus) => void;
+  clearEdgeStatusOverride: (edgeId: string) => void;
+  clearAllEdgeStatusOverrides: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// ID generation
-// ---------------------------------------------------------------------------
-
-let idCounter = 0;
-
-export function generateId(prefix: string): string {
-  idCounter += 1;
-  return `${prefix}-${Date.now().toString(36)}-${idCounter.toString(36)}`;
-}
-
-// ---------------------------------------------------------------------------
-// Example / seed data
-// ---------------------------------------------------------------------------
-
-export function createExampleData(): GoalGraphData {
-  const meId = 'goal-me';
-  const tsId = 'goal-ts';
-  const projectId = 'goal-project';
-  const fullstackId = 'goal-fullstack';
-
+export function createEmptyGoalGraph(): GoalGraph {
   return {
-    goals: [
-      { id: meId, name: 'Me', status: 'pending', achieveMode: 'AND', isMe: true },
-      { id: tsId, name: '掌握 TypeScript', status: 'pending', achieveMode: 'AND', isMe: false },
-      { id: projectId, name: '获得实战经验', status: 'pending', achieveMode: 'AND', isMe: false },
-      { id: fullstackId, name: '成为全栈工程师', status: 'pending', achieveMode: 'AND', isMe: false },
-    ],
-    tasks: [
-      { id: 'task-1', name: '学习基础知识', source: meId, target: tsId, status: 'in_progress' },
-      { id: 'task-2', name: '完成项目 A', source: meId, target: projectId, status: 'pending' },
-      { id: 'task-3', name: '整合前后端技能', source: tsId, target: fullstackId, status: 'pending' },
-      { id: 'task-4', name: '参与开源项目', source: projectId, target: fullstackId, status: 'pending' },
-    ],
+    me: { id: 'me', name: 'Me' },
+    goals: [],
+    edges: [],
   };
 }
+
+function parseStoredOpLog(): GoalOpLog[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(GOAL_OPLOG_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as GoalOpLog[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isGoalGraph(value: unknown): value is GoalGraph {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as GoalGraph;
+  return Boolean(
+    candidate.me
+      && typeof candidate.me.id === 'string'
+      && Array.isArray(candidate.goals)
+      && Array.isArray(candidate.edges),
+  );
+}
+
+function isLegacyGoalGraph(value: unknown): value is LegacyGoalGraphData {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as LegacyGoalGraphData;
+  return Array.isArray(candidate.goals) && Array.isArray(candidate.tasks);
+}
+
+export function migrateLegacyGoalGraph(legacy: LegacyGoalGraphData): LoadedGoalState {
+  const meGoal = legacy.goals.find((goal) => goal.isMe);
+  const me = {
+    id: meGoal?.id ?? 'me',
+    name: meGoal?.name ?? 'Me',
+  };
+
+  const edgeOverrides = new Map<string, TaskEdgeStatus>();
+  const edges: TaskEdge[] = legacy.tasks.map((task, index) => {
+    if (task.status !== 'pending') {
+      edgeOverrides.set(task.id, task.status);
+    }
+    return {
+      id: task.id,
+      title: task.name,
+      description: '',
+      source: task.source,
+      target: task.target,
+      createdAt: index + 1,
+      updatedAt: index + 1,
+    };
+  });
+
+  const goals: GoalNode[] = legacy.goals
+    .filter((goal) => !goal.isMe)
+    .map((goal, index) => {
+      const inbound = edges.filter((edge) => edge.target === goal.id);
+      if (goal.status === 'completed') {
+        inbound.forEach((edge) => edgeOverrides.set(edge.id, 'completed'));
+      }
+      const completionRule = inbound.length === 0
+        ? []
+        : goal.achieveMode === 'OR'
+          ? inbound.map((edge) => [edge.id])
+          : [inbound.map((edge) => edge.id)];
+
+      return {
+        id: goal.id,
+        title: goal.name,
+        description: '',
+        cancelled: goal.status === 'cancelled',
+        completionRule,
+        createdAt: index + 1,
+        updatedAt: index + 1,
+      };
+    });
+
+  return {
+    graph: { me, goals, edges },
+    edgeOverrides,
+    opLog: [],
+  };
+}
+
+function loadStoredGoalState(): LoadedGoalState {
+  const fallback = {
+    graph: createEmptyGoalGraph(),
+    opLog: [],
+    edgeOverrides: new Map<string, TaskEdgeStatus>(),
+  };
+
+  if (typeof window === 'undefined') return fallback;
+
+  try {
+    const raw = window.localStorage.getItem(GOAL_GRAPH_STORAGE_KEY);
+    if (!raw) {
+      return { ...fallback, opLog: parseStoredOpLog() };
+    }
+
+    const parsed = JSON.parse(raw);
+    if (isGoalGraph(parsed)) {
+      return {
+        graph: parsed,
+        opLog: parseStoredOpLog(),
+        edgeOverrides: new Map<string, TaskEdgeStatus>(),
+      };
+    }
+
+    if (isLegacyGoalGraph(parsed)) {
+      const migrated = migrateLegacyGoalGraph(parsed);
+      persistGoalState(migrated.graph, migrated.opLog);
+      return migrated;
+    }
+
+    return { ...fallback, opLog: parseStoredOpLog() };
+  } catch {
+    return { ...fallback, opLog: parseStoredOpLog() };
+  }
+}
+
+function persistGoalState(graph: GoalGraph, opLog: GoalOpLog[]): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(GOAL_GRAPH_STORAGE_KEY, JSON.stringify(graph));
+  window.localStorage.setItem(GOAL_OPLOG_STORAGE_KEY, JSON.stringify(opLog));
+}
+
+function appendOpLog(
+  current: GoalOpLog[],
+  action: string,
+  params: Record<string, unknown>,
+  result?: unknown,
+): GoalOpLog[] {
+  return [
+    ...current,
+    {
+      action,
+      timestamp: Date.now(),
+      params,
+      result,
+    },
+  ];
+}
+
+const initialState = loadStoredGoalState();
+
+export const useGoalStore = create<GoalStoreState>((set, get) => ({
+  graph: initialState.graph,
+  opLog: initialState.opLog,
+  edgeOverrides: initialState.edgeOverrides,
+  getEdgeStatus: (edgeId) => {
+    const edge = get().graph.edges.find((candidate) => candidate.id === edgeId);
+    if (!edge) return 'pending';
+    return getEdgeStatusLogic(edge, { edgeOverrides: get().edgeOverrides });
+  },
+  deriveGoalDisplayStatus: (goalId) => {
+    const goal = get().graph.goals.find((candidate) => candidate.id === goalId);
+    if (!goal) return 'pending';
+    return deriveGoalDisplayStatusLogic(goal, getInEdgesLogic(get().graph, goalId), {
+      graph: get().graph,
+      edgeOverrides: get().edgeOverrides,
+    });
+  },
+  getInEdges: (goalId) => getInEdgesLogic(get().graph, goalId),
+  getOutEdges: (nodeId) => getOutEdgesLogic(get().graph, nodeId),
+  getHopDistance: (goalId) => getHopDistanceLogic(get().graph, goalId, {
+    edgeOverrides: get().edgeOverrides,
+  }),
+  createGoal: (params) => {
+    const state = get();
+    const result = createGoalLogic(state.graph, params, { edgeOverrides: state.edgeOverrides });
+    if (!result.ok) return result;
+    const nextOpLog = appendOpLog(state.opLog, 'createGoal', params as unknown as Record<string, unknown>, {
+      goalId: result.value.goal.id,
+      edgeId: result.value.edge.id,
+    });
+    persistGoalState(result.value.graph, nextOpLog);
+    set({ graph: result.value.graph, opLog: nextOpLog });
+    return {
+      ok: true,
+      value: { goal: result.value.goal, edge: result.value.edge },
+    };
+  },
+  createEdge: (params) => {
+    const state = get();
+    const result = createEdgeLogic(state.graph, params, { edgeOverrides: state.edgeOverrides });
+    if (!result.ok) return result;
+    const nextOpLog = appendOpLog(state.opLog, 'createEdge', params as unknown as Record<string, unknown>, {
+      edgeId: result.value.edge.id,
+    });
+    persistGoalState(result.value.graph, nextOpLog);
+    set({ graph: result.value.graph, opLog: nextOpLog });
+    return { ok: true, value: result.value.edge };
+  },
+  cancelGoal: (params) => {
+    const state = get();
+    const result = cancelGoalLogic(state.graph, params, { edgeOverrides: state.edgeOverrides });
+    if (!result.ok) return result;
+    const nextOpLog = appendOpLog(state.opLog, 'cancelGoal', params as unknown as Record<string, unknown>);
+    persistGoalState(result.value.graph, nextOpLog);
+    set({ graph: result.value.graph, opLog: nextOpLog });
+    return { ok: true, value: undefined };
+  },
+  deleteEdge: (params) => {
+    const state = get();
+    const result = deleteEdgeLogic(state.graph, params, { edgeOverrides: state.edgeOverrides });
+    if (!result.ok) return result;
+    const nextOpLog = appendOpLog(state.opLog, 'deleteEdge', params as unknown as Record<string, unknown>, {
+      autoAddedEdgeId: result.value.autoAddedEdge?.id,
+    });
+    persistGoalState(result.value.graph, nextOpLog);
+    set({ graph: result.value.graph, opLog: nextOpLog });
+    return { ok: true, value: undefined };
+  },
+  updateGoal: (params) => {
+    const state = get();
+    const result = updateGoalLogic(state.graph, params, { edgeOverrides: state.edgeOverrides });
+    if (!result.ok) return result;
+    const nextOpLog = appendOpLog(state.opLog, 'updateGoal', params as unknown as Record<string, unknown>);
+    persistGoalState(result.value.graph, nextOpLog);
+    set({ graph: result.value.graph, opLog: nextOpLog });
+    return { ok: true, value: undefined };
+  },
+  updateEdge: (params) => {
+    const state = get();
+    const result = updateEdgeLogic(state.graph, params, { edgeOverrides: state.edgeOverrides });
+    if (!result.ok) return result;
+    const nextOpLog = appendOpLog(state.opLog, 'updateEdge', params as unknown as Record<string, unknown>);
+    persistGoalState(result.value.graph, nextOpLog);
+    set({ graph: result.value.graph, opLog: nextOpLog });
+    return { ok: true, value: undefined };
+  },
+  setEdgeStatusOverride: (edgeId, status) => {
+    set((state) => ({
+      edgeOverrides: setEdgeStatusOverrideLogic(state.edgeOverrides, edgeId, status),
+    }));
+  },
+  clearEdgeStatusOverride: (edgeId) => {
+    set((state) => ({
+      edgeOverrides: clearEdgeStatusOverrideLogic(state.edgeOverrides, edgeId),
+    }));
+  },
+  clearAllEdgeStatusOverrides: () => {
+    set((state) => ({
+      edgeOverrides: clearAllEdgeStatusOverridesLogic(state.edgeOverrides),
+    }));
+  },
+}));
