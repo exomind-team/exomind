@@ -164,6 +164,7 @@ export function GoalsPage() {
   const getOutEdges = useGoalStore((state) => state.getOutEdges);
   const createGoal = useGoalStore((state) => state.createGoal);
   const createEdge = useGoalStore((state) => state.createEdge);
+  const reconnectEdge = useGoalStore((state) => state.reconnectEdge);
   const cancelGoal = useGoalStore((state) => state.cancelGoal);
   const deleteEdge = useGoalStore((state) => state.deleteEdge);
   const splitEdge = useGoalStore((state) => state.splitEdge);
@@ -530,6 +531,24 @@ export function GoalsPage() {
     simulationRef.current?.reheat();
   }
 
+  function handleReconnect(oldEdge: Edge, source?: string, target?: string) {
+    if (!source || !target || target === graph.me.id) return;
+    const result = reconnectEdge({
+      edgeId: oldEdge.id,
+      newSource: source,
+      newTarget: target,
+      rulePosition: { clauseIndex: 0 },
+    });
+    if (!notifyResult(result, result.ok && !result.value.autoAddedEdgeId ? '已更新连接' : undefined)) return;
+    if (!result.ok) return;
+    if (result.value.autoAddedEdgeId) {
+      flashEdge(result.value.autoAddedEdgeId);
+      toast({ title: '已自动添加连接以保持目标可达' });
+    }
+    setSelected({ kind: 'edge', id: result.value.edge.id });
+    simulationRef.current?.reheat();
+  }
+
   function flashEdge(edgeId: string) {
     setHighlightedEdgeIds((current) => (current.includes(edgeId) ? current : [...current, edgeId]));
     const existing = highlightTimeoutsRef.current.get(edgeId);
@@ -749,6 +768,7 @@ export function GoalsPage() {
         fitView
         nodesDraggable={mode === 'browse'}
         nodesConnectable={mode === 'edit'}
+        edgesReconnectable={mode === 'edit'}
         zoomOnDoubleClick={false}
         onMove={(_, nextViewport) => setViewport(nextViewport)}
         onInit={(instance) => setViewport(instance.getViewport())}
@@ -792,6 +812,9 @@ export function GoalsPage() {
         onConnect={(connection: Connection) => {
           if (!connection.source || !connection.target || connection.target === graph.me.id) return;
           handleConnect(connection.source, connection.target);
+        }}
+        onReconnect={(oldEdge, connection) => {
+          handleReconnect(oldEdge, connection.source, connection.target);
         }}
         onNodeDrag={(_, node) => {
           simulationRef.current?.pinNode(node.id, node.position.x, node.position.y);

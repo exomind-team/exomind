@@ -12,6 +12,7 @@ import {
   getHopDistance,
   getInEdges,
   getOutEdges,
+  reconnectEdge,
   setEdgeStatusOverride,
   splitEdge,
   updateEdge,
@@ -282,6 +283,48 @@ describe('goal-logic', () => {
     expect(originalEdge.target).toBe('goal-b');
     expect(insertedGoal.completionRule).toEqual([[newInboundEdge.id]]);
     expect(goalB.completionRule).toEqual([['edge-a-b']]);
+  });
+
+  it('reconnects an edge to a new target and auto-adds a Me edge when the old target becomes isolated', () => {
+    const graph = makeGraph();
+    const result = reconnectEdge(graph, {
+      edgeId: 'edge-a-b',
+      newTarget: 'goal-c',
+      rulePosition: { clauseIndex: 0 },
+    }, {
+      createId: (prefix) => `${prefix}-auto`,
+      now: () => 77,
+      getTaskStatus: () => 'pending',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const reconnected = result.value.graph.edges.find((edge) => edge.id === 'edge-a-b') as TaskEdge;
+    const autoEdge = result.value.graph.edges.find((edge) => edge.id === 'edge-auto') as TaskEdge;
+    const oldTarget = result.value.graph.goals.find((goal) => goal.id === 'goal-b') as GoalNode;
+    const newTarget = result.value.graph.goals.find((goal) => goal.id === 'goal-c') as GoalNode;
+
+    expect(reconnected.source).toBe('goal-a');
+    expect(reconnected.target).toBe('goal-c');
+    expect(autoEdge.source).toBe('me');
+    expect(autoEdge.target).toBe('goal-b');
+    expect(oldTarget.completionRule).toEqual([['edge-auto']]);
+    expect(newTarget.completionRule).toEqual([['edge-b-c', 'edge-a-b']]);
+  });
+
+  it('rejects reconnecting an inbound edge of a completed target goal', () => {
+    const graph = makeGraph();
+
+    const result = reconnectEdge(graph, {
+      edgeId: 'edge-me-a',
+      newSource: 'goal-b',
+      rulePosition: { clauseIndex: 0 },
+    }, { getTaskStatus });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('已完成的目标不能修改入边');
   });
 
   it('prevents cancelling completed goals and freezes completed targets', () => {

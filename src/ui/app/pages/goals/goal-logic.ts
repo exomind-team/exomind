@@ -9,6 +9,7 @@ import type {
   GoalLogicOptions,
   GoalNode,
   NodeId,
+  ReconnectEdgeParams,
   Result,
   SplitEdgeParams,
   TaskEdge,
@@ -371,6 +372,85 @@ export function deleteEdge(
   }
 
   return { ok: true, value: { graph: nextGraph } };
+}
+
+export function reconnectEdge(
+  graph: GoalGraph,
+  params: ReconnectEdgeParams,
+  options?: GoalLogicOptions,
+): Result<{ graph: GoalGraph; edge: TaskEdge; autoAddedEdge?: TaskEdge }> {
+  const edge = findEdge(graph, params.edgeId);
+  if (!edge) return { ok: false, error: '边不存在' };
+  if (isCancelledGoal(graph, edge.target)) {
+    return { ok: false, error: '当前边已冻结' };
+  }
+  if (isCompletedGoal(graph, edge.target, options)) {
+    return { ok: false, error: '已完成的目标不能修改入边' };
+  }
+
+  const nextSource = params.newSource ?? edge.source;
+  const nextTarget = params.newTarget ?? edge.target;
+  const targetChanged = nextTarget !== edge.target;
+
+  if (!nodeExists(graph, nextSource) || !findGoal(graph, nextTarget)) {
+    return { ok: false, error: '端点不存在' };
+  }
+  if (nextSource === nextTarget) {
+    return { ok: false, error: '不能连到自己' };
+  }
+  if (isCancelledGoal(graph, nextSource)) {
+    return { ok: false, error: '已取消的目标不能发起新任务' };
+  }
+  if (
+    targetChanged
+    && (isCancelledGoal(graph, nextTarget) || isCompletedGoal(graph, nextTarget, options))
+  ) {
+    return { ok: false, error: '已完成的目标不能添加新任务' };
+  }
+  if (wouldCreateCycle(graph, nextSource, nextTarget, edge.id)) {
+    return { ok: false, error: '不能形成环' };
+  }
+
+  const timestamp = nowOf(options);
+  const nextGraph = cloneGraph(graph);
+  const nextEdge = findEdge(nextGraph, params.edgeId) as TaskEdge;
+  let autoAddedEdge: TaskEdge | undefined;
+
+  nextEdge.source = nextSource;
+  nextEdge.target = nextTarget;
+  nextEdge.updatedAt = timestamp;
+
+  if (targetChanged) {
+    const previousTargetGoal = findGoal(nextGraph, edge.target) as GoalNode;
+    previousTargetGoal.completionRule = removeEdgeFromRule(previousTargetGoal.completionRule, edge.id);
+    previousTargetGoal.updatedAt = timestamp;
+
+    const nextTargetGoal = findGoal(nextGraph, nextTarget) as GoalNode;
+    nextTargetGoal.completionRule = addEdgeToRule(
+      nextTargetGoal.completionRule,
+      edge.id,
+      params.rulePosition.clauseIndex,
+    );
+    nextTargetGoal.updatedAt = timestamp;
+
+    const remainingInEdges = getInEdges(nextGraph, previousTargetGoal.id);
+    if (remainingInEdges.length === 0) {
+      autoAddedEdge = {
+        id: createIdOf('edge', options),
+        title: '',
+        description: '',
+        source: nextGraph.me.id,
+        target: previousTargetGoal.id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      nextGraph.edges.push(autoAddedEdge);
+      previousTargetGoal.completionRule = addEdgeToRule(previousTargetGoal.completionRule, autoAddedEdge.id, 0);
+      previousTargetGoal.updatedAt = timestamp;
+    }
+  }
+
+  return { ok: true, value: { graph: nextGraph, edge: nextEdge, autoAddedEdge } };
 }
 
 export function splitEdge(

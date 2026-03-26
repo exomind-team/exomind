@@ -468,6 +468,47 @@ describe('GoalsPage', () => {
     }));
   });
 
+  it('reconnects an edge through React Flow and updates its source endpoint', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    const [goalA, goalB] = useGoalStore.getState().graph.goals;
+    const edgeToReconnect = useGoalStore.getState().graph.edges.find((edge) => edge.target === goalA.id);
+    const onReconnect = flowApiMocks.lastProps?.onReconnect as
+      | ((oldEdge: { id: string }, connection: { source?: string; target?: string }) => void)
+      | undefined;
+
+    act(() => {
+      onReconnect?.(
+        { id: edgeToReconnect?.id as string },
+        {
+          source: goalB.id,
+          target: goalA.id,
+        },
+      );
+    });
+
+    await waitFor(() => {
+      const reconnectedEdge = useGoalStore.getState().graph.edges.find((edge) => edge.id === edgeToReconnect?.id);
+      expect(reconnectedEdge?.source).toBe(goalB.id);
+      expect(reconnectedEdge?.target).toBe(goalA.id);
+    });
+  });
+
   it('shows connect preview while connect mode is active and clears it on pane click', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);

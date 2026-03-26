@@ -11,6 +11,7 @@ import {
   getHopDistance as getHopDistanceLogic,
   getInEdges as getInEdgesLogic,
   getOutEdges as getOutEdgesLogic,
+  reconnectEdge as reconnectEdgeLogic,
   setEdgeStatusOverride as setEdgeStatusOverrideLogic,
   splitEdge as splitEdgeLogic,
   updateEdge as updateEdgeLogic,
@@ -24,6 +25,7 @@ import type {
   GoalGraph,
   GoalNode,
   GoalOpLog,
+  ReconnectEdgeParams,
   Result,
   SplitEdgeParams,
   TaskEdge,
@@ -74,6 +76,7 @@ export interface GoalStoreState {
   getHopDistance: (goalId: string) => number;
   createGoal: (params: CreateGoalParams) => Result<{ goal: GoalNode; edge: TaskEdge }>;
   createEdge: (params: CreateEdgeParams) => Result<TaskEdge>;
+  reconnectEdge: (params: ReconnectEdgeParams) => Result<{ edge: TaskEdge; autoAddedEdgeId?: string }>;
   cancelGoal: (params: CancelGoalParams) => Result<void>;
   deleteEdge: (params: { edgeId: string }) => Result<{ autoAddedEdgeId?: string; adjustedRule: boolean }>;
   splitEdge: (params: SplitEdgeParams) => Result<{ midGoal: GoalNode; newEdge: TaskEdge }>;
@@ -298,6 +301,24 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
     persistGoalState(result.value.graph, nextOpLog);
     set({ graph: result.value.graph, opLog: nextOpLog });
     return { ok: true, value: result.value.edge };
+  },
+  reconnectEdge: (params) => {
+    const state = get();
+    const result = reconnectEdgeLogic(state.graph, params, { edgeOverrides: state.edgeOverrides });
+    if (!result.ok) return result;
+    const nextOpLog = appendOpLog(state.opLog, 'reconnectEdge', params as unknown as Record<string, unknown>, {
+      edgeId: result.value.edge.id,
+      autoAddedEdgeId: result.value.autoAddedEdge?.id,
+    });
+    persistGoalState(result.value.graph, nextOpLog);
+    set({ graph: result.value.graph, opLog: nextOpLog });
+    return {
+      ok: true,
+      value: {
+        edge: result.value.edge,
+        autoAddedEdgeId: result.value.autoAddedEdge?.id,
+      },
+    };
   },
   cancelGoal: (params) => {
     const state = get();
