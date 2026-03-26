@@ -12,10 +12,18 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { toast } from '@/components/ui/toast-hook';
+import { getTaskService } from '@/lib/services/task.service';
 import { cn } from '@/lib/utils';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import {
+  deriveGoalDisplayStatus as deriveGoalDisplayStatusLogic,
+  getEdgeStatus as getEdgeStatusLogic,
+  getHopDistance as getHopDistanceLogic,
+  getInEdges as getInEdgesLogic,
+} from './goal-logic';
 import { GoalForceSimulation, type PositionMap } from './goal-force-layout';
 import { useGoalStore } from './goal-store';
+import type { TaskEdgeStatus } from './goal-types';
 import { CancelGoalDialog } from './components/CancelGoalDialog';
 import { EdgeDetailPanel } from './components/EdgeDetailPanel';
 import { GoalContextMenu } from './components/GoalContextMenu';
@@ -90,10 +98,16 @@ function GoalHopRings({
   centerX,
   centerY,
   maxHop,
+  viewportX,
+  viewportY,
+  zoom,
 }: {
   centerX: number;
   centerY: number;
   maxHop: number;
+  viewportX: number;
+  viewportY: number;
+  zoom: number;
 }) {
   if (maxHop < 1) return null;
 
@@ -101,6 +115,10 @@ function GoalHopRings({
     <svg
       data-testid="goals-hop-rings"
       className="pointer-events-none absolute inset-0 z-[1] h-full w-full"
+      style={{
+        transform: `translate(${viewportX}px, ${viewportY}px) scale(${zoom})`,
+        transformOrigin: '0 0',
+      }}
     >
       <defs>
         <radialGradient id="goal-hop-ring-glow" cx="50%" cy="50%" r="50%">
@@ -143,11 +161,7 @@ function GoalHopRings({
 export function GoalsPage() {
   const graph = useGoalStore((state) => state.graph);
   const edgeOverrides = useGoalStore((state) => state.edgeOverrides);
-  const getEdgeStatus = useGoalStore((state) => state.getEdgeStatus);
-  const deriveGoalDisplayStatus = useGoalStore((state) => state.deriveGoalDisplayStatus);
-  const getInEdges = useGoalStore((state) => state.getInEdges);
   const getOutEdges = useGoalStore((state) => state.getOutEdges);
-  const getHopDistance = useGoalStore((state) => state.getHopDistance);
   const createGoal = useGoalStore((state) => state.createGoal);
   const createEdge = useGoalStore((state) => state.createEdge);
   const cancelGoal = useGoalStore((state) => state.cancelGoal);
@@ -161,6 +175,8 @@ export function GoalsPage() {
   const isDesktop = useIsDesktop();
 
   const [positions, setPositions] = useState<PositionMap>(new Map());
+  const [taskMetaById, setTaskMetaById] = useState<Map<string, { title: string; status: TaskEdgeStatus }>>(() => new Map());
+  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
   const [mode, setMode] = useState<GoalPageMode>(() => readModeStorage());
   const [showCancelled, setShowCancelled] = useState(() => readBooleanStorage(SHOW_CANCELLED_STORAGE_KEY, false));
   const [guideHidden, setGuideHidden] = useState(() => readBooleanStorage(GUIDE_HIDDEN_STORAGE_KEY, false));
@@ -210,11 +226,84 @@ export function GoalsPage() {
     highlightTimeoutsRef.current.clear();
   }, []);
 
+  useEffect(() => {
+    const taskService = getTaskService();
+    let cancelled = false;
+
+    async function syncTaskMeta() {
+      const tasks = await taskService.listTasks(true);
+      if (cancelled) return;
+      const nextTaskMeta = new Map(tasks.map((task) => [task.id, { title: task.title, status: task.status }]));
+      setTaskMetaById((current) => {
+        if (current.size !== nextTaskMeta.size) return nextTaskMeta;
+        for (const [taskId, taskMeta] of nextTaskMeta) {
+          const currentMeta = current.get(taskId);
+          if (!currentMeta || currentMeta.title !== taskMeta.title || currentMeta.status !== taskMeta.status) {
+            return nextTaskMeta;
+          }
+        }
+        return current;
+      });
+    }
+
+    void syncTaskMeta();
+    const unsubscribe = taskService.onTaskChange(() => {
+      void syncTaskMeta();
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
   const visibleGraph = useMemo(() => ({
     ...graph,
     goals: showCancelled ? graph.goals : graph.goals.filter((goal) => !goal.cancelled),
     edges: buildVisibleEdges(graph, showCancelled),
   }), [graph, showCancelled]);
+
+  const getTaskStatusByRef = useCallback((taskNodeRef: string) => (
+    taskMetaById.get(taskNodeRef)?.status
+  ), [taskMetaById]);
+
+  const getTaskTitleByRef = useCallback((taskNodeRef: string) => (
+    taskMetaById.get(taskNodeRef)?.title
+  ), [taskMetaById]);
+
+  const resolveEdgeStatus = useCallback((edgeId: string) => {
+    const edge = graph.edges.find((item) => item.id === edgeId);
+    if (!edge) return 'pending';
+    return getEdgeStatusLogic(edge, {
+      edgeOverrides,
+      getTaskStatus: getTaskStatusByRef,
+    });
+  }, [edgeOverrides, getTaskStatusByRef, graph.edges]);
+
+  const resolveGoalStatus = useCallback((goalId: string) => {
+    const goal = graph.goals.find((item) => item.id === goalId);
+    if (!goal) return 'pending';
+    return deriveGoalDisplayStatusLogic(goal, getInEdgesLogic(graph, goalId), {
+      graph,
+      edgeOverrides,
+      getTaskStatus: getTaskStatusByRef,
+    });
+  }, [edgeOverrides, getTaskStatusByRef, graph]);
+
+  const resolveHopDistance = useCallback((goalId: string) => (
+    getHopDistanceLogic(graph, goalId, {
+      edgeOverrides,
+      getTaskStatus: getTaskStatusByRef,
+    })
+  ), [edgeOverrides, getTaskStatusByRef, graph]);
+
+  const resolveEdgeLabel = useCallback((edgeId: string) => {
+    const edge = graph.edges.find((item) => item.id === edgeId);
+    if (!edge) return '待定义';
+    if (edge.title) return edge.title;
+    if (edge.taskNodeRef) return getTaskTitleByRef(edge.taskNodeRef) || edge.taskNodeRef;
+    return '待定义';
+  }, [getTaskTitleByRef, graph.edges]);
 
   useEffect(() => {
     window.localStorage.setItem(MODE_STORAGE_KEY, mode);
@@ -280,7 +369,7 @@ export function GoalsPage() {
       position: positions.get(goal.id) ?? { x: 0, y: 0 },
       data: {
         title: goal.title,
-        status: deriveGoalDisplayStatus(goal.id),
+        status: resolveGoalStatus(goal.id),
         editMode: mode === 'edit',
         hasEmptyRule: goal.completionRule.length === 0,
         connectModeTargetable: connectMode.isActive && goal.id !== connectMode.sourceId,
@@ -298,7 +387,7 @@ export function GoalsPage() {
     }));
 
     return [meNode, ...goalNodes];
-  }, [connectMode, deriveGoalDisplayStatus, graph.me.id, graph.me.name, mode, openContextMenu, positions, visibleGraph.goals]);
+  }, [connectMode, graph.me.id, graph.me.name, mode, openContextMenu, positions, resolveGoalStatus, visibleGraph.goals]);
 
   const edges = useMemo<Array<Edge<TaskFlowEdgeData>>>(() => {
     const edgesByPair = new Map<string, Array<{ id: string }>>();
@@ -312,6 +401,8 @@ export function GoalsPage() {
     return visibleGraph.edges.map((edge) => {
       const siblings = edgesByPair.get(`${edge.source}::${edge.target}`) ?? [{ id: edge.id }];
       const parallelIndex = siblings.findIndex((candidate) => candidate.id === edge.id);
+      const sourceGoal = edge.source === graph.me.id ? null : graph.goals.find((goal) => goal.id === edge.source);
+      const targetGoal = graph.goals.find((goal) => goal.id === edge.target);
       return {
         id: edge.id,
         source: edge.source,
@@ -319,9 +410,10 @@ export function GoalsPage() {
         type: 'task',
         selectable: true,
         data: {
-          label: edge.title || (edge.taskNodeRef ? edge.taskNodeRef : '待定义'),
-          status: getEdgeStatus(edge.id),
+          label: resolveEdgeLabel(edge.id),
+          status: resolveEdgeStatus(edge.id),
           isEmptySlot: !edge.taskNodeRef,
+          isZombie: Boolean(showCancelled && (sourceGoal?.cancelled || targetGoal?.cancelled)),
           highlighted: highlightedEdgeIds.includes(edge.id),
           parallelIndex,
           parallelTotal: siblings.length,
@@ -332,7 +424,7 @@ export function GoalsPage() {
         },
       };
     });
-  }, [getEdgeStatus, highlightedEdgeIds, openContextMenu, visibleGraph.edges]);
+  }, [graph.goals, highlightedEdgeIds, openContextMenu, resolveEdgeLabel, resolveEdgeStatus, showCancelled, visibleGraph.edges]);
 
   const connectPreview = useMemo(() => {
     if (!connectMode.isActive || !connectMode.sourceId || !connectMode.previewPoint) return null;
@@ -352,7 +444,7 @@ export function GoalsPage() {
 
   const hopRingMetrics = useMemo(() => {
     const finiteDistances = visibleGraph.goals
-      .map((goal) => getHopDistance(goal.id))
+      .map((goal) => resolveHopDistance(goal.id))
       .filter((distance) => Number.isFinite(distance));
 
     if (finiteDistances.length === 0) return null;
@@ -363,7 +455,7 @@ export function GoalsPage() {
       centerY: mePosition.y + ME_NODE_SIZE / 2,
       maxHop: Math.max(...finiteDistances),
     };
-  }, [getHopDistance, graph.me.id, positions, visibleGraph.goals]);
+  }, [graph.me.id, positions, resolveHopDistance, visibleGraph.goals]);
 
   const emptyStateGuideStyle = useMemo(() => {
     const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
@@ -376,12 +468,12 @@ export function GoalsPage() {
   const goalStatusSnapshot = useMemo(
     () => visibleGraph.goals.map((goal) => ({
       id: goal.id,
-      status: deriveGoalDisplayStatus(goal.id),
+      status: resolveGoalStatus(goal.id),
       inboundEdgeIds: visibleGraph.edges
         .filter((edge) => edge.target === goal.id)
         .map((edge) => edge.id),
     })),
-    [deriveGoalDisplayStatus, edgeOverrides, visibleGraph.edges, visibleGraph.goals],
+    [resolveGoalStatus, visibleGraph.edges, visibleGraph.goals],
   );
 
   const selectedGoal = selected?.kind === 'goal'
@@ -399,9 +491,9 @@ export function GoalsPage() {
       goal.id !== splitTargetEdge.source
       && goal.id !== splitTargetEdge.target
       && !goal.cancelled
-      && deriveGoalDisplayStatus(goal.id) !== 'completed'
+      && resolveGoalStatus(goal.id) !== 'completed'
     ));
-  }, [deriveGoalDisplayStatus, graph.goals, splitTargetEdge]);
+  }, [graph.goals, resolveGoalStatus, splitTargetEdge]);
 
   function notifyResult(result: { ok: false; error: string } | { ok: true }, success?: string) {
     if (!result.ok) {
@@ -505,7 +597,7 @@ export function GoalsPage() {
     if (contextMenu.kind === 'goal') {
       const goal = graph.goals.find((item) => item.id === contextMenu.id);
       if (!goal || goal.cancelled) return [];
-      const goalStatus = deriveGoalDisplayStatus(contextMenu.id);
+      const goalStatus = resolveGoalStatus(contextMenu.id);
       if (goalStatus === 'completed') {
         return [
           { key: 'detail', label: '详情', onSelect: () => setSelected({ kind: 'goal', id: contextMenu.id }) },
@@ -531,7 +623,7 @@ export function GoalsPage() {
       ];
     }
     const edge = graph.edges.find((item) => item.id === contextMenu.id);
-    const targetCompleted = edge ? deriveGoalDisplayStatus(edge.target) === 'completed' : false;
+    const targetCompleted = edge ? resolveGoalStatus(edge.target) === 'completed' : false;
     return [
       { key: 'detail', label: '详情', onSelect: () => setSelected({ kind: 'edge', id: contextMenu.id }) },
       ...(!targetCompleted ? [{
@@ -567,7 +659,7 @@ export function GoalsPage() {
         },
       }] : []),
     ];
-  }, [connectMode, contextMenu, deleteEdge, deriveGoalDisplayStatus, graph.edges, graph.goals]);
+  }, [connectMode, contextMenu, deleteEdge, graph.edges, graph.goals, resolveGoalStatus]);
 
   return (
     <div
@@ -606,6 +698,9 @@ export function GoalsPage() {
           centerX={hopRingMetrics.centerX}
           centerY={hopRingMetrics.centerY}
           maxHop={hopRingMetrics.maxHop}
+          viewportX={viewport.x}
+          viewportY={viewport.y}
+          zoom={viewport.zoom}
         />
       ) : null}
 
@@ -655,6 +750,8 @@ export function GoalsPage() {
         nodesDraggable={mode === 'browse'}
         nodesConnectable={mode === 'edit'}
         zoomOnDoubleClick={false}
+        onMove={(_, nextViewport) => setViewport(nextViewport)}
+        onInit={(instance) => setViewport(instance.getViewport())}
         onPaneClick={() => {
           closeContextMenu();
           if (connectMode.isActive) {
@@ -723,12 +820,12 @@ export function GoalsPage() {
       {selectedGoal ? (
         <GoalDetailPanel
           goal={selectedGoal}
-          status={deriveGoalDisplayStatus(selectedGoal.id)}
-          inEdges={getInEdges(selectedGoal.id)}
+          status={resolveGoalStatus(selectedGoal.id)}
+          inEdges={getInEdgesLogic(graph, selectedGoal.id)}
           outEdges={getOutEdges(selectedGoal.id)}
           onClose={() => setSelected(null)}
           onJumpEdge={(edgeId) => setSelected({ kind: 'edge', id: edgeId })}
-          hopDistance={getHopDistance(selectedGoal.id)}
+          hopDistance={resolveHopDistance(selectedGoal.id)}
           onUpdate={(patch) => {
             const result = updateGoal({ goalId: selectedGoal.id, ...patch });
             if (!result.ok) {
@@ -752,8 +849,9 @@ export function GoalsPage() {
       {selectedEdge ? (
         <EdgeDetailPanel
           edge={selectedEdge}
-          status={getEdgeStatus(selectedEdge.id)}
-          targetStatus={deriveGoalDisplayStatus(selectedEdge.target)}
+          status={resolveEdgeStatus(selectedEdge.id)}
+          targetStatus={resolveGoalStatus(selectedEdge.target)}
+          taskTitle={selectedEdge.taskNodeRef ? getTaskTitleByRef(selectedEdge.taskNodeRef) : undefined}
           sourceLabel={selectedEdge.source === graph.me.id ? graph.me.name : graph.goals.find((goal) => goal.id === selectedEdge.source)?.title || '待命名'}
           targetLabel={graph.goals.find((goal) => goal.id === selectedEdge.target)?.title || '待命名'}
           onClose={() => setSelected(null)}

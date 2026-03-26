@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
@@ -130,5 +130,81 @@ describe('GoalDetailPanel', () => {
     expect(screen.getByDisplayValue('Locked')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'AND' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'OR' })).toBeDisabled();
+    expect(screen.getByText('已完成')).toBeInTheDocument();
+  });
+
+  it('submits the current draft once when an external freeze happens', async () => {
+    const { GoalDetailPanel } = await import('../components/GoalDetailPanel');
+    const onUpdate = vi.fn(() => true);
+
+    const { rerender } = render(
+      <GoalDetailPanel
+        goal={{
+          id: 'goal-freeze',
+          title: 'Old Goal',
+          description: 'Old description',
+          cancelled: false,
+          completionRule: [['edge-a']],
+          createdAt: 1,
+          updatedAt: 1,
+        }}
+        status="pending"
+        inEdges={[
+          {
+            id: 'edge-a',
+            title: 'A',
+            description: '',
+            source: 'me',
+            target: 'goal-freeze',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ]}
+        outEdges={[]}
+        hopDistance={1}
+        onClose={() => {}}
+        onUpdate={onUpdate}
+        onJumpEdge={() => {}}
+      />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('Old Goal'), { target: { value: 'Draft Goal' } });
+    fireEvent.change(screen.getByDisplayValue('Old description'), { target: { value: 'Draft description' } });
+
+    rerender(
+      <GoalDetailPanel
+        goal={{
+          id: 'goal-freeze',
+          title: 'Old Goal',
+          description: 'Old description',
+          cancelled: false,
+          completionRule: [['edge-a']],
+          createdAt: 1,
+          updatedAt: 1,
+        }}
+        status="completed"
+        inEdges={[
+          {
+            id: 'edge-a',
+            title: 'A',
+            description: '',
+            source: 'me',
+            target: 'goal-freeze',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ]}
+        outEdges={[]}
+        hopDistance={1}
+        onClose={() => {}}
+        onUpdate={onUpdate}
+        onJumpEdge={() => {}}
+      />,
+    );
+
+    expect(onUpdate).toHaveBeenCalledWith({
+      title: 'Draft Goal',
+      description: 'Draft description',
+    });
   });
 });

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GoalDisplayStatus, GoalNode, TaskEdge } from '../goal-types';
 import { DetailPanelShell } from './DetailPanelShell';
+import { formatGoalStatus } from '../status-labels';
 
 interface GoalDetailPanelProps {
   goal: GoalNode;
@@ -41,6 +42,7 @@ export function GoalDetailPanel({
   const [title, setTitle] = useState(goal.title);
   const [description, setDescription] = useState(goal.description);
   const frozen = goal.cancelled || status === 'completed';
+  const previousFrozenRef = useRef(frozen);
   const mode = getMode(goal, inEdges);
   const modeLabel = goal.completionRule.length === 0 ? '空规则' : (
     goal.completionRule.length === 1 && goal.completionRule[0]?.length === inEdges.length
@@ -53,7 +55,22 @@ export function GoalDetailPanel({
   useEffect(() => {
     setTitle(goal.title);
     setDescription(goal.description);
-  }, [goal]);
+  }, [goal.description, goal.id, goal.title]);
+
+  useEffect(() => {
+    if (!previousFrozenRef.current && frozen) {
+      const patch: { title?: string; description?: string } = {};
+      if (title !== goal.title) patch.title = title;
+      if (description !== goal.description) patch.description = description;
+
+      if (Object.keys(patch).length > 0 && !onUpdate(patch)) {
+        setTitle(goal.title);
+        setDescription(goal.description);
+      }
+    }
+
+    previousFrozenRef.current = frozen;
+  }, [description, frozen, goal.description, goal.title, onUpdate, title]);
 
   return (
     <DetailPanelShell title={goal.title || '待命名'} subtitle="目标详情" onClose={onClose}>
@@ -92,7 +109,7 @@ export function GoalDetailPanel({
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">状态</span>
             <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
-              {status}
+              {formatGoalStatus(status)}
             </span>
           </div>
           <div className="flex gap-2">

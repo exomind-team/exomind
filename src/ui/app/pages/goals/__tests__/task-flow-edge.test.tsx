@@ -164,6 +164,38 @@ describe('TaskFlowEdge', () => {
     expect(emptySlotCall.style.strokeWidth).toBeLessThan(taskBackedCall.style.strokeWidth);
   });
 
+  it('renders zombie edges with a distinct cancelled-goal visual treatment', async () => {
+    const { TaskFlowEdge } = await import('../components/TaskFlowEdge');
+    baseEdgeCalls.length = 0;
+
+    render(
+      <svg>
+        <TaskFlowEdge
+          id="edge-zombie"
+          source="me"
+          target="goal-a"
+          sourceX={0}
+          sourceY={0}
+          sourcePosition={'right' as never}
+          targetX={120}
+          targetY={0}
+          targetPosition={'left' as never}
+          selected={false}
+          data={{
+            label: 'Zombie',
+            status: 'pending',
+            isZombie: true,
+          }}
+        />
+      </svg>,
+    );
+
+    const zombieCall = baseEdgeCalls[baseEdgeCalls.length - 1] as { style: { strokeWidth: number; strokeDasharray: string; stroke: string } };
+    expect(zombieCall.style.strokeDasharray).toBe('2 6');
+    expect(zombieCall.style.strokeWidth).toBe(1.6);
+    expect(screen.getByText('Zombie').className).toContain('opacity-60');
+  });
+
   it('opens the edge context callback on long press', async () => {
     vi.useFakeTimers();
     const onOpenContextMenu = vi.fn();

@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GoalDisplayStatus, TaskEdge, TaskEdgeStatus } from '../goal-types';
 import { DetailPanelShell } from './DetailPanelShell';
+import { formatGoalStatus, formatTaskStatus } from '../status-labels';
 
 interface EdgeDetailPanelProps {
   edge: TaskEdge;
   status: TaskEdgeStatus;
   targetStatus: GoalDisplayStatus;
+  taskTitle?: string;
   sourceLabel: string;
   targetLabel: string;
   onClose: () => void;
@@ -19,6 +21,7 @@ export function EdgeDetailPanel({
   edge,
   status,
   targetStatus,
+  taskTitle,
   sourceLabel,
   targetLabel,
   onClose,
@@ -31,25 +34,43 @@ export function EdgeDetailPanel({
   const [description, setDescription] = useState(edge.description);
   const [taskNodeRef, setTaskNodeRef] = useState(edge.taskNodeRef ?? '');
   const [developerOpen, setDeveloperOpen] = useState(false);
-  const frozen = targetStatus === 'completed';
-  const panelTitle = edge.title || edge.taskNodeRef || '待定义';
+  const frozen = targetStatus === 'completed' || targetStatus === 'cancelled';
+  const previousFrozenRef = useRef(frozen);
+  const panelTitle = edge.title || taskTitle || edge.taskNodeRef || '待定义';
 
   useEffect(() => {
     setTitle(edge.title);
     setDescription(edge.description);
     setTaskNodeRef(edge.taskNodeRef ?? '');
     setDeveloperOpen(false);
-  }, [edge]);
+  }, [edge.description, edge.id, edge.taskNodeRef, edge.title]);
+
+  useEffect(() => {
+    if (!previousFrozenRef.current && frozen) {
+      const patch: { title?: string; description?: string; taskNodeRef?: string } = {};
+      if (title !== edge.title) patch.title = title;
+      if (description !== edge.description) patch.description = description;
+      if (taskNodeRef !== (edge.taskNodeRef ?? '')) patch.taskNodeRef = taskNodeRef || undefined;
+
+      if (Object.keys(patch).length > 0 && !onUpdate(patch)) {
+        setTitle(edge.title);
+        setDescription(edge.description);
+        setTaskNodeRef(edge.taskNodeRef ?? '');
+      }
+    }
+
+    previousFrozenRef.current = frozen;
+  }, [description, edge.description, edge.taskNodeRef, edge.title, frozen, onUpdate, taskNodeRef, title]);
 
   return (
     <DetailPanelShell title={panelTitle} subtitle="路径详情" onClose={onClose}>
       <div className="space-y-5">
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
-            {status}
+            {formatTaskStatus(status)}
           </span>
           <span className="rounded-full bg-[#FAF7F5] px-2 py-0.5 text-[10px] font-medium text-[#A8A29E] dark:bg-[#120F0D] dark:text-[#A8A29E]">
-            target {targetStatus}
+            {`target ${formatGoalStatus(targetStatus)}`}
           </span>
         </div>
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { TaskNode } from '@/lib/types/task';
 
 const flowApiMocks = vi.hoisted(() => ({
   lastProps: null as null | Record<string, unknown>,
@@ -8,9 +9,18 @@ const flowApiMocks = vi.hoisted(() => ({
 
 const isDesktopMock = vi.hoisted(() => vi.fn(() => true));
 const toastMock = vi.hoisted(() => vi.fn());
+const taskServiceMocks = vi.hoisted(() => ({
+  listTasks: vi.fn<() => Promise<TaskNode[]>>(async () => []),
+  getTask: vi.fn<(id: string) => Promise<TaskNode | null>>(async () => null),
+  onTaskChange: vi.fn<(callback: () => void) => () => void>(() => () => {}),
+}));
 
 vi.mock('@/components/ui/toast-hook', () => ({
   toast: toastMock,
+}));
+
+vi.mock('@/lib/services/task.service', () => ({
+  getTaskService: () => taskServiceMocks,
 }));
 
 vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
@@ -144,6 +154,12 @@ describe('GoalsPage', () => {
     toastMock.mockReset();
     isDesktopMock.mockReset();
     isDesktopMock.mockReturnValue(true);
+    taskServiceMocks.listTasks.mockReset();
+    taskServiceMocks.getTask.mockReset();
+    taskServiceMocks.onTaskChange.mockReset();
+    taskServiceMocks.listTasks.mockResolvedValue([]);
+    taskServiceMocks.getTask.mockResolvedValue(null);
+    taskServiceMocks.onTaskChange.mockReturnValue(() => {});
   });
 
   it('creates a goal from Me context menu and opens its detail panel', async () => {
@@ -379,6 +395,51 @@ describe('GoalsPage', () => {
     view.unmount();
   });
 
+  it('uses bound task title and status in the graph when taskNodeRef is set', async () => {
+    taskServiceMocks.listTasks.mockResolvedValue([
+      {
+        id: 'task-123',
+        title: '真实任务',
+        description: '',
+        status: 'in_progress',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
+
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    act(() => {
+      useGoalStore.getState().updateEdge({
+        edgeId,
+        taskNodeRef: 'task-123',
+      });
+    });
+
+    await waitFor(() => {
+      const edges = flowApiMocks.lastProps?.edges as Array<{ id: string; data?: { label?: string; status?: string } }>;
+      const nodes = flowApiMocks.lastProps?.nodes as Array<{ id: string; data?: { status?: string } }>;
+
+      expect(edges.find((edge) => edge.id === edgeId)?.data?.label).toBe('真实任务');
+      expect(edges.find((edge) => edge.id === edgeId)?.data?.status).toBe('in_progress');
+      expect(nodes.find((node) => node.id === goalId)?.data?.status).toBe('in_progress');
+    });
+  });
+
   it('shows connect preview while connect mode is active and clears it on pane click', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);
@@ -478,5 +539,35 @@ describe('GoalsPage', () => {
     expect(screen.getByTestId('goals-hop-rings')).toBeInTheDocument();
     expect(screen.getByTestId('goals-hop-ring-1')).toBeInTheDocument();
     expect(screen.getByTestId('goals-hop-ring-2')).toBeInTheDocument();
+  });
+
+  it('keeps hop-distance rings aligned with the React Flow viewport transform', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const firstGoalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${firstGoalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    const onMove = flowApiMocks.lastProps?.onMove as undefined | ((event: unknown, viewport: { x: number; y: number; zoom: number }) => void);
+    act(() => {
+      onMove?.({}, { x: 48, y: 32, zoom: 1.5 });
+    });
+
+    expect(screen.getByTestId('goals-hop-rings')).toHaveStyle({
+      transform: 'translate(48px, 32px) scale(1.5)',
+      transformOrigin: '0 0',
+    });
   });
 });
