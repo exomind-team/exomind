@@ -497,20 +497,146 @@ Agent 可以用正则或 JSON 解析提取特定批次，例如：
 grep -A 50 "id: 'M'" temp/exomind-route-*.html | grep "num:" | head -20
 ```
 
-### 从批次到实施计划的衔接
+### 从批次到实施计划的衔接（计划撰写方法论）
 
-当用户要求"草拟批次 X 的实现计划"时，Agent 应：
+当用户要求"草拟批次 X 的实现计划"时，Agent 应按以下流程执行。本流程从实战中提炼（批次 M1、N 的拟定经验），面向**无上下文的执行者 Agent**。
 
-1. **读取批次数据**：从航线中提取批次 X 的完整信息
-2. **检查前置依赖**：确认 deps 中的批次已完成，否则提醒用户
-3. **读取 planner-methodology**：`docs/development/planner-methodology.md`，了解计划文件规范
-4. **按规范生成计划**：
-   - 文件名：`docs/plans/YYYY-MM-DD-batch-{x}-{name}-plan.md`
-   - 格式：Context → 步骤 → 验证 → 不要做清单 → 容易出错的关键点
-   - 批次的 `fileDomain` 直接指明要改哪些文件
-   - 批次的 `branch` 直接给出分支名
-   - 批次的 `issues` 按 `done` 字段跳过已完成的
-5. **给出执行提示词**：生成可交给 Codex 的提示词文件
+#### 第一步：环境能力评估与批次拆分
+
+先判断批次内哪些 issue 在当前环境可做，必要时拆分：
+
+| 环境能力 | 验证工具 | 可做的 issue 类型 |
+|----------|----------|------------------|
+| TypeScript/前端 | `npx tsc --noEmit` + `npx vitest run` | UI 修复、逻辑重构、安全清理 |
+| Rust/RT | `cargo test` + `cargo build` + `cargo clippy` | RT API、数据层、状态机 |
+| Web UI | `npx vite --host` + 浏览器 | 页面交互验证 |
+| RT API | `cargo run` + `curl` | HTTP 端点验证 |
+| CI/Scripts | 编辑 + push → GitHub Actions | workflow、脚本 |
+| 文档/设计 | 编写 + commit | 研究、规格、讨论 |
+
+**不可做**：需要桌面系统（Tauri 窗口/快捷键）、需要 Android APK 安装、需要多设备同步、需要音频硬件。
+
+**拆分规则**：若批次内可做与不可做的 issue 混合存在，拆为子批次：
+- `X1`：当前环境可完整交付的
+- `X2`：需要特定设备/环境的，暂缓
+
+#### 第二步：代码扫描（先扫描再写计划）
+
+**这是计划质量的关键。** 不要凭记忆或 issue 标题推测代码状态，必须实际扫描。
+
+按 issue 类型选择扫描策略：
+
+| issue 类型 | 扫描方法 | 示例 |
+|-----------|----------|------|
+| 安全清理 | grep 预置 pattern 列表 | `api_key\|API_KEY\|apiKey\|secret\|token\|password` |
+| Bug 修复 | 读取 issue 中报错的文件 + 调用链 | 从错误信息追溯到源函数 |
+| 新 API | 读取现有同类 API 的实现 | 读 tasks.rs 了解现有路由再写新路由 |
+| 重构 | 读取待重构模块 + 消费者 | 读模块本身 + grep 所有 import |
+
+**预置 grep pattern（减少试错）**：
+
+```bash
+# 安全类 issue
+grep -rn 'api_key\|API_KEY\|apiKey\|secret\|token\|password\|credential' src/ crates/ --include='*.ts' --include='*.rs'
+
+# 环境变量类
+grep -rn 'EXOMIND_\|VITE_\|import\.meta\.env' src/ --include='*.ts'
+
+# Rust unwrap
+grep -rn '\.unwrap()' crates/ --include='*.rs' | grep -v test | grep -v '#\[cfg(test)\]'
+
+# 死代码（未使用的 export）
+grep -rn 'pub fn\|pub async fn' crates/exomind-runtime/src/ --include='*.rs'
+```
+
+#### 第三步：生成计划文件
+
+**文件名**：`docs/plans/YYYY-MM-DD-batch-{x}-{name}-plan.md`
+
+**必须遵循 `docs/development/planner-methodology.md` 第四章的结构**：
+
+```markdown
+# 批次 X：名称
+
+> **状态**：待执行
+> **分支**：{batch.branch}
+> **关联 Issue**：#xxx, #yyy, ...
+> **执行顺序**：#xxx → #yyy → ...
+
+## Context
+（代码扫描发现 + 当前状态 + 本批次范围）
+
+## 步骤 N：#xxx 标题
+### N.1 改动（伪代码级）
+### N.2 验证（具体命令 + 期望输出）
+
+## 关键文件索引
+（表格：文件 | 改动类型 | Issue）
+
+## ⚠️ 不要做清单
+（至少 5 条，精确到文件名）
+
+## ⚠️ 容易出错的关键点
+（来自代码扫描中发现的陷阱）
+
+## 验证总表
+（表格：场景 | 操作 | 期望结果 | Issue）
+
+## 完成回填
+（执行后填写）
+```
+
+#### 第四步：按 issue size 控制步骤详度
+
+| Size | 步骤描述详度 | 示例 |
+|------|-------------|------|
+| **S** (小) | 改动摘要 ≤5 行，点明文件和函数名即可 | "在 `store.rs:validate_terminal_task_update()` 中追加 title 字段检查" |
+| **M** (中) | 伪代码 ≤15 行，含关键逻辑和边界处理 | 含函数签名 + 核心 if/match 分支 |
+| **L** (大) | 伪代码 ≤30 行，含完整数据流和错误处理 | 含 SQL、HTTP 路由定义、请求/响应类型 |
+| **XL** (epic) | 拆为子步骤，每步 ≤15 行，标注哪些子步骤可并行 | 拆为 Phase 1/2/3 |
+
+#### 第五步：相邻批次冲突检查
+
+如果同时为多个批次写计划，必须在计划末尾补充：
+
+```markdown
+## 相邻批次文件冲突检查
+
+| 文件 | 本批次改动 | 相邻批次 | 冲突风险 |
+|------|-----------|---------|---------|
+| src/xxx.ts | 修改 | 批次 Y #zzz | 低/中/高 |
+```
+
+检查方法：对比两个批次的 `fileDomain`，grep 共同文件路径。
+
+#### 第六步：生成执行提示词
+
+计划完成后，在 `.claude/tmp/prompt-batch-{x}.md` 生成可交给 Codex 的提示词：
+
+```
+第一行：指明计划文件路径
+第二段：列举步骤编号和 issue 编号（概要）
+第三段：3-5 条最重要的禁止项（从"不要做清单"中挑选高风险项）
+最后：验证命令 + 回填指令
+```
+
+#### 质量标准
+
+| 标准 | 要求 |
+|------|------|
+| **不要做清单** | ≥5 条，每条精确到文件名（"不要改动 xxx.ts"） |
+| **验证命令** | 每个步骤必须有可在当前环境执行的验证命令 |
+| **伪代码精度** | 必须包含文件路径和函数名，S size 可省略函数体 |
+| **扫描先行** | 禁止不读代码就写计划，Context 必须包含扫描发现 |
+| **覆盖诚实** | 若发现 issue 已部分完成（如 #460 Phase 1 已做），明确标注并调整范围 |
+
+#### 经验教训（来自 M1/N 实战）
+
+1. **grep 预置 pattern 列表**能把安全类 issue 的扫描从 45 次工具调用降到 15 次
+2. **先做设计定论 issue**（如 #683），后续实现 issue 才有依据
+3. **EventLog 写入用 best-effort 模式**（错误只 log 不传播），否则日志功能会拖垮主流程
+4. **路由注册顺序很重要**：`/tasks/batch-transition` 必须在 `/tasks/:id` 之前，否则被参数捕获
+5. **edition = "2024" 不存在**：扫描发现的这类"看起来对但实际无效"的值，只有读了代码才能发现
 
 ### 航线刷新判断
 
