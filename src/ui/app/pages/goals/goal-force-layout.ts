@@ -5,6 +5,7 @@ import {
   type Simulation,
   type SimulationNodeDatum,
 } from 'd3-force';
+import { GOAL_NODE_SIZE, ME_NODE_SIZE } from './components/GoalFlowNode';
 import { summarizeGraph, summarizePositions, warnGoalDebug } from './goal-debug';
 import type { GoalGraph, NodeId } from './goal-types';
 
@@ -450,9 +451,10 @@ export class GoalForceSimulation {
   private snapshotPositions(): PositionMap {
     const positions: PositionMap = new Map();
     for (const node of this.nodes) {
+      const nodeSize = node.kind === 'me' ? ME_NODE_SIZE : GOAL_NODE_SIZE;
       positions.set(String(node.id), {
-        x: node.x ?? this.cx,
-        y: node.y ?? this.cy,
+        x: (node.x ?? this.cx) - nodeSize / 2,
+        y: (node.y ?? this.cy) - nodeSize / 2,
       });
     }
     return positions;

@@ -212,12 +212,37 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     await expect(page.locator('[data-testid^="task-flow-edge-hit-area-"]')).toHaveCount(1);
     await expect(page.locator('[data-testid^="task-flow-edge-label-"]')).toHaveCount(1);
 
+    const visibilityMetrics = await page.evaluate(() => (
+      Array.from(document.querySelectorAll('[data-testid^="goal-flow-node-"]')).map((node) => {
+        const element = node as HTMLElement;
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return {
+          testId: element.getAttribute('data-testid'),
+          visibility: style.visibility,
+          display: style.display,
+          opacity: Number.parseFloat(style.opacity || '1'),
+          width: rect.width,
+          height: rect.height,
+        };
+      })
+    ));
+
+    expect(visibilityMetrics).toHaveLength(2);
+    for (const metric of visibilityMetrics) {
+      expect(metric.visibility).not.toBe('hidden');
+      expect(metric.display).not.toBe('none');
+      expect(metric.opacity).toBeGreaterThan(0.01);
+      expect(metric.width).toBeGreaterThan(0);
+      expect(metric.height).toBeGreaterThan(0);
+    }
+
     expect(goalWarnings.some((entry) => entry.includes('simulation:init'))).toBe(true);
     expect(goalWarnings.some((entry) => entry.includes('page:render-health'))).toBe(true);
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
-  test('renders full concentric hop rings around Me without overlapping labels or glow rectangles', async ({ page }) => {
+  test('keeps Me fixed at the concentric-ring center and renders complete independent rings', async ({ page }) => {
     await page.goto('/goals', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
@@ -239,7 +264,9 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     await expect(page.getByTestId('goals-hop-ring-1')).toBeVisible();
     await expect(page.getByTestId('goals-hop-ring-2')).toBeVisible();
 
-    const ringMetrics = await page.evaluate(() => {
+    const initialMetrics = await page.evaluate(() => {
+      const pageEl = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const flowSurfaceEl = pageEl?.querySelector('[role="application"]') as HTMLElement | null;
       const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
       const rings = document.querySelector('[data-testid="goals-hop-rings"]') as SVGSVGElement | null;
       const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
@@ -247,10 +274,12 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       const label1 = document.querySelector('[data-testid="goals-hop-ring-1"] text') as SVGTextElement | null;
       const label2 = document.querySelector('[data-testid="goals-hop-ring-2"] text') as SVGTextElement | null;
 
-      if (!me || !rings || !ring1 || !ring2 || !label1 || !label2) {
+      if (!pageEl || !flowSurfaceEl || !me || !rings || !ring1 || !ring2 || !label1 || !label2) {
         return null;
       }
 
+      const pageRect = pageEl.getBoundingClientRect();
+      const flowSurfaceRect = flowSurfaceEl.getBoundingClientRect();
       const meRect = me.getBoundingClientRect();
       const ring1Rect = ring1.getBoundingClientRect();
       const ring2Rect = ring2.getBoundingClientRect();
@@ -289,27 +318,77 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
           x: meRect.x + meRect.width / 2,
           y: meRect.y + meRect.height / 2,
         },
+        flowSurfaceCenter: {
+          x: flowSurfaceRect.x + flowSurfaceRect.width / 2,
+          y: flowSurfaceRect.y + flowSurfaceRect.height / 2,
+        },
+        pageRect: {
+          left: pageRect.left,
+          top: pageRect.top,
+          right: pageRect.right,
+          bottom: pageRect.bottom,
+        },
         topElementAtMeCenter:
           topElementAtMeCenter?.closest('[data-testid]')?.getAttribute('data-testid')
           ?? topElementAtMeCenter?.tagName
           ?? null,
         labelOverlap: overlap,
+        ring2Rect: {
+          left: ring2Rect.left,
+          top: ring2Rect.top,
+          right: ring2Rect.right,
+          bottom: ring2Rect.bottom,
+        },
       };
     });
 
-    expect(ringMetrics).not.toBeNull();
-    expect(ringMetrics?.glowCircleCount).toBe(0);
-    expect(ringMetrics?.ring1.fill).toBe('none');
-    expect(ringMetrics?.ring2.fill).toBe('none');
-    expect(ringMetrics?.ring1.cx).toBe(ringMetrics?.ring2.cx);
-    expect(ringMetrics?.ring1.cy).toBe(ringMetrics?.ring2.cy);
-    expect(ringMetrics?.ring2.r ?? 0).toBeGreaterThan(ringMetrics?.ring1.r ?? 0);
-    expect(ringMetrics?.labelOverlap).toBe(false);
-    expect(Math.abs((ringMetrics?.ring1.centerX ?? 0) - (ringMetrics?.meCenter.x ?? 0))).toBeLessThan(6);
-    expect(Math.abs((ringMetrics?.ring1.centerY ?? 0) - (ringMetrics?.meCenter.y ?? 0))).toBeLessThan(6);
-    expect(Math.abs((ringMetrics?.ring2.centerX ?? 0) - (ringMetrics?.meCenter.x ?? 0))).toBeLessThan(6);
-    expect(Math.abs((ringMetrics?.ring2.centerY ?? 0) - (ringMetrics?.meCenter.y ?? 0))).toBeLessThan(6);
-    expect(ringMetrics?.topElementAtMeCenter).toBe('goal-flow-node-me');
+    await page.waitForTimeout(1200);
+
+    const settledMetrics = await page.evaluate(() => {
+      const pageEl = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const flowSurfaceEl = pageEl?.querySelector('[role="application"]') as HTMLElement | null;
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      if (!pageEl || !flowSurfaceEl || !me) {
+        return null;
+      }
+      const flowSurfaceRect = flowSurfaceEl.getBoundingClientRect();
+      const meRect = me.getBoundingClientRect();
+      return {
+        meCenter: {
+          x: meRect.x + meRect.width / 2,
+          y: meRect.y + meRect.height / 2,
+        },
+        flowSurfaceCenter: {
+          x: flowSurfaceRect.x + flowSurfaceRect.width / 2,
+          y: flowSurfaceRect.y + flowSurfaceRect.height / 2,
+        },
+      };
+    });
+
+    expect(initialMetrics).not.toBeNull();
+    expect(initialMetrics?.glowCircleCount).toBe(0);
+    expect(initialMetrics?.ring1.fill).toBe('none');
+    expect(initialMetrics?.ring2.fill).toBe('none');
+    expect(initialMetrics?.ring1.cx).toBe(initialMetrics?.ring2.cx);
+    expect(initialMetrics?.ring1.cy).toBe(initialMetrics?.ring2.cy);
+    expect(initialMetrics?.ring2.r ?? 0).toBeGreaterThan(initialMetrics?.ring1.r ?? 0);
+    expect(initialMetrics?.labelOverlap).toBe(false);
+    expect(Math.abs((initialMetrics?.ring1.centerX ?? 0) - (initialMetrics?.meCenter.x ?? 0))).toBeLessThan(6);
+    expect(Math.abs((initialMetrics?.ring1.centerY ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(6);
+    expect(Math.abs((initialMetrics?.ring2.centerX ?? 0) - (initialMetrics?.meCenter.x ?? 0))).toBeLessThan(6);
+    expect(Math.abs((initialMetrics?.ring2.centerY ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(6);
+    expect(Math.abs((initialMetrics?.meCenter.x ?? 0) - (initialMetrics?.flowSurfaceCenter.x ?? 0))).toBeLessThan(24);
+    expect(Math.abs((initialMetrics?.meCenter.y ?? 0) - (initialMetrics?.flowSurfaceCenter.y ?? 0))).toBeLessThan(24);
+    expect(initialMetrics?.ring2Rect.left ?? 0).toBeGreaterThanOrEqual((initialMetrics?.pageRect.left ?? 0) - 2);
+    expect(initialMetrics?.ring2Rect.top ?? 0).toBeGreaterThanOrEqual((initialMetrics?.pageRect.top ?? 0) - 2);
+    expect(initialMetrics?.ring2Rect.right ?? 0).toBeLessThanOrEqual((initialMetrics?.pageRect.right ?? 0) + 2);
+    expect(initialMetrics?.ring2Rect.bottom ?? 0).toBeLessThanOrEqual((initialMetrics?.pageRect.bottom ?? 0) + 2);
+    expect(initialMetrics?.topElementAtMeCenter).toBe('goal-flow-node-me');
+    expect(settledMetrics).not.toBeNull();
+    expect(Math.abs((settledMetrics?.meCenter.x ?? 0) - (settledMetrics?.flowSurfaceCenter.x ?? 0))).toBeLessThan(24);
+    expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (settledMetrics?.flowSurfaceCenter.y ?? 0))).toBeLessThan(24);
+    expect(Math.abs((settledMetrics?.meCenter.x ?? 0) - (initialMetrics?.meCenter.x ?? 0))).toBeLessThan(2);
+    expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(2);
   });
 
   test('keeps randomized three-node samples within the stable geometry constraints across 10 independent seeds', async ({ page }, testInfo) => {

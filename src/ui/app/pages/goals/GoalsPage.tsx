@@ -108,7 +108,8 @@ function buildVisibleEdges(graph: ReturnType<typeof useGoalStore.getState>['grap
   });
 }
 
-const HOP_RING_SPACING = 152;
+const HOP_RING_SPACING = 100;
+const HOP_RING_LABEL_PADDING = 28;
 
 function buildNodeHandles(size: number) {
   return [
@@ -138,6 +139,8 @@ function GoalHopRings({
   viewportX,
   viewportY,
   zoom,
+  pageWidth,
+  pageHeight,
 }: {
   centerX: number;
   centerY: number;
@@ -145,8 +148,29 @@ function GoalHopRings({
   viewportX: number;
   viewportY: number;
   zoom: number;
+  pageWidth: number;
+  pageHeight: number;
 }) {
   if (maxHop < 1) return null;
+
+  const safeZoom = zoom > 0 ? zoom : 1;
+  const screenCenterX = centerX * safeZoom + viewportX;
+  const screenCenterY = centerY * safeZoom + viewportY;
+  const hasPageBounds = pageWidth > 0 && pageHeight > 0;
+  const maxScreenRadius = hasPageBounds
+    ? Math.max(
+        0,
+        Math.min(
+          screenCenterX - HOP_RING_LABEL_PADDING,
+          pageWidth - screenCenterX - HOP_RING_LABEL_PADDING,
+          screenCenterY - HOP_RING_LABEL_PADDING,
+          pageHeight - screenCenterY - HOP_RING_LABEL_PADDING,
+        ),
+      )
+    : Number.POSITIVE_INFINITY;
+  const ringSpacing = maxHop > 0
+    ? Math.min(HOP_RING_SPACING, maxScreenRadius / maxHop / safeZoom)
+    : HOP_RING_SPACING;
 
   return (
     <svg
@@ -159,7 +183,7 @@ function GoalHopRings({
     >
       {Array.from({ length: maxHop }, (_, index) => {
         const hop = index + 1;
-        const radius = hop * HOP_RING_SPACING;
+        const radius = hop * ringSpacing;
         const labelAngle = -Math.PI / 4;
         const labelX = centerX + Math.cos(labelAngle) * radius;
         const labelY = centerY + Math.sin(labelAngle) * radius;
@@ -348,6 +372,7 @@ export function GoalsPage() {
   const [positions, setPositions] = useState<PositionMap>(new Map());
   const [taskMetaById, setTaskMetaById] = useState<Map<string, { title: string; status: TaskEdgeStatus }>>(() => new Map());
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
+  const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
   const [mode, setMode] = useState<GoalPageMode>(() => readModeStorage());
   const [showCancelled, setShowCancelled] = useState(() => readBooleanStorage(SHOW_CANCELLED_STORAGE_KEY, false));
   const [guideHidden, setGuideHidden] = useState(() => readBooleanStorage(GUIDE_HIDDEN_STORAGE_KEY, false));
@@ -374,7 +399,6 @@ export function GoalsPage() {
   const mePulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousGoalStatusesRef = useRef<Map<string, string>>(new Map());
   const skipNextSimulationSyncRef = useRef(true);
-  const fitViewSignatureRef = useRef('');
   const hasCenteredInitialMeRef = useRef(false);
   const lastGraphChangeAtRef = useRef(Date.now());
   const renderHealthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -408,6 +432,33 @@ export function GoalsPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [closeContextMenu, connectMode]);
+
+  useLayoutEffect(() => {
+    const element = pageRef.current;
+    if (!element) return;
+
+    const updatePageSize = (width: number, height: number) => {
+      setPageSize((current) => (
+        current.width === width && current.height === height
+          ? current
+          : { width, height }
+      ));
+    };
+
+    updatePageSize(element.clientWidth, element.clientHeight);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      updatePageSize(Math.round(entry.contentRect.width), Math.round(entry.contentRect.height));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => () => {
     highlightTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
@@ -841,8 +892,10 @@ export function GoalsPage() {
       }
       const style = window.getComputedStyle(element);
       const rect = element.getBoundingClientRect();
+      const opacity = Number.parseFloat(style.opacity || '1');
       const visible = style.visibility !== 'hidden'
         && style.display !== 'none'
+        && opacity > 0.01
         && rect.width > 0
         && rect.height > 0;
       return {
@@ -851,7 +904,7 @@ export function GoalsPage() {
         visible,
         visibility: style.visibility,
         display: style.display,
-        opacity: style.opacity,
+        opacity: Number.isFinite(opacity) ? opacity : style.opacity,
         rect: {
           x: Math.round(rect.x),
           y: Math.round(rect.y),
@@ -953,34 +1006,6 @@ export function GoalsPage() {
       hasCenteredInitialMeRef.current = true;
     }
   }, [centerMeInViewport, graph.me.id, positions]);
-
-  useEffect(() => {
-    const expectedNodeCount = visibleGraph.goals.length + 1;
-    if (!reactFlowRef.current) return;
-    if (positions.size < expectedNodeCount) return;
-
-    const signature = JSON.stringify({
-      expectedNodeCount,
-      edgeCount: visibleGraph.edges.length,
-      showCancelled,
-    });
-    if (signature === fitViewSignatureRef.current) return;
-    fitViewSignatureRef.current = signature;
-
-    warnGoalDebug('page:fit-view-request', {
-      expectedNodeCount,
-      edgeCount: visibleGraph.edges.length,
-      positions: positionSummary,
-      showCancelled,
-    });
-
-    requestAnimationFrame(() => {
-      reactFlowRef.current?.fitView({
-        duration: 180,
-        padding: 0.22,
-      });
-    });
-  }, [positionSummary, positions.size, showCancelled, visibleGraph.edges.length, visibleGraph.goals.length]);
 
   function notifyResult(
     result: { ok: false; error: string } | { ok: true },
@@ -1207,6 +1232,9 @@ export function GoalsPage() {
     ];
   }, [connectMode, contextMenu, deleteEdge, graph.edges, graph.goals, resolveGoalStatus]);
 
+  const currentPageWidth = pageSize.width || pageRef.current?.clientWidth || 0;
+  const currentPageHeight = pageSize.height || pageRef.current?.clientHeight || 0;
+
   return (
     <div
       ref={pageRef}
@@ -1247,6 +1275,8 @@ export function GoalsPage() {
           viewportX={viewport.x}
           viewportY={viewport.y}
           zoom={viewport.zoom}
+          pageWidth={currentPageWidth}
+          pageHeight={currentPageHeight}
         />
       ) : null}
 

@@ -887,20 +887,67 @@ describe('GoalsPage', () => {
     });
   });
 
+  it('keeps Me centered when the graph grows instead of auto-fitting the viewport away from Me', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+    const meId = useGoalStore.getState().graph.me.id;
+    let firstGoalId = '';
+
+    await waitFor(() => {
+      expect(flowApiMocks.setCenter).toHaveBeenCalled();
+    });
+
+    act(() => {
+      const firstResult = useGoalStore.getState().createGoal({
+        fromNode: meId,
+        direction: 'downstream',
+      });
+      expect(firstResult.ok).toBe(true);
+      if (firstResult.ok) {
+        firstGoalId = firstResult.value.goal.id;
+      }
+    });
+
+    act(() => {
+      const secondResult = useGoalStore.getState().createGoal({
+        fromNode: firstGoalId,
+        direction: 'downstream',
+      });
+      expect(secondResult.ok).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    expect(flowApiMocks.fitView).not.toHaveBeenCalled();
+    expect(flowApiMocks.setCenter).toHaveBeenCalled();
+  });
+
   it('renders concentric hop rings without overlapping labels or clipped glow fill', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);
+    const meId = useGoalStore.getState().graph.me.id;
+    let firstGoalId = '';
 
-    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
-    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
-
-    await waitFor(() => {
-      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    act(() => {
+      const firstResult = useGoalStore.getState().createGoal({
+        fromNode: meId,
+        direction: 'downstream',
+      });
+      expect(firstResult.ok).toBe(true);
+      if (firstResult.ok) {
+        firstGoalId = firstResult.value.goal.id;
+      }
     });
 
-    const firstGoalId = useGoalStore.getState().graph.goals[0]?.id as string;
-    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${firstGoalId}`));
-    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+    act(() => {
+      const secondResult = useGoalStore.getState().createGoal({
+        fromNode: firstGoalId,
+        direction: 'downstream',
+      });
+      expect(secondResult.ok).toBe(true);
+    });
 
     await waitFor(() => {
       expect(useGoalStore.getState().graph.goals).toHaveLength(2);
