@@ -1,6 +1,6 @@
 # 批次 N：RT 任务 API 增强
 
-> **状态**：执行中（代码主体、reviewer 回归收口与最终验收已完成，待提交推送与汇报）
+> **状态**：已完成（代码、测试、`9124`/build55 验收、提交推送均已完成；CI 跟踪中）
 > **分支**：直接在 `dev` 上开发
 > **关联 Issue**：#683, #689, #686, #687, #688, #460, #673, #672
 > **执行顺序**：#683 → #689 → #686 → #687 → #688 → #460 → #673 → #672
@@ -65,10 +65,11 @@
 - [x] 完成 #672：时间块 `start/pause/resume/end` 全生命周期自动写入 EventLog
 - [x] 完成本轮联动收敛：任务与事件流默认 RT 化、旧前端适配器标记弃用、任务列表支持热更新
 - [x] 修复 reviewer 补充回归：Web + RT 事件追加/投影统一走 RT EventLog，`task.cancelled` 纳入前端热更新链路
+- [x] 顺带收敛 #726：目标拆解对话框支持搜索已有目标，并补齐对应前端测试
 - [x] 依据更新后的验收 HTML 跑满全部手工验收项（`9124` / `anonymous` / build55 环境）
 - [x] 串行补齐最终基线验证：`cargo build -p exomind-runtime`、`cargo test -p exomind-runtime`、`cargo clippy -p exomind-runtime -- -D warnings`
 - [x] 补跑前端 RT 回归验证：`npx tsc --noEmit`、相关 Vitest 回归集、`9124` 本地 RT curl 复验
-- [ ] 汇总命令、预期、实际结果与因果说明，随后提交、推送并继续跟踪 CI
+- [x] 汇总命令、预期、实际结果与因果说明，完成提交、推送并继续跟踪 CI
 
 ---
 

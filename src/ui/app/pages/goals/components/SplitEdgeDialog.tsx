@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import type { GoalNode } from '../goal-types';
 
 interface SplitEdgeDialogProps {
@@ -29,6 +30,24 @@ export function SplitEdgeDialog({
   onCancel,
   onConfirm,
 }: SplitEdgeDialogProps) {
+  const [goalSearchQuery, setGoalSearchQuery] = useState('');
+
+  useEffect(() => {
+    if (!open || insertMode !== 'existing') {
+      setGoalSearchQuery('');
+    }
+  }, [insertMode, open]);
+
+  const filteredGoals = useMemo(() => {
+    const query = goalSearchQuery.trim().toLowerCase();
+    if (!query) return availableGoals;
+    return availableGoals.filter((goal) => {
+      const title = goal.title.trim().toLowerCase();
+      const id = goal.id.toLowerCase();
+      return title.includes(query) || id.includes(query);
+    });
+  }, [availableGoals, goalSearchQuery]);
+
   if (!open) return null;
 
   return (
@@ -72,6 +91,13 @@ export function SplitEdgeDialog({
           ) : (
             <label className="block space-y-2">
               <span className="text-sm text-[#57534E] dark:text-[#D6D3D1]">选择已有目标</span>
+              <input
+                aria-label="搜索已有目标"
+                value={goalSearchQuery}
+                onChange={(event) => setGoalSearchQuery(event.target.value)}
+                placeholder="搜索标题或 ID"
+                className="w-full rounded-2xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#1C1917] dark:border-[#3F3F46] dark:bg-[#120F0D] dark:text-[#FAFAF9]"
+              />
               <select
                 aria-label="选择已有目标"
                 value={existingGoalId}
@@ -79,11 +105,17 @@ export function SplitEdgeDialog({
                 className="w-full rounded-2xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#1C1917] dark:border-[#3F3F46] dark:bg-[#120F0D] dark:text-[#FAFAF9]"
               >
                 <option value="">请选择目标</option>
-                {availableGoals.map((goal) => (
-                  <option key={goal.id} value={goal.id}>
-                    {goal.title || '待命名'}
+                {filteredGoals.length > 0 ? (
+                  filteredGoals.map((goal) => (
+                    <option key={goal.id} value={goal.id}>
+                      {goal.title || '待命名'}
+                    </option>
+                  ))
+                ) : (
+                  <option value="" disabled>
+                    没有匹配目标
                   </option>
-                ))}
+                )}
               </select>
             </label>
           )}
