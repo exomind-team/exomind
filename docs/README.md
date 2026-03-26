@@ -82,6 +82,10 @@
 - [评论策略与模板](agents/review-agent/comment-policy-and-templates.md) -- PR 评论策略与模板
 - [统一入口 Prompt](agents/review-agent/review-agent.prompt.md) -- 审阅 Agent 统一入口 Prompt
 
+### 开发航线
+
+- [开发航线](agents/dev-route/) -- Issue 聚类分析与批次实施规划航线图
+
 ---
 
 ## 活跃计划
