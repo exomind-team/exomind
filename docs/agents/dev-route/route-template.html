@@ -464,46 +464,51 @@ function renderRouteMap() {
       ctx.fillStyle = batch.status === 'blocked' ? 'rgba(13,17,23,.85)' : 'rgba(13,17,23,.95)';
       ctx.fill();
 
-      // Border
+      // Border (status-driven: blocked=yellow dim, ready=green, active=brown)
       ctx.strokeStyle = isSelected ? '#C75B3A' : p.border;
       ctx.lineWidth = isSelected ? 2.5 : 1.8;
+      if (batch.status === 'blocked') { ctx.globalAlpha = 0.6; }
       ctx.stroke();
+      ctx.globalAlpha = 1;
 
-      // Left track color accent bar
+      // Left track color accent bar (always visible, dimmed if blocked)
       const barW = 4;
+      ctx.globalAlpha = batch.status === 'blocked' ? 0.6 : 1;
       drawRoundedRect(ctx, x, y, barW, n.h, [r, 0, 0, r]);
       ctx.fillStyle = trackColor;
       ctx.fill();
+      ctx.globalAlpha = 1;
 
-      // Blocked overlay (dim)
+      // Blocked overlay (subtle dim, preserves track color visibility)
       if (batch.status === 'blocked') {
         drawRoundedRect(ctx, x, y, n.w, n.h, r);
-        ctx.fillStyle = 'rgba(6,8,13,.3)';
+        ctx.fillStyle = 'rgba(6,8,13,.2)';
         ctx.fill();
       }
 
-      // Batch ID (large)
-      ctx.fillStyle = p.text;
+      // Batch ID (large, track-colored, dimmed if blocked)
+      ctx.globalAlpha = batch.status === 'blocked' ? 0.6 : 1;
+      ctx.fillStyle = trackColor;
       ctx.font = 'bold 18px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillText(batch.id, n.x, y + 8);
 
-      // Batch name (small, colored by track)
-      ctx.fillStyle = batch.status === 'blocked' ? '#484f58' : trackColor;
+      // Batch name (small, track-colored, dimmed if blocked)
       ctx.font = '500 10px "Outfit", sans-serif';
       const nameText = batch.name.length > 14 ? batch.name.slice(0, 13) + '…' : batch.name;
       ctx.fillText(nameText, n.x, y + 30);
 
       // Issue count badge
-      ctx.fillStyle = batch.status === 'blocked' ? '#484f58' : '#6e7681';
+      ctx.fillStyle = batch.status === 'blocked' ? '#6e7681' : '#8b949e';
       ctx.font = '10px "JetBrains Mono", monospace';
       ctx.fillText(`${batch.issues.length} issues`, n.x, y + 44);
+      ctx.globalAlpha = 1;
 
-      // Progress mini-bar
+      // Progress mini-bar (always show)
       const doneCount = batch.issues.filter(i => i.done).length;
       const pct = batch.issues.length > 0 ? doneCount / batch.issues.length : 0;
-      if (pct > 0 || batch.status !== 'blocked') {
+      if (true) {
         const barWid = n.w - 24;
         const barH = 3;
         const barX = x + 12;
