@@ -261,11 +261,13 @@ describe('GoalsPage', () => {
     const { GoalsPage } = await loadGoalsPage();
     render(<GoalsPage />);
 
-    const guide = screen.getByTestId('goals-empty-state-guide');
-    expect(guide).toHaveTextContent('右键 Me 添加你的第一个目标');
-    expect(guide).toHaveStyle({
-      left: '110px',
-      top: '18px',
+    await waitFor(() => {
+      const guide = screen.getByTestId('goals-empty-state-guide');
+      expect(guide).toHaveTextContent('右键 Me 添加你的第一个目标');
+      expect(guide).toHaveStyle({
+        left: '110px',
+        top: '18px',
+      });
     });
   });
 
