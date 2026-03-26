@@ -489,9 +489,9 @@ function renderRouteMap() {
       ctx.textBaseline = 'top';
       ctx.fillText(batch.id, n.x, y + 8);
 
-      // Batch name (small)
-      ctx.fillStyle = batch.status === 'blocked' ? '#484f58' : '#8b949e';
-      ctx.font = '10px "Outfit", sans-serif';
+      // Batch name (small, colored by track)
+      ctx.fillStyle = batch.status === 'blocked' ? '#484f58' : trackColor;
+      ctx.font = '500 10px "Outfit", sans-serif';
       const nameText = batch.name.length > 14 ? batch.name.slice(0, 13) + '…' : batch.name;
       ctx.fillText(nameText, n.x, y + 30);
 
