@@ -26,6 +26,34 @@ pub struct TimeBlockData {
     pub task_status_outcomes: Option<HashMap<String, String>>,
     #[serde(default)]
     pub task_association_log: Vec<BlockTaskAssociationEvent>,
+    #[serde(default)]
+    pub source_planned_block_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PlannedTimeBlockType {
+    Work,
+    Rest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedTimeBlockData {
+    pub id: String,
+    pub date: String,
+    #[serde(rename = "type")]
+    pub block_type: PlannedTimeBlockType,
+    pub title: String,
+    pub planned_start_at: u64,
+    pub planned_duration_minutes: u64,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub linked_task_ids: Vec<String>,
+    pub order: i64,
+    pub created_at: u64,
+    pub updated_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,6 +92,8 @@ pub struct ActiveBlockData {
     pub task_ids: Vec<String>,
     #[serde(default)]
     pub task_association_log: Vec<BlockTaskAssociationEvent>,
+    #[serde(default)]
+    pub source_planned_block_id: Option<String>,
     /// Deprecated: legacy single-task field. Read for compat, never written.
     #[serde(default, skip_serializing)]
     pub task_id: Option<String>,
@@ -136,6 +166,7 @@ pub enum TimeBlockStoreBackendKind {
 struct TimeBlockScopeState {
     completed: Vec<TimeBlockData>,
     active: Option<ActiveBlockData>,
+    planned: Vec<PlannedTimeBlockData>,
 }
 
 enum TimeBlockStoreBackend {
@@ -171,6 +202,127 @@ impl TimeBlockStore {
 
     pub fn list_completed(&self) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
         self.list_completed_scoped(None)
+    }
+
+    pub fn list_planned(&self) -> Result<Vec<PlannedTimeBlockData>, TimeBlockStoreError> {
+        self.list_planned_scoped(None)
+    }
+
+    pub fn list_planned_scoped(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<Vec<PlannedTimeBlockData>, TimeBlockStoreError> {
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => Ok(sorted_planned_blocks(
+                state
+                    .read()
+                    .unwrap()
+                    .get(normalize_scope_key(scope_key))
+                    .map(|scope| scope.planned.clone())
+                    .unwrap_or_default(),
+            )),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.list_planned_scoped(normalize_scope_key(scope_key))
+            }
+        }
+    }
+
+    pub fn list_planned_for_date_scoped(
+        &self,
+        scope_key: Option<&str>,
+        date: &str,
+    ) -> Result<Vec<PlannedTimeBlockData>, TimeBlockStoreError> {
+        let normalized_date = date.trim();
+        Ok(self
+            .list_planned_scoped(scope_key)?
+            .into_iter()
+            .filter(|block| block.date == normalized_date)
+            .collect())
+    }
+
+    pub fn get_planned_scoped(
+        &self,
+        scope_key: Option<&str>,
+        block_id: &str,
+    ) -> Result<Option<PlannedTimeBlockData>, TimeBlockStoreError> {
+        let normalized_block_id = block_id.trim();
+        if normalized_block_id.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(self
+            .list_planned_scoped(scope_key)?
+            .into_iter()
+            .find(|block| block.id == normalized_block_id))
+    }
+
+    pub fn replace_planned_scoped(
+        &self,
+        scope_key: Option<&str>,
+        blocks: &[PlannedTimeBlockData],
+    ) -> Result<(), TimeBlockStoreError> {
+        let sorted = sorted_planned_blocks(blocks.to_vec());
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => {
+                state
+                    .write()
+                    .unwrap()
+                    .entry(normalize_scope_key(scope_key).to_string())
+                    .or_default()
+                    .planned = sorted;
+                Ok(())
+            }
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.replace_planned_scoped(normalize_scope_key(scope_key), &sorted)
+            }
+        }
+    }
+
+    pub fn put_planned_scoped(
+        &self,
+        scope_key: Option<&str>,
+        block: PlannedTimeBlockData,
+    ) -> Result<(), TimeBlockStoreError> {
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => {
+                let mut guard = state.write().unwrap();
+                let scope = guard
+                    .entry(normalize_scope_key(scope_key).to_string())
+                    .or_default();
+                if let Some(index) = scope.planned.iter().position(|item| item.id == block.id) {
+                    scope.planned[index] = block;
+                } else {
+                    scope.planned.push(block);
+                }
+                scope.planned = sorted_planned_blocks(scope.planned.clone());
+                Ok(())
+            }
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.put_planned_scoped(normalize_scope_key(scope_key), &block)
+            }
+        }
+    }
+
+    pub fn delete_planned_scoped(
+        &self,
+        scope_key: Option<&str>,
+        block_id: &str,
+    ) -> Result<(), TimeBlockStoreError> {
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => {
+                if let Some(scope) = state
+                    .write()
+                    .unwrap()
+                    .get_mut(normalize_scope_key(scope_key))
+                {
+                    scope.planned.retain(|block| block.id != block_id);
+                }
+                Ok(())
+            }
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.delete_planned_scoped(normalize_scope_key(scope_key), block_id)
+            }
+        }
     }
 
     pub fn list_completed_scoped(
@@ -368,6 +520,17 @@ impl TimeBlockStore {
     }
 }
 
+fn sorted_planned_blocks(mut blocks: Vec<PlannedTimeBlockData>) -> Vec<PlannedTimeBlockData> {
+    blocks.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then_with(|| left.order.cmp(&right.order))
+            .then_with(|| left.planned_start_at.cmp(&right.planned_start_at))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    blocks
+}
+
 impl Default for TimeBlockStore {
     fn default() -> Self {
         Self::new()
@@ -379,6 +542,27 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::tempdir;
+
+    fn sample_planned_block(
+        id: &str,
+        date: &str,
+        block_type: PlannedTimeBlockType,
+        order: i64,
+    ) -> PlannedTimeBlockData {
+        PlannedTimeBlockData {
+            id: id.to_string(),
+            date: date.to_string(),
+            block_type,
+            title: format!("planned-{id}"),
+            planned_start_at: 1_700_000_000_000 + (order as u64 * 60_000),
+            planned_duration_minutes: 25,
+            note: Some("sample note".to_string()),
+            linked_task_ids: vec![format!("task-{id}")],
+            order,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        }
+    }
 
     #[test]
     fn sqlite_store_isolates_timeblocks_by_scope() {
@@ -410,6 +594,7 @@ mod tests {
                         timestamp: 1,
                         source: "block_start".to_string(),
                     }],
+                    source_planned_block_id: None,
                 }],
             )
             .unwrap();
@@ -428,6 +613,7 @@ mod tests {
                     task_ids: vec![],
                     task_status_outcomes: None,
                     task_association_log: vec![],
+                    source_planned_block_id: None,
                 }],
             )
             .unwrap();
@@ -463,6 +649,7 @@ mod tests {
                         timestamp: 10,
                         source: "block_start".to_string(),
                     }],
+                    source_planned_block_id: None,
                     task_id: None,
                 },
             )
@@ -551,5 +738,91 @@ mod tests {
         assert_eq!(normalized.task_ids, vec!["task-2".to_string()]);
         assert_eq!(serialized["taskIds"], json!(["task-2"]));
         assert!(serialized.get("taskId").is_none());
+    }
+
+    #[test]
+    fn sqlite_store_isolates_planned_timeblocks_by_scope() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("planned-timeblocks.sqlite");
+        let store = TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap();
+
+        store
+            .replace_planned_scoped(
+                Some("profile-a"),
+                &[
+                    sample_planned_block("plan-a-1", "2026-03-26", PlannedTimeBlockType::Work, 1),
+                    sample_planned_block("plan-a-2", "2026-03-27", PlannedTimeBlockType::Rest, 2),
+                ],
+            )
+            .unwrap();
+        store
+            .replace_planned_scoped(
+                Some("profile-b"),
+                &[sample_planned_block(
+                    "plan-b-1",
+                    "2026-03-26",
+                    PlannedTimeBlockType::Rest,
+                    1,
+                )],
+            )
+            .unwrap();
+
+        let scoped_a_today = store
+            .list_planned_for_date_scoped(Some("profile-a"), "2026-03-26")
+            .unwrap();
+        let scoped_a_other_day = store
+            .list_planned_for_date_scoped(Some("profile-a"), "2026-03-27")
+            .unwrap();
+        let scoped_b_today = store
+            .list_planned_for_date_scoped(Some("profile-b"), "2026-03-26")
+            .unwrap();
+        let anonymous_today = store
+            .list_planned_for_date_scoped(None, "2026-03-26")
+            .unwrap();
+
+        assert_eq!(scoped_a_today.len(), 1);
+        assert_eq!(scoped_a_today[0].id, "plan-a-1");
+        assert_eq!(scoped_a_today[0].block_type, PlannedTimeBlockType::Work);
+        assert_eq!(scoped_a_other_day.len(), 1);
+        assert_eq!(scoped_a_other_day[0].id, "plan-a-2");
+        assert_eq!(scoped_b_today.len(), 1);
+        assert_eq!(scoped_b_today[0].id, "plan-b-1");
+        assert!(anonymous_today.is_empty());
+    }
+
+    #[test]
+    fn planned_block_provenance_round_trips_through_json() {
+        let active_block: ActiveBlockData = serde_json::from_value(json!({
+            "startId": "active-1",
+            "name": "Deep Work",
+            "mode": "countdown",
+            "targetMinutes": 50,
+            "elapsed": 120000,
+            "paused": false,
+            "startTime": 1_700_000_000_000u64,
+            "taskIds": ["task-a"],
+            "taskAssociationLog": [],
+            "sourcePlannedBlockId": "plan-1"
+        }))
+        .unwrap();
+        let completed_block: TimeBlockData = serde_json::from_value(json!({
+            "id": "tb-1",
+            "name": "Deep Work",
+            "startId": "active-1",
+            "endId": "end-1",
+            "tags": ["block_feedback"],
+            "startTime": 1_700_000_000_000u64,
+            "endTime": 1_700_000_300_000u64,
+            "taskIds": ["task-a"],
+            "taskAssociationLog": [],
+            "sourcePlannedBlockId": "plan-1"
+        }))
+        .unwrap();
+
+        let active_json = serde_json::to_value(active_block).unwrap();
+        let completed_json = serde_json::to_value(completed_block).unwrap();
+
+        assert_eq!(active_json["sourcePlannedBlockId"], json!("plan-1"));
+        assert_eq!(completed_json["sourcePlannedBlockId"], json!("plan-1"));
     }
 }

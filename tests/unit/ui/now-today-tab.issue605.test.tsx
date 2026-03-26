@@ -10,6 +10,7 @@ const onTaskChangeMock = vi.fn(() => () => {});
 const loadTimeBlocksMock = vi.fn();
 const loadActiveBlockMock = vi.fn();
 const onBlockChangeMock = vi.fn();
+const getTodayPlannerMock = vi.fn();
 
 let blockChangeHandler: ((block: ActiveBlockData | null) => void) | null = null;
 
@@ -26,6 +27,14 @@ vi.mock('@/lib/services', () => ({
     loadTimeBlocks: loadTimeBlocksMock,
     loadActiveBlock: loadActiveBlockMock,
     onBlockChange: onBlockChangeMock,
+  }),
+  getTodayPlannerService: () => ({
+    getTodayPlanner: getTodayPlannerMock,
+    createPlannedBlock: vi.fn(),
+    updatePlannedBlock: vi.fn(),
+    reorderPlannedBlocks: vi.fn(),
+    startPlannedBlock: vi.fn(),
+    deletePlannedBlock: vi.fn(),
   }),
 }));
 
@@ -74,7 +83,12 @@ describe('NowTodayTab issue-605（活跃时间块快照闪烁修复）', () => {
     loadTimeBlocksMock.mockReset();
     loadActiveBlockMock.mockReset();
     onBlockChangeMock.mockReset();
+    getTodayPlannerMock.mockReset();
     blockChangeHandler = null;
+    getTodayPlannerMock.mockResolvedValue({
+      date: '2026-03-26',
+      blocks: [],
+    });
 
     onBlockChangeMock.mockImplementation((callback: (block: ActiveBlockData | null) => void) => {
       blockChangeHandler = callback;

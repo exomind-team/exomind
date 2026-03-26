@@ -97,6 +97,7 @@ export interface TimeBlockData {
   taskStatusOutcomes?: Record<string, string>;
   /** 关联历史日志：可回放“曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
 }
 
 // 时间块类型（UI 使用）
@@ -114,6 +115,7 @@ export interface TimeBlock {
   taskStatusOutcomes?: Record<string, string>;
   /** 关联历史日志：可回放“曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
 }
 
 // 活跃时间块（进行中）
@@ -161,8 +163,56 @@ export interface ActiveBlockData {
   taskIds: UUID[];
   /** 运行期关联历史：不仅能恢复当前关联，也能保留“曾经关联过”的任务全集 */
   taskAssociationLog: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
   /** @deprecated Use taskIds. Kept for deserialization compat only. */
   taskId?: UUID;
+}
+
+export type PlannedTimeBlockType = 'work' | 'rest';
+export type PlannedTimeBlockStatus = 'pending' | 'active' | 'completed';
+
+export interface PlannedTimeBlockData {
+  id: UUID;
+  date: string;
+  type: PlannedTimeBlockType;
+  title: string;
+  plannedStartAt: Timestamp;
+  plannedDurationMinutes: number;
+  note?: string;
+  linkedTaskIds: UUID[];
+  order: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface TodayPlannerBlock extends PlannedTimeBlockData {
+  status: PlannedTimeBlockStatus;
+  sourceTimeBlockId?: UUID;
+}
+
+export interface TodayPlannerSnapshot {
+  date: string;
+  blocks: TodayPlannerBlock[];
+}
+
+export interface CreatePlannedTimeBlockInput {
+  date: string;
+  type: PlannedTimeBlockType;
+  title: string;
+  plannedStartAt: Timestamp;
+  plannedDurationMinutes: number;
+  note?: string;
+  linkedTaskIds?: UUID[];
+}
+
+export interface UpdatePlannedTimeBlockInput {
+  date?: string;
+  type?: PlannedTimeBlockType;
+  title?: string;
+  plannedStartAt?: Timestamp;
+  plannedDurationMinutes?: number;
+  note?: string | null;
+  linkedTaskIds?: UUID[];
 }
 
 // 计时器配置

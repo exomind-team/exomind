@@ -627,6 +627,7 @@ mod tests {
                             task_ids: vec![],
                             task_status_outcomes: None,
                             task_association_log: vec![],
+                            source_planned_block_id: None,
                         }])
                         .unwrap(),
                     ))
@@ -667,6 +668,7 @@ mod tests {
                                     source: "block_start".to_string(),
                                 },
                             ],
+                            source_planned_block_id: None,
                         }])
                         .unwrap(),
                     ))
@@ -714,6 +716,7 @@ mod tests {
                                     source: "block_start".to_string(),
                                 },
                             ],
+                            source_planned_block_id: None,
                             task_id: Some("task-profile-a".to_string()),
                         })
                         .unwrap(),
@@ -827,6 +830,7 @@ mod tests {
                                     source: "block_start".to_string(),
                                 },
                             ],
+                            source_planned_block_id: None,
                         }])
                         .unwrap(),
                     ))
@@ -874,6 +878,7 @@ mod tests {
                                     source: "block_start".to_string(),
                                 },
                             ],
+                            source_planned_block_id: None,
                             task_id: Some("task-user-a".to_string()),
                         })
                         .unwrap(),
@@ -975,6 +980,7 @@ mod tests {
                             paused_at: None,
                             task_ids: vec!["task-a".to_string()],
                             task_association_log: vec![],
+                            source_planned_block_id: None,
                             task_id: Some("task-a".to_string()),
                         })
                         .unwrap(),
@@ -1035,6 +1041,7 @@ mod tests {
                             paused_at: None,
                             task_ids: vec!["task-a".to_string()],
                             task_association_log: vec![],
+                            source_planned_block_id: None,
                             task_id: Some("task-a".to_string()),
                         })
                         .unwrap(),
@@ -1099,6 +1106,7 @@ mod tests {
             paused_at: None,
             task_ids: vec!["task-a".to_string()],
             task_association_log: vec![],
+            source_planned_block_id: None,
             task_id: Some("task-a".to_string()),
         };
 
@@ -1220,6 +1228,7 @@ mod tests {
             paused_at: None,
             task_ids: vec!["task-a".to_string()],
             task_association_log: vec![],
+            source_planned_block_id: None,
             task_id: Some("task-a".to_string()),
         };
 
