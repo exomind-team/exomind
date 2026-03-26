@@ -127,7 +127,7 @@ impl MeshState {
     ) -> Self {
         let persisted = persist_path
             .as_ref()
-            .and_then(|path| load_persisted_state(path));
+            .and_then(load_persisted_state);
 
         let mut peers = HashMap::new();
         let mut interests = HashMap::new();
@@ -217,11 +217,7 @@ impl MeshState {
                 peer.created_at = now.clone();
             }
 
-            if peer.updated_at.is_empty() {
-                peer.updated_at = now.clone();
-            } else {
-                peer.updated_at = now.clone();
-            }
+            peer.updated_at = now.clone();
 
             if peer.enabled {
                 if matches!(peer.status, PeerStatus::Disabled) {

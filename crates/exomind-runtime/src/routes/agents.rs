@@ -406,16 +406,16 @@ async fn chat_with_agent(
 
             if !chunk.content.is_empty() {
                 preview.push_str(&chunk.content);
-                if let Some(session_id) = active_session_id.as_deref() {
-                    if let Ok(updated) = state.session_store.update(
+                if let Some(session_id) = active_session_id.as_deref()
+                    && let Ok(updated) = state.session_store.update(
                         session_id,
                         UpdateSessionInput {
                             last_output_preview: Some(truncate_output_preview(&preview)),
                             ..Default::default()
                         },
-                    ) {
-                        broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
-                    }
+                    )
+                {
+                    broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
                 }
             }
 

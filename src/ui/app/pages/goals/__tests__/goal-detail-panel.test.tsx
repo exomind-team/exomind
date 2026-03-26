@@ -207,4 +207,71 @@ describe('GoalDetailPanel', () => {
       description: 'Draft description',
     });
   });
+
+  it('uses resolved task labels in completion rule and edge lists when edge title is empty', async () => {
+    const { GoalDetailPanel } = await import('../components/GoalDetailPanel');
+
+    render(
+      <GoalDetailPanel
+        goal={{
+          id: 'goal-task-labels',
+          title: 'Goal',
+          description: '',
+          cancelled: false,
+          completionRule: [['edge-a'], ['edge-b']],
+          createdAt: 1,
+          updatedAt: 1,
+        }}
+        status="pending"
+        inEdges={[
+          {
+            id: 'edge-a',
+            title: '',
+            description: '',
+            source: 'me',
+            target: 'goal-task-labels',
+            taskNodeRef: 'task-a',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: 'edge-b',
+            title: '',
+            description: '',
+            source: 'me',
+            target: 'goal-task-labels',
+            taskNodeRef: 'task-b',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ]}
+        outEdges={[
+          {
+            id: 'edge-out',
+            title: '',
+            description: '',
+            source: 'goal-task-labels',
+            target: 'goal-next',
+            taskNodeRef: 'task-out',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ]}
+        hopDistance={1}
+        edgeLabelById={{
+          'edge-a': '真实任务 A',
+          'edge-b': '真实任务 B',
+          'edge-out': '真实任务 Out',
+        }}
+        onClose={() => {}}
+        onUpdate={() => true}
+        onJumpEdge={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('真实任务 A 或 真实任务 B')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '真实任务 A' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '真实任务 B' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '真实任务 Out' })).toBeInTheDocument();
+  });
 });

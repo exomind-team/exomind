@@ -823,6 +823,12 @@ export function GoalsPage() {
           status={resolveGoalStatus(selectedGoal.id)}
           inEdges={getInEdgesLogic(graph, selectedGoal.id)}
           outEdges={getOutEdges(selectedGoal.id)}
+          edgeLabelById={Object.fromEntries(
+            [...getInEdgesLogic(graph, selectedGoal.id), ...getOutEdges(selectedGoal.id)].map((edge) => [
+              edge.id,
+              resolveEdgeLabel(edge.id),
+            ]),
+          )}
           onClose={() => setSelected(null)}
           onJumpEdge={(edgeId) => setSelected({ kind: 'edge', id: edgeId })}
           hopDistance={resolveHopDistance(selectedGoal.id)}

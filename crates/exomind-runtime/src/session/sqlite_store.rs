@@ -372,9 +372,9 @@ fn map_session_row(row: &rusqlite::Row) -> Result<AgentSession, rusqlite::Error>
     let labels_json: String = row.get(15)?;
     let quick_actions_json: String = row.get(22)?;
 
-    let status = SessionStatus::from_str(&status_str).unwrap_or(SessionStatus::Running);
+    let status = SessionStatus::parse(&status_str).unwrap_or(SessionStatus::Running);
     let interaction_mode =
-        InteractionMode::from_str(&interaction_str).unwrap_or(InteractionMode::Structured);
+        InteractionMode::parse(&interaction_str).unwrap_or(InteractionMode::Structured);
     let issue_refs: Vec<String> = serde_json::from_str(&issue_refs_json).unwrap_or_default();
     let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_default();
     let quick_actions: Vec<QuickAction> =

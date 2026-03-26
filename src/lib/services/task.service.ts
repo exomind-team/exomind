@@ -6,6 +6,7 @@ import { emitTaskCreated, emitTaskTransition } from './task-event-emitter'
 
 type TaskEnvironmentLike = {
   task: ITaskPort
+  runtime?: 'web' | 'tauri'
 }
 
 export interface TaskServiceOptions {
@@ -200,12 +201,16 @@ export class TaskServiceImpl implements TaskService {
     }
   }
 
+  notifyExternalChange(): void {
+    this.notifyChangeListeners()
+  }
+
   private resolveDefaultBackendMode(): DomainBackendMode {
     if (this.useInjectedEnv) {
       return 'legacy'
     }
 
-    return getTaskBackendMode()
+    return this.env.runtime === 'tauri' ? getTaskBackendMode() : 'rt-sqlite'
   }
 
   private shouldEmitTransitionEvents(): boolean {
@@ -244,4 +249,10 @@ let instance: TaskService | null = null
 export function getTaskService(): TaskService {
   if (!instance) instance = new TaskServiceImpl()
   return instance
+}
+
+export function notifyTaskDataChanged(): void {
+  if (instance && instance instanceof TaskServiceImpl) {
+    instance.notifyExternalChange()
+  }
 }

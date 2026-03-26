@@ -10,6 +10,7 @@ use exomind_runtime::{
     spawn_ts_agents_default_for_platform, start_with_options,
 };
 use std::sync::Mutex;
+use tempfile::tempdir;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -87,4 +88,35 @@ async fn start_with_port_zero_binds_a_random_available_port() {
     assert_eq!(handle.host(), "127.0.0.1");
 
     handle.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn start_with_options_uses_persistent_sqlite_task_backend_by_default() {
+    let dir = tempdir().expect("temp dir should be available");
+
+    let mut handle = start_with_options(RuntimeStartOptions {
+        bind_host: "127.0.0.1".to_string(),
+        port: 0,
+        spawn_ts_agents: false,
+        data_dir: Some(dir.path().to_path_buf()),
+        ..Default::default()
+    })
+    .await
+    .expect("runtime should start");
+
+    let response = reqwest::get(format!(
+        "http://127.0.0.1:{}/tasks/backend/status",
+        handle.port()
+    ))
+    .await
+    .expect("backend status request should succeed");
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .expect("backend status payload should decode");
+
+    handle.stop().await.expect("runtime should stop");
+
+    assert_eq!(payload["backend"], "rt-sqlite");
+    assert_eq!(payload["supports_sqlite_snapshot"], true);
 }

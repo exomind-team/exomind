@@ -3,6 +3,9 @@
  *
  * 基于 PouchDB TaskStorage 实现 ITaskPort。
  * 仿照 WebEventLogStorageAdapter 模式：委托给 Storage 层，负责数据转换。
+ *
+ * 已弃用待删除：业务数据链路已切换到 RT Tasks，本适配器仅保留给
+ * 旧版迁移/兼容路径使用，后续迁移完成后应整体移除。
  */
 
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port';

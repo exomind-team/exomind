@@ -1,6 +1,6 @@
 [package]
 name = "exomind-runtime"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 default-run = "exomind-rt"
 
@@ -38,6 +38,7 @@ rand = "0.8"
 base64 = "0.22"
 async-stream = "0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
 
 # PTY support: not available on Android (portable-pty → termios → no android impl)
 [target.'cfg(not(target_os = "android"))'.dependencies]
@@ -46,6 +47,5 @@ dirs = "5"
 
 [dev-dependencies]
 http-body-util = "0.1"
-tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }

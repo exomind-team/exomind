@@ -440,6 +440,10 @@ describe('GoalsPage', () => {
       expect(edges.find((edge) => edge.id === edgeId)?.data?.status).toBe('in_progress');
       expect(nodes.find((node) => node.id === goalId)?.data?.status).toBe('in_progress');
     });
+
+    fireEvent.click(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+
+    expect(await screen.findByRole('button', { name: '真实任务' })).toBeInTheDocument();
   });
 
   it('shows connect preview while connect mode is active and clears it on pane click', async () => {

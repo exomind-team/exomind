@@ -38,7 +38,7 @@ impl Default for InternalState {
 /// keeping the same `CognitionEngine` interface.
 pub struct LlmCognition {
     agent_id: String,
-    soul: String,
+    _soul: String,
     state: RwLock<InternalState>,
 }
 
@@ -46,7 +46,7 @@ impl LlmCognition {
     pub fn new(agent_id: impl Into<String>, soul: impl Into<String>) -> Self {
         Self {
             agent_id: agent_id.into(),
-            soul: soul.into(),
+            _soul: soul.into(),
             state: RwLock::new(InternalState::default()),
         }
     }
@@ -178,7 +178,7 @@ impl CognitionEngine for LlmCognition {
                         ));
                     }
                 }
-                "exploring" | _ => {
+                _ => {
                     // Full activity: write diary + emit signal.
                     let diary_entry = Self::build_diary_entry(
                         tick,
@@ -188,11 +188,7 @@ impl CognitionEngine for LlmCognition {
                     );
 
                     // Append to diary.md (or create it).
-                    let existing_diary = ctx
-                        .knowledge_summary
-                        .contains("diary.md")
-                        .then_some(true)
-                        .unwrap_or(false);
+                    let existing_diary = ctx.knowledge_summary.contains("diary.md");
 
                     if existing_diary {
                         // We'll append by writing the full content.

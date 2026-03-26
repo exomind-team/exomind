@@ -423,13 +423,14 @@ pub async fn start_with_options(
         .local_addr()
         .map_err(RuntimeStartError::ReadLocalAddr)?;
 
-    let mut state = AppState::new_runtime(
+    let mut state = AppState::new_runtime_with_storage_paths(
         local_addr.port(),
         options.host_id.clone(),
         options.mesh_state_path.clone(),
         options.signal_storage_path.clone(),
         true,
         options.auth_secret.clone(),
+        runtime_storage_paths_for_persistent_start(options.data_dir.clone()),
     );
 
     // mDNS discovery setup.
@@ -756,6 +757,56 @@ fn resolve_data_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("./runtime-data"))
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeStoragePaths {
+    data_dir: PathBuf,
+    eventlog_sqlite_path: Option<PathBuf>,
+    task_sqlite_path: Option<PathBuf>,
+    timeblock_sqlite_path: Option<PathBuf>,
+    session_sqlite_path: Option<PathBuf>,
+}
+
+fn runtime_storage_paths_from_env() -> RuntimeStoragePaths {
+    RuntimeStoragePaths {
+        data_dir: resolve_data_dir(),
+        eventlog_sqlite_path: env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        task_sqlite_path: env::var("EXOMIND_RT_TASK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        timeblock_sqlite_path: env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        session_sqlite_path: env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+    }
+}
+
+fn runtime_storage_paths_for_persistent_start(data_dir: Option<PathBuf>) -> RuntimeStoragePaths {
+    let data_dir = data_dir.unwrap_or_else(resolve_data_dir);
+    RuntimeStoragePaths {
+        eventlog_sqlite_path: env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("eventlog.sqlite"))),
+        task_sqlite_path: env::var("EXOMIND_RT_TASK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("tasks.sqlite"))),
+        timeblock_sqlite_path: env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("timeblocks.sqlite"))),
+        session_sqlite_path: env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("sessions.sqlite"))),
+        data_dir,
+    }
+}
+
 impl AppState {
     pub fn new(port: u16) -> Self {
         Self::new_runtime(port, default_runtime_host_id(port), None, None, false, None)
@@ -768,6 +819,26 @@ impl AppState {
         signal_storage_path: Option<PathBuf>,
         enable_mesh_relay: bool,
         auth_secret: Option<String>,
+    ) -> Self {
+        Self::new_runtime_with_storage_paths(
+            port,
+            host_id,
+            mesh_persist_path,
+            signal_storage_path,
+            enable_mesh_relay,
+            auth_secret,
+            runtime_storage_paths_from_env(),
+        )
+    }
+
+    fn new_runtime_with_storage_paths(
+        port: u16,
+        host_id: String,
+        mesh_persist_path: Option<PathBuf>,
+        signal_storage_path: Option<PathBuf>,
+        enable_mesh_relay: bool,
+        auth_secret: Option<String>,
+        storage_paths: RuntimeStoragePaths,
     ) -> Self {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
@@ -803,10 +874,16 @@ impl AppState {
             host_id.clone(),
         ));
 
-        let data_dir = resolve_data_dir();
-        let eventlog_store = env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
+        let data_dir = storage_paths.data_dir;
+        if let Err(error) = std::fs::create_dir_all(&data_dir) {
+            tracing::warn!(
+                path = %data_dir.display(),
+                error = %error,
+                "failed to create runtime data dir (创建运行时数据目录失败)"
+            );
+        }
+        let eventlog_store = storage_paths
+            .eventlog_sqlite_path
             .map(|path| {
                 EventLogStore::with_sqlite_path(data_dir.clone(), &path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -818,9 +895,8 @@ impl AppState {
                 })
             })
             .unwrap_or_else(|| EventLogStore::new(data_dir));
-        let task_store = env::var("EXOMIND_RT_TASK_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
+        let task_store = storage_paths
+            .task_sqlite_path
             .map(|path| {
                 task::TaskStore::with_sqlite_path(&path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -831,10 +907,9 @@ impl AppState {
                     task::TaskStore::new()
                 })
             })
-            .unwrap_or_else(task::TaskStore::new);
-        let timeblock_store = env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
+            .unwrap_or_default();
+        let timeblock_store = storage_paths
+            .timeblock_sqlite_path
             .map(|path| {
                 timeblock::TimeBlockStore::with_sqlite_path(&path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -845,10 +920,9 @@ impl AppState {
                     timeblock::TimeBlockStore::new()
                 })
             })
-            .unwrap_or_else(timeblock::TimeBlockStore::new);
-        let session_store = env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
+            .unwrap_or_default();
+        let session_store = storage_paths
+            .session_sqlite_path
             .map(|path| {
                 session::SessionStore::with_sqlite_path(&path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -859,7 +933,7 @@ impl AppState {
                     session::SessionStore::new()
                 })
             })
-            .unwrap_or_else(session::SessionStore::new);
+            .unwrap_or_default();
         let energy_registry = energy::EnergyRegistry::new();
         let tick_manager = Arc::new(tick::TickManager::new(
             host_id.clone(),

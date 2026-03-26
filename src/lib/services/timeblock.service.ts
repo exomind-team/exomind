@@ -155,7 +155,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return 'legacy';
     }
 
-    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'legacy';
+    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'rt-sqlite';
   }
 
   async loadTimeBlocks(): Promise<TimeBlock[]> {

@@ -1,7 +1,7 @@
 use axum::{Json, extract::State};
 use serde::Serialize;
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 use sysinfo::System;
 

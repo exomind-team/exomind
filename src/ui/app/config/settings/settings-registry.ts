@@ -405,6 +405,10 @@ function devOnly(ctx: SettingsContext): boolean {
   return Boolean(ctx.developerMode);
 }
 
+function tauriDevOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.developerMode) && Boolean(ctx.isTauriWindow);
+}
+
 function volcanoOnly(ctx: SettingsContext): boolean {
   return ctx.voiceShortcutAsrProvider === 'volcano';
 }
@@ -1110,7 +1114,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '事件日志后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
@@ -1127,7 +1131,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '任务后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
@@ -1144,7 +1148,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '时间块后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },

@@ -9,7 +9,7 @@ const ACTIVE_BLOCK_SINGLETON_KEY: &str = "current";
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
 
 pub struct SqliteTimeBlockStore {
-    path: PathBuf,
+    _path: PathBuf,
     connection: Mutex<Connection>,
 }
 
@@ -21,7 +21,7 @@ impl SqliteTimeBlockStore {
 
         let connection = Connection::open(path)?;
         let store = Self {
-            path: path.to_path_buf(),
+            _path: path.to_path_buf(),
             connection: Mutex::new(connection),
         };
         store.init()?;

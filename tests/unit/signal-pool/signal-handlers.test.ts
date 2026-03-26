@@ -14,7 +14,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   startSignalHandlers,
   type ActiveBlockReplicationSnapshotPayload,
+  type TaskChangedPayload,
   type TaskAutoCreatedPayload,
+  type TaskTransitionedPayload,
   type EventLogAppendedPayload,
   type EventLogReplicationAppendedPayload,
   type ReviewCompletedPayload,
@@ -94,6 +96,60 @@ describe('signal-handlers: task.auto-created', () => {
         }),
       ),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('signal-handlers: task lifecycle topics', () => {
+  it('calls onTaskCreated when topic is task.created', async () => {
+    const onTaskCreated = vi.fn<[TaskChangedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+    const handler = startSignalHandlers({ onTaskCreated });
+    const payload: TaskChangedPayload = {
+      id: 'task-created-1',
+      title: '新任务',
+      status: 'pending',
+    };
+
+    await handler(makeSignalEvent('task.created', payload));
+
+    expect(onTaskCreated).toHaveBeenCalledTimes(1);
+    expect(onTaskCreated).toHaveBeenCalledWith(payload);
+  });
+
+  it('calls onTaskUpdated when topic is task.updated', async () => {
+    const onTaskUpdated = vi.fn<[TaskChangedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+    const handler = startSignalHandlers({ onTaskUpdated });
+    const payload: TaskChangedPayload = {
+      id: 'task-updated-1',
+      title: '已更新任务',
+      status: 'pending',
+    };
+
+    await handler(makeSignalEvent('task.updated', payload));
+
+    expect(onTaskUpdated).toHaveBeenCalledTimes(1);
+    expect(onTaskUpdated).toHaveBeenCalledWith(payload);
+  });
+
+  it('calls onTaskTransitioned when topic is task.transitioned', async () => {
+    const onTaskTransitioned = vi.fn<[TaskTransitionedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+    const handler = startSignalHandlers({ onTaskTransitioned });
+    const payload: TaskTransitionedPayload = {
+      task: {
+        id: 'task-transitioned-1',
+        title: '迁移中的任务',
+        status: 'in_progress',
+      },
+      old_status: 'pending',
+      new_status: 'in_progress',
+    };
+
+    await handler(makeSignalEvent('task.transitioned', payload));
+
+    expect(onTaskTransitioned).toHaveBeenCalledTimes(1);
+    expect(onTaskTransitioned).toHaveBeenCalledWith(payload);
   });
 });
 

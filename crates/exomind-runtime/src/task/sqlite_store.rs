@@ -231,7 +231,23 @@ impl SqliteTaskStore {
     }
 
     pub fn cancel_scoped(&self, scope_key: &str, id: &str) -> Result<Task, TaskStoreError> {
-        let (_, task) = self.transition_scoped(scope_key, id, TaskStatus::Cancelled)?;
+        let mut task = self
+            .get_scoped(scope_key, id)?
+            .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
+
+        if task.status.is_terminal() {
+            return Err(TaskStoreError::InvalidTransition {
+                from: task.status,
+                to: TaskStatus::Cancelled,
+            });
+        }
+
+        let now = chrono::Utc::now().timestamp_millis() as u64;
+        task.status = TaskStatus::Cancelled;
+        task.updated_at = now;
+        task.completed_at = Some(now);
+
+        self.persist_task(scope_key, &task)?;
         Ok(task)
     }
 
@@ -255,6 +271,10 @@ impl SqliteTaskStore {
 
     pub fn len(&self) -> Result<usize, TaskStoreError> {
         self.len_scoped(DEFAULT_SCOPE_KEY)
+    }
+
+    pub fn is_empty(&self) -> Result<bool, TaskStoreError> {
+        Ok(self.len()? == 0)
     }
 
     pub fn len_scoped(&self, scope_key: &str) -> Result<usize, TaskStoreError> {
