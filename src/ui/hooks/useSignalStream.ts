@@ -204,6 +204,10 @@ export function useSignalStream(): void {
         notifyTaskDataChanged();
         notifyEventLogChanged();
       },
+      onTaskCancelled: async () => {
+        notifyTaskDataChanged();
+        notifyEventLogChanged();
+      },
       onEventLogAppended: async (payload: EventLogAppendedPayload) => {
         if (payload.inputMode !== 'external') {
           return;

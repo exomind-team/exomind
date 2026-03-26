@@ -15,6 +15,7 @@ import {
   startSignalHandlers,
   type ActiveBlockReplicationSnapshotPayload,
   type TaskChangedPayload,
+  type TaskCancelledPayload,
   type TaskAutoCreatedPayload,
   type TaskTransitionedPayload,
   type EventLogAppendedPayload,
@@ -150,6 +151,22 @@ describe('signal-handlers: task lifecycle topics', () => {
 
     expect(onTaskTransitioned).toHaveBeenCalledTimes(1);
     expect(onTaskTransitioned).toHaveBeenCalledWith(payload);
+  });
+
+  it('calls onTaskCancelled when topic is task.cancelled', async () => {
+    const onTaskCancelled = vi.fn<[TaskCancelledPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+    const handler = startSignalHandlers({ onTaskCancelled });
+    const payload: TaskCancelledPayload = {
+      id: 'task-cancelled-1',
+      title: '已取消任务',
+      status: 'cancelled',
+    };
+
+    await handler(makeSignalEvent('task.cancelled', payload));
+
+    expect(onTaskCancelled).toHaveBeenCalledTimes(1);
+    expect(onTaskCancelled).toHaveBeenCalledWith(payload);
   });
 });
 

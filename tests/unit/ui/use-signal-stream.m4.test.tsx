@@ -404,6 +404,11 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
       old_status: 'pending',
       new_status: 'in_progress',
     });
+    await signalHandlerOptions[0].onTaskCancelled?.({
+      id: 'task-cancelled-1',
+      title: 'cancelled task',
+      status: 'cancelled',
+    });
     await signalHandlerOptions[0].onEventLogReplicationAppended?.({
       schemaVersion: 1,
       replicationSeq: 11,
@@ -420,7 +425,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
       },
     });
 
-    expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(3);
-    expect(notifyEventLogChangedMock).toHaveBeenCalledTimes(2);
+    expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(4);
+    expect(notifyEventLogChangedMock).toHaveBeenCalledTimes(3);
   });
 });

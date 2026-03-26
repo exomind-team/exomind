@@ -27,6 +27,9 @@ export interface TaskChangedPayload {
   status: string;
 }
 
+/** Payload shape for task.cancelled signals. */
+export interface TaskCancelledPayload extends TaskChangedPayload {}
+
 /** Payload shape for task.transitioned signals. */
 export interface TaskTransitionedPayload {
   task: TaskChangedPayload;
@@ -89,6 +92,7 @@ export interface SignalHandlerOptions {
   onTaskCreated?: (payload: TaskChangedPayload) => Promise<void>;
   onTaskUpdated?: (payload: TaskChangedPayload) => Promise<void>;
   onTaskTransitioned?: (payload: TaskTransitionedPayload) => Promise<void>;
+  onTaskCancelled?: (payload: TaskCancelledPayload) => Promise<void>;
   onEventLogAppended?: (payload: EventLogAppendedPayload) => Promise<void>;
   onEventLogReplicationAppended?: (payload: EventLogReplicationAppendedPayload) => Promise<void>;
   onActiveBlockReplicationSnapshot?: (payload: ActiveBlockReplicationSnapshotPayload) => Promise<void>;
@@ -139,6 +143,12 @@ export function startSignalHandlers(
       case 'task.transitioned':
         if (options.onTaskTransitioned) {
           await options.onTaskTransitioned(event.payload as TaskTransitionedPayload);
+        }
+        break;
+
+      case 'task.cancelled':
+        if (options.onTaskCancelled) {
+          await options.onTaskCancelled(event.payload as TaskCancelledPayload);
         }
         break;
 
