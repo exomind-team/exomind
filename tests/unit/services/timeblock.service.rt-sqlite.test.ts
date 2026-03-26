@@ -4,10 +4,12 @@ const {
   getEventStorageMock,
   addEventMock,
   getFeedbackPreferencesMock,
+  appendEventWithEcsReplicationMock,
 } = vi.hoisted(() => ({
   getEventStorageMock: vi.fn(),
   addEventMock: vi.fn(),
   getFeedbackPreferencesMock: vi.fn(),
+  appendEventWithEcsReplicationMock: vi.fn(async (event) => event),
 }));
 
 vi.mock('@/lib/storage/event-storage', () => ({
@@ -19,7 +21,7 @@ vi.mock('@/config/feedback-preferences', () => ({
 }));
 
 vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
-  appendEventWithEcsReplication: vi.fn(async (event) => event),
+  appendEventWithEcsReplication: appendEventWithEcsReplicationMock,
 }));
 
 vi.mock('@/lib/services/ecs-active-block-replication.service', () => ({
@@ -101,6 +103,8 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
       addEvent: addEventMock,
       getEvents: vi.fn().mockResolvedValue([]),
     });
+    appendEventWithEcsReplicationMock.mockReset();
+    appendEventWithEcsReplicationMock.mockImplementation(async (event) => event);
     getFeedbackPreferencesMock.mockReset();
     getFeedbackPreferencesMock.mockReturnValue({
       timingInfoEnabled: true,
@@ -178,5 +182,25 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
 
     expect(rtAdapter.putActiveBlock).toHaveBeenCalled();
     expect(rtAdapter.replaceCompletedBlocks).toHaveBeenCalled();
+  });
+
+  it('does not duplicate block_start/pause/resume eventlog writes in rt-sqlite mode', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter();
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+
+    await service.startBlock('Deep Work', { mode: 'countup' });
+    await service.pauseBlock();
+    await service.resumeBlock();
+
+    const types = appendEventWithEcsReplicationMock.mock.calls.map(
+      ([event]) => (event as { type?: string }).type,
+    );
+    expect(types).not.toContain('block_start');
+    expect(types).not.toContain('block_pause');
+    expect(types).not.toContain('block_resume');
   });
 });

@@ -252,7 +252,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     // 创建开始事件
     const normalizedDescription = description?.trim();
     const eventContent = normalizedDescription ? `${name}\n${normalizedDescription}` : name;
-    await this.addBlockEvent(eventContent, 'block_start', new Date(now).toISOString());
+    if (this.shouldWriteFrontendLifecycleEvent()) {
+      await this.addBlockEvent(eventContent, 'block_start', new Date(now).toISOString());
+    }
 
     // 保存进行中的时间块
     const activeBlock: ActiveBlockData = {
@@ -321,7 +323,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 记录暂停事件
     const eventStart = perfNow();
-    await this.addBlockEvent(`${normalized.name} 暂停`, 'block_pause', new Date(now).toISOString());
+    if (this.shouldWriteFrontendLifecycleEvent()) {
+      await this.addBlockEvent(`${normalized.name} 暂停`, 'block_pause', new Date(now).toISOString());
+    }
     const eventMs = Math.round(perfNow() - eventStart);
     this.notifyChange(pausedBlock);
     log.info(`[TB-SVC] pauseBlock done ${JSON.stringify({ startId: pausedBlock.startId, saveMs, eventMs, totalMs: Math.round(perfNow() - opStart) })}`);
@@ -360,7 +364,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 记录继续事件
     const eventStart = perfNow();
-    await this.addBlockEvent(`${normalized.name} 继续`, 'block_resume', new Date(now).toISOString());
+    if (this.shouldWriteFrontendLifecycleEvent()) {
+      await this.addBlockEvent(`${normalized.name} 继续`, 'block_resume', new Date(now).toISOString());
+    }
     const eventMs = Math.round(perfNow() - eventStart);
     this.notifyChange(resumedBlock);
     log.info(`[TB-SVC] resumeBlock done ${JSON.stringify({ startId: resumedBlock.startId, saveMs, eventMs, totalMs: Math.round(perfNow() - opStart) })}`);
@@ -659,6 +665,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         source: getEventSourceMetadata(),
       },
     });
+  }
+
+  private shouldWriteFrontendLifecycleEvent(): boolean {
+    return this.backendMode !== 'rt-sqlite'
   }
 
   private notifyChange(block: ActiveBlockData | null): void {

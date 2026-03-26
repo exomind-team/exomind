@@ -399,6 +399,26 @@ describe('TaskService Phase3: dependency-aware transitions', () => {
 
     expect(emitTaskTransition).toHaveBeenCalledWith('task', '测试任务', 'in_progress', 'cancelled')
   })
+
+  it('transitionTask does not emit duplicate transition event in rt-sqlite mode', async () => {
+    const task = makeTask({ id: 'task', status: 'pending', title: '测试任务' })
+    port = createMockPort([task])
+    service = new TaskServiceImpl({ task: port }, { backendMode: 'rt-sqlite' })
+
+    await service.transitionTask('task', 'in_progress')
+
+    expect(emitTaskTransition).not.toHaveBeenCalled()
+  })
+
+  it('cancelTask does not emit duplicate cancel event in rt-sqlite mode', async () => {
+    const task = makeTask({ id: 'task', status: 'in_progress', title: '测试任务' })
+    port = createMockPort([task])
+    service = new TaskServiceImpl({ task: port }, { backendMode: 'rt-sqlite' })
+
+    await service.cancelTask('task')
+
+    expect(emitTaskTransition).not.toHaveBeenCalled()
+  })
 })
 
 describe('TaskService Phase3: checkDependenciesMet', () => {

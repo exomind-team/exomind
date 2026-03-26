@@ -1,10 +1,15 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment'
+import { getTaskBackendMode, type DomainBackendMode } from '@/config/domain-backend-mode'
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
 import { emitTaskCreated, emitTaskTransition } from './task-event-emitter'
 
 type TaskEnvironmentLike = {
   task: ITaskPort
+}
+
+export interface TaskServiceOptions {
+  backendMode?: DomainBackendMode
 }
 
 export interface DependencyCheckResult {
@@ -35,10 +40,14 @@ export interface TaskService {
 
 export class TaskServiceImpl implements TaskService {
   private readonly env: TaskEnvironmentLike
+  private readonly useInjectedEnv: boolean
+  private readonly backendMode: DomainBackendMode
   private changeListeners = new Set<() => void>()
 
-  constructor(env?: TaskEnvironmentLike) {
+  constructor(env?: TaskEnvironmentLike, options: TaskServiceOptions = {}) {
     this.env = env ?? ExoMindEnvironment.getInstance()
+    this.useInjectedEnv = typeof env !== 'undefined'
+    this.backendMode = options.backendMode ?? this.resolveDefaultBackendMode()
   }
 
   listTasks(includeCancelled = false) {
@@ -74,7 +83,9 @@ export class TaskServiceImpl implements TaskService {
     const task = await this.env.task.cancelTask(id)
     if (task) {
       this.notifyChangeListeners()
-      emitTaskTransition(task.id, task.title, fromStatus, 'cancelled')
+      if (this.shouldEmitTransitionEvents()) {
+        emitTaskTransition(task.id, task.title, fromStatus, 'cancelled')
+      }
     }
     return task
   }
@@ -95,7 +106,9 @@ export class TaskServiceImpl implements TaskService {
     const transitioned = await this.env.task.transitionTask(id, to)
     if (transitioned) {
       this.notifyChangeListeners()
-      emitTaskTransition(transitioned.id, transitioned.title, fromStatus, to)
+      if (this.shouldEmitTransitionEvents()) {
+        emitTaskTransition(transitioned.id, transitioned.title, fromStatus, to)
+      }
     }
     return transitioned
   }
@@ -185,6 +198,18 @@ export class TaskServiceImpl implements TaskService {
     for (const listener of this.changeListeners) {
       try { listener() } catch { /* ignore */ }
     }
+  }
+
+  private resolveDefaultBackendMode(): DomainBackendMode {
+    if (this.useInjectedEnv) {
+      return 'legacy'
+    }
+
+    return getTaskBackendMode()
+  }
+
+  private shouldEmitTransitionEvents(): boolean {
+    return this.backendMode !== 'rt-sqlite'
   }
 
   /**
