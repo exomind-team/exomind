@@ -12,6 +12,7 @@ export interface GoalFlowNodeData extends Record<string, unknown> {
   title: string;
   status: GoalDisplayStatus;
   isMe?: boolean;
+  isAbsorbing?: boolean;
   editMode?: boolean;
   hasEmptyRule?: boolean;
   connectModeTargetable?: boolean;
@@ -72,6 +73,7 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
   });
   const connectModeTargetable = Boolean(data.connectModeTargetable);
   const connectModeHovering = Boolean(data.connectModeHovering);
+  const isAbsorbing = Boolean(data.isAbsorbing);
 
   return (
     <div
@@ -79,6 +81,7 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
       className={cn(
         'relative flex items-center justify-center rounded-full text-white shadow-lg transition-shadow',
         getGoalClasses(status, isMe),
+        isAbsorbing && 'pointer-events-none opacity-0',
         !editMode && 'cursor-grab active:cursor-grabbing',
         editMode && 'cursor-crosshair',
         connectModeTargetable && 'ring-2 ring-[#C75B3A]/30 ring-offset-2 ring-offset-[#FAF7F5] dark:ring-offset-[#0C0A09]',

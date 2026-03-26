@@ -196,6 +196,35 @@ describe('TaskFlowEdge', () => {
     expect(screen.getByText('Zombie').className).toContain('opacity-60');
   });
 
+  it('renders a strike overlay for cancelled task edges', async () => {
+    const { TaskFlowEdge } = await import('../components/TaskFlowEdge');
+    baseEdgeCalls.length = 0;
+
+    render(
+      <svg>
+        <TaskFlowEdge
+          id="edge-cancelled"
+          source="me"
+          target="goal-a"
+          sourceX={0}
+          sourceY={0}
+          sourcePosition={'right' as never}
+          targetX={120}
+          targetY={0}
+          targetPosition={'left' as never}
+          selected={false}
+          data={{
+            label: 'Cancelled',
+            status: 'cancelled',
+          }}
+        />
+      </svg>,
+    );
+
+    expect(screen.getByTestId('task-flow-edge-cancel-strike')).toBeInTheDocument();
+    expect(screen.getByText('Cancelled').className).toContain('line-through');
+  });
+
   it('opens the edge context callback on long press', async () => {
     vi.useFakeTimers();
     const onOpenContextMenu = vi.fn();

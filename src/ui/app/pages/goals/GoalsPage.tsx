@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -41,6 +41,18 @@ type Selection = { kind: 'goal' | 'edge' | 'me'; id: string } | null;
 const MODE_STORAGE_KEY = 'exomind:goals-mode';
 const SHOW_CANCELLED_STORAGE_KEY = 'exomind:goals-show-cancelled';
 const GUIDE_HIDDEN_STORAGE_KEY = 'exomind:goals-guide-hidden';
+const COMPLETION_ABSORB_DURATION_MS = 520;
+const COMPLETION_ME_PULSE_DURATION_MS = 320;
+const COMPLETION_ABSORB_NODE_SIZE = 72;
+
+interface CompletionAbsorptionAnimation {
+  goalId: string;
+  title: string;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+}
 
 function readBooleanStorage(key: string, fallback: boolean): boolean {
   if (typeof window === 'undefined') return fallback;
@@ -158,6 +170,131 @@ function GoalHopRings({
   );
 }
 
+function GoalCompletionEffects({
+  animations,
+  meCenterX,
+  meCenterY,
+  mePulseActive,
+  viewportX,
+  viewportY,
+  zoom,
+}: {
+  animations: CompletionAbsorptionAnimation[];
+  meCenterX: number;
+  meCenterY: number;
+  mePulseActive: boolean;
+  viewportX: number;
+  viewportY: number;
+  zoom: number;
+}) {
+  if (animations.length === 0 && !mePulseActive) return null;
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-[9]"
+      style={{
+        transform: `translate(${viewportX}px, ${viewportY}px) scale(${zoom})`,
+        transformOrigin: '0 0',
+      }}
+    >
+      <style>
+        {`
+          @keyframes goal-completion-absorb {
+            0% {
+              transform: translate(var(--goal-absorb-from-x), var(--goal-absorb-from-y)) scale(1);
+              opacity: 1;
+            }
+            72% {
+              opacity: 1;
+            }
+            100% {
+              transform: translate(var(--goal-absorb-to-x), var(--goal-absorb-to-y)) scale(0.2);
+              opacity: 0;
+            }
+          }
+
+          @keyframes goal-completion-trail {
+            0% {
+              opacity: 0.68;
+              transform: scaleX(1);
+            }
+            100% {
+              opacity: 0;
+              transform: scaleX(0.18);
+            }
+          }
+
+          @keyframes goal-me-pulse {
+            0% {
+              transform: scale(0.78);
+              opacity: 0;
+            }
+            30% {
+              opacity: 0.82;
+            }
+            100% {
+              transform: scale(1.32);
+              opacity: 0;
+            }
+          }
+        `}
+      </style>
+
+      {animations.map((animation) => {
+        const deltaX = animation.toX - animation.fromX;
+        const deltaY = animation.toY - animation.fromY;
+        const distance = Math.hypot(deltaX, deltaY);
+        const angle = Math.atan2(deltaY, deltaX);
+        const absorbStyle = {
+          width: `${COMPLETION_ABSORB_NODE_SIZE}px`,
+          height: `${COMPLETION_ABSORB_NODE_SIZE}px`,
+          ['--goal-absorb-from-x' as string]: `${animation.fromX - COMPLETION_ABSORB_NODE_SIZE / 2}px`,
+          ['--goal-absorb-from-y' as string]: `${animation.fromY - COMPLETION_ABSORB_NODE_SIZE / 2}px`,
+          ['--goal-absorb-to-x' as string]: `${animation.toX - COMPLETION_ABSORB_NODE_SIZE / 2}px`,
+          ['--goal-absorb-to-y' as string]: `${animation.toY - COMPLETION_ABSORB_NODE_SIZE / 2}px`,
+          animation: `goal-completion-absorb ${COMPLETION_ABSORB_DURATION_MS}ms cubic-bezier(0.16, 1, 0.3, 1) forwards`,
+        } as CSSProperties;
+
+        return (
+          <div key={animation.goalId}>
+            <div
+              className="absolute h-[2px] origin-left rounded-full bg-[linear-gradient(90deg,rgba(199,91,58,0.72),rgba(199,91,58,0.08))]"
+              style={{
+                left: `${animation.fromX}px`,
+                top: `${animation.fromY}px`,
+                width: `${distance}px`,
+                transform: `rotate(${angle}rad)`,
+                animation: `goal-completion-trail ${COMPLETION_ABSORB_DURATION_MS}ms ease-out forwards`,
+              }}
+            />
+            <div
+              data-testid={`goals-completion-absorption-${animation.goalId}`}
+              className="absolute flex items-center justify-center rounded-full border border-[#F5C7B8] bg-[radial-gradient(circle_at_30%_30%,rgba(125,211,252,0.95),rgba(59,130,246,0.86)_55%,rgba(79,70,229,0.88))] px-3 text-center text-[11px] font-semibold leading-tight text-white shadow-[0_18px_40px_-18px_rgba(59,130,246,0.9),0_0_0_1px_rgba(255,255,255,0.25)]"
+              style={absorbStyle}
+            >
+              <span className="max-w-[52px] truncate">{animation.title || '待命名'}</span>
+            </div>
+          </div>
+        );
+      })}
+
+      {mePulseActive ? (
+        <div
+          data-testid="goals-me-pulse"
+          className="absolute rounded-full border border-[#FDBA74]/70 bg-[radial-gradient(circle,rgba(251,191,36,0.22),rgba(251,146,60,0.10)_58%,rgba(251,146,60,0))] shadow-[0_0_36px_rgba(251,146,60,0.28)]"
+          style={{
+            left: `${meCenterX - 62}px`,
+            top: `${meCenterY - 62}px`,
+            width: '124px',
+            height: '124px',
+            animation: `goal-me-pulse ${COMPLETION_ME_PULSE_DURATION_MS}ms ease-out forwards`,
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export function GoalsPage() {
   const graph = useGoalStore((state) => state.graph);
   const edgeOverrides = useGoalStore((state) => state.edgeOverrides);
@@ -191,11 +328,15 @@ export function GoalsPage() {
   const [splitNewGoalTitle, setSplitNewGoalTitle] = useState('');
   const [splitOriginalEdgePlacement, setSplitOriginalEdgePlacement] = useState<'first-half' | 'second-half'>('second-half');
   const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<string[]>([]);
+  const [completionAnimations, setCompletionAnimations] = useState<CompletionAbsorptionAnimation[]>([]);
+  const [mePulseActive, setMePulseActive] = useState(false);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
   const pageRef = useRef<HTMLDivElement | null>(null);
   const simulationRef = useRef<GoalForceSimulation | null>(null);
   const highlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const completionTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const mePulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousGoalStatusesRef = useRef<Map<string, string>>(new Map());
 
   const updateConnectPreview = useCallback((clientX: number, clientY: number) => {
@@ -225,6 +366,23 @@ export function GoalsPage() {
   useEffect(() => () => {
     highlightTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     highlightTimeoutsRef.current.clear();
+    completionTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    completionTimeoutsRef.current.clear();
+    if (mePulseTimeoutRef.current) {
+      clearTimeout(mePulseTimeoutRef.current);
+      mePulseTimeoutRef.current = null;
+    }
+  }, []);
+
+  const triggerMePulse = useCallback(() => {
+    setMePulseActive(true);
+    if (mePulseTimeoutRef.current) {
+      clearTimeout(mePulseTimeoutRef.current);
+    }
+    mePulseTimeoutRef.current = setTimeout(() => {
+      setMePulseActive(false);
+      mePulseTimeoutRef.current = null;
+    }, COMPLETION_ME_PULSE_DURATION_MS);
   }, []);
 
   useEffect(() => {
@@ -371,6 +529,7 @@ export function GoalsPage() {
       data: {
         title: goal.title,
         status: resolveGoalStatus(goal.id),
+        isAbsorbing: completionAnimations.some((animation) => animation.goalId === goal.id),
         editMode: mode === 'edit',
         hasEmptyRule: goal.completionRule.length === 0,
         connectModeTargetable: connectMode.isActive && goal.id !== connectMode.sourceId,
@@ -388,7 +547,7 @@ export function GoalsPage() {
     }));
 
     return [meNode, ...goalNodes];
-  }, [connectMode, graph.me.id, graph.me.name, mode, openContextMenu, positions, resolveGoalStatus, visibleGraph.goals]);
+  }, [completionAnimations, connectMode, graph.me.id, graph.me.name, mode, openContextMenu, positions, resolveGoalStatus, visibleGraph.goals]);
 
   const edges = useMemo<Array<Edge<TaskFlowEdgeData>>>(() => {
     const edgesByPair = new Map<string, Array<{ id: string }>>();
@@ -457,6 +616,14 @@ export function GoalsPage() {
       maxHop: Math.max(...finiteDistances),
     };
   }, [graph.me.id, positions, resolveHopDistance, visibleGraph.goals]);
+
+  const meCenter = useMemo(() => {
+    const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
+    return {
+      x: mePosition.x + ME_NODE_SIZE / 2,
+      y: mePosition.y + ME_NODE_SIZE / 2,
+    };
+  }, [graph.me.id, positions]);
 
   const emptyStateGuideStyle = useMemo(() => {
     const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
@@ -582,12 +749,26 @@ export function GoalsPage() {
     }
 
     const edgesToFlash = new Set<string>();
+    const completedGoalsToAnimate: CompletionAbsorptionAnimation[] = [];
     for (const item of goalStatusSnapshot) {
       const previousStatus = previousGoalStatusesRef.current.get(item.id);
       const nextStatus = currentStatuses.get(item.id);
       if (!previousStatus || !nextStatus || previousStatus === nextStatus) continue;
       for (const edgeId of item.inboundEdgeIds) {
         edgesToFlash.add(edgeId);
+      }
+      if (previousStatus !== 'completed' && nextStatus === 'completed') {
+        const goalPosition = positions.get(item.id);
+        if (!goalPosition) continue;
+        const goal = graph.goals.find((candidate) => candidate.id === item.id);
+        completedGoalsToAnimate.push({
+          goalId: item.id,
+          title: goal?.title || '',
+          fromX: goalPosition.x + GOAL_NODE_SIZE / 2,
+          fromY: goalPosition.y + GOAL_NODE_SIZE / 2,
+          toX: meCenter.x,
+          toY: meCenter.y,
+        });
       }
     }
 
@@ -602,8 +783,31 @@ export function GoalsPage() {
       highlightTimeoutsRef.current.set(edgeId, timeoutId);
     });
 
+    if (completedGoalsToAnimate.length > 0) {
+      setCompletionAnimations((current) => {
+        const activeGoalIds = new Set(current.map((animation) => animation.goalId));
+        return [
+          ...current,
+          ...completedGoalsToAnimate.filter((animation) => !activeGoalIds.has(animation.goalId)),
+        ];
+      });
+
+      completedGoalsToAnimate.forEach((animation) => {
+        const existing = completionTimeoutsRef.current.get(animation.goalId);
+        if (existing) {
+          clearTimeout(existing);
+        }
+        const timeoutId = setTimeout(() => {
+          setCompletionAnimations((current) => current.filter((candidate) => candidate.goalId !== animation.goalId));
+          completionTimeoutsRef.current.delete(animation.goalId);
+          triggerMePulse();
+        }, COMPLETION_ABSORB_DURATION_MS);
+        completionTimeoutsRef.current.set(animation.goalId, timeoutId);
+      });
+    }
+
     previousGoalStatusesRef.current = currentStatuses;
-  }, [goalStatusSnapshot]);
+  }, [goalStatusSnapshot, graph.goals, meCenter.x, meCenter.y, positions, triggerMePulse]);
 
   const contextItems = useMemo(() => {
     if (!contextMenu) return [];
@@ -722,6 +926,16 @@ export function GoalsPage() {
           zoom={viewport.zoom}
         />
       ) : null}
+
+      <GoalCompletionEffects
+        animations={completionAnimations}
+        meCenterX={meCenter.x}
+        meCenterY={meCenter.y}
+        mePulseActive={mePulseActive}
+        viewportX={viewport.x}
+        viewportY={viewport.y}
+        zoom={viewport.zoom}
+      />
 
       {connectPreview ? (
         <svg

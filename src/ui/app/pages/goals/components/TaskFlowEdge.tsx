@@ -207,6 +207,18 @@ export function TaskFlowEdge({
         </marker>
       </defs>
       <BaseEdge id={id} path={path} style={style} markerEnd={`url(#${markerId})`} />
+      {status === 'cancelled' && !isZombie ? (
+        <line
+          data-testid="task-flow-edge-cancel-strike"
+          x1={labelX - 12}
+          y1={labelY + 9}
+          x2={labelX + 12}
+          y2={labelY - 9}
+          stroke="rgba(225,29,72,0.65)"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        />
+      ) : null}
       <path
         data-testid="task-flow-edge-hit-area"
         d={path}

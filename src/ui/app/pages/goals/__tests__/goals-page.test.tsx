@@ -397,6 +397,54 @@ describe('GoalsPage', () => {
     view.unmount();
   });
 
+  it('renders an absorption overlay and pulses Me when a goal becomes completed', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    const view = render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        useGoalStore.getState().setEdgeStatusOverride(edgeId, 'completed');
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId(`goals-completion-absorption-${goalId}`)).toBeInTheDocument();
+      const nodes = flowApiMocks.lastProps?.nodes as Array<{ id: string; data?: { isAbsorbing?: boolean } }>;
+      expect(nodes.find((node) => node.id === goalId)?.data?.isAbsorbing).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(520);
+      });
+
+      expect(screen.queryByTestId(`goals-completion-absorption-${goalId}`)).toBeNull();
+      expect(screen.getByTestId('goals-me-pulse')).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+
+      expect(screen.queryByTestId('goals-me-pulse')).toBeNull();
+      const settledNodes = flowApiMocks.lastProps?.nodes as Array<{ id: string; data?: { isAbsorbing?: boolean } }>;
+      expect(settledNodes.find((node) => node.id === goalId)?.data?.isAbsorbing).not.toBe(true);
+
+    } finally {
+      vi.useRealTimers();
+    }
+    view.unmount();
+  });
+
   it('uses bound task title and status in the graph when taskNodeRef is set', async () => {
     taskServiceMocks.listTasks.mockResolvedValue([
       {
