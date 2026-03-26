@@ -372,6 +372,86 @@ describe('GoalsPage', () => {
     view.unmount();
   });
 
+  it('rolls back goal drafts and toasts save failure when the goal freezes externally', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    act(() => {
+      useGoalStore.getState().updateGoal({
+        goalId,
+        title: 'Stable Goal',
+      });
+    });
+
+    const titleInput = screen.getByDisplayValue('Stable Goal');
+    fireEvent.change(titleInput, { target: { value: 'Draft Goal' } });
+
+    act(() => {
+      useGoalStore.getState().setEdgeStatusOverride(edgeId, 'completed');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '保存失败',
+        description: '当前目标已冻结',
+      }));
+      expect(screen.getByDisplayValue('Stable Goal')).toBeDisabled();
+    });
+  });
+
+  it('rolls back edge drafts and toasts save failure when the target freezes externally', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    act(() => {
+      useGoalStore.getState().updateEdge({
+        edgeId,
+        title: 'Stable Path',
+      });
+    });
+
+    fireEvent.click(screen.getByTestId(`mock-react-flow-edge-${edgeId}`));
+    const edgeTitleInput = screen.getByDisplayValue('Stable Path');
+    fireEvent.change(edgeTitleInput, { target: { value: 'Draft Path' } });
+
+    act(() => {
+      useGoalStore.getState().setEdgeStatusOverride(edgeId, 'completed');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '保存失败',
+        description: '当前边已冻结',
+      }));
+      expect(screen.getByDisplayValue('Stable Path')).toBeDisabled();
+    });
+  });
+
   it('highlights inbound edges when a goal display status changes', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     const view = render(<GoalsPage />);

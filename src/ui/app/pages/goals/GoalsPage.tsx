@@ -663,9 +663,13 @@ export function GoalsPage() {
     ));
   }, [graph.goals, resolveGoalStatus, splitTargetEdge]);
 
-  function notifyResult(result: { ok: false; error: string } | { ok: true }, success?: string) {
+  function notifyResult(
+    result: { ok: false; error: string } | { ok: true },
+    success?: string,
+    failureTitle = '操作失败',
+  ) {
     if (!result.ok) {
-      toast({ title: '操作失败', description: result.error });
+      toast({ title: failureTitle, description: result.error });
       return false;
     }
     if (success) {
@@ -1072,7 +1076,7 @@ export function GoalsPage() {
           onUpdate={(patch) => {
             const result = updateGoal({ goalId: selectedGoal.id, ...patch });
             if (!result.ok) {
-              return notifyResult(result);
+              return notifyResult(result, undefined, '保存失败');
             }
             if (patch.completionRule) {
               const nextMode = patch.completionRule.every((clause) => clause.length === 1) ? 'OR' : 'AND';
@@ -1099,7 +1103,7 @@ export function GoalsPage() {
           targetLabel={graph.goals.find((goal) => goal.id === selectedEdge.target)?.title || '待命名'}
           onClose={() => setSelected(null)}
           onJumpNode={(nodeId) => setSelected(nodeId === graph.me.id ? { kind: 'me', id: nodeId } : { kind: 'goal', id: nodeId })}
-          onUpdate={(patch) => notifyResult(updateEdge({ edgeId: selectedEdge.id, ...patch }), '已更新路径')}
+          onUpdate={(patch) => notifyResult(updateEdge({ edgeId: selectedEdge.id, ...patch }), '已更新路径', '保存失败')}
           onSetOverride={(status) => {
             const edgeLabel = resolveEdgeLabel(selectedEdge.id);
             setEdgeStatusOverride(selectedEdge.id, status);
@@ -1120,7 +1124,7 @@ export function GoalsPage() {
           name={graph.me.name}
           goalsCount={graph.goals.length}
           onClose={() => setSelected(null)}
-          onUpdate={(name) => notifyResult(updateMe(name), '已更新 Me')}
+          onUpdate={(name) => notifyResult(updateMe(name), '已更新 Me', '保存失败')}
         />
       ) : null}
 
