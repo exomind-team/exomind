@@ -52,13 +52,13 @@ function getGoalClasses(status: GoalDisplayStatus, isMe: boolean): string {
     case 'completed':
       return 'border border-emerald-300 bg-gradient-to-br from-emerald-400 to-emerald-600 opacity-80';
     case 'in_progress':
-      return 'border-[2.5px] border-[#C75B3A] bg-gradient-to-br from-[#D97757] to-[#C75B3A] ring-[3px] ring-[#C75B3A]/25 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]';
+      return 'border-[2.5px] border-[#C75B3A] bg-gradient-to-br from-sky-400 via-sky-500 to-indigo-500 ring-[3px] ring-[#C75B3A]/25 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]';
     case 'suspended':
-      return 'border-2 border-[#A8A29E] bg-gradient-to-br from-[#78716C] to-[#57534E]';
+      return 'border-2 border-[#94A3B8] bg-gradient-to-br from-sky-400/85 via-sky-500/80 to-indigo-500/80';
     case 'cancelled':
-      return 'border border-[#A8A29E] bg-gradient-to-br from-[#A8A29E] to-[#78716C] opacity-50';
+      return 'border border-[#94A3B8] bg-gradient-to-br from-sky-400/45 via-sky-500/40 to-indigo-500/40 opacity-50';
     default:
-      return 'border border-[#E7E5E4] bg-gradient-to-br from-[#D6D3D1] to-[#A8A29E] text-[#1C1917] shadow-[0_12px_36px_-12px_rgba(120,113,108,0.35)]';
+      return 'border border-sky-200 bg-gradient-to-br from-sky-400 to-indigo-500 text-white shadow-[0_14px_38px_-18px_rgba(59,130,246,0.45)]';
   }
 }
 

@@ -6,6 +6,7 @@ import { useLongPress } from '../hooks/useLongPress';
 export interface TaskFlowEdgeData extends Record<string, unknown> {
   label: string;
   status: TaskEdgeStatus;
+  isEmptySlot?: boolean;
   highlighted?: boolean;
   parallelIndex?: number;
   parallelTotal?: number;
@@ -28,7 +29,7 @@ function getEdgeColor(status: TaskEdgeStatus, highlighted: boolean) {
   return 'rgba(120,113,108,0.7)';
 }
 
-function getEdgeStyle(status: TaskEdgeStatus, selected: boolean, highlighted: boolean) {
+function getEdgeStyle(status: TaskEdgeStatus, selected: boolean, highlighted: boolean, isEmptySlot: boolean) {
   if (highlighted) {
     return {
       stroke: getEdgeColor(status, highlighted),
@@ -48,6 +49,9 @@ function getEdgeStyle(status: TaskEdgeStatus, selected: boolean, highlighted: bo
   }
   if (status === 'cancelled') {
     return { stroke: getEdgeColor(status, highlighted), strokeDasharray: '8 4', strokeWidth: selected ? 2.4 : 1.8 };
+  }
+  if (isEmptySlot) {
+    return { stroke: getEdgeColor(status, highlighted), strokeDasharray: '4 5', strokeWidth: selected ? 2.1 : 1.5 };
   }
   return { stroke: getEdgeColor(status, highlighted), strokeDasharray: '6 4', strokeWidth: selected ? 2.4 : 1.8 };
 }
@@ -169,7 +173,8 @@ export function TaskFlowEdge({
   const label = data?.label || '';
   const status = data?.status ?? 'pending';
   const highlighted = Boolean(data?.highlighted);
-  const style = getEdgeStyle(status, Boolean(selected), highlighted);
+  const isEmptySlot = Boolean(data?.isEmptySlot);
+  const style = getEdgeStyle(status, Boolean(selected), highlighted, isEmptySlot);
   const markerId = `goal-task-arrow-${id}`;
   const markerColor = getEdgeColor(status, highlighted);
   const longPressHandlers = useLongPress((event) => {

@@ -108,6 +108,62 @@ describe('TaskFlowEdge', () => {
     expect(screen.getByText('B')).toBeInTheDocument();
   });
 
+  it('renders empty-slot pending edges thinner than task-backed pending edges', async () => {
+    const { TaskFlowEdge } = await import('../components/TaskFlowEdge');
+    baseEdgeCalls.length = 0;
+
+    const { rerender } = render(
+      <svg>
+        <TaskFlowEdge
+          id="edge-empty-slot"
+          source="me"
+          target="goal-a"
+          sourceX={0}
+          sourceY={0}
+          sourcePosition={'right' as never}
+          targetX={120}
+          targetY={0}
+          targetPosition={'left' as never}
+          selected={false}
+          data={{
+            label: '待定义',
+            status: 'pending',
+            isEmptySlot: true,
+          }}
+        />
+      </svg>,
+    );
+
+    const emptySlotCall = baseEdgeCalls[baseEdgeCalls.length - 1] as { style: { strokeWidth: number; strokeDasharray: string } };
+
+    rerender(
+      <svg>
+        <TaskFlowEdge
+          id="edge-task-backed"
+          source="me"
+          target="goal-a"
+          sourceX={0}
+          sourceY={0}
+          sourcePosition={'right' as never}
+          targetX={120}
+          targetY={0}
+          targetPosition={'left' as never}
+          selected={false}
+          data={{
+            label: '任务 A',
+            status: 'pending',
+            isEmptySlot: false,
+          }}
+        />
+      </svg>,
+    );
+
+    const taskBackedCall = baseEdgeCalls[baseEdgeCalls.length - 1] as { style: { strokeWidth: number; strokeDasharray: string } };
+    expect(emptySlotCall.style.strokeDasharray).toBe('4 5');
+    expect(taskBackedCall.style.strokeDasharray).toBe('6 4');
+    expect(emptySlotCall.style.strokeWidth).toBeLessThan(taskBackedCall.style.strokeWidth);
+  });
+
   it('opens the edge context callback on long press', async () => {
     vi.useFakeTimers();
     const onOpenContextMenu = vi.fn();

@@ -321,6 +321,7 @@ export function GoalsPage() {
         data: {
           label: edge.title || (edge.taskNodeRef ? edge.taskNodeRef : '待定义'),
           status: getEdgeStatus(edge.id),
+          isEmptySlot: !edge.taskNodeRef,
           highlighted: highlightedEdgeIds.includes(edge.id),
           parallelIndex,
           parallelTotal: siblings.length,
