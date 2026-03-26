@@ -13,41 +13,45 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 describe('TaskFlowEdge', () => {
-  it('keeps a single edge straight and only bends duplicate edges', async () => {
-    const { buildTaskEdgePath } = await import('../components/TaskFlowEdge');
+  it('anchors single edges to the nearest points on both nodes and only bends duplicate edges in the middle', async () => {
+    const { buildTaskEdgePath, resolveEdgeAnchors } = await import('../components/TaskFlowEdge');
+
+    const anchors = resolveEdgeAnchors({
+      sourceCenterX: 0,
+      sourceCenterY: 0,
+      sourceRadius: 20,
+      targetCenterX: 120,
+      targetCenterY: 40,
+      targetRadius: 20,
+    });
 
     const single = buildTaskEdgePath({
-      sourceX: 0,
-      sourceY: 0,
-      targetX: 120,
-      targetY: 40,
+      ...anchors,
       parallelIndex: 0,
       parallelTotal: 1,
     });
 
     const duplicateA = buildTaskEdgePath({
-      sourceX: 0,
-      sourceY: 0,
-      targetX: 120,
-      targetY: 40,
+      ...anchors,
       parallelIndex: 0,
       parallelTotal: 2,
     });
 
     const duplicateB = buildTaskEdgePath({
-      sourceX: 0,
-      sourceY: 0,
-      targetX: 120,
-      targetY: 40,
+      ...anchors,
       parallelIndex: 1,
       parallelTotal: 2,
     });
 
-    expect(single.path).toBe('M 0 0 L 120 40');
-    expect(duplicateA.path).toMatch(/^M 0 0 C /);
-    expect(duplicateB.path).toMatch(/^M 0 0 C /);
-    expect(duplicateA.path.endsWith('120 40')).toBe(true);
-    expect(duplicateB.path.endsWith('120 40')).toBe(true);
+    expect(anchors.sourceX).toBeCloseTo(18.97, 1);
+    expect(anchors.sourceY).toBeCloseTo(6.32, 1);
+    expect(anchors.targetX).toBeCloseTo(101.03, 1);
+    expect(anchors.targetY).toBeCloseTo(33.68, 1);
+    expect(single.path).toBe(`M ${anchors.sourceX} ${anchors.sourceY} L ${anchors.targetX} ${anchors.targetY}`);
+    expect(duplicateA.path).toMatch(new RegExp(`^M ${anchors.sourceX} ${anchors.sourceY} C `));
+    expect(duplicateB.path).toMatch(new RegExp(`^M ${anchors.sourceX} ${anchors.sourceY} C `));
+    expect(duplicateA.path.endsWith(`${anchors.targetX} ${anchors.targetY}`)).toBe(true);
+    expect(duplicateB.path.endsWith(`${anchors.targetX} ${anchors.targetY}`)).toBe(true);
   });
 
   it('renders directional markers and separates parallel edges', async () => {
@@ -70,6 +74,12 @@ describe('TaskFlowEdge', () => {
           data={{
             label: 'A',
             status: 'pending',
+            sourceCenterX: 0,
+            sourceCenterY: 0,
+            sourceRadius: 20,
+            targetCenterX: 120,
+            targetCenterY: 0,
+            targetRadius: 20,
             parallelIndex: 0,
             parallelTotal: 2,
           }}
@@ -96,6 +106,12 @@ describe('TaskFlowEdge', () => {
           data={{
             label: 'B',
             status: 'pending',
+            sourceCenterX: 0,
+            sourceCenterY: 0,
+            sourceRadius: 20,
+            targetCenterX: 120,
+            targetCenterY: 0,
+            targetRadius: 20,
             parallelIndex: 1,
             parallelTotal: 2,
           }}
@@ -221,7 +237,7 @@ describe('TaskFlowEdge', () => {
       </svg>,
     );
 
-    expect(screen.getByTestId('task-flow-edge-cancel-strike')).toBeInTheDocument();
+    expect(screen.getByTestId('task-flow-edge-cancel-strike-edge-cancelled')).toBeInTheDocument();
     expect(screen.getByText('Cancelled').className).toContain('line-through');
   });
 
@@ -252,7 +268,7 @@ describe('TaskFlowEdge', () => {
       </svg>,
     );
 
-    screen.getByTestId('task-flow-edge-hit-area').dispatchEvent(new PointerEvent('pointerdown', {
+    screen.getByTestId('task-flow-edge-hit-area-edge-long-press').dispatchEvent(new PointerEvent('pointerdown', {
       bubbles: true,
       clientX: 40,
       clientY: 20,

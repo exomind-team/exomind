@@ -9,6 +9,12 @@ export interface TaskFlowEdgeData extends Record<string, unknown> {
   isEmptySlot?: boolean;
   isZombie?: boolean;
   highlighted?: boolean;
+  sourceCenterX?: number;
+  sourceCenterY?: number;
+  sourceRadius?: number;
+  targetCenterX?: number;
+  targetCenterY?: number;
+  targetRadius?: number;
   parallelIndex?: number;
   parallelTotal?: number;
   onOpenContextMenu?: (edgeId: string, x: number, y: number) => void;
@@ -68,71 +74,120 @@ function getEdgeStyle(status: TaskEdgeStatus, selected: boolean, highlighted: bo
 export function buildTaskEdgePath({
   sourceX,
   sourceY,
-  sourcePosition,
   targetX,
   targetY,
-  targetPosition,
+  sourceCenterX,
+  sourceCenterY,
+  sourceRadius,
+  targetCenterX,
+  targetCenterY,
+  targetRadius,
   parallelIndex = 0,
   parallelTotal = 1,
 }: {
   sourceX: number;
   sourceY: number;
-  sourcePosition?: string;
   targetX: number;
   targetY: number;
-  targetPosition?: string;
+  sourceCenterX?: number;
+  sourceCenterY?: number;
+  sourceRadius?: number;
+  targetCenterX?: number;
+  targetCenterY?: number;
+  targetRadius?: number;
   parallelIndex?: number;
   parallelTotal?: number;
 }) {
+  const anchors = (
+    sourceCenterX !== undefined
+    && sourceCenterY !== undefined
+    && sourceRadius !== undefined
+    && targetCenterX !== undefined
+    && targetCenterY !== undefined
+    && targetRadius !== undefined
+  )
+    ? resolveEdgeAnchors({
+      sourceCenterX,
+      sourceCenterY,
+      sourceRadius,
+      targetCenterX,
+      targetCenterY,
+      targetRadius,
+    })
+    : { sourceX, sourceY, targetX, targetY };
+
+  const anchorSourceX = anchors.sourceX;
+  const anchorSourceY = anchors.sourceY;
+  const anchorTargetX = anchors.targetX;
+  const anchorTargetY = anchors.targetY;
+
   if (parallelTotal <= 1) {
     return {
-      path: `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`,
-      labelX: (sourceX + targetX) / 2,
-      labelY: (sourceY + targetY) / 2,
+      path: `M ${anchorSourceX} ${anchorSourceY} L ${anchorTargetX} ${anchorTargetY}`,
+      labelX: (anchorSourceX + anchorTargetX) / 2,
+      labelY: (anchorSourceY + anchorTargetY) / 2,
     };
   }
 
-  const dx = targetX - sourceX;
-  const dy = targetY - sourceY;
+  const dx = anchorTargetX - anchorSourceX;
+  const dy = anchorTargetY - anchorSourceY;
   const distance = Math.hypot(dx, dy) || 1;
   const normalX = -dy / distance;
   const normalY = dx / distance;
+  const directionX = dx / distance;
+  const directionY = dy / distance;
   const offset = getParallelOffset(parallelIndex, parallelTotal);
   const controlDistance = Math.min(Math.max(distance * 0.35, 42), 132);
-  const sourceVector = getHandleVector(sourcePosition, dx, dy, 'source');
-  const targetVector = getHandleVector(targetPosition, dx, dy, 'target');
-  const control1X = sourceX + sourceVector.x * controlDistance + normalX * offset;
-  const control1Y = sourceY + sourceVector.y * controlDistance + normalY * offset;
-  const control2X = targetX + targetVector.x * controlDistance + normalX * offset;
-  const control2Y = targetY + targetVector.y * controlDistance + normalY * offset;
-  const labelPoint = getCubicPointAt(0.5, sourceX, sourceY, control1X, control1Y, control2X, control2Y, targetX, targetY);
+  const control1X = anchorSourceX + directionX * controlDistance + normalX * offset;
+  const control1Y = anchorSourceY + directionY * controlDistance + normalY * offset;
+  const control2X = anchorTargetX - directionX * controlDistance + normalX * offset;
+  const control2Y = anchorTargetY - directionY * controlDistance + normalY * offset;
+  const labelPoint = getCubicPointAt(
+    0.5,
+    anchorSourceX,
+    anchorSourceY,
+    control1X,
+    control1Y,
+    control2X,
+    control2Y,
+    anchorTargetX,
+    anchorTargetY,
+  );
 
   return {
-    path: `M ${sourceX} ${sourceY} C ${control1X} ${control1Y} ${control2X} ${control2Y} ${targetX} ${targetY}`,
+    path: `M ${anchorSourceX} ${anchorSourceY} C ${control1X} ${control1Y} ${control2X} ${control2Y} ${anchorTargetX} ${anchorTargetY}`,
     labelX: labelPoint.x,
     labelY: labelPoint.y,
   };
 }
 
-function getHandleVector(position: string | undefined, dx: number, dy: number, role: 'source' | 'target') {
-  switch (position) {
-    case 'left':
-      return { x: -1, y: 0 };
-    case 'right':
-      return { x: 1, y: 0 };
-    case 'top':
-      return { x: 0, y: -1 };
-    case 'bottom':
-      return { x: 0, y: 1 };
-    default: {
-      const distance = Math.hypot(dx, dy) || 1;
-      const directionX = dx / distance;
-      const directionY = dy / distance;
-      return role === 'source'
-        ? { x: directionX, y: directionY }
-        : { x: -directionX, y: -directionY };
-    }
-  }
+export function resolveEdgeAnchors({
+  sourceCenterX,
+  sourceCenterY,
+  sourceRadius,
+  targetCenterX,
+  targetCenterY,
+  targetRadius,
+}: {
+  sourceCenterX: number;
+  sourceCenterY: number;
+  sourceRadius: number;
+  targetCenterX: number;
+  targetCenterY: number;
+  targetRadius: number;
+}) {
+  const dx = targetCenterX - sourceCenterX;
+  const dy = targetCenterY - sourceCenterY;
+  const distance = Math.hypot(dx, dy) || 1;
+  const normalX = dx / distance;
+  const normalY = dy / distance;
+
+  return {
+    sourceX: sourceCenterX + normalX * sourceRadius,
+    sourceY: sourceCenterY + normalY * sourceRadius,
+    targetX: targetCenterX - normalX * targetRadius,
+    targetY: targetCenterY - normalY * targetRadius,
+  };
 }
 
 function getCubicPointAt(
@@ -162,20 +217,22 @@ export function TaskFlowEdge({
   id,
   sourceX,
   sourceY,
-  sourcePosition,
   targetX,
   targetY,
-  targetPosition,
   data,
   selected,
 }: EdgeProps<Edge<TaskFlowEdgeData>>) {
   const { path, labelX, labelY } = buildTaskEdgePath({
     sourceX,
     sourceY,
-    sourcePosition,
     targetX,
     targetY,
-    targetPosition,
+    sourceCenterX: typeof data?.sourceCenterX === 'number' ? data.sourceCenterX : undefined,
+    sourceCenterY: typeof data?.sourceCenterY === 'number' ? data.sourceCenterY : undefined,
+    sourceRadius: typeof data?.sourceRadius === 'number' ? data.sourceRadius : undefined,
+    targetCenterX: typeof data?.targetCenterX === 'number' ? data.targetCenterX : undefined,
+    targetCenterY: typeof data?.targetCenterY === 'number' ? data.targetCenterY : undefined,
+    targetRadius: typeof data?.targetRadius === 'number' ? data.targetRadius : undefined,
     parallelIndex: data?.parallelIndex ?? 0,
     parallelTotal: data?.parallelTotal ?? 1,
   });
@@ -209,7 +266,7 @@ export function TaskFlowEdge({
       <BaseEdge id={id} path={path} style={style} markerEnd={`url(#${markerId})`} />
       {status === 'cancelled' && !isZombie ? (
         <line
-          data-testid="task-flow-edge-cancel-strike"
+          data-testid={`task-flow-edge-cancel-strike-${id}`}
           x1={labelX - 12}
           y1={labelY + 9}
           x2={labelX + 12}
@@ -220,7 +277,7 @@ export function TaskFlowEdge({
         />
       ) : null}
       <path
-        data-testid="task-flow-edge-hit-area"
+        data-testid={`task-flow-edge-hit-area-${id}`}
         d={path}
         fill="none"
         stroke="transparent"
@@ -236,6 +293,7 @@ export function TaskFlowEdge({
       {label ? (
         <EdgeLabelRenderer>
           <div
+            data-testid={`task-flow-edge-label-${id}`}
             className={cn(
               'absolute rounded bg-white/90 px-1.5 py-0.5 text-[10px] text-stone-600 shadow-sm dark:bg-stone-900/90 dark:text-stone-300',
               highlighted && 'bg-[#FFF7ED] text-[#C75B3A] ring-1 ring-[#F5C7B8]',

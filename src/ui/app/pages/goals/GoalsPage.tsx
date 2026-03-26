@@ -9,6 +9,8 @@ import {
   type EdgeTypes,
   type Node,
   type NodeTypes,
+  Position,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { toast } from '@/components/ui/toast-hook';
@@ -21,6 +23,7 @@ import {
   getHopDistance as getHopDistanceLogic,
   getInEdges as getInEdgesLogic,
 } from './goal-logic';
+import { summarizeGraph, summarizePositions, summarizeViewport, warnGoalDebug } from './goal-debug';
 import { GoalForceSimulation, type PositionMap } from './goal-force-layout';
 import { useGoalStore } from './goal-store';
 import type { TaskEdgeStatus } from './goal-types';
@@ -44,6 +47,7 @@ const GUIDE_HIDDEN_STORAGE_KEY = 'exomind:goals-guide-hidden';
 const COMPLETION_ABSORB_DURATION_MS = 520;
 const COMPLETION_ME_PULSE_DURATION_MS = 320;
 const COMPLETION_ABSORB_NODE_SIZE = 72;
+const RENDER_HEALTH_GRACE_MS = 1500;
 
 interface CompletionAbsorptionAnimation {
   goalId: string;
@@ -106,6 +110,27 @@ function buildVisibleEdges(graph: ReturnType<typeof useGoalStore.getState>['grap
 
 const HOP_RING_SPACING = 152;
 
+function buildNodeHandles(size: number) {
+  return [
+    {
+      type: 'target' as const,
+      position: Position.Top,
+      x: 0,
+      y: 0,
+      width: size,
+      height: size,
+    },
+    {
+      type: 'source' as const,
+      position: Position.Bottom,
+      x: 0,
+      y: 0,
+      width: size,
+      height: size,
+    },
+  ];
+}
+
 function GoalHopRings({
   centerX,
   centerY,
@@ -126,23 +151,18 @@ function GoalHopRings({
   return (
     <svg
       data-testid="goals-hop-rings"
-      className="pointer-events-none absolute inset-0 z-[1] h-full w-full"
+      className="pointer-events-none absolute inset-0 z-[1] h-full w-full overflow-visible"
       style={{
         transform: `translate(${viewportX}px, ${viewportY}px) scale(${zoom})`,
         transformOrigin: '0 0',
       }}
     >
-      <defs>
-        <radialGradient id="goal-hop-ring-glow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="rgba(199,91,58,0.10)" />
-          <stop offset="70%" stopColor="rgba(199,91,58,0.03)" />
-          <stop offset="100%" stopColor="rgba(199,91,58,0)" />
-        </radialGradient>
-      </defs>
-      <circle cx={centerX} cy={centerY} r={Math.max(HOP_RING_SPACING * maxHop, 120)} fill="url(#goal-hop-ring-glow)" />
       {Array.from({ length: maxHop }, (_, index) => {
         const hop = index + 1;
         const radius = hop * HOP_RING_SPACING;
+        const labelAngle = -Math.PI / 4;
+        const labelX = centerX + Math.cos(labelAngle) * radius;
+        const labelY = centerY + Math.sin(labelAngle) * radius;
         return (
           <g key={hop} data-testid={`goals-hop-ring-${hop}`}>
             <circle
@@ -154,15 +174,28 @@ function GoalHopRings({
               strokeWidth={hop === 1 ? 1.6 : 1}
               strokeDasharray={hop === 1 ? '0' : '5 10'}
             />
-            <text
-              x={centerX}
-              y={Math.max(centerY - radius + 18, 24)}
-              fill="rgba(120,113,108,0.8)"
-              fontSize="11"
-              textAnchor="middle"
-            >
-              {hop} 跳
-            </text>
+            <g transform={`translate(${labelX}, ${labelY})`}>
+              <rect
+                x={-18}
+                y={-11}
+                width={36}
+                height={22}
+                rx={11}
+                fill="rgba(250,247,245,0.92)"
+                stroke={hop === 1 ? 'rgba(199,91,58,0.28)' : 'rgba(168,162,158,0.28)'}
+                strokeWidth="1"
+              />
+              <text
+                x={0}
+                y={4}
+                fill="rgba(87,83,78,0.92)"
+                fontSize="11"
+                fontWeight="600"
+                textAnchor="middle"
+              >
+                {hop} 跳
+              </text>
+            </g>
           </g>
         );
       })}
@@ -330,14 +363,27 @@ export function GoalsPage() {
   const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<string[]>([]);
   const [completionAnimations, setCompletionAnimations] = useState<CompletionAbsorptionAnimation[]>([]);
   const [mePulseActive, setMePulseActive] = useState(false);
+  const [renderHealthProbe, setRenderHealthProbe] = useState(0);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
   const pageRef = useRef<HTMLDivElement | null>(null);
   const simulationRef = useRef<GoalForceSimulation | null>(null);
+  const reactFlowRef = useRef<ReactFlowInstance<Node<GoalFlowNodeData>, Edge<TaskFlowEdgeData>> | null>(null);
   const highlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const completionTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const mePulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousGoalStatusesRef = useRef<Map<string, string>>(new Map());
+  const skipNextSimulationSyncRef = useRef(true);
+  const fitViewSignatureRef = useRef('');
+  const hasCenteredInitialMeRef = useRef(false);
+  const lastGraphChangeAtRef = useRef(Date.now());
+  const renderHealthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debugRef = useRef({
+    graphSignature: '',
+    viewportSignature: '',
+    renderSignature: '',
+    selectionSignature: '',
+  });
 
   const updateConnectPreview = useCallback((clientX: number, clientY: number) => {
     const bounds = pageRef.current?.getBoundingClientRect();
@@ -368,6 +414,10 @@ export function GoalsPage() {
     highlightTimeoutsRef.current.clear();
     completionTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     completionTimeoutsRef.current.clear();
+    if (renderHealthTimeoutRef.current) {
+      clearTimeout(renderHealthTimeoutRef.current);
+      renderHealthTimeoutRef.current = null;
+    }
     if (mePulseTimeoutRef.current) {
       clearTimeout(mePulseTimeoutRef.current);
       mePulseTimeoutRef.current = null;
@@ -482,19 +532,65 @@ export function GoalsPage() {
     }
   }, [graph.goals.length, guideHidden]);
 
+  const logViewport = useCallback((source: string, nextViewport: { x: number; y: number; zoom: number }) => {
+    const viewportSummary = summarizeViewport(nextViewport);
+    const signature = JSON.stringify({ source, viewportSummary });
+    if (signature === debugRef.current.viewportSignature) return;
+    debugRef.current.viewportSignature = signature;
+    warnGoalDebug('page:viewport', {
+      source,
+      viewport: viewportSummary,
+    });
+  }, []);
+
+  const graphSummary = useMemo(() => summarizeGraph(visibleGraph), [visibleGraph]);
+  const positionSummary = useMemo(() => summarizePositions(positions), [positions]);
+  const missingPositionIds = useMemo(() => {
+    const nodeIds = [graph.me.id, ...visibleGraph.goals.map((goal) => goal.id)];
+    return nodeIds.filter((nodeId) => !positions.has(nodeId));
+  }, [graph.me.id, positions, visibleGraph.goals]);
+
   useEffect(() => {
-    const simulation = simulationRef.current;
-    if (!simulation) {
-      simulationRef.current = new GoalForceSimulation(visibleGraph, 1200, 800, setPositions, {
+    lastGraphChangeAtRef.current = Date.now();
+    if (renderHealthTimeoutRef.current) {
+      clearTimeout(renderHealthTimeoutRef.current);
+      renderHealthTimeoutRef.current = null;
+    }
+  }, [graphSummary, showCancelled]);
+
+  useEffect(() => {
+    warnGoalDebug('page:simulation-create', {
+      graph: graphSummary,
+      showCancelled,
+    });
+    simulationRef.current = new GoalForceSimulation(visibleGraph, 1200, 800, setPositions, {
+      showCancelled,
+    });
+    skipNextSimulationSyncRef.current = true;
+    return () => {
+      warnGoalDebug('page:simulation-destroy', {
+        graph: summarizeGraph(visibleGraph),
         showCancelled,
       });
-      return () => {
-        simulationRef.current?.destroy();
-        simulationRef.current = null;
-      };
+      simulationRef.current?.destroy();
+      simulationRef.current = null;
+    };
+    // Mount once; later graph updates sync through a separate effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!simulationRef.current) return;
+    if (skipNextSimulationSyncRef.current) {
+      skipNextSimulationSyncRef.current = false;
+      return;
     }
-    simulation.updateData(visibleGraph, { showCancelled });
-  }, [visibleGraph, showCancelled]);
+    warnGoalDebug('page:simulation-sync', {
+      graph: graphSummary,
+      showCancelled,
+    });
+    simulationRef.current.updateData(visibleGraph, { showCancelled });
+  }, [graphSummary, showCancelled, visibleGraph]);
 
   const nodeTypes = useMemo<NodeTypes>(() => ({
     goal: GoalFlowNode,
@@ -507,6 +603,17 @@ export function GoalsPage() {
       id: graph.me.id,
       type: 'me',
       position: positions.get(graph.me.id) ?? { x: 0, y: 0 },
+      width: ME_NODE_SIZE,
+      height: ME_NODE_SIZE,
+      initialWidth: ME_NODE_SIZE,
+      initialHeight: ME_NODE_SIZE,
+      handles: buildNodeHandles(ME_NODE_SIZE),
+      sourcePosition: Position.Bottom,
+      targetPosition: Position.Top,
+      style: {
+        width: `${ME_NODE_SIZE}px`,
+        height: `${ME_NODE_SIZE}px`,
+      },
       data: {
         title: graph.me.name,
         status: 'pending',
@@ -526,6 +633,17 @@ export function GoalsPage() {
       id: goal.id,
       type: 'goal',
       position: positions.get(goal.id) ?? { x: 0, y: 0 },
+      width: GOAL_NODE_SIZE,
+      height: GOAL_NODE_SIZE,
+      initialWidth: GOAL_NODE_SIZE,
+      initialHeight: GOAL_NODE_SIZE,
+      handles: buildNodeHandles(GOAL_NODE_SIZE),
+      sourcePosition: Position.Bottom,
+      targetPosition: Position.Top,
+      style: {
+        width: `${GOAL_NODE_SIZE}px`,
+        height: `${GOAL_NODE_SIZE}px`,
+      },
       data: {
         title: goal.title,
         status: resolveGoalStatus(goal.id),
@@ -563,6 +681,10 @@ export function GoalsPage() {
       const parallelIndex = siblings.findIndex((candidate) => candidate.id === edge.id);
       const sourceGoal = edge.source === graph.me.id ? null : graph.goals.find((goal) => goal.id === edge.source);
       const targetGoal = graph.goals.find((goal) => goal.id === edge.target);
+      const sourcePosition = positions.get(edge.source) ?? { x: 0, y: 0 };
+      const targetPosition = positions.get(edge.target) ?? { x: 0, y: 0 };
+      const sourceSize = edge.source === graph.me.id ? ME_NODE_SIZE : GOAL_NODE_SIZE;
+      const targetSize = edge.target === graph.me.id ? ME_NODE_SIZE : GOAL_NODE_SIZE;
       return {
         id: edge.id,
         source: edge.source,
@@ -575,6 +697,12 @@ export function GoalsPage() {
           isEmptySlot: !edge.taskNodeRef,
           isZombie: Boolean(showCancelled && (sourceGoal?.cancelled || targetGoal?.cancelled)),
           highlighted: highlightedEdgeIds.includes(edge.id),
+          sourceCenterX: sourcePosition.x + sourceSize / 2,
+          sourceCenterY: sourcePosition.y + sourceSize / 2,
+          sourceRadius: sourceSize / 2,
+          targetCenterX: targetPosition.x + targetSize / 2,
+          targetCenterY: targetPosition.y + targetSize / 2,
+          targetRadius: targetSize / 2,
           parallelIndex,
           parallelTotal: siblings.length,
           onOpenContextMenu: (edgeId: string, x: number, y: number) => {
@@ -584,7 +712,7 @@ export function GoalsPage() {
         },
       };
     });
-  }, [graph.goals, highlightedEdgeIds, openContextMenu, resolveEdgeLabel, resolveEdgeStatus, showCancelled, visibleGraph.edges]);
+  }, [graph.goals, graph.me.id, highlightedEdgeIds, openContextMenu, positions, resolveEdgeLabel, resolveEdgeStatus, showCancelled, visibleGraph.edges]);
 
   const connectPreview = useMemo(() => {
     if (!connectMode.isActive || !connectMode.sourceId || !connectMode.previewPoint) return null;
@@ -625,6 +753,30 @@ export function GoalsPage() {
     };
   }, [graph.me.id, positions]);
 
+  const centerMeInViewport = useCallback((source: string) => {
+    if (!reactFlowRef.current || !positions.has(graph.me.id)) return false;
+
+    warnGoalDebug('page:center-me-request', {
+      source,
+      meCenter: {
+        x: Number(meCenter.x.toFixed(1)),
+        y: Number(meCenter.y.toFixed(1)),
+      },
+      graph: graphSummary,
+      positions: positionSummary,
+    });
+
+    reactFlowRef.current.setCenter(meCenter.x, meCenter.y, {
+      zoom: 1,
+      duration: 0,
+    });
+
+    const nextViewport = reactFlowRef.current.getViewport();
+    setViewport(nextViewport);
+    logViewport(source, nextViewport);
+    return true;
+  }, [graph.me.id, graphSummary, logViewport, meCenter.x, meCenter.y, positionSummary, positions]);
+
   const emptyStateGuideStyle = useMemo(() => {
     const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
     return {
@@ -662,6 +814,173 @@ export function GoalsPage() {
       && resolveGoalStatus(goal.id) !== 'completed'
     ));
   }, [graph.goals, resolveGoalStatus, splitTargetEdge]);
+
+  useEffect(() => {
+    const payload = {
+      graph: graphSummary,
+      positions: positionSummary,
+      showCancelled,
+      mode,
+      guideHidden,
+    };
+    const signature = JSON.stringify(payload);
+    if (signature === debugRef.current.graphSignature) return;
+    debugRef.current.graphSignature = signature;
+    warnGoalDebug('page:graph-input', payload);
+  }, [graphSummary, guideHidden, mode, positionSummary, showCancelled]);
+
+  useEffect(() => {
+    const nodeDomState = nodes.map((node) => {
+      const element = pageRef.current?.querySelector(`[data-testid="goal-flow-node-${node.id}"]`) as HTMLElement | null;
+      if (!element) {
+        return {
+          id: node.id,
+          present: false,
+          visible: false,
+        };
+      }
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const visible = style.visibility !== 'hidden'
+        && style.display !== 'none'
+        && rect.width > 0
+        && rect.height > 0;
+      return {
+        id: node.id,
+        present: true,
+        visible,
+        visibility: style.visibility,
+        display: style.display,
+        opacity: style.opacity,
+        rect: {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        },
+      };
+    });
+    const hiddenDomNodeIds = nodeDomState.filter((entry) => !entry.visible).map((entry) => entry.id);
+    const edgeDomState = edges.map((edge) => {
+      const hitArea = pageRef.current?.querySelector(`[data-testid="task-flow-edge-hit-area-${edge.id}"]`) as SVGPathElement | null;
+      const label = pageRef.current?.querySelector(`[data-testid="task-flow-edge-label-${edge.id}"]`) as HTMLElement | null;
+      return {
+        id: edge.id,
+        hitAreaPresent: Boolean(hitArea),
+        labelPresent: Boolean(label),
+      };
+    });
+    const missingEdgeDomIds = edgeDomState.filter((entry) => !entry.hitAreaPresent).map((entry) => entry.id);
+    const suspiciousReasons: string[] = [];
+    if (visibleGraph.goals.length > 0 && positionSummary.count === 0) {
+      suspiciousReasons.push('positions-empty-while-goals-visible');
+    }
+    if (visibleGraph.goals.length > 0 && missingPositionIds.length > 0) {
+      suspiciousReasons.push('missing-node-positions');
+    }
+    if (visibleGraph.goals.length > 0 && nodes.length <= 1) {
+      suspiciousReasons.push('only-me-node-rendered');
+    }
+    if (visibleGraph.edges.length > 0 && edges.length === 0) {
+      suspiciousReasons.push('edges-dropped-before-react-flow');
+    }
+    if (edges.length > 0 && missingEdgeDomIds.length > 0) {
+      suspiciousReasons.push('react-flow-edge-missing-in-dom');
+    }
+    if (nodes.length > 0 && hiddenDomNodeIds.length > 0) {
+      suspiciousReasons.push('react-flow-node-hidden-in-dom');
+    }
+
+    const elapsedSinceGraphChange = Date.now() - lastGraphChangeAtRef.current;
+    const withinGraceWindow = suspiciousReasons.length > 0 && elapsedSinceGraphChange < RENDER_HEALTH_GRACE_MS;
+
+    const payload = {
+      graph: graphSummary,
+      reactFlow: {
+        nodeCount: nodes.length,
+        edgeCount: edges.length,
+        nodeIds: nodes.map((node) => node.id),
+        edgeIds: edges.map((edge) => edge.id),
+      },
+      positions: positionSummary,
+      missingPositionIds,
+      nodeDomState,
+      edgeDomState,
+      viewport: summarizeViewport(viewport),
+      selected,
+      mode,
+      showCancelled,
+      suspiciousReasons,
+      withinGraceWindow,
+    };
+    const signature = JSON.stringify(payload);
+    if (signature === debugRef.current.renderSignature) return;
+    debugRef.current.renderSignature = signature;
+    warnGoalDebug('page:render-health', payload);
+    if (withinGraceWindow) {
+      if (renderHealthTimeoutRef.current) {
+        clearTimeout(renderHealthTimeoutRef.current);
+      }
+      renderHealthTimeoutRef.current = setTimeout(() => {
+        renderHealthTimeoutRef.current = null;
+        setRenderHealthProbe((current) => current + 1);
+      }, RENDER_HEALTH_GRACE_MS - elapsedSinceGraphChange + 16);
+      return;
+    }
+    if (renderHealthTimeoutRef.current) {
+      clearTimeout(renderHealthTimeoutRef.current);
+      renderHealthTimeoutRef.current = null;
+    }
+    if (suspiciousReasons.length > 0) {
+      warnGoalDebug('page:suspect-render-state', payload);
+    }
+  }, [edges, graphSummary, missingPositionIds, mode, nodes, positionSummary, renderHealthProbe, selected, showCancelled, viewport, visibleGraph.edges.length, visibleGraph.goals.length]);
+
+  useEffect(() => {
+    const payload = { selected };
+    const signature = JSON.stringify(payload);
+    if (signature === debugRef.current.selectionSignature) return;
+    debugRef.current.selectionSignature = signature;
+    warnGoalDebug('page:selection', payload);
+  }, [selected]);
+
+  useLayoutEffect(() => {
+    if (hasCenteredInitialMeRef.current) return;
+    if (!reactFlowRef.current) return;
+    if (!positions.has(graph.me.id)) return;
+
+    if (centerMeInViewport('initial-me-center')) {
+      hasCenteredInitialMeRef.current = true;
+    }
+  }, [centerMeInViewport, graph.me.id, positions]);
+
+  useEffect(() => {
+    const expectedNodeCount = visibleGraph.goals.length + 1;
+    if (!reactFlowRef.current) return;
+    if (positions.size < expectedNodeCount) return;
+
+    const signature = JSON.stringify({
+      expectedNodeCount,
+      edgeCount: visibleGraph.edges.length,
+      showCancelled,
+    });
+    if (signature === fitViewSignatureRef.current) return;
+    fitViewSignatureRef.current = signature;
+
+    warnGoalDebug('page:fit-view-request', {
+      expectedNodeCount,
+      edgeCount: visibleGraph.edges.length,
+      positions: positionSummary,
+      showCancelled,
+    });
+
+    requestAnimationFrame(() => {
+      reactFlowRef.current?.fitView({
+        duration: 180,
+        padding: 0.22,
+      });
+    });
+  }, [positionSummary, positions.size, showCancelled, visibleGraph.edges.length, visibleGraph.goals.length]);
 
   function notifyResult(
     result: { ok: false; error: string } | { ok: true },
@@ -983,14 +1302,25 @@ export function GoalsPage() {
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
         nodesDraggable={mode === 'browse'}
         nodesConnectable={mode === 'edit'}
         edgesReconnectable={mode === 'edit'}
         zoomOnDoubleClick={false}
-        onMove={(_, nextViewport) => setViewport(nextViewport)}
-        onInit={(instance) => setViewport(instance.getViewport())}
+        onMove={(_, nextViewport) => {
+          setViewport(nextViewport);
+          logViewport('move', nextViewport);
+        }}
+        onInit={(instance) => {
+          reactFlowRef.current = instance;
+          const nextViewport = instance.getViewport();
+          setViewport(nextViewport);
+          logViewport('init', nextViewport);
+        }}
         onPaneClick={() => {
+          warnGoalDebug('page:interaction-pane-click', {
+            connectModeActive: connectMode.isActive,
+            selectedBefore: selected,
+          });
           closeContextMenu();
           if (connectMode.isActive) {
             connectMode.cancel();
@@ -999,6 +1329,12 @@ export function GoalsPage() {
           setSelected(null);
         }}
         onNodeClick={(_, node) => {
+          warnGoalDebug('page:interaction-node-click', {
+            nodeId: node.id,
+            isMe: node.id === graph.me.id,
+            connectModeActive: connectMode.isActive,
+            selectedBefore: selected,
+          });
           closeContextMenu();
           if (connectMode.isActive) {
             if (node.id === graph.me.id) return;
@@ -1008,11 +1344,21 @@ export function GoalsPage() {
           setSelected(node.id === graph.me.id ? { kind: 'me', id: node.id } : { kind: 'goal', id: node.id });
         }}
         onEdgeClick={(_, edge) => {
+          warnGoalDebug('page:interaction-edge-click', {
+            edgeId: edge.id,
+            selectedBefore: selected,
+          });
           closeContextMenu();
           setSelected({ kind: 'edge', id: edge.id });
         }}
         onNodeContextMenu={(event, node) => {
           event.preventDefault();
+          warnGoalDebug('page:interaction-node-context-menu', {
+            nodeId: node.id,
+            isMe: node.id === graph.me.id,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          });
           updateConnectPreview(event.clientX, event.clientY);
           setSelected(node.id === graph.me.id ? { kind: 'me', id: node.id } : { kind: 'goal', id: node.id });
           openContextMenu({
@@ -1024,24 +1370,41 @@ export function GoalsPage() {
         }}
         onEdgeContextMenu={(event, edge) => {
           event.preventDefault();
+          warnGoalDebug('page:interaction-edge-context-menu', {
+            edgeId: edge.id,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          });
           setSelected({ kind: 'edge', id: edge.id });
           openContextMenu({ kind: 'edge', id: edge.id, x: event.clientX, y: event.clientY });
         }}
         onConnect={(connection: Connection) => {
+          warnGoalDebug('page:interaction-connect', connection as Record<string, unknown>);
           if (!connection.source || !connection.target || connection.target === graph.me.id) return;
           handleConnect(connection.source, connection.target);
         }}
         onReconnect={(oldEdge, connection) => {
+          warnGoalDebug('page:interaction-reconnect', {
+            oldEdgeId: oldEdge.id,
+            source: connection.source,
+            target: connection.target,
+          });
           handleReconnect(oldEdge, connection.source, connection.target);
         }}
         onNodeDrag={(_, node) => {
           simulationRef.current?.pinNode(node.id, node.position.x, node.position.y);
         }}
         onNodeDragStop={(_, node) => {
+          warnGoalDebug('page:interaction-node-drag-stop', {
+            nodeId: node.id,
+            x: node.position.x,
+            y: node.position.y,
+          });
           simulationRef.current?.releaseNode(node.id);
         }}
         onPaneContextMenu={(event) => {
           event.preventDefault();
+          warnGoalDebug('page:interaction-pane-context-menu');
           closeContextMenu();
         }}
       >
