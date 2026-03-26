@@ -864,13 +864,15 @@ export function GoalsPage() {
           onJumpNode={(nodeId) => setSelected(nodeId === graph.me.id ? { kind: 'me', id: nodeId } : { kind: 'goal', id: nodeId })}
           onUpdate={(patch) => notifyResult(updateEdge({ edgeId: selectedEdge.id, ...patch }), '已更新路径')}
           onSetOverride={(status) => {
+            const edgeLabel = resolveEdgeLabel(selectedEdge.id);
             setEdgeStatusOverride(selectedEdge.id, status);
-            toast({ title: `[开发者] 边状态已设为 ${status}` });
+            toast({ title: `[开发者] 边'${edgeLabel}'状态已设为 ${status}` });
           }}
           onClearOverride={() => {
             if (edgeOverrides.has(selectedEdge.id)) {
+              const edgeLabel = resolveEdgeLabel(selectedEdge.id);
               clearEdgeStatusOverride(selectedEdge.id);
-              toast({ title: '[开发者] 已清除状态覆盖' });
+              toast({ title: `[开发者] 已清除边'${edgeLabel}'的状态覆盖` });
             }
           }}
         />

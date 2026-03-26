@@ -446,6 +446,28 @@ describe('GoalsPage', () => {
     expect(await screen.findByRole('button', { name: '真实任务' })).toBeInTheDocument();
   });
 
+  it('includes the edge label in developer override toasts', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    fireEvent.click(screen.getByTestId(`mock-react-flow-edge-${edgeId}`));
+    fireEvent.click(await screen.findByRole('button', { name: '⚙ 开发者' }));
+    fireEvent.click(screen.getByRole('button', { name: 'completed' }));
+
+    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: "[开发者] 边'待定义'状态已设为 completed",
+    }));
+  });
+
   it('shows connect preview while connect mode is active and clears it on pane click', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);
