@@ -271,4 +271,27 @@ describe('BlockTaskAssociationList issue-418', () => {
     fireEvent.click(screen.getByTestId('task-association-prestart-task-task-1'));
     expect(onPrestartSelectedTaskIdsChange).toHaveBeenCalledWith(['task-2', 'task-1']);
   });
+
+  it('includes suspended tasks in prestart selectable list when they are not hard-blocked', async () => {
+    loadActiveBlockMock.mockResolvedValue(null);
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-1', title: '待办任务', status: 'pending' }),
+      makeTask({ id: 'task-2', title: '挂起任务', status: 'suspended' }),
+      makeTask({ id: 'task-3', title: '已取消任务', status: 'cancelled' }),
+    ]);
+
+    render(
+      <BlockTaskAssociationList
+        prestartSelectedTaskIds={[]}
+        onPrestartSelectedTaskIdsChange={vi.fn()}
+      />,
+    );
+
+    await screen.findByText('时间块开始前即可选择可执行任务，开始后会自动关联到本次时间块。');
+    expect(screen.getByTestId('task-association-prestart-task-task-1')).toBeInTheDocument();
+    expect(screen.getByTestId('task-association-prestart-task-task-2')).toBeInTheDocument();
+    expect(screen.getByText('挂起任务')).toBeInTheDocument();
+    expect(screen.getByText('已挂起')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-association-prestart-task-task-3')).toBeNull();
+  });
 });

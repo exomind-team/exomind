@@ -9,7 +9,7 @@ function hasHardBlockingDependency(
 }
 
 export function isPrestartSelectableTask(task: TaskNode): boolean {
-  return task.status === 'pending' || task.status === 'in_progress';
+  return task.status === 'pending' || task.status === 'in_progress' || task.status === 'suspended';
 }
 
 export function usePrestartSelectableTasks(): TaskNode[] {
@@ -60,6 +60,19 @@ interface PrestartTaskSelectionListProps {
   className?: string;
 }
 
+function resolvePrestartTaskStatusLabel(task: TaskNode, selected: boolean): string {
+  if (selected) {
+    return '已选';
+  }
+  if (task.status === 'in_progress') {
+    return '进行中';
+  }
+  if (task.status === 'suspended') {
+    return '已挂起';
+  }
+  return '待办';
+}
+
 export function PrestartTaskSelectionList({
   tasks,
   selectedTaskIds,
@@ -107,7 +120,7 @@ export function PrestartTaskSelectionList({
           >
             <span className="truncate">{task.title}</span>
             <span className="ml-3 shrink-0 text-[11px]">
-              {selected ? '已选' : task.status === 'in_progress' ? '进行中' : '待办'}
+              {resolvePrestartTaskStatusLabel(task, selected)}
             </span>
           </button>
         );
