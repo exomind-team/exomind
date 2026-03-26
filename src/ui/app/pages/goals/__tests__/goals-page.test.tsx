@@ -289,9 +289,40 @@ describe('GoalsPage', () => {
     });
   });
 
+  it('splits an edge from the context menu by inserting a new midpoint goal', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    const view = render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-edge-${edgeId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-split'));
+
+    fireEvent.change(screen.getByLabelText('中间目标标题'), { target: { value: 'Bridge' } });
+    fireEvent.click(screen.getByText('确认拆解'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+      expect(useGoalStore.getState().graph.edges).toHaveLength(2);
+    });
+
+    expect(useGoalStore.getState().graph.goals.map((goal) => goal.title)).toContain('Bridge');
+    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: '已拆解路径',
+    }));
+
+    view.unmount();
+  });
+
   it('toasts when switching completion mode in goal detail panel', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
-    render(<GoalsPage />);
+    const view = render(<GoalsPage />);
 
     fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
     fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
@@ -307,6 +338,8 @@ describe('GoalsPage', () => {
         title: '完成条件已更新为 OR',
       }));
     });
+
+    view.unmount();
   });
 
   it('highlights inbound edges when a goal display status changes', async () => {

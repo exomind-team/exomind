@@ -10,6 +10,7 @@ import type {
   GoalNode,
   NodeId,
   Result,
+  SplitEdgeParams,
   TaskEdge,
   TaskEdgeId,
   TaskEdgeStatus,
@@ -92,6 +93,12 @@ function addEdgeToRule(rule: CompletionRule, edgeId: TaskEdgeId, clauseIndex: nu
 function removeEdgeFromRule(rule: CompletionRule, edgeId: TaskEdgeId): CompletionRule {
   return rule
     .map((clause) => clause.filter((candidate) => candidate !== edgeId))
+    .filter((clause) => clause.length > 0);
+}
+
+function replaceEdgeInRule(rule: CompletionRule, previousEdgeId: TaskEdgeId, nextEdgeId: TaskEdgeId): CompletionRule {
+  return rule
+    .map((clause) => dedupeClause(clause.map((edgeId) => (edgeId === previousEdgeId ? nextEdgeId : edgeId))))
     .filter((clause) => clause.length > 0);
 }
 
@@ -364,6 +371,135 @@ export function deleteEdge(
   }
 
   return { ok: true, value: { graph: nextGraph } };
+}
+
+export function splitEdge(
+  graph: GoalGraph,
+  params: SplitEdgeParams,
+  options?: GoalLogicOptions,
+): Result<{ graph: GoalGraph; midGoal: GoalNode; newEdge: TaskEdge }> {
+  const edge = findEdge(graph, params.edgeId);
+  if (!edge) return { ok: false, error: '边不存在' };
+  if (isCompletedGoal(graph, edge.target, options)) {
+    return { ok: false, error: '已完成目标的入边不可拆解' };
+  }
+
+  let existingGoal: GoalNode | undefined;
+  if (params.insertMode === 'existing') {
+    if (!params.existingGoalId) return { ok: false, error: '请选择中间目标' };
+    existingGoal = findGoal(graph, params.existingGoalId);
+    if (!existingGoal) return { ok: false, error: '中间目标不存在' };
+    if (existingGoal.cancelled || isCompletedGoal(graph, existingGoal.id, options)) {
+      return { ok: false, error: '中间目标不可用' };
+    }
+  }
+
+  const midGoalId = params.insertMode === 'existing'
+    ? params.existingGoalId as string
+    : createIdOf('goal', options);
+
+  if (midGoalId === edge.source || midGoalId === edge.target) {
+    return { ok: false, error: '中间目标不能与原边端点重复' };
+  }
+
+  const newEdgeId = createIdOf('edge', options);
+  const timestamp = nowOf(options);
+  const originalEdgePlacement = params.originalEdgePlacement;
+  const sourceToMid: TaskEdge = originalEdgePlacement === 'first-half'
+    ? {
+        ...edge,
+        source: edge.source,
+        target: midGoalId,
+        updatedAt: timestamp,
+      }
+    : {
+        id: newEdgeId,
+        title: '',
+        description: '',
+        source: edge.source,
+        target: midGoalId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+  const midToTarget: TaskEdge = originalEdgePlacement === 'second-half'
+    ? {
+        ...edge,
+        source: midGoalId,
+        target: edge.target,
+        updatedAt: timestamp,
+      }
+    : {
+        id: newEdgeId,
+        title: '',
+        description: '',
+        source: midGoalId,
+        target: edge.target,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+  const validationGraph: GoalGraph = cloneGraph(graph);
+  validationGraph.edges = validationGraph.edges.filter((candidate) => candidate.id !== edge.id);
+  for (const candidate of [sourceToMid, midToTarget]) {
+    if (candidate.source === candidate.target) {
+      return { ok: false, error: '不能连到自己' };
+    }
+    if (wouldCreateCycle(validationGraph, candidate.source, candidate.target)) {
+      return { ok: false, error: '不能形成环' };
+    }
+    validationGraph.edges.push(candidate);
+  }
+
+  const nextGraph = cloneGraph(graph);
+  nextGraph.edges = nextGraph.edges.filter((candidate) => candidate.id !== edge.id);
+
+  const midGoal = params.insertMode === 'existing'
+    ? (findGoal(nextGraph, midGoalId) as GoalNode)
+    : {
+        id: midGoalId,
+        title: params.newGoalTitle ?? '',
+        description: params.newGoalDescription ?? '',
+        cancelled: false,
+        completionRule: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+  if (params.insertMode === 'new') {
+    nextGraph.goals.push(midGoal);
+  }
+
+  nextGraph.edges.push(sourceToMid);
+  nextGraph.edges.push(midToTarget);
+
+  if (params.insertMode === 'existing') {
+    const nextMidGoal = findGoal(nextGraph, midGoalId) as GoalNode;
+    nextMidGoal.completionRule = addEdgeToRule(
+      nextMidGoal.completionRule,
+      sourceToMid.target === midGoalId ? sourceToMid.id : midToTarget.id,
+      params.rulePosition.clauseIndex,
+    );
+    nextMidGoal.updatedAt = timestamp;
+  } else {
+    const nextMidGoal = findGoal(nextGraph, midGoalId) as GoalNode;
+    nextMidGoal.completionRule = [[sourceToMid.target === midGoalId ? sourceToMid.id : midToTarget.id]];
+    nextMidGoal.updatedAt = timestamp;
+  }
+
+  const originalTargetGoal = findGoal(nextGraph, edge.target) as GoalNode;
+  if (originalEdgePlacement === 'first-half') {
+    originalTargetGoal.completionRule = replaceEdgeInRule(originalTargetGoal.completionRule, edge.id, midToTarget.id);
+    originalTargetGoal.updatedAt = timestamp;
+  }
+
+  return {
+    ok: true,
+    value: {
+      graph: nextGraph,
+      midGoal,
+      newEdge: originalEdgePlacement === 'second-half' ? sourceToMid : midToTarget,
+    },
+  };
 }
 
 export function updateGoal(

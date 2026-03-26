@@ -89,6 +89,16 @@ export interface DeleteEdgeParams {
   edgeId: TaskEdgeId;
 }
 
+export interface SplitEdgeParams {
+  edgeId: TaskEdgeId;
+  insertMode: 'new' | 'existing';
+  existingGoalId?: GoalId;
+  newGoalTitle?: string;
+  newGoalDescription?: string;
+  originalEdgePlacement: 'first-half' | 'second-half';
+  rulePosition: { clauseIndex: number };
+}
+
 export interface UpdateGoalParams {
   goalId: GoalId;
   title?: string;

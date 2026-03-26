@@ -12,6 +12,7 @@ import {
   getInEdges as getInEdgesLogic,
   getOutEdges as getOutEdgesLogic,
   setEdgeStatusOverride as setEdgeStatusOverrideLogic,
+  splitEdge as splitEdgeLogic,
   updateEdge as updateEdgeLogic,
   updateGoal as updateGoalLogic,
 } from './goal-logic';
@@ -24,6 +25,7 @@ import type {
   GoalNode,
   GoalOpLog,
   Result,
+  SplitEdgeParams,
   TaskEdge,
   TaskEdgeStatus,
   UpdateEdgeParams,
@@ -74,6 +76,7 @@ export interface GoalStoreState {
   createEdge: (params: CreateEdgeParams) => Result<TaskEdge>;
   cancelGoal: (params: CancelGoalParams) => Result<void>;
   deleteEdge: (params: { edgeId: string }) => Result<{ autoAddedEdgeId?: string; adjustedRule: boolean }>;
+  splitEdge: (params: SplitEdgeParams) => Result<{ midGoal: GoalNode; newEdge: TaskEdge }>;
   updateGoal: (params: UpdateGoalParams) => Result<void>;
   updateEdge: (params: UpdateEdgeParams) => Result<void>;
   setEdgeStatusOverride: (edgeId: string, status: TaskEdgeStatus) => void;
@@ -319,6 +322,24 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
       value: {
         autoAddedEdgeId: result.value.autoAddedEdge?.id,
         adjustedRule: true,
+      },
+    };
+  },
+  splitEdge: (params) => {
+    const state = get();
+    const result = splitEdgeLogic(state.graph, params, { edgeOverrides: state.edgeOverrides });
+    if (!result.ok) return result;
+    const nextOpLog = appendOpLog(state.opLog, 'splitEdge', params as unknown as Record<string, unknown>, {
+      midGoalId: result.value.midGoal.id,
+      newEdgeId: result.value.newEdge.id,
+    });
+    persistGoalState(result.value.graph, nextOpLog);
+    set({ graph: result.value.graph, opLog: nextOpLog });
+    return {
+      ok: true,
+      value: {
+        midGoal: result.value.midGoal,
+        newEdge: result.value.newEdge,
       },
     };
   },

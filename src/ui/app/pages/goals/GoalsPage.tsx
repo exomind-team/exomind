@@ -22,6 +22,7 @@ import { GoalContextMenu } from './components/GoalContextMenu';
 import { GoalDetailPanel } from './components/GoalDetailPanel';
 import { GOAL_NODE_SIZE, GoalFlowNode, ME_NODE_SIZE, type GoalFlowNodeData } from './components/GoalFlowNode';
 import { MeDetailPanel } from './components/MeDetailPanel';
+import { SplitEdgeDialog } from './components/SplitEdgeDialog';
 import { TaskFlowEdge, type TaskFlowEdgeData } from './components/TaskFlowEdge';
 import { useConnectMode } from './hooks/useConnectMode';
 import { useContextMenu } from './hooks/useContextMenu';
@@ -151,6 +152,7 @@ export function GoalsPage() {
   const createEdge = useGoalStore((state) => state.createEdge);
   const cancelGoal = useGoalStore((state) => state.cancelGoal);
   const deleteEdge = useGoalStore((state) => state.deleteEdge);
+  const splitEdge = useGoalStore((state) => state.splitEdge);
   const updateGoal = useGoalStore((state) => state.updateGoal);
   const updateEdge = useGoalStore((state) => state.updateEdge);
   const setEdgeStatusOverride = useGoalStore((state) => state.setEdgeStatusOverride);
@@ -166,6 +168,11 @@ export function GoalsPage() {
   const [cancelGoalId, setCancelGoalId] = useState<string | null>(null);
   const [cancelCascadeInTasks, setCancelCascadeInTasks] = useState(false);
   const [cancelCascadeOutTasks, setCancelCascadeOutTasks] = useState(false);
+  const [splitEdgeId, setSplitEdgeId] = useState<string | null>(null);
+  const [splitInsertMode, setSplitInsertMode] = useState<'new' | 'existing'>('new');
+  const [splitExistingGoalId, setSplitExistingGoalId] = useState('');
+  const [splitNewGoalTitle, setSplitNewGoalTitle] = useState('');
+  const [splitOriginalEdgePlacement, setSplitOriginalEdgePlacement] = useState<'first-half' | 'second-half'>('second-half');
   const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<string[]>([]);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
@@ -191,6 +198,7 @@ export function GoalsPage() {
       setCancelGoalId(null);
       setCancelCascadeInTasks(false);
       setCancelCascadeOutTasks(false);
+      setSplitEdgeId(null);
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -373,6 +381,18 @@ export function GoalsPage() {
   const selectedEdge = selected?.kind === 'edge'
     ? graph.edges.find((edge) => edge.id === selected.id) ?? null
     : null;
+  const splitTargetEdge = splitEdgeId
+    ? graph.edges.find((edge) => edge.id === splitEdgeId) ?? null
+    : null;
+  const availableSplitGoals = useMemo(() => {
+    if (!splitTargetEdge) return [];
+    return graph.goals.filter((goal) => (
+      goal.id !== splitTargetEdge.source
+      && goal.id !== splitTargetEdge.target
+      && !goal.cancelled
+      && deriveGoalDisplayStatus(goal.id) !== 'completed'
+    ));
+  }, [deriveGoalDisplayStatus, graph.goals, splitTargetEdge]);
 
   function notifyResult(result: { ok: false; error: string } | { ok: true }, success?: string) {
     if (!result.ok) {
@@ -420,6 +440,14 @@ export function GoalsPage() {
       highlightTimeoutsRef.current.delete(edgeId);
     }, 1000);
     highlightTimeoutsRef.current.set(edgeId, timeoutId);
+  }
+
+  function resetSplitDialog() {
+    setSplitEdgeId(null);
+    setSplitInsertMode('new');
+    setSplitExistingGoalId('');
+    setSplitNewGoalTitle('');
+    setSplitOriginalEdgePlacement('second-half');
   }
 
   useLayoutEffect(() => {
@@ -493,9 +521,22 @@ export function GoalsPage() {
         },
       ];
     }
+    const edge = graph.edges.find((item) => item.id === contextMenu.id);
+    const targetCompleted = edge ? deriveGoalDisplayStatus(edge.target) === 'completed' : false;
     return [
       { key: 'detail', label: '详情', onSelect: () => setSelected({ kind: 'edge', id: contextMenu.id }) },
-      {
+      ...(!targetCompleted ? [{
+        key: 'split',
+        label: '拆解',
+        onSelect: () => {
+          setSplitEdgeId(contextMenu.id);
+          setSplitInsertMode('new');
+          setSplitExistingGoalId('');
+          setSplitNewGoalTitle('');
+          setSplitOriginalEdgePlacement('second-half');
+        },
+      }] : []),
+      ...(!targetCompleted ? [{
         key: 'delete',
         label: '删除',
         danger: true,
@@ -515,9 +556,9 @@ export function GoalsPage() {
           }
           setSelected(null);
         },
-      },
+      }] : []),
     ];
-  }, [connectMode, contextMenu, deleteEdge, deriveGoalDisplayStatus, graph.goals]);
+  }, [connectMode, contextMenu, deleteEdge, deriveGoalDisplayStatus, graph.edges, graph.goals]);
 
   return (
     <div
@@ -720,6 +761,43 @@ export function GoalsPage() {
           onUpdate={(name) => notifyResult(updateMe(name), '已更新 Me')}
         />
       ) : null}
+
+      <SplitEdgeDialog
+        open={Boolean(splitTargetEdge)}
+        availableGoals={availableSplitGoals}
+        insertMode={splitInsertMode}
+        existingGoalId={splitExistingGoalId}
+        newGoalTitle={splitNewGoalTitle}
+        originalEdgePlacement={splitOriginalEdgePlacement}
+        onInsertModeChange={(mode) => {
+          setSplitInsertMode(mode);
+          if (mode === 'new') {
+            setSplitExistingGoalId('');
+          } else {
+            setSplitNewGoalTitle('');
+          }
+        }}
+        onExistingGoalIdChange={setSplitExistingGoalId}
+        onNewGoalTitleChange={setSplitNewGoalTitle}
+        onOriginalEdgePlacementChange={setSplitOriginalEdgePlacement}
+        onCancel={resetSplitDialog}
+        onConfirm={() => {
+          if (!splitTargetEdge) return;
+          const result = splitEdge({
+            edgeId: splitTargetEdge.id,
+            insertMode: splitInsertMode,
+            existingGoalId: splitInsertMode === 'existing' ? splitExistingGoalId || undefined : undefined,
+            newGoalTitle: splitInsertMode === 'new' ? splitNewGoalTitle : undefined,
+            originalEdgePlacement: splitOriginalEdgePlacement,
+            rulePosition: { clauseIndex: 0 },
+          });
+          if (!notifyResult(result, '已拆解路径')) return;
+          if (!result.ok) return;
+          setSelected({ kind: 'goal', id: result.value.midGoal.id });
+          simulationRef.current?.reheat();
+          resetSplitDialog();
+        }}
+      />
 
       <CancelGoalDialog
         open={Boolean(cancelGoalId)}

@@ -13,6 +13,7 @@ import {
   getInEdges,
   getOutEdges,
   setEdgeStatusOverride,
+  splitEdge,
   updateEdge,
   updateGoal,
   wouldCreateCycle,
@@ -244,6 +245,43 @@ describe('goal-logic', () => {
     expect(autoEdge.source).toBe('me');
     expect(autoEdge.target).toBe('goal-c');
     expect(goalC.completionRule).toEqual([['edge-auto']]);
+  });
+
+  it('splits an edge by inserting a new midpoint goal and keeps the original edge as the second half', () => {
+    const graph = makeGraph();
+    const result = splitEdge(graph, {
+      edgeId: 'edge-a-b',
+      insertMode: 'new',
+      newGoalTitle: 'Bridge',
+      originalEdgePlacement: 'second-half',
+      rulePosition: { clauseIndex: 0 },
+    }, {
+      createId: (() => {
+        let index = 0;
+        return (prefix: string) => `${prefix}-${++index}`;
+      })(),
+      now: () => 99,
+      getTaskStatus,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.midGoal.title).toBe('Bridge');
+    expect(result.value.graph.goals).toHaveLength(4);
+    expect(result.value.graph.edges).toHaveLength(4);
+
+    const insertedGoal = result.value.graph.goals.find((goal) => goal.id === result.value.midGoal.id) as GoalNode;
+    const newInboundEdge = result.value.graph.edges.find((edge) => edge.id === result.value.newEdge.id) as TaskEdge;
+    const originalEdge = result.value.graph.edges.find((edge) => edge.id === 'edge-a-b') as TaskEdge;
+    const goalB = result.value.graph.goals.find((goal) => goal.id === 'goal-b') as GoalNode;
+
+    expect(newInboundEdge.source).toBe('goal-a');
+    expect(newInboundEdge.target).toBe(insertedGoal.id);
+    expect(originalEdge.source).toBe(insertedGoal.id);
+    expect(originalEdge.target).toBe('goal-b');
+    expect(insertedGoal.completionRule).toEqual([[newInboundEdge.id]]);
+    expect(goalB.completionRule).toEqual([['edge-a-b']]);
   });
 
   it('prevents cancelling completed goals and freezes completed targets', () => {
