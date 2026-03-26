@@ -164,6 +164,8 @@ export function GoalsPage() {
   const [guideHidden, setGuideHidden] = useState(() => readBooleanStorage(GUIDE_HIDDEN_STORAGE_KEY, false));
   const [selected, setSelected] = useState<Selection>(null);
   const [cancelGoalId, setCancelGoalId] = useState<string | null>(null);
+  const [cancelCascadeInTasks, setCancelCascadeInTasks] = useState(false);
+  const [cancelCascadeOutTasks, setCancelCascadeOutTasks] = useState(false);
   const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<string[]>([]);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
@@ -186,6 +188,8 @@ export function GoalsPage() {
       closeContextMenu();
       connectMode.cancel();
       setCancelGoalId(null);
+      setCancelCascadeInTasks(false);
+      setCancelCascadeOutTasks(false);
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -430,7 +434,16 @@ export function GoalsPage() {
         { key: 'downstream', label: '添加下游目标', onSelect: () => handleCreateGoal(contextMenu.id, 'downstream') },
         { key: 'upstream', label: '添加上游目标', onSelect: () => handleCreateGoal(contextMenu.id, 'upstream') },
         { key: 'connect', label: '连接到...', onSelect: () => connectMode.start(contextMenu.id) },
-        { key: 'cancel', label: '取消目标', danger: true, onSelect: () => setCancelGoalId(contextMenu.id) },
+        {
+          key: 'cancel',
+          label: '取消目标',
+          danger: true,
+          onSelect: () => {
+            setCancelCascadeInTasks(false);
+            setCancelCascadeOutTasks(false);
+            setCancelGoalId(contextMenu.id);
+          },
+        },
       ];
     }
     return [
@@ -664,13 +677,27 @@ export function GoalsPage() {
       <CancelGoalDialog
         open={Boolean(cancelGoalId)}
         goalTitle={graph.goals.find((goal) => goal.id === cancelGoalId)?.title ?? ''}
-        onCancel={() => setCancelGoalId(null)}
+        cascadeInTasks={cancelCascadeInTasks}
+        cascadeOutTasks={cancelCascadeOutTasks}
+        onCascadeInTasksChange={setCancelCascadeInTasks}
+        onCascadeOutTasksChange={setCancelCascadeOutTasks}
+        onCancel={() => {
+          setCancelGoalId(null);
+          setCancelCascadeInTasks(false);
+          setCancelCascadeOutTasks(false);
+        }}
         onConfirm={() => {
           if (!cancelGoalId) return;
-          const result = cancelGoal({ goalId: cancelGoalId });
+          const result = cancelGoal({
+            goalId: cancelGoalId,
+            cascadeInTasks: cancelCascadeInTasks,
+            cascadeOutTasks: cancelCascadeOutTasks,
+          });
           if (notifyResult(result, '目标已取消')) {
             setSelected(null);
             setCancelGoalId(null);
+            setCancelCascadeInTasks(false);
+            setCancelCascadeOutTasks(false);
           }
         }}
       />

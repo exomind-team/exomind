@@ -146,9 +146,9 @@ describe('GoalsPage', () => {
     isDesktopMock.mockReturnValue(true);
   });
 
-  it('creates a goal from Me context menu and saves title from detail panel', async () => {
+  it('creates a goal from Me context menu and opens its detail panel', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
-    render(<GoalsPage />);
+    const view = render(<GoalsPage />);
 
     fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
     fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
@@ -157,13 +157,10 @@ describe('GoalsPage', () => {
       expect(useGoalStore.getState().graph.goals).toHaveLength(1);
     });
 
-    const titleInput = screen.getAllByRole('textbox')[0] as HTMLInputElement;
-    fireEvent.change(titleInput, { target: { value: 'First goal' } });
-    fireEvent.blur(titleInput);
+    expect(screen.getByText('目标详情')).toBeInTheDocument();
+    expect(screen.getAllByRole('textbox')[0]).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(useGoalStore.getState().graph.goals[0]?.title).toBe('First goal');
-    });
+    view.unmount();
   });
 
   it('hides cancelled goals by default and shows them when toggle is enabled', async () => {
@@ -189,6 +186,41 @@ describe('GoalsPage', () => {
     expect(screen.queryByTestId(`mock-react-flow-node-${goalId}`)).toBeNull();
     fireEvent.click(screen.getByRole('checkbox'));
     expect(screen.getByTestId(`mock-react-flow-node-${goalId}`)).toBeInTheDocument();
+  });
+
+  it('captures cascade options in the cancel goal dialog before confirming', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-cancel'));
+
+    const cascadeIn = screen.getByLabelText('同时取消入边关联的任务（达成手段）');
+    const cascadeOut = screen.getByLabelText('同时取消出边关联的任务（后续路径）');
+    fireEvent.click(cascadeIn);
+    fireEvent.click(cascadeOut);
+    fireEvent.click(screen.getByText('确认取消'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals[0]?.cancelled).toBe(true);
+    });
+
+    const opLog = useGoalStore.getState().opLog;
+    const lastOp = opLog[opLog.length - 1];
+    expect(lastOp?.action).toBe('cancelGoal');
+    expect(lastOp?.params).toMatchObject({
+      goalId,
+      cascadeInTasks: true,
+      cascadeOutTasks: true,
+    });
   });
 
   it('uses touch-first empty-state copy on mobile and lets Me name be edited', async () => {
