@@ -431,3 +431,127 @@ exomind-route-YYYY-MM-DD.html
 | 外部依赖 | dagre.js CDN + Google Fonts CDN |
 | 响应式 | ≥1200px 双列 / <768px 紧凑 |
 | 输出 | 单文件 HTML |
+
+---
+
+## 航线消费（供其他 Agent 查询）
+
+航线不仅是发布物，也是其他 Agent 的**批次数据查询入口**。任何 Agent 在收到以下类型请求时，应先获取最新航线数据再行动。
+
+### 触发词
+
+| 用户说 | Agent 应做 |
+|--------|-----------|
+| "获取最新开发航线" / "航线状态" | 读取最新航线，输出概览 |
+| "批次 X 里有哪些 issue" | 读取航线，提取对应批次详情 |
+| "草拟批次 X 的实现计划" | 读取批次 → 衔接 planner-methodology 写计划 |
+| "下一个该做哪个批次" | 读取航线，找 status=ready 且优先级最高的 |
+| "批次 X 完成了吗" | 读取批次 issues，对比 gh issue 当前状态 |
+
+### 获取最新航线数据
+
+**方式 1：从本地 temp/ 读取**（最新、最完整）
+
+```bash
+# 找到最新的航线文件
+ls -t temp/exomind-route-*.html | head -1
+```
+
+然后从 HTML 文件中提取 `ROUTE` 数据对象：
+- 开始标记：`const ROUTE = {`
+- 结束标记：`// ═══`（注释边界之前）
+- 提取的是纯 JavaScript 对象字面量，可直接解析
+
+**方式 2：从 devlog 仓库 manifest 读取**（已发布的）
+
+```bash
+cat /data/data/com.termux/files/home/A137442/exomind-devlog/routes/manifest.json
+```
+
+manifest 只有摘要（日期、标题、状态、指标），不含完整批次数据。如需完整数据，读取对应的 HTML 文件。
+
+### 提取特定批次
+
+从 ROUTE 对象中按 `id` 查找批次：
+
+```javascript
+// ROUTE.batches 是数组，每个元素：
+{
+  id: 'M',           // 批次字母
+  name: '...',        // 批次名称
+  track: 'web',      // 平台轨道
+  status: 'ready',   // ready|active|done|blocked
+  priority: 'P0',    // 最高优先级
+  deps: [{id, reason}], // 前置依赖
+  branch: '...',      // 建议分支名
+  fileDomain: '...', // 文件域
+  issues: [           // Issue 列表
+    { num: 452, title: '...', priority: 'P0', done: false, size: 'M' },
+  ],
+}
+```
+
+Agent 可以用正则或 JSON 解析提取特定批次，例如：
+```bash
+# 快速查看批次 M 的 issue 编号
+grep -A 50 "id: 'M'" temp/exomind-route-*.html | grep "num:" | head -20
+```
+
+### 从批次到实施计划的衔接
+
+当用户要求"草拟批次 X 的实现计划"时，Agent 应：
+
+1. **读取批次数据**：从航线中提取批次 X 的完整信息
+2. **检查前置依赖**：确认 deps 中的批次已完成，否则提醒用户
+3. **读取 planner-methodology**：`docs/development/planner-methodology.md`，了解计划文件规范
+4. **按规范生成计划**：
+   - 文件名：`docs/plans/YYYY-MM-DD-batch-{x}-{name}-plan.md`
+   - 格式：Context → 步骤 → 验证 → 不要做清单 → 容易出错的关键点
+   - 批次的 `fileDomain` 直接指明要改哪些文件
+   - 批次的 `branch` 直接给出分支名
+   - 批次的 `issues` 按 `done` 字段跳过已完成的
+5. **给出执行提示词**：生成可交给 Codex 的提示词文件
+
+### 航线刷新判断
+
+当 Agent 读取航线数据时，应先检查时效性：
+
+```bash
+# 检查最新航线的生成日期
+ls -t temp/exomind-route-*.html | head -1 | grep -o '[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}'
+
+# 或运行触发检查
+bun run route:check
+```
+
+如果输出 `TRIGGER=true`，建议用户先重新生成航线再做批次规划。
+
+### 示例对话流
+
+```
+用户：批次 O 里有哪些 issue？
+
+Agent：
+1. 读取 temp/ 下最新航线
+2. 提取批次 O 数据
+3. 输出：
+
+   批次 O：时间块体验修复
+   轨道：Web-only | 状态：就绪 | 优先级：P1
+   依赖：无
+   分支：feature/batch-o-timeblock-polish
+   文件域：src/ui/app/pages/Now*, TimeBlock*
+
+   Issues (7):
+   ○ #704 P1 关联任务刷新过慢（500ms 内更新）
+   ○ #705 P2 移除关联任务未弹状态弹窗
+   ○ #606 P2 取消关联时提供任务状态设置弹窗
+   ...
+
+用户：草拟批次 O 的实现计划
+
+Agent：
+1. 读取批次 O 数据
+2. 读取 planner-methodology.md
+3. 生成 docs/plans/2026-03-26-batch-o-timeblock-polish-plan.md
+```
