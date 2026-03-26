@@ -276,4 +276,56 @@ describe('GoalsPage', () => {
       }));
     });
   });
+
+  it('shows connect preview while connect mode is active and clears it on pane click', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-connect'));
+
+    fireEvent.mouseMove(screen.getByTestId('goals-page'), { clientX: 240, clientY: 180 });
+
+    expect(screen.getByTestId('goals-connect-preview')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-pane'));
+
+    expect(screen.queryByTestId('goals-connect-preview')).toBeNull();
+  });
+
+  it('passes parallel edge metadata to duplicate edges', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    act(() => {
+      useGoalStore.getState().createEdge({
+        source: 'me',
+        target: goalId,
+        rulePosition: { clauseIndex: 0 },
+      });
+    });
+
+    await waitFor(() => {
+      const edges = flowApiMocks.lastProps?.edges as Array<{ data?: { parallelIndex?: number; parallelTotal?: number } }>;
+      expect(edges).toHaveLength(2);
+      expect(edges.map((edge) => edge.data?.parallelTotal)).toEqual([2, 2]);
+      expect(edges.map((edge) => edge.data?.parallelIndex)).toEqual([0, 1]);
+    });
+  });
 });

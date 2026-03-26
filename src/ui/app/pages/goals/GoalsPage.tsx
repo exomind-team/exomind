@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -20,7 +20,7 @@ import { CancelGoalDialog } from './components/CancelGoalDialog';
 import { EdgeDetailPanel } from './components/EdgeDetailPanel';
 import { GoalContextMenu } from './components/GoalContextMenu';
 import { GoalDetailPanel } from './components/GoalDetailPanel';
-import { GoalFlowNode, type GoalFlowNodeData } from './components/GoalFlowNode';
+import { GOAL_NODE_SIZE, GoalFlowNode, ME_NODE_SIZE, type GoalFlowNodeData } from './components/GoalFlowNode';
 import { MeDetailPanel } from './components/MeDetailPanel';
 import { TaskFlowEdge, type TaskFlowEdgeData } from './components/TaskFlowEdge';
 import { useConnectMode } from './hooks/useConnectMode';
@@ -111,8 +111,18 @@ export function GoalsPage() {
   const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<string[]>([]);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
+  const pageRef = useRef<HTMLDivElement | null>(null);
   const simulationRef = useRef<GoalForceSimulation | null>(null);
   const highlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const updateConnectPreview = useCallback((clientX: number, clientY: number) => {
+    const bounds = pageRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    connectMode.updatePreviewPoint({
+      x: clientX - bounds.left,
+      y: clientY - bounds.top,
+    });
+  }, [connectMode]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -185,6 +195,8 @@ export function GoalsPage() {
         status: 'pending',
         isMe: true,
         editMode: mode === 'edit',
+        connectModeTargetable: false,
+        connectModeHovering: false,
         onOpenContextMenu: (nodeId: string, x: number, y: number) => {
           setSelected({ kind: 'me', id: nodeId });
           openContextMenu({ kind: 'me', id: nodeId, x, y });
@@ -202,6 +214,12 @@ export function GoalsPage() {
         status: deriveGoalDisplayStatus(goal.id),
         editMode: mode === 'edit',
         hasEmptyRule: goal.completionRule.length === 0,
+        connectModeTargetable: connectMode.isActive && goal.id !== connectMode.sourceId,
+        connectModeHovering: connectMode.hoverTargetId === goal.id,
+        onConnectHoverChange: (hovering: boolean) => {
+          if (!connectMode.isActive || goal.id === connectMode.sourceId) return;
+          connectMode.setHoverTarget(hovering ? goal.id : null);
+        },
         onOpenContextMenu: (nodeId: string, x: number, y: number) => {
           setSelected({ kind: 'goal', id: nodeId });
           openContextMenu({ kind: 'goal', id: nodeId, x, y });
@@ -211,22 +229,56 @@ export function GoalsPage() {
     }));
 
     return [meNode, ...goalNodes];
-  }, [deriveGoalDisplayStatus, graph.me.id, graph.me.name, mode, positions, visibleGraph.goals]);
+  }, [connectMode, deriveGoalDisplayStatus, graph.me.id, graph.me.name, mode, openContextMenu, positions, visibleGraph.goals]);
 
-  const edges = useMemo<Array<Edge<TaskFlowEdgeData>>>(() => (
-    visibleGraph.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: 'task',
-      selectable: true,
-      data: {
-        label: edge.title || (edge.taskNodeRef ? edge.taskNodeRef : '待定义'),
-        status: getEdgeStatus(edge.id),
-        highlighted: highlightedEdgeIds.includes(edge.id),
-      },
-    }))
-  ), [getEdgeStatus, highlightedEdgeIds, visibleGraph.edges]);
+  const edges = useMemo<Array<Edge<TaskFlowEdgeData>>>(() => {
+    const edgesByPair = new Map<string, Array<{ id: string }>>();
+    for (const edge of visibleGraph.edges) {
+      const key = `${edge.source}::${edge.target}`;
+      const current = edgesByPair.get(key) ?? [];
+      current.push({ id: edge.id });
+      edgesByPair.set(key, current);
+    }
+
+    return visibleGraph.edges.map((edge) => {
+      const siblings = edgesByPair.get(`${edge.source}::${edge.target}`) ?? [{ id: edge.id }];
+      const parallelIndex = siblings.findIndex((candidate) => candidate.id === edge.id);
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: 'task',
+        selectable: true,
+        data: {
+          label: edge.title || (edge.taskNodeRef ? edge.taskNodeRef : '待定义'),
+          status: getEdgeStatus(edge.id),
+          highlighted: highlightedEdgeIds.includes(edge.id),
+          parallelIndex,
+          parallelTotal: siblings.length,
+          onOpenContextMenu: (edgeId: string, x: number, y: number) => {
+            setSelected({ kind: 'edge', id: edgeId });
+            openContextMenu({ kind: 'edge', id: edgeId, x, y });
+          },
+        },
+      };
+    });
+  }, [getEdgeStatus, highlightedEdgeIds, openContextMenu, visibleGraph.edges]);
+
+  const connectPreview = useMemo(() => {
+    if (!connectMode.isActive || !connectMode.sourceId || !connectMode.previewPoint) return null;
+
+    const sourcePosition = positions.get(connectMode.sourceId);
+    if (!sourcePosition) return null;
+
+    const sourceSize = connectMode.sourceId === graph.me.id ? ME_NODE_SIZE : GOAL_NODE_SIZE;
+
+    return {
+      x1: sourcePosition.x + sourceSize / 2,
+      y1: sourcePosition.y + sourceSize / 2,
+      x2: connectMode.previewPoint.x,
+      y2: connectMode.previewPoint.y,
+    };
+  }, [connectMode, graph.me.id, positions]);
 
   const selectedGoal = selected?.kind === 'goal'
     ? graph.goals.find((goal) => goal.id === selected.id) ?? null
@@ -337,7 +389,22 @@ export function GoalsPage() {
   }, [connectMode, contextMenu, deleteEdge, deriveGoalDisplayStatus, graph.goals]);
 
   return (
-    <div data-testid="goals-page" className="relative h-[calc(100vh-5rem)] overflow-hidden rounded-[32px] border border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]">
+    <div
+      ref={pageRef}
+      data-testid="goals-page"
+      className={cn(
+        'relative h-[calc(100vh-5rem)] overflow-hidden rounded-[32px] border border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]',
+        connectMode.isActive && 'cursor-crosshair',
+      )}
+      onMouseMove={(event) => {
+        if (!connectMode.isActive) return;
+        updateConnectPreview(event.clientX, event.clientY);
+      }}
+      onPointerMove={(event) => {
+        if (!connectMode.isActive) return;
+        updateConnectPreview(event.clientX, event.clientY);
+      }}
+    >
       <GoalModeSelector mode={mode} onChange={setMode} />
 
       <div className="pointer-events-auto absolute right-3 top-3 z-10 flex items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-2 text-xs text-[#57534E] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]">
@@ -351,6 +418,26 @@ export function GoalsPage() {
         <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-[#1C1917] px-4 py-2 text-xs text-white">
           连线模式：点击目标节点完成连接，点击空白或 ESC 取消
         </div>
+      ) : null}
+
+      {connectPreview ? (
+        <svg
+          data-testid="goals-connect-preview"
+          className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+        >
+          <line
+            x1={connectPreview.x1}
+            y1={connectPreview.y1}
+            x2={connectPreview.x2}
+            y2={connectPreview.y2}
+            stroke="#C75B3A"
+            strokeWidth="2.5"
+            strokeDasharray="8 6"
+            strokeLinecap="round"
+            opacity="0.95"
+          />
+          <circle cx={connectPreview.x1} cy={connectPreview.y1} r="4" fill="#C75B3A" opacity="0.85" />
+        </svg>
       ) : null}
 
       {!guideHidden && graph.goals.length === 0 ? (
@@ -392,6 +479,7 @@ export function GoalsPage() {
         }}
         onNodeContextMenu={(event, node) => {
           event.preventDefault();
+          updateConnectPreview(event.clientX, event.clientY);
           setSelected(node.id === graph.me.id ? { kind: 'me', id: node.id } : { kind: 'goal', id: node.id });
           openContextMenu({
             kind: node.id === graph.me.id ? 'me' : 'goal',

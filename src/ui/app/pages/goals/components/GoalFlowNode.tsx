@@ -14,6 +14,9 @@ export interface GoalFlowNodeData extends Record<string, unknown> {
   isMe?: boolean;
   editMode?: boolean;
   hasEmptyRule?: boolean;
+  connectModeTargetable?: boolean;
+  connectModeHovering?: boolean;
+  onConnectHoverChange?: (hovering: boolean) => void;
   onOpenContextMenu?: (nodeId: string, x: number, y: number) => void;
 }
 
@@ -67,6 +70,8 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
   const longPressHandlers = useLongPress((event) => {
     data.onOpenContextMenu?.(id, event.clientX, event.clientY);
   });
+  const connectModeTargetable = Boolean(data.connectModeTargetable);
+  const connectModeHovering = Boolean(data.connectModeHovering);
 
   return (
     <div
@@ -76,10 +81,19 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
         getGoalClasses(status, isMe),
         !editMode && 'cursor-grab active:cursor-grabbing',
         editMode && 'cursor-crosshair',
+        connectModeTargetable && 'ring-2 ring-[#C75B3A]/30 ring-offset-2 ring-offset-[#FAF7F5] dark:ring-offset-[#0C0A09]',
+        connectModeHovering && 'ring-4 ring-[#C75B3A]/45 ring-offset-4 ring-offset-[#FAF7F5] shadow-[0_0_0_1px_rgba(199,91,58,0.45),0_18px_42px_-16px_rgba(199,91,58,0.55)] dark:ring-offset-[#0C0A09]',
         selected && 'ring-2 ring-orange-400 ring-offset-2 ring-offset-[#FAF7F5] dark:ring-offset-[#0C0A09]',
       )}
       style={{ width: size, height: size }}
-      {...longPressHandlers}
+      onPointerEnter={() => data.onConnectHoverChange?.(true)}
+      onPointerDown={longPressHandlers.onPointerDown}
+      onPointerMove={longPressHandlers.onPointerMove}
+      onPointerUp={longPressHandlers.onPointerUp}
+      onPointerLeave={() => {
+        data.onConnectHoverChange?.(false);
+        longPressHandlers.onPointerLeave?.();
+      }}
     >
       <Handle type="target" position={Position.Top} style={getHandleStyle(editMode)} />
       <Handle type="source" position={Position.Bottom} style={getHandleStyle(editMode)} />
