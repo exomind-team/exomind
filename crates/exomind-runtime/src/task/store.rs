@@ -53,6 +53,7 @@ pub struct TaskStore {
 }
 
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
+pub(crate) const TASK_FIELD_TITLE: &str = "title";
 pub(crate) const TASK_FIELD_DEPENDS_ON: &str = "depends_on";
 pub(crate) const TASK_FIELD_ESTIMATED_MINUTES: &str = "estimated_minutes";
 
@@ -69,6 +70,13 @@ pub(crate) fn validate_terminal_task_update(
 ) -> Result<(), TaskStoreError> {
     if !status.is_terminal() {
         return Ok(());
+    }
+
+    if input.title.is_some() {
+        return Err(TaskStoreError::TerminalFieldImmutable {
+            status,
+            field: TASK_FIELD_TITLE,
+        });
     }
 
     if input.depends_on.is_some() {
@@ -324,6 +332,50 @@ impl TaskStore {
         new_status: TaskStatus,
     ) -> Result<(TaskStatus, Task), TaskStoreError> {
         self.transition_scoped(None, id, new_status)
+    }
+
+    pub fn transition_with_shortcut(
+        &self,
+        id: &str,
+        target_status: TaskStatus,
+    ) -> Result<Vec<(TaskStatus, Task)>, TaskStoreError> {
+        self.transition_with_shortcut_scoped(None, id, target_status)
+    }
+
+    pub fn transition_with_shortcut_scoped(
+        &self,
+        scope_key: Option<&str>,
+        id: &str,
+        target_status: TaskStatus,
+    ) -> Result<Vec<(TaskStatus, Task)>, TaskStoreError> {
+        let task = self
+            .get_scoped(scope_key, id)
+            .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
+
+        if task.status == target_status {
+            return Ok(vec![]);
+        }
+
+        let path =
+            task.status
+                .path_to(&target_status)
+                .ok_or(TaskStoreError::InvalidTransition {
+                    from: task.status,
+                    to: target_status,
+                })?;
+
+        let steps = if path.is_empty() {
+            vec![target_status]
+        } else {
+            path
+        };
+
+        let mut results = Vec::with_capacity(steps.len());
+        for step in steps {
+            results.push(self.transition_scoped(scope_key, id, step)?);
+        }
+
+        Ok(results)
     }
 
     pub fn transition_scoped(
@@ -785,7 +837,7 @@ mod tests {
             .update(
                 &task.id,
                 UpdateTaskInput {
-                    title: Some("Retitled".to_string()),
+                    title: None,
                     description: Some("Still editable".to_string()),
                     done_condition: None,
                     priority: None,
@@ -799,9 +851,41 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(updated.title, "Retitled");
+        assert_eq!(updated.title, "Done task");
         assert_eq!(updated.description.as_deref(), Some("Still editable"));
         assert_eq!(updated.status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn update_terminal_task_rejects_title_changes() {
+        let store = make_store();
+        let task = store.create(create_input("Done task"));
+        store.transition(&task.id, TaskStatus::InProgress).unwrap();
+        store.transition(&task.id, TaskStatus::Completed).unwrap();
+
+        let result = store.update(
+            &task.id,
+            UpdateTaskInput {
+                title: Some("Retitled".to_string()),
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: None,
+                due_at: None,
+                estimated_minutes: None,
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(TaskStoreError::TerminalFieldImmutable {
+                field: "title",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -815,7 +899,7 @@ mod tests {
         let result = store.update(
             &task.id,
             UpdateTaskInput {
-                title: Some("Try update".to_string()),
+                title: None,
                 description: None,
                 done_condition: None,
                 priority: None,
@@ -1027,7 +1111,7 @@ mod tests {
             .update(
                 &task.id,
                 UpdateTaskInput {
-                    title: Some("Retitled".to_string()),
+                    title: None,
                     description: Some("Still editable".to_string()),
                     done_condition: None,
                     priority: None,
@@ -1040,7 +1124,8 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(allowed.title, "Retitled");
+        assert_eq!(allowed.title, "Done task");
+        assert_eq!(allowed.description.as_deref(), Some("Still editable"));
 
         let dependency_result = store.update(
             &task.id,
@@ -1196,6 +1281,25 @@ mod tests {
             result,
             Err(TaskStoreError::InvalidTransition { .. })
         ));
+    }
+
+    #[test]
+    fn transition_with_shortcut_walks_intermediates() {
+        let store = make_store();
+        let task = store.create(create_input("Shortcut task"));
+
+        let steps = store
+            .transition_with_shortcut(&task.id, TaskStatus::Completed)
+            .unwrap();
+
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].0, TaskStatus::Pending);
+        assert_eq!(steps[0].1.status, TaskStatus::InProgress);
+        assert_eq!(steps[1].0, TaskStatus::InProgress);
+        assert_eq!(steps[1].1.status, TaskStatus::Completed);
+
+        let final_task = store.get(&task.id).unwrap();
+        assert_eq!(final_task.status, TaskStatus::Completed);
     }
 
     #[test]

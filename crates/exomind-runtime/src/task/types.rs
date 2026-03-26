@@ -14,7 +14,7 @@ where
 
 /// 5-state machine matching front-end TaskStatus.
 /// pending → in_progress ⇌ suspended → completed / cancelled
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TaskStatus {
     #[serde(rename = "pending", alias = "not_started")]
     Pending,
@@ -50,6 +50,42 @@ impl TaskStatus {
 
     pub fn can_transition_to(&self, target: &TaskStatus) -> bool {
         self.valid_transitions().contains(target)
+    }
+
+    pub fn path_to(&self, target: &TaskStatus) -> Option<Vec<TaskStatus>> {
+        if self == target {
+            return Some(vec![]);
+        }
+        if self.can_transition_to(target) {
+            return Some(vec![]);
+        }
+
+        use std::collections::{HashSet, VecDeque};
+
+        let mut visited = HashSet::from([*self]);
+        let mut queue = VecDeque::new();
+
+        for &next in self.valid_transitions() {
+            if visited.insert(next) {
+                queue.push_back((next, vec![next]));
+            }
+        }
+
+        while let Some((current, path)) = queue.pop_front() {
+            if current == *target {
+                return Some(path);
+            }
+
+            for &next in current.valid_transitions() {
+                if visited.insert(next) {
+                    let mut next_path = path.clone();
+                    next_path.push(next);
+                    queue.push_back((next, next_path));
+                }
+            }
+        }
+
+        None
     }
 
     pub fn is_terminal(&self) -> bool {
@@ -173,6 +209,38 @@ pub struct TransitionInput {
     pub status: TaskStatus,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatchTransitionInput {
+    pub tasks: Vec<BatchTransitionItem>,
+    #[serde(default)]
+    pub shortcut: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatchTransitionItem {
+    pub id: String,
+    pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchTransitionResult {
+    pub id: String,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_status: Option<TaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_status: Option<TaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchTransitionResponse {
+    pub results: Vec<BatchTransitionResult>,
+    pub succeeded: usize,
+    pub failed: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,6 +278,23 @@ mod tests {
         assert!(TaskStatus::Cancelled.is_terminal());
         assert!(TaskStatus::Completed.valid_transitions().is_empty());
         assert!(TaskStatus::Cancelled.valid_transitions().is_empty());
+    }
+
+    #[test]
+    fn path_to_finds_shortcut() {
+        assert_eq!(
+            TaskStatus::Pending.path_to(&TaskStatus::Completed),
+            Some(vec![TaskStatus::InProgress, TaskStatus::Completed])
+        );
+        assert_eq!(
+            TaskStatus::Pending.path_to(&TaskStatus::Cancelled),
+            Some(vec![TaskStatus::InProgress, TaskStatus::Cancelled])
+        );
+        assert_eq!(
+            TaskStatus::Pending.path_to(&TaskStatus::InProgress),
+            Some(vec![])
+        );
+        assert_eq!(TaskStatus::Completed.path_to(&TaskStatus::Pending), None);
     }
 
     #[test]

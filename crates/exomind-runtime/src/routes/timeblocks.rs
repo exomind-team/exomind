@@ -130,10 +130,52 @@ async fn put_active_timeblock(
     Json(payload): Json<ActiveBlockData>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let normalized = payload.normalize_task_ids();
+    let existing_active = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?;
+    let is_new_block = existing_active
+        .as_ref()
+        .map(|block| block.start_id != normalized.start_id)
+        .unwrap_or(true);
+
     state
         .timeblock_store
-        .put_active_scoped(scope_key, payload.normalize_task_ids())
+        .put_active_scoped(scope_key, normalized.clone())
         .map_err(|error| internal_error(error.to_string()))?;
+
+    if is_new_block {
+        write_timeblock_eventlog(
+            &state,
+            scope_key,
+            "block_start",
+            &normalized.name,
+            &normalized.start_id,
+            &normalized.task_ids,
+        );
+    } else if let Some(existing) = existing_active {
+        if !existing.paused && normalized.paused {
+            write_timeblock_eventlog(
+                &state,
+                scope_key,
+                "block_pause",
+                &normalized.name,
+                &normalized.start_id,
+                &normalized.task_ids,
+            );
+        } else if existing.paused && !normalized.paused {
+            write_timeblock_eventlog(
+                &state,
+                scope_key,
+                "block_resume",
+                &normalized.name,
+                &normalized.start_id,
+                &normalized.task_ids,
+            );
+        }
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -142,10 +184,26 @@ async fn delete_active_timeblock(
     Query(query): Query<ScopeQuery>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let active = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?;
     state
         .timeblock_store
         .delete_active_scoped(scope_key)
         .map_err(|error| internal_error(error.to_string()))?;
+
+    if let Some(block) = active {
+        write_timeblock_eventlog(
+            &state,
+            scope_key,
+            "block_end",
+            &block.name,
+            &block.start_id,
+            &block.task_ids,
+        );
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -345,6 +403,42 @@ fn apply_timeblock_import(
     })
 }
 
+fn write_timeblock_eventlog(
+    state: &AppState,
+    scope_key: Option<&str>,
+    event_type: &str,
+    block_name: &str,
+    start_id: &str,
+    task_ids: &[String],
+) {
+    let content = match event_type {
+        "block_start" => format!("时间块开始: {block_name}"),
+        "block_end" => format!("时间块结束: {block_name}"),
+        "block_pause" => format!("时间块暂停: {block_name}"),
+        "block_resume" => format!("时间块恢复: {block_name}"),
+        _ => format!("时间块事件: {block_name}"),
+    };
+    let event = crate::eventlog::EventRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp: chrono::Utc::now().timestamp_millis(),
+        content,
+        tags: vec![event_type.to_string()],
+        metadata: Some(serde_json::json!({
+            "block_name": block_name,
+            "start_id": start_id,
+            "task_ids": task_ids,
+            "source": {
+                "app": "exomind-runtime",
+                "trigger": format!("http:timeblocks/{event_type}"),
+            }
+        })),
+    };
+
+    if let Err(error) = state.eventlog_store.append_event(scope_key, event) {
+        tracing::warn!(error = %error, "failed to write timeblock eventlog");
+    }
+}
+
 fn build_timeblocks_sqlite_snapshot_bytes(
     state: &AppState,
     scope_key: Option<&str>,
@@ -422,6 +516,21 @@ mod tests {
     fn test_state_with_timeblock_store(
         timeblock_store: Arc<crate::timeblock::TimeBlockStore>,
     ) -> AppState {
+        test_state_with_timeblock_store_and_eventlog(
+            timeblock_store,
+            Arc::new(crate::eventlog::EventLogStore::new(
+                std::env::temp_dir().join(format!(
+                    "exomind-test-timeblocks-{}",
+                    uuid::Uuid::new_v4()
+                )),
+            )),
+        )
+    }
+
+    fn test_state_with_timeblock_store_and_eventlog(
+        timeblock_store: Arc<crate::timeblock::TimeBlockStore>,
+        eventlog_store: Arc<crate::eventlog::EventLogStore>,
+    ) -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
         let host_id = "timeblocks-test-host".to_string();
         let registry = crate::agent::AgentRegistry::new();
@@ -456,9 +565,7 @@ mod tests {
                 Arc::clone(&signal_pool),
             )),
             life_agents: std::collections::HashMap::new(),
-            eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
-                std::env::temp_dir().join("exomind-test-timeblocks"),
-            )),
+            eventlog_store,
             #[cfg(not(target_os = "android"))]
             pty_manager: Arc::new(crate::pty::PtyManager::new(
                 Arc::clone(&signal_pool),
@@ -802,5 +909,214 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn put_active_writes_block_start_to_eventlog() {
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            std::env::temp_dir().join(format!(
+                "exomind-test-timeblock-start-eventlog-{}",
+                uuid::Uuid::new_v4()
+            )),
+        ));
+        let state = test_state_with_timeblock_store_and_eventlog(
+            Arc::new(crate::timeblock::TimeBlockStore::new()),
+            eventlog_store.clone(),
+        );
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks/active")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ActiveBlockData {
+                            start_id: "active-1".to_string(),
+                            name: "Morning focus".to_string(),
+                            mode: "countdown".to_string(),
+                            target_minutes: Some(25),
+                            elapsed: 0,
+                            updated_at: Some(1_700_000_101_000),
+                            phase: Some("running".to_string()),
+                            version: Some(1),
+                            actor_id: Some("actor-a".to_string()),
+                            last_transition_at: Some(1_700_000_101_000),
+                            last_resumed_at: Some(1_700_000_101_000),
+                            accumulated_run_ms: Some(0),
+                            start_time: 1_700_000_100_000,
+                            action_ended_at: None,
+                            feedback_started_at: None,
+                            feedback_submitted_at: None,
+                            pause_accumulated_ms: Some(0),
+                            paused: false,
+                            paused_at: None,
+                            task_ids: vec!["task-a".to_string()],
+                            task_association_log: vec![],
+                            task_id: Some("task-a".to_string()),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let events = eventlog_store.list_events(None).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].tags, vec!["block_start".to_string()]);
+        assert_eq!(events[0].metadata.as_ref().unwrap()["block_name"], "Morning focus");
+    }
+
+    #[tokio::test]
+    async fn delete_active_writes_block_end_to_eventlog() {
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            std::env::temp_dir().join(format!(
+                "exomind-test-timeblock-end-eventlog-{}",
+                uuid::Uuid::new_v4()
+            )),
+        ));
+        let state = test_state_with_timeblock_store_and_eventlog(
+            Arc::new(crate::timeblock::TimeBlockStore::new()),
+            eventlog_store.clone(),
+        );
+        let app = test_router(state);
+
+        let put_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks/active")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ActiveBlockData {
+                            start_id: "active-1".to_string(),
+                            name: "Morning focus".to_string(),
+                            mode: "countdown".to_string(),
+                            target_minutes: Some(25),
+                            elapsed: 0,
+                            updated_at: Some(1_700_000_101_000),
+                            phase: Some("running".to_string()),
+                            version: Some(1),
+                            actor_id: Some("actor-a".to_string()),
+                            last_transition_at: Some(1_700_000_101_000),
+                            last_resumed_at: Some(1_700_000_101_000),
+                            accumulated_run_ms: Some(0),
+                            start_time: 1_700_000_100_000,
+                            action_ended_at: None,
+                            feedback_started_at: None,
+                            feedback_submitted_at: None,
+                            pause_accumulated_ms: Some(0),
+                            paused: false,
+                            paused_at: None,
+                            task_ids: vec!["task-a".to_string()],
+                            task_association_log: vec![],
+                            task_id: Some("task-a".to_string()),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+        let delete_response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/timeblocks/active")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+
+        let events = eventlog_store.list_events(None).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().any(|event| event.tags == vec!["block_start".to_string()]));
+        assert!(events.iter().any(|event| event.tags == vec!["block_end".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn put_active_pause_writes_block_pause_to_eventlog() {
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            std::env::temp_dir().join(format!(
+                "exomind-test-timeblock-pause-eventlog-{}",
+                uuid::Uuid::new_v4()
+            )),
+        ));
+        let state = test_state_with_timeblock_store_and_eventlog(
+            Arc::new(crate::timeblock::TimeBlockStore::new()),
+            eventlog_store.clone(),
+        );
+        let app = test_router(state);
+
+        let active = ActiveBlockData {
+            start_id: "active-1".to_string(),
+            name: "Morning focus".to_string(),
+            mode: "countdown".to_string(),
+            target_minutes: Some(25),
+            elapsed: 0,
+            updated_at: Some(1_700_000_101_000),
+            phase: Some("running".to_string()),
+            version: Some(1),
+            actor_id: Some("actor-a".to_string()),
+            last_transition_at: Some(1_700_000_101_000),
+            last_resumed_at: Some(1_700_000_101_000),
+            accumulated_run_ms: Some(0),
+            start_time: 1_700_000_100_000,
+            action_ended_at: None,
+            feedback_started_at: None,
+            feedback_submitted_at: None,
+            pause_accumulated_ms: Some(0),
+            paused: false,
+            paused_at: None,
+            task_ids: vec!["task-a".to_string()],
+            task_association_log: vec![],
+            task_id: Some("task-a".to_string()),
+        };
+
+        let put_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks/active")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&active).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+        let paused_response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks/active")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ActiveBlockData {
+                            paused: true,
+                            paused_at: Some(1_700_000_102_000),
+                            ..active
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(paused_response.status(), StatusCode::NO_CONTENT);
+
+        let events = eventlog_store.list_events(None).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().any(|event| event.tags == vec!["block_pause".to_string()]));
     }
 }

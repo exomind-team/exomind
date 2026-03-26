@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::signal::types::SignalEvent;
 use crate::task::store::TaskStoreError;
-use crate::task::{CreateTaskInput, Task, TaskStatus, TransitionInput, UpdateTaskInput};
+use crate::task::{
+    BatchTransitionInput, BatchTransitionResponse, BatchTransitionResult, CreateTaskInput, Task,
+    TaskStatus, TransitionInput, UpdateTaskInput,
+};
 
 // ── Query types ─────────────────────────────────────────────────
 
@@ -16,6 +19,10 @@ use crate::task::{CreateTaskInput, Task, TaskStatus, TransitionInput, UpdateTask
 struct ListQuery {
     #[serde(default)]
     status: Option<TaskStatus>,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    parent_id: Option<String>,
     #[serde(default)]
     profile_id: Option<String>,
     #[serde(default)]
@@ -38,6 +45,16 @@ struct ScopeQuery {
     profile_id: Option<String>,
     #[serde(default)]
     user_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransitionQuery {
+    #[serde(default)]
+    profile_id: Option<String>,
+    #[serde(default)]
+    user_id: Option<String>,
+    #[serde(default)]
+    shortcut: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -86,10 +103,19 @@ async fn list_tasks(
     Query(query): Query<ListQuery>,
 ) -> Json<Vec<Task>> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let tasks = match &query.status {
+    let mut tasks = match &query.status {
         Some(status) => state.task_store.list_by_status_scoped(scope_key, status),
         None => state.task_store.list_scoped(scope_key),
     };
+
+    if let Some(tag) = &query.tag {
+        tasks.retain(|task| task.tags.iter().any(|task_tag| task_tag == tag));
+    }
+
+    if let Some(parent_id) = &query.parent_id {
+        tasks.retain(|task| task.parent_id.as_deref() == Some(parent_id.as_str()));
+    }
+
     Json(tasks)
 }
 
@@ -146,53 +172,150 @@ async fn update_task(
 async fn transition_task(
     Path(id): Path<String>,
     State(state): State<AppState>,
-    Query(query): Query<ScopeQuery>,
+    Query(query): Query<TransitionQuery>,
     Json(input): Json<TransitionInput>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    if query.shortcut.unwrap_or(false) {
+        let steps = state
+            .task_store
+            .transition_with_shortcut_scoped(scope_key, &id, input.status)
+            .map_err(map_task_store_error)?;
+        let (_, final_task) = steps
+            .last()
+            .cloned()
+            .ok_or((StatusCode::CONFLICT, "task already at target status".to_string()))?;
+
+        for (old_status, task) in &steps {
+            publish_task_transition_signal(&state, *old_status, task);
+            write_task_transition_eventlog(
+                &state,
+                scope_key,
+                task,
+                *old_status,
+                "http:tasks/transition",
+            );
+        }
+
+        return Ok(Json(final_task));
+    }
+
     let (old_status, task) = state
         .task_store
         .transition_scoped(scope_key, &id, input.status)
-        .map_err(|e| {
-            let code = match &e {
-                crate::task::store::TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
-                _ => StatusCode::CONFLICT,
-            };
-            (code, e.to_string())
-        })?;
+        .map_err(map_task_store_error)?;
 
-    let event = SignalEvent {
-        schema_version: 1,
-        id: uuid::Uuid::new_v4().to_string(),
-        topic: "task.transitioned".to_string(),
-        ts: chrono::Utc::now().timestamp_millis() as u64,
-        source: "http:tasks".to_string(),
-        origin_host_id: state.host_id.clone(),
-        hop: 0,
-        trace_id: None,
-        payload: serde_json::json!({
-            "task": task,
-            "old_status": old_status,
-            "new_status": task.status,
-        }),
-    };
-    state.signal_pool.publish(event);
+    publish_task_transition_signal(&state, old_status, &task);
+    write_task_transition_eventlog(
+        &state,
+        scope_key,
+        &task,
+        old_status,
+        "http:tasks/transition",
+    );
 
     Ok(Json(task))
+}
+
+async fn batch_transition_tasks(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+    Json(input): Json<BatchTransitionInput>,
+) -> Json<BatchTransitionResponse> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let use_shortcut = input.shortcut.unwrap_or(false);
+    let mut results = Vec::with_capacity(input.tasks.len());
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+
+    for item in input.tasks {
+        let result = if use_shortcut {
+            state
+                .task_store
+                .transition_with_shortcut_scoped(scope_key, &item.id, item.status)
+                .map(|steps| {
+                    for (old_status, task) in &steps {
+                        publish_task_transition_signal(&state, *old_status, task);
+                        write_task_transition_eventlog(
+                            &state,
+                            scope_key,
+                            task,
+                            *old_status,
+                            "http:tasks/batch-transition",
+                        );
+                    }
+                    steps.last().cloned()
+                })
+                .and_then(|maybe_step| {
+                    maybe_step.ok_or(TaskStoreError::InvalidTransition {
+                        from: item.status,
+                        to: item.status,
+                    })
+                })
+        } else {
+            state
+                .task_store
+                .transition_scoped(scope_key, &item.id, item.status)
+                .map(|(old_status, task)| {
+                    publish_task_transition_signal(&state, old_status, &task);
+                    write_task_transition_eventlog(
+                        &state,
+                        scope_key,
+                        &task,
+                        old_status,
+                        "http:tasks/batch-transition",
+                    );
+                    (old_status, task)
+                })
+        };
+
+        match result {
+            Ok((old_status, task)) => {
+                succeeded += 1;
+                results.push(BatchTransitionResult {
+                    id: item.id,
+                    success: true,
+                    old_status: Some(old_status),
+                    new_status: Some(task.status),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                failed += 1;
+                results.push(BatchTransitionResult {
+                    id: item.id,
+                    success: false,
+                    old_status: None,
+                    new_status: None,
+                    error: Some(error.to_string()),
+                });
+            }
+        }
+    }
+
+    Json(BatchTransitionResponse {
+        results,
+        succeeded,
+        failed,
+    })
 }
 
 fn cancel_task_in_scope(
     state: &AppState,
     scope_key: Option<&str>,
     id: &str,
-) -> Result<Task, (StatusCode, String)> {
-    state.task_store.cancel_scoped(scope_key, id).map_err(|e| {
-        let code = match &e {
-            crate::task::store::TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
-            _ => StatusCode::CONFLICT,
-        };
-        (code, e.to_string())
-    })
+) -> Result<(TaskStatus, Task), (StatusCode, String)> {
+    let old_status = state
+        .task_store
+        .get_scoped(scope_key, id)
+        .map(|task| task.status)
+        .ok_or((StatusCode::NOT_FOUND, format!("task not found: {id}")))?;
+    let task = state
+        .task_store
+        .cancel_scoped(scope_key, id)
+        .map_err(map_task_store_error)?;
+
+    Ok((old_status, task))
 }
 
 /// POST /tasks/:id/cancel — cancel task (set status to cancelled)
@@ -202,9 +325,10 @@ async fn cancel_task(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let task = cancel_task_in_scope(&state, scope_key, &id)?;
+    let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
 
     publish_task_signal(&state, "task.cancelled", &task);
+    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/cancel");
 
     Ok(Json(task))
 }
@@ -216,9 +340,10 @@ async fn delete_task(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let task = cancel_task_in_scope(&state, scope_key, &id)?;
+    let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
 
     publish_task_signal(&state, "task.cancelled", &task);
+    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete");
 
     Ok(Json(task))
 }
@@ -310,6 +435,62 @@ fn publish_task_signal(state: &AppState, topic: &str, task: &Task) {
         payload: serde_json::to_value(task).unwrap_or_default(),
     };
     state.signal_pool.publish(event);
+}
+
+fn publish_task_transition_signal(state: &AppState, old_status: TaskStatus, task: &Task) {
+    let event = SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "task.transitioned".to_string(),
+        ts: chrono::Utc::now().timestamp_millis() as u64,
+        source: "http:tasks".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 0,
+        trace_id: None,
+        payload: serde_json::json!({
+            "task": task,
+            "old_status": old_status,
+            "new_status": task.status,
+        }),
+    };
+    state.signal_pool.publish(event);
+}
+
+fn write_task_transition_eventlog(
+    state: &AppState,
+    scope_key: Option<&str>,
+    task: &Task,
+    old_status: TaskStatus,
+    trigger: &str,
+) {
+    let event = crate::eventlog::EventRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp: chrono::Utc::now().timestamp_millis(),
+        content: format!("任务状态变更: {} ({old_status:?} -> {:?})", task.title, task.status),
+        tags: vec!["task_transition".to_string()],
+        metadata: Some(serde_json::json!({
+            "task_id": task.id,
+            "task_title": task.title,
+            "old_status": old_status,
+            "new_status": task.status,
+            "source": {
+                "app": "exomind-runtime",
+                "trigger": trigger,
+            }
+        })),
+    };
+
+    if let Err(error) = state.eventlog_store.append_event(scope_key, event) {
+        tracing::warn!(error = %error, "failed to write task transition eventlog");
+    }
+}
+
+fn map_task_store_error(error: TaskStoreError) -> (StatusCode, String) {
+    let code = match error {
+        TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+        _ => StatusCode::CONFLICT,
+    };
+    (code, error.to_string())
 }
 
 fn parse_import_strategy(raw: Option<&str>) -> Result<TaskImportStrategy, (StatusCode, String)> {
@@ -433,6 +614,7 @@ fn read_tasks_from_sqlite_snapshot(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/tasks", get(list_tasks).post(create_task))
+        .route("/tasks/batch-transition", post(batch_transition_tasks))
         .route("/tasks/backend/status", get(task_backend_status))
         .route("/tasks/backup/json", get(export_tasks_json))
         .route("/tasks/backup/sqlite", get(export_tasks_sqlite))
@@ -467,6 +649,18 @@ mod tests {
     }
 
     fn test_state_with_task_store(task_store: Arc<crate::task::TaskStore>) -> AppState {
+        test_state_with_task_store_and_eventlog(
+            task_store,
+            Arc::new(crate::eventlog::EventLogStore::new(
+                std::env::temp_dir().join(format!("exomind-test-tasks-{}", uuid::Uuid::new_v4())),
+            )),
+        )
+    }
+
+    fn test_state_with_task_store_and_eventlog(
+        task_store: Arc<crate::task::TaskStore>,
+        eventlog_store: Arc<crate::eventlog::EventLogStore>,
+    ) -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
         let host_id = "tasks-test-host".to_string();
         let registry = crate::agent::AgentRegistry::new();
@@ -501,9 +695,7 @@ mod tests {
                 Arc::clone(&signal_pool),
             )),
             life_agents: std::collections::HashMap::new(),
-            eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
-                std::env::temp_dir().join("exomind-test-tasks"),
-            )),
+            eventlog_store,
             #[cfg(not(target_os = "android"))]
             pty_manager: Arc::new(crate::pty::PtyManager::new(
                 Arc::clone(&signal_pool),
@@ -679,7 +871,7 @@ mod tests {
                     .method("PUT")
                     .uri(format!("/tasks/{}", task.id))
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"title":"Renamed after completion"}"#))
+                    .body(Body::from(r#"{"description":"Post-completion note"}"#))
                     .unwrap(),
             )
             .await
@@ -688,9 +880,51 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let updated: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(updated["title"], "Renamed after completion");
+        assert_eq!(updated["title"], "Original");
+        assert_eq!(updated["description"], "Post-completion note");
         assert_eq!(updated["estimated_minutes"], 30);
         assert_eq!(updated["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn update_terminal_task_title_returns_conflict() {
+        let state = test_state();
+        let task = state.task_store.create(CreateTaskInput {
+            title: "Original".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap();
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::Completed)
+            .unwrap();
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/tasks/{}", task.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Renamed after completion"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]
@@ -940,6 +1174,139 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transition_shortcut_pending_to_completed() {
+        let state = test_state();
+        let task = state.task_store.create(CreateTaskInput {
+            title: "Shortcut task".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/tasks/{}/transition?shortcut=true", task.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"status":"completed"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let transitioned: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(transitioned["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn transition_writes_eventlog() {
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            std::env::temp_dir().join(format!(
+                "exomind-test-task-transition-eventlog-{}",
+                uuid::Uuid::new_v4()
+            )),
+        ));
+        let state = test_state_with_task_store_and_eventlog(
+            Arc::new(crate::task::TaskStore::new()),
+            eventlog_store.clone(),
+        );
+        let task = state.task_store.create(CreateTaskInput {
+            title: "Task with eventlog".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/tasks/{}/transition", task.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"status":"in_progress"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let events = eventlog_store.list_events(None).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].tags, vec!["task_transition".to_string()]);
+        assert_eq!(events[0].metadata.as_ref().unwrap()["task_id"], task.id);
+        assert_eq!(events[0].metadata.as_ref().unwrap()["old_status"], "pending");
+        assert_eq!(events[0].metadata.as_ref().unwrap()["new_status"], "in_progress");
+    }
+
+    #[tokio::test]
+    async fn cancel_writes_eventlog() {
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            std::env::temp_dir().join(format!(
+                "exomind-test-task-cancel-eventlog-{}",
+                uuid::Uuid::new_v4()
+            )),
+        ));
+        let state = test_state_with_task_store_and_eventlog(
+            Arc::new(crate::task::TaskStore::new()),
+            eventlog_store.clone(),
+        );
+        let task = state.task_store.create(CreateTaskInput {
+            title: "Task cancel eventlog".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap();
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/tasks/{}/cancel", task.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let events = eventlog_store.list_events(None).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].metadata.as_ref().unwrap()["task_id"], task.id);
+        assert_eq!(events[0].metadata.as_ref().unwrap()["new_status"], "cancelled");
+    }
+
+    #[tokio::test]
     async fn cancel_route_cancels_task() {
         let state = test_state();
         let task = state.task_store.create(CreateTaskInput {
@@ -1068,6 +1435,350 @@ mod tests {
         let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["title"], "Task 1");
+    }
+
+    #[tokio::test]
+    async fn list_with_tag_filter() {
+        let state = test_state();
+        state.task_store.create(CreateTaskInput {
+            title: "Work only".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec!["work".to_string()],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state.task_store.create(CreateTaskInput {
+            title: "Personal".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec!["personal".to_string()],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state.task_store.create(CreateTaskInput {
+            title: "Work urgent".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec!["work".to_string(), "urgent".to_string()],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks?tag=work")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert!(tasks.iter().any(|task| task["title"] == "Work only"));
+        assert!(tasks.iter().any(|task| task["title"] == "Work urgent"));
+    }
+
+    #[tokio::test]
+    async fn list_with_parent_id_filter() {
+        let state = test_state();
+        let parent = state.task_store.create(CreateTaskInput {
+            title: "Parent".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state.task_store.create(CreateTaskInput {
+            title: "Child A".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: Some(parent.id.clone()),
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state.task_store.create(CreateTaskInput {
+            title: "Child B".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: Some(parent.id.clone()),
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state.task_store.create(CreateTaskInput {
+            title: "Orphan".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/tasks?parent_id={}", parent.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert!(tasks.iter().any(|task| task["title"] == "Child A"));
+        assert!(tasks.iter().any(|task| task["title"] == "Child B"));
+    }
+
+    #[tokio::test]
+    async fn list_with_combined_filters() {
+        let state = test_state();
+        let pending = state.task_store.create(CreateTaskInput {
+            title: "Pending work".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec!["work".to_string()],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let in_progress = state.task_store.create(CreateTaskInput {
+            title: "Active work".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec!["work".to_string()],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state.task_store.create(CreateTaskInput {
+            title: "Pending personal".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec!["personal".to_string()],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&in_progress.id, TaskStatus::InProgress)
+            .unwrap();
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks?status=pending&tag=work")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0]["id"], pending.id);
+    }
+
+    #[tokio::test]
+    async fn batch_transition_succeeds_for_valid_tasks() {
+        let state = test_state();
+        let task_a = state.task_store.create(CreateTaskInput {
+            title: "Task A".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let task_b = state.task_store.create(CreateTaskInput {
+            title: "Task B".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let task_c = state.task_store.create(CreateTaskInput {
+            title: "Task C".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/batch-transition")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{
+                            "tasks": [
+                                {{"id":"{}","status":"in_progress"}},
+                                {{"id":"{}","status":"in_progress"}},
+                                {{"id":"{}","status":"in_progress"}}
+                            ]
+                        }}"#,
+                        task_a.id, task_b.id, task_c.id
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["succeeded"], 3);
+        assert_eq!(payload["failed"], 0);
+        assert_eq!(payload["results"].as_array().map(|items| items.len()), Some(3));
+    }
+
+    #[tokio::test]
+    async fn batch_transition_partial_failure() {
+        let state = test_state();
+        let pending = state.task_store.create(CreateTaskInput {
+            title: "Pending".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let completed = state.task_store.create(CreateTaskInput {
+            title: "Completed".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&completed.id, TaskStatus::InProgress)
+            .unwrap();
+        state
+            .task_store
+            .transition(&completed.id, TaskStatus::Completed)
+            .unwrap();
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/batch-transition")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{
+                            "tasks": [
+                                {{"id":"{}","status":"in_progress"}},
+                                {{"id":"{}","status":"in_progress"}}
+                            ]
+                        }}"#,
+                        pending.id, completed.id
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["succeeded"], 1);
+        assert_eq!(payload["failed"], 1);
+        let results = payload["results"].as_array().unwrap();
+        assert!(results.iter().any(|result| result["success"] == true));
+        assert!(results.iter().any(|result| result["success"] == false));
     }
 
     #[tokio::test]
