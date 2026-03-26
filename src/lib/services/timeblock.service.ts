@@ -392,9 +392,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         : 0
     );
 
-    // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
+    // rt-sqlite 由 RT 在 active block 进入结束态时写 block_end，避免前后端重复。
     const eventStart = perfNow();
-    await this.addBlockEvent(`${normalized.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
+    if (this.shouldWriteFrontendLifecycleEvent()) {
+      await this.addBlockEvent(`${normalized.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
+    }
     const eventMs = Math.round(perfNow() - eventStart);
 
     const endedBlock: ActiveBlockData = this.normalizeActiveBlock({

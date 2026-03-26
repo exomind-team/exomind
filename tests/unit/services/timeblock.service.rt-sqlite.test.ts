@@ -203,4 +203,21 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     expect(types).not.toContain('block_pause');
     expect(types).not.toContain('block_resume');
   });
+
+  it('does not duplicate block_end eventlog write in rt-sqlite mode', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter();
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+
+    await service.startBlock('Deep Work', { mode: 'countup' });
+    await service.markEnding();
+
+    const types = appendEventWithEcsReplicationMock.mock.calls.map(
+      ([event]) => (event as { type?: string }).type,
+    );
+    expect(types).not.toContain('block_end');
+  });
 });

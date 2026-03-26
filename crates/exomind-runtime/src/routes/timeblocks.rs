@@ -154,8 +154,17 @@ async fn put_active_timeblock(
             &normalized.start_id,
             &normalized.task_ids,
         );
-    } else if let Some(existing) = existing_active {
-        if !existing.paused && normalized.paused {
+    } else if let Some(existing) = existing_active.as_ref() {
+        if !is_timeblock_ended(existing) && is_timeblock_ended(&normalized) {
+            write_timeblock_eventlog(
+                &state,
+                scope_key,
+                "block_end",
+                &normalized.name,
+                &normalized.start_id,
+                &normalized.task_ids,
+            );
+        } else if !existing.paused && normalized.paused {
             write_timeblock_eventlog(
                 &state,
                 scope_key,
@@ -194,6 +203,9 @@ async fn delete_active_timeblock(
         .map_err(|error| internal_error(error.to_string()))?;
 
     if let Some(block) = active {
+        if is_timeblock_ended(&block) {
+            return Ok(StatusCode::NO_CONTENT);
+        }
         write_timeblock_eventlog(
             &state,
             scope_key,
@@ -205,6 +217,15 @@ async fn delete_active_timeblock(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn is_timeblock_ended(block: &ActiveBlockData) -> bool {
+    matches!(
+        block.phase.as_deref(),
+        Some("action_ended" | "feedback_in_progress" | "feedback_submitted")
+    ) || block.action_ended_at.is_some()
+        || block.feedback_started_at.is_some()
+        || block.feedback_submitted_at.is_some()
 }
 
 async fn timeblock_backend_status(
@@ -1040,6 +1061,127 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(events.iter().any(|event| event.tags == vec!["block_start".to_string()]));
         assert!(events.iter().any(|event| event.tags == vec!["block_end".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn put_active_feedback_transition_writes_block_end_once_to_eventlog() {
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            std::env::temp_dir().join(format!(
+                "exomind-test-timeblock-put-end-eventlog-{}",
+                uuid::Uuid::new_v4()
+            )),
+        ));
+        let state = test_state_with_timeblock_store_and_eventlog(
+            Arc::new(crate::timeblock::TimeBlockStore::new()),
+            eventlog_store.clone(),
+        );
+        let app = test_router(state);
+
+        let active = ActiveBlockData {
+            start_id: "active-1".to_string(),
+            name: "Morning focus".to_string(),
+            mode: "countdown".to_string(),
+            target_minutes: Some(25),
+            elapsed: 0,
+            updated_at: Some(1_700_000_101_000),
+            phase: Some("running".to_string()),
+            version: Some(1),
+            actor_id: Some("actor-a".to_string()),
+            last_transition_at: Some(1_700_000_101_000),
+            last_resumed_at: Some(1_700_000_101_000),
+            accumulated_run_ms: Some(0),
+            start_time: 1_700_000_100_000,
+            action_ended_at: None,
+            feedback_started_at: None,
+            feedback_submitted_at: None,
+            pause_accumulated_ms: Some(0),
+            paused: false,
+            paused_at: None,
+            task_ids: vec!["task-a".to_string()],
+            task_association_log: vec![],
+            task_id: Some("task-a".to_string()),
+        };
+
+        let put_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks/active")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&active).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+        let feedback_in_progress_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks/active")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ActiveBlockData {
+                            phase: Some("feedback_in_progress".to_string()),
+                            version: Some(2),
+                            action_ended_at: Some(1_700_000_130_000),
+                            feedback_started_at: Some(1_700_000_130_000),
+                            accumulated_run_ms: Some(1_800_000),
+                            last_transition_at: Some(1_700_000_130_000),
+                            last_resumed_at: None,
+                            paused: false,
+                            paused_at: None,
+                            updated_at: Some(1_700_000_130_000),
+                            ..active.clone()
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(feedback_in_progress_response.status(), StatusCode::NO_CONTENT);
+
+        let feedback_submitted_response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks/active")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ActiveBlockData {
+                            phase: Some("feedback_submitted".to_string()),
+                            version: Some(3),
+                            action_ended_at: Some(1_700_000_130_000),
+                            feedback_started_at: Some(1_700_000_130_000),
+                            feedback_submitted_at: Some(1_700_000_150_000),
+                            accumulated_run_ms: Some(1_800_000),
+                            last_transition_at: Some(1_700_000_150_000),
+                            last_resumed_at: None,
+                            paused: false,
+                            paused_at: None,
+                            updated_at: Some(1_700_000_150_000),
+                            ..active
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(feedback_submitted_response.status(), StatusCode::NO_CONTENT);
+
+        let events = eventlog_store.list_events(None).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.tags == vec!["block_end".to_string()])
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]
