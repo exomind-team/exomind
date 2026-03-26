@@ -825,6 +825,49 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     expect(transitionTaskMock).toHaveBeenCalledWith('task-b', 'cancelled');
   });
 
+  it('submits suspended when overlay keeps the displayed default status（issue-735 悬浮窗提交默认值必须与显示默认值一致）', async () => {
+    runtimeStateByUser['overlay-test-user'].activeBlock = {
+      startId: 'block-feedback-default',
+      name: '结束反馈默认终态测试',
+      mode: 'countup',
+      startTime: Date.UTC(2026, 2, 11, 9, 0, 0),
+      elapsed: 0,
+      paused: false,
+      phase: 'feedback_in_progress',
+      actionEndedAt: Date.UTC(2026, 2, 11, 9, 30, 0),
+      feedbackStartedAt: Date.UTC(2026, 2, 11, 9, 30, 0),
+      taskIds: ['task-default'],
+    };
+    runtimeStateByUser['overlay-test-user'].tasks = [
+      {
+        id: 'task-default',
+        title: '默认挂起任务',
+        status: 'in_progress',
+      },
+    ];
+
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+    render(<NowWorkbenchOverlayPage />);
+
+    const textarea = await screen.findByTestId('now-overlay-feedback-textarea');
+    const suspendedOption = await screen.findByTestId('feedback-task-status-suspended');
+    expect(suspendedOption).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.change(textarea, { target: { value: '悬浮窗保持默认状态提交' } });
+    fireEvent.click(screen.getByTestId('now-overlay-feedback-confirm'));
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith('悬浮窗保持默认状态提交', {
+        taskStatusOutcomes: {
+          'task-default': 'suspended',
+        },
+        taskTitles: {
+          'task-default': '默认挂起任务',
+        },
+      });
+    });
+  });
+
   it('refreshes against the latest current user context after prewarm（预热窗口后刷新会重新读取当前用户）', { timeout: 30000 }, async () => {
     currentUserState.userId = 'overlay-test-user';
     runtimeStateByUser['overlay-test-user'] = {

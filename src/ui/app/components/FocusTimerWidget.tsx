@@ -36,7 +36,10 @@ import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/eve
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { FocusBgmPanel } from '@/ui/app/components/settings/settings-custom-items';
 import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
-import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+import {
+  normalizeEndTaskStatusChoice,
+  type TaskStatusChoice,
+} from '@/ui/app/components/TaskStatusSelector';
 import {
   resolveFeedbackSubmitLabel,
   useFeedbackSubmitControls,
@@ -126,7 +129,7 @@ function buildTaskStatusChoices(
   previousChoices: Record<string, TaskStatusChoice> = {},
 ): Record<string, TaskStatusChoice> {
   return taskIds.reduce<Record<string, TaskStatusChoice>>((nextChoices, taskId) => {
-    nextChoices[taskId] = previousChoices[taskId] ?? 'continue';
+    nextChoices[taskId] = normalizeEndTaskStatusChoice(previousChoices[taskId]);
     return nextChoices;
   }, {});
 }
@@ -626,10 +629,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       return titles;
     }, {});
     const taskStatusOutcomes = taskIdsSnapshot.reduce<Record<string, string>>((outcomes, taskId) => {
-      const statusChoice = taskStatusChoicesSnapshot[taskId] ?? 'continue';
-      if (statusChoice !== 'continue') {
-        outcomes[taskId] = statusChoice;
-      }
+      const statusChoice = normalizeEndTaskStatusChoice(taskStatusChoicesSnapshot[taskId]);
+      outcomes[taskId] = statusChoice;
       return outcomes;
     }, {});
     if (!canSubmitFeedback(trimmedFeedback)) {
@@ -669,19 +670,17 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       try {
         await getTaskTimerService().onBlockEndForTasks(taskIdsSnapshot, blockDataSnapshot.startId);
         for (const taskId of taskIdsSnapshot) {
-          const taskStatusChoice = taskStatusChoicesSnapshot[taskId] ?? 'continue';
-          if (taskStatusChoice !== 'continue') {
-            const task = linkedTasksSnapshot.find((candidate) => candidate.id === taskId);
-            await getTaskService().transitionTask(taskId, taskStatusChoice as TaskStatus);
-            if (task) {
-              await appendTaskStatusChangeDescription({
-                taskId,
-                taskTitle: task.title,
-                fromStatus: task.status,
-                toStatus: taskStatusChoice as TaskStatus,
-                description: trimmedFeedback,
-              });
-            }
+          const taskStatusChoice = normalizeEndTaskStatusChoice(taskStatusChoicesSnapshot[taskId]);
+          const task = linkedTasksSnapshot.find((candidate) => candidate.id === taskId);
+          await getTaskService().transitionTask(taskId, taskStatusChoice as TaskStatus);
+          if (task) {
+            await appendTaskStatusChangeDescription({
+              taskId,
+              taskTitle: task.title,
+              fromStatus: task.status,
+              toStatus: taskStatusChoice as TaskStatus,
+              description: trimmedFeedback,
+            });
           }
         }
       } catch (error) {

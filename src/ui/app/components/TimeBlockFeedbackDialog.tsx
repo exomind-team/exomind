@@ -10,6 +10,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import {
+  normalizeEndTaskStatusChoice,
   TaskStatusSelector,
   TASK_STATUS_SELECTOR_END_OPTIONS,
   type TaskStatusChoice,
@@ -125,7 +126,7 @@ export function TimeBlockFeedbackDialog({
                   <TaskStatusSelector
                     data-testid={taskStatusTestIds?.selector?.(task.id) ?? `task-dag-end-dialog-status-${task.id}`}
                     optionTestIdPrefix={taskStatusTestIds?.optionPrefix?.(task.id)}
-                    value={outcomes[task.id] ?? 'suspended'}
+                    value={normalizeEndTaskStatusChoice(outcomes[task.id])}
                     allowedChoices={TASK_STATUS_SELECTOR_END_OPTIONS}
                     onChange={(choice) => onOutcomeChange?.(task.id, choice)}
                   />

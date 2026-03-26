@@ -13,6 +13,14 @@ export const TASK_STATUS_SELECTOR_END_OPTIONS: readonly TaskStatusChoice[] = [
   'cancelled',
 ] as const;
 
+export const DEFAULT_END_TASK_STATUS_CHOICE: TaskStatusChoice = 'suspended';
+
+export function normalizeEndTaskStatusChoice(choice: TaskStatusChoice | undefined): TaskStatusChoice {
+  return TASK_STATUS_SELECTOR_END_OPTIONS.includes(choice ?? DEFAULT_END_TASK_STATUS_CHOICE)
+    ? (choice ?? DEFAULT_END_TASK_STATUS_CHOICE)
+    : DEFAULT_END_TASK_STATUS_CHOICE;
+}
+
 interface TaskStatusSelectorProps {
   value: TaskStatusChoice;
   onChange: (choice: TaskStatusChoice) => void;

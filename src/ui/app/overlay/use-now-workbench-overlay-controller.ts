@@ -11,7 +11,10 @@ import {
 import { appendTaskStatusChangeDescription } from '@/lib/task/task-status-change-description';
 import { resolveActiveBlockTaskIds, type ActiveBlockData, type Event as UiEvent, type TimerConfig } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
-import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+import {
+  normalizeEndTaskStatusChoice,
+  type TaskStatusChoice,
+} from '@/ui/app/components/TaskStatusSelector';
 import { buildNowWorkbenchOverlayModel, type NowWorkbenchOverlayMode } from './now-workbench-overlay-model';
 import { getNowWorkbenchOverlayService } from '@/services/now-workbench-overlay.service';
 
@@ -295,7 +298,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
       }
 
       const nextChoices = activeBlockTaskIds.reduce<Record<string, TaskStatusChoice>>((choices, taskId) => {
-        choices[taskId] = current[taskId] ?? 'continue';
+        choices[taskId] = normalizeEndTaskStatusChoice(current[taskId]);
         return choices;
       }, {});
 
@@ -378,7 +381,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
       }
       await loadActiveBlock();
       setTaskStatusChoices(nextTaskIds.reduce<Record<string, TaskStatusChoice>>((choices, taskId) => {
-        choices[taskId] = 'continue';
+        choices[taskId] = normalizeEndTaskStatusChoice(undefined);
         return choices;
       }, {}));
       setFeedbackOpen(true);
@@ -399,10 +402,8 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
         return titles;
       }, {});
       const taskStatusOutcomes = taskIdsSnapshot.reduce<Record<string, string>>((outcomes, taskId) => {
-        const taskStatusChoice = taskStatusChoices[taskId] ?? 'continue';
-        if (taskStatusChoice !== 'continue') {
-          outcomes[taskId] = taskStatusChoice;
-        }
+        const taskStatusChoice = normalizeEndTaskStatusChoice(taskStatusChoices[taskId]);
+        outcomes[taskId] = taskStatusChoice;
         return outcomes;
       }, {});
 
@@ -419,19 +420,17 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
         try {
           await taskTimerService.onBlockEndForTasks(taskIdsSnapshot, blockBeforeEnd.startId);
           for (const taskId of taskIdsSnapshot) {
-            const taskStatusChoice = taskStatusChoices[taskId] ?? 'continue';
-            if (taskStatusChoice !== 'continue') {
-              const task = activeBlockTasks.find((candidate) => candidate.id === taskId);
-              await taskService.transitionTask(taskId, taskStatusChoice as TaskStatus);
-              if (task) {
-                await appendTaskStatusChangeDescription({
-                  taskId,
-                  taskTitle: task.title,
-                  fromStatus: task.status,
-                  toStatus: taskStatusChoice as TaskStatus,
-                  description: feedback,
-                });
-              }
+            const taskStatusChoice = normalizeEndTaskStatusChoice(taskStatusChoices[taskId]);
+            const task = activeBlockTasks.find((candidate) => candidate.id === taskId);
+            await taskService.transitionTask(taskId, taskStatusChoice as TaskStatus);
+            if (task) {
+              await appendTaskStatusChangeDescription({
+                taskId,
+                taskTitle: task.title,
+                fromStatus: task.status,
+                toStatus: taskStatusChoice as TaskStatus,
+                description: feedback,
+              });
             }
           }
         } catch (transitionError) {

@@ -707,6 +707,57 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     });
   });
 
+  it('submits suspended when linked task keeps the displayed default status（issue-735 提交默认值必须与显示默认值一致）', async () => {
+    const now = Date.now();
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'block-task-default',
+      name: '关联任务默认终态',
+      startTime: now - 10_000,
+      elapsed: 10_000,
+      mode: 'countup',
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-default'],
+      taskAssociationLog: [],
+    });
+    getTaskMock.mockResolvedValue({
+      id: 'task-default',
+      title: '默认挂起任务',
+      status: 'in_progress',
+      priority: 'medium',
+      dependsOn: [],
+      tags: [],
+      createdAt: now - 20_000,
+      updatedAt: now - 5_000,
+    });
+
+    render(<FocusTimerWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+      expect(getTaskMock).toHaveBeenCalledWith('task-default');
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    const feedback = await screen.findByTestId('new-focus-feedback-textarea');
+    const suspendedOption = screen.getByTestId('feedback-task-status-task-default-suspended');
+    expect(suspendedOption).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.change(feedback, { target: { value: '保持默认状态直接提交' } });
+    fireEvent.click(screen.getByTestId('new-focus-feedback-confirm'));
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith('保持默认状态直接提交', {
+        taskStatusOutcomes: {
+          'task-default': 'suspended',
+        },
+        taskTitles: {
+          'task-default': '默认挂起任务',
+        },
+      });
+    });
+  });
+
   it('preserves selected task status when markEnding callback arrives late（issue-374 异步回调不应覆盖已选状态）', async () => {
     const now = Date.now();
     const runningBlock = {
