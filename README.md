@@ -137,6 +137,16 @@ exomind/
 └─ website/             # Public website source
 ```
 
+## Ecosystem
+
+ExoMind is part of a larger ecosystem of open-source projects:
+
+| Project | Description |
+|---------|-------------|
+| [ExoMind Cell](https://github.com/exomind-team/exomind-cell) | Operational closure VM for Cognitive Life Science experiments (Rust) |
+| [Wattson](https://github.com/exomind-team/wattson) | Digital PSU monitoring — energy sensing layer (Rust) |
+| [CCOPL](https://github.com/exomind-team/ccopl) | Contributors' Collective Ownership Public License |
+
 ## Documentation
 
 > Documentation is primarily written in Chinese. English translations are provided where available.
