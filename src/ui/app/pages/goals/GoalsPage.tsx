@@ -108,9 +108,11 @@ export function GoalsPage() {
   const [guideHidden, setGuideHidden] = useState(() => readBooleanStorage(GUIDE_HIDDEN_STORAGE_KEY, false));
   const [selected, setSelected] = useState<Selection>(null);
   const [cancelGoalId, setCancelGoalId] = useState<string | null>(null);
+  const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<string[]>([]);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
   const simulationRef = useRef<GoalForceSimulation | null>(null);
+  const highlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -123,6 +125,11 @@ export function GoalsPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [closeContextMenu, connectMode]);
+
+  useEffect(() => () => {
+    highlightTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    highlightTimeoutsRef.current.clear();
+  }, []);
 
   const visibleGraph = useMemo(() => ({
     ...graph,
@@ -216,9 +223,10 @@ export function GoalsPage() {
       data: {
         label: edge.title || (edge.taskNodeRef ? edge.taskNodeRef : '待定义'),
         status: getEdgeStatus(edge.id),
+        highlighted: highlightedEdgeIds.includes(edge.id),
       },
     }))
-  ), [getEdgeStatus, visibleGraph.edges]);
+  ), [getEdgeStatus, highlightedEdgeIds, visibleGraph.edges]);
 
   const selectedGoal = selected?.kind === 'goal'
     ? graph.goals.find((goal) => goal.id === selected.id) ?? null
@@ -262,6 +270,19 @@ export function GoalsPage() {
     simulationRef.current?.reheat();
   }
 
+  function flashEdge(edgeId: string) {
+    setHighlightedEdgeIds((current) => (current.includes(edgeId) ? current : [...current, edgeId]));
+    const existing = highlightTimeoutsRef.current.get(edgeId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const timeoutId = setTimeout(() => {
+      setHighlightedEdgeIds((current) => current.filter((candidate) => candidate !== edgeId));
+      highlightTimeoutsRef.current.delete(edgeId);
+    }, 1000);
+    highlightTimeoutsRef.current.set(edgeId, timeoutId);
+  }
+
   const contextItems = useMemo(() => {
     if (!contextMenu) return [];
     if (contextMenu.kind === 'me') {
@@ -297,9 +318,19 @@ export function GoalsPage() {
         danger: true,
         onSelect: () => {
           const result = deleteEdge({ edgeId: contextMenu.id });
-          if (notifyResult(result, '已删除连接')) {
-            setSelected(null);
+          if (!result.ok) {
+            notifyResult(result);
+            return;
           }
+          if (result.value.autoAddedEdgeId) {
+            flashEdge(result.value.autoAddedEdgeId);
+            toast({ title: '已自动添加连接以保持目标可达' });
+          } else if (result.value.adjustedRule) {
+            toast({ title: '完成条件已自动调整' });
+          } else {
+            toast({ title: '已删除连接' });
+          }
+          setSelected(null);
         },
       },
     ];
@@ -411,7 +442,23 @@ export function GoalsPage() {
           onClose={() => setSelected(null)}
           onJumpEdge={(edgeId) => setSelected({ kind: 'edge', id: edgeId })}
           hopDistance={getHopDistance(selectedGoal.id)}
-          onUpdate={(patch) => notifyResult(updateGoal({ goalId: selectedGoal.id, ...patch }), '已更新目标')}
+          onUpdate={(patch) => {
+            const result = updateGoal({ goalId: selectedGoal.id, ...patch });
+            if (!result.ok) {
+              return notifyResult(result);
+            }
+            if (patch.completionRule) {
+              const nextMode = patch.completionRule.every((clause) => clause.length === 1) ? 'OR' : 'AND';
+              console.log('[goals] completionRule updated', {
+                goalId: selectedGoal.id,
+                previous: selectedGoal.completionRule,
+                next: patch.completionRule,
+              });
+              toast({ title: `完成条件已更新为 ${nextMode}` });
+              return true;
+            }
+            return notifyResult(result, '已更新目标');
+          }}
         />
       ) : null}
 

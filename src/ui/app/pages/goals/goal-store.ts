@@ -73,7 +73,7 @@ export interface GoalStoreState {
   createGoal: (params: CreateGoalParams) => Result<{ goal: GoalNode; edge: TaskEdge }>;
   createEdge: (params: CreateEdgeParams) => Result<TaskEdge>;
   cancelGoal: (params: CancelGoalParams) => Result<void>;
-  deleteEdge: (params: { edgeId: string }) => Result<void>;
+  deleteEdge: (params: { edgeId: string }) => Result<{ autoAddedEdgeId?: string; adjustedRule: boolean }>;
   updateGoal: (params: UpdateGoalParams) => Result<void>;
   updateEdge: (params: UpdateEdgeParams) => Result<void>;
   setEdgeStatusOverride: (edgeId: string, status: TaskEdgeStatus) => void;
@@ -314,7 +314,13 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
     });
     persistGoalState(result.value.graph, nextOpLog);
     set({ graph: result.value.graph, opLog: nextOpLog });
-    return { ok: true, value: undefined };
+    return {
+      ok: true,
+      value: {
+        autoAddedEdgeId: result.value.autoAddedEdge?.id,
+        adjustedRule: true,
+      },
+    };
   },
   updateGoal: (params) => {
     const state = get();

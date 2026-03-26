@@ -234,4 +234,46 @@ describe('GoalsPage', () => {
     expect(screen.queryByTestId('goal-context-item-upstream')).toBeNull();
     expect(screen.queryByTestId('goal-context-item-cancel')).toBeNull();
   });
+
+  it('shows C5 feedback when deleting the last inbound edge', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-edge-${edgeId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-delete'));
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '已自动添加连接以保持目标可达',
+      }));
+    });
+  });
+
+  it('toasts when switching completion mode in goal detail panel', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'OR' }));
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '完成条件已更新为 OR',
+      }));
+    });
+  });
 });
