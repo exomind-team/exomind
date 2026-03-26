@@ -17,7 +17,7 @@ function getMode(goal: GoalNode, inEdges: TaskEdge[]): 'AND' | 'OR' | null {
   if (goal.completionRule.length === 0 || inEdges.length === 0) return null;
   if (goal.completionRule.length === 1 && goal.completionRule[0]?.length === inEdges.length) return 'AND';
   if (goal.completionRule.length === inEdges.length && goal.completionRule.every((clause) => clause.length === 1)) return 'OR';
-  return 'AND';
+  return null;
 }
 
 function formatRule(goal: GoalNode, inEdges: TaskEdge[]): string {
