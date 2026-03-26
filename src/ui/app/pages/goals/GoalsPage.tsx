@@ -364,6 +364,14 @@ export function GoalsPage() {
     };
   }, [getHopDistance, graph.me.id, positions, visibleGraph.goals]);
 
+  const emptyStateGuideStyle = useMemo(() => {
+    const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
+    return {
+      left: `${Math.round(mePosition.x + ME_NODE_SIZE + 26)}px`,
+      top: `${Math.round(mePosition.y + ME_NODE_SIZE / 2 - 24)}px`,
+    };
+  }, [graph.me.id, positions]);
+
   const goalStatusSnapshot = useMemo(
     () => visibleGraph.goals.map((goal) => ({
       id: goal.id,
@@ -621,8 +629,19 @@ export function GoalsPage() {
       ) : null}
 
       {!guideHidden && graph.goals.length === 0 ? (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 px-4 py-2 text-sm text-[#57534E] shadow-sm">
-          {isDesktop ? '右键 Me 添加你的第一个目标' : '长按 Me 添加你的第一个目标'}
+        <div
+          data-testid="goals-empty-state-guide"
+          className="pointer-events-none absolute z-10"
+          style={emptyStateGuideStyle}
+        >
+          <div className="relative rounded-[24px] border border-[#F3D5C7] bg-[linear-gradient(180deg,rgba(255,251,247,0.95),rgba(252,244,238,0.92))] px-4 py-3 text-sm text-[#6B5B52] shadow-[0_18px_40px_-18px_rgba(120,113,108,0.45)] backdrop-blur dark:border-[#3F3F46] dark:bg-[#1C1917]/95 dark:text-[#D6D3D1]">
+            <div className="absolute left-[-36px] top-1/2 h-px w-9 -translate-y-1/2 bg-gradient-to-r from-[#C75B3A]/80 to-[#C75B3A]/0" />
+            <div className="absolute left-[-8px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border border-[#F3D5C7] bg-[#FFF7ED] shadow-sm dark:border-[#57534E] dark:bg-[#292524]" />
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#C75B3A]">起点</p>
+            <p className="mt-1 whitespace-nowrap">
+              {isDesktop ? '右键 Me 添加你的第一个目标' : '长按 Me 添加你的第一个目标'}
+            </p>
+          </div>
         </div>
       ) : null}
 

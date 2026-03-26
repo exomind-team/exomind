@@ -71,6 +71,14 @@ export function buildTaskEdgePath({
   parallelIndex?: number;
   parallelTotal?: number;
 }) {
+  if (parallelTotal <= 1) {
+    return {
+      path: `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`,
+      labelX: (sourceX + targetX) / 2,
+      labelY: (sourceY + targetY) / 2,
+    };
+  }
+
   const dx = targetX - sourceX;
   const dy = targetY - sourceY;
   const distance = Math.hypot(dx, dy) || 1;

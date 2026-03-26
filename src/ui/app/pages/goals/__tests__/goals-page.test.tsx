@@ -241,6 +241,18 @@ describe('GoalsPage', () => {
     });
   });
 
+  it('anchors the empty-state guide next to Me instead of centering it on the canvas', async () => {
+    const { GoalsPage } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    const guide = screen.getByTestId('goals-empty-state-guide');
+    expect(guide).toHaveTextContent('右键 Me 添加你的第一个目标');
+    expect(guide).toHaveStyle({
+      left: '110px',
+      top: '18px',
+    });
+  });
+
   it('limits completed goal context menu to read-only actions', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);

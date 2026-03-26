@@ -13,6 +13,43 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 describe('TaskFlowEdge', () => {
+  it('keeps a single edge straight and only bends duplicate edges', async () => {
+    const { buildTaskEdgePath } = await import('../components/TaskFlowEdge');
+
+    const single = buildTaskEdgePath({
+      sourceX: 0,
+      sourceY: 0,
+      targetX: 120,
+      targetY: 40,
+      parallelIndex: 0,
+      parallelTotal: 1,
+    });
+
+    const duplicateA = buildTaskEdgePath({
+      sourceX: 0,
+      sourceY: 0,
+      targetX: 120,
+      targetY: 40,
+      parallelIndex: 0,
+      parallelTotal: 2,
+    });
+
+    const duplicateB = buildTaskEdgePath({
+      sourceX: 0,
+      sourceY: 0,
+      targetX: 120,
+      targetY: 40,
+      parallelIndex: 1,
+      parallelTotal: 2,
+    });
+
+    expect(single.path).toBe('M 0 0 L 120 40');
+    expect(duplicateA.path).toMatch(/^M 0 0 C /);
+    expect(duplicateB.path).toMatch(/^M 0 0 C /);
+    expect(duplicateA.path.endsWith('120 40')).toBe(true);
+    expect(duplicateB.path.endsWith('120 40')).toBe(true);
+  });
+
   it('renders directional markers and separates parallel edges', async () => {
     const { TaskFlowEdge } = await import('../components/TaskFlowEdge');
     baseEdgeCalls.length = 0;
