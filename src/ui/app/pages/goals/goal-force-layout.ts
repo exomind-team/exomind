@@ -1,72 +1,55 @@
-// ---------------------------------------------------------------------------
-// Continuous force-directed simulation for goal graph (Obsidian-style)
-// ---------------------------------------------------------------------------
-// Nodes float, repel, and are connected by spring-like links.
-// Me node is pinned at center. Dragged nodes snap to cursor then drift
-// back after release.
-// ---------------------------------------------------------------------------
-
 import {
-  forceSimulation,
-  forceLink,
-  forceManyBody,
   forceCenter,
   forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
   type Simulation,
-  type SimulationNodeDatum,
   type SimulationLinkDatum,
+  type SimulationNodeDatum,
 } from 'd3-force';
-import type { GoalGraphData } from './goal-store';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import type { GoalGraph, NodeId } from './goal-types';
 
 export interface ForceNode extends SimulationNodeDatum {
-  id: string;
-  isMe: boolean;
+  id: NodeId;
+  kind: 'me' | 'goal';
 }
 
-interface ForceLink extends SimulationLinkDatum<ForceNode> {
-  id?: string;
-}
+interface ForceLink extends SimulationLinkDatum<ForceNode> {}
 
 export type PositionMap = Map<string, { x: number; y: number }>;
 type TickCallback = (positions: PositionMap) => void;
 
-// ---------------------------------------------------------------------------
-// GoalForceSimulation — long-lived, mutable, RAF-driven
-// ---------------------------------------------------------------------------
+interface LayoutOptions {
+  showCancelled?: boolean;
+}
 
 export class GoalForceSimulation {
   private simulation: Simulation<ForceNode, ForceLink>;
   private nodes: ForceNode[] = [];
   private links: ForceLink[] = [];
-  private readonly cx: number;
-  private readonly cy: number;
+  private readonly cx = 0;
+  private readonly cy = 0;
   private readonly onTick: TickCallback;
   private rafId: number | null = null;
   private dirty = false;
 
   constructor(
-    data: GoalGraphData,
+    graph: GoalGraph,
     _width: number,
     _height: number,
     onTick: TickCallback,
+    options?: LayoutOptions,
   ) {
-    // Me is the origin (0, 0). Other nodes orbit around it.
-    this.cx = 0;
-    this.cy = 0;
     this.onTick = onTick;
-
-    this.buildNodesAndLinks(data, true);
+    this.buildNodesAndLinks(graph, true, options);
 
     this.simulation = forceSimulation<ForceNode>(this.nodes)
       .force('charge', forceManyBody<ForceNode>().strength(-350))
       .force(
         'link',
         forceLink<ForceNode, ForceLink>(this.links)
-          .id((d) => d.id)
+          .id((node) => node.id)
           .distance(200)
           .strength(0.4),
       )
@@ -80,8 +63,6 @@ export class GoalForceSimulation {
 
     this.startRafLoop();
   }
-
-  // ---- RAF loop (batches d3 ticks into animation frames) ----
 
   private startRafLoop(): void {
     const loop = () => {
@@ -97,7 +78,7 @@ export class GoalForceSimulation {
   private emitPositions(): void {
     const positions: PositionMap = new Map();
     for (const node of this.nodes) {
-      positions.set(node.id, {
+      positions.set(String(node.id), {
         x: node.x ?? this.cx,
         y: node.y ?? this.cy,
       });
@@ -105,85 +86,79 @@ export class GoalForceSimulation {
     this.onTick(positions);
   }
 
-  // ---- Data management ----
+  private buildNodesAndLinks(graph: GoalGraph, initial: boolean, options?: LayoutOptions): void {
+    const existingById = new Map(this.nodes.map((node) => [String(node.id), node]));
+    const showCancelled = options?.showCancelled ?? false;
+    const visibleGoals = graph.goals.filter((goal) => showCancelled || !goal.cancelled);
 
-  private buildNodesAndLinks(data: GoalGraphData, initial: boolean): void {
-    const existingById = new Map(this.nodes.map((n) => [n.id, n]));
-
-    this.nodes = data.goals.map((g) => {
-      const existing = existingById.get(g.id);
-      if (existing) {
-        existing.isMe = g.isMe;
-        if (g.isMe) {
-          existing.fx = this.cx;
-          existing.fy = this.cy;
+    this.nodes = [
+      {
+        id: graph.me.id,
+        kind: 'me',
+        x: this.cx,
+        y: this.cy,
+        fx: this.cx,
+        fy: this.cy,
+      },
+      ...visibleGoals.map((goal) => {
+        const existing = existingById.get(goal.id);
+        if (existing) {
+          existing.kind = 'goal';
+          return existing;
         }
-        return existing;
-      }
-      // New node — scatter around center
-      const angle = Math.random() * Math.PI * 2;
-      const dist = initial ? 120 + Math.random() * 80 : 60 + Math.random() * 40;
-      return {
-        id: g.id,
-        isMe: g.isMe,
-        x: g.isMe ? this.cx : this.cx + Math.cos(angle) * dist,
-        y: g.isMe ? this.cy : this.cy + Math.sin(angle) * dist,
-        fx: g.isMe ? this.cx : null,
-        fy: g.isMe ? this.cy : null,
-      };
-    });
+        const angle = Math.random() * Math.PI * 2;
+        const distance = initial ? 120 + Math.random() * 80 : 60 + Math.random() * 40;
+        return {
+          id: goal.id,
+          kind: 'goal' as const,
+          x: this.cx + Math.cos(angle) * distance,
+          y: this.cy + Math.sin(angle) * distance,
+          fx: null,
+          fy: null,
+        };
+      }),
+    ];
 
-    const nodeIds = new Set(this.nodes.map((n) => n.id));
-    this.links = data.tasks
-      .filter((t) => nodeIds.has(t.source) && nodeIds.has(t.target))
-      .map((t) => ({ source: t.source, target: t.target }));
+    const nodeIds = new Set(this.nodes.map((node) => String(node.id)));
+    this.links = graph.edges
+      .filter((edge) => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)))
+      .map((edge) => ({ source: edge.source, target: edge.target }));
   }
 
-  /** Merge new graph data into the live simulation (preserves positions). */
-  updateData(data: GoalGraphData): void {
-    this.buildNodesAndLinks(data, false);
+  updateData(graph: GoalGraph, options?: LayoutOptions): void {
+    this.buildNodesAndLinks(graph, false, options);
     this.simulation.nodes(this.nodes);
-
-    // Re-apply link force with updated links
     this.simulation.force(
       'link',
       forceLink<ForceNode, ForceLink>(this.links)
-        .id((d) => d.id)
+        .id((node) => node.id)
         .distance(200)
         .strength(0.4),
     );
-
     this.simulation.alpha(0.6).restart();
   }
 
-  // ---- Drag interaction ----
-
-  /** Pin a node to a specific position (during drag). Me cannot be pinned. */
   pinNode(id: string, x: number, y: number): void {
-    const node = this.nodes.find((n) => n.id === id);
-    if (!node || node.isMe) return;
+    const node = this.nodes.find((candidate) => String(candidate.id) === id);
+    if (!node || node.kind === 'me') return;
     node.fx = x;
     node.fy = y;
-    // Gentle reheat so other nodes react
     this.simulation.alpha(Math.max(this.simulation.alpha(), 0.15)).restart();
   }
 
-  /** Release a pinned node (after drag). Me stays pinned. */
   releaseNode(id: string): void {
-    const node = this.nodes.find((n) => n.id === id);
-    if (node && !node.isMe) {
+    const node = this.nodes.find((candidate) => String(candidate.id) === id);
+    if (node && node.kind !== 'me') {
       node.fx = null;
       node.fy = null;
     }
     this.simulation.alpha(Math.max(this.simulation.alpha(), 0.3)).restart();
   }
 
-  /** Give the simulation a kick. */
   reheat(): void {
     this.simulation.alpha(0.5).restart();
   }
 
-  /** Stop simulation and cancel RAF. */
   destroy(): void {
     this.simulation.stop();
     if (this.rafId !== null) {
