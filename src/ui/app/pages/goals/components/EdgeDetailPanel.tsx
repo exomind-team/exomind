@@ -32,6 +32,7 @@ export function EdgeDetailPanel({
   const [taskNodeRef, setTaskNodeRef] = useState(edge.taskNodeRef ?? '');
   const [developerOpen, setDeveloperOpen] = useState(false);
   const frozen = targetStatus === 'completed';
+  const panelTitle = edge.title || edge.taskNodeRef || '待定义';
 
   useEffect(() => {
     setTitle(edge.title);
@@ -41,7 +42,7 @@ export function EdgeDetailPanel({
   }, [edge]);
 
   return (
-    <DetailPanelShell title={edge.title || '待定义'} subtitle="路径详情" onClose={onClose}>
+    <DetailPanelShell title={panelTitle} subtitle="路径详情" onClose={onClose}>
       <div className="space-y-5">
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">

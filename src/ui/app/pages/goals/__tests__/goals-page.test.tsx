@@ -403,6 +403,31 @@ describe('GoalsPage', () => {
     expect(screen.queryByTestId('goals-connect-preview')).toBeNull();
   });
 
+  it('toasts when connect mode is confirmed on the same goal node', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-connect'));
+    fireEvent.click(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '操作失败',
+        description: '不能连到自己',
+      }));
+    });
+  });
+
   it('passes parallel edge metadata to duplicate edges', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);

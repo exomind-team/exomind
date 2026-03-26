@@ -666,9 +666,8 @@ export function GoalsPage() {
         onNodeClick={(_, node) => {
           closeContextMenu();
           if (connectMode.isActive) {
-            if (node.id !== connectMode.sourceId && node.id !== graph.me.id) {
-              handleConnect(connectMode.sourceId as string, node.id);
-            }
+            if (node.id === graph.me.id) return;
+            handleConnect(connectMode.sourceId as string, node.id);
             return;
           }
           setSelected(node.id === graph.me.id ? { kind: 'me', id: node.id } : { kind: 'goal', id: node.id });
