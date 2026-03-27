@@ -1009,6 +1009,89 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps re-hidden cancelled structures from distorting the visible graph after show-cancelled toggles back off', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+    const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+
+    await primeGoalsPageWithGraph(page, makeShownCancelledGraph(), {
+      fixedPolarSequence: [
+        { angle: 0.2, distance: 192 },
+        { angle: 0.85, distance: 226 },
+      ],
+    });
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toHaveCount(0);
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toHaveCount(0);
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected initial simulation:end warn log before toggle-roundtrip baseline assertions',
+      })
+      .toBeGreaterThanOrEqual(1);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'toggle-roundtrip:initial-hidden',
+    );
+
+    const baselineMetrics = await measureSingleVisibleGoalDirection(page, 'goal-flow-node-goal-a');
+    expect(baselineMetrics, 'toggle-roundtrip: expected measurable baseline visible geometry').not.toBeNull();
+
+    const simulationEndCountBeforeShow = countSimulationEnds();
+    await page.getByRole('checkbox', { name: '显示已取消' }).check();
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected a new simulation:end warn log after show-cancelled toggles on',
+      })
+      .toBeGreaterThan(simulationEndCountBeforeShow);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'toggle-roundtrip:shown',
+    );
+
+    const simulationEndCountBeforeHide = countSimulationEnds();
+    await page.getByRole('checkbox', { name: '显示已取消' }).uncheck();
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toHaveCount(0);
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toHaveCount(0);
+    await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected a new simulation:end warn log after show-cancelled toggles back off',
+      })
+      .toBeGreaterThan(simulationEndCountBeforeHide);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'toggle-roundtrip:rehidden',
+    );
+
+    const rehiddenMetrics = await measureSingleVisibleGoalDirection(page, 'goal-flow-node-goal-a');
+    expect(rehiddenMetrics, 'toggle-roundtrip: expected measurable re-hidden visible geometry').not.toBeNull();
+    expect(rehiddenMetrics?.edgePath.includes(' C '), 'toggle-roundtrip: expected visible single edge to remain straight after re-hide').toBe(false);
+    expect(
+      Math.abs((rehiddenMetrics?.angleDeg ?? 0) - (baselineMetrics?.angleDeg ?? 0)),
+      `toggle-roundtrip: expected visible goal A direction to remain near the initial hidden baseline (baseline=${baselineMetrics?.angleDeg ?? 0}, rehidden=${rehiddenMetrics?.angleDeg ?? 0})`,
+    ).toBeLessThan(8);
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps semantic-status edges visible whenever both endpoint nodes stay visible', async ({ page }) => {
     for (const edgeStatus of ['in_progress', 'suspended', 'completed', 'cancelled'] as const) {
       await primeGoalsPageWithStoredGraph(page, makeLegacySemanticEdgeGraph(edgeStatus));

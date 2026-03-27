@@ -105,6 +105,15 @@ export function createSeededGoalLayoutRandom(seed: number): () => number {
   };
 }
 
+function hashStringToUnitInterval(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 0x100000000;
+}
+
 export function resolveGoalLayoutInitialPolar({
   initial,
   nextRandom,
@@ -112,6 +121,7 @@ export function resolveGoalLayoutInitialPolar({
   preferredAngle,
   preferredDistance,
   sequenceIndex,
+  stableKey,
 }: {
   initial: boolean;
   nextRandom: () => number;
@@ -119,15 +129,27 @@ export function resolveGoalLayoutInitialPolar({
   preferredAngle?: number;
   preferredDistance?: number;
   sequenceIndex: number;
+  stableKey?: string;
 }): GoalLayoutInitialPolar {
   const fixed = fixedPolarSequence?.[sequenceIndex];
   if (fixed) {
     return fixed;
   }
 
+  const stableAngle = stableKey === undefined
+    ? undefined
+    : hashStringToUnitInterval(`${stableKey}:angle`) * Math.PI * 2;
+  const stableDistanceFactor = stableKey === undefined
+    ? undefined
+    : hashStringToUnitInterval(`${stableKey}:distance`);
+
   return {
-    angle: preferredAngle ?? nextRandom() * Math.PI * 2,
-    distance: preferredDistance ?? (initial ? 120 + nextRandom() * 80 : 60 + nextRandom() * 40),
+    angle: preferredAngle ?? stableAngle ?? nextRandom() * Math.PI * 2,
+    distance: preferredDistance ?? (
+      initial
+        ? 120 + (stableDistanceFactor ?? nextRandom()) * 80
+        : 60 + (stableDistanceFactor ?? nextRandom()) * 40
+    ),
   };
 }
 
@@ -672,7 +694,8 @@ export class GoalForceSimulation {
   private emitCount = 0;
   private alphaLogBucket = 100;
   private placementSequenceIndex = 0;
-  private readonly nextRandom: () => number;
+  private nextRandom: () => number;
+  private readonly randomSeed: number | null;
   private readonly layoutTestConfig: GoalLayoutTestConfig | null;
 
   constructor(
@@ -684,8 +707,9 @@ export class GoalForceSimulation {
   ) {
     this.onTick = onTick;
     this.layoutTestConfig = getGoalLayoutTestConfig();
-    this.nextRandom = this.layoutTestConfig?.randomSeed !== undefined
-      ? createSeededGoalLayoutRandom(this.layoutTestConfig.randomSeed)
+    this.randomSeed = this.layoutTestConfig?.randomSeed ?? null;
+    this.nextRandom = this.randomSeed !== null
+      ? createSeededGoalLayoutRandom(this.randomSeed)
       : Math.random;
     this.buildNodesAndLinks(graph, true, options);
     warnGoalDebug('simulation:init', {
@@ -788,8 +812,22 @@ export class GoalForceSimulation {
     this.onTick(positions);
   }
 
-  private buildNodesAndLinks(graph: GoalGraph, initial: boolean, options?: LayoutOptions): void {
-    const existingById = new Map(this.nodes.map((node) => [String(node.id), node]));
+  private resetPlacementState(): void {
+    this.placementSequenceIndex = 0;
+    this.nextRandom = this.randomSeed !== null
+      ? createSeededGoalLayoutRandom(this.randomSeed)
+      : Math.random;
+  }
+
+  private buildNodesAndLinks(
+    graph: GoalGraph,
+    initial: boolean,
+    options?: LayoutOptions,
+    reuseExisting = true,
+  ): void {
+    const existingById = reuseExisting
+      ? new Map(this.nodes.map((node) => [String(node.id), node]))
+      : new Map<string, ForceNode>();
     const { visibleGoals, visibleEdges } = buildVisibleGraph(graph, options);
     const adjacency = buildHopAdjacency(graph, options);
 
@@ -828,6 +866,7 @@ export class GoalForceSimulation {
           preferredAngle,
           preferredDistance: hopDistance === null ? undefined : resolveMeGoalRepulsionDistance(hopDistance),
           sequenceIndex: this.placementSequenceIndex,
+          stableKey: goal.id,
         });
         this.placementSequenceIndex += 1;
         return {
@@ -850,7 +889,26 @@ export class GoalForceSimulation {
   }
 
   updateData(graph: GoalGraph, options?: LayoutOptions): void {
-    this.buildNodesAndLinks(graph, false, options);
+    const previousNodeIds = new Set(
+      this.nodes
+        .map((node) => String(node.id))
+        .filter((nodeId) => nodeId !== String(graph.me.id)),
+    );
+    const nextVisibleNodeIds = new Set(buildVisibleGraph(graph, options).visibleGoals.map((goal) => goal.id));
+    const removedNodeIds = [...previousNodeIds].filter((nodeId) => !nextVisibleNodeIds.has(nodeId));
+    const shouldResetLayout = removedNodeIds.length > 0;
+
+    if (shouldResetLayout) {
+      this.resetPlacementState();
+      warnGoalDebug('simulation:reset-layout', {
+        reason: 'visible-node-removed',
+        removedNodeIds,
+        remainingNodeIds: [...nextVisibleNodeIds],
+        showCancelled: options?.showCancelled ?? false,
+      });
+    }
+
+    this.buildNodesAndLinks(graph, shouldResetLayout, options, !shouldResetLayout);
     this.simulation.nodes(this.nodes);
     this.simulation.force('goal-relationship', createLayeredGoalForce(this.pairSpecs));
     this.simulation.force('spring-links', createSpringAttractionForce(this.links));
