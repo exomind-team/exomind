@@ -390,6 +390,52 @@ function makeHiddenCancelledSiblingGraph(): PersistedGoalGraph {
   };
 }
 
+function makeShownCancelledGraph(): PersistedGoalGraph {
+  return {
+    me: { id: 'me', name: 'Me' },
+    goals: [
+      {
+        id: 'goal-a',
+        title: 'A',
+        description: '',
+        cancelled: false,
+        completionRule: [['edge-me-a']],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'goal-b',
+        title: 'B',
+        description: '',
+        cancelled: true,
+        completionRule: [['edge-me-b']],
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ],
+    edges: [
+      {
+        id: 'edge-me-a',
+        title: 'Edge A',
+        description: '',
+        source: 'me',
+        target: 'goal-a',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'edge-me-b',
+        title: 'Edge B',
+        description: '',
+        source: 'me',
+        target: 'goal-b',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ],
+  };
+}
+
 function makeLegacySemanticEdgeGraph(
   edgeStatus: 'in_progress' | 'suspended' | 'completed' | 'cancelled',
 ): LegacyPersistedGoalGraph {
@@ -892,6 +938,75 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     } finally {
       await hiddenSiblingPage.close();
     }
+  });
+
+  test('keeps cancelled zombie nodes and edges visible when show-cancelled is enabled', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await primeGoalsPageWithGraph(page, makeShownCancelledGraph(), {
+      fixedPolarSequence: [
+        { angle: 0.2, distance: 192 },
+        { angle: 0.85, distance: 226 },
+      ],
+    });
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toHaveCount(0);
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toHaveCount(0);
+
+    await page.getByRole('checkbox', { name: '显示已取消' }).check();
+
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected simulation:end warn log before zombie-visibility assertions',
+      })
+      .toBe(true);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'show-cancelled-zombie:settled',
+    );
+
+    const zombieMetrics = await page.evaluate(() => {
+      const goal = document.querySelector('[data-testid="goal-flow-node-goal-b"]') as HTMLElement | null;
+      const edge = document.querySelector('[data-testid="task-flow-edge-visible-edge-me-b"]') as SVGPathElement | null;
+      const label = document.querySelector('[data-testid="task-flow-edge-label-edge-me-b"]') as HTMLElement | null;
+      if (!goal || !edge || !label) return null;
+      const goalStyle = window.getComputedStyle(goal);
+      const edgeStyle = window.getComputedStyle(edge);
+      const labelStyle = window.getComputedStyle(label);
+      const goalRect = goal.getBoundingClientRect();
+      const edgeRect = edge.getBoundingClientRect();
+      return {
+        goalOpacity: Number.parseFloat(goalStyle.opacity || '1'),
+        goalWidth: goalRect.width,
+        goalHeight: goalRect.height,
+        edgeOpacity: Number.parseFloat(edgeStyle.opacity || '1'),
+        edgeStrokeDasharray: edgeStyle.strokeDasharray,
+        edgeWidth: Math.max(edgeRect.width, edgeRect.height),
+        labelOpacity: Number.parseFloat(labelStyle.opacity || '1'),
+      };
+    });
+
+    expect(zombieMetrics, 'show-cancelled-zombie: expected measurable zombie metrics').not.toBeNull();
+    expect(zombieMetrics?.goalOpacity ?? 0, 'show-cancelled-zombie: cancelled node should remain visible').toBeGreaterThan(0.01);
+    expect(zombieMetrics?.goalWidth ?? 0).toBeGreaterThan(0);
+    expect(zombieMetrics?.goalHeight ?? 0).toBeGreaterThan(0);
+    expect(zombieMetrics?.edgeOpacity ?? 0, 'show-cancelled-zombie: zombie edge should remain visible').toBeGreaterThan(0.01);
+    expect(zombieMetrics?.edgeWidth ?? 0, 'show-cancelled-zombie: zombie edge should keep a measurable path').toBeGreaterThan(0);
+    expect(zombieMetrics?.labelOpacity ?? 0, 'show-cancelled-zombie: zombie label should remain visible').toBeGreaterThan(0.01);
+    expect(zombieMetrics?.edgeStrokeDasharray).not.toBe('none');
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
   test('keeps semantic-status edges visible whenever both endpoint nodes stay visible', async ({ page }) => {
