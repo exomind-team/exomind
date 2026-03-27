@@ -1419,6 +1419,16 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       'interaction-stability:goal-selected',
     );
 
+    await detailPanel.getByRole('button').first().click();
+    await expect(detailPanel).toHaveCount(0);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'interaction-stability:detail-closed',
+    );
+
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
