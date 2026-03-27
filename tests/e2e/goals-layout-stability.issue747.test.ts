@@ -298,6 +298,52 @@ function makeDuplicateEdgeGraph(): PersistedGoalGraph {
   };
 }
 
+function makeStarGraph(): PersistedGoalGraph {
+  return {
+    me: { id: 'me', name: 'Me' },
+    goals: [
+      {
+        id: 'goal-a',
+        title: 'A',
+        description: '',
+        cancelled: false,
+        completionRule: [['edge-me-a']],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'goal-b',
+        title: 'B',
+        description: '',
+        cancelled: false,
+        completionRule: [['edge-me-b']],
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ],
+    edges: [
+      {
+        id: 'edge-me-a',
+        title: 'Edge A',
+        description: '',
+        source: 'me',
+        target: 'goal-a',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'edge-me-b',
+        title: 'Edge B',
+        description: '',
+        source: 'me',
+        target: 'goal-b',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ],
+  };
+}
+
 function makeLegacySemanticEdgeGraph(
   edgeStatus: 'in_progress' | 'suspended' | 'completed' | 'cancelled',
 ): LegacyPersistedGoalGraph {
@@ -635,6 +681,72 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((paths?.first?.endY ?? 0) - (paths?.second?.endY ?? 0))).toBeLessThan(1);
     expect(Math.abs((paths?.first?.control1Y ?? 0) - (paths?.second?.control1Y ?? 0))).toBeGreaterThan(1);
     expect(Math.abs((paths?.first?.control2Y ?? 0) - (paths?.second?.control2Y ?? 0))).toBeGreaterThan(1);
+  });
+
+  test('opens the shared-endpoint fan around Me in the browser when star edges start nearly collinear', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await primeGoalsPageWithGraph(page, makeStarGraph(), {
+      fixedPolarSequence: [
+        { angle: 0, distance: 192 },
+        { angle: 0.03, distance: 194 },
+      ],
+    });
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected simulation:end warn log before shared-endpoint fan assertions',
+      })
+      .toBe(true);
+
+    const snapshot = await snapshotRenderVisibility(page);
+    expectVisibleGraphSnapshot(snapshot, 3, 2, 'shared-endpoint-fan:settled');
+
+    const fanMetrics = await page.evaluate(() => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const goalA = document.querySelector('[data-testid="goal-flow-node-goal-a"]') as HTMLElement | null;
+      const goalB = document.querySelector('[data-testid="goal-flow-node-goal-b"]') as HTMLElement | null;
+      if (!me || !goalA || !goalB) return null;
+
+      const getCenter = (element: HTMLElement) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+
+      const meCenter = getCenter(me);
+      const aCenter = getCenter(goalA);
+      const bCenter = getCenter(goalB);
+      const angleA = Math.atan2(aCenter.y - meCenter.y, aCenter.x - meCenter.x);
+      const angleB = Math.atan2(bCenter.y - meCenter.y, bCenter.x - meCenter.x);
+      const rawDelta = Math.abs(angleA - angleB);
+      const angleDeltaDeg = Math.min(rawDelta, Math.PI * 2 - rawDelta) * 180 / Math.PI;
+
+      return {
+        meCenter,
+        aCenter,
+        bCenter,
+        angleDeltaDeg,
+      };
+    });
+
+    expect(fanMetrics, 'shared-endpoint-fan: expected measurable star geometry').not.toBeNull();
+    expect(
+      fanMetrics?.angleDeltaDeg ?? 0,
+      `shared-endpoint-fan: expected Me fan angle to open well beyond the initial ~1.7deg, got ${fanMetrics?.angleDeltaDeg ?? 0}deg`,
+    ).toBeGreaterThan(20);
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
   test('keeps semantic-status edges visible whenever both endpoint nodes stay visible', async ({ page }) => {
