@@ -14,13 +14,17 @@ type RuntimeConfigCacheState = {
   runtimeEnabled: boolean;
   entries: Map<string, string>;
   bootstrapPromise: Promise<void> | null;
+  bootstrapRetryTimer: number | null;
 };
+
+const BOOTSTRAP_RETRY_DELAY_MS = 1000;
 
 const state: RuntimeConfigCacheState = {
   bootstrapped: false,
   runtimeEnabled: false,
   entries: new Map(),
   bootstrapPromise: null,
+  bootstrapRetryTimer: null,
 };
 
 function readLocalStorageValue(key: string): string | null {
@@ -63,6 +67,29 @@ function replaceRuntimeEntries(entries: RuntimeConfigEntryRecord[]): void {
   state.entries = new Map(entries.map((entry) => [entry.key, entry.value]));
 }
 
+function clearBootstrapRetryTimer(): void {
+  if (state.bootstrapRetryTimer == null) {
+    return;
+  }
+
+  window.clearTimeout(state.bootstrapRetryTimer);
+  state.bootstrapRetryTimer = null;
+}
+
+function scheduleBootstrapRetry(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (state.bootstrapRetryTimer != null || state.bootstrapped) {
+    return;
+  }
+
+  state.bootstrapRetryTimer = window.setTimeout(() => {
+    state.bootstrapRetryTimer = null;
+    void bootstrapRuntimeConfig().catch(() => {});
+  }, BOOTSTRAP_RETRY_DELAY_MS);
+}
+
 export async function bootstrapRuntimeConfig(): Promise<void> {
   if (state.bootstrapped) {
     return;
@@ -72,16 +99,25 @@ export async function bootstrapRuntimeConfig(): Promise<void> {
   }
 
   state.bootstrapPromise = (async () => {
-    const payload = await bootstrapRuntimeConfigTransport();
-    state.bootstrapped = true;
-    if (!payload) {
+    try {
+      const payload = await bootstrapRuntimeConfigTransport();
+      if (!payload) {
+        state.runtimeEnabled = false;
+        state.entries.clear();
+        scheduleBootstrapRetry();
+        return;
+      }
+
+      clearBootstrapRetryTimer();
+      state.bootstrapped = true;
+      state.runtimeEnabled = true;
+      replaceRuntimeEntries(payload.entries);
+    } catch (error) {
       state.runtimeEnabled = false;
       state.entries.clear();
-      return;
+      scheduleBootstrapRetry();
+      throw error;
     }
-
-    state.runtimeEnabled = true;
-    replaceRuntimeEntries(payload.entries);
   })().finally(() => {
     state.bootstrapPromise = null;
   });
@@ -132,9 +168,11 @@ export function __primeRuntimeConfigForTests(entries: Record<string, string>): v
 }
 
 export function __resetRuntimeConfigCacheForTests(): void {
+  clearBootstrapRetryTimer();
   state.bootstrapped = false;
   state.runtimeEnabled = false;
   state.entries.clear();
   state.bootstrapPromise = null;
+  state.bootstrapRetryTimer = null;
   __resetRuntimeConfigAdapterForTests();
 }
