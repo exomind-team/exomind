@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::timeblock::{
-    ActiveBlockData, BlockTaskAssociationEvent, PlannedTimeBlockData, PlannedTimeBlockType,
+    ActiveBlockData, BlockTaskAssociationEvent, BreakWindowKind, PlannedSegmentData,
+    PlannedSegmentKind, RhythmPresetData, SchedulingWindowData,
 };
 
 #[derive(Debug, Deserialize)]
@@ -28,57 +29,51 @@ struct TodayPlannerQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreatePlannedTimeBlockPayload {
+struct CreateSchedulingWindowPayload {
     date: String,
-    #[serde(rename = "type")]
-    block_type: PlannedTimeBlockType,
-    title: String,
+    #[serde(default)]
+    title: Option<String>,
     planned_start_at: u64,
-    planned_duration_minutes: u64,
-    #[serde(default)]
-    note: Option<String>,
-    #[serde(default)]
-    linked_task_ids: Vec<String>,
+    planned_end_at: u64,
+    rhythm_preset_key: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UpdatePlannedTimeBlockPayload {
-    #[serde(default)]
-    date: Option<String>,
-    #[serde(rename = "type", default)]
-    block_type: Option<PlannedTimeBlockType>,
+struct UpdatePlannedSegmentPayload {
     #[serde(default)]
     title: Option<String>,
-    #[serde(default)]
-    planned_start_at: Option<u64>,
-    #[serde(default)]
-    planned_duration_minutes: Option<u64>,
-    #[serde(default)]
-    note: Option<Option<String>>,
     #[serde(default)]
     linked_task_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ReorderPlannedTimeBlocksPayload {
-    date: String,
-    ordered_ids: Vec<String>,
+struct ReflowWindowPayload {
+    anchor_segment_id: String,
+    actual_end_at: u64,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TodayPlannerSnapshotResponse {
     date: String,
-    blocks: Vec<TodayPlannerBlockResponse>,
+    windows: Vec<SchedulingWindowResponse>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TodayPlannerBlockResponse {
+struct SchedulingWindowResponse {
     #[serde(flatten)]
-    block: PlannedTimeBlockData,
+    window: SchedulingWindowData,
+    segments: Vec<PlannedSegmentResponse>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlannedSegmentResponse {
+    #[serde(flatten)]
+    segment: PlannedSegmentData,
     status: String,
     #[serde(rename = "sourceTimeBlockId")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,14 +139,192 @@ fn normalize_linked_task_ids(task_ids: Vec<String>) -> Vec<String> {
     normalized
 }
 
+fn resolve_rhythm_preset(key: &str) -> Option<RhythmPresetData> {
+    match key.trim() {
+        "pomodoro_25_5" => Some(RhythmPresetData {
+            key: "pomodoro_25_5".to_string(),
+            label: "25 / 5".to_string(),
+            work_minutes: 25,
+            short_break_minutes: 5,
+            long_break_minutes: 20,
+            long_break_after_work_segments: 4,
+        }),
+        "focus_45_10" => Some(RhythmPresetData {
+            key: "focus_45_10".to_string(),
+            label: "45 / 10".to_string(),
+            work_minutes: 45,
+            short_break_minutes: 10,
+            long_break_minutes: 20,
+            long_break_after_work_segments: 3,
+        }),
+        "focus_45_15" => Some(RhythmPresetData {
+            key: "focus_45_15".to_string(),
+            label: "45 / 15".to_string(),
+            work_minutes: 45,
+            short_break_minutes: 15,
+            long_break_minutes: 25,
+            long_break_after_work_segments: 3,
+        }),
+        _ => None,
+    }
+}
+
+fn duration_minutes_from_segment(segment: &PlannedSegmentData) -> u64 {
+    let duration_ms = segment
+        .planned_end_at
+        .saturating_sub(segment.planned_start_at);
+    let rounded = duration_ms.div_ceil(60_000);
+    rounded.max(1)
+}
+
+fn generate_segments_for_window(
+    window_id: &str,
+    window_start_at: u64,
+    window_end_at: u64,
+    preset: &RhythmPresetData,
+    now: u64,
+) -> Vec<PlannedSegmentData> {
+    let mut cursor = window_start_at;
+    let mut order = 0i64;
+    let mut work_count = 0u32;
+    let mut segments = Vec::new();
+
+    while cursor < window_end_at {
+        let remaining_minutes = window_end_at.saturating_sub(cursor).div_ceil(60_000);
+        if remaining_minutes == 0 {
+            break;
+        }
+
+        let work_minutes = preset.work_minutes.min(remaining_minutes);
+        let work_end = (cursor + work_minutes * 60_000).min(window_end_at);
+        work_count += 1;
+        segments.push(PlannedSegmentData {
+            id: uuid::Uuid::new_v4().to_string(),
+            window_id: window_id.to_string(),
+            kind: PlannedSegmentKind::Work,
+            break_kind: None,
+            title: format!("Work {work_count}"),
+            planned_start_at: cursor,
+            planned_end_at: work_end,
+            linked_task_ids: Vec::new(),
+            order,
+            created_at: now,
+            updated_at: now,
+        });
+        order += 1;
+        cursor = work_end;
+
+        if cursor >= window_end_at {
+            break;
+        }
+
+        let remaining_after_work = window_end_at.saturating_sub(cursor).div_ceil(60_000);
+        if remaining_after_work == 0 {
+            break;
+        }
+        if remaining_after_work <= preset.short_break_minutes {
+            if let Some(last_work_segment) = segments.last_mut() {
+                last_work_segment.planned_end_at = window_end_at;
+                last_work_segment.updated_at = now;
+            }
+            break;
+        }
+
+        let use_long_break = preset.long_break_after_work_segments > 0
+            && work_count % preset.long_break_after_work_segments == 0
+            && remaining_after_work > preset.short_break_minutes;
+        let break_minutes = if use_long_break {
+            preset.long_break_minutes
+        } else {
+            preset.short_break_minutes
+        }
+        .min(remaining_after_work);
+        let break_end = (cursor + break_minutes * 60_000).min(window_end_at);
+
+        segments.push(PlannedSegmentData {
+            id: uuid::Uuid::new_v4().to_string(),
+            window_id: window_id.to_string(),
+            kind: PlannedSegmentKind::Break,
+            break_kind: Some(if use_long_break {
+                BreakWindowKind::Long
+            } else {
+                BreakWindowKind::Short
+            }),
+            title: if use_long_break {
+                "Long Break".to_string()
+            } else {
+                "Short Break".to_string()
+            },
+            planned_start_at: cursor,
+            planned_end_at: break_end,
+            linked_task_ids: Vec::new(),
+            order,
+            created_at: now,
+            updated_at: now,
+        });
+        order += 1;
+        cursor = break_end;
+    }
+
+    segments
+}
+
+fn build_segment_response(
+    segment: PlannedSegmentData,
+    active_block: Option<&ActiveBlockData>,
+    completed_blocks: &[crate::timeblock::TimeBlockData],
+) -> PlannedSegmentResponse {
+    if let Some(active) = active_block {
+        if active.source_planned_block_id.as_deref() == Some(segment.id.as_str()) {
+            return PlannedSegmentResponse {
+                segment,
+                status: "active".to_string(),
+                source_timeblock_id: Some(active.start_id.clone()),
+            };
+        }
+    }
+
+    if let Some(completed) = completed_blocks
+        .iter()
+        .find(|completed| completed.source_planned_block_id.as_deref() == Some(segment.id.as_str()))
+    {
+        return PlannedSegmentResponse {
+            segment,
+            status: "completed".to_string(),
+            source_timeblock_id: Some(completed.id.clone()),
+        };
+    }
+
+    PlannedSegmentResponse {
+        segment,
+        status: "pending".to_string(),
+        source_timeblock_id: None,
+    }
+}
+
+fn build_window_response(
+    window: SchedulingWindowData,
+    active_block: Option<&ActiveBlockData>,
+    completed_blocks: &[crate::timeblock::TimeBlockData],
+) -> SchedulingWindowResponse {
+    let segments = window
+        .segments
+        .clone()
+        .into_iter()
+        .map(|segment| build_segment_response(segment, active_block, completed_blocks))
+        .collect();
+
+    SchedulingWindowResponse { window, segments }
+}
+
 fn build_snapshot_response(
     state: &AppState,
     scope_key: Option<&str>,
     date: &str,
 ) -> Result<TodayPlannerSnapshotResponse, (StatusCode, Json<ErrorResponse>)> {
-    let blocks = state
+    let windows = state
         .timeblock_store
-        .list_planned_for_date_scoped(scope_key, date)
+        .list_windows_for_date_scoped(scope_key, date)
         .map_err(|error| internal_error(error.to_string()))?;
     let active_block = state
         .timeblock_store
@@ -162,41 +335,12 @@ fn build_snapshot_response(
         .list_completed_scoped(scope_key)
         .map_err(|error| internal_error(error.to_string()))?;
 
-    let block_responses = blocks
-        .into_iter()
-        .map(|block| {
-            if let Some(active) = active_block.as_ref() {
-                if active.source_planned_block_id.as_deref() == Some(block.id.as_str()) {
-                    return TodayPlannerBlockResponse {
-                        block,
-                        status: "active".to_string(),
-                        source_timeblock_id: Some(active.start_id.clone()),
-                    };
-                }
-            }
-
-            if let Some(completed) = completed_blocks
-                .iter()
-                .find(|completed| completed.source_planned_block_id.as_deref() == Some(block.id.as_str()))
-            {
-                return TodayPlannerBlockResponse {
-                    block,
-                    status: "completed".to_string(),
-                    source_timeblock_id: Some(completed.id.clone()),
-                };
-            }
-
-            TodayPlannerBlockResponse {
-                block,
-                status: "pending".to_string(),
-                source_timeblock_id: None,
-            }
-        })
-        .collect();
-
     Ok(TodayPlannerSnapshotResponse {
         date: date.to_string(),
-        blocks: block_responses,
+        windows: windows
+            .into_iter()
+            .map(|window| build_window_response(window, active_block.as_ref(), &completed_blocks))
+            .collect(),
     })
 }
 
@@ -208,210 +352,129 @@ async fn get_today_planner(
     Ok(Json(snapshot))
 }
 
-async fn create_planned_block(
+async fn create_window(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
-    Json(payload): Json<CreatePlannedTimeBlockPayload>,
-) -> Result<(StatusCode, Json<TodayPlannerBlockResponse>), (StatusCode, Json<ErrorResponse>)> {
+    Json(payload): Json<CreateSchedulingWindowPayload>,
+) -> Result<(StatusCode, Json<SchedulingWindowResponse>), (StatusCode, Json<ErrorResponse>)> {
     if payload.date.trim().is_empty() {
         return Err(bad_request("date is required"));
     }
-    if payload.title.trim().is_empty() {
-        return Err(bad_request("title is required"));
+    if payload.planned_end_at <= payload.planned_start_at {
+        return Err(bad_request("plannedEndAt must be greater than plannedStartAt"));
     }
-    if payload.planned_duration_minutes == 0 {
-        return Err(bad_request("plannedDurationMinutes must be greater than 0"));
-    }
+    let preset = resolve_rhythm_preset(&payload.rhythm_preset_key)
+        .ok_or_else(|| bad_request("unknown rhythmPresetKey"))?;
 
     let scope_key = scope_key_from_query(&query);
-    let existing = state
-        .timeblock_store
-        .list_planned_for_date_scoped(scope_key, &payload.date)
-        .map_err(|error| internal_error(error.to_string()))?;
-    let next_order = existing.iter().map(|block| block.order).max().unwrap_or(-1) + 1;
     let now = chrono::Utc::now().timestamp_millis() as u64;
-    let block = PlannedTimeBlockData {
-        id: uuid::Uuid::new_v4().to_string(),
+    let window_id = uuid::Uuid::new_v4().to_string();
+    let window = SchedulingWindowData {
+        id: window_id.clone(),
         date: payload.date.trim().to_string(),
-        block_type: payload.block_type,
-        title: payload.title.trim().to_string(),
+        title: payload
+            .title
+            .map(|title| title.trim().to_string())
+            .filter(|title| !title.is_empty()),
         planned_start_at: payload.planned_start_at,
-        planned_duration_minutes: payload.planned_duration_minutes,
-        note: payload.note.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        }),
-        linked_task_ids: normalize_linked_task_ids(payload.linked_task_ids),
-        order: next_order,
+        planned_end_at: payload.planned_end_at,
+        rhythm_preset: preset.clone(),
+        segments: generate_segments_for_window(
+            &window_id,
+            payload.planned_start_at,
+            payload.planned_end_at,
+            &preset,
+            now,
+        ),
         created_at: now,
         updated_at: now,
     };
 
     state
         .timeblock_store
-        .put_planned_scoped(scope_key, block.clone())
+        .put_window_scoped(scope_key, window.clone())
         .map_err(|error| internal_error(error.to_string()))?;
 
     Ok((
         StatusCode::CREATED,
-        Json(TodayPlannerBlockResponse {
-            block,
-            status: "pending".to_string(),
-            source_timeblock_id: None,
-        }),
+        Json(build_window_response(window, None, &[])),
     ))
 }
 
-async fn update_planned_block(
+async fn update_segment(
     State(state): State<AppState>,
-    Path(block_id): Path<String>,
+    Path(segment_id): Path<String>,
     Query(query): Query<ScopeQuery>,
-    Json(payload): Json<UpdatePlannedTimeBlockPayload>,
-) -> Result<Json<TodayPlannerBlockResponse>, (StatusCode, Json<ErrorResponse>)> {
+    Json(payload): Json<UpdatePlannedSegmentPayload>,
+) -> Result<Json<PlannedSegmentResponse>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = scope_key_from_query(&query);
-    let existing = state
+    let mut window = state
         .timeblock_store
-        .get_planned_scoped(scope_key, &block_id)
+        .get_window_by_segment_scoped(scope_key, &segment_id)
         .map_err(|error| internal_error(error.to_string()))?
-        .ok_or_else(|| not_found("planned block not found"))?;
+        .ok_or_else(|| not_found("planned segment not found"))?;
 
-    let next_title = payload
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or(existing.title.clone());
-    let next_date = payload
-        .date
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or(existing.date.clone());
-    let next_duration = payload
-        .planned_duration_minutes
-        .unwrap_or(existing.planned_duration_minutes);
-    if next_duration == 0 {
-        return Err(bad_request("plannedDurationMinutes must be greater than 0"));
+    let segment = window
+        .segments
+        .iter_mut()
+        .find(|segment| segment.id == segment_id)
+        .ok_or_else(|| not_found("planned segment not found"))?;
+    if segment.kind != PlannedSegmentKind::Work {
+        return Err(bad_request("only work segments can be updated"));
     }
 
-    let updated = PlannedTimeBlockData {
-        id: existing.id.clone(),
-        date: next_date,
-        block_type: payload.block_type.unwrap_or(existing.block_type),
-        title: next_title,
-        planned_start_at: payload.planned_start_at.unwrap_or(existing.planned_start_at),
-        planned_duration_minutes: next_duration,
-        note: payload
-            .note
-            .map(|value| {
-                value.and_then(|inner| {
-                    let trimmed = inner.trim().to_string();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed)
-                    }
-                })
-            })
-            .unwrap_or(existing.note.clone()),
-        linked_task_ids: payload
-            .linked_task_ids
-            .map(normalize_linked_task_ids)
-            .unwrap_or(existing.linked_task_ids.clone()),
-        order: existing.order,
-        created_at: existing.created_at,
-        updated_at: chrono::Utc::now().timestamp_millis() as u64,
-    };
-
-    state
-        .timeblock_store
-        .put_planned_scoped(scope_key, updated.clone())
-        .map_err(|error| internal_error(error.to_string()))?;
-
-    let snapshot = build_snapshot_response(&state, scope_key, &updated.date)?;
-    let response = snapshot
-        .blocks
-        .into_iter()
-        .find(|block| block.block.id == updated.id)
-        .ok_or_else(|| internal_error("updated planned block missing from snapshot".to_string()))?;
-    Ok(Json(response))
-}
-
-async fn reorder_planned_blocks(
-    State(state): State<AppState>,
-    Query(query): Query<ScopeQuery>,
-    Json(payload): Json<ReorderPlannedTimeBlocksPayload>,
-) -> Result<Json<TodayPlannerSnapshotResponse>, (StatusCode, Json<ErrorResponse>)> {
-    if payload.date.trim().is_empty() {
-        return Err(bad_request("date is required"));
-    }
-
-    let scope_key = scope_key_from_query(&query);
-    let mut all_blocks = state
-        .timeblock_store
-        .list_planned_scoped(scope_key)
-        .map_err(|error| internal_error(error.to_string()))?;
-
-    let ordered_ids = payload
-        .ordered_ids
-        .iter()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    if ordered_ids.is_empty() {
-        return Err(bad_request("orderedIds is required"));
-    }
-
-    let mut next_order = 0i64;
-    for ordered_id in ordered_ids {
-        if let Some(block) = all_blocks
-            .iter_mut()
-            .find(|block| block.date == payload.date && block.id == ordered_id)
-        {
-            block.order = next_order;
-            block.updated_at = chrono::Utc::now().timestamp_millis() as u64;
-            next_order += 1;
+    if let Some(title) = payload.title {
+        let trimmed = title.trim();
+        if !trimmed.is_empty() {
+            segment.title = trimmed.to_string();
         }
     }
-
-    for block in all_blocks
-        .iter_mut()
-        .filter(|block| block.date == payload.date && !payload.ordered_ids.iter().any(|id| id == &block.id))
-    {
-        block.order = next_order;
-        block.updated_at = chrono::Utc::now().timestamp_millis() as u64;
-        next_order += 1;
+    if let Some(linked_task_ids) = payload.linked_task_ids {
+        segment.linked_task_ids = normalize_linked_task_ids(linked_task_ids);
     }
+    segment.updated_at = chrono::Utc::now().timestamp_millis() as u64;
+    window.updated_at = segment.updated_at;
 
     state
         .timeblock_store
-        .replace_planned_scoped(scope_key, &all_blocks)
+        .put_window_scoped(scope_key, window.clone())
         .map_err(|error| internal_error(error.to_string()))?;
 
-    Ok(Json(build_snapshot_response(
-        &state,
-        scope_key,
-        payload.date.trim(),
-    )?))
+    let active_block = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?;
+    let completed_blocks = state
+        .timeblock_store
+        .list_completed_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?;
+    let updated_segment = window
+        .segments
+        .into_iter()
+        .find(|segment| segment.id == segment_id)
+        .ok_or_else(|| internal_error("updated segment missing from window".to_string()))?;
+
+    Ok(Json(build_segment_response(
+        updated_segment,
+        active_block.as_ref(),
+        &completed_blocks,
+    )))
 }
 
-async fn start_planned_block(
+async fn start_segment(
     State(state): State<AppState>,
-    Path(block_id): Path<String>,
+    Path(segment_id): Path<String>,
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<ActiveBlockData>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = scope_key_from_query(&query);
-    let planned_block = state
+    let segment = state
         .timeblock_store
-        .get_planned_scoped(scope_key, &block_id)
+        .get_segment_scoped(scope_key, &segment_id)
         .map_err(|error| internal_error(error.to_string()))?
-        .ok_or_else(|| not_found("planned block not found"))?;
+        .ok_or_else(|| not_found("planned segment not found"))?;
+    if segment.kind != PlannedSegmentKind::Work {
+        return Err(bad_request("only work segments can be started"));
+    }
 
     if let Some(active) = state
         .timeblock_store
@@ -431,7 +494,7 @@ async fn start_planned_block(
 
     let now = chrono::Utc::now().timestamp_millis() as u64;
     let start_id = uuid::Uuid::new_v4().to_string();
-    let task_association_log = planned_block
+    let task_association_log = segment
         .linked_task_ids
         .iter()
         .map(|task_id| BlockTaskAssociationEvent {
@@ -444,10 +507,10 @@ async fn start_planned_block(
         .collect::<Vec<_>>();
     let active_block = ActiveBlockData {
         start_id: start_id.clone(),
-        name: planned_block.title.clone(),
+        name: segment.title.clone(),
         mode: "countdown".to_string(),
-        target_minutes: Some(planned_block.planned_duration_minutes),
-        elapsed: planned_block.planned_duration_minutes * 60 * 1000,
+        target_minutes: Some(duration_minutes_from_segment(&segment)),
+        elapsed: duration_minutes_from_segment(&segment) * 60 * 1000,
         updated_at: Some(now),
         phase: Some("running".to_string()),
         version: Some(1),
@@ -462,9 +525,9 @@ async fn start_planned_block(
         pause_accumulated_ms: Some(0),
         paused: false,
         paused_at: None,
-        task_ids: planned_block.linked_task_ids.clone(),
+        task_ids: segment.linked_task_ids.clone(),
         task_association_log,
-        source_planned_block_id: Some(planned_block.id.clone()),
+        source_planned_block_id: Some(segment.id.clone()),
         task_id: None,
     };
 
@@ -484,25 +547,59 @@ async fn start_planned_block(
     Ok(Json(active_block))
 }
 
-async fn delete_planned_block(
+async fn reflow_window(
     State(state): State<AppState>,
-    Path(block_id): Path<String>,
+    Path(window_id): Path<String>,
     Query(query): Query<ScopeQuery>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    Json(payload): Json<ReflowWindowPayload>,
+) -> Result<Json<SchedulingWindowResponse>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = scope_key_from_query(&query);
-    let existing = state
+    let mut window = state
         .timeblock_store
-        .get_planned_scoped(scope_key, &block_id)
-        .map_err(|error| internal_error(error.to_string()))?;
-    if existing.is_none() {
-        return Err(not_found("planned block not found"));
+        .get_window_scoped(scope_key, &window_id)
+        .map_err(|error| internal_error(error.to_string()))?
+        .ok_or_else(|| not_found("planner window not found"))?;
+
+    let anchor_index = window
+        .segments
+        .iter()
+        .position(|segment| segment.id == payload.anchor_segment_id)
+        .ok_or_else(|| not_found("anchor segment not found"))?;
+    let anchor = window.segments[anchor_index].clone();
+    if payload.actual_end_at <= anchor.planned_start_at {
+        return Err(bad_request("actualEndAt must be after anchor segment start"));
     }
+
+    let delta = payload.actual_end_at as i128 - anchor.planned_end_at as i128;
+    if delta != 0 {
+        for segment in window.segments.iter_mut().skip(anchor_index + 1) {
+            segment.planned_start_at = segment.planned_start_at.saturating_add_signed(delta as i64);
+            segment.planned_end_at = segment.planned_end_at.saturating_add_signed(delta as i64);
+            segment.updated_at = chrono::Utc::now().timestamp_millis() as u64;
+        }
+        window.planned_end_at = window.planned_end_at.saturating_add_signed(delta as i64);
+    }
+    window.updated_at = chrono::Utc::now().timestamp_millis() as u64;
 
     state
         .timeblock_store
-        .delete_planned_scoped(scope_key, &block_id)
+        .put_window_scoped(scope_key, window.clone())
         .map_err(|error| internal_error(error.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
+
+    let active_block = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?;
+    let completed_blocks = state
+        .timeblock_store
+        .list_completed_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?;
+
+    Ok(Json(build_window_response(
+        window,
+        active_block.as_ref(),
+        &completed_blocks,
+    )))
 }
 
 fn write_timeblock_eventlog(
@@ -544,17 +641,17 @@ fn write_timeblock_eventlog(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/act/today-planner", get(get_today_planner))
-        .route("/act/today-planner/blocks", post(create_planned_block))
+        .route("/act/today-planner/windows", post(create_window))
         .route(
-            "/act/today-planner/blocks/reorder",
-            post(reorder_planned_blocks),
+            "/act/today-planner/windows/:window_id/reflow",
+            post(reflow_window),
         )
         .route(
-            "/act/today-planner/blocks/:block_id",
-            patch(update_planned_block).delete(delete_planned_block),
+            "/act/today-planner/segments/:segment_id",
+            patch(update_segment),
         )
         .route(
-            "/act/today-planner/blocks/:block_id/start",
-            post(start_planned_block),
+            "/act/today-planner/segments/:segment_id/start",
+            post(start_segment),
         )
 }

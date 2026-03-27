@@ -168,51 +168,73 @@ export interface ActiveBlockData {
   taskId?: UUID;
 }
 
-export type PlannedTimeBlockType = 'work' | 'rest';
-export type PlannedTimeBlockStatus = 'pending' | 'active' | 'completed';
+export type RhythmPresetKey = 'pomodoro_25_5' | 'focus_45_10' | 'focus_45_15';
 
-export interface PlannedTimeBlockData {
+export interface RhythmPresetData {
+  key: RhythmPresetKey;
+  label: string;
+  workMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  longBreakAfterWorkSegments: number;
+}
+
+export type PlannedSegmentKind = 'work' | 'break';
+export type BreakWindowKind = 'short' | 'long';
+export type TodayPlannerSegmentStatus = 'pending' | 'active' | 'completed';
+
+export interface PlannedSegmentData {
   id: UUID;
-  date: string;
-  type: PlannedTimeBlockType;
+  windowId: UUID;
+  kind: PlannedSegmentKind;
+  breakKind?: BreakWindowKind;
   title: string;
   plannedStartAt: Timestamp;
-  plannedDurationMinutes: number;
-  note?: string;
+  plannedEndAt: Timestamp;
   linkedTaskIds: UUID[];
   order: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
 
-export interface TodayPlannerBlock extends PlannedTimeBlockData {
-  status: PlannedTimeBlockStatus;
+export interface TodayPlannerSegment extends PlannedSegmentData {
+  status: TodayPlannerSegmentStatus;
   sourceTimeBlockId?: UUID;
+}
+
+export interface TodayPlannerWindow {
+  id: UUID;
+  date: string;
+  title?: string;
+  plannedStartAt: Timestamp;
+  plannedEndAt: Timestamp;
+  rhythmPreset: RhythmPresetData;
+  segments: TodayPlannerSegment[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }
 
 export interface TodayPlannerSnapshot {
   date: string;
-  blocks: TodayPlannerBlock[];
+  windows: TodayPlannerWindow[];
 }
 
-export interface CreatePlannedTimeBlockInput {
+export interface CreateSchedulingWindowInput {
   date: string;
-  type: PlannedTimeBlockType;
-  title: string;
+  title?: string;
   plannedStartAt: Timestamp;
-  plannedDurationMinutes: number;
-  note?: string;
+  plannedEndAt: Timestamp;
+  rhythmPresetKey: RhythmPresetKey;
+}
+
+export interface UpdatePlannedSegmentInput {
+  title?: string;
   linkedTaskIds?: UUID[];
 }
 
-export interface UpdatePlannedTimeBlockInput {
-  date?: string;
-  type?: PlannedTimeBlockType;
-  title?: string;
-  plannedStartAt?: Timestamp;
-  plannedDurationMinutes?: number;
-  note?: string | null;
-  linkedTaskIds?: UUID[];
+export interface ReflowSchedulingWindowInput {
+  anchorSegmentId: UUID;
+  actualEndAt: Timestamp;
 }
 
 // 计时器配置

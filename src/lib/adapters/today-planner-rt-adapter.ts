@@ -5,10 +5,12 @@ import {
 } from '@/config/runtime-target';
 import type {
   ActiveBlockData,
-  CreatePlannedTimeBlockInput,
-  TodayPlannerBlock,
+  CreateSchedulingWindowInput,
+  ReflowSchedulingWindowInput,
   TodayPlannerSnapshot,
-  UpdatePlannedTimeBlockInput,
+  TodayPlannerSegment,
+  TodayPlannerWindow,
+  UpdatePlannedSegmentInput,
 } from '@/lib/types/event';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
@@ -43,37 +45,34 @@ export class TodayPlannerRtAdapter {
     return this.requestJson<TodayPlannerSnapshot>(`/act/today-planner?date=${encodeURIComponent(date)}`);
   }
 
-  async createPlannedBlock(input: CreatePlannedTimeBlockInput): Promise<TodayPlannerBlock> {
-    return this.requestJsonWithBody<TodayPlannerBlock>('/act/today-planner/blocks', 'POST', {
-      ...input,
-      linkedTaskIds: input.linkedTaskIds ?? [],
-    });
+  async createSchedulingWindow(input: CreateSchedulingWindowInput): Promise<TodayPlannerWindow> {
+    return this.requestJsonWithBody<TodayPlannerWindow>('/act/today-planner/windows', 'POST', input);
   }
 
-  async updatePlannedBlock(blockId: string, input: UpdatePlannedTimeBlockInput): Promise<TodayPlannerBlock> {
-    return this.requestJsonWithBody<TodayPlannerBlock>(`/act/today-planner/blocks/${encodeURIComponent(blockId)}`, 'PATCH', input);
+  async updatePlannedSegment(segmentId: string, input: UpdatePlannedSegmentInput): Promise<TodayPlannerSegment> {
+    return this.requestJsonWithBody<TodayPlannerSegment>(
+      `/act/today-planner/segments/${encodeURIComponent(segmentId)}`,
+      'PATCH',
+      {
+        ...input,
+        linkedTaskIds: input.linkedTaskIds ?? [],
+      },
+    );
   }
 
-  async reorderPlannedBlocks(date: string, orderedIds: string[]): Promise<TodayPlannerSnapshot> {
-    return this.requestJsonWithBody<TodayPlannerSnapshot>('/act/today-planner/blocks/reorder', 'POST', {
-      date,
-      orderedIds,
-    });
+  async startWorkSegment(segmentId: string): Promise<ActiveBlockData> {
+    return this.requestJsonWithBody<ActiveBlockData>(
+      `/act/today-planner/segments/${encodeURIComponent(segmentId)}/start`,
+      'POST',
+    );
   }
 
-  async startPlannedBlock(blockId: string): Promise<ActiveBlockData> {
-    return this.requestJsonWithBody<ActiveBlockData>(`/act/today-planner/blocks/${encodeURIComponent(blockId)}/start`, 'POST');
-  }
-
-  async deletePlannedBlock(blockId: string): Promise<void> {
-    const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(`/act/today-planner/blocks/${encodeURIComponent(blockId)}`, target), {
-      method: 'DELETE',
-      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
-    });
-    if (!response.ok && response.status !== 204) {
-      throw new Error(`RT today planner delete failed: ${response.status}`);
-    }
+  async reflowSchedulingWindow(windowId: string, input: ReflowSchedulingWindowInput): Promise<TodayPlannerWindow> {
+    return this.requestJsonWithBody<TodayPlannerWindow>(
+      `/act/today-planner/windows/${encodeURIComponent(windowId)}/reflow`,
+      'POST',
+      input,
+    );
   }
 
   private async requestJson<T>(path: string): Promise<T> {

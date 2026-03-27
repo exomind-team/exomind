@@ -1,22 +1,21 @@
 # Today Planner API（今日计划器接口）
 
-本文件记录本轮 `Today Planner（今日计划器）` 的最小可用 RT feature API。
+本文件记录本轮 `Today Planner / 今日计划` 的 runtime API 合同。
 
-范围只覆盖：
+本轮范围只覆盖：
 
-- 手动创建今日计划块
-- 计划块类型：`work` / `rest`
-- 编辑 / 删除 / 重排
-- 从计划块直接开始执行
+- 手动框选一个 `Scheduling Window / 可调度区间`
+- 按 `Rhythm Preset / 节奏预设` 自动生成工作片段与休息窗
+- 只允许 `work / 工作片段` 关联任务、开始执行
+- 只对当前区间做 `reflow / 重算`
 
-不覆盖：
+本轮不覆盖：
 
-- 自动排程
-- 自动插入休息
-- 通知 / 提醒
-- 任务 `plannedStartAt` 大范围建模
+- MCP skill 接线
+- AI 自动排整天日程
+- 多个区间之间的全局重排
 
-## 1. 获取某天计划
+## 1. 获取某天计划快照
 
 ```text
 GET /act/today-planner?date=YYYY-MM-DD&user_id=<profile-id>
@@ -25,135 +24,163 @@ GET /act/today-planner?date=YYYY-MM-DD&user_id=<profile-id>
 示例：
 
 ```powershell
-curl.exe -sS "http://127.0.0.1:9124/act/today-planner?date=2026-03-26&user_id=profile-argon"
+curl.exe -sS "http://127.0.0.1:9124/act/today-planner?date=2026-03-27&user_id=profile-argon"
 ```
 
 返回示例：
 
 ```json
 {
-  "date": "2026-03-26",
-  "blocks": [
+  "date": "2026-03-27",
+  "windows": [
     {
-      "id": "plan-1",
-      "date": "2026-03-26",
-      "type": "work",
-      "title": "Deep Work",
-      "plannedStartAt": 1774490400000,
-      "plannedDurationMinutes": 50,
-      "linkedTaskIds": ["task-a"],
-      "order": 0,
-      "createdAt": 1774489000000,
-      "updatedAt": 1774489000000,
-      "status": "pending"
+      "id": "window-1",
+      "date": "2026-03-27",
+      "title": "Morning Focus",
+      "plannedStartAt": 1774573600000,
+      "plannedEndAt": 1774577200000,
+      "rhythmPreset": {
+        "key": "pomodoro_25_5",
+        "label": "25 / 5",
+        "workMinutes": 25,
+        "shortBreakMinutes": 5,
+        "longBreakMinutes": 20,
+        "longBreakAfterWorkSegments": 4
+      },
+      "segments": [
+        {
+          "id": "segment-work-1",
+          "windowId": "window-1",
+          "kind": "work",
+          "title": "Work 1",
+          "plannedStartAt": 1774573600000,
+          "plannedEndAt": 1774575100000,
+          "linkedTaskIds": [],
+          "order": 0,
+          "createdAt": 1774570000000,
+          "updatedAt": 1774570000000,
+          "status": "pending"
+        },
+        {
+          "id": "segment-break-1",
+          "windowId": "window-1",
+          "kind": "break",
+          "breakKind": "short",
+          "title": "Short Break",
+          "plannedStartAt": 1774575100000,
+          "plannedEndAt": 1774575400000,
+          "linkedTaskIds": [],
+          "order": 1,
+          "createdAt": 1774570000000,
+          "updatedAt": 1774570000000,
+          "status": "pending"
+        }
+      ],
+      "createdAt": 1774570000000,
+      "updatedAt": 1774570000000
     }
   ]
 }
 ```
 
-`status` 目前有三种：
+`status` 当前有三种：
 
 - `pending`：还没开始
-- `active`：已经进入当前执行时间块
-- `completed`：已经完成并留下历史时间块
+- `active`：已经开始执行，对应 runtime 里存在 active time block
+- `completed`：已完成，并能回溯到历史 time block
 
-## 2. 创建计划块
+## 2. 创建可调度区间
 
 ```text
-POST /act/today-planner/blocks?user_id=<profile-id>
+POST /act/today-planner/windows?user_id=<profile-id>
 ```
 
 示例：
 
 ```powershell
-curl.exe -sS -X POST "http://127.0.0.1:9124/act/today-planner/blocks?user_id=profile-argon" ^
+curl.exe -sS -X POST "http://127.0.0.1:9124/act/today-planner/windows?user_id=profile-argon" ^
   -H "Content-Type: application/json" ^
-  -d "{\"date\":\"2026-03-26\",\"type\":\"work\",\"title\":\"Deep Work\",\"plannedStartAt\":1774490400000,\"plannedDurationMinutes\":50,\"note\":\"ship vertical slice\",\"linkedTaskIds\":[\"task-a\"]}"
-```
-
-`type` 只支持：
-
-- `work`
-- `rest`
-
-## 3. 更新计划块
-
-```text
-PATCH /act/today-planner/blocks/:blockId?user_id=<profile-id>
-```
-
-示例：
-
-```powershell
-curl.exe -sS -X PATCH "http://127.0.0.1:9124/act/today-planner/blocks/plan-1?user_id=profile-argon" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"title\":\"Lunch + Walk\",\"plannedDurationMinutes\":40,\"note\":null}"
+  -d "{\"date\":\"2026-03-27\",\"title\":\"Morning Focus\",\"plannedStartAt\":1774573600000,\"plannedEndAt\":1774577200000,\"rhythmPresetKey\":\"pomodoro_25_5\"}"
 ```
 
 说明：
 
-- `note: null` 表示清空备注
-- 不传某个字段则保持原值
+- 创建的是一个大区间，不是单个工作块
+- runtime 会立刻根据预设自动生成内部 `segments`
+- 当前支持的 `rhythmPresetKey`：
+  - `pomodoro_25_5`
+  - `focus_45_10`
+  - `focus_45_15`
 
-## 4. 重排计划块
+## 3. 更新工作片段
 
 ```text
-POST /act/today-planner/blocks/reorder?user_id=<profile-id>
+PATCH /act/today-planner/segments/:segmentId?user_id=<profile-id>
 ```
 
 示例：
 
 ```powershell
-curl.exe -sS -X POST "http://127.0.0.1:9124/act/today-planner/blocks/reorder?user_id=profile-argon" ^
+curl.exe -sS -X PATCH "http://127.0.0.1:9124/act/today-planner/segments/segment-work-1?user_id=profile-argon" ^
   -H "Content-Type: application/json" ^
-  -d "{\"date\":\"2026-03-26\",\"orderedIds\":[\"plan-2\",\"plan-1\",\"plan-3\"]}"
+  -d "{\"title\":\"Deep Work A\",\"linkedTaskIds\":[\"task-a\",\"task-b\"]}"
 ```
 
-当前前端默认使用“上移 / 下移”按钮，本质也是调用这个接口。
+说明：
 
-## 5. 从计划块开始执行
+- 只允许更新 `work / 工作片段`
+- `break / 休息窗` 不允许挂任务
+- 不传字段就保持原值
+
+## 4. 从工作片段开始执行
 
 ```text
-POST /act/today-planner/blocks/:blockId/start?user_id=<profile-id>
+POST /act/today-planner/segments/:segmentId/start?user_id=<profile-id>
 ```
 
 示例：
 
 ```powershell
-curl.exe -sS -X POST "http://127.0.0.1:9124/act/today-planner/blocks/plan-1/start?user_id=profile-argon"
+curl.exe -sS -X POST "http://127.0.0.1:9124/act/today-planner/segments/segment-work-1/start?user_id=profile-argon"
 ```
 
-返回值是当前 `active time block（进行中时间块）`，并带上：
+返回值是当前 `active time block / 进行中时间块`，并带上：
 
 - `sourcePlannedBlockId`
+- `taskIds`
 
 这意味着：
 
-- Today Planner 能知道它是从哪个计划块启动的
-- 后续结束反馈写回 completed block 时，也能保留这条溯源链
+- Today Planner 的工作片段能和真实执行中的 time block 建立来源链
+- 后续完成后的历史时间块也能继续追溯回这个片段
 
-## 6. 删除计划块
+## 5. 重算当前可调度区间
 
 ```text
-DELETE /act/today-planner/blocks/:blockId?user_id=<profile-id>
+POST /act/today-planner/windows/:windowId/reflow?user_id=<profile-id>
 ```
 
 示例：
 
 ```powershell
-curl.exe -sS -X DELETE "http://127.0.0.1:9124/act/today-planner/blocks/plan-1?user_id=profile-argon"
+curl.exe -sS -X POST "http://127.0.0.1:9124/act/today-planner/windows/window-1/reflow?user_id=profile-argon" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"anchorSegmentId\":\"segment-work-1\",\"actualEndAt\":1774575300000}"
 ```
 
-成功返回：
+说明：
 
-- `204 No Content`
+- `anchorSegmentId` 是你刚刚实际结束的那个工作片段
+- `actualEndAt` 是实际结束时刻（毫秒时间戳）
+- 当前实现只平移这个 `window / 可调度区间` 里后续剩余片段
+- 不会影响其他区间
 
-## 7. 当前约束
+## 6. 当前契约约束
 
-本轮最重要的契约约束：
+本轮最重要的接口约束：
 
-- UI 走这套 API
+- 前端 Today Planner 走这套 API
 - `curl.exe` 走这套 API
-- 后续 ExoMind RT skill / Agent 也走这套 API
+- 后续 MCP/Skill 接线也应该复用这套 runtime contract
 
-也就是说，Today Planner 的核心业务语义已经不再是前端私有逻辑，而是 runtime 的正式 feature API。
+也就是说，Today Planner 已经不是前端私有排表逻辑，而是 runtime 的正式 feature API。

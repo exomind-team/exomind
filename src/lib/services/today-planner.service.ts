@@ -1,19 +1,20 @@
 import { TodayPlannerRtAdapter } from '@/lib/adapters/today-planner-rt-adapter';
 import type {
   ActiveBlockData,
-  CreatePlannedTimeBlockInput,
-  TodayPlannerBlock,
+  CreateSchedulingWindowInput,
+  ReflowSchedulingWindowInput,
   TodayPlannerSnapshot,
-  UpdatePlannedTimeBlockInput,
+  TodayPlannerSegment,
+  TodayPlannerWindow,
+  UpdatePlannedSegmentInput,
 } from '@/lib/types/event';
 
 export interface TodayPlannerService {
   getTodayPlanner(date: string): Promise<TodayPlannerSnapshot>;
-  createPlannedBlock(input: CreatePlannedTimeBlockInput): Promise<TodayPlannerBlock>;
-  updatePlannedBlock(blockId: string, input: UpdatePlannedTimeBlockInput): Promise<TodayPlannerBlock>;
-  reorderPlannedBlocks(date: string, orderedIds: string[]): Promise<TodayPlannerSnapshot>;
-  startPlannedBlock(blockId: string): Promise<ActiveBlockData>;
-  deletePlannedBlock(blockId: string): Promise<void>;
+  createSchedulingWindow(input: CreateSchedulingWindowInput): Promise<TodayPlannerWindow>;
+  updatePlannedSegment(segmentId: string, input: UpdatePlannedSegmentInput): Promise<TodayPlannerSegment>;
+  startWorkSegment(segmentId: string): Promise<ActiveBlockData>;
+  reflowSchedulingWindow(windowId: string, input: ReflowSchedulingWindowInput): Promise<TodayPlannerWindow>;
 }
 
 export class TodayPlannerServiceImpl implements TodayPlannerService {
@@ -23,24 +24,20 @@ export class TodayPlannerServiceImpl implements TodayPlannerService {
     return this.rtAdapter.getTodayPlanner(date);
   }
 
-  createPlannedBlock(input: CreatePlannedTimeBlockInput): Promise<TodayPlannerBlock> {
-    return this.rtAdapter.createPlannedBlock(input);
+  createSchedulingWindow(input: CreateSchedulingWindowInput): Promise<TodayPlannerWindow> {
+    return this.rtAdapter.createSchedulingWindow(input);
   }
 
-  updatePlannedBlock(blockId: string, input: UpdatePlannedTimeBlockInput): Promise<TodayPlannerBlock> {
-    return this.rtAdapter.updatePlannedBlock(blockId, input);
+  updatePlannedSegment(segmentId: string, input: UpdatePlannedSegmentInput): Promise<TodayPlannerSegment> {
+    return this.rtAdapter.updatePlannedSegment(segmentId, input);
   }
 
-  reorderPlannedBlocks(date: string, orderedIds: string[]): Promise<TodayPlannerSnapshot> {
-    return this.rtAdapter.reorderPlannedBlocks(date, orderedIds);
+  startWorkSegment(segmentId: string): Promise<ActiveBlockData> {
+    return this.rtAdapter.startWorkSegment(segmentId);
   }
 
-  startPlannedBlock(blockId: string): Promise<ActiveBlockData> {
-    return this.rtAdapter.startPlannedBlock(blockId);
-  }
-
-  deletePlannedBlock(blockId: string): Promise<void> {
-    return this.rtAdapter.deletePlannedBlock(blockId);
+  reflowSchedulingWindow(windowId: string, input: ReflowSchedulingWindowInput): Promise<TodayPlannerWindow> {
+    return this.rtAdapter.reflowSchedulingWindow(windowId, input);
   }
 }
 

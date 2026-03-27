@@ -4,8 +4,8 @@ use std::sync::Mutex;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::timeblock::{
-    ActiveBlockData, PlannedTimeBlockData, PlannedTimeBlockType, TimeBlockData,
-    TimeBlockStoreError,
+    ActiveBlockData, PlannedTimeBlockData, PlannedTimeBlockType, SchedulingWindowData,
+    TimeBlockData, TimeBlockStoreError,
 };
 
 const ACTIVE_BLOCK_SINGLETON_KEY: &str = "current";
@@ -194,6 +194,78 @@ impl SqliteTimeBlockStore {
         connection.execute(
             "DELETE FROM planned_timeblocks WHERE scope_key = ?1 AND id = ?2",
             params![normalize_scope_key(scope_key), block_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_windows_scoped(
+        &self,
+        scope_key: &str,
+    ) -> Result<Vec<SchedulingWindowData>, TimeBlockStoreError> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT id, date, title, planned_start_at, planned_end_at, preset_json, segments_json, created_at, updated_at
+             FROM planner_windows
+             WHERE scope_key = ?1
+             ORDER BY date ASC, planned_start_at ASC, id ASC",
+        )?;
+
+        let rows = statement.query_map(params![normalize_scope_key(scope_key)], |row| {
+            Ok(SchedulingWindowData {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                title: row.get(2)?,
+                planned_start_at: row.get(3)?,
+                planned_end_at: row.get(4)?,
+                rhythm_preset: serde_json::from_str(&row.get::<_, String>(5)?)
+                    .map_err(to_sqlite_conversion_error)?,
+                segments: serde_json::from_str(&row.get::<_, String>(6)?)
+                    .map_err(to_sqlite_conversion_error)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(TimeBlockStoreError::from)
+    }
+
+    pub fn replace_windows_scoped(
+        &self,
+        scope_key: &str,
+        windows: &[SchedulingWindowData],
+    ) -> Result<(), TimeBlockStoreError> {
+        let mut connection = self.connection();
+        let tx = connection.transaction()?;
+        tx.execute(
+            "DELETE FROM planner_windows WHERE scope_key = ?1",
+            params![normalize_scope_key(scope_key)],
+        )?;
+        for window in windows {
+            insert_or_replace_window(&tx, scope_key, window)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn put_window_scoped(
+        &self,
+        scope_key: &str,
+        window: &SchedulingWindowData,
+    ) -> Result<(), TimeBlockStoreError> {
+        let connection = self.connection();
+        insert_or_replace_window(&connection, scope_key, window)
+    }
+
+    pub fn delete_window_scoped(
+        &self,
+        scope_key: &str,
+        window_id: &str,
+    ) -> Result<(), TimeBlockStoreError> {
+        let connection = self.connection();
+        connection.execute(
+            "DELETE FROM planner_windows WHERE scope_key = ?1 AND id = ?2",
+            params![normalize_scope_key(scope_key), window_id],
         )?;
         Ok(())
     }
@@ -439,6 +511,19 @@ impl SqliteTimeBlockStore {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 PRIMARY KEY (scope_key, id)
+             );
+             CREATE TABLE IF NOT EXISTS planner_windows (
+                scope_key TEXT NOT NULL,
+                id TEXT NOT NULL,
+                date TEXT NOT NULL,
+                title TEXT NULL,
+                planned_start_at INTEGER NOT NULL,
+                planned_end_at INTEGER NOT NULL,
+                preset_json TEXT NOT NULL,
+                segments_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (scope_key, id)
              );",
         )?;
         Ok(())
@@ -502,6 +587,40 @@ fn insert_or_replace_planned_block(
             block.order,
             block.created_at,
             block.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_or_replace_window(
+    connection: &Connection,
+    scope_key: &str,
+    window: &SchedulingWindowData,
+) -> Result<(), TimeBlockStoreError> {
+    connection.execute(
+        "INSERT INTO planner_windows (
+            scope_key, id, date, title, planned_start_at, planned_end_at, preset_json, segments_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(scope_key, id) DO UPDATE SET
+            date = excluded.date,
+            title = excluded.title,
+            planned_start_at = excluded.planned_start_at,
+            planned_end_at = excluded.planned_end_at,
+            preset_json = excluded.preset_json,
+            segments_json = excluded.segments_json,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at",
+        params![
+            normalize_scope_key(scope_key),
+            window.id,
+            window.date,
+            window.title,
+            window.planned_start_at,
+            window.planned_end_at,
+            serde_json::to_string(&window.rhythm_preset)?,
+            serde_json::to_string(&window.segments)?,
+            window.created_at,
+            window.updated_at,
         ],
     )?;
     Ok(())

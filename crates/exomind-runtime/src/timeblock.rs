@@ -58,6 +58,65 @@ pub struct PlannedTimeBlockData {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct RhythmPresetData {
+    pub key: String,
+    pub label: String,
+    pub work_minutes: u64,
+    pub short_break_minutes: u64,
+    pub long_break_minutes: u64,
+    pub long_break_after_work_segments: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PlannedSegmentKind {
+    Work,
+    Break,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BreakWindowKind {
+    Short,
+    Long,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedSegmentData {
+    pub id: String,
+    pub window_id: String,
+    pub kind: PlannedSegmentKind,
+    #[serde(default)]
+    pub break_kind: Option<BreakWindowKind>,
+    pub title: String,
+    pub planned_start_at: u64,
+    pub planned_end_at: u64,
+    #[serde(default)]
+    pub linked_task_ids: Vec<String>,
+    pub order: i64,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulingWindowData {
+    pub id: String,
+    pub date: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    pub planned_start_at: u64,
+    pub planned_end_at: u64,
+    pub rhythm_preset: RhythmPresetData,
+    #[serde(default)]
+    pub segments: Vec<PlannedSegmentData>,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockTaskAssociationEvent {
     pub block_id: String,
     pub task_id: String,
@@ -167,6 +226,7 @@ struct TimeBlockScopeState {
     completed: Vec<TimeBlockData>,
     active: Option<ActiveBlockData>,
     planned: Vec<PlannedTimeBlockData>,
+    windows: Vec<SchedulingWindowData>,
 }
 
 enum TimeBlockStoreBackend {
@@ -323,6 +383,160 @@ impl TimeBlockStore {
                 store.delete_planned_scoped(normalize_scope_key(scope_key), block_id)
             }
         }
+    }
+
+    pub fn list_windows(&self) -> Result<Vec<SchedulingWindowData>, TimeBlockStoreError> {
+        self.list_windows_scoped(None)
+    }
+
+    pub fn list_windows_scoped(
+        &self,
+        scope_key: Option<&str>,
+    ) -> Result<Vec<SchedulingWindowData>, TimeBlockStoreError> {
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => Ok(sorted_windows(
+                state
+                    .read()
+                    .unwrap()
+                    .get(normalize_scope_key(scope_key))
+                    .map(|scope| scope.windows.clone())
+                    .unwrap_or_default(),
+            )),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.list_windows_scoped(normalize_scope_key(scope_key))
+            }
+        }
+    }
+
+    pub fn list_windows_for_date_scoped(
+        &self,
+        scope_key: Option<&str>,
+        date: &str,
+    ) -> Result<Vec<SchedulingWindowData>, TimeBlockStoreError> {
+        let normalized_date = date.trim();
+        Ok(self
+            .list_windows_scoped(scope_key)?
+            .into_iter()
+            .filter(|window| window.date == normalized_date)
+            .collect())
+    }
+
+    pub fn get_window_scoped(
+        &self,
+        scope_key: Option<&str>,
+        window_id: &str,
+    ) -> Result<Option<SchedulingWindowData>, TimeBlockStoreError> {
+        let normalized_window_id = window_id.trim();
+        if normalized_window_id.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(self
+            .list_windows_scoped(scope_key)?
+            .into_iter()
+            .find(|window| window.id == normalized_window_id))
+    }
+
+    pub fn replace_windows_scoped(
+        &self,
+        scope_key: Option<&str>,
+        windows: &[SchedulingWindowData],
+    ) -> Result<(), TimeBlockStoreError> {
+        let sorted = sorted_windows(windows.to_vec());
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => {
+                state
+                    .write()
+                    .unwrap()
+                    .entry(normalize_scope_key(scope_key).to_string())
+                    .or_default()
+                    .windows = sorted;
+                Ok(())
+            }
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.replace_windows_scoped(normalize_scope_key(scope_key), &sorted)
+            }
+        }
+    }
+
+    pub fn put_window_scoped(
+        &self,
+        scope_key: Option<&str>,
+        window: SchedulingWindowData,
+    ) -> Result<(), TimeBlockStoreError> {
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => {
+                let mut guard = state.write().unwrap();
+                let scope = guard
+                    .entry(normalize_scope_key(scope_key).to_string())
+                    .or_default();
+                if let Some(index) = scope.windows.iter().position(|item| item.id == window.id) {
+                    scope.windows[index] = normalize_window(window);
+                } else {
+                    scope.windows.push(normalize_window(window));
+                }
+                scope.windows = sorted_windows(scope.windows.clone());
+                Ok(())
+            }
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.put_window_scoped(normalize_scope_key(scope_key), &normalize_window(window))
+            }
+        }
+    }
+
+    pub fn delete_window_scoped(
+        &self,
+        scope_key: Option<&str>,
+        window_id: &str,
+    ) -> Result<(), TimeBlockStoreError> {
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => {
+                if let Some(scope) = state
+                    .write()
+                    .unwrap()
+                    .get_mut(normalize_scope_key(scope_key))
+                {
+                    scope.windows.retain(|window| window.id != window_id);
+                }
+                Ok(())
+            }
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.delete_window_scoped(normalize_scope_key(scope_key), window_id)
+            }
+        }
+    }
+
+    pub fn get_segment_scoped(
+        &self,
+        scope_key: Option<&str>,
+        segment_id: &str,
+    ) -> Result<Option<PlannedSegmentData>, TimeBlockStoreError> {
+        let normalized_segment_id = segment_id.trim();
+        if normalized_segment_id.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(self
+            .list_windows_scoped(scope_key)?
+            .into_iter()
+            .flat_map(|window| window.segments.into_iter())
+            .find(|segment| segment.id == normalized_segment_id))
+    }
+
+    pub fn get_window_by_segment_scoped(
+        &self,
+        scope_key: Option<&str>,
+        segment_id: &str,
+    ) -> Result<Option<SchedulingWindowData>, TimeBlockStoreError> {
+        let normalized_segment_id = segment_id.trim();
+        if normalized_segment_id.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(self
+            .list_windows_scoped(scope_key)?
+            .into_iter()
+            .find(|window| window.segments.iter().any(|segment| segment.id == normalized_segment_id)))
     }
 
     pub fn list_completed_scoped(
@@ -531,6 +745,38 @@ fn sorted_planned_blocks(mut blocks: Vec<PlannedTimeBlockData>) -> Vec<PlannedTi
     blocks
 }
 
+fn normalize_segment(mut segment: PlannedSegmentData) -> PlannedSegmentData {
+    segment.linked_task_ids.retain(|task_id| !task_id.trim().is_empty());
+    segment
+}
+
+fn sorted_segments(mut segments: Vec<PlannedSegmentData>) -> Vec<PlannedSegmentData> {
+    segments = segments.into_iter().map(normalize_segment).collect();
+    segments.sort_by(|left, right| {
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.planned_start_at.cmp(&right.planned_start_at))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    segments
+}
+
+fn normalize_window(mut window: SchedulingWindowData) -> SchedulingWindowData {
+    window.segments = sorted_segments(window.segments);
+    window
+}
+
+fn sorted_windows(mut windows: Vec<SchedulingWindowData>) -> Vec<SchedulingWindowData> {
+    windows = windows.into_iter().map(normalize_window).collect();
+    windows.sort_by(|left, right| {
+        left.date
+            .cmp(&right.date)
+            .then_with(|| left.planned_start_at.cmp(&right.planned_start_at))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    windows
+}
+
 impl Default for TimeBlockStore {
     fn default() -> Self {
         Self::new()
@@ -561,6 +807,59 @@ mod tests {
             order,
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_000_000,
+        }
+    }
+
+    fn sample_window(
+        id: &str,
+        date: &str,
+        start_at: u64,
+        end_at: u64,
+    ) -> SchedulingWindowData {
+        SchedulingWindowData {
+            id: id.to_string(),
+            date: date.to_string(),
+            title: Some(format!("window-{id}")),
+            planned_start_at: start_at,
+            planned_end_at: end_at,
+            rhythm_preset: RhythmPresetData {
+                key: "pomodoro_25_5".to_string(),
+                label: "25 / 5".to_string(),
+                work_minutes: 25,
+                short_break_minutes: 5,
+                long_break_minutes: 20,
+                long_break_after_work_segments: 4,
+            },
+            segments: vec![
+                PlannedSegmentData {
+                    id: format!("{id}-work-1"),
+                    window_id: id.to_string(),
+                    kind: PlannedSegmentKind::Work,
+                    break_kind: None,
+                    title: "Work 1".to_string(),
+                    planned_start_at: start_at,
+                    planned_end_at: start_at + 25 * 60_000,
+                    linked_task_ids: vec!["task-a".to_string()],
+                    order: 0,
+                    created_at: start_at,
+                    updated_at: start_at,
+                },
+                PlannedSegmentData {
+                    id: format!("{id}-break-1"),
+                    window_id: id.to_string(),
+                    kind: PlannedSegmentKind::Break,
+                    break_kind: Some(BreakWindowKind::Short),
+                    title: "Short Break".to_string(),
+                    planned_start_at: start_at + 25 * 60_000,
+                    planned_end_at: start_at + 30 * 60_000,
+                    linked_task_ids: vec![],
+                    order: 1,
+                    created_at: start_at,
+                    updated_at: start_at,
+                },
+            ],
+            created_at: start_at,
+            updated_at: start_at,
         }
     }
 
@@ -824,5 +1123,57 @@ mod tests {
 
         assert_eq!(active_json["sourcePlannedBlockId"], json!("plan-1"));
         assert_eq!(completed_json["sourcePlannedBlockId"], json!("plan-1"));
+    }
+
+    #[test]
+    fn sqlite_store_isolates_planner_windows_by_scope() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("planner-windows.sqlite");
+        let store = TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap();
+
+        store
+            .replace_windows_scoped(
+                Some("profile-a"),
+                &[sample_window(
+                    "window-a",
+                    "2026-03-27",
+                    1_774_570_800_000,
+                    1_774_579_800_000,
+                )],
+            )
+            .unwrap();
+        store
+            .replace_windows_scoped(
+                Some("profile-b"),
+                &[sample_window(
+                    "window-b",
+                    "2026-03-27",
+                    1_774_581_600_000,
+                    1_774_586_100_000,
+                )],
+            )
+            .unwrap();
+
+        let scoped_a = store
+            .list_windows_for_date_scoped(Some("profile-a"), "2026-03-27")
+            .unwrap();
+        let scoped_b = store
+            .list_windows_for_date_scoped(Some("profile-b"), "2026-03-27")
+            .unwrap();
+        let anonymous = store
+            .list_windows_for_date_scoped(None, "2026-03-27")
+            .unwrap();
+
+        assert_eq!(scoped_a.len(), 1);
+        assert_eq!(scoped_a[0].id, "window-a");
+        assert_eq!(scoped_a[0].segments.len(), 2);
+        assert_eq!(scoped_a[0].segments[0].kind, PlannedSegmentKind::Work);
+        assert_eq!(
+            scoped_a[0].segments[1].break_kind,
+            Some(BreakWindowKind::Short)
+        );
+        assert_eq!(scoped_b.len(), 1);
+        assert_eq!(scoped_b[0].id, "window-b");
+        assert!(anonymous.is_empty());
     }
 }

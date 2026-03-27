@@ -64,28 +64,26 @@ fn test_router(state: AppState) -> Router {
 }
 
 #[tokio::test]
-async fn today_planner_routes_create_reorder_and_start_blocks() {
+async fn today_planner_windows_create_start_and_reflow() {
     let dir = tempdir().unwrap();
     let sqlite_path = dir.path().join("today-planner.sqlite");
     let store = Arc::new(TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
     let app = test_router(test_state_with_timeblock_store(store));
 
-    let create_work_response = app
+    let create_response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/act/today-planner/blocks?user_id=user-a")
+                .uri("/act/today-planner/windows?user_id=user-a")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
-                        "date": "2026-03-26",
-                        "type": "work",
-                        "title": "Deep Work",
-                        "plannedStartAt": 1774490400000u64,
-                        "plannedDurationMinutes": 50,
-                        "note": "ship vertical slice",
-                        "linkedTaskIds": ["task-a"],
+                        "date": "2026-03-27",
+                        "title": "Morning Focus",
+                        "plannedStartAt": 1_774_573_600_000u64,
+                        "plannedEndAt": 1_774_577_200_000u64,
+                        "rhythmPresetKey": "pomodoro_25_5",
                     })
                     .to_string(),
                 ))
@@ -94,100 +92,34 @@ async fn today_planner_routes_create_reorder_and_start_blocks() {
         .await
         .unwrap();
 
-    assert_eq!(create_work_response.status(), StatusCode::CREATED);
-    let work_body = create_work_response
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body = create_response
         .into_body()
         .collect()
         .await
         .unwrap()
         .to_bytes();
-    let work_payload: Value = serde_json::from_slice(&work_body).unwrap();
-    let work_id = work_payload["id"].as_str().unwrap().to_string();
-    assert_eq!(work_payload["type"], "work");
-    assert_eq!(work_payload["status"], "pending");
+    let create_payload: Value = serde_json::from_slice(&create_body).unwrap();
+    let window_id = create_payload["id"].as_str().unwrap().to_string();
+    assert_eq!(create_payload["date"], "2026-03-27");
+    assert_eq!(create_payload["segments"].as_array().unwrap().len(), 3);
 
-    let create_rest_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/act/today-planner/blocks?user_id=user-a")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({
-                        "date": "2026-03-26",
-                        "type": "rest",
-                        "title": "Lunch Reset",
-                        "plannedStartAt": 1774494000000u64,
-                        "plannedDurationMinutes": 30,
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let work_segment_id = create_payload["segments"][0]["id"].as_str().unwrap().to_string();
+    let break_segment_id = create_payload["segments"][1]["id"].as_str().unwrap().to_string();
 
-    assert_eq!(create_rest_response.status(), StatusCode::CREATED);
-    let rest_body = create_rest_response
-        .into_body()
-        .collect()
-        .await
-        .unwrap()
-        .to_bytes();
-    let rest_payload: Value = serde_json::from_slice(&rest_body).unwrap();
-    let rest_id = rest_payload["id"].as_str().unwrap().to_string();
-
-    let list_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/act/today-planner?date=2026-03-26&user_id=user-a")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(list_response.status(), StatusCode::OK);
-    let list_body = list_response.into_body().collect().await.unwrap().to_bytes();
-    let list_payload: Value = serde_json::from_slice(&list_body).unwrap();
-    assert_eq!(list_payload["date"], "2026-03-26");
-    assert_eq!(list_payload["blocks"][0]["id"], work_id);
-    assert_eq!(list_payload["blocks"][1]["id"], rest_id);
-
-    let reorder_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/act/today-planner/blocks/reorder?user_id=user-a")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({
-                        "date": "2026-03-26",
-                        "orderedIds": [rest_id, work_id],
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(reorder_response.status(), StatusCode::OK);
-
-    let update_response = app
+    let update_segment_response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("PATCH")
                 .uri(&format!(
-                    "/act/today-planner/blocks/{rest_id}?user_id=user-a"
+                    "/act/today-planner/segments/{work_segment_id}?user_id=user-a"
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
-                        "title": "Lunch + Walk",
-                        "plannedDurationMinutes": 40,
+                        "title": "Deep Work A",
+                        "linkedTaskIds": ["task-a", "task-b"],
                     })
                     .to_string(),
                 ))
@@ -195,16 +127,16 @@ async fn today_planner_routes_create_reorder_and_start_blocks() {
         )
         .await
         .unwrap();
-    assert_eq!(update_response.status(), StatusCode::OK);
-    let update_body = update_response
+    assert_eq!(update_segment_response.status(), StatusCode::OK);
+    let update_segment_body = update_segment_response
         .into_body()
         .collect()
         .await
         .unwrap()
         .to_bytes();
-    let update_payload: Value = serde_json::from_slice(&update_body).unwrap();
-    assert_eq!(update_payload["title"], "Lunch + Walk");
-    assert_eq!(update_payload["plannedDurationMinutes"], 40);
+    let update_segment_payload: Value = serde_json::from_slice(&update_segment_body).unwrap();
+    assert_eq!(update_segment_payload["title"], "Deep Work A");
+    assert_eq!(update_segment_payload["linkedTaskIds"], json!(["task-a", "task-b"]));
 
     let start_response = app
         .clone()
@@ -212,7 +144,7 @@ async fn today_planner_routes_create_reorder_and_start_blocks() {
             Request::builder()
                 .method("POST")
                 .uri(&format!(
-                    "/act/today-planner/blocks/{rest_id}/start?user_id=user-a"
+                    "/act/today-planner/segments/{work_segment_id}/start?user_id=user-a"
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -227,41 +159,55 @@ async fn today_planner_routes_create_reorder_and_start_blocks() {
         .unwrap()
         .to_bytes();
     let start_payload: Value = serde_json::from_slice(&start_body).unwrap();
-    assert_eq!(start_payload["sourcePlannedBlockId"], rest_id);
-    assert_eq!(start_payload["targetMinutes"], 40);
+    assert_eq!(start_payload["sourcePlannedBlockId"], work_segment_id);
+    assert_eq!(start_payload["taskIds"], json!(["task-a", "task-b"]));
 
-    let after_start_response = app
+    let reflow_response = app
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/act/today-planner?date=2026-03-26&user_id=user-a")
-                .body(Body::empty())
+                .method("POST")
+                .uri(&format!(
+                    "/act/today-planner/windows/{window_id}/reflow?user_id=user-a"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "anchorSegmentId": work_segment_id,
+                        "actualEndAt": 1_774_575_300_000u64,
+                    })
+                    .to_string(),
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(after_start_response.status(), StatusCode::OK);
-    let after_start_body = after_start_response
+    assert_eq!(reflow_response.status(), StatusCode::OK);
+    let reflow_body = reflow_response
         .into_body()
         .collect()
         .await
         .unwrap()
         .to_bytes();
-    let after_start_payload: Value = serde_json::from_slice(&after_start_body).unwrap();
-    assert_eq!(after_start_payload["blocks"][0]["id"], rest_id);
-    assert_eq!(after_start_payload["blocks"][0]["status"], "active");
+    let reflow_payload: Value = serde_json::from_slice(&reflow_body).unwrap();
+    assert_eq!(reflow_payload["id"], window_id);
+    assert_eq!(reflow_payload["segments"][1]["id"], break_segment_id);
+    assert_eq!(reflow_payload["segments"][1]["plannedStartAt"], json!(1_774_575_300_000u64));
 
-    let delete_response = app
+    let list_response = app
+        .clone()
         .oneshot(
             Request::builder()
-                .method("DELETE")
-                .uri(&format!(
-                    "/act/today-planner/blocks/{work_id}?user_id=user-a"
-                ))
+                .uri("/act/today-planner?date=2026-03-27&user_id=user-a")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = list_response.into_body().collect().await.unwrap().to_bytes();
+    let list_payload: Value = serde_json::from_slice(&list_body).unwrap();
+    assert_eq!(list_payload["date"], "2026-03-27");
+    assert_eq!(list_payload["windows"][0]["id"], window_id);
+    assert_eq!(list_payload["windows"][0]["segments"][0]["status"], "active");
 }
