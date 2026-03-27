@@ -50,12 +50,22 @@ function resolveRepoFile(relativePath) {
   return absolutePath;
 }
 
+function resolveStepStdio(step) {
+  if (step.stdio) {
+    return step.stdio;
+  }
+  if (step.ignoreStdin) {
+    return ['ignore', 'inherit', 'inherit'];
+  }
+  return 'inherit';
+}
+
 function runStep(step) {
   return new Promise((resolve) => {
     const child = spawn(step.command, step.args, {
       cwd: step.cwd || process.cwd(),
       env: step.env || process.env,
-      stdio: 'inherit',
+      stdio: resolveStepStdio(step),
     });
 
     const forwardSigint = () => child.kill('SIGINT');
@@ -96,10 +106,10 @@ function getStepsForPreset(runtime, name, args) {
 
   if (name === 'vite-dev') {
     if (runtime === 'bun') {
-      return [{ command: 'bun', args: ['run', 'dev'] }];
+      return [{ command: 'bun', args: ['run', 'dev'], ignoreStdin: true }];
     }
     const viteCli = resolveRepoFile('node_modules/vite/bin/vite.js');
-    return [{ command: 'node', args: [viteCli] }];
+    return [{ command: 'node', args: [viteCli], ignoreStdin: true }];
   }
 
   if (name === 'server-start') {
@@ -158,6 +168,14 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  fail(error instanceof Error ? error.message : String(error));
-});
+if (require.main === module) {
+  main().catch((error) => {
+    fail(error instanceof Error ? error.message : String(error));
+  });
+}
+
+module.exports = {
+  getStepsForPreset,
+  resolveStepStdio,
+  runStep,
+};
