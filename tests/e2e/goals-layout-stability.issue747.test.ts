@@ -31,6 +31,23 @@ interface PersistedGoalGraph {
   }>;
 }
 
+interface LegacyPersistedGoalGraph {
+  goals: Array<{
+    id: string;
+    name: string;
+    status: 'pending' | 'completed' | 'cancelled';
+    achieveMode: 'AND' | 'OR';
+    isMe: boolean;
+  }>;
+  tasks: Array<{
+    id: string;
+    name: string;
+    source: string;
+    target: string;
+    status: 'pending' | 'in_progress' | 'suspended' | 'completed' | 'cancelled';
+  }>;
+}
+
 interface ThreeNodeGeometry {
   distMA: number;
   distMB: number;
@@ -89,6 +106,31 @@ async function primeGoalsPageWithGraph(
   });
 }
 
+async function primeGoalsPageWithStoredGraph(
+  page: Page,
+  storedGraph: PersistedGoalGraph | LegacyPersistedGoalGraph,
+  layoutTestConfig: GoalLayoutTestConfig | null = null,
+) {
+  await page.addInitScript(({ config, persistedGraph }) => {
+    localStorage.setItem('exomind:goalsPageEnabled', 'true');
+    localStorage.setItem('exomind:developerMode', 'true');
+    localStorage.setItem('exomind:goal-graph', JSON.stringify(persistedGraph));
+    localStorage.setItem('exomind:goal-oplog', '[]');
+    localStorage.removeItem('exomind:goals-guide-hidden');
+    const windowWithConfig = window as typeof window & {
+      __EXOMIND_GOAL_LAYOUT_TEST_CONFIG__?: GoalLayoutTestConfig;
+    };
+    if (config) {
+      windowWithConfig.__EXOMIND_GOAL_LAYOUT_TEST_CONFIG__ = config;
+      return;
+    }
+    delete windowWithConfig.__EXOMIND_GOAL_LAYOUT_TEST_CONFIG__;
+  }, {
+    config: layoutTestConfig,
+    persistedGraph: storedGraph,
+  });
+}
+
 async function openNodeContextMenu(page: Page, testId: string, clientX: number, clientY: number) {
   await page.getByTestId(testId).dispatchEvent('contextmenu', {
     bubbles: true,
@@ -119,7 +161,8 @@ interface RenderVisibilitySnapshot {
 
 async function snapshotRenderVisibility(page: Page): Promise<RenderVisibilitySnapshot> {
   return page.evaluate(() => {
-    const nodeElements = Array.from(document.querySelectorAll('[data-testid^="goal-flow-node-"]')) as HTMLElement[];
+    const nodeElements = Array.from(document.querySelectorAll('[data-testid^="goal-flow-node-"]'))
+      .filter((element) => !(element.getAttribute('data-testid') ?? '').startsWith('goal-flow-node-progress-pulse-')) as HTMLElement[];
     const edgeElements = Array.from(document.querySelectorAll('[data-testid^="task-flow-edge-visible-"]')) as SVGElement[];
 
     const hiddenNodeIds = nodeElements
@@ -250,6 +293,38 @@ function makeDuplicateEdgeGraph(): PersistedGoalGraph {
         target: 'goal-a',
         createdAt: 2,
         updatedAt: 2,
+      },
+    ],
+  };
+}
+
+function makeLegacySemanticEdgeGraph(
+  edgeStatus: 'in_progress' | 'suspended' | 'completed' | 'cancelled',
+): LegacyPersistedGoalGraph {
+  return {
+    goals: [
+      {
+        id: 'me',
+        name: 'Me',
+        status: 'pending',
+        achieveMode: 'OR',
+        isMe: true,
+      },
+      {
+        id: 'goal-a',
+        name: 'A',
+        status: 'pending',
+        achieveMode: 'AND',
+        isMe: false,
+      },
+    ],
+    tasks: [
+      {
+        id: `edge-me-a-${edgeStatus}`,
+        name: `Edge ${edgeStatus}`,
+        source: 'me',
+        target: 'goal-a',
+        status: edgeStatus,
       },
     ],
   };
@@ -560,6 +635,56 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((paths?.first?.endY ?? 0) - (paths?.second?.endY ?? 0))).toBeLessThan(1);
     expect(Math.abs((paths?.first?.control1Y ?? 0) - (paths?.second?.control1Y ?? 0))).toBeGreaterThan(1);
     expect(Math.abs((paths?.first?.control2Y ?? 0) - (paths?.second?.control2Y ?? 0))).toBeGreaterThan(1);
+  });
+
+  test('keeps semantic-status edges visible whenever both endpoint nodes stay visible', async ({ page }) => {
+    for (const edgeStatus of ['in_progress', 'suspended', 'completed', 'cancelled'] as const) {
+      await primeGoalsPageWithStoredGraph(page, makeLegacySemanticEdgeGraph(edgeStatus));
+      await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+
+      const edgeId = `edge-me-a-${edgeStatus}`;
+      await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId(`task-flow-edge-visible-${edgeId}`)).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId(`task-flow-edge-marker-${edgeId}`)).toBeAttached();
+
+      const snapshot = await snapshotRenderVisibility(page);
+      expectVisibleGraphSnapshot(snapshot, 2, 1, `semantic-edge-${edgeStatus}`);
+
+      const edgeMetrics = await page.evaluate((currentEdgeId) => {
+        const edge = document.querySelector(`[data-testid="task-flow-edge-visible-${currentEdgeId}"]`) as SVGPathElement | null;
+        const label = document.querySelector(`[data-testid="task-flow-edge-label-${currentEdgeId}"]`) as HTMLElement | null;
+        if (!edge || !label) return null;
+        const edgeStyle = window.getComputedStyle(edge);
+        const edgeRect = edge.getBoundingClientRect();
+        const labelStyle = window.getComputedStyle(label);
+        return {
+          strokeDasharray: edgeStyle.strokeDasharray,
+          strokeOpacity: Number.parseFloat(edgeStyle.opacity || '1'),
+          edgeWidth: edgeRect.width,
+          edgeHeight: edgeRect.height,
+          labelOpacity: Number.parseFloat(labelStyle.opacity || '1'),
+          labelTextDecoration: labelStyle.textDecorationLine,
+        };
+      }, edgeId);
+
+      expect(edgeMetrics, `semantic-edge-${edgeStatus}: expected measurable edge metrics`).not.toBeNull();
+      expect(edgeMetrics?.strokeOpacity ?? 0, `semantic-edge-${edgeStatus}: expected edge opacity to stay visible`).toBeGreaterThan(0.01);
+      expect(
+        Math.max(edgeMetrics?.edgeWidth ?? 0, edgeMetrics?.edgeHeight ?? 0),
+        `semantic-edge-${edgeStatus}: expected edge path to keep a measurable box`,
+      ).toBeGreaterThan(0);
+      expect(edgeMetrics?.labelOpacity ?? 0, `semantic-edge-${edgeStatus}: expected label to stay visible`).toBeGreaterThan(0.01);
+
+      if (edgeStatus === 'cancelled') {
+        expect(
+          edgeMetrics?.strokeDasharray,
+          'semantic-edge-cancelled: expected cancelled edge to keep its cancelled visual style while remaining visible',
+        ).not.toBe('none');
+        expect(edgeMetrics?.labelTextDecoration).toContain('line-through');
+      }
+    }
   });
 
   test('keeps Me fixed at the concentric-ring center and renders complete independent rings', async ({ page }) => {
