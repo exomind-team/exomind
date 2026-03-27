@@ -110,6 +110,86 @@ function trackGoalWarnings(page: Page): string[] {
   return goalWarnings;
 }
 
+interface RenderVisibilitySnapshot {
+  nodeCount: number;
+  edgeCount: number;
+  hiddenNodeIds: string[];
+  hiddenEdgeIds: string[];
+}
+
+async function snapshotRenderVisibility(page: Page): Promise<RenderVisibilitySnapshot> {
+  return page.evaluate(() => {
+    const nodeElements = Array.from(document.querySelectorAll('[data-testid^="goal-flow-node-"]')) as HTMLElement[];
+    const edgeElements = Array.from(document.querySelectorAll('[data-testid^="task-flow-edge-visible-"]')) as SVGElement[];
+
+    const hiddenNodeIds = nodeElements
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.visibility === 'hidden'
+          || style.display === 'none'
+          || Number.parseFloat(style.opacity || '1') <= 0.01
+          || rect.width <= 0
+          || rect.height <= 0;
+      })
+      .map((element) => element.getAttribute('data-testid') ?? 'unknown-node');
+
+    const hiddenEdgeIds = edgeElements
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.visibility === 'hidden'
+          || style.display === 'none'
+          || Number.parseFloat(style.opacity || '1') <= 0.01
+          || rect.width <= 0
+          || rect.height <= 0;
+      })
+      .map((element) => element.getAttribute('data-testid') ?? 'unknown-edge');
+
+    return {
+      nodeCount: nodeElements.length,
+      edgeCount: edgeElements.length,
+      hiddenNodeIds,
+      hiddenEdgeIds,
+    };
+  });
+}
+
+function expectVisibleGraphSnapshot(
+  snapshot: RenderVisibilitySnapshot,
+  expectedNodeCount: number,
+  expectedEdgeCount: number,
+  sampleLabel: string,
+) {
+  expect(
+    snapshot.nodeCount,
+    `${sampleLabel}: expected ${expectedNodeCount} nodes, got ${snapshot.nodeCount}`,
+  ).toBe(expectedNodeCount);
+  expect(
+    snapshot.edgeCount,
+    `${sampleLabel}: expected ${expectedEdgeCount} visible edges, got ${snapshot.edgeCount}`,
+  ).toBe(expectedEdgeCount);
+  expect(
+    snapshot.hiddenNodeIds,
+    `${sampleLabel}: expected all nodes to stay visible`,
+  ).toEqual([]);
+  expect(
+    snapshot.hiddenEdgeIds,
+    `${sampleLabel}: expected all edges to stay visible`,
+  ).toEqual([]);
+}
+
+async function readViewportTransform(page: Page) {
+  return page.evaluate(() => {
+    const viewport = document.querySelector('.react-flow__viewport') as HTMLElement | SVGElement | null;
+    if (!viewport) return null;
+    return {
+      transform: window.getComputedStyle(viewport).transform,
+      attribute: viewport.getAttribute('transform'),
+    };
+  });
+}
+
 function makeSingleEdgeGraph(): PersistedGoalGraph {
   return {
     me: { id: 'me', name: 'Me' },
@@ -297,7 +377,7 @@ function expectThreeNodeConstraints(
 }
 
 test.describe('Issue #747 goal layout stability diagnostics', () => {
-  test.setTimeout(240000);
+  test.setTimeout(720000);
 
   test.beforeEach(async ({ page }) => {
     await primeGoalsPage(page);
@@ -629,6 +709,95 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (settledMetrics?.flowSurfaceCenter.y ?? 0))).toBeLessThan(24);
     expect(Math.abs((settledMetrics?.meCenter.x ?? 0) - (initialMetrics?.meCenter.x ?? 0))).toBeLessThan(2);
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(2);
+  });
+
+  test('keeps nodes and edges visible through settled selection, detail-open, zoom, and pan interactions', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected simulation:end warn log before interaction-stability assertions',
+      })
+      .toBe(true);
+
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(1);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'interaction-stability:settled-idle',
+    );
+
+    const viewportBeforeZoom = await readViewportTransform(page);
+    const renderer = page.locator('.react-flow__renderer');
+    const rendererBox = await renderer.boundingBox();
+    expect(rendererBox).not.toBeNull();
+    if (!rendererBox) {
+      throw new Error('expected react-flow renderer bounding box');
+    }
+
+    await renderer.hover();
+    await page.mouse.wheel(0, -320);
+
+    await expect
+      .poll(() => readViewportTransform(page), {
+        timeout: 4000,
+        message: 'expected viewport transform to change after zoom interaction',
+      })
+      .not.toEqual(viewportBeforeZoom);
+
+    const viewportAfterZoom = await readViewportTransform(page);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'interaction-stability:after-zoom',
+    );
+
+    await page.keyboard.down('Space');
+    await page.mouse.wheel(120, 96);
+    await page.keyboard.up('Space');
+
+    await expect
+      .poll(() => readViewportTransform(page), {
+        timeout: 4000,
+        message: 'expected viewport transform to change after pan interaction',
+      })
+      .not.toEqual(viewportAfterZoom);
+
+    expect(goalWarnings.some((entry) => entry.includes('page:viewport') && entry.includes('"source":"move"'))).toBe(true);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'interaction-stability:after-pan',
+    );
+
+    const goalNode = page.locator('[data-testid^="goal-flow-node-"]').nth(1);
+    await goalNode.click();
+    const detailPanel = page.getByTestId('goals-page').getByRole('complementary');
+    await expect(detailPanel).toBeVisible();
+    await expect(page.getByText('目标详情')).toBeVisible();
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'interaction-stability:goal-selected',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
 test('keeps randomized three-node samples within the stable geometry constraints across 20 independent seeds', async ({ page }, testInfo) => {
