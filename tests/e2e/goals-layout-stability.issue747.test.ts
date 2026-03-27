@@ -344,6 +344,52 @@ function makeStarGraph(): PersistedGoalGraph {
   };
 }
 
+function makeHiddenCancelledSiblingGraph(): PersistedGoalGraph {
+  return {
+    me: { id: 'me', name: 'Me' },
+    goals: [
+      {
+        id: 'goal-a',
+        title: 'A',
+        description: '',
+        cancelled: false,
+        completionRule: [['edge-me-a']],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'goal-b',
+        title: 'B',
+        description: '',
+        cancelled: true,
+        completionRule: [['edge-me-b']],
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ],
+    edges: [
+      {
+        id: 'edge-me-a',
+        title: 'Edge A',
+        description: '',
+        source: 'me',
+        target: 'goal-a',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'edge-me-b',
+        title: 'Edge B',
+        description: '',
+        source: 'me',
+        target: 'goal-b',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ],
+  };
+}
+
 function makeLegacySemanticEdgeGraph(
   edgeStatus: 'in_progress' | 'suspended' | 'completed' | 'cancelled',
 ): LegacyPersistedGoalGraph {
@@ -447,6 +493,35 @@ async function measureThreeNodeGeometry(page: Page, goalATestId: string) {
       angle,
     };
   }, goalATestId);
+}
+
+async function measureSingleVisibleGoalDirection(page: Page, goalTestId: string) {
+  return page.evaluate((resolvedGoalTestId) => {
+    const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+    const goal = document.querySelector(`[data-testid="${resolvedGoalTestId}"]`) as HTMLElement | null;
+    const edge = document.querySelector('[data-testid="task-flow-edge-visible-edge-me-a"]') as SVGPathElement | null;
+    if (!me || !goal || !edge) {
+      return null;
+    }
+
+    const getCenter = (element: HTMLElement) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        x: rect.x + rect.width / 2,
+        y: rect.y + rect.height / 2,
+      };
+    };
+
+    const meCenter = getCenter(me);
+    const goalCenter = getCenter(goal);
+
+    return {
+      angleDeg: Math.atan2(goalCenter.y - meCenter.y, goalCenter.x - meCenter.x) * 180 / Math.PI,
+      edgePath: edge.getAttribute('d') ?? '',
+      meCenter,
+      goalCenter,
+    };
+  }, goalTestId);
 }
 
 async function runThreeNodeSample(page: Page, layoutTestConfig: GoalLayoutTestConfig | null = null) {
@@ -747,6 +822,76 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       `shared-endpoint-fan: expected Me fan angle to open well beyond the initial ~1.7deg, got ${fanMetrics?.angleDeltaDeg ?? 0}deg`,
     ).toBeGreaterThan(20);
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
+  test('keeps hidden cancelled siblings from distorting the visible single-edge graph in the browser', async ({ page }) => {
+    const baselinePage = await page.context().newPage();
+    let baselineMetrics: Awaited<ReturnType<typeof measureSingleVisibleGoalDirection>> | null = null;
+
+    try {
+      await primeGoalsPageWithGraph(baselinePage, makeSingleEdgeGraph(), {
+        fixedPolarSequence: [
+          { angle: 0.2, distance: 192 },
+        ],
+      });
+      const baselineWarnings = trackGoalWarnings(baselinePage);
+      await baselinePage.goto('/goals', { waitUntil: 'domcontentloaded' });
+      await expect(baselinePage.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+      await expect(baselinePage.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+      await expect
+        .poll(() => baselineWarnings.some((entry) => entry.includes('simulation:end')), {
+          timeout: 15000,
+          message: 'expected baseline simulation:end warn log before hidden-sibling comparison',
+        })
+        .toBe(true);
+      baselineMetrics = await measureSingleVisibleGoalDirection(baselinePage, 'goal-flow-node-goal-a');
+    } finally {
+      await baselinePage.close();
+    }
+
+    const hiddenSiblingPage = await page.context().newPage();
+    try {
+      await primeGoalsPageWithGraph(hiddenSiblingPage, makeHiddenCancelledSiblingGraph(), {
+        fixedPolarSequence: [
+          { angle: 0.2, distance: 192 },
+          { angle: 0.23, distance: 194 },
+        ],
+      });
+      const hiddenWarnings = trackGoalWarnings(hiddenSiblingPage);
+      await hiddenSiblingPage.goto('/goals', { waitUntil: 'domcontentloaded' });
+      await expect(hiddenSiblingPage.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+      await expect(hiddenSiblingPage.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+      await expect(hiddenSiblingPage.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+      await expect(hiddenSiblingPage.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+      await expect(hiddenSiblingPage.getByTestId('goal-flow-node-goal-b')).toHaveCount(0);
+      await expect(hiddenSiblingPage.getByTestId('task-flow-edge-visible-edge-me-b')).toHaveCount(0);
+      await expect
+        .poll(() => hiddenWarnings.some((entry) => entry.includes('simulation:end')), {
+          timeout: 15000,
+          message: 'expected hidden-sibling simulation:end warn log before distortion assertions',
+        })
+        .toBe(true);
+
+      expectVisibleGraphSnapshot(
+        await snapshotRenderVisibility(hiddenSiblingPage),
+        2,
+        1,
+        'hidden-cancelled-sibling:settled',
+      );
+
+      const hiddenMetrics = await measureSingleVisibleGoalDirection(hiddenSiblingPage, 'goal-flow-node-goal-a');
+
+      expect(baselineMetrics, 'hidden-cancelled-sibling: expected measurable baseline geometry').not.toBeNull();
+      expect(hiddenMetrics, 'hidden-cancelled-sibling: expected measurable visible geometry').not.toBeNull();
+      expect(hiddenMetrics?.edgePath.includes(' C '), 'hidden-cancelled-sibling: expected visible edge to remain a straight single edge').toBe(false);
+      expect(
+        Math.abs((hiddenMetrics?.angleDeg ?? 0) - (baselineMetrics?.angleDeg ?? 0)),
+        `hidden-cancelled-sibling: expected hidden cancelled sibling not to materially rotate visible goal A (baseline=${baselineMetrics?.angleDeg ?? 0}, hidden=${hiddenMetrics?.angleDeg ?? 0})`,
+      ).toBeLessThan(8);
+      expect(hiddenWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+    } finally {
+      await hiddenSiblingPage.close();
+    }
   });
 
   test('keeps semantic-status edges visible whenever both endpoint nodes stay visible', async ({ page }) => {
