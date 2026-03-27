@@ -64,9 +64,16 @@ struct TodayPlannerSnapshotResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SchedulingWindowResponse {
-    #[serde(flatten)]
-    window: SchedulingWindowData,
+    id: String,
+    date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    planned_start_at: u64,
+    planned_end_at: u64,
+    rhythm_preset: RhythmPresetData,
     segments: Vec<PlannedSegmentResponse>,
+    created_at: u64,
+    updated_at: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -321,7 +328,17 @@ fn build_window_response(
         .map(|segment| build_segment_response(segment, active_block, completed_blocks))
         .collect();
 
-    SchedulingWindowResponse { window, segments }
+    SchedulingWindowResponse {
+        id: window.id,
+        date: window.date,
+        title: window.title,
+        planned_start_at: window.planned_start_at,
+        planned_end_at: window.planned_end_at,
+        rhythm_preset: window.rhythm_preset,
+        segments,
+        created_at: window.created_at,
+        updated_at: window.updated_at,
+    }
 }
 
 fn build_snapshot_response(
@@ -470,6 +487,11 @@ async fn update_segment(
     )))
 }
 
+fn can_replace_active_block_for_planner_start(active: &ActiveBlockData) -> bool {
+    matches!(active.phase.as_deref(), Some("feedback_submitted"))
+        || active.feedback_submitted_at.is_some()
+}
+
 async fn start_segment(
     State(state): State<AppState>,
     Path(segment_id): Path<String>,
@@ -490,13 +512,7 @@ async fn start_segment(
         .get_active_scoped(scope_key)
         .map_err(|error| internal_error(error.to_string()))?
     {
-        if !matches!(
-            active.phase.as_deref(),
-            Some("feedback_in_progress" | "feedback_submitted")
-        ) && active.action_ended_at.is_none()
-            && active.feedback_started_at.is_none()
-            && active.feedback_submitted_at.is_none()
-        {
+        if !can_replace_active_block_for_planner_start(&active) {
             return Err(conflict("active timeblock already exists"));
         }
     }
@@ -580,15 +596,20 @@ async fn reflow_window(
     }
 
     let delta = payload.actual_end_at as i128 - anchor.planned_end_at as i128;
+    let updated_at = chrono::Utc::now().timestamp_millis() as u64;
+    if let Some(anchor_segment) = window.segments.get_mut(anchor_index) {
+        anchor_segment.planned_end_at = payload.actual_end_at;
+        anchor_segment.updated_at = updated_at;
+    }
     if delta != 0 {
         for segment in window.segments.iter_mut().skip(anchor_index + 1) {
             segment.planned_start_at = segment.planned_start_at.saturating_add_signed(delta as i64);
             segment.planned_end_at = segment.planned_end_at.saturating_add_signed(delta as i64);
-            segment.updated_at = chrono::Utc::now().timestamp_millis() as u64;
+            segment.updated_at = updated_at;
         }
         window.planned_end_at = window.planned_end_at.saturating_add_signed(delta as i64);
     }
-    window.updated_at = chrono::Utc::now().timestamp_millis() as u64;
+    window.updated_at = updated_at;
 
     state
         .timeblock_store

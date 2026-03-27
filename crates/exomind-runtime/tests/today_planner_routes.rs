@@ -7,7 +7,7 @@ use exomind_runtime::AppState;
 use exomind_runtime::mesh::MeshState;
 use exomind_runtime::routes;
 use exomind_runtime::signal::SignalPool;
-use exomind_runtime::timeblock::TimeBlockStore;
+use exomind_runtime::timeblock::{ActiveBlockData, TimeBlockStore};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -99,7 +99,9 @@ async fn today_planner_windows_create_start_and_reflow() {
         .await
         .unwrap()
         .to_bytes();
-    let create_payload: Value = serde_json::from_slice(&create_body).unwrap();
+    let create_body_text = String::from_utf8(create_body.to_vec()).unwrap();
+    assert_eq!(create_body_text.matches("\"segments\"").count(), 1);
+    let create_payload: Value = serde_json::from_str(&create_body_text).unwrap();
     let window_id = create_payload["id"].as_str().unwrap().to_string();
     assert_eq!(create_payload["date"], "2026-03-27");
     assert_eq!(create_payload["segments"].as_array().unwrap().len(), 3);
@@ -191,6 +193,7 @@ async fn today_planner_windows_create_start_and_reflow() {
         .to_bytes();
     let reflow_payload: Value = serde_json::from_slice(&reflow_body).unwrap();
     assert_eq!(reflow_payload["id"], window_id);
+    assert_eq!(reflow_payload["segments"][0]["plannedEndAt"], json!(1_774_575_300_000u64));
     assert_eq!(reflow_payload["segments"][1]["id"], break_segment_id);
     assert_eq!(reflow_payload["segments"][1]["plannedStartAt"], json!(1_774_575_300_000u64));
 
@@ -275,4 +278,91 @@ async fn today_planner_work_segment_inherits_window_title_before_edit() {
         .to_bytes();
     let start_payload: Value = serde_json::from_slice(&start_body).unwrap();
     assert_eq!(start_payload["name"], "Morning Focus");
+}
+
+#[tokio::test]
+async fn today_planner_start_conflicts_while_feedback_is_still_in_progress() {
+    let dir = tempdir().unwrap();
+    let sqlite_path = dir.path().join("today-planner-feedback-conflict.sqlite");
+    let store = Arc::new(TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
+    let app = test_router(test_state_with_timeblock_store(Arc::clone(&store)));
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/act/today-planner/windows?user_id=user-a")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "date": "2026-03-27",
+                        "title": "Evening Focus",
+                        "plannedStartAt": 1_774_624_000_000u64,
+                        "plannedEndAt": 1_774_627_600_000u64,
+                        "rhythmPresetKey": "pomodoro_25_5",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body = create_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let create_payload: Value = serde_json::from_slice(&create_body).unwrap();
+    let work_segment_id = create_payload["segments"][0]["id"].as_str().unwrap().to_string();
+
+    store
+        .put_active_scoped(
+            Some("user-a"),
+            ActiveBlockData {
+                start_id: "active-feedback-pending".to_string(),
+                name: "Pending Feedback".to_string(),
+                mode: "countdown".to_string(),
+                target_minutes: Some(25),
+                elapsed: 25 * 60 * 1000,
+                updated_at: Some(1_774_624_600_000u64),
+                phase: Some("feedback_in_progress".to_string()),
+                version: Some(3),
+                actor_id: Some("test".to_string()),
+                last_transition_at: Some(1_774_624_600_000u64),
+                last_resumed_at: Some(1_774_624_000_000u64),
+                accumulated_run_ms: Some(25 * 60 * 1000),
+                start_time: 1_774_624_000_000u64,
+                action_ended_at: Some(1_774_624_600_000u64),
+                feedback_started_at: Some(1_774_624_600_000u64),
+                feedback_submitted_at: None,
+                pause_accumulated_ms: Some(0),
+                paused: false,
+                paused_at: None,
+                task_ids: vec![],
+                task_association_log: vec![],
+                source_planned_block_id: Some("finished-segment".to_string()),
+                task_id: None,
+            },
+        )
+        .unwrap();
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!(
+                    "/act/today-planner/segments/{work_segment_id}/start?user_id=user-a"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(start_response.status(), StatusCode::CONFLICT);
 }

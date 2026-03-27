@@ -175,4 +175,38 @@ describe('TodayPlannerRtAdapter（Today Planner RT 适配器）', () => {
       actualEndAt: 1774575300000,
     });
   });
+
+  it('omits linkedTaskIds when updating only the title（仅改标题时不覆盖已关联任务）', async () => {
+    activateProfileScope();
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'segment-2',
+        windowId: 'window-1',
+        kind: 'work',
+        title: 'Renamed Segment',
+        plannedStartAt: 1774573600000,
+        plannedEndAt: 1774575100000,
+        linkedTaskIds: ['task-a'],
+        order: 0,
+        createdAt: 1774570000000,
+        updatedAt: 1774570100000,
+        status: 'pending',
+      }),
+    });
+    const adapter = new TodayPlannerRtAdapter({
+      fetchImpl,
+      resolveTarget: () => ({ mode: 'embedded', host: '127.0.0.1', port: 9124 }),
+    });
+
+    await adapter.updatePlannedSegment('segment-2', {
+      title: 'Renamed Segment',
+    });
+
+    const [, updateInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(updateInit.body))).toEqual({
+      title: 'Renamed Segment',
+    });
+  });
 });

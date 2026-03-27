@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
 import type {
@@ -49,6 +49,10 @@ vi.mock('@/lib/services', () => ({
 
 function plannerTs(clock: string): number {
   return new Date(`2026-03-27T${clock}:00+08:00`).getTime();
+}
+
+function plannerTsOn(dateKey: string, clock: string): number {
+  return new Date(`${dateKey}T${clock}:00+08:00`).getTime();
 }
 
 function makeTask(input: Partial<TaskNode> & Pick<TaskNode, 'id' | 'title'>): TaskNode {
@@ -362,6 +366,74 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
       expect(updatePlannedSegmentMock).toHaveBeenCalledWith('segment-work-overflow', {
         linkedTaskIds: ['task-11'],
       });
+    });
+  });
+
+  it('reflows a work segment ending at midnight using the next-day timestamp（跨午夜重算会把 00:00 解释为次日）', async () => {
+    const snapshotWindow = makeWindow({
+      id: 'window-midnight',
+      title: '夜间冲刺',
+      plannedStartAt: plannerTs('23:15'),
+      plannedEndAt: plannerTsOn('2026-03-28', '00:30'),
+      segments: [
+        makeSegment({
+          id: 'segment-work-midnight',
+          windowId: 'window-midnight',
+          kind: 'work',
+          title: '夜间工作块',
+          plannedStartAt: plannerTs('23:15'),
+          plannedEndAt: plannerTsOn('2026-03-28', '00:00'),
+          order: 0,
+        }),
+        makeSegment({
+          id: 'segment-break-midnight',
+          windowId: 'window-midnight',
+          kind: 'break',
+          breakKind: 'short',
+          title: 'Short Break',
+          plannedStartAt: plannerTsOn('2026-03-28', '00:00'),
+          plannedEndAt: plannerTsOn('2026-03-28', '00:30'),
+          order: 1,
+        }),
+      ],
+    });
+
+    getTodayPlannerMock.mockResolvedValue({ date: '2026-03-27', windows: [snapshotWindow] });
+    reflowSchedulingWindowMock.mockResolvedValue(snapshotWindow);
+
+    render(<NowTodayTab />);
+
+    fireEvent.click(await screen.findByTestId('planner-segment-segment-work-midnight'));
+    expect(await screen.findByTestId('planner-segment-inspector')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '重算当前区间' }));
+
+    await waitFor(() => {
+      expect(reflowSchedulingWindowMock).toHaveBeenCalledWith('window-midnight', {
+        anchorSegmentId: 'segment-work-midnight',
+        actualEndAt: plannerTsOn('2026-03-28', '00:00'),
+      });
+    });
+  });
+
+  it('refreshes planner date after midnight even without an active block（无活跃块时跨午夜也会刷新今日日期）', async () => {
+    vi.setSystemTime(new Date('2026-03-27T23:59:00+08:00'));
+    getTodayPlannerMock.mockImplementation(async (date: string) => ({ date, windows: [] }));
+
+    render(<NowTodayTab />);
+
+    await waitFor(() => {
+      expect(getTodayPlannerMock).toHaveBeenCalledWith('2026-03-27');
+    });
+
+    getTodayPlannerMock.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+
+    await waitFor(() => {
+      expect(getTodayPlannerMock).toHaveBeenCalledWith('2026-03-28');
     });
   });
 });

@@ -253,6 +253,19 @@ export function NowTodayTab() {
     };
   }, [activeBlock]);
 
+  useEffect(() => {
+    const nextDayStart = new Date();
+    nextDayStart.setHours(24, 0, 0, 0);
+    const delay = Math.max(1, nextDayStart.getTime() - Date.now());
+    const timerId = window.setTimeout(() => {
+      setNow(new Date());
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [todayDate]);
+
   const blocks = useMemo(() => {
     const nextBlocks = [...completedBlocks];
     if (activeBlock && isToday(activeBlock.startTime, now)) {
@@ -268,9 +281,13 @@ export function NowTodayTab() {
   }), [blocks, now, tasksById]);
 
   const refreshPlanner = async () => {
+    const currentDate = formatDateKey(new Date());
     setPlannerError(null);
-    const snapshot = await getTodayPlannerService().getTodayPlanner(todayDate);
+    const snapshot = await getTodayPlannerService().getTodayPlanner(currentDate);
     setPlannerSnapshot(snapshot);
+    if (currentDate !== todayDate) {
+      setNow(new Date());
+    }
   };
 
   return (

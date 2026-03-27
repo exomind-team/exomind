@@ -50,13 +50,14 @@ export class TodayPlannerRtAdapter {
   }
 
   async updatePlannedSegment(segmentId: string, input: UpdatePlannedSegmentInput): Promise<TodayPlannerSegment> {
+    const payload = {
+      ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.linkedTaskIds !== undefined ? { linkedTaskIds: input.linkedTaskIds } : {}),
+    };
     return this.requestJsonWithBody<TodayPlannerSegment>(
       `/act/today-planner/segments/${encodeURIComponent(segmentId)}`,
       'PATCH',
-      {
-        ...input,
-        linkedTaskIds: input.linkedTaskIds ?? [],
-      },
+      payload,
     );
   }
 

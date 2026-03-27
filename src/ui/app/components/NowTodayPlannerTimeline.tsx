@@ -48,6 +48,15 @@ function dayStart(dateKey: string): number {
   return buildTs(dateKey, '00:00');
 }
 
+function resolveActualEndAt(dateKey: string, segment: TodayPlannerSegment, timeInput: string): number {
+  const resolved = buildTs(dateKey, timeInput);
+  const dayEnd = dayStart(dateKey) + 86_400_000;
+  if (segment.plannedEndAt >= dayEnd && resolved <= segment.plannedStartAt) {
+    return resolved + 86_400_000;
+  }
+  return resolved;
+}
+
 function clock(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
@@ -213,7 +222,7 @@ export function NowTodayPlannerTimeline({
     try {
       await getTodayPlannerService().reflowSchedulingWindow(selectedWork.window.id, {
         anchorSegmentId: selectedWork.segment.id,
-        actualEndAt: buildTs(dateKey, actualEndTime),
+        actualEndAt: resolveActualEndAt(dateKey, selectedWork.segment, actualEndTime),
       });
       await refreshPlanner();
     } catch (cause) {

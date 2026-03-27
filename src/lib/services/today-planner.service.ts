@@ -1,4 +1,5 @@
 import { TodayPlannerRtAdapter } from '@/lib/adapters/today-planner-rt-adapter';
+import { getTimeBlockService } from './timeblock.service';
 import type {
   ActiveBlockData,
   CreateSchedulingWindowInput,
@@ -32,8 +33,10 @@ export class TodayPlannerServiceImpl implements TodayPlannerService {
     return this.rtAdapter.updatePlannedSegment(segmentId, input);
   }
 
-  startWorkSegment(segmentId: string): Promise<ActiveBlockData> {
-    return this.rtAdapter.startWorkSegment(segmentId);
+  async startWorkSegment(segmentId: string): Promise<ActiveBlockData> {
+    const activeBlock = await this.rtAdapter.startWorkSegment(segmentId);
+    await getTimeBlockService().applyReplicatedActiveBlock(activeBlock);
+    return activeBlock;
   }
 
   reflowSchedulingWindow(windowId: string, input: ReflowSchedulingWindowInput): Promise<TodayPlannerWindow> {
