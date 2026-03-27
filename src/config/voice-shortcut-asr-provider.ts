@@ -12,6 +12,7 @@ const _module = createConfigModule<VoiceShortcutAsrProvider>({
   eventName: 'exomind:voice-shortcut-asr-provider-changed',
   defaultValue: 'moss',
   normalize: normalizeProvider,
+  persistMode: 'runtime-preferred',
 });
 
 export function getVoiceShortcutAsrProvider(): VoiceShortcutAsrProvider {

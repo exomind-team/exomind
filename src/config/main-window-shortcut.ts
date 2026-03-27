@@ -1,3 +1,8 @@
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
+
 const MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY = 'exomind:mainWindowShortcutSelection';
 const MAIN_WINDOW_SHORTCUT_CUSTOMIZED_STORAGE_KEY = 'exomind:mainWindowShortcutSelectionCustomized';
 const MAIN_WINDOW_SHORTCUT_SELECTION_CHANGED_EVENT = 'exomind:main-window-shortcut-selection-changed';
@@ -32,15 +37,6 @@ type SetMainWindowShortcutSelectionOptions = {
   emitEvent?: boolean;
   customized?: boolean;
 };
-
-function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
-  if (typeof window === 'undefined') return null;
-  const localStorageLike = window.localStorage as Partial<Storage> | undefined;
-  if (!localStorageLike) return null;
-  if (typeof localStorageLike.getItem !== 'function') return null;
-  if (typeof localStorageLike.setItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
-}
 
 function isMainWindowShortcutOption(value: unknown): value is MainWindowShortcutOption {
   return typeof value === 'string'
@@ -86,24 +82,26 @@ function isSameSelection(
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function isCustomizedSelection(storage: Pick<Storage, 'getItem' | 'setItem'>): boolean {
-  return storage.getItem(MAIN_WINDOW_SHORTCUT_CUSTOMIZED_STORAGE_KEY) === 'true';
+function isCustomizedSelection(): boolean {
+  return getRuntimeConfigValueSync(MAIN_WINDOW_SHORTCUT_CUSTOMIZED_STORAGE_KEY) === 'true';
 }
 
-function readStoredMainWindowShortcutSelection(
-  storage: Pick<Storage, 'getItem' | 'setItem'>,
-): MainWindowShortcutSelection {
+function readStoredMainWindowShortcutSelection(): MainWindowShortcutSelection {
   const normalized = normalizeMainWindowShortcutSelection(
-    storage.getItem(MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY),
+    getRuntimeConfigValueSync(MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY),
   );
 
   if (
-    !isCustomizedSelection(storage)
+    !isCustomizedSelection()
     && isSameSelection(normalized, LEGACY_DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION)
   ) {
-    storage.setItem(
+    setRuntimeConfigValue(
       MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY,
       stringifySelection(DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION),
+      {
+        source: 'main-window-shortcut-legacy-default-migration',
+        sourceOrigin: typeof window !== 'undefined' ? window.location?.origin : undefined,
+      },
     );
     return [...DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION];
   }
@@ -126,12 +124,11 @@ function buildHotkey(selection: MainWindowShortcutSelection): string | null {
 }
 
 export function getMainWindowShortcutSelection(): MainWindowShortcutSelection {
-  const storage = getStorage();
-  if (!storage) {
+  if (typeof window === 'undefined') {
     return [...DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION];
   }
 
-  return readStoredMainWindowShortcutSelection(storage);
+  return readStoredMainWindowShortcutSelection();
 }
 
 export function setMainWindowShortcutSelection(
@@ -139,18 +136,25 @@ export function setMainWindowShortcutSelection(
   options: SetMainWindowShortcutSelectionOptions = {},
 ): MainWindowShortcutSelection {
   const normalized = normalizeMainWindowShortcutSelection(selection);
-  const storage = getStorage();
-  if (!storage) {
+  if (typeof window === 'undefined') {
     return normalized;
   }
 
-  storage.setItem(
+  setRuntimeConfigValue(
     MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY,
     stringifySelection(normalized),
+    {
+      source: MAIN_WINDOW_SHORTCUT_SELECTION_CHANGED_EVENT,
+      sourceOrigin: window.location?.origin,
+    },
   );
-  storage.setItem(
+  setRuntimeConfigValue(
     MAIN_WINDOW_SHORTCUT_CUSTOMIZED_STORAGE_KEY,
     options.customized === false ? 'false' : 'true',
+    {
+      source: MAIN_WINDOW_SHORTCUT_SELECTION_CHANGED_EVENT,
+      sourceOrigin: window.location?.origin,
+    },
   );
 
   if (options.emitEvent !== false) {

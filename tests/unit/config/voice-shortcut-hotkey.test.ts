@@ -4,10 +4,15 @@ import {
   setVoiceShortcutHotkey,
   subscribeVoiceShortcutHotkeyChanges,
 } from '@/config/voice-shortcut-hotkey';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('voice shortcut hotkey config（语音全局快捷键配置）', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    __resetRuntimeConfigCacheForTests();
   });
 
   it('uses Alt+Q as default hotkey（默认快捷键）', () => {
@@ -25,6 +30,13 @@ describe('voice shortcut hotkey config（语音全局快捷键配置）', () => 
     setVoiceShortcutHotkey('Alt+1');
 
     expect(getVoiceShortcutHotkey()).toBe('Alt+Q');
+  });
+
+  it('reads runtime-backed value before localStorage（优先读取 Runtime 值）', () => {
+    window.localStorage.setItem('exomind:voiceShortcutHotkey', 'Alt+W');
+    __primeRuntimeConfigForTests({ 'exomind:voiceShortcutHotkey': 'Ctrl+Space' });
+
+    expect(getVoiceShortcutHotkey()).toBe('Ctrl+Space');
   });
 
   it('can store hotkey without notifying subscribers（可静默同步快捷键存储）', () => {

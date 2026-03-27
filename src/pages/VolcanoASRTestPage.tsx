@@ -37,6 +37,10 @@ import {
   subscribeVolcanoLanguageChanges,
   subscribeVolcanoResourceIdChanges,
 } from '@/config/volcano-asr-settings';
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from '@/config/runtime-config-cache';
 import { isTauriWindow } from '@/config/runtime-target';
 
 type RecordingState = 'idle' | 'recording' | 'recognizing';
@@ -56,7 +60,7 @@ interface LogEntry {
 
 function loadSavedBoolean(key: string, fallback: boolean): boolean {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = getRuntimeConfigValueSync(key);
     return raw == null ? fallback : raw === 'true';
   } catch {
     return fallback;
@@ -65,7 +69,7 @@ function loadSavedBoolean(key: string, fallback: boolean): boolean {
 
 function loadSavedNumber(key: string, fallback: number): number {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = getRuntimeConfigValueSync(key);
     const parsed = Number.parseInt(raw ?? '', 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   } catch {
@@ -149,10 +153,22 @@ export function VolcanoASRTestPage() {
 
   const handleSaveTestOptions = () => {
     try {
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.enableNonstream, String(enableNonstream));
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.showUtterances, String(showUtterances));
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.endWindowSize, String(endWindowSize));
-      localStorage.setItem(VOLCANO_STORAGE_KEYS.forceToSpeechTime, String(forceToSpeechTime));
+      setRuntimeConfigValue(VOLCANO_STORAGE_KEYS.enableNonstream, String(enableNonstream), {
+        source: 'volcano-test-options',
+        sourceOrigin: window.location?.origin,
+      });
+      setRuntimeConfigValue(VOLCANO_STORAGE_KEYS.showUtterances, String(showUtterances), {
+        source: 'volcano-test-options',
+        sourceOrigin: window.location?.origin,
+      });
+      setRuntimeConfigValue(VOLCANO_STORAGE_KEYS.endWindowSize, String(endWindowSize), {
+        source: 'volcano-test-options',
+        sourceOrigin: window.location?.origin,
+      });
+      setRuntimeConfigValue(VOLCANO_STORAGE_KEYS.forceToSpeechTime, String(forceToSpeechTime), {
+        source: 'volcano-test-options',
+        sourceOrigin: window.location?.origin,
+      });
       setTestOptionsSaved(true);
       addLog(`测试参数已保存，模式=${endpoint}，资源=${resourceId}`);
       setTimeout(() => setTestOptionsSaved(false), 2000);

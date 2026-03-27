@@ -19,6 +19,11 @@
  *   export const subscribeMyConfigChanges = myConfig.subscribe;
  */
 
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
+
 export interface ConfigModuleOptions<T> {
   /** localStorage key */
   storageKey: string;
@@ -36,6 +41,8 @@ export interface ConfigModuleOptions<T> {
    * Defaults to String(value).
    */
   serialize?: (value: T) => string;
+  /** Persist to Runtime first while still mirroring localStorage（优先写 Runtime，同时镜像到 localStorage） */
+  persistMode?: 'localStorage' | 'runtime-preferred';
 }
 
 export interface ConfigModule<T> {
@@ -56,8 +63,17 @@ function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 export function createConfigModule<T>(options: ConfigModuleOptions<T>): ConfigModule<T> {
   const { storageKey, eventName, defaultValue, normalize } = options;
   const serialize: (value: T) => string = options.serialize ?? String;
+  const persistMode = options.persistMode ?? 'localStorage';
 
   function get(): T {
+    if (persistMode === 'runtime-preferred') {
+      try {
+        return normalize(getRuntimeConfigValueSync(storageKey));
+      } catch {
+        return defaultValue;
+      }
+    }
+
     const storage = getStorage();
     if (!storage) return defaultValue;
     try {
@@ -72,13 +88,20 @@ export function createConfigModule<T>(options: ConfigModuleOptions<T>): ConfigMo
     // pass a value of type T still get the canonical form back, matching the
     // behaviour of hand-written setters that call normalizeXxx(input) first.
     const normalized = normalize(serialize(value));
-    const storage = getStorage();
-    if (!storage) return normalized;
     try {
-      storage.setItem(storageKey, serialize(normalized));
+      if (persistMode === 'runtime-preferred') {
+        setRuntimeConfigValue(storageKey, serialize(normalized), {
+          source: eventName,
+          sourceOrigin: typeof window !== 'undefined' ? window.location?.origin : undefined,
+        });
+      } else {
+        const storage = getStorage();
+        if (!storage) return normalized;
+        storage.setItem(storageKey, serialize(normalized));
+      }
       window.dispatchEvent(new CustomEvent<T>(eventName, { detail: normalized }));
     } catch {
-      // ignore localStorage write errors
+      // ignore localStorage/runtime write errors
     }
     return normalized;
   }

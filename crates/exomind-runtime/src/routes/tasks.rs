@@ -679,6 +679,7 @@ mod tests {
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
+            config_store: Arc::new(crate::config::ConfigStore::new()),
             task_store,
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,

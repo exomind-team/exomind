@@ -13,6 +13,7 @@ const _module = createConfigModule<VoiceTranscriptSendMode>({
   eventName: 'exomind:voice-transcript-send-mode-changed',
   defaultValue: 'insert',
   normalize: normalizeMode,
+  persistMode: 'runtime-preferred',
 });
 
 export function getVoiceTranscriptSendMode(): VoiceTranscriptSendMode {

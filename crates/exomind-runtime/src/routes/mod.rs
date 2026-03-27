@@ -3,6 +3,7 @@ use axum::{Router, routing::get};
 use crate::AppState;
 
 pub mod agents;
+pub mod config;
 pub mod energy;
 pub mod eventlog;
 pub mod mesh;
@@ -21,6 +22,7 @@ pub fn router() -> Router<AppState> {
     let r = Router::new()
         .route("/topology", get(topology::get_topology))
         .merge(agents::router())
+        .merge(config::router())
         .merge(energy::router())
         .merge(eventlog::router())
         .merge(mesh::router())
