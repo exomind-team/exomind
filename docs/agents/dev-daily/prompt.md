@@ -36,12 +36,14 @@ docs/agents/dev-daily/prompt.md「共用流程」执行数据采集与分析。
 docs/agents/dev-daily/prompt.md「共用流程」执行数据采集与分析。
 
 输出模式：本地 HTML 仪表盘
-1. 复制 docs/agents/dev-daily/report-template.html
-   到 temp/exomind-daily-report-YYYY-MM-DD-HHmmss.html
+1. 用系统时间动态生成文件名（禁止硬编码时间戳）：
+   TIMESTAMP=$(date +%Y-%m-%d-%H%M%S)
+   cp docs/agents/dev-daily/report-template.html temp/exomind-daily-report-$TIMESTAMP.html
 2. 只修改顶部 REPORT 数据对象，不改渲染代码
 3. 必须填写 publisher 四个字段（identity/os/model/version，见 AGENTS.md）
-4. 根据当前时间设置 meta.title：夜报(0-6h)/早报(6-12h)/午报(12-18h)/晚报(18-24h)
-5. 完成后告知用户文件路径，并提示：
+4. REPORT.meta.date 填写当前日期（从 date +%Y-%m-%d 获取）
+5. 根据当前时间设置 meta.title：夜报(0-6h)/早报(6-12h)/午报(12-18h)/晚报(18-24h)
+6. 完成后告知用户文件路径，并提示：
    💡 可升级：输入"发布"将此报告推送到 GitHub Pages 公开归档
 ```
 
@@ -56,8 +58,8 @@ docs/agents/dev-daily/prompt.md「共用流程」执行数据采集与分析。
 docs/agents/dev-daily/prompt.md「共用流程」执行数据采集与分析。
 
 输出模式：公开发布到 GitHub Pages
-1. 先按「入口 B」生成本地 HTML 到 temp/exomind-daily-report-YYYY-MM-DD-HHmmss.html
-2. 执行 bun run devlog:publish 发布
+1. 先按「入口 B」生成本地 HTML（文件名用系统时间动态生成）
+2. 执行 bun run devlog:publish 发布（脚本自动找 temp/ 下最新文件）
 3. 脚本自动：提取数据 → 生成薄HTML → 更新manifest → push → 等待Pages构建
 4. 完成后输出公开链接：
    - 归档首页: https://exomind-team.github.io/exomind-devlog/

@@ -15,14 +15,16 @@
 docs/agents/dev-route/prompt.md「共用流程」执行数据采集与聚类分析。
 
 输出模式：本地 HTML 航线仪表盘
-1. 复制 docs/agents/dev-route/route-template.html
-   到 temp/exomind-route-YYYY-MM-DD.html
+1. 用系统时间动态生成文件名（禁止硬编码时间戳）：
+   TIMESTAMP=$(date +%Y-%m-%d-%H%M%S)
+   cp docs/agents/dev-route/route-template.html temp/exomind-route-$TIMESTAMP.html
 2. 只修改顶部 ROUTE 数据对象，不改渲染代码
 3. 必须填写 publisher 四个字段（identity/os/model/version）
-4. 完成后执行：
+4. ROUTE.meta.date 填写当前日期（从 date +%Y-%m-%d 获取）
+5. 完成后执行：
    python3 -m http.server 8765 --directory temp --bind 0.0.0.0 &
-   termux-open-url http://localhost:8765/exomind-route-YYYY-MM-DD.html
-5. 告知用户文件路径和访问地址
+   termux-open-url http://localhost:8765/exomind-route-$TIMESTAMP.html
+6. 告知用户文件路径和访问地址
 ```
 
 ---
