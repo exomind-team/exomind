@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VOICE_AUTO_RECORD_KEY } from '@/config/voice-auto-record';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
+import { __resetRuntimeConfigCacheForTests } from '@/config/runtime-config-cache';
 import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
 import {
   getActiveInteractionContextService,
@@ -20,6 +21,7 @@ const convertWebmBlobToWavMock = vi.fn();
 const writeClipboardMock = vi.fn();
 const addEventMock = vi.fn();
 const publishVoiceTranscriptSignalMock = vi.fn();
+const buildVoiceShortcutStorageEventMock = vi.fn();
 const getUserMediaWithConstraintFallbackMock = vi.fn();
 const subscribeHotkeyMock = vi.fn(() => () => {});
 const livePreviewIsAvailableMock = vi.fn(() => true);
@@ -132,6 +134,10 @@ vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
   appendEventWithEcsReplication: (...args: unknown[]) => addEventMock(...args),
 }));
 
+vi.mock('@/services/voice-shortcut-eventlog', () => ({
+  buildVoiceShortcutStorageEvent: (...args: unknown[]) => buildVoiceShortcutStorageEventMock(...args),
+}));
+
 vi.mock('@/lib/asr/live-preview', () => ({
   createDefaultVoiceLivePreviewSource: () => ({
     isAvailable: (...args: unknown[]) => livePreviewIsAvailableMock(...args),
@@ -242,6 +248,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     writeClipboardMock.mockReset();
     addEventMock.mockReset();
     publishVoiceTranscriptSignalMock.mockReset();
+    buildVoiceShortcutStorageEventMock.mockReset();
     publishVoiceTranscriptSignalMock.mockResolvedValue(undefined);
     getUserMediaWithConstraintFallbackMock.mockReset();
     subscribeHotkeyMock.mockClear();
@@ -262,6 +269,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     runtimeFlags.developerModeEnabled = false;
     runtimeFlags.voiceShortcutSendMode = 'insert-only';
     resetActiveInteractionContextServiceForTests();
+    __resetRuntimeConfigCacheForTests();
 
     Object.defineProperty(window.navigator, 'permissions', {
       configurable: true,
@@ -298,6 +306,36 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     writeClipboardMock.mockResolvedValue({ ok: true, title: 'ok' });
     addEventMock.mockResolvedValue(undefined);
+    buildVoiceShortcutStorageEventMock.mockImplementation(async (input: {
+      text: string;
+      startedAtMs?: number;
+      targetScope: string;
+      window?: {
+        title?: string;
+        processName?: string;
+      };
+      agentContext?: {
+        agentId?: string;
+        agentName?: string;
+        sessionId?: string;
+      };
+    }) => ({
+      id: `voice-event-${input.startedAtMs ?? 0}`,
+      content: input.text,
+      type: 'voice',
+      createdAt: new Date(input.startedAtMs ?? 0).toISOString(),
+      metadata: {
+        inputSource: 'voice',
+        inputMethod: 'recognition',
+        voiceShortcut: {
+          text: input.text,
+          captureSource: 'global-shortcut',
+          targetScope: input.targetScope,
+          ...(input.window ? { window: input.window } : {}),
+          ...(input.agentContext ? { agentContext: input.agentContext } : {}),
+        },
+      },
+    }));
     setVoiceShortcutMicPrewarmEnabled(true);
 
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {

@@ -182,6 +182,10 @@ import {
   subscribeVoiceShortcutAsrProviderChanges,
 } from '@/config/voice-shortcut-asr-provider';
 import {
+  getMossApiKey,
+  setMossApiKey,
+} from '@/config/moss-api-key';
+import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_LANGUAGE_OPTIONS,
@@ -257,8 +261,6 @@ import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-wind
  * Product/runtime code should import the owning config/service module directly.
  */
 
-const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
-
 function normalizeMossApiKey(value: string): string {
   if (!value) {
     return '';
@@ -270,29 +272,12 @@ function normalizeMossApiKey(value: string): string {
 }
 
 function readStoredMossApiKey(): string {
-  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
-    return '';
-  }
-
-  try {
-    return normalizeMossApiKey(window.localStorage.getItem(MOSS_API_KEY_STORAGE_KEY) || '');
-  } catch {
-    return '';
-  }
+  return normalizeMossApiKey(getMossApiKey());
 }
 
 function writeStoredMossApiKey(value: string): void {
-  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
-    return;
-  }
-
   const normalized = normalizeMossApiKey(value);
-  if (!normalized) {
-    window.localStorage.removeItem(MOSS_API_KEY_STORAGE_KEY);
-    return;
-  }
-
-  window.localStorage.setItem(MOSS_API_KEY_STORAGE_KEY, normalized);
+  setMossApiKey(normalized);
 }
 
 function maskStoredSecret(value: string): string {

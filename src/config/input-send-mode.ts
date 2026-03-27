@@ -20,6 +20,7 @@ const _module = createConfigModule<InputSendMode>({
   eventName: 'exomind:input-send-mode-changed',
   defaultValue: 'ctrl-enter-send',
   normalize: normalizeMode,
+  persistMode: 'runtime-preferred',
 });
 
 export function getInputSendMode(): InputSendMode {

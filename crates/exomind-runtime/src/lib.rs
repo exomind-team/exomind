@@ -18,6 +18,7 @@ use signal::SignalPool;
 
 pub mod agent;
 pub mod auth;
+pub mod config;
 pub mod discovery;
 pub mod energy;
 pub mod eventlog;
@@ -771,6 +772,7 @@ pub struct AppState {
     pub auth_secret: Option<String>,
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub pairing: Arc<pairing::PairingManager>,
+    pub config_store: Arc<config::ConfigStore>,
     pub task_store: Arc<task::TaskStore>,
     pub session_store: Arc<session::SessionStore>,
     pub session_event_tx: Option<tokio::sync::broadcast::Sender<routes::sessions::SessionEvent>>,
@@ -800,6 +802,7 @@ struct RuntimeStoragePaths {
     task_sqlite_path: Option<PathBuf>,
     timeblock_sqlite_path: Option<PathBuf>,
     session_sqlite_path: Option<PathBuf>,
+    config_sqlite_path: Option<PathBuf>,
 }
 
 fn runtime_storage_paths_from_env() -> RuntimeStoragePaths {
@@ -815,6 +818,9 @@ fn runtime_storage_paths_from_env() -> RuntimeStoragePaths {
             .ok()
             .map(PathBuf::from),
         session_sqlite_path: env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        config_sqlite_path: env::var("EXOMIND_RT_CONFIG_SQLITE_PATH")
             .ok()
             .map(PathBuf::from),
     }
@@ -839,6 +845,10 @@ fn runtime_storage_paths_for_persistent_start(data_dir: Option<PathBuf>) -> Runt
             .ok()
             .map(PathBuf::from)
             .or_else(|| Some(data_dir.join("sessions.sqlite"))),
+        config_sqlite_path: env::var("EXOMIND_RT_CONFIG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("config.sqlite"))),
         data_dir,
     }
 }
@@ -931,6 +941,19 @@ impl AppState {
                 })
             })
             .unwrap_or_else(|| EventLogStore::new(data_dir));
+        let config_store = storage_paths
+            .config_sqlite_path
+            .map(|path| {
+                config::ConfigStore::with_sqlite_path(&path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "config sqlite init failed, falling back to in-memory store (Config SQLite 初始化失败，降级到内存存储)"
+                    );
+                    config::ConfigStore::new()
+                })
+            })
+            .unwrap_or_else(config::ConfigStore::new);
         let task_store = storage_paths
             .task_sqlite_path
             .map(|path| {
@@ -991,6 +1014,7 @@ impl AppState {
             auth_secret,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
+            config_store: Arc::new(config_store),
             task_store: Arc::new(task_store),
             session_store: Arc::new(session_store),
             session_event_tx: {
@@ -1110,6 +1134,7 @@ mod tests {
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
+            config_store: Arc::new(config::ConfigStore::new()),
             task_store: Arc::new(task::TaskStore::new()),
             session_store: Arc::new(session::SessionStore::new()),
             session_event_tx: None,

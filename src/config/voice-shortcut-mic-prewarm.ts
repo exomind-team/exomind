@@ -1,3 +1,8 @@
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
+
 const VOICE_SHORTCUT_MIC_PREWARM_STORAGE_KEY = 'exomind:voiceShortcutMicPrewarmEnabled';
 const VOICE_SHORTCUT_MIC_PREWARM_CHANGED_EVENT = 'exomind:voice-shortcut-mic-prewarm-changed';
 
@@ -8,27 +13,16 @@ function normalizeBoolean(rawValue: string | null | undefined): boolean {
   return rawValue === 'true';
 }
 
-function getStorage():
-  | Pick<Storage, 'getItem' | 'setItem'>
-  | null {
-  if (typeof window === 'undefined') return null;
-  const localStorageLike = window.localStorage as Partial<Storage> | undefined;
-  if (!localStorageLike) return null;
-  if (typeof localStorageLike.getItem !== 'function') return null;
-  if (typeof localStorageLike.setItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
-}
-
 export function getVoiceShortcutMicPrewarmEnabled(): boolean {
-  const storage = getStorage();
-  if (!storage) return true;
-  return normalizeBoolean(storage.getItem(VOICE_SHORTCUT_MIC_PREWARM_STORAGE_KEY));
+  return normalizeBoolean(getRuntimeConfigValueSync(VOICE_SHORTCUT_MIC_PREWARM_STORAGE_KEY));
 }
 
 export function setVoiceShortcutMicPrewarmEnabled(enabled: boolean): void {
-  const storage = getStorage();
-  if (!storage) return;
-  storage.setItem(VOICE_SHORTCUT_MIC_PREWARM_STORAGE_KEY, String(enabled));
+  if (typeof window === 'undefined') return;
+  setRuntimeConfigValue(VOICE_SHORTCUT_MIC_PREWARM_STORAGE_KEY, String(enabled), {
+    source: VOICE_SHORTCUT_MIC_PREWARM_CHANGED_EVENT,
+    sourceOrigin: window.location?.origin,
+  });
   window.dispatchEvent(new CustomEvent<boolean>(VOICE_SHORTCUT_MIC_PREWARM_CHANGED_EVENT, { detail: enabled }));
 }
 

@@ -143,6 +143,7 @@ const BUTTON_ACTION_IDS = [
 ] as const;
 
 const CUSTOM_ITEM_IDS = [
+  'sound-preset',
   'focus-bgm',
   'volcano-engine-key',
   'moss-voice-test',
@@ -245,8 +246,8 @@ describe('settings registry coverage audit', () => {
     const countdownEndMode = getItem('countdown-end-mode', 'enum');
     expect(countdownEndMode.options.every((option) => Boolean(option.description))).toBe(true);
 
-    const soundPreset = getItem('sound-preset', 'enum');
-    expect(soundPreset.dialogTitle).toBe('选择提示音');
+    const soundPreset = getItem('sound-preset', 'custom');
+    expect(soundPreset.label).toBe('提示音');
 
     const volcanoResourceModel = getItem('volcano-resource-model', 'enum');
     expect(volcanoResourceModel.options.map((option) => option.label)).toEqual([
@@ -290,6 +291,7 @@ describe('settings registry coverage audit', () => {
     expect(featureToggles.children.map((child) => child.id)).toEqual([
       'me-page-enabled',
       'agent-page-enabled',
+      'goals-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
     ]);
@@ -397,6 +399,7 @@ describe('settings registry coverage audit', () => {
     expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
       'me-page-enabled',
       'agent-page-enabled',
+      'goals-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
     ]);
