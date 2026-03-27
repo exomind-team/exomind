@@ -1159,12 +1159,18 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
 
     await openNodeContextMenu(page, firstGoalId, 220, 180);
     await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+
+    const visibleNodeTestIds = await page.locator('[data-testid^="goal-flow-node-"]')
+      .evaluateAll((elements) => elements
+        .map((element) => element.getAttribute('data-testid'))
+        .filter((value): value is string => Boolean(value)));
 
     await expect(page.getByTestId('goals-hop-rings')).toBeVisible();
     await expect(page.getByTestId('goals-hop-ring-1')).toBeVisible();
     await expect(page.getByTestId('goals-hop-ring-2')).toBeVisible();
 
-    const initialMetrics = await page.evaluate(() => {
+    const initialMetrics = await page.evaluate((nodeTestIds: string[]) => {
       const pageEl = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
       const flowSurfaceEl = pageEl?.querySelector('[role="application"]') as HTMLElement | null;
       const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
@@ -1189,6 +1195,26 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         meRect.x + meRect.width / 2,
         meRect.y + meRect.height / 2,
       ) as HTMLElement | null;
+      const nodeLayering = nodeTestIds.map((testId) => {
+        const node = document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null;
+        if (!node) {
+          return {
+            testId,
+            closestTestIdsAtCenter: [],
+          };
+        }
+        const nodeRect = node.getBoundingClientRect();
+        const elementsAtCenter = document.elementsFromPoint(
+          nodeRect.x + nodeRect.width / 2,
+          nodeRect.y + nodeRect.height / 2,
+        ) as HTMLElement[];
+        return {
+          testId,
+          closestTestIdsAtCenter: elementsAtCenter
+            .map((element) => element.closest('[data-testid]')?.getAttribute('data-testid') ?? null)
+            .filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index),
+        };
+      });
       const overlap = !(
         label1Rect.right < label2Rect.left
         || label2Rect.right < label1Rect.left
@@ -1232,6 +1258,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
           topElementAtMeCenter?.closest('[data-testid]')?.getAttribute('data-testid')
           ?? topElementAtMeCenter?.tagName
           ?? null,
+        nodeLayering,
         labelOverlap: overlap,
         ring2Rect: {
           left: ring2Rect.left,
@@ -1240,7 +1267,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
           bottom: ring2Rect.bottom,
         },
       };
-    });
+    }, visibleNodeTestIds);
 
     await page.waitForTimeout(1200);
 
@@ -1284,6 +1311,21 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(initialMetrics?.ring2Rect.right ?? 0).toBeLessThanOrEqual((initialMetrics?.pageRect.right ?? 0) + 2);
     expect(initialMetrics?.ring2Rect.bottom ?? 0).toBeLessThanOrEqual((initialMetrics?.pageRect.bottom ?? 0) + 2);
     expect(initialMetrics?.topElementAtMeCenter).toBe('goal-flow-node-me');
+    expect(initialMetrics?.nodeLayering).toHaveLength(3);
+    for (const nodeLayering of initialMetrics?.nodeLayering ?? []) {
+      expect(
+        nodeLayering.closestTestIdsAtCenter,
+        `expected ${nodeLayering.testId} to remain in the hit-test stack at its center`,
+      ).toContain(nodeLayering.testId);
+      const nodeIndex = nodeLayering.closestTestIdsAtCenter.indexOf(nodeLayering.testId);
+      const ringsIndex = nodeLayering.closestTestIdsAtCenter.indexOf('goals-hop-rings');
+      if (ringsIndex !== -1) {
+        expect(
+          nodeIndex,
+          `expected ${nodeLayering.testId} to stay above hop rings in the hit-test stack`,
+        ).toBeLessThan(ringsIndex);
+      }
+    }
     expect(settledMetrics).not.toBeNull();
     expect(Math.abs((settledMetrics?.meCenter.x ?? 0) - (settledMetrics?.flowSurfaceCenter.x ?? 0))).toBeLessThan(24);
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (settledMetrics?.flowSurfaceCenter.y ?? 0))).toBeLessThan(24);
