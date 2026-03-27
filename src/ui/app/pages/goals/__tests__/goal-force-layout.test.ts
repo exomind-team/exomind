@@ -135,9 +135,15 @@ describe('goal-force-layout', () => {
   });
 
   it('pushes farther-hop goals into a meaningfully farther Me-centered layer', () => {
-    expect(resolveMeGoalRepulsionDistance(1)).toBeGreaterThan(0);
-    expect(resolveMeGoalRepulsionDistance(2)).toBeGreaterThan(resolveMeGoalRepulsionDistance(1));
-    expect(resolveMeGoalRepulsionDistance(3)).toBeGreaterThan(resolveMeGoalRepulsionDistance(2));
+    const hopOneDistance = resolveMeGoalRepulsionDistance(1);
+    const hopTwoDistance = resolveMeGoalRepulsionDistance(2);
+    const hopThreeDistance = resolveMeGoalRepulsionDistance(3);
+
+    expect(hopOneDistance).toBeGreaterThan(0);
+    expect(hopTwoDistance).toBeGreaterThan(hopOneDistance);
+    expect(hopTwoDistance / hopOneDistance).toBeGreaterThanOrEqual(1);
+    expect(hopTwoDistance / hopOneDistance).toBeLessThanOrEqual(2.2);
+    expect(hopThreeDistance).toBeGreaterThan(hopTwoDistance);
     expect(resolveMeGoalRepulsionStrength(2)).toBeGreaterThan(resolveMeGoalRepulsionStrength(1));
   });
 

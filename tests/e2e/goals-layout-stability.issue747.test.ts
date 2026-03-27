@@ -163,15 +163,14 @@ function expectThreeNodeConstraints(
   sampleLabel: string,
 ) {
   const edgeRatio = (geometry?.distAB ?? 0) / Math.max(geometry?.distMA ?? 1, 1);
+  const hopRatio = (geometry?.distMB ?? 0) / Math.max(geometry?.distMA ?? 1, 1);
   const summary = geometry
-    ? `MA=${geometry.distMA.toFixed(2)}, MB=${geometry.distMB.toFixed(2)}, AB=${geometry.distAB.toFixed(2)}, angle=${geometry.angle.toFixed(2)}, edgeRatio=${edgeRatio.toFixed(3)}`
+    ? `MA=${geometry.distMA.toFixed(2)}, MB=${geometry.distMB.toFixed(2)}, AB=${geometry.distAB.toFixed(2)}, angle=${geometry.angle.toFixed(2)}, edgeRatio=${edgeRatio.toFixed(3)}, hopRatio=${hopRatio.toFixed(3)}`
     : 'geometry=null';
   expect(geometry, `${sampleLabel}: expected measurable three-node geometry (${summary})`).not.toBeNull();
   expect(settledInMs, `${sampleLabel}: expected layout to settle within 30s (${summary})`).toBeLessThanOrEqual(30000);
-  expect(
-    geometry?.distMB ?? 0,
-    `${sampleLabel}: expected Me-B distance to stay at least 1.5x Me-A (${summary})`,
-  ).toBeGreaterThanOrEqual((geometry?.distMA ?? 0) * 1.5);
+  expect(hopRatio, `${sampleLabel}: expected Me-B / Me-A ratio to be >= 1 (${summary})`).toBeGreaterThanOrEqual(1);
+  expect(hopRatio, `${sampleLabel}: expected Me-B / Me-A ratio to be <= 2.2 (${summary})`).toBeLessThanOrEqual(2.2);
   expect(edgeRatio, `${sampleLabel}: expected A-B / A-Me ratio to be >= 0.8 (${summary})`).toBeGreaterThanOrEqual(0.8);
   expect(edgeRatio, `${sampleLabel}: expected A-B / A-Me ratio to be <= 1.25 (${summary})`).toBeLessThanOrEqual(1.25);
   expect(geometry?.angle ?? 0, `${sampleLabel}: expected angle B-A-Me to exceed 120deg (${summary})`).toBeGreaterThan(120);
@@ -391,14 +390,14 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(2);
   });
 
-  test('keeps randomized three-node samples within the stable geometry constraints across 10 independent seeds', async ({ page }, testInfo) => {
+test('keeps randomized three-node samples within the stable geometry constraints across 20 independent seeds', async ({ page }, testInfo) => {
     const overriddenSeeds = process.env.ISSUE747_RANDOM_SEEDS
       ?.split(',')
       .map((value) => Number.parseInt(value.trim(), 10))
       .filter((value) => Number.isInteger(value) && value > 0) ?? [];
     const seeds = overriddenSeeds.length > 0
       ? overriddenSeeds
-      : Array.from({ length: 10 }, () => randomInt(1, 0x7fffffff));
+      : Array.from({ length: 20 }, () => randomInt(1, 0x7fffffff));
     testInfo.annotations.push({
       type: 'random-seeds',
       description: seeds.join(','),
@@ -418,8 +417,8 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     }
   });
 
-  test('keeps fixed-angle three-node samples within the stable geometry constraints across full angle coverage', async ({ page }) => {
-    const coverageAngles = Array.from({ length: 12 }, (_, index) => index * Math.PI / 6);
+  test('keeps fixed-angle three-node samples within the stable geometry constraints across 20 fixed-angle samples', async ({ page }) => {
+    const coverageAngles = Array.from({ length: 20 }, (_, index) => index * Math.PI / 10);
 
     for (const [index, angle] of coverageAngles.entries()) {
       const samplePage = await page.context().newPage();

@@ -19,6 +19,13 @@ interface ForceLink {
   target: string;
 }
 
+interface EdgeSeparationSpec {
+  pivot: NodeId;
+  first: NodeId;
+  second: NodeId;
+  fallbackSign: 1 | -1;
+}
+
 export type ForcePairKind =
   | 'me-goal-repel'
   | 'goal-goal-near-repel'
@@ -49,6 +56,24 @@ export interface GoalLayoutTestConfig {
   fixedPolarSequence?: GoalLayoutInitialPolar[];
 }
 
+export interface GoalLayoutForceMask {
+  meGoal?: boolean;
+  goalGoal?: boolean;
+  springLinks?: boolean;
+  charge?: boolean;
+  collide?: boolean;
+  edgeSeparation?: boolean;
+}
+
+export interface GoalLayoutSimulationSample {
+  before: PositionMap;
+  after: PositionMap;
+  alpha: number;
+  stable: boolean;
+  pairSpecs: ForcePairSpec[];
+  links: Array<{ source: string; target: string }>;
+}
+
 const ME_GOAL_REPULSION_DISTANCE = 192;
 const GOAL_NEAR_REPULSION_DISTANCE = 164;
 const GOAL_FAR_ATTRACTION_DISTANCE = 308;
@@ -61,6 +86,8 @@ const GOAL_COLLISION_RADIUS = 55;
 const GOAL_CHARGE_STRENGTH = -15;
 export const GOAL_LAYOUT_VELOCITY_DECAY = 0.01;
 const ME_GOAL_LAYER_TOLERANCE = 12;
+const EDGE_SEPARATION_STRENGTH = 0.055;
+const EDGE_SEPARATION_EPSILON = 0.0001;
 
 function getGoalLayoutTestConfig(): GoalLayoutTestConfig | null {
   if (typeof window === 'undefined') return null;
@@ -112,6 +139,17 @@ export function resolveMeGoalRepulsionDistance(hopDistance: number | null): numb
 export function resolveMeGoalRepulsionStrength(hopDistance: number | null): number {
   const resolvedHop = hopDistance !== null && hopDistance > 0 ? hopDistance : 1;
   return ME_GOAL_REPULSION_STRENGTH * resolvedHop;
+}
+
+function resolveGoalLayoutForceMask(mask?: GoalLayoutForceMask) {
+  return {
+    meGoal: mask?.meGoal ?? true,
+    goalGoal: mask?.goalGoal ?? true,
+    springLinks: mask?.springLinks ?? true,
+    charge: mask?.charge ?? true,
+    collide: mask?.collide ?? true,
+    edgeSeparation: mask?.edgeSeparation ?? true,
+  };
 }
 
 function getPairKey(a: string, b: string): string {
@@ -230,6 +268,44 @@ export function buildForcePairSpecs(graph: GoalGraph, options?: LayoutOptions): 
   return specs;
 }
 
+function buildEdgeSeparationSpecs(graph: GoalGraph, options?: LayoutOptions): EdgeSeparationSpec[] {
+  const { visibleGoals, visibleEdges } = buildVisibleGraph(graph, options);
+  const visibleNodeIds = [graph.me.id, ...visibleGoals.map((goal) => goal.id)];
+  const incidentByPivot = new Map<string, Set<string>>(visibleNodeIds.map((nodeId) => [nodeId, new Set<string>()]));
+  const uniqueLogicalEdges = new Map<string, { source: string; target: string }>();
+
+  for (const edge of visibleEdges) {
+    const source = String(edge.source);
+    const target = String(edge.target);
+    const key = getPairKey(source, target);
+    if (!uniqueLogicalEdges.has(key)) {
+      uniqueLogicalEdges.set(key, { source, target });
+    }
+  }
+
+  for (const edge of uniqueLogicalEdges.values()) {
+    incidentByPivot.get(edge.source)?.add(edge.target);
+    incidentByPivot.get(edge.target)?.add(edge.source);
+  }
+
+  const specs: EdgeSeparationSpec[] = [];
+  for (const [pivot, neighbors] of incidentByPivot.entries()) {
+    const orderedNeighbors = Array.from(neighbors).sort();
+    for (let index = 0; index < orderedNeighbors.length; index += 1) {
+      for (let inner = index + 1; inner < orderedNeighbors.length; inner += 1) {
+        specs.push({
+          pivot,
+          first: orderedNeighbors[index],
+          second: orderedNeighbors[inner],
+          fallbackSign: 1,
+        });
+      }
+    }
+  }
+
+  return specs;
+}
+
 function summarizeForcePairs(pairSpecs: ForcePairSpec[]) {
   return pairSpecs.reduce<Record<string, number>>((summary, pair) => {
     summary[pair.kind] = (summary[pair.kind] ?? 0) + 1;
@@ -238,6 +314,187 @@ function summarizeForcePairs(pairSpecs: ForcePairSpec[]) {
     }
     return summary;
   }, {});
+}
+
+function snapshotCenterPositions(nodes: ForceNode[]): PositionMap {
+  const positions: PositionMap = new Map();
+  for (const node of nodes) {
+    positions.set(String(node.id), {
+      x: node.x ?? 0,
+      y: node.y ?? 0,
+    });
+  }
+  return positions;
+}
+
+function buildGoalForceNodes({
+  graph,
+  options,
+  initial,
+  layoutTestConfig,
+  nextRandom,
+  initialPositions,
+}: {
+  graph: GoalGraph;
+  options?: LayoutOptions;
+  initial: boolean;
+  layoutTestConfig?: GoalLayoutTestConfig | null;
+  nextRandom: () => number;
+  initialPositions?: Record<string, { x: number; y: number }>;
+}) {
+  const adjacency = buildHopAdjacency(graph, options);
+  const { visibleGoals, visibleEdges } = buildVisibleGraph(graph, options);
+  let placementSequenceIndex = 0;
+
+  const nodes: ForceNode[] = [
+    {
+      id: graph.me.id,
+      kind: 'me',
+      x: initialPositions?.[graph.me.id]?.x ?? 0,
+      y: initialPositions?.[graph.me.id]?.y ?? 0,
+      fx: initialPositions?.[graph.me.id]?.x ?? 0,
+      fy: initialPositions?.[graph.me.id]?.y ?? 0,
+    },
+    ...visibleGoals.map((goal) => {
+      const forcedPosition = initialPositions?.[goal.id];
+      if (forcedPosition) {
+        return {
+          id: goal.id,
+          kind: 'goal' as const,
+          x: forcedPosition.x,
+          y: forcedPosition.y,
+          fx: null,
+          fy: null,
+        };
+      }
+
+      const hopDistance = getHopDistanceBetween(adjacency, graph.me.id, goal.id);
+      const inboundSourceId = visibleEdges.find((edge) => edge.target === goal.id)?.source;
+      const inboundSourcePosition = inboundSourceId
+        ? initialPositions?.[String(inboundSourceId)]
+        : undefined;
+      const parentRayAngle = inboundSourceId === graph.me.id
+        ? Math.atan2(0, 0)
+        : inboundSourcePosition
+          ? Math.atan2(inboundSourcePosition.y, inboundSourcePosition.x)
+          : undefined;
+      const preferredAngle = parentRayAngle === undefined
+        ? undefined
+        : parentRayAngle + (nextRandom() - 0.5) * 0.24;
+      const polar = resolveGoalLayoutInitialPolar({
+        initial,
+        nextRandom,
+        fixedPolarSequence: layoutTestConfig?.fixedPolarSequence,
+        preferredAngle,
+        preferredDistance: hopDistance === null ? undefined : resolveMeGoalRepulsionDistance(hopDistance),
+        sequenceIndex: placementSequenceIndex,
+      });
+      placementSequenceIndex += 1;
+      return {
+        id: goal.id,
+        kind: 'goal' as const,
+        x: Math.cos(polar.angle) * polar.distance,
+        y: Math.sin(polar.angle) * polar.distance,
+        fx: null,
+        fy: null,
+      };
+    }),
+  ];
+
+  return {
+    nodes,
+    links: buildSpringLinks(graph, options).map((link) => ({
+      source: link.source,
+      target: link.target,
+    })),
+    pairSpecs: buildForcePairSpecs(graph, options),
+  };
+}
+
+function filterForcePairSpecs(pairSpecs: ForcePairSpec[], mask: ReturnType<typeof resolveGoalLayoutForceMask>) {
+  return pairSpecs.filter((pair) => {
+    if (pair.kind === 'me-goal-repel') return mask.meGoal;
+    return mask.goalGoal;
+  });
+}
+
+export function simulateGoalLayoutTicks(
+  graph: GoalGraph,
+  {
+    ticks = 60,
+    options,
+    layoutTestConfig,
+    initialPositions,
+    enabledForces,
+  }: {
+    ticks?: number;
+    options?: LayoutOptions;
+    layoutTestConfig?: GoalLayoutTestConfig | null;
+    initialPositions?: Record<string, { x: number; y: number }>;
+    enabledForces?: GoalLayoutForceMask;
+  } = {},
+): GoalLayoutSimulationSample {
+  const mask = resolveGoalLayoutForceMask(enabledForces);
+  const nextRandom = layoutTestConfig?.randomSeed !== undefined
+    ? createSeededGoalLayoutRandom(layoutTestConfig.randomSeed)
+    : Math.random;
+  const built = buildGoalForceNodes({
+    graph,
+    options,
+    initial: true,
+    layoutTestConfig,
+    nextRandom,
+    initialPositions,
+  });
+  const pairSpecs = filterForcePairSpecs(built.pairSpecs, mask);
+  const edgeSeparationSpecs = buildEdgeSeparationSpecs(graph, options);
+  const before = snapshotCenterPositions(built.nodes);
+
+  const simulation = forceSimulation<ForceNode>(built.nodes)
+    .alpha(1)
+    .alphaMin(0.003)
+    .alphaDecay(0.024)
+    .velocityDecay(GOAL_LAYOUT_VELOCITY_DECAY)
+    .stop();
+
+  if (mask.charge) {
+    simulation.force('charge', forceManyBody<ForceNode>().strength((node) => (node.kind === 'me' ? 0 : GOAL_CHARGE_STRENGTH)));
+  }
+  if (pairSpecs.length > 0) {
+    simulation.force('goal-relationship', createLayeredGoalForce(pairSpecs));
+  }
+  if (mask.springLinks && built.links.length > 0) {
+    simulation.force('spring-links', createSpringAttractionForce(built.links));
+  }
+  if (mask.collide) {
+    simulation.force('collide', forceCollide<ForceNode>(GOAL_COLLISION_RADIUS));
+  }
+  if (mask.edgeSeparation && edgeSeparationSpecs.length > 0) {
+    simulation.force('edge-separation', createEdgeSeparationForce(edgeSeparationSpecs));
+  }
+
+  for (let index = 0; index < ticks; index += 1) {
+    simulation.tick();
+  }
+
+  const after = snapshotCenterPositions(built.nodes);
+  const stable = Number.isFinite(simulation.alpha())
+    && simulation.alpha() < 0.2
+    && built.nodes.every((node) => (
+      Number.isFinite(node.x ?? NaN)
+      && Number.isFinite(node.y ?? NaN)
+      && Number.isFinite(node.vx ?? 0)
+      && Number.isFinite(node.vy ?? 0)
+    ));
+
+  return {
+    before,
+    after,
+    alpha: simulation.alpha(),
+    stable,
+    pairSpecs,
+    links: built.links,
+  };
 }
 
 function applyImpulse(node: ForceNode, x: number, y: number): void {
@@ -356,11 +613,56 @@ function createSpringAttractionForce(links: ForceLink[]) {
   return force;
 }
 
+function applyTangentialImpulse(pivot: ForceNode, outer: ForceNode, sign: 1 | -1, magnitude: number) {
+  const vector = getResolvedVector(pivot, outer);
+  const ccwX = -vector.normalY;
+  const ccwY = vector.normalX;
+  applyImpulse(outer, ccwX * magnitude * sign, ccwY * magnitude * sign);
+}
+
+function createEdgeSeparationForce(specs: EdgeSeparationSpec[]) {
+  let nodeLookup = new Map<string, ForceNode>();
+
+  const force = (alpha: number) => {
+    for (const spec of specs) {
+      const pivot = nodeLookup.get(String(spec.pivot));
+      const first = nodeLookup.get(String(spec.first));
+      const second = nodeLookup.get(String(spec.second));
+      if (!pivot || !first || !second) continue;
+
+      const firstVector = getResolvedVector(pivot, first);
+      const secondVector = getResolvedVector(pivot, second);
+      const dot = Math.max(-1, Math.min(1, (
+        firstVector.normalX * secondVector.normalX
+        + firstVector.normalY * secondVector.normalY
+      )));
+      const compression = (1 + dot) / 2;
+      if (compression <= 0) continue;
+
+      const cross = firstVector.normalX * secondVector.normalY - firstVector.normalY * secondVector.normalX;
+      const turnSign = Math.abs(cross) <= EDGE_SEPARATION_EPSILON
+        ? spec.fallbackSign
+        : (cross > 0 ? 1 : -1);
+      const impulse = compression * EDGE_SEPARATION_STRENGTH * alpha;
+
+      applyTangentialImpulse(pivot, first, turnSign === 1 ? -1 : 1, impulse);
+      applyTangentialImpulse(pivot, second, turnSign === 1 ? 1 : -1, impulse);
+    }
+  };
+
+  force.initialize = (nodes: ForceNode[]) => {
+    nodeLookup = new Map(nodes.map((node) => [String(node.id), node]));
+  };
+
+  return force;
+}
+
 export class GoalForceSimulation {
   private simulation: Simulation<ForceNode, ForceLink>;
   private nodes: ForceNode[] = [];
   private links: ForceLink[] = [];
   private pairSpecs: ForcePairSpec[] = [];
+  private edgeSeparationSpecs: EdgeSeparationSpec[] = [];
   private readonly cx = 0;
   private readonly cy = 0;
   private readonly onTick: TickCallback;
@@ -405,6 +707,7 @@ export class GoalForceSimulation {
       .force('goal-relationship', createLayeredGoalForce(this.pairSpecs))
       .force('spring-links', createSpringAttractionForce(this.links))
       .force('collide', forceCollide<ForceNode>(GOAL_COLLISION_RADIUS))
+      .force('edge-separation', createEdgeSeparationForce(this.edgeSeparationSpecs))
       .alphaMin(0.003)
       .alphaDecay(0.024)
       .velocityDecay(GOAL_LAYOUT_VELOCITY_DECAY)
@@ -543,6 +846,7 @@ export class GoalForceSimulation {
       target: link.target,
     }));
     this.pairSpecs = buildForcePairSpecs(graph, options);
+    this.edgeSeparationSpecs = buildEdgeSeparationSpecs(graph, options);
   }
 
   updateData(graph: GoalGraph, options?: LayoutOptions): void {
@@ -550,6 +854,7 @@ export class GoalForceSimulation {
     this.simulation.nodes(this.nodes);
     this.simulation.force('goal-relationship', createLayeredGoalForce(this.pairSpecs));
     this.simulation.force('spring-links', createSpringAttractionForce(this.links));
+    this.simulation.force('edge-separation', createEdgeSeparationForce(this.edgeSeparationSpecs));
     warnGoalDebug('simulation:update-data', {
       graph: summarizeGraph(graph),
       visibleNodeCount: this.nodes.length,
