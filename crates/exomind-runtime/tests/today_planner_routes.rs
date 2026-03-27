@@ -211,3 +211,68 @@ async fn today_planner_windows_create_start_and_reflow() {
     assert_eq!(list_payload["windows"][0]["id"], window_id);
     assert_eq!(list_payload["windows"][0]["segments"][0]["status"], "active");
 }
+
+#[tokio::test]
+async fn today_planner_work_segment_inherits_window_title_before_edit() {
+    let dir = tempdir().unwrap();
+    let sqlite_path = dir.path().join("today-planner-title.sqlite");
+    let store = Arc::new(TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
+    let app = test_router(test_state_with_timeblock_store(store));
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/act/today-planner/windows?user_id=user-a")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "date": "2026-03-27",
+                        "title": "Morning Focus",
+                        "plannedStartAt": 1_774_573_600_000u64,
+                        "plannedEndAt": 1_774_577_200_000u64,
+                        "rhythmPresetKey": "pomodoro_25_5",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body = create_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let create_payload: Value = serde_json::from_slice(&create_body).unwrap();
+    let work_segment_id = create_payload["segments"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(create_payload["segments"][0]["title"], "Morning Focus");
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!(
+                    "/act/today-planner/segments/{work_segment_id}/start?user_id=user-a"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(start_response.status(), StatusCode::OK);
+    let start_body = start_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let start_payload: Value = serde_json::from_slice(&start_body).unwrap();
+    assert_eq!(start_payload["name"], "Morning Focus");
+}

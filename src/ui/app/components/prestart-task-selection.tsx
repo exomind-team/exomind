@@ -58,6 +58,8 @@ interface PrestartTaskSelectionListProps {
   itemTestIdPrefix: string;
   emptyLabel: string;
   className?: string;
+  maxVisibleTasks?: number;
+  overflowSelectLabel?: string;
 }
 
 function resolvePrestartTaskStatusLabel(task: TaskNode, selected: boolean): string {
@@ -81,8 +83,26 @@ export function PrestartTaskSelectionList({
   itemTestIdPrefix,
   emptyLabel,
   className,
+  maxVisibleTasks,
+  overflowSelectLabel,
 }: PrestartTaskSelectionListProps) {
   const selectedTaskIdSet = new Set(selectedTaskIds);
+  const [overflowSelection, setOverflowSelection] = useState('');
+  const visibleTasks = maxVisibleTasks ? tasks.slice(0, maxVisibleTasks) : tasks;
+  const overflowTasks = maxVisibleTasks ? tasks.slice(maxVisibleTasks) : [];
+
+  const toggleTask = (taskId: string) => {
+    const selected = selectedTaskIdSet.has(taskId);
+    onSelectedTaskIdsChange(
+      selected
+        ? selectedTaskIds.filter((value) => value !== taskId)
+        : [...selectedTaskIds, taskId],
+    );
+  };
+
+  useEffect(() => {
+    setOverflowSelection('');
+  }, [selectedTaskIds, tasks]);
 
   if (tasks.length === 0) {
     return (
@@ -97,7 +117,7 @@ export function PrestartTaskSelectionList({
       data-testid={listTestId}
       className={className ?? 'space-y-2 rounded-[12px] border border-[#E7E5E4] bg-white/55 p-2 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]'}
     >
-      {tasks.map((task) => {
+      {visibleTasks.map((task) => {
         const selected = selectedTaskIdSet.has(task.id);
         return (
           <button
@@ -105,13 +125,7 @@ export function PrestartTaskSelectionList({
             type="button"
             data-testid={`${itemTestIdPrefix}${task.id}`}
             aria-pressed={selected}
-            onClick={() => {
-              onSelectedTaskIdsChange(
-                selected
-                  ? selectedTaskIds.filter((taskId) => taskId !== task.id)
-                  : [...selectedTaskIds, task.id],
-              );
-            }}
+            onClick={() => toggleTask(task.id)}
             className={`flex w-full items-center justify-between rounded-[10px] px-3 py-2 text-left text-[12px] transition-colors ${
               selected
                 ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
@@ -125,6 +139,39 @@ export function PrestartTaskSelectionList({
           </button>
         );
       })}
+      {overflowTasks.length > 0 ? (
+        <label className="block space-y-1 text-[12px] text-[#57534E] dark:text-[#D6D3D1]">
+          <span className="flex items-center justify-between gap-2">
+            <span>{overflowSelectLabel ?? 'More tasks / 更多任务'}</span>
+            <span className="text-[11px] text-[#A8A29E]">{overflowTasks.length} 个候选</span>
+          </span>
+          <select
+            aria-label={overflowSelectLabel ?? '更多任务'}
+            value={overflowSelection}
+            onChange={(event) => {
+              const nextTaskId = event.target.value;
+              setOverflowSelection(nextTaskId);
+              if (!nextTaskId) {
+                return;
+              }
+              toggleTask(nextTaskId);
+              setOverflowSelection('');
+            }}
+            className="w-full rounded-[10px] border border-[#E7E5E4] bg-white px-3 py-2 text-[12px] outline-none focus:border-[#C75B3A] dark:border-[#FFFFFF20] dark:bg-[#120F0D] dark:text-[#D6D3D1]"
+          >
+            <option value="">从下拉里查看和选择更多任务</option>
+            {overflowTasks.map((task) => {
+              const selected = selectedTaskIdSet.has(task.id);
+              const statusLabel = resolvePrestartTaskStatusLabel(task, selected);
+              return (
+                <option key={task.id} value={task.id}>
+                  {`${selected ? '[已选] ' : ''}${task.title} · ${statusLabel}`}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      ) : null}
     </div>
   );
 }

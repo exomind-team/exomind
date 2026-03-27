@@ -297,4 +297,71 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
       expect(startWorkSegmentMock).toHaveBeenCalledWith('segment-work-3');
     });
   });
+
+  it('shows only the first 10 task chips and uses a dropdown for overflow tasks（任务过多时只平铺前 10 个，其余走下拉）', async () => {
+    const snapshotWindow = makeWindow({
+      id: 'window-overflow',
+      title: '任务太多测试',
+      plannedStartAt: plannerTs('15:00'),
+      plannedEndAt: plannerTs('16:00'),
+      segments: [
+        makeSegment({
+          id: 'segment-work-overflow',
+          windowId: 'window-overflow',
+          kind: 'work',
+          title: '任务过多工作块',
+          plannedStartAt: plannerTs('15:00'),
+          plannedEndAt: plannerTs('15:45'),
+          order: 0,
+        }),
+        makeSegment({
+          id: 'segment-break-overflow',
+          windowId: 'window-overflow',
+          kind: 'break',
+          breakKind: 'short',
+          title: 'Short Break',
+          plannedStartAt: plannerTs('15:45'),
+          plannedEndAt: plannerTs('16:00'),
+          order: 1,
+        }),
+      ],
+    });
+
+    getTodayPlannerMock.mockResolvedValue({ date: '2026-03-27', windows: [snapshotWindow] });
+    listTasksMock.mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => makeTask({
+        id: `task-${index + 1}`,
+        title: `任务 ${index + 1}`,
+        status: 'pending',
+      })),
+    );
+    updatePlannedSegmentMock.mockResolvedValue({
+      ...snapshotWindow.segments[0],
+      linkedTaskIds: ['task-11'],
+      status: 'pending',
+    });
+
+    render(<NowTodayTab />);
+
+    fireEvent.click(await screen.findByTestId('planner-segment-segment-work-overflow'));
+
+    expect(await screen.findByTestId('planner-segment-inspector')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/planner-segment-task-task-/)).toHaveLength(10);
+    });
+    expect(screen.getByTestId('planner-segment-task-task-10')).toBeInTheDocument();
+    expect(screen.queryByTestId('planner-segment-task-task-11')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('更多任务'), {
+      target: { value: 'task-11' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存工作片段' }));
+
+    await waitFor(() => {
+      expect(updatePlannedSegmentMock).toHaveBeenCalledWith('segment-work-overflow', {
+        linkedTaskIds: ['task-11'],
+      });
+    });
+  });
 });

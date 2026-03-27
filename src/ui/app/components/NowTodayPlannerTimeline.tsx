@@ -390,7 +390,16 @@ export function NowTodayPlannerTimeline({
                   <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">Tasks / 关联任务</p>
                   <span className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">只有工作片段可以挂任务</span>
                 </div>
-                <PrestartTaskSelectionList tasks={selectableTasks} selectedTaskIds={editorTaskIds} onSelectedTaskIdsChange={setEditorTaskIds} listTestId="planner-segment-task-list" itemTestIdPrefix="planner-segment-task-" emptyLabel="当前没有可关联的任务。" />
+                <PrestartTaskSelectionList
+                  tasks={selectableTasks}
+                  selectedTaskIds={editorTaskIds}
+                  onSelectedTaskIdsChange={setEditorTaskIds}
+                  listTestId="planner-segment-task-list"
+                  itemTestIdPrefix="planner-segment-task-"
+                  emptyLabel="当前没有可关联的任务。"
+                  maxVisibleTasks={10}
+                  overflowSelectLabel="更多任务"
+                />
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">Reflow / 当前区间重算</p>

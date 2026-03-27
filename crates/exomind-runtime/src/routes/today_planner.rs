@@ -179,6 +179,7 @@ fn duration_minutes_from_segment(segment: &PlannedSegmentData) -> u64 {
 
 fn generate_segments_for_window(
     window_id: &str,
+    window_title: Option<&str>,
     window_start_at: u64,
     window_end_at: u64,
     preset: &RhythmPresetData,
@@ -188,6 +189,10 @@ fn generate_segments_for_window(
     let mut order = 0i64;
     let mut work_count = 0u32;
     let mut segments = Vec::new();
+    let normalized_window_title = window_title
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned);
 
     while cursor < window_end_at {
         let remaining_minutes = window_end_at.saturating_sub(cursor).div_ceil(60_000);
@@ -203,7 +208,9 @@ fn generate_segments_for_window(
             window_id: window_id.to_string(),
             kind: PlannedSegmentKind::Work,
             break_kind: None,
-            title: format!("Work {work_count}"),
+            title: normalized_window_title
+                .clone()
+                .unwrap_or_else(|| format!("Work {work_count}")),
             planned_start_at: cursor,
             planned_end_at: work_end,
             linked_task_ids: Vec::new(),
@@ -369,18 +376,20 @@ async fn create_window(
     let scope_key = scope_key_from_query(&query);
     let now = chrono::Utc::now().timestamp_millis() as u64;
     let window_id = uuid::Uuid::new_v4().to_string();
+    let window_title = payload
+        .title
+        .map(|title| title.trim().to_string())
+        .filter(|title| !title.is_empty());
     let window = SchedulingWindowData {
         id: window_id.clone(),
         date: payload.date.trim().to_string(),
-        title: payload
-            .title
-            .map(|title| title.trim().to_string())
-            .filter(|title| !title.is_empty()),
+        title: window_title.clone(),
         planned_start_at: payload.planned_start_at,
         planned_end_at: payload.planned_end_at,
         rhythm_preset: preset.clone(),
         segments: generate_segments_for_window(
             &window_id,
+            window_title.as_deref(),
             payload.planned_start_at,
             payload.planned_end_at,
             &preset,
