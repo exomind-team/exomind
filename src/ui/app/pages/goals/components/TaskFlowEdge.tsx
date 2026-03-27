@@ -253,6 +253,7 @@ export function TaskFlowEdge({
     <>
       <defs>
         <marker
+          data-testid={`task-flow-edge-marker-${id}`}
           id={markerId}
           markerWidth="10"
           markerHeight="10"
@@ -264,7 +265,13 @@ export function TaskFlowEdge({
           <path d="M 0 0 L 10 5 L 0 10 z" fill={markerColor} />
         </marker>
       </defs>
-      <BaseEdge id={id} path={path} style={style} markerEnd={`url(#${markerId})`} />
+      <BaseEdge
+        id={id}
+        path={path}
+        style={style}
+        markerEnd={`url(#${markerId})`}
+        data-testid={`task-flow-edge-visible-${id}`}
+      />
       {status === 'cancelled' && !isZombie ? (
         <line
           data-testid={`task-flow-edge-cancel-strike-${id}`}

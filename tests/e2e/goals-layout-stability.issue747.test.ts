@@ -9,6 +9,28 @@ interface GoalLayoutTestConfig {
   }>;
 }
 
+interface PersistedGoalGraph {
+  me: { id: string; name: string };
+  goals: Array<{
+    id: string;
+    title: string;
+    description: string;
+    cancelled: boolean;
+    completionRule: string[][];
+    createdAt: number;
+    updatedAt: number;
+  }>;
+  edges: Array<{
+    id: string;
+    title: string;
+    description: string;
+    source: string;
+    target: string;
+    createdAt: number;
+    updatedAt: number;
+  }>;
+}
+
 interface ThreeNodeGeometry {
   distMA: number;
   distMB: number;
@@ -17,11 +39,16 @@ interface ThreeNodeGeometry {
 }
 
 async function primeGoalsPage(page: Page, layoutTestConfig: GoalLayoutTestConfig | null = null) {
-  await page.addInitScript((config) => {
+  await page.addInitScript(({ config, graph }) => {
     localStorage.setItem('exomind:goalsPageEnabled', 'true');
     localStorage.setItem('exomind:developerMode', 'true');
-    localStorage.removeItem('exomind:goal-graph');
-    localStorage.removeItem('exomind:goal-oplog');
+    if (graph) {
+      localStorage.setItem('exomind:goal-graph', JSON.stringify(graph));
+      localStorage.setItem('exomind:goal-oplog', '[]');
+    } else {
+      localStorage.removeItem('exomind:goal-graph');
+      localStorage.removeItem('exomind:goal-oplog');
+    }
     localStorage.removeItem('exomind:goals-guide-hidden');
     const windowWithConfig = window as typeof window & {
       __EXOMIND_GOAL_LAYOUT_TEST_CONFIG__?: GoalLayoutTestConfig;
@@ -31,7 +58,35 @@ async function primeGoalsPage(page: Page, layoutTestConfig: GoalLayoutTestConfig
       return;
     }
     delete windowWithConfig.__EXOMIND_GOAL_LAYOUT_TEST_CONFIG__;
-  }, layoutTestConfig);
+  }, {
+    config: layoutTestConfig,
+    graph: null as PersistedGoalGraph | null,
+  });
+}
+
+async function primeGoalsPageWithGraph(
+  page: Page,
+  graph: PersistedGoalGraph,
+  layoutTestConfig: GoalLayoutTestConfig | null = null,
+) {
+  await page.addInitScript(({ config, persistedGraph }) => {
+    localStorage.setItem('exomind:goalsPageEnabled', 'true');
+    localStorage.setItem('exomind:developerMode', 'true');
+    localStorage.setItem('exomind:goal-graph', JSON.stringify(persistedGraph));
+    localStorage.setItem('exomind:goal-oplog', '[]');
+    localStorage.removeItem('exomind:goals-guide-hidden');
+    const windowWithConfig = window as typeof window & {
+      __EXOMIND_GOAL_LAYOUT_TEST_CONFIG__?: GoalLayoutTestConfig;
+    };
+    if (config) {
+      windowWithConfig.__EXOMIND_GOAL_LAYOUT_TEST_CONFIG__ = config;
+      return;
+    }
+    delete windowWithConfig.__EXOMIND_GOAL_LAYOUT_TEST_CONFIG__;
+  }, {
+    config: layoutTestConfig,
+    persistedGraph: graph,
+  });
 }
 
 async function openNodeContextMenu(page: Page, testId: string, clientX: number, clientY: number) {
@@ -53,6 +108,71 @@ function trackGoalWarnings(page: Page): string[] {
     goalWarnings.push(text);
   });
   return goalWarnings;
+}
+
+function makeSingleEdgeGraph(): PersistedGoalGraph {
+  return {
+    me: { id: 'me', name: 'Me' },
+    goals: [
+      {
+        id: 'goal-a',
+        title: 'A',
+        description: '',
+        cancelled: false,
+        completionRule: [['edge-me-a']],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+    edges: [
+      {
+        id: 'edge-me-a',
+        title: 'Edge A',
+        description: '',
+        source: 'me',
+        target: 'goal-a',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+  };
+}
+
+function makeDuplicateEdgeGraph(): PersistedGoalGraph {
+  return {
+    me: { id: 'me', name: 'Me' },
+    goals: [
+      {
+        id: 'goal-a',
+        title: 'A',
+        description: '',
+        cancelled: false,
+        completionRule: [['edge-me-a-1'], ['edge-me-a-2']],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+    edges: [
+      {
+        id: 'edge-me-a-1',
+        title: 'Edge A1',
+        description: '',
+        source: 'me',
+        target: 'goal-a',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'edge-me-a-2',
+        title: 'Edge A2',
+        description: '',
+        source: 'me',
+        target: 'goal-a',
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ],
+  };
 }
 
 async function createThreeNodeChain(page: Page) {
@@ -239,6 +359,127 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('simulation:init'))).toBe(true);
     expect(goalWarnings.some((entry) => entry.includes('page:render-health'))).toBe(true);
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
+  test('renders single-edge arrows and nearest-point anchors in the browser', async ({ page }) => {
+    await primeGoalsPageWithGraph(page, makeSingleEdgeGraph());
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-marker-edge-me-a')).toBeAttached();
+
+    const geometry = await page.evaluate(() => {
+      const edge = document.querySelector('[data-testid="task-flow-edge-visible-edge-me-a"]') as SVGPathElement | null;
+      const marker = document.querySelector('[data-testid="task-flow-edge-marker-edge-me-a"]') as SVGMarkerElement | null;
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const goalA = document.querySelector('[data-testid="goal-flow-node-goal-a"]') as HTMLElement | null;
+      if (!edge || !marker || !me || !goalA) return null;
+
+      const edgePath = edge.getAttribute('d') ?? '';
+      const match = edgePath.match(/^M\s*([-\d.]+)\s+([-\d.]+)\s+L\s+([-\d.]+)\s+([-\d.]+)/);
+      if (!match) return null;
+
+      const [, sx, sy, tx, ty] = match;
+      const matrix = edge.getScreenCTM();
+      if (!matrix) return null;
+      const svg = edge.ownerSVGElement;
+      if (!svg) return null;
+      const startPoint = new DOMPoint(Number(sx), Number(sy)).matrixTransform(matrix);
+      const endPoint = new DOMPoint(Number(tx), Number(ty)).matrixTransform(matrix);
+      const getCenter = (element: HTMLElement) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+          radius: rect.width / 2,
+        };
+      };
+
+      const source = getCenter(me);
+      const target = getCenter(goalA);
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const normalX = dx / distance;
+      const normalY = dy / distance;
+
+      return {
+        edgePath,
+        markerEnd: edge.getAttribute('marker-end'),
+        startX: startPoint.x,
+        startY: startPoint.y,
+        endX: endPoint.x,
+        endY: endPoint.y,
+        expectedStartX: source.x + normalX * source.radius,
+        expectedStartY: source.y + normalY * source.radius,
+        expectedEndX: target.x - normalX * target.radius,
+        expectedEndY: target.y - normalY * target.radius,
+      };
+    });
+
+    expect(geometry).not.toBeNull();
+    expect(geometry?.edgePath.includes(' C ')).toBe(false);
+    expect(geometry?.markerEnd).toContain('goal-task-arrow-edge-me-a');
+    expect(Math.abs((geometry?.startX ?? 0) - (geometry?.expectedStartX ?? 0))).toBeLessThan(2);
+    expect(Math.abs((geometry?.startY ?? 0) - (geometry?.expectedStartY ?? 0))).toBeLessThan(2);
+    expect(Math.abs((geometry?.endX ?? 0) - (geometry?.expectedEndX ?? 0))).toBeLessThan(2);
+    expect(Math.abs((geometry?.endY ?? 0) - (geometry?.expectedEndY ?? 0))).toBeLessThan(2);
+  });
+
+  test('keeps duplicate edges curved in the middle while sharing the same endpoints and arrows', async ({ page }) => {
+    await primeGoalsPageWithGraph(page, makeDuplicateEdgeGraph());
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a-1')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a-2')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-marker-edge-me-a-1')).toBeAttached();
+    await expect(page.getByTestId('task-flow-edge-marker-edge-me-a-2')).toBeAttached();
+
+    const paths = await page.evaluate(() => {
+      const first = document.querySelector('[data-testid="task-flow-edge-visible-edge-me-a-1"]') as SVGPathElement | null;
+      const second = document.querySelector('[data-testid="task-flow-edge-visible-edge-me-a-2"]') as SVGPathElement | null;
+      if (!first || !second) return null;
+
+      const parse = (value: string) => {
+        const match = value.match(/^M\s*([-\d.]+)\s+([-\d.]+)\s+C\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)/);
+        if (!match) return null;
+        const [, sx, sy, c1x, c1y, c2x, c2y, tx, ty] = match;
+        return {
+          startX: Number(sx),
+          startY: Number(sy),
+          control1X: Number(c1x),
+          control1Y: Number(c1y),
+          control2X: Number(c2x),
+          control2Y: Number(c2y),
+          endX: Number(tx),
+          endY: Number(ty),
+        };
+      };
+
+      return {
+        firstPath: first.getAttribute('d') ?? '',
+        secondPath: second.getAttribute('d') ?? '',
+        first: parse(first.getAttribute('d') ?? ''),
+        second: parse(second.getAttribute('d') ?? ''),
+        firstMarkerEnd: first.getAttribute('marker-end'),
+        secondMarkerEnd: second.getAttribute('marker-end'),
+      };
+    });
+
+    expect(paths).not.toBeNull();
+    expect(paths?.firstPath.includes(' C ')).toBe(true);
+    expect(paths?.secondPath.includes(' C ')).toBe(true);
+    expect(paths?.firstMarkerEnd).toContain('goal-task-arrow-edge-me-a-1');
+    expect(paths?.secondMarkerEnd).toContain('goal-task-arrow-edge-me-a-2');
+    expect(paths?.firstPath).not.toBe(paths?.secondPath);
+    expect(Math.abs((paths?.first?.startX ?? 0) - (paths?.second?.startX ?? 0))).toBeLessThan(1);
+    expect(Math.abs((paths?.first?.startY ?? 0) - (paths?.second?.startY ?? 0))).toBeLessThan(1);
+    expect(Math.abs((paths?.first?.endX ?? 0) - (paths?.second?.endX ?? 0))).toBeLessThan(1);
+    expect(Math.abs((paths?.first?.endY ?? 0) - (paths?.second?.endY ?? 0))).toBeLessThan(1);
+    expect(Math.abs((paths?.first?.control1Y ?? 0) - (paths?.second?.control1Y ?? 0))).toBeGreaterThan(1);
+    expect(Math.abs((paths?.first?.control2Y ?? 0) - (paths?.second?.control2Y ?? 0))).toBeGreaterThan(1);
   });
 
   test('keeps Me fixed at the concentric-ring center and renders complete independent rings', async ({ page }) => {
