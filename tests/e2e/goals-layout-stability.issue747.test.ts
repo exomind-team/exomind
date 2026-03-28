@@ -1432,6 +1432,56 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps edges visible through edge-detail open and close interactions', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await primeGoalsPageWithGraph(page, makeSingleEdgeGraph());
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-label-edge-me-a')).toBeVisible({ timeout: 10000 });
+
+    const edgeBox = await page.getByTestId('task-flow-edge-hit-area-edge-me-a').boundingBox();
+    expect(edgeBox, 'edge-detail-stability: expected measurable edge hit area').not.toBeNull();
+    if (!edgeBox) {
+      throw new Error('expected edge hit area bounding box');
+    }
+
+    await page.mouse.click(edgeBox.x + edgeBox.width / 2, edgeBox.y + edgeBox.height / 2, { button: 'right' });
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('goal-context-item-detail').click();
+
+    const edgeDetailPanel = page.getByTestId('goals-page').getByRole('complementary');
+    await expect(edgeDetailPanel).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('路径详情')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible();
+    await expect(page.getByTestId('task-flow-edge-marker-edge-me-a')).toBeAttached();
+    await expect(page.getByTestId('task-flow-edge-label-edge-me-a')).toBeVisible();
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'edge-detail-stability:detail-open',
+    );
+
+    await edgeDetailPanel.getByRole('button').first().click();
+    await expect(edgeDetailPanel).toHaveCount(0);
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible();
+    await expect(page.getByTestId('task-flow-edge-label-edge-me-a')).toBeVisible();
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'edge-detail-stability:detail-closed',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
 test('keeps randomized three-node samples within the stable geometry constraints across 20 independent seeds', async ({ page }, testInfo) => {
     const overriddenSeeds = process.env.ISSUE747_RANDOM_SEEDS
       ?.split(',')
