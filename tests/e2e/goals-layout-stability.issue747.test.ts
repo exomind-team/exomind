@@ -1354,6 +1354,10 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     await page.getByTestId('goal-context-item-downstream').click();
     await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
     await expect(page.getByTestId('goals-hop-rings')).toBeVisible();
+    const visibleNodeTestIds = await page.locator('[data-testid^="goal-flow-node-"]')
+      .evaluateAll((elements) => elements
+        .map((element) => element.getAttribute('data-testid'))
+        .filter((value): value is string => Boolean(value)));
 
     const readRingViewportMetrics = () => page.evaluate(() => {
       const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
@@ -1420,8 +1424,8 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     await page.mouse.move(panStartX, panStartY);
     await page.mouse.down();
     await page.mouse.move(
-      panStartX + 96,
-      panStartY + 72,
+      panStartX + 36,
+      panStartY + 24,
       { steps: 12 },
     );
     await page.mouse.up();
@@ -1453,6 +1457,55 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         transformChanged: true,
         aligned: true,
       });
+
+    const nodeLayeringAfterViewportChange = await page.evaluate((nodeTestIds: string[]) => (
+      nodeTestIds.map((testId) => {
+        const node = document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null;
+        if (!node) {
+          return {
+            testId,
+            inViewport: false,
+            closestTestIdsAtCenter: [],
+          };
+        }
+        const nodeRect = node.getBoundingClientRect();
+        const centerX = nodeRect.x + nodeRect.width / 2;
+        const centerY = nodeRect.y + nodeRect.height / 2;
+        const inViewport = centerX >= 0
+          && centerX <= window.innerWidth
+          && centerY >= 0
+          && centerY <= window.innerHeight;
+        const elementsAtCenter = document.elementsFromPoint(
+          centerX,
+          centerY,
+        ) as HTMLElement[];
+        return {
+          testId,
+          inViewport,
+          closestTestIdsAtCenter: elementsAtCenter
+            .map((element) => element.closest('[data-testid]')?.getAttribute('data-testid') ?? null)
+            .filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index),
+        };
+      })
+    ), visibleNodeTestIds);
+
+    const inViewportNodeLayering = nodeLayeringAfterViewportChange.filter((nodeLayering) => nodeLayering.inViewport);
+    expect(inViewportNodeLayering.length).toBeGreaterThanOrEqual(2);
+    expect(inViewportNodeLayering.some((nodeLayering) => nodeLayering.testId === 'goal-flow-node-me')).toBe(true);
+    for (const nodeLayering of inViewportNodeLayering) {
+      expect(
+        nodeLayering.closestTestIdsAtCenter,
+        `expected ${nodeLayering.testId} to remain in the hit-test stack after viewport changes`,
+      ).toContain(nodeLayering.testId);
+      const nodeIndex = nodeLayering.closestTestIdsAtCenter.indexOf(nodeLayering.testId);
+      const ringsIndex = nodeLayering.closestTestIdsAtCenter.indexOf('goals-hop-rings');
+      if (ringsIndex !== -1) {
+        expect(
+          nodeIndex,
+          `expected ${nodeLayering.testId} to stay above hop rings after viewport changes`,
+        ).toBeLessThan(ringsIndex);
+      }
+    }
 
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
