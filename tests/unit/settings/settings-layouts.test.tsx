@@ -20,7 +20,8 @@ const items: SettingsItem[] = [
   makeCustomItem('theme', 'appearance', '主题'),
   makeCustomItem('feedback-content', 'feedback', '反馈内容'),
   makeCustomItem('voice-transcript-send-mode', 'input', '语音转写后'),
-  makeCustomItem('sync-server-url', 'sync', '同步服务器'),
+  makeCustomItem('ai-registry', 'ai', 'AI Registry'),
+  makeCustomItem('runtime-target-mode', 'connection', 'RT 配置'),
   makeCustomItem('export-backup', 'data', '导出备份'),
   makeCustomItem('developer-mode', 'developer', '开发者模式'),
   makeCustomItem('clear-local-cache', 'danger', '清空本地缓存'),
@@ -35,7 +36,8 @@ describe('settings layouts', () => {
     expect(screen.getByText('外观')).toBeInTheDocument();
     expect(screen.getByText('时间块反馈')).toBeInTheDocument();
     expect(screen.getByText('输入')).toBeInTheDocument();
-    expect(screen.getByText('同步')).toBeInTheDocument();
+    expect(screen.getByText('AI 设置')).toBeInTheDocument();
+    expect(screen.getByText('连接')).toBeInTheDocument();
     expect(screen.getByText('数据')).toBeInTheDocument();
     expect(screen.getByText('开发者')).toBeInTheDocument();
     expect(screen.getByText('危险区域')).toBeInTheDocument();
@@ -56,6 +58,7 @@ describe('settings layouts', () => {
     expect(screen.getByRole('button', { name: '专注设置' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '输入' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '服务' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '连接' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '数据' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开发者' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '危险区域' })).toBeInTheDocument();

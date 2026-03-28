@@ -8,8 +8,9 @@ use exomind_runtime::{
 };
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, ToSocketAddrs, UdpSocket};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, timeout, Duration};
 
@@ -90,6 +91,173 @@ pub struct SignalPublishFastResponse {
     pub event_id: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeNetworkMode {
+    #[default]
+    Local,
+    Lan,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeNetworkModePersisted {
+    network_mode: RuntimeNetworkMode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeTargetMode {
+    #[default]
+    Embedded,
+    External,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeTargetModePersisted {
+    target_mode: RuntimeTargetMode,
+}
+
+impl RuntimeNetworkMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Lan => "lan",
+        }
+    }
+
+    pub fn bind_host(self) -> &'static str {
+        match self {
+            Self::Local => "127.0.0.1",
+            Self::Lan => "0.0.0.0",
+        }
+    }
+
+    fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim() {
+            "local" => Ok(Self::Local),
+            "lan" => Ok(Self::Lan),
+            other => Err(format!("unsupported runtime network mode: {other}")),
+        }
+    }
+}
+
+impl RuntimeTargetMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Embedded => "embedded",
+            Self::External => "external",
+        }
+    }
+
+    fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim() {
+            "embedded" => Ok(Self::Embedded),
+            "external" => Ok(Self::External),
+            other => Err(format!("unsupported runtime target mode: {other}")),
+        }
+    }
+}
+
+fn runtime_network_mode_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir
+        .join("settings")
+        .join("runtime-network-mode.json")
+}
+
+fn runtime_target_mode_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir
+        .join("settings")
+        .join("runtime-target-mode.json")
+}
+
+fn load_runtime_network_mode_from_path(path: &Path) -> Result<RuntimeNetworkMode, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str::<RuntimeNetworkModePersisted>(&raw)
+            .map(|persisted| persisted.network_mode)
+            .map_err(|error| format!("failed to parse runtime network mode file: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(RuntimeNetworkMode::Local),
+        Err(error) => Err(format!("failed to read runtime network mode file: {error}")),
+    }
+}
+
+fn save_runtime_network_mode_to_path(path: &Path, mode: RuntimeNetworkMode) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create runtime settings dir: {error}"))?;
+    }
+
+    let payload = serde_json::to_string_pretty(&RuntimeNetworkModePersisted { network_mode: mode })
+        .map_err(|error| format!("failed to serialize runtime network mode: {error}"))?;
+    std::fs::write(path, payload)
+        .map_err(|error| format!("failed to write runtime network mode file: {error}"))
+}
+
+fn load_runtime_target_mode_from_path(path: &Path) -> Result<RuntimeTargetMode, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str::<RuntimeTargetModePersisted>(&raw)
+            .map(|persisted| persisted.target_mode)
+            .map_err(|error| format!("failed to parse runtime target mode file: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(RuntimeTargetMode::Embedded)
+        }
+        Err(error) => Err(format!("failed to read runtime target mode file: {error}")),
+    }
+}
+
+fn save_runtime_target_mode_to_path(path: &Path, mode: RuntimeTargetMode) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create runtime settings dir: {error}"))?;
+    }
+
+    let payload = serde_json::to_string_pretty(&RuntimeTargetModePersisted { target_mode: mode })
+        .map_err(|error| format!("failed to serialize runtime target mode: {error}"))?;
+    std::fs::write(path, payload)
+        .map_err(|error| format!("failed to write runtime target mode file: {error}"))
+}
+
+pub fn load_persisted_runtime_network_mode(app: &AppHandle) -> Result<RuntimeNetworkMode, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    load_runtime_network_mode_from_path(&runtime_network_mode_path(&app_data_dir))
+}
+
+pub fn load_persisted_runtime_target_mode(app: &AppHandle) -> Result<RuntimeTargetMode, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    load_runtime_target_mode_from_path(&runtime_target_mode_path(&app_data_dir))
+}
+
+fn save_persisted_runtime_network_mode(
+    app: &AppHandle,
+    mode: RuntimeNetworkMode,
+) -> Result<RuntimeNetworkMode, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    save_runtime_network_mode_to_path(&runtime_network_mode_path(&app_data_dir), mode)?;
+    Ok(mode)
+}
+
+fn save_persisted_runtime_target_mode(
+    app: &AppHandle,
+    mode: RuntimeTargetMode,
+) -> Result<RuntimeTargetMode, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    save_runtime_target_mode_to_path(&runtime_target_mode_path(&app_data_dir), mode)?;
+    Ok(mode)
+}
+
 fn lock_or_error<'a>(
     state: &'a Arc<RuntimeProcessState>,
 ) -> Result<std::sync::MutexGuard<'a, RuntimeInner>, String> {
@@ -167,9 +335,13 @@ fn resolve_reachable_host(remote_host: &str, remote_port: u16) -> Result<String,
     let target = resolved
         .next()
         .ok_or_else(|| "remote host did not resolve to any address".to_string())?;
-    let bind_addr = if target.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
-    let socket =
-        UdpSocket::bind(bind_addr).map_err(|error| format!("failed to bind udp socket: {error}"))?;
+    let bind_addr = if target.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
+    let socket = UdpSocket::bind(bind_addr)
+        .map_err(|error| format!("failed to bind udp socket: {error}"))?;
     socket
         .connect(target)
         .map_err(|error| format!("failed to connect udp probe socket: {error}"))?;
@@ -268,7 +440,10 @@ pub async fn ensure_runtime_started(
         if let Some((host, port)) = running_snapshot {
             inner.host = host;
             inner.port = port;
-            inner.host_id = inner.handle.as_ref().map(|handle| handle.host_id().to_string());
+            inner.host_id = inner
+                .handle
+                .as_ref()
+                .map(|handle| handle.host_id().to_string());
             inner.auth_secret = requested_auth_secret.clone();
             inner.last_error = None;
             inner.external_runtime = false;
@@ -405,7 +580,10 @@ pub fn runtime_status_snapshot(
     let running = if let Some((host, port)) = running_snapshot {
         inner.host = host;
         inner.port = port;
-        inner.host_id = inner.handle.as_ref().map(|handle| handle.host_id().to_string());
+        inner.host_id = inner
+            .handle
+            .as_ref()
+            .map(|handle| handle.host_id().to_string());
         inner.external_runtime = false;
         true
     } else if inner.external_runtime {
@@ -439,6 +617,22 @@ pub fn runtime_service_status(
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<RuntimeServiceStatus, String> {
     runtime_status_snapshot(state.inner().clone())
+}
+
+#[tauri::command]
+pub fn runtime_network_mode_set(app: AppHandle, mode: String) -> Result<String, String> {
+    let parsed = RuntimeNetworkMode::parse(&mode)?;
+    Ok(save_persisted_runtime_network_mode(&app, parsed)?
+        .as_str()
+        .to_string())
+}
+
+#[tauri::command]
+pub fn runtime_target_mode_set(app: AppHandle, mode: String) -> Result<String, String> {
+    let parsed = RuntimeTargetMode::parse(&mode)?;
+    Ok(save_persisted_runtime_target_mode(&app, parsed)?
+        .as_str()
+        .to_string())
 }
 
 #[tauri::command]
@@ -559,6 +753,70 @@ mod tests {
         assert!(super::should_enable_mdns_for_bind_host("0.0.0.0"));
         assert!(super::should_enable_mdns_for_bind_host("192.168.1.10"));
         assert!(super::should_enable_mdns_for_bind_host("my-laptop.local"));
+    }
+
+    #[test]
+    fn runtime_network_mode_maps_to_expected_bind_hosts() {
+        assert_eq!(super::RuntimeNetworkMode::Local.bind_host(), "127.0.0.1");
+        assert_eq!(super::RuntimeNetworkMode::Lan.bind_host(), "0.0.0.0");
+    }
+
+    #[test]
+    fn runtime_network_mode_file_roundtrip() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("exomind-rt-network-mode-{}", uuid::Uuid::new_v4()));
+        let path = temp_dir.join("runtime-network-mode.json");
+
+        super::save_runtime_network_mode_to_path(&path, super::RuntimeNetworkMode::Lan)
+            .expect("runtime network mode should persist");
+
+        let loaded = super::load_runtime_network_mode_from_path(&path)
+            .expect("runtime network mode should load");
+        assert_eq!(loaded, super::RuntimeNetworkMode::Lan);
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn missing_runtime_network_mode_file_defaults_to_local() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "exomind-rt-network-mode-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let path = temp_dir.join("missing-runtime-network-mode.json");
+
+        let loaded = super::load_runtime_network_mode_from_path(&path)
+            .expect("missing runtime network mode file should fall back");
+        assert_eq!(loaded, super::RuntimeNetworkMode::Local);
+    }
+
+    #[test]
+    fn runtime_target_mode_file_roundtrip() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("exomind-rt-target-mode-{}", uuid::Uuid::new_v4()));
+        let path = temp_dir.join("runtime-target-mode.json");
+
+        super::save_runtime_target_mode_to_path(&path, super::RuntimeTargetMode::External)
+            .expect("runtime target mode should persist");
+
+        let loaded = super::load_runtime_target_mode_from_path(&path)
+            .expect("runtime target mode should load");
+        assert_eq!(loaded, super::RuntimeTargetMode::External);
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn missing_runtime_target_mode_file_defaults_to_embedded() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "exomind-rt-target-mode-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let path = temp_dir.join("missing-runtime-target-mode.json");
+
+        let loaded = super::load_runtime_target_mode_from_path(&path)
+            .expect("missing runtime target mode file should fall back");
+        assert_eq!(loaded, super::RuntimeTargetMode::Embedded);
     }
 
     #[test]

@@ -48,6 +48,7 @@ const AUDITED_SETTINGS_IDS = [
   'moss-voice-test',
   'volcano-asr-test',
   'ai-registry',
+  'embedded-runtime-open-mode',
   'sync-server-url',
   'eventlog-backend-mode',
   'task-backend-mode',
@@ -89,6 +90,7 @@ const INLINE_SINGLE_ENUM_IDS = [
 const DIALOG_ENUM_IDS = [
   'countdown-end-mode',
   'sound-preset',
+  'embedded-runtime-open-mode',
   'volcano-endpoint',
   'volcano-language',
 ] as const;
@@ -271,6 +273,17 @@ describe('settings registry coverage audit', () => {
     expect(syncServerUrl.stringStyle).toBe('dialog');
     expect(syncServerUrl.dialogFieldKind).toBe('plain');
     expect(syncServerUrl.dialogInputType).toBe('url');
+
+    const embeddedRuntimeOpenMode = getItem('embedded-runtime-open-mode', 'enum');
+    expect(embeddedRuntimeOpenMode.options.map((option) => option.value)).toEqual(['local', 'lan']);
+    expect(embeddedRuntimeOpenMode.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: false,
+    })).toBe(false);
+    expect(embeddedRuntimeOpenMode.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+    })).toBe(true);
 
     const featureToggles = getItem('feature-toggles', 'group');
     expect(featureToggles.groupStyle).toBe('adaptive-overlay');

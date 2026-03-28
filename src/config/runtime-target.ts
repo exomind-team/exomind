@@ -5,6 +5,7 @@ export const RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY = 'exomind:runtimeExternalAddr
 export const EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY = 'exomind:embeddedRuntimeNetworkMode';
 export const EMBEDDED_RUNTIME_STATUS_STORAGE_KEY = 'exomind:embeddedRuntimeStatus';
 export const RUNTIME_TARGET_CHANGED_EVENT = 'exomind:runtime-target-changed';
+export const EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT = 'exomind:embedded-runtime-network-mode-changed';
 
 export type RuntimeTargetMode = 'embedded' | 'external';
 export type EmbeddedRuntimeNetworkMode = 'local' | 'lan';
@@ -248,6 +249,39 @@ export function setEmbeddedRuntimeNetworkMode(mode: EmbeddedRuntimeNetworkMode):
 
   const normalized = normalizeEmbeddedRuntimeNetworkMode(mode);
   window.localStorage.setItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY, normalized);
+  window.dispatchEvent(
+    new CustomEvent<EmbeddedRuntimeNetworkMode>(EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT, {
+      detail: normalized,
+    }),
+  );
+}
+
+export function subscribeEmbeddedRuntimeNetworkModeChanges(
+  listener: (mode: EmbeddedRuntimeNetworkMode) => void,
+): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY) {
+      return;
+    }
+    listener(normalizeEmbeddedRuntimeNetworkMode(event.newValue));
+  };
+
+  const handleCustomEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<EmbeddedRuntimeNetworkMode>;
+    listener(normalizeEmbeddedRuntimeNetworkMode(customEvent.detail));
+  };
+
+  window.addEventListener('storage', handleStorage);
+  window.addEventListener(EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT, handleCustomEvent);
+
+  return () => {
+    window.removeEventListener('storage', handleStorage);
+    window.removeEventListener(EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT, handleCustomEvent);
+  };
 }
 
 export function getRuntimeExternalAddress(): string {
@@ -379,4 +413,3 @@ export function subscribeRuntimeTargetChanges(listener: (target: RuntimeTarget) 
     window.removeEventListener(RUNTIME_TARGET_CHANGED_EVENT, handleCustomEvent);
   };
 }
-

@@ -3,7 +3,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { parseMainWindowShortcutSelection, setMainWindowShortcutSelection } from '@/config/main-window-shortcut';
-import { isTauriWindow } from '@/config/runtime-target';
+import { getRuntimeTargetMode, isTauriWindow, subscribeRuntimeTargetChanges } from '@/config/runtime-target';
 import { getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { UserCard } from '@/ui/app/components/UserCard';
@@ -34,6 +34,10 @@ function useSettingsContext(): SettingsContext {
   const developerMode = useSubscribed(getDeveloperModeEnabled, subscribeDeveloperModeChanges);
   const desktopAdaptiveEnabled = useSubscribed(getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges);
   const voiceShortcutAsrProvider = useSubscribed(getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges);
+  const runtimeTargetMode = useSubscribed(
+    getRuntimeTargetMode,
+    (listener) => subscribeRuntimeTargetChanges((target) => listener(target.mode)),
+  );
 
   return useMemo<SettingsContext>(() => ({
     isDesktop,
@@ -42,7 +46,8 @@ function useSettingsContext(): SettingsContext {
     developerMode,
     desktopAdaptiveEnabled,
     voiceShortcutAsrProvider,
-  }), [isDesktop, developerMode, desktopAdaptiveEnabled, voiceShortcutAsrProvider]);
+    runtimeTargetMode,
+  }), [isDesktop, developerMode, desktopAdaptiveEnabled, voiceShortcutAsrProvider, runtimeTargetMode]);
 }
 
 export function SettingsPage() {

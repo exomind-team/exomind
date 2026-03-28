@@ -24,13 +24,13 @@ import {
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
   resolveEmbeddedRuntimeBindHost,
-  setEmbeddedRuntimeNetworkMode,
   setRuntimeExternalAddress,
-  setRuntimeTargetMode,
   subscribeRuntimeTargetChanges,
   type EmbeddedRuntimeNetworkMode,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
+import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
+import { setPersistedRuntimeTargetMode } from '@/config/runtime-target-mode';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
 import { PtyTerminal } from '../components/PtyTerminal';
 import { PtySpawnDialog } from '../components/PtySpawnDialog';
@@ -1282,24 +1282,40 @@ export function AgentsPage() {
     }
   };
 
-  const handleRuntimeTargetModeChange = (mode: RuntimeTargetMode) => {
+  const handleRuntimeTargetModeChange = async (mode: RuntimeTargetMode) => {
+    const runtimeControlService = getRuntimeControlService();
     setRuntimeTargetError('');
-    setRuntimeTargetMode(mode);
-    syncRuntimeTargetState();
+    try {
+      await setPersistedRuntimeTargetMode(mode);
+      syncRuntimeTargetState();
+      setRuntimeServiceStatus(await runtimeControlService.getStatus());
+      await refreshRuntimeSnapshot();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeTargetError(message);
+    }
   };
 
-  const handleEmbeddedRuntimeNetworkModeChange = (mode: EmbeddedRuntimeNetworkMode) => {
+  const handleEmbeddedRuntimeNetworkModeChange = async (mode: EmbeddedRuntimeNetworkMode) => {
     setRuntimeTargetError('');
-    setEmbeddedRuntimeNetworkMode(mode);
-    setEmbeddedRuntimeNetworkModeValue(mode);
+    try {
+      const persistedMode = await setPersistedEmbeddedRuntimeNetworkMode(mode);
+      setEmbeddedRuntimeNetworkModeValue(persistedMode);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeTargetError(message);
+    }
   };
 
-  const handleApplyRuntimeExternalAddress = () => {
+  const handleApplyRuntimeExternalAddress = async () => {
+    const runtimeControlService = getRuntimeControlService();
     try {
       setRuntimeTargetError('');
       setRuntimeExternalAddress(runtimeExternalAddressDraft);
-      setRuntimeTargetMode('external');
+      await setPersistedRuntimeTargetMode('external');
       syncRuntimeTargetState();
+      setRuntimeServiceStatus(await runtimeControlService.getStatus());
+      await refreshRuntimeSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRuntimeTargetError(message);

@@ -24,6 +24,7 @@ export type Category =
   | 'input'
   | 'feedback'
   | 'ai'
+  | 'connection'
   | 'sync'
   | 'data'
   | 'developer'
@@ -38,6 +39,7 @@ export interface SettingsContext {
   developerMode?: boolean;
   desktopAdaptiveEnabled?: boolean;
   voiceShortcutAsrProvider?: string;
+  runtimeTargetMode?: 'embedded' | 'external';
 }
 
 export interface SettingsItemBase {
