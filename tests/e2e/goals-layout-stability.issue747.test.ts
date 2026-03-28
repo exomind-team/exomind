@@ -1333,6 +1333,130 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(2);
   });
 
+  test('keeps hop rings aligned with the browser viewport transform during zoom and pan', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const firstGoal = page.locator('[data-testid^="goal-flow-node-"]').nth(1);
+    const firstGoalId = await firstGoal.getAttribute('data-testid');
+    if (!firstGoalId) {
+      throw new Error('expected first goal node test id');
+    }
+
+    await openNodeContextMenu(page, firstGoalId, 220, 180);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.getByTestId('goals-hop-rings')).toBeVisible();
+
+    const readRingViewportMetrics = () => page.evaluate(() => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const rings = document.querySelector('[data-testid="goals-hop-rings"]') as SVGSVGElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const ring2 = document.querySelector('[data-testid="goals-hop-ring-2"] circle') as SVGCircleElement | null;
+      if (!me || !rings || !ring1 || !ring2) {
+        return null;
+      }
+
+      const meRect = me.getBoundingClientRect();
+      const ring1Rect = ring1.getBoundingClientRect();
+      const ring2Rect = ring2.getBoundingClientRect();
+      return {
+        ringsTransform: rings.style.transform,
+        meCenter: {
+          x: meRect.x + meRect.width / 2,
+          y: meRect.y + meRect.height / 2,
+        },
+        ring1Center: {
+          x: ring1Rect.x + ring1Rect.width / 2,
+          y: ring1Rect.y + ring1Rect.height / 2,
+        },
+        ring2Center: {
+          x: ring2Rect.x + ring2Rect.width / 2,
+          y: ring2Rect.y + ring2Rect.height / 2,
+        },
+      };
+    });
+
+    const viewportBefore = await readViewportTransform(page);
+    const metricsBefore = await readRingViewportMetrics();
+
+    expect(viewportBefore).not.toBeNull();
+    expect(metricsBefore).not.toBeNull();
+    expect(metricsBefore?.ringsTransform).not.toBe('');
+    expect(Math.abs((metricsBefore?.ring1Center.x ?? 0) - (metricsBefore?.meCenter.x ?? 0))).toBeLessThan(6);
+    expect(Math.abs((metricsBefore?.ring1Center.y ?? 0) - (metricsBefore?.meCenter.y ?? 0))).toBeLessThan(6);
+    expect(Math.abs((metricsBefore?.ring2Center.x ?? 0) - (metricsBefore?.meCenter.x ?? 0))).toBeLessThan(6);
+    expect(Math.abs((metricsBefore?.ring2Center.y ?? 0) - (metricsBefore?.meCenter.y ?? 0))).toBeLessThan(6);
+
+    const renderer = page.locator('.react-flow__renderer');
+    await renderer.hover();
+    await page.mouse.wheel(0, -320);
+
+    await expect
+      .poll(() => readViewportTransform(page), {
+        timeout: 4000,
+        message: 'expected viewport transform to change after zoom in hop-ring viewport test',
+      })
+      .not.toEqual(viewportBefore);
+
+    const viewportAfterZoom = await readViewportTransform(page);
+
+    const pane = page.locator('.react-flow__pane');
+    const paneBox = await pane.boundingBox();
+    expect(paneBox, 'hop-ring-viewport: expected pane box for pan gesture').not.toBeNull();
+    if (!paneBox) {
+      throw new Error('expected pane box for pan gesture');
+    }
+
+    const panStartX = paneBox.x + Math.min(72, paneBox.width * 0.15);
+    const panStartY = paneBox.y + Math.min(72, paneBox.height * 0.15);
+    await page.mouse.move(panStartX, panStartY);
+    await page.mouse.down();
+    await page.mouse.move(
+      panStartX + 96,
+      panStartY + 72,
+      { steps: 12 },
+    );
+    await page.mouse.up();
+
+    await expect
+      .poll(() => readViewportTransform(page), {
+        timeout: 4000,
+        message: 'expected viewport transform to change after pan in hop-ring viewport test',
+      })
+      .not.toEqual(viewportAfterZoom);
+
+    await expect
+      .poll(async () => {
+        const metricsAfter = await readRingViewportMetrics();
+        if (!metricsAfter) return null;
+        return {
+          transformChanged: metricsAfter.ringsTransform !== metricsBefore?.ringsTransform,
+          aligned:
+            Math.abs(metricsAfter.ring1Center.x - metricsAfter.meCenter.x) <= 6
+            && Math.abs(metricsAfter.ring1Center.y - metricsAfter.meCenter.y) <= 6
+            && Math.abs(metricsAfter.ring2Center.x - metricsAfter.meCenter.x) <= 6
+            && Math.abs(metricsAfter.ring2Center.y - metricsAfter.meCenter.y) <= 6,
+        };
+      }, {
+        timeout: 4000,
+        message: 'expected hop rings to settle back onto the Me-centered viewport-aligned position after zoom/pan',
+      })
+      .toEqual({
+        transformChanged: true,
+        aligned: true,
+      });
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps nodes and edges visible through settled selection, detail-open, zoom, and pan interactions', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
