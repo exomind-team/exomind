@@ -574,7 +574,7 @@ async function runThreeNodeSample(page: Page, layoutTestConfig: GoalLayoutTestCo
   await primeGoalsPage(page, layoutTestConfig);
   const goalWarnings = trackGoalWarnings(page);
   const { firstGoalId } = await createThreeNodeChain(page);
-  const settleStartAt = Date.now();
+  const settleStartAt = performance.now();
 
   await expect
     .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
@@ -583,7 +583,7 @@ async function runThreeNodeSample(page: Page, layoutTestConfig: GoalLayoutTestCo
     })
     .toBe(true);
 
-  const settledInMs = Date.now() - settleStartAt;
+  const settledInMs = Math.round(performance.now() - settleStartAt);
   await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
   await expect
     .poll(() => measureThreeNodeGeometry(page, firstGoalId), {
@@ -680,6 +680,73 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
 
     expect(goalWarnings.some((entry) => entry.includes('simulation:init'))).toBe(true);
     expect(goalWarnings.some((entry) => entry.includes('page:render-health'))).toBe(true);
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
+  test('keeps Me centered in the browser on first load and after the graph grows', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    const readMeViewportMetrics = () => page.evaluate(() => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const canvas = me?.closest('.react-flow') as HTMLElement | null;
+      if (!me || !canvas) return null;
+      const canvasRect = canvas.getBoundingClientRect();
+      const rect = me.getBoundingClientRect();
+      return {
+        meCenterX: rect.x + rect.width / 2,
+        meCenterY: rect.y + rect.height / 2,
+        viewportCenterX: canvasRect.x + canvasRect.width / 2,
+        viewportCenterY: canvasRect.y + canvasRect.height / 2,
+      };
+    });
+
+    await expect
+      .poll(async () => {
+        const metrics = await readMeViewportMetrics();
+        if (!metrics) return false;
+        return Math.abs(metrics.meCenterX - metrics.viewportCenterX) <= 16
+          && Math.abs(metrics.meCenterY - metrics.viewportCenterY) <= 16;
+      }, {
+        timeout: 15000,
+        message: 'expected Me to initialize near the viewport center instead of the top-left corner',
+      })
+      .toBe(true);
+
+    const simulationEndCountBeforeGrowth = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+    await expect(page.locator('[data-testid^="task-flow-edge-hit-area-"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid^="task-flow-edge-label-"]')).toHaveCount(1);
+
+    await expect
+      .poll(() => goalWarnings.filter((entry) => entry.includes('simulation:end')).length, {
+        timeout: 15000,
+        message: 'expected a new simulation:end warn log after the graph grows from Me',
+      })
+      .toBeGreaterThan(simulationEndCountBeforeGrowth);
+
+    await expect
+      .poll(async () => {
+        const metrics = await readMeViewportMetrics();
+        if (!metrics) return false;
+        return Math.abs(metrics.meCenterX - metrics.viewportCenterX) <= 16
+          && Math.abs(metrics.meCenterY - metrics.viewportCenterY) <= 16;
+      }, {
+        timeout: 15000,
+        message: 'expected Me to remain centered after the graph grows',
+      })
+      .toBe(true);
+
+    const visibilitySnapshot = await snapshotRenderVisibility(page);
+    expectVisibleGraphSnapshot(visibilitySnapshot, 2, 1, 'me-centered-after-growth');
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
