@@ -683,6 +683,66 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps nodes and edges visible while the goal force simulation is still moving', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const tickCountBeforeGrowth = goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+    const endCountBeforeGrowth = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+
+    const firstGoalTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(1).getAttribute('data-testid');
+    if (!firstGoalTestId) {
+      throw new Error('expected first goal node test id for moving-state coverage');
+    }
+
+    await openNodeContextMenu(page, firstGoalTestId, 220, 180);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-hit-area-"]')).toHaveCount(2);
+
+    await expect
+      .poll(() => {
+        const tickCount = goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+        const endCount = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+        return tickCount > tickCountBeforeGrowth && endCount === endCountBeforeGrowth;
+      }, {
+        timeout: 5000,
+        message: 'expected a moving simulation window after graph growth before the next simulation:end',
+      })
+      .toBe(true);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'moving-simulation-window',
+    );
+
+    await expect
+      .poll(() => goalWarnings.filter((entry) => entry.includes('simulation:end')).length, {
+        timeout: 15000,
+        message: 'expected simulation:end warn log after moving-state visibility assertions',
+      })
+      .toBeGreaterThan(endCountBeforeGrowth);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'moving-simulation-settled',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps Me centered in the browser on first load and after the graph grows', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
