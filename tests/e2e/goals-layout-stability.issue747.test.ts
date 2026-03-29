@@ -2499,26 +2499,26 @@ test('keeps randomized three-node samples within the stable geometry constraints
       description: seeds.join(','),
     });
 
-    const samplePage = await page.context().newPage();
-    try {
-      for (const [index, seed] of seeds.entries()) {
+    for (const [index, seed] of seeds.entries()) {
+      const samplePage = await page.context().newPage();
+      try {
         const result = await runThreeNodeSample(samplePage, {
           randomSeed: seed,
         });
         expect(result.goalWarnings.some((entry) => entry.includes('simulation:init'))).toBe(true);
         expectThreeNodeConstraints(result.geometry, result.settledInMs, `random-sample-${index + 1}-seed-${seed}`);
+      } finally {
+        await samplePage.close();
       }
-    } finally {
-      await samplePage.close();
     }
   });
 
   test('keeps fixed-angle three-node samples within the stable geometry constraints across 20 fixed-angle samples', async ({ page }) => {
     const coverageAngles = Array.from({ length: 20 }, (_, index) => index * Math.PI / 10);
 
-    const samplePage = await page.context().newPage();
-    try {
-      for (const [index, angle] of coverageAngles.entries()) {
+    for (const [index, angle] of coverageAngles.entries()) {
+      const samplePage = await page.context().newPage();
+      try {
         const result = await runThreeNodeSample(samplePage, {
           fixedPolarSequence: [
             { angle, distance: 192 },
@@ -2527,9 +2527,9 @@ test('keeps randomized three-node samples within the stable geometry constraints
         });
         expect(result.goalWarnings.some((entry) => entry.includes('simulation:init'))).toBe(true);
         expectThreeNodeConstraints(result.geometry, result.settledInMs, `fixed-angle-${index + 1}`);
+      } finally {
+        await samplePage.close();
       }
-    } finally {
-      await samplePage.close();
     }
   });
 });
