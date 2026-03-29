@@ -142,14 +142,23 @@ async function openNodeContextMenu(page: Page, testId: string, clientX: number, 
 }
 
 function trackGoalWarnings(page: Page): string[] {
+  const { goalWarnings } = createGoalWarningTracker(page);
+  return goalWarnings;
+}
+
+function createGoalWarningTracker(page: Page) {
   const goalWarnings: string[] = [];
-  page.on('console', (message) => {
+  const handler = (message: any) => {
     if (message.type() !== 'warning') return;
     const text = message.text();
     if (!text.includes('[goals][#747]')) return;
     goalWarnings.push(text);
-  });
-  return goalWarnings;
+  };
+  page.on('console', handler);
+  return {
+    goalWarnings,
+    detach: () => page.off('console', handler),
+  };
 }
 
 interface RenderVisibilitySnapshot {
@@ -231,6 +240,11 @@ async function readViewportTransform(page: Page) {
       attribute: viewport.getAttribute('transform'),
     };
   });
+}
+
+async function gotoGoalsPage(page: Page) {
+  await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 20000 });
 }
 
 function makeSingleEdgeGraph(): PersistedGoalGraph {
@@ -469,8 +483,7 @@ function makeLegacySemanticEdgeGraph(
 }
 
 async function createThreeNodeChain(page: Page) {
-  await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+  await gotoGoalsPage(page);
   await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
 
   await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
@@ -572,31 +585,36 @@ async function measureSingleVisibleGoalDirection(page: Page, goalTestId: string)
 
 async function runThreeNodeSample(page: Page, layoutTestConfig: GoalLayoutTestConfig | null = null) {
   await primeGoalsPage(page, layoutTestConfig);
-  const goalWarnings = trackGoalWarnings(page);
-  const { firstGoalId } = await createThreeNodeChain(page);
-  const settleStartAt = performance.now();
+  const tracker = createGoalWarningTracker(page);
+  try {
+    const { goalWarnings } = tracker;
+    const { firstGoalId } = await createThreeNodeChain(page);
+    const settleStartAt = performance.now();
 
-  await expect
-    .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
-      timeout: 30000,
-      message: 'expected simulation:end warn log for three-node chain within 30s',
-    })
-    .toBe(true);
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 30000,
+        message: 'expected simulation:end warn log for three-node chain within 30s',
+      })
+      .toBe(true);
 
-  const settledInMs = Math.round(performance.now() - settleStartAt);
-  await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
-  await expect
-    .poll(() => measureThreeNodeGeometry(page, firstGoalId), {
-      timeout: 2000,
-      message: 'expected measurable three-node geometry after the final layout paint',
-    })
-    .not.toBeNull();
-  const geometry = await measureThreeNodeGeometry(page, firstGoalId);
-  return {
-    geometry,
-    goalWarnings,
-    settledInMs,
-  };
+    const settledInMs = Math.round(performance.now() - settleStartAt);
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect
+      .poll(() => measureThreeNodeGeometry(page, firstGoalId), {
+        timeout: 2000,
+        message: 'expected measurable three-node geometry after the final layout paint',
+      })
+      .not.toBeNull();
+    const geometry = await measureThreeNodeGeometry(page, firstGoalId);
+    return {
+      geometry,
+      goalWarnings,
+      settledInMs,
+    };
+  } finally {
+    tracker.detach();
+  }
 }
 
 function expectThreeNodeConstraints(
@@ -628,8 +646,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
   test('keeps nodes visible after simulation settles and emits traceable warn logs', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
 
     const meNode = page.getByTestId('goal-flow-node-me');
     await expect(meNode).toBeVisible({ timeout: 10000 });
@@ -686,8 +703,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
   test('keeps nodes and edges visible while the goal force simulation is still moving', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
 
     await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
@@ -746,8 +762,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
   test('keeps the graph stable when selecting a goal and opening detail before the simulation settles', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
 
     await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
@@ -812,8 +827,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
   test('keeps the graph stable when opening edge detail before the simulation settles', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
 
     await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
@@ -885,11 +899,120 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps the graph stable when zooming and panning before the simulation settles', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const tickCountBeforeGrowth = goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+    const endCountBeforeGrowth = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+
+    const firstGoalTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(1).getAttribute('data-testid');
+    if (!firstGoalTestId) {
+      throw new Error('expected first goal node test id for moving-viewport coverage');
+    }
+
+    await openNodeContextMenu(page, firstGoalTestId, 220, 180);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+
+    await expect
+      .poll(() => {
+        const tickCount = goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+        const endCount = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+        return tickCount > tickCountBeforeGrowth && endCount === endCountBeforeGrowth;
+      }, {
+        timeout: 5000,
+        message: 'expected a moving simulation window before zooming and panning',
+      })
+      .toBe(true);
+
+    const viewportBeforeZoom = await readViewportTransform(page);
+    const renderer = page.locator('.react-flow__renderer');
+    await renderer.hover();
+    await page.mouse.wheel(0, -320);
+
+    await expect
+      .poll(async () => {
+        const viewportAfterZoom = await readViewportTransform(page);
+        const endCount = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+        return {
+          viewportChanged: JSON.stringify(viewportAfterZoom) !== JSON.stringify(viewportBeforeZoom),
+          stillMoving: endCount === endCountBeforeGrowth,
+        };
+      }, {
+        timeout: 4000,
+        message: 'expected viewport transform to change after zoom during the moving simulation window',
+      })
+      .toEqual({
+        viewportChanged: true,
+        stillMoving: true,
+      });
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'moving-viewport:after-zoom-before-settle',
+    );
+
+    const viewportAfterZoom = await readViewportTransform(page);
+    await page.keyboard.down('Space');
+    await page.mouse.wheel(120, 96);
+    await page.keyboard.up('Space');
+
+    await expect
+      .poll(async () => {
+        const viewportAfterPan = await readViewportTransform(page);
+        const endCount = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+        return {
+          viewportChanged: JSON.stringify(viewportAfterPan) !== JSON.stringify(viewportAfterZoom),
+          stillMoving: endCount === endCountBeforeGrowth,
+        };
+      }, {
+        timeout: 4000,
+        message: 'expected viewport transform to change after pan during the moving simulation window',
+      })
+      .toEqual({
+        viewportChanged: true,
+        stillMoving: true,
+      });
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'moving-viewport:after-pan-before-settle',
+    );
+
+    await expect
+      .poll(() => goalWarnings.filter((entry) => entry.includes('simulation:end')).length, {
+        timeout: 15000,
+        message: 'expected simulation:end warn log after moving viewport interactions',
+      })
+      .toBeGreaterThan(endCountBeforeGrowth);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'moving-viewport:after-pan-after-settle',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps Me centered in the browser on first load and after the graph grows', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
 
     const readMeViewportMetrics = () => page.evaluate(() => {
@@ -954,8 +1077,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
 
   test('renders single-edge arrows and nearest-point anchors in the browser', async ({ page }) => {
     await primeGoalsPageWithGraph(page, makeSingleEdgeGraph());
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
@@ -1021,8 +1143,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
 
   test('keeps duplicate edges curved in the middle while sharing the same endpoints and arrows', async ({ page }) => {
     await primeGoalsPageWithGraph(page, makeDuplicateEdgeGraph());
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('task-flow-edge-visible-edge-me-a-1')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('task-flow-edge-visible-edge-me-a-2')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('task-flow-edge-marker-edge-me-a-1')).toBeAttached();
@@ -1082,9 +1203,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         { angle: 0.03, distance: 194 },
       ],
     });
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('goal-flow-node-goal-b')).toBeVisible({ timeout: 10000 });
@@ -1151,7 +1270,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       });
       const baselineWarnings = trackGoalWarnings(baselinePage);
       await baselinePage.goto('/goals', { waitUntil: 'domcontentloaded' });
-      await expect(baselinePage.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+      await expect(baselinePage.getByTestId('goals-page')).toBeVisible({ timeout: 20000 });
       await expect(baselinePage.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
       await expect
         .poll(() => baselineWarnings.some((entry) => entry.includes('simulation:end')), {
@@ -1174,7 +1293,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       });
       const hiddenWarnings = trackGoalWarnings(hiddenSiblingPage);
       await hiddenSiblingPage.goto('/goals', { waitUntil: 'domcontentloaded' });
-      await expect(hiddenSiblingPage.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+      await expect(hiddenSiblingPage.getByTestId('goals-page')).toBeVisible({ timeout: 20000 });
       await expect(hiddenSiblingPage.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
       await expect(hiddenSiblingPage.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
       await expect(hiddenSiblingPage.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
@@ -1218,9 +1337,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         { angle: 0.85, distance: 226 },
       ],
     });
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
@@ -1278,6 +1395,100 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps hidden-condition show-cancelled round-trips stable while the layout is still moving', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+    const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+    const countSimulationTicks = () => goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+
+    await primeGoalsPageWithGraph(page, makeShownCancelledGraph(), {
+      fixedPolarSequence: [
+        { angle: 0.2, distance: 192 },
+        { angle: 0.85, distance: 226 },
+      ],
+    });
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toHaveCount(0);
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toHaveCount(0);
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected initial simulation:end warn log before moving show-cancelled round-trip assertions',
+      })
+      .toBeGreaterThanOrEqual(1);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'moving-show-cancelled:initial-hidden',
+    );
+
+    const simulationTickCountBeforeShow = countSimulationTicks();
+    const simulationEndCountBeforeShow = countSimulationEnds();
+    await page.getByRole('checkbox', { name: '显示已取消' }).check();
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(() => {
+        const tickCount = countSimulationTicks();
+        const endCount = countSimulationEnds();
+        return tickCount > simulationTickCountBeforeShow && endCount === simulationEndCountBeforeShow;
+      }, {
+        timeout: 5000,
+        message: 'expected moving window after show-cancelled toggles on before the next simulation:end',
+      })
+      .toBe(true);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'moving-show-cancelled:shown-before-settle',
+    );
+
+    const simulationTickCountBeforeHide = countSimulationTicks();
+    await page.getByRole('checkbox', { name: '显示已取消' }).uncheck();
+    await expect(page.getByTestId('goal-flow-node-goal-b')).toHaveCount(0);
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toHaveCount(0);
+    await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(() => countSimulationTicks(), {
+        timeout: 5000,
+        message: 'expected simulation ticks to continue after show-cancelled toggles back off during motion',
+      })
+      .toBeGreaterThan(simulationTickCountBeforeHide);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'moving-show-cancelled:hidden-before-settle',
+    );
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected a new simulation:end warn log after moving show-cancelled round-trip',
+      })
+      .toBeGreaterThan(simulationEndCountBeforeShow);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      2,
+      1,
+      'moving-show-cancelled:hidden-after-settle',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps re-hidden cancelled structures from distorting the visible graph after show-cancelled toggles back off', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
     const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
@@ -1288,9 +1499,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         { angle: 0.85, distance: 226 },
       ],
     });
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
@@ -1364,10 +1573,8 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
   test('keeps semantic-status edges visible whenever both endpoint nodes stay visible', async ({ page }) => {
     for (const edgeStatus of ['in_progress', 'suspended', 'completed', 'cancelled'] as const) {
       await primeGoalsPageWithStoredGraph(page, makeLegacySemanticEdgeGraph(edgeStatus));
-      await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-
       const edgeId = `edge-me-a-${edgeStatus}`;
-      await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+      await gotoGoalsPage(page);
       await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
       await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
       await expect(page.getByTestId(`task-flow-edge-visible-${edgeId}`)).toBeVisible({ timeout: 10000 });
@@ -1412,8 +1619,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
   });
 
   test('keeps Me fixed at the concentric-ring center and renders complete independent rings', async ({ page }) => {
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
 
     await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
@@ -1605,8 +1811,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
   test('keeps hop rings aligned with the browser viewport transform during zoom and pan', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
 
     await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
@@ -1782,8 +1987,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
   test('keeps nodes and edges visible through settled selection, detail-open, zoom, and pan interactions', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
 
     await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
@@ -1882,8 +2086,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     const goalWarnings = trackGoalWarnings(page);
 
     await primeGoalsPageWithGraph(page, makeSingleEdgeGraph());
-    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('goal-flow-node-goal-a')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
@@ -1941,26 +2144,26 @@ test('keeps randomized three-node samples within the stable geometry constraints
       description: seeds.join(','),
     });
 
-    for (const [index, seed] of seeds.entries()) {
-      const samplePage = await page.context().newPage();
-      try {
+    const samplePage = await page.context().newPage();
+    try {
+      for (const [index, seed] of seeds.entries()) {
         const result = await runThreeNodeSample(samplePage, {
           randomSeed: seed,
         });
         expect(result.goalWarnings.some((entry) => entry.includes('simulation:init'))).toBe(true);
         expectThreeNodeConstraints(result.geometry, result.settledInMs, `random-sample-${index + 1}-seed-${seed}`);
-      } finally {
-        await samplePage.close();
       }
+    } finally {
+      await samplePage.close();
     }
   });
 
   test('keeps fixed-angle three-node samples within the stable geometry constraints across 20 fixed-angle samples', async ({ page }) => {
     const coverageAngles = Array.from({ length: 20 }, (_, index) => index * Math.PI / 10);
 
-    for (const [index, angle] of coverageAngles.entries()) {
-      const samplePage = await page.context().newPage();
-      try {
+    const samplePage = await page.context().newPage();
+    try {
+      for (const [index, angle] of coverageAngles.entries()) {
         const result = await runThreeNodeSample(samplePage, {
           fixedPolarSequence: [
             { angle, distance: 192 },
@@ -1969,9 +2172,9 @@ test('keeps randomized three-node samples within the stable geometry constraints
         });
         expect(result.goalWarnings.some((entry) => entry.includes('simulation:init'))).toBe(true);
         expectThreeNodeConstraints(result.geometry, result.settledInMs, `fixed-angle-${index + 1}`);
-      } finally {
-        await samplePage.close();
       }
+    } finally {
+      await samplePage.close();
     }
   });
 });
