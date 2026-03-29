@@ -1009,6 +1009,174 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps the graph stable while dragging a goal node and releasing it', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+    const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const firstGoalTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(1).getAttribute('data-testid');
+    if (!firstGoalTestId) {
+      throw new Error('expected first goal node test id for node-drag coverage');
+    }
+
+    await openNodeContextMenu(page, firstGoalTestId, 220, 180);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    await expect(page.getByTestId('goals-hop-rings')).toBeVisible({ timeout: 10000 });
+    const openDetailPanel = page.getByTestId('goals-page').getByRole('complementary');
+    if (await openDetailPanel.count()) {
+      await openDetailPanel.getByRole('button').first().click();
+      await expect(openDetailPanel).toHaveCount(0);
+    }
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected simulation:end warn log before node-drag stability assertions',
+      })
+      .toBeGreaterThanOrEqual(1);
+
+    const secondGoalTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(2).getAttribute('data-testid');
+    if (!secondGoalTestId) {
+      throw new Error('expected second goal node test id for node-drag coverage');
+    }
+
+    const readDragMetrics = () => page.evaluate(({ draggedGoalTestId, siblingGoalTestId }) => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const draggedGoal = document.querySelector(`[data-testid="${draggedGoalTestId}"]`) as HTMLElement | null;
+      const siblingGoal = document.querySelector(`[data-testid="${siblingGoalTestId}"]`) as HTMLElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const ring2 = document.querySelector('[data-testid="goals-hop-ring-2"] circle') as SVGCircleElement | null;
+      if (!me || !draggedGoal || !siblingGoal || !ring1 || !ring2) {
+        return null;
+      }
+
+      const getCenter = (element: Element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+
+      return {
+        meCenter: getCenter(me),
+        draggedGoalCenter: getCenter(draggedGoal),
+        siblingGoalCenter: getCenter(siblingGoal),
+        ring1Center: getCenter(ring1),
+        ring2Center: getCenter(ring2),
+      };
+    }, {
+      draggedGoalTestId: firstGoalTestId,
+      siblingGoalTestId: secondGoalTestId,
+    });
+
+    const baselineMetrics = await readDragMetrics();
+    expect(baselineMetrics, 'node-drag: expected measurable baseline metrics').not.toBeNull();
+
+    const draggedGoal = page.locator(`.react-flow__node:has([data-testid="${firstGoalTestId}"])`);
+    const draggedGoalBox = await draggedGoal.boundingBox();
+    expect(draggedGoalBox, 'node-drag: expected measurable dragged goal box').not.toBeNull();
+    if (!draggedGoalBox) {
+      throw new Error('expected dragged goal bounding box for node-drag coverage');
+    }
+
+    const dragStartX = draggedGoalBox.x + draggedGoalBox.width / 2;
+    const dragStartY = draggedGoalBox.y + draggedGoalBox.height / 2;
+    const dragEndX = dragStartX + 84;
+    const dragEndY = dragStartY + 56;
+    const simulationEndCountBeforeDrag = countSimulationEnds();
+
+    await page.mouse.move(dragStartX, dragStartY);
+    await page.mouse.down();
+    await page.mouse.move(dragEndX, dragEndY, { steps: 12 });
+
+    await expect
+      .poll(async () => {
+        const dragMetrics = await readDragMetrics();
+        if (!dragMetrics || !baselineMetrics) return null;
+        const movedDistance = Math.hypot(
+          dragMetrics.draggedGoalCenter.x - baselineMetrics.draggedGoalCenter.x,
+          dragMetrics.draggedGoalCenter.y - baselineMetrics.draggedGoalCenter.y,
+        );
+        return {
+          movedEnough: movedDistance >= 24,
+          pinLogged: goalWarnings.some((entry) => entry.includes('simulation:pin-node') && entry.includes(firstGoalTestId.replace('goal-flow-node-', ''))),
+          meStable:
+            Math.abs(dragMetrics.meCenter.x - baselineMetrics.meCenter.x) <= 2
+            && Math.abs(dragMetrics.meCenter.y - baselineMetrics.meCenter.y) <= 2,
+          ringsAligned:
+            Math.abs(dragMetrics.ring1Center.x - dragMetrics.meCenter.x) <= 6
+            && Math.abs(dragMetrics.ring1Center.y - dragMetrics.meCenter.y) <= 6
+            && Math.abs(dragMetrics.ring2Center.x - dragMetrics.meCenter.x) <= 6
+            && Math.abs(dragMetrics.ring2Center.y - dragMetrics.meCenter.y) <= 6,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected node drag to move the goal while keeping Me and hop rings stable',
+      })
+      .toEqual({
+        movedEnough: true,
+        pinLogged: true,
+        meStable: true,
+        ringsAligned: true,
+      });
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'node-drag:during-drag',
+    );
+
+    await page.mouse.up();
+
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:release-node') && entry.includes(firstGoalTestId.replace('goal-flow-node-', ''))), {
+        timeout: 5000,
+        message: 'expected simulation:release-node warn log after goal drag stops',
+      })
+      .toBe(true);
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected a new simulation:end warn log after releasing the dragged goal node',
+      })
+      .toBeGreaterThan(simulationEndCountBeforeDrag);
+
+    const settledMetrics = await readDragMetrics();
+    expect(settledMetrics, 'node-drag: expected measurable settled metrics').not.toBeNull();
+    const settledMovedDistance = Math.hypot(
+      (settledMetrics?.draggedGoalCenter.x ?? 0) - (baselineMetrics?.draggedGoalCenter.x ?? 0),
+      (settledMetrics?.draggedGoalCenter.y ?? 0) - (baselineMetrics?.draggedGoalCenter.y ?? 0),
+    );
+    expect(settledMovedDistance, 'node-drag: expected dragged goal to remain meaningfully displaced after release').toBeGreaterThanOrEqual(24);
+    expect(Math.abs((settledMetrics?.meCenter.x ?? 0) - (baselineMetrics?.meCenter.x ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (baselineMetrics?.meCenter.y ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs((settledMetrics?.ring1Center.x ?? 0) - (settledMetrics?.meCenter.x ?? 0))).toBeLessThanOrEqual(6);
+    expect(Math.abs((settledMetrics?.ring1Center.y ?? 0) - (settledMetrics?.meCenter.y ?? 0))).toBeLessThanOrEqual(6);
+    expect(Math.abs((settledMetrics?.ring2Center.x ?? 0) - (settledMetrics?.meCenter.x ?? 0))).toBeLessThanOrEqual(6);
+    expect(Math.abs((settledMetrics?.ring2Center.y ?? 0) - (settledMetrics?.meCenter.y ?? 0))).toBeLessThanOrEqual(6);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'node-drag:after-release',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps Me centered in the browser on first load and after the graph grows', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 

@@ -398,3 +398,12 @@ export const useGoalStore = create<GoalStoreState>((set, get) => ({
     }));
   },
 }));
+
+export function resetGoalStoreForTests(): void {
+  const nextState = loadStoredGoalState();
+  useGoalStore.setState({
+    graph: nextState.graph,
+    opLog: nextState.opLog,
+    edgeOverrides: nextState.edgeOverrides,
+  });
+}

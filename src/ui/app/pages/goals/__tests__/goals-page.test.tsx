@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { TaskNode } from '@/lib/types/task';
+import { resetGoalStoreForTests } from '../goal-store';
 
 const flowApiMocks = vi.hoisted(() => ({
   lastProps: null as null | Record<string, unknown>,
@@ -177,7 +178,6 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 async function loadGoalsPage() {
-  vi.resetModules();
   const { GoalsPage } = await import('../GoalsPage');
   const { useGoalStore } = await import('../goal-store');
   return { GoalsPage, useGoalStore };
@@ -188,6 +188,7 @@ describe('GoalsPage', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    resetGoalStoreForTests();
     forceLayoutMocks.emitEnabled = true;
     developerModeMocks.enabled = false;
     developerModeMocks.subscribe.mockClear();
@@ -204,6 +205,7 @@ describe('GoalsPage', () => {
     flowApiMocks.setCenter.mockReset();
     flowApiMocks.getViewport.mockReset();
     flowApiMocks.getViewport.mockReturnValue({ x: 0, y: 0, zoom: 1 });
+    flowApiMocks.lastProps = null;
     consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
