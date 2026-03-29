@@ -1366,6 +1366,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
 
   test('keeps the graph stable when reconnecting an edge through the real edge updater', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
+    const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
     await primeGoalsPageWithGraph(page, makeStarGraph());
     await gotoGoalsPage(page);
 
@@ -1379,6 +1380,45 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       .toBe(true);
 
     await page.getByRole('button', { name: '编辑' }).click();
+
+    const readReconnectMetrics = () => page.evaluate(() => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const goalA = document.querySelector('[data-testid="goal-flow-node-goal-a"]') as HTMLElement | null;
+      const goalB = document.querySelector('[data-testid="goal-flow-node-goal-b"]') as HTMLElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const goalsPage = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const meWrapper = me?.closest('.react-flow__node') as HTMLElement | null;
+      const goalAWrapper = goalA?.closest('.react-flow__node') as HTMLElement | null;
+      const goalBWrapper = goalB?.closest('.react-flow__node') as HTMLElement | null;
+      const nodesContainer = document.querySelector('.react-flow__nodes') as HTMLElement | null;
+      const reactFlowWrapper = document.querySelector('[data-testid="rf__wrapper"]') as HTMLElement | null;
+      if (!me || !goalA || !goalB || !ring1) {
+        return null;
+      }
+      const getCenter = (element: Element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+      return {
+        meCenter: getCenter(me),
+        goalACenter: getCenter(goalA),
+        goalBCenter: getCenter(goalB),
+        ring1Center: getCenter(ring1),
+        scrollY: window.scrollY,
+        pageTop: goalsPage?.getBoundingClientRect().top ?? null,
+        meTransform: meWrapper?.style.transform ?? null,
+        goalATransform: goalAWrapper?.style.transform ?? null,
+        goalBTransform: goalBWrapper?.style.transform ?? null,
+        meWrapperCenter: meWrapper ? getCenter(meWrapper) : null,
+        nodesContainerTop: nodesContainer?.getBoundingClientRect().top ?? null,
+        reactFlowScrollTop: reactFlowWrapper?.scrollTop ?? null,
+        reactFlowScrollLeft: reactFlowWrapper?.scrollLeft ?? null,
+      };
+    });
+
     const edgeHitArea = page.getByTestId('task-flow-edge-hit-area-edge-me-a');
     const edgeBBox = await edgeHitArea.boundingBox();
     if (!edgeBBox) {
@@ -1390,15 +1430,52 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       edgeBBox.y + edgeBBox.height / 2,
     );
 
-    const sourceUpdater = page.locator('.react-flow__edgeupdater-source').first();
-    await expect(sourceUpdater).toBeVisible({ timeout: 5000 });
+    const targetUpdaters = page.locator('.react-flow__edgeupdater-target');
+    await expect(targetUpdaters.first()).toBeVisible({ timeout: 5000 });
+    const baselineMetrics = await readReconnectMetrics();
+    expect(baselineMetrics, 'edge-reconnect: expected measurable baseline metrics').not.toBeNull();
+    const baselineViewport = await readViewportTransform(page);
 
+    const goalABox = await page.getByTestId('goal-flow-node-goal-a').boundingBox();
     const goalBBox = await page.getByTestId('goal-flow-node-goal-b').boundingBox();
-    const updaterBBox = await sourceUpdater.boundingBox();
-    if (!goalBBox || !updaterBBox) {
-      throw new Error('expected measurable edge updater and goal node bounds for reconnect coverage');
+    if (!goalABox || !goalBBox) {
+      throw new Error('expected measurable goal node bounds for reconnect coverage');
     }
 
+    const updaterCandidates = await targetUpdaters.evaluateAll((elements) => (
+      elements.map((element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        };
+      })
+    ));
+    const updaterBBox = updaterCandidates
+      .map((candidate) => ({
+        ...candidate,
+        centerX: candidate.x + candidate.width / 2,
+        centerY: candidate.y + candidate.height / 2,
+      }))
+      .sort((left, right) => {
+        const leftDistance = Math.hypot(
+          left.centerX - (goalABox.x + goalABox.width / 2),
+          left.centerY - (goalABox.y + goalABox.height / 2),
+        );
+        const rightDistance = Math.hypot(
+          right.centerX - (goalABox.x + goalABox.width / 2),
+          right.centerY - (goalABox.y + goalABox.height / 2),
+        );
+        return leftDistance - rightDistance;
+      })[0];
+
+    if (!updaterBBox) {
+      throw new Error('expected measurable edge updater bounds for reconnect coverage');
+    }
+
+    const simulationEndCountBeforeReconnect = countSimulationEnds();
     await page.mouse.move(
       updaterBBox.x + updaterBBox.width / 2,
       updaterBBox.y + updaterBBox.height / 2,
@@ -1418,13 +1495,81 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       })
       .toBe(true);
 
+    await expect
+      .poll(async () => {
+        const reconnectMetrics = await readReconnectMetrics();
+        if (!reconnectMetrics || !baselineMetrics) return null;
+        const viewportAfterReconnect = await readViewportTransform(page);
+        return {
+          meStable:
+            Math.abs(reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x) <= 2
+            && Math.abs(reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y) <= 2,
+          meDeltaX: Number((reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x).toFixed(2)),
+          meDeltaY: Number((reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y).toFixed(2)),
+          goalADeltaX: Number((reconnectMetrics.goalACenter.x - baselineMetrics.goalACenter.x).toFixed(2)),
+          goalADeltaY: Number((reconnectMetrics.goalACenter.y - baselineMetrics.goalACenter.y).toFixed(2)),
+          goalBDeltaX: Number((reconnectMetrics.goalBCenter.x - baselineMetrics.goalBCenter.x).toFixed(2)),
+          goalBDeltaY: Number((reconnectMetrics.goalBCenter.y - baselineMetrics.goalBCenter.y).toFixed(2)),
+          meWrapperDeltaY: Number((((reconnectMetrics.meWrapperCenter?.y ?? 0) - (baselineMetrics.meWrapperCenter?.y ?? 0))).toFixed(2)),
+          scrollDeltaY: Number(((reconnectMetrics.scrollY ?? 0) - (baselineMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((reconnectMetrics.pageTop ?? 0) - (baselineMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((reconnectMetrics.nodesContainerTop ?? 0) - (baselineMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((reconnectMetrics.reactFlowScrollTop ?? 0) - (baselineMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((reconnectMetrics.reactFlowScrollLeft ?? 0) - (baselineMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
+          ringsAligned:
+            Math.abs(reconnectMetrics.ring1Center.x - reconnectMetrics.meCenter.x) <= 6
+            && Math.abs(reconnectMetrics.ring1Center.y - reconnectMetrics.meCenter.y) <= 6,
+          viewportChanged: JSON.stringify(viewportAfterReconnect) !== JSON.stringify(baselineViewport),
+          meTransformChanged: reconnectMetrics.meTransform !== baselineMetrics.meTransform,
+          goalATransformChanged: reconnectMetrics.goalATransform !== baselineMetrics.goalATransform,
+          goalBTransformChanged: reconnectMetrics.goalBTransform !== baselineMetrics.goalBTransform,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected Me screen position and hop rings to remain stable while reconnecting an edge',
+      })
+      .toMatchObject({
+        meStable: true,
+        meDeltaX: 0,
+        meDeltaY: 0,
+        meWrapperDeltaY: 0,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
+        ringsAligned: true,
+        viewportChanged: false,
+        meTransformChanged: false,
+      });
+
     await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
-    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(3);
     expectVisibleGraphSnapshot(
       await snapshotRenderVisibility(page),
       3,
-      2,
-      'edge-reconnect:settled',
+      3,
+      'edge-reconnect:after-reconnect-before-settle',
+    );
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected a new simulation:end warn log after reconnecting an edge',
+      })
+      .toBeGreaterThan(simulationEndCountBeforeReconnect);
+
+    const settledMetrics = await readReconnectMetrics();
+    expect(Math.abs(((settledMetrics?.meCenter.x ?? 0) - (baselineMetrics?.meCenter.x ?? 0)))).toBeLessThanOrEqual(2);
+    expect(Math.abs(((settledMetrics?.meCenter.y ?? 0) - (baselineMetrics?.meCenter.y ?? 0)))).toBeLessThanOrEqual(2);
+    expect(Math.abs(((settledMetrics?.ring1Center.x ?? 0) - (settledMetrics?.meCenter.x ?? 0)))).toBeLessThanOrEqual(6);
+    expect(Math.abs(((settledMetrics?.ring1Center.y ?? 0) - (settledMetrics?.meCenter.y ?? 0)))).toBeLessThanOrEqual(6);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      3,
+      'edge-reconnect:after-reconnect-after-settle',
     );
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
