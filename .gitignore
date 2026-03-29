@@ -78,6 +78,7 @@ htmlcov/
 !docs/agents/**/report-template.html
 !docs/agents/**/route-template.html
 !.claude/skills/**/assets/*.html
+!skills/**/assets/*.html
 
 # === Obsidian editor config ===
 .obsidian/
