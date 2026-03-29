@@ -809,6 +809,82 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps the graph stable when opening edge detail before the simulation settles', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await page.goto('/goals', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const tickCountBeforeGrowth = goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+    const endCountBeforeGrowth = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+
+    const firstGoalTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(1).getAttribute('data-testid');
+    if (!firstGoalTestId) {
+      throw new Error('expected first goal node test id for moving-edge-detail coverage');
+    }
+
+    await openNodeContextMenu(page, firstGoalTestId, 220, 180);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+
+    await expect
+      .poll(() => {
+        const tickCount = goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+        const endCount = goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+        return tickCount > tickCountBeforeGrowth && endCount === endCountBeforeGrowth;
+      }, {
+        timeout: 5000,
+        message: 'expected a moving simulation window before opening edge detail',
+      })
+      .toBe(true);
+
+    const edgeHitArea = page.locator('[data-testid^="task-flow-edge-hit-area-"]').first();
+    const edgeBox = await edgeHitArea.boundingBox();
+    expect(edgeBox, 'moving-edge-detail: expected measurable edge hit area').not.toBeNull();
+    if (!edgeBox) {
+      throw new Error('expected edge hit area bounding box for moving-edge-detail coverage');
+    }
+
+    await page.mouse.click(edgeBox.x + edgeBox.width / 2, edgeBox.y + edgeBox.height / 2, { button: 'right' });
+    const edgeDetailPanel = page.getByTestId('goals-page').getByRole('complementary');
+    await expect(edgeDetailPanel).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('路径详情')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    await expect(page.locator('[data-testid^="task-flow-edge-label-"]')).toHaveCount(2);
+
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'moving-edge-detail:detail-open-before-settle',
+    );
+
+    await expect
+      .poll(() => goalWarnings.filter((entry) => entry.includes('simulation:end')).length, {
+        timeout: 15000,
+        message: 'expected simulation:end warn log after opening edge detail during motion',
+      })
+      .toBeGreaterThan(endCountBeforeGrowth);
+
+    await expect(edgeDetailPanel).toBeVisible();
+    await expect(page.getByText('路径详情')).toBeVisible();
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'moving-edge-detail:detail-open-after-settle',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps Me centered in the browser on first load and after the graph grows', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
