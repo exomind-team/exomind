@@ -631,7 +631,8 @@ function renderBatchPanel() {
 
 function renderHeatmap() {
   const H = R.heatmap;
-  let html = '<div class="heatmap-grid">';
+  const colCount = H.cols.length;
+  let html = `<div class="heatmap-grid" style="grid-template-columns:100px repeat(${colCount},1fr)">`;
   // Header row
   html += '<div class="heatmap-header"></div>';
   H.cols.forEach(c => { html += `<div class="heatmap-header">${c}</div>`; });
