@@ -1839,6 +1839,228 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps the graph stable when cancelling an edge reconnect through the real edge updater', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+    const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+    const countReconnectStarts = () => goalWarnings.filter((entry) => entry.includes('page:interaction-reconnect-start')).length;
+    const countReconnectEnds = () => goalWarnings.filter((entry) => entry.includes('page:interaction-reconnect-end')).length;
+    const countReconnects = () => goalWarnings.filter((entry) => entry.includes('page:interaction-reconnect {')).length;
+
+    await primeGoalsPageWithGraph(page, makeStarGraph());
+    await gotoGoalsPage(page);
+
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected baseline simulation:end before reconnect-cancel coverage',
+      })
+      .toBe(true);
+
+    await page.getByRole('button', { name: '编辑' }).click();
+
+    const readReconnectMetrics = () => page.evaluate(() => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const goalsPage = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const meWrapper = me?.closest('.react-flow__node') as HTMLElement | null;
+      const nodesContainer = document.querySelector('.react-flow__nodes') as HTMLElement | null;
+      const reactFlowWrapper = document.querySelector('[data-testid="rf__wrapper"]') as HTMLElement | null;
+      if (!me || !ring1) {
+        return null;
+      }
+      const getCenter = (element: Element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+      return {
+        meCenter: getCenter(me),
+        ring1Center: getCenter(ring1),
+        scrollY: window.scrollY,
+        pageTop: goalsPage?.getBoundingClientRect().top ?? null,
+        meTransform: meWrapper?.style.transform ?? null,
+        meWrapperCenter: meWrapper ? getCenter(meWrapper) : null,
+        nodesContainerTop: nodesContainer?.getBoundingClientRect().top ?? null,
+        reactFlowScrollTop: reactFlowWrapper?.scrollTop ?? null,
+        reactFlowScrollLeft: reactFlowWrapper?.scrollLeft ?? null,
+      };
+    });
+
+    const edgeHitArea = page.getByTestId('task-flow-edge-hit-area-edge-me-a');
+    const edgeBBox = await edgeHitArea.boundingBox();
+    if (!edgeBBox) {
+      throw new Error('expected measurable edge hit area before reconnect-cancel coverage');
+    }
+
+    await page.mouse.click(
+      edgeBBox.x + edgeBBox.width / 2,
+      edgeBBox.y + edgeBBox.height / 2,
+    );
+
+    const targetUpdaters = page.locator('.react-flow__edgeupdater-target');
+    await expect(targetUpdaters.first()).toBeVisible({ timeout: 5000 });
+    const goalABox = await page.getByTestId('goal-flow-node-goal-a').boundingBox();
+    if (!goalABox) {
+      throw new Error('expected measurable goal-a bounds for reconnect-cancel coverage');
+    }
+
+    const updaterCandidates = await targetUpdaters.evaluateAll((elements) => (
+      elements.map((element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          centerX: rect.x + rect.width / 2,
+          centerY: rect.y + rect.height / 2,
+        };
+      })
+    ));
+    const updaterMatch = updaterCandidates
+      .map((candidate, index) => ({
+        index,
+        ...candidate,
+      }))
+      .sort((left, right) => {
+        const leftDistance = Math.hypot(
+          left.centerX - (goalABox.x + goalABox.width / 2),
+          left.centerY - (goalABox.y + goalABox.height / 2),
+        );
+        const rightDistance = Math.hypot(
+          right.centerX - (goalABox.x + goalABox.width / 2),
+          right.centerY - (goalABox.y + goalABox.height / 2),
+        );
+        return leftDistance - rightDistance;
+      })[0];
+    if (!updaterMatch) {
+      throw new Error('expected measurable edge updater bounds for reconnect-cancel coverage');
+    }
+
+    const liveUpdaterBox = await targetUpdaters.nth(updaterMatch.index).boundingBox();
+    if (!liveUpdaterBox) {
+      throw new Error('expected live edge updater bounds for reconnect-cancel coverage');
+    }
+
+    const baselineMetrics = await readReconnectMetrics();
+    expect(baselineMetrics, 'edge-reconnect-cancel: expected measurable baseline metrics').not.toBeNull();
+    const baselineViewport = await readViewportTransform(page);
+    const simulationEndCountBeforeReconnect = countSimulationEnds();
+    const reconnectStartCountBefore = countReconnectStarts();
+    const reconnectEndCountBefore = countReconnectEnds();
+    const reconnectCountBefore = countReconnects();
+
+    await page.mouse.move(
+      liveUpdaterBox.x + liveUpdaterBox.width / 2,
+      liveUpdaterBox.y + liveUpdaterBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(96, 220, { steps: 12 });
+
+    await expect
+      .poll(() => countReconnectStarts(), {
+        timeout: 5000,
+        message: 'expected reconnect-start warn log after beginning a cancelled reconnect gesture through the real edge updater',
+      })
+      .toBeGreaterThan(reconnectStartCountBefore);
+
+    await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'edge-reconnect-cancel:during-drag',
+    );
+
+    await page.mouse.up();
+
+    await expect
+      .poll(() => countReconnectEnds(), {
+        timeout: 5000,
+        message: 'expected reconnect-end warn log after cancelling a reconnect gesture',
+      })
+      .toBeGreaterThan(reconnectEndCountBefore);
+
+    expect(
+      countReconnects(),
+      'expected cancelled reconnect gesture to avoid page:interaction-reconnect',
+    ).toBe(reconnectCountBefore);
+
+    await expect
+      .poll(async () => {
+        const reconnectMetrics = await readReconnectMetrics();
+        if (!reconnectMetrics || !baselineMetrics) return null;
+        const viewportAfterReconnect = await readViewportTransform(page);
+        return {
+          meStable:
+            Math.abs(reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x) <= 2
+            && Math.abs(reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y) <= 2,
+          meDeltaX: Number((reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x).toFixed(2)),
+          meDeltaY: Number((reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y).toFixed(2)),
+          meWrapperDeltaY: Number((((reconnectMetrics.meWrapperCenter?.y ?? 0) - (baselineMetrics.meWrapperCenter?.y ?? 0))).toFixed(2)),
+          scrollDeltaY: Number(((reconnectMetrics.scrollY ?? 0) - (baselineMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((reconnectMetrics.pageTop ?? 0) - (baselineMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((reconnectMetrics.nodesContainerTop ?? 0) - (baselineMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((reconnectMetrics.reactFlowScrollTop ?? 0) - (baselineMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((reconnectMetrics.reactFlowScrollLeft ?? 0) - (baselineMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
+          ringsAligned:
+            Math.abs(reconnectMetrics.ring1Center.x - reconnectMetrics.meCenter.x) <= 6
+            && Math.abs(reconnectMetrics.ring1Center.y - reconnectMetrics.meCenter.y) <= 6,
+          viewportChanged: JSON.stringify(viewportAfterReconnect) !== JSON.stringify(baselineViewport),
+          meTransformChanged: reconnectMetrics.meTransform !== baselineMetrics.meTransform,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected Me screen position and hop rings to remain stable while cancelling reconnect',
+      })
+      .toMatchObject({
+        meStable: true,
+        meDeltaX: 0,
+        meDeltaY: 0,
+        meWrapperDeltaY: 0,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
+        ringsAligned: true,
+        viewportChanged: false,
+        meTransformChanged: false,
+      });
+
+    await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'edge-reconnect-cancel:after-cancel-before-settle',
+    );
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected cancelled reconnect gesture to preserve the existing settled graph',
+      })
+      .toBe(simulationEndCountBeforeReconnect);
+
+    await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'edge-reconnect-cancel:after-cancel-after-settle',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps Me centered in the browser on first load and after the graph grows', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
