@@ -132,10 +132,20 @@ async function primeGoalsPageWithStoredGraph(
 }
 
 async function openNodeContextMenu(page: Page, testId: string, clientX: number, clientY: number) {
-  await page.getByTestId(testId).dispatchEvent('contextmenu', {
-    bubbles: true,
-    cancelable: true,
-    button: 2,
+  const locator = page.getByTestId(testId);
+  await locator.evaluate((element, point) => {
+    element.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      buttons: 2,
+      clientX: point.clientX,
+      clientY: point.clientY,
+      screenX: point.clientX,
+      screenY: point.clientY,
+      view: window,
+    }));
+  }, {
     clientX,
     clientY,
   });
@@ -1220,6 +1230,11 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
       const targetGoal = document.querySelector(`[data-testid="${targetGoalTestId}"]`) as HTMLElement | null;
       const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const goalsPage = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const meWrapper = me?.closest('.react-flow__node') as HTMLElement | null;
+      const targetGoalWrapper = targetGoal?.closest('.react-flow__node') as HTMLElement | null;
+      const nodesContainer = document.querySelector('.react-flow__nodes') as HTMLElement | null;
+      const reactFlowWrapper = document.querySelector('[data-testid="rf__wrapper"]') as HTMLElement | null;
       if (!me || !targetGoal || !ring1) {
         return null;
       }
@@ -1234,6 +1249,14 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         meCenter: getCenter(me),
         targetGoalCenter: getCenter(targetGoal),
         ring1Center: getCenter(ring1),
+        scrollY: window.scrollY,
+        pageTop: goalsPage?.getBoundingClientRect().top ?? null,
+        meTransform: meWrapper?.style.transform ?? null,
+        targetGoalTransform: targetGoalWrapper?.style.transform ?? null,
+        meWrapperCenter: meWrapper ? getCenter(meWrapper) : null,
+        nodesContainerTop: nodesContainer?.getBoundingClientRect().top ?? null,
+        reactFlowScrollTop: reactFlowWrapper?.scrollTop ?? null,
+        reactFlowScrollLeft: reactFlowWrapper?.scrollLeft ?? null,
       };
     }, {
       targetGoalTestId: secondGoalTestId,
@@ -1244,6 +1267,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
 
     const baselineMetrics = await readReconnectMetrics();
     expect(baselineMetrics, 'edge-create: expected measurable baseline metrics').not.toBeNull();
+    const baselineViewport = await readViewportTransform(page);
 
     await openNodeContextMenu(page, firstGoalTestId, 220, 180);
     await page.getByTestId('goal-context-item-connect').click();
@@ -1273,17 +1297,45 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       .poll(async () => {
         const reconnectMetrics = await readReconnectMetrics();
         if (!reconnectMetrics || !baselineMetrics) return null;
+        const viewportAfterConnect = await readViewportTransform(page);
         return {
+          meStable:
+            Math.abs(reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x) <= 2
+            && Math.abs(reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y) <= 2,
+          meDeltaX: Number((reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x).toFixed(2)),
+          meDeltaY: Number((reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y).toFixed(2)),
+          targetGoalDeltaX: Number((reconnectMetrics.targetGoalCenter.x - baselineMetrics.targetGoalCenter.x).toFixed(2)),
+          targetGoalDeltaY: Number((reconnectMetrics.targetGoalCenter.y - baselineMetrics.targetGoalCenter.y).toFixed(2)),
+          meWrapperDeltaY: Number((((reconnectMetrics.meWrapperCenter?.y ?? 0) - (baselineMetrics.meWrapperCenter?.y ?? 0))).toFixed(2)),
+          scrollDeltaY: Number(((reconnectMetrics.scrollY ?? 0) - (baselineMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((reconnectMetrics.pageTop ?? 0) - (baselineMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((reconnectMetrics.nodesContainerTop ?? 0) - (baselineMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((reconnectMetrics.reactFlowScrollTop ?? 0) - (baselineMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((reconnectMetrics.reactFlowScrollLeft ?? 0) - (baselineMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
           ringsAligned:
             Math.abs(reconnectMetrics.ring1Center.x - reconnectMetrics.meCenter.x) <= 6
             && Math.abs(reconnectMetrics.ring1Center.y - reconnectMetrics.meCenter.y) <= 6,
+          viewportChanged: JSON.stringify(viewportAfterConnect) !== JSON.stringify(baselineViewport),
+          meTransformChanged: reconnectMetrics.meTransform !== baselineMetrics.meTransform,
+          targetGoalTransformChanged: reconnectMetrics.targetGoalTransform !== baselineMetrics.targetGoalTransform,
         };
       }, {
         timeout: 5000,
-        message: 'expected hop rings to remain aligned with Me while creating a new edge',
+        message: 'expected Me screen position and hop rings to remain stable while creating a new edge',
       })
-      .toEqual({
+      .toMatchObject({
+        meStable: true,
+        meDeltaX: 0,
+        meDeltaY: 0,
+        meWrapperDeltaY: 0,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
         ringsAligned: true,
+        viewportChanged: false,
+        meTransformChanged: false,
       });
 
     await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(3);

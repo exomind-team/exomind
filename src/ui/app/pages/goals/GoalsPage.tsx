@@ -402,6 +402,7 @@ export function GoalsPage() {
   const previousGoalStatusesRef = useRef<Map<string, string>>(new Map());
   const skipNextSimulationSyncRef = useRef(true);
   const hasCenteredInitialMeRef = useRef(false);
+  const lastCenteredGraphSignatureRef = useRef<string | null>(null);
   const lastGraphChangeAtRef = useRef(Date.now());
   const renderHealthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debugRef = useRef({
@@ -659,6 +660,7 @@ export function GoalsPage() {
     const meNode: Node<GoalFlowNodeData> = {
       id: graph.me.id,
       type: 'me',
+      selected: selected?.kind === 'me',
       position: positions.get(graph.me.id) ?? { x: 0, y: 0 },
       width: ME_NODE_SIZE,
       height: ME_NODE_SIZE,
@@ -689,6 +691,7 @@ export function GoalsPage() {
     const goalNodes = visibleGraph.goals.map((goal) => ({
       id: goal.id,
       type: 'goal',
+      selected: selected?.kind === 'goal' && selected.id === goal.id,
       position: positions.get(goal.id) ?? { x: 0, y: 0 },
       width: GOAL_NODE_SIZE,
       height: GOAL_NODE_SIZE,
@@ -722,7 +725,7 @@ export function GoalsPage() {
     }));
 
     return [meNode, ...goalNodes];
-  }, [completionAnimations, connectMode, graph.me.id, graph.me.name, mode, openContextMenu, positions, resolveGoalStatus, visibleGraph.goals]);
+  }, [completionAnimations, connectMode, graph.me.id, graph.me.name, mode, openContextMenu, positions, resolveGoalStatus, selected, visibleGraph.goals]);
 
   const edges = useMemo<Array<Edge<TaskFlowEdgeData>>>(() => {
     const edgesByPair = new Map<string, Array<{ id: string }>>();
@@ -747,6 +750,7 @@ export function GoalsPage() {
         source: edge.source,
         target: edge.target,
         type: 'task',
+        selected: selected?.kind === 'edge' && selected.id === edge.id,
         selectable: true,
         data: {
           label: resolveEdgeLabel(edge.id),
@@ -769,7 +773,7 @@ export function GoalsPage() {
         },
       };
     });
-  }, [graph.goals, graph.me.id, highlightedEdgeIds, openContextMenu, positions, resolveEdgeLabel, resolveEdgeStatus, showCancelled, visibleGraph.edges]);
+  }, [graph.goals, graph.me.id, highlightedEdgeIds, openContextMenu, positions, resolveEdgeLabel, resolveEdgeStatus, selected, showCancelled, visibleGraph.edges]);
 
   const connectPreview = useMemo(() => {
     if (!connectMode.isActive || !connectMode.sourceId || !connectMode.previewPoint) return null;
@@ -1010,8 +1014,26 @@ export function GoalsPage() {
 
     if (centerMeInViewport('initial-me-center')) {
       hasCenteredInitialMeRef.current = true;
+      lastCenteredGraphSignatureRef.current = JSON.stringify({
+        goals: graphSummary.totalGoals,
+        edges: graphSummary.totalEdges,
+        showCancelled,
+      });
     }
-  }, [centerMeInViewport, graph.me.id, positions]);
+  }, [centerMeInViewport, graph.me.id, graphSummary.totalEdges, graphSummary.totalGoals, positions, showCancelled]);
+
+  useLayoutEffect(() => {
+    if (!hasCenteredInitialMeRef.current) return;
+    const signature = JSON.stringify({
+      goals: graphSummary.totalGoals,
+      edges: graphSummary.totalEdges,
+      showCancelled,
+    });
+    if (signature === lastCenteredGraphSignatureRef.current) return;
+    if (centerMeInViewport('graph-topology-center')) {
+      lastCenteredGraphSignatureRef.current = signature;
+    }
+  }, [centerMeInViewport, graphSummary.totalEdges, graphSummary.totalGoals, showCancelled]);
 
   function notifyResult(
     result: { ok: false; error: string } | { ok: true },
@@ -1340,7 +1362,13 @@ export function GoalsPage() {
         edgeTypes={edgeTypes}
         nodesDraggable={mode === 'browse'}
         nodesConnectable={mode === 'edit'}
+        nodesFocusable={false}
+        edgesFocusable={false}
         edgesReconnectable={mode === 'edit'}
+        elementsSelectable={false}
+        autoPanOnNodeFocus={false}
+        autoPanOnConnect={false}
+        autoPanOnNodeDrag={false}
         zoomOnDoubleClick={false}
         onMove={(_, nextViewport) => {
           setViewport(nextViewport);

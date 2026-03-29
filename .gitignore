@@ -120,6 +120,7 @@ server/log.txt
 log.txt
 test-results/.last-run.json
 test-results/*
+.tmp-issue747-trace/
 tests/e2e/report/
 packages/mcp/.data/
 packages/mcp/events_*/
