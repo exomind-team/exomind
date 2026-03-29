@@ -1364,6 +1364,71 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps the graph stable when reconnecting an edge through the real edge updater', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+    await primeGoalsPageWithGraph(page, makeStarGraph());
+    await gotoGoalsPage(page);
+
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected simulation:end before reconnecting an edge through the browser',
+      })
+      .toBe(true);
+
+    await page.getByRole('button', { name: '编辑' }).click();
+    const edgeHitArea = page.getByTestId('task-flow-edge-hit-area-edge-me-a');
+    const edgeBBox = await edgeHitArea.boundingBox();
+    if (!edgeBBox) {
+      throw new Error('expected measurable edge hit area before reconnect coverage');
+    }
+
+    await page.mouse.click(
+      edgeBBox.x + edgeBBox.width / 2,
+      edgeBBox.y + edgeBBox.height / 2,
+    );
+
+    const sourceUpdater = page.locator('.react-flow__edgeupdater-source').first();
+    await expect(sourceUpdater).toBeVisible({ timeout: 5000 });
+
+    const goalBBox = await page.getByTestId('goal-flow-node-goal-b').boundingBox();
+    const updaterBBox = await sourceUpdater.boundingBox();
+    if (!goalBBox || !updaterBBox) {
+      throw new Error('expected measurable edge updater and goal node bounds for reconnect coverage');
+    }
+
+    await page.mouse.move(
+      updaterBBox.x + updaterBBox.width / 2,
+      updaterBBox.y + updaterBBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      goalBBox.x + goalBBox.width / 2,
+      goalBBox.y + goalBBox.height / 2,
+      { steps: 10 },
+    );
+    await page.mouse.up();
+
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('page:interaction-reconnect')), {
+        timeout: 5000,
+        message: 'expected page:interaction-reconnect warn log after real reconnect gesture',
+      })
+      .toBe(true);
+
+    await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'edge-reconnect:settled',
+    );
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps Me centered in the browser on first load and after the graph grows', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
