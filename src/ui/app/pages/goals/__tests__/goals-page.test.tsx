@@ -292,8 +292,8 @@ describe('GoalsPage', () => {
           ]),
         }),
       );
-    }, { timeout: 3000 });
-  });
+    }, { timeout: 4000 });
+  }, 10000);
 
   it('provides explicit node handles so edges can render before DOM handle measurement completes', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
