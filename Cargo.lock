@@ -1275,6 +1275,7 @@ version = "0.3.6"
 dependencies = [
  "chrono",
  "enigo",
+ "exomind-android-keepalive",
  "exomind-runtime",
  "flate2",
  "futures",
@@ -1298,6 +1299,16 @@ dependencies = [
  "tungstenite 0.21.0",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "exomind-android-keepalive"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

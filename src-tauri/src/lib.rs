@@ -27,8 +27,8 @@ use commands::runtime_commands::{
     ensure_runtime_started, load_persisted_runtime_network_mode,
     load_persisted_runtime_target_mode, runtime_network_mode_set,
     runtime_service_reachable_address, runtime_service_start, runtime_service_status,
-    runtime_service_stop, runtime_target_mode_set, signal_publish_fast, RuntimeProcessState,
-    RuntimeTargetMode,
+    runtime_service_stop, runtime_target_mode_set, signal_publish_fast,
+    sync_android_runtime_keepalive, RuntimeProcessState, RuntimeTargetMode,
 };
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, foreground_window_get, main_window_shortcut_get,
@@ -123,6 +123,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(exomind_android_keepalive::init())
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
         .manage(voice_shortcut_state)
@@ -199,22 +200,39 @@ pub fn run() {
             if runtime_target_mode == RuntimeTargetMode::Embedded {
                 let runtime_state = runtime_process_state_for_setup.clone();
                 let runtime_port = resolve_embedded_runtime_port();
+                let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     // Keep embedded runtime port aligned with EXOMIND_RT_PORT（与前端端口配置保持一致）.
-                    if let Err(error) =
-                        ensure_runtime_started(
-                            runtime_state,
-                            Some(runtime_bind_host),
-                            Some(runtime_port),
-                        )
-                        .await
+                    match ensure_runtime_started(
+                        runtime_state,
+                        Some(runtime_bind_host),
+                        Some(runtime_port),
+                    )
+                    .await
                     {
-                        log::error!(
-                            "failed to auto-start embedded runtime on {runtime_port}: {error}"
-                        );
+                        Ok(status) => {
+                            sync_android_runtime_keepalive(
+                                &app_handle,
+                                true,
+                                &status.host,
+                                status.port,
+                            );
+                        }
+                        Err(error) => {
+                            sync_android_runtime_keepalive(
+                                &app_handle,
+                                false,
+                                "127.0.0.1",
+                                runtime_port,
+                            );
+                            log::error!(
+                                "failed to auto-start embedded runtime on {runtime_port}: {error}"
+                            );
+                        }
                     }
                 });
             } else {
+                sync_android_runtime_keepalive(&app.handle(), false, "127.0.0.1", 0);
                 log::info!("runtime target mode is external, skip embedded runtime auto-start");
             }
             Ok(())

@@ -2,6 +2,7 @@
 //! 提供桌面端 Runtime 的启动、停止与状态查询。
 
 use chrono::Utc;
+use exomind_android_keepalive::AndroidRuntimeKeepaliveExt;
 use exomind_runtime::{
     start_with_options, RuntimeHandle, RuntimePublishRequest, RuntimeStartError,
     RuntimeStartOptions, DEFAULT_RT_PORT,
@@ -400,6 +401,21 @@ fn mark_external_runtime_running(
     Ok(compose_status(&inner, true, None))
 }
 
+pub fn sync_android_runtime_keepalive(app: &AppHandle, enabled: bool, host: &str, port: u16) {
+    let title = enabled.then_some("ExoMind RT 正在后台运行".to_string());
+    let text = enabled.then_some(format!(
+        "后台保持 RT 可连接：{}:{}。返回应用后会自动隐藏常驻通知。",
+        host, port
+    ));
+
+    if let Err(error) = app
+        .android_runtime_keepalive()
+        .set_enabled(enabled, title, text)
+    {
+        log::warn!("failed to sync android runtime keepalive: {error}");
+    }
+}
+
 pub async fn ensure_runtime_started(
     state: Arc<RuntimeProcessState>,
     host: Option<String>,
@@ -598,18 +614,24 @@ pub fn runtime_status_snapshot(
 
 #[tauri::command]
 pub async fn runtime_service_start(
+    app: AppHandle,
     state: State<'_, Arc<RuntimeProcessState>>,
     host: Option<String>,
     port: Option<u16>,
 ) -> Result<RuntimeServiceStatus, String> {
-    ensure_runtime_started(state.inner().clone(), host, port).await
+    let status = ensure_runtime_started(state.inner().clone(), host, port).await?;
+    sync_android_runtime_keepalive(&app, true, &status.host, status.port);
+    Ok(status)
 }
 
 #[tauri::command]
 pub async fn runtime_service_stop(
+    app: AppHandle,
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<RuntimeServiceStatus, String> {
-    ensure_runtime_stopped(state.inner().clone()).await
+    let status = ensure_runtime_stopped(state.inner().clone()).await?;
+    sync_android_runtime_keepalive(&app, false, &status.host, status.port);
+    Ok(status)
 }
 
 #[tauri::command]

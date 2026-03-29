@@ -1,0 +1,18 @@
+[package]
+name = "exomind-android-keepalive"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+links = "exomind-android-keepalive"
+
+[lib]
+name = "exomind_android_keepalive"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", default-features = false }
+thiserror = "1"
+
+[build-dependencies]
+tauri-plugin = { version = "2.4", features = ["build"] }
