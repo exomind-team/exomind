@@ -432,6 +432,10 @@ exomind-route-YYYY-MM-DD.html
 | 响应式 | ≥1200px 双列 / <768px 紧凑 |
 | 输出 | 单文件 HTML |
 
+### 模板修改须三处同步
+
+修改航线模板的渲染逻辑、样式或交互时，必须同步 devlog 运行时资产、exomind 模板源文件和 skills 副本三个位置。详见 `docs/agents/dev-daily/AGENTS.md`「模板与渲染引擎的三处同步规则」章节。
+
 ---
 
 ## 航线消费（供其他 Agent 查询）

@@ -488,3 +488,20 @@ bun run devlog:publish --dry-run                 # 预览，不提交推送
 
 - 按时间戳从新到旧排列
 - 最新一份日志自动获得 `LATEST` 高亮标签和强调样式
+
+### 模板与渲染引擎的三处同步规则
+
+日报和航线共享「深空仪表盘」视觉语言，模板代码分布在三个位置。修改渲染逻辑、样式或交互时**必须三处同步**，否则会出现已发布页面与新生成页面行为不一致。
+
+| # | 位置 | 路径 | 影响范围 |
+|---|------|------|----------|
+| 1 | **devlog 运行时资产** | `exomind-devlog/assets/{report,route}-{style.css,engine.js}` | 所有已发布的薄 HTML 页面（立即生效） |
+| 2 | **exomind 模板源文件** | `docs/agents/dev-{daily,route}/*-template.html` | 未来生成的 standalone HTML |
+| 3 | **exomind skills 副本** | `skills/dev-{daily,route}/assets/*-template.html` | Skill 加载时的模板引用 |
+
+**操作顺序**：先改 devlog 运行时资产（影响线上），再改 exomind 模板源文件 + skills 副本（影响未来生成），最后确认 `.gitignore` 允许新增的 HTML 文件被追踪（`skills/**/assets/*.html` 已添加例外）。
+
+**典型场景**：
+- 新增页脚导航链接 → 三处的 `renderFooter()` + CSS `.devlog-nav` 都要改
+- 修改 Chart.js 配色 → 三处的渲染引擎数据段都要改
+- 新增交互区块 → 三处的 HTML 模板 + JS + CSS 都要改
