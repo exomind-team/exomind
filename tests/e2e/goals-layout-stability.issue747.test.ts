@@ -1177,6 +1177,141 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps the graph stable when creating a new edge before the simulation settles', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+    const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+    const countSimulationTicks = () => goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const tickCountBeforeGrowth = countSimulationTicks();
+    const endCountBeforeGrowth = countSimulationEnds();
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 180, 150);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    await expect(page.getByTestId('goals-hop-rings')).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(() => {
+        const tickCount = countSimulationTicks();
+        const endCount = countSimulationEnds();
+        return tickCount > tickCountBeforeGrowth && endCount === endCountBeforeGrowth;
+      }, {
+        timeout: 5000,
+        message: 'expected a moving simulation window before reconnecting an edge',
+      })
+      .toBe(true);
+
+    const firstGoalTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(1).getAttribute('data-testid');
+    const secondGoalTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(2).getAttribute('data-testid');
+    if (!firstGoalTestId || !secondGoalTestId) {
+      throw new Error('expected goal node test ids for edge-creation coverage');
+    }
+
+    const readReconnectMetrics = () => page.evaluate(({ targetGoalTestId }) => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const targetGoal = document.querySelector(`[data-testid="${targetGoalTestId}"]`) as HTMLElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      if (!me || !targetGoal || !ring1) {
+        return null;
+      }
+      const getCenter = (element: Element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+      return {
+        meCenter: getCenter(me),
+        targetGoalCenter: getCenter(targetGoal),
+        ring1Center: getCenter(ring1),
+      };
+    }, {
+      targetGoalTestId: secondGoalTestId,
+    });
+
+    await page.getByTestId(firstGoalTestId).click();
+    await expect(page.getByTestId('goals-page').getByRole('complementary')).toBeVisible({ timeout: 10000 });
+
+    const baselineMetrics = await readReconnectMetrics();
+    expect(baselineMetrics, 'edge-create: expected measurable baseline metrics').not.toBeNull();
+
+    await openNodeContextMenu(page, firstGoalTestId, 220, 180);
+    await page.getByTestId('goal-context-item-connect').click();
+    await page.mouse.move(260, 200);
+    await expect(page.getByTestId('goals-connect-preview')).toBeVisible({ timeout: 5000 });
+
+    const simulationEndCountBeforeConnect = countSimulationEnds();
+    await page.getByTestId(secondGoalTestId).click();
+
+    await expect
+      .poll(async () => {
+        const visibility = await snapshotRenderVisibility(page);
+        return {
+          edgeCount: visibility.edgeCount,
+          connectPreviewCleared: await page.getByTestId('goals-connect-preview').count() === 0,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected a new visible edge and cleared connect preview after creating a new edge during motion',
+      })
+      .toEqual({
+        edgeCount: 3,
+        connectPreviewCleared: true,
+      });
+
+    await expect
+      .poll(async () => {
+        const reconnectMetrics = await readReconnectMetrics();
+        if (!reconnectMetrics || !baselineMetrics) return null;
+        return {
+          ringsAligned:
+            Math.abs(reconnectMetrics.ring1Center.x - reconnectMetrics.meCenter.x) <= 6
+            && Math.abs(reconnectMetrics.ring1Center.y - reconnectMetrics.meCenter.y) <= 6,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected hop rings to remain aligned with Me while creating a new edge',
+      })
+      .toEqual({
+        ringsAligned: true,
+      });
+
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(3);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      3,
+      'edge-create:after-connect-before-settle',
+    );
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected a new simulation:end warn log after creating a new edge during motion',
+      })
+      .toBeGreaterThan(simulationEndCountBeforeConnect);
+
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(3);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      3,
+      'edge-create:after-connect-after-settle',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
   test('keeps Me centered in the browser on first load and after the graph grows', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
