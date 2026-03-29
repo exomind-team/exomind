@@ -27,7 +27,7 @@ function getParallelOffset(parallelIndex: number, parallelTotal: number) {
   return (parallelIndex - (parallelTotal - 1) / 2) * PARALLEL_EDGE_SPACING;
 }
 
-function getEdgeColor(status: TaskEdgeStatus, highlighted: boolean, isZombie: boolean) {
+export function getTaskFlowEdgeColor(status: TaskEdgeStatus, highlighted: boolean, isZombie: boolean) {
   if (highlighted) return '#C75B3A';
   if (isZombie) return 'rgba(148,163,184,0.52)';
   if (status === 'completed') return '#10b981';
@@ -37,10 +37,16 @@ function getEdgeColor(status: TaskEdgeStatus, highlighted: boolean, isZombie: bo
   return 'rgba(120,113,108,0.7)';
 }
 
-function getEdgeStyle(status: TaskEdgeStatus, selected: boolean, highlighted: boolean, isEmptySlot: boolean, isZombie: boolean) {
+export function getTaskFlowEdgeStyle(
+  status: TaskEdgeStatus,
+  selected: boolean,
+  highlighted: boolean,
+  isEmptySlot: boolean,
+  isZombie: boolean,
+) {
   if (highlighted) {
     return {
-      stroke: getEdgeColor(status, highlighted, isZombie),
+      stroke: getTaskFlowEdgeColor(status, highlighted, isZombie),
       strokeDasharray: '6 4',
       strokeWidth: selected ? 3.2 : 2.8,
       filter: 'drop-shadow(0 0 6px rgba(199,91,58,0.45))',
@@ -48,27 +54,27 @@ function getEdgeStyle(status: TaskEdgeStatus, selected: boolean, highlighted: bo
   }
   if (isZombie) {
     return {
-      stroke: getEdgeColor(status, highlighted, isZombie),
+      stroke: getTaskFlowEdgeColor(status, highlighted, isZombie),
       strokeDasharray: '2 6',
       strokeWidth: selected ? 1.9 : 1.6,
     };
   }
   if (status === 'completed') {
-    return { stroke: getEdgeColor(status, highlighted, isZombie), strokeWidth: selected ? 2.8 : 2.2 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeWidth: selected ? 2.8 : 2.2 };
   }
   if (status === 'in_progress') {
-    return { stroke: getEdgeColor(status, highlighted, isZombie), strokeWidth: selected ? 2.8 : 2.2 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeWidth: selected ? 2.8 : 2.2 };
   }
   if (status === 'suspended') {
-    return { stroke: getEdgeColor(status, highlighted, isZombie), strokeDasharray: '6 4', strokeWidth: selected ? 2.6 : 2 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeDasharray: '6 4', strokeWidth: selected ? 2.6 : 2 };
   }
   if (status === 'cancelled') {
-    return { stroke: getEdgeColor(status, highlighted, isZombie), strokeDasharray: '8 4', strokeWidth: selected ? 2.4 : 1.8 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeDasharray: '8 4', strokeWidth: selected ? 2.4 : 1.8 };
   }
   if (isEmptySlot) {
-    return { stroke: getEdgeColor(status, highlighted, isZombie), strokeDasharray: '4 5', strokeWidth: selected ? 2.1 : 1.5 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeDasharray: '4 5', strokeWidth: selected ? 2.1 : 1.5 };
   }
-  return { stroke: getEdgeColor(status, highlighted, isZombie), strokeDasharray: '6 4', strokeWidth: selected ? 2.4 : 1.8 };
+  return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeDasharray: '6 4', strokeWidth: selected ? 2.4 : 1.8 };
 }
 
 export function buildTaskEdgePath({
@@ -242,9 +248,9 @@ export function TaskFlowEdge({
   const isEmptySlot = Boolean(data?.isEmptySlot);
   const isZombie = Boolean(data?.isZombie);
   const hasPlaceholderLabel = isEmptySlot && label.trim() === '待定义';
-  const style = getEdgeStyle(status, Boolean(selected), highlighted, isEmptySlot, isZombie);
+  const style = getTaskFlowEdgeStyle(status, Boolean(selected), highlighted, isEmptySlot, isZombie);
   const markerId = `goal-task-arrow-${id}`;
-  const markerColor = getEdgeColor(status, highlighted, isZombie);
+  const markerColor = getTaskFlowEdgeColor(status, highlighted, isZombie);
   const longPressHandlers = useLongPress((event) => {
     data?.onOpenContextMenu?.(id, event.clientX, event.clientY);
   });

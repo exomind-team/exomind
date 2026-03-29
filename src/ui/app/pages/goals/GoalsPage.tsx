@@ -35,12 +35,22 @@ import { GoalDetailPanel } from './components/GoalDetailPanel';
 import { GOAL_NODE_SIZE, GoalFlowNode, ME_NODE_SIZE, type GoalFlowNodeData } from './components/GoalFlowNode';
 import { MeDetailPanel } from './components/MeDetailPanel';
 import { SplitEdgeDialog } from './components/SplitEdgeDialog';
-import { TaskFlowEdge, type TaskFlowEdgeData } from './components/TaskFlowEdge';
+import {
+  buildTaskEdgePath,
+  getTaskFlowEdgeColor,
+  getTaskFlowEdgeStyle,
+  TaskFlowEdge,
+  type TaskFlowEdgeData,
+} from './components/TaskFlowEdge';
 import { useConnectMode } from './hooks/useConnectMode';
 import { useContextMenu } from './hooks/useContextMenu';
 
 type GoalPageMode = 'browse' | 'edit';
 type Selection = { kind: 'goal' | 'edge' | 'me'; id: string } | null;
+type ActiveReconnect = {
+  edgeId: string;
+  handleType: 'source' | 'target';
+} | null;
 
 const MODE_STORAGE_KEY = 'exomind:goals-mode';
 const SHOW_CANCELLED_STORAGE_KEY = 'exomind:goals-show-cancelled';
@@ -353,6 +363,125 @@ function GoalCompletionEffects({
   );
 }
 
+function ReconnectingEdgeOverlay({
+  edge,
+  viewportX,
+  viewportY,
+  zoom,
+}: {
+  edge: Edge<TaskFlowEdgeData>;
+  viewportX: number;
+  viewportY: number;
+  zoom: number;
+}) {
+  const sourceCenterX = typeof edge.data?.sourceCenterX === 'number' ? edge.data.sourceCenterX : undefined;
+  const sourceCenterY = typeof edge.data?.sourceCenterY === 'number' ? edge.data.sourceCenterY : undefined;
+  const sourceRadius = typeof edge.data?.sourceRadius === 'number' ? edge.data.sourceRadius : undefined;
+  const targetCenterX = typeof edge.data?.targetCenterX === 'number' ? edge.data.targetCenterX : undefined;
+  const targetCenterY = typeof edge.data?.targetCenterY === 'number' ? edge.data.targetCenterY : undefined;
+  const targetRadius = typeof edge.data?.targetRadius === 'number' ? edge.data.targetRadius : undefined;
+
+  if (
+    sourceCenterX === undefined
+    || sourceCenterY === undefined
+    || sourceRadius === undefined
+    || targetCenterX === undefined
+    || targetCenterY === undefined
+    || targetRadius === undefined
+  ) {
+    return null;
+  }
+
+  const { path, labelX, labelY } = buildTaskEdgePath({
+    sourceX: sourceCenterX,
+    sourceY: sourceCenterY,
+    targetX: targetCenterX,
+    targetY: targetCenterY,
+    sourceCenterX,
+    sourceCenterY,
+    sourceRadius,
+    targetCenterX,
+    targetCenterY,
+    targetRadius,
+    parallelIndex: edge.data?.parallelIndex ?? 0,
+    parallelTotal: edge.data?.parallelTotal ?? 1,
+  });
+  const status = edge.data?.status ?? 'pending';
+  const highlighted = Boolean(edge.data?.highlighted);
+  const isEmptySlot = Boolean(edge.data?.isEmptySlot);
+  const isZombie = Boolean(edge.data?.isZombie);
+  const label = edge.data?.label || '';
+  const style = getTaskFlowEdgeStyle(status, Boolean(edge.selected), highlighted, isEmptySlot, isZombie);
+  const markerId = `goal-task-arrow-${edge.id}`;
+  const markerColor = getTaskFlowEdgeColor(status, highlighted, isZombie);
+
+  return (
+    <svg
+      data-testid={`task-flow-edge-reconnect-overlay-${edge.id}`}
+      className="pointer-events-none absolute inset-0 z-[2] h-full w-full overflow-visible"
+    >
+      <defs>
+        <marker
+          data-testid={`task-flow-edge-marker-${edge.id}`}
+          id={markerId}
+          markerWidth="10"
+          markerHeight="10"
+          refX="8"
+          refY="5"
+          orient="auto"
+          markerUnits="userSpaceOnUse"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill={markerColor} />
+        </marker>
+      </defs>
+      <g transform={`translate(${viewportX} ${viewportY}) scale(${zoom})`}>
+        <path
+          data-testid={`task-flow-edge-visible-${edge.id}`}
+          d={path}
+          fill="none"
+          stroke={String(style.stroke)}
+          strokeWidth={Number(style.strokeWidth ?? 1.8)}
+          strokeDasharray={typeof style.strokeDasharray === 'string' ? style.strokeDasharray : undefined}
+          strokeLinecap="round"
+          markerEnd={`url(#${markerId})`}
+          opacity="0.98"
+        />
+        <path
+          data-testid={`task-flow-edge-hit-area-${edge.id}`}
+          d={path}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={18}
+          strokeLinecap="round"
+        />
+        {label ? (
+          <g data-testid={`task-flow-edge-label-${edge.id}`} transform={`translate(${labelX}, ${labelY})`}>
+            <rect
+              x={-24}
+              y={-10}
+              width={48}
+              height={20}
+              rx={6}
+              fill="rgba(255,255,255,0.92)"
+              stroke="rgba(231,229,228,0.95)"
+              strokeWidth={0.8}
+            />
+            <text
+              x={0}
+              y={3.5}
+              fill={highlighted ? '#C75B3A' : 'rgba(87,83,78,0.96)'}
+              fontSize="10"
+              textAnchor="middle"
+            >
+              {label}
+            </text>
+          </g>
+        ) : null}
+      </g>
+    </svg>
+  );
+}
+
 export function GoalsPage() {
   const graph = useGoalStore((state) => state.graph);
   const edgeOverrides = useGoalStore((state) => state.edgeOverrides);
@@ -390,6 +519,7 @@ export function GoalsPage() {
   const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<string[]>([]);
   const [completionAnimations, setCompletionAnimations] = useState<CompletionAbsorptionAnimation[]>([]);
   const [mePulseActive, setMePulseActive] = useState(false);
+  const [activeReconnect, setActiveReconnect] = useState<ActiveReconnect>(null);
   const [renderHealthProbe, setRenderHealthProbe] = useState(0);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
@@ -790,6 +920,11 @@ export function GoalsPage() {
       y2: connectMode.previewPoint.y,
     };
   }, [connectMode, graph.me.id, positions]);
+
+  const reconnectOverlayEdge = useMemo(() => {
+    if (!activeReconnect) return null;
+    return edges.find((edge) => edge.id === activeReconnect.edgeId) ?? null;
+  }, [activeReconnect, edges]);
 
   const hopRingMetrics = useMemo(() => {
     const finiteDistances = visibleGraph.goals
@@ -1338,6 +1473,15 @@ export function GoalsPage() {
         </svg>
       ) : null}
 
+      {reconnectOverlayEdge ? (
+        <ReconnectingEdgeOverlay
+          edge={reconnectOverlayEdge}
+          viewportX={viewport.x}
+          viewportY={viewport.y}
+          zoom={viewport.zoom}
+        />
+      ) : null}
+
       {!guideHidden && graph.goals.length === 0 ? (
         <div
           data-testid="goals-empty-state-guide"
@@ -1454,6 +1598,24 @@ export function GoalsPage() {
             target: connection.target,
           });
           handleReconnect(oldEdge, connection.source, connection.target);
+        }}
+        onReconnectStart={(_, edge, handleType) => {
+          warnGoalDebug('page:interaction-reconnect-start', {
+            edgeId: edge.id,
+            handleType,
+            selectedBefore: selected,
+          });
+          setActiveReconnect({ edgeId: edge.id, handleType });
+        }}
+        onReconnectEnd={(_, edge, handleType, connectionState) => {
+          warnGoalDebug('page:interaction-reconnect-end', {
+            edgeId: edge.id,
+            handleType,
+            toNodeId: connectionState.toNode?.id ?? null,
+            toHandleType: connectionState.toHandle?.type ?? null,
+            isValid: connectionState.isValid ?? null,
+          });
+          setActiveReconnect(null);
         }}
         onNodeDrag={(_, node) => {
           simulationRef.current?.pinNode(node.id, node.position.x, node.position.y);
