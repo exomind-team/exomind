@@ -6,7 +6,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::timeblock::{ActiveBlockData, TimeBlockData};
+use crate::timeblock::{ActiveBlockData, TimeBlockData, TimeBlockStore};
 
 #[derive(Debug, Deserialize)]
 struct ImportQuery {
@@ -77,6 +77,216 @@ fn internal_error(message: String) -> (StatusCode, Json<ErrorResponse>) {
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ErrorResponse { error: message }),
     )
+}
+
+fn conflict(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::CONFLICT,
+        Json(ErrorResponse { error: message.into() }),
+    )
+}
+
+// ── #759 newBlock primitive ─────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NewBlockRequest {
+    /// Required: the blockType of the NEW block to create ("active" or "gap")
+    block_type: String,
+    // Fields for creating active blocks
+    name: Option<String>,
+    mode: Option<String>,
+    target_minutes: Option<u64>,
+    task_ids: Option<Vec<String>>,
+    source_planned_block_id: Option<String>,
+    // Fields for completing the old block (when ending active → gap)
+    feedback: Option<String>,
+    task_status_outcomes: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartBlockRequest {
+    name: String,
+    #[serde(default = "default_mode")]
+    mode: String,
+    target_minutes: Option<u64>,
+    #[serde(default)]
+    task_ids: Vec<String>,
+    source_planned_block_id: Option<String>,
+}
+
+fn default_mode() -> String { "countup".to_string() }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EndBlockRequest {
+    feedback: Option<String>,
+    task_status_outcomes: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NewBlockResponse {
+    completed: Option<TimeBlockData>,
+    active: ActiveBlockData,
+}
+
+/// Internal: atomic newBlock — ends old block + creates new block of specified type.
+/// No state validation. Callers (start/end guards or POST /timeblocks/new) are responsible.
+fn do_new_block(
+    store: &TimeBlockStore,
+    scope_key: Option<&str>,
+    req: &NewBlockRequest,
+) -> Result<NewBlockResponse, (StatusCode, Json<ErrorResponse>)> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let current = store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    // Complete current block (if any)
+    let completed = if let Some(ref active) = current {
+        let completed_block = TimeBlockData {
+            id: active.start_id.clone(),
+            name: active.name.clone(),
+            start_id: active.start_id.clone(),
+            end_id: format!("end-{}", uuid::Uuid::new_v4()),
+            note: req.feedback.clone(),
+            tags: if active.block_type.as_deref() == Some("gap") { vec![] } else { vec!["block_feedback".to_string()] },
+            start_time: active.start_time,
+            end_time: now,
+            block_type: active.block_type.clone(),
+            task_ids: active.task_ids.clone(),
+            task_status_outcomes: req.task_status_outcomes.clone(),
+            task_association_log: active.task_association_log.clone(),
+            source_planned_block_id: active.source_planned_block_id.clone(),
+        };
+
+        let mut blocks = store
+            .list_completed_scoped(scope_key)
+            .map_err(|e| internal_error(e.to_string()))?;
+        blocks.push(completed_block.clone());
+        store
+            .replace_completed_scoped(scope_key, &blocks)
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        Some(completed_block)
+    } else {
+        None
+    };
+
+    // Create new block of the specified type
+    let is_gap = req.block_type == "gap";
+    let new_active = ActiveBlockData {
+        start_id: if is_gap {
+            format!("gap-{}", uuid::Uuid::new_v4())
+        } else {
+            format!("tb-{}", uuid::Uuid::new_v4())
+        },
+        name: if is_gap { String::new() } else { req.name.clone().unwrap_or_default() },
+        mode: if is_gap { "countup".to_string() } else { req.mode.clone().unwrap_or_else(|| "countup".to_string()) },
+        target_minutes: if is_gap { None } else { req.target_minutes },
+        block_type: Some(req.block_type.clone()),
+        elapsed: if !is_gap && req.mode.as_deref() == Some("countdown") {
+            req.target_minutes.unwrap_or(25) * 60 * 1000
+        } else { 0 },
+        updated_at: Some(now),
+        phase: if is_gap { None } else { Some("running".to_string()) },
+        version: Some(1),
+        actor_id: Some("rt:newblock".to_string()),
+        last_transition_at: Some(now),
+        last_resumed_at: if is_gap { None } else { Some(now) },
+        accumulated_run_ms: if is_gap { None } else { Some(0) },
+        start_time: now,
+        action_ended_at: None,
+        feedback_started_at: None,
+        feedback_submitted_at: None,
+        pause_accumulated_ms: if is_gap { None } else { Some(0) },
+        paused: false,
+        paused_at: None,
+        task_ids: if is_gap { vec![] } else { req.task_ids.clone().unwrap_or_default() },
+        task_association_log: vec![],
+        source_planned_block_id: if is_gap { None } else { req.source_planned_block_id.clone() },
+        task_id: None,
+    };
+
+    store
+        .put_active_scoped(scope_key, new_active.clone())
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    Ok(NewBlockResponse { completed, active: new_active })
+}
+
+/// POST /timeblocks/new — raw primitive, no guard. For Agent/script use.
+async fn new_block(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+    Json(payload): Json<NewBlockRequest>,
+) -> Result<Json<NewBlockResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    do_new_block(&state.timeblock_store, scope_key, &payload).map(Json)
+}
+
+/// POST /timeblocks/start — guard: current must be gap (or empty). Creates active.
+async fn start_block(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+    Json(payload): Json<StartBlockRequest>,
+) -> Result<Json<NewBlockResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+
+    // Guard: reject if current block is active (not gap, not completed)
+    if let Some(current) = state.timeblock_store.get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))? {
+        if current.block_type.as_deref() != Some("gap")
+            && current.feedback_submitted_at.is_none() {
+            return Err(conflict("cannot start: active block in progress"));
+        }
+    }
+
+    do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
+        block_type: "active".to_string(),
+        name: Some(payload.name),
+        mode: Some(payload.mode),
+        target_minutes: payload.target_minutes,
+        task_ids: Some(payload.task_ids),
+        source_planned_block_id: payload.source_planned_block_id,
+        feedback: None,
+        task_status_outcomes: None,
+    }).map(Json)
+}
+
+/// POST /timeblocks/end — guard: current must be active. Creates gap.
+async fn end_block(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+    Json(payload): Json<EndBlockRequest>,
+) -> Result<Json<NewBlockResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+
+    // Guard: reject if current block is gap (or empty)
+    let current = state.timeblock_store.get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+        .ok_or_else(|| conflict("cannot end: no active block"))?;
+
+    if current.block_type.as_deref() == Some("gap") {
+        return Err(conflict("cannot end: current block is a gap"));
+    }
+
+    do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
+        block_type: "gap".to_string(),
+        name: None,
+        mode: None,
+        target_minutes: None,
+        task_ids: None,
+        source_planned_block_id: None,
+        feedback: payload.feedback,
+        task_status_outcomes: payload.task_status_outcomes,
+    }).map(Json)
 }
 
 async fn list_timeblocks(
@@ -509,6 +719,9 @@ fn read_timeblocks_from_sqlite_snapshot(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/timeblocks", get(list_timeblocks).put(replace_timeblocks))
+        .route("/timeblocks/new", post(new_block))
+        .route("/timeblocks/start", post(start_block))
+        .route("/timeblocks/end", post(end_block))
         .route(
             "/timeblocks/active",
             get(get_active_timeblock)

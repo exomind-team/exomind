@@ -232,6 +232,23 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       if (!this.isCompletedBlock(normalized)) {
         return normalized;
       }
+      // #759: 截断 gap 块，存为 completed TimeBlockData
+      if (normalized.blockType === 'gap') {
+        const now = Date.now();
+        const completedGap: TimeBlockData = {
+          id: normalized.startId,
+          name: normalized.name,
+          startId: normalized.startId,
+          endId: createUuidV4(),
+          tags: [],
+          startTime: normalized.startTime,
+          endTime: now,
+          blockType: 'gap',
+        };
+        const completed = await this.readCompletedBlockData();
+        completed.push(completedGap);
+        await this.writeCompletedBlockData(completed);
+      }
     }
     const startId = createUuidV4();
     const now = Date.now();
@@ -264,6 +281,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       elapsed: initialElapsed,
       mode: config.mode,
       targetMinutes: config.mode === 'countdown' ? (config.minutes ?? 25) : undefined,
+      blockType: 'active',
       phase: 'running',
       version: 1,
       actorId: this.actorId,
@@ -517,6 +535,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       tags: ['block_feedback'],
       startTime: activeData.startTime,
       endTime: submittedAt,
+      blockType: activeData.blockType ?? 'active',
       taskIds: activeData.taskIds ?? [],
       taskStatusOutcomes: options?.taskStatusOutcomes,
       taskAssociationLog: activeData.taskAssociationLog ?? [],
@@ -553,13 +572,34 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.rememberAcceptedBlock(terminalBlock);
 
     // 发布 timeblock.completed 信号（fire-and-forget，失败不阻塞）
-    this.publishTimeblockCompleted(timeBlock, report).catch((err) => {
-      log.warn(`[TimeBlockService] failed to publish timeblock.completed signal: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    // #759: gap 块不触发 completed 信号
+    if (timeBlock.blockType !== 'gap') {
+      this.publishTimeblockCompleted(timeBlock, report).catch((err) => {
+        log.warn(`[TimeBlockService] failed to publish timeblock.completed signal: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
 
-    // 通知变化
-    this.notifyChange(null);
-    log.info(`[TB-SVC] endBlock done ${JSON.stringify({ startId: terminalBlock.startId, feedbackEventMs, completedWriteMs, saveTerminalMs, totalMs: Math.round(perfNow() - opStart) })}`);
+    // #759: 创建 gap 块代替 notifyChange(null)
+    const gapBlock: ActiveBlockData = this.normalizeActiveBlock({
+      startId: createUuidV4(),
+      name: '',
+      mode: 'countup' as const,
+      elapsed: 0,
+      startTime: submittedAt,
+      paused: false,
+      taskIds: [],
+      taskAssociationLog: [],
+      blockType: 'gap',
+      phase: undefined,
+      version: 1,
+      actorId: this.actorId,
+      lastTransitionAt: submittedAt,
+      updatedAt: submittedAt,
+    }, submittedAt);
+    await this.saveActiveBlock(gapBlock);
+    this.rememberAcceptedBlock(gapBlock);
+    this.notifyChange(gapBlock);
+    log.info(`[TB-SVC] endBlock done, gap created ${JSON.stringify({ startId: terminalBlock.startId, gapStartId: gapBlock.startId, feedbackEventMs, completedWriteMs, saveTerminalMs, totalMs: Math.round(perfNow() - opStart) })}`);
 
     return {
       ...timeBlock,
@@ -982,7 +1022,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private isCompletedBlock(block: ActiveBlockData): boolean {
-    return Boolean(block.feedbackSubmittedAt);
+    return block.blockType === 'gap' || Boolean(block.feedbackSubmittedAt);
   }
 
   private pickPreferredBlock(
