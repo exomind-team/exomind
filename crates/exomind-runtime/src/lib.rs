@@ -35,6 +35,8 @@ pub mod timeblock;
 pub mod timeblock_sqlite;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const BUILD_GIT_HASH: &str = env!("BUILD_GIT_HASH");
+pub const BUILD_TIME: &str = env!("BUILD_TIME");
 pub const DEFAULT_RT_PORT: u16 = 1949;
 
 #[derive(Debug, Error)]
@@ -751,6 +753,7 @@ pub fn app_with_state(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/version", get(version))
         .merge(routes::public_router())
         .merge(protected)
         .layer(cors)
@@ -1044,13 +1047,24 @@ pub type RuntimeState = AppState;
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: &'static str,
-    version: &'static str,
 }
 
 async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok",
+    Json(HealthResponse { status: "ok" })
+}
+
+#[derive(Debug, Serialize)]
+struct VersionResponse {
+    version: &'static str,
+    git_hash: &'static str,
+    build_time: &'static str,
+}
+
+async fn version() -> Json<VersionResponse> {
+    Json(VersionResponse {
         version: RUNTIME_VERSION,
+        git_hash: BUILD_GIT_HASH,
+        build_time: BUILD_TIME,
     })
 }
 
@@ -1217,8 +1231,7 @@ mod tests {
         assert_eq!(
             payload,
             serde_json::json!({
-                "status": "ok",
-                "version": RUNTIME_VERSION
+                "status": "ok"
             })
         );
     }
