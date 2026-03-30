@@ -43,7 +43,7 @@ export type ManagedTauriInstanceHealthSnapshot = {
 };
 
 export type ManagedTauriInstanceHealth = {
-  status: 'running' | 'degraded' | 'stale';
+  status: 'starting' | 'running' | 'degraded' | 'stale';
   detail: string;
 };
 
@@ -114,6 +114,17 @@ function uniquePositivePids(values: Array<number | undefined>): number[] {
   return [...new Set(values.filter((value): value is number => Number.isInteger(value) && value > 0))];
 }
 
+const DESKTOP_APP_STARTUP_GRACE_MS = 90_000;
+
+function isRecentDesktopStartup(startedAt: string, now = Date.now()): boolean {
+  const startedAtMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return false;
+  }
+
+  return (now - startedAtMs) < DESKTOP_APP_STARTUP_GRACE_MS;
+}
+
 export function formatManagedTauriLogSessionStart(input: ManagedTauriLogSessionStart): string {
   const timestamp = input.startedAt.trim();
   return [
@@ -152,6 +163,20 @@ export function evaluateManagedTauriInstanceHealth(
   }
 
   if (record.target === 'desktop' && snapshot.appProcessAlive === false) {
+    if (isRecentDesktopStartup(record.startedAt)) {
+      if (listeningLabels.length > 0) {
+        return {
+          status: 'starting',
+          detail: `desktop app process warming up; active listeners: ${listeningLabels.join(', ')}`,
+        };
+      }
+
+      return {
+        status: 'starting',
+        detail: 'desktop app process warming up',
+      };
+    }
+
     if (listeningLabels.length > 0) {
       return {
         status: 'stale',

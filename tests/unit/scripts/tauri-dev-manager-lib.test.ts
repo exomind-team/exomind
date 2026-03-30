@@ -76,7 +76,7 @@ describe('tauri-dev-manager-lib', () => {
     }
   });
 
-  it('marks desktop instances stale when the Tauri app process is gone even if web ports still listen（桌面窗口进程消失但端口残留时应判定为 stale）', () => {
+  it('keeps fresh desktop startup in starting state while the app process is still warming up（桌面实例冷启动编译阶段不应误报 stale）', () => {
     const health = evaluateManagedTauriInstanceHealth(
       {
         name: 'desktop',
@@ -86,7 +86,35 @@ describe('tauri-dev-manager-lib', () => {
         hmrPort: 1421,
         logPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.log',
         metaPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.json',
-        startedAt: '2026-03-18T10:02:03.000Z',
+        startedAt: new Date(Date.now() - 15_000).toISOString(),
+        enableWatch: false,
+        target: 'desktop',
+      },
+      {
+        rootPidAlive: true,
+        webPortListening: true,
+        hmrPortListening: true,
+        appProcessAlive: false,
+      },
+    );
+
+    expect(health.status).toBe('starting');
+    expect(health.detail).toContain('desktop app process warming up');
+    expect(health.detail).toContain('web=1420');
+    expect(health.detail).toContain('hmr=1421');
+  });
+
+  it('marks desktop instances stale when the Tauri app process never appears after startup grace period（桌面窗口进程长时间未出现时才应判定为 stale）', () => {
+    const health = evaluateManagedTauriInstanceHealth(
+      {
+        name: 'desktop',
+        projectRoot: 'D:\\project\\exomind',
+        rootPid: 1234,
+        webPort: 1420,
+        hmrPort: 1421,
+        logPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.log',
+        metaPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.json',
+        startedAt: new Date(Date.now() - 180_000).toISOString(),
         enableWatch: false,
         target: 'desktop',
       },
