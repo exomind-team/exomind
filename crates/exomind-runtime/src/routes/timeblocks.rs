@@ -383,6 +383,9 @@ async fn list_timeblocks(
     Ok(Json(filtered))
 }
 
+/// PUT /timeblocks — replace completed blocks list.
+/// TODO(#759): Deprecate once all callers migrate to newBlock primitive.
+/// Current callers: TS writeCompletedBlockData (endBlock, startBlock gap truncation, backfill).
 async fn replace_timeblocks(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
@@ -493,6 +496,9 @@ async fn put_active_timeblock_legacy(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// DELETE /timeblocks/active — delete active block.
+/// TODO(#759): Deprecate once TS endBlock fully migrates to POST /timeblocks/end.
+/// Current callers: TS endBlock (saves terminal block then deletes active).
 async fn delete_active_timeblock(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
