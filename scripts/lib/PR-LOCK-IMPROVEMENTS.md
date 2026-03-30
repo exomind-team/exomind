@@ -230,7 +230,7 @@ interface LockState {
 ### 获取锁（自动获取当前分支）
 
 ```bash
-bun run Scripts/lib/pr-lock.ts acquire 419 60 agent-id \
+bun run scripts/lib/pr-lock.ts acquire 419 60 agent-id \
   --worktree-path="exomind-worktree-pr-419" \
   --task-id=4 \
   --reason="修复 TypeScript 类型错误"
@@ -239,7 +239,7 @@ bun run Scripts/lib/pr-lock.ts acquire 419 60 agent-id \
 ### 获取锁（手动指定分支）
 
 ```bash
-bun run Scripts/lib/pr-lock.ts acquire 419 60 agent-id \
+bun run scripts/lib/pr-lock.ts acquire 419 60 agent-id \
   --worktree-path="exomind-worktree-pr-419" \
   --branch="feature/pr-lock-improvements" \
   --task-id=4 \
@@ -249,13 +249,13 @@ bun run Scripts/lib/pr-lock.ts acquire 419 60 agent-id \
 ### 检查锁状态
 
 ```bash
-bun run Scripts/lib/pr-lock.ts check 419
+bun run scripts/lib/pr-lock.ts check 419
 ```
 
 ### 释放锁
 
 ```bash
-bun run Scripts/lib/pr-lock.ts release 419 agent-id
+bun run scripts/lib/pr-lock.ts release 419 agent-id
 ```
 
 ---
@@ -265,7 +265,7 @@ bun run Scripts/lib/pr-lock.ts release 419 agent-id
 运行测试脚本验证所有功能：
 
 ```bash
-bun run Scripts/test-pr-lock.ts
+bun run scripts/test-pr-lock.ts
 ```
 
 ---

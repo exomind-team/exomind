@@ -8,7 +8,7 @@ import {
   collectManagedTauriCleanupPids,
   evaluateManagedTauriInstanceHealth,
   resolveManagedTauriInstancePaths,
-} from '../../../Scripts/dev/tauri-dev-manager-lib';
+} from '../../../scripts/dev/tauri-dev-manager-lib';
 
 describe('tauri-dev-manager-lib', () => {
   it('resolves managed instance paths under project tmp directory（实例元数据与日志应落到项目内 .tmp 目录）', () => {

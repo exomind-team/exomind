@@ -11,7 +11,7 @@ export default defineConfig({
   use: getBaseUse('http://localhost:1420', 'on-first-retry'),
   projects: [getChromiumProject()],
   webServer: {
-    command: 'node Scripts/test/runtime-dispatch.cjs vite-dev',
+    command: 'node scripts/test/runtime-dispatch.cjs vite-dev',
     url: 'http://localhost:1420',
     reuseExistingServer: !process.env.CI,
   },

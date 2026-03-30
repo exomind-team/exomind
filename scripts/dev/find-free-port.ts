@@ -1,6 +1,6 @@
 /**
  * Find a free TCP port and print it to stdout.
- * Usage: bun Scripts/dev/find-free-port.ts [preferredPort]
+ * Usage: bun scripts/dev/find-free-port.ts [preferredPort]
  *
  * If preferredPort is available, prints it. Otherwise finds a random free port.
  *

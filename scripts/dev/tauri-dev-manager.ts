@@ -39,11 +39,11 @@ type PortListenerInfo = {
 
 function printUsage(): never {
   console.log(`Usage:
-  bun Scripts/dev/tauri-dev-manager.ts start --name <instance> [--target desktop|android] [--web-port <port>] [--hmr-port <port>] [--watch]
-  bun Scripts/dev/tauri-dev-manager.ts list
-  bun Scripts/dev/tauri-dev-manager.ts stop --name <instance>
-  bun Scripts/dev/tauri-dev-manager.ts logs --name <instance> [--tail <n>] [--follow]
-  bun Scripts/dev/tauri-dev-manager.ts prune`);
+  bun scripts/dev/tauri-dev-manager.ts start --name <instance> [--target desktop|android] [--web-port <port>] [--hmr-port <port>] [--watch]
+  bun scripts/dev/tauri-dev-manager.ts list
+  bun scripts/dev/tauri-dev-manager.ts stop --name <instance>
+  bun scripts/dev/tauri-dev-manager.ts logs --name <instance> [--tail <n>] [--follow]
+  bun scripts/dev/tauri-dev-manager.ts prune`);
   process.exit(1);
 }
 

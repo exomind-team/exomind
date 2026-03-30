@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as reviewLoopLib from '../../../Scripts/review-agent/review-loop-lib.ts';
+import * as reviewLoopLib from '../../../agents/review-agent/scripts/review-loop-lib.ts';
 import {
   HUMAN_TEST_PREFIX,
   NEEDS_HUMAN_TEST_LABEL,
@@ -15,12 +15,12 @@ import {
   type ReviewCompletionResult,
   type PullRequestFile,
   validateReviewComment,
-} from '../../../Scripts/review-agent/review-loop-lib.ts';
+} from '../../../agents/review-agent/scripts/review-loop-lib.ts';
 import {
   executeReviewAction,
   paginatePullFiles,
   resolveReviewCommentTarget,
-} from '../../../Scripts/review-agent/review-loop-runtime-lib.ts';
+} from '../../../agents/review-agent/scripts/review-loop-runtime-lib.ts';
 
 const PASS_COMMENT_BODY = [
   '[Codex Reviewer] 已审阅最新变更，未发现问题。',
@@ -107,7 +107,7 @@ describe('review-agent review loop', () => {
       additions: 90,
       deletions: 20,
       files: [
-        { path: 'Scripts/review-agent/review-loop.ts', status: 'added', additions: 50, deletions: 0 },
+        { path: 'scripts/review-agent/review-loop.ts', status: 'added', additions: 50, deletions: 0 },
       ],
     });
 
@@ -115,7 +115,7 @@ describe('review-agent review loop', () => {
     expect(summary.reviewMode).toBe('priority-review');
     expect(summary).not.toHaveProperty('needsWorktree');
     expect(summary.prioritizedFiles.map((file) => file.path)).toEqual([
-      'Scripts/review-agent/review-loop.ts',
+      'scripts/review-agent/review-loop.ts',
     ]);
   });
 

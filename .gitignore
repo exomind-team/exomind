@@ -74,11 +74,9 @@ htmlcov/
 !voice-overlay.html
 !now-workbench-overlay.html
 
-# === Agent skill assets ===
-!docs/agents/**/report-template.html
-!docs/agents/**/route-template.html
-!.claude/skills/**/assets/*.html
+# === Agent & skill assets ===
 !skills/**/assets/*.html
+!agents/**/assets/*.html
 
 # === Obsidian editor config ===
 .obsidian/

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveTauriDevInstanceName,
   resolveTauriDevTargetDir,
-} from '../../Scripts/dev/tauri-dev-target-dir-lib';
+} from '../../scripts/dev/tauri-dev-target-dir-lib';
 
 describe('tauri dev target dir resolver', () => {
   const projectRoot = path.resolve('D:/project/exomind');

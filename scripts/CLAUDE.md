@@ -8,36 +8,36 @@
 
 ```
 请构建桌面端
-→ 执行 Scripts/build/desktop.ps1
+→ 执行 scripts/build/desktop.ps1
 
 请构建 Android
-→ 执行 Scripts/build/android.ps1
+→ 执行 scripts/build/android.ps1
 
 请全平台构建
-→ 执行 Scripts/build/all.ps1
+→ 执行 scripts/build/all.ps1
 ```
 
 ### 开发
 
 ```
 启动桌面端开发
-→ 执行 Scripts/dev/desktop.ps1
+→ 执行 scripts/dev/desktop.ps1
 
 启动 Android 开发
-→ 执行 Scripts/dev/android.ps1
+→ 执行 scripts/dev/android.ps1
 
 显示全部开发启动命令
-→ 执行 Scripts/dev/all.ps1
+→ 执行 scripts/dev/all.ps1
 ```
 
 ### 测试
 
 ```
 运行单元测试
-→ 执行 Scripts/test/unit.ps1
+→ 执行 scripts/test/unit.ps1
 
 运行全部测试
-→ 执行 Scripts/test/all.ps1
+→ 执行 scripts/test/all.ps1
 ```
 
 ## 多实例开发管理器（tauri:manager）
@@ -105,11 +105,11 @@ bun tauri:manager prune
 
 ## 脚本契约
 
-- 所有脚本从 `Scripts/` 目录执行
+- 所有脚本从 `scripts/` 目录执行
 - 脚本支持 `-NoInstall` 跳过依赖安装
 - 构建脚本接受 `-SkipDesktop`, `-SkipAndroid` 参数
 - 测试脚本返回退出码 0=成功, 非0=失败
-- 共享配置位于 `Scripts/_shared/config.ps1`
+- 共享配置位于 `scripts/_shared/config.ps1`
 
 ## 常用参数速查
 

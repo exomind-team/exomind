@@ -149,7 +149,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 function printHelp(): void {
   console.log(`
 Usage:
-  bun Scripts/dev/gh-auto-reply-qmark.ts [options]
+  bun scripts/dev/gh-auto-reply-qmark.ts [options]
 
 Options:
   --repo <owner/repo>         GitHub repo (default: current repo)

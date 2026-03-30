@@ -45,7 +45,7 @@ function runGh(args: string[]): string {
 function printHelp(): void {
   const help = `
 Usage:
-  bun Scripts/dev/github-comment.ts [options]
+  bun scripts/dev/github-comment.ts [options]
 
 Options:
   --repo <owner/repo>             GitHub repo. Optional; auto-detected from origin when omitted.
@@ -60,9 +60,9 @@ Options:
   --help                          Show help
 
 Examples:
-  bun Scripts/dev/github-comment.ts --type issue --number 93 --file docs/report.md
-  bun Scripts/dev/github-comment.ts --type pr --number 89 --comment '#issuecomment-3883010944' --mode replace --file docs/update.md
-  bun Scripts/dev/github-comment.ts --ref https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944 --file docs/add.md --mode append
+  bun scripts/dev/github-comment.ts --type issue --number 93 --file docs/report.md
+  bun scripts/dev/github-comment.ts --type pr --number 89 --comment '#issuecomment-3883010944' --mode replace --file docs/update.md
+  bun scripts/dev/github-comment.ts --ref https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944 --file docs/add.md --mode append
 `;
   console.log(help.trim());
 }

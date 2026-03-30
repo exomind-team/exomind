@@ -13,10 +13,10 @@
 # 执行方式：
 #
 #   # 方式 1: 直接指定清洗后仓库路径
-#   pwsh -File Scripts/verify-open-source-clean.ps1 -RepoPath C:\tmp\exomind-clean
+#   pwsh -File scripts/verify-open-source-clean.ps1 -RepoPath C:\tmp\exomind-clean
 #
 #   # 方式 2: Cygwin/Git Bash 环境
-#   powershell.exe -ExecutionPolicy Bypass -File Scripts/verify-open-source-clean.ps1 -RepoPath /tmp/exomind-clean
+#   powershell.exe -ExecutionPolicy Bypass -File scripts/verify-open-source-clean.ps1 -RepoPath /tmp/exomind-clean
 #
 #   # 方式 3: 在清洗后仓库目录内运行（需要拷贝脚本过去或用绝对路径）
 #   cd /tmp/exomind-clean

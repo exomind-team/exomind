@@ -1,5 +1,27 @@
-import { randomInt } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
+
+const ISSUE747_FROZEN_RANDOM_SAMPLE_SEEDS = [
+  1386297379,
+  1410414701,
+  1942749808,
+  1380669409,
+  2124903778,
+  1237704268,
+  1550436838,
+  115713120,
+  994620516,
+  1561867595,
+  286603475,
+  363364812,
+  1226997560,
+  760290680,
+  646038413,
+  161413300,
+  606232779,
+  2002801733,
+  402121570,
+  1519728956,
+] as const;
 
 interface GoalLayoutTestConfig {
   randomSeed?: number;
@@ -3489,7 +3511,13 @@ test('keeps randomized three-node samples within the stable geometry constraints
       .filter((value) => Number.isInteger(value) && value > 0) ?? [];
     const seeds = overriddenSeeds.length > 0
       ? overriddenSeeds
-      : Array.from({ length: 20 }, () => randomInt(1, 0x7fffffff));
+      : [...ISSUE747_FROZEN_RANDOM_SAMPLE_SEEDS];
+    if (overriddenSeeds.length === 0) {
+      expect(
+        seeds,
+        'expected issue 747 default randomized sample seeds to be frozen into a committed 20-sample baseline',
+      ).toEqual(ISSUE747_FROZEN_RANDOM_SAMPLE_SEEDS);
+    }
     testInfo.annotations.push({
       type: 'random-seeds',
       description: seeds.join(','),

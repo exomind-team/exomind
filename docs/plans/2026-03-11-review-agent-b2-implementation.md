@@ -13,8 +13,8 @@
 ### Task 1: 删除持久化状态中的主评论 id 字段
 
 **Files:**
-- Modify: `Scripts/review-agent/state-lib.ts`
-- Modify: `Scripts/review-agent/review-loop-lib.ts`
+- Modify: `agents/review-agent/scripts/state-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop-lib.ts`
 - Test: `tests/unit/review-agent/review-loop.test.ts`
 
 **Step 1: 写失败测试**
@@ -34,8 +34,8 @@ Run: `npx vitest run tests/unit/review-agent/review-loop.test.ts`
 ### Task 2: 删除 review-loop 的本地主评论恢复链路
 
 **Files:**
-- Modify: `Scripts/review-agent/review-loop.ts`
-- Modify: `Scripts/review-agent/review-loop-runtime-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop.ts`
+- Modify: `agents/review-agent/scripts/review-loop-runtime-lib.ts`
 - Test: `tests/unit/review-agent/review-loop.test.ts`
 
 **Step 1: 写失败测试**
@@ -86,8 +86,8 @@ Run: `npx vitest run tests/unit/review-agent`
 
 **Step 2: 运行脚本烟测**
 Run:
-- `npx tsx Scripts/review-agent/router.ts`
-- `npx tsx Scripts/review-agent/review-loop.ts --pr 465`
+- `npx tsx agents/review-agent/scripts/router.ts`
+- `npx tsx agents/review-agent/scripts/review-loop.ts --pr 465`
 
 **Step 3: 类型检查（如仍受仓库既有错误影响则据实记录）**
 Run: `npx tsc --noEmit --pretty false`

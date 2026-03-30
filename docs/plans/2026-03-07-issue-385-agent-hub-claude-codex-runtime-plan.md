@@ -360,7 +360,7 @@ await expect(page.getByText(/stopped/i)).toBeVisible();
 
 **Step 2: Run test to verify it fails**
 
-Run: `node Scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.runtime-claude-codex.issue385.test.ts tests/e2e/agent-hub.runtime-api.issue385.test.ts --config tests/e2e/playwright.issue385.config.ts`
+Run: `node scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.runtime-claude-codex.issue385.test.ts tests/e2e/agent-hub.runtime-api.issue385.test.ts --config tests/e2e/playwright.issue385.config.ts`
 Expected: FAIL before the new runtime flow is fully connected.
 
 **Step 3: Add E2E config and script**
@@ -376,7 +376,7 @@ Run:
 npx tsc --noEmit
 npx vitest run tests/unit/services/runtime-client.issue201.test.ts tests/unit/services/runtime-manager.issue385.test.ts tests/unit/agent-provider/provider-profile-storage.issue385.test.ts tests/unit/ui/agent-hub/agents-page.issue204.test.tsx tests/unit/ui/agent-hub/agents-page.runtime.issue201.test.tsx tests/unit/ui/agent-hub/agents-page.create-flow.issue385.test.tsx tests/unit/ui/agent-hub/agent-conversation.runtime.issue385.test.tsx
 cargo test -p exomind-runtime --test claude_persistent_streaming --test codex_app_server_streaming --test api_agent_streaming --test agent_lifecycle_routes --manifest-path src-tauri/Cargo.toml
-node Scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.runtime-claude-codex.issue385.test.ts tests/e2e/agent-hub.runtime-api.issue385.test.ts --config tests/e2e/playwright.issue385.config.ts
+node scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.runtime-claude-codex.issue385.test.ts tests/e2e/agent-hub.runtime-api.issue385.test.ts --config tests/e2e/playwright.issue385.config.ts
 ```
 
 Expected:

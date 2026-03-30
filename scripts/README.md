@@ -25,7 +25,7 @@ cd Scripts\test
 ## 目录结构
 
 ```
-Scripts/
+scripts/
 ├── README.md              # 本文件
 ├── CLAUDE.md              # 大模型使用指南
 │
@@ -58,7 +58,7 @@ Scripts/
 
 ### 项目路径配置
 
-脚本已预配置以下路径（在 `Scripts/_shared/config.ps1` 中修改）：
+脚本已预配置以下路径（在 `scripts/_shared/config.ps1` 中修改）：
 
 ```powershell
 Java 17:    D:\data\AndroidStudioSDK\java17
@@ -277,7 +277,7 @@ build-logs/
 
 ### Q: 找不到 Java 17
 
-**A**: 修改 `Scripts/_shared/config.ps1` 中的路径：
+**A**: 修改 `scripts/_shared/config.ps1` 中的路径：
 ```powershell
 $Global:EMConfig = @{
     Java17 = "你的Java17路径"
@@ -287,7 +287,7 @@ $Global:EMConfig = @{
 
 ### Q: 找不到 ADB
 
-**A**: 修改 `Scripts/_shared/config.ps1` 中的路径：
+**A**: 修改 `scripts/_shared/config.ps1` 中的路径：
 ```powershell
 $Global:EMConfig = @{
     AndroidSdk = "你的Android SDK路径"

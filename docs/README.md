@@ -161,7 +161,7 @@
 - [BUILD.md](../BUILD.md) -- 构建说明（CI/CD、跨平台构建）
 - [CHANGELOG.md](../CHANGELOG.md) -- 版本历史
 - [QUICK-START.md](../QUICK-START.md) -- 快速上手指南
-- [Scripts/CLAUDE.md](../Scripts/CLAUDE.md) -- **开发脚本文档（tauri-dev-manager、端口管理）**
+- [scripts/CLAUDE.md](../scripts/CLAUDE.md) -- **开发脚本文档（tauri-dev-manager、端口管理）**
 
 ---
 

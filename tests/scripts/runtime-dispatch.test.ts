@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const {
   getStepsForPreset,
   resolveStepStdio,
-} = require('../../Scripts/test/runtime-dispatch.cjs') as {
+} = require('../../scripts/test/runtime-dispatch.cjs') as {
   getStepsForPreset: (runtime: string, name: string, args: string[]) => Array<Record<string, unknown>>;
   resolveStepStdio: (step: Record<string, unknown>) => unknown;
 };

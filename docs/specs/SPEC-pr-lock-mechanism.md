@@ -320,7 +320,7 @@ pr_last_updated_at = max(last_commit_time, last_comment_time)
 ### 6.1 获取锁
 
 ```bash
-bun Scripts/lib/pr-lock.ts acquire <pr-number> <timeout-minutes> <agent-id> \
+bun scripts/lib/pr-lock.ts acquire <pr-number> <timeout-minutes> <agent-id> \
   [--worktree-path=<path>] \
   [--task-id=<id>] \
   [--reason="<reason>"]
@@ -328,7 +328,7 @@ bun Scripts/lib/pr-lock.ts acquire <pr-number> <timeout-minutes> <agent-id> \
 
 **示例：**
 ```bash
-bun Scripts/lib/pr-lock.ts acquire 419 60 fixer@team \
+bun scripts/lib/pr-lock.ts acquire 419 60 fixer@team \
   --worktree-path="exomind-worktree-pr-419" \
   --task-id=4 \
   --reason="修复 TypeScript 类型错误"
@@ -337,7 +337,7 @@ bun Scripts/lib/pr-lock.ts acquire 419 60 fixer@team \
 ### 6.2 查询锁状态
 
 ```bash
-bun Scripts/lib/pr-lock.ts check <pr-number>
+bun scripts/lib/pr-lock.ts check <pr-number>
 ```
 
 **输出：** JSON 格式的锁状态（包含动态计算的过期时间）
@@ -345,13 +345,13 @@ bun Scripts/lib/pr-lock.ts check <pr-number>
 ### 6.3 释放锁
 
 ```bash
-bun Scripts/lib/pr-lock.ts release <pr-number> <agent-id>
+bun scripts/lib/pr-lock.ts release <pr-number> <agent-id>
 ```
 
 ### 6.4 强制释放过期锁
 
 ```bash
-bun Scripts/lib/pr-lock.ts force-release <pr-number>
+bun scripts/lib/pr-lock.ts force-release <pr-number>
 ```
 
 **注意：** 只能释放已过期的锁，否则返回错误。
@@ -381,7 +381,7 @@ fi
 PR_NUMBER=$(jq -r '.pr_number' "$LOCK_FILE")
 
 # 验证锁状态
-bun Scripts/lib/pr-lock.ts check "$PR_NUMBER"
+bun scripts/lib/pr-lock.ts check "$PR_NUMBER"
 
 if [ $? -ne 0 ]; then
   echo "❌ 锁验证失败：锁已过期或被其他 Agent 抢占"

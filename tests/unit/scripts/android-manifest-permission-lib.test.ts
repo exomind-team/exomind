@@ -18,7 +18,7 @@ import {
   ensureReleaseCleartextTrafficInGradle,
   ensureRequiredAudioPermissionsInManifest,
   resolveInstalledNdkVersion,
-} from '../../../Scripts/dev/android-manifest-permission-lib';
+} from '../../../scripts/dev/android-manifest-permission-lib';
 
 describe('ensureRequiredAudioPermissionsInManifest', () => {
   it('injects audio permissions when missing（缺失时自动注入双权限）', () => {

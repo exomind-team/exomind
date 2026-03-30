@@ -8,7 +8,7 @@
    - `AGENTS.md`
    - 本 prompt 中的最小启动契约
 2. 立即运行路由脚本，禁止依赖自己对上轮状态的记忆：
-   - `npx tsx Scripts/review-agent/router.ts`
+   - `npx tsx agents/review-agent/scripts/router.ts`
 3. 读取路由脚本输出：
    - 优先遵循输出里的 `referencesMustRead`
    - 若 `action = discovery`，继续执行 discovery 子流程
