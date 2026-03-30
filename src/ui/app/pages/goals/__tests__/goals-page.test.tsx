@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { TaskNode } from '@/lib/types/task';
 import { resetGoalStoreForTests } from '../goal-store';
+import { GOAL_NODE_SIZE, ME_NODE_SIZE } from '../components/GoalFlowNode';
 
 const flowApiMocks = vi.hoisted(() => ({
   lastProps: null as null | Record<string, unknown>,
@@ -936,6 +937,57 @@ describe('GoalsPage', () => {
     expect(screen.getByTestId('goals-hop-rings')).toBeInTheDocument();
     expect(screen.getByTestId('goals-hop-ring-1')).toBeInTheDocument();
     expect(screen.getByTestId('goals-hop-ring-2')).toBeInTheDocument();
+  });
+
+  it('sizes hop-distance rings from the actual Me-to-goal graph distance for each hop', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const firstGoalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${firstGoalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    const nodes = flowApiMocks.lastProps?.nodes as Array<{ id: string; position: { x: number; y: number } }> | undefined;
+    const meNode = nodes?.find((node) => node.id === 'me');
+    const firstGoalNode = nodes?.find((node) => node.id === firstGoalId);
+    const secondGoalId = useGoalStore.getState().graph.goals[1]?.id as string;
+    const secondGoalNode = nodes?.find((node) => node.id === secondGoalId);
+    expect(meNode).toBeDefined();
+    expect(firstGoalNode).toBeDefined();
+    expect(secondGoalNode).toBeDefined();
+    if (!meNode || !firstGoalNode || !secondGoalNode) {
+      throw new Error('expected Me and two goal nodes for hop ring distance assertions');
+    }
+
+    const meCenter = {
+      x: meNode.position.x + ME_NODE_SIZE / 2,
+      y: meNode.position.y + ME_NODE_SIZE / 2,
+    };
+    const firstHopDistance = Math.hypot(
+      firstGoalNode.position.x + GOAL_NODE_SIZE / 2 - meCenter.x,
+      firstGoalNode.position.y + GOAL_NODE_SIZE / 2 - meCenter.y,
+    );
+    const secondHopDistance = Math.hypot(
+      secondGoalNode.position.x + GOAL_NODE_SIZE / 2 - meCenter.x,
+      secondGoalNode.position.y + GOAL_NODE_SIZE / 2 - meCenter.y,
+    );
+
+    const ring1Radius = Number(screen.getByTestId('goals-hop-ring-1').querySelector('circle')?.getAttribute('r'));
+    const ring2Radius = Number(screen.getByTestId('goals-hop-ring-2').querySelector('circle')?.getAttribute('r'));
+
+    expect(ring1Radius).toBeCloseTo(firstHopDistance, 3);
+    expect(ring2Radius).toBeCloseTo(secondHopDistance, 3);
   });
 
   it('keeps hop-distance rings aligned with the React Flow viewport transform', async () => {

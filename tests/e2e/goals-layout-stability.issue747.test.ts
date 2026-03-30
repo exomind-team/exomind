@@ -4063,7 +4063,6 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         return null;
       }
 
-      const pageRect = pageEl.getBoundingClientRect();
       const flowSurfaceRect = flowSurfaceEl.getBoundingClientRect();
       const meRect = me.getBoundingClientRect();
       const ring1Rect = ring1.getBoundingClientRect();
@@ -4127,24 +4126,12 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
           x: flowSurfaceRect.x + flowSurfaceRect.width / 2,
           y: flowSurfaceRect.y + flowSurfaceRect.height / 2,
         },
-        pageRect: {
-          left: pageRect.left,
-          top: pageRect.top,
-          right: pageRect.right,
-          bottom: pageRect.bottom,
-        },
         topElementAtMeCenter:
           topElementAtMeCenter?.closest('[data-testid]')?.getAttribute('data-testid')
           ?? topElementAtMeCenter?.tagName
           ?? null,
         nodeLayering,
         labelOverlap: overlap,
-        ring2Rect: {
-          left: ring2Rect.left,
-          top: ring2Rect.top,
-          right: ring2Rect.right,
-          bottom: ring2Rect.bottom,
-        },
       };
     }, visibleNodeTestIds);
 
@@ -4185,10 +4172,6 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((initialMetrics?.ring2.centerY ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(6);
     expect(Math.abs((initialMetrics?.meCenter.x ?? 0) - (initialMetrics?.flowSurfaceCenter.x ?? 0))).toBeLessThan(24);
     expect(Math.abs((initialMetrics?.meCenter.y ?? 0) - (initialMetrics?.flowSurfaceCenter.y ?? 0))).toBeLessThan(24);
-    expect(initialMetrics?.ring2Rect.left ?? 0).toBeGreaterThanOrEqual((initialMetrics?.pageRect.left ?? 0) - 2);
-    expect(initialMetrics?.ring2Rect.top ?? 0).toBeGreaterThanOrEqual((initialMetrics?.pageRect.top ?? 0) - 2);
-    expect(initialMetrics?.ring2Rect.right ?? 0).toBeLessThanOrEqual((initialMetrics?.pageRect.right ?? 0) + 2);
-    expect(initialMetrics?.ring2Rect.bottom ?? 0).toBeLessThanOrEqual((initialMetrics?.pageRect.bottom ?? 0) + 2);
     expect(initialMetrics?.topElementAtMeCenter).toBe('goal-flow-node-me');
     expect(initialMetrics?.nodeLayering).toHaveLength(3);
     for (const nodeLayering of initialMetrics?.nodeLayering ?? []) {
@@ -4210,6 +4193,163 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (settledMetrics?.flowSurfaceCenter.y ?? 0))).toBeLessThan(24);
     expect(Math.abs((settledMetrics?.meCenter.x ?? 0) - (initialMetrics?.meCenter.x ?? 0))).toBeLessThan(2);
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(2);
+  });
+
+  test('keeps each hop ring radius tied to its target distance while panning the canvas', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const firstGoal = page.locator('[data-testid^="goal-flow-node-"]').nth(1);
+    const firstGoalId = await firstGoal.getAttribute('data-testid');
+    if (!firstGoalId) {
+      throw new Error('expected first goal node test id for hop ring distance coverage');
+    }
+
+    await openNodeContextMenu(page, firstGoalId, 220, 180);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+
+    const secondGoal = page.locator('[data-testid^="goal-flow-node-"]').nth(2);
+    const secondGoalId = await secondGoal.getAttribute('data-testid');
+    if (!secondGoalId) {
+      throw new Error('expected second goal node test id for hop ring distance coverage');
+    }
+
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected simulation:end warn log before hop ring distance assertions',
+      })
+      .toBe(true);
+
+    const readHopRingDistanceMetrics = () => page.evaluate(({ firstHopGoalId, secondHopGoalId }) => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const firstHopGoal = document.querySelector(`[data-testid="${firstHopGoalId}"]`) as HTMLElement | null;
+      const secondHopGoal = document.querySelector(`[data-testid="${secondHopGoalId}"]`) as HTMLElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const ring2 = document.querySelector('[data-testid="goals-hop-ring-2"] circle') as SVGCircleElement | null;
+      if (!me || !firstHopGoal || !secondHopGoal || !ring1 || !ring2) {
+        return null;
+      }
+
+      const getCenter = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+
+      const meCenter = getCenter(me);
+      const firstHopGoalCenter = getCenter(firstHopGoal);
+      const secondHopGoalCenter = getCenter(secondHopGoal);
+      const ring1Rect = ring1.getBoundingClientRect();
+      const ring2Rect = ring2.getBoundingClientRect();
+
+      return {
+        ring1GraphRadius: Number(ring1.getAttribute('r')),
+        ring2GraphRadius: Number(ring2.getAttribute('r')),
+        ring1ScreenRadius: ring1Rect.width / 2,
+        ring2ScreenRadius: ring2Rect.width / 2,
+        firstHopGoalScreenDistance: Math.hypot(
+          firstHopGoalCenter.x - meCenter.x,
+          firstHopGoalCenter.y - meCenter.y,
+        ),
+        secondHopGoalScreenDistance: Math.hypot(
+          secondHopGoalCenter.x - meCenter.x,
+          secondHopGoalCenter.y - meCenter.y,
+        ),
+      };
+    }, {
+      firstHopGoalId: firstGoalId,
+      secondHopGoalId: secondGoalId,
+    });
+
+    const baselineMetrics = await readHopRingDistanceMetrics();
+    expect(baselineMetrics, 'hop-ring-distance: expected measurable baseline metrics').not.toBeNull();
+    expect(
+      Math.abs((baselineMetrics?.ring1ScreenRadius ?? 0) - (baselineMetrics?.firstHopGoalScreenDistance ?? 0)),
+      'hop-ring-distance: expected 1-hop ring to match the first-hop target distance before pan',
+    ).toBeLessThan(8);
+    expect(
+      Math.abs((baselineMetrics?.ring2ScreenRadius ?? 0) - (baselineMetrics?.secondHopGoalScreenDistance ?? 0)),
+      'hop-ring-distance: expected 2-hop ring to match the second-hop target distance before pan',
+    ).toBeLessThan(8);
+
+    const viewportBeforePan = await readViewportTransform(page);
+    const pane = page.locator('.react-flow__pane');
+    const paneBox = await pane.boundingBox();
+    expect(paneBox, 'hop-ring-distance: expected pane box for pan gesture').not.toBeNull();
+    if (!paneBox) {
+      throw new Error('expected pane box for hop-ring-distance pan gesture');
+    }
+
+    const panStartX = paneBox.x + Math.min(72, paneBox.width * 0.15);
+    const panStartY = paneBox.y + Math.min(72, paneBox.height * 0.15);
+    await page.mouse.move(panStartX, panStartY);
+    await page.mouse.down();
+    await page.mouse.move(
+      panStartX + 48,
+      panStartY + 32,
+      { steps: 12 },
+    );
+    await page.mouse.up();
+
+    await expect
+      .poll(() => readViewportTransform(page), {
+        timeout: 4000,
+        message: 'expected viewport transform to change after pan in hop-ring distance test',
+      })
+      .not.toEqual(viewportBeforePan);
+
+    let stablePannedMetrics: (NonNullable<Awaited<ReturnType<typeof readHopRingDistanceMetrics>>> & {
+      ring1RadiusDelta: number;
+      ring2RadiusDelta: number;
+    }) | null = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const metrics = await readHopRingDistanceMetrics();
+      if (metrics && baselineMetrics) {
+        const candidate = {
+          ...metrics,
+          ring1RadiusDelta: Math.abs(metrics.ring1GraphRadius - baselineMetrics.ring1GraphRadius),
+          ring2RadiusDelta: Math.abs(metrics.ring2GraphRadius - baselineMetrics.ring2GraphRadius),
+        };
+        const ring1DistanceDelta = Math.abs(candidate.ring1ScreenRadius - candidate.firstHopGoalScreenDistance);
+        const ring2DistanceDelta = Math.abs(candidate.ring2ScreenRadius - candidate.secondHopGoalScreenDistance);
+        if (ring1DistanceDelta <= 8 && ring2DistanceDelta <= 8) {
+          stablePannedMetrics = candidate;
+          break;
+        }
+      }
+      await page.waitForTimeout(200);
+    }
+
+    expect(stablePannedMetrics, 'hop-ring-distance: expected hop ring radius to settle after panning').not.toBeNull();
+    if (!stablePannedMetrics) {
+      throw new Error('expected stable hop ring metrics after panning');
+    }
+    expect(
+      Math.abs(stablePannedMetrics.ring1ScreenRadius - stablePannedMetrics.firstHopGoalScreenDistance),
+      'hop-ring-distance: expected 1-hop ring to stay aligned with the first-hop target after pan',
+    ).toBeLessThan(8);
+    expect(
+      Math.abs(stablePannedMetrics.ring2ScreenRadius - stablePannedMetrics.secondHopGoalScreenDistance),
+      'hop-ring-distance: expected 2-hop ring to stay aligned with the second-hop target after pan',
+    ).toBeLessThan(8);
+    expect(
+      stablePannedMetrics.ring1RadiusDelta,
+      'hop-ring-distance: expected 1-hop ring graph radius to remain invariant while panning',
+    ).toBeLessThan(0.5);
+    expect(
+      stablePannedMetrics.ring2RadiusDelta,
+      'hop-ring-distance: expected 2-hop ring graph radius to remain invariant while panning',
+    ).toBeLessThan(0.5);
   });
 
   test('keeps hop rings aligned with the browser viewport transform during zoom and pan', async ({ page }) => {
