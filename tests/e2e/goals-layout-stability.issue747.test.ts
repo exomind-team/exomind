@@ -22,6 +22,7 @@ const ISSUE747_FROZEN_RANDOM_SAMPLE_SEEDS = [
   402121570,
   1519728956,
 ] as const;
+// Keep #747 browser coverage reproducible with a committed 20-sample random baseline.
 
 interface GoalLayoutTestConfig {
   randomSeed?: number;
