@@ -2598,7 +2598,10 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
       const goalA = document.querySelector('[data-testid="goal-flow-node-goal-a"]') as HTMLElement | null;
       const goalB = document.querySelector('[data-testid="goal-flow-node-goal-b"]') as HTMLElement | null;
-      if (!me || !goalA || !goalB) return null;
+      const canvas = me?.closest('.react-flow') as HTMLElement | null;
+      const rings = document.querySelector('[data-testid="goals-hop-rings"]') as SVGSVGElement | null;
+      const ring1 = rings?.querySelector('[data-testid="goals-hop-ring-1"]') as SVGCircleElement | null;
+      if (!me || !goalA || !goalB || !canvas) return null;
 
       const getCenter = (element: HTMLElement) => {
         const rect = element.getBoundingClientRect();
@@ -2615,12 +2618,23 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       const angleB = Math.atan2(bCenter.y - meCenter.y, bCenter.x - meCenter.x);
       const rawDelta = Math.abs(angleA - angleB);
       const angleDeltaDeg = Math.min(rawDelta, Math.PI * 2 - rawDelta) * 180 / Math.PI;
+      const ring1Rect = ring1?.getBoundingClientRect() ?? null;
+      const canvasRect = canvas.getBoundingClientRect();
+      const viewportCenter = {
+        x: canvasRect.x + canvasRect.width / 2,
+        y: canvasRect.y + canvasRect.height / 2,
+      };
 
       return {
         meCenter,
         aCenter,
         bCenter,
         angleDeltaDeg,
+        viewportCenter,
+        ring1Center: ring1Rect ? {
+          x: ring1Rect.x + ring1Rect.width / 2,
+          y: ring1Rect.y + ring1Rect.height / 2,
+        } : null,
       };
     });
 
@@ -2629,6 +2643,24 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       fanMetrics?.angleDeltaDeg ?? 0,
       `shared-endpoint-fan: expected Me fan angle to open well beyond the initial ~1.7deg, got ${fanMetrics?.angleDeltaDeg ?? 0}deg`,
     ).toBeGreaterThan(20);
+    expect(
+      Math.abs((fanMetrics?.meCenter.x ?? 0) - (fanMetrics?.viewportCenter.x ?? 0)),
+      `shared-endpoint-fan: expected Me to remain near viewport center on x-axis, got me=${fanMetrics?.meCenter.x ?? 0}, viewport=${fanMetrics?.viewportCenter.x ?? 0}`,
+    ).toBeLessThanOrEqual(16);
+    expect(
+      Math.abs((fanMetrics?.meCenter.y ?? 0) - (fanMetrics?.viewportCenter.y ?? 0)),
+      `shared-endpoint-fan: expected Me to remain near viewport center on y-axis, got me=${fanMetrics?.meCenter.y ?? 0}, viewport=${fanMetrics?.viewportCenter.y ?? 0}`,
+    ).toBeLessThanOrEqual(16);
+    if (fanMetrics?.ring1Center) {
+      expect(
+        Math.abs(fanMetrics.ring1Center.x - fanMetrics.meCenter.x),
+        `shared-endpoint-fan: expected ring1 to remain concentric with Me on x-axis, got ring=${fanMetrics.ring1Center.x}, me=${fanMetrics.meCenter.x}`,
+      ).toBeLessThanOrEqual(6);
+      expect(
+        Math.abs(fanMetrics.ring1Center.y - fanMetrics.meCenter.y),
+        `shared-endpoint-fan: expected ring1 to remain concentric with Me on y-axis, got ring=${fanMetrics.ring1Center.y}, me=${fanMetrics.meCenter.y}`,
+      ).toBeLessThanOrEqual(6);
+    }
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
