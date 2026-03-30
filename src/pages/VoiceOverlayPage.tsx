@@ -50,6 +50,18 @@ interface OverlayData {
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
 
+// WebView2 is more fragile with heavy transparent overlay effects on Windows（Windows 下的 WebView2 对透明重特效更脆弱）.
+function shouldUseReducedOverlayEffects(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent ?? '';
+  const isWindows = /Windows/i.test(userAgent);
+  const isTauriWindow = '__TAURI_INTERNALS__' in window;
+  return isWindows && isTauriWindow;
+}
+
 export function VoiceOverlayPage() {
   const [shortcut, setShortcut] = useState<VoiceShortcutHotkey>(() => getVoiceShortcutHotkey());
   const [overlayOpacity, setOverlayOpacity] = useState<number>(() => getVoiceOverlayOpacity());
@@ -79,6 +91,7 @@ export function VoiceOverlayPage() {
   const overlayAudioLevel = data.state === 'recording'
     ? Math.max(0, Math.min(1, data.audioLevel ?? 0))
     : 0;
+  const useReducedOverlayEffects = shouldUseReducedOverlayEffects();
   const overlayCardStyle = {
     '--overlay-edge-alpha': (0.12 + overlayAudioLevel * 0.08).toFixed(2),
     '--overlay-halo-alpha': (0.03 + overlayAudioLevel * 0.07).toFixed(2),
@@ -272,7 +285,12 @@ export function VoiceOverlayPage() {
           />
         </div>
       </div>
-      <style>{overlayStyles(overlayPrimaryAlpha, overlaySecondaryAlpha, transcriptLines)}</style>
+      <style>{overlayStyles(
+        overlayPrimaryAlpha,
+        overlaySecondaryAlpha,
+        transcriptLines,
+        useReducedOverlayEffects,
+      )}</style>
     </div>
   );
 }
@@ -536,7 +554,12 @@ function formatSessionWarmState(
   }
 }
 
-const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptLines: number) => /* css */ `
+const overlayStyles = (
+  primaryAlpha: number,
+  secondaryAlpha: number,
+  transcriptLines: number,
+  useReducedEffects: boolean,
+) => /* css */ `
   html, body, #root {
     width: 100%;
     height: 100%;
@@ -571,24 +594,28 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptL
     min-height: 112px;
     padding: 16px 18px;
     border-radius: 24px;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: ${useReducedEffects ? 'none' : 'blur(20px)'};
+    -webkit-backdrop-filter: ${useReducedEffects ? 'none' : 'blur(20px)'};
     background: linear-gradient(
       180deg,
       hsl(var(--bg-card) / ${primaryAlpha.toFixed(2)}),
       hsl(var(--bg-surface) / ${secondaryAlpha.toFixed(2)})
     );
     border: 1.5px solid hsl(var(--brand-accent) / var(--overlay-edge-alpha));
-    box-shadow:
+    box-shadow: ${useReducedEffects
+    ? '0 18px 36px -24px rgba(15, 23, 42, calc(0.42 + var(--overlay-shadow-alpha)))'
+    : `
       0 26px 64px -30px rgba(15, 23, 42, calc(0.52 + var(--overlay-shadow-alpha))),
       0 10px 24px -18px rgba(15, 23, 42, calc(0.24 + var(--overlay-shadow-alpha) * 0.6)),
-      0 0 0 1px hsl(var(--brand-accent) / calc(var(--overlay-edge-alpha) * 0.24));
-    animation: overlay-fade-in 0.15s ease-out;
+      0 0 0 1px hsl(var(--brand-accent) / calc(var(--overlay-edge-alpha) * 0.24))`};
+    animation: ${useReducedEffects ? 'none' : 'overlay-fade-in 0.15s ease-out'};
     font-size: 13px;
     line-height: 1.3;
     color: hsl(var(--text-primary));
     isolation: isolate;
-    transition: border-color 180ms ease-out, box-shadow 220ms ease-out;
+    transition: ${useReducedEffects
+    ? 'border-color 180ms ease-out'
+    : 'border-color 180ms ease-out, box-shadow 220ms ease-out'};
   }
 
   .voice-overlay::before,
@@ -607,13 +634,16 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptL
   .voice-overlay::after {
     inset: -6px;
     z-index: -1;
+    ${useReducedEffects
+    ? 'display: none;'
+    : `
     background: radial-gradient(
       circle at center,
       hsl(var(--brand-accent) / var(--overlay-halo-alpha)) 0%,
       transparent 72%
     );
     filter: blur(16px);
-    transition: background 180ms ease-out;
+    transition: background 180ms ease-out;`}
   }
 
   .overlay-icon {
@@ -630,26 +660,26 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptL
   }
 
   .overlay-icon--recording {
-    animation: pulse-icon 1.2s ease-in-out infinite;
+    animation: ${useReducedEffects ? 'none' : 'pulse-icon 1.2s ease-in-out infinite'};
   }
 
   .overlay-icon--arming {
-    animation: spin-icon 1s linear infinite;
+    animation: ${useReducedEffects ? 'none' : 'spin-icon 1s linear infinite'};
     color: hsl(var(--brand-accent));
   }
 
   .overlay-icon--recognizing {
-    animation: spin-icon 1s linear infinite;
+    animation: ${useReducedEffects ? 'none' : 'spin-icon 1s linear infinite'};
     color: hsl(var(--brand));
   }
 
   .overlay-icon--done {
-    animation: pop-in 0.25s ease-out;
+    animation: ${useReducedEffects ? 'none' : 'pop-in 0.25s ease-out'};
     color: hsl(var(--success));
   }
 
   .overlay-icon--error {
-    animation: shake-icon 0.4s ease-out;
+    animation: ${useReducedEffects ? 'none' : 'shake-icon 0.4s ease-out'};
     color: hsl(var(--destructive));
   }
 
