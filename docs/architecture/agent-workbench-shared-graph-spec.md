@@ -821,6 +821,11 @@ type DerivedArtifact = {
 8. `inspector`
 9. `outcome`
 
+说明：
+
+1. `browser` 虽然保留在长期 `ViewType` 枚举中，但不是 Phase 1 首批视图
+2. Phase 1 不以 `browser pane` 作为关闭 issue 的验收门槛
+
 ## 6.2 `work-area` 与投影模式
 
 中间主舞台统一叫 `work-area`。  
@@ -835,7 +840,10 @@ type DerivedArtifact = {
 1. `canvas` 同时表示容器、视图、派生产物
 2. `network` 同时表示页面与派生关系图
 
-## 6.3 默认产品预设
+## 6.3 长期默认产品预设（post-Phase-1）
+
+下面这组预设描述的是 Phase 1 之后的长期桌面目标，不是 Phase 1 的默认交付面。  
+Phase 1 当前默认交付面以 `Flat Workbench（平铺工作台）` 为准，优先是 `session panes + inspector / outcome`，而不是 `canvas-first`。
 
 若不另行定制，桌面端默认预设建议为：
 
@@ -899,7 +907,7 @@ type DerivedArtifact = {
 3. drawer / sheet / fullscreen 的导航状态
 4. `SurfaceSlot.localState`
 
-## 7.2 Desktop（桌面端）
+## 7.2 Desktop（桌面端，长期目标）
 
 目标：
 
@@ -912,6 +920,11 @@ type DerivedArtifact = {
 1. 完整 `container graph`
 2. 支持 `panel + tabs + floating + work-area-host`
 3. 默认三栏只是预设，不是唯一布局
+
+补充说明：
+
+1. 这部分描述的是长期桌面能力，不是 Phase 1 的默认实现范围
+2. Phase 1 桌面默认实现以平铺 pane 工作台为准，不要求先交付 `floating + work-area-host`
 
 ## 7.3 Tablet（平板端）
 
@@ -1304,7 +1317,7 @@ Phase 1 必须具备：
    - 能恢复最近使用的会话集合
 3. `SessionObject`
    - MVP 先稳定兼容现有 `agent-backed session`
-   - 同时给 `PTY / SSH / browser runtime` 预留一致纳管入口
+   - 同时给 `PTY / SSH` 稳定纳管，并给 `browser runtime` 预留一致入口
 4. `RuntimeBinding + RuntimeAttachment + SessionAnchor`
    - 统一表示运行时句柄、宿主语义与附着关系
 5. `SurfaceSlot + SurfaceNavigationState`
@@ -1337,7 +1350,8 @@ Phase 1 必须具备：
 注意：
 
 1. `browser runtime` 在 Phase 1 先作为 `RuntimeBinding.bindingType = 'browser-runtime'`
-2. 是否升级为独立 `BrowserNodeObject` 留到下一轮评审
+2. 它在 Phase 1 只要求模型预留与注册入口，不作为关闭 issue 的强制可见功能
+3. 是否升级为独立 `BrowserNodeObject` 留到下一轮评审
 
 ## 12.5 Phase 1 关键用户旅程
 
@@ -1346,13 +1360,40 @@ Phase 1 必须具备：
    - 恢复最近活跃的 `SessionObject`
    - 用平铺工作面显示多个会话 pane（面板）
 2. 在同一工作台中新增会话
-   - 用户新建 `agent / PTY / SSH / browser runtime`
+   - 用户新建 `agent / PTY / SSH`
    - 系统创建 `SessionObject`
    - 系统通过 `RuntimeBinding` 附着到底层运行时
 3. 从主窗口派生次窗口
    - 用户把某个 pane 或 view 弹到新窗口
    - 新窗口仍然属于同一 `WorkbenchSpace`
    - 共享同一底层对象、关系与事实流
+
+## 12.6 Phase 1 可见功能与人类验收
+
+Phase 1 不只是交付抽象模型，它必须给出人类可直接看到、可直接验收的功能面。
+
+最低可见功能集合：
+
+1. 访问 `/workbench`
+   - 能打开一个稳定的平铺工作台
+2. 在同一工作台中同时看到至少 2 个 session pane
+   - 例如 `agent + PTY` 或 `agent + SSH`
+   - 至少一个 pane 应来自真实运行时恢复或真实运行时挂载
+   - 至少一个 pane 不是 `agent-backed session`
+3. 关闭并重新打开后
+   - 最近工作台能恢复
+4. 从主窗口派生一个次窗口工作面
+   - 仅要求桌面端 / Tauri 路径成立
+   - 次窗口仍加载同一 `WorkbenchSpace`
+
+Phase 1 最低人类验收清单：
+
+1. 打开工作台时不是空白页或跳错页
+2. 可以从工作台新建至少一种运行时 pane
+3. 主窗口中可同时看到 2 个以上工作面，且至少有一个不是 `agent-backed session`
+4. 重启或刷新后，最近 pane 集合能够恢复
+5. 桌面端打开次窗口后，两个窗口仍然指向同一空间语义
+6. 基础会话输入/输出可继续进入事实流
 
 ---
 
@@ -1380,6 +1421,7 @@ Phase 1 必须具备：
 1. 抽 `SessionInteropAdapter`
 2. 把现有 `AgentSession` 映射到 `SessionObject`
 3. 把 `PTY / SSH / browser runtime` 收到统一 `RuntimeBinding` 语义
+   - 其中 `browser runtime` 在 Phase 1 仅要求模型预留，不要求形成首批可见 pane
 4. 消除“PTY 伪装成 agent”这类语义污染
 
 交付标准：
@@ -1441,6 +1483,7 @@ Phase 1 必须具备：
 - [ ] `EventTape` 仍是事实源，结构化层只能派生
 - [ ] `/agents/*` 必须通过兼容路由逐步迁移
 - [ ] Epic 与阶段 issue 的治理方式保持最小扩散
+- [ ] 每个阶段 issue 都对应至少一个人类可见、可手测验收的功能面
 
 ---
 

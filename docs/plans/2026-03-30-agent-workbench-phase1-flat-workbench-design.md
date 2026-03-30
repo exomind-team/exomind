@@ -82,6 +82,20 @@ Phase 1 只要求下面这组关系稳定存在：
 
 1. 这不是最终全部关系类型
 2. 但足以支撑“一个空间、多个 pane、多个运行时、多个窗口、同一事实流”
+3. 这些词是 `Phase 1 operational alias（阶段操作别名）`，不能替代长期正式模型
+
+### 3.2.1 与长期正式模型的映射
+
+1. `space_contains`
+   - 对应长期模型中的 `SpaceObjectMembership`
+2. `surface_shows`
+   - 对应 `SurfaceSlot / ViewInstance` 的承载关系
+3. `session_anchors_to`
+   - 对应 `SessionAnchor`
+4. `session_attaches_runtime`
+   - 对应 `RuntimeAttachment`
+5. `session_emits_event`
+   - 对应 `EventTape / TapeEvent`
 
 ## 3.3 核心对象图
 
@@ -290,9 +304,78 @@ flowchart LR
 1. 关闭重开后可恢复最近工作台
 2. 文档中的对象模型与实际实现结构一致
 
+## 5.6 Slice F：可见功能封板与人类验收
+
+交付：
+
+1. Phase 1 最低可见功能面全部可访问
+2. 验收入口清晰，不依赖阅读实现细节
+3. issue 中的验收项与真实工作台界面一致
+
+验收：
+
+1. 人类可直接进入 `/workbench`
+2. 人类可看见至少 2 个 pane 同时存在
+3. 人类可看见最近工作台恢复成功
+4. 人类可看见次窗口仍属于同一 `WorkbenchSpace`
+
 ---
 
-## 6. 现有代码映射
+## 6. 可见功能验收清单
+
+## 6.1 最低可见功能
+
+1. `WorkbenchPage` 可访问
+2. `Flat Workbench` 平铺布局可见
+3. 至少 2 个 session pane 可同时显示
+   - 且至少 1 个 pane 对应真实运行时恢复或真实运行时挂载
+4. 最近工作台恢复可见
+5. 桌面端 / Tauri 下的次窗口工作面可见
+6. `browser runtime` 在 Phase 1 只要求模型预留与注册入口，不作为关闭条件
+
+## 6.2 人类手测步骤
+
+1. 打开 `/workbench`
+   - 预期：进入平铺工作台，而不是旧页面空壳
+2. 新建或恢复两个会话 pane
+   - 预期：两者可同时可见
+3. 刷新或重启应用
+   - 预期：最近工作台恢复
+4. 从当前工作台弹出一个次窗口
+   - 预期：仅在桌面端 / Tauri 路径验证
+   - 预期：次窗口仍属于同一空间，且能看到该空间的子集工作面
+5. 在其中一个 pane 内继续操作
+   - 预期：事实流继续记录，不出现“切窗口后丢状态”的明显断裂
+
+## 6.3 自动化与验证建议
+
+1. 单元测试
+   - `SessionObject / RuntimeBinding / SurfaceSlot` 的状态映射与恢复逻辑
+2. 集成测试
+   - `/agents/*` shim 到 `/workbench` 的兼容导航
+3. E2E 测试
+   - `/workbench` 打开、双 pane 显示、恢复最近工作台
+4. 人类手测
+   - 桌面端 / Tauri 的次窗口同空间语义
+   - 基本 session 输入/输出仍正常
+
+## 6.4 开发纪律
+
+1. 行为变更先写失败测试，再写最小实现
+2. 每个 Slice 完成后都要做 reviewer 复核
+3. 对外宣称“完成”之前，必须有新鲜验证证据
+4. Phase 1 的“完成”必须同时满足：
+   - 自动化验证通过
+   - 人类可见功能可手测
+5. 最低验证门槛建议：
+   - `bunx tsc --noEmit`
+   - 新增或受影响的定向 `vitest`
+   - 新增或受影响的定向 Playwright / E2E
+   - 桌面端 / Tauri 的次窗口手测烟雾验证
+
+---
+
+## 7. 现有代码映射
 
 1. [AgentsPage.tsx](../../src/ui/app/pages/AgentsPage.tsx)
    - 提供多会话、PTY、详情面板、移动端入口经验
@@ -306,16 +389,17 @@ flowchart LR
 
 ---
 
-## 7. 风险与评审点
+## 8. 风险与评审点
 
-## 7.1 主要风险
+## 8.1 主要风险
 
 1. 如果 Phase 1 又偷偷回到自由画布，会拖慢交付
 2. 如果 `browser runtime` 只写进文案、不进模型，后续还会断层
 3. 如果窗口层没有“共享同一空间语义”，会退化成多个孤立页面
 4. 如果 `EventTape` 不先打通，结构化层后面会变成伪真相
+5. 如果 issue 没有明确可见验收面，阶段执行会再次滑回抽象实现
 
-## 7.2 评审时重点看什么
+## 8.2 评审时重点看什么
 
 1. 当前阶段是否真的收敛到了 `Flat Workbench`
 2. `SessionObject + RuntimeBinding` 是否已经成为统一入口
@@ -324,7 +408,7 @@ flowchart LR
 
 ---
 
-## 8. 结论
+## 9. 结论
 
 Phase 1 的正确交付物，不是一个很自由的 UI，而是一个：
 
