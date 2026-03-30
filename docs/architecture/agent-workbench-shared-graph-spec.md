@@ -8,6 +8,7 @@
 > **关联**:
 > - Epic: `#728`
 > - 讨论笔记: `docs/plans/2026-03-30-agent-workbench-canvas-brainstorm.md`
+> - Phase 1 设计: `docs/plans/2026-03-30-agent-workbench-phase1-flat-workbench-design.md`
 > - 参考: `docs/architecture/agent-hub-ui-spec.md`
 > - 参考: `docs/specs/SPEC-goal-system-v0.3-logic.md`
 > - 现有运行时: `crates/exomind-runtime/src/session/types.rs`
@@ -188,7 +189,34 @@ Derived Layer
   └─ replay read models
 ```
 
-### 3.2 四层分工
+### 3.2 Obsidian 速览图
+
+```mermaid
+flowchart TD
+  WS["WorkbenchSpace<br/>工作空间"]
+  SL["SurfaceSlot / SurfaceNavigationState<br/>承载槽 / 导航态"]
+  VI["ViewInstance<br/>视图实例"]
+  SO["SessionObject<br/>会话对象"]
+  RB["RuntimeBinding<br/>运行时绑定"]
+  ET["EventTape<br/>事件带"]
+  DA["DerivedArtifact<br/>派生产物"]
+
+  WS --> SL
+  WS --> VI
+  VI --> SO
+  SO --> RB
+  SO --> ET
+  ET --> DA
+```
+
+```mermaid
+flowchart LR
+  P1["Phase 1<br/>Flat Workbench<br/>平铺工作台"] --> P2["Phase 2<br/>Cross-Window Federation<br/>跨窗口联邦"]
+  P2 --> P3["Phase 3<br/>EventTape + Structured Projection<br/>事实层与结构化投影"]
+  P3 --> P4["Phase 4<br/>Work-Area Projections<br/>Canvas / Network / Replay"]
+```
+
+### 3.3 四层分工
 
 #### A. `space layer（空间层）`
 
@@ -295,6 +323,7 @@ type ViewType =
   | 'session'
   | 'conversation'
   | 'terminal'
+  | 'browser'
   | 'work-area'
   | 'note'
   | 'inspector'
@@ -567,7 +596,7 @@ type ResultObject = WorkbenchObjectBase & {
 ```ts
 type RuntimeBinding = {
   id: string;
-  bindingType: 'pty' | 'ssh' | 'agent-session' | 'external-process';
+  bindingType: 'pty' | 'ssh' | 'agent-session' | 'browser-runtime' | 'external-process';
   runtimeRef: string;
   status: 'running' | 'idle' | 'waiting' | 'stopped' | 'error';
   metadata?: Record<string, unknown>;
@@ -1242,156 +1271,197 @@ MVP 兼容规则：
 
 ---
 
-## 12. MVP 边界
+## 12. 分阶段实施策略
 
-## 12.1 MVP 必须具备
+## 12.1 长期愿景与当前落点
+
+长期愿景保持不变：
+
+1. `WorkbenchSpace` 仍是产品主对象
+2. `container graph + shared work graph + EventTape` 仍是底层骨架
+3. `Signal Network / Canvas / Replay` 最终仍要回到同一底层模型
+
+但当前开工落点必须收紧为：
+
+> **先做 `Flat Workbench（平铺工作台）`，再做 `Cross-Window Federation（跨窗口联邦）`，最后再把 `canvas / network / replay` 做成统一投影。**
+
+这意味着：
+
+1. Phase 1 不把自由画布当成阻塞项
+2. Phase 1 先交付“一个稳定的多会话工作台”
+3. `agent / PTY / SSH / browser runtime` 先通过统一 `SessionObject + RuntimeBinding` 纳管
+4. 跨窗口先做“共享同一空间语义”的联邦骨架，而不是完整窗口管理器
+
+## 12.2 Phase 1：`Flat Workbench（平铺工作台）`
+
+Phase 1 必须具备：
+
+1. `WorkbenchPage`
+   - 提供固定或半固定的平铺工作面
+   - 不先要求自由画布
+2. `WorkbenchSpace`
+   - 至少有一个稳定 `default space（默认空间）`
+   - 能恢复最近使用的会话集合
+3. `SessionObject`
+   - MVP 先稳定兼容现有 `agent-backed session`
+   - 同时给 `PTY / SSH / browser runtime` 预留一致纳管入口
+4. `RuntimeBinding + RuntimeAttachment + SessionAnchor`
+   - 统一表示运行时句柄、宿主语义与附着关系
+5. `SurfaceSlot + SurfaceNavigationState`
+   - 先支撑“主窗口 + 次窗口/次承载面”的基本联邦
+6. `EventTape`
+   - 至少记录会话输入、会话输出、系统控制事件
+7. `/agents/*` shim
+   - 旧路由可以逐步映射到新的 `WorkbenchPage`
+
+## 12.3 Phase 1 明确不做
+
+1. 自由画布编排
+2. 完整 `network` 投影编辑器
+3. 完整多窗口管理器
+4. 完整插件系统
+5. 一次性替换所有旧页面
+6. 全量智能解析与自动洞察
+
+## 12.4 Phase 1 首批对象集合
 
 1. `WorkbenchSpace`
-   - 支持三端 layout profile
-2. `ViewInstance + LayoutNode + SurfaceNavigationState`
-   - 至少能表达 desktop / mobile 的差异
-3. `SessionObject`
-   - MVP 先稳定兼容现有 agent-backed session
-4. `AgentNodeObject` 与 `TerminalNodeObject`
-   - 作为空间中的长期节点
-5. `RuntimeBinding + RuntimeAttachment + SessionAnchor`
-6. `FocusRun + EventTape`
-   - 先桥接现有 `TimeBlock`
-7. `work-area`
-   - 支持 `canvas` 与 `network` 两种投影模式
+2. `ViewInstance`
+3. `SurfaceSlot + SurfaceNavigationState`
+4. `SessionObject`
+5. `AgentNodeObject`
+6. `TerminalNodeObject`
+7. `ResultObject`（轻量）
+8. `TaskObject / NoteObject`（轻量接入）
 
-## 12.2 MVP 明确不做
+注意：
 
-1. 完整插件系统
-2. 完整多窗口管理器
-3. 全对象类型一次性统一
-4. 全量智能解析与自动洞察
-5. 一次性替换所有旧页面
-6. 原生 `terminal / conversation` 新运行时协议
+1. `browser runtime` 在 Phase 1 先作为 `RuntimeBinding.bindingType = 'browser-runtime'`
+2. 是否升级为独立 `BrowserNodeObject` 留到下一轮评审
 
-## 12.3 MVP 首批对象集合
+## 12.5 Phase 1 关键用户旅程
 
-1. `AgentNodeObject`
-2. `TerminalNodeObject`
-3. `SessionObject`
-4. `ResultObject`
-5. `TaskObject`（轻量接入）
-6. `NoteObject`（轻量接入）
+1. 打开 `/workbench`
+   - 系统解析或创建 `default space`
+   - 恢复最近活跃的 `SessionObject`
+   - 用平铺工作面显示多个会话 pane（面板）
+2. 在同一工作台中新增会话
+   - 用户新建 `agent / PTY / SSH / browser runtime`
+   - 系统创建 `SessionObject`
+   - 系统通过 `RuntimeBinding` 附着到底层运行时
+3. 从主窗口派生次窗口
+   - 用户把某个 pane 或 view 弹到新窗口
+   - 新窗口仍然属于同一 `WorkbenchSpace`
+   - 共享同一底层对象、关系与事实流
 
 ---
 
-## 13. 开工切片建议
+## 13. Phase 1 开工切片建议
 
-## 13.1 Slice A: 核心模型与关系存储
-
-目标：
-
-1. 新增 `WorkbenchSpace / LayoutProfile / SurfaceNavigationState`
-2. 新增 `WorkbenchRelation / SessionAnchor / RuntimeAttachment`
-3. 明确 `FocusRun / EventTape` 不变量
-
-交付标准：
-
-1. 能存空间
-2. 能存布局 profile
-3. 能存对象边与成员关系
-
-## 13.2 Slice B: 抽取 adapter / read model
-
-目标：
-
-1. 抽 `SessionInteropAdapter`
-2. 抽 `TimeBlockFocusRunAdapter`
-3. 抽 `TopologyProjectionAdapter`
-4. 抽 `TaskDagViewStateAdapter`
-
-交付标准：
-
-1. 不改旧页面主行为
-2. 新模型已经能读旧数据
-
-## 13.3 Slice C: Workbench 壳层与兼容路由
+## 13.1 Slice A：平铺壳层与兼容路由
 
 目标：
 
 1. 新增 `WorkbenchPage.tsx`
 2. 接入 `/workbench`
 3. 建立 `/agents/*` shim
+4. 提供固定或半固定的多 pane 布局
 
 交付标准：
 
 1. 壳层能打开
 2. 不打断当前移动端全屏与二级页面
+3. 平铺工作面能稳定显示多个 pane
 
-## 13.4 Slice D: 会话与终端纳管
+## 13.2 Slice B：统一会话与运行时注册表
 
 目标：
 
-1. 把现有 `AgentSession`、PTY、SSH 纳入 `SessionObject + RuntimeBinding`
-2. 让一个空间里能稳定展示多个会话与终端工作面
+1. 抽 `SessionInteropAdapter`
+2. 把现有 `AgentSession` 映射到 `SessionObject`
+3. 把 `PTY / SSH / browser runtime` 收到统一 `RuntimeBinding` 语义
+4. 消除“PTY 伪装成 agent”这类语义污染
 
 交付标准：
 
-1. 一个空间里能恢复多个 agent-backed session
-2. PTY 不再以 `agent` 语义进入投影
+1. 一个空间里能恢复多个 `agent-backed session`
+2. 新旧语义映射可追溯
+3. 新增运行时不再要求复制一套页面模型
 
-## 13.5 Slice E: `FocusRun + EventTape`
+## 13.3 Slice C：跨窗口联邦前置抽象
+
+目标：
+
+1. 让多个 `SurfaceSlot` 能映射到“主窗口 + 次窗口/次承载面”
+2. 接入 `#646` 的窗口研究结论
+3. 确立“同一 `WorkbenchSpace`，多个窗口共享对象与导航语义”的骨架
+
+交付标准：
+
+1. 可以从主窗口打开第二个工作面
+2. 新窗口能加载同一空间中的子集视图
+3. 不要求完整窗口拖放与任意停靠
+
+## 13.4 Slice D：`FocusRun + EventTape` 基础接入
 
 目标：
 
 1. 桥接现有 `TimeBlock`
-2. 开始记录 append-only 事件
+2. 把会话输入/输出与系统控制事件写入 append-only 事实流
+3. 为后续 `structured projection（结构化投影）` 预留稳定来源链路
 
 交付标准：
 
 1. 能开始/结束 `FocusRun`
-2. 会话输出和用户输入进入 `EventTape`
-3. 能产出基础 replay timeline
+2. 同一空间内多个会话的事件进入同一 `EventTape`
+3. 可生成最基础的 replay 时间线
 
-## 13.6 Slice F: `work-area` 投影模式
+## 13.5 Slice E：恢复、只读视图与评审支撑
 
 目标：
 
-1. `canvas`
-2. `network`
+1. 形成 `session list + active panes + outcome / inspector` 的稳定读模型
+2. 把当前状态持久化到空间级模型，而不是散落在临时 `localStorage`
+3. 给后续 `canvas / network` 投影提供只读恢复底座
 
 交付标准：
 
-1. 同一批对象在两种投影里切换
-2. 共享同一底层对象与关系，不造两套假数据
+1. 重启后可恢复最近工作台
+2. 同一空间中的 pane 排布与会话集合可恢复
+3. 评审文档与真实对象模型一致
 
 ---
 
 ## 14. 团队评审重点
 
-- [ ] `WorkbenchSpace` 是长期工作场景，而不是任务或会话
-- [ ] 三端布局根节点按 `surface profile` 分离
-- [ ] `ViewInstance` 是呈现机制，不是产品主对象
-- [ ] `SessionObject` 与 `AgentNodeObject` 分开，但产品入口仍然收敛
-- [ ] `workbench_relations` 是正式对象边存储
-- [ ] `EventTape` 是事实源，`TapeEvent` 有稳定顺序键
-- [ ] `FocusRun` 在 MVP 中桥接现有 `TimeBlock`
+- [ ] 长期愿景仍是 `WorkbenchSpace + shared work graph + EventTape`
+- [ ] 当前第一阶段明确收敛为 `Flat Workbench`，不是自由画布
+- [ ] `SessionObject + RuntimeBinding` 能统一承载 `agent / PTY / SSH / browser runtime`
+- [ ] `SurfaceSlot + SurfaceNavigationState` 足以支撑跨窗口联邦前置抽象
+- [ ] `EventTape` 仍是事实源，结构化层只能派生
 - [ ] `/agents/*` 必须通过兼容路由逐步迁移
+- [ ] Epic 与阶段 issue 的治理方式保持最小扩散
 
 ---
 
 ## 15. 仍保留的开放问题
 
-1. `TaskObject / NoteObject` 在 MVP 是只读投影还是半托管对象
-2. 手机端默认首页更偏 `current focus（当前专注）` 还是 `current task flow（当前任务流）`
-3. `workbench_relations` 的端点类型约束是写在 schema 还是 service 层
-4. `terminal / conversation` 何时从未来类型升级为首批原生运行时对象
+1. `default space` 的创建、归档、删除生命周期仍需补充
+2. `browser runtime` 是长期保持在 `RuntimeBinding` 层，还是升级为 `BrowserNodeObject`
+3. `EventTape` 与现有 `eventlog / signals` 的最终归属仍需补明确迁移关系
+4. `tape_events` 的 retention / compression / backpressure 策略仍需补充
+5. `workbench_relations` 的端点类型约束是写在 schema 还是 service 层
 
 ---
 
 ## 16. 结论
 
-这次规格的关键不是“再做一个更自由的 UI”，而是把下面五件事写成可执行模型：
+这次规格现在的执行重点，不再是“先做一个完美自由的 UI”，而是先把下面五件事落地：
 
-1. 外层是按端分离的 `container graph`
-2. 内层是有正式对象边存储的 `shared work graph`
-3. 事实层由 `FocusRun + EventTape` 承担，并桥接现有 `TimeBlock`
-4. `SessionObject`、节点对象、运行时资源通过 typed relation（类型化关系）连接
-5. `Signal Network / Canvas / Replay` 不再是平行产品，而是 `work-area` 的不同投影模式
+1. `WorkbenchSpace` 作为长期工作场景先站住
+2. `Flat Workbench` 先把多个会话工作面稳定纳管起来
+3. `RuntimeBinding` 统一承载 `agent / PTY / SSH / browser runtime`
+4. 跨窗口先实现联邦骨架，而不是完整窗口管理器
+5. `EventTape` 为后续 `structured projection / canvas / network / replay` 提供稳定事实层
 
-只要团队确认这五条，就已经可以按新的切片顺序开始第一批 PR。
+只要团队接受这个阶段收口，第一批 PR 就不必再被“先做自由画布”卡住。
