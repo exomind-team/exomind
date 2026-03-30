@@ -32,6 +32,8 @@ pub struct TimeBlockData {
     pub task_association_log: Vec<BlockTaskAssociationEvent>,
     #[serde(default)]
     pub source_planned_block_id: Option<String>,
+    #[serde(default)]
+    pub transitions: Vec<BlockTransition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -120,6 +122,27 @@ pub struct SchedulingWindowData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockTransitionType {
+    Start,
+    Pause,
+    Resume,
+    FeedbackStart,
+    FeedbackSubmit,
+    End,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockTransition {
+    #[serde(rename = "type")]
+    pub transition_type: BlockTransitionType,
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockTaskAssociationEvent {
     pub block_id: String,
@@ -161,6 +184,8 @@ pub struct ActiveBlockData {
     pub task_association_log: Vec<BlockTaskAssociationEvent>,
     #[serde(default)]
     pub source_planned_block_id: Option<String>,
+    #[serde(default)]
+    pub transitions: Vec<BlockTransition>,
     /// Deprecated: legacy single-task field. Read for compat, never written.
     #[serde(default, skip_serializing)]
     pub task_id: Option<String>,
@@ -903,6 +928,7 @@ mod tests {
                     }],
                     source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                 }],
             )
             .unwrap();
@@ -923,6 +949,7 @@ mod tests {
                     task_association_log: vec![],
                     source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                 }],
             )
             .unwrap();
@@ -960,6 +987,7 @@ mod tests {
                     }],
                     source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                     task_id: None,
                 },
             )

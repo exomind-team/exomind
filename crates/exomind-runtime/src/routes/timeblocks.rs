@@ -6,7 +6,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::timeblock::{ActiveBlockData, TimeBlockData, TimeBlockStore};
+use crate::timeblock::{ActiveBlockData, BlockTransition, BlockTransitionType, TimeBlockData, TimeBlockStore};
 
 #[derive(Debug, Deserialize)]
 struct ImportQuery {
@@ -167,6 +167,14 @@ pub fn do_new_block(
             task_status_outcomes: req.task_status_outcomes.clone(),
             task_association_log: active.task_association_log.clone(),
             source_planned_block_id: active.source_planned_block_id.clone(),
+            transitions: {
+                let mut t = active.transitions.clone();
+                if req.feedback.is_some() {
+                    t.push(BlockTransition { transition_type: BlockTransitionType::FeedbackSubmit, at: now, actor_id: Some("rt:newblock".to_string()) });
+                }
+                t.push(BlockTransition { transition_type: BlockTransitionType::End, at: now, actor_id: Some("rt:newblock".to_string()) });
+                t
+            },
         };
 
         let mut blocks = store
@@ -194,6 +202,11 @@ pub fn do_new_block(
         mode: if is_gap { "countup".to_string() } else { req.mode.clone().unwrap_or_else(|| "countup".to_string()) },
         target_minutes: if is_gap { None } else { req.target_minutes },
         block_type: Some(req.block_type.clone()),
+        transitions: vec![BlockTransition {
+            transition_type: BlockTransitionType::Start,
+            at: now,
+            actor_id: Some("rt:newblock".to_string()),
+        }],
         elapsed: if !is_gap && req.mode.as_deref() == Some("countdown") {
             req.target_minutes.unwrap_or(25) * 60 * 1000
         } else { 0 },
@@ -328,6 +341,10 @@ async fn stop_block(
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
     updated.updated_at = Some(now);
+    updated.transitions.push(BlockTransition {
+        transition_type: BlockTransitionType::FeedbackStart,
+        at: now, actor_id: Some("rt:stop".to_string()),
+    });
 
     let name = updated.name.clone();
     let start_id = updated.start_id.clone();
@@ -379,6 +396,10 @@ async fn pause_block(
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
     updated.updated_at = Some(now);
+    updated.transitions.push(BlockTransition {
+        transition_type: BlockTransitionType::Pause,
+        at: now, actor_id: Some("rt:pause".to_string()),
+    });
 
     let name = updated.name.clone();
     let start_id = updated.start_id.clone();
@@ -428,6 +449,10 @@ async fn resume_block(
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
     updated.updated_at = Some(now);
+    updated.transitions.push(BlockTransition {
+        transition_type: BlockTransitionType::Resume,
+        at: now, actor_id: Some("rt:resume".to_string()),
+    });
 
     let name = updated.name.clone();
     let start_id = updated.start_id.clone();
@@ -1115,6 +1140,7 @@ mod tests {
                             task_association_log: vec![],
                             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                         }])
                         .unwrap(),
                     ))
@@ -1157,6 +1183,7 @@ mod tests {
                             ],
                             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                         }])
                         .unwrap(),
                     ))
@@ -1206,6 +1233,7 @@ mod tests {
                             ],
                             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                             task_id: Some("task-profile-a".to_string()),
                         })
                         .unwrap(),
@@ -1321,6 +1349,7 @@ mod tests {
                             ],
                             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                         }])
                         .unwrap(),
                     ))
@@ -1370,6 +1399,7 @@ mod tests {
                             ],
                             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                             task_id: Some("task-user-a".to_string()),
                         })
                         .unwrap(),
@@ -1473,6 +1503,7 @@ mod tests {
                             task_association_log: vec![],
                             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                             task_id: Some("task-a".to_string()),
                         })
                         .unwrap(),
@@ -1535,6 +1566,7 @@ mod tests {
                             task_association_log: vec![],
                             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
                             task_id: Some("task-a".to_string()),
                         })
                         .unwrap(),
@@ -1601,6 +1633,7 @@ mod tests {
             task_association_log: vec![],
             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
             task_id: Some("task-a".to_string()),
         };
 
@@ -1724,6 +1757,7 @@ mod tests {
             task_association_log: vec![],
             source_planned_block_id: None,
                     block_type: None,
+                    transitions: vec![],
             task_id: Some("task-a".to_string()),
         };
 

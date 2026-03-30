@@ -43,7 +43,7 @@ impl SqliteTimeBlockStore {
         let mut statement = connection.prepare(
             "SELECT id, name, start_id, end_id, note, tags_json, start_time, end_time,
                     task_ids_json, task_status_outcomes_json, task_association_log_json,
-                    source_planned_block_id, block_type
+                    source_planned_block_id, block_type, transitions_json
              FROM completed_timeblocks
              WHERE scope_key = ?1
              ORDER BY end_time DESC, id DESC",
@@ -70,6 +70,9 @@ impl SqliteTimeBlockStore {
                     .map_err(to_sqlite_conversion_error)?,
                 source_planned_block_id: row.get(11)?,
                 block_type: row.get(12)?,
+                transitions: row.get::<_, Option<String>>(13)?
+                    .map(|v| serde_json::from_str(&v).unwrap_or_default())
+                    .unwrap_or_default(),
             })
         })?;
 
@@ -97,8 +100,8 @@ impl SqliteTimeBlockStore {
                 "INSERT OR REPLACE INTO completed_timeblocks (
                     scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
                     task_ids_json, task_status_outcomes_json, task_association_log_json,
-                    source_planned_block_id, block_type
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    source_planned_block_id, block_type, transitions_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     normalize_scope_key(scope_key),
                     block.id,
@@ -118,6 +121,7 @@ impl SqliteTimeBlockStore {
                     serde_json::to_string(&block.task_association_log)?,
                     block.source_planned_block_id,
                     block.block_type,
+                    serde_json::to_string(&block.transitions)?,
                 ],
             )?;
         }
@@ -454,6 +458,15 @@ impl SqliteTimeBlockStore {
                     [],
                 )?;
             }
+
+            // #780: add transitions_json column
+            let columns = completed_timeblock_columns(&connection)?;
+            if !columns.iter().any(|column| column == "transitions_json") {
+                connection.execute(
+                    "ALTER TABLE completed_timeblocks ADD COLUMN transitions_json TEXT NOT NULL DEFAULT '[]'",
+                    [],
+                )?;
+            }
         }
 
         let has_active_table: bool = connection.query_row(
@@ -501,6 +514,7 @@ impl SqliteTimeBlockStore {
                 task_association_log_json TEXT NOT NULL DEFAULT '[]',
                 source_planned_block_id TEXT NULL,
                 block_type TEXT NULL DEFAULT 'active',
+                transitions_json TEXT NOT NULL DEFAULT '[]',
                 PRIMARY KEY (scope_key, id)
              );
              CREATE TABLE IF NOT EXISTS active_timeblock (
