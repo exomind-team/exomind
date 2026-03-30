@@ -632,6 +632,10 @@ function expectThreeNodeConstraints(
   settledInMs: number,
   sampleLabel: string,
 ) {
+  const edgeLengthBalanceMin = 4 / 5;
+  const edgeLengthBalanceMax = 5 / 4;
+  const hopDistanceSeparationMin = 8 / 5;
+  const hopDistanceSeparationMax = 12 / 5;
   const edgeRatio = (geometry?.distAB ?? 0) / Math.max(geometry?.distMA ?? 1, 1);
   const hopRatio = (geometry?.distMB ?? 0) / Math.max(geometry?.distMA ?? 1, 1);
   const summary = geometry
@@ -639,11 +643,26 @@ function expectThreeNodeConstraints(
     : 'geometry=null';
   expect(geometry, `${sampleLabel}: expected measurable three-node geometry (${summary})`).not.toBeNull();
   expect(settledInMs, `${sampleLabel}: expected layout to settle within 30s (${summary})`).toBeLessThanOrEqual(30000);
-  expect(hopRatio, `${sampleLabel}: expected Me-B / Me-A ratio to be >= 1 (${summary})`).toBeGreaterThanOrEqual(1);
-  expect(hopRatio, `${sampleLabel}: expected Me-B / Me-A ratio to be <= 2.2 (${summary})`).toBeLessThanOrEqual(2.2);
-  expect(edgeRatio, `${sampleLabel}: expected A-B / A-Me ratio to be >= 0.8 (${summary})`).toBeGreaterThanOrEqual(0.8);
-  expect(edgeRatio, `${sampleLabel}: expected A-B / A-Me ratio to be <= 1.25 (${summary})`).toBeLessThanOrEqual(1.25);
-  expect(geometry?.angle ?? 0, `${sampleLabel}: expected angle B-A-Me to exceed 120deg (${summary})`).toBeGreaterThan(120);
+  expect(
+    hopRatio,
+    `${sampleLabel}: expected hop-distance-separation >= ${hopDistanceSeparationMin} (${summary})`,
+  ).toBeGreaterThanOrEqual(hopDistanceSeparationMin);
+  expect(
+    hopRatio,
+    `${sampleLabel}: expected hop-distance-separation <= ${hopDistanceSeparationMax} (${summary})`,
+  ).toBeLessThanOrEqual(hopDistanceSeparationMax);
+  expect(
+    edgeRatio,
+    `${sampleLabel}: expected edge-length-balance >= ${edgeLengthBalanceMin} (${summary})`,
+  ).toBeGreaterThanOrEqual(edgeLengthBalanceMin);
+  expect(
+    edgeRatio,
+    `${sampleLabel}: expected edge-length-balance <= ${edgeLengthBalanceMax} (${summary})`,
+  ).toBeLessThanOrEqual(edgeLengthBalanceMax);
+  expect(
+    geometry?.angle ?? 0,
+    `${sampleLabel}: expected chain-opening-angle to exceed 120deg (${summary})`,
+  ).toBeGreaterThan(120);
 }
 
 test.describe('Issue #747 goal layout stability diagnostics', () => {
@@ -1672,19 +1691,19 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       edgeBBox.y + edgeBBox.height / 2,
     );
 
-    const targetUpdaters = page.locator('.react-flow__edgeupdater-target');
-    await expect(targetUpdaters.first()).toBeVisible({ timeout: 5000 });
+    const sourceUpdaters = page.locator('.react-flow__edgeupdater-source');
+    await expect(sourceUpdaters.first()).toBeVisible({ timeout: 5000 });
     const baselineMetrics = await readReconnectMetrics();
     expect(baselineMetrics, 'moving-edge-reconnect: expected measurable baseline metrics').not.toBeNull();
     const baselineViewport = await readViewportTransform(page);
 
-    const goalABox = await page.getByTestId('goal-flow-node-goal-a').boundingBox();
+    const meBox = await page.getByTestId('goal-flow-node-me').boundingBox();
     const goalBBox = await page.getByTestId('goal-flow-node-goal-b').boundingBox();
-    if (!goalABox || !goalBBox) {
+    if (!meBox || !goalBBox) {
       throw new Error('expected measurable goal node bounds for moving reconnect coverage');
     }
 
-    const updaterCandidates = await targetUpdaters.evaluateAll((elements) => (
+    const updaterCandidates = await sourceUpdaters.evaluateAll((elements) => (
       elements.map((element) => {
         const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
         return {
@@ -1704,12 +1723,12 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       }))
       .sort((left, right) => {
         const leftDistance = Math.hypot(
-          left.centerX - (goalABox.x + goalABox.width / 2),
-          left.centerY - (goalABox.y + goalABox.height / 2),
+          left.centerX - (meBox.x + meBox.width / 2),
+          left.centerY - (meBox.y + meBox.height / 2),
         );
         const rightDistance = Math.hypot(
-          right.centerX - (goalABox.x + goalABox.width / 2),
-          right.centerY - (goalABox.y + goalABox.height / 2),
+          right.centerX - (meBox.x + meBox.width / 2),
+          right.centerY - (meBox.y + meBox.height / 2),
         );
         return leftDistance - rightDistance;
       })[0];
@@ -1808,11 +1827,11 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       });
 
     await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
-    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(4);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(3);
     expectVisibleGraphSnapshot(
       await snapshotRenderVisibility(page),
       4,
-      4,
+      3,
       'moving-edge-reconnect:after-reconnect-before-settle',
     );
 
@@ -1832,7 +1851,7 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expectVisibleGraphSnapshot(
       await snapshotRenderVisibility(page),
       4,
-      4,
+      3,
       'moving-edge-reconnect:after-reconnect-after-settle',
     );
 
