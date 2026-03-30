@@ -18,18 +18,17 @@ export function applyEventLogListOptions(
     return events;
   }
 
+  const hasIncrementalCursor =
+    (typeof options.sinceId === 'string' && options.sinceId.length > 0)
+    || typeof options.sinceTimestamp === 'number';
+
+  // Legacy PouchDB / Tauri JSON backends are ordered by event timestamp（事件时间）, not arrival order（到达顺序）.
+  // Applying local since* filters here can permanently hide late-arriving historical events（晚到旧事件）.
+  if (hasIncrementalCursor) {
+    return events;
+  }
+
   let next = events;
-
-  if (typeof options.sinceTimestamp === 'number') {
-    next = next.filter((event) => event.timestamp >= options.sinceTimestamp!);
-  }
-
-  if (typeof options.sinceId === 'string' && options.sinceId.length > 0) {
-    const index = next.findIndex((event) => event.id === options.sinceId);
-    if (index >= 0) {
-      next = next.slice(0, index);
-    }
-  }
 
   if (typeof options.limit === 'number') {
     next = next.slice(0, Math.max(0, options.limit));

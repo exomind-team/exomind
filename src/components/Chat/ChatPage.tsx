@@ -34,6 +34,7 @@ const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 const RT_REFRESH_INTERVAL_MS = 2_000;
+const RT_FULL_RECONCILE_INTERVAL_MS = 60_000;
 const TASK_CREATED_EVENT_TAGS = [
   'task_created',
 ] as const;
@@ -208,6 +209,8 @@ export function ChatPage({
   const shouldStickToBottomRef = useRef(true);
   const refreshInFlightRef = useRef(false);
   const refreshQueuedRef = useRef(false);
+  const refreshQueuedTriggerRef = useRef<'poll' | 'event'>('poll');
+  const lastFullRefreshAtRef = useRef(0);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn, activeProfileId } = useSyncStore();
   const syncStatus: 'connected' | 'disconnected' | 'syncing' = isLoggedIn && Boolean(currentUser)
@@ -255,6 +258,7 @@ export function ChatPage({
     const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
     shouldStickToBottomRef.current = true;
     applyVisibleWindow(loadedEvents, PAGE_SIZE);
+    lastFullRefreshAtRef.current = Date.now();
 
     requestAnimationFrame(() => {
       scrollToBottom('auto');
@@ -262,21 +266,45 @@ export function ChatPage({
     setIsInitialLoading(false);
   }, [applyVisibleWindow, scrollToBottom]);
 
-  const refreshLatestEvents = useCallback(async (behavior: ScrollBehavior = 'smooth') => {
+  const refreshLatestEvents = useCallback(async (
+    behavior: ScrollBehavior = 'smooth',
+    trigger: 'poll' | 'event' = 'poll',
+  ) => {
     const t0 = perfNow();
     const latestCursor = getLatestEventCursor(allEventsRef.current);
-    const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents(
-      latestCursor
+    const shouldForceFullReconcile = latestCursor !== null
+      && (Date.now() - lastFullRefreshAtRef.current) >= RT_FULL_RECONCILE_INTERVAL_MS;
+    let mode: 'full' | 'incremental' = latestCursor && !shouldForceFullReconcile ? 'incremental' : 'full';
+    let loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents(
+      mode === 'incremental'
         ? {
-            sinceId: latestCursor.id,
-            sinceTimestamp: latestCursor.timestamp,
+            sinceId: latestCursor!.id,
+            sinceTimestamp: latestCursor!.timestamp,
           }
         : undefined,
     ));
+
+    if (mode === 'incremental' && loadedEvents.length === 0 && trigger === 'event') {
+      mode = 'full';
+      loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
+    }
     const queryMs = Math.round(perfNow() - t0);
 
+    if (mode === 'full') {
+      lastFullRefreshAtRef.current = Date.now();
+      applyVisibleWindow(loadedEvents);
+
+      requestAnimationFrame(() => {
+        if (shouldStickToBottomRef.current) {
+          scrollToBottom(behavior);
+        }
+      });
+      log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
+      return;
+    }
+
     if (loadedEvents.length === 0) {
-      log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ fetched: 0, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
+      log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: 0, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
       return;
     }
 
@@ -288,21 +316,28 @@ export function ChatPage({
         scrollToBottom(behavior);
       }
     });
-    log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
+    log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
   }, [applyVisibleWindow, scrollToBottom]);
 
-  const scheduleLatestRefresh = useCallback((): void => {
+  const scheduleLatestRefresh = useCallback((trigger: 'poll' | 'event'): void => {
     if (refreshInFlightRef.current) {
       refreshQueuedRef.current = true;
+      if (trigger === 'event') {
+        refreshQueuedTriggerRef.current = 'event';
+      }
       return;
     }
 
     refreshInFlightRef.current = true;
+    refreshQueuedTriggerRef.current = trigger;
     void (async () => {
       try {
+        let nextTrigger = trigger;
         do {
           refreshQueuedRef.current = false;
-          await refreshLatestEvents('smooth');
+          await refreshLatestEvents('smooth', nextTrigger);
+          nextTrigger = refreshQueuedTriggerRef.current;
+          refreshQueuedTriggerRef.current = 'poll';
         } while (refreshQueuedRef.current);
       } finally {
         refreshInFlightRef.current = false;
@@ -354,11 +389,11 @@ export function ChatPage({
 
     const unsubscribe = eventLogService.current.onEvent(() => {
       shouldStickToBottomRef.current = true;
-      scheduleLatestRefresh();
+      scheduleLatestRefresh('event');
     });
     const intervalId = window.setInterval(() => {
       shouldStickToBottomRef.current = isNearBottom();
-      scheduleLatestRefresh();
+      scheduleLatestRefresh('poll');
     }, RT_REFRESH_INTERVAL_MS);
 
     return () => {

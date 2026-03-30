@@ -83,10 +83,28 @@ const initialEvent: Event = {
 describe('ChatPage incremental refresh issue 769', () => {
   const unsubscribe = vi.fn();
   const loadEvents = vi.fn();
+  let onEventCallback: ((event: Event) => void) | null = null;
+
+  const lateHistoricalEvent: Event = {
+    id: 'evt-late-history',
+    timestamp: new Date('2026-03-29T08:00:00.000Z').getTime(),
+    content: '补导入的历史事件',
+    tags: new Set<string>(),
+    metadata: {
+      source: {
+        deviceId: 'device-2',
+        deviceName: 'Imported',
+        platform: 'windows',
+        app: 'ExoMind',
+      },
+    },
+  };
 
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-30T10:10:00.000Z'));
     vi.clearAllMocks();
+    onEventCallback = null;
 
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0);
@@ -111,7 +129,10 @@ describe('ChatPage incremental refresh issue 769', () => {
       appendEventData: vi.fn(),
       exportEventsAsJson: vi.fn(),
       importEventsFromJson: vi.fn(),
-      onEvent: vi.fn(() => unsubscribe),
+      onEvent: vi.fn((callback: (event: Event) => void) => {
+        onEventCallback = callback;
+        return unsubscribe;
+      }),
     });
   });
 
@@ -141,5 +162,37 @@ describe('ChatPage incremental refresh issue 769', () => {
       sinceTimestamp: initialEvent.timestamp,
     });
     expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"fetched":0'));
+  });
+
+  it('reconciles full state when signaled refresh sees an empty delta（外部刷新信号遇到空增量时应回退全量对账）', async () => {
+    loadEvents.mockReset();
+    loadEvents
+      .mockResolvedValueOnce([initialEvent])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([lateHistoricalEvent]);
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(onEventCallback).not.toBeNull();
+
+    await act(async () => {
+      onEventCallback?.(lateHistoricalEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEvents).toHaveBeenCalledTimes(3);
+    expect(loadEvents).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+    expect(loadEvents).toHaveBeenNthCalledWith(3);
+    expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+    expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"mode":"full"'));
   });
 });
