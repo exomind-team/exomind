@@ -292,6 +292,80 @@ async fn end_block(
     }).map(Json)
 }
 
+// ── #759 describe: modify name/note of a timeblock by ID ────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DescribeBlockRequest {
+    name: Option<String>,
+    note: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BlockIdPath {
+    block_id: String,
+}
+
+/// POST /timeblocks/:block_id/describe — modify name/note of a timeblock.
+///
+/// Rules (aligned with ExoMind immutability principle):
+/// - Current active block (active or gap): allowed
+/// - Completed gap block: allowed (retroactive naming, ① → ②)
+/// - Completed active block: forbidden (immutable history)
+async fn describe_block(
+    State(state): State<AppState>,
+    axum::extract::Path(path): axum::extract::Path<BlockIdPath>,
+    Query(query): Query<ScopeQuery>,
+    Json(payload): Json<DescribeBlockRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let block_id = &path.block_id;
+
+    // Try active block first
+    if let Some(mut active) = state.timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))? {
+        if active.start_id == *block_id {
+            if let Some(name) = payload.name {
+                active.name = name;
+            }
+            // Active blocks don't have note field — skip silently
+            state.timeblock_store
+                .put_active_scoped(scope_key, active.clone())
+                .map_err(|e| internal_error(e.to_string()))?;
+            return Ok(Json(serde_json::json!({ "updated": "active", "blockId": block_id })));
+        }
+    }
+
+    // Try completed blocks
+    let mut blocks = state.timeblock_store
+        .list_completed_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    let idx = blocks.iter().position(|b| b.id == *block_id);
+    match idx {
+        None => Err(conflict(format!("block not found: {block_id}"))),
+        Some(i) => {
+            let block = &blocks[i];
+            // Immutability: completed active blocks cannot be modified
+            if block.block_type.as_deref() != Some("gap") {
+                return Err(conflict("cannot describe: completed active blocks are immutable"));
+            }
+            // Gap block: allow describe (retroactive naming)
+            if let Some(name) = payload.name {
+                blocks[i].name = name;
+            }
+            if let Some(note) = payload.note {
+                blocks[i].note = Some(note);
+            }
+            state.timeblock_store
+                .replace_completed_scoped(scope_key, &blocks)
+                .map_err(|e| internal_error(e.to_string()))?;
+            Ok(Json(serde_json::json!({ "updated": "completed_gap", "blockId": block_id })))
+        }
+    }
+}
+
 async fn list_timeblocks(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
@@ -730,6 +804,7 @@ pub fn router() -> Router<AppState> {
         .route("/timeblocks/new", post(new_block))
         .route("/timeblocks/start", post(start_block))
         .route("/timeblocks/end", post(end_block))
+        .route("/timeblocks/:block_id/describe", post(describe_block))
         .route(
             "/timeblocks/active",
             get(get_active_timeblock)
