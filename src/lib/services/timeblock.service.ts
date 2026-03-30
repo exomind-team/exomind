@@ -34,6 +34,7 @@ import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/f
 import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
+import { generateGapBlocks } from './gap-backfill';
 import { appendEventWithEcsReplication } from './ecs-eventlog-replication.service';
 import { getEventLogService } from './eventlog.service';
 import { publishActiveBlockReplicationSnapshot } from './ecs-active-block-replication.service';
@@ -169,6 +170,19 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         tags: new Set(normalized.tags),
       };
     });
+  }
+
+  /** #759: 全量补创历史 gap 块。返回插入的 gap 数量。 */
+  async backfillGapBlocks(): Promise<number> {
+    const blocks = await this.readCompletedBlockData();
+    if (!blocks || blocks.length < 2) return 0;
+
+    const gaps = generateGapBlocks(blocks);
+    if (gaps.length === 0) return 0;
+
+    const merged = [...blocks, ...gaps].sort((a, b) => a.startTime - b.startTime);
+    await this.writeCompletedBlockData(merged);
+    return gaps.length;
   }
 
   async updateActiveBlock(
