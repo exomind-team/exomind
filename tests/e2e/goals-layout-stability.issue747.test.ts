@@ -653,6 +653,24 @@ async function measureCenteredCanvasMetrics(page: Page) {
   });
 }
 
+async function readVisibleEdgeState(page: Page, edgeId: string) {
+  return page.evaluate((resolvedEdgeId) => {
+    const edge = document.querySelector(`[data-testid="task-flow-edge-visible-${resolvedEdgeId}"]`) as SVGPathElement | null;
+    const marker = document.querySelector(`[data-testid="task-flow-edge-marker-${resolvedEdgeId}"]`) as SVGMarkerElement | null;
+    if (!edge || !marker) {
+      return null;
+    }
+    const edgeStyle = window.getComputedStyle(edge);
+    const edgeRect = edge.getBoundingClientRect();
+    return {
+      path: edge.getAttribute('d') ?? '',
+      markerEnd: edge.getAttribute('marker-end') ?? '',
+      edgeOpacity: Number.parseFloat(edgeStyle.opacity || '1'),
+      edgeWidth: Math.max(edgeRect.width, edgeRect.height),
+    };
+  }, edgeId);
+}
+
 async function runThreeNodeSample(page: Page, layoutTestConfig: GoalLayoutTestConfig | null = null) {
   await primeGoalsPage(page, layoutTestConfig);
   const tracker = createGoalWarningTracker(page);
@@ -2415,6 +2433,229 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       4,
       3,
       'moving-edge-reconnect-cancel:after-cancel-after-settle',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
+  test('keeps the original edge visible when reconnecting to an invalid node through the real edge updater', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+    const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+    const countReconnectStarts = () => goalWarnings.filter((entry) => entry.includes('page:interaction-reconnect-start')).length;
+    const countReconnectEnds = () => goalWarnings.filter((entry) => entry.includes('page:interaction-reconnect-end')).length;
+    const countInvalidReconnectEnds = () => goalWarnings.filter((entry) => (
+      entry.includes('page:interaction-reconnect-end')
+      && entry.includes('"toNodeId":"me"')
+      && entry.includes('"isValid":true')
+    )).length;
+    const countInvalidReconnects = () => goalWarnings.filter((entry) => (
+      entry.includes('page:interaction-reconnect {')
+      && entry.includes('"source":"me"')
+      && entry.includes('"target":"me"')
+    )).length;
+
+    await primeGoalsPageWithGraph(page, makeStarGraph());
+    await gotoGoalsPage(page);
+
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected baseline simulation:end before invalid reconnect coverage',
+      })
+      .toBe(true);
+
+    await page.getByRole('button', { name: '编辑' }).click();
+
+    const readReconnectMetrics = () => page.evaluate(() => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const goalsPage = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const meWrapper = me?.closest('.react-flow__node') as HTMLElement | null;
+      const nodesContainer = document.querySelector('.react-flow__nodes') as HTMLElement | null;
+      const reactFlowWrapper = document.querySelector('[data-testid="rf__wrapper"]') as HTMLElement | null;
+      if (!me || !ring1) {
+        return null;
+      }
+      const getCenter = (element: Element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+      return {
+        meCenter: getCenter(me),
+        ring1Center: getCenter(ring1),
+        scrollY: window.scrollY,
+        pageTop: goalsPage?.getBoundingClientRect().top ?? null,
+        meTransform: meWrapper?.style.transform ?? null,
+        meWrapperCenter: meWrapper ? getCenter(meWrapper) : null,
+        nodesContainerTop: nodesContainer?.getBoundingClientRect().top ?? null,
+        reactFlowScrollTop: reactFlowWrapper?.scrollTop ?? null,
+        reactFlowScrollLeft: reactFlowWrapper?.scrollLeft ?? null,
+      };
+    });
+
+    const edgeHitArea = page.getByTestId('task-flow-edge-hit-area-edge-me-a');
+    const edgeBBox = await edgeHitArea.boundingBox();
+    if (!edgeBBox) {
+      throw new Error('expected measurable edge hit area before invalid reconnect coverage');
+    }
+
+    await page.mouse.click(
+      edgeBBox.x + edgeBBox.width / 2,
+      edgeBBox.y + edgeBBox.height / 2,
+    );
+
+    const targetUpdaters = page.locator('.react-flow__edgeupdater-target');
+    await expect(targetUpdaters.first()).toBeVisible({ timeout: 5000 });
+    const goalABox = await page.getByTestId('goal-flow-node-goal-a').boundingBox();
+    const meBox = await page.getByTestId('goal-flow-node-me').boundingBox();
+    if (!goalABox || !meBox) {
+      throw new Error('expected measurable node bounds for invalid reconnect coverage');
+    }
+
+    const updaterCandidates = await targetUpdaters.evaluateAll((elements) => (
+      elements.map((element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          centerX: rect.x + rect.width / 2,
+          centerY: rect.y + rect.height / 2,
+        };
+      })
+    ));
+    const updaterMatch = updaterCandidates
+      .map((candidate, index) => ({
+        index,
+        ...candidate,
+      }))
+      .sort((left, right) => {
+        const leftDistance = Math.hypot(
+          left.centerX - (goalABox.x + goalABox.width / 2),
+          left.centerY - (goalABox.y + goalABox.height / 2),
+        );
+        const rightDistance = Math.hypot(
+          right.centerX - (goalABox.x + goalABox.width / 2),
+          right.centerY - (goalABox.y + goalABox.height / 2),
+        );
+        return leftDistance - rightDistance;
+      })[0];
+    if (!updaterMatch) {
+      throw new Error('expected measurable edge updater bounds for invalid reconnect coverage');
+    }
+
+    const baselineMetrics = await readReconnectMetrics();
+    const baselineEdgeState = await readVisibleEdgeState(page, 'edge-me-a');
+    expect(baselineMetrics, 'invalid-edge-reconnect: expected measurable baseline metrics').not.toBeNull();
+    expect(baselineEdgeState, 'invalid-edge-reconnect: expected measurable baseline edge state').not.toBeNull();
+    const baselineViewport = await readViewportTransform(page);
+    const reconnectStartCountBefore = countReconnectStarts();
+    const reconnectEndCountBefore = countReconnectEnds();
+    const invalidReconnectEndCountBefore = countInvalidReconnectEnds();
+    const invalidReconnectCountBefore = countInvalidReconnects();
+
+    await page.mouse.move(
+      updaterMatch.centerX,
+      updaterMatch.centerY,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      meBox.x + meBox.width / 2,
+      meBox.y + meBox.height / 2,
+      { steps: 12 },
+    );
+
+    await expect
+      .poll(() => countReconnectStarts(), {
+        timeout: 5000,
+        message: 'expected reconnect-start warn log after beginning an invalid reconnect gesture through the real edge updater',
+      })
+      .toBeGreaterThan(reconnectStartCountBefore);
+
+    await page.mouse.up();
+
+    await expect
+      .poll(() => countReconnectEnds(), {
+        timeout: 5000,
+        message: 'expected reconnect-end warn log after releasing an invalid reconnect gesture',
+      })
+      .toBeGreaterThan(reconnectEndCountBefore);
+    await expect
+      .poll(() => countInvalidReconnectEnds(), {
+        timeout: 5000,
+        message: 'expected invalid reconnect gesture to land on the Me node with React Flow reporting isValid=true',
+      })
+      .toBeGreaterThan(invalidReconnectEndCountBefore);
+    await expect
+      .poll(() => countInvalidReconnects(), {
+        timeout: 5000,
+        message: 'expected invalid reconnect gesture to emit an app-level reconnect attempt targeting Me',
+      })
+      .toBeGreaterThan(invalidReconnectCountBefore);
+
+    await expect
+      .poll(async () => {
+        const reconnectMetrics = await readReconnectMetrics();
+        const edgeState = await readVisibleEdgeState(page, 'edge-me-a');
+        if (!reconnectMetrics || !baselineMetrics || !edgeState || !baselineEdgeState) return null;
+        const viewportAfterReconnect = await readViewportTransform(page);
+        return {
+          meStable:
+            Math.abs(reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x) <= 2
+            && Math.abs(reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y) <= 2,
+          meDeltaX: Number((reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x).toFixed(2)),
+          meDeltaY: Number((reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y).toFixed(2)),
+          meWrapperDeltaY: Number((((reconnectMetrics.meWrapperCenter?.y ?? 0) - (baselineMetrics.meWrapperCenter?.y ?? 0))).toFixed(2)),
+          scrollDeltaY: Number(((reconnectMetrics.scrollY ?? 0) - (baselineMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((reconnectMetrics.pageTop ?? 0) - (baselineMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((reconnectMetrics.nodesContainerTop ?? 0) - (baselineMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((reconnectMetrics.reactFlowScrollTop ?? 0) - (baselineMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((reconnectMetrics.reactFlowScrollLeft ?? 0) - (baselineMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
+          ringsAligned:
+            Math.abs(reconnectMetrics.ring1Center.x - reconnectMetrics.meCenter.x) <= 6
+            && Math.abs(reconnectMetrics.ring1Center.y - reconnectMetrics.meCenter.y) <= 6,
+          viewportChanged: JSON.stringify(viewportAfterReconnect) !== JSON.stringify(baselineViewport),
+          meTransformChanged: reconnectMetrics.meTransform !== baselineMetrics.meTransform,
+          edgeStillVisible: edgeState.edgeOpacity > 0.01 && edgeState.edgeWidth > 0,
+          edgePathPreserved: edgeState.path === baselineEdgeState.path,
+          markerPreserved: edgeState.markerEnd === baselineEdgeState.markerEnd,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected invalid reconnect gesture to preserve the original visible edge and keep Me/hop rings stable',
+      })
+      .toMatchObject({
+        meStable: true,
+        meDeltaX: 0,
+        meDeltaY: 0,
+        meWrapperDeltaY: 0,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
+        ringsAligned: true,
+        viewportChanged: false,
+        meTransformChanged: false,
+        edgeStillVisible: true,
+        edgePathPreserved: true,
+        markerPreserved: true,
+      });
+
+    await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="task-flow-edge-marker-edge-me-a"]')).toBeAttached();
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      3,
+      2,
+      'invalid-edge-reconnect:after-invalid-release',
     );
 
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
