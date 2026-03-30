@@ -1,5 +1,10 @@
 import type { EventData, EventMetadata, Tag } from '../types/event';
-import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
+import type {
+  EventLogListOptions,
+  EventLogListResult,
+  EventLogListSemantics,
+  IEventLogPort,
+} from '../environment/interfaces/eventlog.port';
 import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
 import { appendEventWithEcsReplication } from '../services/ecs-eventlog-replication.service';
 
@@ -8,6 +13,37 @@ const TAGS_METADATA_KEY = 'tags';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function resolveEventLogListSemantics(_options?: EventLogListOptions): EventLogListSemantics {
+  return 'full_snapshot';
+}
+
+export function applyEventLogListOptions(
+  events: EventData[],
+  options?: EventLogListOptions,
+): EventData[] {
+  if (!options) {
+    return events;
+  }
+
+  const hasIncrementalCursor =
+    (typeof options.sinceId === 'string' && options.sinceId.length > 0)
+    || typeof options.sinceTimestamp === 'number';
+
+  // Legacy PouchDB / Tauri JSON backends are ordered by event timestamp（事件时间）, not arrival order（到达顺序）.
+  // Applying local since* filters here can permanently hide late-arriving historical events（晚到旧事件）.
+  if (hasIncrementalCursor) {
+    return events;
+  }
+
+  let next = events;
+
+  if (typeof options.limit === 'number') {
+    next = next.slice(0, Math.max(0, options.limit));
+  }
+
+  return next;
 }
 
 /**
@@ -25,9 +61,20 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     return getEventStorage(this.userId);
   }
 
-  async listEvents(): Promise<EventData[]> {
+  async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
+    const result = await this.listEventsDetailed(options);
+    return result.events;
+  }
+
+  async listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult> {
     const events = await this.storage.getEvents();
-    return events.map((event) => this.fromStorageEvent(event));
+    return {
+      events: applyEventLogListOptions(
+        events.map((event) => this.fromStorageEvent(event)),
+        options,
+      ),
+      semantics: resolveEventLogListSemantics(options),
+    };
   }
 
   async appendEvent(event: EventData): Promise<EventData> {

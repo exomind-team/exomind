@@ -197,6 +197,11 @@ impl EventLogStore {
         })
     }
 
+    pub fn current_revision(&self, user_id: Option<&str>) -> Result<Option<i64>, String> {
+        let paths = self.resolve_paths(user_id)?;
+        Ok(read_checkpoint(&paths.checkpoint)?.map(|checkpoint| checkpoint.updated_at_ms))
+    }
+
     pub fn rebuild_markdown(&self, user_id: Option<&str>) -> Result<MirrorStatus, String> {
         let paths = self.resolve_paths(user_id)?;
         let events = self.list_events(user_id)?;

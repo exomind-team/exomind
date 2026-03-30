@@ -25,8 +25,11 @@ vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
 }));
 
 import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
+import { WebEventLogStorageAdapter } from '@/lib/adapters/web-eventlog-storage';
 
 describe('EventLogService PouchDB backend', () => {
+  const createPouchPort = () => new WebEventLogStorageAdapter();
+
   beforeEach(() => {
     replicationMocks.appendEventWithEcsReplication.mockReset().mockImplementation(async (event) => {
       await mocks.addEvent(event);
@@ -49,7 +52,7 @@ describe('EventLogService PouchDB backend', () => {
       },
     ]);
 
-    const service = new EventLogServiceImpl();
+    const service = new EventLogServiceImpl({ port: createPouchPort() });
     const raw = await service.exportEventsAsJson();
     const payload = JSON.parse(raw) as { events: Array<{ content: string }> };
 
@@ -68,7 +71,7 @@ describe('EventLogService PouchDB backend', () => {
       replicationSeq: 1,
     });
 
-    const service = new EventLogServiceImpl();
+    const service = new EventLogServiceImpl({ port: createPouchPort() });
     const backup = JSON.stringify({
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -84,4 +87,3 @@ describe('EventLogService PouchDB backend', () => {
     expect(result).toEqual({ imported: 1, skipped: 0, total: 1 });
   });
 });
-
