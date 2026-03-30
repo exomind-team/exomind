@@ -419,20 +419,10 @@ async fn get_active_timeblock(
     }
 }
 
-/// DEPRECATED: Use POST /timeblocks/start or /timeblocks/new instead.
-/// This route bypasses gap truncation and newBlock atomicity.
-/// Kept temporarily for backward compat; will be removed.
+/// TODO(#780): Migrate callers (saveActiveBlock 8 call sites) then deprecate.
+/// Current callers: startBlock, pauseBlock, resumeBlock, markEnding, endBlock (gap creation).
+/// Bypasses gap truncation and newBlock atomicity — replacement needs PATCH or event-driven approach.
 async fn put_active_timeblock(
-    State(_state): State<AppState>,
-    Query(_query): Query<ScopeQuery>,
-    Json(_payload): Json<ActiveBlockData>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    Err(conflict("PUT /timeblocks/active is deprecated. Use POST /timeblocks/start or POST /timeblocks/new instead."))
-}
-
-/// Original implementation kept for reference during migration.
-#[allow(dead_code)]
-async fn put_active_timeblock_legacy(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
     Json(payload): Json<ActiveBlockData>,
