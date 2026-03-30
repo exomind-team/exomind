@@ -10,7 +10,7 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
+import type { EventLogListOptions, IEventLogPort } from '../environment/interfaces/eventlog.port';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
@@ -32,7 +32,7 @@ export interface ImportEventsResult {
 
 export interface EventLogService {
   /** 加载所有事件 */
-  loadEvents(): Promise<Event[]>;
+  loadEvents(options?: EventLogListOptions): Promise<Event[]>;
 
   /** 添加普通事件 */
   addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event>;
@@ -62,8 +62,8 @@ export class EventLogServiceImpl implements EventLogService {
     this.port = options.port ?? ExoMindEnvironment.getInstance().eventlog;
   }
 
-  async loadEvents(): Promise<Event[]> {
-    const data = await this.readEventData();
+  async loadEvents(options?: EventLogListOptions): Promise<Event[]> {
+    const data = await this.readEventData(options);
     return data.map((d) => this.deserializeEvent(d)).sort((a, b) => b.timestamp - a.timestamp);
   }
 
@@ -160,8 +160,8 @@ export class EventLogServiceImpl implements EventLogService {
     };
   }
 
-  private async readEventData(): Promise<EventData[]> {
-    return this.port.listEvents();
+  private async readEventData(options?: EventLogListOptions): Promise<EventData[]> {
+    return this.port.listEvents(options);
   }
 
   private async writeEventData(events: EventData[]): Promise<void> {

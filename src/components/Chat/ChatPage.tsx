@@ -28,6 +28,7 @@ import { useSyncStore } from '@/ui/stores/sync-store';
 import { log } from '@/lib/logger';
 import { registerMainWindowFocusTarget } from '@/services/main-window-focus-targets';
 import { MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT } from '@/services/main-window-shortcut.service';
+import { mergeLatestEventsAscending } from './chat-event-pagination';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
@@ -61,6 +62,18 @@ function perfNow(): number {
 
 function sortEventsAscending(events: Event[]): Event[] {
   return [...events].sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function getLatestEventCursor(events: Event[]): { id: string; timestamp: number } | null {
+  const latestEvent = events[events.length - 1];
+  if (!latestEvent) {
+    return null;
+  }
+
+  return {
+    id: latestEvent.id,
+    timestamp: latestEvent.timestamp,
+  };
 }
 
 interface ChatPageProps {
@@ -251,9 +264,24 @@ export function ChatPage({
 
   const refreshLatestEvents = useCallback(async (behavior: ScrollBehavior = 'smooth') => {
     const t0 = perfNow();
-    const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
+    const latestCursor = getLatestEventCursor(allEventsRef.current);
+    const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents(
+      latestCursor
+        ? {
+            sinceId: latestCursor.id,
+            sinceTimestamp: latestCursor.timestamp,
+          }
+        : undefined,
+    ));
     const queryMs = Math.round(perfNow() - t0);
-    applyVisibleWindow(loadedEvents);
+
+    if (loadedEvents.length === 0) {
+      log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ fetched: 0, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
+      return;
+    }
+
+    const mergedEvents = mergeLatestEventsAscending(allEventsRef.current, loadedEvents);
+    applyVisibleWindow(mergedEvents);
 
     requestAnimationFrame(() => {
       if (shouldStickToBottomRef.current) {
@@ -261,7 +289,7 @@ export function ChatPage({
       }
     });
     log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
-  }, [scrollToBottom]);
+  }, [applyVisibleWindow, scrollToBottom]);
 
   const scheduleLatestRefresh = useCallback((): void => {
     if (refreshInFlightRef.current) {
@@ -353,13 +381,12 @@ export function ChatPage({
     shouldStickToBottomRef.current = true;
     try {
       await eventLogService.current.addEvent(trimmed);
-      await refreshLatestEvents('smooth');
       log.info(`[ChatPage] handleSend done ${JSON.stringify({ totalMs: Math.round(perfNow() - t0) })}`);
     } catch (error) {
       log.error(`[ChatPage] handleSend failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
-  }, [refreshLatestEvents]);
+  }, []);
 
   // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦
   useEffect(() => {

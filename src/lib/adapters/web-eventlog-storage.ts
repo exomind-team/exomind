@@ -1,5 +1,5 @@
 import type { EventData, EventMetadata, Tag } from '../types/event';
-import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
+import type { EventLogListOptions, IEventLogPort } from '../environment/interfaces/eventlog.port';
 import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
 import { appendEventWithEcsReplication } from '../services/ecs-eventlog-replication.service';
 
@@ -8,6 +8,34 @@ const TAGS_METADATA_KEY = 'tags';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function applyEventLogListOptions(
+  events: EventData[],
+  options?: EventLogListOptions,
+): EventData[] {
+  if (!options) {
+    return events;
+  }
+
+  let next = events;
+
+  if (typeof options.sinceTimestamp === 'number') {
+    next = next.filter((event) => event.timestamp >= options.sinceTimestamp!);
+  }
+
+  if (typeof options.sinceId === 'string' && options.sinceId.length > 0) {
+    const index = next.findIndex((event) => event.id === options.sinceId);
+    if (index >= 0) {
+      next = next.slice(0, index);
+    }
+  }
+
+  if (typeof options.limit === 'number') {
+    next = next.slice(0, Math.max(0, options.limit));
+  }
+
+  return next;
 }
 
 /**
@@ -25,9 +53,12 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     return getEventStorage(this.userId);
   }
 
-  async listEvents(): Promise<EventData[]> {
+  async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
     const events = await this.storage.getEvents();
-    return events.map((event) => this.fromStorageEvent(event));
+    return applyEventLogListOptions(
+      events.map((event) => this.fromStorageEvent(event)),
+      options,
+    );
   }
 
   async appendEvent(event: EventData): Promise<EventData> {

@@ -1,5 +1,11 @@
 import type { EventData } from '../../types/event';
 
+export interface EventLogListOptions {
+  limit?: number;
+  sinceId?: string;
+  sinceTimestamp?: number;
+}
+
 /**
  * IEventLogPort - 事件日志能力接口
  *
@@ -10,7 +16,7 @@ export interface IEventLogPort {
   /**
    * 列出所有事件（建议按时间倒序）
    */
-  listEvents(): Promise<EventData[]>;
+  listEvents(options?: EventLogListOptions): Promise<EventData[]>;
 
   /**
    * 追加一条事件
@@ -27,4 +33,3 @@ export interface IEventLogPort {
    */
   clearEvents(): Promise<void>;
 }
-

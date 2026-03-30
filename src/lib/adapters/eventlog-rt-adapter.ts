@@ -3,7 +3,7 @@ import {
   getSelectedRuntimeTarget,
   type RuntimeTarget,
 } from '@/config/runtime-target';
-import type { IEventLogPort } from '@/lib/environment/interfaces/eventlog.port';
+import type { EventLogListOptions, IEventLogPort } from '@/lib/environment/interfaces/eventlog.port';
 import type { EventData } from '@/lib/types/event';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
@@ -59,9 +59,9 @@ export class EventLogRtAdapter implements IEventLogPort {
     this.resolveTarget = options.resolveTarget ?? (() => getSelectedRuntimeTarget());
   }
 
-  async listEvents(): Promise<EventData[]> {
+  async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url('/eventlog', target), {
+    const response = await this.fetchImpl(this.url(this.buildListPath(options), target), {
       method: 'GET',
       headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
@@ -122,6 +122,22 @@ export class EventLogRtAdapter implements IEventLogPort {
 
   private baseUrl(target = this.resolveTarget()): string {
     return buildBaseUrl(target);
+  }
+
+  private buildListPath(options?: EventLogListOptions): string {
+    const url = new URL('/eventlog', 'http://runtime.local');
+
+    if (typeof options?.sinceId === 'string' && options.sinceId.length > 0) {
+      url.searchParams.set('since_id', options.sinceId);
+    }
+    if (typeof options?.sinceTimestamp === 'number') {
+      url.searchParams.set('since_timestamp', String(options.sinceTimestamp));
+    }
+    if (typeof options?.limit === 'number') {
+      url.searchParams.set('limit', String(options.limit));
+    }
+
+    return `${url.pathname}${url.search}`;
   }
 
   private url(path: string, target = this.resolveTarget()): string {

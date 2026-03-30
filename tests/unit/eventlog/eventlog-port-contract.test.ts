@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { EventLogListOptions } from '@/lib/environment/interfaces/eventlog.port';
 import type { EventData } from '@/lib/types/event';
 import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
 
@@ -19,8 +20,8 @@ describe('EventLogService port contract', () => {
 
   it('uses injected eventlog port for read/write instead of direct storage dependency', async () => {
     const port = {
-      listEvents: vi.fn<() => Promise<EventData[]>>().mockResolvedValue([]),
-      appendEvent: vi.fn<(_: EventData) => Promise<void>>().mockResolvedValue(undefined),
+      listEvents: vi.fn(async (_options?: EventLogListOptions) => [] as EventData[]),
+      appendEvent: vi.fn(async (event: EventData) => event),
       getEvent: vi.fn<(_: string) => Promise<EventData | null>>().mockResolvedValue(null),
       clearEvents: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     };
@@ -43,8 +44,8 @@ describe('EventLogService port contract', () => {
 
   it('keeps addEvent working when crypto.randomUUID is unavailable', async () => {
     const port = {
-      listEvents: vi.fn<() => Promise<EventData[]>>().mockResolvedValue([]),
-      appendEvent: vi.fn<(_: EventData) => Promise<void>>().mockResolvedValue(undefined),
+      listEvents: vi.fn(async (_options?: EventLogListOptions) => [] as EventData[]),
+      appendEvent: vi.fn(async (event: EventData) => event),
       getEvent: vi.fn<(_: string) => Promise<EventData | null>>().mockResolvedValue(null),
       clearEvents: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     };
@@ -96,8 +97,8 @@ describe('EventLogService port contract', () => {
     };
 
     const port = {
-      listEvents: vi.fn<() => Promise<EventData[]>>().mockResolvedValue([sample]),
-      appendEvent: vi.fn<(_: EventData) => Promise<void>>().mockResolvedValue(undefined),
+      listEvents: vi.fn(async (_options?: EventLogListOptions) => [sample]),
+      appendEvent: vi.fn(async (event: EventData) => event),
       getEvent: vi.fn<(_: string) => Promise<EventData | null>>().mockResolvedValue(sample),
       clearEvents: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     };
@@ -112,5 +113,28 @@ describe('EventLogService port contract', () => {
       agentId: 'codex',
       sessionId: 'session-002',
     }));
+  });
+
+  it('passes optional loadEvents query parameters to the injected port（透传增量读取参数）', async () => {
+    const port = {
+      listEvents: vi.fn(async (_options?: EventLogListOptions) => [] as EventData[]),
+      appendEvent: vi.fn(async (event: EventData) => event),
+      getEvent: vi.fn<(_: string) => Promise<EventData | null>>().mockResolvedValue(null),
+      clearEvents: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    };
+
+    const service = new EventLogServiceImpl({ port });
+
+    await service.loadEvents({
+      sinceId: 'evt-2',
+      sinceTimestamp: 1700000000000,
+      limit: 20,
+    });
+
+    expect(port.listEvents).toHaveBeenCalledWith({
+      sinceId: 'evt-2',
+      sinceTimestamp: 1700000000000,
+      limit: 20,
+    });
   });
 });

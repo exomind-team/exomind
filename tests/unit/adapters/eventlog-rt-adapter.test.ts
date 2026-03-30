@@ -73,6 +73,34 @@ describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
     expect(url.searchParams.get('user_id')).toBe(profileId);
   });
 
+  it('passes incremental query parameters to runtime eventlog list（透传增量查询参数）', async () => {
+    const profileId = activateProfileScope();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ([]),
+    }));
+
+    const adapter = new EventLogRtAdapter({
+      fetchImpl,
+      resolveTarget: () => ({ mode: 'embedded', host: '127.0.0.1', port: 9124 }),
+    });
+
+    await adapter.listEvents({
+      sinceId: 'event-9',
+      sinceTimestamp: 1700000000500,
+      limit: 5,
+    });
+
+    const [requestUrl] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const url = new URL(requestUrl);
+    expect(`${url.origin}${url.pathname}`).toBe('http://127.0.0.1:9124/eventlog');
+    expect(url.searchParams.get('user_id')).toBe(profileId);
+    expect(url.searchParams.get('since_id')).toBe('event-9');
+    expect(url.searchParams.get('since_timestamp')).toBe('1700000000500');
+    expect(url.searchParams.get('limit')).toBe('5');
+  });
+
   it('serializes frontend EventData to runtime append payload', async () => {
     const profileId = activateProfileScope();
     const fetchImpl = vi.fn(async () => ({
