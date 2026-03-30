@@ -488,7 +488,8 @@ async fn update_segment(
 }
 
 fn can_replace_active_block_for_planner_start(active: &ActiveBlockData) -> bool {
-    matches!(active.phase.as_deref(), Some("feedback_submitted"))
+    active.block_type.as_deref() == Some("gap")
+        || matches!(active.phase.as_deref(), Some("feedback_submitted"))
         || active.feedback_submitted_at.is_some()
 }
 
@@ -507,6 +508,7 @@ async fn start_segment(
         return Err(bad_request("only work segments can be started"));
     }
 
+    // Guard: check if current block can be replaced
     if let Some(active) = state
         .timeblock_store
         .get_active_scoped(scope_key)
@@ -517,60 +519,36 @@ async fn start_segment(
         }
     }
 
-    let now = chrono::Utc::now().timestamp_millis() as u64;
-    let start_id = uuid::Uuid::new_v4().to_string();
-    let task_association_log = segment
-        .linked_task_ids
-        .iter()
-        .map(|task_id| BlockTaskAssociationEvent {
-            block_id: start_id.clone(),
-            task_id: task_id.clone(),
-            action: "associated".to_string(),
-            timestamp: now,
-            source: "block_start".to_string(),
-        })
-        .collect::<Vec<_>>();
-    let active_block = ActiveBlockData {
-        start_id: start_id.clone(),
-        name: segment.title.clone(),
-        mode: "countdown".to_string(),
-        target_minutes: Some(duration_minutes_from_segment(&segment)),
-        block_type: Some("active".to_string()),
-        elapsed: duration_minutes_from_segment(&segment) * 60 * 1000,
-        updated_at: Some(now),
-        phase: Some("running".to_string()),
-        version: Some(1),
-        actor_id: Some("rt:today-planner".to_string()),
-        last_transition_at: Some(now),
-        last_resumed_at: Some(now),
-        accumulated_run_ms: Some(0),
-        start_time: now,
-        action_ended_at: None,
-        feedback_started_at: None,
-        feedback_submitted_at: None,
-        pause_accumulated_ms: Some(0),
-        paused: false,
-        paused_at: None,
-        task_ids: segment.linked_task_ids.clone(),
-        task_association_log,
-        source_planned_block_id: Some(segment.id.clone()),
-        task_id: None,
-    };
+    // Use do_new_block to atomically truncate gap + create active block
+    let result = super::timeblocks::do_new_block(
+        &state.timeblock_store,
+        scope_key,
+        &super::timeblocks::NewBlockRequest {
+            block_type: "active".to_string(),
+            name: Some(segment.title.clone()),
+            mode: Some("countdown".to_string()),
+            target_minutes: Some(duration_minutes_from_segment(&segment)),
+            task_ids: Some(segment.linked_task_ids.clone()),
+            source_planned_block_id: Some(segment.id.clone()),
+            feedback: None,
+            task_status_outcomes: None,
+        },
+    )
+    .map_err(|(status, _)| {
+        let err: ErrorResponse = ErrorResponse { error: "failed to create timeblock via newBlock".into() };
+        (status, Json(err))
+    })?;
 
-    state
-        .timeblock_store
-        .put_active_scoped(scope_key, active_block.clone())
-        .map_err(|error| internal_error(error.to_string()))?;
     write_timeblock_eventlog(
         &state,
         scope_key,
         "block_start",
-        &active_block.name,
-        &active_block.start_id,
-        &active_block.task_ids,
+        &result.active.name,
+        &result.active.start_id,
+        &result.active.task_ids,
     );
 
-    Ok(Json(active_block))
+    Ok(Json(result.active))
 }
 
 async fn reflow_window(

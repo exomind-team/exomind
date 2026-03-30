@@ -66,8 +66,8 @@ struct TimeBlockBackendStatusResponse {
 }
 
 #[derive(Debug, Serialize)]
-struct ErrorResponse {
-    error: String,
+pub struct ErrorResponse {
+    pub error: String,
 }
 
 enum TimeBlockImportStrategy {
@@ -93,18 +93,18 @@ fn conflict(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct NewBlockRequest {
+pub struct NewBlockRequest {
     /// Required: the blockType of the NEW block to create ("active" or "gap")
-    block_type: String,
+    pub block_type: String,
     // Fields for creating active blocks
-    name: Option<String>,
-    mode: Option<String>,
-    target_minutes: Option<u64>,
-    task_ids: Option<Vec<String>>,
-    source_planned_block_id: Option<String>,
+    pub name: Option<String>,
+    pub mode: Option<String>,
+    pub target_minutes: Option<u64>,
+    pub task_ids: Option<Vec<String>>,
+    pub source_planned_block_id: Option<String>,
     // Fields for completing the old block (when ending active → gap)
-    feedback: Option<String>,
-    task_status_outcomes: Option<std::collections::HashMap<String, String>>,
+    pub feedback: Option<String>,
+    pub task_status_outcomes: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,14 +130,14 @@ struct EndBlockRequest {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NewBlockResponse {
-    completed: Option<TimeBlockData>,
-    active: ActiveBlockData,
+pub struct NewBlockResponse {
+    pub completed: Option<TimeBlockData>,
+    pub active: ActiveBlockData,
 }
 
-/// Internal: atomic newBlock — ends old block + creates new block of specified type.
-/// No state validation. Callers (start/end guards or POST /timeblocks/new) are responsible.
-fn do_new_block(
+/// Atomic newBlock — ends old block + creates new block of specified type.
+/// No state validation. Callers (start/end guards) are responsible.
+pub fn do_new_block(
     store: &TimeBlockStore,
     scope_key: Option<&str>,
     req: &NewBlockRequest,
@@ -416,7 +416,20 @@ async fn get_active_timeblock(
     }
 }
 
+/// DEPRECATED: Use POST /timeblocks/start or /timeblocks/new instead.
+/// This route bypasses gap truncation and newBlock atomicity.
+/// Kept temporarily for backward compat; will be removed.
 async fn put_active_timeblock(
+    State(_state): State<AppState>,
+    Query(_query): Query<ScopeQuery>,
+    Json(_payload): Json<ActiveBlockData>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    Err(conflict("PUT /timeblocks/active is deprecated. Use POST /timeblocks/start or POST /timeblocks/new instead."))
+}
+
+/// Original implementation kept for reference during migration.
+#[allow(dead_code)]
+async fn put_active_timeblock_legacy(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
     Json(payload): Json<ActiveBlockData>,
