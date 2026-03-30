@@ -406,6 +406,24 @@ describe('GoalsPage', () => {
     });
   });
 
+  it('keeps the empty-state guide anchored next to Me after the viewport moves', async () => {
+    const { GoalsPage } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    const onMove = flowApiMocks.lastProps?.onMove as undefined | ((event: unknown, viewport: { x: number; y: number; zoom: number }) => void);
+    act(() => {
+      onMove?.({}, { x: 48, y: 32, zoom: 1.5 });
+    });
+
+    await waitFor(() => {
+      const guide = screen.getByTestId('goals-empty-state-guide');
+      expect(guide).toHaveStyle({
+        left: '200px',
+        top: '71px',
+      });
+    });
+  });
+
   it('limits completed goal context menu to read-only actions', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);
@@ -813,6 +831,34 @@ describe('GoalsPage', () => {
     fireEvent.click(screen.getByTestId('mock-react-flow-pane'));
 
     expect(screen.queryByTestId('goals-connect-preview')).toBeNull();
+  });
+
+  it('keeps the connect preview start anchored to the source node after the viewport moves', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const onMove = flowApiMocks.lastProps?.onMove as undefined | ((event: unknown, viewport: { x: number; y: number; zoom: number }) => void);
+    act(() => {
+      onMove?.({}, { x: 48, y: 32, zoom: 1.5 });
+    });
+
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-connect'));
+    fireEvent.mouseMove(screen.getByTestId('goals-page'), { clientX: 360, clientY: 280 });
+
+    const preview = screen.getByTestId('goals-connect-preview');
+    const line = preview.querySelector('line');
+    expect(line).not.toBeNull();
+    expect(Number.parseFloat(line?.getAttribute('x1') ?? '0')).toBeCloseTo(271.5, 1);
+    expect(Number.parseFloat(line?.getAttribute('y1') ?? '0')).toBeCloseTo(255.5, 1);
   });
 
   it('toasts when connect mode is confirmed on the same goal node', async () => {

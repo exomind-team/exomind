@@ -375,6 +375,40 @@ async function readViewportTransform(page: Page) {
   });
 }
 
+async function readEmptyStateGuideAnchorMetrics(page: Page) {
+  return page.evaluate(() => {
+    const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+    const guide = document.querySelector('[data-testid="goals-empty-state-guide"]') as HTMLElement | null;
+    if (!me || !guide) return null;
+
+    const meRect = me.getBoundingClientRect();
+    const guideRect = guide.getBoundingClientRect();
+
+    return {
+      horizontalGap: guideRect.left - meRect.right,
+      verticalOffset: (guideRect.top + guideRect.height / 2) - (meRect.top + meRect.height / 2),
+    };
+  });
+}
+
+async function readConnectPreviewAnchorMetrics(page: Page, sourceTestId: string) {
+  return page.evaluate((testId) => {
+    const source = document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null;
+    const preview = document.querySelector('[data-testid="goals-connect-preview"] line') as SVGLineElement | null;
+    const goalsPage = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+    if (!source || !preview || !goalsPage) return null;
+
+    const sourceRect = source.getBoundingClientRect();
+    const pageRect = goalsPage.getBoundingClientRect();
+    return {
+      sourceCenterX: sourceRect.left + sourceRect.width / 2 - pageRect.left,
+      sourceCenterY: sourceRect.top + sourceRect.height / 2 - pageRect.top,
+      previewX1: Number.parseFloat(preview.getAttribute('x1') ?? 'NaN'),
+      previewY1: Number.parseFloat(preview.getAttribute('y1') ?? 'NaN'),
+    };
+  }, sourceTestId);
+}
+
 async function gotoGoalsPage(page: Page) {
   await page.goto('/goals', { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 20000 });
@@ -3143,6 +3177,63 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     const visibilitySnapshot = await snapshotRenderVisibility(page);
     expectVisibleGraphSnapshot(visibilitySnapshot, 2, 1, 'me-centered-after-growth');
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
+  test('keeps the empty-state guide anchored next to Me in the browser after initial centering', async ({ page }) => {
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goals-empty-state-guide')).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(async () => {
+        const metrics = await readEmptyStateGuideAnchorMetrics(page);
+        if (!metrics) return null;
+        return {
+          horizontalGap: Number(metrics.horizontalGap.toFixed(1)),
+          verticalOffset: Number(metrics.verticalOffset.toFixed(1)),
+        };
+      }, {
+        timeout: 15000,
+        message: 'expected the empty-state guide bubble to stay anchored next to Me after initial centering',
+      })
+      .toEqual({
+        horizontalGap: 26,
+        verticalOffset: 11,
+      });
+  });
+
+  test('keeps the connect preview start anchored to the source node in the browser after initial centering', async ({ page }) => {
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const sourceTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(1).getAttribute('data-testid');
+    if (!sourceTestId) {
+      throw new Error('expected a measurable goal node to start connect preview coverage');
+    }
+
+    await openNodeContextMenu(page, sourceTestId, 220, 180);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-connect').click();
+
+    await page.mouse.move(360, 280);
+    await expect(page.getByTestId('goals-connect-preview')).toBeVisible({ timeout: 5000 });
+
+    await expect
+      .poll(async () => {
+        const metrics = await readConnectPreviewAnchorMetrics(page, sourceTestId);
+        if (!metrics) return null;
+        return Math.abs(metrics.previewX1 - metrics.sourceCenterX) <= 2
+          && Math.abs(metrics.previewY1 - metrics.sourceCenterY) <= 2;
+      }, {
+        timeout: 15000,
+        message: 'expected the connect preview start to stay anchored to the source node center',
+      })
+      .toBe(true);
   });
 
   test('renders single-edge arrows and nearest-point anchors in the browser', async ({ page }) => {

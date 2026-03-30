@@ -912,14 +912,16 @@ export function GoalsPage() {
     if (!sourcePosition) return null;
 
     const sourceSize = connectMode.sourceId === graph.me.id ? ME_NODE_SIZE : GOAL_NODE_SIZE;
+    const sourceCenterX = viewport.x + (sourcePosition.x + sourceSize / 2) * viewport.zoom;
+    const sourceCenterY = viewport.y + (sourcePosition.y + sourceSize / 2) * viewport.zoom;
 
     return {
-      x1: sourcePosition.x + sourceSize / 2,
-      y1: sourcePosition.y + sourceSize / 2,
+      x1: sourceCenterX,
+      y1: sourceCenterY,
       x2: connectMode.previewPoint.x,
       y2: connectMode.previewPoint.y,
     };
-  }, [connectMode, graph.me.id, positions]);
+  }, [connectMode, graph.me.id, positions, viewport.x, viewport.y, viewport.zoom]);
 
   const reconnectOverlayEdge = useMemo(() => {
     if (!activeReconnect) return null;
@@ -975,11 +977,13 @@ export function GoalsPage() {
 
   const emptyStateGuideStyle = useMemo(() => {
     const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
+    const meScreenRight = viewport.x + (mePosition.x + ME_NODE_SIZE) * viewport.zoom;
+    const meScreenCenterY = viewport.y + (mePosition.y + ME_NODE_SIZE / 2) * viewport.zoom;
     return {
-      left: `${Math.round(mePosition.x + ME_NODE_SIZE + 26)}px`,
-      top: `${Math.round(mePosition.y + ME_NODE_SIZE / 2 - 24)}px`,
+      left: `${Math.round(meScreenRight + 26)}px`,
+      top: `${Math.round(meScreenCenterY - 24)}px`,
     };
-  }, [graph.me.id, positions]);
+  }, [graph.me.id, positions, viewport.x, viewport.y, viewport.zoom]);
 
   const goalStatusSnapshot = useMemo(
     () => visibleGraph.goals.map((goal) => ({
