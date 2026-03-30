@@ -292,6 +292,178 @@ async fn end_block(
     }).map(Json)
 }
 
+// ── #780 stop/pause/resume ──────────────────────────────────────────
+
+/// POST /timeblocks/stop — end focus, enter feedback phase (no gap created)
+async fn stop_block(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+
+    let current = state.timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+        .ok_or_else(|| conflict("cannot stop: no active block"))?;
+
+    if current.block_type.as_deref() == Some("gap") {
+        return Err(conflict("cannot stop: current block is a gap"));
+    }
+    if current.action_ended_at.is_some() || current.feedback_started_at.is_some() {
+        return Err(conflict("cannot stop: already in feedback phase"));
+    }
+
+    let mut updated = current;
+    updated.action_ended_at = Some(now);
+    updated.feedback_started_at = Some(now);
+    updated.phase = Some("feedback_in_progress".to_string());
+    updated.paused = false;
+    updated.version = Some(updated.version.unwrap_or(0) + 1);
+    updated.last_transition_at = Some(now);
+    updated.updated_at = Some(now);
+
+    let name = updated.name.clone();
+    let start_id = updated.start_id.clone();
+    let task_ids = updated.task_ids.clone();
+
+    state.timeblock_store
+        .put_active_scoped(scope_key, updated)
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    write_timeblock_eventlog(&state, scope_key, "block_end", &name, &start_id, &task_ids);
+
+    Ok(Json(serde_json::json!({ "status": "stopped", "phase": "feedback_in_progress" })))
+}
+
+/// POST /timeblocks/pause — pause the current active block
+async fn pause_block(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+
+    let current = state.timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+        .ok_or_else(|| conflict("cannot pause: no active block"))?;
+
+    if current.block_type.as_deref() == Some("gap") {
+        return Err(conflict("cannot pause: current block is a gap"));
+    }
+    if current.paused {
+        return Err(conflict("cannot pause: already paused"));
+    }
+    if current.action_ended_at.is_some() {
+        return Err(conflict("cannot pause: block is in feedback phase"));
+    }
+
+    // Calculate accumulated run time
+    let run_since = current.last_resumed_at.unwrap_or(current.start_time);
+    let new_run_ms = now.saturating_sub(run_since);
+    let accumulated = current.accumulated_run_ms.unwrap_or(0) + new_run_ms;
+
+    let mut updated = current;
+    updated.paused = true;
+    updated.paused_at = Some(now);
+    updated.accumulated_run_ms = Some(accumulated);
+    updated.phase = Some("paused".to_string());
+    updated.version = Some(updated.version.unwrap_or(0) + 1);
+    updated.last_transition_at = Some(now);
+    updated.updated_at = Some(now);
+
+    let name = updated.name.clone();
+    let start_id = updated.start_id.clone();
+    let task_ids = updated.task_ids.clone();
+
+    state.timeblock_store
+        .put_active_scoped(scope_key, updated)
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    write_timeblock_eventlog(&state, scope_key, "block_pause", &name, &start_id, &task_ids);
+
+    Ok(Json(serde_json::json!({ "status": "paused" })))
+}
+
+/// POST /timeblocks/resume — resume the current paused block
+async fn resume_block(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+
+    let current = state.timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+        .ok_or_else(|| conflict("cannot resume: no active block"))?;
+
+    if current.block_type.as_deref() == Some("gap") {
+        return Err(conflict("cannot resume: current block is a gap"));
+    }
+    if !current.paused {
+        return Err(conflict("cannot resume: not paused"));
+    }
+
+    // Calculate accumulated pause time
+    let pause_since = current.paused_at.unwrap_or(now);
+    let new_pause_ms = now.saturating_sub(pause_since);
+    let pause_accumulated = current.pause_accumulated_ms.unwrap_or(0) + new_pause_ms;
+
+    let mut updated = current;
+    updated.paused = false;
+    updated.paused_at = None;
+    updated.last_resumed_at = Some(now);
+    updated.pause_accumulated_ms = Some(pause_accumulated);
+    updated.phase = Some("running".to_string());
+    updated.version = Some(updated.version.unwrap_or(0) + 1);
+    updated.last_transition_at = Some(now);
+    updated.updated_at = Some(now);
+
+    let name = updated.name.clone();
+    let start_id = updated.start_id.clone();
+    let task_ids = updated.task_ids.clone();
+
+    state.timeblock_store
+        .put_active_scoped(scope_key, updated)
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    write_timeblock_eventlog(&state, scope_key, "block_resume", &name, &start_id, &task_ids);
+
+    Ok(Json(serde_json::json!({ "status": "resumed" })))
+}
+
+/// POST /timeblocks/describe — modify name of the current active block (no id needed)
+async fn describe_current_block(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+    Json(payload): Json<DescribeBlockRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+
+    let mut active = state.timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(ErrorResponse { error: "no active block".into() })))?;
+
+    if let Some(name) = payload.name {
+        active.name = name;
+    }
+    // note field not yet on ActiveBlockData (#780 follow-up)
+
+    let block_id = active.start_id.clone();
+
+    state.timeblock_store
+        .put_active_scoped(scope_key, active)
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "updated": "current", "blockId": block_id })))
+}
+
 // ── #759 describe: modify name/note of a timeblock by ID ────────────
 
 #[derive(Debug, Deserialize)]
@@ -813,6 +985,10 @@ pub fn router() -> Router<AppState> {
         .route("/timeblocks/new", post(new_block))
         .route("/timeblocks/start", post(start_block))
         .route("/timeblocks/end", post(end_block))
+        .route("/timeblocks/stop", post(stop_block))
+        .route("/timeblocks/pause", post(pause_block))
+        .route("/timeblocks/resume", post(resume_block))
+        .route("/timeblocks/describe", post(describe_current_block))
         .route("/timeblocks/:block_id/describe", post(describe_block))
         .route(
             "/timeblocks/active",
