@@ -535,6 +535,7 @@ async fn start_segment(
         name: segment.title.clone(),
         mode: "countdown".to_string(),
         target_minutes: Some(duration_minutes_from_segment(&segment)),
+        block_type: Some("active".to_string()),
         elapsed: duration_minutes_from_segment(&segment) * 60 * 1000,
         updated_at: Some(now),
         phase: Some("running".to_string()),

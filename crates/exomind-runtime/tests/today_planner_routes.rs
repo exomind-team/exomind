@@ -346,6 +346,7 @@ async fn today_planner_start_conflicts_while_feedback_is_still_in_progress() {
                 task_association_log: vec![],
                 source_planned_block_id: Some("finished-segment".to_string()),
                 task_id: None,
+                    block_type: None,
             },
         )
         .unwrap();

@@ -628,6 +628,7 @@ mod tests {
                             task_status_outcomes: None,
                             task_association_log: vec![],
                             source_planned_block_id: None,
+                    block_type: None,
                         }])
                         .unwrap(),
                     ))
@@ -669,6 +670,7 @@ mod tests {
                                 },
                             ],
                             source_planned_block_id: None,
+                    block_type: None,
                         }])
                         .unwrap(),
                     ))
@@ -717,6 +719,7 @@ mod tests {
                                 },
                             ],
                             source_planned_block_id: None,
+                    block_type: None,
                             task_id: Some("task-profile-a".to_string()),
                         })
                         .unwrap(),
@@ -831,6 +834,7 @@ mod tests {
                                 },
                             ],
                             source_planned_block_id: None,
+                    block_type: None,
                         }])
                         .unwrap(),
                     ))
@@ -879,6 +883,7 @@ mod tests {
                                 },
                             ],
                             source_planned_block_id: None,
+                    block_type: None,
                             task_id: Some("task-user-a".to_string()),
                         })
                         .unwrap(),
@@ -981,6 +986,7 @@ mod tests {
                             task_ids: vec!["task-a".to_string()],
                             task_association_log: vec![],
                             source_planned_block_id: None,
+                    block_type: None,
                             task_id: Some("task-a".to_string()),
                         })
                         .unwrap(),
@@ -1042,6 +1048,7 @@ mod tests {
                             task_ids: vec!["task-a".to_string()],
                             task_association_log: vec![],
                             source_planned_block_id: None,
+                    block_type: None,
                             task_id: Some("task-a".to_string()),
                         })
                         .unwrap(),
@@ -1107,6 +1114,7 @@ mod tests {
             task_ids: vec!["task-a".to_string()],
             task_association_log: vec![],
             source_planned_block_id: None,
+                    block_type: None,
             task_id: Some("task-a".to_string()),
         };
 
@@ -1229,6 +1237,7 @@ mod tests {
             task_ids: vec!["task-a".to_string()],
             task_association_log: vec![],
             source_planned_block_id: None,
+                    block_type: None,
             task_id: Some("task-a".to_string()),
         };
 
