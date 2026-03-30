@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
 import { getGoalsPageEnabled, subscribeGoalsPageEnabledChanges } from '@/config/goals-page-enabled';
+import { getWorkbenchLegacyShimEnabled } from '@/config/workbench-legacy-shim-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
@@ -183,6 +184,36 @@ function PageFallback() {
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
+}
+
+function LegacyWorkbenchShim({
+  enabled,
+  search,
+  children,
+}: {
+  enabled: boolean;
+  search: Record<string, string>;
+  children: React.ReactNode;
+}) {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    void navigate({
+      to: '/workbench',
+      search,
+      replace: true,
+    });
+  }, [enabled, navigate, search]);
+
+  if (enabled) {
+    return null;
+  }
+
+  return <>{children}</>;
 }
 
 function resolveRuntimePlatform(): 'web' | 'tauri' | 'unknown' {
@@ -935,9 +966,14 @@ const newAgentsRoute = createRoute({
   path: '/agents',
   component: function NewAgents() {
     return (
-      <LazyPage>
-        <AgentsPage />
-      </LazyPage>
+      <LegacyWorkbenchShim
+        enabled={getWorkbenchLegacyShimEnabled()}
+        search={{ legacySource: 'agents-hub' }}
+      >
+        <LazyPage>
+          <AgentsPage />
+        </LazyPage>
+      </LegacyWorkbenchShim>
     );
   },
 });
@@ -1009,10 +1045,19 @@ const newAgentConversationRoute = createRoute({
   path: '/agents/chat/$agentId',
   component: function NewAgentConversation() {
     const { agentId } = useParams({ strict: false }) as { agentId?: string };
+    const legacyShimEnabled = getWorkbenchLegacyShimEnabled();
     return (
-      <LazyPage>
-        <AgentConversationPage agentId={agentId} />
-      </LazyPage>
+      <LegacyWorkbenchShim
+        enabled={legacyShimEnabled && Boolean(agentId)}
+        search={{
+          legacySource: 'agent-chat',
+          agentId: agentId ?? '',
+        }}
+      >
+        <LazyPage>
+          <AgentConversationPage agentId={agentId} />
+        </LazyPage>
+      </LegacyWorkbenchShim>
     );
   },
 });
@@ -1062,4 +1107,3 @@ const newRouteTree = newRootRoute.addChildren([
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
-

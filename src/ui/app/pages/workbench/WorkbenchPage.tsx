@@ -1,10 +1,13 @@
+import { useLocation } from '@tanstack/react-router';
 import { Bot, Network, TerminalSquare } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
 import {
+  applyWorkbenchLegacyIntent,
   readOrCreateWorkbenchFlatState,
+  resolveWorkbenchLegacyIntent,
   type WorkbenchBindingType,
   type WorkbenchPaneState,
 } from './workbench-storage';
@@ -87,7 +90,15 @@ function WorkbenchPaneCard({ pane }: { pane: WorkbenchPaneState }) {
 
 export function WorkbenchPage() {
   const isDesktop = useIsDesktop(1024);
-  const state = useMemo(() => readOrCreateWorkbenchFlatState(), []);
+  const location = useLocation();
+  const legacyIntent = useMemo(
+    () => resolveWorkbenchLegacyIntent(location.searchStr ?? ''),
+    [location.searchStr],
+  );
+  const state = useMemo(
+    () => applyWorkbenchLegacyIntent(readOrCreateWorkbenchFlatState(), legacyIntent),
+    [legacyIntent],
+  );
 
   return (
     <div
@@ -144,6 +155,15 @@ export function WorkbenchPage() {
             </div>
           </div>
         </header>
+
+        {legacyIntent ? (
+          <section
+            data-testid="workbench-legacy-entry"
+            className="rounded-[20px] border border-[#E9D5FF] bg-[#FAF5FF] px-4 py-3 text-sm text-[#6B21A8] shadow-[0_12px_36px_-30px_rgba(109,40,217,0.45)] dark:border-[#4C1D95] dark:bg-[#1E1433] dark:text-[#E9D5FF]"
+          >
+            Legacy route handoff / 旧入口接力：<code>{legacyIntent.route}</code>
+          </section>
+        ) : null}
 
         <section
           data-testid="workbench-pane-grid"

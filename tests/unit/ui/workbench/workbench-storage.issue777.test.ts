@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   WORKBENCH_PHASE1_STORAGE_KEY,
+  applyWorkbenchLegacyIntent,
   readOrCreateWorkbenchFlatState,
+  resolveWorkbenchLegacyIntent,
   type WorkbenchFlatState,
 } from '@/ui/app/pages/workbench/workbench-storage';
 
@@ -103,5 +105,21 @@ describe('Issue #777 workbench storage（工作台默认空间与最近 pane 恢
       configurable: true,
       value: originalLocalStorage,
     });
+  });
+
+  it('resolves legacy chat route intent and focuses the agent pane（解析旧聊天路由并聚焦 agent pane）', () => {
+    const state = readOrCreateWorkbenchFlatState(() => '2026-03-30T21:00:00.000Z');
+    const intent = resolveWorkbenchLegacyIntent('?legacySource=agent-chat&agentId=agent-daily');
+
+    expect(intent).toEqual({
+      source: 'agent-chat',
+      route: '/agents/chat/agent-daily',
+      agentId: 'agent-daily',
+    });
+
+    const next = applyWorkbenchLegacyIntent(state, intent);
+
+    expect(next.panes[0]?.title).toBe('Agent Chat / agent-daily');
+    expect(next.panes[0]?.description).toContain('/agents/chat/agent-daily');
   });
 });

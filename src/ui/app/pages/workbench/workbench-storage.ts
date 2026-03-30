@@ -37,6 +37,17 @@ export type WorkbenchFlatState = {
   panes: WorkbenchPaneState[];
 };
 
+export type WorkbenchLegacyIntent =
+  | {
+      source: 'agents-hub';
+      route: '/agents';
+    }
+  | {
+      source: 'agent-chat';
+      route: string;
+      agentId: string;
+    };
+
 function createDefaultWorkbenchFlatState(nowIso: string): WorkbenchFlatState {
   return {
     version: 1,
@@ -267,4 +278,64 @@ export function readOrCreateWorkbenchFlatState(now: () => string = () => new Dat
   const created = createDefaultWorkbenchFlatState(now());
   writeWorkbenchFlatState(created);
   return created;
+}
+
+export function resolveWorkbenchLegacyIntent(search: string): WorkbenchLegacyIntent | null {
+  const normalizedSearch = search.startsWith('?') ? search.slice(1) : search;
+  const params = new URLSearchParams(normalizedSearch);
+  const legacySource = params.get('legacySource');
+
+  if (legacySource === 'agents-hub') {
+    return {
+      source: 'agents-hub',
+      route: '/agents',
+    };
+  }
+
+  if (legacySource === 'agent-chat') {
+    const agentId = params.get('agentId');
+    if (!agentId) {
+      return null;
+    }
+
+    return {
+      source: 'agent-chat',
+      route: `/agents/chat/${agentId}`,
+      agentId,
+    };
+  }
+
+  return null;
+}
+
+export function applyWorkbenchLegacyIntent(
+  state: WorkbenchFlatState,
+  intent: WorkbenchLegacyIntent | null,
+): WorkbenchFlatState {
+  if (!intent) {
+    return state;
+  }
+
+  if (intent.source !== 'agent-chat') {
+    return state;
+  }
+
+  let didApplyAgentChatHandoff = false;
+  const panes = state.panes.map((pane) => {
+    if (didApplyAgentChatHandoff || pane.bindingType !== 'agent-session') {
+      return pane;
+    }
+
+    didApplyAgentChatHandoff = true;
+    return {
+      ...pane,
+      title: `Agent Chat / ${intent.agentId}`,
+      description: `Legacy handoff from ${intent.route} / 来自旧聊天入口的接力`,
+    };
+  });
+
+  return {
+    ...state,
+    panes,
+  };
 }
