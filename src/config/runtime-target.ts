@@ -21,8 +21,6 @@ export interface EmbeddedRuntimeStatusSnapshot {
   host: string;
   port: number;
   hostId?: string;
-  /** Admin auth secret for the embedded runtime (when EXOMIND_RT_SECRET is set). */
-  authSecret?: string;
 }
 
 function resolveEmbeddedRuntimePort(rawValue: string | undefined): number {
@@ -67,7 +65,7 @@ export function formatHostForUrl(host: string): string {
   return host;
 }
 
-function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
+export function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
   if (typeof window === 'undefined') {
     return null;
   }
@@ -83,16 +81,24 @@ function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<EmbeddedRuntimeStatusSnapshot>;
+    const parsed = JSON.parse(raw) as Partial<EmbeddedRuntimeStatusSnapshot> & {
+      authSecret?: unknown;
+    };
     if (typeof parsed.host !== 'string' || typeof parsed.port !== 'number') {
       return null;
     }
-    return {
+    const snapshot = {
       host: resolveLocalServiceHost(parsed.host),
       port: parsed.port,
       hostId: typeof parsed.hostId === 'string' ? parsed.hostId : undefined,
-      authSecret: typeof parsed.authSecret === 'string' ? parsed.authSecret : undefined,
     };
+    if (Object.prototype.hasOwnProperty.call(parsed, 'authSecret')) {
+      window.localStorage.setItem(
+        EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+        JSON.stringify(snapshot),
+      );
+    }
+    return snapshot;
   } catch {
     return null;
   }
@@ -156,11 +162,6 @@ function resolveEmbeddedPort(): number {
   }
 
   return DEFAULT_EMBEDDED_RUNTIME_PORT;
-}
-
-function resolveEmbeddedAuthToken(): string | undefined {
-  const authSecret = readEmbeddedRuntimeStatus()?.authSecret?.trim();
-  return authSecret ? authSecret : undefined;
 }
 
 export function getPreferredEmbeddedRuntimePort(): number {
@@ -350,7 +351,6 @@ export function getSelectedRuntimeTarget(): RuntimeTarget {
     mode,
     host: resolveEmbeddedHost(),
     port: resolveEmbeddedPort(),
-    authToken: resolveEmbeddedAuthToken(),
   };
 }
 
@@ -383,7 +383,6 @@ export function persistEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnapsh
       host: resolveLocalServiceHost(status.host),
       port: status.port,
       hostId: status.hostId,
-      authSecret: status.authSecret,
     }),
   );
   emitRuntimeTargetChanged();

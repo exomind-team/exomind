@@ -123,7 +123,6 @@ export function useSignalStream(): void {
                 host: status.host,
                 port: status.port,
                 hostId: status.hostId,
-                authSecret: status.authSecret,
               });
               if (!cancelled) {
                 setRuntimeTargetHydrated(true);
