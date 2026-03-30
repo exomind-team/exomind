@@ -616,6 +616,43 @@ async function measureSingleVisibleGoalDirection(page: Page, goalTestId: string)
   }, goalTestId);
 }
 
+async function measureCenteredCanvasMetrics(page: Page) {
+  return page.evaluate(() => {
+    const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+    const canvas = me?.closest('.react-flow') as HTMLElement | null;
+    const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+    const ring2 = document.querySelector('[data-testid="goals-hop-ring-2"] circle') as SVGCircleElement | null;
+    const goalsPage = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+    const meWrapper = me?.closest('.react-flow__node') as HTMLElement | null;
+    const nodesContainer = document.querySelector('.react-flow__nodes') as HTMLElement | null;
+    const reactFlowWrapper = document.querySelector('[data-testid="rf__wrapper"]') as HTMLElement | null;
+    if (!me || !canvas) {
+      return null;
+    }
+
+    const getCenter = (element: Element) => {
+      const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+      return {
+        x: rect.x + rect.width / 2,
+        y: rect.y + rect.height / 2,
+      };
+    };
+
+    return {
+      meCenter: getCenter(me),
+      canvasCenter: getCenter(canvas),
+      ring1Center: ring1 ? getCenter(ring1) : null,
+      ring2Center: ring2 ? getCenter(ring2) : null,
+      scrollY: window.scrollY,
+      pageTop: goalsPage?.getBoundingClientRect().top ?? null,
+      meTransform: meWrapper?.style.transform ?? null,
+      nodesContainerTop: nodesContainer?.getBoundingClientRect().top ?? null,
+      reactFlowScrollTop: reactFlowWrapper?.scrollTop ?? null,
+      reactFlowScrollLeft: reactFlowWrapper?.scrollLeft ?? null,
+    };
+  });
+}
+
 async function runThreeNodeSample(page: Page, layoutTestConfig: GoalLayoutTestConfig | null = null) {
   await primeGoalsPage(page, layoutTestConfig);
   const tracker = createGoalWarningTracker(page);
@@ -2749,6 +2786,9 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     await expect(page.getByTestId('task-flow-edge-visible-edge-me-a')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('goal-flow-node-goal-b')).toHaveCount(0);
     await expect(page.getByTestId('task-flow-edge-visible-edge-me-b')).toHaveCount(0);
+    const baselineCenteredMetrics = await measureCenteredCanvasMetrics(page);
+    expect(baselineCenteredMetrics, 'show-cancelled-zombie: expected measurable baseline centered metrics').not.toBeNull();
+    const baselineViewport = await readViewportTransform(page);
 
     await page.getByRole('checkbox', { name: '显示已取消' }).check();
 
@@ -2768,6 +2808,60 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       2,
       'show-cancelled-zombie:settled',
     );
+
+    await expect
+      .poll(async () => {
+        const currentMetrics = await measureCenteredCanvasMetrics(page);
+        if (!currentMetrics || !baselineCenteredMetrics) return null;
+        const viewportAfterToggle = await readViewportTransform(page);
+        return {
+          meStable:
+            Math.abs(currentMetrics.meCenter.x - baselineCenteredMetrics.meCenter.x) <= 2
+            && Math.abs(currentMetrics.meCenter.y - baselineCenteredMetrics.meCenter.y) <= 2,
+          meCentered:
+            Math.abs(currentMetrics.meCenter.x - currentMetrics.canvasCenter.x) <= 6
+            && Math.abs(currentMetrics.meCenter.y - currentMetrics.canvasCenter.y) <= 6,
+          ring1Aligned:
+            !currentMetrics.ring1Center
+            || (
+              Math.abs(currentMetrics.ring1Center.x - currentMetrics.meCenter.x) <= 6
+              && Math.abs(currentMetrics.ring1Center.y - currentMetrics.meCenter.y) <= 6
+            ),
+          ring2Aligned:
+            !currentMetrics.ring2Center
+            || (
+              Math.abs(currentMetrics.ring2Center.x - currentMetrics.meCenter.x) <= 6
+              && Math.abs(currentMetrics.ring2Center.y - currentMetrics.meCenter.y) <= 6
+            ),
+          meDeltaX: Number((currentMetrics.meCenter.x - baselineCenteredMetrics.meCenter.x).toFixed(2)),
+          meDeltaY: Number((currentMetrics.meCenter.y - baselineCenteredMetrics.meCenter.y).toFixed(2)),
+          scrollDeltaY: Number(((currentMetrics.scrollY ?? 0) - (baselineCenteredMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((currentMetrics.pageTop ?? 0) - (baselineCenteredMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((currentMetrics.nodesContainerTop ?? 0) - (baselineCenteredMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((currentMetrics.reactFlowScrollTop ?? 0) - (baselineCenteredMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((currentMetrics.reactFlowScrollLeft ?? 0) - (baselineCenteredMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
+          viewportChanged: JSON.stringify(viewportAfterToggle) !== JSON.stringify(baselineViewport),
+          meTransformChanged: currentMetrics.meTransform !== baselineCenteredMetrics.meTransform,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected show-cancelled zombie toggle to keep Me, hop rings, and viewport stable',
+      })
+      .toMatchObject({
+        meStable: true,
+        meCentered: true,
+        ring1Aligned: true,
+        ring2Aligned: true,
+        meDeltaX: 0,
+        meDeltaY: 0,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
+        viewportChanged: false,
+        meTransformChanged: false,
+      });
 
     const zombieMetrics = await page.evaluate(() => {
       const goal = document.querySelector('[data-testid="goal-flow-node-goal-b"]') as HTMLElement | null;
@@ -2826,6 +2920,10 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       })
       .toBeGreaterThanOrEqual(1);
 
+    const baselineCenteredMetrics = await measureCenteredCanvasMetrics(page);
+    expect(baselineCenteredMetrics, 'moving-show-cancelled: expected measurable baseline centered metrics').not.toBeNull();
+    const baselineViewport = await readViewportTransform(page);
+
     expectVisibleGraphSnapshot(
       await snapshotRenderVisibility(page),
       2,
@@ -2850,6 +2948,56 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       })
       .toBe(true);
 
+    await expect
+      .poll(async () => {
+        const currentMetrics = await measureCenteredCanvasMetrics(page);
+        if (!currentMetrics || !baselineCenteredMetrics) return null;
+        const viewportAfterShow = await readViewportTransform(page);
+        return {
+          meStable:
+            Math.abs(currentMetrics.meCenter.x - baselineCenteredMetrics.meCenter.x) <= 2
+            && Math.abs(currentMetrics.meCenter.y - baselineCenteredMetrics.meCenter.y) <= 2,
+          meCentered:
+            Math.abs(currentMetrics.meCenter.x - currentMetrics.canvasCenter.x) <= 6
+            && Math.abs(currentMetrics.meCenter.y - currentMetrics.canvasCenter.y) <= 6,
+          ring1Aligned:
+            !currentMetrics.ring1Center
+            || (
+              Math.abs(currentMetrics.ring1Center.x - currentMetrics.meCenter.x) <= 6
+              && Math.abs(currentMetrics.ring1Center.y - currentMetrics.meCenter.y) <= 6
+            ),
+          ring2Aligned:
+            !currentMetrics.ring2Center
+            || (
+              Math.abs(currentMetrics.ring2Center.x - currentMetrics.meCenter.x) <= 6
+              && Math.abs(currentMetrics.ring2Center.y - currentMetrics.meCenter.y) <= 6
+            ),
+          scrollDeltaY: Number(((currentMetrics.scrollY ?? 0) - (baselineCenteredMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((currentMetrics.pageTop ?? 0) - (baselineCenteredMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((currentMetrics.nodesContainerTop ?? 0) - (baselineCenteredMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((currentMetrics.reactFlowScrollTop ?? 0) - (baselineCenteredMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((currentMetrics.reactFlowScrollLeft ?? 0) - (baselineCenteredMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
+          viewportChanged: JSON.stringify(viewportAfterShow) !== JSON.stringify(baselineViewport),
+          meTransformChanged: currentMetrics.meTransform !== baselineCenteredMetrics.meTransform,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected show-cancelled toggle-on during motion to keep Me and hop rings stable',
+      })
+      .toMatchObject({
+        meStable: true,
+        meCentered: true,
+        ring1Aligned: true,
+        ring2Aligned: true,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
+        viewportChanged: false,
+        meTransformChanged: false,
+      });
+
     expectVisibleGraphSnapshot(
       await snapshotRenderVisibility(page),
       3,
@@ -2871,6 +3019,56 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       })
       .toBeGreaterThan(simulationTickCountBeforeHide);
 
+    await expect
+      .poll(async () => {
+        const currentMetrics = await measureCenteredCanvasMetrics(page);
+        if (!currentMetrics || !baselineCenteredMetrics) return null;
+        const viewportAfterHide = await readViewportTransform(page);
+        return {
+          meStable:
+            Math.abs(currentMetrics.meCenter.x - baselineCenteredMetrics.meCenter.x) <= 2
+            && Math.abs(currentMetrics.meCenter.y - baselineCenteredMetrics.meCenter.y) <= 2,
+          meCentered:
+            Math.abs(currentMetrics.meCenter.x - currentMetrics.canvasCenter.x) <= 6
+            && Math.abs(currentMetrics.meCenter.y - currentMetrics.canvasCenter.y) <= 6,
+          ring1Aligned:
+            !currentMetrics.ring1Center
+            || (
+              Math.abs(currentMetrics.ring1Center.x - currentMetrics.meCenter.x) <= 6
+              && Math.abs(currentMetrics.ring1Center.y - currentMetrics.meCenter.y) <= 6
+            ),
+          ring2Aligned:
+            !currentMetrics.ring2Center
+            || (
+              Math.abs(currentMetrics.ring2Center.x - currentMetrics.meCenter.x) <= 6
+              && Math.abs(currentMetrics.ring2Center.y - currentMetrics.meCenter.y) <= 6
+            ),
+          scrollDeltaY: Number(((currentMetrics.scrollY ?? 0) - (baselineCenteredMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((currentMetrics.pageTop ?? 0) - (baselineCenteredMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((currentMetrics.nodesContainerTop ?? 0) - (baselineCenteredMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((currentMetrics.reactFlowScrollTop ?? 0) - (baselineCenteredMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((currentMetrics.reactFlowScrollLeft ?? 0) - (baselineCenteredMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
+          viewportChanged: JSON.stringify(viewportAfterHide) !== JSON.stringify(baselineViewport),
+          meTransformChanged: currentMetrics.meTransform !== baselineCenteredMetrics.meTransform,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected show-cancelled toggle-off during motion to keep Me and hop rings stable',
+      })
+      .toMatchObject({
+        meStable: true,
+        meCentered: true,
+        ring1Aligned: true,
+        ring2Aligned: true,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
+        viewportChanged: false,
+        meTransformChanged: false,
+      });
+
     expectVisibleGraphSnapshot(
       await snapshotRenderVisibility(page),
       2,
@@ -2884,6 +3082,56 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         message: 'expected a new simulation:end warn log after moving show-cancelled round-trip',
       })
       .toBeGreaterThan(simulationEndCountBeforeShow);
+
+    await expect
+      .poll(async () => {
+        const currentMetrics = await measureCenteredCanvasMetrics(page);
+        if (!currentMetrics || !baselineCenteredMetrics) return null;
+        const viewportAfterSettle = await readViewportTransform(page);
+        return {
+          meStable:
+            Math.abs(currentMetrics.meCenter.x - baselineCenteredMetrics.meCenter.x) <= 2
+            && Math.abs(currentMetrics.meCenter.y - baselineCenteredMetrics.meCenter.y) <= 2,
+          meCentered:
+            Math.abs(currentMetrics.meCenter.x - currentMetrics.canvasCenter.x) <= 6
+            && Math.abs(currentMetrics.meCenter.y - currentMetrics.canvasCenter.y) <= 6,
+          ring1Aligned:
+            !currentMetrics.ring1Center
+            || (
+              Math.abs(currentMetrics.ring1Center.x - currentMetrics.meCenter.x) <= 6
+              && Math.abs(currentMetrics.ring1Center.y - currentMetrics.meCenter.y) <= 6
+            ),
+          ring2Aligned:
+            !currentMetrics.ring2Center
+            || (
+              Math.abs(currentMetrics.ring2Center.x - currentMetrics.meCenter.x) <= 6
+              && Math.abs(currentMetrics.ring2Center.y - currentMetrics.meCenter.y) <= 6
+            ),
+          scrollDeltaY: Number(((currentMetrics.scrollY ?? 0) - (baselineCenteredMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((currentMetrics.pageTop ?? 0) - (baselineCenteredMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((currentMetrics.nodesContainerTop ?? 0) - (baselineCenteredMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((currentMetrics.reactFlowScrollTop ?? 0) - (baselineCenteredMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((currentMetrics.reactFlowScrollLeft ?? 0) - (baselineCenteredMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
+          viewportChanged: JSON.stringify(viewportAfterSettle) !== JSON.stringify(baselineViewport),
+          meTransformChanged: currentMetrics.meTransform !== baselineCenteredMetrics.meTransform,
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected settled show-cancelled round-trip to restore Me and hop rings to the original hidden baseline',
+      })
+      .toMatchObject({
+        meStable: true,
+        meCentered: true,
+        ring1Aligned: true,
+        ring2Aligned: true,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
+        viewportChanged: false,
+        meTransformChanged: false,
+      });
 
     expectVisibleGraphSnapshot(
       await snapshotRenderVisibility(page),
