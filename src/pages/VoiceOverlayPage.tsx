@@ -80,9 +80,9 @@ export function VoiceOverlayPage() {
     ? Math.max(0, Math.min(1, data.audioLevel ?? 0))
     : 0;
   const overlayCardStyle = {
-    '--overlay-edge-alpha': (0.14 + overlayAudioLevel * 0.22).toFixed(2),
-    '--overlay-halo-alpha': (0.05 + overlayAudioLevel * 0.17).toFixed(2),
-    '--overlay-shadow-alpha': (0.14 + overlayAudioLevel * 0.12).toFixed(2),
+    '--overlay-edge-alpha': (0.12 + overlayAudioLevel * 0.08).toFixed(2),
+    '--overlay-halo-alpha': (0.03 + overlayAudioLevel * 0.07).toFixed(2),
+    '--overlay-shadow-alpha': (0.13 + overlayAudioLevel * 0.03).toFixed(2),
   } as CSSProperties;
 
   useEffect(() => {
@@ -588,7 +588,7 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptL
     line-height: 1.3;
     color: hsl(var(--text-primary));
     isolation: isolate;
-    transition: border-color 90ms linear, box-shadow 110ms linear;
+    transition: border-color 180ms ease-out, box-shadow 220ms ease-out;
   }
 
   .voice-overlay::before,
@@ -613,7 +613,7 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptL
       transparent 72%
     );
     filter: blur(16px);
-    transition: background 90ms linear;
+    transition: background 180ms ease-out;
   }
 
   .overlay-icon {

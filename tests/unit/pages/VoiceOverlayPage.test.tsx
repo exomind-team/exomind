@@ -182,9 +182,32 @@ describe('VoiceOverlayPage', () => {
     expect(styleTag?.textContent).toContain('.voice-overlay--recording .overlay-transcript .overlay-text');
     expect(styleTag?.textContent).toContain('color: hsl(var(--brand-accent));');
     const overlayCard = container.querySelector('.voice-overlay') as HTMLDivElement | null;
-    expect(overlayCard?.style.getPropertyValue('--overlay-edge-alpha')).toBe('0.30');
-    expect(overlayCard?.style.getPropertyValue('--overlay-halo-alpha')).toBe('0.17');
+    expect(overlayCard?.style.getPropertyValue('--overlay-edge-alpha')).toBe('0.18');
+    expect(overlayCard?.style.getPropertyValue('--overlay-halo-alpha')).toBe('0.08');
     nowSpy.mockRestore();
+  });
+
+  it('keeps audio-reactive edge breathing subtle at peak levels（高音量下边缘反馈仍保持克制，避免整窗闪烁）', async () => {
+    const { container } = render(<VoiceOverlayPage />);
+
+    await act(async () => {
+      overlayListener?.({
+        payload: {
+          state: 'recording',
+          duration: 1,
+          text: '峰值音量测试',
+          audioLevel: 1,
+        },
+      });
+    });
+
+    const overlayCard = container.querySelector('.voice-overlay') as HTMLDivElement | null;
+    const styleTag = container.querySelector('style');
+    expect(overlayCard?.style.getPropertyValue('--overlay-edge-alpha')).toBe('0.20');
+    expect(overlayCard?.style.getPropertyValue('--overlay-halo-alpha')).toBe('0.10');
+    expect(overlayCard?.style.getPropertyValue('--overlay-shadow-alpha')).toBe('0.16');
+    expect(styleTag?.textContent).toContain('transition: border-color 180ms ease-out, box-shadow 220ms ease-out;');
+    expect(styleTag?.textContent).toContain('transition: background 180ms ease-out;');
   });
 
   it('applies configured transcript line count（按配置应用实时文本行数）', async () => {
