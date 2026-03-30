@@ -78,6 +78,7 @@
 2. `should ship`
    - 现有 `PTY / SSH` 被统一纳入 `RuntimeBinding`
    - 至少可以恢复、展示或附着到工作台
+   - 不要求在本阶段先稳定为独立 `terminal SessionKind`
 3. `model-only`
    - `browser-runtime`
    - 只要求模型预留与统一注册入口
