@@ -12,7 +12,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 
 // ── Types ──
 
@@ -116,6 +116,10 @@ function getStr(dataBlock: string, key: string): string {
   return m ? m[1] : '';
 }
 
+function resolveDaypart(hour: number): string {
+  return hour < 6 ? '开发夜报' : hour < 12 ? '开发早报' : hour < 18 ? '开发午报' : '开发晚报';
+}
+
 function getStrArray(dataBlock: string, key: string): string[] {
   const m = dataBlock.match(new RegExp(`${key}:\\s*\\[([\\s\\S]*?)\\]`));
   if (!m) return [];
@@ -128,14 +132,23 @@ function getStrArray(dataBlock: string, key: string): string[] {
 
 // ── Report Text Generation ──
 
-function reportToText(dataBlock: string): string {
+function reportToText(dataBlock: string, timeHint?: string): string {
   const lines: string[] = [];
 
   // Meta
-  const title = getStr(dataBlock, 'title');
+  let title = getStr(dataBlock, 'title');
   const date = getStr(dataBlock, 'date');
   const coverage = getStr(dataBlock, 'coverage');
   const baseline = getStr(dataBlock, 'baseline');
+
+  // Auto-resolve daypart from HHmmss time (passed via second arg or extracted from coverage)
+  // Priority: explicit timeHint > 6-digit time pattern in coverage > skip
+  const coverageHourMatch = coverage.match(/(\d{2}):(\d{2})(?:\s*~|$)/);
+  const hourStr = timeHint?.substring(0, 2) || (coverageHourMatch ? coverageHourMatch[1] : '');
+  if (hourStr) {
+    const hour = parseInt(hourStr, 10);
+    if (!isNaN(hour)) title = resolveDaypart(hour);
+  }
 
   // Publisher
   const pubIdentity = getStr(dataBlock, 'identity');
@@ -399,10 +412,14 @@ function main() {
   const html = readFileSync(filePath, 'utf-8');
   const dataBlock = extractDataBlock(html, docType);
 
+  // Extract time hint from filename (HHmmss portion)
+  const fnameTimeMatch = basename(filePath).match(/(\d{4}-\d{2}-\d{2})-(\d{6})/);
+  const timeHint = fnameTimeMatch ? fnameTimeMatch[2] : undefined;
+
   if (opts.format === 'json') {
     console.log(dataBlockToJson(dataBlock));
   } else {
-    const text = docType === 'report' ? reportToText(dataBlock) : routeToText(dataBlock);
+    const text = docType === 'report' ? reportToText(dataBlock, timeHint) : routeToText(dataBlock);
     console.log(text);
   }
 }
