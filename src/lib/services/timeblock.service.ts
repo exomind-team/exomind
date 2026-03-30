@@ -258,10 +258,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
           startTime: normalized.startTime,
           endTime: now,
           blockType: 'gap',
-          transitions: [
-            ...(normalized.transitions ?? []),
-            { type: 'end' as const, at: now },
-          ],
         };
         const completed = await this.readCompletedBlockData();
         completed.push(completedGap);
@@ -300,7 +296,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       mode: config.mode,
       targetMinutes: config.mode === 'countdown' ? (config.minutes ?? 25) : undefined,
       blockType: 'active',
-      transitions: [{ type: 'start' as const, at: now }],
       phase: 'running',
       version: 1,
       actorId: this.actorId,
@@ -351,7 +346,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       accumulatedRunMs: this.calculateRunDurationMs(normalized, now),
       updatedAt: now,
       pauseAccumulatedMs: normalized.pauseAccumulatedMs ?? 0,
-      transitions: [...(normalized.transitions ?? []), { type: 'pause' as const, at: now }],
     }, now);
 
     const saveStart = perfNow();
@@ -393,7 +387,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pauseAccumulatedMs,
       updatedAt: now,
       accumulatedRunMs: normalized.accumulatedRunMs ?? this.calculateRunDurationMs(normalized, now),
-      transitions: [...(normalized.transitions ?? []), { type: 'resume' as const, at: now }],
     }, now);
 
     const saveStart = perfNow();
@@ -452,7 +445,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pausedAt: undefined,
       pauseAccumulatedMs,
       updatedAt: actionEndedAt,
-      transitions: [...(normalized.transitions ?? []), { type: 'feedback_start' as const, at: now }],
     }, actionEndedAt);
 
     const saveStart = perfNow();
@@ -558,11 +550,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       startTime: activeData.startTime,
       endTime: submittedAt,
       blockType: activeData.blockType ?? 'active',
-      transitions: [
-        ...(activeData.transitions ?? []),
-        { type: 'feedback_submit' as const, at: submittedAt },
-        { type: 'end' as const, at: submittedAt },
-      ],
       taskIds: activeData.taskIds ?? [],
       taskStatusOutcomes: options?.taskStatusOutcomes,
       taskAssociationLog: activeData.taskAssociationLog ?? [],
@@ -617,7 +604,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       taskIds: [],
       taskAssociationLog: [],
       blockType: 'gap',
-      transitions: [{ type: 'start' as const, at: submittedAt }],
       phase: undefined,
       version: 1,
       actorId: this.actorId,
