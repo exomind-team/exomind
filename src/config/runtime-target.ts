@@ -72,6 +72,11 @@ function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
     return null;
   }
 
+  // 非 Tauri 环境不存在内嵌 RT，跳过 localStorage 缓存（#775）
+  if (!isTauriWindow()) {
+    return null;
+  }
+
   const raw = window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY);
   if (!raw) {
     return null;
@@ -142,7 +147,15 @@ function resolveEmbeddedHost(): string {
 
 function resolveEmbeddedPort(): number {
   const cachedStatus = readEmbeddedRuntimeStatus();
-  return cachedStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+  if (cachedStatus?.port) return cachedStatus.port;
+
+  // Web 开发模式：无 Tauri、无 localStorage 缓存时，使用当前页面端口
+  // 让请求走 Vite proxy 到 RT，避免跨端口 fetch 失败（#775）
+  if (!isTauriWindow() && typeof window !== 'undefined' && window.location?.port) {
+    return Number(window.location.port);
+  }
+
+  return DEFAULT_EMBEDDED_RUNTIME_PORT;
 }
 
 function resolveEmbeddedAuthToken(): string | undefined {
