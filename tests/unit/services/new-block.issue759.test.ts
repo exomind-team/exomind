@@ -44,6 +44,11 @@ type TimeBlockRtAdapterLike = {
   getActiveBlock: () => Promise<ActiveBlockData | null>;
   putActiveBlock: (block: ActiveBlockData) => Promise<void>;
   deleteActiveBlock: () => Promise<void>;
+  rtStartBlock: (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtStopBlock: () => Promise<{ status: string }>;
+  rtEndBlock: (params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtPauseBlock: () => Promise<{ status: string }>;
+  rtResumeBlock: () => Promise<{ status: string }>;
 };
 
 function createMemoryEnv() {
@@ -69,6 +74,74 @@ function createRtAdapter(initial?: {
     getActiveBlock: vi.fn(async () => activeBlock),
     putActiveBlock: vi.fn(async (block: ActiveBlockData) => { activeBlock = block; }),
     deleteActiveBlock: vi.fn(async () => { activeBlock = null; }),
+    rtStartBlock: vi.fn(async (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[] }) => {
+      const now = Date.now();
+      const newBlock: ActiveBlockData = {
+        startId: `rt-start-${now}`,
+        name: params.name,
+        mode: params.mode as 'countdown' | 'countup',
+        targetMinutes: params.targetMinutes,
+        elapsed: params.mode === 'countdown' ? (params.targetMinutes ?? 25) * 60 * 1000 : 0,
+        paused: false,
+        startTime: now,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: now,
+        lastResumedAt: now,
+        accumulatedRunMs: 0,
+        pauseAccumulatedMs: 0,
+        blockType: 'active',
+        taskIds: params.taskIds ?? [],
+        taskAssociationLog: [],
+      };
+      activeBlock = newBlock;
+      return { completed: null, active: newBlock };
+    }),
+    rtStopBlock: vi.fn(async () => {
+      if (activeBlock) {
+        const now = Date.now();
+        activeBlock = { ...activeBlock, phase: 'feedback_in_progress', actionEndedAt: now, feedbackStartedAt: now };
+      }
+      return { status: 'ok' };
+    }),
+    rtEndBlock: vi.fn(async () => {
+      const now = Date.now();
+      const completed: TimeBlockData | null = activeBlock ? {
+        id: activeBlock.startId,
+        name: activeBlock.name,
+        startId: activeBlock.startId,
+        endId: `rt-end-${now}`,
+        tags: ['block_feedback'],
+        startTime: activeBlock.startTime,
+        endTime: now,
+        blockType: 'active',
+        taskIds: activeBlock.taskIds ?? [],
+      } : null;
+      const gapBlock: ActiveBlockData = {
+        startId: `rt-gap-${now}`,
+        name: '',
+        mode: 'countup',
+        elapsed: 0,
+        paused: false,
+        startTime: now,
+        blockType: 'gap',
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: now,
+        taskIds: [],
+        taskAssociationLog: [],
+      };
+      activeBlock = gapBlock;
+      return { completed, active: gapBlock };
+    }),
+    rtPauseBlock: vi.fn(async () => {
+      if (activeBlock) { activeBlock = { ...activeBlock, phase: 'paused', paused: true, pausedAt: Date.now() }; }
+      return { status: 'ok' };
+    }),
+    rtResumeBlock: vi.fn(async () => {
+      if (activeBlock) { activeBlock = { ...activeBlock, phase: 'running', paused: false, pausedAt: undefined, lastResumedAt: Date.now() }; }
+      return { status: 'ok' };
+    }),
   };
 }
 

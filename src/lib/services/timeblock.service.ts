@@ -61,6 +61,12 @@ interface TimeBlockRtPort {
   getActiveBlock(): Promise<ActiveBlockData | null>;
   putActiveBlock(block: ActiveBlockData): Promise<void>;
   deleteActiveBlock(): Promise<void>;
+  // #780 new RT routes
+  rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtStopBlock(): Promise<{ status: string }>;
+  rtEndBlock(params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtPauseBlock(): Promise<{ status: string }>;
+  rtResumeBlock(): Promise<{ status: string }>;
 }
 
 export interface TimeBlockServiceOptions {
@@ -264,6 +270,23 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         await this.writeCompletedBlockData(completed);
       }
     }
+
+    // #780: rt-sqlite 模式走新路由，RT 处理状态转换、事件写入、gap 截断
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      const resolvedTaskIds = typeof taskBinding === 'string'
+        ? [taskBinding]
+        : taskBinding?.taskIds ?? [];
+      const result = await this.rtAdapter.rtStartBlock({
+        name,
+        mode: config.mode,
+        targetMinutes: config.mode === 'countdown' ? config.minutes : undefined,
+        taskIds: resolvedTaskIds,
+      });
+      this.rememberAcceptedBlock(result.active);
+      this.notifyChange(result.active);
+      return result.active;
+    }
+
     const startId = createUuidV4();
     const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
@@ -334,6 +357,18 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       this.rememberAcceptedBlock(normalized);
       return;
     }
+
+    // #780: rt-sqlite 模式走新路由
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      await this.rtAdapter.rtPauseBlock();
+      const updated = await this.rtAdapter.getActiveBlock();
+      if (updated) {
+        this.rememberAcceptedBlock(updated);
+        this.notifyChange(updated);
+      }
+      return;
+    }
+
     const pausedBlock: ActiveBlockData = this.normalizeActiveBlock({
       ...normalized,
       phase: 'paused',
@@ -373,6 +408,18 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       this.rememberAcceptedBlock(normalized);
       return;
     }
+
+    // #780: rt-sqlite 模式走新路由
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      await this.rtAdapter.rtResumeBlock();
+      const updated = await this.rtAdapter.getActiveBlock();
+      if (updated) {
+        this.rememberAcceptedBlock(updated);
+        this.notifyChange(updated);
+      }
+      return;
+    }
+
     const pausedAt = normalized.pausedAt ?? now;
     const pauseAccumulatedMs = (normalized.pauseAccumulatedMs ?? 0) + Math.max(0, now - pausedAt);
     const resumedBlock: ActiveBlockData = this.normalizeActiveBlock({
@@ -413,6 +460,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const normalized = this.normalizeActiveBlock(raw, now);
     if (normalized.actionEndedAt || this.isCompletedBlock(normalized)) {
       this.rememberAcceptedBlock(normalized);
+      return;
+    }
+
+    // #780: rt-sqlite 模式走新路由（stop = markEnding）
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      await this.rtAdapter.rtStopBlock();
+      const updated = await this.rtAdapter.getActiveBlock();
+      if (updated) {
+        this.rememberAcceptedBlock(updated);
+        this.notifyChange(updated);
+      }
       return;
     }
 
@@ -468,6 +526,26 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const activeData = this.normalizeActiveBlock(rawActiveData);
     if (this.isCompletedBlock(activeData)) {
       this.rememberAcceptedBlock(activeData);
+      return null;
+    }
+
+    // #780: rt-sqlite 模式走新路由，RT 处理 completed 保存、gap 创建、EventLog 写入
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      const result = await this.rtAdapter.rtEndBlock({
+        feedback,
+        taskStatusOutcomes: options?.taskStatusOutcomes,
+      });
+      // RT 已处理：completed 块保存、gap 块创建、EventLog 写入
+      // TS 只需更新本地状态
+      this.rememberAcceptedBlock(result.active);
+      this.notifyChange(result.active);
+
+      if (result.completed) {
+        return {
+          ...result.completed,
+          tags: new Set(result.completed.tags),
+        };
+      }
       return null;
     }
 
