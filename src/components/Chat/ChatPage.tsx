@@ -62,7 +62,12 @@ function perfNow(): number {
 }
 
 function sortEventsAscending(events: Event[]): Event[] {
-  return [...events].sort((a, b) => a.timestamp - b.timestamp);
+  return [...events].sort((a, b) => {
+    if (a.timestamp !== b.timestamp) {
+      return a.timestamp - b.timestamp;
+    }
+    return a.id.localeCompare(b.id);
+  });
 }
 
 function getLatestEventCursor(events: Event[]): { id: string; timestamp: number } | null {

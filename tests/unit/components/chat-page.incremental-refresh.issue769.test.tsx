@@ -80,6 +80,22 @@ const initialEvent: Event = {
   },
 };
 
+const sameTimestampBase = new Date('2026-03-30T10:05:00.000Z').getTime();
+
+const sameTimestampLowerIdEvent: Event = {
+  id: 'evt-same-a',
+  timestamp: sameTimestampBase,
+  content: '同时间戳 A',
+  tags: new Set<string>(),
+};
+
+const sameTimestampHigherIdEvent: Event = {
+  id: 'evt-same-b',
+  timestamp: sameTimestampBase,
+  content: '同时间戳 B',
+  tags: new Set<string>(),
+};
+
 describe('ChatPage incremental refresh issue 769', () => {
   const unsubscribe = vi.fn();
   const loadEvents = vi.fn();
@@ -162,6 +178,30 @@ describe('ChatPage incremental refresh issue 769', () => {
       sinceTimestamp: initialEvent.timestamp,
     });
     expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"fetched":0'));
+  });
+
+  it('uses the timestamp+id tail event as incremental cursor（同时间戳时应使用 timestamp+id 尾事件做游标）', async () => {
+    loadEvents.mockReset();
+    loadEvents
+      .mockResolvedValueOnce([
+        sameTimestampHigherIdEvent,
+        sameTimestampLowerIdEvent,
+      ])
+      .mockResolvedValueOnce([]);
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(loadEvents).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-same-b',
+      sinceTimestamp: sameTimestampBase,
+    });
   });
 
   it('reconciles full state when signaled refresh sees an empty delta（外部刷新信号遇到空增量时应回退全量对账）', async () => {
