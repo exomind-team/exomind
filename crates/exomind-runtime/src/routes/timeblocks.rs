@@ -24,6 +24,9 @@ struct ScopeQuery {
     profile_id: Option<String>,
     #[serde(default)]
     user_id: Option<String>,
+    /// #759: filter by blockType ("active" or "gap"). Omit to return all.
+    #[serde(default)]
+    block_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -298,7 +301,12 @@ async fn list_timeblocks(
         .timeblock_store
         .list_completed_scoped(scope_key)
         .map_err(|error| internal_error(error.to_string()))?;
-    Ok(Json(blocks))
+    // #759: filter by blockType if specified
+    let filtered = match query.block_type.as_deref() {
+        Some(bt) => blocks.into_iter().filter(|b| b.block_type.as_deref() == Some(bt)).collect(),
+        None => blocks,
+    };
+    Ok(Json(filtered))
 }
 
 async fn replace_timeblocks(

@@ -313,41 +313,54 @@ export function NowTodayTab() {
         ) : view.items.length === 0 ? (
           <p className="px-1 py-4 text-sm text-[#78716C] dark:text-[#A8A29E]">今天还没有时间块记录。</p>
         ) : (
-          view.items.map((item) => (
-            <Link
-              key={item.blockId}
-              to="/eventlog/timeblocks/$blockId"
-              params={{ blockId: item.blockId }}
-              className="block rounded-2xl border border-[#E7E5E4] bg-white p-4 transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:bg-[#292524]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                  <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.timeLabel}</p>
-                </div>
-                <span className="rounded-full bg-[#F5F0ED] px-2 py-1 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
-                  {item.linkedTasks.length} 个任务
-                </span>
-              </div>
-
-              {item.linkedTasks.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {item.linkedTasks.map((task) => (
-                    <span
-                      key={`${item.blockId}-${task.taskId}`}
-                      className="rounded-full bg-[#FFF7ED] px-2 py-1 text-[11px] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
-                    >
-                      {task.title}{task.outcome ? ` · ${task.outcome}` : ''}
+          view.items.map((item) => {
+            const isGap = item.blockType === 'gap';
+            return (
+              <Link
+                key={item.blockId}
+                to="/eventlog/timeblocks/$blockId"
+                params={{ blockId: item.blockId }}
+                className={isGap
+                  ? "block rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAFAF9] px-4 py-2 transition-colors hover:bg-[#F5F0ED] dark:border-[#44403C] dark:bg-[#1C1917]/50 dark:hover:bg-[#292524]"
+                  : "block rounded-2xl border border-[#E7E5E4] bg-white p-4 transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:bg-[#292524]"
+                }
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className={isGap
+                      ? "text-xs text-[#A8A29E] dark:text-[#78716C]"
+                      : "text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
+                    }>
+                      {isGap ? (item.title || '未记录') : item.title}
+                    </p>
+                    <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.timeLabel}</p>
+                  </div>
+                  {!isGap && (
+                    <span className="rounded-full bg-[#F5F0ED] px-2 py-1 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
+                      {item.linkedTasks.length} 个任务
                     </span>
-                  ))}
+                  )}
                 </div>
-              ) : null}
 
-              {item.note ? (
-                <p className="mt-3 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.note}</p>
-              ) : null}
-            </Link>
-          ))
+                {!isGap && item.linkedTasks.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {item.linkedTasks.map((task) => (
+                      <span
+                        key={`${item.blockId}-${task.taskId}`}
+                        className="rounded-full bg-[#FFF7ED] px-2 py-1 text-[11px] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
+                      >
+                        {task.title}{task.outcome ? ` · ${task.outcome}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                {item.note ? (
+                  <p className="mt-3 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.note}</p>
+                ) : null}
+              </Link>
+            );
+          })
         )}
       </section>
     </div>

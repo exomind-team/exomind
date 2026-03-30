@@ -114,6 +114,7 @@ export interface TimeBlock {
   tags: Set<Tag>;
   startTime: Timestamp;
   endTime: Timestamp;
+  blockType?: BlockType;
   /** 结束时仍关联的任务快照；历史全集请看 taskAssociationLog */
   taskIds?: UUID[];
   taskStatusOutcomes?: Record<string, string>;
