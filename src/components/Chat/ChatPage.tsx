@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Play, Pause, Square, FileText, NotepadText, Bot, Mic } from 'lucide-react';
+import { Play, Pause, Square, FileText, NotepadText, Bot, Mic, Link2, ListTodo } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
@@ -33,15 +33,26 @@ const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 const RT_REFRESH_INTERVAL_MS = 2_000;
-const TASK_SYSTEM_EVENT_TAGS = [
+const TASK_CREATED_EVENT_TAGS = [
   'task_created',
+] as const;
+const TASK_LIFECYCLE_EVENT_TAGS = [
   'task_started',
   'task_resumed',
   'task_suspended',
   'task_completed',
   'task_cancelled',
+  // Backward compatibility for historical RT task transition events. Remove after migration.
+  'task_transition',
+] as const;
+const TASK_RELATION_EVENT_TAGS = [
   'task_linked',
   'task_unlinked',
+] as const;
+const TASK_SYSTEM_EVENT_TAGS = [
+  ...TASK_CREATED_EVENT_TAGS,
+  ...TASK_LIFECYCLE_EVENT_TAGS,
+  ...TASK_RELATION_EVENT_TAGS,
 ] as const;
 
 function perfNow(): number {
@@ -127,6 +138,34 @@ function formatEventSourceLabel(event: Event): string {
 
 function isVoiceInputEvent(event: Event): boolean {
   return isRecord(event.metadata) && event.metadata.inputSource === 'voice';
+}
+
+function hasAnyTag(event: Event, tags: readonly string[]): boolean {
+  return tags.some((tag) => event.tags.has(tag));
+}
+
+function isTaskCreatedEvent(event: Event): boolean {
+  return hasAnyTag(event, TASK_CREATED_EVENT_TAGS);
+}
+
+function isTaskLifecycleEvent(event: Event): boolean {
+  return hasAnyTag(event, TASK_LIFECYCLE_EVENT_TAGS);
+}
+
+function isTaskRelationEvent(event: Event): boolean {
+  return hasAnyTag(event, TASK_RELATION_EVENT_TAGS);
+}
+
+function resolveTaskLifecycleStatus(event: Event): string | null {
+  if (event.tags.has('task_started') || event.tags.has('task_resumed')) return 'in_progress';
+  if (event.tags.has('task_suspended')) return 'suspended';
+  if (event.tags.has('task_completed')) return 'completed';
+  if (event.tags.has('task_cancelled')) return 'cancelled';
+  if (!event.tags.has('task_transition') || !isRecord(event.metadata)) {
+    return null;
+  }
+
+  return readNonEmptyString(event.metadata.new_status) ?? readNonEmptyString(event.metadata.newStatus);
 }
 
 function VoiceInputBadge() {
@@ -417,7 +456,8 @@ export function ChatPage({
     if (event.tags.has('block_resume')) return <Play size={14} />;
     if (event.tags.has('block_end')) return <Square size={14} />;
     if (event.tags.has('block_feedback')) return <NotepadText size={14} />;
-    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) return <FileText size={14} />;
+    if (isTaskRelationEvent(event)) return <Link2 size={14} />;
+    if (isTaskCreatedEvent(event) || isTaskLifecycleEvent(event)) return <ListTodo size={14} />;
     return <FileText size={14} />;
   };
 
@@ -429,7 +469,21 @@ export function ChatPage({
     if (event.tags.has('block_resume')) return 'bg-success';
     if (event.tags.has('block_end')) return 'bg-destructive';
     if (event.tags.has('block_feedback')) return 'bg-brand';
-    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) return 'bg-brand';
+    if (isTaskRelationEvent(event)) return 'bg-cyan-500';
+    if (isTaskCreatedEvent(event)) return 'bg-brand';
+    switch (resolveTaskLifecycleStatus(event)) {
+      case 'in_progress':
+        return 'bg-green-500';
+      case 'suspended':
+        return 'bg-yellow-500';
+      case 'completed':
+        return 'bg-blue-500';
+      case 'cancelled':
+        return 'bg-red-500';
+      default:
+        break;
+    }
+    if (isTaskLifecycleEvent(event)) return 'bg-brand';
     return 'bg-brand';
   };
 
@@ -450,7 +504,25 @@ export function ChatPage({
     if (event.tags.has('block_end')) {
       return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-100 rounded-br-md';
     }
-    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) {
+    if (isTaskRelationEvent(event)) {
+      return 'bg-cyan-100 text-cyan-900 dark:bg-cyan-950 dark:text-cyan-100 rounded-br-md';
+    }
+    if (isTaskCreatedEvent(event)) {
+      return 'bg-stone-100 text-stone-800 dark:bg-stone-900 dark:text-stone-100 rounded-br-md';
+    }
+    switch (resolveTaskLifecycleStatus(event)) {
+      case 'in_progress':
+        return 'bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100 rounded-br-md';
+      case 'suspended':
+        return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-100 rounded-br-md';
+      case 'completed':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 rounded-br-md';
+      case 'cancelled':
+        return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-100 rounded-br-md';
+      default:
+        break;
+    }
+    if (isTaskLifecycleEvent(event)) {
       return 'bg-stone-100 text-stone-800 dark:bg-stone-900 dark:text-stone-100 rounded-br-md';
     }
     return 'bg-muted rounded-bl-md';

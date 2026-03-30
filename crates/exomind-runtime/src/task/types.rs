@@ -93,18 +93,13 @@ impl TaskStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskPriority {
     Low,
+    #[default]
     Medium,
     High,
-}
-
-impl Default for TaskPriority {
-    fn default() -> Self {
-        TaskPriority::Medium
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +149,7 @@ pub struct Task {
 
 /// Input for creating a new task.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateTaskInput {
     pub title: String,
     #[serde(default)]

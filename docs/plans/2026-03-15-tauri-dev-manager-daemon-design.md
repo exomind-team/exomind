@@ -88,5 +88,5 @@ bun tauri:manager up  →  instance: "alice-desktop"
 
 ## 文件变更
 
-- `Scripts/dev/tauri-dev-manager.ts` — 新增 `up`/`daemon`/`attach` 命令
-- `Scripts/dev/tauri-dev-manager-lib.ts` — 新增 IPC 协议类型
+- `scripts/dev/tauri-dev-manager.ts` — 新增 `up`/`daemon`/`attach` 命令
+- `scripts/dev/tauri-dev-manager-lib.ts` — 新增 IPC 协议类型

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decideNextAction,
   type RouterContext,
-} from '../../../Scripts/review-agent/router-lib.ts';
+} from '../../../agents/review-agent/scripts/router-lib.ts';
 
 function makeContext(overrides: Partial<RouterContext> = {}): RouterContext {
   return {

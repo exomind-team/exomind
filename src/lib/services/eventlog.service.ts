@@ -134,6 +134,21 @@ export class EventLogServiceImpl implements EventLogService {
     return () => this.listeners.delete(callback);
   }
 
+  notifyExternalChange(eventData?: EventData): void {
+    const fallbackEventData: EventData = eventData ?? {
+      id: `eventlog-refresh-${createUuidV4()}`,
+      timestamp: Date.now(),
+      content: '',
+      tags: [NOTE_TAG],
+      metadata: {
+        source: getEventSourceMetadata(),
+        refreshOnly: true,
+      },
+    };
+    const event = this.deserializeEvent(fallbackEventData);
+    this.listeners.forEach((cb) => cb(event));
+  }
+
   /** 反序列化事件（从存储读取） */
   private deserializeEvent(data: EventData): Event {
     return {
@@ -168,4 +183,10 @@ export function getEventLogService(): EventLogService {
     eventLogServiceInstance = new EventLogServiceImpl({ port: environment.eventlog });
   }
   return eventLogServiceInstance;
+}
+
+export function notifyEventLogChanged(eventData?: EventData): void {
+  if (eventLogServiceInstance && eventLogServiceInstance instanceof EventLogServiceImpl) {
+    eventLogServiceInstance.notifyExternalChange(eventData);
+  }
 }

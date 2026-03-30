@@ -155,7 +155,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return 'legacy';
     }
 
-    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'legacy';
+    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'rt-sqlite';
   }
 
   async loadTimeBlocks(): Promise<TimeBlock[]> {
@@ -520,6 +520,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       taskIds: activeData.taskIds ?? [],
       taskStatusOutcomes: options?.taskStatusOutcomes,
       taskAssociationLog: activeData.taskAssociationLog ?? [],
+      sourcePlannedBlockId: activeData.sourcePlannedBlockId,
     };
 
     // 追加到已完成列表

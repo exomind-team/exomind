@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toThreadReplies } from '../../../Scripts/review-agent/review-comment-lib.ts';
+import { toThreadReplies } from '../../../agents/review-agent/scripts/review-comment-lib.ts';
 
 describe('review comment helpers', () => {
   it('keeps only reply comments as thread replies', () => {

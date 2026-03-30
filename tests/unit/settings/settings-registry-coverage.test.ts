@@ -48,6 +48,8 @@ const AUDITED_SETTINGS_IDS = [
   'moss-voice-test',
   'volcano-asr-test',
   'ai-registry',
+  'runtime-target-mode',
+  'embedded-runtime-open-mode',
   'sync-server-url',
   'eventlog-backend-mode',
   'task-backend-mode',
@@ -88,6 +90,8 @@ const INLINE_SINGLE_ENUM_IDS = [
 
 const DIALOG_ENUM_IDS = [
   'countdown-end-mode',
+  'runtime-target-mode',
+  'embedded-runtime-open-mode',
   'volcano-endpoint',
   'volcano-language',
 ] as const;
@@ -151,10 +155,13 @@ const CUSTOM_ITEM_IDS = [
   'device-pairing',
 ] as const;
 
-const DEV_ONLY_IDS = [
+const TAURI_DEV_ONLY_IDS = [
   'eventlog-backend-mode',
   'task-backend-mode',
   'timeblock-backend-mode',
+] as const;
+
+const DEV_ONLY_IDS = [
   'use-mock-data',
   'devtools',
   'feature-toggles',
@@ -270,7 +277,29 @@ describe('settings registry coverage audit', () => {
     const syncServerUrl = getItem('sync-server-url', 'string');
     expect(syncServerUrl.stringStyle).toBe('dialog');
     expect(syncServerUrl.dialogFieldKind).toBe('plain');
-    expect(syncServerUrl.dialogInputType).toBe('url');
+    expect(syncServerUrl.dialogInputType).toBe('text');
+
+    const embeddedRuntimeOpenMode = getItem('embedded-runtime-open-mode', 'enum');
+    expect(embeddedRuntimeOpenMode.options.map((option) => option.value)).toEqual(['local', 'lan']);
+    expect(embeddedRuntimeOpenMode.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: false,
+    })).toBe(false);
+    expect(embeddedRuntimeOpenMode.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+    })).toBe(true);
+
+    const runtimeTargetMode = getItem('runtime-target-mode', 'enum');
+    expect(runtimeTargetMode.options.map((option) => option.value)).toEqual(['embedded', 'external']);
+    expect(runtimeTargetMode.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: false,
+    })).toBe(false);
+    expect(runtimeTargetMode.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+    })).toBe(true);
 
     const featureToggles = getItem('feature-toggles', 'group');
     expect(featureToggles.groupStyle).toBe('adaptive-overlay');
@@ -311,6 +340,11 @@ describe('settings registry coverage audit', () => {
       ...getBaseCtx(),
       developerMode: true,
     }).map((item) => item.id);
+    const tauriDeveloperIds = getVisibleSettings({
+      ...getBaseCtx(),
+      developerMode: true,
+      isTauriWindow: true,
+    }).map((item) => item.id);
     const volcanoIds = getVisibleSettings({
       ...getBaseCtx(),
       developerMode: true,
@@ -320,6 +354,11 @@ describe('settings registry coverage audit', () => {
     DEV_ONLY_IDS.forEach((id) => {
       expect(baseIds).not.toContain(id);
       expect(developerIds).toContain(id);
+    });
+    TAURI_DEV_ONLY_IDS.forEach((id) => {
+      expect(baseIds).not.toContain(id);
+      expect(developerIds).not.toContain(id);
+      expect(tauriDeveloperIds).toContain(id);
     });
 
     expect(baseIds).toContain('moss-api-token');

@@ -97,6 +97,7 @@ export interface TimeBlockData {
   taskStatusOutcomes?: Record<string, string>;
   /** 关联历史日志：可回放“曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
 }
 
 // 时间块类型（UI 使用）
@@ -114,6 +115,7 @@ export interface TimeBlock {
   taskStatusOutcomes?: Record<string, string>;
   /** 关联历史日志：可回放“曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
 }
 
 // 活跃时间块（进行中）
@@ -161,8 +163,78 @@ export interface ActiveBlockData {
   taskIds: UUID[];
   /** 运行期关联历史：不仅能恢复当前关联，也能保留“曾经关联过”的任务全集 */
   taskAssociationLog: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
   /** @deprecated Use taskIds. Kept for deserialization compat only. */
   taskId?: UUID;
+}
+
+export type RhythmPresetKey = 'pomodoro_25_5' | 'focus_45_10' | 'focus_45_15';
+
+export interface RhythmPresetData {
+  key: RhythmPresetKey;
+  label: string;
+  workMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  longBreakAfterWorkSegments: number;
+}
+
+export type PlannedSegmentKind = 'work' | 'break';
+export type BreakWindowKind = 'short' | 'long';
+export type TodayPlannerSegmentStatus = 'pending' | 'active' | 'completed';
+
+export interface PlannedSegmentData {
+  id: UUID;
+  windowId: UUID;
+  kind: PlannedSegmentKind;
+  breakKind?: BreakWindowKind;
+  title: string;
+  plannedStartAt: Timestamp;
+  plannedEndAt: Timestamp;
+  linkedTaskIds: UUID[];
+  order: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface TodayPlannerSegment extends PlannedSegmentData {
+  status: TodayPlannerSegmentStatus;
+  sourceTimeBlockId?: UUID;
+}
+
+export interface TodayPlannerWindow {
+  id: UUID;
+  date: string;
+  title?: string;
+  plannedStartAt: Timestamp;
+  plannedEndAt: Timestamp;
+  rhythmPreset: RhythmPresetData;
+  segments: TodayPlannerSegment[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface TodayPlannerSnapshot {
+  date: string;
+  windows: TodayPlannerWindow[];
+}
+
+export interface CreateSchedulingWindowInput {
+  date: string;
+  title?: string;
+  plannedStartAt: Timestamp;
+  plannedEndAt: Timestamp;
+  rhythmPresetKey: RhythmPresetKey;
+}
+
+export interface UpdatePlannedSegmentInput {
+  title?: string;
+  linkedTaskIds?: UUID[];
+}
+
+export interface ReflowSchedulingWindowInput {
+  anchorSegmentId: UUID;
+  actualEndAt: Timestamp;
 }
 
 // 计时器配置

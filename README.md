@@ -131,7 +131,7 @@ exomind/
 ├─ src-tauri/           # Tauri Rust backend & config
 ├─ crates/              # Rust crates (exomind-runtime)
 ├─ server/              # PouchDB sync server
-├─ Scripts/             # PowerShell/Bun automation
+├─ scripts/             # PowerShell/Bun automation
 ├─ tests/               # Vitest + Playwright tests
 ├─ docs/                # Documentation (architecture, specs, plans)
 └─ website/             # Public website source
@@ -156,7 +156,7 @@ ExoMind is part of a larger ecosystem of open-source projects:
 - [Product requirements](docs/product/PRD.md)
 - [Product roadmap](docs/product/roadmap.md)
 - [Development guide](CLAUDE.md)
-- [Scripts guide](Scripts/README.md)
+- [Scripts guide](scripts/README.md)
 - [Git workflow](docs/development/git-spec.md)
 
 ## Build & Release

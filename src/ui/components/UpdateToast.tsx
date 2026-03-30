@@ -70,7 +70,7 @@ export function UpdateToast() {
 
       {/* 文本 */}
       <span className="flex-1 text-sm font-medium truncate">
-        发现新版本 v{updateAvailable.latestVersion}
+        发现新版本 v{updateAvailable.latestVersion.replace(/^v/, '')}
       </span>
 
       {/* 查看详情 */}

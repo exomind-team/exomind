@@ -53,7 +53,7 @@ impl SessionStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "running" => Some(SessionStatus::Running),
             "waiting_input" => Some(SessionStatus::WaitingInput),
@@ -82,7 +82,7 @@ impl InteractionMode {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "terminal" => Some(InteractionMode::Terminal),
             "structured" => Some(InteractionMode::Structured),
@@ -382,7 +382,7 @@ mod tests {
         ];
         for status in &statuses {
             let s = status.as_str();
-            let parsed = SessionStatus::from_str(s).expect("should parse");
+            let parsed = SessionStatus::parse(s).expect("should parse");
             assert_eq!(&parsed, status);
         }
     }

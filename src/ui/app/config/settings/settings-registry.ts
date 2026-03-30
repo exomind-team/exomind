@@ -32,10 +32,16 @@ import {
 } from 'lucide-react';
 import type { SettingsContext, SettingsItem } from './settings-types';
 import {
-  getSyncServerUrlOverride,
-  resolveSyncServerUrl,
-  setSyncServerUrlOverride,
-} from '@/config/port-env';
+  formatRuntimeTargetAddress,
+  getEmbeddedRuntimeNetworkMode,
+  getRuntimeExternalAddress,
+  getRuntimeTargetMode,
+  isDesktopOperatingSystem,
+  parseRuntimeAddress,
+  setRuntimeExternalAddress,
+  subscribeRuntimeTargetChanges,
+  subscribeEmbeddedRuntimeNetworkModeChanges,
+} from '@/config/runtime-target';
 import {
   getThemePreference,
   setThemePreference,
@@ -216,7 +222,8 @@ import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import { openExternalUrl } from '@/lib/utils/open-external';
-import { isDesktopOperatingSystem } from '@/config/runtime-target';
+import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
+import { setPersistedRuntimeTargetMode } from '@/config/runtime-target-mode';
 import {
   DataTransferSetting,
   DevInstanceDiagnosticsSetting,
@@ -301,36 +308,21 @@ function setFeedbackContentSelection(values: string[]): void {
   });
 }
 
-function getResolvedSyncServerUrl(): string {
-  return getSyncServerUrlOverride() ?? resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>);
+function getResolvedRuntimeExternalAddress(): string {
+  return getRuntimeExternalAddress();
 }
 
-function normalizeSyncServerUrl(value: string): string {
-  const normalized = value.trim().replace(/\/+$/, '');
-  if (!normalized) {
-    throw new Error('同步服务器地址不能为空');
-  }
-
-  let url: URL;
-  try {
-    url = new URL(normalized);
-  } catch {
-    throw new Error('同步服务器地址格式无效');
-  }
-
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('同步服务器地址必须以 http:// 或 https:// 开头');
-  }
-
-  return normalized;
+function normalizeRuntimeExternalAddress(value: string): string {
+  const parsed = parseRuntimeAddress(value);
+  return formatRuntimeTargetAddress(parsed);
 }
 
-function validateSyncServerUrl(value: string): string | null {
+function validateRuntimeExternalAddress(value: string): string | null {
   try {
-    normalizeSyncServerUrl(value);
+    normalizeRuntimeExternalAddress(value);
     return null;
   } catch (error) {
-    return error instanceof Error ? error.message : '同步服务器地址格式无效';
+    return error instanceof Error ? error.message : 'RT 地址格式无效';
   }
 }
 
@@ -390,6 +382,10 @@ function devOnly(ctx: SettingsContext): boolean {
   return Boolean(ctx.developerMode);
 }
 
+function tauriDevOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.developerMode) && Boolean(ctx.isTauriWindow);
+}
+
 function volcanoOnly(ctx: SettingsContext): boolean {
   return ctx.voiceShortcutAsrProvider === 'volcano';
 }
@@ -400,6 +396,21 @@ function mossOnly(ctx: SettingsContext): boolean {
 
 function desktopOperatingSystemOnly(): boolean {
   return isDesktopOperatingSystem();
+}
+
+function tauriWindowOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.isTauriWindow);
+}
+
+function embeddedRuntimeOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.isTauriWindow) && (ctx.runtimeTargetMode ?? 'embedded') === 'embedded';
+}
+
+function externalRuntimeOnly(ctx: SettingsContext): boolean {
+  if (!ctx.isTauriWindow) {
+    return true;
+  }
+  return (ctx.runtimeTargetMode ?? 'embedded') === 'external';
 }
 
 function setDeveloperModeWithSideEffects(enabled: boolean): void {
@@ -1066,25 +1077,93 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     component: AIRegistrySetting,
   },
   {
-    id: 'sync-server-url',
-    label: '同步服务器',
+    id: 'runtime-target-mode',
+    label: 'RT 配置',
     icon: Wifi,
-    category: 'sync',
+    category: 'connection',
+    type: 'enum',
+    enumStyle: 'dialog',
+    visible: tauriWindowOnly,
+    dialogTitle: 'RT 配置',
+    dialogDescription: '选择使用当前设备自带的 RT，还是连接到另一台设备上的 RT。切换时会自动启动或关闭内置 RT。',
+    options: [
+      {
+        label: '内置',
+        value: 'embedded',
+        description: '使用当前设备自带的 RT。切换后会自动启动内置 RT。',
+      },
+      {
+        label: '外部',
+        value: 'external',
+        description: '连接到另一台设备上的 RT。切换后会自动关闭内置 RT，并使用下面填写的 RT 地址。',
+      },
+    ],
+    optionTestId: (value) => `new-settings-runtime-target-mode-${value}`,
+    get: () => getRuntimeTargetMode(),
+    set: async (value: string) => await setPersistedRuntimeTargetMode(value as 'embedded' | 'external'),
+    subscribe: (cb: (value: string) => void) => subscribeRuntimeTargetChanges((target) => cb(target.mode)),
+    successMessage: (value: string) => value === 'external'
+      ? '已切换为外部 RT，内置 RT 会自动关闭'
+      : '已切换为内置 RT，系统会自动启动本机 RT',
+    errorMessagePrefix: 'RT 配置切换失败',
+  },
+  {
+    id: 'embedded-runtime-open-mode',
+    label: 'RT 开放模式',
+    icon: Wifi,
+    category: 'connection',
+    type: 'enum',
+    enumStyle: 'dialog',
+    visible: embeddedRuntimeOnly,
+    dialogTitle: 'RT 开放模式',
+    dialogDescription: '决定 Tauri 启动内嵌 RT 时对外开放的范围；修改后在下次启动或手动重启 RT 时生效。',
+    options: [
+      {
+        label: '仅本机',
+        value: 'local',
+        description: '监听 127.0.0.1，仅当前设备可访问，不做局域网广播。',
+      },
+      {
+        label: '局域网',
+        value: 'lan',
+        description: '监听 0.0.0.0，并允许局域网设备通过本机 IP 访问与发现。',
+      },
+    ],
+    optionTestId: (value) => `new-settings-embedded-runtime-open-mode-${value}`,
+    helperText: (value: string) => value === 'lan'
+      ? '当前会在下次启动或手动重启 RT 时切换为局域网开放。'
+      : '当前会在下次启动或手动重启 RT 时切换为仅本机开放。',
+    get: () => getEmbeddedRuntimeNetworkMode(),
+    set: async (value: string) => await setPersistedEmbeddedRuntimeNetworkMode(value as 'local' | 'lan'),
+    subscribe: subscribeEmbeddedRuntimeNetworkModeChanges,
+    successMessage: (value: string) => value === 'lan'
+      ? 'RT 开放模式已切换为局域网'
+      : 'RT 开放模式已切换为仅本机',
+    errorMessagePrefix: 'RT 开放模式保存失败',
+  },
+  {
+    id: 'sync-server-url',
+    label: 'RT 地址',
+    icon: Wifi,
+    category: 'connection',
+    description: '需要连接另一台电脑或手机上的 ExoMind 时，在这里填写对方显示的地址；平时只在本机使用就不用改。',
+    visible: externalRuntimeOnly,
     type: 'string',
     stringStyle: 'dialog',
     dialogFieldKind: 'plain',
-    dialogInputType: 'url',
-    placeholder: 'http://127.0.0.1:6984',
-    dialogTitle: '同步服务器',
-    dialogDescription: '设置事件日志同步的服务器地址',
-    get: getResolvedSyncServerUrl,
-    set: (value: string) => {
-      const normalized = normalizeSyncServerUrl(value);
-      setSyncServerUrlOverride(normalized);
+    dialogInputType: 'text',
+    placeholder: '192.168.1.23:1949',
+    dialogTitle: '设置 RT 地址',
+    dialogDescription: '填写你想连接的那台设备地址，例如 192.168.1.23:1949。保存后，当前设备会切换到这个地址继续连接。',
+    get: getResolvedRuntimeExternalAddress,
+    set: async (value: string) => {
+      const normalized = normalizeRuntimeExternalAddress(value);
+      setRuntimeExternalAddress(normalized);
+      await setPersistedRuntimeTargetMode('external');
       return normalized;
     },
-    validate: validateSyncServerUrl,
-    successMessage: (value: string) => `同步服务器地址已保存：${value}`,
+    validate: validateRuntimeExternalAddress,
+    successMessage: (value: string) => `已切换到 RT 地址：${value}`,
   },
   {
     id: 'eventlog-backend-mode',
@@ -1095,7 +1174,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '事件日志后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
@@ -1112,7 +1191,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '任务后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
@@ -1129,7 +1208,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '时间块后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },

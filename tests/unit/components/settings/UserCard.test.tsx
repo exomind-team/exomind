@@ -1,10 +1,10 @@
 /**
  * UserCard 组件 - 单元测试
- * GH#217: User Card Action Row 新增「激活」按钮
+ * GH#217: User Card Action Row 当前不再展示“激活”按钮（activate button，激活按钮）
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { UserCard } from '@/ui/app/components/UserCard';
 
 // Mock dependencies
@@ -33,9 +33,9 @@ describe('UserCard', () => {
       } as any);
     });
 
-    it('renders activate button', () => {
+    it('does not render activate button when logged in（登录态也不显示激活按钮）', () => {
       render(<UserCard />);
-      expect(screen.getByText('激活')).toBeInTheDocument();
+      expect(screen.queryByText('激活')).not.toBeInTheDocument();
     });
 
     it('renders switch account button', () => {

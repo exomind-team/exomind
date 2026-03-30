@@ -5,9 +5,9 @@ import {
   computeNextBackoff,
   REVIEWER_PREFIX,
   type PullRequestSnapshot,
-} from '../../../Scripts/review-agent/discovery-lib.ts';
-import * as discoveryRuntime from '../../../Scripts/review-agent/discovery-runtime-lib.ts';
-import { loadThreadRepliesWithFallback } from '../../../Scripts/review-agent/discovery-runtime-lib.ts';
+} from '../../../agents/review-agent/scripts/discovery-lib.ts';
+import * as discoveryRuntime from '../../../agents/review-agent/scripts/discovery-runtime-lib.ts';
+import { loadThreadRepliesWithFallback } from '../../../agents/review-agent/scripts/discovery-runtime-lib.ts';
 
 function makeSnapshot(overrides: Partial<PullRequestSnapshot> = {}): PullRequestSnapshot {
   return {

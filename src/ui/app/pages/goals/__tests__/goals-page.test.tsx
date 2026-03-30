@@ -1,20 +1,49 @@
-import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useEffect, type ReactNode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { TaskNode } from '@/lib/types/task';
+import { resetGoalStoreForTests } from '../goal-store';
 
 const flowApiMocks = vi.hoisted(() => ({
   lastProps: null as null | Record<string, unknown>,
+  fitView: vi.fn(),
+  setCenter: vi.fn(),
+  getViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 1 })),
 }));
 
 const isDesktopMock = vi.hoisted(() => vi.fn(() => true));
 const toastMock = vi.hoisted(() => vi.fn());
+const taskServiceMocks = vi.hoisted(() => ({
+  listTasks: vi.fn<() => Promise<TaskNode[]>>(async () => []),
+  getTask: vi.fn<(id: string) => Promise<TaskNode | null>>(async () => null),
+  onTaskChange: vi.fn<(callback: () => void) => () => void>(() => () => {}),
+}));
+const forceLayoutMocks = vi.hoisted(() => ({
+  emitEnabled: true,
+}));
+const developerModeMocks = vi.hoisted(() => ({
+  enabled: false,
+  subscribe: vi.fn<(listener: (enabled: boolean) => void) => () => void>((listener) => {
+    listener(developerModeMocks.enabled);
+    return () => {};
+  }),
+}));
 
 vi.mock('@/components/ui/toast-hook', () => ({
   toast: toastMock,
 }));
 
+vi.mock('@/lib/services/task.service', () => ({
+  getTaskService: () => taskServiceMocks,
+}));
+
 vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
   useIsDesktop: () => isDesktopMock(),
+}));
+
+vi.mock('@/config/developer-mode', () => ({
+  getDeveloperModeEnabled: () => developerModeMocks.enabled,
+  subscribeDeveloperModeChanges: developerModeMocks.subscribe,
 }));
 
 vi.mock('../goal-force-layout', () => ({
@@ -23,7 +52,9 @@ vi.mock('../goal-force-layout', () => ({
 
     constructor(graph: { me: { id: string }; goals: Array<{ id: string }> }, _width: number, _height: number, onTick: (positions: Map<string, { x: number; y: number }>) => void) {
       this.onTick = onTick;
-      this.emit(graph);
+      if (forceLayoutMocks.emitEnabled) {
+        this.emit(graph);
+      }
     }
 
     private emit(graph: { me: { id: string }; goals: Array<{ id: string }> }) {
@@ -34,7 +65,9 @@ vi.mock('../goal-force-layout', () => ({
     }
 
     updateData(graph: { me: { id: string }; goals: Array<{ id: string }> }) {
-      this.emit(graph);
+      if (forceLayoutMocks.emitEnabled) {
+        this.emit(graph);
+      }
     }
 
     pinNode() {}
@@ -49,6 +82,7 @@ vi.mock('@xyflow/react', () => ({
     nodes,
     edges,
     children,
+    onInit,
     onPaneClick,
     onPaneContextMenu,
     onNodeClick,
@@ -61,6 +95,11 @@ vi.mock('@xyflow/react', () => ({
     nodes?: Array<{ id: string; type?: string; data?: Record<string, unknown> }>;
     edges?: Array<{ id: string }>;
     children?: ReactNode;
+    onInit?: (instance: {
+      fitView: () => void;
+      setCenter: (x: number, y: number, options?: Record<string, unknown>) => void;
+      getViewport: () => { x: number; y: number; zoom: number };
+    }) => void;
     onPaneClick?: () => void;
     onPaneContextMenu?: (_event: { preventDefault: () => void }) => void;
     onNodeClick?: (_event: unknown, node: { id: string; data?: Record<string, unknown> }) => void;
@@ -71,6 +110,13 @@ vi.mock('@xyflow/react', () => ({
     [key: string]: unknown;
   }) => {
     flowApiMocks.lastProps = { ...props, nodes, edges };
+    useEffect(() => {
+      onInit?.({
+        fitView: flowApiMocks.fitView,
+        setCenter: flowApiMocks.setCenter,
+        getViewport: flowApiMocks.getViewport,
+      });
+    }, []);
     return (
       <div data-testid="mock-react-flow">
         <button type="button" data-testid="mock-react-flow-pane" onClick={() => onPaneClick?.()}>
@@ -132,18 +178,39 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 async function loadGoalsPage() {
-  vi.resetModules();
   const { GoalsPage } = await import('../GoalsPage');
   const { useGoalStore } = await import('../goal-store');
   return { GoalsPage, useGoalStore };
 }
 
 describe('GoalsPage', () => {
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     window.localStorage.clear();
+    resetGoalStoreForTests();
+    forceLayoutMocks.emitEnabled = true;
+    developerModeMocks.enabled = false;
+    developerModeMocks.subscribe.mockClear();
     toastMock.mockReset();
     isDesktopMock.mockReset();
     isDesktopMock.mockReturnValue(true);
+    taskServiceMocks.listTasks.mockReset();
+    taskServiceMocks.getTask.mockReset();
+    taskServiceMocks.onTaskChange.mockReset();
+    taskServiceMocks.listTasks.mockResolvedValue([]);
+    taskServiceMocks.getTask.mockResolvedValue(null);
+    taskServiceMocks.onTaskChange.mockReturnValue(() => {});
+    flowApiMocks.fitView.mockReset();
+    flowApiMocks.setCenter.mockReset();
+    flowApiMocks.getViewport.mockReset();
+    flowApiMocks.getViewport.mockReturnValue({ x: 0, y: 0, zoom: 1 });
+    flowApiMocks.lastProps = null;
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleWarnSpy.mockRestore();
   });
 
   it('creates a goal from Me context menu and opens its detail panel', async () => {
@@ -161,6 +228,22 @@ describe('GoalsPage', () => {
     expect(screen.getAllByRole('textbox')[0]).toBeInTheDocument();
 
     view.unmount();
+  }, 15000);
+
+  it('centers Me on first load instead of leaving it at the top-left viewport origin', async () => {
+    const { GoalsPage } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    await waitFor(() => {
+      expect(flowApiMocks.setCenter).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        expect.objectContaining({
+          duration: 0,
+          zoom: 1,
+        }),
+      );
+    });
   });
 
   it('hides cancelled goals by default and shows them when toggle is enabled', async () => {
@@ -186,6 +269,74 @@ describe('GoalsPage', () => {
     expect(screen.queryByTestId(`mock-react-flow-node-${goalId}`)).toBeNull();
     fireEvent.click(screen.getByRole('checkbox'));
     expect(screen.getByTestId(`mock-react-flow-node-${goalId}`)).toBeInTheDocument();
+  });
+
+  it('emits suspect render warnings when visible goals lose their force-layout positions', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    forceLayoutMocks.emitEnabled = false;
+    const meId = useGoalStore.getState().graph.me.id;
+    act(() => {
+      useGoalStore.getState().createGoal({
+        fromNode: meId,
+        direction: 'downstream',
+      });
+    });
+
+    render(<GoalsPage />);
+
+    await waitFor(() => {
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('page:suspect-render-state'),
+        expect.objectContaining({
+          suspiciousReasons: expect.arrayContaining([
+            'positions-empty-while-goals-visible',
+            'missing-node-positions',
+          ]),
+        }),
+      );
+    }, { timeout: 4000 });
+  }, 10000);
+
+  it('provides explicit node handles so edges can render before DOM handle measurement completes', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const flowNodes = flowApiMocks.lastProps?.nodes as Array<{
+      id: string;
+      handles?: Array<{ type: string; position: string; x: number; y: number; width: number; height: number }>;
+    }> | undefined;
+
+    expect(flowNodes).toBeDefined();
+    expect(flowNodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'me',
+          handles: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'target',
+              position: 'top',
+            }),
+            expect.objectContaining({
+              type: 'source',
+              position: 'bottom',
+            }),
+          ]),
+        }),
+      ]),
+    );
+
+    for (const node of flowNodes ?? []) {
+      expect(node.handles).toHaveLength(2);
+      expect(node.handles?.every((handle) => handle.x === 0 && handle.y === 0)).toBe(true);
+      expect(node.handles?.every((handle) => handle.width === handle.height)).toBe(true);
+    }
   });
 
   it('captures cascade options in the cancel goal dialog before confirming', async () => {
@@ -238,6 +389,20 @@ describe('GoalsPage', () => {
 
     await waitFor(() => {
       expect(useGoalStore.getState().graph.me.name).toBe('Core Self');
+    });
+  });
+
+  it('anchors the empty-state guide next to Me instead of centering it on the canvas', async () => {
+    const { GoalsPage } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    await waitFor(() => {
+      const guide = screen.getByTestId('goals-empty-state-guide');
+      expect(guide).toHaveTextContent('右键 Me 添加你的第一个目标');
+      expect(guide).toHaveStyle({
+        left: '110px',
+        top: '18px',
+      });
     });
   });
 
@@ -342,6 +507,86 @@ describe('GoalsPage', () => {
     view.unmount();
   });
 
+  it('rolls back goal drafts and toasts save failure when the goal freezes externally', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    act(() => {
+      useGoalStore.getState().updateGoal({
+        goalId,
+        title: 'Stable Goal',
+      });
+    });
+
+    const titleInput = screen.getByDisplayValue('Stable Goal');
+    fireEvent.change(titleInput, { target: { value: 'Draft Goal' } });
+
+    act(() => {
+      useGoalStore.getState().setEdgeStatusOverride(edgeId, 'completed');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '保存失败',
+        description: '当前目标已冻结',
+      }));
+      expect(screen.getByDisplayValue('Stable Goal')).toBeDisabled();
+    });
+  });
+
+  it('rolls back edge drafts and toasts save failure when the target freezes externally', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    act(() => {
+      useGoalStore.getState().updateEdge({
+        edgeId,
+        title: 'Stable Path',
+      });
+    });
+
+    fireEvent.click(screen.getByTestId(`mock-react-flow-edge-${edgeId}`));
+    const edgeTitleInput = screen.getByDisplayValue('Stable Path');
+    fireEvent.change(edgeTitleInput, { target: { value: 'Draft Path' } });
+
+    act(() => {
+      useGoalStore.getState().setEdgeStatusOverride(edgeId, 'completed');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '保存失败',
+        description: '当前边已冻结',
+      }));
+      expect(screen.getByDisplayValue('Stable Path')).toBeDisabled();
+    });
+  });
+
   it('highlights inbound edges when a goal display status changes', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     const view = render(<GoalsPage />);
@@ -367,6 +612,185 @@ describe('GoalsPage', () => {
     view.unmount();
   });
 
+  it('renders an absorption overlay and pulses Me when a goal becomes completed', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    const view = render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        useGoalStore.getState().setEdgeStatusOverride(edgeId, 'completed');
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId(`goals-completion-absorption-${goalId}`)).toBeInTheDocument();
+      const nodes = flowApiMocks.lastProps?.nodes as Array<{ id: string; data?: { isAbsorbing?: boolean } }>;
+      expect(nodes.find((node) => node.id === goalId)?.data?.isAbsorbing).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(520);
+      });
+
+      expect(screen.queryByTestId(`goals-completion-absorption-${goalId}`)).toBeNull();
+      expect(screen.getByTestId('goals-me-pulse')).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+
+      expect(screen.queryByTestId('goals-me-pulse')).toBeNull();
+      const settledNodes = flowApiMocks.lastProps?.nodes as Array<{ id: string; data?: { isAbsorbing?: boolean } }>;
+      expect(settledNodes.find((node) => node.id === goalId)?.data?.isAbsorbing).not.toBe(true);
+
+    } finally {
+      vi.useRealTimers();
+    }
+    view.unmount();
+  });
+
+  it('uses bound task title and status in the graph when taskNodeRef is set', async () => {
+    taskServiceMocks.listTasks.mockResolvedValue([
+      {
+        id: 'task-123',
+        title: '真实任务',
+        description: '',
+        status: 'in_progress',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
+
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    act(() => {
+      useGoalStore.getState().updateEdge({
+        edgeId,
+        taskNodeRef: 'task-123',
+      });
+    });
+
+    await waitFor(() => {
+      const edges = flowApiMocks.lastProps?.edges as Array<{ id: string; data?: { label?: string; status?: string } }>;
+      const nodes = flowApiMocks.lastProps?.nodes as Array<{ id: string; data?: { status?: string } }>;
+
+      expect(edges.find((edge) => edge.id === edgeId)?.data?.label).toBe('真实任务');
+      expect(edges.find((edge) => edge.id === edgeId)?.data?.status).toBe('in_progress');
+      expect(nodes.find((node) => node.id === goalId)?.data?.status).toBe('in_progress');
+    });
+
+    fireEvent.click(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+
+    expect(await screen.findByRole('button', { name: '真实任务' })).toBeInTheDocument();
+  });
+
+  it('includes the edge label in developer override toasts', async () => {
+    developerModeMocks.enabled = true;
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+
+    fireEvent.click(screen.getByTestId(`mock-react-flow-edge-${edgeId}`));
+    fireEvent.click(await screen.findByRole('button', { name: '⚙ 开发者' }));
+    fireEvent.click(screen.getByRole('button', { name: 'completed' }));
+
+    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: "[开发者] 边'待定义'状态已设为 completed",
+    }));
+  });
+
+  it('hides developer override controls on the page when developer mode is disabled', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const edgeId = useGoalStore.getState().graph.edges[0]?.id as string;
+    fireEvent.click(screen.getByTestId(`mock-react-flow-edge-${edgeId}`));
+
+    expect(screen.queryByRole('button', { name: '⚙ 开发者' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'completed' })).toBeNull();
+  });
+
+  it('reconnects an edge through React Flow and updates its source endpoint', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    const [goalA, goalB] = useGoalStore.getState().graph.goals;
+    const edgeToReconnect = useGoalStore.getState().graph.edges.find((edge) => edge.target === goalA.id);
+    const onReconnect = flowApiMocks.lastProps?.onReconnect as
+      | ((oldEdge: { id: string }, connection: { source?: string; target?: string }) => void)
+      | undefined;
+
+    act(() => {
+      onReconnect?.(
+        { id: edgeToReconnect?.id as string },
+        {
+          source: goalB.id,
+          target: goalA.id,
+        },
+      );
+    });
+
+    await waitFor(() => {
+      const reconnectedEdge = useGoalStore.getState().graph.edges.find((edge) => edge.id === edgeToReconnect?.id);
+      expect(reconnectedEdge?.source).toBe(goalB.id);
+      expect(reconnectedEdge?.target).toBe(goalA.id);
+    });
+  });
+
   it('shows connect preview while connect mode is active and clears it on pane click', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);
@@ -389,6 +813,31 @@ describe('GoalsPage', () => {
     fireEvent.click(screen.getByTestId('mock-react-flow-pane'));
 
     expect(screen.queryByTestId('goals-connect-preview')).toBeNull();
+  });
+
+  it('toasts when connect mode is confirmed on the same goal node', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-connect'));
+    fireEvent.click(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '操作失败',
+        description: '不能连到自己',
+      }));
+    });
   });
 
   it('passes parallel edge metadata to duplicate edges', async () => {
@@ -441,5 +890,118 @@ describe('GoalsPage', () => {
     expect(screen.getByTestId('goals-hop-rings')).toBeInTheDocument();
     expect(screen.getByTestId('goals-hop-ring-1')).toBeInTheDocument();
     expect(screen.getByTestId('goals-hop-ring-2')).toBeInTheDocument();
+  });
+
+  it('keeps hop-distance rings aligned with the React Flow viewport transform', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const firstGoalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${firstGoalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    const onMove = flowApiMocks.lastProps?.onMove as undefined | ((event: unknown, viewport: { x: number; y: number; zoom: number }) => void);
+    act(() => {
+      onMove?.({}, { x: 48, y: 32, zoom: 1.5 });
+    });
+
+    expect(screen.getByTestId('goals-hop-rings')).toHaveStyle({
+      transform: 'translate(48px, 32px) scale(1.5)',
+      transformOrigin: '0 0',
+    });
+  });
+
+  it('keeps Me centered when the graph grows instead of auto-fitting the viewport away from Me', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+    const meId = useGoalStore.getState().graph.me.id;
+    let firstGoalId = '';
+
+    await waitFor(() => {
+      expect(flowApiMocks.setCenter).toHaveBeenCalled();
+    });
+
+    act(() => {
+      const firstResult = useGoalStore.getState().createGoal({
+        fromNode: meId,
+        direction: 'downstream',
+      });
+      expect(firstResult.ok).toBe(true);
+      if (firstResult.ok) {
+        firstGoalId = firstResult.value.goal.id;
+      }
+    });
+
+    act(() => {
+      const secondResult = useGoalStore.getState().createGoal({
+        fromNode: firstGoalId,
+        direction: 'downstream',
+      });
+      expect(secondResult.ok).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    expect(flowApiMocks.fitView).not.toHaveBeenCalled();
+    expect(flowApiMocks.setCenter).toHaveBeenCalled();
+  });
+
+  it('renders concentric hop rings without overlapping labels or clipped glow fill', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+    const meId = useGoalStore.getState().graph.me.id;
+    let firstGoalId = '';
+
+    act(() => {
+      const firstResult = useGoalStore.getState().createGoal({
+        fromNode: meId,
+        direction: 'downstream',
+      });
+      expect(firstResult.ok).toBe(true);
+      if (firstResult.ok) {
+        firstGoalId = firstResult.value.goal.id;
+      }
+    });
+
+    act(() => {
+      const secondResult = useGoalStore.getState().createGoal({
+        fromNode: firstGoalId,
+        direction: 'downstream',
+      });
+      expect(secondResult.ok).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    const rings = screen.getByTestId('goals-hop-rings');
+    expect(rings.querySelector('circle[fill^="url("]')).toBeNull();
+
+    const ring1 = screen.getByTestId('goals-hop-ring-1');
+    const ring2 = screen.getByTestId('goals-hop-ring-2');
+    const ring1Circle = ring1.querySelector('circle');
+    const ring2Circle = ring2.querySelector('circle');
+    const ring1Label = within(ring1).getByText('1 跳');
+    const ring2Label = within(ring2).getByText('2 跳');
+
+    expect(ring1Circle).toHaveAttribute('fill', 'none');
+    expect(ring2Circle).toHaveAttribute('fill', 'none');
+    expect(ring1Circle).toHaveAttribute('cx', ring2Circle?.getAttribute('cx') ?? '');
+    expect(ring1Circle).toHaveAttribute('cy', ring2Circle?.getAttribute('cy') ?? '');
+    expect(ring1Label.parentElement?.getAttribute('transform')).not.toBe(ring2Label.parentElement?.getAttribute('transform'));
   });
 });

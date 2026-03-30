@@ -13,7 +13,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * WebEventLogStorageAdapter
  *
- * 基于 PouchDB EventStorage 实现 IEventLogPort
+ * 基于 PouchDB EventStorage 实现 IEventLogPort。
+ *
+ * 已弃用待删除：业务数据链路已切换到 RT EventLog，本适配器仅保留给
+ * 旧版迁移/兼容路径使用，后续迁移完成后应整体移除。
  */
 export class WebEventLogStorageAdapter implements IEventLogPort {
   constructor(private readonly userId?: string) {}
@@ -109,4 +112,3 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     return [NOTE_TAG];
   }
 }
-

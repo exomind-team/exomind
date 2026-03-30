@@ -13,9 +13,9 @@
 ### Task 1: Remove `viewerCanMerge` as a merge preflight gate
 
 **Files:**
-- Modify: `Scripts/review-agent/review-loop-lib.ts`
-- Modify: `Scripts/review-agent/review-loop.ts`
-- Modify: `Scripts/review-agent/review-loop-runtime-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop.ts`
+- Modify: `agents/review-agent/scripts/review-loop-runtime-lib.ts`
 - Test: `tests/unit/review-agent/review-loop.test.ts`
 - Docs: `docs/agents/review-agent/review-loop.md`
 
@@ -52,7 +52,7 @@
 ### Task 2: Make merge-gate comment validation bilingual
 
 **Files:**
-- Modify: `Scripts/review-agent/review-loop-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop-lib.ts`
 - Test: `tests/unit/review-agent/review-loop.test.ts`
 - Docs: `docs/agents/review-agent/comment-policy-and-templates.md`
 - Docs: `docs/agents/review-agent/review-agent.prompt.md`
@@ -95,7 +95,7 @@
 ### Task 3: Re-verify merge blocked vs retryable behavior after the preflight removal
 
 **Files:**
-- Modify: `Scripts/review-agent/review-loop-runtime-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop-runtime-lib.ts`
 - Test: `tests/unit/review-agent/review-loop.test.ts`
 - Docs: `docs/agents/review-agent/review-loop.md`
 
@@ -137,11 +137,11 @@
 - Expected: PASS
 
 **Step 2: Run the review-loop summary smoke**
-- Run: `npx tsx Scripts/review-agent/review-loop.ts --pr 465`
+- Run: `npx tsx agents/review-agent/scripts/review-loop.ts --pr 465`
 - Expected: JSON summary output succeeds
 
 **Step 3: Run the router smoke**
-- Run: `npx tsx Scripts/review-agent/router.ts`
+- Run: `npx tsx agents/review-agent/scripts/router.ts`
 - Expected: JSON output succeeds
 
 **Step 4: Record any pre-existing unrelated failures**

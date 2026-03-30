@@ -22,7 +22,7 @@ export default defineConfig({
   projects: [getChromiumProject()],
   webServer: [
     {
-      command: 'node ../Scripts/test/runtime-dispatch.cjs server-start',
+      command: 'node ../scripts/test/runtime-dispatch.cjs server-start',
       cwd: '../../server',
       url: `${SYNC_SERVER_URL}/_all_dbs`,
       reuseExistingServer: false,
@@ -34,7 +34,7 @@ export default defineConfig({
       }),
     },
     {
-      command: 'node Scripts/test/runtime-dispatch.cjs vite-dev',
+      command: 'node scripts/test/runtime-dispatch.cjs vite-dev',
       cwd: '../..',
       url: BASE_URL,
       reuseExistingServer: false,

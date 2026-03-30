@@ -38,6 +38,12 @@ pub struct PairingManager {
     sessions: RwLock<HashMap<String, PairingSession>>,
 }
 
+impl Default for PairingManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PairingManager {
     /// Create an empty pairing manager.
     pub fn new() -> Self {

@@ -39,6 +39,7 @@ import {
   VOLCANO_RESOURCE_PRESETS,
   findVolcanoResourcePreset,
   getStoredVolcanoRuntimeConfig,
+  setVolcanoResourceId,
   type VolcanoRuntimeConfig,
 } from '@/lib/asr/volcano-config';
 import {
@@ -65,6 +66,10 @@ const AUTO_HIDE_ERROR_MS = 3000;
 const AUTO_ENTER_SEND_DELAY_MS = 120;
 const VOLCANO_WARM_MAINTENANCE_INTERVAL_MS = 3000;
 const VOLCANO_WARM_ROTATE_AFTER_MS = 5000;
+const VOLCANO_SEED_DURATION_RESOURCE_ID = 'volc.seedasr.sauc.duration';
+const VOLCANO_SEED_CONCURRENT_RESOURCE_ID = 'volc.seedasr.sauc.concurrent';
+const VOLCANO_BIG_DURATION_RESOURCE_ID = 'volc.bigasr.sauc.duration';
+const VOLCANO_BIG_CONCURRENT_RESOURCE_ID = 'volc.bigasr.sauc.concurrent';
 
 type VolcanoSessionWarmReason =
   | 'prewarmed'
@@ -1065,14 +1070,85 @@ export class VoiceShortcutService {
     return normalizeRecognitionText(text?.trim() ?? '');
   }
 
+  private stringifyVolcanoError(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error ?? '');
+  }
+
+  private getVolcanoResourceLabel(resourceId: string): string {
+    const label = VOLCANO_RESOURCE_PRESETS.find((item) => item.value === resourceId)?.label ?? resourceId;
+    return label.replace('模型 ', '');
+  }
+
+  private resolveVolcanoQuotaFallback(
+    error: unknown,
+    config: VolcanoRuntimeConfig,
+  ): { config: VolcanoRuntimeConfig; message: string } | null {
+    const normalizedError = this.stringifyVolcanoError(error).toLowerCase();
+    const isQuotaExceeded = normalizedError.includes('45000292') || normalizedError.includes('450000292');
+    if (!isQuotaExceeded) {
+      return null;
+    }
+
+    let fallbackResourceId: string | null = null;
+    if (normalizedError.includes('audio_duration_lifetime')) {
+      fallbackResourceId = config.resourceId === VOLCANO_SEED_DURATION_RESOURCE_ID
+        ? VOLCANO_BIG_DURATION_RESOURCE_ID
+        : null;
+    } else if (normalizedError.includes('audio_concurrent_lifetime')) {
+      fallbackResourceId = config.resourceId === VOLCANO_SEED_CONCURRENT_RESOURCE_ID
+        ? VOLCANO_BIG_CONCURRENT_RESOURCE_ID
+        : null;
+    } else if (config.resourceId === VOLCANO_SEED_DURATION_RESOURCE_ID) {
+      fallbackResourceId = VOLCANO_BIG_DURATION_RESOURCE_ID;
+    } else if (config.resourceId === VOLCANO_SEED_CONCURRENT_RESOURCE_ID) {
+      fallbackResourceId = VOLCANO_BIG_CONCURRENT_RESOURCE_ID;
+    }
+
+    if (!fallbackResourceId || fallbackResourceId === config.resourceId) {
+      return null;
+    }
+
+    const persistedResourceId = setVolcanoResourceId(fallbackResourceId);
+    const fallbackConfig: VolcanoRuntimeConfig = {
+      ...config,
+      resourceId: persistedResourceId,
+    };
+
+    const fromLabel = this.getVolcanoResourceLabel(config.resourceId);
+    const toLabel = this.getVolcanoResourceLabel(persistedResourceId);
+    this.debugWarn(
+      LOG_TAG,
+      `volcano quota exceeded, fallback resource: ${config.resourceId} -> ${persistedResourceId}`,
+    );
+
+    return {
+      config: fallbackConfig,
+      message: `火山 ${fromLabel} 额度已用尽，已自动切换到 ${toLabel}，请再试一次。`,
+    };
+  }
+
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
     if (this.asrProvider === 'volcano') {
       const config = this.getVolcanoRuntimeConfigOrThrow();
       const pcmAudio = wavData.slice(44);
-      return await invoke<ASRResult>('volcano_asr_recognize', {
-        audioData: Array.from(pcmAudio),
-        config,
-      });
+      try {
+        return await invoke<ASRResult>('volcano_asr_recognize', {
+          audioData: Array.from(pcmAudio),
+          config,
+        });
+      } catch (error) {
+        const fallback = this.resolveVolcanoQuotaFallback(error, config);
+        if (!fallback) {
+          throw error;
+        }
+        return await invoke<ASRResult>('volcano_asr_recognize', {
+          audioData: Array.from(pcmAudio),
+          config: fallback.config,
+        });
+      }
     }
 
     return await this.adapter.transcribe({
@@ -1369,7 +1445,11 @@ export class VoiceShortcutService {
     }
 
     if (payload.errorMessage) {
-      this.handleError(payload.errorMessage);
+      const config = this.getVolcanoRuntimeConfigOrThrow();
+      const fallback = this.resolveVolcanoQuotaFallback(payload.errorMessage, config);
+      this.cleanupVolcanoStreamingState();
+      void this.syncRecordingActive(false);
+      this.handleError(fallback?.message ?? payload.errorMessage);
       return;
     }
     const nextText = (payload.text || '').trim();

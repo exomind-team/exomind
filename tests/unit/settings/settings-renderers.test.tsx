@@ -317,30 +317,31 @@ describe('SettingsItemRenderer', () => {
 
     const item: StringSettingsItem = {
       id: 'sync-server-url',
-      label: '同步服务器',
-      category: 'sync',
+      label: 'RT 地址',
+      category: 'connection',
+      description: '需要连接另一台电脑或手机上的 ExoMind 时，在这里填写对方显示的地址；平时只在本机使用就不用改。',
       type: 'string',
       stringStyle: 'dialog',
       dialogFieldKind: 'plain',
-      dialogInputType: 'url',
-      placeholder: 'http://127.0.0.1:6984',
-      dialogTitle: '同步服务器',
-      dialogDescription: '设置事件日志同步的服务器地址',
+      dialogInputType: 'text',
+      placeholder: '192.168.1.23:1949',
+      dialogTitle: '设置 RT 地址',
+      dialogDescription: '填写你想连接的那台设备地址，例如 192.168.1.23:1949。保存后，当前设备会切换到这个地址继续连接。',
       get: () => currentValue,
       set: setValue,
     };
 
     render(<SettingsItemRenderer item={item} ctx={ctx} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /同步服务器/ }));
+    fireEvent.click(screen.getByRole('button', { name: /RT 地址/ }));
 
-    const dialog = screen.getByRole('dialog', { name: '同步服务器' });
-    expect(within(dialog).getByText('设置事件日志同步的服务器地址')).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog', { name: '设置 RT 地址' });
+    expect(within(dialog).getByText('填写你想连接的那台设备地址，例如 192.168.1.23:1949。保存后，当前设备会切换到这个地址继续连接。')).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: '显示 Token' })).toBeNull();
     expect(within(dialog).queryByRole('button', { name: '清空' })).toBeNull();
 
-    const input = within(dialog).getByPlaceholderText('http://127.0.0.1:6984');
-    expect(input).toHaveAttribute('type', 'url');
+    const input = within(dialog).getByPlaceholderText('192.168.1.23:1949');
+    expect(input).toHaveAttribute('type', 'text');
 
     const cancelButton = within(dialog).getByRole('button', { name: '取消' });
     const saveButton = within(dialog).getByRole('button', { name: '保存' });
@@ -348,11 +349,11 @@ describe('SettingsItemRenderer', () => {
     expect(saveButton.className).toContain('flex-1');
 
     fireEvent.change(input, {
-      target: { value: 'http://localhost:6984' },
+      target: { value: '192.168.1.88:1949' },
     });
     fireEvent.click(saveButton);
 
-    expect(setValue).toHaveBeenCalledWith('http://localhost:6984');
+    expect(setValue).toHaveBeenCalledWith('192.168.1.88:1949');
   });
 
   it('renders dialog enum items with descriptions inside a dialog picker', () => {

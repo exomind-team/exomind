@@ -463,11 +463,16 @@ impl ClaudeAgent {
 
         let input_line = build_stream_json_user_input(&message);
         if let Err(error) = write_user_input_line(&mut session.stdin, &input_line).await {
+            let error_message = if error.kind() == std::io::ErrorKind::BrokenPipe {
+                build_session_ended_error_message(&mut session)
+            } else {
+                format!("Claude 输入写入失败: {error}")
+            };
             session.status = SessionStatus::Crashed;
             self.upsert_snapshot_from_session(&session);
             drop(session);
             self.cleanup_session(&session_id).await;
-            emit_error_chunk(&sender, format!("Claude 输入写入失败: {error}")).await;
+            emit_error_chunk(&sender, error_message).await;
             return;
         }
 

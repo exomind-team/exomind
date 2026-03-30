@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
-import { resolveTauriExecutable } from '../../../Scripts/dev/tauri-cli-lib';
+import { resolveTauriExecutable } from '../../../scripts/dev/tauri-cli-lib';
 
 describe('resolveTauriExecutable', () => {
   it('prefers local node_modules tauri.exe on Windows（Windows 优先使用本地 tauri.exe）', () => {

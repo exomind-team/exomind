@@ -9,6 +9,8 @@ use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use tokio::sync::broadcast;
 use tokio::time::{Duration, Instant};
 
@@ -141,10 +143,10 @@ fn apply_since_id_and_limit(
     since_id: Option<&str>,
     limit: Option<usize>,
 ) -> Vec<EventRecord> {
-    if let Some(since_id) = since_id {
-        if let Some(pos) = events.iter().position(|event| event.id == since_id) {
-            events.truncate(pos);
-        }
+    if let Some(since_id) = since_id
+        && let Some(pos) = events.iter().position(|event| event.id == since_id)
+    {
+        events.truncate(pos);
     }
 
     if let Some(limit) = limit {
@@ -591,6 +593,14 @@ fn apply_event_import(
     Ok(outcome)
 }
 
+#[cfg(test)]
+fn eventlog_sqlite_tempdir_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("eventlog sqlite tempdir lock poisoned")
+}
+
 fn build_eventlog_sqlite_snapshot_bytes(
     state: &AppState,
     user_id: Option<&str>,
@@ -605,20 +615,24 @@ fn build_eventlog_sqlite_snapshot_bytes(
             });
     }
 
-    let temp_root =
-        std::env::temp_dir().join(format!("exomind-eventlog-export-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_root)
+    #[cfg(test)]
+    let _tempdir_guard = eventlog_sqlite_tempdir_guard();
+
+    let temp_root = tempfile::Builder::new()
+        .prefix("exomind-eventlog-export-")
+        .tempdir()
         .map_err(|error| format!("failed to create temp eventlog export dir: {error}"))?;
-    let sqlite_path = temp_root.join("eventlog-export.sqlite");
+    let sqlite_path = temp_root.path().join("eventlog-export.sqlite");
     let scoped_store =
-        crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
+        crate::eventlog::EventLogStore::with_sqlite_path(temp_root.path().to_path_buf(), &sqlite_path)?;
     scoped_store.replace_all_events(user_id, events)?;
     let bytes = scoped_store
         .sqlite_snapshot_bytes()?
         .ok_or_else(|| "failed to produce scoped sqlite snapshot".to_string())?;
     drop(scoped_store);
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    temp_root
+        .close()
+        .map_err(|error| format!("failed to clean temp eventlog export dir: {error}"))?;
     Ok(bytes)
 }
 
@@ -626,18 +640,23 @@ fn read_events_from_sqlite_snapshot(
     bytes: &[u8],
     user_id: Option<&str>,
 ) -> Result<Vec<EventRecord>, String> {
-    let temp_root =
-        std::env::temp_dir().join(format!("exomind-eventlog-import-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_root)
+    #[cfg(test)]
+    let _tempdir_guard = eventlog_sqlite_tempdir_guard();
+
+    let temp_root = tempfile::Builder::new()
+        .prefix("exomind-eventlog-import-")
+        .tempdir()
         .map_err(|error| format!("failed to create temp eventlog dir: {error}"))?;
-    let sqlite_path = temp_root.join("eventlog-import.sqlite");
+    let sqlite_path = temp_root.path().join("eventlog-import.sqlite");
     std::fs::write(&sqlite_path, bytes)
         .map_err(|error| format!("failed to write temp sqlite snapshot: {error}"))?;
-    let store = crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
+    let store =
+        crate::eventlog::EventLogStore::with_sqlite_path(temp_root.path().to_path_buf(), &sqlite_path)?;
     let events = store.list_events(user_id)?;
     drop(store);
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    temp_root
+        .close()
+        .map_err(|error| format!("failed to clean temp eventlog import dir: {error}"))?;
     Ok(events)
 }
 

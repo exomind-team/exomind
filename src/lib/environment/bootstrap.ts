@@ -70,8 +70,8 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
   const asr = new VolcanoEngineASRAdapter();
   const clipboard: IClipboardPort = runtime === 'tauri' ? new TauriClipboardAdapter() : new WebClipboardAdapter();
   const useMockData = options.useMockData ?? getUseMockDataEnabled();
-  const taskBackendMode = runtime === 'tauri' ? getTaskBackendMode() : 'legacy';
-  const eventlogBackendMode = runtime === 'tauri' ? getEventlogBackendMode() : 'legacy';
+  const taskBackendMode = runtime === 'tauri' ? getTaskBackendMode() : 'rt-sqlite';
+  const eventlogBackendMode = runtime === 'tauri' ? getEventlogBackendMode() : 'rt-sqlite';
   const task: ITaskPort = useMockData
     ? new TaskMockAdapter()
     : (runtime === 'tauri' && taskBackendMode === 'legacy'
@@ -86,7 +86,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
         ? (eventlogBackendMode === 'legacy'
           ? new TauriEventLogStorageAdapter()
           : new EventLogRtAdapter())
-        : new WebEventLogStorageAdapter()
+        : new EventLogRtAdapter()
     );
 
   if (runtime === 'tauri') {

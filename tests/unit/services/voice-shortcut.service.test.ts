@@ -291,6 +291,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.accessKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.resourceId);
+    setVoiceShortcutAsrProvider('moss');
 
     getUserMediaWithConstraintFallbackMock.mockResolvedValue({
       getTracks: () => [{ stop: vi.fn(), readyState: 'live' }],
@@ -1311,6 +1312,69 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     expect(writeClipboardMock).toHaveBeenCalledWith('火山实时结果');
     expectLastVoiceStorageEvent('火山实时结果');
+
+    service.destroy();
+  });
+
+  it('falls back to volcano 1.0 resource after 2.0 quota error（火山 2.0 额度耗尽后自动回退到 1.0 资源）', async () => {
+    setVoiceShortcutMicPrewarmEnabled(false);
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    const sessionIds = ['stream-session-quota-1', 'stream-session-quota-2'];
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return sessionIds.shift() ?? 'stream-session-quota-fallback';
+      }
+      if (
+        command === 'volcano_asr_stream_push'
+        || command === 'voice_recording_set_active'
+        || command === 'volcano_asr_stream_cancel'
+      ) {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+
+    await emitVolcanoStreamEvent({
+      sessionId: 'stream-session-quota-1',
+      errorMessage: 'API 错误 45000292: quota exceeded for types: audio_duration_lifetime',
+    });
+    await flushPipeline();
+
+    expect(window.localStorage.getItem(VOLCANO_STORAGE_KEYS.resourceId)).toBe('volc.bigasr.sauc.duration');
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'error',
+        errorMessage: expect.stringContaining('已自动切换到 1.0 小时版'),
+      }),
+    );
+
+    invokeMock.mockClear();
+
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'volcano_asr_stream_start',
+      expect.objectContaining({
+        config: expect.objectContaining({
+          resourceId: 'volc.bigasr.sauc.duration',
+        }),
+      }),
+    );
 
     service.destroy();
   });

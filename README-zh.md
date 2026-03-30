@@ -131,7 +131,7 @@ exomind/
 ├─ src-tauri/           # Tauri Rust 后端与配置
 ├─ crates/              # Rust crates (exomind-runtime)
 ├─ server/              # PouchDB 同步服务
-├─ Scripts/             # PowerShell/Bun 自动化脚本
+├─ scripts/             # PowerShell/Bun 自动化脚本
 ├─ tests/               # Vitest + Playwright 测试
 ├─ docs/                # 文档（架构、规格、计划）
 └─ website/             # 官网源码
@@ -146,7 +146,7 @@ exomind/
 - [产品需求](docs/product/PRD.md) — 产品需求文档
 - [产品路线图](docs/product/roadmap.md) — 版本规划
 - [开发指南](CLAUDE.md) — 开发规范与工作流
-- [脚本指南](Scripts/README.md) — 脚本使用说明
+- [脚本指南](scripts/README.md) — 脚本使用说明
 - [Git 工作流](docs/development/git-spec.md) — Git 分支与提交规范
 
 ## 构建与发布

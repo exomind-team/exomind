@@ -1,6 +1,6 @@
 # 批次 N：RT 任务 API 增强
 
-> **状态**：待执行
+> **状态**：已完成（代码、测试、`9124`/build55 验收、提交推送均已完成；CI 跟踪中）
 > **分支**：直接在 `dev` 上开发
 > **关联 Issue**：#683, #689, #686, #687, #688, #460, #673, #672
 > **执行顺序**：#683 → #689 → #686 → #687 → #688 → #460 → #673 → #672
@@ -54,21 +54,38 @@
 5. EventLog 端点已存在（#460 Phase 1 已完成，剩余 MCP 迁移部分）
 6. 任务/时间块事件自动写入 eventlog
 
+## 当前任务清单（2026-03-26）
+
+- [x] 完成 #683 / #689：终态任务 `title` / `description` 均不可修改，路由返回 `409 Conflict`
+- [x] 完成 #686：`POST /tasks/batch-transition` 支持全部成功与部分失败
+- [x] 完成 #687：`GET /tasks` 支持 `status` / `tag` / `parent_id` 组合过滤
+- [x] 完成 #688：`POST /tasks/:id/transition?shortcut=true` 支持快捷跳步
+- [x] 完成 #460：RT EventLog HTTP 端点可用，Web 侧默认走 RT 适配链路
+- [x] 完成 #673：任务状态迁移自动写入 EventLog，并改为人性化动作消息
+- [x] 完成 #672：时间块 `start/pause/resume/end` 全生命周期自动写入 EventLog
+- [x] 完成本轮联动收敛：任务与事件流默认 RT 化、旧前端适配器标记弃用、任务列表支持热更新
+- [x] 修复 reviewer 补充回归：Web + RT 事件追加/投影统一走 RT EventLog，`task.cancelled` 纳入前端热更新链路
+- [x] 依据更新后的验收 HTML 跑满全部手工验收项（`9124` / `anonymous` / build55 环境）
+- [x] 串行补齐最终基线验证：`cargo build -p exomind-runtime`、`cargo test -p exomind-runtime`、`cargo clippy -p exomind-runtime -- -D warnings`
+- [x] 补跑前端 RT 回归验证：`npx tsc --noEmit`、相关 Vitest 回归集、`9124` 本地 RT curl 复验
+- [x] 汇总命令、预期、实际结果与因果说明，完成提交、推送并继续跟踪 CI
+
 ---
 
-## 步骤 1：#683 任务 title 仅终态冻结（设计定论）
+## 步骤 1：#683 终态任务 title / description 冻结（设计定论）
 
-**结论**：title 在 `pending/in_progress/suspended` 均可修改，仅 `completed/cancelled` 冻结。
+**结论**：`title` 与 `description` 在 `pending/in_progress/suspended` 均可修改，仅 `completed/cancelled` 冻结。
 
 ### 1.1 改动
 
 **文件**：`crates/exomind-runtime/src/task/store.rs`
 
-在 `validate_terminal_task_update()` 函数中新增 title 检查：
+在 `validate_terminal_task_update()` 函数中新增 `title` / `description` 检查：
 
 ```rust
-// ★ 新增：冻结 title
+// ★ 新增：冻结 title / description
 pub(crate) const TASK_FIELD_TITLE: &str = "title";
+pub(crate) const TASK_FIELD_DESCRIPTION: &str = "description";
 
 pub(crate) fn validate_terminal_task_update(
     status: TaskStatus,
@@ -78,11 +95,17 @@ pub(crate) fn validate_terminal_task_update(
         return Ok(());
     }
 
-    // ★ 新增
     if input.title.is_some() {
         return Err(TaskStoreError::TerminalFieldImmutable {
             status,
             field: TASK_FIELD_TITLE,
+        });
+    }
+
+    if input.description.is_some() {
+        return Err(TaskStoreError::TerminalFieldImmutable {
+            status,
+            field: TASK_FIELD_DESCRIPTION,
         });
     }
 
@@ -125,7 +148,7 @@ cargo clippy -p exomind-runtime
 
 ```rust
 #[test]
-fn update_terminal_task_rejects_title_changes() {
+fn update_terminal_task_rejects_title_and_description_changes() {
     let store = make_store();
     let task = store.create(create_input("Done task"));
     store.transition(&task.id, TaskStatus::InProgress).unwrap();
@@ -135,7 +158,7 @@ fn update_terminal_task_rejects_title_changes() {
         &task.id,
         UpdateTaskInput {
             title: Some("New name".to_string()),
-            description: None,
+            description: Some("New note".to_string()),
             done_condition: None,
             priority: None,
             tags: None,
@@ -149,7 +172,7 @@ fn update_terminal_task_rejects_title_changes() {
     assert!(matches!(
         result,
         Err(TaskStoreError::TerminalFieldImmutable {
-            field: TASK_FIELD_TITLE,
+            field: TASK_FIELD_TITLE | TASK_FIELD_DESCRIPTION,
             ..
         })
     ));
@@ -158,7 +181,7 @@ fn update_terminal_task_rejects_title_changes() {
 
 ---
 
-## 步骤 2：#689 PUT 终态任务 title 应拒绝修改
+## 步骤 2：#689 PUT 终态任务 title / description 应拒绝修改
 
 ### 2.1 改动
 
@@ -168,44 +191,19 @@ fn update_terminal_task_rejects_title_changes() {
 
 修改现有测试 `update_terminal_task_allows_non_frozen_fields`（行 651-694）：
 
-当前测试断言 title 修改在终态返回 200 OK，**需要改为断言返回 409 CONFLICT**：
+当前测试断言终态仍允许部分文案修改，**需要改为断言 title / description 返回 409 CONFLICT**：
 
 ```rust
 // ★ 修改：原测试 update_terminal_task_allows_non_frozen_fields
-// 原来的请求体是 {"title":"Renamed after completion"}，期望 200
-// 现在应该改为：只修改 description（仍然允许），title 变更测试独立
-
-#[tokio::test]
-async fn update_terminal_task_allows_non_frozen_fields() {
-    // ... setup 同现有 ...
-    // 改为只修改 description（非冻结字段）
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri(format!("/tasks/{}", task.id))
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"description":"Post-completion note"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response.into_body().collect().await.unwrap().to_bytes();
-    let updated: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(updated["description"], "Post-completion note");
-    assert_eq!(updated["status"], "completed");
-}
+// title / description 在终态都应返回 409
 ```
 
 新增路由层测试：
 
 ```rust
-#[tokio::test]
-async fn update_terminal_task_title_returns_conflict() {
-    // setup: create task → in_progress → completed
-    // PUT {"title": "New name"} → assert 409
-}
+// setup: create task → in_progress → completed
+// PUT {"title": "New name"} → assert 409
+// PUT {"description": "New note"} → assert 409
 ```
 
 ### 2.2 验证
@@ -1147,7 +1145,7 @@ async fn put_active_pause_writes_block_pause_to_eventlog() {
 | 场景 | 操作 | 期望结果 | Issue |
 |------|------|---------|-------|
 | 终态 title 冻结 | PUT /tasks/:id `{"title":"x"}` on completed task | 409 Conflict | #683, #689 |
-| 终态 description 可改 | PUT /tasks/:id `{"description":"x"}` on completed task | 200 OK | #683 |
+| 终态 description 冻结 | PUT /tasks/:id `{"description":"x"}` on completed task | 409 Conflict | #683, #689 |
 | 批量迁移-全部成功 | POST /tasks/batch-transition, 3 valid tasks | 200, succeeded=3, failed=0 | #686 |
 | 批量迁移-部分失败 | POST /tasks/batch-transition, 1 valid + 1 invalid | 200, succeeded=1, failed=1 | #686 |
 | tag 过滤 | GET /tasks?tag=work | 只返回含 "work" tag 的任务 | #687 |
@@ -1156,11 +1154,12 @@ async fn put_active_pause_writes_block_pause_to_eventlog() {
 | 快捷跳步 | POST /tasks/:id/transition?shortcut=true `{"status":"completed"}` from pending | 200, status=completed | #688 |
 | 快捷跳步不影响直接迁移 | POST /tasks/:id/transition `{"status":"in_progress"}` from pending (无 shortcut) | 200, 正常 | #688 |
 | EventLog 端点存在 | GET /eventlog | 200 | #460 |
-| 任务迁移写 eventlog | POST /tasks/:id/transition → GET /eventlog?tags=task_transition | eventlog 中有记录 | #673 |
-| 批量迁移写 eventlog | POST /tasks/batch-transition → GET /eventlog?tags=task_transition | 每个成功迁移一条记录 | #673 |
+| 任务迁移写 eventlog | POST /tasks/:id/transition → GET /eventlog?tags=task_started | eventlog 中有动作化事件 | #673 |
+| 批量迁移写 eventlog | POST /tasks/batch-transition → GET /eventlog?tags=task_started | 每个成功迁移一条记录 | #673 |
 | 时间块开始写 eventlog | PUT /timeblocks/active (新块) → GET /eventlog?tags=block_start | eventlog 中有 block_start | #672 |
 | 时间块结束写 eventlog | DELETE /timeblocks/active → GET /eventlog?tags=block_end | eventlog 中有 block_end | #672 |
 | 时间块暂停写 eventlog | PUT /timeblocks/active (paused: true) → GET /eventlog?tags=block_pause | eventlog 中有 block_pause | #672 |
+| 时间块恢复写 eventlog | PUT /timeblocks/active (paused: false) → GET /eventlog?tags=block_resume | eventlog 中有 block_resume | #672 |
 | 全量构建 | cargo build -p exomind-runtime | 编译通过 | ALL |
 | 全量测试 | cargo test -p exomind-runtime | 全部通过 | ALL |
 | clippy 检查 | cargo clippy -p exomind-runtime | 无 warning | ALL |

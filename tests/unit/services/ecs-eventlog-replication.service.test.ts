@@ -7,6 +7,7 @@ const replicationMocks = vi.hoisted(() => ({
   addEventStorageMock: vi.fn(),
   getEventStorageMock: vi.fn(),
   getEventlogBackendModeMock: vi.fn(),
+  runtimeModeMock: vi.fn(),
   appendEventDataMock: vi.fn(),
   getEventPortMock: vi.fn(),
   getSelectedRuntimeTargetMock: vi.fn(),
@@ -48,7 +49,7 @@ vi.mock('@/lib/services/eventlog.service', () => ({
 vi.mock('@/lib/environment/environment', () => ({
   ExoMindEnvironment: {
     getInstance: () => ({
-      runtime: 'tauri',
+      runtime: replicationMocks.runtimeModeMock(),
       eventlog: {
         getEvent: replicationMocks.getEventPortMock,
       },
@@ -102,6 +103,7 @@ describe('ecs-eventlog-replication.service', () => {
       projectReplicatedEvent: replicationMocks.projectReplicatedEventMock,
     });
     replicationMocks.getEventlogBackendModeMock.mockReset().mockReturnValue('legacy');
+    replicationMocks.runtimeModeMock.mockReset().mockReturnValue('tauri');
     replicationMocks.getSelectedRuntimeTargetMock.mockReset().mockReturnValue({
       mode: 'embedded',
       host: '127.0.0.1',
@@ -183,6 +185,59 @@ describe('ecs-eventlog-replication.service', () => {
           platform: 'Windows',
         },
       },
+    });
+  });
+
+  it('appends to RT eventlog in web runtime when backend is rt-sqlite', async () => {
+    replicationMocks.runtimeModeMock.mockReturnValue('web');
+    replicationMocks.getEventlogBackendModeMock.mockReturnValue('rt-sqlite');
+
+    await appendEventWithEcsReplication({
+      id: 'evt-web-rt-001',
+      content: 'web runtime rt append',
+      createdAt: '2026-03-26T10:00:00.000Z',
+      type: 'task_created',
+    });
+
+    expect(replicationMocks.addEventStorageMock).not.toHaveBeenCalled();
+    expect(replicationMocks.appendEventDataMock).toHaveBeenCalledWith({
+      id: 'evt-web-rt-001',
+      timestamp: Date.parse('2026-03-26T10:00:00.000Z'),
+      content: 'web runtime rt append',
+      tags: ['task_created'],
+      metadata: undefined,
+    });
+  });
+
+  it('projects replicated payload into RT eventlog in web runtime when backend is rt-sqlite', async () => {
+    replicationMocks.runtimeModeMock.mockReturnValue('web');
+    replicationMocks.getEventlogBackendModeMock.mockReturnValue('rt-sqlite');
+    replicationMocks.getEventPortMock.mockResolvedValue(null);
+    const payload: EventLogReplicationAppendedPayload = {
+      schemaVersion: 1,
+      replicationSeq: 108,
+      cursor: {
+        kind: 'replication_seq',
+        value: 108,
+      },
+      event: {
+        ...sampleEvent,
+        id: 'evt-web-rt-remote-001',
+        createdAt: '2026-03-26T10:05:00.000Z',
+        type: 'task_cancelled',
+        replicationSeq: 108,
+      },
+    };
+
+    await expect(projectEventLogReplicationAppend(payload)).resolves.toBe('inserted');
+
+    expect(replicationMocks.projectReplicatedEventMock).not.toHaveBeenCalled();
+    expect(replicationMocks.appendEventDataMock).toHaveBeenCalledWith({
+      id: 'evt-web-rt-remote-001',
+      timestamp: Date.parse('2026-03-26T10:05:00.000Z'),
+      content: sampleEvent.content,
+      tags: ['task_cancelled'],
+      metadata: sampleEvent.metadata,
     });
   });
 });

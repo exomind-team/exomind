@@ -26,6 +26,33 @@ function collapseRepeatedWholeText(text: string): string {
 }
 
 /**
+ * Collapse a duplicated leading segment when the second copy is followed by
+ * unique tail content.
+ * "火山实时结果火山实时结果继续补充" → "火山实时结果继续补充"
+ */
+function collapseRepeatedLeadingSegment(text: string): string {
+  const characters = Array.from(text);
+  const totalLength = characters.length;
+
+  for (let repeatCount = 3; repeatCount >= 2; repeatCount -= 1) {
+    const maxUnitLength = Math.floor((totalLength - 1) / repeatCount);
+    for (let unitLength = maxUnitLength; unitLength >= 2; unitLength -= 1) {
+      const repeatedLength = unitLength * repeatCount;
+      if (repeatedLength >= totalLength) {
+        continue;
+      }
+
+      const unit = characters.slice(0, unitLength).join('');
+      if (characters.slice(0, repeatedLength).join('') === unit.repeat(repeatCount)) {
+        return `${unit}${characters.slice(repeatedLength).join('')}`;
+      }
+    }
+  }
+
+  return text;
+}
+
+/**
  * Collapse consecutive identical space-separated tokens.
  * "super super" → "super"
  * "C C I I U U D D" → "C I U D"
@@ -99,6 +126,7 @@ export function normalizeRecognitionText(text: string): string {
   }
 
   let result = collapseRepeatedWholeText(trimmed);
+  result = collapseRepeatedLeadingSegment(result);
   result = collapseHanWordGroupRepeat(result);
   result = collapseHanStutter(result);
   result = collapseConsecutiveTokens(result);

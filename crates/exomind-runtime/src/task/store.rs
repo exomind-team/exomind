@@ -52,8 +52,15 @@ pub struct TaskStore {
     backend: TaskStoreBackend,
 }
 
+impl Default for TaskStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
 pub(crate) const TASK_FIELD_TITLE: &str = "title";
+pub(crate) const TASK_FIELD_DESCRIPTION: &str = "description";
 pub(crate) const TASK_FIELD_DEPENDS_ON: &str = "depends_on";
 pub(crate) const TASK_FIELD_ESTIMATED_MINUTES: &str = "estimated_minutes";
 
@@ -76,6 +83,13 @@ pub(crate) fn validate_terminal_task_update(
         return Err(TaskStoreError::TerminalFieldImmutable {
             status,
             field: TASK_FIELD_TITLE,
+        });
+    }
+
+    if input.description.is_some() {
+        return Err(TaskStoreError::TerminalFieldImmutable {
+            status,
+            field: TASK_FIELD_DESCRIPTION,
         });
     }
 
@@ -395,14 +409,14 @@ impl TaskStore {
 
             if !task.status.can_transition_to(&new_status) {
                 return Err(TaskStoreError::InvalidTransition {
-                    from: task.status.clone(),
+                    from: task.status,
                     to: new_status,
                 });
             }
 
-            let old_status = task.status.clone();
+            let old_status = task.status;
             let now = chrono::Utc::now().timestamp_millis() as u64;
-            task.status = new_status.clone();
+            task.status = new_status;
             task.updated_at = now;
 
             if new_status.is_terminal() {
@@ -422,8 +436,25 @@ impl TaskStore {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
             return store.cancel_scoped(normalize_scope_key(scope_key), id);
         }
-        let (_, task) = self.transition_scoped(scope_key, id, TaskStatus::Cancelled)?;
-        Ok(task)
+        self.with_memory_scope_mut(scope_key, |tasks| {
+            let task = tasks
+                .get_mut(id)
+                .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
+
+            if task.status.is_terminal() {
+                return Err(TaskStoreError::InvalidTransition {
+                    from: task.status,
+                    to: TaskStatus::Cancelled,
+                });
+            }
+
+            let now = chrono::Utc::now().timestamp_millis() as u64;
+            task.status = TaskStatus::Cancelled;
+            task.updated_at = now;
+            task.completed_at = Some(now);
+
+            Ok(task.clone())
+        })
     }
 
     /// Hard remove from store. Returns the removed task if it existed.
@@ -446,6 +477,10 @@ impl TaskStore {
         self.len_scoped(None)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.is_empty_scoped(None)
+    }
+
     pub fn len_scoped(&self, scope_key: Option<&str>) -> usize {
         match &self.backend {
             TaskStoreBackend::Memory(_) => self.memory_scope(scope_key).len(),
@@ -453,6 +488,10 @@ impl TaskStore {
                 .len_scoped(normalize_scope_key(scope_key))
                 .expect("sqlite task len should succeed"),
         }
+    }
+
+    pub fn is_empty_scoped(&self, scope_key: Option<&str>) -> bool {
+        self.len_scoped(scope_key) == 0
     }
 
     pub fn upsert(&self, task: Task) -> Result<Task, TaskStoreError> {
@@ -827,33 +866,35 @@ mod tests {
     }
 
     #[test]
-    fn update_terminal_task_allows_non_frozen_updates() {
+    fn update_terminal_task_rejects_description_changes() {
         let store = make_store();
         let task = store.create(create_input("Done task"));
         store.transition(&task.id, TaskStatus::InProgress).unwrap();
         store.transition(&task.id, TaskStatus::Completed).unwrap();
 
-        let updated = store
-            .update(
-                &task.id,
-                UpdateTaskInput {
-                    title: None,
-                    description: Some("Still editable".to_string()),
-                    done_condition: None,
-                    priority: None,
-                    tags: None,
-                    depends_on: None,
-                    due_at: None,
-                    estimated_minutes: None,
-                    parent_id: None,
-                    time_block_ids: None,
-                },
-            )
-            .unwrap();
+        let result = store.update(
+            &task.id,
+            UpdateTaskInput {
+                title: None,
+                description: Some("Still editable".to_string()),
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: None,
+                due_at: None,
+                estimated_minutes: None,
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
 
-        assert_eq!(updated.title, "Done task");
-        assert_eq!(updated.description.as_deref(), Some("Still editable"));
-        assert_eq!(updated.status, TaskStatus::Completed);
+        assert!(matches!(
+            result,
+            Err(TaskStoreError::TerminalFieldImmutable {
+                field: TASK_FIELD_DESCRIPTION,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1107,25 +1148,28 @@ mod tests {
         store.transition(&task.id, TaskStatus::InProgress).unwrap();
         store.transition(&task.id, TaskStatus::Completed).unwrap();
 
-        let allowed = store
-            .update(
-                &task.id,
-                UpdateTaskInput {
-                    title: None,
-                    description: Some("Still editable".to_string()),
-                    done_condition: None,
-                    priority: None,
-                    tags: None,
-                    depends_on: None,
-                    due_at: None,
-                    estimated_minutes: None,
-                    parent_id: None,
-                    time_block_ids: None,
-                },
-            )
-            .unwrap();
-        assert_eq!(allowed.title, "Done task");
-        assert_eq!(allowed.description.as_deref(), Some("Still editable"));
+        let description_result = store.update(
+            &task.id,
+            UpdateTaskInput {
+                title: None,
+                description: Some("Still editable".to_string()),
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: None,
+                due_at: None,
+                estimated_minutes: None,
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
+        assert!(matches!(
+            description_result,
+            Err(TaskStoreError::TerminalFieldImmutable {
+                field: TASK_FIELD_DESCRIPTION,
+                ..
+            })
+        ));
 
         let dependency_result = store.update(
             &task.id,
@@ -1307,6 +1351,16 @@ mod tests {
         let store = make_store();
         let task = store.create(create_input("Task"));
         store.transition(&task.id, TaskStatus::InProgress).unwrap();
+
+        let cancelled = store.cancel(&task.id).unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+        assert!(cancelled.completed_at.is_some());
+    }
+
+    #[test]
+    fn cancel_pending_task() {
+        let store = make_store();
+        let task = store.create(create_input("Pending task"));
 
         let cancelled = store.cancel(&task.id).unwrap();
         assert_eq!(cancelled.status, TaskStatus::Cancelled);
