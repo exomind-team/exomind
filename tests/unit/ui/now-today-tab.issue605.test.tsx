@@ -6,10 +6,17 @@ import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
 const getTaskMock = vi.fn();
+const listTasksMock = vi.fn();
+const checkDependenciesMetMock = vi.fn();
 const onTaskChangeMock = vi.fn(() => () => {});
 const loadTimeBlocksMock = vi.fn();
 const loadActiveBlockMock = vi.fn();
 const onBlockChangeMock = vi.fn();
+const getTodayPlannerMock = vi.fn();
+const createSchedulingWindowMock = vi.fn();
+const updatePlannedSegmentMock = vi.fn();
+const startWorkSegmentMock = vi.fn();
+const reflowSchedulingWindowMock = vi.fn();
 
 let blockChangeHandler: ((block: ActiveBlockData | null) => void) | null = null;
 
@@ -20,12 +27,21 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     getTask: getTaskMock,
+    listTasks: listTasksMock,
+    checkDependenciesMet: checkDependenciesMetMock,
     onTaskChange: onTaskChangeMock,
   }),
   getTimeBlockService: () => ({
     loadTimeBlocks: loadTimeBlocksMock,
     loadActiveBlock: loadActiveBlockMock,
     onBlockChange: onBlockChangeMock,
+  }),
+  getTodayPlannerService: () => ({
+    getTodayPlanner: getTodayPlannerMock,
+    createSchedulingWindow: createSchedulingWindowMock,
+    updatePlannedSegment: updatePlannedSegmentMock,
+    startWorkSegment: startWorkSegmentMock,
+    reflowSchedulingWindow: reflowSchedulingWindowMock,
   }),
 }));
 
@@ -70,11 +86,24 @@ function makeBlock(input: Partial<TimeBlock> & Pick<TimeBlock, 'id' | 'name' | '
 describe('NowTodayTab issue-605（活跃时间块快照闪烁修复）', () => {
   beforeEach(() => {
     getTaskMock.mockReset();
+    listTasksMock.mockReset();
+    checkDependenciesMetMock.mockReset();
     onTaskChangeMock.mockClear();
     loadTimeBlocksMock.mockReset();
     loadActiveBlockMock.mockReset();
     onBlockChangeMock.mockReset();
+    getTodayPlannerMock.mockReset();
+    createSchedulingWindowMock.mockReset();
+    updatePlannedSegmentMock.mockReset();
+    startWorkSegmentMock.mockReset();
+    reflowSchedulingWindowMock.mockReset();
     blockChangeHandler = null;
+    getTodayPlannerMock.mockResolvedValue({
+      date: '2026-03-26',
+      windows: [],
+    });
+    listTasksMock.mockResolvedValue([]);
+    checkDependenciesMetMock.mockResolvedValue({ met: true, blocking: [] });
 
     onBlockChangeMock.mockImplementation((callback: (block: ActiveBlockData | null) => void) => {
       blockChangeHandler = callback;

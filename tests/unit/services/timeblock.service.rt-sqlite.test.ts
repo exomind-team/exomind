@@ -77,9 +77,12 @@ function createMemoryEnv(initial: Record<string, unknown> = {}): MemoryEnv {
   };
 }
 
-function createRtAdapter(): TimeBlockRtAdapterLike {
-  let completedBlocks: TimeBlockData[] = [];
-  let activeBlock: ActiveBlockData | null = null;
+function createRtAdapter(initial?: {
+  completedBlocks?: TimeBlockData[];
+  activeBlock?: ActiveBlockData | null;
+}): TimeBlockRtAdapterLike {
+  let completedBlocks: TimeBlockData[] = initial?.completedBlocks ?? [];
+  let activeBlock: ActiveBlockData | null = initial?.activeBlock ?? null;
   return {
     listCompletedBlocks: vi.fn(async () => completedBlocks),
     replaceCompletedBlocks: vi.fn(async (blocks: TimeBlockData[]) => {
@@ -219,5 +222,37 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
       ([event]) => (event as { type?: string }).type,
     );
     expect(types).not.toContain('block_end');
+  });
+
+  it('preserves sourcePlannedBlockId when finishing a planned block in rt-sqlite mode', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter({
+      activeBlock: {
+        startId: 'active-planned-1',
+        name: 'Lunch Reset',
+        mode: 'countdown',
+        targetMinutes: 30,
+        elapsed: 1_800_000,
+        paused: false,
+        startTime: 1_700_000_000_000,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: 1_700_000_000_000,
+        taskIds: [],
+        taskAssociationLog: [],
+        sourcePlannedBlockId: 'plan-1',
+      },
+    });
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+
+    await service.markEnding();
+    await service.endBlock('rest done');
+
+    expect(rtAdapter.replaceCompletedBlocks).toHaveBeenCalled();
+    const [completedBlocks] = (rtAdapter.replaceCompletedBlocks as ReturnType<typeof vi.fn>).mock.calls.at(-1) ?? [];
+    expect(completedBlocks?.[0]?.sourcePlannedBlockId).toBe('plan-1');
   });
 });

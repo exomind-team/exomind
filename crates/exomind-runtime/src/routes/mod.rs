@@ -12,6 +12,7 @@ pub mod pty;
 pub mod sessions;
 pub mod signals;
 pub mod tasks;
+pub mod today_planner;
 pub mod timeblocks;
 pub mod topology;
 pub mod workspace;
@@ -28,6 +29,7 @@ pub fn router() -> Router<AppState> {
         .merge(sessions::router())
         .merge(signals::router())
         .merge(tasks::router())
+        .merge(today_planner::router())
         .merge(timeblocks::router())
         .merge(workspace::router());
     #[cfg(not(target_os = "android"))]

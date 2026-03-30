@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { getTaskService, getTimeBlockService } from '@/lib/services';
-import { resolveActiveBlockTaskIds, resolveTimeBlockRelatedTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
+import { getTaskService, getTimeBlockService, getTodayPlannerService } from '@/lib/services';
+import {
+  resolveActiveBlockTaskIds,
+  resolveTimeBlockRelatedTaskIds,
+  type ActiveBlockData,
+  type TimeBlock,
+  type TodayPlannerSnapshot,
+} from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 import { buildNowTodayBlocksView } from '@/ui/app/pages/now-today-blocks-view';
+import { NowTodayPlannerTimeline } from './NowTodayPlannerTimeline';
 
 function isToday(timestamp: number, now: Date): boolean {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -80,17 +87,60 @@ function collectRelevantTaskIds(blocks: TimeBlock[], activeBlock: ActiveBlockDat
   return Array.from(ids);
 }
 
+function formatDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function NowTodayTab() {
+  const [plannerSnapshot, setPlannerSnapshot] = useState<TodayPlannerSnapshot | null>(null);
+  const [plannerLoading, setPlannerLoading] = useState(true);
+  const [plannerError, setPlannerError] = useState<string | null>(null);
   const [completedBlocks, setCompletedBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [tasksById, setTasksById] = useState<Map<string, TaskNode>>(new Map());
-  const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [now, setNow] = useState(() => new Date());
+  const refreshHistoryRef = useRef<((forceRefreshTasks?: boolean) => Promise<void>) | null>(null);
   const completedBlocksRef = useRef<TimeBlock[]>([]);
   const activeBlockRef = useRef<ActiveBlockData | null>(null);
   const completedBlocksSignatureRef = useRef('');
   const activeBlockSignatureRef = useRef('null');
   const taskIdsSignatureRef = useRef('');
+  const todayDate = formatDateKey(now);
+
+  useEffect(() => {
+    const todayPlannerService = getTodayPlannerService();
+    let disposed = false;
+
+    const loadPlanner = async () => {
+      setPlannerLoading(true);
+      setPlannerError(null);
+      try {
+        const snapshot = await todayPlannerService.getTodayPlanner(todayDate);
+        if (disposed) {
+          return;
+        }
+        setPlannerSnapshot(snapshot);
+      } catch (error) {
+        if (disposed) {
+          return;
+        }
+        setPlannerError(error instanceof Error ? error.message : '加载今日计划失败');
+      } finally {
+        if (!disposed) {
+          setPlannerLoading(false);
+        }
+      }
+    };
+
+    void loadPlanner();
+    return () => {
+      disposed = true;
+    };
+  }, [todayDate]);
 
   useEffect(() => {
     let disposed = false;
@@ -158,9 +208,10 @@ export function NowTodayTab() {
       }
 
       setNow(new Date());
-      setLoading(false);
+      setHistoryLoading(false);
     };
 
+    refreshHistoryRef.current = loadSnapshot;
     void loadSnapshot(true);
     const unsubscribeTasks = taskService.onTaskChange(() => {
       void syncTasks(completedBlocksRef.current, activeBlockRef.current, true);
@@ -180,6 +231,7 @@ export function NowTodayTab() {
 
     return () => {
       disposed = true;
+      refreshHistoryRef.current = null;
       unsubscribeTasks();
       unsubscribeBlocks();
     };
@@ -201,6 +253,19 @@ export function NowTodayTab() {
     };
   }, [activeBlock]);
 
+  useEffect(() => {
+    const nextDayStart = new Date();
+    nextDayStart.setHours(24, 0, 0, 0);
+    const delay = Math.max(1, nextDayStart.getTime() - Date.now());
+    const timerId = window.setTimeout(() => {
+      setNow(new Date());
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [todayDate]);
+
   const blocks = useMemo(() => {
     const nextBlocks = [...completedBlocks];
     if (activeBlock && isToday(activeBlock.startTime, now)) {
@@ -215,51 +280,76 @@ export function NowTodayTab() {
     now,
   }), [blocks, now, tasksById]);
 
-  if (loading) {
-    return <p className="px-1 py-4 text-sm text-[#78716C] dark:text-[#A8A29E]">加载今日时间块...</p>;
-  }
-
-  if (view.items.length === 0) {
-    return <p className="px-1 py-4 text-sm text-[#78716C] dark:text-[#A8A29E]">今天还没有时间块记录。</p>;
-  }
+  const refreshPlanner = async () => {
+    const currentDate = formatDateKey(new Date());
+    setPlannerError(null);
+    const snapshot = await getTodayPlannerService().getTodayPlanner(currentDate);
+    setPlannerSnapshot(snapshot);
+    if (currentDate !== todayDate) {
+      setNow(new Date());
+    }
+  };
 
   return (
-    <div className="space-y-3">
-      {view.items.map((item) => (
-        <Link
-          key={item.blockId}
-          to="/eventlog/timeblocks/$blockId"
-          params={{ blockId: item.blockId }}
-          className="block rounded-2xl border border-[#E7E5E4] bg-white p-4 transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:bg-[#292524]"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-              <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.timeLabel}</p>
-            </div>
-            <span className="rounded-full bg-[#F5F0ED] px-2 py-1 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
-              {item.linkedTasks.length} 个任务
-            </span>
-          </div>
+    <div className="space-y-6">
+      <NowTodayPlannerTimeline
+        dateKey={todayDate}
+        snapshot={plannerSnapshot}
+        loading={plannerLoading}
+        error={plannerError}
+        setError={setPlannerError}
+        refreshPlanner={refreshPlanner}
+        refreshHistory={(forceRefreshTasks) => refreshHistoryRef.current?.(forceRefreshTasks) ?? Promise.resolve()}
+      />
 
-          {item.linkedTasks.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {item.linkedTasks.map((task) => (
-                <span
-                  key={`${item.blockId}-${task.taskId}`}
-                  className="rounded-full bg-[#FFF7ED] px-2 py-1 text-[11px] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
-                >
-                  {task.title}{task.outcome ? ` · ${task.outcome}` : ''}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">今日记录</p>
+          <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">执行后的时间块会继续留在这里。</p>
+        </div>
+
+        {historyLoading ? (
+          <p className="px-1 py-4 text-sm text-[#78716C] dark:text-[#A8A29E]">加载今日时间块...</p>
+        ) : view.items.length === 0 ? (
+          <p className="px-1 py-4 text-sm text-[#78716C] dark:text-[#A8A29E]">今天还没有时间块记录。</p>
+        ) : (
+          view.items.map((item) => (
+            <Link
+              key={item.blockId}
+              to="/eventlog/timeblocks/$blockId"
+              params={{ blockId: item.blockId }}
+              className="block rounded-2xl border border-[#E7E5E4] bg-white p-4 transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:bg-[#292524]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                  <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.timeLabel}</p>
+                </div>
+                <span className="rounded-full bg-[#F5F0ED] px-2 py-1 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
+                  {item.linkedTasks.length} 个任务
                 </span>
-              ))}
-            </div>
-          ) : null}
+              </div>
 
-          {item.note ? (
-            <p className="mt-3 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.note}</p>
-          ) : null}
-        </Link>
-      ))}
+              {item.linkedTasks.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {item.linkedTasks.map((task) => (
+                    <span
+                      key={`${item.blockId}-${task.taskId}`}
+                      className="rounded-full bg-[#FFF7ED] px-2 py-1 text-[11px] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
+                    >
+                      {task.title}{task.outcome ? ` · ${task.outcome}` : ''}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {item.note ? (
+                <p className="mt-3 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.note}</p>
+              ) : null}
+            </Link>
+          ))
+        )}
+      </section>
     </div>
   );
 }
