@@ -21,6 +21,19 @@ Use this skill when the user asks for:
 2. Read `references/prompt.md` if you need the original execution prompt wording.
 3. Use `assets/report-template.html` when the requested output needs the existing HTML template.
 
+## Reading Past Reports
+
+To extract structured data from a published report (Agent-friendly text or JSON):
+
+```bash
+bun run devlog:extract --type report              # 最新日报 → 纯文本摘要
+bun run devlog:extract --type report --format json # 最新日报 → JSON
+bun run devlog:extract --file <path>               # 指定 HTML 文件
+bun run devlog:extract --type report --source devlog # 从 devlog 仓库读取
+```
+
+When generating a new report, read the previous report first to compare trends and fill the scorecard.
+
 ## Core Rules
 
 - Query GitHub and git state live; do not reuse stale report data.

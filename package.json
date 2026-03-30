@@ -14,6 +14,7 @@
     "devlog:publish": "bun scripts/dev/publish-devlog.ts",
     "route:publish": "bun scripts/dev/publish-route.ts",
     "route:check": "bun scripts/dev/check-route-trigger.ts",
+    "devlog:extract": "bun scripts/dev/extract-devlog.ts",
     "gh:comment": "bun scripts/dev/github-comment.ts",
     "gh:qmark:once": "bun scripts/dev/gh-auto-reply-qmark.ts --once",
     "gh:qmark:watch": "bun scripts/dev/gh-auto-reply-qmark.ts --watch --interval-seconds 180",
