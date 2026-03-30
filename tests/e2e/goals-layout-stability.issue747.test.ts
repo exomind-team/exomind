@@ -248,6 +248,98 @@ async function snapshotRenderVisibility(page: Page): Promise<RenderVisibilitySna
   });
 }
 
+async function waitForStableVisibleGraph(
+  page: Page,
+  expectedNodeCount: number,
+  expectedEdgeCount: number,
+  message: string,
+) {
+  let previousSignature: string | null = null;
+  let stableSamples = 0;
+
+  await expect
+    .poll(async () => {
+      const snapshot = await snapshotRenderVisibility(page);
+      const signature = await page.evaluate(() => {
+        const nodeElements = Array.from(document.querySelectorAll('[data-testid^="goal-flow-node-"]'))
+          .filter((element) => !(element.getAttribute('data-testid') ?? '').startsWith('goal-flow-node-progress-pulse-')) as HTMLElement[];
+        const edgeElements = Array.from(document.querySelectorAll('[data-testid^="task-flow-edge-visible-"]')) as SVGPathElement[];
+        const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+        const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+        if (!me) {
+          return null;
+        }
+
+        const getCenter = (element: Element) => {
+          const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+          return {
+            x: Number((rect.x + rect.width / 2).toFixed(1)),
+            y: Number((rect.y + rect.height / 2).toFixed(1)),
+          };
+        };
+
+        return {
+          meCenter: getCenter(me),
+          ring1Center: ring1 ? getCenter(ring1) : null,
+          nodes: nodeElements
+            .map((element) => ({
+              id: element.getAttribute('data-testid') ?? 'unknown-node',
+              center: getCenter(element),
+            }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+          edges: edgeElements
+            .map((element) => ({
+              id: element.getAttribute('data-testid') ?? 'unknown-edge',
+              path: element.getAttribute('d') ?? '',
+            }))
+            .sort((left, right) => left.id.localeCompare(right.id)),
+        };
+      });
+
+      const visibleOk =
+        snapshot.nodeCount === expectedNodeCount
+        && snapshot.edgeCount === expectedEdgeCount
+        && snapshot.hiddenNodeIds.length === 0
+        && snapshot.hiddenEdgeIds.length === 0;
+
+      if (!visibleOk || !signature) {
+        previousSignature = null;
+        stableSamples = 0;
+        return {
+          stable: false,
+          visibleOk,
+          ringAligned: false,
+          stableSamples,
+        };
+      }
+
+      const ringAligned = !signature.ring1Center
+        || (
+          Math.abs(signature.ring1Center.x - signature.meCenter.x) <= 6
+          && Math.abs(signature.ring1Center.y - signature.meCenter.y) <= 6
+        );
+
+      const currentSignature = JSON.stringify(signature);
+      stableSamples = currentSignature === previousSignature ? stableSamples + 1 : 1;
+      previousSignature = currentSignature;
+
+      return {
+        stable: stableSamples >= 2,
+        visibleOk,
+        ringAligned,
+        stableSamples,
+      };
+    }, {
+      timeout: 15000,
+      message,
+    })
+    .toMatchObject({
+      stable: true,
+      visibleOk: true,
+      ringAligned: true,
+    });
+}
+
 function expectVisibleGraphSnapshot(
   snapshot: RenderVisibilitySnapshot,
   expectedNodeCount: number,
@@ -773,12 +865,12 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     await expect(page.locator('[data-testid^="task-flow-edge-hit-area-"]')).toHaveCount(1);
     await expect(page.locator('[data-testid^="task-flow-edge-label-"]')).toHaveCount(1);
 
-    await expect
-      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
-        timeout: 15000,
-        message: 'expected simulation:end warn log after force layout settles',
-      })
-      .toBe(true);
+    await waitForStableVisibleGraph(
+      page,
+      2,
+      1,
+      'expected the visible two-node graph to settle and stay stable in the browser',
+    );
 
     await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible();
@@ -811,6 +903,10 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     }
 
     expect(goalWarnings.some((entry) => entry.includes('simulation:init'))).toBe(true);
+    expect(goalWarnings.some((entry) => (
+      entry.includes('simulation:tick')
+      || entry.includes('simulation:end')
+    ))).toBe(true);
     expect(goalWarnings.some((entry) => entry.includes('page:render-health'))).toBe(true);
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
