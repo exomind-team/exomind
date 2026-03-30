@@ -18,9 +18,10 @@ Use this skill when the user asks for:
 
 ## Load Order
 
-1. Read `references/AGENTS.md` for the route-planning workflow, issue clustering rules, and output requirements.
-2. Read `references/prompt.md` if you need the original execution prompt wording.
-3. Use `assets/route-template.html` when the requested output needs the existing HTML route template.
+1. **Read the previous route first**: run `bun run devlog:extract --type route` to get the latest published route as Agent-friendly text. This is required for batch status comparison, trigger detection, and batch letter continuation.
+2. Read `references/AGENTS.md` for the route-planning workflow, issue clustering rules, and output requirements.
+3. Read `references/prompt.md` if you need the original execution prompt wording.
+4. Use `assets/route-template.html` when the requested output needs the existing HTML route template.
 
 ## Reading Past Routes
 
