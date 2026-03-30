@@ -1,5 +1,10 @@
 import type { EventData, EventMetadata, Tag } from '../types/event';
-import type { EventLogListOptions, IEventLogPort } from '../environment/interfaces/eventlog.port';
+import type {
+  EventLogListOptions,
+  EventLogListResult,
+  EventLogListSemantics,
+  IEventLogPort,
+} from '../environment/interfaces/eventlog.port';
 import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
 import { appendEventWithEcsReplication } from '../services/ecs-eventlog-replication.service';
 
@@ -8,6 +13,10 @@ const TAGS_METADATA_KEY = 'tags';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function resolveEventLogListSemantics(_options?: EventLogListOptions): EventLogListSemantics {
+  return 'full_snapshot';
 }
 
 export function applyEventLogListOptions(
@@ -53,11 +62,19 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
   }
 
   async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
+    const result = await this.listEventsDetailed(options);
+    return result.events;
+  }
+
+  async listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult> {
     const events = await this.storage.getEvents();
-    return applyEventLogListOptions(
-      events.map((event) => this.fromStorageEvent(event)),
-      options,
-    );
+    return {
+      events: applyEventLogListOptions(
+        events.map((event) => this.fromStorageEvent(event)),
+        options,
+      ),
+      semantics: resolveEventLogListSemantics(options),
+    };
   }
 
   async appendEvent(event: EventData): Promise<EventData> {

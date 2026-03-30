@@ -10,7 +10,12 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import type { EventLogListOptions, IEventLogPort } from '../environment/interfaces/eventlog.port';
+import type {
+  EventLogListOptions,
+  EventLogListResult,
+  EventLogListSemantics,
+  IEventLogPort,
+} from '../environment/interfaces/eventlog.port';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
@@ -30,9 +35,18 @@ export interface ImportEventsResult {
   total: number;
 }
 
+export interface EventLogLoadResult {
+  events: Event[];
+  semantics: EventLogListSemantics;
+  snapshotRevision?: string | null;
+}
+
 export interface EventLogService {
   /** 加载所有事件 */
   loadEvents(options?: EventLogListOptions): Promise<Event[]>;
+
+  /** 加载事件并显式返回 snapshot / incremental 语义 */
+  loadEventsDetailed(options?: EventLogListOptions): Promise<EventLogLoadResult>;
 
   /** 添加普通事件 */
   addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event>;
@@ -63,8 +77,19 @@ export class EventLogServiceImpl implements EventLogService {
   }
 
   async loadEvents(options?: EventLogListOptions): Promise<Event[]> {
-    const data = await this.readEventData(options);
-    return data.map((d) => this.deserializeEvent(d)).sort((a, b) => b.timestamp - a.timestamp);
+    const result = await this.loadEventsDetailed(options);
+    return result.events;
+  }
+
+  async loadEventsDetailed(options?: EventLogListOptions): Promise<EventLogLoadResult> {
+    const result = await this.readEventDataDetailed(options);
+    return {
+      events: result.events
+        .map((data) => this.deserializeEvent(data))
+        .sort((a, b) => b.timestamp - a.timestamp),
+      semantics: result.semantics,
+      snapshotRevision: result.snapshotRevision,
+    };
   }
 
   async addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event> {
@@ -121,6 +146,7 @@ export class EventLogServiceImpl implements EventLogService {
     }
 
     await this.writeEventData(next);
+    this.notifyExternalChange();
 
     return {
       imported,
@@ -161,7 +187,19 @@ export class EventLogServiceImpl implements EventLogService {
   }
 
   private async readEventData(options?: EventLogListOptions): Promise<EventData[]> {
-    return this.port.listEvents(options);
+    const result = await this.readEventDataDetailed(options);
+    return result.events;
+  }
+
+  private async readEventDataDetailed(options?: EventLogListOptions): Promise<EventLogListResult> {
+    if (typeof this.port.listEventsDetailed === 'function') {
+      return this.port.listEventsDetailed(options);
+    }
+
+    return {
+      events: await this.port.listEvents(options),
+      semantics: 'full_snapshot',
+    };
   }
 
   private async writeEventData(events: EventData[]): Promise<void> {

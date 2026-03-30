@@ -3,11 +3,17 @@ import {
   getSelectedRuntimeTarget,
   type RuntimeTarget,
 } from '@/config/runtime-target';
-import type { EventLogListOptions, IEventLogPort } from '@/lib/environment/interfaces/eventlog.port';
+import type {
+  EventLogListOptions,
+  EventLogListResult,
+  EventLogListSemantics,
+  IEventLogPort,
+} from '@/lib/environment/interfaces/eventlog.port';
 import type { EventData } from '@/lib/types/event';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
+const EVENTLOG_REVISION_HEADER = 'x-exomind-eventlog-revision';
 
 interface RuntimeEventPayload {
   id: string;
@@ -60,6 +66,11 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
+    const result = await this.listEventsDetailed(options);
+    return result.events;
+  }
+
+  async listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult> {
     const target = this.resolveTarget();
     const response = await this.fetchImpl(this.url(this.buildListPath(options), target), {
       method: 'GET',
@@ -69,7 +80,11 @@ export class EventLogRtAdapter implements IEventLogPort {
       throw new Error(`RT eventlog list failed: ${response.status}`);
     }
     const payload = await response.json() as RuntimeEventPayload[];
-    return payload.map(toEventData);
+    return {
+      events: payload.map(toEventData),
+      semantics: this.resolveListSemantics(options),
+      snapshotRevision: response.headers?.get(EVENTLOG_REVISION_HEADER) ?? undefined,
+    };
   }
 
   async appendEvent(event: EventData): Promise<EventData> {
@@ -138,6 +153,13 @@ export class EventLogRtAdapter implements IEventLogPort {
     }
 
     return `${url.pathname}${url.search}`;
+  }
+
+  private resolveListSemantics(options?: EventLogListOptions): EventLogListSemantics {
+    const hasIncrementalCursor =
+      (typeof options?.sinceId === 'string' && options.sinceId.length > 0)
+      || typeof options?.sinceTimestamp === 'number';
+    return hasIncrementalCursor ? 'incremental_batch' : 'full_snapshot';
   }
 
   private url(path: string, target = this.resolveTarget()): string {

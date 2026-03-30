@@ -101,6 +101,36 @@ describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
     expect(url.searchParams.get('limit')).toBe('5');
   });
 
+  it('exposes incremental semantics and runtime snapshot revision from response headers（暴露 RT 增量语义与快照修订号）', async () => {
+    activateProfileScope();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'x-exomind-eventlog-revision': 'rev-2',
+      }),
+      json: async () => ([]),
+    }));
+
+    const adapter = new EventLogRtAdapter({
+      fetchImpl,
+      resolveTarget: () => ({ mode: 'embedded', host: '127.0.0.1', port: 9124 }),
+    }) as EventLogRtAdapter & {
+      listEventsDetailed: typeof EventLogRtAdapter.prototype.listEventsDetailed;
+    };
+
+    const result = await adapter.listEventsDetailed({
+      sinceId: 'event-9',
+      sinceTimestamp: 1700000000500,
+    });
+
+    expect(result).toEqual({
+      events: [],
+      semantics: 'incremental_batch',
+      snapshotRevision: 'rev-2',
+    });
+  });
+
   it('serializes frontend EventData to runtime append payload', async () => {
     const profileId = activateProfileScope();
     const fetchImpl = vi.fn(async () => ({

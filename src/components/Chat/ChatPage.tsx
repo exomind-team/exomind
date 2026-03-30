@@ -23,7 +23,7 @@ import { MessageActions } from '@/components/Chat/MessageActions';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
-import { getEventLogService } from '@/lib/services/eventlog.service';
+import { getEventLogService, type EventLogLoadResult } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { log } from '@/lib/logger';
 import { registerMainWindowFocusTarget } from '@/services/main-window-focus-targets';
@@ -216,6 +216,7 @@ export function ChatPage({
   const refreshQueuedRef = useRef(false);
   const refreshQueuedTriggerRef = useRef<'poll' | 'event'>('poll');
   const lastFullRefreshAtRef = useRef(0);
+  const lastAppliedSnapshotRevisionRef = useRef<string | null | undefined>(undefined);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn, activeProfileId } = useSyncStore();
   const syncStatus: 'connected' | 'disconnected' | 'syncing' = isLoggedIn && Boolean(currentUser)
@@ -260,8 +261,10 @@ export function ChatPage({
 
   const loadInitialEvents = useCallback(async () => {
     setIsInitialLoading(true);
-    const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
+    const initialResult = await eventLogService.current.loadEventsDetailed();
+    const loadedEvents = sortEventsAscending(initialResult.events);
     shouldStickToBottomRef.current = true;
+    lastAppliedSnapshotRevisionRef.current = initialResult.snapshotRevision ?? null;
     applyVisibleWindow(loadedEvents, PAGE_SIZE);
     lastFullRefreshAtRef.current = Date.now();
 
@@ -279,24 +282,34 @@ export function ChatPage({
     const latestCursor = getLatestEventCursor(allEventsRef.current);
     const shouldForceFullReconcile = latestCursor !== null
       && (Date.now() - lastFullRefreshAtRef.current) >= RT_FULL_RECONCILE_INTERVAL_MS;
-    let mode: 'full' | 'incremental' = latestCursor && !shouldForceFullReconcile ? 'incremental' : 'full';
-    let loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents(
-      mode === 'incremental'
+    let requestedMode: 'full' | 'incremental' = latestCursor && !shouldForceFullReconcile ? 'incremental' : 'full';
+    let loadedResult: EventLogLoadResult = await eventLogService.current.loadEventsDetailed(
+      requestedMode === 'incremental'
         ? {
             sinceId: latestCursor!.id,
             sinceTimestamp: latestCursor!.timestamp,
           }
         : undefined,
-    ));
+    );
+    let mode: 'full' | 'incremental' = requestedMode === 'incremental'
+      && loadedResult.semantics === 'incremental_batch'
+      ? 'incremental'
+      : 'full';
+    let loadedEvents = sortEventsAscending(loadedResult.events);
+    const revisionChanged = loadedResult.snapshotRevision !== undefined
+      && loadedResult.snapshotRevision !== lastAppliedSnapshotRevisionRef.current;
 
-    if (mode === 'incremental' && loadedEvents.length === 0 && trigger === 'event') {
+    if (mode === 'incremental' && loadedEvents.length === 0 && (trigger === 'event' || revisionChanged)) {
+      requestedMode = 'full';
       mode = 'full';
-      loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
+      loadedResult = await eventLogService.current.loadEventsDetailed();
+      loadedEvents = sortEventsAscending(loadedResult.events);
     }
     const queryMs = Math.round(perfNow() - t0);
 
     if (mode === 'full') {
       lastFullRefreshAtRef.current = Date.now();
+      lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? null;
       applyVisibleWindow(loadedEvents);
 
       requestAnimationFrame(() => {
@@ -309,11 +322,15 @@ export function ChatPage({
     }
 
     if (loadedEvents.length === 0) {
+      if (loadedResult.snapshotRevision !== undefined) {
+        lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision;
+      }
       log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: 0, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
       return;
     }
 
     const mergedEvents = mergeLatestEventsAscending(allEventsRef.current, loadedEvents);
+    lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? lastAppliedSnapshotRevisionRef.current ?? null;
     applyVisibleWindow(mergedEvents);
 
     requestAnimationFrame(() => {
@@ -390,6 +407,7 @@ export function ChatPage({
   // 初始化 RT EventLog 读源，并用轮询补齐跨链路写入后的 UI 刷新。
   useEffect(() => {
     visibleCountRef.current = PAGE_SIZE;
+    lastAppliedSnapshotRevisionRef.current = undefined;
     void loadInitialEvents();
 
     const unsubscribe = eventLogService.current.onEvent(() => {

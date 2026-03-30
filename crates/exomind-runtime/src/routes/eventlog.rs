@@ -3,7 +3,7 @@
 //! Mirrors the Tauri commands from `eventlog_commands.rs` as REST endpoints.
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -17,6 +17,8 @@ use tokio::time::{Duration, Instant};
 use crate::AppState;
 use crate::eventlog::{EventListFilter, EventRecord, MirrorStatus, sanitize_user_id};
 use crate::signal::types::SignalEvent;
+
+const EVENTLOG_REVISION_HEADER: &str = "x-exomind-eventlog-revision";
 
 // ── Request / query types ───────────────────────────────────────
 
@@ -263,7 +265,7 @@ async fn publish_eventlog_replication_append(state: &AppState, event: &EventReco
 async fn list_events(
     State(state): State<AppState>,
     Query(query): Query<EventLogQuery>,
-) -> Result<Json<Vec<EventRecord>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(HeaderMap, Json<Vec<EventRecord>>), (StatusCode, Json<ErrorResponse>)> {
     let events = load_events_for_query(
         &state,
         query.user_id.as_deref(),
@@ -274,7 +276,18 @@ async fn list_events(
         query.tags.as_deref(),
     )
     .map_err(internal_error)?;
-    Ok(Json(events))
+    let mut headers = HeaderMap::new();
+    if let Some(revision) = state
+        .eventlog_store
+        .current_revision(query.user_id.as_deref())
+        .map_err(internal_error)?
+    {
+        let header_value = HeaderValue::from_str(&revision.to_string()).map_err(|error| {
+            internal_error(format!("invalid eventlog revision header: {error}"))
+        })?;
+        headers.insert(EVENTLOG_REVISION_HEADER, header_value);
+    }
+    Ok((headers, Json(events)))
 }
 
 /// POST /eventlog — append (or upsert) a single event.
@@ -398,6 +411,7 @@ async fn clear_events(
         .eventlog_store
         .clear_events(query.user_id.as_deref())
         .map_err(internal_error)?;
+    notify_eventlog_watchers(&state, query.user_id.as_deref());
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -623,8 +637,10 @@ fn build_eventlog_sqlite_snapshot_bytes(
         .tempdir()
         .map_err(|error| format!("failed to create temp eventlog export dir: {error}"))?;
     let sqlite_path = temp_root.path().join("eventlog-export.sqlite");
-    let scoped_store =
-        crate::eventlog::EventLogStore::with_sqlite_path(temp_root.path().to_path_buf(), &sqlite_path)?;
+    let scoped_store = crate::eventlog::EventLogStore::with_sqlite_path(
+        temp_root.path().to_path_buf(),
+        &sqlite_path,
+    )?;
     scoped_store.replace_all_events(user_id, events)?;
     let bytes = scoped_store
         .sqlite_snapshot_bytes()?
@@ -650,8 +666,10 @@ fn read_events_from_sqlite_snapshot(
     let sqlite_path = temp_root.path().join("eventlog-import.sqlite");
     std::fs::write(&sqlite_path, bytes)
         .map_err(|error| format!("failed to write temp sqlite snapshot: {error}"))?;
-    let store =
-        crate::eventlog::EventLogStore::with_sqlite_path(temp_root.path().to_path_buf(), &sqlite_path)?;
+    let store = crate::eventlog::EventLogStore::with_sqlite_path(
+        temp_root.path().to_path_buf(),
+        &sqlite_path,
+    )?;
     let events = store.list_events(user_id)?;
     drop(store);
     temp_root
@@ -775,6 +793,66 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["id"], appended_id);
         assert_eq!(events[0]["content"], "hello");
+    }
+
+    #[tokio::test]
+    async fn list_events_sets_revision_header_and_refreshes_it_after_mutation() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let app = test_router(test_state_with_eventlog(store));
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000000000,"content":"hello","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let first_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let first_revision = first_response
+            .headers()
+            .get(EVENTLOG_REVISION_HEADER)
+            .expect("revision header should exist after first write")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000001000,"content":"hello again","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let second_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let second_revision = second_response
+            .headers()
+            .get(EVENTLOG_REVISION_HEADER)
+            .expect("revision header should exist after second write")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        assert_ne!(first_revision, second_revision);
     }
 
     #[tokio::test]
@@ -1008,7 +1086,10 @@ mod tests {
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        assert!(!watch_handle.is_finished(), "watch should not return existing backlog without cursor");
+        assert!(
+            !watch_handle.is_finished(),
+            "watch should not return existing backlog without cursor"
+        );
 
         let appended = append_event_via_api(
             &app,

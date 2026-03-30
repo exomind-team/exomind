@@ -80,6 +80,12 @@ const initialEvent: Event = {
   },
 };
 
+type MockLoadEventsDetailedResult = {
+  events: Event[];
+  semantics: 'full_snapshot' | 'incremental_batch';
+  snapshotRevision?: string | null;
+};
+
 const sameTimestampBase = new Date('2026-03-30T10:05:00.000Z').getTime();
 
 const sameTimestampLowerIdEvent: Event = {
@@ -98,7 +104,7 @@ const sameTimestampHigherIdEvent: Event = {
 
 describe('ChatPage incremental refresh issue 769', () => {
   const unsubscribe = vi.fn();
-  const loadEvents = vi.fn();
+  const loadEventsDetailed = vi.fn<() => Promise<MockLoadEventsDetailedResult>>();
   let onEventCallback: ((event: Event) => void) | null = null;
 
   const lateHistoricalEvent: Event = {
@@ -135,12 +141,21 @@ describe('ChatPage incremental refresh issue 769', () => {
       activeProfileId: 'profile-alice',
     } as never);
 
-    loadEvents
-      .mockResolvedValueOnce([initialEvent])
-      .mockResolvedValueOnce([]);
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rev-1',
+      });
 
     mockGetEventLogService.mockReturnValue({
-      loadEvents,
+      loadEventsDetailed,
+      loadEvents: vi.fn(),
       addEvent: vi.fn(),
       appendEventData: vi.fn(),
       exportEventsAsJson: vi.fn(),
@@ -164,16 +179,16 @@ describe('ChatPage incremental refresh issue 769', () => {
       await Promise.resolve();
     });
 
-    expect(loadEvents).toHaveBeenCalledTimes(1);
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
     expect(screen.getByText('初始事件')).toBeInTheDocument();
-    expect(loadEvents.mock.calls[0]).toEqual([]);
+    expect(loadEventsDetailed.mock.calls[0]).toEqual([]);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
 
-    expect(loadEvents).toHaveBeenCalledTimes(2);
-    expect(loadEvents).toHaveBeenNthCalledWith(2, {
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
       sinceId: 'evt-initial',
       sinceTimestamp: initialEvent.timestamp,
     });
@@ -181,13 +196,21 @@ describe('ChatPage incremental refresh issue 769', () => {
   });
 
   it('uses the timestamp+id tail event as incremental cursor（同时间戳时应使用 timestamp+id 尾事件做游标）', async () => {
-    loadEvents.mockReset();
-    loadEvents
-      .mockResolvedValueOnce([
-        sameTimestampHigherIdEvent,
-        sameTimestampLowerIdEvent,
-      ])
-      .mockResolvedValueOnce([]);
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [
+          sameTimestampHigherIdEvent,
+          sameTimestampLowerIdEvent,
+        ],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-same-1',
+      })
+      .mockResolvedValueOnce({
+        events: [],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rev-same-1',
+      });
 
     await act(async () => {
       render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
@@ -198,18 +221,30 @@ describe('ChatPage incremental refresh issue 769', () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
 
-    expect(loadEvents).toHaveBeenNthCalledWith(2, {
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
       sinceId: 'evt-same-b',
       sinceTimestamp: sameTimestampBase,
     });
   });
 
   it('reconciles full state when signaled refresh sees an empty delta（外部刷新信号遇到空增量时应回退全量对账）', async () => {
-    loadEvents.mockReset();
-    loadEvents
-      .mockResolvedValueOnce([initialEvent])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([lateHistoricalEvent]);
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-2',
+      });
 
     await act(async () => {
       render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
@@ -225,14 +260,89 @@ describe('ChatPage incremental refresh issue 769', () => {
       await Promise.resolve();
     });
 
-    expect(loadEvents).toHaveBeenCalledTimes(3);
-    expect(loadEvents).toHaveBeenNthCalledWith(2, {
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(3);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
       sinceId: 'evt-initial',
       sinceTimestamp: initialEvent.timestamp,
     });
-    expect(loadEvents).toHaveBeenNthCalledWith(3);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
     expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
     expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
     expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"mode":"full"'));
+  });
+
+  it('replaces visible events when legacy cursor queries resolve as full snapshot（legacy 快照结果不应继续按增量 merge）', async () => {
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'legacy-rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'legacy-rev-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+    expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+  });
+
+  it('forces full reconcile when incremental poll sees a newer snapshot revision with empty delta（空增量但 revision 变化时应立即全量对账）', async () => {
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rt-rev-2',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(3);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
+    expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
   });
 });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { EventData } from '@/lib/types/event';
-import { applyEventLogListOptions } from '@/lib/adapters/web-eventlog-storage';
+import {
+  applyEventLogListOptions,
+  resolveEventLogListSemantics,
+} from '@/lib/adapters/web-eventlog-storage';
 
 const sampleEvents: EventData[] = [
   {
@@ -35,5 +38,12 @@ describe('applyEventLogListOptions', () => {
     expect(applyEventLogListOptions(sampleEvents, {
       limit: 2,
     })).toEqual(sampleEvents.slice(0, 2));
+  });
+
+  it('marks legacy cursor queries as full snapshot semantics（legacy cursor 查询应显式标记为全量快照）', () => {
+    expect(resolveEventLogListSemantics({
+      sinceId: 'evt-cursor',
+      sinceTimestamp: 1_500,
+    })).toBe('full_snapshot');
   });
 });
