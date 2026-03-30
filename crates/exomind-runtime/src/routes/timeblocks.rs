@@ -264,7 +264,7 @@ async fn start_block(
         }
     }
 
-    do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
+    let result = do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
         block_type: "active".to_string(),
         name: Some(payload.name),
         mode: Some(payload.mode),
@@ -273,7 +273,12 @@ async fn start_block(
         source_planned_block_id: payload.source_planned_block_id,
         feedback: None,
         task_status_outcomes: None,
-    }).map(Json)
+    })?;
+
+    // Transition → EventLog linkage (active blocks only, gap skipped)
+    write_timeblock_eventlog(&state, scope_key, "block_start", &result.active.name, &result.active.start_id, &result.active.task_ids);
+
+    Ok(Json(result))
 }
 
 /// POST /timeblocks/end — guard: current must be active. Creates gap.
@@ -298,7 +303,7 @@ async fn end_block(
         return Err(conflict("cannot end: must stop first (use POST /timeblocks/stop)"));
     }
 
-    do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
+    let result = do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
         block_type: "gap".to_string(),
         name: None,
         mode: None,
@@ -307,7 +312,15 @@ async fn end_block(
         source_planned_block_id: None,
         feedback: payload.feedback,
         task_status_outcomes: payload.task_status_outcomes,
-    }).map(Json)
+    })?;
+
+    // Transition → EventLog linkage: write block_feedback for the completed active block
+    // Gap block creation does NOT write EventLog (per #759 design)
+    if let Some(ref completed) = result.completed {
+        write_timeblock_eventlog(&state, scope_key, "block_feedback", &completed.name, &completed.start_id, &completed.task_ids);
+    }
+
+    Ok(Json(result))
 }
 
 // ── #780 stop/pause/resume ──────────────────────────────────────────
