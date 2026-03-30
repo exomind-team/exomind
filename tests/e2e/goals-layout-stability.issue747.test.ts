@@ -174,6 +174,14 @@ async function openNodeContextMenu(page: Page, testId: string, clientX: number, 
   });
 }
 
+async function clickFlowNodeCenter(page: Page, testId: string) {
+  const box = await page.getByTestId(testId).boundingBox();
+  if (!box) {
+    throw new Error(`expected measurable node bounds before clicking ${testId}`);
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
 function trackGoalWarnings(page: Page): string[] {
   const { goalWarnings } = createGoalWarningTracker(page);
   return goalWarnings;
@@ -901,9 +909,16 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       })
       .toBe(true);
 
-    await page.getByTestId(firstGoalTestId).click();
     const detailPanel = page.getByTestId('goals-page').getByRole('complementary');
-    await expect(detailPanel).toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(async () => {
+        await clickFlowNodeCenter(page, firstGoalTestId);
+        return await detailPanel.isVisible();
+      }, {
+        timeout: 10000,
+        message: 'expected goal detail panel to open while the selected goal is still moving',
+      })
+      .toBe(true);
     await expect(page.getByText('目标详情')).toBeVisible({ timeout: 10000 });
 
     expectVisibleGraphSnapshot(
@@ -1359,8 +1374,16 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       targetGoalTestId: secondGoalTestId,
     });
 
-    await page.getByTestId(firstGoalTestId).click();
-    await expect(page.getByTestId('goals-page').getByRole('complementary')).toBeVisible({ timeout: 10000 });
+    const detailPanel = page.getByTestId('goals-page').getByRole('complementary');
+    await expect
+      .poll(async () => {
+        await clickFlowNodeCenter(page, firstGoalTestId);
+        return await detailPanel.isVisible();
+      }, {
+        timeout: 10000,
+        message: 'expected goal detail panel to open before starting moving edge-create coverage',
+      })
+      .toBe(true);
 
     const baselineMetrics = await readReconnectMetrics();
     expect(baselineMetrics, 'edge-create: expected measurable baseline metrics').not.toBeNull();
@@ -2656,6 +2679,305 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       3,
       2,
       'invalid-edge-reconnect:after-invalid-release',
+    );
+
+    expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
+  test('keeps the original edge visible when reconnecting to Me before the simulation settles', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+    const countSimulationEnds = () => goalWarnings.filter((entry) => entry.includes('simulation:end')).length;
+    const countSimulationTicks = () => goalWarnings.filter((entry) => entry.includes('simulation:tick')).length;
+    const countReconnectStarts = () => goalWarnings.filter((entry) => entry.includes('page:interaction-reconnect-start')).length;
+    const countReconnectEnds = () => goalWarnings.filter((entry) => entry.includes('page:interaction-reconnect-end')).length;
+    const countInvalidReconnectEnds = () => goalWarnings.filter((entry) => (
+      entry.includes('page:interaction-reconnect-end')
+      && entry.includes('"toNodeId":"me"')
+      && entry.includes('"isValid":true')
+    )).length;
+    const countInvalidReconnects = () => goalWarnings.filter((entry) => (
+      entry.includes('page:interaction-reconnect {')
+      && entry.includes('"source":"me"')
+      && entry.includes('"target":"me"')
+    )).length;
+
+    await primeGoalsPageWithGraph(page, makeStarGraph());
+    await gotoGoalsPage(page);
+
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(2);
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected baseline simulation:end before moving invalid reconnect coverage',
+      })
+      .toBe(true);
+
+    const tickCountBeforeGrowth = countSimulationTicks();
+    const endCountBeforeGrowth = countSimulationEnds();
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 180, 150);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(4);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(3);
+    await expect(page.getByTestId('goals-hop-rings')).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(() => {
+        const tickCount = countSimulationTicks();
+        const endCount = countSimulationEnds();
+        return tickCount > tickCountBeforeGrowth && endCount === endCountBeforeGrowth;
+      }, {
+        timeout: 5000,
+        message: 'expected a moving simulation window before invalid reconnect coverage',
+      })
+      .toBe(true);
+
+    await page.getByRole('button', { name: '编辑' }).click();
+
+    const readReconnectMetrics = () => page.evaluate(() => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const goalA = document.querySelector('[data-testid="goal-flow-node-goal-a"]') as HTMLElement | null;
+      const goalB = document.querySelector('[data-testid="goal-flow-node-goal-b"]') as HTMLElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const goalsPage = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const meWrapper = me?.closest('.react-flow__node') as HTMLElement | null;
+      const goalAWrapper = goalA?.closest('.react-flow__node') as HTMLElement | null;
+      const goalBWrapper = goalB?.closest('.react-flow__node') as HTMLElement | null;
+      const nodesContainer = document.querySelector('.react-flow__nodes') as HTMLElement | null;
+      const reactFlowWrapper = document.querySelector('[data-testid="rf__wrapper"]') as HTMLElement | null;
+      if (!me || !goalA || !goalB || !ring1) {
+        return null;
+      }
+      const getCenter = (element: Element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+      return {
+        meCenter: getCenter(me),
+        goalACenter: getCenter(goalA),
+        goalBCenter: getCenter(goalB),
+        ring1Center: getCenter(ring1),
+        scrollY: window.scrollY,
+        pageTop: goalsPage?.getBoundingClientRect().top ?? null,
+        meTransform: meWrapper?.style.transform ?? null,
+        goalATransform: goalAWrapper?.style.transform ?? null,
+        goalBTransform: goalBWrapper?.style.transform ?? null,
+        meWrapperCenter: meWrapper ? getCenter(meWrapper) : null,
+        nodesContainerTop: nodesContainer?.getBoundingClientRect().top ?? null,
+        reactFlowScrollTop: reactFlowWrapper?.scrollTop ?? null,
+        reactFlowScrollLeft: reactFlowWrapper?.scrollLeft ?? null,
+      };
+    });
+
+    const edgeHitArea = page.getByTestId('task-flow-edge-hit-area-edge-me-a');
+    const edgeBBox = await edgeHitArea.boundingBox();
+    if (!edgeBBox) {
+      throw new Error('expected measurable edge hit area before moving invalid reconnect coverage');
+    }
+
+    await page.mouse.click(
+      edgeBBox.x + edgeBBox.width / 2,
+      edgeBBox.y + edgeBBox.height / 2,
+    );
+
+    const targetUpdaters = page.locator('.react-flow__edgeupdater-target');
+    await expect(targetUpdaters.first()).toBeVisible({ timeout: 5000 });
+    const goalABox = await page.getByTestId('goal-flow-node-goal-a').boundingBox();
+    const meBox = await page.getByTestId('goal-flow-node-me').boundingBox();
+    if (!goalABox || !meBox) {
+      throw new Error('expected measurable node bounds for moving invalid reconnect coverage');
+    }
+
+    const updaterCandidates = await targetUpdaters.evaluateAll((elements) => (
+      elements.map((element) => {
+        const rect = (element as HTMLElement | SVGElement).getBoundingClientRect();
+        return {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          centerX: rect.x + rect.width / 2,
+          centerY: rect.y + rect.height / 2,
+        };
+      })
+    ));
+    const updaterMatch = updaterCandidates
+      .map((candidate, index) => ({
+        index,
+        ...candidate,
+      }))
+      .sort((left, right) => {
+        const leftDistance = Math.hypot(
+          left.centerX - (goalABox.x + goalABox.width / 2),
+          left.centerY - (goalABox.y + goalABox.height / 2),
+        );
+        const rightDistance = Math.hypot(
+          right.centerX - (goalABox.x + goalABox.width / 2),
+          right.centerY - (goalABox.y + goalABox.height / 2),
+        );
+        return leftDistance - rightDistance;
+      })[0];
+    if (!updaterMatch) {
+      throw new Error('expected measurable edge updater bounds for moving invalid reconnect coverage');
+    }
+    const updaterLocator = targetUpdaters.nth(updaterMatch.index);
+
+    const baselineMetrics = await readReconnectMetrics();
+    const baselineEdgeState = await readVisibleEdgeState(page, 'edge-me-a');
+    expect(baselineMetrics, 'moving-invalid-edge-reconnect: expected measurable baseline metrics').not.toBeNull();
+    expect(baselineEdgeState, 'moving-invalid-edge-reconnect: expected measurable baseline edge state').not.toBeNull();
+    const baselineViewport = await readViewportTransform(page);
+    const simulationEndCountBeforeReconnect = countSimulationEnds();
+    const simulationTickCountBeforeReconnect = countSimulationTicks();
+    const reconnectStartCountBefore = countReconnectStarts();
+    const reconnectEndCountBefore = countReconnectEnds();
+    const invalidReconnectEndCountBefore = countInvalidReconnectEnds();
+    const invalidReconnectCountBefore = countInvalidReconnects();
+    const liveUpdaterBox = await updaterLocator.boundingBox();
+    if (!liveUpdaterBox) {
+      throw new Error('expected live edge updater bounds for moving invalid reconnect coverage');
+    }
+
+    await page.mouse.move(
+      liveUpdaterBox.x + liveUpdaterBox.width / 2,
+      liveUpdaterBox.y + liveUpdaterBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      meBox.x + meBox.width / 2,
+      meBox.y + meBox.height / 2,
+      { steps: 12 },
+    );
+
+    await expect
+      .poll(() => countReconnectStarts(), {
+        timeout: 5000,
+        message: 'expected reconnect-start warn log after beginning a moving invalid reconnect gesture through the real edge updater',
+      })
+      .toBeGreaterThan(reconnectStartCountBefore);
+
+    const liveMeBox = await page.getByTestId('goal-flow-node-me').boundingBox();
+    if (!liveMeBox) {
+      throw new Error('expected live Me bounds before releasing moving invalid reconnect gesture');
+    }
+    await page.mouse.move(
+      liveMeBox.x + liveMeBox.width / 2,
+      liveMeBox.y + liveMeBox.height / 2,
+      { steps: 4 },
+    );
+    await page.mouse.up();
+
+    await expect
+      .poll(() => countReconnectEnds(), {
+        timeout: 5000,
+        message: 'expected reconnect-end warn log after releasing a moving invalid reconnect gesture',
+      })
+      .toBeGreaterThan(reconnectEndCountBefore);
+    await expect
+      .poll(() => countInvalidReconnectEnds(), {
+        timeout: 5000,
+        message: 'expected moving invalid reconnect gesture to land on the Me node with React Flow reporting isValid=true',
+      })
+      .toBeGreaterThan(invalidReconnectEndCountBefore);
+    await expect
+      .poll(() => countInvalidReconnects(), {
+        timeout: 5000,
+        message: 'expected moving invalid reconnect gesture to emit an app-level reconnect attempt targeting Me',
+      })
+      .toBeGreaterThan(invalidReconnectCountBefore);
+
+    await expect
+      .poll(() => {
+        const tickCount = countSimulationTicks();
+        const endCount = countSimulationEnds();
+        return tickCount > simulationTickCountBeforeReconnect && endCount === simulationEndCountBeforeReconnect;
+      }, {
+        timeout: 5000,
+        message: 'expected simulation ticks to continue before the next simulation:end after reconnecting to Me during motion',
+      })
+      .toBe(true);
+
+    await expect
+      .poll(async () => {
+        const reconnectMetrics = await readReconnectMetrics();
+        const edgeState = await readVisibleEdgeState(page, 'edge-me-a');
+        if (!reconnectMetrics || !baselineMetrics || !edgeState || !baselineEdgeState) return null;
+        const viewportAfterReconnect = await readViewportTransform(page);
+        return {
+          meStable:
+            Math.abs(reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x) <= 2
+            && Math.abs(reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y) <= 2,
+          meDeltaX: Number((reconnectMetrics.meCenter.x - baselineMetrics.meCenter.x).toFixed(2)),
+          meDeltaY: Number((reconnectMetrics.meCenter.y - baselineMetrics.meCenter.y).toFixed(2)),
+          goalADeltaX: Number((reconnectMetrics.goalACenter.x - baselineMetrics.goalACenter.x).toFixed(2)),
+          goalADeltaY: Number((reconnectMetrics.goalACenter.y - baselineMetrics.goalACenter.y).toFixed(2)),
+          goalBDeltaX: Number((reconnectMetrics.goalBCenter.x - baselineMetrics.goalBCenter.x).toFixed(2)),
+          goalBDeltaY: Number((reconnectMetrics.goalBCenter.y - baselineMetrics.goalBCenter.y).toFixed(2)),
+          meWrapperDeltaY: Number((((reconnectMetrics.meWrapperCenter?.y ?? 0) - (baselineMetrics.meWrapperCenter?.y ?? 0))).toFixed(2)),
+          scrollDeltaY: Number(((reconnectMetrics.scrollY ?? 0) - (baselineMetrics.scrollY ?? 0)).toFixed(2)),
+          pageTopDeltaY: Number((((reconnectMetrics.pageTop ?? 0) - (baselineMetrics.pageTop ?? 0))).toFixed(2)),
+          nodesContainerTopDeltaY: Number((((reconnectMetrics.nodesContainerTop ?? 0) - (baselineMetrics.nodesContainerTop ?? 0))).toFixed(2)),
+          reactFlowScrollTopDeltaY: Number((((reconnectMetrics.reactFlowScrollTop ?? 0) - (baselineMetrics.reactFlowScrollTop ?? 0))).toFixed(2)),
+          reactFlowScrollLeftDeltaX: Number((((reconnectMetrics.reactFlowScrollLeft ?? 0) - (baselineMetrics.reactFlowScrollLeft ?? 0))).toFixed(2)),
+          ringsAligned:
+            Math.abs(reconnectMetrics.ring1Center.x - reconnectMetrics.meCenter.x) <= 6
+            && Math.abs(reconnectMetrics.ring1Center.y - reconnectMetrics.meCenter.y) <= 6,
+          viewportChanged: JSON.stringify(viewportAfterReconnect) !== JSON.stringify(baselineViewport),
+          meTransformChanged: reconnectMetrics.meTransform !== baselineMetrics.meTransform,
+          edgeStillVisible: edgeState.edgeOpacity > 0.01 && edgeState.edgeWidth > 0,
+          edgeMarkerPreserved: edgeState.markerEnd === baselineEdgeState.markerEnd,
+          edgePathValid: edgeState.path.length > 0 && !edgeState.path.includes('NaN'),
+        };
+      }, {
+        timeout: 5000,
+        message: 'expected moving invalid reconnect gesture to preserve the original visible edge and keep Me/hop rings stable',
+      })
+      .toMatchObject({
+        meStable: true,
+        meDeltaX: 0,
+        meDeltaY: 0,
+        meWrapperDeltaY: 0,
+        scrollDeltaY: 0,
+        pageTopDeltaY: 0,
+        nodesContainerTopDeltaY: 0,
+        reactFlowScrollTopDeltaY: 0,
+        reactFlowScrollLeftDeltaX: 0,
+        ringsAligned: true,
+        viewportChanged: false,
+        meTransformChanged: false,
+        edgeStillVisible: true,
+        edgeMarkerPreserved: true,
+        edgePathValid: true,
+      });
+
+    await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="task-flow-edge-marker-edge-me-a"]')).toBeAttached();
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(3);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      4,
+      3,
+      'moving-invalid-edge-reconnect:after-invalid-release-before-settle',
+    );
+
+    await expect
+      .poll(() => countSimulationEnds(), {
+        timeout: 15000,
+        message: 'expected the moving graph to settle after reconnecting to Me without losing visibility',
+      })
+      .toBeGreaterThan(simulationEndCountBeforeReconnect);
+
+    await expect(page.locator('[data-testid="task-flow-edge-visible-edge-me-a"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid^="task-flow-edge-visible-"]')).toHaveCount(3);
+    expectVisibleGraphSnapshot(
+      await snapshotRenderVisibility(page),
+      4,
+      3,
+      'moving-invalid-edge-reconnect:after-invalid-release-after-settle',
     );
 
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);

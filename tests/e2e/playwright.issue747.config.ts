@@ -17,7 +17,7 @@ export default defineConfig({
   use: getBaseUse(BASE_URL),
   projects: [getChromiumProject()],
   webServer: {
-    command: 'EXOMIND_JS_RUNTIME=node node scripts/test/runtime-dispatch.cjs vite-dev',
+    command: `EXOMIND_JS_RUNTIME=node node scripts/test/runtime-dispatch.cjs issue77-preview ${WEB_PORT}`,
     cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: true,
