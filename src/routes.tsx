@@ -133,6 +133,11 @@ const AgentsPage = lazy(async () => {
   return { default: module.AgentsPage };
 });
 
+const WorkbenchPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/workbench/WorkbenchPage');
+  return { default: module.WorkbenchPage };
+});
+
 const GoalsPage = lazy(async () => {
   const module = await import('@/ui/app/pages/goals/GoalsPage');
   return { default: module.GoalsPage };
@@ -937,6 +942,18 @@ const newAgentsRoute = createRoute({
   },
 });
 
+const newWorkbenchRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/workbench',
+  component: function NewWorkbench() {
+    return (
+      <LazyPage>
+        <WorkbenchPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newUpdateRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/update',
@@ -1033,6 +1050,7 @@ const newRouteTree = newRootRoute.addChildren([
   newVolcanoAsrTestRoute,
   newSyncTestRoute,
   newAgentsRoute,
+  newWorkbenchRoute,
   newUpdateRoute,
   newAgentDetailRoute,
   newActorDetailRoute,
@@ -1044,5 +1062,4 @@ const newRouteTree = newRootRoute.addChildren([
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
-
 

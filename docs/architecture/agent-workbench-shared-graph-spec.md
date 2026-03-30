@@ -211,7 +211,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  P1["Phase 1<br/>Flat Workbench<br/>平铺工作台"] --> P2["Phase 2<br/>Cross-Window Federation<br/>跨窗口联邦"]
+  P1["Phase 1<br/>Flat Workbench + Federation Skeleton<br/>平铺工作台 + 联邦骨架"] --> P2["Phase 2<br/>Expanded Cross-Window Federation<br/>增强跨窗口联邦"]
   P2 --> P3["Phase 3<br/>EventTape + Structured Projection<br/>事实层与结构化投影"]
   P3 --> P4["Phase 4<br/>Work-Area Projections<br/>Canvas / Network / Replay"]
 ```
@@ -1093,6 +1093,31 @@ type StoredTapeEvent = {
 2. append-only（追加写入）
 3. 派生层单独存，不回写原始事件
 
+## 9.6 Phase 1 存储位置与迁移边界
+
+当前必须明确：Phase 1 不是一次性把所有存储都搬完，而是分层落位。
+
+### Phase 1 推荐落位
+
+| 层 | Phase 1 推荐落位 | 说明 |
+|---|---|---|
+| `Flat Workbench` 壳层、最近 pane 恢复 | 前端本地持久层（`localStorage / PouchDB`） | 允许先做可见恢复，不阻塞 `/workbench` 起步 |
+| `AgentSession -> SessionObject` 读模型桥接 | 前端 adapter + 现有 runtime API | 先桥接现有模型，不要求先反向改写 runtime 真相源 |
+| `FocusRun / EventTape` 正式事实层 | runtime 侧持久层（优先复用现有 SQLite 能力） | 不能长期只留在前端本地缓存 |
+| `signal / session / terminal` 原始输入 | 继续来自现有 runtime / signal 通道 | Workbench 先接入，不重复造第二份事实源 |
+
+### Phase 1 迁移原则
+
+1. `Slice A / B / E`
+   - 允许先用前端本地恢复模型完成可见工作台
+   - 但字段命名、对象边界、adapter 接口要向长期模型靠拢
+2. `Slice D`
+   - `EventTape` 进入正式事实层时，必须优先挂到 runtime 持久化能力
+   - 不能让前端 `localStorage / PouchDB` 成为长期事实源
+3. `Cross-Window Federation`
+   - 如果需要跨窗口共享当前空间与当前 pane 集合，优先通过共享 service / runtime 通道实现
+   - 不能依赖每个窗口各自维护一份互不相认的本地状态
+
 ---
 
 ## 10. 模块、服务与桥接层
@@ -1221,7 +1246,41 @@ MVP 规则：
 | `loadActiveBlock()` | `resolveRunningFocusRun()` | 先走 adapter |
 | `endBlock()` | `endFocusRun()` | 仍由旧服务执行，结果映射回新语义 |
 
-## 11.3 `AgentsPage`
+## 11.3 `EventTape` 与现有 `eventlog / signals` 的阶段关系
+
+这一条必须说清楚，否则后面会重复造“第二套事件系统”。
+
+### 当前阶段结论
+
+1. `eventlog`
+   - 当前仍是已有事实日志基础设施
+   - Phase 1 不能直接把它当成废弃系统
+2. `signals`
+   - 当前仍是实时分发与路由基础设施
+   - Phase 1 不能要求它先完全改写成 Workbench 对象模型
+3. `EventTape`
+   - 当前是 Workbench 规格下的事实层目标形态
+   - 需要通过 adapter 逐步和现有 `eventlog / signals` 对齐，而不是平地起第二套孤立存储
+
+### 分阶段要求
+
+1. `Slice A / B / C / E`
+   - `EventTape` 可以只停留在接口与对象语义层
+   - 旧系统继续承担现有运行时事实输入
+2. `Slice D`
+   - 必须明确 `EventTape` 的正式写入位置、序列化格式、以及和现有 `eventlog` 的关系
+   - 若暂时复用现有 SQLite 事件日志实现，也必须保证 `Workbench` 读写接口稳定
+3. 长期目标
+   - `EventTape` 成为 Workbench 对象可追溯事实层
+   - `signals / session stdout / terminal stream` 通过统一 ingress（事件入口）进入它
+
+### 强约束
+
+1. 不允许 Workbench 自己再造一套脱离 `eventlog / signals` 的孤立“事实流”
+2. 不允许派生摘要回写覆盖原始事件
+3. `Slice D` 关闭前，必须给出 `raw` 序列化与 retention（保留）策略
+
+## 11.4 `AgentsPage`
 
 当前现状：
 
@@ -1241,7 +1300,7 @@ MVP 规则：
 1. 只能复用它的 read model 和交互经验
 2. 不能直接把它的对象语义搬进共享工作图谱
 
-## 11.4 `TaskDagPage`
+## 11.5 `TaskDagPage`
 
 当前现状：
 
@@ -1255,7 +1314,7 @@ MVP 规则：
 2. 不能直接复用状态持久化方式
 3. 必须先做 `TaskDagViewStateAdapter`
 
-## 11.5 路由兼容策略
+## 11.6 路由兼容策略
 
 当前现状：
 
@@ -1273,9 +1332,10 @@ MVP 兼容规则：
 3. `/agents/agent/*`
 4. `/agents/actor/*`
 5. `/agents/signal/*`
-6. `/agents/pty/*`
-   - 全部保留 shim（兼容壳）
-   - 内部映射到 `WorkbenchPage + SurfaceNavigationState`
+6. `legacy /agents/pty/*`
+   - 当前仍属于 `AgentsPage` 内部裸 `pushState` 次级路径
+   - 不作为 `Slice A` 第一批 shim 完成标准
+   - 归入后续路由正规化工作
 
 强约束：
 
@@ -1296,14 +1356,14 @@ MVP 兼容规则：
 
 但当前开工落点必须收紧为：
 
-> **先做 `Flat Workbench（平铺工作台）`，再做 `Cross-Window Federation（跨窗口联邦）`，最后再把 `canvas / network / replay` 做成统一投影。**
+> **先做 `Flat Workbench（平铺工作台）` 并立起最小 `federation skeleton（联邦骨架）`，再增强 `Cross-Window Federation（跨窗口联邦）`，最后再把 `canvas / network / replay` 做成统一投影。**
 
 这意味着：
 
 1. Phase 1 不把自由画布当成阻塞项
 2. Phase 1 先交付“一个稳定的多会话工作台”
 3. `agent / PTY / SSH / browser runtime` 先通过统一 `SessionObject + RuntimeBinding` 纳管
-4. 跨窗口先做“共享同一空间语义”的联邦骨架，而不是完整窗口管理器
+4. Phase 1 只做“共享同一空间语义”的联邦骨架，增强型跨窗口能力留到后续阶段
 
 ## 12.2 Phase 1：`Flat Workbench（平铺工作台）`
 
@@ -1324,19 +1384,73 @@ Phase 1 必须具备：
    - 先支撑“主窗口 + 次窗口/次承载面”的基本联邦
 6. `EventTape`
    - 至少记录会话输入、会话输出、系统控制事件
+   - 这是 Phase 1 终局要求，不是 `Slice A` 首刀阻塞项
 7. `/agents/*` shim
    - 旧路由可以逐步映射到新的 `WorkbenchPage`
+   - 允许先从代表性旧入口开始收口，再逐步覆盖完整兼容面
+
+### 12.2.1 Phase 1 `default space` 生命周期
+
+为了避免 `WorkbenchSpace` 继续停留在抽象名词，Phase 1 先把默认空间规则写死：
+
+1. 首次打开 `/workbench`
+   - 若本地还没有任何空间记录，则自动创建一个 `default space`
+2. 再次打开 `/workbench`
+   - 优先恢复最近一次活跃的同一默认空间
+3. `default space` 的 Phase 1 身份规则
+   - 当前本地 profile（本地档案）下固定使用同一个稳定 `spaceId`
+   - 在没有多空间 UI 之前，默认实现就是 `default-space`
+4. 主窗口与次窗口
+   - 必须通过同一个 `resolveDefaultSpace()` 入口拿到当前默认空间
+   - 若默认空间已存在，次窗口不得再次创建第二份“默认空间”
+5. Phase 1 不提供：
+   - 空间删除 UI
+   - 空间归档 UI
+   - 多空间切换管理 UI
+6. Phase 1 允许：
+   - 在模型层保留 `spaceId`
+   - 在文案与测试里显式显示当前空间标识
+7. 进入 Phase 2 之前：
+   - `default space` 必须是稳定宿主，而不是临时页面状态
+
+### 12.2.2 跨窗口共享同一 `WorkbenchSpace` 的执行契约
+
+这部分不是长期愿景描述，而是后续 `Slice C` 必须落地的执行约束。
+
+#### 共享状态（cross-window shared state）
+
+1. `spaceId`
+2. 当前空间内可见 pane 集合
+3. `SessionObject / RuntimeBinding` 的附着关系
+4. 当前运行中的 `FocusRun` 标识
+5. 最近恢复集合的版本号或快照标识
+
+#### 严格本地状态（surface-local state）
+
+1. 某个窗口当前选中的 pane
+2. 局部滚动位置
+3. inspector 展开折叠
+4. 仅服务当前窗口的临时 hover / selection / draft
+
+#### 单写者规则（single-writer rule）
+
+1. 事实层写入只能经过统一 service / runtime ingress（事件入口）
+2. 任一窗口都不能直接把本地临时状态当成空间真相源
+3. 跨窗口共享对象的改动，必须通过同一个 `WorkbenchService` 契约落盘或广播
+4. `SurfaceNavigationState.localState` 默认视为窗口本地态，不参与事实层同步
 
 ### Phase 1 runtime 支持分档
 
 1. `must ship（本阶段必须可见可用）`
    - `agent-backed session`
    - 平铺 pane 恢复
-   - `/agents/* -> /workbench` 兼容落点
+   - 至少一个 `runtime-attached non-agent pane（带运行时附着的非 agent 面板）`
+   - 当前默认来源是 `PTY / SSH`
+   - `/agents` 与 `/agents/chat/* -> /workbench` 的代表性兼容落点
 2. `should ship（本阶段优先纳管）`
-   - 现有 `PTY / SSH` 通过统一 `RuntimeBinding` 进入工作台语义
-   - 至少具备恢复、展示或附着能力之一
+   - 现有 `PTY / SSH` 通过统一 `RuntimeBinding` 深化进入工作台语义
    - 不要求在本阶段先稳定为独立 `terminal SessionKind`
+   - 也不要求在本阶段一次做完完整终端产品面
 3. `model-only（只做模型预留）`
    - `browser-runtime`
    - 只要求统一模型入口与注册语义，不作为本阶段关闭条件
@@ -1394,6 +1508,8 @@ Phase 1 不只是交付抽象模型，它必须给出人类可直接看到、可
    - 例如 `agent + PTY` 或 `agent + SSH`
    - 至少一个 pane 应来自真实运行时恢复或真实运行时挂载
    - 至少一个 pane 不是 `agent-backed session`
+   - `Slice A` 首笔实现允许先以 `workbench-modeled non-agent pane（工作台建模的非 agent pane）` 起步
+   - 但 Phase 1 关闭前必须接上真实 `PTY / SSH` 注册或恢复链路
 3. 关闭并重新打开后
    - 最近工作台能恢复
 4. 从主窗口派生一个次窗口工作面
@@ -1409,7 +1525,21 @@ Phase 1 最低人类验收清单：
 5. 桌面端打开次窗口后，两个窗口仍然指向同一空间语义
 6. 基础会话输入/输出可继续进入事实流
 7. 至少 2 个代表性旧入口仍可落到正确工作台位置
-   - 例如 `/agents/chat/*`、`/agents/pty/*`
+   - 第一批以 `/agents`、`/agents/chat/*` 为准
+   - `legacy /agents/pty/*` 归入后续路由正规化工作
+
+## 12.7 评审闭环状态
+
+下面这张表用于回答“上一轮高风险评审意见现在还剩什么”：
+
+| 评审点 | 当前状态 | 结论 |
+|---|---|---|
+| 自建窗口管理器过重 | 已收口为 `Phase 2+`，Phase 1 不做完整窗口管理器 | 已解决 |
+| 关系类型过多 | 已收口为 Phase 1 最小关系集与操作别名 | 已解决 |
+| `Signal Network` 直接并入会过重 | 已明确为长期 `projection`，Phase 1 与旧页共存 | 已解决 |
+| `default space` 生命周期未定义 | 本版补充了 Phase 1 默认空间规则 | 已解决 |
+| `EventTape` 与 `eventlog / signals` 关系不清 | 本版补充了分阶段关系，但正式落库仍留到 `Slice D` | 部分解决 |
+| `tape_events retention / compression` 未定义 | 仍未最终定稿，但不阻塞 `Slice A / B / C / E` | 延后到 `Slice D` |
 
 ---
 
@@ -1421,7 +1551,7 @@ Phase 1 最低人类验收清单：
 
 1. 新增 `WorkbenchPage.tsx`
 2. 接入 `/workbench`
-3. 建立 `/agents/*` shim
+3. 分成 `Slice A1` 与 `Slice A2`
 4. 提供固定或半固定的多 pane 布局
 
 交付标准：
@@ -1429,6 +1559,18 @@ Phase 1 最低人类验收清单：
 1. 壳层能打开
 2. 不打断当前移动端全屏与二级页面
 3. 平铺工作面能稳定显示多个 pane
+
+### `Slice A1`
+
+1. 直接访问 `/workbench`
+2. 创建或恢复 `default space`
+3. 展示一个 `agent-backed session pane + non-agent pane`
+
+### `Slice A2`
+
+1. 建立代表性旧入口 shim
+2. 优先覆盖 `/agents` 或 `/agents/chat/*` 其中之一
+3. 明确返回路径与空间落点语义
 
 ## 13.2 Slice B：统一会话与运行时注册表
 
@@ -1459,6 +1601,20 @@ Phase 1 最低人类验收清单：
 1. 可以从主窗口打开第二个工作面
 2. 新窗口能加载同一空间中的子集视图
 3. 不要求完整窗口拖放与任意停靠
+
+补充执行契约：
+
+1. 共享：
+   - `spaceId`
+   - pane membership（pane 归属）
+   - `SessionObject / RuntimeBinding` 关联
+2. 本地：
+   - `SurfaceNavigationState.localState`
+   - 当前窗口选中的 pane
+   - 当前窗口的滚动和临时 UI 状态
+3. 写入：
+   - 多窗口都通过统一 service 修改共享状态
+   - 事实层写入不能由窗口各自直接追加本地日志
 
 ## 13.4 Slice D：`FocusRun + EventTape` 基础接入
 
@@ -1505,11 +1661,16 @@ Phase 1 最低人类验收清单：
 
 ## 15. 仍保留的开放问题
 
-1. `default space` 的创建、归档、删除生命周期仍需补充
-2. `browser runtime` 是长期保持在 `RuntimeBinding` 层，还是升级为 `BrowserNodeObject`
-3. `EventTape` 与现有 `eventlog / signals` 的最终归属仍需补明确迁移关系
-4. `tape_events` 的 retention / compression / backpressure 策略仍需补充
-5. `workbench_relations` 的端点类型约束是写在 schema 还是 service 层
+## 15.1 不阻塞 `Slice A / B / C / E` 的开放问题
+
+1. `browser runtime` 是长期保持在 `RuntimeBinding` 层，还是升级为 `BrowserNodeObject`
+2. `workbench_relations` 的端点类型约束是写在 schema 还是 service 层
+
+## 15.2 `Slice D / F` 前必须收口的问题
+
+1. `EventTape` 与现有 `eventlog / signals` 的最终落库与归属关系
+2. `tape_events` 的 retention / compression / backpressure 策略
+3. `raw` 事件的序列化约定（JSON / chunk / offset / idempotency 规则）
 
 ---
 

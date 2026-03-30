@@ -75,13 +75,54 @@
    - `agent-backed session`
    - 双 pane 工作面
    - 最近工作台恢复
+   - 至少一个 `runtime-attached non-agent pane`
+   - 当前默认来源是 `PTY / SSH`
 2. `should ship`
    - 现有 `PTY / SSH` 被统一纳入 `RuntimeBinding`
-   - 至少可以恢复、展示或附着到工作台
    - 不要求在本阶段先稳定为独立 `terminal SessionKind`
+   - 也不要求在本阶段一次做完完整终端产品面
 3. `model-only`
    - `browser-runtime`
    - 只要求模型预留与统一注册入口
+
+## 3.1.2 Phase 1 `default space` 生命周期
+
+1. 第一次打开 `/workbench`
+   - 若还没有空间记录，则自动创建一个 `default space`
+2. 再次打开 `/workbench`
+   - 优先恢复最近一次活跃的同一默认空间
+3. `default space` 的 Phase 1 身份规则
+   - 当前本地 profile 下固定使用一个稳定 `spaceId`
+   - 在没有多空间 UI 之前，默认实现就是 `default-space`
+4. 主窗口与次窗口
+   - 必须通过同一个 `resolveDefaultSpace()` 入口拿到当前默认空间
+   - 若默认空间已存在，次窗口不得再次创建第二份“默认空间”
+5. Phase 1 不提供：
+   - 空间删除 UI
+   - 空间归档 UI
+   - 多空间管理 UI
+6. Phase 1 必须提供：
+   - 可见的 `spaceId / spaceName`
+   - 稳定的最近工作台恢复入口
+
+## 3.1.3 跨窗口共享空间契约
+
+这部分是 `Slice C` 的执行契约，不是只停留在愿景层的口号。
+
+1. 跨窗口共享：
+   - `spaceId`
+   - pane membership（pane 归属）
+   - `SessionObject / RuntimeBinding` 关联
+   - 当前运行中的 `FocusRun` 标识
+2. 严格窗口本地：
+   - 当前窗口选中的 pane
+   - 滚动位置
+   - inspector 展开折叠
+   - 临时 hover / selection / draft
+3. 单写者规则：
+   - 共享状态必须通过统一 service 更新
+   - 事实层写入不能由窗口各自直接追加本地日志
+   - `SurfaceNavigationState.localState` 默认视为窗口本地态
 
 ## 3.2 最小关系集
 
@@ -271,13 +312,29 @@ flowchart LR
 1. `WorkbenchPage.tsx`
 2. `flat preset（平铺预设）`
 3. `/workbench` 路由入口
-4. `/agents/*` shim
+4. 代表性旧入口 shim（第一批以 `/agents`、`/agents/chat/*` 为准）
+5. `legacy /agents/pty/*` 留在后续路由正规化，不作为第一批 shim 完成标准
+
+执行备注：
+
+1. 第一个 red-green loop 只要求：
+   - `/workbench` 路由存在
+   - 平铺壳层可见
+   - 至少 2 个 pane 同时可见
+   - 且至少 1 个 pane 明确不是 `agent-backed session`
+   - 允许先以 `workbench-modeled non-agent pane（工作台建模的非 agent pane）` 起步
+   - 但 Phase 1 关闭前必须接上真实 `PTY / SSH` 注册或恢复链路
+2. 代表性旧入口 shim
+   - 允许作为 Slice A 后半段继续补齐
+   - 不要求在第一笔实现里一次覆盖全部 `/agents/*`
+   - `legacy /agents/pty/*` 不算第一笔必须覆盖项
 
 验收：
 
 1. 页面能打开
 2. 可稳定显示多个 pane
-3. 不破坏当前移动端二级页面
+3. 当前空间标识可见
+4. 不破坏当前移动端二级页面
 
 ## 5.2 Slice B：Session / Runtime Federation
 
@@ -307,6 +364,20 @@ flowchart LR
 1. 次窗口可打开
 2. 次窗口能展示同一空间下的子集工作面
 3. 不要求任意停靠与拖拽
+
+执行契约：
+
+1. 共享：
+   - `spaceId`
+   - pane membership
+   - `SessionObject / RuntimeBinding` 关联
+2. 本地：
+   - `SurfaceNavigationState.localState`
+   - 当前窗口选中的 pane
+   - 当前窗口的滚动和临时 UI 状态
+3. 写入：
+   - 多窗口都通过统一 service 修改共享状态
+   - 事实层写入不能由窗口各自直接追加本地日志
 
 ## 5.4 Slice D：EventTape Ingress
 
@@ -360,6 +431,8 @@ flowchart LR
 3. 至少 2 个 session pane 可同时显示
    - 且至少 1 个 pane 对应真实运行时恢复或真实运行时挂载
    - 且至少 1 个 pane 不是 `agent-backed session`
+   - 若当前还处在 `Slice A1`，允许先是 modeled non-agent pane
+   - 进入 `Phase 1 close` 前必须升级为真实 `PTY / SSH` 运行时链路
 4. 最近工作台恢复可见
 5. 桌面端 / Tauri 下的次窗口工作面可见
 6. `browser runtime` 在 Phase 1 只要求模型预留与注册入口，不作为关闭条件
@@ -378,7 +451,8 @@ flowchart LR
 5. 在其中一个 pane 内继续操作
    - 预期：事实流继续记录，不出现“切窗口后丢状态”的明显断裂
 6. 打开代表性旧入口
-   - 例如 `/agents/chat/*`、`/agents/pty/*`
+   - 第一批以 `/agents`、`/agents/chat/*` 为准
+   - `legacy /agents/pty/*` 归入后续路由正规化
    - 预期：仍能落到正确的 `Workbench` pane / space / 返回路径
 
 ## 6.2.1 Given / When / Then 验收模板
@@ -403,11 +477,14 @@ flowchart LR
 ## 6.3 自动化与验证建议
 
 1. 单元测试
+   - `default space / recent panes` 恢复逻辑
    - `SessionObject / RuntimeBinding / SurfaceSlot` 的状态映射与恢复逻辑
 2. 集成测试
-   - `/agents/*` shim 到 `/workbench` 的兼容导航
+   - 代表性旧入口到 `/workbench` 的兼容导航
 3. E2E 测试
-   - `/workbench` 打开、跨 runtime 双 pane 显示、恢复最近工作台
+   - `/workbench` 打开
+   - 跨 runtime 双 pane 显示
+   - 最近工作台恢复
 4. 人类手测
    - 桌面端 / Tauri 的次窗口同空间语义
    - 基本 session 输入/输出仍正常
@@ -468,6 +545,17 @@ flowchart LR
 2. `SessionObject + RuntimeBinding` 是否已经成为统一入口
 3. 次窗口是否共享同一 `WorkbenchSpace`
 4. 文档和 issue 的阶段切分是否足够清楚
+
+## 8.3 对上一轮评审的闭环结论
+
+1. “不要自建窗口管理器”
+   - 已收敛，Phase 1 不做完整窗口管理器
+2. “`default space` 生命周期要说清楚”
+   - 已在本版补充默认空间规则
+3. “`EventTape` 与现有事件系统关系要讲清”
+   - 已明确：`Slice A / B / C / E` 先桥接，`Slice D` 再正式收口
+4. “每个阶段必须有人类可见验收”
+   - 已转成 Given / When / Then 和关闭 issue 门槛
 
 ---
 
