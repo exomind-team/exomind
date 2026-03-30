@@ -102,6 +102,22 @@ const sameTimestampHigherIdEvent: Event = {
   tags: new Set<string>(),
 };
 
+const refreshOnlySignalEvent: Event = {
+  id: 'evt-refresh-signal',
+  timestamp: new Date('2026-03-30T10:10:01.000Z').getTime(),
+  content: '',
+  tags: new Set<string>(['note']),
+  metadata: {
+    refreshOnly: true,
+    source: {
+      deviceId: 'device-refresh',
+      deviceName: 'Refresh Only',
+      platform: 'windows',
+      app: 'ExoMind',
+    },
+  },
+};
+
 describe('ChatPage incremental refresh issue 769', () => {
   const unsubscribe = vi.fn();
   const loadEventsDetailed = vi.fn<() => Promise<MockLoadEventsDetailedResult>>();
@@ -227,17 +243,12 @@ describe('ChatPage incremental refresh issue 769', () => {
     });
   });
 
-  it('reconciles full state when signaled refresh sees an empty delta（外部刷新信号遇到空增量时应回退全量对账）', async () => {
+  it('reconciles full state immediately for refresh-only signals（仅刷新信号应立即走全量对账）', async () => {
     loadEventsDetailed.mockReset();
     loadEventsDetailed
       .mockResolvedValueOnce({
         events: [initialEvent],
         semantics: 'full_snapshot',
-        snapshotRevision: 'rev-1',
-      })
-      .mockResolvedValueOnce({
-        events: [],
-        semantics: 'incremental_batch',
         snapshotRevision: 'rev-1',
       })
       .mockResolvedValueOnce({
@@ -255,20 +266,55 @@ describe('ChatPage incremental refresh issue 769', () => {
     expect(onEventCallback).not.toBeNull();
 
     await act(async () => {
-      onEventCallback?.(lateHistoricalEvent);
+      onEventCallback?.(refreshOnlySignalEvent);
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(loadEventsDetailed).toHaveBeenCalledTimes(3);
-    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
-      sinceId: 'evt-initial',
-      sinceTimestamp: initialEvent.timestamp,
-    });
-    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, undefined);
     expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
     expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
     expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"mode":"full"'));
+  });
+
+  it('refresh-only signals keep late historical events and new tail events together（外部刷新含历史补录和新尾事件时必须整页对账）', async () => {
+    const appendedNewestEvent: Event = {
+      id: 'evt-new-tail',
+      timestamp: new Date('2026-03-30T10:12:00.000Z').getTime(),
+      content: '外部同步带来的新尾事件',
+      tags: new Set<string>(),
+    };
+
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-mixed-1',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent, initialEvent, appendedNewestEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-mixed-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      onEventCallback?.(refreshOnlySignalEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, undefined);
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(screen.getByText('外部同步带来的新尾事件')).toBeInTheDocument();
   });
 
   it('replaces visible events when legacy cursor queries resolve as full snapshot（legacy 快照结果不应继续按增量 merge）', async () => {
@@ -344,5 +390,104 @@ describe('ChatPage incremental refresh issue 769', () => {
     expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
     expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
     expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+  });
+
+  it('forces full reconcile when poll sees revision drift with non-empty delta（轮询发现 revision 漂移且增量非空时也必须全量对账）', async () => {
+    const appendedNewestEvent: Event = {
+      id: 'evt-poll-new-tail',
+      timestamp: new Date('2026-03-30T10:12:30.000Z').getTime(),
+      content: '轮询先看到的新尾事件',
+      tags: new Set<string>(),
+    };
+
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-mixed-1',
+      })
+      .mockResolvedValueOnce({
+        events: [appendedNewestEvent],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rt-rev-mixed-2',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent, initialEvent, appendedNewestEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-mixed-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(3);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(screen.getByText('轮询先看到的新尾事件')).toBeInTheDocument();
+    expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"mode":"full"'));
+  });
+
+  it('replaces stale rows when RT cursor query is downgraded to full snapshot（RT cursor reset 后应直接按快照替换）', async () => {
+    const staleEvent: Event = {
+      id: 'evt-stale',
+      timestamp: new Date('2026-03-30T10:06:00.000Z').getTime(),
+      content: '应被移除的旧事件',
+      tags: new Set<string>(),
+    };
+    const rewrittenLatestEvent: Event = {
+      id: 'evt-rewritten-latest',
+      timestamp: new Date('2026-03-30T10:08:00.000Z').getTime(),
+      content: '重写后的新尾事件',
+      tags: new Set<string>(),
+    };
+
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent, staleEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-10',
+      })
+      .mockResolvedValueOnce({
+        events: [rewrittenLatestEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-11',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('应被移除的旧事件')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-stale',
+      sinceTimestamp: staleEvent.timestamp,
+    });
+    expect(screen.queryByText('应被移除的旧事件')).not.toBeInTheDocument();
+    expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(screen.getByText('重写后的新尾事件')).toBeInTheDocument();
   });
 });

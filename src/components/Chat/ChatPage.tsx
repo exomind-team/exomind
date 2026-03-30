@@ -88,6 +88,8 @@ interface ChatPageProps {
   showTimerWidget?: boolean;
 }
 
+type RefreshTrigger = 'poll' | 'event' | 'external-refresh';
+
 const UNKNOWN_DEVICE_LABEL = '未知设备';
 const UNKNOWN_PLATFORM_LABEL = '未知平台';
 const CLOSED_PROFILE_EVENTLOG_NAME = '未名';
@@ -123,6 +125,14 @@ function resolveEventLogUserDisplayName(currentUser?: string | null): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRefreshOnlyEvent(event: Event): boolean {
+  if (!isRecord(event.metadata)) {
+    return false;
+  }
+
+  return event.metadata.refreshOnly === true;
 }
 
 function readNonEmptyString(value: unknown): string | null {
@@ -214,7 +224,7 @@ export function ChatPage({
   const shouldStickToBottomRef = useRef(true);
   const refreshInFlightRef = useRef(false);
   const refreshQueuedRef = useRef(false);
-  const refreshQueuedTriggerRef = useRef<'poll' | 'event'>('poll');
+  const refreshQueuedTriggerRef = useRef<RefreshTrigger>('poll');
   const lastFullRefreshAtRef = useRef(0);
   const lastAppliedSnapshotRevisionRef = useRef<string | null | undefined>(undefined);
   const eventLogService = useRef(getEventLogService());
@@ -276,12 +286,15 @@ export function ChatPage({
 
   const refreshLatestEvents = useCallback(async (
     behavior: ScrollBehavior = 'smooth',
-    trigger: 'poll' | 'event' = 'poll',
+    trigger: RefreshTrigger = 'poll',
   ) => {
     const t0 = perfNow();
     const latestCursor = getLatestEventCursor(allEventsRef.current);
-    const shouldForceFullReconcile = latestCursor !== null
-      && (Date.now() - lastFullRefreshAtRef.current) >= RT_FULL_RECONCILE_INTERVAL_MS;
+    const shouldForceFullReconcile = trigger === 'external-refresh'
+      || (
+        latestCursor !== null
+        && (Date.now() - lastFullRefreshAtRef.current) >= RT_FULL_RECONCILE_INTERVAL_MS
+      );
     let requestedMode: 'full' | 'incremental' = latestCursor && !shouldForceFullReconcile ? 'incremental' : 'full';
     let loadedResult: EventLogLoadResult = await eventLogService.current.loadEventsDetailed(
       requestedMode === 'incremental'
@@ -299,7 +312,12 @@ export function ChatPage({
     const revisionChanged = loadedResult.snapshotRevision !== undefined
       && loadedResult.snapshotRevision !== lastAppliedSnapshotRevisionRef.current;
 
-    if (mode === 'incremental' && loadedEvents.length === 0 && (trigger === 'event' || revisionChanged)) {
+    const shouldFallbackToFull = mode === 'incremental' && (
+      (trigger === 'poll' && revisionChanged)
+      || (loadedEvents.length === 0 && (trigger === 'event' || revisionChanged))
+    );
+
+    if (shouldFallbackToFull) {
       requestedMode = 'full';
       mode = 'full';
       loadedResult = await eventLogService.current.loadEventsDetailed();
@@ -341,10 +359,12 @@ export function ChatPage({
     log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
   }, [applyVisibleWindow, scrollToBottom]);
 
-  const scheduleLatestRefresh = useCallback((trigger: 'poll' | 'event'): void => {
+  const scheduleLatestRefresh = useCallback((trigger: RefreshTrigger): void => {
     if (refreshInFlightRef.current) {
       refreshQueuedRef.current = true;
-      if (trigger === 'event') {
+      if (trigger === 'external-refresh') {
+        refreshQueuedTriggerRef.current = 'external-refresh';
+      } else if (trigger === 'event' && refreshQueuedTriggerRef.current === 'poll') {
         refreshQueuedTriggerRef.current = 'event';
       }
       return;
@@ -354,7 +374,7 @@ export function ChatPage({
     refreshQueuedTriggerRef.current = trigger;
     void (async () => {
       try {
-        let nextTrigger = trigger;
+        let nextTrigger: RefreshTrigger = trigger;
         do {
           refreshQueuedRef.current = false;
           await refreshLatestEvents('smooth', nextTrigger);
@@ -410,9 +430,9 @@ export function ChatPage({
     lastAppliedSnapshotRevisionRef.current = undefined;
     void loadInitialEvents();
 
-    const unsubscribe = eventLogService.current.onEvent(() => {
+    const unsubscribe = eventLogService.current.onEvent((event) => {
       shouldStickToBottomRef.current = true;
-      scheduleLatestRefresh('event');
+      scheduleLatestRefresh(isRefreshOnlyEvent(event) ? 'external-refresh' : 'event');
     });
     const intervalId = window.setInterval(() => {
       shouldStickToBottomRef.current = isNearBottom();

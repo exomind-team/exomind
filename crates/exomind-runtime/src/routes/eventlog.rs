@@ -19,6 +19,7 @@ use crate::eventlog::{EventListFilter, EventRecord, MirrorStatus, sanitize_user_
 use crate::signal::types::SignalEvent;
 
 const EVENTLOG_REVISION_HEADER: &str = "x-exomind-eventlog-revision";
+const EVENTLOG_LIST_SEMANTICS_HEADER: &str = "x-exomind-eventlog-list-semantics";
 
 // ── Request / query types ───────────────────────────────────────
 
@@ -144,18 +145,21 @@ fn apply_since_id_and_limit(
     mut events: Vec<EventRecord>,
     since_id: Option<&str>,
     limit: Option<usize>,
-) -> Vec<EventRecord> {
-    if let Some(since_id) = since_id
-        && let Some(pos) = events.iter().position(|event| event.id == since_id)
-    {
-        events.truncate(pos);
+) -> (Vec<EventRecord>, bool) {
+    let mut cursor_found = since_id.is_none();
+
+    if let Some(since_id) = since_id {
+        if let Some(pos) = events.iter().position(|event| event.id == since_id) {
+            events.truncate(pos);
+            cursor_found = true;
+        }
     }
 
     if let Some(limit) = limit {
         events.truncate(limit);
     }
 
-    events
+    (events, cursor_found)
 }
 
 fn load_events_for_query(
@@ -166,7 +170,7 @@ fn load_events_for_query(
     since_timestamp: Option<i64>,
     until_timestamp: Option<i64>,
     tags: Option<&str>,
-) -> Result<Vec<EventRecord>, String> {
+) -> Result<(Vec<EventRecord>, bool), String> {
     let filter = build_event_list_filter(since_timestamp, until_timestamp, tags);
     let events = state
         .eventlog_store
@@ -182,7 +186,7 @@ fn resolve_watch_since_id(
         return Ok(query.since_id.clone());
     }
 
-    let latest = load_events_for_query(
+    let (latest, _) = load_events_for_query(
         state,
         query.user_id.as_deref(),
         None,
@@ -266,7 +270,7 @@ async fn list_events(
     State(state): State<AppState>,
     Query(query): Query<EventLogQuery>,
 ) -> Result<(HeaderMap, Json<Vec<EventRecord>>), (StatusCode, Json<ErrorResponse>)> {
-    let events = load_events_for_query(
+    let (events, cursor_found) = load_events_for_query(
         &state,
         query.user_id.as_deref(),
         query.since_id.as_deref(),
@@ -287,6 +291,17 @@ async fn list_events(
         })?;
         headers.insert(EVENTLOG_REVISION_HEADER, header_value);
     }
+    let semantics = if query.since_id.is_some() && !cursor_found {
+        "full_snapshot"
+    } else if query.since_id.is_some() || query.since_timestamp.is_some() {
+        "incremental_batch"
+    } else {
+        "full_snapshot"
+    };
+    headers.insert(
+        EVENTLOG_LIST_SEMANTICS_HEADER,
+        HeaderValue::from_static(semantics),
+    );
     Ok((headers, Json(events)))
 }
 
@@ -331,7 +346,7 @@ async fn watch_events(
     let effective_since_id = resolve_watch_since_id(&state, &query).map_err(internal_error)?;
 
     if query.since_id.is_some() || query.since_timestamp.is_some() {
-        let initial = load_events_for_query(
+        let (initial, _) = load_events_for_query(
             &state,
             query.user_id.as_deref(),
             effective_since_id.as_deref(),
@@ -361,7 +376,7 @@ async fn watch_events(
                     continue;
                 }
 
-                let events = load_events_for_query(
+                let (events, _) = load_events_for_query(
                     &state,
                     query.user_id.as_deref(),
                     effective_since_id.as_deref(),
@@ -853,6 +868,68 @@ mod tests {
             .to_string();
 
         assert_ne!(first_revision, second_revision);
+    }
+
+    #[tokio::test]
+    async fn list_events_marks_cursor_reset_results_as_full_snapshot() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let app = test_router(test_state_with_eventlog(store));
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000000000,"content":"first","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000001000,"content":"second","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/eventlog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000002000,"content":"after reset","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog?since_id=missing-cursor&since_timestamp=1700000001000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(EVENTLOG_LIST_SEMANTICS_HEADER)
+                .expect("semantics header should exist")
+                .to_str()
+                .unwrap(),
+            "full_snapshot"
+        );
     }
 
     #[tokio::test]

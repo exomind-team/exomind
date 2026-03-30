@@ -14,6 +14,7 @@ import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
 const EVENTLOG_REVISION_HEADER = 'x-exomind-eventlog-revision';
+const EVENTLOG_LIST_SEMANTICS_HEADER = 'x-exomind-eventlog-list-semantics';
 
 interface RuntimeEventPayload {
   id: string;
@@ -82,7 +83,7 @@ export class EventLogRtAdapter implements IEventLogPort {
     const payload = await response.json() as RuntimeEventPayload[];
     return {
       events: payload.map(toEventData),
-      semantics: this.resolveListSemantics(options),
+      semantics: this.resolveListSemantics(options, response.headers),
       snapshotRevision: response.headers?.get(EVENTLOG_REVISION_HEADER) ?? undefined,
     };
   }
@@ -155,7 +156,15 @@ export class EventLogRtAdapter implements IEventLogPort {
     return `${url.pathname}${url.search}`;
   }
 
-  private resolveListSemantics(options?: EventLogListOptions): EventLogListSemantics {
+  private resolveListSemantics(
+    options?: EventLogListOptions,
+    headers?: Headers,
+  ): EventLogListSemantics {
+    const headerValue = headers?.get(EVENTLOG_LIST_SEMANTICS_HEADER);
+    if (headerValue === 'full_snapshot' || headerValue === 'incremental_batch') {
+      return headerValue;
+    }
+
     const hasIncrementalCursor =
       (typeof options?.sinceId === 'string' && options.sinceId.length > 0)
       || typeof options?.sinceTimestamp === 'number';

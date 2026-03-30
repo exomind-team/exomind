@@ -131,6 +131,52 @@ describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
     });
   });
 
+  it('honors backend semantics header when cursor query has been reset（后端声明 reset 快照时不再误判为增量）', async () => {
+    activateProfileScope();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'x-exomind-eventlog-revision': 'rev-11',
+        'x-exomind-eventlog-list-semantics': 'full_snapshot',
+      }),
+      json: async () => ([
+        {
+          id: 'event-reset-1',
+          timestamp: 1700000002000,
+          content: 'after reset',
+          tags: ['note'],
+        },
+      ]),
+    }));
+
+    const adapter = new EventLogRtAdapter({
+      fetchImpl,
+      resolveTarget: () => ({ mode: 'embedded', host: '127.0.0.1', port: 9124 }),
+    }) as EventLogRtAdapter & {
+      listEventsDetailed: typeof EventLogRtAdapter.prototype.listEventsDetailed;
+    };
+
+    const result = await adapter.listEventsDetailed({
+      sinceId: 'missing-cursor',
+      sinceTimestamp: 1700000001000,
+    });
+
+    expect(result).toEqual({
+      events: [
+        {
+          id: 'event-reset-1',
+          timestamp: 1700000002000,
+          content: 'after reset',
+          tags: ['note'],
+          metadata: undefined,
+        },
+      ],
+      semantics: 'full_snapshot',
+      snapshotRevision: 'rev-11',
+    });
+  });
+
   it('serializes frontend EventData to runtime append payload', async () => {
     const profileId = activateProfileScope();
     const fetchImpl = vi.fn(async () => ({
