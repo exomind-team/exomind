@@ -1,6 +1,8 @@
 use tauri::AppHandle;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::dev_instance_paths::resolve_overlay_webview_data_dir;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::{Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -42,6 +44,14 @@ pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String
 
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
+
+    let builder = if let Some(data_dir) =
+        resolve_overlay_webview_data_dir(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL)
+    {
+        builder.data_directory(data_dir)
+    } else {
+        builder
+    };
 
     let window = builder.build().map_err(|error| error.to_string())?;
     position_now_workbench_overlay_default(app, &window)

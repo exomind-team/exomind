@@ -1,11 +1,12 @@
 //! EventLog 命令
 //! 提供 Tauri 端最小闭环：append/list/get/clear + markdown mirror
 
+use crate::dev_instance_paths::resolve_instance_app_data_dir;
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const EVENTLOG_DIR_NAME: &str = "eventlog";
 const MIRROR_HEADER: &str = "# EventLog Mirror\n\n";
@@ -62,11 +63,7 @@ fn sanitize_user_id(user_id: Option<&str>) -> String {
 }
 
 fn resolve_eventlog_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
-
+    let data_dir = resolve_instance_app_data_dir(app)?;
     let eventlog_dir = data_dir.join(EVENTLOG_DIR_NAME);
     if !eventlog_dir.exists() {
         fs::create_dir_all(&eventlog_dir)
