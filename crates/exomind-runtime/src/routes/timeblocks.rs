@@ -280,6 +280,11 @@ async fn end_block(
         return Err(conflict("cannot end: current block is a gap"));
     }
 
+    // Guard: must have stopped first (feedback phase required for active blocks)
+    if current.action_ended_at.is_none() && current.feedback_started_at.is_none() {
+        return Err(conflict("cannot end: must stop first (use POST /timeblocks/stop)"));
+    }
+
     do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
         block_type: "gap".to_string(),
         name: None,
