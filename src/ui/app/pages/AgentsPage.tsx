@@ -134,6 +134,7 @@ import { AddNodeSheet, AgentCreateSheet, RuntimeHostManagerSheet } from './agent
 import { RoutesTabView } from './agents/RoutesTabView';
 import { ListTabView, type NodeFilterType } from './agents/NodesTabView';
 import { SignalHistoryTabView } from './agents/SignalHistoryTabView';
+import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
 
 export {
   buildListSectionsFromRuntimeAgents,
@@ -885,6 +886,7 @@ export function AgentsPage() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
   const [showPtySpawnDialog, setShowPtySpawnDialog] = useState(false);
+  const [peerPairingOpen, setPeerPairingOpen] = useState(false);
 
   const openPtyTerminal = (ptyId: string, hostId?: string) => {
     setActivePtyId(ptyId);
@@ -999,6 +1001,17 @@ export function AgentsPage() {
       hostAddress: `${host.host}:${host.port}`,
     }];
   }, [runtimeHostSnapshots, activeSignalRouteHost, runtimeServiceStatus]);
+
+  const peerPairingRuntimeBaseUrl = useMemo(() => {
+    const host = runtimeServiceStatus?.host === '0.0.0.0'
+      ? '127.0.0.1'
+      : runtimeServiceStatus?.host ?? '127.0.0.1';
+    const port = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+    return `http://${formatHostForUrl(host)}:${port}`;
+  }, [runtimeServiceStatus]);
+
+  const peerPairingLocalHostId = runtimeServiceStatus?.hostId ?? 'local';
+  const peerPairingLocalAuthToken = runtimeServiceStatus?.authSecret ?? undefined;
 
   const {
     sessions: liveSessions,
@@ -1646,6 +1659,7 @@ export function AgentsPage() {
           onRuntimeExternalAddressDraftChange={setRuntimeExternalAddressDraft}
           onApplyRuntimeExternalAddress={handleApplyRuntimeExternalAddress}
           onOpenHostManager={() => setHostManagerOpen(true)}
+          onOpenPeerPairing={() => setPeerPairingOpen(true)}
         />
       );
     }
@@ -2402,6 +2416,13 @@ export function AgentsPage() {
           onClose={() => setHostManagerOpen(false)}
         />
       )}
+      <PeerPairingDialog
+        open={peerPairingOpen}
+        onOpenChange={setPeerPairingOpen}
+        runtimeBaseUrl={peerPairingRuntimeBaseUrl}
+        localHostId={peerPairingLocalHostId}
+        localAuthToken={peerPairingLocalAuthToken}
+      />
     </div>
   );
 }

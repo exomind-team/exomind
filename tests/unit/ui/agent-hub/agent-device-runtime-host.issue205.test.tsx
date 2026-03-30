@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
@@ -177,7 +177,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-host-panel')).toBeInTheDocument();
-      expect(screen.getByText('Hope Desktop')).toBeInTheDocument();
+      expect(screen.getAllByText('Hope Desktop').length).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByTestId('runtime-host-manage-button'));
@@ -193,6 +193,104 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       expect(runtimeManagerMocks.addHostFromAddress).toHaveBeenCalledWith('192.168.1.33', 'LAN Runner');
       expect(screen.getAllByText('LAN Runner').length).toBeGreaterThan(0);
       expect(screen.getAllByText(`192.168.1.33:${DEFAULT_EXTERNAL_RUNTIME_PORT}`).length).toBeGreaterThan(0);
+    });
+  });
+
+  it('requires local embedded runtime before pairing（未启动本机 RT 时禁用配对入口）', async () => {
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
+    });
+
+    const pairingButton = screen.getByTestId('device-open-peer-pairing');
+    expect(pairingButton).toBeDisabled();
+
+    fireEvent.click(pairingButton);
+    expect(screen.queryByRole('heading', { name: '设备配对' })).not.toBeInTheDocument();
+  });
+
+  it('promotes node-first sections and pairing entry in device view（设备页主路径切到节点视角并上浮配对入口）', async () => {
+    hosts = [
+      {
+        id: 'runtime-host-discovered',
+        name: 'Candidate Phone',
+        host: '192.168.1.23',
+        port: 9124,
+        status: 'unknown',
+        createdAt: '2026-02-27T10:00:00.000Z',
+        updatedAt: '2026-02-27T10:00:00.000Z',
+        trustState: 'discovered_candidate',
+      },
+      {
+        id: 'runtime-host-confirmed',
+        name: 'Paired Laptop',
+        host: '192.168.1.24',
+        port: 9124,
+        status: 'unknown',
+        createdAt: '2026-02-27T10:01:00.000Z',
+        updatedAt: '2026-02-27T10:01:00.000Z',
+        trustState: 'confirmed_peer',
+        hostId: 'paired-laptop-host',
+        lastSuccessfulDialAddress: '192.168.1.24:9124',
+      },
+      {
+        id: 'runtime-host-manual',
+        name: 'Legacy Bridge',
+        host: '10.9.0.8',
+        port: 2999,
+        status: 'unknown',
+        createdAt: '2026-02-27T10:02:00.000Z',
+        updatedAt: '2026-02-27T10:02:00.000Z',
+        trustState: 'manual_seed',
+        manualOverride: '10.9.0.8:2999',
+      },
+    ];
+    hostState = {
+      'runtime-host-discovered': 'online',
+      'runtime-host-confirmed': 'online',
+      'runtime-host-manual': 'offline',
+    };
+
+    runtimeControlMocks.getStatus.mockResolvedValueOnce({
+      running: true,
+      host: '127.0.0.1',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      hostId: 'desktop-local-host',
+      authSecret: 'embedded-secret',
+      pid: 9527,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('我的节点')).toBeInTheDocument();
+      expect(screen.getByText('已发现节点')).toBeInTheDocument();
+      expect(screen.getByText('已确认节点')).toBeInTheDocument();
+      expect(screen.getByText('高级 / 兼容模式')).toBeInTheDocument();
+    });
+
+    expect(
+      within(screen.getByTestId('runtime-peer-section-discovered'))
+        .getByTestId('runtime-host-device-card-runtime-host-discovered'),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('runtime-peer-section-confirmed'))
+        .getByTestId('runtime-host-device-card-runtime-host-confirmed'),
+    ).toBeInTheDocument();
+    expect(within(screen.getByTestId('runtime-peer-section-confirmed')).getByText('复制状态')).toBeInTheDocument();
+    expect(within(screen.getByTestId('runtime-peer-section-confirmed')).getByText('已连接')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('runtime-peer-section-advanced'))
+        .getByTestId('runtime-host-device-card-runtime-host-manual'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('device-open-peer-pairing'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '设备配对' })).toBeInTheDocument();
     });
   });
 

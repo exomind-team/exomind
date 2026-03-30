@@ -692,13 +692,15 @@ function readRuntimeInfo() {
 
 export function DevicePairingSetting(_props: { ctx: SettingsContext }) {
   const [open, setOpen] = useState(false);
+  // Legacy developer entry（旧开发者入口）: keep pairing reachable from settings,
+  // but product primary flow now lives in Network -> Device.
   const runtimeInfo = readRuntimeInfo();
 
   return (
     <>
       <SettingRow
         icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
-        label="设备配对"
+        label="高级设备配对"
         onClick={() => setOpen(true)}
         right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
       />
