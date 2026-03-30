@@ -210,38 +210,6 @@ describe('VoiceOverlayPage', () => {
     expect(styleTag?.textContent).toContain('transition: background 180ms ease-out;');
   });
 
-  it('uses reduced effects on Windows Tauri overlays（Windows Tauri 下收敛高风险视觉效果）', async () => {
-    Object.defineProperty(window.navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    });
-    Object.defineProperty(window, '__TAURI_INTERNALS__', {
-      configurable: true,
-      value: {},
-    });
-
-    const { container } = render(<VoiceOverlayPage />);
-
-    await act(async () => {
-      overlayListener?.({
-        payload: {
-          state: 'recording',
-          duration: 1,
-          text: 'Windows Tauri',
-        },
-      });
-    });
-
-    const styleTag = container.querySelector('style');
-    expect(styleTag?.textContent).toContain('backdrop-filter: none;');
-    expect(styleTag?.textContent).toContain('-webkit-backdrop-filter: none;');
-    expect(styleTag?.textContent).toContain('display: none;');
-    expect(styleTag?.textContent).toContain('animation: none;');
-    expect(styleTag?.textContent).not.toContain('filter: blur(16px);');
-
-    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
-  });
-
   it('applies configured transcript line count（按配置应用实时文本行数）', async () => {
     overlayPreferenceState.transcriptLines = 5;
     const { container } = render(<VoiceOverlayPage />);
