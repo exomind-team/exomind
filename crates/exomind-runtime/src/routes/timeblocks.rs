@@ -973,6 +973,8 @@ fn write_timeblock_eventlog(
 
     if let Err(error) = state.eventlog_store.append_event(scope_key, event) {
         tracing::warn!(error = %error, "failed to write timeblock eventlog");
+    } else {
+        super::eventlog::notify_eventlog_watchers(state, scope_key);
     }
 }
 

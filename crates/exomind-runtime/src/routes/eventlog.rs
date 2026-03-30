@@ -199,7 +199,7 @@ fn resolve_watch_since_id(
     Ok(latest.first().map(|event| event.id.clone()))
 }
 
-fn notify_eventlog_watchers(state: &AppState, user_id: Option<&str>) {
+pub fn notify_eventlog_watchers(state: &AppState, user_id: Option<&str>) {
     let _ = state.eventlog_watch_tx.send(sanitize_user_id(user_id));
 }
 
