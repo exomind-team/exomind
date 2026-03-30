@@ -239,7 +239,7 @@ describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
     expect(appended.id).toBe('rt-event-2');
   });
 
-  it('sends embedded runtime auth token when cached status has authSecret（内嵌 RT 鉴权密钥应透传到 EventLog 请求）', async () => {
+  it('does not send embedded runtime auth token from cached status（不再从缓存的内嵌 RT 状态透传鉴权密钥）', async () => {
     activateProfileScope();
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
@@ -278,6 +278,6 @@ describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
     const headers = new Headers(requestInit?.headers);
     expect(headers.get('Accept')).toBe('application/json');
     expect(headers.get('Content-Type')).toBe('application/json');
-    expect(headers.get('Authorization')).toBe('Bearer embedded-secret');
+    expect(headers.get('Authorization')).toBeNull();
   });
 });

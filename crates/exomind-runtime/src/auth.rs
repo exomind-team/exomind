@@ -1,7 +1,8 @@
-use axum::extract::{Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
+use std::net::SocketAddr;
 
 use crate::AppState;
 
@@ -32,6 +33,76 @@ fn is_peer_allowed_path(path: &str) -> bool {
         .any(|prefix| path.starts_with(prefix))
 }
 
+fn is_loopback_request(request: &Request) -> bool {
+    request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| addr.ip().is_loopback())
+        .unwrap_or(false)
+}
+
+fn parse_origin_scheme_and_host(origin: &str) -> Option<(&str, &str)> {
+    let origin = origin.trim();
+    let (scheme, remainder) = origin.split_once("://")?;
+    let authority = remainder
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+
+    if scheme.is_empty() || authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+
+    if let Some(rest) = authority.strip_prefix('[') {
+        let end = rest.find(']')?;
+        let host = &rest[..end];
+        let trailing = &rest[end + 1..];
+        if !trailing.is_empty()
+            && !(trailing.starts_with(':')
+                && trailing[1..].chars().all(|char| char.is_ascii_digit())
+                && !trailing[1..].is_empty())
+        {
+            return None;
+        }
+        return Some((scheme, host));
+    }
+
+    let (host, trailing) = authority.split_once(':').unwrap_or((authority, ""));
+    if host.is_empty()
+        || trailing.contains(':')
+        || (!trailing.is_empty() && !trailing.chars().all(|char| char.is_ascii_digit()))
+    {
+        return None;
+    }
+
+    Some((scheme, host))
+}
+
+pub(crate) fn is_trusted_loopback_origin_value(origin: &str) -> bool {
+    let Some((scheme, host)) = parse_origin_scheme_and_host(origin) else {
+        return false;
+    };
+
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "tauri") {
+        return false;
+    }
+
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "::1" | "tauri.localhost"
+    )
+}
+
+fn has_trusted_loopback_origin(request: &Request) -> bool {
+    request
+        .headers()
+        .get("origin")
+        .and_then(|value| value.to_str().ok())
+        .map(is_trusted_loopback_origin_value)
+        .unwrap_or(false)
+}
+
 /// Bearer token auth middleware (Bearer Token 鉴权中间件).
 ///
 /// If `AppState.auth_secret` is `None`, all requests are allowed (local dev mode).
@@ -47,6 +118,10 @@ pub async fn require_auth(
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    if is_loopback_request(&request) && has_trusted_loopback_origin(&request) {
+        return Ok(next.run(request).await);
+    }
+
     let Some(expected_secret) = &state.auth_secret else {
         // No secret configured: allow all requests (local dev mode).
         return Ok(next.run(request).await);

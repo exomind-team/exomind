@@ -122,4 +122,23 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
       'initiatePairing failed: POST http://127.0.0.1:4077/mesh/pairing/initiate -> HTTP 401 Unauthorized, auth=missing, body=missing bearer token',
     );
   });
+
+  it('omits authorization header for local mesh discovery when auth token is absent（本地 mesh 发现无 token 时不发送 Authorization 头）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ([]),
+    }));
+    const service = new RuntimeMeshSyncService({ fetchImpl });
+
+    await service.listDiscoveredPeers('http://127.0.0.1:4077', undefined);
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:4077/mesh/discovered',
+      expect.objectContaining({
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      }),
+    );
+  });
 });

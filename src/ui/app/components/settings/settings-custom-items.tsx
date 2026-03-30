@@ -63,6 +63,7 @@ import {
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
   getSelectedRuntimeTarget,
   isTauriWindow,
+  readEmbeddedRuntimeStatus,
   toRuntimeBaseUrl,
 } from '@/config/runtime-target';
 import {
@@ -665,28 +666,12 @@ export function AiApiKeySetting(_props: { ctx: SettingsContext }) {
 
 function readRuntimeInfo() {
   const runtimeBaseUrl = toRuntimeBaseUrl(getSelectedRuntimeTarget());
-  let localHostId = 'local';
-  let localAuthToken: string | undefined;
-
-  try {
-    const raw = window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as { hostId?: string; authSecret?: string };
-      if (typeof parsed.hostId === 'string') {
-        localHostId = parsed.hostId;
-      }
-      if (typeof parsed.authSecret === 'string') {
-        localAuthToken = parsed.authSecret;
-      }
-    }
-  } catch {
-    // Ignore malformed runtime status cache.
-  }
+  const localHostId = readEmbeddedRuntimeStatus()?.hostId ?? 'local';
 
   return {
     runtimeBaseUrl,
     localHostId,
-    localAuthToken,
+    localAuthToken: undefined,
   };
 }
 
