@@ -1327,6 +1327,20 @@ Phase 1 必须具备：
 7. `/agents/*` shim
    - 旧路由可以逐步映射到新的 `WorkbenchPage`
 
+### Phase 1 runtime 支持分档
+
+1. `must ship（本阶段必须可见可用）`
+   - `agent-backed session`
+   - 平铺 pane 恢复
+   - `/agents/* -> /workbench` 兼容落点
+2. `should ship（本阶段优先纳管）`
+   - 现有 `PTY / SSH` 通过统一 `RuntimeBinding` 进入工作台语义
+   - 至少具备恢复、展示或附着能力之一
+   - 不要求在本阶段先稳定为独立 `terminal SessionKind`
+3. `model-only（只做模型预留）`
+   - `browser-runtime`
+   - 只要求统一模型入口与注册语义，不作为本阶段关闭条件
+
 ## 12.3 Phase 1 明确不做
 
 1. 自由画布编排
@@ -1394,6 +1408,8 @@ Phase 1 最低人类验收清单：
 4. 重启或刷新后，最近 pane 集合能够恢复
 5. 桌面端打开次窗口后，两个窗口仍然指向同一空间语义
 6. 基础会话输入/输出可继续进入事实流
+7. 至少 2 个代表性旧入口仍可落到正确工作台位置
+   - 例如 `/agents/chat/*`、`/agents/pty/*`
 
 ---
 

@@ -19,7 +19,7 @@
 1. 不先做自由画布
 2. 不先做完整窗口管理器
 3. 先做一个稳定的 `Flat Workbench（平铺工作台）`
-4. 先让 `agent / PTY / SSH / browser runtime` 能被统一纳管
+4. 先让 `agent / PTY / SSH` 能被统一纳管，并给 `browser runtime` 预留模型入口
 5. 先把多个窗口共享同一 `WorkbenchSpace（工作空间）` 的联邦骨架立起来
 
 一句话概括：
@@ -63,10 +63,24 @@
    - 一次会话过程的历史容器
 5. `RuntimeBinding`
    - 真实运行时句柄
-   - Phase 1 首批类型：`agent-session / pty / ssh / browser-runtime`
+   - Phase 1 首批闭环类型：`agent-session / pty / ssh`
+   - `browser-runtime` 保留为模型预留，不作为 Phase 1 关闭 issue 的必选范围
 6. `EventTape`
    - 事实流
    - 记录输入、输出、控制事件
+
+## 3.1.1 Phase 1 runtime 支持分档
+
+1. `must ship`
+   - `agent-backed session`
+   - 双 pane 工作面
+   - 最近工作台恢复
+2. `should ship`
+   - 现有 `PTY / SSH` 被统一纳入 `RuntimeBinding`
+   - 至少可以恢复、展示或附着到工作台
+3. `model-only`
+   - `browser-runtime`
+   - 只要求模型预留与统一注册入口
 
 ## 3.2 最小关系集
 
@@ -198,7 +212,7 @@ sequenceDiagram
 
 ## 4.2 在同一空间里新增运行时 pane
 
-1. 用户选择新建 `agent / PTY / SSH / browser runtime`
+1. 用户选择新建 `agent / PTY / SSH`
 2. 系统创建 `SessionObject`
 3. 系统创建对应 `RuntimeBinding`
 4. 新 pane 进入当前 `WorkbenchSpace`
@@ -233,6 +247,21 @@ flowchart LR
 ---
 
 ## 5. 实施切片
+
+## 5.0 推荐执行顺序
+
+1. `Slice A`
+   - 先把 `/workbench` 壳层与平铺 pane 打开
+2. `Slice B`
+   - 再统一 `SessionObject + RuntimeBinding`
+3. `Slice E`
+   - 再把恢复能力补上，让“最近工作台恢复”成为可见功能
+4. `Slice C`
+   - 然后上桌面端 / Tauri 的次窗口工作面
+5. `Slice D`
+   - 最后把 `EventTape` 接进来，避免事实层阻塞前面可见工作面
+6. `Slice F`
+   - 用于功能封板与关闭 issue 前的人类验收
 
 ## 5.1 Slice A：Flat Shell
 
@@ -315,7 +344,7 @@ flowchart LR
 验收：
 
 1. 人类可直接进入 `/workbench`
-2. 人类可看见至少 2 个 pane 同时存在
+2. 人类可看见至少 2 个 pane 同时存在，且必须跨 runtime 类型
 3. 人类可看见最近工作台恢复成功
 4. 人类可看见次窗口仍属于同一 `WorkbenchSpace`
 
@@ -329,6 +358,7 @@ flowchart LR
 2. `Flat Workbench` 平铺布局可见
 3. 至少 2 个 session pane 可同时显示
    - 且至少 1 个 pane 对应真实运行时恢复或真实运行时挂载
+   - 且至少 1 个 pane 不是 `agent-backed session`
 4. 最近工作台恢复可见
 5. 桌面端 / Tauri 下的次窗口工作面可见
 6. `browser runtime` 在 Phase 1 只要求模型预留与注册入口，不作为关闭条件
@@ -338,7 +368,7 @@ flowchart LR
 1. 打开 `/workbench`
    - 预期：进入平铺工作台，而不是旧页面空壳
 2. 新建或恢复两个会话 pane
-   - 预期：两者可同时可见
+   - 预期：两者可同时可见，且至少一者不是 `agent-backed session`
 3. 刷新或重启应用
    - 预期：最近工作台恢复
 4. 从当前工作台弹出一个次窗口
@@ -346,6 +376,28 @@ flowchart LR
    - 预期：次窗口仍属于同一空间，且能看到该空间的子集工作面
 5. 在其中一个 pane 内继续操作
    - 预期：事实流继续记录，不出现“切窗口后丢状态”的明显断裂
+6. 打开代表性旧入口
+   - 例如 `/agents/chat/*`、`/agents/pty/*`
+   - 预期：仍能落到正确的 `Workbench` pane / space / 返回路径
+
+## 6.2.1 Given / When / Then 验收模板
+
+1. Given：
+   - 已存在一个默认 `WorkbenchSpace`
+   - 已存在至少一个最近活跃的 `agent-backed session`
+   - 已存在或可新建至少一个 `PTY / SSH` 运行时
+2. When：
+   - 打开 `/workbench`
+   - 新建或恢复第二个 pane
+   - 刷新或重启应用
+   - 从桌面端 / Tauri 弹出次窗口
+3. Then：
+   - 人类能看到同一空间名称或同一空间标识
+   - 至少 2 个 pane 同时可见
+   - 至少 1 个 pane 不是 `agent-backed session`
+   - 最近工作台恢复
+   - 次窗口仍指向同一空间语义
+   - 代表性旧入口落点正确
 
 ## 6.3 自动化与验证建议
 
@@ -354,7 +406,7 @@ flowchart LR
 2. 集成测试
    - `/agents/*` shim 到 `/workbench` 的兼容导航
 3. E2E 测试
-   - `/workbench` 打开、双 pane 显示、恢复最近工作台
+   - `/workbench` 打开、跨 runtime 双 pane 显示、恢复最近工作台
 4. 人类手测
    - 桌面端 / Tauri 的次窗口同空间语义
    - 基本 session 输入/输出仍正常
@@ -372,6 +424,16 @@ flowchart LR
    - 新增或受影响的定向 `vitest`
    - 新增或受影响的定向 Playwright / E2E
    - 桌面端 / Tauri 的次窗口手测烟雾验证
+
+## 6.5 关闭 issue 前的最终门槛
+
+1. `/workbench` 可访问
+2. 至少 2 个 pane 同时可见
+   - 且至少 1 个 pane 不是 `agent-backed session`
+3. 最近工作台恢复通过
+4. 桌面端 / Tauri 的次窗口工作面通过
+5. 至少 2 个代表性旧入口兼容通过
+6. 自动化验证与人类手测都完成
 
 ---
 
