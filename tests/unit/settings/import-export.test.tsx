@@ -19,7 +19,7 @@ describe('settings registry import/export entries', () => {
     const syncServerItem = SETTINGS_REGISTRY.find((item) => item.id === 'sync-server-url');
 
     expect(syncServerItem).toBeDefined();
-    expect(syncServerItem?.label).toBe('同步服务器');
+    expect(syncServerItem?.label).toBe('RT 地址');
     expect(syncServerItem?.type).toBe('string');
   });
 

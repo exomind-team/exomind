@@ -45,7 +45,7 @@ Expected: it still lists `common-contract.md`, `discovery-loop.md`, `review-loop
 Update the prompt so it says:
 - read `AGENTS.md`
 - follow the inlined minimal startup contract
-- run `npx tsx Scripts/review-agent/router.ts`
+- run `npx tsx agents/review-agent/scripts/router.ts`
 - then load detailed protocol docs from `referencesMustRead` or `router.action`
 
 **Step 4: Re-read the prompt to verify the structure**
@@ -130,8 +130,8 @@ git commit -m "docs(review-agent): separate startup and phase references"
 ### Task 3: Add `referencesMustRead` to router output without changing routing logic
 
 **Files:**
-- Modify: `Scripts/review-agent/router-lib.ts`
-- Modify: `Scripts/review-agent/router.ts`
+- Modify: `agents/review-agent/scripts/router-lib.ts`
+- Modify: `agents/review-agent/scripts/router.ts`
 - Test: `tests/unit/review-agent/router.test.ts`
 
 **Step 1: Write the failing tests**
@@ -182,15 +182,15 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add Scripts/review-agent/router-lib.ts Scripts/review-agent/router.ts tests/unit/review-agent/router.test.ts
+git add agents/review-agent/scripts/router-lib.ts agents/review-agent/scripts/router.ts tests/unit/review-agent/router.test.ts
 git commit -m "feat(review-agent): emit router must-read references"
 ```
 
 ### Task 4: Add `referencesMustRead` to discovery and review outputs
 
 **Files:**
-- Modify: `Scripts/review-agent/discovery.ts`
-- Modify: `Scripts/review-agent/review-loop.ts`
+- Modify: `agents/review-agent/scripts/discovery.ts`
+- Modify: `agents/review-agent/scripts/review-loop.ts`
 - Test: `tests/unit/review-agent/discovery.test.ts`
 - Test: `tests/unit/review-agent/review-loop.test.ts`
 
@@ -234,7 +234,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add Scripts/review-agent/discovery.ts Scripts/review-agent/review-loop.ts tests/unit/review-agent/discovery.test.ts tests/unit/review-agent/review-loop.test.ts
+git add agents/review-agent/scripts/discovery.ts agents/review-agent/scripts/review-loop.ts tests/unit/review-agent/discovery.test.ts tests/unit/review-agent/review-loop.test.ts
 git commit -m "feat(review-agent): emit phase must-read references"
 ```
 
@@ -258,7 +258,7 @@ Expected: PASS
 Run:
 
 ```bash
-npx tsx Scripts/review-agent/router.ts
+npx tsx agents/review-agent/scripts/router.ts
 ```
 
 Expected: JSON output succeeds and includes `referencesMustRead`.
@@ -268,7 +268,7 @@ Expected: JSON output succeeds and includes `referencesMustRead`.
 Run:
 
 ```bash
-npx tsx Scripts/review-agent/discovery.ts --limit 20
+npx tsx agents/review-agent/scripts/discovery.ts --limit 20
 ```
 
 Expected: JSON output succeeds and includes `referencesMustRead`.
@@ -278,7 +278,7 @@ Expected: JSON output succeeds and includes `referencesMustRead`.
 Run:
 
 ```bash
-npx tsx Scripts/review-agent/review-loop.ts --pr 465
+npx tsx agents/review-agent/scripts/review-loop.ts --pr 465
 ```
 
 Expected: JSON output succeeds and includes `referencesMustRead`.

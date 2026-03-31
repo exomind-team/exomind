@@ -1,3 +1,8 @@
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
+
 const MAIN_WINDOW_SHORTCUT_FOCUS_STORAGE_KEY = 'exomind:mainWindowShortcutQuickFocusEnabled';
 const MAIN_WINDOW_SHORTCUT_FOCUS_CHANGED_EVENT = 'exomind:main-window-shortcut-quick-focus-changed';
 
@@ -7,37 +12,26 @@ type SetMainWindowShortcutQuickFocusOptions = {
   emitEvent?: boolean;
 };
 
-function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
-  if (typeof window === 'undefined') return null;
-  const localStorageLike = window.localStorage as Partial<Storage> | undefined;
-  if (!localStorageLike) return null;
-  if (typeof localStorageLike.getItem !== 'function') return null;
-  if (typeof localStorageLike.setItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
-}
-
 function normalizeEnabled(rawValue: string | null | undefined): boolean {
   return rawValue === 'true';
 }
 
 export function getMainWindowShortcutQuickFocusEnabled(): MainWindowShortcutQuickFocusEnabled {
-  const storage = getStorage();
-  if (!storage) {
-    return false;
-  }
-  return normalizeEnabled(storage.getItem(MAIN_WINDOW_SHORTCUT_FOCUS_STORAGE_KEY));
+  return normalizeEnabled(getRuntimeConfigValueSync(MAIN_WINDOW_SHORTCUT_FOCUS_STORAGE_KEY));
 }
 
 export function setMainWindowShortcutQuickFocusEnabled(
   enabled: boolean,
   options: SetMainWindowShortcutQuickFocusOptions = {},
 ): MainWindowShortcutQuickFocusEnabled {
-  const storage = getStorage();
-  if (!storage) {
+  if (typeof window === 'undefined') {
     return enabled;
   }
 
-  storage.setItem(MAIN_WINDOW_SHORTCUT_FOCUS_STORAGE_KEY, enabled ? 'true' : 'false');
+  setRuntimeConfigValue(MAIN_WINDOW_SHORTCUT_FOCUS_STORAGE_KEY, enabled ? 'true' : 'false', {
+    source: MAIN_WINDOW_SHORTCUT_FOCUS_CHANGED_EVENT,
+    sourceOrigin: window.location?.origin,
+  });
   if (options.emitEvent !== false) {
     window.dispatchEvent(new CustomEvent<boolean>(MAIN_WINDOW_SHORTCUT_FOCUS_CHANGED_EVENT, { detail: enabled }));
   }

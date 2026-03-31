@@ -87,7 +87,7 @@
    - `AGENTS.md`
    - prompt 内联的最小启动契约
 2. 立即运行：
-   - `npx tsx Scripts/review-agent/router.ts`
+   - `npx tsx agents/review-agent/scripts/router.ts`
 3. 根据 `router.action` 再读取：
    - `discovery-loop.md`
    - 或 `review-loop.md`

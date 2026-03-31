@@ -14,8 +14,8 @@
 
 **Files:**
 - Modify: `tests/unit/review-agent/review-loop.test.ts`
-- Modify: `Scripts/review-agent/review-loop-lib.ts`
-- Modify: `Scripts/review-agent/review-loop-runtime-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop-runtime-lib.ts`
 
 **Step 1: Write the failing tests**
 - Replace the `viewerCanMerge`-specific tests with tests that require merge mode to avoid requesting unsupported `viewerCanMerge` JSON.
@@ -39,8 +39,8 @@ Expected: all updated tests pass.
 
 **Files:**
 - Modify: `tests/unit/review-agent/review-loop.test.ts`
-- Modify: `Scripts/review-agent/review-loop-runtime-lib.ts`
-- Modify: `Scripts/review-agent/review-loop.ts`
+- Modify: `agents/review-agent/scripts/review-loop-runtime-lib.ts`
+- Modify: `agents/review-agent/scripts/review-loop.ts`
 
 **Step 1: Write the failing tests**
 - Add a merge-path test proving an `approve` failure does not claim a successful formal review decision.
@@ -77,8 +77,8 @@ Expected: all updated tests pass.
 **Step 2: Run targeted tests and scripts**
 Run:
 - `npx vitest run tests/unit/review-agent/review-loop.test.ts tests/unit/review-agent/router.test.ts tests/unit/review-agent/discovery.test.ts`
-- `npx tsx Scripts/review-agent/router.ts`
-- `npx tsx Scripts/review-agent/review-loop.ts --pr 465`
+- `npx tsx agents/review-agent/scripts/router.ts`
+- `npx tsx agents/review-agent/scripts/review-loop.ts --pr 465`
 Expected: tests pass and script output remains valid.
 
 ### Task 4: Final verification, commit, push, and PR sync

@@ -83,6 +83,16 @@ export interface BlockTaskAssociationEvent {
 }
 
 // 时间块数据类型（存储用）
+export type BlockType = 'active' | 'gap';
+
+export type BlockTransitionType = 'start' | 'pause' | 'resume' | 'feedback_start' | 'feedback_submit' | 'end';
+
+export interface BlockTransition {
+  type: BlockTransitionType;
+  at: Timestamp;
+  actorId?: string;
+}
+
 export interface TimeBlockData {
   id: UUID;
   name: string;
@@ -92,11 +102,15 @@ export interface TimeBlockData {
   tags: string[];
   startTime: Timestamp;
   endTime: Timestamp;
+  /** 'active' = 用户主动触发, 'gap' = 自动间隙。缺省视为 'active'（向后兼容） */
+  blockType?: BlockType;
+  transitions?: BlockTransition[];
   /** 结束时仍关联的任务快照；历史全集请看 taskAssociationLog */
   taskIds?: UUID[];
   taskStatusOutcomes?: Record<string, string>;
-  /** 关联历史日志：可回放“曾关联过哪些任务”以及后续计算任务出现程度 */
+  /** 关联历史日志：可回放”曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
 }
 
 // 时间块类型（UI 使用）
@@ -109,11 +123,13 @@ export interface TimeBlock {
   tags: Set<Tag>;
   startTime: Timestamp;
   endTime: Timestamp;
+  blockType?: BlockType;
   /** 结束时仍关联的任务快照；历史全集请看 taskAssociationLog */
   taskIds?: UUID[];
   taskStatusOutcomes?: Record<string, string>;
   /** 关联历史日志：可回放“曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
 }
 
 // 活跃时间块（进行中）
@@ -129,6 +145,9 @@ export interface ActiveBlockData {
   name: string;
   mode: 'countup' | 'countdown';
   targetMinutes?: number;
+  /** 'active' = 用户主动触发, 'gap' = 自动间隙。缺省视为 'active'（向后兼容） */
+  blockType?: BlockType;
+  transitions?: BlockTransition[];
   /** 兼容旧结构：逐步迁移中，优先由锚点字段推导 */
   elapsed: number;
   /** 兼容旧结构：逐步迁移中 */
@@ -161,8 +180,78 @@ export interface ActiveBlockData {
   taskIds: UUID[];
   /** 运行期关联历史：不仅能恢复当前关联，也能保留“曾经关联过”的任务全集 */
   taskAssociationLog: BlockTaskAssociationEvent[];
+  sourcePlannedBlockId?: UUID;
   /** @deprecated Use taskIds. Kept for deserialization compat only. */
   taskId?: UUID;
+}
+
+export type RhythmPresetKey = 'pomodoro_25_5' | 'focus_45_10' | 'focus_45_15';
+
+export interface RhythmPresetData {
+  key: RhythmPresetKey;
+  label: string;
+  workMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  longBreakAfterWorkSegments: number;
+}
+
+export type PlannedSegmentKind = 'work' | 'break';
+export type BreakWindowKind = 'short' | 'long';
+export type TodayPlannerSegmentStatus = 'pending' | 'active' | 'completed';
+
+export interface PlannedSegmentData {
+  id: UUID;
+  windowId: UUID;
+  kind: PlannedSegmentKind;
+  breakKind?: BreakWindowKind;
+  title: string;
+  plannedStartAt: Timestamp;
+  plannedEndAt: Timestamp;
+  linkedTaskIds: UUID[];
+  order: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface TodayPlannerSegment extends PlannedSegmentData {
+  status: TodayPlannerSegmentStatus;
+  sourceTimeBlockId?: UUID;
+}
+
+export interface TodayPlannerWindow {
+  id: UUID;
+  date: string;
+  title?: string;
+  plannedStartAt: Timestamp;
+  plannedEndAt: Timestamp;
+  rhythmPreset: RhythmPresetData;
+  segments: TodayPlannerSegment[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface TodayPlannerSnapshot {
+  date: string;
+  windows: TodayPlannerWindow[];
+}
+
+export interface CreateSchedulingWindowInput {
+  date: string;
+  title?: string;
+  plannedStartAt: Timestamp;
+  plannedEndAt: Timestamp;
+  rhythmPresetKey: RhythmPresetKey;
+}
+
+export interface UpdatePlannedSegmentInput {
+  title?: string;
+  linkedTaskIds?: UUID[];
+}
+
+export interface ReflowSchedulingWindowInput {
+  anchorSegmentId: UUID;
+  actualEndAt: Timestamp;
 }
 
 // 计时器配置

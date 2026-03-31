@@ -13,19 +13,28 @@ import {
   setRuntimeTargetMode,
   subscribeRuntimeTargetChanges,
 } from '@/config/runtime-target';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('runtime target config（Runtime 目标配置）', () => {
+  const expectedWebEmbeddedPort = window.location.port
+    ? Number(window.location.port)
+    : DEFAULT_EMBEDDED_RUNTIME_PORT;
+
   beforeEach(() => {
     window.localStorage.clear();
+    __resetRuntimeConfigCacheForTests();
   });
 
-  it('defaults to embedded runtime port（默认内嵌 runtime 端口）', () => {
+  it('defaults to current page port in web mode（Web 模式默认走当前页面端口）', () => {
     expect(getRuntimeTargetMode()).toBe('embedded');
     expect(getEmbeddedRuntimeNetworkMode()).toBe('local');
     expect(resolveEmbeddedRuntimeBindHost()).toBe('127.0.0.1');
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
-      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      port: expectedWebEmbeddedPort,
     });
   });
 
@@ -42,7 +51,12 @@ describe('runtime target config（Runtime 目标配置）', () => {
     });
   });
 
-  it('prefers cached embedded runtime status（优先使用缓存的内嵌 runtime 状态）', () => {
+  it('prefers cached embedded runtime status without exposing auth token（优先使用缓存的内嵌 runtime 状态且不暴露鉴权 token）', () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+
     window.localStorage.setItem(
       EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
       JSON.stringify({
@@ -56,8 +70,9 @@ describe('runtime target config（Runtime 目标配置）', () => {
       mode: 'embedded',
       host: '127.0.0.1',
       port: 4077,
-      authToken: 'embedded-secret',
     });
+    expect(getSelectedRuntimeTarget().authToken).toBeUndefined();
+    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).not.toContain('"authSecret"');
   });
 
   it('persists embedded runtime LAN bind mode（保存内嵌 Runtime 局域网监听模式）', () => {
@@ -66,6 +81,26 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(getEmbeddedRuntimeNetworkMode()).toBe('lan');
     expect(resolveEmbeddedRuntimeBindHost()).toBe('0.0.0.0');
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY)).toBe('lan');
+  });
+
+  it('reads runtime-backed target settings before localStorage（优先读取 Runtime 中的运行时目标配置）', () => {
+    window.localStorage.setItem('exomind:runtimeTargetMode', 'embedded');
+    window.localStorage.setItem('exomind:embeddedRuntimeNetworkMode', 'local');
+    window.localStorage.setItem('exomind:runtimeExternalAddress', '127.0.0.1:1949');
+    __primeRuntimeConfigForTests({
+      'exomind:runtimeTargetMode': 'external',
+      'exomind:embeddedRuntimeNetworkMode': 'lan',
+      'exomind:runtimeExternalAddress': '10.8.0.5:2999',
+    });
+
+    expect(getRuntimeTargetMode()).toBe('external');
+    expect(getEmbeddedRuntimeNetworkMode()).toBe('lan');
+    expect(getRuntimeExternalAddress()).toBe('10.8.0.5:2999');
+    expect(getSelectedRuntimeTarget()).toMatchObject({
+      mode: 'external',
+      host: '10.8.0.5',
+      port: 2999,
+    });
   });
 
   it('switches to external runtime with default 1949（切到外部默认 1949）', () => {
@@ -103,4 +138,3 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(() => setRuntimeExternalAddress('127.0.0.1:70000')).toThrow();
   });
 });
-

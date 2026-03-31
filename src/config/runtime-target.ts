@@ -1,3 +1,4 @@
+import { createConfigModule } from './config-factory';
 import { resolveLocalServiceHost } from '@/config/local-service-host';
 
 export const RUNTIME_TARGET_MODE_STORAGE_KEY = 'exomind:runtimeTargetMode';
@@ -5,6 +6,9 @@ export const RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY = 'exomind:runtimeExternalAddr
 export const EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY = 'exomind:embeddedRuntimeNetworkMode';
 export const EMBEDDED_RUNTIME_STATUS_STORAGE_KEY = 'exomind:embeddedRuntimeStatus';
 export const RUNTIME_TARGET_CHANGED_EVENT = 'exomind:runtime-target-changed';
+export const EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT = 'exomind:embedded-runtime-network-mode-changed';
+const RUNTIME_TARGET_MODE_VALUE_CHANGED_EVENT = 'exomind:runtime-target-mode-value-changed';
+const RUNTIME_EXTERNAL_ADDRESS_CHANGED_EVENT = 'exomind:runtime-external-address-changed';
 
 export type RuntimeTargetMode = 'embedded' | 'external';
 export type EmbeddedRuntimeNetworkMode = 'local' | 'lan';
@@ -20,8 +24,6 @@ export interface EmbeddedRuntimeStatusSnapshot {
   host: string;
   port: number;
   hostId?: string;
-  /** Admin auth secret for the embedded runtime (when EXOMIND_RT_SECRET is set). */
-  authSecret?: string;
 }
 
 function resolveEmbeddedRuntimePort(rawValue: string | undefined): number {
@@ -41,6 +43,7 @@ const DEFAULT_EXTERNAL_RUNTIME_HOST = '127.0.0.1';
 export const DEFAULT_EXTERNAL_RUNTIME_PORT = 1949;
 const DEFAULT_RUNTIME_TARGET_MODE: RuntimeTargetMode = 'embedded';
 const DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE: EmbeddedRuntimeNetworkMode = 'local';
+const DEFAULT_RUNTIME_EXTERNAL_ADDRESS = `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
 
 function normalizeRuntimeMode(rawValue: string | null | undefined): RuntimeTargetMode {
   return rawValue === 'external' ? 'external' : 'embedded';
@@ -66,8 +69,13 @@ export function formatHostForUrl(host: string): string {
   return host;
 }
 
-function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
+export function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
   if (typeof window === 'undefined') {
+    return null;
+  }
+
+  // 非 Tauri 环境不存在内嵌 RT，跳过 localStorage 缓存（#775）
+  if (!isTauriWindow()) {
     return null;
   }
 
@@ -77,16 +85,24 @@ function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<EmbeddedRuntimeStatusSnapshot>;
+    const parsed = JSON.parse(raw) as Partial<EmbeddedRuntimeStatusSnapshot> & {
+      authSecret?: unknown;
+    };
     if (typeof parsed.host !== 'string' || typeof parsed.port !== 'number') {
       return null;
     }
-    return {
+    const snapshot = {
       host: resolveLocalServiceHost(parsed.host),
       port: parsed.port,
       hostId: typeof parsed.hostId === 'string' ? parsed.hostId : undefined,
-      authSecret: typeof parsed.authSecret === 'string' ? parsed.authSecret : undefined,
     };
+    if (Object.prototype.hasOwnProperty.call(parsed, 'authSecret')) {
+      window.localStorage.setItem(
+        EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+        JSON.stringify(snapshot),
+      );
+    }
+    return snapshot;
   } catch {
     return null;
   }
@@ -141,12 +157,15 @@ function resolveEmbeddedHost(): string {
 
 function resolveEmbeddedPort(): number {
   const cachedStatus = readEmbeddedRuntimeStatus();
-  return cachedStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
-}
+  if (cachedStatus?.port) return cachedStatus.port;
 
-function resolveEmbeddedAuthToken(): string | undefined {
-  const authSecret = readEmbeddedRuntimeStatus()?.authSecret?.trim();
-  return authSecret ? authSecret : undefined;
+  // Web 开发模式：无 Tauri、无 localStorage 缓存时，使用当前页面端口
+  // 让请求走 Vite proxy 到 RT，避免跨端口 fetch 失败（#775）
+  if (!isTauriWindow() && typeof window !== 'undefined' && window.location?.port) {
+    return Number(window.location.port);
+  }
+
+  return DEFAULT_EMBEDDED_RUNTIME_PORT;
 }
 
 export function getPreferredEmbeddedRuntimePort(): number {
@@ -201,6 +220,49 @@ function toAddress(host: string, port: number): string {
   return `${formatHostForAddress(host)}:${port}`;
 }
 
+function normalizeRuntimeExternalAddress(rawValue: string | null | undefined): string {
+  if (!rawValue) {
+    return DEFAULT_RUNTIME_EXTERNAL_ADDRESS;
+  }
+
+  try {
+    const parsed = parseRuntimeAddress(rawValue);
+    return toAddress(parsed.host, parsed.port);
+  } catch {
+    return DEFAULT_RUNTIME_EXTERNAL_ADDRESS;
+  }
+}
+
+const runtimeTargetModeModule = createConfigModule<RuntimeTargetMode>({
+  storageKey: RUNTIME_TARGET_MODE_STORAGE_KEY,
+  eventName: RUNTIME_TARGET_MODE_VALUE_CHANGED_EVENT,
+  defaultValue: DEFAULT_RUNTIME_TARGET_MODE,
+  normalize: normalizeRuntimeMode,
+  serialize: (value) => normalizeRuntimeMode(value),
+  persistMode: 'runtime-preferred',
+});
+
+const embeddedRuntimeNetworkModeModule = createConfigModule<EmbeddedRuntimeNetworkMode>({
+  storageKey: EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
+  eventName: EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT,
+  defaultValue: DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE,
+  normalize: normalizeEmbeddedRuntimeNetworkMode,
+  serialize: (value) => normalizeEmbeddedRuntimeNetworkMode(value),
+  persistMode: 'runtime-preferred',
+});
+
+const runtimeExternalAddressModule = createConfigModule<string>({
+  storageKey: RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY,
+  eventName: RUNTIME_EXTERNAL_ADDRESS_CHANGED_EVENT,
+  defaultValue: DEFAULT_RUNTIME_EXTERNAL_ADDRESS,
+  normalize: normalizeRuntimeExternalAddress,
+  serialize: (value) => {
+    const parsed = parseRuntimeAddress(value);
+    return toAddress(parsed.host, parsed.port);
+  },
+  persistMode: 'runtime-preferred',
+});
+
 function emitRuntimeTargetChanged(): void {
   if (typeof window === 'undefined') {
     return;
@@ -214,70 +276,34 @@ function emitRuntimeTargetChanged(): void {
 }
 
 export function getRuntimeTargetMode(): RuntimeTargetMode {
-  if (typeof window === 'undefined') {
-    return DEFAULT_RUNTIME_TARGET_MODE;
-  }
-
-  return normalizeRuntimeMode(window.localStorage.getItem(RUNTIME_TARGET_MODE_STORAGE_KEY));
+  return runtimeTargetModeModule.get();
 }
 
 export function getEmbeddedRuntimeNetworkMode(): EmbeddedRuntimeNetworkMode {
-  if (typeof window === 'undefined') {
-    return DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE;
-  }
-
-  return normalizeEmbeddedRuntimeNetworkMode(
-    window.localStorage.getItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY),
-  );
+  return embeddedRuntimeNetworkModeModule.get();
 }
 
 export function setRuntimeTargetMode(mode: RuntimeTargetMode): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const normalized = normalizeRuntimeMode(mode);
-  window.localStorage.setItem(RUNTIME_TARGET_MODE_STORAGE_KEY, normalized);
+  runtimeTargetModeModule.set(mode);
   emitRuntimeTargetChanged();
 }
 
 export function setEmbeddedRuntimeNetworkMode(mode: EmbeddedRuntimeNetworkMode): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
+  embeddedRuntimeNetworkModeModule.set(mode);
+}
 
-  const normalized = normalizeEmbeddedRuntimeNetworkMode(mode);
-  window.localStorage.setItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY, normalized);
+export function subscribeEmbeddedRuntimeNetworkModeChanges(
+  listener: (mode: EmbeddedRuntimeNetworkMode) => void,
+): () => void {
+  return embeddedRuntimeNetworkModeModule.subscribe(listener);
 }
 
 export function getRuntimeExternalAddress(): string {
-  if (typeof window === 'undefined') {
-    return `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
-  }
-
-  const raw = window.localStorage.getItem(RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY);
-  if (!raw) {
-    return `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
-  }
-
-  try {
-    const parsed = parseRuntimeAddress(raw);
-    return toAddress(parsed.host, parsed.port);
-  } catch {
-    return `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
-  }
+  return runtimeExternalAddressModule.get();
 }
 
 export function setRuntimeExternalAddress(address: string): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const parsed = parseRuntimeAddress(address);
-  window.localStorage.setItem(
-    RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY,
-    toAddress(parsed.host, parsed.port),
-  );
+  runtimeExternalAddressModule.set(address);
   emitRuntimeTargetChanged();
 }
 
@@ -303,7 +329,6 @@ export function getSelectedRuntimeTarget(): RuntimeTarget {
     mode,
     host: resolveEmbeddedHost(),
     port: resolveEmbeddedPort(),
-    authToken: resolveEmbeddedAuthToken(),
   };
 }
 
@@ -336,7 +361,6 @@ export function persistEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnapsh
       host: resolveLocalServiceHost(status.host),
       port: status.port,
       hostId: status.hostId,
-      authSecret: status.authSecret,
     }),
   );
   emitRuntimeTargetChanged();
@@ -379,4 +403,3 @@ export function subscribeRuntimeTargetChanges(listener: (target: RuntimeTarget) 
     window.removeEventListener(RUNTIME_TARGET_CHANGED_EVENT, handleCustomEvent);
   };
 }
-

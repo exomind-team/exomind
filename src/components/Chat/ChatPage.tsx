@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Play, Pause, Square, FileText, NotepadText, Bot, Mic } from 'lucide-react';
+import { Play, Pause, Square, FileText, NotepadText, Bot, Mic, Link2, ListTodo } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
@@ -23,25 +23,38 @@ import { MessageActions } from '@/components/Chat/MessageActions';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
-import { getEventLogService } from '@/lib/services/eventlog.service';
+import { getEventLogService, type EventLogLoadResult } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { log } from '@/lib/logger';
 import { registerMainWindowFocusTarget } from '@/services/main-window-focus-targets';
 import { MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT } from '@/services/main-window-shortcut.service';
+import { mergeLatestEventsAscending } from './chat-event-pagination';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 const RT_REFRESH_INTERVAL_MS = 2_000;
-const TASK_SYSTEM_EVENT_TAGS = [
+const RT_FULL_RECONCILE_INTERVAL_MS = 60_000;
+const TASK_CREATED_EVENT_TAGS = [
   'task_created',
+] as const;
+const TASK_LIFECYCLE_EVENT_TAGS = [
   'task_started',
   'task_resumed',
   'task_suspended',
   'task_completed',
   'task_cancelled',
+  // Backward compatibility for historical RT task transition events. Remove after migration.
+  'task_transition',
+] as const;
+const TASK_RELATION_EVENT_TAGS = [
   'task_linked',
   'task_unlinked',
+] as const;
+const TASK_SYSTEM_EVENT_TAGS = [
+  ...TASK_CREATED_EVENT_TAGS,
+  ...TASK_LIFECYCLE_EVENT_TAGS,
+  ...TASK_RELATION_EVENT_TAGS,
 ] as const;
 
 function perfNow(): number {
@@ -49,7 +62,24 @@ function perfNow(): number {
 }
 
 function sortEventsAscending(events: Event[]): Event[] {
-  return [...events].sort((a, b) => a.timestamp - b.timestamp);
+  return [...events].sort((a, b) => {
+    if (a.timestamp !== b.timestamp) {
+      return a.timestamp - b.timestamp;
+    }
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function getLatestEventCursor(events: Event[]): { id: string; timestamp: number } | null {
+  const latestEvent = events[events.length - 1];
+  if (!latestEvent) {
+    return null;
+  }
+
+  return {
+    id: latestEvent.id,
+    timestamp: latestEvent.timestamp,
+  };
 }
 
 interface ChatPageProps {
@@ -57,6 +87,8 @@ interface ChatPageProps {
   hideHeader?: boolean;
   showTimerWidget?: boolean;
 }
+
+type RefreshTrigger = 'poll' | 'event' | 'external-refresh';
 
 const UNKNOWN_DEVICE_LABEL = '未知设备';
 const UNKNOWN_PLATFORM_LABEL = '未知平台';
@@ -95,6 +127,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isRefreshOnlyEvent(event: Event): boolean {
+  if (!isRecord(event.metadata)) {
+    return false;
+  }
+
+  return event.metadata.refreshOnly === true;
+}
+
 function readNonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -129,6 +169,34 @@ function isVoiceInputEvent(event: Event): boolean {
   return isRecord(event.metadata) && event.metadata.inputSource === 'voice';
 }
 
+function hasAnyTag(event: Event, tags: readonly string[]): boolean {
+  return tags.some((tag) => event.tags.has(tag));
+}
+
+function isTaskCreatedEvent(event: Event): boolean {
+  return hasAnyTag(event, TASK_CREATED_EVENT_TAGS);
+}
+
+function isTaskLifecycleEvent(event: Event): boolean {
+  return hasAnyTag(event, TASK_LIFECYCLE_EVENT_TAGS);
+}
+
+function isTaskRelationEvent(event: Event): boolean {
+  return hasAnyTag(event, TASK_RELATION_EVENT_TAGS);
+}
+
+function resolveTaskLifecycleStatus(event: Event): string | null {
+  if (event.tags.has('task_started') || event.tags.has('task_resumed')) return 'in_progress';
+  if (event.tags.has('task_suspended')) return 'suspended';
+  if (event.tags.has('task_completed')) return 'completed';
+  if (event.tags.has('task_cancelled')) return 'cancelled';
+  if (!event.tags.has('task_transition') || !isRecord(event.metadata)) {
+    return null;
+  }
+
+  return readNonEmptyString(event.metadata.new_status) ?? readNonEmptyString(event.metadata.newStatus);
+}
+
 function VoiceInputBadge() {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
@@ -156,6 +224,9 @@ export function ChatPage({
   const shouldStickToBottomRef = useRef(true);
   const refreshInFlightRef = useRef(false);
   const refreshQueuedRef = useRef(false);
+  const refreshQueuedTriggerRef = useRef<RefreshTrigger>('poll');
+  const lastFullRefreshAtRef = useRef(0);
+  const lastAppliedSnapshotRevisionRef = useRef<string | null | undefined>(undefined);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn, activeProfileId } = useSyncStore();
   const syncStatus: 'connected' | 'disconnected' | 'syncing' = isLoggedIn && Boolean(currentUser)
@@ -200,9 +271,12 @@ export function ChatPage({
 
   const loadInitialEvents = useCallback(async () => {
     setIsInitialLoading(true);
-    const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
+    const initialResult = await eventLogService.current.loadEventsDetailed();
+    const loadedEvents = sortEventsAscending(initialResult.events);
     shouldStickToBottomRef.current = true;
+    lastAppliedSnapshotRevisionRef.current = initialResult.snapshotRevision ?? null;
     applyVisibleWindow(loadedEvents, PAGE_SIZE);
+    lastFullRefreshAtRef.current = Date.now();
 
     requestAnimationFrame(() => {
       scrollToBottom('auto');
@@ -210,32 +284,102 @@ export function ChatPage({
     setIsInitialLoading(false);
   }, [applyVisibleWindow, scrollToBottom]);
 
-  const refreshLatestEvents = useCallback(async (behavior: ScrollBehavior = 'smooth') => {
+  const refreshLatestEvents = useCallback(async (
+    behavior: ScrollBehavior = 'smooth',
+    trigger: RefreshTrigger = 'poll',
+  ) => {
     const t0 = perfNow();
-    const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
+    const latestCursor = getLatestEventCursor(allEventsRef.current);
+    const shouldForceFullReconcile = trigger === 'external-refresh'
+      || (
+        latestCursor !== null
+        && (Date.now() - lastFullRefreshAtRef.current) >= RT_FULL_RECONCILE_INTERVAL_MS
+      );
+    let requestedMode: 'full' | 'incremental' = latestCursor && !shouldForceFullReconcile ? 'incremental' : 'full';
+    let loadedResult: EventLogLoadResult = await eventLogService.current.loadEventsDetailed(
+      requestedMode === 'incremental'
+        ? {
+            sinceId: latestCursor!.id,
+            sinceTimestamp: latestCursor!.timestamp,
+          }
+        : undefined,
+    );
+    let mode: 'full' | 'incremental' = requestedMode === 'incremental'
+      && loadedResult.semantics === 'incremental_batch'
+      ? 'incremental'
+      : 'full';
+    let loadedEvents = sortEventsAscending(loadedResult.events);
+    const revisionChanged = loadedResult.snapshotRevision !== undefined
+      && loadedResult.snapshotRevision !== lastAppliedSnapshotRevisionRef.current;
+
+    const shouldFallbackToFull = mode === 'incremental' && (
+      (trigger === 'poll' && revisionChanged)
+      || (loadedEvents.length === 0 && (trigger === 'event' || revisionChanged))
+    );
+
+    if (shouldFallbackToFull) {
+      requestedMode = 'full';
+      mode = 'full';
+      loadedResult = await eventLogService.current.loadEventsDetailed();
+      loadedEvents = sortEventsAscending(loadedResult.events);
+    }
     const queryMs = Math.round(perfNow() - t0);
-    applyVisibleWindow(loadedEvents);
+
+    if (mode === 'full') {
+      lastFullRefreshAtRef.current = Date.now();
+      lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? null;
+      applyVisibleWindow(loadedEvents);
+
+      requestAnimationFrame(() => {
+        if (shouldStickToBottomRef.current) {
+          scrollToBottom(behavior);
+        }
+      });
+      log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
+      return;
+    }
+
+    if (loadedEvents.length === 0) {
+      if (loadedResult.snapshotRevision !== undefined) {
+        lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision;
+      }
+      log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: 0, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
+      return;
+    }
+
+    const mergedEvents = mergeLatestEventsAscending(allEventsRef.current, loadedEvents);
+    lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? lastAppliedSnapshotRevisionRef.current ?? null;
+    applyVisibleWindow(mergedEvents);
 
     requestAnimationFrame(() => {
       if (shouldStickToBottomRef.current) {
         scrollToBottom(behavior);
       }
     });
-    log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
-  }, [scrollToBottom]);
+    log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
+  }, [applyVisibleWindow, scrollToBottom]);
 
-  const scheduleLatestRefresh = useCallback((): void => {
+  const scheduleLatestRefresh = useCallback((trigger: RefreshTrigger): void => {
     if (refreshInFlightRef.current) {
       refreshQueuedRef.current = true;
+      if (trigger === 'external-refresh') {
+        refreshQueuedTriggerRef.current = 'external-refresh';
+      } else if (trigger === 'event' && refreshQueuedTriggerRef.current === 'poll') {
+        refreshQueuedTriggerRef.current = 'event';
+      }
       return;
     }
 
     refreshInFlightRef.current = true;
+    refreshQueuedTriggerRef.current = trigger;
     void (async () => {
       try {
+        let nextTrigger: RefreshTrigger = trigger;
         do {
           refreshQueuedRef.current = false;
-          await refreshLatestEvents('smooth');
+          await refreshLatestEvents('smooth', nextTrigger);
+          nextTrigger = refreshQueuedTriggerRef.current;
+          refreshQueuedTriggerRef.current = 'poll';
         } while (refreshQueuedRef.current);
       } finally {
         refreshInFlightRef.current = false;
@@ -283,15 +427,16 @@ export function ChatPage({
   // 初始化 RT EventLog 读源，并用轮询补齐跨链路写入后的 UI 刷新。
   useEffect(() => {
     visibleCountRef.current = PAGE_SIZE;
+    lastAppliedSnapshotRevisionRef.current = undefined;
     void loadInitialEvents();
 
-    const unsubscribe = eventLogService.current.onEvent(() => {
+    const unsubscribe = eventLogService.current.onEvent((event) => {
       shouldStickToBottomRef.current = true;
-      scheduleLatestRefresh();
+      scheduleLatestRefresh(isRefreshOnlyEvent(event) ? 'external-refresh' : 'event');
     });
     const intervalId = window.setInterval(() => {
       shouldStickToBottomRef.current = isNearBottom();
-      scheduleLatestRefresh();
+      scheduleLatestRefresh('poll');
     }, RT_REFRESH_INTERVAL_MS);
 
     return () => {
@@ -314,13 +459,12 @@ export function ChatPage({
     shouldStickToBottomRef.current = true;
     try {
       await eventLogService.current.addEvent(trimmed);
-      await refreshLatestEvents('smooth');
       log.info(`[ChatPage] handleSend done ${JSON.stringify({ totalMs: Math.round(perfNow() - t0) })}`);
     } catch (error) {
       log.error(`[ChatPage] handleSend failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
-  }, [refreshLatestEvents]);
+  }, []);
 
   // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦
   useEffect(() => {
@@ -417,7 +561,8 @@ export function ChatPage({
     if (event.tags.has('block_resume')) return <Play size={14} />;
     if (event.tags.has('block_end')) return <Square size={14} />;
     if (event.tags.has('block_feedback')) return <NotepadText size={14} />;
-    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) return <FileText size={14} />;
+    if (isTaskRelationEvent(event)) return <Link2 size={14} />;
+    if (isTaskCreatedEvent(event) || isTaskLifecycleEvent(event)) return <ListTodo size={14} />;
     return <FileText size={14} />;
   };
 
@@ -429,7 +574,21 @@ export function ChatPage({
     if (event.tags.has('block_resume')) return 'bg-success';
     if (event.tags.has('block_end')) return 'bg-destructive';
     if (event.tags.has('block_feedback')) return 'bg-brand';
-    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) return 'bg-brand';
+    if (isTaskRelationEvent(event)) return 'bg-cyan-500';
+    if (isTaskCreatedEvent(event)) return 'bg-brand';
+    switch (resolveTaskLifecycleStatus(event)) {
+      case 'in_progress':
+        return 'bg-green-500';
+      case 'suspended':
+        return 'bg-yellow-500';
+      case 'completed':
+        return 'bg-blue-500';
+      case 'cancelled':
+        return 'bg-red-500';
+      default:
+        break;
+    }
+    if (isTaskLifecycleEvent(event)) return 'bg-brand';
     return 'bg-brand';
   };
 
@@ -450,7 +609,25 @@ export function ChatPage({
     if (event.tags.has('block_end')) {
       return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-100 rounded-br-md';
     }
-    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) {
+    if (isTaskRelationEvent(event)) {
+      return 'bg-cyan-100 text-cyan-900 dark:bg-cyan-950 dark:text-cyan-100 rounded-br-md';
+    }
+    if (isTaskCreatedEvent(event)) {
+      return 'bg-stone-100 text-stone-800 dark:bg-stone-900 dark:text-stone-100 rounded-br-md';
+    }
+    switch (resolveTaskLifecycleStatus(event)) {
+      case 'in_progress':
+        return 'bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100 rounded-br-md';
+      case 'suspended':
+        return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-100 rounded-br-md';
+      case 'completed':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 rounded-br-md';
+      case 'cancelled':
+        return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-100 rounded-br-md';
+      default:
+        break;
+    }
+    if (isTaskLifecycleEvent(event)) {
       return 'bg-stone-100 text-stone-800 dark:bg-stone-900 dark:text-stone-100 rounded-br-md';
     }
     return 'bg-muted rounded-bl-md';

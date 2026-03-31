@@ -3,11 +3,18 @@ import {
   getSelectedRuntimeTarget,
   type RuntimeTarget,
 } from '@/config/runtime-target';
-import type { IEventLogPort } from '@/lib/environment/interfaces/eventlog.port';
+import type {
+  EventLogListOptions,
+  EventLogListResult,
+  EventLogListSemantics,
+  IEventLogPort,
+} from '@/lib/environment/interfaces/eventlog.port';
 import type { EventData } from '@/lib/types/event';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
+const EVENTLOG_REVISION_HEADER = 'x-exomind-eventlog-revision';
+const EVENTLOG_LIST_SEMANTICS_HEADER = 'x-exomind-eventlog-list-semantics';
 
 interface RuntimeEventPayload {
   id: string;
@@ -59,9 +66,14 @@ export class EventLogRtAdapter implements IEventLogPort {
     this.resolveTarget = options.resolveTarget ?? (() => getSelectedRuntimeTarget());
   }
 
-  async listEvents(): Promise<EventData[]> {
+  async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
+    const result = await this.listEventsDetailed(options);
+    return result.events;
+  }
+
+  async listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url('/eventlog', target), {
+    const response = await this.fetchImpl(this.url(this.buildListPath(options), target), {
       method: 'GET',
       headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
@@ -69,7 +81,11 @@ export class EventLogRtAdapter implements IEventLogPort {
       throw new Error(`RT eventlog list failed: ${response.status}`);
     }
     const payload = await response.json() as RuntimeEventPayload[];
-    return payload.map(toEventData);
+    return {
+      events: payload.map(toEventData),
+      semantics: this.resolveListSemantics(options, response.headers),
+      snapshotRevision: response.headers?.get(EVENTLOG_REVISION_HEADER) ?? undefined,
+    };
   }
 
   async appendEvent(event: EventData): Promise<EventData> {
@@ -122,6 +138,37 @@ export class EventLogRtAdapter implements IEventLogPort {
 
   private baseUrl(target = this.resolveTarget()): string {
     return buildBaseUrl(target);
+  }
+
+  private buildListPath(options?: EventLogListOptions): string {
+    const url = new URL('/eventlog', 'http://runtime.local');
+
+    if (typeof options?.sinceId === 'string' && options.sinceId.length > 0) {
+      url.searchParams.set('since_id', options.sinceId);
+    }
+    if (typeof options?.sinceTimestamp === 'number') {
+      url.searchParams.set('since_timestamp', String(options.sinceTimestamp));
+    }
+    if (typeof options?.limit === 'number') {
+      url.searchParams.set('limit', String(options.limit));
+    }
+
+    return `${url.pathname}${url.search}`;
+  }
+
+  private resolveListSemantics(
+    options?: EventLogListOptions,
+    headers?: Headers,
+  ): EventLogListSemantics {
+    const headerValue = headers?.get(EVENTLOG_LIST_SEMANTICS_HEADER);
+    if (headerValue === 'full_snapshot' || headerValue === 'incremental_batch') {
+      return headerValue;
+    }
+
+    const hasIncrementalCursor =
+      (typeof options?.sinceId === 'string' && options.sinceId.length > 0)
+      || typeof options?.sinceTimestamp === 'number';
+    return hasIncrementalCursor ? 'incremental_batch' : 'full_snapshot';
   }
 
   private url(path: string, target = this.resolveTarget()): string {

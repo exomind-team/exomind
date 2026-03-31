@@ -28,7 +28,7 @@ test.describe('Settings Page Sections', () => {
     await expect(page.getByText('构建')).toBeVisible();
   });
 
-  test('User card has activate button', async ({ page }) => {
-    await expect(page.getByText('激活')).toBeVisible();
+  test('User card does not show activate button（不显示激活按钮）', async ({ page }) => {
+    await expect(page.getByText('激活')).toHaveCount(0);
   });
 });

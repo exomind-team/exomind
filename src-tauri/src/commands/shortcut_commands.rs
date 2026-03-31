@@ -1,10 +1,11 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::sync::atomic::AtomicI32;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use tauri::{AppHandle, State};
+use crate::dev_instance_paths::resolve_overlay_webview_data_dir;
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, State};
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -298,6 +299,13 @@ pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
 
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
+
+    let builder =
+        if let Some(data_dir) = resolve_overlay_webview_data_dir(VOICE_OVERLAY_WINDOW_LABEL) {
+            builder.data_directory(data_dir)
+        } else {
+            builder
+        };
 
     let window = builder.build().map_err(|error| error.to_string())?;
 

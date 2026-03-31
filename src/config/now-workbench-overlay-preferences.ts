@@ -1,3 +1,9 @@
+import { createConfigModule } from './config-factory';
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
+
 export const NOW_WORKBENCH_OVERLAY_ENABLED_STORAGE_KEY = 'exomind:nowWorkbenchOverlayEnabled';
 export const NOW_WORKBENCH_OVERLAY_ENABLED_CHANGED_EVENT = 'exomind:now-workbench-overlay-enabled-changed';
 export const NOW_WORKBENCH_OVERLAY_POSITION_STORAGE_KEY = 'exomind:nowWorkbenchOverlayPosition';
@@ -10,16 +16,11 @@ export interface NowWorkbenchOverlayPosition {
   y: number;
 }
 
-const WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD = -30000;
-
-function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
-  if (typeof window === 'undefined') return null;
-  const localStorageLike = window.localStorage as Partial<Storage> | undefined;
-  if (!localStorageLike) return null;
-  if (typeof localStorageLike.getItem !== 'function') return null;
-  if (typeof localStorageLike.setItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
+interface StoredNowWorkbenchOverlayPosition extends NowWorkbenchOverlayPosition {
+  displaySignature: string;
 }
+
+const WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD = -30000;
 
 function normalizeBoolean(rawValue: string | null | undefined, fallback: boolean): boolean {
   if (rawValue == null) {
@@ -59,39 +60,63 @@ function normalizePosition(rawValue: unknown): NowWorkbenchOverlayPosition | nul
   return { x, y };
 }
 
-function subscribeBooleanPreference(
-  changedEvent: string,
-  storageKey: string,
-  fallback: () => boolean,
-  listener: (value: boolean) => void,
-): () => void {
+function resolveDisplaySignature(): string | null {
   if (typeof window === 'undefined') {
-    return () => {};
+    return null;
   }
 
-  const handler = (event: Event) => {
-    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-    if (detail && typeof detail.value === 'boolean') {
-      listener(detail.value);
-      return;
+  const width = window.screen?.availWidth || window.screen?.width;
+  const height = window.screen?.availHeight || window.screen?.height;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !width || !height) {
+    return null;
+  }
+
+  return `${Math.round(width)}x${Math.round(height)}`;
+}
+
+function normalizeStoredPosition(
+  rawValue: unknown,
+): StoredNowWorkbenchOverlayPosition | null {
+  if (!rawValue || typeof rawValue !== 'object') {
+    return null;
+  }
+
+  const candidate = rawValue as Record<string, unknown>;
+  const normalized = normalizePosition(candidate);
+  const displaySignature = typeof candidate.displaySignature === 'string'
+    ? candidate.displaySignature.trim()
+    : '';
+  const currentDisplaySignature = resolveDisplaySignature();
+  if (!normalized || !displaySignature || !currentDisplaySignature) {
+    return null;
+  }
+  if (displaySignature !== currentDisplaySignature) {
+    return null;
+  }
+
+  return {
+    ...normalized,
+    displaySignature,
+  };
+}
+
+function parseStoredPosition(rawValue: string | null | undefined): NowWorkbenchOverlayPosition | null {
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const normalized = normalizeStoredPosition(JSON.parse(rawValue));
+    if (!normalized) {
+      return null;
     }
-
-    listener(fallback());
-  };
-
-  const storageHandler = (event: StorageEvent) => {
-    if (event.key !== storageKey) {
-      return;
-    }
-    listener(normalizeBoolean(event.newValue, fallback()));
-  };
-
-  window.addEventListener(changedEvent, handler);
-  window.addEventListener('storage', storageHandler);
-  return () => {
-    window.removeEventListener(changedEvent, handler);
-    window.removeEventListener('storage', storageHandler);
-  };
+    return {
+      x: normalized.x,
+      y: normalized.y,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function subscribePositionPreference(
@@ -104,114 +129,86 @@ function subscribePositionPreference(
     return () => {};
   }
 
-  const handler = (event: Event) => {
-    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-    const normalized = normalizePosition(detail?.value);
-    listener(normalized ?? fallback());
+  const handleCustomEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<NowWorkbenchOverlayPosition | null>;
+    listener(normalizePosition(customEvent.detail) ?? fallback());
   };
 
-  const storageHandler = (event: StorageEvent) => {
+  const handleStorage = (event: StorageEvent) => {
     if (event.key !== storageKey) {
       return;
     }
 
-    if (typeof event.newValue !== 'string') {
-      listener(fallback());
-      return;
-    }
-
-    try {
-      listener(normalizePosition(JSON.parse(event.newValue)) ?? fallback());
-    } catch {
-      listener(fallback());
-    }
+    listener(parseStoredPosition(event.newValue) ?? fallback());
   };
 
-  window.addEventListener(changedEvent, handler);
-  window.addEventListener('storage', storageHandler);
+  window.addEventListener(changedEvent, handleCustomEvent);
+  window.addEventListener('storage', handleStorage);
   return () => {
-    window.removeEventListener(changedEvent, handler);
-    window.removeEventListener('storage', storageHandler);
+    window.removeEventListener(changedEvent, handleCustomEvent);
+    window.removeEventListener('storage', handleStorage);
   };
 }
 
-export function getNowWorkbenchOverlayEnabled(): boolean {
-  const storage = getStorage();
-  if (!storage) return DEFAULT_NOW_WORKBENCH_OVERLAY_ENABLED;
+const enabledModule = createConfigModule<boolean>({
+  storageKey: NOW_WORKBENCH_OVERLAY_ENABLED_STORAGE_KEY,
+  eventName: NOW_WORKBENCH_OVERLAY_ENABLED_CHANGED_EVENT,
+  defaultValue: DEFAULT_NOW_WORKBENCH_OVERLAY_ENABLED,
+  normalize: (rawValue) => normalizeBoolean(rawValue, DEFAULT_NOW_WORKBENCH_OVERLAY_ENABLED),
+  serialize: (value) => String(Boolean(value)),
+  persistMode: 'runtime-preferred',
+});
 
-  try {
-    return normalizeBoolean(
-      storage.getItem(NOW_WORKBENCH_OVERLAY_ENABLED_STORAGE_KEY),
-      DEFAULT_NOW_WORKBENCH_OVERLAY_ENABLED,
-    );
-  } catch {
-    return DEFAULT_NOW_WORKBENCH_OVERLAY_ENABLED;
-  }
+export function getNowWorkbenchOverlayEnabled(): boolean {
+  return enabledModule.get();
 }
 
 export function setNowWorkbenchOverlayEnabled(value: boolean): boolean {
-  const normalizedValue = Boolean(value);
-  const storage = getStorage();
-  if (!storage) return normalizedValue;
-
-  try {
-    storage.setItem(NOW_WORKBENCH_OVERLAY_ENABLED_STORAGE_KEY, String(normalizedValue));
-    window.dispatchEvent(new CustomEvent(
-      NOW_WORKBENCH_OVERLAY_ENABLED_CHANGED_EVENT,
-      { detail: { value: normalizedValue } },
-    ));
-  } catch {
-    // ignore localStorage write errors
-  }
-
-  return normalizedValue;
+  return enabledModule.set(value);
 }
 
 export function subscribeNowWorkbenchOverlayEnabledChanges(
   listener: (value: boolean) => void,
 ): () => void {
-  return subscribeBooleanPreference(
-    NOW_WORKBENCH_OVERLAY_ENABLED_CHANGED_EVENT,
-    NOW_WORKBENCH_OVERLAY_ENABLED_STORAGE_KEY,
-    getNowWorkbenchOverlayEnabled,
-    listener,
-  );
+  return enabledModule.subscribe(listener);
 }
 
 export function getNowWorkbenchOverlayPosition(): NowWorkbenchOverlayPosition | null {
-  const storage = getStorage();
-  if (!storage) return null;
-
-  try {
-    const rawValue = storage.getItem(NOW_WORKBENCH_OVERLAY_POSITION_STORAGE_KEY);
-    if (!rawValue) {
-      return null;
-    }
-
-    return normalizePosition(JSON.parse(rawValue));
-  } catch {
-    return null;
-  }
+  return parseStoredPosition(getRuntimeConfigValueSync(NOW_WORKBENCH_OVERLAY_POSITION_STORAGE_KEY));
 }
 
 export function setNowWorkbenchOverlayPosition(
   value: NowWorkbenchOverlayPosition,
 ): NowWorkbenchOverlayPosition | null {
   const normalizedValue = normalizePosition(value);
-  const storage = getStorage();
-  if (!storage || !normalizedValue) return normalizedValue;
+  if (!normalizedValue) return normalizedValue;
+  const displaySignature = resolveDisplaySignature();
+  if (!displaySignature) {
+    return normalizedValue;
+  }
+  if (typeof window === 'undefined') {
+    return normalizedValue;
+  }
 
   try {
-    storage.setItem(
+    const storedValue: StoredNowWorkbenchOverlayPosition = {
+      ...normalizedValue,
+      displaySignature,
+    };
+    setRuntimeConfigValue(
       NOW_WORKBENCH_OVERLAY_POSITION_STORAGE_KEY,
-      JSON.stringify(normalizedValue),
+      JSON.stringify(storedValue),
+      {
+        source: NOW_WORKBENCH_OVERLAY_POSITION_CHANGED_EVENT,
+        sourceOrigin: window.location?.origin,
+      },
     );
-    window.dispatchEvent(new CustomEvent(
+    window.dispatchEvent(new CustomEvent<NowWorkbenchOverlayPosition>(
       NOW_WORKBENCH_OVERLAY_POSITION_CHANGED_EVENT,
-      { detail: { value: normalizedValue } },
+      { detail: normalizedValue },
     ));
   } catch {
-    // ignore localStorage write errors
+    // Ignore runtime/local mirror write errors（忽略 Runtime / 本地镜像写入失败）
   }
 
   return normalizedValue;

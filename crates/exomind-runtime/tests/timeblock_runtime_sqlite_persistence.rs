@@ -51,6 +51,9 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_for_completed_and_active() 
                 timestamp: 1_700_000_000_000,
                 source: "block_start".to_string(),
             }],
+            source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
         }])
         .unwrap();
 
@@ -84,6 +87,9 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_for_completed_and_active() 
                 timestamp: 1_700_000_000_000,
                 source: "block_start".to_string(),
             }],
+            source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
             task_id: Some("task-1".to_string()),
         })
         .unwrap();
@@ -156,6 +162,9 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
             task_ids: vec![],
             task_status_outcomes: None,
             task_association_log: vec![],
+            source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
         }])
         .unwrap();
 
@@ -184,6 +193,9 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
                     timestamp: 1_700_000_100_000,
                     source: "block_start".to_string(),
                 }],
+                source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
             }],
         )
         .unwrap();
@@ -220,6 +232,9 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
                     timestamp: 1_700_000_100_000,
                     source: "block_start".to_string(),
                 }],
+                source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
                 task_id: Some("task-profile-a".to_string()),
             },
         )
@@ -301,6 +316,9 @@ fn timeblock_store_clearing_active_block_preserves_completed_blocks() {
             task_ids: vec![],
             task_status_outcomes: None,
             task_association_log: vec![],
+            source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
         }])
         .unwrap();
 
@@ -327,6 +345,9 @@ fn timeblock_store_clearing_active_block_preserves_completed_blocks() {
             paused_at: Some(1_700_000_120_000),
             task_ids: vec![],
             task_association_log: vec![],
+            source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
             task_id: None,
         })
         .unwrap();

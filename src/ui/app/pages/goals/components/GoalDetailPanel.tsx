@@ -1,29 +1,42 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GoalDisplayStatus, GoalNode, TaskEdge } from '../goal-types';
 import { DetailPanelShell } from './DetailPanelShell';
+import { formatGoalStatus } from '../status-labels';
 
 interface GoalDetailPanelProps {
   goal: GoalNode;
   status: GoalDisplayStatus;
   inEdges: TaskEdge[];
   outEdges: TaskEdge[];
+  edgeLabelById?: Record<string, string>;
   hopDistance: number;
   onClose: () => void;
   onUpdate: (patch: { title?: string; description?: string; completionRule?: string[][] }) => boolean;
   onJumpEdge: (edgeId: string) => void;
 }
 
-function getMode(goal: GoalNode, inEdges: TaskEdge[]): 'AND' | 'OR' {
+function getMode(goal: GoalNode, inEdges: TaskEdge[]): 'AND' | 'OR' | null {
+  if (goal.completionRule.length === 0 || inEdges.length === 0) return null;
   if (goal.completionRule.length === 1 && goal.completionRule[0]?.length === inEdges.length) return 'AND';
   if (goal.completionRule.length === inEdges.length && goal.completionRule.every((clause) => clause.length === 1)) return 'OR';
-  return 'AND';
+  return null;
 }
 
-function formatRule(goal: GoalNode, inEdges: TaskEdge[]): string {
-  const labelByEdgeId = new Map(inEdges.map((edge) => [edge.id, edge.title || '待定义']));
-  if (goal.completionRule.length === 0) return '无完成条件，请添加任务边';
+function resolveEdgeLabel(edge: TaskEdge, edgeLabelById: Record<string, string>): string {
+  return edgeLabelById[edge.id] || edge.title || '待定义';
+}
+
+function formatRule(goal: GoalNode, inEdges: TaskEdge[], edgeLabelById: Record<string, string>): string {
+  const labelByEdgeId = new Map(inEdges.map((edge) => [edge.id, resolveEdgeLabel(edge, edgeLabelById)]));
+  if (goal.completionRule.length === 0) return '⚠ 无完成条件，请添加任务边';
   return goal.completionRule
-    .map((clause) => clause.map((edgeId) => labelByEdgeId.get(edgeId) ?? edgeId).join(' 且 '))
+    .map((clause) => {
+      const clauseText = clause.map((edgeId) => labelByEdgeId.get(edgeId) ?? edgeId).join(' 且 ');
+      if (goal.completionRule.length > 1 && clause.length > 1) {
+        return `(${clauseText})`;
+      }
+      return clauseText;
+    })
     .join(' 或 ');
 }
 
@@ -32,6 +45,7 @@ export function GoalDetailPanel({
   status,
   inEdges,
   outEdges,
+  edgeLabelById = {},
   hopDistance,
   onClose,
   onUpdate,
@@ -40,6 +54,7 @@ export function GoalDetailPanel({
   const [title, setTitle] = useState(goal.title);
   const [description, setDescription] = useState(goal.description);
   const frozen = goal.cancelled || status === 'completed';
+  const previousFrozenRef = useRef(frozen);
   const mode = getMode(goal, inEdges);
   const modeLabel = goal.completionRule.length === 0 ? '空规则' : (
     goal.completionRule.length === 1 && goal.completionRule[0]?.length === inEdges.length
@@ -52,7 +67,22 @@ export function GoalDetailPanel({
   useEffect(() => {
     setTitle(goal.title);
     setDescription(goal.description);
-  }, [goal]);
+  }, [goal.description, goal.id, goal.title]);
+
+  useEffect(() => {
+    if (!previousFrozenRef.current && frozen) {
+      const patch: { title?: string; description?: string } = {};
+      if (title !== goal.title) patch.title = title;
+      if (description !== goal.description) patch.description = description;
+
+      if (Object.keys(patch).length > 0 && !onUpdate(patch)) {
+        setTitle(goal.title);
+        setDescription(goal.description);
+      }
+    }
+
+    previousFrozenRef.current = frozen;
+  }, [description, frozen, goal.description, goal.title, onUpdate, title]);
 
   return (
     <DetailPanelShell title={goal.title || '待命名'} subtitle="目标详情" onClose={onClose}>
@@ -91,7 +121,7 @@ export function GoalDetailPanel({
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">状态</span>
             <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
-              {status}
+              {formatGoalStatus(status)}
             </span>
           </div>
           <div className="flex gap-2">
@@ -114,7 +144,7 @@ export function GoalDetailPanel({
           </div>
           <p className="text-[11px] text-[#A8A29E]">当前模式：{modeLabel}</p>
           <p className="rounded-2xl bg-[#FAF7F5] px-3 py-2 text-sm text-[#57534E] dark:bg-[#120F0D] dark:text-[#D6D3D1]">
-            {formatRule(goal, inEdges)}
+            {formatRule(goal, inEdges, edgeLabelById)}
           </p>
         </section>
 
@@ -133,7 +163,7 @@ export function GoalDetailPanel({
                 onClick={() => onJumpEdge(edge.id)}
                 className="block w-full rounded-2xl border border-[#E7E5E4] px-3 py-2 text-left text-sm text-[#1C1917] dark:border-[#3F3F46] dark:text-[#FAFAF9]"
               >
-                {edge.title || '待定义'}
+                {resolveEdgeLabel(edge, edgeLabelById)}
               </button>
             ))}
           </div>
@@ -150,7 +180,7 @@ export function GoalDetailPanel({
                 onClick={() => onJumpEdge(edge.id)}
                 className="block w-full rounded-2xl border border-[#E7E5E4] px-3 py-2 text-left text-sm text-[#1C1917] dark:border-[#3F3F46] dark:text-[#FAFAF9]"
               >
-                {edge.title || '待定义'}
+                {resolveEdgeLabel(edge, edgeLabelById)}
               </button>
             ))}
           </div>

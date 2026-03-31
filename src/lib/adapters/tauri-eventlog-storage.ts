@@ -1,6 +1,14 @@
 import type { EventData } from '../types/event';
-import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
-import { WebEventLogStorageAdapter } from './web-eventlog-storage';
+import type {
+  EventLogListOptions,
+  EventLogListResult,
+  IEventLogPort,
+} from '../environment/interfaces/eventlog.port';
+import {
+  applyEventLogListOptions,
+  resolveEventLogListSemantics,
+  WebEventLogStorageAdapter,
+} from './web-eventlog-storage';
 import { getCurrentUserId } from '../storage/event-storage';
 import { log } from '@/lib/logger';
 import { isTauriWindow } from '@/config/runtime-target';
@@ -34,18 +42,27 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
     return this.userId ?? getCurrentUserId();
   }
 
-  async listEvents(): Promise<EventData[]> {
+  async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
+    const result = await this.listEventsDetailed(options);
+    return result.events;
+  }
+
+  async listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult> {
     const invoke = await getTauriInvoke();
     if (!invoke) {
-      return this.fallback.listEvents();
+      return this.fallback.listEventsDetailed(options);
     }
 
     const userId = this.resolveUserId();
     try {
-      return await invoke<EventData[]>('eventlog_list', { userId });
+      const events = await invoke<EventData[]>('eventlog_list', { userId });
+      return {
+        events: applyEventLogListOptions(events, options),
+        semantics: resolveEventLogListSemantics(options),
+      };
     } catch (error) {
       log.warn(`[TauriEventLogStorageAdapter] eventlog_list failed, fallback to web storage: ${error instanceof Error ? error.message : String(error)}`);
-      return this.fallback.listEvents();
+      return this.fallback.listEventsDetailed(options);
     }
   }
 
@@ -96,4 +113,3 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
     }
   }
 }
-

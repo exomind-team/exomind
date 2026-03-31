@@ -10,7 +10,7 @@ use thiserror::Error;
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use eventlog::EventLogStore;
 use mesh::{MeshRelayManager, MeshState};
@@ -18,6 +18,7 @@ use signal::SignalPool;
 
 pub mod agent;
 pub mod auth;
+pub mod config;
 pub mod discovery;
 pub mod energy;
 pub mod eventlog;
@@ -35,6 +36,8 @@ pub mod timeblock;
 pub mod timeblock_sqlite;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const BUILD_GIT_HASH: &str = env!("BUILD_GIT_HASH");
+pub const BUILD_TIME: &str = env!("BUILD_TIME");
 pub const DEFAULT_RT_PORT: u16 = 1949;
 
 #[derive(Debug, Error)]
@@ -70,6 +73,30 @@ pub fn configured_host_id_from_env() -> String {
 
 fn default_runtime_host_id(port: u16) -> String {
     format!("rt-local-{port}")
+}
+
+fn bind_host_is_loopback_or_local(host: &str) -> bool {
+    let normalized = host.trim().trim_matches(['[', ']']);
+    if normalized.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    normalized
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+fn ensure_auth_secret_for_bind_host(options: &mut RuntimeStartOptions) {
+    if options.auth_secret.is_some() || bind_host_is_loopback_or_local(&options.bind_host) {
+        return;
+    }
+
+    tracing::warn!(
+        "EXOMIND_RT_SECRET not configured for non-loopback bind host {}; generating ephemeral admin secret for this runtime session",
+        options.bind_host
+    );
+    options.auth_secret = Some(format!("rt-admin-{}", uuid::Uuid::new_v4()));
 }
 
 /// Runtime startup options（运行时启动选项）.
@@ -407,6 +434,9 @@ pub async fn start() -> Result<RuntimeHandle, RuntimeStartError> {
 pub async fn start_with_options(
     options: RuntimeStartOptions,
 ) -> Result<RuntimeHandle, RuntimeStartError> {
+    let mut options = options;
+    ensure_auth_secret_for_bind_host(&mut options);
+
     let bind_addr_raw = format!("{}:{}", options.bind_host, options.port);
     let bind_addr: SocketAddr =
         bind_addr_raw
@@ -426,13 +456,14 @@ pub async fn start_with_options(
         .local_addr()
         .map_err(RuntimeStartError::ReadLocalAddr)?;
 
-    let mut state = AppState::new_runtime(
+    let mut state = AppState::new_runtime_with_storage_paths(
         local_addr.port(),
         options.host_id.clone(),
         options.mesh_state_path.clone(),
         options.signal_storage_path.clone(),
         true,
         options.auth_secret.clone(),
+        runtime_storage_paths_for_persistent_start(options.data_dir.clone()),
     );
 
     // mDNS discovery setup.
@@ -559,7 +590,7 @@ pub async fn start_with_options(
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {
-        axum::serve(listener, app)
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
             .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
             })
@@ -708,7 +739,13 @@ pub fn app_with_state(state: AppState) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
     // CORS must be outermost so that preflight OPTIONS requests (which carry no token) are handled.
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::predicate(|origin, _parts| {
+            origin
+                .to_str()
+                .ok()
+                .map(auth::is_trusted_loopback_origin_value)
+                .unwrap_or(false)
+        }))
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -726,6 +763,7 @@ pub fn app_with_state(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/version", get(version))
         .merge(routes::public_router())
         .merge(protected)
         .layer(cors)
@@ -743,6 +781,7 @@ pub struct AppState {
     pub auth_secret: Option<String>,
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub pairing: Arc<pairing::PairingManager>,
+    pub config_store: Arc<config::ConfigStore>,
     pub task_store: Arc<task::TaskStore>,
     pub session_store: Arc<session::SessionStore>,
     pub session_event_tx: Option<tokio::sync::broadcast::Sender<routes::sessions::SessionEvent>>,
@@ -765,6 +804,64 @@ fn resolve_data_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("./runtime-data"))
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeStoragePaths {
+    data_dir: PathBuf,
+    eventlog_sqlite_path: Option<PathBuf>,
+    config_sqlite_path: Option<PathBuf>,
+    task_sqlite_path: Option<PathBuf>,
+    timeblock_sqlite_path: Option<PathBuf>,
+    session_sqlite_path: Option<PathBuf>,
+}
+
+fn runtime_storage_paths_from_env() -> RuntimeStoragePaths {
+    RuntimeStoragePaths {
+        data_dir: resolve_data_dir(),
+        eventlog_sqlite_path: env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        config_sqlite_path: env::var("EXOMIND_RT_CONFIG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        task_sqlite_path: env::var("EXOMIND_RT_TASK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        timeblock_sqlite_path: env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        session_sqlite_path: env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+    }
+}
+
+fn runtime_storage_paths_for_persistent_start(data_dir: Option<PathBuf>) -> RuntimeStoragePaths {
+    let data_dir = data_dir.unwrap_or_else(resolve_data_dir);
+    RuntimeStoragePaths {
+        eventlog_sqlite_path: env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("eventlog.sqlite"))),
+        config_sqlite_path: env::var("EXOMIND_RT_CONFIG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("config.sqlite"))),
+        task_sqlite_path: env::var("EXOMIND_RT_TASK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("tasks.sqlite"))),
+        timeblock_sqlite_path: env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("timeblocks.sqlite"))),
+        session_sqlite_path: env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("sessions.sqlite"))),
+        data_dir,
+    }
+}
+
 impl AppState {
     pub fn new(port: u16) -> Self {
         Self::new_runtime(port, default_runtime_host_id(port), None, None, false, None)
@@ -777,6 +874,26 @@ impl AppState {
         signal_storage_path: Option<PathBuf>,
         enable_mesh_relay: bool,
         auth_secret: Option<String>,
+    ) -> Self {
+        Self::new_runtime_with_storage_paths(
+            port,
+            host_id,
+            mesh_persist_path,
+            signal_storage_path,
+            enable_mesh_relay,
+            auth_secret,
+            runtime_storage_paths_from_env(),
+        )
+    }
+
+    fn new_runtime_with_storage_paths(
+        port: u16,
+        host_id: String,
+        mesh_persist_path: Option<PathBuf>,
+        signal_storage_path: Option<PathBuf>,
+        enable_mesh_relay: bool,
+        auth_secret: Option<String>,
+        storage_paths: RuntimeStoragePaths,
     ) -> Self {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
@@ -812,10 +929,16 @@ impl AppState {
             host_id.clone(),
         ));
 
-        let data_dir = resolve_data_dir();
-        let eventlog_store = env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
+        let data_dir = storage_paths.data_dir;
+        if let Err(error) = std::fs::create_dir_all(&data_dir) {
+            tracing::warn!(
+                path = %data_dir.display(),
+                error = %error,
+                "failed to create runtime data dir (创建运行时数据目录失败)"
+            );
+        }
+        let eventlog_store = storage_paths
+            .eventlog_sqlite_path
             .map(|path| {
                 EventLogStore::with_sqlite_path(data_dir.clone(), &path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -827,9 +950,21 @@ impl AppState {
                 })
             })
             .unwrap_or_else(|| EventLogStore::new(data_dir));
-        let task_store = env::var("EXOMIND_RT_TASK_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
+        let config_store = storage_paths
+            .config_sqlite_path
+            .map(|path| {
+                config::ConfigStore::with_sqlite_path(&path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "config sqlite init failed, falling back to in-memory store (Config SQLite 初始化失败，降级到内存存储)"
+                    );
+                    config::ConfigStore::new()
+                })
+            })
+            .unwrap_or_default();
+        let task_store = storage_paths
+            .task_sqlite_path
             .map(|path| {
                 task::TaskStore::with_sqlite_path(&path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -840,10 +975,9 @@ impl AppState {
                     task::TaskStore::new()
                 })
             })
-            .unwrap_or_else(task::TaskStore::new);
-        let timeblock_store = env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
+            .unwrap_or_default();
+        let timeblock_store = storage_paths
+            .timeblock_sqlite_path
             .map(|path| {
                 timeblock::TimeBlockStore::with_sqlite_path(&path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -854,10 +988,9 @@ impl AppState {
                     timeblock::TimeBlockStore::new()
                 })
             })
-            .unwrap_or_else(timeblock::TimeBlockStore::new);
-        let session_store = env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
+            .unwrap_or_default();
+        let session_store = storage_paths
+            .session_sqlite_path
             .map(|path| {
                 session::SessionStore::with_sqlite_path(&path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -868,7 +1001,7 @@ impl AppState {
                     session::SessionStore::new()
                 })
             })
-            .unwrap_or_else(session::SessionStore::new);
+            .unwrap_or_default();
         let energy_registry = energy::EnergyRegistry::new();
         let tick_manager = Arc::new(tick::TickManager::new(
             host_id.clone(),
@@ -876,6 +1009,9 @@ impl AppState {
             energy_registry.clone(),
             Arc::clone(&signal_pool),
         ));
+
+        let (eventlog_watch_tx, _rx) = routes::eventlog::eventlog_watch_channel();
+        eventlog_store.set_watch_tx(eventlog_watch_tx.clone());
 
         Self {
             port,
@@ -887,16 +1023,14 @@ impl AppState {
             auth_secret,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
+            config_store: Arc::new(config_store),
             task_store: Arc::new(task_store),
             session_store: Arc::new(session_store),
             session_event_tx: {
                 let (tx, _rx) = routes::sessions::session_event_channel();
                 Some(tx)
             },
-            eventlog_watch_tx: {
-                let (tx, _rx) = routes::eventlog::eventlog_watch_channel();
-                tx
-            },
+            eventlog_watch_tx,
             timeblock_store: Arc::new(timeblock_store),
             energy_registry,
             tick_manager,
@@ -946,13 +1080,24 @@ pub type RuntimeState = AppState;
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: &'static str,
-    version: &'static str,
 }
 
 async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok",
+    Json(HealthResponse { status: "ok" })
+}
+
+#[derive(Debug, Serialize)]
+struct VersionResponse {
+    version: &'static str,
+    git_hash: &'static str,
+    build_time: &'static str,
+}
+
+async fn version() -> Json<VersionResponse> {
+    Json(VersionResponse {
         version: RUNTIME_VERSION,
+        git_hash: BUILD_GIT_HASH,
+        build_time: BUILD_TIME,
     })
 }
 
@@ -979,6 +1124,11 @@ mod tests {
         let host_id = format!("lib-test-{port}");
         let registry_clone = registry.clone();
         let energy_registry = energy::EnergyRegistry::new();
+        let (eventlog_watch_tx, _rx) = routes::eventlog::eventlog_watch_channel();
+        let eventlog_store = Arc::new(eventlog::EventLogStore::new(
+            std::env::temp_dir().join("exomind-test-lib"),
+        ));
+        eventlog_store.set_watch_tx(eventlog_watch_tx.clone());
         AppState {
             port,
             host_id: host_id.clone(),
@@ -993,13 +1143,11 @@ mod tests {
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
+            config_store: Arc::new(config::ConfigStore::new()),
             task_store: Arc::new(task::TaskStore::new()),
             session_store: Arc::new(session::SessionStore::new()),
             session_event_tx: None,
-            eventlog_watch_tx: {
-                let (tx, _rx) = routes::eventlog::eventlog_watch_channel();
-                tx
-            },
+            eventlog_watch_tx,
             timeblock_store: Arc::new(timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(tick::TickManager::new(
@@ -1009,9 +1157,7 @@ mod tests {
                 Arc::clone(&signal_pool),
             )),
             life_agents: std::collections::HashMap::new(),
-            eventlog_store: Arc::new(eventlog::EventLogStore::new(
-                std::env::temp_dir().join("exomind-test-lib"),
-            )),
+            eventlog_store,
             #[cfg(not(target_os = "android"))]
             pty_manager: Arc::new(pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
@@ -1119,8 +1265,7 @@ mod tests {
         assert_eq!(
             payload,
             serde_json::json!({
-                "status": "ok",
-                "version": RUNTIME_VERSION
+                "status": "ok"
             })
         );
     }
@@ -1230,7 +1375,57 @@ mod tests {
                 .headers()
                 .get("access-control-allow-origin")
                 .and_then(|value| value.to_str().ok()),
-            Some("*")
+            Some("http://127.0.0.1:1420")
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_endpoint_omits_cors_header_for_untrusted_origin() {
+        const TEST_PORT: u16 = 3004;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents")
+                    .header("origin", "https://evil.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+        assert!(
+            response.headers().get("access-control-allow-origin").is_none(),
+            "untrusted origin must not receive a CORS allow header"
+        );
+    }
+
+    #[tokio::test]
+    async fn pairing_initiate_preflight_allows_trusted_local_origin() {
+        const TEST_PORT: u16 = 3004;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/mesh/pairing/initiate")
+                    .header("origin", "http://127.0.0.1:1420")
+                    .header("access-control-request-method", "POST")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            response.status(),
+            StatusCode::OK | StatusCode::NO_CONTENT
+        ));
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|value| value.to_str().ok()),
+            Some("http://127.0.0.1:1420")
         );
     }
 
@@ -1758,5 +1953,37 @@ mod tests {
         runtime
             .block_on(async { handle.stop().await })
             .expect("runtime should stop cleanly");
+    }
+
+    #[test]
+    fn ensure_auth_secret_for_lan_bind_generates_ephemeral_secret() {
+        let mut options = RuntimeStartOptions {
+            bind_host: "0.0.0.0".to_string(),
+            auth_secret: None,
+            ..RuntimeStartOptions::default()
+        };
+
+        ensure_auth_secret_for_bind_host(&mut options);
+
+        assert!(
+            options.auth_secret.is_some(),
+            "non-loopback bind host must not run without an admin secret"
+        );
+    }
+
+    #[test]
+    fn ensure_auth_secret_for_loopback_bind_keeps_secret_optional() {
+        let mut options = RuntimeStartOptions {
+            bind_host: "127.0.0.1".to_string(),
+            auth_secret: None,
+            ..RuntimeStartOptions::default()
+        };
+
+        ensure_auth_secret_for_bind_host(&mut options);
+
+        assert!(
+            options.auth_secret.is_none(),
+            "loopback bind host may keep secret optional for local-only dev mode"
+        );
     }
 }

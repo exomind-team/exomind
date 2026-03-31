@@ -16,7 +16,7 @@ async fn auth_with_secret_no_token_returns_401() {
     assert_eq!(
         response.status(),
         401,
-        "should reject request without token"
+        "should reject request without token when origin is missing"
     );
 
     stop_runtime(&mut rt, "auth-test-1").await;
@@ -58,7 +58,7 @@ async fn auth_with_secret_wrong_token_returns_401() {
     assert_eq!(
         response.status(),
         401,
-        "should reject request with wrong token"
+        "should reject request with wrong token when origin is missing"
     );
 
     stop_runtime(&mut rt, "auth-test-3").await;
@@ -132,4 +132,46 @@ async fn auth_via_query_param_token() {
     );
 
     stop_runtime(&mut rt, "auth-test-6").await;
+}
+
+#[tokio::test]
+async fn auth_with_secret_trusted_loopback_origin_returns_200_without_token() {
+    let mut rt = start_test_runtime_with_secret("auth-test-7", Some("s3cret".to_string())).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("{}/topology", runtime_base_url(&rt)))
+        .header("Origin", "http://tauri.localhost")
+        .send()
+        .await
+        .expect("request should send");
+
+    assert_eq!(
+        response.status(),
+        200,
+        "trusted local UI origin should be allowed without token"
+    );
+
+    stop_runtime(&mut rt, "auth-test-7").await;
+}
+
+#[tokio::test]
+async fn auth_with_secret_untrusted_origin_still_returns_401() {
+    let mut rt = start_test_runtime_with_secret("auth-test-8", Some("s3cret".to_string())).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("{}/topology", runtime_base_url(&rt)))
+        .header("Origin", "https://evil.example")
+        .send()
+        .await
+        .expect("request should send");
+
+    assert_eq!(
+        response.status(),
+        401,
+        "untrusted browser origin must still provide a valid token"
+    );
+
+    stop_runtime(&mut rt, "auth-test-8").await;
 }

@@ -81,7 +81,7 @@ impl ActionLog {
         let reader = io::BufReader::new(file);
         let count = reader
             .lines()
-            .filter_map(|l| l.ok())
+            .map_while(Result::ok)
             .filter(|l| !l.trim().is_empty())
             .count();
         Ok(count as u64)
@@ -191,8 +191,7 @@ impl AgentWorkspace {
         };
         let new_total = current_usage - existing_size + content.len();
         if new_total > self.max_knowledge_bytes {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 format!(
                     "knowledge quota exceeded: {new_total} > {} bytes",
                     self.max_knowledge_bytes
@@ -212,10 +211,10 @@ impl AgentWorkspace {
         let mut names = Vec::new();
         for entry in fs::read_dir(&self.knowledge_dir)? {
             let entry = entry?;
-            if entry.file_type()?.is_file() {
-                if let Some(name) = entry.file_name().to_str() {
-                    names.push(name.to_string());
-                }
+            if entry.file_type()?.is_file()
+                && let Some(name) = entry.file_name().to_str()
+            {
+                names.push(name.to_string());
             }
         }
         names.sort();

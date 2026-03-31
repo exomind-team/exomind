@@ -3,7 +3,7 @@ import {
   collectArtifactSizeSummary,
   parseAndroidStringValues,
   resolveMissingIconFiles,
-} from '../../../Scripts/dev/android-meta-check-lib.ts';
+} from '../../../scripts/dev/android-meta-check-lib.ts';
 
 describe('android-meta-check-lib', () => {
   it('parses android string resources from xml', () => {

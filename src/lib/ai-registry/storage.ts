@@ -1,4 +1,8 @@
 import type { AIRegistrySnapshot } from './types';
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from '@/config/runtime-config-cache';
 
 const AI_REGISTRY_SNAPSHOT_KEY = 'exomind:ai-registry:snapshot';
 export const AI_REGISTRY_CHANGED_EVENT = 'exomind:ai-registry:changed';
@@ -13,19 +17,6 @@ const EMPTY_AI_REGISTRY_SNAPSHOT: AIRegistrySnapshot = {
   resolutionRules: [],
   updatedAt: '',
 };
-
-function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
-  if (typeof globalThis.localStorage === 'undefined') {
-    return null;
-  }
-
-  const localStorageLike = globalThis.localStorage as Partial<Storage>;
-  if (typeof localStorageLike.getItem !== 'function' || typeof localStorageLike.setItem !== 'function') {
-    return null;
-  }
-
-  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
-}
 
 function emitRegistryChanged(): void {
   if (typeof window === 'undefined') {
@@ -48,13 +39,8 @@ export function getDefaultAIRegistrySnapshot(): AIRegistrySnapshot {
 }
 
 export function getAIRegistrySnapshot(): AIRegistrySnapshot {
-  const storage = getStorage();
-  if (!storage) {
-    return getDefaultAIRegistrySnapshot();
-  }
-
   try {
-    const raw = storage.getItem(AI_REGISTRY_SNAPSHOT_KEY);
+    const raw = getRuntimeConfigValueSync(AI_REGISTRY_SNAPSHOT_KEY);
     if (!raw) {
       return getDefaultAIRegistrySnapshot();
     }
@@ -76,12 +62,10 @@ export function getAIRegistrySnapshot(): AIRegistrySnapshot {
 }
 
 export function saveAIRegistrySnapshot(snapshot: AIRegistrySnapshot): void {
-  const storage = getStorage();
-  if (!storage) {
-    return;
-  }
-
-  storage.setItem(AI_REGISTRY_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  setRuntimeConfigValue(AI_REGISTRY_SNAPSHOT_KEY, JSON.stringify(snapshot), {
+    source: AI_REGISTRY_CHANGED_EVENT,
+    sourceOrigin: typeof window !== 'undefined' ? window.location?.origin : undefined,
+  });
   emitRegistryChanged();
 }
 

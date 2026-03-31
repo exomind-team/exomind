@@ -111,8 +111,7 @@ export async function publishEventLogReplicationAppend(event: StorageEvent): Pro
 }
 
 export async function appendEventWithEcsReplication(event: AppendableStorageEvent, userId?: string): Promise<StorageEvent> {
-  const environment = ExoMindEnvironment.getInstance();
-  if (environment.runtime === 'tauri' && getEventlogBackendMode() === 'rt-sqlite') {
+  if (getEventlogBackendMode() === 'rt-sqlite') {
     const persisted = await getEventLogService().appendEventData(storageEventToEventData(event));
     return eventLogEventToStorageEvent(persisted);
   }
@@ -144,7 +143,7 @@ export async function projectEventLogReplicationAppend(
   userId?: string,
 ): Promise<ProjectReplicatedEventResult> {
   const environment = ExoMindEnvironment.getInstance();
-  if (environment.runtime === 'tauri' && getEventlogBackendMode() === 'rt-sqlite') {
+  if (getEventlogBackendMode() === 'rt-sqlite') {
     const existing = await environment.eventlog.getEvent(payload.event.id);
     if (existing) {
       return 'duplicate';

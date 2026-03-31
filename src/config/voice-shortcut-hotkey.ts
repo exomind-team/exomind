@@ -1,3 +1,8 @@
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
+
 const VOICE_SHORTCUT_HOTKEY_STORAGE_KEY = 'exomind:voiceShortcutHotkey';
 const VOICE_SHORTCUT_HOTKEY_CHANGED_EVENT = 'exomind:voice-shortcut-hotkey-changed';
 
@@ -15,19 +20,8 @@ type SetVoiceShortcutOptions = {
   emitEvent?: boolean;
 };
 
-function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
-  if (typeof window === 'undefined') return null;
-  const localStorageLike = window.localStorage as Partial<Storage> | undefined;
-  if (!localStorageLike) return null;
-  if (typeof localStorageLike.getItem !== 'function') return null;
-  if (typeof localStorageLike.setItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
-}
-
 export function getVoiceShortcutHotkey(): VoiceShortcutHotkey {
-  const storage = getStorage();
-  if (!storage) return 'Alt+Q';
-  return normalizeHotkey(storage.getItem(VOICE_SHORTCUT_HOTKEY_STORAGE_KEY));
+  return normalizeHotkey(getRuntimeConfigValueSync(VOICE_SHORTCUT_HOTKEY_STORAGE_KEY));
 }
 
 export function setVoiceShortcutHotkey(
@@ -35,9 +29,11 @@ export function setVoiceShortcutHotkey(
   options: SetVoiceShortcutOptions = {},
 ): VoiceShortcutHotkey {
   const normalized = normalizeHotkey(hotkey);
-  const storage = getStorage();
-  if (!storage) return normalized;
-  storage.setItem(VOICE_SHORTCUT_HOTKEY_STORAGE_KEY, normalized);
+  if (typeof window === 'undefined') return normalized;
+  setRuntimeConfigValue(VOICE_SHORTCUT_HOTKEY_STORAGE_KEY, normalized, {
+    source: VOICE_SHORTCUT_HOTKEY_CHANGED_EVENT,
+    sourceOrigin: window.location?.origin,
+  });
   if (options.emitEvent !== false) {
     window.dispatchEvent(new CustomEvent<VoiceShortcutHotkey>(VOICE_SHORTCUT_HOTKEY_CHANGED_EVENT, { detail: normalized }));
   }

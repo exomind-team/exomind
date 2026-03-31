@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VOICE_AUTO_RECORD_KEY } from '@/config/voice-auto-record';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
+import { __resetRuntimeConfigCacheForTests } from '@/config/runtime-config-cache';
 import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
 import {
   getActiveInteractionContextService,
@@ -20,6 +21,7 @@ const convertWebmBlobToWavMock = vi.fn();
 const writeClipboardMock = vi.fn();
 const addEventMock = vi.fn();
 const publishVoiceTranscriptSignalMock = vi.fn();
+const buildVoiceShortcutStorageEventMock = vi.fn();
 const getUserMediaWithConstraintFallbackMock = vi.fn();
 const subscribeHotkeyMock = vi.fn(() => () => {});
 const livePreviewIsAvailableMock = vi.fn(() => true);
@@ -132,6 +134,10 @@ vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
   appendEventWithEcsReplication: (...args: unknown[]) => addEventMock(...args),
 }));
 
+vi.mock('@/services/voice-shortcut-eventlog', () => ({
+  buildVoiceShortcutStorageEvent: (...args: unknown[]) => buildVoiceShortcutStorageEventMock(...args),
+}));
+
 vi.mock('@/lib/asr/live-preview', () => ({
   createDefaultVoiceLivePreviewSource: () => ({
     isAvailable: (...args: unknown[]) => livePreviewIsAvailableMock(...args),
@@ -242,6 +248,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     writeClipboardMock.mockReset();
     addEventMock.mockReset();
     publishVoiceTranscriptSignalMock.mockReset();
+    buildVoiceShortcutStorageEventMock.mockReset();
     publishVoiceTranscriptSignalMock.mockResolvedValue(undefined);
     getUserMediaWithConstraintFallbackMock.mockReset();
     subscribeHotkeyMock.mockClear();
@@ -262,6 +269,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     runtimeFlags.developerModeEnabled = false;
     runtimeFlags.voiceShortcutSendMode = 'insert-only';
     resetActiveInteractionContextServiceForTests();
+    __resetRuntimeConfigCacheForTests();
 
     Object.defineProperty(window.navigator, 'permissions', {
       configurable: true,
@@ -283,6 +291,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.accessKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.resourceId);
+    setVoiceShortcutAsrProvider('moss');
 
     getUserMediaWithConstraintFallbackMock.mockResolvedValue({
       getTracks: () => [{ stop: vi.fn(), readyState: 'live' }],
@@ -297,6 +306,36 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     writeClipboardMock.mockResolvedValue({ ok: true, title: 'ok' });
     addEventMock.mockResolvedValue(undefined);
+    buildVoiceShortcutStorageEventMock.mockImplementation(async (input: {
+      text: string;
+      startedAtMs?: number;
+      targetScope: string;
+      window?: {
+        title?: string;
+        processName?: string;
+      };
+      agentContext?: {
+        agentId?: string;
+        agentName?: string;
+        sessionId?: string;
+      };
+    }) => ({
+      id: `voice-event-${input.startedAtMs ?? 0}`,
+      content: input.text,
+      type: 'voice',
+      createdAt: new Date(input.startedAtMs ?? 0).toISOString(),
+      metadata: {
+        inputSource: 'voice',
+        inputMethod: 'recognition',
+        voiceShortcut: {
+          text: input.text,
+          captureSource: 'global-shortcut',
+          targetScope: input.targetScope,
+          ...(input.window ? { window: input.window } : {}),
+          ...(input.agentContext ? { agentContext: input.agentContext } : {}),
+        },
+      },
+    }));
     setVoiceShortcutMicPrewarmEnabled(true);
 
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
@@ -1273,6 +1312,131 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     expect(writeClipboardMock).toHaveBeenCalledWith('火山实时结果');
     expectLastVoiceStorageEvent('火山实时结果');
+
+    service.destroy();
+  });
+
+  it('upgrades legacy volcano 1.0 resource to 2.0 after quota error（火山旧版 1.0 额度耗尽后自动切到 2.0 资源）', async () => {
+    setVoiceShortcutMicPrewarmEnabled(false);
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.bigasr.sauc.duration');
+
+    const sessionIds = ['stream-session-quota-1', 'stream-session-quota-2'];
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return sessionIds.shift() ?? 'stream-session-quota-fallback';
+      }
+      if (
+        command === 'volcano_asr_stream_push'
+        || command === 'voice_recording_set_active'
+        || command === 'volcano_asr_stream_cancel'
+      ) {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+
+    await emitVolcanoStreamEvent({
+      sessionId: 'stream-session-quota-1',
+      errorMessage: 'API 错误 45000292: quota exceeded for types: audio_duration_lifetime',
+    });
+    await flushPipeline();
+
+    expect(window.localStorage.getItem(VOLCANO_STORAGE_KEYS.resourceId)).toBe('volc.seedasr.sauc.duration');
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'error',
+        errorMessage: expect.stringContaining('已自动切换到 2.0 小时版'),
+      }),
+    );
+
+    invokeMock.mockClear();
+
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'volcano_asr_stream_start',
+      expect.objectContaining({
+        config: expect.objectContaining({
+          resourceId: 'volc.seedasr.sauc.duration',
+        }),
+      }),
+    );
+
+    service.destroy();
+  });
+
+  it('keeps volcano 2.0 resource on 2.0 quota error（火山 2.0 额度报错时不应回退到 1.0）', async () => {
+    setVoiceShortcutMicPrewarmEnabled(false);
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return 'stream-session-seed-quota';
+      }
+      if (
+        command === 'volcano_asr_stream_push'
+        || command === 'voice_recording_set_active'
+        || command === 'volcano_asr_stream_cancel'
+      ) {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+
+    await emitVolcanoStreamEvent({
+      sessionId: 'stream-session-seed-quota',
+      errorMessage: 'API 错误 45000292: quota exceeded for types: audio_duration_lifetime',
+    });
+    await flushPipeline();
+
+    expect(window.localStorage.getItem(VOLCANO_STORAGE_KEYS.resourceId)).toBe('volc.seedasr.sauc.duration');
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'error',
+        errorMessage: expect.not.stringContaining('已自动切换到 1.0'),
+      }),
+    );
+
+    invokeMock.mockClear();
+
+    await emitVoiceShortcut('start');
+    await flushPipeline();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'volcano_asr_stream_start',
+      expect.objectContaining({
+        config: expect.objectContaining({
+          resourceId: 'volc.seedasr.sauc.duration',
+        }),
+      }),
+    );
 
     service.destroy();
   });

@@ -6,7 +6,15 @@ import { useLongPress } from '../hooks/useLongPress';
 export interface TaskFlowEdgeData extends Record<string, unknown> {
   label: string;
   status: TaskEdgeStatus;
+  isEmptySlot?: boolean;
+  isZombie?: boolean;
   highlighted?: boolean;
+  sourceCenterX?: number;
+  sourceCenterY?: number;
+  sourceRadius?: number;
+  targetCenterX?: number;
+  targetCenterY?: number;
+  targetRadius?: number;
   parallelIndex?: number;
   parallelTotal?: number;
   onOpenContextMenu?: (edgeId: string, x: number, y: number) => void;
@@ -19,8 +27,9 @@ function getParallelOffset(parallelIndex: number, parallelTotal: number) {
   return (parallelIndex - (parallelTotal - 1) / 2) * PARALLEL_EDGE_SPACING;
 }
 
-function getEdgeColor(status: TaskEdgeStatus, highlighted: boolean) {
+export function getTaskFlowEdgeColor(status: TaskEdgeStatus, highlighted: boolean, isZombie: boolean) {
   if (highlighted) return '#C75B3A';
+  if (isZombie) return 'rgba(148,163,184,0.52)';
   if (status === 'completed') return '#10b981';
   if (status === 'in_progress') return '#f59e0b';
   if (status === 'suspended') return '#64748b';
@@ -28,90 +37,163 @@ function getEdgeColor(status: TaskEdgeStatus, highlighted: boolean) {
   return 'rgba(120,113,108,0.7)';
 }
 
-function getEdgeStyle(status: TaskEdgeStatus, selected: boolean, highlighted: boolean) {
+export function getTaskFlowEdgeStyle(
+  status: TaskEdgeStatus,
+  selected: boolean,
+  highlighted: boolean,
+  isEmptySlot: boolean,
+  isZombie: boolean,
+) {
   if (highlighted) {
     return {
-      stroke: getEdgeColor(status, highlighted),
+      stroke: getTaskFlowEdgeColor(status, highlighted, isZombie),
       strokeDasharray: '6 4',
       strokeWidth: selected ? 3.2 : 2.8,
       filter: 'drop-shadow(0 0 6px rgba(199,91,58,0.45))',
     };
   }
+  if (isZombie) {
+    return {
+      stroke: getTaskFlowEdgeColor(status, highlighted, isZombie),
+      strokeDasharray: '2 6',
+      strokeWidth: selected ? 1.9 : 1.6,
+    };
+  }
   if (status === 'completed') {
-    return { stroke: getEdgeColor(status, highlighted), strokeWidth: selected ? 2.8 : 2.2 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeWidth: selected ? 2.8 : 2.2 };
   }
   if (status === 'in_progress') {
-    return { stroke: getEdgeColor(status, highlighted), strokeWidth: selected ? 2.8 : 2.2 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeWidth: selected ? 2.8 : 2.2 };
   }
   if (status === 'suspended') {
-    return { stroke: getEdgeColor(status, highlighted), strokeDasharray: '6 4', strokeWidth: selected ? 2.6 : 2 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeDasharray: '6 4', strokeWidth: selected ? 2.6 : 2 };
   }
   if (status === 'cancelled') {
-    return { stroke: getEdgeColor(status, highlighted), strokeDasharray: '8 4', strokeWidth: selected ? 2.4 : 1.8 };
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeDasharray: '8 4', strokeWidth: selected ? 2.4 : 1.8 };
   }
-  return { stroke: getEdgeColor(status, highlighted), strokeDasharray: '6 4', strokeWidth: selected ? 2.4 : 1.8 };
+  if (isEmptySlot) {
+    return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeDasharray: '4 5', strokeWidth: selected ? 2.1 : 1.5 };
+  }
+  return { stroke: getTaskFlowEdgeColor(status, highlighted, isZombie), strokeDasharray: '6 4', strokeWidth: selected ? 2.4 : 1.8 };
 }
 
 export function buildTaskEdgePath({
   sourceX,
   sourceY,
-  sourcePosition,
   targetX,
   targetY,
-  targetPosition,
+  sourceCenterX,
+  sourceCenterY,
+  sourceRadius,
+  targetCenterX,
+  targetCenterY,
+  targetRadius,
   parallelIndex = 0,
   parallelTotal = 1,
 }: {
   sourceX: number;
   sourceY: number;
-  sourcePosition?: string;
   targetX: number;
   targetY: number;
-  targetPosition?: string;
+  sourceCenterX?: number;
+  sourceCenterY?: number;
+  sourceRadius?: number;
+  targetCenterX?: number;
+  targetCenterY?: number;
+  targetRadius?: number;
   parallelIndex?: number;
   parallelTotal?: number;
 }) {
-  const dx = targetX - sourceX;
-  const dy = targetY - sourceY;
+  const anchors = (
+    sourceCenterX !== undefined
+    && sourceCenterY !== undefined
+    && sourceRadius !== undefined
+    && targetCenterX !== undefined
+    && targetCenterY !== undefined
+    && targetRadius !== undefined
+  )
+    ? resolveEdgeAnchors({
+      sourceCenterX,
+      sourceCenterY,
+      sourceRadius,
+      targetCenterX,
+      targetCenterY,
+      targetRadius,
+    })
+    : { sourceX, sourceY, targetX, targetY };
+
+  const anchorSourceX = anchors.sourceX;
+  const anchorSourceY = anchors.sourceY;
+  const anchorTargetX = anchors.targetX;
+  const anchorTargetY = anchors.targetY;
+
+  if (parallelTotal <= 1) {
+    return {
+      path: `M ${anchorSourceX} ${anchorSourceY} L ${anchorTargetX} ${anchorTargetY}`,
+      labelX: (anchorSourceX + anchorTargetX) / 2,
+      labelY: (anchorSourceY + anchorTargetY) / 2,
+    };
+  }
+
+  const dx = anchorTargetX - anchorSourceX;
+  const dy = anchorTargetY - anchorSourceY;
   const distance = Math.hypot(dx, dy) || 1;
   const normalX = -dy / distance;
   const normalY = dx / distance;
+  const directionX = dx / distance;
+  const directionY = dy / distance;
   const offset = getParallelOffset(parallelIndex, parallelTotal);
   const controlDistance = Math.min(Math.max(distance * 0.35, 42), 132);
-  const sourceVector = getHandleVector(sourcePosition, dx, dy, 'source');
-  const targetVector = getHandleVector(targetPosition, dx, dy, 'target');
-  const control1X = sourceX + sourceVector.x * controlDistance + normalX * offset;
-  const control1Y = sourceY + sourceVector.y * controlDistance + normalY * offset;
-  const control2X = targetX + targetVector.x * controlDistance + normalX * offset;
-  const control2Y = targetY + targetVector.y * controlDistance + normalY * offset;
-  const labelPoint = getCubicPointAt(0.5, sourceX, sourceY, control1X, control1Y, control2X, control2Y, targetX, targetY);
+  const control1X = anchorSourceX + directionX * controlDistance + normalX * offset;
+  const control1Y = anchorSourceY + directionY * controlDistance + normalY * offset;
+  const control2X = anchorTargetX - directionX * controlDistance + normalX * offset;
+  const control2Y = anchorTargetY - directionY * controlDistance + normalY * offset;
+  const labelPoint = getCubicPointAt(
+    0.5,
+    anchorSourceX,
+    anchorSourceY,
+    control1X,
+    control1Y,
+    control2X,
+    control2Y,
+    anchorTargetX,
+    anchorTargetY,
+  );
 
   return {
-    path: `M ${sourceX} ${sourceY} C ${control1X} ${control1Y} ${control2X} ${control2Y} ${targetX} ${targetY}`,
+    path: `M ${anchorSourceX} ${anchorSourceY} C ${control1X} ${control1Y} ${control2X} ${control2Y} ${anchorTargetX} ${anchorTargetY}`,
     labelX: labelPoint.x,
     labelY: labelPoint.y,
   };
 }
 
-function getHandleVector(position: string | undefined, dx: number, dy: number, role: 'source' | 'target') {
-  switch (position) {
-    case 'left':
-      return { x: -1, y: 0 };
-    case 'right':
-      return { x: 1, y: 0 };
-    case 'top':
-      return { x: 0, y: -1 };
-    case 'bottom':
-      return { x: 0, y: 1 };
-    default: {
-      const distance = Math.hypot(dx, dy) || 1;
-      const directionX = dx / distance;
-      const directionY = dy / distance;
-      return role === 'source'
-        ? { x: directionX, y: directionY }
-        : { x: -directionX, y: -directionY };
-    }
-  }
+export function resolveEdgeAnchors({
+  sourceCenterX,
+  sourceCenterY,
+  sourceRadius,
+  targetCenterX,
+  targetCenterY,
+  targetRadius,
+}: {
+  sourceCenterX: number;
+  sourceCenterY: number;
+  sourceRadius: number;
+  targetCenterX: number;
+  targetCenterY: number;
+  targetRadius: number;
+}) {
+  const dx = targetCenterX - sourceCenterX;
+  const dy = targetCenterY - sourceCenterY;
+  const distance = Math.hypot(dx, dy) || 1;
+  const normalX = dx / distance;
+  const normalY = dy / distance;
+
+  return {
+    sourceX: sourceCenterX + normalX * sourceRadius,
+    sourceY: sourceCenterY + normalY * sourceRadius,
+    targetX: targetCenterX - normalX * targetRadius,
+    targetY: targetCenterY - normalY * targetRadius,
+  };
 }
 
 function getCubicPointAt(
@@ -141,29 +223,34 @@ export function TaskFlowEdge({
   id,
   sourceX,
   sourceY,
-  sourcePosition,
   targetX,
   targetY,
-  targetPosition,
   data,
   selected,
 }: EdgeProps<Edge<TaskFlowEdgeData>>) {
   const { path, labelX, labelY } = buildTaskEdgePath({
     sourceX,
     sourceY,
-    sourcePosition,
     targetX,
     targetY,
-    targetPosition,
+    sourceCenterX: typeof data?.sourceCenterX === 'number' ? data.sourceCenterX : undefined,
+    sourceCenterY: typeof data?.sourceCenterY === 'number' ? data.sourceCenterY : undefined,
+    sourceRadius: typeof data?.sourceRadius === 'number' ? data.sourceRadius : undefined,
+    targetCenterX: typeof data?.targetCenterX === 'number' ? data.targetCenterX : undefined,
+    targetCenterY: typeof data?.targetCenterY === 'number' ? data.targetCenterY : undefined,
+    targetRadius: typeof data?.targetRadius === 'number' ? data.targetRadius : undefined,
     parallelIndex: data?.parallelIndex ?? 0,
     parallelTotal: data?.parallelTotal ?? 1,
   });
   const label = data?.label || '';
   const status = data?.status ?? 'pending';
   const highlighted = Boolean(data?.highlighted);
-  const style = getEdgeStyle(status, Boolean(selected), highlighted);
+  const isEmptySlot = Boolean(data?.isEmptySlot);
+  const isZombie = Boolean(data?.isZombie);
+  const hasPlaceholderLabel = isEmptySlot && label.trim() === '待定义';
+  const style = getTaskFlowEdgeStyle(status, Boolean(selected), highlighted, isEmptySlot, isZombie);
   const markerId = `goal-task-arrow-${id}`;
-  const markerColor = getEdgeColor(status, highlighted);
+  const markerColor = getTaskFlowEdgeColor(status, highlighted, isZombie);
   const longPressHandlers = useLongPress((event) => {
     data?.onOpenContextMenu?.(id, event.clientX, event.clientY);
   });
@@ -172,6 +259,7 @@ export function TaskFlowEdge({
     <>
       <defs>
         <marker
+          data-testid={`task-flow-edge-marker-${id}`}
           id={markerId}
           markerWidth="10"
           markerHeight="10"
@@ -183,9 +271,27 @@ export function TaskFlowEdge({
           <path d="M 0 0 L 10 5 L 0 10 z" fill={markerColor} />
         </marker>
       </defs>
-      <BaseEdge id={id} path={path} style={style} markerEnd={`url(#${markerId})`} />
+      <BaseEdge
+        id={id}
+        path={path}
+        style={style}
+        markerEnd={`url(#${markerId})`}
+        data-testid={`task-flow-edge-visible-${id}`}
+      />
+      {status === 'cancelled' && !isZombie ? (
+        <line
+          data-testid={`task-flow-edge-cancel-strike-${id}`}
+          x1={labelX - 12}
+          y1={labelY + 9}
+          x2={labelX + 12}
+          y2={labelY - 9}
+          stroke="rgba(225,29,72,0.65)"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        />
+      ) : null}
       <path
-        data-testid="task-flow-edge-hit-area"
+        data-testid={`task-flow-edge-hit-area-${id}`}
         d={path}
         fill="none"
         stroke="transparent"
@@ -201,10 +307,13 @@ export function TaskFlowEdge({
       {label ? (
         <EdgeLabelRenderer>
           <div
+            data-testid={`task-flow-edge-label-${id}`}
             className={cn(
               'absolute rounded bg-white/90 px-1.5 py-0.5 text-[10px] text-stone-600 shadow-sm dark:bg-stone-900/90 dark:text-stone-300',
+              hasPlaceholderLabel && 'italic opacity-75',
               highlighted && 'bg-[#FFF7ED] text-[#C75B3A] ring-1 ring-[#F5C7B8]',
               status === 'cancelled' && 'line-through opacity-60',
+              isZombie && 'opacity-60',
             )}
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,

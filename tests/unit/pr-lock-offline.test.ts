@@ -9,8 +9,8 @@
  */
 
 import { describe, test, expect, beforeEach } from 'vitest';
-import { PRLockManager } from '../../Scripts/lib/pr-lock';
-import { MockGitHubAPI } from '../../Scripts/lib/pr-lock-mock';
+import { PRLockManager } from '../../scripts/lib/pr-lock';
+import { MockGitHubAPI } from '../../scripts/lib/pr-lock-mock';
 
 describe('PR Lock - 降级路径测试', () => {
   let mockAPI: MockGitHubAPI;

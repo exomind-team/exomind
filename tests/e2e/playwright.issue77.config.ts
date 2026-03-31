@@ -13,7 +13,7 @@ export default defineConfig({
   use: getBaseUse(BASE_URL),
   projects: [getChromiumProject()],
   webServer: {
-    command: `node Scripts/test/runtime-dispatch.cjs issue77-preview ${PORT}`,
+    command: `node scripts/test/runtime-dispatch.cjs issue77-preview ${PORT}`,
     cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: true,

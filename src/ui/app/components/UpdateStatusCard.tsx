@@ -110,7 +110,7 @@ export function UpdateStatusCard() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
-                新版本 v{updateAvailable.latestVersion}
+                新版本 v{updateAvailable.latestVersion.replace(/^v/, '')}
               </p>
               {updateAvailable.publishedAt && (
                 <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">

@@ -22,8 +22,8 @@ use crate::session::{
 struct ListQuery {
     #[serde(default)]
     status: Option<String>,
-    #[serde(default)]
-    sort: Option<String>,
+    #[serde(default, rename = "sort")]
+    _sort: Option<String>,
 }
 
 // ── SSE event types ─────────────────────────────────────────────
@@ -167,7 +167,7 @@ async fn list_sessions(
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<AgentSession>>, (StatusCode, String)> {
     let sessions = if let Some(status_str) = query.status {
-        let status = SessionStatus::from_str(&status_str).ok_or_else(|| {
+        let status = SessionStatus::parse(&status_str).ok_or_else(|| {
             (
                 StatusCode::BAD_REQUEST,
                 format!("invalid status: {status_str}"),

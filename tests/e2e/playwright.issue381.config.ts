@@ -25,7 +25,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'node Scripts/test/runtime-dispatch.cjs vite-dev',
+    command: 'node scripts/test/runtime-dispatch.cjs vite-dev',
     cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: false,

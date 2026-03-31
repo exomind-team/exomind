@@ -15,15 +15,17 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   });
 
   it('switches desktop layout for primary app routes（主应用路由切桌面布局）', () => {
-    expect(source).toContain('const isDesktopAdaptiveRoute');
-    expect(source).toContain('isDesktopAdaptiveShellPath(location.pathname)');
     expect(source).toContain('resolveAppShellMode({');
+    expect(source).toContain("if (selectedShell === 'desktop')");
   });
 
   it('keeps me entry behind feature flag in desktop nav（桌面导航中的 Me 入口受功能开关控制）', () => {
-    expect(desktopNavBlock).toContain("title: '首页', path: '/'");
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
     expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
+    expect(desktopNavBlock).toContain('...(goalsPageEnabled ? [{');
+    expect(desktopNavBlock).toContain("title: '目标'");
+    expect(desktopNavBlock).toContain("path: '/goals'");
+    expect(desktopNavBlock).toContain('icon: Orbit');
     expect(desktopNavBlock).toContain('...(mePageEnabled ? [{');
     expect(desktopNavBlock).toContain("title: 'Me'");
     expect(desktopNavBlock).toContain("path: '/me'");
@@ -32,6 +34,10 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(desktopNavBlock).toContain("title: '网络'");
     expect(desktopNavBlock).toContain("path: '/agents'");
     expect(desktopNavBlock).toContain('icon: Waypoints');
+    expect(desktopNavBlock).toContain("key: 'workbench-test'");
+    expect(desktopNavBlock).toContain("title: '工作台测试'");
+    expect(desktopNavBlock).toContain("path: '/workbench'");
+    expect(desktopNavBlock).toContain('icon: FlaskConical');
     expect(desktopNavBlock).toContain("title: '设置', path: '/settings'");
     expect(desktopNavBlock).not.toContain("title: '总览', path: '/dashboard'");
     expect(desktopNavBlock).not.toContain('事件日志');
@@ -40,7 +46,7 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   });
 
   it('uses network label and waypoints icon in mobile shell nav（移动端底栏使用网络文案与拓扑图标）', () => {
-    expect(source).toContain("{ title: '首页', path: '/', icon: House }");
+    expect(source).toContain("{ title: '当下', path: '/eventlog', icon: Target }");
     expect(source).toContain("...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : [])");
     expect(source).not.toContain("...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : [])");
   });
@@ -66,9 +72,8 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   it('adds collapsible desktop sidebar state and toggle（桌面侧栏支持收起状态与切换按钮）', () => {
     expect(source).toContain('desktopSidebarCollapsed');
     expect(source).toContain('setDesktopSidebarCollapsed');
-    expect(source).toContain("const DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY = 'exomind:desktop-sidebar-collapsed'");
-    expect(source).toContain('readStoredDesktopSidebarCollapsed');
-    expect(source).toContain('writeStoredDesktopSidebarCollapsed');
+    expect(source).toContain('getPersistedDesktopSidebarCollapsed');
+    expect(source).toContain('setPersistedDesktopSidebarCollapsed');
     expect(source).toContain('data-testid="desktop-sidebar-toggle"');
     expect(source).toContain('收起侧边栏');
     expect(source).toContain('展开侧边栏');

@@ -19,6 +19,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { resolveLocalServiceHost } from '@/config/local-service-host';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT, type EmbeddedRuntimeNetworkMode } from '@/config/runtime-target';
+import { readRuntimeBackedValue } from '@/config/runtime-preference-storage';
 import { VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
 import type {
   LinkProofAckPayload,
@@ -304,7 +305,7 @@ export function getDirectRuntimePortCandidates(): number[] {
   }
 
   try {
-    const raw = window.localStorage.getItem(DIRECT_RUNTIME_PORT_STORAGE_KEY);
+    const raw = readRuntimeBackedValue(DIRECT_RUNTIME_PORT_STORAGE_KEY);
     if (!raw) return [...DIRECT_RUNTIME_PORT_CANDIDATES];
 
     const parsed = JSON.parse(raw);

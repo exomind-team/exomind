@@ -1,10 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('task page fuzzy search config（任务页模糊搜索配置）', () => {
   let storage: Record<string, string>;
 
   beforeEach(() => {
     storage = {};
+    __resetRuntimeConfigCacheForTests();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
       value: {
@@ -31,6 +36,14 @@ describe('task page fuzzy search config（任务页模糊搜索配置）', () =>
     expect(storage['exomind:taskPageFuzzySearchEnabled']).toBe('false');
     expect(listener).toHaveBeenCalledWith(false);
     unsubscribe();
+  });
+
+  it('reads runtime-backed switch before localStorage（优先读取 Runtime 中的模糊搜索开关）', async () => {
+    storage['exomind:taskPageFuzzySearchEnabled'] = 'false';
+    __primeRuntimeConfigForTests({ 'exomind:taskPageFuzzySearchEnabled': 'true' });
+
+    const module = await import('@/config/task-page-fuzzy-search');
+    expect(module.getTaskPageFuzzySearchEnabled()).toBe(true);
   });
 
   it('normalizes storage values and supports storage sync（异常值归一化并支持 storage 同步）', async () => {

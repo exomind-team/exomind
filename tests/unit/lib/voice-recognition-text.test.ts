@@ -82,6 +82,10 @@ describe('normalizeRecognitionText（通用语音去重）', () => {
     it('collapses fully duplicated text（"火山实时结果火山实时结果" → "火山实时结果"）', () => {
       expect(normalizeRecognitionText('火山实时结果火山实时结果')).toBe('火山实时结果');
     });
+
+    it('collapses duplicated leading phrase before the unique tail（"火山实时结果火山实时结果继续补充" → "火山实时结果继续补充"）', () => {
+      expect(normalizeRecognitionText('火山实时结果火山实时结果继续补充')).toBe('火山实时结果继续补充');
+    });
   });
 
   // ── 边界 ──

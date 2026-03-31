@@ -34,6 +34,20 @@ describe('Settings Registry Consistency', () => {
     }
   });
 
+  it('hides domain backend mode toggles in Web runtime because Web data flow is RT-only', () => {
+    const webCtx = {
+      isDesktop: true,
+      isTauriWindow: false,
+      developerMode: true,
+    };
+
+    for (const id of ['eventlog-backend-mode', 'task-backend-mode', 'timeblock-backend-mode']) {
+      const item = SETTINGS_REGISTRY.find((entry) => entry.id === id);
+      expect(item).toBeDefined();
+      expect(item?.visible?.(webCtx)).toBe(false);
+    }
+  });
+
   it('voice-shortcut-hotkey allows await when set returns a promise', async () => {
     const hotkeyItem = SETTINGS_REGISTRY.find((item) => item.id === 'voice-shortcut-hotkey');
 

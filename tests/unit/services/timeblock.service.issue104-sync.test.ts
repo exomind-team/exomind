@@ -98,6 +98,10 @@ vi.mock('@/config/feedback-preferences', () => ({
 
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 
+function createLegacySyncService(): TimeBlockServiceImpl {
+  return new TimeBlockServiceImpl(undefined, { backendMode: 'legacy' });
+}
+
 describe('Issue #104 TimeBlockService sync lifecycle', () => {
   beforeEach(() => {
     storageForUser = {};
@@ -148,19 +152,30 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     appendEventWithEcsReplicationMock.mockClear();
   });
 
-  it('falls back to legacy storage outside tauri even when preference is rt-sqlite', async () => {
+  it('uses RT storage outside tauri when Web data domains are RT-only', async () => {
     getTimeblockBackendModeMock.mockReturnValue('rt-sqlite');
     loadActiveBlockMock.mockResolvedValueOnce(null);
     const service = new TimeBlockServiceImpl();
 
     await service.loadActiveBlock();
 
-    expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
-    expect(rtGetActiveBlockMock).not.toHaveBeenCalled();
+    expect(loadActiveBlockMock).not.toHaveBeenCalled();
+    expect(rtGetActiveBlockMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores legacy timeblock backend preference outside tauri', async () => {
+    getTimeblockBackendModeMock.mockReturnValue('legacy');
+    loadActiveBlockMock.mockResolvedValueOnce(null);
+    const service = new TimeBlockServiceImpl();
+
+    await service.loadActiveBlock();
+
+    expect(loadActiveBlockMock).not.toHaveBeenCalled();
+    expect(rtGetActiveBlockMock).toHaveBeenCalledTimes(1);
   });
 
   it('starts and stops ECS sync mode without calling storage syncToRemote', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
 
     await service.startSync();
     await service.stopSync();
@@ -169,7 +184,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('rolls back subscriber count when ECS seed fails so retry can re-attempt', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
 
     loadActiveBlockMock
       .mockRejectedValueOnce(new Error('sync failed once'))
@@ -185,7 +200,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('switches active storage when remote user changes', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
 
     await service.startSync('http://127.0.0.1:6984/user-a');
     await service.startSync('http://127.0.0.1:6984/user-b');
@@ -196,7 +211,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('serializes old stopSync before seeding next user storage to avoid dual-channel window', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const userAUrl = 'http://127.0.0.1:6984/user-a';
     const userBUrl = 'http://127.0.0.1:6984/user-b';
     let releaseUserAStop: (() => void) | null = null;
@@ -225,7 +240,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('notifies current snapshot when switching sync user to prevent stale UI state', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
     const base = Date.now();
@@ -256,7 +271,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('forwards remote block changes to onBlockChange subscribers', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
 
@@ -282,7 +297,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('ignores local storage writes to avoid self-overwrite loops', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
 
@@ -306,7 +321,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('notifies UI subscribers even when remote block requires normalization write-back', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
 
@@ -336,7 +351,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('rejects stale running sync updates after feedback is already submitted', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
 
@@ -381,7 +396,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('writes back canonical local block when stale sync packet has older startId', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const base = Date.now();
 
     const localBaseline = {
@@ -428,7 +443,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('prefers newer transition time over actorId when phase and version tie', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
     const base = Date.now();
@@ -480,7 +495,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('keeps remaining subscriber active after another subscriber unsubscribes', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChangeA = vi.fn();
     const onChangeB = vi.fn();
     const unsubscribeA = service.onBlockChange(onChangeA);
@@ -510,7 +525,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('ignores stale sync packets from previous user storage after user switch', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
     const base = Date.now();
@@ -560,7 +575,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('includes remote context in canonical write-back dedupe signature', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const base = Date.now();
 
     loadActiveBlockMock.mockResolvedValue({
@@ -612,7 +627,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('emits structured diagnostics when rejecting stale sync packets', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const base = Date.now();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
@@ -687,7 +702,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('publishes canonical snapshot when local storage emits ECS-replicated change trigger', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const base = Date.now();
 
     await service.startSync('http://127.0.0.1:6984/test-user');

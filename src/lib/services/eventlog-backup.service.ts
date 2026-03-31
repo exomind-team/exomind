@@ -5,6 +5,7 @@ import {
 } from '@/config/runtime-target';
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
 import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
+import { notifyEventLogChanged } from '@/lib/services/eventlog.service';
 
 type RuntimeFetch = typeof fetch;
 export type EventLogImportStrategy = 'merge' | 'overwrite';
@@ -122,24 +123,28 @@ export class EventLogBackupServiceImpl {
   }
 
   async importEventsFromJson(content: string, strategy: EventLogImportStrategy): Promise<EventLogImportResult> {
-    return this.requestJson<EventLogImportResult>(`/eventlog/import/json?strategy=${strategy}`, {
+    const result = await this.requestJson<EventLogImportResult>(`/eventlog/import/json?strategy=${strategy}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: content,
     });
+    notifyEventLogChanged();
+    return result;
   }
 
   async importEventsFromSqliteSnapshot(
     bytes: Uint8Array,
     strategy: EventLogImportStrategy,
   ): Promise<EventLogImportResult> {
-    return this.requestJson<EventLogImportResult>(`/eventlog/import/sqlite?strategy=${strategy}`, {
+    const result = await this.requestJson<EventLogImportResult>(`/eventlog/import/sqlite?strategy=${strategy}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         content_base64: bytesToBase64(bytes),
       }),
     });
+    notifyEventLogChanged();
+    return result;
   }
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {

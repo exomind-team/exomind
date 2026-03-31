@@ -41,6 +41,7 @@ const volcanoAppKeyModule = createConfigModule<string>({
   eventName: 'exomind:volcano-asr-app-key-changed',
   defaultValue: envMap.VITE_VOLCANO_APP_KEY || '',
   normalize: (rawValue) => normalizeTrimmedString(rawValue, envMap.VITE_VOLCANO_APP_KEY || ''),
+  persistMode: 'runtime-preferred',
 });
 
 const volcanoAccessKeyModule = createConfigModule<string>({
@@ -48,6 +49,7 @@ const volcanoAccessKeyModule = createConfigModule<string>({
   eventName: 'exomind:volcano-asr-access-key-changed',
   defaultValue: envMap.VITE_VOLCANO_ACCESS_KEY || '',
   normalize: (rawValue) => normalizeTrimmedString(rawValue, envMap.VITE_VOLCANO_ACCESS_KEY || ''),
+  persistMode: 'runtime-preferred',
 });
 
 const volcanoResourceIdModule = createConfigModule<string>({
@@ -55,6 +57,7 @@ const volcanoResourceIdModule = createConfigModule<string>({
   eventName: 'exomind:volcano-asr-resource-id-changed',
   defaultValue: envMap.VITE_VOLCANO_RESOURCE_ID || DEFAULT_VOLCANO_RESOURCE_ID,
   normalize: (rawValue) => normalizeVolcanoResourceId(rawValue ?? envMap.VITE_VOLCANO_RESOURCE_ID),
+  persistMode: 'runtime-preferred',
 });
 
 const volcanoEndpointModule = createConfigModule<VolcanoEndpoint>({
@@ -62,6 +65,7 @@ const volcanoEndpointModule = createConfigModule<VolcanoEndpoint>({
   eventName: 'exomind:volcano-asr-endpoint-changed',
   defaultValue: DEFAULT_VOLCANO_ASR_OPTIONS.endpoint,
   normalize: normalizeVolcanoEndpoint,
+  persistMode: 'runtime-preferred',
 });
 
 const volcanoLanguageModule = createConfigModule<string>({
@@ -69,6 +73,7 @@ const volcanoLanguageModule = createConfigModule<string>({
   eventName: 'exomind:volcano-asr-language-changed',
   defaultValue: 'zh-CN',
   normalize: normalizeVolcanoLanguage,
+  persistMode: 'runtime-preferred',
 });
 
 export function getVolcanoAppKey(): string {

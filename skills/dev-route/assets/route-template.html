@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ExoMind 开发航线</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#06080d;--card:#0d1117;--card-hover:#161b22;--border:#21262d;
+  --text:#e6edf3;--text-dim:#8b949e;--text-faint:#484f58;
+  --accent:#58a6ff;--accent-glow:rgba(88,166,255,.15);
+  --p0:#f85149;--p1:#d29922;--p2:#6e7681;
+  --green:#2ea043;--green-dim:#238636;
+  --purple:#8957e5;--orange:#d29922;--cyan:#39d2c0;
+  --radius:10px;--radius-sm:6px;
+  /* Track colors */
+  --track-web:#58a6ff;--track-rt:#d29922;--track-desktop:#8957e5;
+  --track-android:#2ea043;--track-cross:#f778ba;--track-ci:#6e7681;
+}
+html{font-size:16px;scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:'Outfit',sans-serif;font-weight:300;
+  line-height:1.6;min-height:100vh;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%,rgba(88,166,255,.06),transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%,rgba(137,87,229,.04),transparent);
+}
+a{color:var(--accent);text-decoration:none}
+code,.mono{font-family:'JetBrains Mono',monospace}
+.container{max-width:1200px;margin:0 auto;padding:1.5rem 1rem 3rem}
+
+/* Header */
+.header{text-align:center;padding:2rem 0 1.5rem;position:relative}
+.header::after{content:'';display:block;width:80px;height:2px;margin:1rem auto 0;background:linear-gradient(90deg,transparent,var(--accent),transparent)}
+.logo{font-family:'JetBrains Mono',monospace;font-size:2.8rem;font-weight:700;letter-spacing:.15em;color:var(--accent);text-shadow:0 0 30px rgba(88,166,255,.3)}
+.header h1{font-size:1.6rem;font-weight:500;color:var(--text-dim);margin-top:.3rem;letter-spacing:.4em}
+.header .meta{font-size:.85rem;color:var(--text-dim);margin-top:.5rem}
+.header .meta .mono{color:var(--accent)}
+
+/* Status + Metrics row */
+.top-row{display:grid;grid-template-columns:1fr 3fr;gap:1rem;margin:1.5rem 0}
+.status-card{border-radius:var(--radius);padding:1.4rem;position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(88,166,255,.12),rgba(137,87,229,.08));border:1px solid rgba(88,166,255,.15)}
+.status-emoji{font-size:2.5rem}
+.status-label{font-size:1.2rem;font-weight:700;margin-top:.3rem}
+.status-sub{font-size:.82rem;color:var(--text-dim);margin-top:.2rem}
+.metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem}
+.metric-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;text-align:center;transition:border-color .2s,box-shadow .2s}
+.metric-card:hover{border-color:var(--accent);box-shadow:0 0 20px var(--accent-glow)}
+.metric-card .label{font-size:.85rem;color:var(--text-dim);letter-spacing:.08em}
+.metric-card .value{font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:700;margin:.2rem 0;background:linear-gradient(135deg,var(--text),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.metric-card .note{font-size:.72rem;color:var(--text-faint)}
+
+/* Section Titles */
+.section-title{font-size:.82rem;font-weight:700;color:var(--text-dim);letter-spacing:.15em;text-transform:uppercase;margin:2rem 0 .8rem;display:flex;align-items:center;gap:.5rem}
+.section-title::before{content:'';flex:0 0 3px;height:1rem;background:var(--accent);border-radius:2px}
+
+/* Route Map (DAG) */
+.route-map-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;position:relative;overflow-x:auto}
+.route-map-canvas{display:block;margin:0 auto}
+
+/* Track Legend */
+.track-legend{display:flex;flex-wrap:wrap;gap:1rem;margin:.8rem 0;font-size:.78rem}
+.track-legend-item{display:flex;align-items:center;gap:.35rem}
+.track-dot{width:10px;height:10px;border-radius:50%}
+
+/* Batch Detail Panel */
+.batch-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-top:.8rem;overflow:hidden;transition:max-height .4s ease,opacity .3s;max-height:0;opacity:0}
+.batch-panel.open{max-height:800px;opacity:1}
+.batch-panel-inner{padding:1.2rem}
+.batch-panel-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem}
+.batch-panel-title{font-weight:700;font-size:1.1rem}
+.batch-panel-close{cursor:pointer;color:var(--text-faint);font-size:1.2rem;padding:.2rem .5rem;border-radius:var(--radius-sm);transition:background .15s}
+.batch-panel-close:hover{background:var(--card-hover)}
+.batch-meta-row{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:.8rem;font-size:.78rem}
+.batch-meta-tag{padding:.2rem .6rem;border-radius:3px;font-weight:700;letter-spacing:.05em}
+.batch-meta-tag.platform{background:rgba(88,166,255,.1);color:var(--accent)}
+.batch-meta-tag.priority-p0{background:rgba(248,81,73,.12);color:var(--p0)}
+.batch-meta-tag.priority-p1{background:rgba(210,153,34,.12);color:var(--p1)}
+.batch-meta-tag.priority-p2{background:rgba(110,118,129,.12);color:var(--text-dim)}
+.batch-meta-tag.status-ready{background:rgba(88,166,255,.1);color:var(--accent)}
+.batch-meta-tag.status-active{background:rgba(46,160,67,.15);color:var(--green)}
+.batch-meta-tag.status-done{background:rgba(46,160,67,.3);color:var(--green)}
+.batch-meta-tag.status-blocked{background:rgba(248,81,73,.1);color:var(--p0)}
+.batch-progress{height:6px;background:var(--border);border-radius:3px;margin:.6rem 0;overflow:hidden}
+.batch-progress-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--green-dim),var(--green));transition:width .5s}
+.batch-issue-list{list-style:none;margin-top:.5rem}
+.batch-issue-item{display:flex;align-items:center;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.82rem}
+.batch-issue-item:last-child{border-bottom:none}
+.batch-issue-num{font-family:'JetBrains Mono',monospace;color:var(--accent);min-width:45px}
+.batch-issue-pri{font-size:.7rem;font-weight:700;padding:.1rem .35rem;border-radius:2px}
+.batch-issue-pri.p0{background:rgba(248,81,73,.15);color:var(--p0)}
+.batch-issue-pri.p1{background:rgba(210,153,34,.15);color:var(--p1)}
+.batch-issue-pri.p2{background:rgba(110,118,129,.15);color:var(--text-dim)}
+.batch-issue-title{color:var(--text-dim);flex:1}
+.batch-deps{font-size:.78rem;color:var(--text-faint);margin-top:.5rem}
+.batch-deps strong{color:var(--text-dim)}
+
+/* Heatmap */
+.heatmap-grid{display:grid;grid-template-columns:100px repeat(7,1fr);gap:2px;font-size:.75rem}
+.heatmap-header{background:var(--card-hover);padding:.4rem;text-align:center;font-weight:700;color:var(--text-dim);border-radius:var(--radius-sm)}
+.heatmap-label{background:var(--card);padding:.4rem;display:flex;align-items:center;font-weight:500;color:var(--text-dim);border-radius:var(--radius-sm)}
+.heatmap-cell{padding:.5rem;text-align:center;border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;font-weight:700;transition:transform .15s}
+.heatmap-cell:hover{transform:scale(1.1)}
+.heatmap-cell.heat-0{background:rgba(110,118,129,.08);color:var(--text-faint)}
+.heatmap-cell.heat-1{background:rgba(88,166,255,.1);color:var(--accent)}
+.heatmap-cell.heat-2{background:rgba(210,153,34,.15);color:var(--p1)}
+.heatmap-cell.heat-3{background:rgba(248,81,73,.15);color:var(--p0)}
+.heatmap-cell.heat-4{background:rgba(248,81,73,.25);color:var(--p0)}
+
+/* Actions */
+.action-item{display:flex;align-items:flex-start;gap:.7rem;padding:.7rem 0;border-bottom:1px solid var(--border)}
+.action-item:last-child{border-bottom:none}
+.action-check{flex-shrink:0;width:20px;height:20px;margin-top:2px;cursor:pointer;accent-color:var(--accent)}
+.action-text{font-size:.88rem}
+.action-detail{font-size:.78rem;color:var(--text-dim);margin-top:.2rem}
+
+/* Insight */
+.insight{margin-top:2rem;padding:1.5rem;border-radius:var(--radius);background:linear-gradient(135deg,rgba(88,166,255,.04),rgba(137,87,229,.04));border:1px solid rgba(88,166,255,.1);position:relative}
+.insight::before{content:'\2605';position:absolute;top:-.5rem;left:1.2rem;background:var(--bg);padding:0 .4rem;color:var(--accent);font-size:.9rem}
+.insight p{font-size:.88rem;color:var(--text-dim);line-height:1.8;font-style:italic}
+.insight .author{font-size:.78rem;color:var(--text-faint);margin-top:.5rem;text-align:right}
+
+/* Footer */
+.footer{text-align:center;padding:2rem 0 1rem;font-size:.78rem;color:var(--text-faint)}
+.devlog-nav{text-align:center;padding:1rem 0;font-size:.85rem}
+.devlog-nav a{color:var(--accent);font-family:'JetBrains Mono',monospace}
+
+/* Responsive */
+@media(max-width:1199px){.top-row{grid-template-columns:1fr}.metrics-grid{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:767px){html{font-size:14px}.metrics-grid{grid-template-columns:repeat(2,1fr)}.logo{font-size:2rem}.heatmap-grid{grid-template-columns:80px repeat(7,1fr);font-size:.65rem}}
+
+/* Animations */
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(88,166,255,.4)}50%{box-shadow:0 0 12px 4px rgba(88,166,255,.2)}}
+.animate{animation:fadeUp .5s ease both}
+.d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}
+.d4{animation-delay:.2s}.d5{animation-delay:.25s}.d6{animation-delay:.3s}
+</style>
+</head>
+<body>
+<div class="container" id="app"></div>
+
+<script>
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  ExoMind 开发航线 · 数据模板                                    ║
+// ║                                                                  ║
+// ║  使用方法:                                                       ║
+// ║  1. 复制此文件并重命名为 route-YYYY-MM-DD.html                    ║
+// ║  2. 填写下方 ROUTE 对象中的数据                                   ║
+// ║  3. 在浏览器中打开此文件即可                                       ║
+// ║  4. 所有 HTML 由 JS 从 ROUTE 数据自动渲染                         ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+const ROUTE = {
+
+  meta: {
+    title: '开发航线',
+    date: 'YYYY-MM-DD',
+    baseline: '0000000',
+    repo: 'exomind-team/exomind',
+  },
+
+  publisher: {
+    identity: '',
+    os: '',
+    model: '',
+    version: '',
+  },
+
+  status: {
+    level: 'cloudy',
+    emoji: '⛅',
+    label: '就绪待发',
+    summary: '...',
+  },
+
+  metrics: [
+    { label: '总批次', value: '0', note: '...' },
+    { label: '就绪', value: '0', note: '...' },
+    { label: '进行中', value: '0', note: '...' },
+    { label: '覆盖 Issues', value: '0', note: '...' },
+  ],
+
+  tracks: [
+    { id: 'web', name: 'Web-only', color: '#58a6ff', desc: 'Termux/任意开发机可做' },
+    { id: 'rt', name: 'RT Rust', color: '#d29922', desc: '需 Rust 工具链' },
+    { id: 'desktop', name: 'Desktop', color: '#8957e5', desc: '需 Windows/macOS 桌面' },
+    { id: 'android', name: 'Android', color: '#2ea043', desc: '需 Android 真机' },
+    { id: 'cross', name: 'Cross', color: '#f778ba', desc: '需多端协同验证' },
+    { id: 'ci', name: 'CI/Infra', color: '#6e7681', desc: '独立可做' },
+    { id: 'research', name: 'Research', color: '#f0883e', desc: '任意环境可思考' },
+  ],
+
+  // batch 对象字段结构:
+  // {
+  //   id: 'A',                        // 批次编号（单字母）
+  //   name: '批次名称',                // 批次简称
+  //   track: 'web',                    // 所属轨道 id（对应 tracks 中的 id）
+  //   status: 'ready',                 // 状态: ready | active | done | blocked
+  //   priority: 'P1',                  // 优先级: P0 | P1 | P2
+  //   pct: 0,                          // 完成百分比 0-100
+  //   deps: [                           // 前置依赖（带理由）
+  //     { id: 'M', reason: '依赖安全修复后的 API' },
+  //   ],
+  //   branch: 'feature/xxx',           // Git 分支名
+  //   fileDomain: 'src/...',           // 涉及的文件域
+  //   issues: [                        // Issue 列表
+  //     { num: 123, title: '...', priority: 'P1', done: false, size: 'M' },
+  //     // size 可选: S(小) / M(中) / L(大) / XL(epic 级)
+  //   ],
+  // }
+  batches: [],
+
+  // Priority × Platform heatmap data
+  heatmap: {
+    rows: ['P0', 'P1', 'P2'],
+    cols: ['Web', 'RT', 'Desktop', 'Android', 'Cross', 'CI', 'Research'],
+    data: [
+      [0, 0, 0, 0, 0, 0, 0],  // P0
+      [0, 0, 0, 0, 0, 0, 0],  // P1
+      [0, 0, 0, 0, 0, 0, 0],  // P2
+    ],
+  },
+
+  actions: [],
+
+  insight: {
+    text: '...',
+    author: '...',
+  },
+};
+
+// ══════════════════════════════════════════════════════════════
+// Render Engine
+// ══════════════════════════════════════════════════════════════
+
+const R = ROUTE;
+const GH = `https://github.com/${R.meta.repo}/issues/`;
+let selectedBatch = null;
+
+function ghLink(num) {
+  return `<a href="${GH}${num}" target="_blank" class="mono" style="color:var(--accent)">#${num}</a>`;
+}
+
+function renderHeader() {
+  return `
+    <div class="header animate d1">
+      <div class="logo">EXOMIND</div>
+      <h1>开 发 航 线</h1>
+      <div class="meta">
+        ${R.meta.date} · dev@<span class="mono">${R.meta.baseline}</span>
+        · ${R.publisher.identity}·${R.publisher.os} [${R.publisher.model} ${R.publisher.version}]
+      </div>
+    </div>`;
+}
+
+function renderTopRow() {
+  const metricsHtml = R.metrics.map(m => `
+    <div class="metric-card">
+      <div class="label">${m.label}</div>
+      <div class="value">${m.value}</div>
+      <div class="note">${m.note}</div>
+    </div>`).join('');
+
+  return `
+    <div class="top-row animate d2">
+      <div class="status-card">
+        <div class="status-emoji">${R.status.emoji}</div>
+        <div class="status-label">${R.status.label}</div>
+        <div class="status-sub">${R.status.summary}</div>
+      </div>
+      <div class="metrics-grid">${metricsHtml}</div>
+    </div>`;
+}
+
+function renderTrackLegend() {
+  return `
+    <div class="track-legend">
+      ${R.tracks.map(t => `
+        <div class="track-legend-item" title="${t.desc}">
+          <div class="track-dot" style="background:${t.color}"></div>
+          <span style="color:${t.color}">${t.name}</span>
+        </div>`).join('')}
+      <div class="track-legend-item">
+        <div class="track-dot" style="background:var(--green)"></div> 已完成
+      </div>
+      <div class="track-legend-item">
+        <div class="track-dot" style="background:var(--accent);box-shadow:0 0 6px var(--accent)"></div> 就绪
+      </div>
+      <div class="track-legend-item">
+        <div class="track-dot" style="background:var(--text-faint)"></div> 待解锁
+      </div>
+    </div>`;
+}
+
+function getTrackColor(trackId) {
+  const t = R.tracks.find(x => x.id === trackId);
+  return t ? t.color : '#6e7681';
+}
+
+function getStatusColor(status) {
+  switch(status) {
+    case 'done': return 'var(--green)';
+    case 'active': return 'var(--accent)';
+    case 'ready': return 'var(--accent)';
+    case 'blocked': return 'var(--text-faint)';
+    default: return 'var(--text-faint)';
+  }
+}
+
+function renderRouteMap() {
+  // Build dagre graph
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: 'LR', ranksep: 120, nodesep: 50, marginx: 50, marginy: 40 });
+  g.setDefaultEdgeLabel(() => ({}));
+
+  R.batches.forEach(b => {
+    g.setNode(b.id, { label: b.id, width: 140, height: 70 });
+  });
+  R.batches.forEach(b => {
+    b.deps.forEach(dep => {
+      const depId = typeof dep === 'string' ? dep : dep.id;
+      if (R.batches.find(x => x.id === depId)) {
+        g.setEdge(depId, b.id);
+      }
+    });
+  });
+
+  dagre.layout(g);
+
+  const nodes = [];
+  const edges = [];
+  g.nodes().forEach(id => {
+    const n = g.node(id);
+    if (n) nodes.push({ id, x: n.x, y: n.y, w: n.width, h: n.height });
+  });
+  g.edges().forEach(e => {
+    const edge = g.edge(e);
+    edges.push({ from: e.v, to: e.w, points: edge.points });
+  });
+
+  // Calculate canvas size
+  const maxX = Math.max(...nodes.map(n => n.x + n.w / 2)) + 60;
+  const maxY = Math.max(...nodes.map(n => n.y + n.h / 2)) + 60;
+  const canvasW = Math.max(maxX, 600);
+  const canvasH = Math.max(maxY, 200);
+
+  // ExoMind TaskDag-inspired palette
+  const PALETTE = {
+    active:     { border: '#C75B3A', ring: 'rgba(199,91,58,.35)', bg: 'rgba(199,91,58,.08)', text: '#e6edf3' },
+    ready:      { border: '#16A34A', ring: 'rgba(34,197,94,.20)', bg: 'rgba(240,253,244,.06)', text: '#e6edf3' },
+    done:       { border: '#A8A29E', ring: 'rgba(214,211,209,.15)', bg: 'rgba(214,211,209,.06)', text: '#78716C' },
+    blocked:    { border: '#EAB308', ring: 'rgba(234,179,8,.15)', bg: 'rgba(234,179,8,.04)', text: '#8b949e' },
+  };
+  const EDGE_CORNER_RADIUS = 20;
+
+  function drawRoundedRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+  }
+
+  function drawBezierEdge(ctx, pts, color, dashed) {
+    if (pts.length < 2) return;
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.25;
+    ctx.setLineDash(dashed ? [7, 5] : []);
+
+    if (pts.length === 2) {
+      // Simple bezier
+      const [p0, p1] = pts;
+      const cpOffset = Math.abs(p1.x - p0.x) * 0.4;
+      ctx.moveTo(p0.x, p0.y);
+      ctx.bezierCurveTo(p0.x + cpOffset, p0.y, p1.x - cpOffset, p1.y, p1.x, p1.y);
+    } else {
+      // Multi-point with rounded corners
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const prev = pts[i-1], cur = pts[i], next = pts[i+1];
+        const r = Math.min(EDGE_CORNER_RADIUS,
+          Math.hypot(cur.x-prev.x, cur.y-prev.y)/2,
+          Math.hypot(next.x-cur.x, next.y-cur.y)/2);
+        const d1 = Math.hypot(cur.x-prev.x, cur.y-prev.y);
+        const d2 = Math.hypot(next.x-cur.x, next.y-cur.y);
+        const cp1x = cur.x - (cur.x-prev.x)/d1*r;
+        const cp1y = cur.y - (cur.y-prev.y)/d1*r;
+        const cp2x = cur.x + (next.x-cur.x)/d2*r;
+        const cp2y = cur.y + (next.y-cur.y)/d2*r;
+        ctx.lineTo(cp1x, cp1y);
+        ctx.quadraticCurveTo(cur.x, cur.y, cp2x, cp2y);
+      }
+      ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Arrow head
+    const last = pts[pts.length - 1];
+    const prev = pts.length >= 2 ? pts[pts.length - 2] : pts[0];
+    const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+    ctx.beginPath();
+    ctx.fillStyle = color;
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(last.x - 10 * Math.cos(angle - .35), last.y - 10 * Math.sin(angle - .35));
+    ctx.lineTo(last.x - 10 * Math.cos(angle + .35), last.y - 10 * Math.sin(angle + .35));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  setTimeout(() => {
+    const canvas = document.getElementById('route-canvas');
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvasW * dpr;
+    canvas.height = canvasH * dpr;
+    canvas.style.width = canvasW + 'px';
+    canvas.style.height = canvasH + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    // Draw edges with bezier curves
+    edges.forEach(e => {
+      const toBatch = R.batches.find(b => b.id === e.to);
+      const isBlocked = toBatch && toBatch.status === 'blocked';
+      const color = isBlocked ? 'rgba(234,179,8,.35)' : '#C75B3A';
+      drawBezierEdge(ctx, e.points, color, isBlocked);
+    });
+
+    // Draw nodes (ExoMind TaskDag card style)
+    nodes.forEach(n => {
+      const batch = R.batches.find(b => b.id === n.id);
+      if (!batch) return;
+      const trackColor = getTrackColor(batch.track);
+      const isSelected = selectedBatch === batch.id;
+      const p = PALETTE[batch.status] || PALETTE.blocked;
+      const r = 12; // rounded-xl
+      const x = n.x - n.w/2, y = n.y - n.h/2;
+
+      // Outer ring (glow) for selected or active
+      if (isSelected || batch.status === 'active') {
+        ctx.save();
+        ctx.shadowColor = p.border;
+        ctx.shadowBlur = 12;
+        drawRoundedRect(ctx, x - 2, y - 2, n.w + 4, n.h + 4, r + 2);
+        ctx.strokeStyle = p.ring;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Card background
+      drawRoundedRect(ctx, x, y, n.w, n.h, r);
+      ctx.fillStyle = batch.status === 'blocked' ? 'rgba(13,17,23,.85)' : 'rgba(13,17,23,.95)';
+      ctx.fill();
+
+      // Border (status-driven: blocked=yellow dim, ready=green, active=brown)
+      ctx.strokeStyle = isSelected ? '#C75B3A' : p.border;
+      ctx.lineWidth = isSelected ? 2.5 : 1.8;
+      if (batch.status === 'blocked') { ctx.globalAlpha = 0.6; }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // Left track color accent bar (always visible, dimmed if blocked)
+      const barW = 4;
+      ctx.globalAlpha = batch.status === 'blocked' ? 0.6 : 1;
+      drawRoundedRect(ctx, x, y, barW, n.h, [r, 0, 0, r]);
+      ctx.fillStyle = trackColor;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Blocked overlay (subtle dim, preserves track color visibility)
+      if (batch.status === 'blocked') {
+        drawRoundedRect(ctx, x, y, n.w, n.h, r);
+        ctx.fillStyle = 'rgba(6,8,13,.2)';
+        ctx.fill();
+      }
+
+      // Batch ID (large, track-colored, dimmed if blocked)
+      ctx.globalAlpha = batch.status === 'blocked' ? 0.6 : 1;
+      ctx.fillStyle = trackColor;
+      ctx.font = 'bold 18px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(batch.id, n.x, y + 8);
+
+      // Batch name (small, track-colored, dimmed if blocked)
+      ctx.font = '500 10px "Outfit", sans-serif';
+      const nameText = batch.name.length > 14 ? batch.name.slice(0, 13) + '…' : batch.name;
+      ctx.fillText(nameText, n.x, y + 30);
+
+      // Issue count badge
+      ctx.fillStyle = batch.status === 'blocked' ? '#6e7681' : '#8b949e';
+      ctx.font = '10px "JetBrains Mono", monospace';
+      ctx.fillText(`${batch.issues.length} issues`, n.x, y + 44);
+      ctx.globalAlpha = 1;
+
+      // Progress mini-bar (always show)
+      const doneCount = batch.issues.filter(i => i.done).length;
+      const pct = batch.issues.length > 0 ? doneCount / batch.issues.length : 0;
+      if (true) {
+        const barWid = n.w - 24;
+        const barH = 3;
+        const barX = x + 12;
+        const barY = y + n.h - 10;
+        ctx.fillStyle = 'rgba(110,118,129,.2)';
+        ctx.fillRect(barX, barY, barWid, barH);
+        if (pct > 0) {
+          ctx.fillStyle = '#2ea043';
+          ctx.fillRect(barX, barY, barWid * pct, barH);
+        }
+      }
+    });
+
+    // Click handler
+    canvas.onclick = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left);
+      const my = (e.clientY - rect.top);
+      let clicked = null;
+      nodes.forEach(n => {
+        if (mx >= n.x - n.w/2 && mx <= n.x + n.w/2 && my >= n.y - n.h/2 && my <= n.y + n.h/2) {
+          clicked = n.id;
+        }
+      });
+      if (clicked) {
+        selectedBatch = selectedBatch === clicked ? null : clicked;
+        renderBatchPanel();
+        // Re-render canvas for selection highlight
+        renderRouteMap();
+      }
+    };
+
+    // Hover cursor
+    canvas.onmousemove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left);
+      const my = (e.clientY - rect.top);
+      let hover = false;
+      nodes.forEach(n => {
+        if (mx >= n.x - n.w/2 && mx <= n.x + n.w/2 && my >= n.y - n.h/2 && my <= n.y + n.h/2) {
+          hover = true;
+        }
+      });
+      canvas.style.cursor = hover ? 'pointer' : 'default';
+    };
+
+  }, 50);
+
+  return `
+    <div class="section-title animate d3">🗺️ 航线地图</div>
+    ${renderTrackLegend()}
+    <div class="route-map-wrap animate d3">
+      <canvas id="route-canvas" class="route-map-canvas"></canvas>
+    </div>
+    <div id="batch-panel-container"></div>`;
+}
+
+function renderBatchPanel() {
+  const container = document.getElementById('batch-panel-container');
+  if (!container) return;
+  if (!selectedBatch) {
+    container.innerHTML = '<div class="batch-panel"></div>';
+    return;
+  }
+  const b = R.batches.find(x => x.id === selectedBatch);
+  if (!b) return;
+
+  const doneCount = b.issues.filter(i => i.done).length;
+  const pct = b.issues.length > 0 ? Math.round(doneCount / b.issues.length * 100) : 0;
+
+  const priClass = b.priority === 'P0' ? 'priority-p0' : b.priority === 'P1' ? 'priority-p1' : 'priority-p2';
+  const statusClass = `status-${b.status}`;
+  const statusLabel = { ready: '就绪', active: '进行中', done: '已完成', blocked: '待解锁' }[b.status] || b.status;
+
+  const issuesHtml = b.issues.map(i => {
+    const priCls = i.priority === 'P0' ? 'p0' : i.priority === 'P1' ? 'p1' : 'p2';
+    const icon = i.done ? '✅' : '○';
+    const sizeHtml = i.size ? `<span class="batch-issue-pri" style="background:rgba(137,87,229,.12);color:var(--purple)">${i.size}</span>` : '';
+    return `
+      <li class="batch-issue-item">
+        <span>${icon}</span>
+        <span class="batch-issue-num">${ghLink(i.num)}</span>
+        <span class="batch-issue-pri ${priCls}">${i.priority}</span>
+        ${sizeHtml}
+        <span class="batch-issue-title">${i.title}</span>
+      </li>`;
+  }).join('');
+
+  const depsHtml = b.deps.length > 0
+    ? `<div class="batch-deps"><strong>前置依赖：</strong>${b.deps.map(d => {
+        const depId = typeof d === 'string' ? d : d.id;
+        const reason = typeof d === 'object' && d.reason ? ` <span style="color:var(--text-faint)">(${d.reason})</span>` : '';
+        return `批次 ${depId}${reason}`;
+      }).join(' · ')}</div>`
+    : '';
+
+  container.innerHTML = `
+    <div class="batch-panel open">
+      <div class="batch-panel-inner">
+        <div class="batch-panel-header">
+          <div class="batch-panel-title">批次 ${b.id}：${b.name}</div>
+          <div class="batch-panel-close" onclick="selectedBatch=null;renderBatchPanel()">✕</div>
+        </div>
+        <div class="batch-meta-row">
+          <span class="batch-meta-tag ${statusClass}">${statusLabel}</span>
+          <span class="batch-meta-tag ${priClass}">${b.priority}</span>
+          <span class="batch-meta-tag platform">${R.tracks.find(t=>t.id===b.track)?.name || b.track}</span>
+          <span style="color:var(--text-faint);font-size:.78rem">📁 ${b.fileDomain}</span>
+          <span style="color:var(--text-faint);font-size:.78rem">🌿 ${b.branch}</span>
+        </div>
+        <div class="batch-progress"><div class="batch-progress-fill" style="width:${pct}%"></div></div>
+        <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.5rem">${doneCount}/${b.issues.length} 完成 (${pct}%)</div>
+        ${depsHtml}
+        <ul class="batch-issue-list">${issuesHtml}</ul>
+      </div>
+    </div>`;
+}
+
+function renderHeatmap() {
+  const H = R.heatmap;
+  const colCount = H.cols.length;
+  let html = `<div class="heatmap-grid" style="grid-template-columns:100px repeat(${colCount},1fr)">`;
+  // Header row
+  html += '<div class="heatmap-header"></div>';
+  H.cols.forEach(c => { html += `<div class="heatmap-header">${c}</div>`; });
+  // Data rows
+  H.rows.forEach((row, ri) => {
+    html += `<div class="heatmap-label">${row}</div>`;
+    H.cols.forEach((_, ci) => {
+      const v = H.data[ri][ci];
+      const heat = v === 0 ? 0 : v <= 2 ? 1 : v <= 5 ? 2 : v <= 10 ? 3 : 4;
+      html += `<div class="heatmap-cell heat-${heat}">${v || '·'}</div>`;
+    });
+  });
+  html += '</div>';
+  return `
+    <div class="section-title animate d5">🔥 优先级 × 平台 热力图</div>
+    <div class="animate d5" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem">
+      ${html}
+      <div style="font-size:.72rem;color:var(--text-faint);margin-top:.6rem;text-align:center">
+        数字 = 该优先级在该平台轨道上的 open issue 数量。颜色越深 = 积压越多
+      </div>
+    </div>`;
+}
+
+function renderActions() {
+  const items = R.actions.map((a, i) => {
+    const key = `action-${i}`;
+    const checked = localStorage.getItem(key) === 'true' ? 'checked' : '';
+    return `
+      <div class="action-item">
+        <input type="checkbox" class="action-check" ${checked} onchange="localStorage.setItem('${key}',this.checked)">
+        <div>
+          <div class="action-text">${a.text}</div>
+          <div class="action-detail">${a.detail}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="section-title animate d6">📌 建议航向</div>
+    <div class="animate d6" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem">
+      ${items}
+    </div>`;
+}
+
+function renderInsight() {
+  return `
+    <div class="insight animate d6">
+      <p>${R.insight.text}</p>
+      <div class="author">— ${R.insight.author}</div>
+    </div>`;
+}
+
+function renderFooter() {
+  return `
+    <div class="footer">
+      ExoMind 开发航线 · ${R.meta.date} · 数据驱动，航段变化时更新
+    </div>
+    <div class="devlog-nav"><a href="../">← DevLog 归档</a></div>`;
+}
+
+// Assemble
+document.getElementById('app').innerHTML = [
+  renderHeader(),
+  renderTopRow(),
+  renderRouteMap(),
+  renderHeatmap(),
+  renderActions(),
+  renderInsight(),
+  renderFooter(),
+].join('');
+
+</script>
+</body>
+</html>

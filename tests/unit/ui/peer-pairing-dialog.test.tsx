@@ -167,6 +167,43 @@ describe('PeerPairingDialog（设备配对弹窗）', () => {
       expect(screen.getByText('已连接')).toBeInTheDocument();
     });
     expect(screen.queryByText('未发现局域网设备')).not.toBeInTheDocument();
+    expect(listDiscoveredPeersMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:4077',
+      'embedded-secret',
+    );
+  });
+
+  it('refreshes responder discovery without local auth token after hotfix（热修后无本地 token 也按新链路刷新发现列表）', async () => {
+    listDiscoveredPeersMock.mockResolvedValue([]);
+
+    render(
+      <PeerPairingDialog
+        open
+        onOpenChange={() => {}}
+        runtimeBaseUrl="http://127.0.0.1:4077"
+        localHostId="desktop-host"
+        localAuthToken={undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '响应配对 扫描局域网设备，输入对方的 PIN 码' }));
+
+    await waitFor(() => {
+      expect(listDiscoveredPeersMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:4077',
+        undefined,
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+
+    await waitFor(() => {
+      expect(listDiscoveredPeersMock).toHaveBeenNthCalledWith(
+        2,
+        'http://127.0.0.1:4077',
+        undefined,
+      );
+    });
   });
 
   it('enters pin input mode after selecting a discovered peer（选择已发现设备后进入 PIN 输入态）', async () => {

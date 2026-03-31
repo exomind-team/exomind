@@ -33,7 +33,8 @@ import {
   type RuntimeTarget,
 } from '@/config/runtime-target';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
-import { getEventLogService } from '@/lib/services/eventlog.service';
+import { getEventLogService, notifyEventLogChanged } from '@/lib/services/eventlog.service';
+import { notifyTaskDataChanged } from '@/lib/services/task.service';
 import { log } from '@/lib/logger';
 
 const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
@@ -122,7 +123,6 @@ export function useSignalStream(): void {
                 host: status.host,
                 port: status.port,
                 hostId: status.hostId,
-                authSecret: status.authSecret,
               });
               if (!cancelled) {
                 setRuntimeTargetHydrated(true);
@@ -193,6 +193,20 @@ export function useSignalStream(): void {
     });
 
     const handler = startSignalHandlers({
+      onTaskCreated: async () => {
+        notifyTaskDataChanged();
+      },
+      onTaskUpdated: async () => {
+        notifyTaskDataChanged();
+      },
+      onTaskTransitioned: async () => {
+        notifyTaskDataChanged();
+        notifyEventLogChanged();
+      },
+      onTaskCancelled: async () => {
+        notifyTaskDataChanged();
+        notifyEventLogChanged();
+      },
       onEventLogAppended: async (payload: EventLogAppendedPayload) => {
         if (payload.inputMode !== 'external') {
           return;
@@ -230,6 +244,7 @@ export function useSignalStream(): void {
       onEventLogReplicationAppended: async (payload: EventLogReplicationAppendedPayload) => {
         const result = await projectEventLogReplicationAppend(payload);
         if (result === 'inserted') {
+          notifyEventLogChanged();
           log.info('[SignalStream] eventlog.replication.appended → EventStorage');
         }
       },

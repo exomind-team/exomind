@@ -99,6 +99,13 @@ export interface SplitEdgeParams {
   rulePosition: { clauseIndex: number };
 }
 
+export interface ReconnectEdgeParams {
+  edgeId: TaskEdgeId;
+  newSource?: NodeId;
+  newTarget?: GoalId;
+  rulePosition: { clauseIndex: number };
+}
+
 export interface UpdateGoalParams {
   goalId: GoalId;
   title?: string;

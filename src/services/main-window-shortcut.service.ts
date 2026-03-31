@@ -2,6 +2,10 @@ import { listen } from '@tauri-apps/api/event';
 import { isTauri } from '@tauri-apps/api/core';
 import { appRouter } from '@/routes';
 import {
+  getMainWindowShortcutSelection,
+  MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY,
+} from '@/config/main-window-shortcut';
+import {
   getMainWindowShortcutQuickFocusEnabled,
   subscribeMainWindowShortcutQuickFocusChanges,
 } from '@/config/main-window-shortcut-focus';
@@ -49,6 +53,7 @@ export class MainWindowShortcutService {
   private unlistenEvent: (() => void) | null = null;
   private unlistenVoiceShortcut: (() => void) | null = null;
   private unlistenQuickFocus: (() => void) | null = null;
+  private unlistenSelection: (() => void) | null = null;
   private quickFocusEnabled = getMainWindowShortcutQuickFocusEnabled();
 
   async init(): Promise<void> {
@@ -66,6 +71,7 @@ export class MainWindowShortcutService {
     this.unlistenVoiceShortcut = subscribeVoiceShortcutHotkeyChanges(() => {
       void syncMainWindowShortcutSelectionWithRuntime({ notify: false });
     });
+    this.unlistenSelection = this.subscribeSelectionStorageChanges();
     this.unlistenQuickFocus = subscribeMainWindowShortcutQuickFocusChanges((enabled) => {
       this.quickFocusEnabled = enabled;
     });
@@ -80,9 +86,32 @@ export class MainWindowShortcutService {
     this.unlistenEvent = null;
     this.unlistenVoiceShortcut?.();
     this.unlistenVoiceShortcut = null;
+    this.unlistenSelection?.();
+    this.unlistenSelection = null;
     this.unlistenQuickFocus?.();
     this.unlistenQuickFocus = null;
     this.initialized = false;
+  }
+
+  private subscribeSelectionStorageChanges(): () => void {
+    if (typeof window === 'undefined') {
+      return () => {};
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY) {
+        return;
+      }
+      void syncMainWindowShortcutSelectionWithRuntime({
+        notify: false,
+        selection: getMainWindowShortcutSelection(),
+      });
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
   }
 
   private async handleShortcutActivated(): Promise<void> {

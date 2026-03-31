@@ -9,6 +9,7 @@ export const DESKTOP_TAB_CONFIG: Array<{
   { key: 'focus', label: '专注设置', categories: ['timer', 'feedback'] },
   { key: 'input', label: '输入', categories: ['input'] },
   { key: 'services', label: '服务', categories: ['ai', 'sync'] },
+  { key: 'connection', label: '连接', categories: ['connection'] },
   { key: 'data', label: '数据', categories: ['data'] },
   { key: 'developer', label: '开发者', categories: ['developer'] },
   { key: 'more', label: '更多', categories: ['more'] },

@@ -1,3 +1,8 @@
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from '@/config/runtime-config-cache';
+
 /**
  * Volcano ASR config helpers（火山 ASR 配置辅助）
  *
@@ -55,18 +60,9 @@ export const VOLCANO_STORAGE_KEYS = {
   forceToSpeechTime: 'volcano_asr_force_to_speech_time',
 } as const;
 
-function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
-  if (typeof window === 'undefined') return null;
-  const localStorageLike = window.localStorage as Partial<Storage> | undefined;
-  if (!localStorageLike) return null;
-  if (typeof localStorageLike.getItem !== 'function') return null;
-  if (typeof localStorageLike.setItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
-}
-
 function readStoredString(key: string): string {
   try {
-    return getStorage()?.getItem(key)?.trim() || '';
+    return getRuntimeConfigValueSync(key)?.trim() || '';
   } catch {
     return '';
   }
@@ -74,7 +70,7 @@ function readStoredString(key: string): string {
 
 function readStoredBoolean(key: string, fallback: boolean): boolean {
   try {
-    const raw = getStorage()?.getItem(key);
+    const raw = getRuntimeConfigValueSync(key);
     return raw == null ? fallback : raw === 'true';
   } catch {
     return fallback;
@@ -83,7 +79,7 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
 
 function readStoredNumber(key: string, fallback: number): number {
   try {
-    const raw = getStorage()?.getItem(key);
+    const raw = getRuntimeConfigValueSync(key);
     const parsed = Number.parseInt(raw ?? '', 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   } catch {
@@ -154,9 +150,10 @@ export function getVolcanoResourceId(
 
 export function setVolcanoResourceId(resourceId: string): string {
   const normalized = findVolcanoResourcePreset(resourceId.trim()) || DEFAULT_VOLCANO_RESOURCE_ID;
-  const storage = getStorage();
-  if (!storage) return normalized;
-  storage.setItem(VOLCANO_STORAGE_KEYS.resourceId, normalized);
+  setRuntimeConfigValue(VOLCANO_STORAGE_KEYS.resourceId, normalized, {
+    source: 'volcano-resource-id',
+    sourceOrigin: typeof window !== 'undefined' ? window.location?.origin : undefined,
+  });
   return normalized;
 }
 

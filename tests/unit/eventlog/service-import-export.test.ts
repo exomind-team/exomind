@@ -4,7 +4,12 @@ import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
 
 type EventLogPortShape = {
   listEvents: () => Promise<EventData[]>;
-  appendEvent: (event: EventData) => Promise<void>;
+  listEventsDetailed: () => Promise<{
+    events: EventData[];
+    semantics: 'full_snapshot' | 'incremental_batch';
+    snapshotRevision?: string;
+  }>;
+  appendEvent: (event: EventData) => Promise<EventData>;
   getEvent: (id: string) => Promise<EventData | null>;
   clearEvents: () => Promise<void>;
 };
@@ -13,8 +18,13 @@ function createMockPort(initialEvents: EventData[] = []): EventLogPortShape {
   let current = initialEvents;
   return {
     listEvents: vi.fn(async () => [...current]),
+    listEventsDetailed: vi.fn(async () => ({
+      events: [...current],
+      semantics: 'full_snapshot',
+    })),
     appendEvent: vi.fn(async (event: EventData) => {
       current = [event, ...current];
+      return event;
     }),
     getEvent: vi.fn(async (id: string) => current.find((event) => event.id === id) ?? null),
     clearEvents: vi.fn(async () => {
@@ -43,6 +53,8 @@ describe('EventLogService import/export', () => {
 
   it('imports backup with merge strategy', async () => {
     const service = new EventLogServiceImpl({ port });
+    const onEvent = vi.fn();
+    service.onEvent(onEvent);
     const backup = JSON.stringify({
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -56,6 +68,7 @@ describe('EventLogService import/export', () => {
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(1);
     expect(result.total).toBe(3);
+    expect(onEvent).toHaveBeenCalledTimes(1);
   });
 
   it('appends raw event data without regenerating timestamp or tags', async () => {

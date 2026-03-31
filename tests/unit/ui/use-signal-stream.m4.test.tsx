@@ -11,6 +11,8 @@ const {
   signalServiceOptions,
   signalHandlerOptions,
   appendEventDataMock,
+  notifyEventLogChangedMock,
+  notifyTaskDataChangedMock,
   projectActiveBlockSnapshotMock,
   MockSignalStreamService,
 } = vi.hoisted(() => {
@@ -32,6 +34,8 @@ const {
   const queuedStopMock = vi.fn();
   const queuedOnSignalMock = vi.fn(() => () => {});
   const queuedAppendEventDataMock = vi.fn(async () => undefined);
+  const queuedNotifyEventLogChangedMock = vi.fn();
+  const queuedNotifyTaskDataChangedMock = vi.fn();
   const queuedProjectActiveBlockSnapshotMock = vi.fn(async () => undefined);
 
   class HoistedMockSignalStreamService {
@@ -53,6 +57,8 @@ const {
     signalServiceOptions: queuedSignalServiceOptions,
     signalHandlerOptions: queuedSignalHandlerOptions,
     appendEventDataMock: queuedAppendEventDataMock,
+    notifyEventLogChangedMock: queuedNotifyEventLogChangedMock,
+    notifyTaskDataChangedMock: queuedNotifyTaskDataChangedMock,
     projectActiveBlockSnapshotMock: queuedProjectActiveBlockSnapshotMock,
     MockSignalStreamService: HoistedMockSignalStreamService,
   };
@@ -89,6 +95,11 @@ vi.mock('@/lib/services/eventlog.service', () => ({
   getEventLogService: () => ({
     appendEventData: appendEventDataMock,
   }),
+  notifyEventLogChanged: notifyEventLogChangedMock,
+}));
+
+vi.mock('@/lib/services/task.service', () => ({
+  notifyTaskDataChanged: notifyTaskDataChangedMock,
 }));
 
 vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
@@ -139,6 +150,8 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     stopMock.mockClear();
     onSignalMock.mockClear();
     appendEventDataMock.mockClear();
+    notifyEventLogChangedMock.mockClear();
+    notifyTaskDataChangedMock.mockClear();
     projectActiveBlockSnapshotMock.mockClear();
     setRuntimeTargetMode('embedded');
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
@@ -197,11 +210,11 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
         host: '127.0.0.1',
         port: 48202,
         isLocal: true,
-        authToken: 'embedded-secret',
       }),
     });
+    expect((signalServiceOptions[0].host as { authToken?: string }).authToken).toBeUndefined();
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"port":48202');
-    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"authSecret":"embedded-secret"');
+    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).not.toContain('"authSecret"');
   });
 
   it('bridges eventlog.appended into EventLogService（把 eventlog.appended 桥接进 EventLogService）', async () => {
@@ -358,5 +371,61 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
 
     expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(2);
     expect(projectActiveBlockSnapshotMock).toHaveBeenLastCalledWith(payloadV2);
+  });
+
+  it('notifies task and event listeners from RT lifecycle signals（RT 生命周期信号触发前端热更新）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    await signalHandlerOptions[0].onTaskCreated?.({
+      id: 'task-created-1',
+      title: 'created task',
+      status: 'pending',
+    });
+    await signalHandlerOptions[0].onTaskUpdated?.({
+      id: 'task-updated-1',
+      title: 'updated task',
+      status: 'pending',
+    });
+    await signalHandlerOptions[0].onTaskTransitioned?.({
+      task: {
+        id: 'task-transitioned-1',
+        title: 'transitioned task',
+        status: 'in_progress',
+      },
+      old_status: 'pending',
+      new_status: 'in_progress',
+    });
+    await signalHandlerOptions[0].onTaskCancelled?.({
+      id: 'task-cancelled-1',
+      title: 'cancelled task',
+      status: 'cancelled',
+    });
+    await signalHandlerOptions[0].onEventLogReplicationAppended?.({
+      schemaVersion: 1,
+      replicationSeq: 11,
+      cursor: {
+        kind: 'replication_seq',
+        value: 11,
+      },
+      event: {
+        id: 'evt-rep-11',
+        content: 'replicated event',
+        createdAt: '2026-03-26T00:00:00.000Z',
+        type: 'note',
+        replicationSeq: 11,
+      },
+    });
+
+    expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(4);
+    expect(notifyEventLogChangedMock).toHaveBeenCalledTimes(3);
   });
 });

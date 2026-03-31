@@ -84,15 +84,59 @@ export class TimeBlockRtAdapter {
     }
   }
 
+  /**
+   * @deprecated DELETE /timeblocks/active returns 409 since #780 legacy cleanup.
+   * Use rtEndBlock() or rtStopBlock() instead. Retained only for interface compliance.
+   */
   async deleteActiveBlock(): Promise<void> {
+    console.warn('[TB-RT] deleteActiveBlock is deprecated. Use rtEndBlock() or rtStopBlock(). See #780.');
+  }
+
+  // ── #780 新路由方法 ──
+
+  async rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }> {
+    return this.postJson('/timeblocks/start', params);
+  }
+
+  async rtStopBlock(): Promise<{ status: string }> {
+    return this.postJson('/timeblocks/stop', {});
+  }
+
+  async rtEndBlock(params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }> {
+    return this.postJson('/timeblocks/end', params);
+  }
+
+  async rtPauseBlock(): Promise<{ status: string }> {
+    return this.postJson('/timeblocks/pause', {});
+  }
+
+  async rtResumeBlock(): Promise<{ status: string }> {
+    return this.postJson('/timeblocks/resume', {});
+  }
+
+  async rtDescribeBlock(params: { name?: string; note?: string }): Promise<{ updated: string; blockId: string }> {
+    return this.postJson('/timeblocks/describe', params);
+  }
+
+  async rtDescribeBlockById(blockId: string, params: { name?: string; note?: string }): Promise<{ updated: string; blockId: string }> {
+    return this.postJson(`/timeblocks/${blockId}/describe`, params);
+  }
+
+  private async postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url('/timeblocks/active', target), {
-      method: 'DELETE',
-      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
+    const response = await this.fetchImpl(this.url(path, target), {
+      method: 'POST',
+      headers: buildRuntimeAuthHeaders(target, {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      }),
+      body: JSON.stringify(body),
     });
-    if (!response.ok && response.status !== 204) {
-      throw new Error(`RT timeblocks active delete failed: ${response.status}`);
+    if (!response.ok) {
+      const text = await response.text().catch(() => '(no body)');
+      throw new Error(`RT ${path} failed: ${response.status} — ${text}`);
     }
+    return response.json() as Promise<T>;
   }
 
   private async requestJson<T>(path: string): Promise<T> {

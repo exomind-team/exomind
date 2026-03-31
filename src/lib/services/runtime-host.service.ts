@@ -1,4 +1,3 @@
-import { ExoMindEnvironment } from '@/lib/environment/environment';
 import type { IStoragePort } from '@/lib/environment/interfaces/storage.port';
 import { DEFAULT_EXTERNAL_RUNTIME_PORT, formatHostForUrl } from '@/config/runtime-target';
 import type {
@@ -9,8 +8,14 @@ import type {
   RuntimeHostVerificationTrigger,
 } from '@/lib/types/agent-hub';
 import { createUuidV4 } from '@/lib/utils/uuid';
+import {
+  getRuntimeConfigValueSync,
+  removeRuntimeConfigValue,
+  setRuntimeConfigValue,
+} from '@/config/runtime-config-cache';
 
 const RUNTIME_HOST_STORAGE_KEY = 'agent_runtime_hosts_v1';
+const RUNTIME_HOST_STORAGE_CHANGED_EVENT = 'exomind:runtime-host-storage-changed';
 const DEFAULT_PROBE_TIMEOUT_MS = 2500;
 
 type RuntimeFetch = typeof fetch;
@@ -234,6 +239,41 @@ function normalizeRuntimeHostRecord(record: RuntimeHostRecord): RuntimeHostRecor
   };
 }
 
+function createRuntimeConfigStoragePort(): IStoragePort {
+  return {
+    async write<T>(key: string, data: T): Promise<void> {
+      setRuntimeConfigValue(key, JSON.stringify(data), {
+        source: RUNTIME_HOST_STORAGE_CHANGED_EVENT,
+        sourceOrigin: typeof window !== 'undefined' ? window.location?.origin : undefined,
+      });
+    },
+    async read<T>(key: string): Promise<T | null> {
+      try {
+        const raw = getRuntimeConfigValueSync(key);
+        return raw ? JSON.parse(raw) as T : null;
+      } catch {
+        return null;
+      }
+    },
+    async delete(key: string): Promise<void> {
+      removeRuntimeConfigValue(key);
+    },
+    async readAll<T>(): Promise<Map<string, T>> {
+      return new Map();
+    },
+    async clear(): Promise<void> {
+      removeRuntimeConfigValue(RUNTIME_HOST_STORAGE_KEY);
+    },
+    async query<T>(): Promise<{ items: T[]; total: number; hasMore: boolean }> {
+      return {
+        items: [],
+        total: 0,
+        hasMore: false,
+      };
+    },
+  };
+}
+
 function shouldPromoteToConfirmedPeer(
   current: RuntimeHostRecord,
   next: RuntimeHostRecord,
@@ -281,7 +321,7 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
   private readonly timeoutMs: number;
 
   constructor(options: RuntimeHostServiceOptions = {}) {
-    this.storage = options.storage ?? ExoMindEnvironment.getInstance().storage;
+    this.storage = options.storage ?? createRuntimeConfigStoragePort();
     this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
     this.now = options.now ?? (() => new Date());
     this.timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;

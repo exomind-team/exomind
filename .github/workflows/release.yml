@@ -384,7 +384,7 @@ jobs:
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
         shell: pwsh
         run: |
-          bun Scripts/dev/android-manifest-permission.ts
+          bun scripts/dev/android-manifest-permission.ts
 
       - name: Verify Android discovery patch persisted（校验 Android 发现权限 / 组播锁 / cleartext 配置）
         if: steps.targets.outputs.BUILD_ANDROID == 'true'

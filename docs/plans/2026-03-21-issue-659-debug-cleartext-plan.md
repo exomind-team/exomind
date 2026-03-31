@@ -25,7 +25,7 @@ Android 9+ (API 28+) 默认禁止 HTTP 明文流量（cleartext traffic）。Exo
 
 ## 步骤 1：修改 TypeScript 注入库
 
-**文件**：`Scripts/dev/android-manifest-permission-lib.ts`
+**文件**：`scripts/dev/android-manifest-permission-lib.ts`
 
 ### 1.1 新增 `ensureDebugCleartextTrafficInGradle` 函数
 
@@ -58,7 +58,7 @@ export function ensureDebugCleartextTrafficInGradle(buildGradleKts: string): Gra
 
 ### 1.2 修改 `ensureReleaseCleartextTrafficInGradleFile` 函数
 
-**文件**：`Scripts/dev/android-manifest-permission-lib.ts`（行 394-423）
+**文件**：`scripts/dev/android-manifest-permission-lib.ts`（行 394-423）
 
 在这个函数内部，在 release cleartext patch 之后，追加 debug cleartext patch：
 
@@ -103,7 +103,7 @@ export function ensureReleaseCleartextTrafficInGradleFile(
 
 ## 步骤 2：修改 PowerShell 脚本
 
-**文件**：`Scripts/dev/tauri-wrapper.ps1`
+**文件**：`scripts/dev/tauri-wrapper.ps1`
 
 ### 2.1 新增 `Ensure-AndroidDebugCleartextTraffic` 函数
 
@@ -237,8 +237,8 @@ bunx tsc --noEmit
 
 | 文件 | 改动类型 | 说明 |
 |------|---------|------|
-| `Scripts/dev/android-manifest-permission-lib.ts` | 新增函数 + 修改现有函数 | 核心修复 |
-| `Scripts/dev/tauri-wrapper.ps1` | 新增函数 + 追加调用 | PowerShell 侧同步 |
+| `scripts/dev/android-manifest-permission-lib.ts` | 新增函数 + 修改现有函数 | 核心修复 |
+| `scripts/dev/tauri-wrapper.ps1` | 新增函数 + 追加调用 | PowerShell 侧同步 |
 | `tests/unit/scripts/android-manifest-permission-lib.test.ts` | 新增测试 | 覆盖 debug cleartext |
 | `.github/workflows/release.yml` | 追加校验 | CI 防回归 |
 
@@ -284,11 +284,11 @@ bunx tsc --noEmit
 - 完成时间：2026-03-22
 - 执行结果：已完成
 - 实际改动：
-  - `Scripts/dev/android-manifest-permission-lib.ts`
+  - `scripts/dev/android-manifest-permission-lib.ts`
     - 新增 `ensureDebugCleartextTrafficInGradle`
     - 在 `ensureReleaseCleartextTrafficInGradleFile` 中串入 debug cleartext patch
     - 额外修正 debug 检测范围，只检查 `debug` 块本身，避免误命中后续 `release` 块中的 cleartext
-  - `Scripts/dev/tauri-wrapper.ps1`
+  - `scripts/dev/tauri-wrapper.ps1`
     - 新增 `Ensure-AndroidDebugCleartextTraffic`
     - 在两个既有 patch 调用点后追加 debug cleartext patch
     - 额外修正 PowerShell 侧 debug 检测范围，只检查 `debug` 块本身

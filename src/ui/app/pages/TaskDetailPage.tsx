@@ -1,6 +1,6 @@
 import { ArrowLeft, Ellipsis, NotepadText, Target, Play } from 'lucide-react';
 import { Link, useNavigate, useParams, useLocation } from '@tanstack/react-router';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { TASKS_LAST_PATH_KEY, buildTasksMainSearch } from './task-route-memory';
 import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/TaskBreadcrumb';
 import { getEventLogService, getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
@@ -32,6 +32,11 @@ import {
 import type { TaskDagVisibilityState } from '@/lib/task/task-dag-visibility';
 import { TimerConfigPanel } from '@/ui/app/components/TimerConfigPanel';
 import { useTimerConfig } from '@/ui/app/hooks/useTimerConfig';
+import {
+  getTaskTimerAutoFillEnabled as getPersistedTaskTimerAutoFillEnabled,
+  setTaskTimerAutoFillEnabled as setPersistedTaskTimerAutoFillEnabled,
+  TASK_TIMER_AUTO_FILL_STORAGE_KEY,
+} from '@/config/task-detail-preferences';
 import { Pencil } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import ReactMarkdown from 'react-markdown';
@@ -44,33 +49,11 @@ const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
   timeblocks: { label: '时间线', to: '/tasks/timeline' },
   timeline: { label: '时间线', to: '/tasks/timeline' },
 };
-const TASK_TIMER_AUTO_FILL_STORAGE_KEY = 'exomind:task-timer:auto-fill';
-
 interface TimeblockSourceBackLink {
   to: string;
   search?: Record<string, string>;
   label: string;
   sourceLabel: string;
-}
-
-function readTaskTimerAutoFillEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-
-  try {
-    return window.localStorage.getItem(TASK_TIMER_AUTO_FILL_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function writeTaskTimerAutoFillEnabled(enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(TASK_TIMER_AUTO_FILL_STORAGE_KEY, enabled ? '1' : '0');
-  } catch {
-    // Ignore storage failures and keep the preference in-memory only.
-  }
 }
 
 function resolveAutoTimerConfig(
@@ -1443,7 +1426,8 @@ export function TaskDetailPage() {
   const [dependencyReloadKey, setDependencyReloadKey] = useState(0);
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
-  const [isTimerAutoFillEnabled, setIsTimerAutoFillEnabled] = useState(() => readTaskTimerAutoFillEnabled());
+  const [isTimerAutoFillEnabled, setIsTimerAutoFillEnabled] = useState(() => getPersistedTaskTimerAutoFillEnabled());
+  const hasPersistedInitialTimerAutoFillRef = useRef(false);
   const timerResetKey = taskId ?? preferredBlockId ?? task?.id;
   const taskEstimatedMinutes = taskId
     ? task?.id === taskId ? task.estimatedMinutes : undefined
@@ -1478,8 +1462,31 @@ export function TaskDetailPage() {
   } = useTimerConfig(timerInitialMinutes, timerResetKey);
 
   useEffect(() => {
-    writeTaskTimerAutoFillEnabled(isTimerAutoFillEnabled);
+    if (!hasPersistedInitialTimerAutoFillRef.current) {
+      hasPersistedInitialTimerAutoFillRef.current = true;
+      return;
+    }
+    setPersistedTaskTimerAutoFillEnabled(isTimerAutoFillEnabled);
   }, [isTimerAutoFillEnabled]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return () => {};
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== TASK_TIMER_AUTO_FILL_STORAGE_KEY) {
+        return;
+      }
+
+      setIsTimerAutoFillEnabled(getPersistedTaskTimerAutoFillEnabled());
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTimerAutoFillEnabled || !autoTimerConfig) {

@@ -1,6 +1,10 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 import { MOSSASRTestPage } from '@/pages/MOSSASRTestPage';
 
 let latestVoiceButtonProps: any = null;
@@ -18,6 +22,7 @@ const isDomAvailable = typeof document !== 'undefined';
 (isDomAvailable ? describe : describe.skip)('MOSSASRTestPage', () => {
   beforeEach(() => {
     latestVoiceButtonProps = null;
+    __resetRuntimeConfigCacheForTests();
     if (typeof window.localStorage?.clear === 'function') {
       window.localStorage.clear();
     }
@@ -47,6 +52,16 @@ const isDomAvailable = typeof document !== 'undefined';
 
     await waitFor(() => {
       expect(latestVoiceButtonProps?.adapterConfig).toEqual({ apiKey: 'sk-test-key' });
+    });
+  });
+
+  it('passes adapterConfig with apiKey from runtime config when localStorage mirror is empty（本地镜像为空时也应读取 Runtime 中的 MOSS Key）', async () => {
+    __primeRuntimeConfigForTests({ moss_api_key: 'sk-runtime-key' });
+
+    render(<MOSSASRTestPage />);
+
+    await waitFor(() => {
+      expect(latestVoiceButtonProps?.adapterConfig).toEqual({ apiKey: 'sk-runtime-key' });
     });
   });
 

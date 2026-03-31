@@ -21,8 +21,8 @@ This project uses a unified E2E runtime dispatcher:
 
 ## Runtime Behavior
 
-- Unified E2E entry: `Scripts/test/playwright-runner.cjs`
-- Unified runtime dispatcher: `Scripts/test/runtime-dispatch.cjs`
+- Unified E2E entry: `scripts/test/playwright-runner.cjs`
+- Unified runtime dispatcher: `scripts/test/runtime-dispatch.cjs`
 - Runtime selection env var:
   - `EXOMIND_JS_RUNTIME=auto` (default)
   - `EXOMIND_JS_RUNTIME=bun`

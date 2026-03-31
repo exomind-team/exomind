@@ -32,10 +32,25 @@ import {
 } from 'lucide-react';
 import type { SettingsContext, SettingsItem } from './settings-types';
 import {
-  getSyncServerUrlOverride,
-  resolveSyncServerUrl,
-  setSyncServerUrlOverride,
-} from '@/config/port-env';
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+  formatRuntimeTargetAddress,
+  getEmbeddedRuntimeNetworkMode,
+  getRuntimeExternalAddress,
+  getRuntimeTargetMode,
+  isDesktopOperatingSystem,
+  parseRuntimeAddress,
+  setRuntimeExternalAddress,
+  subscribeRuntimeTargetChanges,
+  subscribeEmbeddedRuntimeNetworkModeChanges,
+} from '@/config/runtime-target';
+import {
+  RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS,
+  RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES,
+} from '@/config/runtime-config-adapter';
+import {
+  removeRuntimeConfigValue,
+  removeRuntimeConfigValuesByPrefixes,
+} from '@/config/runtime-config-cache';
 import {
   getThemePreference,
   setThemePreference,
@@ -176,6 +191,10 @@ import {
   subscribeVoiceShortcutAsrProviderChanges,
 } from '@/config/voice-shortcut-asr-provider';
 import {
+  getMossApiKey,
+  setMossApiKey,
+} from '@/config/moss-api-key';
+import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_LANGUAGE_OPTIONS,
@@ -212,7 +231,8 @@ import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import { openExternalUrl } from '@/lib/utils/open-external';
-import { isDesktopOperatingSystem } from '@/config/runtime-target';
+import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
+import { setPersistedRuntimeTargetMode } from '@/config/runtime-target-mode';
 import {
   DataTransferSetting,
   DevInstanceDiagnosticsSetting,
@@ -221,6 +241,7 @@ import {
   SoundPresetSetting,
   MossVoiceTestSetting,
   VolcanoEngineKeySetting,
+  VolcanoUsageSummarySetting,
   VolcanoVoiceTestSetting,
 } from '@/ui/app/components/settings/settings-custom-items';
 import { AIRegistrySetting } from '@/ui/app/components/settings/ai-registry-settings-card';
@@ -249,8 +270,6 @@ import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-wind
  * Product/runtime code should import the owning config/service module directly.
  */
 
-const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
-
 function normalizeMossApiKey(value: string): string {
   if (!value) {
     return '';
@@ -262,29 +281,12 @@ function normalizeMossApiKey(value: string): string {
 }
 
 function readStoredMossApiKey(): string {
-  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
-    return '';
-  }
-
-  try {
-    return normalizeMossApiKey(window.localStorage.getItem(MOSS_API_KEY_STORAGE_KEY) || '');
-  } catch {
-    return '';
-  }
+  return normalizeMossApiKey(getMossApiKey());
 }
 
 function writeStoredMossApiKey(value: string): void {
-  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
-    return;
-  }
-
   const normalized = normalizeMossApiKey(value);
-  if (!normalized) {
-    window.localStorage.removeItem(MOSS_API_KEY_STORAGE_KEY);
-    return;
-  }
-
-  window.localStorage.setItem(MOSS_API_KEY_STORAGE_KEY, normalized);
+  setMossApiKey(normalized);
 }
 
 function maskStoredSecret(value: string): string {
@@ -316,36 +318,21 @@ function setFeedbackContentSelection(values: string[]): void {
   });
 }
 
-function getResolvedSyncServerUrl(): string {
-  return getSyncServerUrlOverride() ?? resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>);
+function getResolvedRuntimeExternalAddress(): string {
+  return getRuntimeExternalAddress();
 }
 
-function normalizeSyncServerUrl(value: string): string {
-  const normalized = value.trim().replace(/\/+$/, '');
-  if (!normalized) {
-    throw new Error('同步服务器地址不能为空');
-  }
-
-  let url: URL;
-  try {
-    url = new URL(normalized);
-  } catch {
-    throw new Error('同步服务器地址格式无效');
-  }
-
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('同步服务器地址必须以 http:// 或 https:// 开头');
-  }
-
-  return normalized;
+function normalizeRuntimeExternalAddress(value: string): string {
+  const parsed = parseRuntimeAddress(value);
+  return formatRuntimeTargetAddress(parsed);
 }
 
-function validateSyncServerUrl(value: string): string | null {
+function validateRuntimeExternalAddress(value: string): string | null {
   try {
-    normalizeSyncServerUrl(value);
+    normalizeRuntimeExternalAddress(value);
     return null;
   } catch (error) {
-    return error instanceof Error ? error.message : '同步服务器地址格式无效';
+    return error instanceof Error ? error.message : 'RT 地址格式无效';
   }
 }
 
@@ -405,6 +392,10 @@ function devOnly(ctx: SettingsContext): boolean {
   return Boolean(ctx.developerMode);
 }
 
+function tauriDevOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.developerMode) && Boolean(ctx.isTauriWindow);
+}
+
 function volcanoOnly(ctx: SettingsContext): boolean {
   return ctx.voiceShortcutAsrProvider === 'volcano';
 }
@@ -415,6 +406,21 @@ function mossOnly(ctx: SettingsContext): boolean {
 
 function desktopOperatingSystemOnly(): boolean {
   return isDesktopOperatingSystem();
+}
+
+function tauriWindowOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.isTauriWindow);
+}
+
+function embeddedRuntimeOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.isTauriWindow) && (ctx.runtimeTargetMode ?? 'embedded') === 'embedded';
+}
+
+function externalRuntimeOnly(ctx: SettingsContext): boolean {
+  if (!ctx.isTauriWindow) {
+    return true;
+  }
+  return (ctx.runtimeTargetMode ?? 'embedded') === 'external';
 }
 
 function setDeveloperModeWithSideEffects(enabled: boolean): void {
@@ -449,33 +455,129 @@ function resolveBuildText(): string {
   return resolveVersionBuildInfo(envMap, '0.3.6').buildHash || 'dev';
 }
 
+const UPDATE_SETTINGS_STORAGE_KEY = 'exomind-update-settings';
+const RUNTIME_SESSION_CACHE_STORAGE_KEY = 'exomind:runtime-agent-session-cache:v1';
+const LEGACY_PROVIDER_PROFILE_INDEX_STORAGE_KEY = 'exomind:agent-provider-profiles:index';
+const LEGACY_PROVIDER_PROFILE_STORAGE_PREFIX = 'exomind:agent-provider-profiles:';
+const LEGACY_LLM_STORAGE_KEYS = [
+  'exomind:llmApiKey',
+  'exomind:llmBaseUrl',
+  'exomind:llmModel',
+  'exomind:ai-registry:legacy-llm-bootstrap-completed',
+] as const;
+const LOCAL_CACHE_RUNTIME_CONFIG_KEYS = [
+  'exomind:desktop-sidebar-collapsed',
+  'exomind:dag-pan-speed',
+  'exomind:dag-zoom-speed',
+  'exomind:tasks-default-tab',
+  'exomind:task-timer:auto-fill',
+  'exomind:goals-mode',
+  'exomind:goals-show-cancelled',
+  'exomind:goals-guide-hidden',
+  'task-timeline-range',
+  'task-timeline-selected-task',
+  'task-timeline-show-pending',
+  'task-timeline-layout-mode',
+  'exomind:dag-mode',
+  'exomind:dag-direction',
+  'exomind:dag-hide-terminal',
+  'exomind:dag-background-mode',
+  'exomind:dag-immersive',
+  'exomind:dag-viewport',
+  'exomind:dag-search-draft',
+  'exomind:dag-search-options',
+  'exomind:dag-visibility',
+  'exomind:agentHubTopologyLayouts',
+  'exomind:agentHubRuntimePorts',
+  'exomind:voiceOverlayOpacity',
+  'exomind:voiceOverlayShowDiagnostics',
+  'exomind:voiceOverlayTranscriptLines',
+  'exomind:voiceOverlayBottomOffset',
+  'exomind:nowWorkbenchOverlayEnabled',
+  'exomind:nowWorkbenchOverlayPosition',
+] as const;
+const LOCAL_CACHE_LOCAL_ONLY_KEYS = [
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+  RUNTIME_SESSION_CACHE_STORAGE_KEY,
+] as const;
+const RESET_SETTINGS_LOCAL_ONLY_KEYS = [
+  ...LEGACY_LLM_STORAGE_KEYS,
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+  RUNTIME_SESSION_CACHE_STORAGE_KEY,
+  LEGACY_PROVIDER_PROFILE_INDEX_STORAGE_KEY,
+] as const;
+const RESET_SETTINGS_LOCAL_ONLY_PREFIXES = [
+  LEGACY_PROVIDER_PROFILE_STORAGE_PREFIX,
+] as const;
+const EXOMIND_SESSION_STORAGE_PREFIXES = ['exomind:'] as const;
+
+function collectStorageKeysByPrefixes(
+  storage: Storage,
+  prefixes: readonly string[],
+): string[] {
+  const keys = new Set<string>();
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (!key) {
+        continue;
+      }
+      if (prefixes.some((prefix) => key.startsWith(prefix))) {
+        keys.add(key);
+      }
+    }
+  } catch {
+    // Ignore storage enumeration failures（忽略存储枚举失败）
+  }
+  return [...keys];
+}
+
+function removeLocalStorageKeys(keys: Iterable<string>): void {
+  try {
+    for (const key of new Set(keys)) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore localStorage cleanup failures（忽略 localStorage 清理失败）
+  }
+}
+
+function removeSessionStorageKeysByPrefixes(prefixes: readonly string[]): void {
+  try {
+    const keysToRemove = collectStorageKeysByPrefixes(window.sessionStorage, prefixes);
+    for (const key of keysToRemove) {
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore sessionStorage cleanup failures（忽略 sessionStorage 清理失败）
+  }
+}
+
+function removeRuntimeConfigKeys(keys: Iterable<string>): void {
+  for (const key of new Set(keys)) {
+    removeRuntimeConfigValue(key);
+  }
+}
+
+function removeRuntimeConfigKeysByPrefixes(prefixes: readonly string[]): void {
+  removeRuntimeConfigValuesByPrefixes(prefixes);
+}
+
+function scheduleSettingsReload(): void {
+  window.setTimeout(() => {
+    window.location.reload();
+  }, 0);
+}
+
 function clearExomindLocalCache(): string {
   if (typeof window === 'undefined') {
     return '当前环境不支持清空本地缓存';
   }
 
-  const keysToRemove: string[] = [];
-  try {
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (key?.startsWith('exomind:')) {
-        keysToRemove.push(key);
-      }
-    }
-    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
-  } catch {
-    // Ignore localStorage cleanup failures.
-  }
-
-  try {
-    window.sessionStorage.clear();
-  } catch {
-    // Ignore sessionStorage cleanup failures.
-  }
-
-  window.setTimeout(() => {
-    window.location.reload();
-  }, 0);
+  removeRuntimeConfigKeys(LOCAL_CACHE_RUNTIME_CONFIG_KEYS);
+  removeLocalStorageKeys(LOCAL_CACHE_LOCAL_ONLY_KEYS);
+  removeSessionStorageKeysByPrefixes(EXOMIND_SESSION_STORAGE_PREFIXES);
+  scheduleSettingsReload();
 
   return '已清空本地缓存，页面正在刷新。';
 }
@@ -485,21 +587,13 @@ function resetAllSettings(): string {
     return '当前环境不支持重置设置';
   }
 
-  try {
-    window.localStorage.clear();
-  } catch {
-    // Ignore localStorage cleanup failures.
-  }
-
-  try {
-    window.sessionStorage.clear();
-  } catch {
-    // Ignore sessionStorage cleanup failures.
-  }
-
-  window.setTimeout(() => {
-    window.location.reload();
-  }, 0);
+  removeRuntimeConfigKeys(RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS);
+  removeRuntimeConfigKeysByPrefixes(RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES);
+  removeRuntimeConfigKeys([UPDATE_SETTINGS_STORAGE_KEY]);
+  removeLocalStorageKeys(RESET_SETTINGS_LOCAL_ONLY_KEYS);
+  removeLocalStorageKeys(collectStorageKeysByPrefixes(window.localStorage, RESET_SETTINGS_LOCAL_ONLY_PREFIXES));
+  removeSessionStorageKeysByPrefixes(EXOMIND_SESSION_STORAGE_PREFIXES);
+  scheduleSettingsReload();
 
   return '已重置所有设置，页面正在刷新。';
 }
@@ -947,6 +1041,14 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     component: VolcanoEngineKeySetting,
   },
   {
+    id: 'volcano-usage-summary',
+    label: '火山用量概览',
+    category: 'input',
+    type: 'custom',
+    visible: volcanoOnly,
+    component: VolcanoUsageSummarySetting,
+  },
+  {
     id: 'volcano-endpoint',
     label: '火山识别模式',
     icon: Mic,
@@ -1081,25 +1183,93 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     component: AIRegistrySetting,
   },
   {
-    id: 'sync-server-url',
-    label: '同步服务器',
+    id: 'runtime-target-mode',
+    label: 'RT 配置',
     icon: Wifi,
-    category: 'sync',
+    category: 'connection',
+    type: 'enum',
+    enumStyle: 'dialog',
+    visible: tauriWindowOnly,
+    dialogTitle: 'RT 配置',
+    dialogDescription: '选择使用当前设备自带的 RT，还是连接到另一台设备上的 RT。切换时会自动启动或关闭内置 RT。',
+    options: [
+      {
+        label: '内置',
+        value: 'embedded',
+        description: '使用当前设备自带的 RT。切换后会自动启动内置 RT。',
+      },
+      {
+        label: '外部',
+        value: 'external',
+        description: '连接到另一台设备上的 RT。切换后会自动关闭内置 RT，并使用下面填写的 RT 地址。',
+      },
+    ],
+    optionTestId: (value) => `new-settings-runtime-target-mode-${value}`,
+    get: () => getRuntimeTargetMode(),
+    set: async (value: string) => await setPersistedRuntimeTargetMode(value as 'embedded' | 'external'),
+    subscribe: (cb: (value: string) => void) => subscribeRuntimeTargetChanges((target) => cb(target.mode)),
+    successMessage: (value: string) => value === 'external'
+      ? '已切换为外部 RT，内置 RT 会自动关闭'
+      : '已切换为内置 RT，系统会自动启动本机 RT',
+    errorMessagePrefix: 'RT 配置切换失败',
+  },
+  {
+    id: 'embedded-runtime-open-mode',
+    label: 'RT 开放模式',
+    icon: Wifi,
+    category: 'connection',
+    type: 'enum',
+    enumStyle: 'dialog',
+    visible: embeddedRuntimeOnly,
+    dialogTitle: 'RT 开放模式',
+    dialogDescription: '决定 Tauri 启动内嵌 RT 时对外开放的范围；修改后在下次启动或手动重启 RT 时生效。',
+    options: [
+      {
+        label: '仅本机',
+        value: 'local',
+        description: '监听 127.0.0.1，仅当前设备可访问，不做局域网广播。',
+      },
+      {
+        label: '局域网',
+        value: 'lan',
+        description: '监听 0.0.0.0，并允许局域网设备通过本机 IP 访问与发现。',
+      },
+    ],
+    optionTestId: (value) => `new-settings-embedded-runtime-open-mode-${value}`,
+    helperText: (value: string) => value === 'lan'
+      ? '当前会在下次启动或手动重启 RT 时切换为局域网开放。'
+      : '当前会在下次启动或手动重启 RT 时切换为仅本机开放。',
+    get: () => getEmbeddedRuntimeNetworkMode(),
+    set: async (value: string) => await setPersistedEmbeddedRuntimeNetworkMode(value as 'local' | 'lan'),
+    subscribe: subscribeEmbeddedRuntimeNetworkModeChanges,
+    successMessage: (value: string) => value === 'lan'
+      ? 'RT 开放模式已切换为局域网'
+      : 'RT 开放模式已切换为仅本机',
+    errorMessagePrefix: 'RT 开放模式保存失败',
+  },
+  {
+    id: 'sync-server-url',
+    label: 'RT 地址',
+    icon: Wifi,
+    category: 'connection',
+    description: '需要连接另一台电脑或手机上的 ExoMind 时，在这里填写对方显示的地址；平时只在本机使用就不用改。',
+    visible: externalRuntimeOnly,
     type: 'string',
     stringStyle: 'dialog',
     dialogFieldKind: 'plain',
-    dialogInputType: 'url',
-    placeholder: 'http://127.0.0.1:6984',
-    dialogTitle: '同步服务器',
-    dialogDescription: '设置事件日志同步的服务器地址',
-    get: getResolvedSyncServerUrl,
-    set: (value: string) => {
-      const normalized = normalizeSyncServerUrl(value);
-      setSyncServerUrlOverride(normalized);
+    dialogInputType: 'text',
+    placeholder: '192.168.1.23:1949',
+    dialogTitle: '设置 RT 地址',
+    dialogDescription: '填写你想连接的那台设备地址，例如 192.168.1.23:1949。保存后，当前设备会切换到这个地址继续连接。',
+    get: getResolvedRuntimeExternalAddress,
+    set: async (value: string) => {
+      const normalized = normalizeRuntimeExternalAddress(value);
+      setRuntimeExternalAddress(normalized);
+      await setPersistedRuntimeTargetMode('external');
       return normalized;
     },
-    validate: validateSyncServerUrl,
-    successMessage: (value: string) => `同步服务器地址已保存：${value}`,
+    validate: validateRuntimeExternalAddress,
+    successMessage: (value: string) => `已切换到 RT 地址：${value}`,
   },
   {
     id: 'eventlog-backend-mode',
@@ -1110,7 +1280,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '事件日志后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
@@ -1127,7 +1297,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '任务后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
@@ -1144,7 +1314,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     enumStyle: 'dialog',
     dialogTitle: '时间块后端',
     dialogDescription: '切换后页面将自动刷新',
-    visible: devOnly,
+    visible: tauriDevOnly,
     options: [
       { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
       { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },

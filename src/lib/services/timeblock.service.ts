@@ -34,6 +34,7 @@ import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/f
 import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
+import { generateGapBlocks } from './gap-backfill';
 import { appendEventWithEcsReplication } from './ecs-eventlog-replication.service';
 import { getEventLogService } from './eventlog.service';
 import { publishActiveBlockReplicationSnapshot } from './ecs-active-block-replication.service';
@@ -56,10 +57,19 @@ interface BlockPreferenceDecision {
 
 interface TimeBlockRtPort {
   listCompletedBlocks(): Promise<TimeBlockData[]>;
+  /** TODO(#780): migrate backfillGapBlocks to atomic RT primitive, then remove */
   replaceCompletedBlocks(blocks: TimeBlockData[]): Promise<void>;
   getActiveBlock(): Promise<ActiveBlockData | null>;
+  /** TODO(#780): migrate saveActiveBlock/applyReplicatedActiveBlock callers, then remove */
   putActiveBlock(block: ActiveBlockData): Promise<void>;
+  /** @deprecated No callers remain. Route returns 409 since #780 cleanup. */
   deleteActiveBlock(): Promise<void>;
+  // #780 new RT routes
+  rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtStopBlock(): Promise<{ status: string }>;
+  rtEndBlock(params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtPauseBlock(): Promise<{ status: string }>;
+  rtResumeBlock(): Promise<{ status: string }>;
 }
 
 export interface TimeBlockServiceOptions {
@@ -150,12 +160,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.attachStorageListener();
   }
 
+  /**
+   * TODO(#749): Once Tauri desktop fully migrates to rt-sqlite (MigrationDialog
+   * no longer falls back to legacy), this can be simplified to always return
+   * 'rt-sqlite'. The useInjectedEnvStorage path is test-only.
+   */
   private resolveDefaultBackendMode(): DomainBackendMode {
     if (this.useInjectedEnvStorage) {
       return 'legacy';
     }
 
-    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'legacy';
+    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'rt-sqlite';
   }
 
   async loadTimeBlocks(): Promise<TimeBlock[]> {
@@ -169,6 +184,19 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         tags: new Set(normalized.tags),
       };
     });
+  }
+
+  /** #759: 全量补创历史 gap 块。返回插入的 gap 数量。 */
+  async backfillGapBlocks(): Promise<number> {
+    const blocks = await this.readCompletedBlockData();
+    if (!blocks || blocks.length < 2) return 0;
+
+    const gaps = generateGapBlocks(blocks);
+    if (gaps.length === 0) return 0;
+
+    const merged = [...blocks, ...gaps].sort((a, b) => a.startTime - b.startTime);
+    await this.writeCompletedBlockData(merged);
+    return gaps.length;
   }
 
   async updateActiveBlock(
@@ -232,7 +260,41 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       if (!this.isCompletedBlock(normalized)) {
         return normalized;
       }
+      // #759: 截断 gap 块，存为 completed TimeBlockData
+      if (normalized.blockType === 'gap') {
+        const now = Date.now();
+        const completedGap: TimeBlockData = {
+          id: normalized.startId,
+          name: normalized.name,
+          startId: normalized.startId,
+          endId: createUuidV4(),
+          tags: [],
+          startTime: normalized.startTime,
+          endTime: now,
+          blockType: 'gap',
+        };
+        const completed = await this.readCompletedBlockData();
+        completed.push(completedGap);
+        await this.writeCompletedBlockData(completed);
+      }
     }
+
+    // #780: rt-sqlite 模式走新路由，RT 处理状态转换、事件写入、gap 截断
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      const resolvedTaskIds = typeof taskBinding === 'string'
+        ? [taskBinding]
+        : taskBinding?.taskIds ?? [];
+      const result = await this.rtAdapter.rtStartBlock({
+        name,
+        mode: config.mode,
+        targetMinutes: config.mode === 'countdown' ? config.minutes : undefined,
+        taskIds: resolvedTaskIds,
+      });
+      this.rememberAcceptedBlock(result.active);
+      this.notifyChange(result.active);
+      return result.active;
+    }
+
     const startId = createUuidV4();
     const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
@@ -264,6 +326,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       elapsed: initialElapsed,
       mode: config.mode,
       targetMinutes: config.mode === 'countdown' ? (config.minutes ?? 25) : undefined,
+      blockType: 'active',
       phase: 'running',
       version: 1,
       actorId: this.actorId,
@@ -302,6 +365,18 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       this.rememberAcceptedBlock(normalized);
       return;
     }
+
+    // #780: rt-sqlite 模式走新路由
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      await this.rtAdapter.rtPauseBlock();
+      const updated = await this.rtAdapter.getActiveBlock();
+      if (updated) {
+        this.rememberAcceptedBlock(updated);
+        this.notifyChange(updated);
+      }
+      return;
+    }
+
     const pausedBlock: ActiveBlockData = this.normalizeActiveBlock({
       ...normalized,
       phase: 'paused',
@@ -341,6 +416,18 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       this.rememberAcceptedBlock(normalized);
       return;
     }
+
+    // #780: rt-sqlite 模式走新路由
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      await this.rtAdapter.rtResumeBlock();
+      const updated = await this.rtAdapter.getActiveBlock();
+      if (updated) {
+        this.rememberAcceptedBlock(updated);
+        this.notifyChange(updated);
+      }
+      return;
+    }
+
     const pausedAt = normalized.pausedAt ?? now;
     const pauseAccumulatedMs = (normalized.pauseAccumulatedMs ?? 0) + Math.max(0, now - pausedAt);
     const resumedBlock: ActiveBlockData = this.normalizeActiveBlock({
@@ -381,6 +468,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const normalized = this.normalizeActiveBlock(raw, now);
     if (normalized.actionEndedAt || this.isCompletedBlock(normalized)) {
       this.rememberAcceptedBlock(normalized);
+      return;
+    }
+
+    // #780: rt-sqlite 模式走新路由（stop = markEnding）
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      await this.rtAdapter.rtStopBlock();
+      const updated = await this.rtAdapter.getActiveBlock();
+      if (updated) {
+        this.rememberAcceptedBlock(updated);
+        this.notifyChange(updated);
+      }
       return;
     }
 
@@ -436,6 +534,26 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const activeData = this.normalizeActiveBlock(rawActiveData);
     if (this.isCompletedBlock(activeData)) {
       this.rememberAcceptedBlock(activeData);
+      return null;
+    }
+
+    // #780: rt-sqlite 模式走新路由，RT 处理 completed 保存、gap 创建、EventLog 写入
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      const result = await this.rtAdapter.rtEndBlock({
+        feedback,
+        taskStatusOutcomes: options?.taskStatusOutcomes,
+      });
+      // RT 已处理：completed 块保存、gap 块创建、EventLog 写入
+      // TS 只需更新本地状态
+      this.rememberAcceptedBlock(result.active);
+      this.notifyChange(result.active);
+
+      if (result.completed) {
+        return {
+          ...result.completed,
+          tags: new Set(result.completed.tags),
+        };
+      }
       return null;
     }
 
@@ -517,9 +635,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       tags: ['block_feedback'],
       startTime: activeData.startTime,
       endTime: submittedAt,
+      blockType: activeData.blockType ?? 'active',
       taskIds: activeData.taskIds ?? [],
       taskStatusOutcomes: options?.taskStatusOutcomes,
       taskAssociationLog: activeData.taskAssociationLog ?? [],
+      sourcePlannedBlockId: activeData.sourcePlannedBlockId,
     };
 
     // 追加到已完成列表
@@ -552,13 +672,34 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.rememberAcceptedBlock(terminalBlock);
 
     // 发布 timeblock.completed 信号（fire-and-forget，失败不阻塞）
-    this.publishTimeblockCompleted(timeBlock, report).catch((err) => {
-      log.warn(`[TimeBlockService] failed to publish timeblock.completed signal: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    // #759: gap 块不触发 completed 信号
+    if (timeBlock.blockType !== 'gap') {
+      this.publishTimeblockCompleted(timeBlock, report).catch((err) => {
+        log.warn(`[TimeBlockService] failed to publish timeblock.completed signal: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
 
-    // 通知变化
-    this.notifyChange(null);
-    log.info(`[TB-SVC] endBlock done ${JSON.stringify({ startId: terminalBlock.startId, feedbackEventMs, completedWriteMs, saveTerminalMs, totalMs: Math.round(perfNow() - opStart) })}`);
+    // #759: 创建 gap 块代替 notifyChange(null)
+    const gapBlock: ActiveBlockData = this.normalizeActiveBlock({
+      startId: createUuidV4(),
+      name: '',
+      mode: 'countup' as const,
+      elapsed: 0,
+      startTime: submittedAt,
+      paused: false,
+      taskIds: [],
+      taskAssociationLog: [],
+      blockType: 'gap',
+      phase: undefined,
+      version: 1,
+      actorId: this.actorId,
+      lastTransitionAt: submittedAt,
+      updatedAt: submittedAt,
+    }, submittedAt);
+    await this.saveActiveBlock(gapBlock);
+    this.rememberAcceptedBlock(gapBlock);
+    this.notifyChange(gapBlock);
+    log.info(`[TB-SVC] endBlock done, gap created ${JSON.stringify({ startId: terminalBlock.startId, gapStartId: gapBlock.startId, feedbackEventMs, completedWriteMs, saveTerminalMs, totalMs: Math.round(perfNow() - opStart) })}`);
 
     return {
       ...timeBlock,
@@ -981,7 +1122,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private isCompletedBlock(block: ActiveBlockData): boolean {
-    return Boolean(block.feedbackSubmittedAt);
+    return block.blockType === 'gap' || Boolean(block.feedbackSubmittedAt);
   }
 
   private pickPreferredBlock(

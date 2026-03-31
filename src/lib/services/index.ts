@@ -19,6 +19,8 @@ export type {
 
 export { TimeBlockServiceImpl, getTimeBlockService } from './timeblock.service';
 export type { TimeBlockService } from './timeblock.service';
+export { TodayPlannerServiceImpl, getTodayPlannerService } from './today-planner.service';
+export type { TodayPlannerService } from './today-planner.service';
 export {
   TimeBlockBackupServiceImpl,
   getTimeBlockBackupService,

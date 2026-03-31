@@ -58,6 +58,12 @@ type TimeBlockRtAdapterLike = {
   getActiveBlock: () => Promise<ActiveBlockData | null>;
   putActiveBlock: (block: ActiveBlockData) => Promise<void>;
   deleteActiveBlock: () => Promise<void>;
+  // #780 new RT routes
+  rtStartBlock: (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtStopBlock: () => Promise<{ status: string }>;
+  rtEndBlock: (params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtPauseBlock: () => Promise<{ status: string }>;
+  rtResumeBlock: () => Promise<{ status: string }>;
 };
 
 function createMemoryEnv(initial: Record<string, unknown> = {}): MemoryEnv {
@@ -77,10 +83,14 @@ function createMemoryEnv(initial: Record<string, unknown> = {}): MemoryEnv {
   };
 }
 
-function createRtAdapter(): TimeBlockRtAdapterLike {
-  let completedBlocks: TimeBlockData[] = [];
-  let activeBlock: ActiveBlockData | null = null;
-  return {
+function createRtAdapter(initial?: {
+  completedBlocks?: TimeBlockData[];
+  activeBlock?: ActiveBlockData | null;
+}): TimeBlockRtAdapterLike {
+  let completedBlocks: TimeBlockData[] = initial?.completedBlocks ?? [];
+  let activeBlock: ActiveBlockData | null = initial?.activeBlock ?? null;
+
+  const adapter: TimeBlockRtAdapterLike = {
     listCompletedBlocks: vi.fn(async () => completedBlocks),
     replaceCompletedBlocks: vi.fn(async (blocks: TimeBlockData[]) => {
       completedBlocks = blocks;
@@ -92,7 +102,84 @@ function createRtAdapter(): TimeBlockRtAdapterLike {
     deleteActiveBlock: vi.fn(async () => {
       activeBlock = null;
     }),
+    // #780 new RT route mocks
+    rtStartBlock: vi.fn(async (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[] }) => {
+      const now = Date.now();
+      const newBlock: ActiveBlockData = {
+        startId: `rt-start-${now}`,
+        name: params.name,
+        mode: params.mode as 'countdown' | 'countup',
+        targetMinutes: params.targetMinutes,
+        elapsed: params.mode === 'countdown' ? (params.targetMinutes ?? 25) * 60 * 1000 : 0,
+        paused: false,
+        startTime: now,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: now,
+        lastResumedAt: now,
+        accumulatedRunMs: 0,
+        pauseAccumulatedMs: 0,
+        blockType: 'active',
+        taskIds: params.taskIds ?? [],
+        taskAssociationLog: [],
+      };
+      activeBlock = newBlock;
+      return { completed: null, active: newBlock };
+    }),
+    rtStopBlock: vi.fn(async () => {
+      if (activeBlock) {
+        const now = Date.now();
+        activeBlock = { ...activeBlock, phase: 'feedback_in_progress', actionEndedAt: now, feedbackStartedAt: now };
+      }
+      return { status: 'ok' };
+    }),
+    rtEndBlock: vi.fn(async (_params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }) => {
+      const now = Date.now();
+      const completed: TimeBlockData | null = activeBlock ? {
+        id: activeBlock.startId,
+        name: activeBlock.name,
+        startId: activeBlock.startId,
+        endId: `rt-end-${now}`,
+        tags: ['block_feedback'],
+        startTime: activeBlock.startTime,
+        endTime: now,
+        blockType: 'active',
+        taskIds: activeBlock.taskIds ?? [],
+        sourcePlannedBlockId: activeBlock.sourcePlannedBlockId,
+      } : null;
+      const gapBlock: ActiveBlockData = {
+        startId: `rt-gap-${now}`,
+        name: '',
+        mode: 'countup',
+        elapsed: 0,
+        paused: false,
+        startTime: now,
+        blockType: 'gap',
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: now,
+        taskIds: [],
+        taskAssociationLog: [],
+      };
+      activeBlock = gapBlock;
+      return { completed, active: gapBlock };
+    }),
+    rtPauseBlock: vi.fn(async () => {
+      if (activeBlock) {
+        const now = Date.now();
+        activeBlock = { ...activeBlock, phase: 'paused', paused: true, pausedAt: now };
+      }
+      return { status: 'ok' };
+    }),
+    rtResumeBlock: vi.fn(async () => {
+      if (activeBlock) {
+        const now = Date.now();
+        activeBlock = { ...activeBlock, phase: 'running', paused: false, pausedAt: undefined, lastResumedAt: now };
+      }
+      return { status: 'ok' };
+    }),
   };
+  return adapter;
 }
 
 describe('TimeBlockServiceImpl rt-sqlite backend', () => {
@@ -180,8 +267,10 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     await service.markEnding();
     await service.endBlock('done');
 
-    expect(rtAdapter.putActiveBlock).toHaveBeenCalled();
-    expect(rtAdapter.replaceCompletedBlocks).toHaveBeenCalled();
+    // #780: now uses RT routes instead of direct putActiveBlock/replaceCompletedBlocks
+    expect(rtAdapter.rtStartBlock).toHaveBeenCalled();
+    expect(rtAdapter.rtStopBlock).toHaveBeenCalled();
+    expect(rtAdapter.rtEndBlock).toHaveBeenCalled();
   });
 
   it('does not duplicate block_start/pause/resume eventlog writes in rt-sqlite mode', async () => {
@@ -219,5 +308,40 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
       ([event]) => (event as { type?: string }).type,
     );
     expect(types).not.toContain('block_end');
+  });
+
+  it('preserves sourcePlannedBlockId when finishing a planned block in rt-sqlite mode', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter({
+      activeBlock: {
+        startId: 'active-planned-1',
+        name: 'Lunch Reset',
+        mode: 'countdown',
+        targetMinutes: 30,
+        elapsed: 1_800_000,
+        paused: false,
+        startTime: 1_700_000_000_000,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: 1_700_000_000_000,
+        taskIds: [],
+        taskAssociationLog: [],
+        sourcePlannedBlockId: 'plan-1',
+      },
+    });
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+
+    await service.markEnding();
+    await service.endBlock('rest done');
+
+    // #780: now uses RT routes; check rtStopBlock and rtEndBlock were called
+    expect(rtAdapter.rtStopBlock).toHaveBeenCalled();
+    expect(rtAdapter.rtEndBlock).toHaveBeenCalledWith({
+      feedback: 'rest done',
+      taskStatusOutcomes: undefined,
+    });
   });
 });

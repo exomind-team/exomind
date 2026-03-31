@@ -20,6 +20,23 @@ export interface TaskAutoCreatedPayload {
   source_text?: string;
 }
 
+/** Payload shape for task.created / task.updated signals. */
+export interface TaskChangedPayload {
+  id: string;
+  title: string;
+  status: string;
+}
+
+/** Payload shape for task.cancelled signals. */
+export interface TaskCancelledPayload extends TaskChangedPayload {}
+
+/** Payload shape for task.transitioned signals. */
+export interface TaskTransitionedPayload {
+  task: TaskChangedPayload;
+  old_status: string;
+  new_status: string;
+}
+
 /** Payload shape for eventlog.appended signals. */
 export interface EventLogAppendedPayload {
   text: string;
@@ -72,6 +89,10 @@ export interface KeyboardStatePayload {
 /** Options for creating a signal handler dispatcher. */
 export interface SignalHandlerOptions {
   onTaskAutoCreated?: (payload: TaskAutoCreatedPayload) => Promise<void>;
+  onTaskCreated?: (payload: TaskChangedPayload) => Promise<void>;
+  onTaskUpdated?: (payload: TaskChangedPayload) => Promise<void>;
+  onTaskTransitioned?: (payload: TaskTransitionedPayload) => Promise<void>;
+  onTaskCancelled?: (payload: TaskCancelledPayload) => Promise<void>;
   onEventLogAppended?: (payload: EventLogAppendedPayload) => Promise<void>;
   onEventLogReplicationAppended?: (payload: EventLogReplicationAppendedPayload) => Promise<void>;
   onActiveBlockReplicationSnapshot?: (payload: ActiveBlockReplicationSnapshotPayload) => Promise<void>;
@@ -104,6 +125,30 @@ export function startSignalHandlers(
       case 'task.auto-created':
         if (options.onTaskAutoCreated) {
           await options.onTaskAutoCreated(event.payload as TaskAutoCreatedPayload);
+        }
+        break;
+
+      case 'task.created':
+        if (options.onTaskCreated) {
+          await options.onTaskCreated(event.payload as TaskChangedPayload);
+        }
+        break;
+
+      case 'task.updated':
+        if (options.onTaskUpdated) {
+          await options.onTaskUpdated(event.payload as TaskChangedPayload);
+        }
+        break;
+
+      case 'task.transitioned':
+        if (options.onTaskTransitioned) {
+          await options.onTaskTransitioned(event.payload as TaskTransitionedPayload);
+        }
+        break;
+
+      case 'task.cancelled':
+        if (options.onTaskCancelled) {
+          await options.onTaskCancelled(event.payload as TaskCancelledPayload);
         }
         break;
 

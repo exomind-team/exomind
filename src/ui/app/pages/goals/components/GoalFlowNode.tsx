@@ -12,6 +12,7 @@ export interface GoalFlowNodeData extends Record<string, unknown> {
   title: string;
   status: GoalDisplayStatus;
   isMe?: boolean;
+  isAbsorbing?: boolean;
   editMode?: boolean;
   hasEmptyRule?: boolean;
   connectModeTargetable?: boolean;
@@ -52,13 +53,13 @@ function getGoalClasses(status: GoalDisplayStatus, isMe: boolean): string {
     case 'completed':
       return 'border border-emerald-300 bg-gradient-to-br from-emerald-400 to-emerald-600 opacity-80';
     case 'in_progress':
-      return 'border-[2.5px] border-[#C75B3A] bg-gradient-to-br from-[#D97757] to-[#C75B3A] ring-[3px] ring-[#C75B3A]/25 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]';
+      return 'border-[2.5px] border-[#C75B3A] bg-gradient-to-br from-sky-400 via-sky-500 to-indigo-500 ring-[3px] ring-[#C75B3A]/25 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]';
     case 'suspended':
-      return 'border-2 border-[#A8A29E] bg-gradient-to-br from-[#78716C] to-[#57534E]';
+      return 'border-2 border-[#94A3B8] bg-gradient-to-br from-sky-400/85 via-sky-500/80 to-indigo-500/80';
     case 'cancelled':
-      return 'border border-[#A8A29E] bg-gradient-to-br from-[#A8A29E] to-[#78716C] opacity-50';
+      return 'border border-[#94A3B8] bg-gradient-to-br from-sky-400/45 via-sky-500/40 to-indigo-500/40 opacity-50';
     default:
-      return 'border border-[#E7E5E4] bg-gradient-to-br from-[#D6D3D1] to-[#A8A29E] text-[#1C1917] shadow-[0_12px_36px_-12px_rgba(120,113,108,0.35)]';
+      return 'border border-sky-200 bg-gradient-to-br from-sky-400 to-indigo-500 text-white shadow-[0_14px_38px_-18px_rgba(59,130,246,0.45)]';
   }
 }
 
@@ -67,11 +68,13 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
   const editMode = Boolean(data.editMode);
   const size = isMe ? ME_NODE_SIZE : GOAL_NODE_SIZE;
   const status = data.status;
+  const hasPlaceholderTitle = !data.title;
   const longPressHandlers = useLongPress((event) => {
     data.onOpenContextMenu?.(id, event.clientX, event.clientY);
   });
   const connectModeTargetable = Boolean(data.connectModeTargetable);
   const connectModeHovering = Boolean(data.connectModeHovering);
+  const isAbsorbing = Boolean(data.isAbsorbing);
 
   return (
     <div
@@ -79,6 +82,7 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
       className={cn(
         'relative flex items-center justify-center rounded-full text-white shadow-lg transition-shadow',
         getGoalClasses(status, isMe),
+        isAbsorbing && 'pointer-events-none opacity-0',
         !editMode && 'cursor-grab active:cursor-grabbing',
         editMode && 'cursor-crosshair',
         connectModeTargetable && 'ring-2 ring-[#C75B3A]/30 ring-offset-2 ring-offset-[#FAF7F5] dark:ring-offset-[#0C0A09]',
@@ -97,7 +101,19 @@ export function GoalFlowNode({ id, data, selected }: NodeProps<Node<GoalFlowNode
     >
       <Handle type="target" position={Position.Top} style={getHandleStyle(editMode)} />
       <Handle type="source" position={Position.Bottom} style={getHandleStyle(editMode)} />
-      <span className={cn('px-1 text-center leading-tight select-none', isMe ? 'text-sm font-bold' : 'text-xs font-medium')}>
+      {status === 'in_progress' && !isMe ? (
+        <span
+          data-testid={`goal-flow-node-progress-pulse-${id}`}
+          className="pointer-events-none absolute inset-[-5px] rounded-full border border-[#F5C7B8]/80 opacity-80 animate-pulse"
+        />
+      ) : null}
+      <span
+        className={cn(
+          'px-1 text-center leading-tight select-none',
+          isMe ? 'text-sm font-bold' : 'text-xs font-medium',
+          hasPlaceholderTitle && 'italic opacity-75',
+        )}
+      >
         {data.title || '待命名'}
       </span>
 

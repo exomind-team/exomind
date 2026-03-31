@@ -15,7 +15,7 @@ describe('TauriRuntimeAdapter（Tauri 运行时适配器）', () => {
     window.localStorage.clear();
   });
 
-  it('persists authSecret from runtime status（持久化运行时鉴权密钥）', async () => {
+  it('does not persist authSecret from runtime status（不再持久化运行时鉴权密钥）', async () => {
     invokeMock.mockResolvedValue({
       running: true,
       host: '127.0.0.1',
@@ -27,7 +27,7 @@ describe('TauriRuntimeAdapter（Tauri 运行时适配器）', () => {
     const adapter = new TauriRuntimeAdapter();
     await adapter.getStatus();
 
-    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"authSecret":"embedded-secret"');
+    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).not.toContain('"authSecret"');
   });
 
   it('invokes peer dial address command（调用 peer 拨号地址命令）', async () => {

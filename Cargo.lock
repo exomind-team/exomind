@@ -1275,6 +1275,7 @@ version = "0.3.6"
 dependencies = [
  "chrono",
  "enigo",
+ "exomind-android-keepalive",
  "exomind-runtime",
  "flate2",
  "futures",
@@ -1301,8 +1302,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "exomind-runtime"
+name = "exomind-android-keepalive"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "exomind-runtime"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-stream",

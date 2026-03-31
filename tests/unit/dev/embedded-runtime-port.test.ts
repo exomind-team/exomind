@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   normalizeReservedPorts,
   resolveEmbeddedRuntimePort,
-} from '../../../Scripts/dev/embedded-runtime-port';
+} from '../../../scripts/dev/embedded-runtime-port';
 
 describe('embedded runtime port resolver（内嵌 Runtime 端口解析）', () => {
   it('normalizes reserved ports and drops invalid values（保留端口去重并过滤非法值）', () => {

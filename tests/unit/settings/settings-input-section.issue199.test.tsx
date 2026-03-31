@@ -131,6 +131,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
       expect(screen.getByText('火山资源模型')).toBeInTheDocument();
       expect(screen.getByText('火山 Resource ID')).toBeInTheDocument();
       expect(screen.getByText('火山识别语言')).toBeInTheDocument();
+      expect(screen.getByText('火山用量概览')).toBeInTheDocument();
     });
 
     expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
@@ -493,17 +494,18 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('已配置 (sk-t***56)')).toBeInTheDocument();
   });
 
-  it('keeps sync server dialog as plain single-value editor without secret-only footer controls', () => {
+  it('keeps RT address dialog as plain single-value editor without secret-only footer controls', () => {
     render(<SettingsPage />);
 
-    fireEvent.click(screen.getByText('同步服务器'));
+    fireEvent.click(screen.getByText('RT 地址'));
 
-    expect(screen.getByText('设置事件日志同步的服务器地址')).toBeInTheDocument();
+    expect(screen.getByText('需要连接另一台电脑或手机上的 ExoMind 时，在这里填写对方显示的地址；平时只在本机使用就不用改。')).toBeInTheDocument();
+    expect(screen.getByText('填写你想连接的那台设备地址，例如 192.168.1.23:1949。保存后，当前设备会切换到这个地址继续连接。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '显示 Token' })).toBeNull();
     expect(screen.queryByRole('button', { name: '清空' })).toBeNull();
 
-    const syncInput = screen.getByPlaceholderText('http://127.0.0.1:6984');
-    expect(syncInput).toHaveAttribute('type', 'url');
+    const syncInput = screen.getByPlaceholderText('192.168.1.23:1949');
+    expect(syncInput).toHaveAttribute('type', 'text');
 
     const cancelButton = screen.getByRole('button', { name: '取消' });
     const saveButton = screen.getByRole('button', { name: '保存' });

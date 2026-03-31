@@ -9,6 +9,8 @@ import {
   EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
 } from '@/config/runtime-target';
 
+const invokeMock = vi.hoisted(() => vi.fn());
+const isTauriMock = vi.hoisted(() => vi.fn(async () => true));
 const agentHubMocks = vi.hoisted(() => ({
   getTopology: vi.fn(),
   getDeviceView: vi.fn(),
@@ -61,6 +63,10 @@ const signalStreamMocks = vi.hoisted(() => {
   };
 });
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+  isTauri: (...args: unknown[]) => isTauriMock(...args),
+}));
 vi.mock('@/lib/services', () => ({
   getAgentHubService: () => ({
     getTopology: agentHubMocks.getTopology,
@@ -163,11 +169,20 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    vi.stubGlobal('__TAURI_INTERNALS__', {});
+    vi.clearAllMocks();
     fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => [],
     }));
     vi.stubGlobal('fetch', fetchMock);
+    isTauriMock.mockResolvedValue(true);
+    invokeMock.mockImplementation(async (command: string, payload?: { mode?: string }) => {
+      if (command === 'runtime_target_mode_set' || command === 'runtime_network_mode_set') {
+        return payload?.mode ?? 'embedded';
+      }
+      return null;
+    });
 
     hosts = [
       {
@@ -295,7 +310,10 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
           } as RuntimeHostRecord & Record<string, unknown>;
 
           for (const [key, value] of Object.entries(patch)) {
-            if (value === null || typeof value === 'undefined') {
+            if (typeof value === 'undefined') {
+              continue;
+            }
+            if (value === null) {
               delete nextHost[key];
               continue;
             }
@@ -1273,6 +1291,8 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     fireEvent.click(screen.getByTestId('runtime-target-mode-external'));
 
     await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('runtime_target_mode_set', { mode: 'external' });
+      expect(runtimeControlMocks.stopRuntime).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('runtime-target-mode-external')).toHaveAttribute('aria-pressed', 'true');
       expect(screen.getByTestId('runtime-local-start-button')).toBeDisabled();
     });

@@ -1,5 +1,19 @@
 import type { EventData } from '../../types/event';
 
+export interface EventLogListOptions {
+  limit?: number;
+  sinceId?: string;
+  sinceTimestamp?: number;
+}
+
+export type EventLogListSemantics = 'full_snapshot' | 'incremental_batch';
+
+export interface EventLogListResult {
+  events: EventData[];
+  semantics: EventLogListSemantics;
+  snapshotRevision?: string | null;
+}
+
 /**
  * IEventLogPort - 事件日志能力接口
  *
@@ -10,7 +24,12 @@ export interface IEventLogPort {
   /**
    * 列出所有事件（建议按时间倒序）
    */
-  listEvents(): Promise<EventData[]>;
+  listEvents(options?: EventLogListOptions): Promise<EventData[]>;
+
+  /**
+   * 列出事件并显式返回结果语义（快照 / 增量）
+   */
+  listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult>;
 
   /**
    * 追加一条事件
@@ -27,4 +46,3 @@ export interface IEventLogPort {
    */
   clearEvents(): Promise<void>;
 }
-

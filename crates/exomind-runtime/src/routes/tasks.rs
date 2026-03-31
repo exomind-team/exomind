@@ -463,11 +463,12 @@ fn write_task_transition_eventlog(
     old_status: TaskStatus,
     trigger: &str,
 ) {
+    let tag = task_transition_event_tag(old_status, task.status);
     let event = crate::eventlog::EventRecord {
         id: uuid::Uuid::new_v4().to_string(),
         timestamp: chrono::Utc::now().timestamp_millis(),
-        content: format!("任务状态变更: {} ({old_status:?} -> {:?})", task.title, task.status),
-        tags: vec!["task_transition".to_string()],
+        content: format!("{}：{}", task_transition_event_content(tag), task.title),
+        tags: vec![tag.to_string()],
         metadata: Some(serde_json::json!({
             "task_id": task.id,
             "task_title": task.title,
@@ -482,6 +483,29 @@ fn write_task_transition_eventlog(
 
     if let Err(error) = state.eventlog_store.append_event(scope_key, event) {
         tracing::warn!(error = %error, "failed to write task transition eventlog");
+    }
+}
+
+fn task_transition_event_content(tag: &str) -> &'static str {
+    match tag {
+        "task_started" => "任务启动",
+        "task_resumed" => "任务继续",
+        "task_suspended" => "任务挂起",
+        "task_completed" => "任务完成",
+        "task_cancelled" => "任务取消",
+        _ => "任务状态变更",
+    }
+}
+
+fn task_transition_event_tag(old_status: TaskStatus, new_status: TaskStatus) -> &'static str {
+    match (old_status, new_status) {
+        (TaskStatus::Suspended, TaskStatus::InProgress) => "task_resumed",
+        (_, TaskStatus::InProgress) => "task_started",
+        (_, TaskStatus::Suspended) => "task_suspended",
+        (_, TaskStatus::Completed) => "task_completed",
+        (_, TaskStatus::Cancelled) => "task_cancelled",
+        // Keep the legacy tag as a fallback for backward compatibility if a new transition appears.
+        _ => "task_transition",
     }
 }
 
@@ -679,11 +703,13 @@ mod tests {
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
+            config_store: Arc::new(crate::config::ConfigStore::new()),
             task_store,
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
             eventlog_watch_tx: {
                 let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+                eventlog_store.set_watch_tx(tx.clone());
                 tx
             },
             timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
@@ -750,6 +776,37 @@ mod tests {
         let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["title"], "Buy milk");
+    }
+
+    #[tokio::test]
+    async fn create_task_rejects_client_supplied_status() {
+        let state = test_state();
+        let app = test_router(state);
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"title":"Should fail","status":"completed"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let list_response = app
+            .oneshot(Request::builder().uri("/tasks").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(list_response.status(), StatusCode::OK);
+        let body = list_response.into_body().collect().await.unwrap().to_bytes();
+        let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert!(tasks.is_empty());
     }
 
     #[tokio::test]
@@ -840,7 +897,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_terminal_task_allows_non_frozen_fields() {
+    async fn update_terminal_task_description_returns_conflict() {
         let state = test_state();
         let task = state.task_store.create(CreateTaskInput {
             title: "Original".to_string(),
@@ -877,13 +934,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let updated: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(updated["title"], "Original");
-        assert_eq!(updated["description"], "Post-completion note");
-        assert_eq!(updated["estimated_minutes"], 30);
-        assert_eq!(updated["status"], "completed");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]
@@ -1251,7 +1302,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].tags, vec!["task_transition".to_string()]);
+        assert_eq!(events[0].tags, vec!["task_started".to_string()]);
+        assert_eq!(events[0].content, "任务启动：Task with eventlog");
         assert_eq!(events[0].metadata.as_ref().unwrap()["task_id"], task.id);
         assert_eq!(events[0].metadata.as_ref().unwrap()["old_status"], "pending");
         assert_eq!(events[0].metadata.as_ref().unwrap()["new_status"], "in_progress");
@@ -1302,6 +1354,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 1);
+        assert_eq!(events[0].tags, vec!["task_cancelled".to_string()]);
+        assert_eq!(events[0].content, "任务取消：Task cancel eventlog");
         assert_eq!(events[0].metadata.as_ref().unwrap()["task_id"], task.id);
         assert_eq!(events[0].metadata.as_ref().unwrap()["new_status"], "cancelled");
     }
@@ -1322,11 +1376,6 @@ mod tests {
             estimated_minutes: None,
             time_block_ids: vec![],
         });
-        // Must transition to in_progress first (pending → cancelled is invalid)
-        state
-            .task_store
-            .transition(&task.id, TaskStatus::InProgress)
-            .unwrap();
         let _rx = state.signal_pool.subscribe();
         let app = test_router(state);
 

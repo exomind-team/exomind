@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -9,13 +9,37 @@ import {
   type EdgeTypes,
   type Node,
   type NodeTypes,
+  Position,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
+import {
+  getGoalsPageGuideHidden,
+  getGoalsPageMode,
+  getGoalsPageShowCancelled,
+  GOALS_PAGE_GUIDE_HIDDEN_STORAGE_KEY,
+  GOALS_PAGE_MODE_STORAGE_KEY,
+  GOALS_PAGE_SHOW_CANCELLED_STORAGE_KEY,
+  setGoalsPageGuideHidden,
+  setGoalsPageMode,
+  setGoalsPageShowCancelled,
+  type GoalsPageMode,
+} from '@/config/goals-page-preferences';
 import { toast } from '@/components/ui/toast-hook';
+import { getTaskService } from '@/lib/services/task.service';
 import { cn } from '@/lib/utils';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import {
+  deriveGoalDisplayStatus as deriveGoalDisplayStatusLogic,
+  getEdgeStatus as getEdgeStatusLogic,
+  getHopDistance as getHopDistanceLogic,
+  getInEdges as getInEdgesLogic,
+} from './goal-logic';
+import { summarizeGraph, summarizePositions, summarizeViewport, warnGoalDebug } from './goal-debug';
 import { GoalForceSimulation, type PositionMap } from './goal-force-layout';
 import { useGoalStore } from './goal-store';
+import type { TaskEdgeStatus } from './goal-types';
 import { CancelGoalDialog } from './components/CancelGoalDialog';
 import { EdgeDetailPanel } from './components/EdgeDetailPanel';
 import { GoalContextMenu } from './components/GoalContextMenu';
@@ -23,35 +47,50 @@ import { GoalDetailPanel } from './components/GoalDetailPanel';
 import { GOAL_NODE_SIZE, GoalFlowNode, ME_NODE_SIZE, type GoalFlowNodeData } from './components/GoalFlowNode';
 import { MeDetailPanel } from './components/MeDetailPanel';
 import { SplitEdgeDialog } from './components/SplitEdgeDialog';
-import { TaskFlowEdge, type TaskFlowEdgeData } from './components/TaskFlowEdge';
+import {
+  buildTaskEdgePath,
+  getTaskFlowEdgeColor,
+  getTaskFlowEdgeStyle,
+  TaskFlowEdge,
+  type TaskFlowEdgeData,
+} from './components/TaskFlowEdge';
 import { useConnectMode } from './hooks/useConnectMode';
 import { useContextMenu } from './hooks/useContextMenu';
 
-type GoalPageMode = 'browse' | 'edit';
 type Selection = { kind: 'goal' | 'edge' | 'me'; id: string } | null;
+type ActiveReconnect = {
+  edgeId: string;
+  handleType: 'source' | 'target';
+} | null;
 
-const MODE_STORAGE_KEY = 'exomind:goals-mode';
-const SHOW_CANCELLED_STORAGE_KEY = 'exomind:goals-show-cancelled';
-const GUIDE_HIDDEN_STORAGE_KEY = 'exomind:goals-guide-hidden';
+const COMPLETION_ABSORB_DURATION_MS = 520;
+const COMPLETION_ME_PULSE_DURATION_MS = 320;
+const COMPLETION_ABSORB_NODE_SIZE = 72;
+const RENDER_HEALTH_GRACE_MS = 1500;
+const EMPTY_STATE_GUIDE_OFFSET_X = 26;
+const EMPTY_STATE_GUIDE_OFFSET_Y = 24;
+const EMPTY_STATE_GUIDE_MARGIN = 8;
+const EMPTY_STATE_GUIDE_WIDTH = 228;
+const EMPTY_STATE_GUIDE_HEIGHT = 68;
+const DETAIL_PANEL_DESKTOP_WIDTH = 340;
+const DETAIL_PANEL_DESKTOP_RIGHT_INSET = 16;
+const EMPTY_STATE_GUIDE_PANEL_GAP = 8;
 
-function readBooleanStorage(key: string, fallback: boolean): boolean {
-  if (typeof window === 'undefined') return fallback;
-  const raw = window.localStorage.getItem(key);
-  return raw === null ? fallback : raw === 'true';
-}
-
-function readModeStorage(): GoalPageMode {
-  if (typeof window === 'undefined') return 'browse';
-  const raw = window.localStorage.getItem(MODE_STORAGE_KEY);
-  return raw === 'edit' ? 'edit' : 'browse';
+interface CompletionAbsorptionAnimation {
+  goalId: string;
+  title: string;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
 }
 
 function GoalModeSelector({
   mode,
   onChange,
 }: {
-  mode: GoalPageMode;
-  onChange: (mode: GoalPageMode) => void;
+  mode: GoalsPageMode;
+  onChange: (mode: GoalsPageMode) => void;
 }) {
   return (
     <div className="pointer-events-auto absolute left-3 top-3 z-10 flex items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/90 p-1 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
@@ -84,35 +123,95 @@ function buildVisibleEdges(graph: ReturnType<typeof useGoalStore.getState>['grap
   });
 }
 
-const HOP_RING_SPACING = 152;
+function buildNodeHandles(size: number) {
+  return [
+    {
+      type: 'target' as const,
+      position: Position.Top,
+      x: 0,
+      y: 0,
+      width: size,
+      height: size,
+    },
+    {
+      type: 'source' as const,
+      position: Position.Bottom,
+      x: 0,
+      y: 0,
+      width: size,
+      height: size,
+    },
+  ];
+}
+
+export function resolveEmptyStateGuidePosition({
+  meScreenRight,
+  meScreenCenterY,
+  pageWidth,
+  pageHeight,
+  detailPanelOpen,
+  isDesktop,
+}: {
+  meScreenRight: number;
+  meScreenCenterY: number;
+  pageWidth: number;
+  pageHeight: number;
+  detailPanelOpen: boolean;
+  isDesktop: boolean;
+}) {
+  const desiredLeft = Math.round(meScreenRight + EMPTY_STATE_GUIDE_OFFSET_X);
+  const desiredTop = Math.round(meScreenCenterY - EMPTY_STATE_GUIDE_OFFSET_Y);
+  const panelLeft = detailPanelOpen && isDesktop
+    ? pageWidth - DETAIL_PANEL_DESKTOP_RIGHT_INSET - DETAIL_PANEL_DESKTOP_WIDTH
+    : Number.POSITIVE_INFINITY;
+  const maxLeft = pageWidth > 0
+    ? Math.max(
+      EMPTY_STATE_GUIDE_MARGIN,
+      Math.min(
+        pageWidth - EMPTY_STATE_GUIDE_WIDTH - EMPTY_STATE_GUIDE_MARGIN,
+        panelLeft - EMPTY_STATE_GUIDE_PANEL_GAP - EMPTY_STATE_GUIDE_WIDTH,
+      ),
+    )
+    : desiredLeft;
+  const maxTop = pageHeight > 0
+    ? Math.max(EMPTY_STATE_GUIDE_MARGIN, pageHeight - EMPTY_STATE_GUIDE_HEIGHT - EMPTY_STATE_GUIDE_MARGIN)
+    : desiredTop;
+  return {
+    left: `${Math.max(EMPTY_STATE_GUIDE_MARGIN, Math.min(desiredLeft, maxLeft))}px`,
+    top: `${Math.max(EMPTY_STATE_GUIDE_MARGIN, Math.min(desiredTop, maxTop))}px`,
+  };
+}
 
 function GoalHopRings({
   centerX,
   centerY,
-  maxHop,
+  rings,
+  viewportX,
+  viewportY,
+  zoom,
 }: {
   centerX: number;
   centerY: number;
-  maxHop: number;
+  rings: Array<{ hop: number; radius: number }>;
+  viewportX: number;
+  viewportY: number;
+  zoom: number;
 }) {
-  if (maxHop < 1) return null;
+  if (rings.length === 0) return null;
 
   return (
     <svg
       data-testid="goals-hop-rings"
-      className="pointer-events-none absolute inset-0 z-[1] h-full w-full"
+      className="pointer-events-none absolute inset-0 z-[1] h-full w-full overflow-visible"
+      style={{
+        transform: `translate(${viewportX}px, ${viewportY}px) scale(${zoom})`,
+        transformOrigin: '0 0',
+      }}
     >
-      <defs>
-        <radialGradient id="goal-hop-ring-glow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="rgba(199,91,58,0.10)" />
-          <stop offset="70%" stopColor="rgba(199,91,58,0.03)" />
-          <stop offset="100%" stopColor="rgba(199,91,58,0)" />
-        </radialGradient>
-      </defs>
-      <circle cx={centerX} cy={centerY} r={Math.max(HOP_RING_SPACING * maxHop, 120)} fill="url(#goal-hop-ring-glow)" />
-      {Array.from({ length: maxHop }, (_, index) => {
-        const hop = index + 1;
-        const radius = hop * HOP_RING_SPACING;
+      {rings.map(({ hop, radius }) => {
+        const labelAngle = -Math.PI / 4;
+        const labelX = centerX + Math.cos(labelAngle) * radius;
+        const labelY = centerY + Math.sin(labelAngle) * radius;
         return (
           <g key={hop} data-testid={`goals-hop-ring-${hop}`}>
             <circle
@@ -124,15 +223,28 @@ function GoalHopRings({
               strokeWidth={hop === 1 ? 1.6 : 1}
               strokeDasharray={hop === 1 ? '0' : '5 10'}
             />
-            <text
-              x={centerX}
-              y={Math.max(centerY - radius + 18, 24)}
-              fill="rgba(120,113,108,0.8)"
-              fontSize="11"
-              textAnchor="middle"
-            >
-              {hop} 跳
-            </text>
+            <g transform={`translate(${labelX}, ${labelY})`}>
+              <rect
+                x={-18}
+                y={-11}
+                width={36}
+                height={22}
+                rx={11}
+                fill="rgba(250,247,245,0.92)"
+                stroke={hop === 1 ? 'rgba(199,91,58,0.28)' : 'rgba(168,162,158,0.28)'}
+                strokeWidth="1"
+              />
+              <text
+                x={0}
+                y={4}
+                fill="rgba(87,83,78,0.92)"
+                fontSize="11"
+                fontWeight="600"
+                textAnchor="middle"
+              >
+                {hop} 跳
+              </text>
+            </g>
           </g>
         );
       })}
@@ -140,16 +252,257 @@ function GoalHopRings({
   );
 }
 
+function GoalCompletionEffects({
+  animations,
+  meCenterX,
+  meCenterY,
+  mePulseActive,
+  viewportX,
+  viewportY,
+  zoom,
+}: {
+  animations: CompletionAbsorptionAnimation[];
+  meCenterX: number;
+  meCenterY: number;
+  mePulseActive: boolean;
+  viewportX: number;
+  viewportY: number;
+  zoom: number;
+}) {
+  if (animations.length === 0 && !mePulseActive) return null;
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-[9]"
+      style={{
+        transform: `translate(${viewportX}px, ${viewportY}px) scale(${zoom})`,
+        transformOrigin: '0 0',
+      }}
+    >
+      <style>
+        {`
+          @keyframes goal-completion-absorb {
+            0% {
+              transform: translate(var(--goal-absorb-from-x), var(--goal-absorb-from-y)) scale(1);
+              opacity: 1;
+            }
+            72% {
+              opacity: 1;
+            }
+            100% {
+              transform: translate(var(--goal-absorb-to-x), var(--goal-absorb-to-y)) scale(0.2);
+              opacity: 0;
+            }
+          }
+
+          @keyframes goal-completion-trail {
+            0% {
+              opacity: 0.68;
+              transform: scaleX(1);
+            }
+            100% {
+              opacity: 0;
+              transform: scaleX(0.18);
+            }
+          }
+
+          @keyframes goal-me-pulse {
+            0% {
+              transform: scale(0.78);
+              opacity: 0;
+            }
+            30% {
+              opacity: 0.82;
+            }
+            100% {
+              transform: scale(1.32);
+              opacity: 0;
+            }
+          }
+        `}
+      </style>
+
+      {animations.map((animation) => {
+        const deltaX = animation.toX - animation.fromX;
+        const deltaY = animation.toY - animation.fromY;
+        const distance = Math.hypot(deltaX, deltaY);
+        const angle = Math.atan2(deltaY, deltaX);
+        const absorbStyle = {
+          width: `${COMPLETION_ABSORB_NODE_SIZE}px`,
+          height: `${COMPLETION_ABSORB_NODE_SIZE}px`,
+          ['--goal-absorb-from-x' as string]: `${animation.fromX - COMPLETION_ABSORB_NODE_SIZE / 2}px`,
+          ['--goal-absorb-from-y' as string]: `${animation.fromY - COMPLETION_ABSORB_NODE_SIZE / 2}px`,
+          ['--goal-absorb-to-x' as string]: `${animation.toX - COMPLETION_ABSORB_NODE_SIZE / 2}px`,
+          ['--goal-absorb-to-y' as string]: `${animation.toY - COMPLETION_ABSORB_NODE_SIZE / 2}px`,
+          animation: `goal-completion-absorb ${COMPLETION_ABSORB_DURATION_MS}ms cubic-bezier(0.16, 1, 0.3, 1) forwards`,
+        } as CSSProperties;
+
+        return (
+          <div key={animation.goalId}>
+            <div
+              className="absolute h-[2px] origin-left rounded-full bg-[linear-gradient(90deg,rgba(199,91,58,0.72),rgba(199,91,58,0.08))]"
+              style={{
+                left: `${animation.fromX}px`,
+                top: `${animation.fromY}px`,
+                width: `${distance}px`,
+                transform: `rotate(${angle}rad)`,
+                animation: `goal-completion-trail ${COMPLETION_ABSORB_DURATION_MS}ms ease-out forwards`,
+              }}
+            />
+            <div
+              data-testid={`goals-completion-absorption-${animation.goalId}`}
+              className="absolute flex items-center justify-center rounded-full border border-[#F5C7B8] bg-[radial-gradient(circle_at_30%_30%,rgba(125,211,252,0.95),rgba(59,130,246,0.86)_55%,rgba(79,70,229,0.88))] px-3 text-center text-[11px] font-semibold leading-tight text-white shadow-[0_18px_40px_-18px_rgba(59,130,246,0.9),0_0_0_1px_rgba(255,255,255,0.25)]"
+              style={absorbStyle}
+            >
+              <span className="max-w-[52px] truncate">{animation.title || '待命名'}</span>
+            </div>
+          </div>
+        );
+      })}
+
+      {mePulseActive ? (
+        <div
+          data-testid="goals-me-pulse"
+          className="absolute rounded-full border border-[#FDBA74]/70 bg-[radial-gradient(circle,rgba(251,191,36,0.22),rgba(251,146,60,0.10)_58%,rgba(251,146,60,0))] shadow-[0_0_36px_rgba(251,146,60,0.28)]"
+          style={{
+            left: `${meCenterX - 62}px`,
+            top: `${meCenterY - 62}px`,
+            width: '124px',
+            height: '124px',
+            animation: `goal-me-pulse ${COMPLETION_ME_PULSE_DURATION_MS}ms ease-out forwards`,
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ReconnectingEdgeOverlay({
+  edge,
+  viewportX,
+  viewportY,
+  zoom,
+}: {
+  edge: Edge<TaskFlowEdgeData>;
+  viewportX: number;
+  viewportY: number;
+  zoom: number;
+}) {
+  const sourceCenterX = typeof edge.data?.sourceCenterX === 'number' ? edge.data.sourceCenterX : undefined;
+  const sourceCenterY = typeof edge.data?.sourceCenterY === 'number' ? edge.data.sourceCenterY : undefined;
+  const sourceRadius = typeof edge.data?.sourceRadius === 'number' ? edge.data.sourceRadius : undefined;
+  const targetCenterX = typeof edge.data?.targetCenterX === 'number' ? edge.data.targetCenterX : undefined;
+  const targetCenterY = typeof edge.data?.targetCenterY === 'number' ? edge.data.targetCenterY : undefined;
+  const targetRadius = typeof edge.data?.targetRadius === 'number' ? edge.data.targetRadius : undefined;
+
+  if (
+    sourceCenterX === undefined
+    || sourceCenterY === undefined
+    || sourceRadius === undefined
+    || targetCenterX === undefined
+    || targetCenterY === undefined
+    || targetRadius === undefined
+  ) {
+    return null;
+  }
+
+  const { path, labelX, labelY } = buildTaskEdgePath({
+    sourceX: sourceCenterX,
+    sourceY: sourceCenterY,
+    targetX: targetCenterX,
+    targetY: targetCenterY,
+    sourceCenterX,
+    sourceCenterY,
+    sourceRadius,
+    targetCenterX,
+    targetCenterY,
+    targetRadius,
+    parallelIndex: edge.data?.parallelIndex ?? 0,
+    parallelTotal: edge.data?.parallelTotal ?? 1,
+  });
+  const status = edge.data?.status ?? 'pending';
+  const highlighted = Boolean(edge.data?.highlighted);
+  const isEmptySlot = Boolean(edge.data?.isEmptySlot);
+  const isZombie = Boolean(edge.data?.isZombie);
+  const label = edge.data?.label || '';
+  const style = getTaskFlowEdgeStyle(status, Boolean(edge.selected), highlighted, isEmptySlot, isZombie);
+  const markerId = `goal-task-arrow-${edge.id}`;
+  const markerColor = getTaskFlowEdgeColor(status, highlighted, isZombie);
+
+  return (
+    <svg
+      data-testid={`task-flow-edge-reconnect-overlay-${edge.id}`}
+      className="pointer-events-none absolute inset-0 z-[2] h-full w-full overflow-visible"
+    >
+      <defs>
+        <marker
+          data-testid={`task-flow-edge-marker-${edge.id}`}
+          id={markerId}
+          markerWidth="10"
+          markerHeight="10"
+          refX="8"
+          refY="5"
+          orient="auto"
+          markerUnits="userSpaceOnUse"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill={markerColor} />
+        </marker>
+      </defs>
+      <g transform={`translate(${viewportX} ${viewportY}) scale(${zoom})`}>
+        <path
+          data-testid={`task-flow-edge-visible-${edge.id}`}
+          d={path}
+          fill="none"
+          stroke={String(style.stroke)}
+          strokeWidth={Number(style.strokeWidth ?? 1.8)}
+          strokeDasharray={typeof style.strokeDasharray === 'string' ? style.strokeDasharray : undefined}
+          strokeLinecap="round"
+          markerEnd={`url(#${markerId})`}
+          opacity="0.98"
+        />
+        <path
+          data-testid={`task-flow-edge-hit-area-${edge.id}`}
+          d={path}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={18}
+          strokeLinecap="round"
+        />
+        {label ? (
+          <g data-testid={`task-flow-edge-label-${edge.id}`} transform={`translate(${labelX}, ${labelY})`}>
+            <rect
+              x={-24}
+              y={-10}
+              width={48}
+              height={20}
+              rx={6}
+              fill="rgba(255,255,255,0.92)"
+              stroke="rgba(231,229,228,0.95)"
+              strokeWidth={0.8}
+            />
+            <text
+              x={0}
+              y={3.5}
+              fill={highlighted ? '#C75B3A' : 'rgba(87,83,78,0.96)'}
+              fontSize="10"
+              textAnchor="middle"
+            >
+              {label}
+            </text>
+          </g>
+        ) : null}
+      </g>
+    </svg>
+  );
+}
+
 export function GoalsPage() {
   const graph = useGoalStore((state) => state.graph);
   const edgeOverrides = useGoalStore((state) => state.edgeOverrides);
-  const getEdgeStatus = useGoalStore((state) => state.getEdgeStatus);
-  const deriveGoalDisplayStatus = useGoalStore((state) => state.deriveGoalDisplayStatus);
-  const getInEdges = useGoalStore((state) => state.getInEdges);
   const getOutEdges = useGoalStore((state) => state.getOutEdges);
-  const getHopDistance = useGoalStore((state) => state.getHopDistance);
   const createGoal = useGoalStore((state) => state.createGoal);
   const createEdge = useGoalStore((state) => state.createEdge);
+  const reconnectEdge = useGoalStore((state) => state.reconnectEdge);
   const cancelGoal = useGoalStore((state) => state.cancelGoal);
   const deleteEdge = useGoalStore((state) => state.deleteEdge);
   const splitEdge = useGoalStore((state) => state.splitEdge);
@@ -161,9 +514,13 @@ export function GoalsPage() {
   const isDesktop = useIsDesktop();
 
   const [positions, setPositions] = useState<PositionMap>(new Map());
-  const [mode, setMode] = useState<GoalPageMode>(() => readModeStorage());
-  const [showCancelled, setShowCancelled] = useState(() => readBooleanStorage(SHOW_CANCELLED_STORAGE_KEY, false));
-  const [guideHidden, setGuideHidden] = useState(() => readBooleanStorage(GUIDE_HIDDEN_STORAGE_KEY, false));
+  const [taskMetaById, setTaskMetaById] = useState<Map<string, { title: string; status: TaskEdgeStatus }>>(() => new Map());
+  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
+  const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
+  const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
+  const [mode, setMode] = useState<GoalsPageMode>(() => getGoalsPageMode());
+  const [showCancelled, setShowCancelled] = useState(() => getGoalsPageShowCancelled());
+  const [guideHidden, setGuideHidden] = useState(() => getGoalsPageGuideHidden());
   const [selected, setSelected] = useState<Selection>(null);
   const [cancelGoalId, setCancelGoalId] = useState<string | null>(null);
   const [cancelCascadeInTasks, setCancelCascadeInTasks] = useState(false);
@@ -174,12 +531,33 @@ export function GoalsPage() {
   const [splitNewGoalTitle, setSplitNewGoalTitle] = useState('');
   const [splitOriginalEdgePlacement, setSplitOriginalEdgePlacement] = useState<'first-half' | 'second-half'>('second-half');
   const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<string[]>([]);
+  const [completionAnimations, setCompletionAnimations] = useState<CompletionAbsorptionAnimation[]>([]);
+  const [mePulseActive, setMePulseActive] = useState(false);
+  const [activeReconnect, setActiveReconnect] = useState<ActiveReconnect>(null);
+  const [renderHealthProbe, setRenderHealthProbe] = useState(0);
+  const hasPersistedInitialModeRef = useRef(false);
+  const hasPersistedInitialShowCancelledRef = useRef(false);
+  const hasPersistedInitialGuideHiddenRef = useRef(false);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
   const pageRef = useRef<HTMLDivElement | null>(null);
   const simulationRef = useRef<GoalForceSimulation | null>(null);
+  const reactFlowRef = useRef<ReactFlowInstance<Node<GoalFlowNodeData>, Edge<TaskFlowEdgeData>> | null>(null);
   const highlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const completionTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const mePulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousGoalStatusesRef = useRef<Map<string, string>>(new Map());
+  const skipNextSimulationSyncRef = useRef(true);
+  const hasCenteredInitialMeRef = useRef(false);
+  const lastCenteredGraphSignatureRef = useRef<string | null>(null);
+  const lastGraphChangeAtRef = useRef(Date.now());
+  const renderHealthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debugRef = useRef({
+    graphSignature: '',
+    viewportSignature: '',
+    renderSignature: '',
+    selectionSignature: '',
+  });
 
   const updateConnectPreview = useCallback((clientX: number, clientY: number) => {
     const bounds = pageRef.current?.getBoundingClientRect();
@@ -189,6 +567,17 @@ export function GoalsPage() {
       y: clientY - bounds.top,
     });
   }, [connectMode]);
+
+  const resolvePagePoint = useCallback((clientX: number, clientY: number) => {
+    const bounds = pageRef.current?.getBoundingClientRect();
+    if (!bounds) {
+      return { x: clientX, y: clientY };
+    }
+    return {
+      x: clientX - bounds.left,
+      y: clientY - bounds.top,
+    };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -205,9 +594,115 @@ export function GoalsPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [closeContextMenu, connectMode]);
 
+  useEffect(() => (
+    subscribeDeveloperModeChanges(setDeveloperModeEnabled)
+  ), []);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      switch (event.key) {
+        case GOALS_PAGE_MODE_STORAGE_KEY:
+          setMode(getGoalsPageMode());
+          return;
+        case GOALS_PAGE_SHOW_CANCELLED_STORAGE_KEY:
+          setShowCancelled(getGoalsPageShowCancelled());
+          return;
+        case GOALS_PAGE_GUIDE_HIDDEN_STORAGE_KEY:
+          setGuideHidden(getGoalsPageGuideHidden());
+          return;
+        default:
+          return;
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = pageRef.current;
+    if (!element) return;
+
+    const updatePageSize = (width: number, height: number) => {
+      setPageSize((current) => (
+        current.width === width && current.height === height
+          ? current
+          : { width, height }
+      ));
+    };
+
+    updatePageSize(element.clientWidth, element.clientHeight);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      updatePageSize(Math.round(entry.contentRect.width), Math.round(entry.contentRect.height));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => () => {
     highlightTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     highlightTimeoutsRef.current.clear();
+    completionTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    completionTimeoutsRef.current.clear();
+    if (renderHealthTimeoutRef.current) {
+      clearTimeout(renderHealthTimeoutRef.current);
+      renderHealthTimeoutRef.current = null;
+    }
+    if (mePulseTimeoutRef.current) {
+      clearTimeout(mePulseTimeoutRef.current);
+      mePulseTimeoutRef.current = null;
+    }
+  }, []);
+
+  const triggerMePulse = useCallback(() => {
+    setMePulseActive(true);
+    if (mePulseTimeoutRef.current) {
+      clearTimeout(mePulseTimeoutRef.current);
+    }
+    mePulseTimeoutRef.current = setTimeout(() => {
+      setMePulseActive(false);
+      mePulseTimeoutRef.current = null;
+    }, COMPLETION_ME_PULSE_DURATION_MS);
+  }, []);
+
+  useEffect(() => {
+    const taskService = getTaskService();
+    let cancelled = false;
+
+    async function syncTaskMeta() {
+      const tasks = await taskService.listTasks(true);
+      if (cancelled) return;
+      const nextTaskMeta = new Map(tasks.map((task) => [task.id, { title: task.title, status: task.status }]));
+      setTaskMetaById((current) => {
+        if (current.size !== nextTaskMeta.size) return nextTaskMeta;
+        for (const [taskId, taskMeta] of nextTaskMeta) {
+          const currentMeta = current.get(taskId);
+          if (!currentMeta || currentMeta.title !== taskMeta.title || currentMeta.status !== taskMeta.status) {
+            return nextTaskMeta;
+          }
+        }
+        return current;
+      });
+    }
+
+    void syncTaskMeta();
+    const unsubscribe = taskService.onTaskChange(() => {
+      void syncTaskMeta();
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   const visibleGraph = useMemo(() => ({
@@ -216,16 +711,70 @@ export function GoalsPage() {
     edges: buildVisibleEdges(graph, showCancelled),
   }), [graph, showCancelled]);
 
+  const getTaskStatusByRef = useCallback((taskNodeRef: string) => (
+    taskMetaById.get(taskNodeRef)?.status
+  ), [taskMetaById]);
+
+  const getTaskTitleByRef = useCallback((taskNodeRef: string) => (
+    taskMetaById.get(taskNodeRef)?.title
+  ), [taskMetaById]);
+
+  const resolveEdgeStatus = useCallback((edgeId: string) => {
+    const edge = graph.edges.find((item) => item.id === edgeId);
+    if (!edge) return 'pending';
+    return getEdgeStatusLogic(edge, {
+      edgeOverrides,
+      getTaskStatus: getTaskStatusByRef,
+    });
+  }, [edgeOverrides, getTaskStatusByRef, graph.edges]);
+
+  const resolveGoalStatus = useCallback((goalId: string) => {
+    const goal = graph.goals.find((item) => item.id === goalId);
+    if (!goal) return 'pending';
+    return deriveGoalDisplayStatusLogic(goal, getInEdgesLogic(graph, goalId), {
+      graph,
+      edgeOverrides,
+      getTaskStatus: getTaskStatusByRef,
+    });
+  }, [edgeOverrides, getTaskStatusByRef, graph]);
+
+  const resolveHopDistance = useCallback((goalId: string) => (
+    getHopDistanceLogic(graph, goalId, {
+      edgeOverrides,
+      getTaskStatus: getTaskStatusByRef,
+    })
+  ), [edgeOverrides, getTaskStatusByRef, graph]);
+
+  const resolveEdgeLabel = useCallback((edgeId: string) => {
+    const edge = graph.edges.find((item) => item.id === edgeId);
+    if (!edge) return '待定义';
+    if (edge.title) return edge.title;
+    if (edge.taskNodeRef) return getTaskTitleByRef(edge.taskNodeRef) || edge.taskNodeRef;
+    return '待定义';
+  }, [getTaskTitleByRef, graph.edges]);
+
   useEffect(() => {
-    window.localStorage.setItem(MODE_STORAGE_KEY, mode);
+    if (!hasPersistedInitialModeRef.current) {
+      hasPersistedInitialModeRef.current = true;
+      return;
+    }
+    setGoalsPageMode(mode);
   }, [mode]);
 
   useEffect(() => {
-    window.localStorage.setItem(SHOW_CANCELLED_STORAGE_KEY, String(showCancelled));
+    if (!hasPersistedInitialShowCancelledRef.current) {
+      hasPersistedInitialShowCancelledRef.current = true;
+      return;
+    }
+    setGoalsPageShowCancelled(showCancelled);
   }, [showCancelled]);
 
   useEffect(() => {
-    window.localStorage.setItem(GUIDE_HIDDEN_STORAGE_KEY, String(guideHidden));
+    if (!hasPersistedInitialGuideHiddenRef.current) {
+      hasPersistedInitialGuideHiddenRef.current = true;
+      return;
+    }
+    setGoalsPageGuideHidden(guideHidden);
   }, [guideHidden]);
 
   useEffect(() => {
@@ -234,19 +783,65 @@ export function GoalsPage() {
     }
   }, [graph.goals.length, guideHidden]);
 
+  const logViewport = useCallback((source: string, nextViewport: { x: number; y: number; zoom: number }) => {
+    const viewportSummary = summarizeViewport(nextViewport);
+    const signature = JSON.stringify({ source, viewportSummary });
+    if (signature === debugRef.current.viewportSignature) return;
+    debugRef.current.viewportSignature = signature;
+    warnGoalDebug('page:viewport', {
+      source,
+      viewport: viewportSummary,
+    });
+  }, []);
+
+  const graphSummary = useMemo(() => summarizeGraph(visibleGraph), [visibleGraph]);
+  const positionSummary = useMemo(() => summarizePositions(positions), [positions]);
+  const missingPositionIds = useMemo(() => {
+    const nodeIds = [graph.me.id, ...visibleGraph.goals.map((goal) => goal.id)];
+    return nodeIds.filter((nodeId) => !positions.has(nodeId));
+  }, [graph.me.id, positions, visibleGraph.goals]);
+
   useEffect(() => {
-    const simulation = simulationRef.current;
-    if (!simulation) {
-      simulationRef.current = new GoalForceSimulation(visibleGraph, 1200, 800, setPositions, {
+    lastGraphChangeAtRef.current = Date.now();
+    if (renderHealthTimeoutRef.current) {
+      clearTimeout(renderHealthTimeoutRef.current);
+      renderHealthTimeoutRef.current = null;
+    }
+  }, [graphSummary, showCancelled]);
+
+  useEffect(() => {
+    warnGoalDebug('page:simulation-create', {
+      graph: graphSummary,
+      showCancelled,
+    });
+    simulationRef.current = new GoalForceSimulation(visibleGraph, 1200, 800, setPositions, {
+      showCancelled,
+    });
+    skipNextSimulationSyncRef.current = true;
+    return () => {
+      warnGoalDebug('page:simulation-destroy', {
+        graph: summarizeGraph(visibleGraph),
         showCancelled,
       });
-      return () => {
-        simulationRef.current?.destroy();
-        simulationRef.current = null;
-      };
+      simulationRef.current?.destroy();
+      simulationRef.current = null;
+    };
+    // Mount once; later graph updates sync through a separate effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!simulationRef.current) return;
+    if (skipNextSimulationSyncRef.current) {
+      skipNextSimulationSyncRef.current = false;
+      return;
     }
-    simulation.updateData(visibleGraph, { showCancelled });
-  }, [visibleGraph, showCancelled]);
+    warnGoalDebug('page:simulation-sync', {
+      graph: graphSummary,
+      showCancelled,
+    });
+    simulationRef.current.updateData(visibleGraph, { showCancelled });
+  }, [graphSummary, showCancelled, visibleGraph]);
 
   const nodeTypes = useMemo<NodeTypes>(() => ({
     goal: GoalFlowNode,
@@ -258,7 +853,19 @@ export function GoalsPage() {
     const meNode: Node<GoalFlowNodeData> = {
       id: graph.me.id,
       type: 'me',
+      selected: selected?.kind === 'me',
       position: positions.get(graph.me.id) ?? { x: 0, y: 0 },
+      width: ME_NODE_SIZE,
+      height: ME_NODE_SIZE,
+      initialWidth: ME_NODE_SIZE,
+      initialHeight: ME_NODE_SIZE,
+      handles: buildNodeHandles(ME_NODE_SIZE),
+      sourcePosition: Position.Bottom,
+      targetPosition: Position.Top,
+      style: {
+        width: `${ME_NODE_SIZE}px`,
+        height: `${ME_NODE_SIZE}px`,
+      },
       data: {
         title: graph.me.name,
         status: 'pending',
@@ -267,8 +874,9 @@ export function GoalsPage() {
         connectModeTargetable: false,
         connectModeHovering: false,
         onOpenContextMenu: (nodeId: string, x: number, y: number) => {
+          const point = resolvePagePoint(x, y);
           setSelected({ kind: 'me', id: nodeId });
-          openContextMenu({ kind: 'me', id: nodeId, x, y });
+          openContextMenu({ kind: 'me', id: nodeId, x: point.x, y: point.y });
         },
       },
       draggable: mode === 'browse',
@@ -277,10 +885,23 @@ export function GoalsPage() {
     const goalNodes = visibleGraph.goals.map((goal) => ({
       id: goal.id,
       type: 'goal',
+      selected: selected?.kind === 'goal' && selected.id === goal.id,
       position: positions.get(goal.id) ?? { x: 0, y: 0 },
+      width: GOAL_NODE_SIZE,
+      height: GOAL_NODE_SIZE,
+      initialWidth: GOAL_NODE_SIZE,
+      initialHeight: GOAL_NODE_SIZE,
+      handles: buildNodeHandles(GOAL_NODE_SIZE),
+      sourcePosition: Position.Bottom,
+      targetPosition: Position.Top,
+      style: {
+        width: `${GOAL_NODE_SIZE}px`,
+        height: `${GOAL_NODE_SIZE}px`,
+      },
       data: {
         title: goal.title,
-        status: deriveGoalDisplayStatus(goal.id),
+        status: resolveGoalStatus(goal.id),
+        isAbsorbing: completionAnimations.some((animation) => animation.goalId === goal.id),
         editMode: mode === 'edit',
         hasEmptyRule: goal.completionRule.length === 0,
         connectModeTargetable: connectMode.isActive && goal.id !== connectMode.sourceId,
@@ -290,15 +911,16 @@ export function GoalsPage() {
           connectMode.setHoverTarget(hovering ? goal.id : null);
         },
         onOpenContextMenu: (nodeId: string, x: number, y: number) => {
+          const point = resolvePagePoint(x, y);
           setSelected({ kind: 'goal', id: nodeId });
-          openContextMenu({ kind: 'goal', id: nodeId, x, y });
+          openContextMenu({ kind: 'goal', id: nodeId, x: point.x, y: point.y });
         },
       },
       draggable: mode === 'browse',
     }));
 
     return [meNode, ...goalNodes];
-  }, [connectMode, deriveGoalDisplayStatus, graph.me.id, graph.me.name, mode, openContextMenu, positions, visibleGraph.goals]);
+  }, [completionAnimations, connectMode, graph.me.id, graph.me.name, mode, openContextMenu, positions, resolveGoalStatus, selected, visibleGraph.goals]);
 
   const edges = useMemo<Array<Edge<TaskFlowEdgeData>>>(() => {
     const edgesByPair = new Map<string, Array<{ id: string }>>();
@@ -312,26 +934,42 @@ export function GoalsPage() {
     return visibleGraph.edges.map((edge) => {
       const siblings = edgesByPair.get(`${edge.source}::${edge.target}`) ?? [{ id: edge.id }];
       const parallelIndex = siblings.findIndex((candidate) => candidate.id === edge.id);
+      const sourceGoal = edge.source === graph.me.id ? null : graph.goals.find((goal) => goal.id === edge.source);
+      const targetGoal = graph.goals.find((goal) => goal.id === edge.target);
+      const sourcePosition = positions.get(edge.source) ?? { x: 0, y: 0 };
+      const targetPosition = positions.get(edge.target) ?? { x: 0, y: 0 };
+      const sourceSize = edge.source === graph.me.id ? ME_NODE_SIZE : GOAL_NODE_SIZE;
+      const targetSize = edge.target === graph.me.id ? ME_NODE_SIZE : GOAL_NODE_SIZE;
       return {
         id: edge.id,
         source: edge.source,
         target: edge.target,
         type: 'task',
+        selected: selected?.kind === 'edge' && selected.id === edge.id,
         selectable: true,
         data: {
-          label: edge.title || (edge.taskNodeRef ? edge.taskNodeRef : '待定义'),
-          status: getEdgeStatus(edge.id),
+          label: resolveEdgeLabel(edge.id),
+          status: resolveEdgeStatus(edge.id),
+          isEmptySlot: !edge.taskNodeRef,
+          isZombie: Boolean(showCancelled && (sourceGoal?.cancelled || targetGoal?.cancelled)),
           highlighted: highlightedEdgeIds.includes(edge.id),
+          sourceCenterX: sourcePosition.x + sourceSize / 2,
+          sourceCenterY: sourcePosition.y + sourceSize / 2,
+          sourceRadius: sourceSize / 2,
+          targetCenterX: targetPosition.x + targetSize / 2,
+          targetCenterY: targetPosition.y + targetSize / 2,
+          targetRadius: targetSize / 2,
           parallelIndex,
           parallelTotal: siblings.length,
           onOpenContextMenu: (edgeId: string, x: number, y: number) => {
+            const point = resolvePagePoint(x, y);
             setSelected({ kind: 'edge', id: edgeId });
-            openContextMenu({ kind: 'edge', id: edgeId, x, y });
+            openContextMenu({ kind: 'edge', id: edgeId, x: point.x, y: point.y });
           },
         },
       };
     });
-  }, [getEdgeStatus, highlightedEdgeIds, openContextMenu, visibleGraph.edges]);
+  }, [graph.goals, graph.me.id, highlightedEdgeIds, openContextMenu, positions, resolveEdgeLabel, resolveEdgeStatus, resolvePagePoint, selected, showCancelled, visibleGraph.edges]);
 
   const connectPreview = useMemo(() => {
     if (!connectMode.isActive || !connectMode.sourceId || !connectMode.previewPoint) return null;
@@ -340,39 +978,110 @@ export function GoalsPage() {
     if (!sourcePosition) return null;
 
     const sourceSize = connectMode.sourceId === graph.me.id ? ME_NODE_SIZE : GOAL_NODE_SIZE;
+    const sourceCenterX = viewport.x + (sourcePosition.x + sourceSize / 2) * viewport.zoom;
+    const sourceCenterY = viewport.y + (sourcePosition.y + sourceSize / 2) * viewport.zoom;
 
     return {
-      x1: sourcePosition.x + sourceSize / 2,
-      y1: sourcePosition.y + sourceSize / 2,
+      x1: sourceCenterX,
+      y1: sourceCenterY,
       x2: connectMode.previewPoint.x,
       y2: connectMode.previewPoint.y,
     };
-  }, [connectMode, graph.me.id, positions]);
+  }, [connectMode, graph.me.id, positions, viewport.x, viewport.y, viewport.zoom]);
+
+  const reconnectOverlayEdge = useMemo(() => {
+    if (!activeReconnect) return null;
+    return edges.find((edge) => edge.id === activeReconnect.edgeId) ?? null;
+  }, [activeReconnect, edges]);
 
   const hopRingMetrics = useMemo(() => {
-    const finiteDistances = visibleGraph.goals
-      .map((goal) => getHopDistance(goal.id))
-      .filter((distance) => Number.isFinite(distance));
+    const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
+    const meCenterX = mePosition.x + ME_NODE_SIZE / 2;
+    const meCenterY = mePosition.y + ME_NODE_SIZE / 2;
+    const hopRadiusByDistance = new Map<number, number>();
 
-    if (finiteDistances.length === 0) return null;
+    for (const goal of visibleGraph.goals) {
+      const hopDistance = resolveHopDistance(goal.id);
+      if (!Number.isFinite(hopDistance) || hopDistance < 1) continue;
 
+      const goalPosition = positions.get(goal.id);
+      if (!goalPosition) continue;
+
+      const goalCenterX = goalPosition.x + GOAL_NODE_SIZE / 2;
+      const goalCenterY = goalPosition.y + GOAL_NODE_SIZE / 2;
+      const radius = Math.hypot(goalCenterX - meCenterX, goalCenterY - meCenterY);
+      const previousRadius = hopRadiusByDistance.get(hopDistance);
+      if (previousRadius === undefined || radius > previousRadius) {
+        hopRadiusByDistance.set(hopDistance, radius);
+      }
+    }
+
+    if (hopRadiusByDistance.size === 0) return null;
+
+    return {
+      centerX: meCenterX,
+      centerY: meCenterY,
+      rings: Array.from(hopRadiusByDistance.entries())
+        .sort(([leftHop], [rightHop]) => leftHop - rightHop)
+        .map(([hop, radius]) => ({ hop, radius })),
+    };
+  }, [graph.me.id, positions, resolveHopDistance, visibleGraph.goals]);
+
+  const meCenter = useMemo(() => {
     const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
     return {
-      centerX: mePosition.x + ME_NODE_SIZE / 2,
-      centerY: mePosition.y + ME_NODE_SIZE / 2,
-      maxHop: Math.max(...finiteDistances),
+      x: mePosition.x + ME_NODE_SIZE / 2,
+      y: mePosition.y + ME_NODE_SIZE / 2,
     };
-  }, [getHopDistance, graph.me.id, positions, visibleGraph.goals]);
+  }, [graph.me.id, positions]);
+
+  const centerMeInViewport = useCallback((source: string) => {
+    if (!reactFlowRef.current || !positions.has(graph.me.id)) return false;
+
+    warnGoalDebug('page:center-me-request', {
+      source,
+      meCenter: {
+        x: Number(meCenter.x.toFixed(1)),
+        y: Number(meCenter.y.toFixed(1)),
+      },
+      graph: graphSummary,
+      positions: positionSummary,
+    });
+
+    reactFlowRef.current.setCenter(meCenter.x, meCenter.y, {
+      zoom: 1,
+      duration: 0,
+    });
+
+    const nextViewport = reactFlowRef.current.getViewport();
+    setViewport(nextViewport);
+    logViewport(source, nextViewport);
+    return true;
+  }, [graph.me.id, graphSummary, logViewport, meCenter.x, meCenter.y, positionSummary, positions]);
+
+  const emptyStateGuideStyle = useMemo(() => {
+    const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
+    const meScreenRight = viewport.x + (mePosition.x + ME_NODE_SIZE) * viewport.zoom;
+    const meScreenCenterY = viewport.y + (mePosition.y + ME_NODE_SIZE / 2) * viewport.zoom;
+    return resolveEmptyStateGuidePosition({
+      meScreenRight,
+      meScreenCenterY,
+      pageWidth: pageSize.width,
+      pageHeight: pageSize.height,
+      detailPanelOpen: isDesktop && selected !== null,
+      isDesktop,
+    });
+  }, [graph.me.id, isDesktop, pageSize.height, pageSize.width, positions, selected, viewport.x, viewport.y, viewport.zoom]);
 
   const goalStatusSnapshot = useMemo(
     () => visibleGraph.goals.map((goal) => ({
       id: goal.id,
-      status: deriveGoalDisplayStatus(goal.id),
+      status: resolveGoalStatus(goal.id),
       inboundEdgeIds: visibleGraph.edges
         .filter((edge) => edge.target === goal.id)
         .map((edge) => edge.id),
     })),
-    [deriveGoalDisplayStatus, edgeOverrides, visibleGraph.edges, visibleGraph.goals],
+    [resolveGoalStatus, visibleGraph.edges, visibleGraph.goals],
   );
 
   const selectedGoal = selected?.kind === 'goal'
@@ -390,13 +1099,176 @@ export function GoalsPage() {
       goal.id !== splitTargetEdge.source
       && goal.id !== splitTargetEdge.target
       && !goal.cancelled
-      && deriveGoalDisplayStatus(goal.id) !== 'completed'
+      && resolveGoalStatus(goal.id) !== 'completed'
     ));
-  }, [deriveGoalDisplayStatus, graph.goals, splitTargetEdge]);
+  }, [graph.goals, resolveGoalStatus, splitTargetEdge]);
 
-  function notifyResult(result: { ok: false; error: string } | { ok: true }, success?: string) {
+  useEffect(() => {
+    const payload = {
+      graph: graphSummary,
+      positions: positionSummary,
+      showCancelled,
+      mode,
+      guideHidden,
+    };
+    const signature = JSON.stringify(payload);
+    if (signature === debugRef.current.graphSignature) return;
+    debugRef.current.graphSignature = signature;
+    warnGoalDebug('page:graph-input', payload);
+  }, [graphSummary, guideHidden, mode, positionSummary, showCancelled]);
+
+  useEffect(() => {
+    const nodeDomState = nodes.map((node) => {
+      const element = pageRef.current?.querySelector(`[data-testid="goal-flow-node-${node.id}"]`) as HTMLElement | null;
+      if (!element) {
+        return {
+          id: node.id,
+          present: false,
+          visible: false,
+        };
+      }
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const opacity = Number.parseFloat(style.opacity || '1');
+      const visible = style.visibility !== 'hidden'
+        && style.display !== 'none'
+        && opacity > 0.01
+        && rect.width > 0
+        && rect.height > 0;
+      return {
+        id: node.id,
+        present: true,
+        visible,
+        visibility: style.visibility,
+        display: style.display,
+        opacity: Number.isFinite(opacity) ? opacity : style.opacity,
+        rect: {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        },
+      };
+    });
+    const hiddenDomNodeIds = nodeDomState.filter((entry) => !entry.visible).map((entry) => entry.id);
+    const edgeDomState = edges.map((edge) => {
+      const hitArea = pageRef.current?.querySelector(`[data-testid="task-flow-edge-hit-area-${edge.id}"]`) as SVGPathElement | null;
+      const label = pageRef.current?.querySelector(`[data-testid="task-flow-edge-label-${edge.id}"]`) as HTMLElement | null;
+      return {
+        id: edge.id,
+        hitAreaPresent: Boolean(hitArea),
+        labelPresent: Boolean(label),
+      };
+    });
+    const missingEdgeDomIds = edgeDomState.filter((entry) => !entry.hitAreaPresent).map((entry) => entry.id);
+    const suspiciousReasons: string[] = [];
+    if (visibleGraph.goals.length > 0 && positionSummary.count === 0) {
+      suspiciousReasons.push('positions-empty-while-goals-visible');
+    }
+    if (visibleGraph.goals.length > 0 && missingPositionIds.length > 0) {
+      suspiciousReasons.push('missing-node-positions');
+    }
+    if (visibleGraph.goals.length > 0 && nodes.length <= 1) {
+      suspiciousReasons.push('only-me-node-rendered');
+    }
+    if (visibleGraph.edges.length > 0 && edges.length === 0) {
+      suspiciousReasons.push('edges-dropped-before-react-flow');
+    }
+    if (edges.length > 0 && missingEdgeDomIds.length > 0) {
+      suspiciousReasons.push('react-flow-edge-missing-in-dom');
+    }
+    if (nodes.length > 0 && hiddenDomNodeIds.length > 0) {
+      suspiciousReasons.push('react-flow-node-hidden-in-dom');
+    }
+
+    const elapsedSinceGraphChange = Date.now() - lastGraphChangeAtRef.current;
+    const withinGraceWindow = suspiciousReasons.length > 0 && elapsedSinceGraphChange < RENDER_HEALTH_GRACE_MS;
+
+    const payload = {
+      graph: graphSummary,
+      reactFlow: {
+        nodeCount: nodes.length,
+        edgeCount: edges.length,
+        nodeIds: nodes.map((node) => node.id),
+        edgeIds: edges.map((edge) => edge.id),
+      },
+      positions: positionSummary,
+      missingPositionIds,
+      nodeDomState,
+      edgeDomState,
+      viewport: summarizeViewport(viewport),
+      selected,
+      mode,
+      showCancelled,
+      suspiciousReasons,
+      withinGraceWindow,
+    };
+    const signature = JSON.stringify(payload);
+    if (signature === debugRef.current.renderSignature) return;
+    debugRef.current.renderSignature = signature;
+    warnGoalDebug('page:render-health', payload);
+    if (withinGraceWindow) {
+      if (renderHealthTimeoutRef.current) {
+        clearTimeout(renderHealthTimeoutRef.current);
+      }
+      renderHealthTimeoutRef.current = setTimeout(() => {
+        renderHealthTimeoutRef.current = null;
+        setRenderHealthProbe((current) => current + 1);
+      }, RENDER_HEALTH_GRACE_MS - elapsedSinceGraphChange + 16);
+      return;
+    }
+    if (renderHealthTimeoutRef.current) {
+      clearTimeout(renderHealthTimeoutRef.current);
+      renderHealthTimeoutRef.current = null;
+    }
+    if (suspiciousReasons.length > 0) {
+      warnGoalDebug('page:suspect-render-state', payload);
+    }
+  }, [edges, graphSummary, missingPositionIds, mode, nodes, positionSummary, renderHealthProbe, selected, showCancelled, viewport, visibleGraph.edges.length, visibleGraph.goals.length]);
+
+  useEffect(() => {
+    const payload = { selected };
+    const signature = JSON.stringify(payload);
+    if (signature === debugRef.current.selectionSignature) return;
+    debugRef.current.selectionSignature = signature;
+    warnGoalDebug('page:selection', payload);
+  }, [selected]);
+
+  useLayoutEffect(() => {
+    if (hasCenteredInitialMeRef.current) return;
+    if (!reactFlowRef.current) return;
+    if (!positions.has(graph.me.id)) return;
+
+    if (centerMeInViewport('initial-me-center')) {
+      hasCenteredInitialMeRef.current = true;
+      lastCenteredGraphSignatureRef.current = JSON.stringify({
+        goals: graphSummary.totalGoals,
+        edges: graphSummary.totalEdges,
+        showCancelled,
+      });
+    }
+  }, [centerMeInViewport, graph.me.id, graphSummary.totalEdges, graphSummary.totalGoals, positions, showCancelled]);
+
+  useLayoutEffect(() => {
+    if (!hasCenteredInitialMeRef.current) return;
+    const signature = JSON.stringify({
+      goals: graphSummary.totalGoals,
+      edges: graphSummary.totalEdges,
+      showCancelled,
+    });
+    if (signature === lastCenteredGraphSignatureRef.current) return;
+    if (centerMeInViewport('graph-topology-center')) {
+      lastCenteredGraphSignatureRef.current = signature;
+    }
+  }, [centerMeInViewport, graphSummary.totalEdges, graphSummary.totalGoals, showCancelled]);
+
+  function notifyResult(
+    result: { ok: false; error: string } | { ok: true },
+    success?: string,
+    failureTitle = '操作失败',
+  ) {
     if (!result.ok) {
-      toast({ title: '操作失败', description: result.error });
+      toast({ title: failureTitle, description: result.error });
       return false;
     }
     if (success) {
@@ -426,6 +1298,24 @@ export function GoalsPage() {
     if (!notifyResult(result, '已创建连接')) return;
     if (!result.ok) return;
     setSelected({ kind: 'edge', id: result.value.id });
+    simulationRef.current?.reheat();
+  }
+
+  function handleReconnect(oldEdge: Edge, source?: string, target?: string) {
+    if (!source || !target || target === graph.me.id) return;
+    const result = reconnectEdge({
+      edgeId: oldEdge.id,
+      newSource: source,
+      newTarget: target,
+      rulePosition: { clauseIndex: 0 },
+    });
+    if (!notifyResult(result, result.ok && !result.value.autoAddedEdgeId ? '已更新连接' : undefined)) return;
+    if (!result.ok) return;
+    if (result.value.autoAddedEdgeId) {
+      flashEdge(result.value.autoAddedEdgeId);
+      toast({ title: '已自动添加连接以保持目标可达' });
+    }
+    setSelected({ kind: 'edge', id: result.value.edge.id });
     simulationRef.current?.reheat();
   }
 
@@ -462,12 +1352,26 @@ export function GoalsPage() {
     }
 
     const edgesToFlash = new Set<string>();
+    const completedGoalsToAnimate: CompletionAbsorptionAnimation[] = [];
     for (const item of goalStatusSnapshot) {
       const previousStatus = previousGoalStatusesRef.current.get(item.id);
       const nextStatus = currentStatuses.get(item.id);
       if (!previousStatus || !nextStatus || previousStatus === nextStatus) continue;
       for (const edgeId of item.inboundEdgeIds) {
         edgesToFlash.add(edgeId);
+      }
+      if (previousStatus !== 'completed' && nextStatus === 'completed') {
+        const goalPosition = positions.get(item.id);
+        if (!goalPosition) continue;
+        const goal = graph.goals.find((candidate) => candidate.id === item.id);
+        completedGoalsToAnimate.push({
+          goalId: item.id,
+          title: goal?.title || '',
+          fromX: goalPosition.x + GOAL_NODE_SIZE / 2,
+          fromY: goalPosition.y + GOAL_NODE_SIZE / 2,
+          toX: meCenter.x,
+          toY: meCenter.y,
+        });
       }
     }
 
@@ -482,8 +1386,31 @@ export function GoalsPage() {
       highlightTimeoutsRef.current.set(edgeId, timeoutId);
     });
 
+    if (completedGoalsToAnimate.length > 0) {
+      setCompletionAnimations((current) => {
+        const activeGoalIds = new Set(current.map((animation) => animation.goalId));
+        return [
+          ...current,
+          ...completedGoalsToAnimate.filter((animation) => !activeGoalIds.has(animation.goalId)),
+        ];
+      });
+
+      completedGoalsToAnimate.forEach((animation) => {
+        const existing = completionTimeoutsRef.current.get(animation.goalId);
+        if (existing) {
+          clearTimeout(existing);
+        }
+        const timeoutId = setTimeout(() => {
+          setCompletionAnimations((current) => current.filter((candidate) => candidate.goalId !== animation.goalId));
+          completionTimeoutsRef.current.delete(animation.goalId);
+          triggerMePulse();
+        }, COMPLETION_ABSORB_DURATION_MS);
+        completionTimeoutsRef.current.set(animation.goalId, timeoutId);
+      });
+    }
+
     previousGoalStatusesRef.current = currentStatuses;
-  }, [goalStatusSnapshot]);
+  }, [goalStatusSnapshot, graph.goals, meCenter.x, meCenter.y, positions, triggerMePulse]);
 
   const contextItems = useMemo(() => {
     if (!contextMenu) return [];
@@ -496,7 +1423,7 @@ export function GoalsPage() {
     if (contextMenu.kind === 'goal') {
       const goal = graph.goals.find((item) => item.id === contextMenu.id);
       if (!goal || goal.cancelled) return [];
-      const goalStatus = deriveGoalDisplayStatus(contextMenu.id);
+      const goalStatus = resolveGoalStatus(contextMenu.id);
       if (goalStatus === 'completed') {
         return [
           { key: 'detail', label: '详情', onSelect: () => setSelected({ kind: 'goal', id: contextMenu.id }) },
@@ -522,7 +1449,7 @@ export function GoalsPage() {
       ];
     }
     const edge = graph.edges.find((item) => item.id === contextMenu.id);
-    const targetCompleted = edge ? deriveGoalDisplayStatus(edge.target) === 'completed' : false;
+    const targetCompleted = edge ? resolveGoalStatus(edge.target) === 'completed' : false;
     return [
       { key: 'detail', label: '详情', onSelect: () => setSelected({ kind: 'edge', id: contextMenu.id }) },
       ...(!targetCompleted ? [{
@@ -558,7 +1485,7 @@ export function GoalsPage() {
         },
       }] : []),
     ];
-  }, [connectMode, contextMenu, deleteEdge, deriveGoalDisplayStatus, graph.edges, graph.goals]);
+  }, [connectMode, contextMenu, deleteEdge, graph.edges, graph.goals, resolveGoalStatus]);
 
   return (
     <div
@@ -596,9 +1523,22 @@ export function GoalsPage() {
         <GoalHopRings
           centerX={hopRingMetrics.centerX}
           centerY={hopRingMetrics.centerY}
-          maxHop={hopRingMetrics.maxHop}
+          rings={hopRingMetrics.rings}
+          viewportX={viewport.x}
+          viewportY={viewport.y}
+          zoom={viewport.zoom}
         />
       ) : null}
+
+      <GoalCompletionEffects
+        animations={completionAnimations}
+        meCenterX={meCenter.x}
+        meCenterY={meCenter.y}
+        mePulseActive={mePulseActive}
+        viewportX={viewport.x}
+        viewportY={viewport.y}
+        zoom={viewport.zoom}
+      />
 
       {connectPreview ? (
         <svg
@@ -620,9 +1560,29 @@ export function GoalsPage() {
         </svg>
       ) : null}
 
+      {reconnectOverlayEdge ? (
+        <ReconnectingEdgeOverlay
+          edge={reconnectOverlayEdge}
+          viewportX={viewport.x}
+          viewportY={viewport.y}
+          zoom={viewport.zoom}
+        />
+      ) : null}
+
       {!guideHidden && graph.goals.length === 0 ? (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 px-4 py-2 text-sm text-[#57534E] shadow-sm">
-          {isDesktop ? '右键 Me 添加你的第一个目标' : '长按 Me 添加你的第一个目标'}
+        <div
+          data-testid="goals-empty-state-guide"
+          className="pointer-events-none absolute z-10"
+          style={emptyStateGuideStyle}
+        >
+          <div className="relative rounded-[24px] border border-[#F3D5C7] bg-[linear-gradient(180deg,rgba(255,251,247,0.95),rgba(252,244,238,0.92))] px-4 py-3 text-sm text-[#6B5B52] shadow-[0_18px_40px_-18px_rgba(120,113,108,0.45)] backdrop-blur dark:border-[#3F3F46] dark:bg-[#1C1917]/95 dark:text-[#D6D3D1]">
+            <div className="absolute left-[-36px] top-1/2 h-px w-9 -translate-y-1/2 bg-gradient-to-r from-[#C75B3A]/80 to-[#C75B3A]/0" />
+            <div className="absolute left-[-8px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border border-[#F3D5C7] bg-[#FFF7ED] shadow-sm dark:border-[#57534E] dark:bg-[#292524]" />
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#C75B3A]">起点</p>
+            <p className="mt-1 whitespace-nowrap">
+              {isDesktop ? '右键 Me 添加你的第一个目标' : '长按 Me 添加你的第一个目标'}
+            </p>
+          </div>
         </div>
       ) : null}
 
@@ -631,11 +1591,31 @@ export function GoalsPage() {
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
         nodesDraggable={mode === 'browse'}
         nodesConnectable={mode === 'edit'}
+        nodesFocusable={false}
+        edgesFocusable={false}
+        edgesReconnectable={mode === 'edit'}
+        elementsSelectable={false}
+        autoPanOnNodeFocus={false}
+        autoPanOnConnect={false}
+        autoPanOnNodeDrag={false}
         zoomOnDoubleClick={false}
+        onMove={(_, nextViewport) => {
+          setViewport(nextViewport);
+          logViewport('move', nextViewport);
+        }}
+        onInit={(instance) => {
+          reactFlowRef.current = instance;
+          const nextViewport = instance.getViewport();
+          setViewport(nextViewport);
+          logViewport('init', nextViewport);
+        }}
         onPaneClick={() => {
+          warnGoalDebug('page:interaction-pane-click', {
+            connectModeActive: connectMode.isActive,
+            selectedBefore: selected,
+          });
           closeContextMenu();
           if (connectMode.isActive) {
             connectMode.cancel();
@@ -644,47 +1624,102 @@ export function GoalsPage() {
           setSelected(null);
         }}
         onNodeClick={(_, node) => {
+          warnGoalDebug('page:interaction-node-click', {
+            nodeId: node.id,
+            isMe: node.id === graph.me.id,
+            connectModeActive: connectMode.isActive,
+            selectedBefore: selected,
+          });
           closeContextMenu();
           if (connectMode.isActive) {
-            if (node.id !== connectMode.sourceId && node.id !== graph.me.id) {
-              handleConnect(connectMode.sourceId as string, node.id);
-            }
+            if (node.id === graph.me.id) return;
+            handleConnect(connectMode.sourceId as string, node.id);
             return;
           }
           setSelected(node.id === graph.me.id ? { kind: 'me', id: node.id } : { kind: 'goal', id: node.id });
         }}
         onEdgeClick={(_, edge) => {
+          warnGoalDebug('page:interaction-edge-click', {
+            edgeId: edge.id,
+            selectedBefore: selected,
+          });
           closeContextMenu();
           setSelected({ kind: 'edge', id: edge.id });
         }}
         onNodeContextMenu={(event, node) => {
           event.preventDefault();
+          warnGoalDebug('page:interaction-node-context-menu', {
+            nodeId: node.id,
+            isMe: node.id === graph.me.id,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          });
           updateConnectPreview(event.clientX, event.clientY);
           setSelected(node.id === graph.me.id ? { kind: 'me', id: node.id } : { kind: 'goal', id: node.id });
+          const point = resolvePagePoint(event.clientX, event.clientY);
           openContextMenu({
             kind: node.id === graph.me.id ? 'me' : 'goal',
             id: node.id,
-            x: event.clientX,
-            y: event.clientY,
+            x: point.x,
+            y: point.y,
           });
         }}
         onEdgeContextMenu={(event, edge) => {
           event.preventDefault();
+          warnGoalDebug('page:interaction-edge-context-menu', {
+            edgeId: edge.id,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          });
           setSelected({ kind: 'edge', id: edge.id });
-          openContextMenu({ kind: 'edge', id: edge.id, x: event.clientX, y: event.clientY });
+          const point = resolvePagePoint(event.clientX, event.clientY);
+          openContextMenu({ kind: 'edge', id: edge.id, x: point.x, y: point.y });
         }}
         onConnect={(connection: Connection) => {
+          warnGoalDebug('page:interaction-connect', connection as Record<string, unknown>);
           if (!connection.source || !connection.target || connection.target === graph.me.id) return;
           handleConnect(connection.source, connection.target);
+        }}
+        onReconnect={(oldEdge, connection) => {
+          warnGoalDebug('page:interaction-reconnect', {
+            oldEdgeId: oldEdge.id,
+            source: connection.source,
+            target: connection.target,
+          });
+          handleReconnect(oldEdge, connection.source, connection.target);
+        }}
+        onReconnectStart={(_, edge, handleType) => {
+          warnGoalDebug('page:interaction-reconnect-start', {
+            edgeId: edge.id,
+            handleType,
+            selectedBefore: selected,
+          });
+          setActiveReconnect({ edgeId: edge.id, handleType });
+        }}
+        onReconnectEnd={(_, edge, handleType, connectionState) => {
+          warnGoalDebug('page:interaction-reconnect-end', {
+            edgeId: edge.id,
+            handleType,
+            toNodeId: connectionState.toNode?.id ?? null,
+            toHandleType: connectionState.toHandle?.type ?? null,
+            isValid: connectionState.isValid ?? null,
+          });
+          setActiveReconnect(null);
         }}
         onNodeDrag={(_, node) => {
           simulationRef.current?.pinNode(node.id, node.position.x, node.position.y);
         }}
         onNodeDragStop={(_, node) => {
+          warnGoalDebug('page:interaction-node-drag-stop', {
+            nodeId: node.id,
+            x: node.position.x,
+            y: node.position.y,
+          });
           simulationRef.current?.releaseNode(node.id);
         }}
         onPaneContextMenu={(event) => {
           event.preventDefault();
+          warnGoalDebug('page:interaction-pane-context-menu');
           closeContextMenu();
         }}
       >
@@ -696,6 +1731,8 @@ export function GoalsPage() {
         <GoalContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
+          pageWidth={pageRef.current?.clientWidth || pageRef.current?.getBoundingClientRect().width || 0}
+          pageHeight={pageRef.current?.clientHeight || pageRef.current?.getBoundingClientRect().height || 0}
           items={contextItems}
           onClose={closeContextMenu}
         />
@@ -704,16 +1741,22 @@ export function GoalsPage() {
       {selectedGoal ? (
         <GoalDetailPanel
           goal={selectedGoal}
-          status={deriveGoalDisplayStatus(selectedGoal.id)}
-          inEdges={getInEdges(selectedGoal.id)}
+          status={resolveGoalStatus(selectedGoal.id)}
+          inEdges={getInEdgesLogic(graph, selectedGoal.id)}
           outEdges={getOutEdges(selectedGoal.id)}
+          edgeLabelById={Object.fromEntries(
+            [...getInEdgesLogic(graph, selectedGoal.id), ...getOutEdges(selectedGoal.id)].map((edge) => [
+              edge.id,
+              resolveEdgeLabel(edge.id),
+            ]),
+          )}
           onClose={() => setSelected(null)}
           onJumpEdge={(edgeId) => setSelected({ kind: 'edge', id: edgeId })}
-          hopDistance={getHopDistance(selectedGoal.id)}
+          hopDistance={resolveHopDistance(selectedGoal.id)}
           onUpdate={(patch) => {
             const result = updateGoal({ goalId: selectedGoal.id, ...patch });
             if (!result.ok) {
-              return notifyResult(result);
+              return notifyResult(result, undefined, '保存失败');
             }
             if (patch.completionRule) {
               const nextMode = patch.completionRule.every((clause) => clause.length === 1) ? 'OR' : 'AND';
@@ -733,21 +1776,25 @@ export function GoalsPage() {
       {selectedEdge ? (
         <EdgeDetailPanel
           edge={selectedEdge}
-          status={getEdgeStatus(selectedEdge.id)}
-          targetStatus={deriveGoalDisplayStatus(selectedEdge.target)}
+          status={resolveEdgeStatus(selectedEdge.id)}
+          targetStatus={resolveGoalStatus(selectedEdge.target)}
+          taskTitle={selectedEdge.taskNodeRef ? getTaskTitleByRef(selectedEdge.taskNodeRef) : undefined}
           sourceLabel={selectedEdge.source === graph.me.id ? graph.me.name : graph.goals.find((goal) => goal.id === selectedEdge.source)?.title || '待命名'}
           targetLabel={graph.goals.find((goal) => goal.id === selectedEdge.target)?.title || '待命名'}
+          showDeveloperControls={developerModeEnabled}
           onClose={() => setSelected(null)}
           onJumpNode={(nodeId) => setSelected(nodeId === graph.me.id ? { kind: 'me', id: nodeId } : { kind: 'goal', id: nodeId })}
-          onUpdate={(patch) => notifyResult(updateEdge({ edgeId: selectedEdge.id, ...patch }), '已更新路径')}
+          onUpdate={(patch) => notifyResult(updateEdge({ edgeId: selectedEdge.id, ...patch }), '已更新路径', '保存失败')}
           onSetOverride={(status) => {
+            const edgeLabel = resolveEdgeLabel(selectedEdge.id);
             setEdgeStatusOverride(selectedEdge.id, status);
-            toast({ title: `[开发者] 边状态已设为 ${status}` });
+            toast({ title: `[开发者] 边'${edgeLabel}'状态已设为 ${status}` });
           }}
           onClearOverride={() => {
             if (edgeOverrides.has(selectedEdge.id)) {
+              const edgeLabel = resolveEdgeLabel(selectedEdge.id);
               clearEdgeStatusOverride(selectedEdge.id);
-              toast({ title: '[开发者] 已清除状态覆盖' });
+              toast({ title: `[开发者] 已清除边'${edgeLabel}'的状态覆盖` });
             }
           }}
         />
@@ -758,7 +1805,7 @@ export function GoalsPage() {
           name={graph.me.name}
           goalsCount={graph.goals.length}
           onClose={() => setSelected(null)}
-          onUpdate={(name) => notifyResult(updateMe(name), '已更新 Me')}
+          onUpdate={(name) => notifyResult(updateMe(name), '已更新 Me', '保存失败')}
         />
       ) : null}
 

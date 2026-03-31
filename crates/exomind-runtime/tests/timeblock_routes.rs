@@ -33,6 +33,7 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         auth_secret: None,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
+        config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         session_store: Arc::new(exomind_runtime::session::SessionStore::new()),
         session_event_tx: None,
@@ -176,6 +177,9 @@ async fn exports_sqlite_snapshot_and_backend_status() {
                 timestamp: 1700000000000,
                 source: "block_start".to_string(),
             }],
+            source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
         }])
         .unwrap();
     let app = test_router(test_state_with_timeblock_store(store));
@@ -250,6 +254,9 @@ async fn imports_json_backup_with_overwrite() {
             task_ids: vec![],
             task_status_outcomes: None,
             task_association_log: vec![],
+            source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
         }])
         .unwrap();
 

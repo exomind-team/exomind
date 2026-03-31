@@ -12,6 +12,10 @@ const runtimeFlags = {
   quickFocusEnabled: true,
 };
 
+const shortcutSelectionState = {
+  value: ['Ctrl', 'E'] as string[],
+};
+
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: vi.fn(async () => true),
 }));
@@ -52,6 +56,11 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   }),
 }));
 
+vi.mock('@/config/main-window-shortcut', () => ({
+  MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY: 'exomind:mainWindowShortcutSelection',
+  getMainWindowShortcutSelection: vi.fn(() => shortcutSelectionState.value),
+}));
+
 vi.mock('@/services/main-window-focus-targets', () => ({
   requestMainWindowFocusTarget: (...args: unknown[]) => requestFocusTargetMock(...args),
 }));
@@ -72,6 +81,7 @@ describe('MainWindowShortcutService', () => {
     subscribeVoiceShortcutMock.mockClear();
     subscribeQuickFocusMock.mockClear();
     runtimeFlags.quickFocusEnabled = true;
+    shortcutSelectionState.value = ['Ctrl', 'E'];
   });
 
   it('syncs runtime on init and routes eventlog shortcuts to record input', async () => {
@@ -192,6 +202,43 @@ describe('MainWindowShortcutService', () => {
     voiceListener?.();
 
     expect(syncRuntimeMock).toHaveBeenCalledTimes(2);
+
+    service.destroy();
+  });
+
+  it('re-syncs runtime when storage updates shortcut selection after init（延迟配置到达后会重新同步主窗口快捷键）', async () => {
+    const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
+
+    const service = new MainWindowShortcutService();
+    await service.init();
+
+    shortcutSelectionState.value = ['Alt', 'Space'];
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'exomind:mainWindowShortcutSelection',
+      newValue: JSON.stringify(['Alt', 'Space']),
+    }));
+
+    expect(syncRuntimeMock).toHaveBeenCalledTimes(2);
+    expect(syncRuntimeMock.mock.calls[1]?.[0]).toEqual({
+      notify: false,
+      selection: ['Alt', 'Space'],
+    });
+
+    service.destroy();
+  });
+
+  it('does not re-sync runtime on local custom selection events（本地设置页已主动同步时不重复触发）', async () => {
+    const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
+
+    const service = new MainWindowShortcutService();
+    await service.init();
+
+    shortcutSelectionState.value = ['Alt', 'Space'];
+    window.dispatchEvent(new CustomEvent('exomind:main-window-shortcut-selection-changed', {
+      detail: ['Alt', 'Space'],
+    }));
+
+    expect(syncRuntimeMock).toHaveBeenCalledTimes(1);
 
     service.destroy();
   });

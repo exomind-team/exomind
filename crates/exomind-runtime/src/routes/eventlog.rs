@@ -3,18 +3,23 @@
 //! Mirrors the Tauri commands from `eventlog_commands.rs` as REST endpoints.
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use tokio::sync::broadcast;
 use tokio::time::{Duration, Instant};
 
 use crate::AppState;
 use crate::eventlog::{EventListFilter, EventRecord, MirrorStatus, sanitize_user_id};
 use crate::signal::types::SignalEvent;
+
+const EVENTLOG_REVISION_HEADER: &str = "x-exomind-eventlog-revision";
+const EVENTLOG_LIST_SEMANTICS_HEADER: &str = "x-exomind-eventlog-list-semantics";
 
 // ── Request / query types ───────────────────────────────────────
 
@@ -84,7 +89,6 @@ struct EventLogImportResult {
 
 struct EventLogImportOutcome {
     result: EventLogImportResult,
-    changed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -140,10 +144,13 @@ fn apply_since_id_and_limit(
     mut events: Vec<EventRecord>,
     since_id: Option<&str>,
     limit: Option<usize>,
-) -> Vec<EventRecord> {
+) -> (Vec<EventRecord>, bool) {
+    let mut cursor_found = since_id.is_none();
+
     if let Some(since_id) = since_id {
         if let Some(pos) = events.iter().position(|event| event.id == since_id) {
             events.truncate(pos);
+            cursor_found = true;
         }
     }
 
@@ -151,7 +158,7 @@ fn apply_since_id_and_limit(
         events.truncate(limit);
     }
 
-    events
+    (events, cursor_found)
 }
 
 fn load_events_for_query(
@@ -162,7 +169,7 @@ fn load_events_for_query(
     since_timestamp: Option<i64>,
     until_timestamp: Option<i64>,
     tags: Option<&str>,
-) -> Result<Vec<EventRecord>, String> {
+) -> Result<(Vec<EventRecord>, bool), String> {
     let filter = build_event_list_filter(since_timestamp, until_timestamp, tags);
     let events = state
         .eventlog_store
@@ -178,7 +185,7 @@ fn resolve_watch_since_id(
         return Ok(query.since_id.clone());
     }
 
-    let latest = load_events_for_query(
+    let (latest, _) = load_events_for_query(
         state,
         query.user_id.as_deref(),
         None,
@@ -189,10 +196,6 @@ fn resolve_watch_since_id(
     )?;
 
     Ok(latest.first().map(|event| event.id.clone()))
-}
-
-fn notify_eventlog_watchers(state: &AppState, user_id: Option<&str>) {
-    let _ = state.eventlog_watch_tx.send(sanitize_user_id(user_id));
 }
 
 fn eventlog_replication_seq(event: &EventRecord) -> i64 {
@@ -261,8 +264,8 @@ async fn publish_eventlog_replication_append(state: &AppState, event: &EventReco
 async fn list_events(
     State(state): State<AppState>,
     Query(query): Query<EventLogQuery>,
-) -> Result<Json<Vec<EventRecord>>, (StatusCode, Json<ErrorResponse>)> {
-    let events = load_events_for_query(
+) -> Result<(HeaderMap, Json<Vec<EventRecord>>), (StatusCode, Json<ErrorResponse>)> {
+    let (events, cursor_found) = load_events_for_query(
         &state,
         query.user_id.as_deref(),
         query.since_id.as_deref(),
@@ -272,7 +275,29 @@ async fn list_events(
         query.tags.as_deref(),
     )
     .map_err(internal_error)?;
-    Ok(Json(events))
+    let mut headers = HeaderMap::new();
+    if let Some(revision) = state
+        .eventlog_store
+        .current_revision(query.user_id.as_deref())
+        .map_err(internal_error)?
+    {
+        let header_value = HeaderValue::from_str(&revision.to_string()).map_err(|error| {
+            internal_error(format!("invalid eventlog revision header: {error}"))
+        })?;
+        headers.insert(EVENTLOG_REVISION_HEADER, header_value);
+    }
+    let semantics = if query.since_id.is_some() && !cursor_found {
+        "full_snapshot"
+    } else if query.since_id.is_some() || query.since_timestamp.is_some() {
+        "incremental_batch"
+    } else {
+        "full_snapshot"
+    };
+    headers.insert(
+        EVENTLOG_LIST_SEMANTICS_HEADER,
+        HeaderValue::from_static(semantics),
+    );
+    Ok((headers, Json(events)))
 }
 
 /// POST /eventlog — append (or upsert) a single event.
@@ -300,7 +325,6 @@ async fn append_event(
         .eventlog_store
         .append_event(query.user_id.as_deref(), event.clone())
         .map_err(internal_error)?;
-    notify_eventlog_watchers(&state, query.user_id.as_deref());
     publish_eventlog_replication_append(&state, &event).await;
     Ok((StatusCode::CREATED, Json(event)))
 }
@@ -316,7 +340,7 @@ async fn watch_events(
     let effective_since_id = resolve_watch_since_id(&state, &query).map_err(internal_error)?;
 
     if query.since_id.is_some() || query.since_timestamp.is_some() {
-        let initial = load_events_for_query(
+        let (initial, _) = load_events_for_query(
             &state,
             query.user_id.as_deref(),
             effective_since_id.as_deref(),
@@ -346,7 +370,7 @@ async fn watch_events(
                     continue;
                 }
 
-                let events = load_events_for_query(
+                let (events, _) = load_events_for_query(
                     &state,
                     query.user_id.as_deref(),
                     effective_since_id.as_deref(),
@@ -464,9 +488,6 @@ async fn import_eventlog_json(
     let strategy = parse_import_strategy(query.strategy.as_deref()).map_err(internal_error)?;
     let outcome = apply_event_import(&state, query.user_id.as_deref(), payload.events, strategy)
         .map_err(internal_error)?;
-    if outcome.changed {
-        notify_eventlog_watchers(&state, query.user_id.as_deref());
-    }
     Ok(Json(outcome.result))
 }
 
@@ -483,9 +504,6 @@ async fn import_eventlog_sqlite(
         .map_err(internal_error)?;
     let outcome = apply_event_import(&state, query.user_id.as_deref(), imported_events, strategy)
         .map_err(internal_error)?;
-    if outcome.changed {
-        notify_eventlog_watchers(&state, query.user_id.as_deref());
-    }
     Ok(Json(outcome.result))
 }
 
@@ -545,7 +563,6 @@ fn apply_event_import(
     let existing = state.eventlog_store.list_events(user_id)?;
     let outcome = match strategy {
         EventLogImportStrategy::Overwrite => {
-            let changed = existing != incoming;
             state
                 .eventlog_store
                 .replace_all_events(user_id, &incoming)?;
@@ -555,7 +572,6 @@ fn apply_event_import(
                     skipped: 0,
                     total: incoming.len(),
                 },
-                changed,
             }
         }
         EventLogImportStrategy::Merge => {
@@ -583,12 +599,19 @@ fn apply_event_import(
                     skipped,
                     total: next.len(),
                 },
-                changed: imported > 0,
             }
         }
     };
 
     Ok(outcome)
+}
+
+#[cfg(test)]
+fn eventlog_sqlite_tempdir_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("eventlog sqlite tempdir lock poisoned")
 }
 
 fn build_eventlog_sqlite_snapshot_bytes(
@@ -605,20 +628,26 @@ fn build_eventlog_sqlite_snapshot_bytes(
             });
     }
 
-    let temp_root =
-        std::env::temp_dir().join(format!("exomind-eventlog-export-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_root)
+    #[cfg(test)]
+    let _tempdir_guard = eventlog_sqlite_tempdir_guard();
+
+    let temp_root = tempfile::Builder::new()
+        .prefix("exomind-eventlog-export-")
+        .tempdir()
         .map_err(|error| format!("failed to create temp eventlog export dir: {error}"))?;
-    let sqlite_path = temp_root.join("eventlog-export.sqlite");
-    let scoped_store =
-        crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
+    let sqlite_path = temp_root.path().join("eventlog-export.sqlite");
+    let scoped_store = crate::eventlog::EventLogStore::with_sqlite_path(
+        temp_root.path().to_path_buf(),
+        &sqlite_path,
+    )?;
     scoped_store.replace_all_events(user_id, events)?;
     let bytes = scoped_store
         .sqlite_snapshot_bytes()?
         .ok_or_else(|| "failed to produce scoped sqlite snapshot".to_string())?;
     drop(scoped_store);
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    temp_root
+        .close()
+        .map_err(|error| format!("failed to clean temp eventlog export dir: {error}"))?;
     Ok(bytes)
 }
 
@@ -626,18 +655,25 @@ fn read_events_from_sqlite_snapshot(
     bytes: &[u8],
     user_id: Option<&str>,
 ) -> Result<Vec<EventRecord>, String> {
-    let temp_root =
-        std::env::temp_dir().join(format!("exomind-eventlog-import-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_root)
+    #[cfg(test)]
+    let _tempdir_guard = eventlog_sqlite_tempdir_guard();
+
+    let temp_root = tempfile::Builder::new()
+        .prefix("exomind-eventlog-import-")
+        .tempdir()
         .map_err(|error| format!("failed to create temp eventlog dir: {error}"))?;
-    let sqlite_path = temp_root.join("eventlog-import.sqlite");
+    let sqlite_path = temp_root.path().join("eventlog-import.sqlite");
     std::fs::write(&sqlite_path, bytes)
         .map_err(|error| format!("failed to write temp sqlite snapshot: {error}"))?;
-    let store = crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
+    let store = crate::eventlog::EventLogStore::with_sqlite_path(
+        temp_root.path().to_path_buf(),
+        &sqlite_path,
+    )?;
     let events = store.list_events(user_id)?;
     drop(store);
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    temp_root
+        .close()
+        .map_err(|error| format!("failed to clean temp eventlog import dir: {error}"))?;
     Ok(events)
 }
 
@@ -663,6 +699,8 @@ mod tests {
         let host_id = "eventlog-test".to_string();
         let registry = crate::agent::AgentRegistry::new();
         let energy_registry = crate::energy::EnergyRegistry::new();
+        let (eventlog_watch_tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+        store.set_watch_tx(eventlog_watch_tx.clone());
         AppState {
             port: 0,
             host_id: host_id.clone(),
@@ -677,13 +715,11 @@ mod tests {
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
+            config_store: Arc::new(crate::config::ConfigStore::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
-            eventlog_watch_tx: {
-                let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
-                tx
-            },
+            eventlog_watch_tx,
             timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(crate::tick::TickManager::new(
@@ -756,6 +792,128 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["id"], appended_id);
         assert_eq!(events[0]["content"], "hello");
+    }
+
+    #[tokio::test]
+    async fn list_events_sets_revision_header_and_refreshes_it_after_mutation() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let app = test_router(test_state_with_eventlog(store));
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000000000,"content":"hello","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let first_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let first_revision = first_response
+            .headers()
+            .get(EVENTLOG_REVISION_HEADER)
+            .expect("revision header should exist after first write")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000001000,"content":"hello again","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let second_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let second_revision = second_response
+            .headers()
+            .get(EVENTLOG_REVISION_HEADER)
+            .expect("revision header should exist after second write")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        assert_ne!(first_revision, second_revision);
+    }
+
+    #[tokio::test]
+    async fn list_events_marks_cursor_reset_results_as_full_snapshot() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let app = test_router(test_state_with_eventlog(store));
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000000000,"content":"first","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000001000,"content":"second","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/eventlog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"timestamp":1700000002000,"content":"after reset","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog?since_id=missing-cursor&since_timestamp=1700000001000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(EVENTLOG_LIST_SEMANTICS_HEADER)
+                .expect("semantics header should exist")
+                .to_str()
+                .unwrap(),
+            "full_snapshot"
+        );
     }
 
     #[tokio::test]
@@ -989,7 +1147,10 @@ mod tests {
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        assert!(!watch_handle.is_finished(), "watch should not return existing backlog without cursor");
+        assert!(
+            !watch_handle.is_finished(),
+            "watch should not return existing backlog without cursor"
+        );
 
         let appended = append_event_via_api(
             &app,
