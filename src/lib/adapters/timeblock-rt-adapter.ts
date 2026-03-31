@@ -121,6 +121,10 @@ export class TimeBlockRtAdapter {
     return this.postJson('/timeblocks/describe', params);
   }
 
+  async rtDescribeBlockById(blockId: string, params: { name?: string; note?: string }): Promise<{ updated: string; blockId: string }> {
+    return this.postJson(`/timeblocks/${blockId}/describe`, params);
+  }
+
   private async postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
     const target = this.resolveTarget();
     const response = await this.fetchImpl(this.url(path, target), {
