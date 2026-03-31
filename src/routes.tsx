@@ -8,6 +8,10 @@ import { getGoalsPageEnabled, subscribeGoalsPageEnabledChanges } from '@/config/
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
+import {
+  getDesktopSidebarCollapsed as getPersistedDesktopSidebarCollapsed,
+  setDesktopSidebarCollapsed as setPersistedDesktopSidebarCollapsed,
+} from '@/config/desktop-sidebar-preferences';
 import { getCommandRegistryService } from '@/lib/services/command-registry.service';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
@@ -26,32 +30,6 @@ import {
   shouldForceTasksMain,
 } from '@/ui/app/pages/task-route-memory';
 import { resolveEventlogRestoreTab } from '@/ui/app/pages/eventlog-route-memory';
-
-const DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY = 'exomind:desktop-sidebar-collapsed';
-
-function readStoredDesktopSidebarCollapsed(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  try {
-    return window.localStorage.getItem(DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function writeStoredDesktopSidebarCollapsed(collapsed: boolean): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
-  } catch {
-    // Ignore storage failures and keep UI responsive.
-  }
-}
 
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
@@ -493,7 +471,7 @@ function NewLayout() {
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
   const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
   const [goalsPageEnabled, setGoalsPageEnabled] = useState(() => getGoalsPageEnabled());
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => readStoredDesktopSidebarCollapsed());
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => getPersistedDesktopSidebarCollapsed());
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
@@ -520,7 +498,7 @@ function NewLayout() {
     return subscribeCommandPaletteEnabledChanges(setCommandPaletteEnabled);
   }, []);
   useEffect(() => {
-    writeStoredDesktopSidebarCollapsed(desktopSidebarCollapsed);
+    setPersistedDesktopSidebarCollapsed(desktopSidebarCollapsed);
   }, [desktopSidebarCollapsed]);
 
   useEffect(() => {
@@ -1044,5 +1022,4 @@ const newRouteTree = newRootRoute.addChildren([
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
-
 

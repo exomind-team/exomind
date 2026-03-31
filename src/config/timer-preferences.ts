@@ -1,3 +1,4 @@
+import { createConfigModule } from './config-factory';
 import {
   DEFAULT_TIMER_END_SOUND_PRESET_ID,
   getTimerEndSoundPresetById,
@@ -45,39 +46,32 @@ function normalizeTimerPreferences(value: unknown): TimerPreferences {
   };
 }
 
-export function getTimerPreferences(): TimerPreferences {
-  if (typeof window === 'undefined') {
+function parseStoredTimerPreferences(rawValue: string | null | undefined): TimerPreferences {
+  if (!rawValue) {
     return DEFAULT_TIMER_PREFERENCES;
   }
-
   try {
-    const raw = window.localStorage.getItem(TIMER_PREFERENCES_STORAGE_KEY);
-    if (!raw) {
-      return DEFAULT_TIMER_PREFERENCES;
-    }
-    return normalizeTimerPreferences(JSON.parse(raw));
+    return normalizeTimerPreferences(JSON.parse(rawValue));
   } catch {
     return DEFAULT_TIMER_PREFERENCES;
   }
 }
 
-export function setTimerPreferences(preferences: TimerPreferences): void {
-  if (typeof window === 'undefined') return;
+const timerPreferencesModule = createConfigModule<TimerPreferences>({
+  storageKey: TIMER_PREFERENCES_STORAGE_KEY,
+  eventName: TIMER_PREFERENCES_CHANGED_EVENT,
+  defaultValue: DEFAULT_TIMER_PREFERENCES,
+  normalize: parseStoredTimerPreferences,
+  serialize: (value) => JSON.stringify(normalizeTimerPreferences(value)),
+  persistMode: 'runtime-preferred',
+});
 
-  try {
-    const normalized = normalizeTimerPreferences(preferences);
-    window.localStorage.setItem(
-      TIMER_PREFERENCES_STORAGE_KEY,
-      JSON.stringify(normalized),
-    );
-    window.dispatchEvent(
-      new CustomEvent(TIMER_PREFERENCES_CHANGED_EVENT, {
-        detail: { value: normalized },
-      }),
-    );
-  } catch {
-    // ignore localStorage write errors
-  }
+export function getTimerPreferences(): TimerPreferences {
+  return timerPreferencesModule.get();
+}
+
+export function setTimerPreferences(preferences: TimerPreferences): void {
+  timerPreferencesModule.set(preferences);
 }
 
 export function updateTimerPreferences(
@@ -87,39 +81,11 @@ export function updateTimerPreferences(
     ...getTimerPreferences(),
     ...patch,
   };
-  const normalized = normalizeTimerPreferences(merged);
-  setTimerPreferences(normalized);
-  return normalized;
+  return timerPreferencesModule.set(merged);
 }
 
 export function subscribeTimerPreferencesChanges(
   listener: (preferences: TimerPreferences) => void,
 ): () => void {
-  if (typeof window === 'undefined') {
-    return () => {};
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key !== TIMER_PREFERENCES_STORAGE_KEY) return;
-    listener(getTimerPreferences());
-  };
-
-  const handleCustomEvent = (event: Event) => {
-    const detail = (
-      event as CustomEvent<{ value?: unknown }>
-    ).detail;
-    listener(normalizeTimerPreferences(detail?.value));
-  };
-
-  window.addEventListener('storage', handleStorage);
-  window.addEventListener(TIMER_PREFERENCES_CHANGED_EVENT, handleCustomEvent);
-
-  return () => {
-    window.removeEventListener('storage', handleStorage);
-    window.removeEventListener(
-      TIMER_PREFERENCES_CHANGED_EVENT,
-      handleCustomEvent,
-    );
-  };
+  return timerPreferencesModule.subscribe(listener);
 }
-

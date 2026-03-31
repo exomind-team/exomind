@@ -1,3 +1,4 @@
+import { createConfigModule } from './config-factory';
 import { resolveLocalServiceHost } from '@/config/local-service-host';
 
 export const RUNTIME_TARGET_MODE_STORAGE_KEY = 'exomind:runtimeTargetMode';
@@ -6,6 +7,8 @@ export const EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY = 'exomind:embeddedRuntim
 export const EMBEDDED_RUNTIME_STATUS_STORAGE_KEY = 'exomind:embeddedRuntimeStatus';
 export const RUNTIME_TARGET_CHANGED_EVENT = 'exomind:runtime-target-changed';
 export const EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT = 'exomind:embedded-runtime-network-mode-changed';
+const RUNTIME_TARGET_MODE_VALUE_CHANGED_EVENT = 'exomind:runtime-target-mode-value-changed';
+const RUNTIME_EXTERNAL_ADDRESS_CHANGED_EVENT = 'exomind:runtime-external-address-changed';
 
 export type RuntimeTargetMode = 'embedded' | 'external';
 export type EmbeddedRuntimeNetworkMode = 'local' | 'lan';
@@ -42,6 +45,7 @@ const DEFAULT_EXTERNAL_RUNTIME_HOST = '127.0.0.1';
 export const DEFAULT_EXTERNAL_RUNTIME_PORT = 1949;
 const DEFAULT_RUNTIME_TARGET_MODE: RuntimeTargetMode = 'embedded';
 const DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE: EmbeddedRuntimeNetworkMode = 'local';
+const DEFAULT_RUNTIME_EXTERNAL_ADDRESS = `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
 
 function normalizeRuntimeMode(rawValue: string | null | undefined): RuntimeTargetMode {
   return rawValue === 'external' ? 'external' : 'embedded';
@@ -215,6 +219,49 @@ function toAddress(host: string, port: number): string {
   return `${formatHostForAddress(host)}:${port}`;
 }
 
+function normalizeRuntimeExternalAddress(rawValue: string | null | undefined): string {
+  if (!rawValue) {
+    return DEFAULT_RUNTIME_EXTERNAL_ADDRESS;
+  }
+
+  try {
+    const parsed = parseRuntimeAddress(rawValue);
+    return toAddress(parsed.host, parsed.port);
+  } catch {
+    return DEFAULT_RUNTIME_EXTERNAL_ADDRESS;
+  }
+}
+
+const runtimeTargetModeModule = createConfigModule<RuntimeTargetMode>({
+  storageKey: RUNTIME_TARGET_MODE_STORAGE_KEY,
+  eventName: RUNTIME_TARGET_MODE_VALUE_CHANGED_EVENT,
+  defaultValue: DEFAULT_RUNTIME_TARGET_MODE,
+  normalize: normalizeRuntimeMode,
+  serialize: (value) => normalizeRuntimeMode(value),
+  persistMode: 'runtime-preferred',
+});
+
+const embeddedRuntimeNetworkModeModule = createConfigModule<EmbeddedRuntimeNetworkMode>({
+  storageKey: EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
+  eventName: EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT,
+  defaultValue: DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE,
+  normalize: normalizeEmbeddedRuntimeNetworkMode,
+  serialize: (value) => normalizeEmbeddedRuntimeNetworkMode(value),
+  persistMode: 'runtime-preferred',
+});
+
+const runtimeExternalAddressModule = createConfigModule<string>({
+  storageKey: RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY,
+  eventName: RUNTIME_EXTERNAL_ADDRESS_CHANGED_EVENT,
+  defaultValue: DEFAULT_RUNTIME_EXTERNAL_ADDRESS,
+  normalize: normalizeRuntimeExternalAddress,
+  serialize: (value) => {
+    const parsed = parseRuntimeAddress(value);
+    return toAddress(parsed.host, parsed.port);
+  },
+  persistMode: 'runtime-preferred',
+});
+
 function emitRuntimeTargetChanged(): void {
   if (typeof window === 'undefined') {
     return;
@@ -228,103 +275,34 @@ function emitRuntimeTargetChanged(): void {
 }
 
 export function getRuntimeTargetMode(): RuntimeTargetMode {
-  if (typeof window === 'undefined') {
-    return DEFAULT_RUNTIME_TARGET_MODE;
-  }
-
-  return normalizeRuntimeMode(window.localStorage.getItem(RUNTIME_TARGET_MODE_STORAGE_KEY));
+  return runtimeTargetModeModule.get();
 }
 
 export function getEmbeddedRuntimeNetworkMode(): EmbeddedRuntimeNetworkMode {
-  if (typeof window === 'undefined') {
-    return DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE;
-  }
-
-  return normalizeEmbeddedRuntimeNetworkMode(
-    window.localStorage.getItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY),
-  );
+  return embeddedRuntimeNetworkModeModule.get();
 }
 
 export function setRuntimeTargetMode(mode: RuntimeTargetMode): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const normalized = normalizeRuntimeMode(mode);
-  window.localStorage.setItem(RUNTIME_TARGET_MODE_STORAGE_KEY, normalized);
+  runtimeTargetModeModule.set(mode);
   emitRuntimeTargetChanged();
 }
 
 export function setEmbeddedRuntimeNetworkMode(mode: EmbeddedRuntimeNetworkMode): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const normalized = normalizeEmbeddedRuntimeNetworkMode(mode);
-  window.localStorage.setItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY, normalized);
-  window.dispatchEvent(
-    new CustomEvent<EmbeddedRuntimeNetworkMode>(EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT, {
-      detail: normalized,
-    }),
-  );
+  embeddedRuntimeNetworkModeModule.set(mode);
 }
 
 export function subscribeEmbeddedRuntimeNetworkModeChanges(
   listener: (mode: EmbeddedRuntimeNetworkMode) => void,
 ): () => void {
-  if (typeof window === 'undefined') {
-    return () => {};
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key !== EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY) {
-      return;
-    }
-    listener(normalizeEmbeddedRuntimeNetworkMode(event.newValue));
-  };
-
-  const handleCustomEvent = (event: Event) => {
-    const customEvent = event as CustomEvent<EmbeddedRuntimeNetworkMode>;
-    listener(normalizeEmbeddedRuntimeNetworkMode(customEvent.detail));
-  };
-
-  window.addEventListener('storage', handleStorage);
-  window.addEventListener(EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT, handleCustomEvent);
-
-  return () => {
-    window.removeEventListener('storage', handleStorage);
-    window.removeEventListener(EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT, handleCustomEvent);
-  };
+  return embeddedRuntimeNetworkModeModule.subscribe(listener);
 }
 
 export function getRuntimeExternalAddress(): string {
-  if (typeof window === 'undefined') {
-    return `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
-  }
-
-  const raw = window.localStorage.getItem(RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY);
-  if (!raw) {
-    return `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
-  }
-
-  try {
-    const parsed = parseRuntimeAddress(raw);
-    return toAddress(parsed.host, parsed.port);
-  } catch {
-    return `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
-  }
+  return runtimeExternalAddressModule.get();
 }
 
 export function setRuntimeExternalAddress(address: string): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const parsed = parseRuntimeAddress(address);
-  window.localStorage.setItem(
-    RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY,
-    toAddress(parsed.host, parsed.port),
-  );
+  runtimeExternalAddressModule.set(address);
   emitRuntimeTargetChanged();
 }
 

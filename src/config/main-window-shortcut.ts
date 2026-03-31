@@ -3,7 +3,7 @@ import {
   setRuntimeConfigValue,
 } from './runtime-config-cache';
 
-const MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY = 'exomind:mainWindowShortcutSelection';
+export const MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY = 'exomind:mainWindowShortcutSelection';
 const MAIN_WINDOW_SHORTCUT_CUSTOMIZED_STORAGE_KEY = 'exomind:mainWindowShortcutSelectionCustomized';
 const MAIN_WINDOW_SHORTCUT_SELECTION_CHANGED_EVENT = 'exomind:main-window-shortcut-selection-changed';
 

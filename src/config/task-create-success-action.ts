@@ -13,6 +13,7 @@ const _module = createConfigModule<TaskCreateSuccessAction>({
   eventName: 'exomind:task-create-success-action-changed',
   defaultValue: 'refocus',
   normalize: normalizeAction,
+  persistMode: 'runtime-preferred',
 });
 
 export function getTaskCreateSuccessAction(): TaskCreateSuccessAction {

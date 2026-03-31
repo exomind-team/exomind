@@ -17,47 +17,49 @@ const loadTimeBlocksMock = vi.fn<() => Promise<TimeBlock[]>>();
 const loadActiveBlockMock = vi.fn<() => Promise<ActiveBlockData | null>>();
 const onBlockChangeMock = vi.fn(() => () => {});
 
-const getEventsMock = vi.fn<
-  () => Promise<Array<{ id: string; content: string; createdAt: string; type?: string }>>
+const loadEventsMock = vi.fn<
+  () => Promise<Array<{ id: string; content: string; timestamp: number; tags: Set<string> }>>
 >();
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
   useParams: () => ({ taskId: routeTaskId }),
   useNavigate: () => navigateMock,
+  useLocation: () => ({ pathname: window.location.pathname, searchStr: window.location.search }),
 }));
 
-vi.mock('@/lib/services', () => ({
-  getTaskService: () => ({
-    getTask: getTaskMock,
-    listTasks: listTasksMock,
-    addDependency: vi.fn(),
-    removeDependency: vi.fn(),
-    getAvailableTransitions: vi.fn(),
-    getChildTasks: vi.fn(async () => []),
-    checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
-    onTaskChange: onTaskChangeMock,
-    transitionTask: vi.fn(),
-    updateTask: updateTaskMock,
-    cancelTask: vi.fn(),
-  }),
-  getTimeBlockService: () => ({
-    loadTimeBlocks: loadTimeBlocksMock,
-    loadActiveBlock: loadActiveBlockMock,
-    onBlockChange: onBlockChangeMock,
-    pauseBlock: vi.fn(async () => undefined),
-  }),
-  getTaskTimerService: () => ({
-    calculateSpentMinutes: vi.fn(async () => 0),
-    startBlockForTask: vi.fn(async () => undefined),
-  }),
-}));
-
-vi.mock('@/lib/storage/event-storage', () => ({
-  getEventStorage: () => ({
-    getEvents: getEventsMock,
-  }),
-}));
+vi.mock('@/lib/services', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/services')>();
+  return {
+    ...actual,
+    getTaskService: () => ({
+      getTask: getTaskMock,
+      listTasks: listTasksMock,
+      addDependency: vi.fn(),
+      removeDependency: vi.fn(),
+      getAvailableTransitions: vi.fn(),
+      getChildTasks: vi.fn(async () => []),
+      checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
+      onTaskChange: onTaskChangeMock,
+      transitionTask: vi.fn(),
+      updateTask: updateTaskMock,
+      cancelTask: vi.fn(),
+    }),
+    getTimeBlockService: () => ({
+      loadTimeBlocks: loadTimeBlocksMock,
+      loadActiveBlock: loadActiveBlockMock,
+      onBlockChange: onBlockChangeMock,
+      pauseBlock: vi.fn(async () => undefined),
+    }),
+    getEventLogService: () => ({
+      loadEvents: loadEventsMock,
+    }),
+    getTaskTimerService: () => ({
+      calculateSpentMinutes: vi.fn(async () => 0),
+      startBlockForTask: vi.fn(async () => undefined),
+    }),
+  };
+});
 
 function makeTask(overrides: Partial<TaskNode> = {}): TaskNode {
   return {
@@ -128,8 +130,8 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
     loadActiveBlockMock.mockResolvedValue(null);
     onBlockChangeMock.mockClear();
 
-    getEventsMock.mockReset();
-    getEventsMock.mockResolvedValue([]);
+    loadEventsMock.mockReset();
+    loadEventsMock.mockResolvedValue([]);
 
     mockMatchMedia(false);
   });
@@ -145,8 +147,7 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
 
     const view = render(<TaskDetailPage />);
 
-    await screen.findByText('关联任务：任务 A');
-    expect(screen.getByTestId('estimated-time-preset-60')).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByTestId('estimated-time-preset-60')).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(screen.getByTestId('estimated-time-preset-45'));
 
@@ -157,9 +158,8 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
     routeTaskId = 'task-2';
     view.rerender(<TaskDetailPage />);
 
-    await screen.findByText('关联任务：任务 B');
     // Task B has estimatedMinutes=30 which is not a preset, so custom trigger should show
-    expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
 
     await act(async () => {
       pendingSave.resolve(makeTask({ id: 'task-1', title: '任务 A', estimatedMinutes: 45, updatedAt: 999 }));
@@ -168,5 +168,25 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
 
     // Stale save for task-1 should not affect task-2's display
     expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not persist fallback auto-fill on mount and reacts to late storage sync（挂载时不回写默认自动补全，并响应晚到同步）', async () => {
+    render(<TaskDetailPage />);
+
+    const toggle = await screen.findByRole('switch', { name: '自动补全计时时长' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(window.localStorage.getItem('exomind:task-timer:auto-fill')).toBeNull();
+
+    await act(async () => {
+      window.localStorage.setItem('exomind:task-timer:auto-fill', '1');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'exomind:task-timer:auto-fill',
+        newValue: '1',
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: '自动补全计时时长' })).toHaveAttribute('aria-checked', 'true');
+    });
   });
 });

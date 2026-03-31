@@ -9,6 +9,7 @@ const _module = createConfigModule<boolean>({
   eventName: 'exomind:developer-mode-changed',
   defaultValue: false,
   normalize: normalizeBoolean,
+  persistMode: 'runtime-preferred',
 });
 
 export function getDeveloperModeEnabled(): boolean {

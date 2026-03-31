@@ -1,3 +1,8 @@
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
+
 export type DomainBackendMode = 'legacy' | 'rt-sqlite';
 export type DomainBackendKey = 'eventlog' | 'task' | 'timeblock';
 
@@ -12,22 +17,23 @@ const DEFAULTS: Record<DomainBackendKey, DomainBackendMode> = {
   task: 'rt-sqlite',
   timeblock: 'rt-sqlite',
 };
+const DOMAIN_BACKEND_MODE_CHANGED_SOURCE = 'exomind:domain-backend-mode-changed';
 
 function normalizeMode(value: string | null | undefined, domain: DomainBackendKey): DomainBackendMode {
   return value === 'legacy' || value === 'rt-sqlite' ? value : DEFAULTS[domain];
 }
 
 function getMode(domain: DomainBackendKey): DomainBackendMode {
-  if (typeof window === 'undefined') {
-    return DEFAULTS[domain];
-  }
-  return normalizeMode(window.localStorage.getItem(STORAGE_KEYS[domain]), domain);
+  return normalizeMode(getRuntimeConfigValueSync(STORAGE_KEYS[domain]), domain);
 }
 
 function setMode(domain: DomainBackendKey, mode: DomainBackendMode): DomainBackendMode {
   const normalized = normalizeMode(mode, domain);
   if (typeof window !== 'undefined') {
-    window.localStorage.setItem(STORAGE_KEYS[domain], normalized);
+    setRuntimeConfigValue(STORAGE_KEYS[domain], normalized, {
+      source: DOMAIN_BACKEND_MODE_CHANGED_SOURCE,
+      sourceOrigin: window.location?.origin,
+    });
   }
   return normalized;
 }

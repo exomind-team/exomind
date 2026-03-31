@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { TaskTimelinePage } from '@/ui/app/pages/TaskTimelinePage'
 import { SYSTEM_TAGS, type Event, type TimeBlock } from '@/lib/types/event'
 import type { TaskNode } from '@/lib/types/task'
@@ -280,5 +280,32 @@ describe('TaskTimelinePage scale controls（任务时间线比例尺控件）', 
 
     expect(screen.getByText('2026/2')).toBeInTheDocument()
     expect(screen.getByText('2026/3')).toBeInTheDocument()
+  })
+
+  it('reacts to late storage-backed timeline preference updates after mount（挂载后会响应晚到的时间线偏好同步）', async () => {
+    render(<TaskTimelinePage />)
+
+    await screen.findByTestId('task-timeline-page')
+    expect(screen.getByTestId('task-timeline-layout-auto').className).toContain('font-semibold')
+    expect(screen.getByText('比例尺：1天')).toBeInTheDocument()
+
+    await act(async () => {
+      localStorage.setItem('task-timeline-layout-mode', 'vertical')
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'task-timeline-layout-mode',
+        newValue: 'vertical',
+      }))
+
+      localStorage.setItem('task-timeline-range', '7d')
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'task-timeline-range',
+        newValue: '7d',
+      }))
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-timeline-layout-vertical').className).toContain('font-semibold')
+      expect(screen.getByText('比例尺：7天')).toBeInTheDocument()
+    })
   })
 })

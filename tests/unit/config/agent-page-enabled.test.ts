@@ -4,12 +4,17 @@ import {
   setAgentPageEnabled,
   subscribeAgentPageEnabledChanges,
 } from '@/config/agent-page-enabled';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('agent page flag（网络页面开关）', () => {
   let storage: Record<string, string>;
 
   beforeEach(() => {
     storage = {};
+    __resetRuntimeConfigCacheForTests();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
       value: {
@@ -28,6 +33,13 @@ describe('agent page flag（网络页面开关）', () => {
   it('returns false when stored value is false（显式 false 时关闭）', () => {
     storage['exomind:agentPageEnabled'] = 'false';
     expect(getAgentPageEnabled()).toBe(false);
+  });
+
+  it('reads runtime-backed value before localStorage（优先读取 Runtime 中的页面开关）', () => {
+    storage['exomind:agentPageEnabled'] = 'false';
+    __primeRuntimeConfigForTests({ 'exomind:agentPageEnabled': 'true' });
+
+    expect(getAgentPageEnabled()).toBe(true);
   });
 
   it('persists and emits custom event when toggled（切换时持久化并发事件）', () => {

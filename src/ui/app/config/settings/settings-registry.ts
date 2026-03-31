@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import type { SettingsContext, SettingsItem } from './settings-types';
 import {
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
   formatRuntimeTargetAddress,
   getEmbeddedRuntimeNetworkMode,
   getRuntimeExternalAddress,
@@ -42,6 +43,14 @@ import {
   subscribeRuntimeTargetChanges,
   subscribeEmbeddedRuntimeNetworkModeChanges,
 } from '@/config/runtime-target';
+import {
+  RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS,
+  RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES,
+} from '@/config/runtime-config-adapter';
+import {
+  removeRuntimeConfigValue,
+  removeRuntimeConfigValuesByPrefixes,
+} from '@/config/runtime-config-cache';
 import {
   getThemePreference,
   setThemePreference,
@@ -445,33 +454,129 @@ function resolveBuildText(): string {
   return resolveVersionBuildInfo(envMap, '0.3.6').buildHash || 'dev';
 }
 
+const UPDATE_SETTINGS_STORAGE_KEY = 'exomind-update-settings';
+const RUNTIME_SESSION_CACHE_STORAGE_KEY = 'exomind:runtime-agent-session-cache:v1';
+const LEGACY_PROVIDER_PROFILE_INDEX_STORAGE_KEY = 'exomind:agent-provider-profiles:index';
+const LEGACY_PROVIDER_PROFILE_STORAGE_PREFIX = 'exomind:agent-provider-profiles:';
+const LEGACY_LLM_STORAGE_KEYS = [
+  'exomind:llmApiKey',
+  'exomind:llmBaseUrl',
+  'exomind:llmModel',
+  'exomind:ai-registry:legacy-llm-bootstrap-completed',
+] as const;
+const LOCAL_CACHE_RUNTIME_CONFIG_KEYS = [
+  'exomind:desktop-sidebar-collapsed',
+  'exomind:dag-pan-speed',
+  'exomind:dag-zoom-speed',
+  'exomind:tasks-default-tab',
+  'exomind:task-timer:auto-fill',
+  'exomind:goals-mode',
+  'exomind:goals-show-cancelled',
+  'exomind:goals-guide-hidden',
+  'task-timeline-range',
+  'task-timeline-selected-task',
+  'task-timeline-show-pending',
+  'task-timeline-layout-mode',
+  'exomind:dag-mode',
+  'exomind:dag-direction',
+  'exomind:dag-hide-terminal',
+  'exomind:dag-background-mode',
+  'exomind:dag-immersive',
+  'exomind:dag-viewport',
+  'exomind:dag-search-draft',
+  'exomind:dag-search-options',
+  'exomind:dag-visibility',
+  'exomind:agentHubTopologyLayouts',
+  'exomind:agentHubRuntimePorts',
+  'exomind:voiceOverlayOpacity',
+  'exomind:voiceOverlayShowDiagnostics',
+  'exomind:voiceOverlayTranscriptLines',
+  'exomind:voiceOverlayBottomOffset',
+  'exomind:nowWorkbenchOverlayEnabled',
+  'exomind:nowWorkbenchOverlayPosition',
+] as const;
+const LOCAL_CACHE_LOCAL_ONLY_KEYS = [
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+  RUNTIME_SESSION_CACHE_STORAGE_KEY,
+] as const;
+const RESET_SETTINGS_LOCAL_ONLY_KEYS = [
+  ...LEGACY_LLM_STORAGE_KEYS,
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+  RUNTIME_SESSION_CACHE_STORAGE_KEY,
+  LEGACY_PROVIDER_PROFILE_INDEX_STORAGE_KEY,
+] as const;
+const RESET_SETTINGS_LOCAL_ONLY_PREFIXES = [
+  LEGACY_PROVIDER_PROFILE_STORAGE_PREFIX,
+] as const;
+const EXOMIND_SESSION_STORAGE_PREFIXES = ['exomind:'] as const;
+
+function collectStorageKeysByPrefixes(
+  storage: Storage,
+  prefixes: readonly string[],
+): string[] {
+  const keys = new Set<string>();
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (!key) {
+        continue;
+      }
+      if (prefixes.some((prefix) => key.startsWith(prefix))) {
+        keys.add(key);
+      }
+    }
+  } catch {
+    // Ignore storage enumeration failures（忽略存储枚举失败）
+  }
+  return [...keys];
+}
+
+function removeLocalStorageKeys(keys: Iterable<string>): void {
+  try {
+    for (const key of new Set(keys)) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore localStorage cleanup failures（忽略 localStorage 清理失败）
+  }
+}
+
+function removeSessionStorageKeysByPrefixes(prefixes: readonly string[]): void {
+  try {
+    const keysToRemove = collectStorageKeysByPrefixes(window.sessionStorage, prefixes);
+    for (const key of keysToRemove) {
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore sessionStorage cleanup failures（忽略 sessionStorage 清理失败）
+  }
+}
+
+function removeRuntimeConfigKeys(keys: Iterable<string>): void {
+  for (const key of new Set(keys)) {
+    removeRuntimeConfigValue(key);
+  }
+}
+
+function removeRuntimeConfigKeysByPrefixes(prefixes: readonly string[]): void {
+  removeRuntimeConfigValuesByPrefixes(prefixes);
+}
+
+function scheduleSettingsReload(): void {
+  window.setTimeout(() => {
+    window.location.reload();
+  }, 0);
+}
+
 function clearExomindLocalCache(): string {
   if (typeof window === 'undefined') {
     return '当前环境不支持清空本地缓存';
   }
 
-  const keysToRemove: string[] = [];
-  try {
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (key?.startsWith('exomind:')) {
-        keysToRemove.push(key);
-      }
-    }
-    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
-  } catch {
-    // Ignore localStorage cleanup failures.
-  }
-
-  try {
-    window.sessionStorage.clear();
-  } catch {
-    // Ignore sessionStorage cleanup failures.
-  }
-
-  window.setTimeout(() => {
-    window.location.reload();
-  }, 0);
+  removeRuntimeConfigKeys(LOCAL_CACHE_RUNTIME_CONFIG_KEYS);
+  removeLocalStorageKeys(LOCAL_CACHE_LOCAL_ONLY_KEYS);
+  removeSessionStorageKeysByPrefixes(EXOMIND_SESSION_STORAGE_PREFIXES);
+  scheduleSettingsReload();
 
   return '已清空本地缓存，页面正在刷新。';
 }
@@ -481,21 +586,13 @@ function resetAllSettings(): string {
     return '当前环境不支持重置设置';
   }
 
-  try {
-    window.localStorage.clear();
-  } catch {
-    // Ignore localStorage cleanup failures.
-  }
-
-  try {
-    window.sessionStorage.clear();
-  } catch {
-    // Ignore sessionStorage cleanup failures.
-  }
-
-  window.setTimeout(() => {
-    window.location.reload();
-  }, 0);
+  removeRuntimeConfigKeys(RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS);
+  removeRuntimeConfigKeysByPrefixes(RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES);
+  removeRuntimeConfigKeys([UPDATE_SETTINGS_STORAGE_KEY]);
+  removeLocalStorageKeys(RESET_SETTINGS_LOCAL_ONLY_KEYS);
+  removeLocalStorageKeys(collectStorageKeysByPrefixes(window.localStorage, RESET_SETTINGS_LOCAL_ONLY_PREFIXES));
+  removeSessionStorageKeysByPrefixes(EXOMIND_SESSION_STORAGE_PREFIXES);
+  scheduleSettingsReload();
 
   return '已重置所有设置，页面正在刷新。';
 }

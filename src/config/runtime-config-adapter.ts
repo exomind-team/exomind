@@ -13,7 +13,7 @@ import type {
 
 const USER_SCOPE = 'user';
 const BOOTSTRAP_IMPORT_SOURCE = 'frontend-bootstrap-import';
-const FRONTEND_IMPORT_KEYS = [
+export const RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS = [
   'exomind:themePreference',
   'exomind:voiceShortcutHotkey',
   'exomind:mainWindowShortcutSelection',
@@ -24,6 +24,56 @@ const FRONTEND_IMPORT_KEYS = [
   'exomind:voiceShortcutMicPrewarmEnabled',
   'exomind:voiceTranscriptSendMode',
   'exomind:inputSendMode',
+  'exomind:voice-auto-record',
+  'exomind:taskCreateSuccessAction',
+  'exomind:taskPageFuzzySearchEnabled',
+  'exomind:feedbackPreferences',
+  'exomind:timerPreferences',
+  'exomind:agentPageEnabled',
+  'exomind:goalsPageEnabled',
+  'exomind:mePageEnabled',
+  'exomind:commandPaletteEnabled',
+  'exomind:developerMode',
+  'exomind:desktopAdaptiveEnabled',
+  'exomind:desktop-sidebar-collapsed',
+  'exomind:devtoolsEnabled',
+  'exomind:useMockData',
+  'exomind:focusBgmPreferences',
+  'exomind:runtimeTargetMode',
+  'exomind:embeddedRuntimeNetworkMode',
+  'exomind:runtimeExternalAddress',
+  'exomind:eventlogBackendMode',
+  'exomind:taskBackendMode',
+  'exomind:timeblockBackendMode',
+  'exomind:dag-pan-speed',
+  'exomind:dag-zoom-speed',
+  'exomind:tasks-default-tab',
+  'exomind:syncServerUrl',
+  'exomind:task-timer:auto-fill',
+  'exomind:goals-mode',
+  'exomind:goals-show-cancelled',
+  'exomind:goals-guide-hidden',
+  'task-timeline-range',
+  'task-timeline-selected-task',
+  'task-timeline-show-pending',
+  'task-timeline-layout-mode',
+  'exomind:dag-mode',
+  'exomind:dag-direction',
+  'exomind:dag-hide-terminal',
+  'exomind:dag-background-mode',
+  'exomind:dag-immersive',
+  'exomind:dag-viewport',
+  'exomind:dag-search-draft',
+  'exomind:dag-search-options',
+  'exomind:dag-visibility',
+  'exomind:agentHubTopologyLayouts',
+  'exomind:agentHubRuntimePorts',
+  'exomind:voiceOverlayOpacity',
+  'exomind:voiceOverlayShowDiagnostics',
+  'exomind:voiceOverlayTranscriptLines',
+  'exomind:voiceOverlayBottomOffset',
+  'exomind:nowWorkbenchOverlayEnabled',
+  'exomind:nowWorkbenchOverlayPosition',
   'moss_api_key',
   'volcano_asr_app_key',
   'volcano_asr_access_key',
@@ -35,8 +85,10 @@ const FRONTEND_IMPORT_KEYS = [
   'volcano_asr_end_window_size',
   'volcano_asr_force_to_speech_time',
   'exomind:ai-registry:snapshot',
+  'exomind-update-settings',
+  'agent_runtime_hosts_v1',
 ] as const;
-const FRONTEND_IMPORT_PREFIXES = [
+export const RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES = [
   'exomind:ai-registry:energy-secret:',
 ] as const;
 const SENSITIVE_EXACT_KEYS = new Set<string>([
@@ -49,6 +101,27 @@ const SENSITIVE_PREFIXES = [
 ] as const;
 
 let activeTransport: RuntimeConfigTransport | null = null;
+
+export class RuntimeConfigTransportDisabledError extends Error {
+  readonly code = 'runtime-config-transport-disabled';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeConfigTransportDisabledError';
+  }
+}
+
+export function isRuntimeConfigTransportDisabledError(
+  error: unknown,
+): error is RuntimeConfigTransportDisabledError {
+  return error instanceof RuntimeConfigTransportDisabledError
+    || (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && (error as { code?: unknown }).code === 'runtime-config-transport-disabled'
+    );
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -87,14 +160,14 @@ function collectFrontendImportEntries(): RuntimeConfigEntryRecord[] {
     return [];
   }
 
-  const keys = new Set<string>(FRONTEND_IMPORT_KEYS);
+  const keys = new Set<string>(RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS);
   try {
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index);
       if (!key) {
         continue;
       }
-      if (FRONTEND_IMPORT_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      if (RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES.some((prefix) => key.startsWith(prefix))) {
         keys.add(key);
       }
     }
@@ -129,6 +202,13 @@ async function resolveRuntimeTransport(): Promise<RuntimeConfigTransport | null>
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const status = await invoke<RuntimeServiceStatus>('runtime_service_status');
     if (status.running) {
+      if (status.externalRuntime) {
+        activeTransport = null;
+        throw new RuntimeConfigTransportDisabledError(
+          'runtime config transport is disabled for external runtime managers',
+        );
+      }
+
       persistEmbeddedRuntimeStatus({
         host: status.host,
         port: status.port,
@@ -242,6 +322,10 @@ export async function deleteRuntimeConfigValue(key: string): Promise<void> {
   }
 }
 
-export function __resetRuntimeConfigAdapterForTests(): void {
+export function clearRuntimeConfigTransport(): void {
   activeTransport = null;
+}
+
+export function __resetRuntimeConfigAdapterForTests(): void {
+  clearRuntimeConfigTransport();
 }

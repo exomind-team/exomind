@@ -1,4 +1,9 @@
 import { resolveLocalServiceHost } from './local-service-host';
+import {
+  getRuntimeConfigValueSync,
+  removeRuntimeConfigValue,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
 
 export const DEFAULT_PORTS = {
   web: 1420,
@@ -92,13 +97,9 @@ function formatHostForUrl(host: string): string {
 }
 
 export function getSyncServerUrlOverride(): string | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
   try {
     return normalizeOptionalBaseUrl(
-      window.localStorage.getItem(SYNC_SERVER_URL_STORAGE_KEY)
+      getRuntimeConfigValueSync(SYNC_SERVER_URL_STORAGE_KEY)
     );
   } catch {
     return null;
@@ -113,14 +114,17 @@ export function setSyncServerUrlOverride(url: string | null): void {
   try {
     const normalized = normalizeOptionalBaseUrl(url);
     if (!normalized) {
-      window.localStorage.removeItem(SYNC_SERVER_URL_STORAGE_KEY);
+      removeRuntimeConfigValue(SYNC_SERVER_URL_STORAGE_KEY);
       window.dispatchEvent(new CustomEvent(SYNC_SERVER_URL_CHANGED_EVENT, {
         detail: { value: null },
       }));
       return;
     }
 
-    window.localStorage.setItem(SYNC_SERVER_URL_STORAGE_KEY, normalized);
+    setRuntimeConfigValue(SYNC_SERVER_URL_STORAGE_KEY, normalized, {
+      source: SYNC_SERVER_URL_CHANGED_EVENT,
+      sourceOrigin: window.location?.origin,
+    });
     window.dispatchEvent(new CustomEvent(SYNC_SERVER_URL_CHANGED_EVENT, {
       detail: { value: normalized },
     }));
@@ -225,4 +229,3 @@ export function resolveAsrServerUrl(
   const host = formatHostForUrl(resolveRuntimeHostname(normalizedOptions.hostname));
   return `http://${host}:${port}`;
 }
-

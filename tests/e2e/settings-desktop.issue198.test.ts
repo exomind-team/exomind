@@ -14,6 +14,20 @@ async function getTestIdWidth(page: Page, testId: string): Promise<number> {
   return page.getByTestId(testId).evaluate((node) => Math.round(node.getBoundingClientRect().width));
 }
 
+async function setRangeValue(page: Page, testId: string, value: number): Promise<void> {
+  await page.getByTestId(testId).evaluate((node, nextValue) => {
+    const input = node as HTMLInputElement;
+    const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    descriptor?.set?.call(input, String(nextValue));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, value);
+}
+
+async function readLocalStorageValue(page: Page, key: string): Promise<string | null> {
+  return page.evaluate((storageKey) => window.localStorage.getItem(storageKey), key);
+}
+
 async function seedLoggedInDesktopProfile(page: Page) {
   await page.addInitScript(() => {
     const profileId = 'profile-exomind';
@@ -170,6 +184,41 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
     await expect(page.getByRole('link', { name: '设置' })).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar')).toBeHidden();
+  });
+
+  test('desktop input section can update overlay preferences（桌面输入分组可修改悬浮窗偏好）', async ({ page }) => {
+    await page.goto('/settings');
+    await page.getByRole('button', { name: '输入', exact: true }).click();
+
+    await expect(page.getByTestId('new-settings-voice-overlay-opacity-row')).toBeVisible();
+    await expect(page.getByTestId('new-settings-voice-overlay-diagnostics-row')).toBeVisible();
+    await expect(page.getByTestId('new-settings-voice-overlay-transcript-lines-row')).toBeVisible();
+    await expect(page.getByTestId('new-settings-voice-overlay-bottom-offset-row')).toBeVisible();
+    await expect(page.getByTestId('new-settings-now-overlay-enabled-row')).toBeVisible();
+
+    await setRangeValue(page, 'new-settings-voice-overlay-opacity-slider', 82);
+    await page.getByTestId('new-settings-voice-overlay-diagnostics-switch').click();
+    await page.getByTestId('new-settings-now-overlay-enabled-switch').click();
+
+    await expect.poll(() => readLocalStorageValue(page, 'exomind:voiceOverlayOpacity')).toBe('82');
+    await expect.poll(() => readLocalStorageValue(page, 'exomind:voiceOverlayShowDiagnostics')).toBe('true');
+    await expect.poll(() => readLocalStorageValue(page, 'exomind:nowWorkbenchOverlayEnabled')).toBe('false');
+  });
+
+  test('mobile input section can update overlay preferences（移动端输入分组可修改悬浮窗偏好）', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/settings');
+
+    const bottomOffsetRow = page.getByTestId('new-settings-voice-overlay-bottom-offset-row');
+    await bottomOffsetRow.scrollIntoViewIfNeeded();
+    await expect(page.getByTestId('new-settings-voice-overlay-opacity-row')).toBeVisible();
+    await expect(page.getByTestId('new-settings-now-overlay-enabled-row')).toBeVisible();
+
+    await setRangeValue(page, 'new-settings-voice-overlay-bottom-offset-slider', 96);
+    await page.getByTestId('new-settings-now-overlay-enabled-switch').click();
+
+    await expect.poll(() => readLocalStorageValue(page, 'exomind:voiceOverlayBottomOffset')).toBe('96');
+    await expect.poll(() => readLocalStorageValue(page, 'exomind:nowWorkbenchOverlayEnabled')).toBe('false');
   });
 
   test('legal-support page contains only legal three items（法律与支持页仅法务三项）', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import {
   type UpdateChannel,
   type CheckInterval,
@@ -9,6 +9,11 @@ import {
   getPlatform,
   createAutoCheckController,
 } from '@/lib/services/update.service';
+import {
+  getRuntimeConfigValueSync,
+  removeRuntimeConfigValue,
+  setRuntimeConfigValue,
+} from '@/config/runtime-config-cache';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +50,21 @@ interface UpdateState {
 // ---------------------------------------------------------------------------
 
 const autoCheckController = createAutoCheckController();
+const UPDATE_SETTINGS_STORAGE_KEY = 'exomind-update-settings';
+const UPDATE_SETTINGS_CHANGED_EVENT = 'exomind:update-settings-changed';
+
+const updateSettingsStorage = createJSONStorage(() => ({
+  getItem: (key: string) => getRuntimeConfigValueSync(key),
+  setItem: (key: string, value: string) => {
+    setRuntimeConfigValue(key, value, {
+      source: UPDATE_SETTINGS_CHANGED_EVENT,
+      sourceOrigin: typeof window !== 'undefined' ? window.location?.origin : undefined,
+    });
+  },
+  removeItem: (key: string) => {
+    removeRuntimeConfigValue(key);
+  },
+}));
 
 export const useUpdateStore = create<UpdateState>()(
   persist(
@@ -135,7 +155,8 @@ export const useUpdateStore = create<UpdateState>()(
       },
     }),
     {
-      name: 'exomind-update-settings',
+      name: UPDATE_SETTINGS_STORAGE_KEY,
+      storage: updateSettingsStorage,
       // 只持久化设置项和上次检查时间
       partialize: (state) => ({
         channel: state.channel,

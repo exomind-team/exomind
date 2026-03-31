@@ -49,6 +49,7 @@ import {
 } from '@/ui/app/components/TaskDagDetailPanel';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { ensureNodeVisible, useTaskDagKeyboard } from '@/ui/app/hooks/useTaskDagKeyboard';
+import { useEffectAfterMount } from '@/ui/app/hooks/useEffectAfterMount';
 import { TaskDagModeSelector, type TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import {
@@ -62,6 +63,36 @@ import {
   subscribeTaskDagPanSpeedChanges,
   subscribeTaskDagZoomSpeedChanges,
 } from '@/config/task-dag-keyboard-preferences';
+import {
+  getTaskDagBackgroundMode as readStoredBackgroundMode,
+  getTaskDagDirection as readStoredDagDirection,
+  getTaskDagImmersive as readStoredImmersive,
+  getTaskDagMode as readStoredDagMode,
+  TASK_DAG_BACKGROUND_STORAGE_KEY,
+  TASK_DAG_DIRECTION_STORAGE_KEY,
+  TASK_DAG_HIDE_TERMINAL_STORAGE_KEY,
+  TASK_DAG_IMMERSIVE_STORAGE_KEY,
+  TASK_DAG_MODE_STORAGE_KEY,
+  TASK_DAG_SEARCH_DRAFT_STORAGE_KEY,
+  TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY,
+  TASK_DAG_VIEWPORT_STORAGE_KEY,
+  TASK_DAG_VISIBILITY_STORAGE_KEY,
+  getTaskDagSearchDraft as readStoredSearchDraft,
+  getTaskDagSearchOptions as readStoredSearchOptions,
+  getTaskDagTerminalFilterMode as readStoredTerminalFilterMode,
+  getTaskDagViewport as readStoredDagViewport,
+  getTaskDagVisibility as readStoredDagVisibility,
+  setTaskDagBackgroundMode as persistTaskDagBackgroundMode,
+  setTaskDagDirection as persistTaskDagDirection,
+  setTaskDagImmersive as persistTaskDagImmersive,
+  setTaskDagMode as persistTaskDagMode,
+  setTaskDagSearchDraft as persistTaskDagSearchDraft,
+  setTaskDagSearchOptions as persistTaskDagSearchOptions,
+  setTaskDagTerminalFilterMode as persistTaskDagTerminalFilterMode,
+  setTaskDagViewport as writeStoredDagViewport,
+  setTaskDagVisibility as persistTaskDagVisibility,
+  type TaskDagViewportSurface,
+} from '@/config/task-dag-preferences';
 import {
   buildVisibleTaskDagFlow,
   TASK_DAG_NODE_HEIGHT,
@@ -87,21 +118,7 @@ type QuickCreateDependencyContext = {
   direction: 'upstream' | 'downstream';
 } | null;
 
-const TASK_DAG_MODE_STORAGE_KEY = 'exomind:dag-mode';
-const TASK_DAG_DIRECTION_STORAGE_KEY = 'exomind:dag-direction';
-const TASK_DAG_HIDE_TERMINAL_KEY = 'exomind:dag-hide-terminal';
-const TASK_DAG_BACKGROUND_KEY = 'exomind:dag-background-mode';
-const TASK_DAG_IMMERSIVE_KEY = 'exomind:dag-immersive';
-const TASK_DAG_VIEWPORT_KEY = 'exomind:dag-viewport';
-const TASK_DAG_SEARCH_DRAFT_KEY = 'exomind:dag-search-draft';
-const TASK_DAG_SEARCH_OPTIONS_KEY = 'exomind:dag-search-options';
-const TASK_DAG_VISIBILITY_KEY = 'exomind:dag-visibility';
 const TASK_DAG_EXECUTE_DEBUG_TAG = '[TaskDag][ExecuteDebug]';
-const DEFAULT_TASK_DAG_SEARCH_OPTIONS: TaskDagSearchOptions = {
-  includeDescription: false,
-  fuzzy: true,
-  filterMode: false,
-};
 const TASK_DAG_MODE_ORDER: TaskDagMode[] = ['browse', 'connect', 'execute'];
 const TASK_DAG_BACKGROUND_DOT_COLOR_LIGHT = 'rgba(168,162,158,0.42)';
 const TASK_DAG_BACKGROUND_LINE_COLOR_LIGHT = 'rgba(168,162,158,0.24)';
@@ -388,183 +405,6 @@ function buildDownstreamDependencies(taskId: string, tasks: TaskNode[]): TaskDag
       title: task.title,
       type: dependency.type,
     })));
-}
-
-function readStoredDagMode(): TaskDagMode {
-  if (typeof window === 'undefined') return 'browse';
-
-  try {
-    const saved = window.localStorage.getItem(TASK_DAG_MODE_STORAGE_KEY);
-    if (saved === 'connect' || saved === 'execute') {
-      return saved;
-    }
-  } catch {
-    // Ignore storage failures and fall back to browse mode.
-  }
-
-  return 'browse';
-}
-
-function readStoredDagDirection(): DagDirection {
-  if (typeof window === 'undefined') return 'auto';
-
-  try {
-    const saved = window.localStorage.getItem(TASK_DAG_DIRECTION_STORAGE_KEY);
-    if (saved === 'TB' || saved === 'LR' || saved === 'auto') {
-      return saved;
-    }
-  } catch {
-    // Ignore storage failures and fall back to auto direction.
-  }
-
-  return 'auto';
-}
-
-function readStoredTerminalFilterMode(): TaskDagTerminalFilterMode {
-  if (typeof window === 'undefined') return 'show';
-
-  try {
-    const saved = window.localStorage.getItem(TASK_DAG_HIDE_TERMINAL_KEY);
-    if (saved === 'show' || saved === 'smart' || saved === 'hide') {
-      return saved;
-    }
-    if (saved === '1' || saved === 'true') {
-      return 'smart';
-    }
-    if (saved === '0' || saved === 'false') {
-      return 'show';
-    }
-  } catch {
-    return 'show';
-  }
-
-  return 'show';
-}
-
-function readStoredBackgroundMode(): TaskDagBackgroundMode {
-  if (typeof window === 'undefined') {
-    return 'dots';
-  }
-
-  try {
-    const saved = window.localStorage.getItem(TASK_DAG_BACKGROUND_KEY);
-    if (saved === 'none' || saved === 'dots' || saved === 'lines') {
-      return saved;
-    }
-  } catch {
-    return 'dots';
-  }
-
-  return 'dots';
-}
-
-function readStoredImmersive(): boolean {
-  if (typeof window === 'undefined') return false;
-
-  try {
-    return window.localStorage.getItem(TASK_DAG_IMMERSIVE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function readStoredSearchOptions(): TaskDagSearchOptions {
-  if (typeof window === 'undefined') {
-    return DEFAULT_TASK_DAG_SEARCH_OPTIONS;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(TASK_DAG_SEARCH_OPTIONS_KEY);
-    if (!raw) {
-      return DEFAULT_TASK_DAG_SEARCH_OPTIONS;
-    }
-
-    const parsed = JSON.parse(raw) as Partial<TaskDagSearchOptions>;
-    return {
-      ...DEFAULT_TASK_DAG_SEARCH_OPTIONS,
-      ...parsed,
-    };
-  } catch {
-    return DEFAULT_TASK_DAG_SEARCH_OPTIONS;
-  }
-}
-
-function readStoredSearchDraft(): string {
-  if (typeof window === 'undefined') {
-    return '';
-  }
-
-  try {
-    return window.localStorage.getItem(TASK_DAG_SEARCH_DRAFT_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function readStoredDagVisibility(): TaskDagVisibilityState {
-  if (typeof window === 'undefined') {
-    return EMPTY_TASK_DAG_VISIBILITY_STATE;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(TASK_DAG_VISIBILITY_KEY);
-    if (!raw) {
-      return EMPTY_TASK_DAG_VISIBILITY_STATE;
-    }
-
-    const parsed = JSON.parse(raw) as Partial<TaskDagVisibilityState>;
-    return {
-      collapsedUpstreamOf: Array.isArray(parsed.collapsedUpstreamOf)
-        ? parsed.collapsedUpstreamOf.filter((value): value is string => typeof value === 'string')
-        : [],
-      collapsedDownstreamOf: Array.isArray(parsed.collapsedDownstreamOf)
-        ? parsed.collapsedDownstreamOf.filter((value): value is string => typeof value === 'string')
-        : [],
-    };
-  } catch {
-    return EMPTY_TASK_DAG_VISIBILITY_STATE;
-  }
-}
-
-function readStoredDagViewport(direction: DagDirection): { x: number; y: number; zoom: number } | null {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const raw = window.localStorage.getItem(TASK_DAG_VIEWPORT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { x?: unknown; y?: unknown; zoom?: unknown; direction?: unknown };
-    if (parsed.direction !== direction) {
-      return null;
-    }
-    if (
-      typeof parsed.x !== 'number'
-      || typeof parsed.y !== 'number'
-      || typeof parsed.zoom !== 'number'
-      || !Number.isFinite(parsed.x)
-      || !Number.isFinite(parsed.y)
-      || !Number.isFinite(parsed.zoom)
-    ) {
-      return null;
-    }
-    return { x: parsed.x, y: parsed.y, zoom: parsed.zoom };
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredDagViewport(direction: DagDirection, viewport: { x: number; y: number; zoom: number }): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(TASK_DAG_VIEWPORT_KEY, JSON.stringify({
-      direction,
-      x: viewport.x,
-      y: viewport.y,
-      zoom: viewport.zoom,
-    }));
-  } catch {
-    // Ignore storage failures and keep viewport only in memory.
-  }
 }
 
 function resolveConnectTypeFromEvent(event: unknown): DagConnectType {
@@ -981,68 +821,36 @@ export function TaskDagPage() {
     }
   }, [location.pathname, location.searchStr]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TASK_DAG_MODE_STORAGE_KEY, mode);
-    } catch {
-      // Ignore storage failures and keep mode in-memory only.
-    }
+  useEffectAfterMount(() => {
+    persistTaskDagMode(mode);
   }, [mode]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TASK_DAG_DIRECTION_STORAGE_KEY, dagDirection);
-    } catch {
-      // Ignore storage failures and keep direction in-memory only.
-    }
+  useEffectAfterMount(() => {
+    persistTaskDagDirection(dagDirection);
   }, [dagDirection]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TASK_DAG_HIDE_TERMINAL_KEY, terminalFilterMode);
-    } catch {
-      // Ignore storage failures and keep hide-terminal state in-memory only.
-    }
+  useEffectAfterMount(() => {
+    persistTaskDagTerminalFilterMode(terminalFilterMode);
   }, [terminalFilterMode]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TASK_DAG_BACKGROUND_KEY, backgroundMode);
-    } catch {
-      // Ignore storage failures and keep background state in-memory only.
-    }
+  useEffectAfterMount(() => {
+    persistTaskDagBackgroundMode(backgroundMode);
   }, [backgroundMode]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TASK_DAG_IMMERSIVE_KEY, immersive ? '1' : '0');
-    } catch {
-      // Ignore storage failures and keep immersive state in-memory only.
-    }
+  useEffectAfterMount(() => {
+    persistTaskDagImmersive(immersive);
   }, [immersive]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TASK_DAG_SEARCH_OPTIONS_KEY, JSON.stringify(searchOptions));
-    } catch {
-      // Ignore storage failures and keep search options in-memory only.
-    }
+  useEffectAfterMount(() => {
+    persistTaskDagSearchOptions(searchOptions);
   }, [searchOptions]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TASK_DAG_SEARCH_DRAFT_KEY, searchDraft);
-    } catch {
-      // Ignore storage failures and keep search draft in-memory only.
-    }
+  useEffectAfterMount(() => {
+    persistTaskDagSearchDraft(searchDraft);
   }, [searchDraft]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TASK_DAG_VISIBILITY_KEY, JSON.stringify(dagVisibility));
-    } catch {
-      // Ignore storage failures and keep visibility state in-memory only.
-    }
+  useEffectAfterMount(() => {
+    persistTaskDagVisibility(dagVisibility);
   }, [dagVisibility]);
 
   useEffect(() => {
@@ -1175,6 +983,59 @@ export function TaskDagPage() {
 
   useEffect(() => subscribeTaskDagPanSpeedChanges(setPanSpeed), []);
   useEffect(() => subscribeTaskDagZoomSpeedChanges(setZoomSpeed), []);
+
+  const viewportSurface: TaskDagViewportSurface = isDesktop ? 'desktop' : 'mobile';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return () => {};
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      switch (event.key) {
+        case TASK_DAG_MODE_STORAGE_KEY:
+          setMode(readStoredDagMode());
+          return;
+        case TASK_DAG_DIRECTION_STORAGE_KEY:
+          setDagDirection(readStoredDagDirection());
+          return;
+        case TASK_DAG_HIDE_TERMINAL_STORAGE_KEY:
+          setTerminalFilterMode(readStoredTerminalFilterMode());
+          return;
+        case TASK_DAG_BACKGROUND_STORAGE_KEY:
+          setBackgroundMode(readStoredBackgroundMode());
+          return;
+        case TASK_DAG_IMMERSIVE_STORAGE_KEY:
+          setImmersive(readStoredImmersive());
+          return;
+        case TASK_DAG_SEARCH_DRAFT_STORAGE_KEY:
+          setSearchDraft(readStoredSearchDraft());
+          return;
+        case TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY:
+          setSearchOptions(readStoredSearchOptions());
+          return;
+        case TASK_DAG_VISIBILITY_STORAGE_KEY:
+          setDagVisibility(readStoredDagVisibility());
+          return;
+        case TASK_DAG_VIEWPORT_STORAGE_KEY: {
+          const nextViewport = readStoredDagViewport(dagDirection, viewportSurface);
+          if (!nextViewport) {
+            return;
+          }
+          hasAppliedInitialViewportRef.current = true;
+          flowInstanceRef.current?.setViewport(nextViewport);
+          return;
+        }
+        default:
+          return;
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [dagDirection, viewportSurface]);
 
   const resolvedDirection = useMemo(
     () => resolveDagDirection(dagDirection, isDesktop),
@@ -1448,7 +1309,7 @@ export function TaskDagPage() {
     }
 
     hasAppliedInitialViewportRef.current = true;
-    const storedViewport = readStoredDagViewport(dagDirection);
+    const storedViewport = readStoredDagViewport(dagDirection, viewportSurface);
     if (!storedViewport) {
       return;
     }
@@ -1464,14 +1325,14 @@ export function TaskDagPage() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [dagDirection, flowGraph.nodes.length]);
+  }, [dagDirection, flowGraph.nodes.length, viewportSurface]);
 
   useEffect(() => () => {
     const viewport = flowInstanceRef.current?.getViewport();
     if (viewport) {
-      writeStoredDagViewport(dagDirection, viewport);
+      writeStoredDagViewport(dagDirection, viewport, viewportSurface);
     }
-  }, [dagDirection]);
+  }, [dagDirection, viewportSurface]);
 
   const toggleCollapse = (direction: 'upstream' | 'downstream', nodeId: string) => {
     setDagVisibility((prev) => {
@@ -2059,7 +1920,7 @@ export function TaskDagPage() {
               });
               if (flowGraph.nodes.length > 0 && !hasAppliedInitialViewportRef.current) {
                 hasAppliedInitialViewportRef.current = true;
-                const storedViewport = readStoredDagViewport(dagDirection);
+                const storedViewport = readStoredDagViewport(dagDirection, viewportSurface);
                 if (storedViewport) {
                   debugTaskDagExecute('viewport:setViewport:on-init-restore', {
                     direction: dagDirection,
@@ -2078,7 +1939,7 @@ export function TaskDagPage() {
                   viewport,
                   layoutSummary,
                 });
-                writeStoredDagViewport(dagDirection, viewport);
+                writeStoredDagViewport(dagDirection, viewport, viewportSurface);
               }
             }}
             onPaneClick={(event) => {

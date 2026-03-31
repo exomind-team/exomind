@@ -1,3 +1,4 @@
+import { createConfigModule } from './config-factory';
 import {
   DEFAULT_FOCUS_BGM_PRESET_ID,
   getFocusBgmPresetById,
@@ -108,41 +109,31 @@ function normalizeFocusBgmPreferences(value: unknown): FocusBgmPreferences {
 }
 
 export function getFocusBgmPreferences(): FocusBgmPreferences {
-  if (typeof window === 'undefined') {
+  return focusBgmPreferencesModule.get();
+}
+
+function parseStoredFocusBgmPreferences(rawValue: string | null | undefined): FocusBgmPreferences {
+  if (!rawValue) {
     return DEFAULT_FOCUS_BGM_PREFERENCES;
   }
-
   try {
-    const raw = window.localStorage.getItem(FOCUS_BGM_PREFERENCES_STORAGE_KEY);
-    if (!raw) {
-      return DEFAULT_FOCUS_BGM_PREFERENCES;
-    }
-
-    return normalizeFocusBgmPreferences(JSON.parse(raw));
+    return normalizeFocusBgmPreferences(JSON.parse(rawValue));
   } catch {
     return DEFAULT_FOCUS_BGM_PREFERENCES;
   }
 }
 
+const focusBgmPreferencesModule = createConfigModule<FocusBgmPreferences>({
+  storageKey: FOCUS_BGM_PREFERENCES_STORAGE_KEY,
+  eventName: FOCUS_BGM_PREFERENCES_CHANGED_EVENT,
+  defaultValue: DEFAULT_FOCUS_BGM_PREFERENCES,
+  normalize: parseStoredFocusBgmPreferences,
+  serialize: (value) => JSON.stringify(normalizeFocusBgmPreferences(value)),
+  persistMode: 'runtime-preferred',
+});
+
 export function setFocusBgmPreferences(preferences: FocusBgmPreferences): FocusBgmPreferences {
-  if (typeof window === 'undefined') {
-    return normalizeFocusBgmPreferences(preferences);
-  }
-
-  const normalized = normalizeFocusBgmPreferences(preferences);
-  try {
-    window.localStorage.setItem(
-      FOCUS_BGM_PREFERENCES_STORAGE_KEY,
-      JSON.stringify(normalized),
-    );
-    window.dispatchEvent(new CustomEvent(FOCUS_BGM_PREFERENCES_CHANGED_EVENT, {
-      detail: { value: normalized },
-    }));
-  } catch {
-    // Ignore localStorage write failures（忽略本地存储失败）
-  }
-
-  return normalized;
+  return focusBgmPreferencesModule.set(preferences);
 }
 
 export function updateFocusBgmPreferences(
@@ -157,28 +148,5 @@ export function updateFocusBgmPreferences(
 export function subscribeFocusBgmPreferencesChanges(
   listener: (preferences: FocusBgmPreferences) => void,
 ): () => void {
-  if (typeof window === 'undefined') {
-    return () => {};
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key !== FOCUS_BGM_PREFERENCES_STORAGE_KEY) {
-      return;
-    }
-
-    listener(event.newValue ? normalizeFocusBgmPreferences(JSON.parse(event.newValue)) : DEFAULT_FOCUS_BGM_PREFERENCES);
-  };
-
-  const handleCustomEvent = (event: Event) => {
-    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-    listener(normalizeFocusBgmPreferences(detail?.value));
-  };
-
-  window.addEventListener('storage', handleStorage);
-  window.addEventListener(FOCUS_BGM_PREFERENCES_CHANGED_EVENT, handleCustomEvent);
-
-  return () => {
-    window.removeEventListener('storage', handleStorage);
-    window.removeEventListener(FOCUS_BGM_PREFERENCES_CHANGED_EVENT, handleCustomEvent);
-  };
+  return focusBgmPreferencesModule.subscribe(listener);
 }

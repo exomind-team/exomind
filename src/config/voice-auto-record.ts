@@ -8,6 +8,7 @@ const voiceAutoRecordModule = createConfigModule<boolean>({
   defaultValue: true,
   normalize: (rawValue) => rawValue !== '0' && rawValue !== 'false',
   serialize: (value) => (value ? '1' : '0'),
+  persistMode: 'runtime-preferred',
 });
 
 export function getVoiceAutoRecordEnabled(): boolean {
