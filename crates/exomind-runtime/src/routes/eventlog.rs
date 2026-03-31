@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tokio::time::{Duration, Instant};
 
 use crate::AppState;
-use crate::eventlog::{EventListFilter, EventRecord, MirrorStatus, sanitize_user_id};
+use crate::eventlog::{EventListFilter, EventRecord, sanitize_user_id};
 use crate::signal::types::SignalEvent;
 
 const EVENTLOG_REVISION_HEADER: &str = "x-exomind-eventlog-revision";
@@ -423,30 +423,6 @@ async fn clear_events(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// GET /eventlog/mirror-status — return mirror synchronisation status.
-async fn mirror_status_handler(
-    State(state): State<AppState>,
-    Query(query): Query<EventLogQuery>,
-) -> Result<Json<MirrorStatus>, (StatusCode, Json<ErrorResponse>)> {
-    let status = state
-        .eventlog_store
-        .mirror_status(query.user_id.as_deref())
-        .map_err(internal_error)?;
-    Ok(Json(status))
-}
-
-/// POST /eventlog/rebuild — rebuild the markdown mirror and return status.
-async fn rebuild_handler(
-    State(state): State<AppState>,
-    Query(query): Query<EventLogQuery>,
-) -> Result<Json<MirrorStatus>, (StatusCode, Json<ErrorResponse>)> {
-    let status = state
-        .eventlog_store
-        .rebuild_markdown(query.user_id.as_deref())
-        .map_err(internal_error)?;
-    Ok(Json(status))
-}
-
 async fn export_eventlog_json(
     State(state): State<AppState>,
     Query(query): Query<EventLogQuery>,
@@ -539,10 +515,6 @@ pub fn router() -> Router<AppState> {
         .route("/eventlog/backup/sqlite", get(export_eventlog_sqlite))
         .route("/eventlog/import/json", post(import_eventlog_json))
         .route("/eventlog/import/sqlite", post(import_eventlog_sqlite))
-        // Mirror sub-routes use a distinct prefix to avoid conflict with
-        // the dynamic `:id` capture below.
-        .route("/eventlog/mirror/status", get(mirror_status_handler))
-        .route("/eventlog/mirror/rebuild", post(rebuild_handler))
         .route("/eventlog/events/:id", get(get_event))
 }
 
@@ -1317,86 +1289,6 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let events: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(events.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn mirror_status_route() {
-        let dir = tempdir().unwrap();
-        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
-        let state = test_state_with_eventlog(store);
-        let app = test_router(state);
-
-        // Append an event first.
-        let _ = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/eventlog")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"id":"ms1","timestamp":5000,"content":"mirror test","tags":["note"]}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/eventlog/mirror/status")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        let status: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(status["totalEvents"], 1);
-    }
-
-    #[tokio::test]
-    async fn rebuild_route() {
-        let dir = tempdir().unwrap();
-        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
-        let state = test_state_with_eventlog(store);
-        let app = test_router(state);
-
-        // Append.
-        let _ = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/eventlog")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"id":"rb1","timestamp":9000,"content":"rebuild test","tags":[]}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/eventlog/mirror/rebuild")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        let status: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(status["totalEvents"], 1);
-        assert_eq!(status["needsRebuild"], false);
     }
 
     #[tokio::test]
