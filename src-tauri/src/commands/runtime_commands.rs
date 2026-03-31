@@ -129,6 +129,12 @@ struct RuntimeTargetModePersisted {
     target_mode: RuntimeTargetMode,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeExternalAddressPersisted {
+    address: String,
+}
+
 impl RuntimeNetworkMode {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -182,6 +188,12 @@ fn runtime_target_mode_path(app_data_dir: &Path) -> PathBuf {
         .join("runtime-target-mode.json")
 }
 
+fn runtime_external_address_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir
+        .join("settings")
+        .join("runtime-external-address.json")
+}
+
 fn load_runtime_network_mode_from_path(path: &Path) -> Result<RuntimeNetworkMode, String> {
     match std::fs::read_to_string(path) {
         Ok(raw) => serde_json::from_str::<RuntimeNetworkModePersisted>(&raw)
@@ -228,6 +240,83 @@ fn save_runtime_target_mode_to_path(path: &Path, mode: RuntimeTargetMode) -> Res
         .map_err(|error| format!("failed to write runtime target mode file: {error}"))
 }
 
+fn normalize_runtime_external_address(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("runtime external address is required".to_string());
+    }
+    if trimmed.contains("://")
+        || trimmed.contains('/')
+        || trimmed.contains('?')
+        || trimmed.contains('#')
+    {
+        return Err("invalid runtime external address format".to_string());
+    }
+
+    let split_index = trimmed
+        .rfind(':')
+        .ok_or_else(|| "invalid runtime external address format".to_string())?;
+    if split_index == 0 || split_index >= trimmed.len() - 1 {
+        return Err("invalid runtime external address format".to_string());
+    }
+
+    let host_raw = trimmed[..split_index].trim();
+    let port_raw = trimmed[split_index + 1..].trim();
+    let host = if host_raw.starts_with('[') && host_raw.ends_with(']') {
+        host_raw[1..host_raw.len() - 1].trim()
+    } else {
+        host_raw
+    };
+
+    if host.is_empty() || !is_valid_host(host) {
+        return Err("invalid runtime external host".to_string());
+    }
+
+    let port = port_raw
+        .parse::<u16>()
+        .map_err(|_| "invalid runtime external port".to_string())?;
+    if port == 0 {
+        return Err("invalid runtime external port".to_string());
+    }
+
+    let formatted_host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    Ok(format!("{formatted_host}:{port}"))
+}
+
+fn load_runtime_external_address_from_path(path: &Path) -> Result<String, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => {
+            let parsed = serde_json::from_str::<RuntimeExternalAddressPersisted>(&raw)
+                .map_err(|error| format!("failed to parse runtime external address file: {error}"))?;
+            normalize_runtime_external_address(&parsed.address)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(format!("127.0.0.1:{}", DEFAULT_RT_PORT))
+        }
+        Err(error) => Err(format!("failed to read runtime external address file: {error}")),
+    }
+}
+
+fn save_runtime_external_address_to_path(path: &Path, address: &str) -> Result<String, String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create runtime settings dir: {error}"))?;
+    }
+
+    let normalized = normalize_runtime_external_address(address)?;
+    let payload = serde_json::to_string_pretty(&RuntimeExternalAddressPersisted {
+        address: normalized.clone(),
+    })
+    .map_err(|error| format!("failed to serialize runtime external address: {error}"))?;
+    std::fs::write(path, payload)
+        .map_err(|error| format!("failed to write runtime external address file: {error}"))?;
+    Ok(normalized)
+}
+
 pub fn load_persisted_runtime_network_mode(app: &AppHandle) -> Result<RuntimeNetworkMode, String> {
     let app_data_dir = resolve_instance_app_data_dir(app)?;
     load_runtime_network_mode_from_path(&runtime_network_mode_path(&app_data_dir))
@@ -236,6 +325,14 @@ pub fn load_persisted_runtime_network_mode(app: &AppHandle) -> Result<RuntimeNet
 pub fn load_persisted_runtime_target_mode(app: &AppHandle) -> Result<RuntimeTargetMode, String> {
     let app_data_dir = resolve_instance_app_data_dir(app)?;
     load_runtime_target_mode_from_path(&runtime_target_mode_path(&app_data_dir))
+}
+
+pub fn load_persisted_runtime_external_address(app: &AppHandle) -> Result<String, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    load_runtime_external_address_from_path(&runtime_external_address_path(&app_data_dir))
 }
 
 fn save_persisted_runtime_network_mode(
@@ -254,6 +351,17 @@ fn save_persisted_runtime_target_mode(
     let app_data_dir = resolve_instance_app_data_dir(app)?;
     save_runtime_target_mode_to_path(&runtime_target_mode_path(&app_data_dir), mode)?;
     Ok(mode)
+}
+
+fn save_persisted_runtime_external_address(
+    app: &AppHandle,
+    address: &str,
+) -> Result<String, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    save_runtime_external_address_to_path(&runtime_external_address_path(&app_data_dir), address)
 }
 
 fn lock_or_error<'a>(
@@ -828,6 +936,22 @@ pub fn runtime_target_mode_set(app: AppHandle, mode: String) -> Result<String, S
 }
 
 #[tauri::command]
+pub fn runtime_target_mode_get(app: AppHandle) -> Result<String, String> {
+    let mode = load_persisted_runtime_target_mode(&app)?;
+    Ok(mode.as_str().to_string())
+}
+
+#[tauri::command]
+pub fn runtime_external_address_set(app: AppHandle, address: String) -> Result<String, String> {
+    save_persisted_runtime_external_address(&app, &address)
+}
+
+#[tauri::command]
+pub fn runtime_external_address_get(app: AppHandle) -> Result<String, String> {
+    load_persisted_runtime_external_address(&app)
+}
+
+#[tauri::command]
 pub fn runtime_service_reachable_address(
     state: State<'_, Arc<RuntimeProcessState>>,
     remote_host: String,
@@ -1011,6 +1135,36 @@ mod tests {
         let loaded = super::load_runtime_target_mode_from_path(&path)
             .expect("missing runtime target mode file should fall back");
         assert_eq!(loaded, super::RuntimeTargetMode::Embedded);
+    }
+
+    #[test]
+    fn runtime_external_address_file_roundtrip() {
+        let temp_dir = std::env::temp_dir()
+            .join(format!("exomind-rt-external-address-{}", uuid::Uuid::new_v4()));
+        let path = temp_dir.join("runtime-external-address.json");
+
+        let saved = super::save_runtime_external_address_to_path(&path, "192.168.1.48:9124")
+            .expect("runtime external address should persist");
+        assert_eq!(saved, "192.168.1.48:9124");
+
+        let loaded = super::load_runtime_external_address_from_path(&path)
+            .expect("runtime external address should load");
+        assert_eq!(loaded, "192.168.1.48:9124");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn missing_runtime_external_address_file_defaults_to_loopback_rt_port() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "exomind-rt-external-address-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let path = temp_dir.join("missing-runtime-external-address.json");
+
+        let loaded = super::load_runtime_external_address_from_path(&path)
+            .expect("missing runtime external address file should fall back");
+        assert_eq!(loaded, format!("127.0.0.1:{}", super::DEFAULT_RT_PORT));
     }
 
     #[test]

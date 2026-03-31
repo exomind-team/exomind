@@ -27,10 +27,11 @@ use commands::now_workbench_overlay_commands::{
 use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_peer_dial_address,
     load_persisted_runtime_network_mode, load_persisted_runtime_target_mode,
-    runtime_network_mode_set, runtime_service_reachable_address, runtime_service_start,
-    runtime_service_status, runtime_service_stop, runtime_target_mode_set,
-    signal_publish_fast, sync_android_runtime_keepalive, RuntimeProcessState,
-    RuntimeTargetMode,
+    runtime_external_address_get,
+    runtime_external_address_set, runtime_network_mode_set,
+    runtime_service_reachable_address, runtime_service_start, runtime_service_status,
+    runtime_service_stop, runtime_target_mode_get, runtime_target_mode_set, signal_publish_fast,
+    sync_android_runtime_keepalive, RuntimeProcessState, RuntimeTargetMode,
 };
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, foreground_window_get, main_window_shortcut_get,
@@ -344,6 +345,9 @@ pub fn run() {
             runtime_service_status,
             runtime_network_mode_set,
             runtime_target_mode_set,
+            runtime_target_mode_get,
+            runtime_external_address_set,
+            runtime_external_address_get,
             runtime_service_reachable_address,
             runtime_service_peer_dial_address,
             signal_publish_fast,

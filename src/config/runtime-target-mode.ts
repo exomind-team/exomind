@@ -7,8 +7,10 @@ import {
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   getEmbeddedRuntimeNetworkMode,
+  getRuntimeExternalAddress,
   getRuntimeTargetMode,
   resolveEmbeddedRuntimeBindHost,
+  setRuntimeExternalAddress,
   setRuntimeTargetMode,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
@@ -17,6 +19,14 @@ function normalizeRuntimeTargetMode(
   mode: string | null | undefined,
 ): RuntimeTargetMode {
   return mode === 'external' ? 'external' : 'embedded';
+}
+
+function normalizeRuntimeExternalAddress(address: string | null | undefined): string | null {
+  if (typeof address !== 'string') {
+    return null;
+  }
+  const trimmed = address.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export async function setPersistedRuntimeTargetMode(
@@ -57,4 +67,41 @@ export async function setPersistedRuntimeTargetMode(
     setRuntimeTargetMode(previousMode);
     throw error instanceof Error ? error : new Error(String(error));
   }
+}
+
+export async function setPersistedRuntimeExternalAddress(address: string): Promise<string> {
+  const previousAddress = getRuntimeExternalAddress();
+
+  setRuntimeExternalAddress(address);
+
+  if (!await isTauri()) {
+    return getRuntimeExternalAddress();
+  }
+
+  try {
+    const persistedAddress = await invoke<string>('runtime_external_address_set', { address });
+    setRuntimeExternalAddress(persistedAddress);
+    return persistedAddress;
+  } catch (error) {
+    setRuntimeExternalAddress(previousAddress);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export async function hydratePersistedRuntimeTargetConfig(): Promise<void> {
+  if (!await isTauri()) {
+    return;
+  }
+
+  const [persistedMode, persistedAddress] = await Promise.all([
+    invoke<string>('runtime_target_mode_get').catch(() => null),
+    invoke<string>('runtime_external_address_get').catch(() => null),
+  ]);
+
+  const normalizedAddress = normalizeRuntimeExternalAddress(persistedAddress);
+  if (normalizedAddress) {
+    setRuntimeExternalAddress(normalizedAddress);
+  }
+
+  setRuntimeTargetMode(normalizeRuntimeTargetMode(persistedMode));
 }

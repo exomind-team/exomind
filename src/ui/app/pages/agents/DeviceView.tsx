@@ -2,6 +2,7 @@ import { ChevronRight, Link2, Monitor, ShieldCheck, Wifi } from 'lucide-react';
 import type { AgentDeviceGroup, RuntimeServiceStatus } from '@/lib/types/agent-hub';
 import type { RuntimeHostSnapshot } from '@/services/runtime-manager';
 import {
+  DEFAULT_EXTERNAL_RUNTIME_PORT,
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   type EmbeddedRuntimeNetworkMode,
   type RuntimeTargetMode,
@@ -653,7 +654,7 @@ export function DeviceView({
                   data-testid="runtime-target-external-address-input"
                   value={runtimeExternalAddressDraft}
                   onChange={(event) => onRuntimeExternalAddressDraftChange(event.target.value)}
-                  placeholder="host:port（例如 127.0.0.1:1949）"
+                  placeholder={`host:port（例如 127.0.0.1:${DEFAULT_EXTERNAL_RUNTIME_PORT}）`}
                   className="h-7 flex-1 rounded border border-[#E7E5E4] bg-white px-2 text-[11px] text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
                 />
                 <button

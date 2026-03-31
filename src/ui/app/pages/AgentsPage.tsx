@@ -25,13 +25,15 @@ import {
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
   resolveEmbeddedRuntimeBindHost,
-  setRuntimeExternalAddress,
   subscribeRuntimeTargetChanges,
   type EmbeddedRuntimeNetworkMode,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
 import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
-import { setPersistedRuntimeTargetMode } from '@/config/runtime-target-mode';
+import {
+  setPersistedRuntimeExternalAddress,
+  setPersistedRuntimeTargetMode,
+} from '@/config/runtime-target-mode';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
 import { PtyTerminal } from '../components/PtyTerminal';
 import { PtySpawnDialog } from '../components/PtySpawnDialog';
@@ -1893,7 +1895,7 @@ export function AgentsPage() {
     const runtimeControlService = getRuntimeControlService();
     try {
       setRuntimeTargetError('');
-      setRuntimeExternalAddress(runtimeExternalAddressDraft);
+      await setPersistedRuntimeExternalAddress(runtimeExternalAddressDraft);
       await setPersistedRuntimeTargetMode('external');
       syncRuntimeTargetState();
       setRuntimeServiceStatus(await runtimeControlService.getStatus());

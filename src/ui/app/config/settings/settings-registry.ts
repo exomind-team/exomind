@@ -33,13 +33,13 @@ import {
 import type { SettingsContext, SettingsItem } from './settings-types';
 import {
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+  DEFAULT_EXTERNAL_RUNTIME_PORT,
   formatRuntimeTargetAddress,
   getEmbeddedRuntimeNetworkMode,
   getRuntimeExternalAddress,
   getRuntimeTargetMode,
   isDesktopOperatingSystem,
   parseRuntimeAddress,
-  setRuntimeExternalAddress,
   subscribeRuntimeTargetChanges,
   subscribeEmbeddedRuntimeNetworkModeChanges,
 } from '@/config/runtime-target';
@@ -232,7 +232,10 @@ import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legac
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import { openExternalUrl } from '@/lib/utils/open-external';
 import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
-import { setPersistedRuntimeTargetMode } from '@/config/runtime-target-mode';
+import {
+  setPersistedRuntimeExternalAddress,
+  setPersistedRuntimeTargetMode,
+} from '@/config/runtime-target-mode';
 import {
   DataTransferSetting,
   DevInstanceDiagnosticsSetting,
@@ -1258,13 +1261,13 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     stringStyle: 'dialog',
     dialogFieldKind: 'plain',
     dialogInputType: 'text',
-    placeholder: '192.168.1.23:1949',
+    placeholder: `192.168.1.23:${DEFAULT_EXTERNAL_RUNTIME_PORT}`,
     dialogTitle: '设置 RT 地址',
-    dialogDescription: '填写你想连接的那台设备地址，例如 192.168.1.23:1949。保存后，当前设备会切换到这个地址继续连接。',
+    dialogDescription: `填写你想连接的那台设备地址，例如 192.168.1.23:${DEFAULT_EXTERNAL_RUNTIME_PORT}。保存后，当前设备会切换到这个地址继续连接。`,
     get: getResolvedRuntimeExternalAddress,
     set: async (value: string) => {
       const normalized = normalizeRuntimeExternalAddress(value);
-      setRuntimeExternalAddress(normalized);
+      await setPersistedRuntimeExternalAddress(normalized);
       await setPersistedRuntimeTargetMode('external');
       return normalized;
     },
