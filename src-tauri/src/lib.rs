@@ -26,8 +26,9 @@ use commands::now_workbench_overlay_commands::{
     now_workbench_overlay_show,
 };
 use commands::runtime_commands::{
-    ensure_runtime_started, runtime_service_reachable_address, runtime_service_start,
-    runtime_service_status, runtime_service_stop, signal_publish_fast, RuntimeProcessState,
+    ensure_runtime_started, runtime_service_peer_dial_address,
+    runtime_service_reachable_address, runtime_service_start, runtime_service_status,
+    runtime_service_stop, signal_publish_fast, RuntimeProcessState,
 };
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, register_main_window_shortcut, register_voice_shortcut,
@@ -229,6 +230,7 @@ pub fn run() {
             runtime_service_stop,
             runtime_service_status,
             runtime_service_reachable_address,
+            runtime_service_peer_dial_address,
             signal_publish_fast,
             // 语音快捷键 + 悬浮窗命令
             simulate_enter,

@@ -11,6 +11,8 @@ use tokio::time::Duration;
 
 pub const MAX_HOP: u8 = 8;
 const DEDUPE_CAPACITY: usize = 4096;
+const LINK_PROOF_REQUEST_TOPIC: &str = "system.link_proof.request";
+const LINK_PROOF_ACK_TOPIC: &str = "system.link_proof.ack";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -318,6 +320,10 @@ impl MeshState {
         }
         if event.hop >= MAX_HOP {
             return false;
+        }
+
+        if is_targeted_link_proof_event_for_peer(event, peer_id) {
+            return true;
         }
 
         let targeted_by_remote_route = self
@@ -745,6 +751,18 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+fn is_targeted_link_proof_event_for_peer(event: &SignalEvent, peer_id: &str) -> bool {
+    matches!(
+        event.topic.as_str(),
+        LINK_PROOF_REQUEST_TOPIC | LINK_PROOF_ACK_TOPIC
+    ) && event
+        .payload
+        .get("target_peer_id")
+        .and_then(|value| value.as_str())
+        .map(|target_peer_id| target_peer_id == peer_id)
+        .unwrap_or(false)
+}
+
 fn load_persisted_state(path: &PathBuf) -> Option<MeshPersistedState> {
     let json = std::fs::read_to_string(path).ok()?;
     serde_json::from_str::<MeshPersistedState>(&json).ok()
@@ -783,4 +801,82 @@ fn parse_signal_event_from_block(block: &str) -> Option<SignalEvent> {
     }
 
     serde_json::from_str::<SignalEvent>(&data_lines.join("\n")).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signal::SignalPool;
+
+    fn make_peer(id: &str) -> PeerInfo {
+        PeerInfo {
+            id: id.to_string(),
+            base_url: format!("http://{id}.local:1949"),
+            enabled: true,
+            capabilities: vec![],
+            status: PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            auth_token: None,
+            inbound_secret: None,
+        }
+    }
+
+    fn make_link_proof_event(topic: &str, target_peer_id: &str) -> SignalEvent {
+        let ack_kind = if topic == "system.link_proof.ack" {
+            Some("receipt")
+        } else {
+            None
+        };
+
+        SignalEvent {
+            schema_version: 1,
+            id: uuid::Uuid::new_v4().to_string(),
+            topic: topic.to_string(),
+            ts: chrono::Utc::now().timestamp_millis() as u64,
+            source: "ui:test".to_string(),
+            origin_host_id: "host-local".to_string(),
+            hop: 0,
+            trace_id: Some("trace-link-proof".to_string()),
+            payload: serde_json::json!({
+                "proof_session_id": "proof-session-1",
+                "attempt_id": "attempt-1",
+                "initiated_by_peer_id": "host-local",
+                "target_peer_id": target_peer_id,
+                "ack_kind": ack_kind
+            }),
+        }
+    }
+
+    #[test]
+    fn streams_link_proof_events_to_target_peer_without_route_or_interest() {
+        let pool = Arc::new(SignalPool::new(None));
+        let mesh = MeshState::new("host-local".to_string(), Arc::clone(&pool), None);
+        mesh.upsert_peer(make_peer("host-phone"));
+
+        for topic in ["system.link_proof.request", "system.link_proof.ack"] {
+            let event = make_link_proof_event(topic, "host-phone");
+            assert!(
+                mesh.should_stream_event_to_peer("host-phone", &event),
+                "targeted {topic} should bypass route/interest checks（应绕过路由/兴趣检查）"
+            );
+        }
+    }
+
+    #[test]
+    fn does_not_stream_link_proof_events_to_non_target_peer_without_route_or_interest() {
+        let pool = Arc::new(SignalPool::new(None));
+        let mesh = MeshState::new("host-local".to_string(), Arc::clone(&pool), None);
+        mesh.upsert_peer(make_peer("host-phone"));
+
+        for topic in ["system.link_proof.request", "system.link_proof.ack"] {
+            let event = make_link_proof_event(topic, "host-tablet");
+            assert!(
+                !mesh.should_stream_event_to_peer("host-phone", &event),
+                "non-targeted {topic} should not leak to other peers（不应泄漏到其他节点）"
+            );
+        }
+    }
 }

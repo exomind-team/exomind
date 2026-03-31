@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react';
 import {
   formatSignalPayload,
+  formatSignalPayloadDetails,
   formatSignalTime,
   formatRelativeSignalTime,
+  isLinkProofSignalTopic,
   signalTopicTint,
 } from './agents-utils';
 import type { SignalEvent } from '@/lib/types/signal-pool';
+
+const LINK_PROOF_FILTER_VALUE = 'link-proof';
 
 export function SignalHistoryTabView({
   events,
@@ -17,12 +21,31 @@ export function SignalHistoryTabView({
   onSelectSignal: (signalId: string) => void;
 }) {
   const [topicFilter, setTopicFilter] = useState<string>('all');
-  const topicOptions = useMemo(
-    () => ['all', ...Array.from(new Set(events.map((eventItem) => eventItem.topic))).slice(0, 8)],
-    [events],
-  );
+  const topicOptions = useMemo(() => {
+    const businessTopics = Array.from(
+      new Set(
+        events
+          .filter((eventItem) => !isLinkProofSignalTopic(eventItem.topic))
+          .map((eventItem) => eventItem.topic),
+      ),
+    ).slice(0, 8);
+    const hasLinkProofEvents = events.some((eventItem) => isLinkProofSignalTopic(eventItem.topic));
+    return [
+      'all',
+      ...(hasLinkProofEvents ? [LINK_PROOF_FILTER_VALUE] : []),
+      ...businessTopics,
+    ];
+  }, [events]);
   const filteredEvents = useMemo(
-    () => (topicFilter === 'all' ? events : events.filter((eventItem) => eventItem.topic === topicFilter)),
+    () => {
+      if (topicFilter === 'all') {
+        return events;
+      }
+      if (topicFilter === LINK_PROOF_FILTER_VALUE) {
+        return events.filter((eventItem) => isLinkProofSignalTopic(eventItem.topic));
+      }
+      return events.filter((eventItem) => eventItem.topic === topicFilter);
+    },
     [events, topicFilter],
   );
 
@@ -55,7 +78,11 @@ export function SignalHistoryTabView({
                   : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'
               }`}
             >
-              {topic === 'all' ? '全部主题' : `主题 ${topic}`}
+              {topic === 'all'
+                ? '全部主题'
+                : topic === LINK_PROOF_FILTER_VALUE
+                  ? '链路验证'
+                  : `主题 ${topic}`}
             </button>
           );
         })}
@@ -68,8 +95,10 @@ export function SignalHistoryTabView({
       ) : (
         <div className="divide-y divide-[#E7E3E0] overflow-hidden rounded-[10px] border border-[#E7E3E0] bg-white dark:divide-[#292524] dark:border-[#292524] dark:bg-[#0C0A09]">
           {filteredEvents.map((eventItem) => {
-            const payloadText = formatSignalPayload(eventItem.payload);
+            const payloadText = formatSignalPayload(eventItem.payload, eventItem.topic);
+            const payloadDetailsText = formatSignalPayloadDetails(eventItem.payload);
             const tint = signalTopicTint(eventItem.topic);
+            const isSystemLinkProof = isLinkProofSignalTopic(eventItem.topic);
 
             return (
             <div
@@ -85,7 +114,17 @@ export function SignalHistoryTabView({
               >
                 <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: tint }} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">{eventItem.topic}</p>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">{eventItem.topic}</p>
+                    {isSystemLinkProof && (
+                      <span
+                        data-testid={`signal-history-system-badge-${eventItem.id}`}
+                        className="shrink-0 rounded-full bg-[#0F766E20] px-2 py-0.5 text-[10px] font-medium text-[#0F766E]"
+                      >
+                        系统信号
+                      </span>
+                    )}
+                  </div>
                   <p className="mt-1 line-clamp-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
                     {payloadText}
                   </p>
@@ -106,7 +145,7 @@ export function SignalHistoryTabView({
                   展开 payload
                 </summary>
                 <pre className="mt-2 overflow-x-auto rounded-lg bg-[#FAF7F5] p-3 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
-                  {`Payload:\n${payloadText}`}
+                  {`Payload:\n${payloadDetailsText}`}
                 </pre>
               </details>
             </div>

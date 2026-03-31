@@ -10,12 +10,15 @@ import type {
   CreateRouteRequest,
   UpdateRouteRequest,
 } from '@/lib/types/signal-pool';
-import { formatHostForUrl } from '@/config/runtime-target';
+import {
+  buildRuntimeAuthHeaders,
+  resolveRuntimeHostBaseUrl,
+} from '@/lib/utils/runtime-host-address';
 
 // ── 工具函数 ──────────────────────────────────────────────────
 
 function buildBaseUrl(host: RuntimeHostRecord): string {
-  return `http://${formatHostForUrl(host.host)}:${host.port}`;
+  return resolveRuntimeHostBaseUrl(host);
 }
 
 // ── Service ──────────────────────────────────────────────────
@@ -26,13 +29,17 @@ export interface SignalRouteServiceOptions {
 
 export class SignalRouteService {
   private readonly baseUrl: string;
+  private readonly authToken?: string;
 
   constructor(options: SignalRouteServiceOptions) {
     this.baseUrl = buildBaseUrl(options.host);
+    this.authToken = options.host.authToken;
   }
 
   async listRoutes(): Promise<SignalRoute[]> {
-    const response = await fetch(`${this.baseUrl}/signal-routes`);
+    const response = await fetch(`${this.baseUrl}/signal-routes`, {
+      headers: buildRuntimeAuthHeaders(this.authToken),
+    });
     if (!response.ok) {
       throw new Error(`listRoutes failed: HTTP ${response.status}`);
     }
@@ -42,7 +49,7 @@ export class SignalRouteService {
   async createRoute(request: CreateRouteRequest): Promise<SignalRoute> {
     const response = await fetch(`${this.baseUrl}/signal-routes`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildRuntimeAuthHeaders(this.authToken, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(request),
     });
     if (!response.ok) {
@@ -54,7 +61,7 @@ export class SignalRouteService {
   async updateRoute(id: string, updates: UpdateRouteRequest): Promise<SignalRoute> {
     const response = await fetch(`${this.baseUrl}/signal-routes/${encodeURIComponent(id)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildRuntimeAuthHeaders(this.authToken, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(updates),
     });
     if (!response.ok) {
@@ -66,6 +73,7 @@ export class SignalRouteService {
   async deleteRoute(id: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/signal-routes/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      headers: buildRuntimeAuthHeaders(this.authToken),
     });
     if (!response.ok) {
       throw new Error(`deleteRoute failed: HTTP ${response.status}`);

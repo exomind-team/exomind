@@ -17,6 +17,7 @@ import {
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   DEFAULT_EXTERNAL_RUNTIME_PORT,
+  EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
   getEmbeddedRuntimeNetworkMode,
   getPreferredEmbeddedRuntimePort,
   formatHostForUrl,
@@ -35,10 +36,19 @@ import { RouteEditPanel } from '@/components/RouteEditPanel';
 import { PtyTerminal } from '../components/PtyTerminal';
 import { PtySpawnDialog } from '../components/PtySpawnDialog';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
+import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
+import { SignalStreamService } from '@/lib/services/signal-stream.service';
+import { createRuntimeLinkProofService } from '@/lib/services/runtime-link-proof.service';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import { getActiveInteractionContextService } from '@/lib/services/active-interaction-context.service';
+import { getRuntimeMeshHostSyncService } from '@/lib/services/runtime-mesh-host-sync.service';
+import { getRuntimeMeshSyncService } from '@/lib/services/runtime-mesh-sync.service';
 import { KNOWN_AGENT_HUB_TOPICS } from '@/lib/constants/signal-topics';
-import type { SignalEvent, SignalRoute } from '@/lib/types/signal-pool';
+import type {
+  LinkProofRequestPayload,
+  SignalEvent,
+  SignalRoute,
+} from '@/lib/types/signal-pool';
 import type {
   AgentConversationMessage,
   AgentDetailData,
@@ -111,6 +121,11 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { log } from '@/lib/logger';
 import {
+  buildRuntimeAuthHeaders,
+  resolveRuntimeHostBaseUrl,
+  resolveRuntimeHostDialAddress,
+} from '@/lib/utils/runtime-host-address';
+import {
   VIEW_ITEMS,
   ADD_NODE_OPTIONS,
   TOPOLOGY_SCOPE_KEY,
@@ -123,7 +138,7 @@ import {
   mapRuntimeAgentsForHost,
   resolveRuntimeEntityId,
   extractPreferredHostId,
-  formatSignalPayload,
+  formatSignalPayloadDetails,
   formatSignalTime,
   signalTopicTint,
   signalNodeTypeBadgeLabel,
@@ -141,6 +156,95 @@ export {
   ENERGY_PHASE_COLORS,
   mapRuntimeStatusToNodeStatus,
 } from './agents/agents-utils';
+
+function inferEmbeddedRuntimeNetworkMode(
+  status: RuntimeServiceStatus | null,
+): EmbeddedRuntimeNetworkMode {
+  return status?.host === '0.0.0.0' ? 'lan' : 'local';
+}
+
+function hasExplicitEmbeddedRuntimeNetworkModePreference(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.localStorage.getItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY) !== null;
+}
+
+const LINK_PROOF_TOPIC_PREFIX = 'system.link_proof.';
+const LINK_PROOF_REQUEST_TOPIC = 'system.link_proof.request';
+const MANUAL_LINK_PROOF_ADOPTION_POLL_INTERVAL_MS = 500;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readString(payload: Record<string, unknown>, key: string): string | undefined {
+  const value = payload[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function readNumber(payload: Record<string, unknown>, key: string): number | undefined {
+  const value = payload[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function parseLinkProofRequestPayload(event: SignalEvent): LinkProofRequestPayload | null {
+  if (event.topic !== LINK_PROOF_REQUEST_TOPIC) {
+    return null;
+  }
+
+  const payload = asRecord(event.payload);
+  if (!payload) {
+    return null;
+  }
+
+  const proofSessionId = readString(payload, 'proof_session_id');
+  const attemptId = readString(payload, 'attempt_id');
+  const initiatedByPeerId = readString(payload, 'initiated_by_peer_id');
+  const targetPeerId = readString(payload, 'target_peer_id');
+  const trigger = readString(payload, 'trigger');
+  const sentAtMs = readNumber(payload, 'sent_at_ms');
+
+  if (
+    !proofSessionId
+    || !attemptId
+    || !initiatedByPeerId
+    || !targetPeerId
+    || (trigger !== 'pairing_auto' && trigger !== 'manual_retry')
+    || typeof sentAtMs !== 'number'
+  ) {
+    return null;
+  }
+
+  return {
+    proof_session_id: proofSessionId,
+    attempt_id: attemptId,
+    initiated_by_peer_id: initiatedByPeerId,
+    target_peer_id: targetPeerId,
+    trigger,
+    sent_at_ms: sentAtMs,
+  };
+}
+
+function mergeSignalHistoryEvents(...eventGroups: SignalEvent[][]): SignalEvent[] {
+  const merged = new Map<string, SignalEvent>();
+  for (const eventGroup of eventGroups) {
+    for (const eventItem of eventGroup) {
+      merged.set(eventItem.id, eventItem);
+    }
+  }
+
+  return [...merged.values()].sort((left, right) => {
+    if (right.ts !== left.ts) {
+      return right.ts - left.ts;
+    }
+    return right.id.localeCompare(left.id);
+  });
+}
 
 function TabBar({
   value,
@@ -188,6 +292,17 @@ export function AgentsPage() {
   const topologyWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref to always call the latest fetchPtyAgents from the polling interval (avoids stale closure).
   const fetchPtyAgentsRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const runtimeStartInFlightRef = useRef<Promise<void> | null>(null);
+  const autoRuntimeRebindKeyRef = useRef<string | null>(null);
+  const confirmedMeshReplayKeyRef = useRef<Set<string>>(new Set());
+  const autoAdoptedLinkProofEventIdsRef = useRef<Set<string>>(new Set());
+  const inFlightLinkProofPeerIdsRef = useRef<Set<string>>(new Set());
+  const inFlightLinkProofSessionIdsRef = useRef<Set<string>>(new Set());
+  const runtimeHostSnapshotsRef = useRef<RuntimeHostSnapshot[]>([]);
+  const runtimeServiceStatusRef = useRef<RuntimeServiceStatus | null>(null);
+  const refreshRuntimeHostsRef = useRef<(statusOverride?: RuntimeServiceStatus | null) => Promise<void>>(
+    async () => {},
+  );
   // ── Tiled view state ──
   const [tiledLayout, setTiledLayout] = useState<TiledLayout>('2x2');
   const [tiledFocusedIndex, setTiledFocusedIndex] = useState<number | null>(null);
@@ -211,6 +326,9 @@ export function AgentsPage() {
   const [runtimeHostError, setRuntimeHostError] = useState('');
   const [embeddedRuntimeNetworkMode, setEmbeddedRuntimeNetworkModeValue] = useState<EmbeddedRuntimeNetworkMode>(
     getEmbeddedRuntimeNetworkMode(),
+  );
+  const [hasExplicitEmbeddedRuntimeNetworkMode, setHasExplicitEmbeddedRuntimeNetworkMode] = useState<boolean>(
+    hasExplicitEmbeddedRuntimeNetworkModePreference(),
   );
   const [runtimeTargetModeValue, setRuntimeTargetModeValue] = useState<RuntimeTargetMode>(initialRuntimeTarget.mode);
   const [runtimeTargetAddress, setRuntimeTargetAddress] = useState(
@@ -917,7 +1035,7 @@ export function AgentsPage() {
   /** Resolve the first available RT base URL from runtime host snapshots. */
   const resolveRtBaseUrl = (): string => {
     const host = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
-    if (host) return `http://${formatHostForUrl(host.host)}:${host.port}`;
+    if (host) return resolveRuntimeHostBaseUrl(host);
     return `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`;
   };
 
@@ -952,6 +1070,22 @@ export function AgentsPage() {
     return matchedHost ?? null;
   };
 
+  const resolveRuntimeSnapshotPeerId = (snapshot: RuntimeHostSnapshot): string | undefined => (
+    snapshot.topology?.host_id ?? snapshot.host.hostId
+  );
+
+  const toLiveRuntimePeerHost = (snapshot: RuntimeHostSnapshot): RuntimeHostRecord => {
+    const livePeerId = resolveRuntimeSnapshotPeerId(snapshot);
+    if (!livePeerId || livePeerId === snapshot.host.hostId) {
+      return snapshot.host;
+    }
+
+    return {
+      ...snapshot.host,
+      hostId: livePeerId,
+    };
+  };
+
   const resolveRuntimeHostForSession = (session: SessionInfo): RuntimeHostRecord => {
     const matchedHost = resolveRuntimeHostBySourceHostId(session.source_host_id);
     if (matchedHost) return matchedHost;
@@ -961,7 +1095,7 @@ export function AgentsPage() {
   const resolveRuntimeConnectionForSession = (session: SessionInfo) => {
     const host = resolveRuntimeHostForSession(session);
     return {
-      rtBaseUrl: `http://${formatHostForUrl(host.host)}:${host.port}`,
+      rtBaseUrl: resolveRuntimeHostBaseUrl(host),
       authToken: host.authToken ?? resolveRtAuthToken(),
     };
   };
@@ -970,7 +1104,7 @@ export function AgentsPage() {
     const matchedHost = resolveRuntimeHostBySourceHostId(hostId);
     if (matchedHost) {
       return {
-        rtBaseUrl: `http://${formatHostForUrl(matchedHost.host)}:${matchedHost.port}`,
+        rtBaseUrl: resolveRuntimeHostBaseUrl(matchedHost),
         authToken: matchedHost.authToken ?? resolveRtAuthToken(),
       };
     }
@@ -984,23 +1118,115 @@ export function AgentsPage() {
     const sortedHosts = sortRouteHostsByPriority(runtimeHostSnapshots);
     if (sortedHosts.length > 0) {
       return sortedHosts.map((snapshot) => ({
-        id: snapshot.host.hostId ?? snapshot.topology?.host_id ?? snapshot.host.id,
-        rtBaseUrl: `http://${formatHostForUrl(snapshot.host.host)}:${snapshot.host.port}`,
-        authToken: snapshot.host.authToken,
+        id: resolveRuntimeSnapshotPeerId(snapshot) ?? snapshot.host.id,
+        rtBaseUrl: resolveRuntimeHostBaseUrl(snapshot.host),
+        authToken: snapshot.host.authToken ?? resolveRtAuthToken(),
         hostName: snapshot.host.name,
-        hostAddress: `${snapshot.host.host}:${snapshot.host.port}`,
+        hostAddress: resolveRuntimeHostDialAddress(snapshot.host),
       }));
     }
 
     const host = resolveActiveRuntimeHost();
-    return [{
-      id: host.id,
-      rtBaseUrl: `http://${formatHostForUrl(host.host)}:${host.port}`,
-      authToken: host.authToken ?? resolveRtAuthToken(),
-      hostName: host.name,
-      hostAddress: `${host.host}:${host.port}`,
-    }];
+      return [{
+        id: host.id,
+        rtBaseUrl: resolveRuntimeHostBaseUrl(host),
+        authToken: host.authToken ?? resolveRtAuthToken(),
+        hostName: host.name,
+        hostAddress: resolveRuntimeHostDialAddress(host),
+      }];
   }, [runtimeHostSnapshots, activeSignalRouteHost, runtimeServiceStatus]);
+  const runtimeHostService = useMemo(() => getRuntimeHostService(), []);
+  const localLinkProofHost = useMemo(() => {
+    if (!runtimeServiceStatus?.running) {
+      return null;
+    }
+
+    const localHost = runtimeServiceStatus.host === '0.0.0.0'
+      ? '127.0.0.1'
+      : runtimeServiceStatus.host;
+
+    return {
+      id: 'runtime-host-local-link-proof',
+      name: `Local Runtime (${localHost}:${runtimeServiceStatus.port})`,
+      host: localHost,
+      port: runtimeServiceStatus.port,
+      status: 'online',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      isLocal: true,
+      hostId: runtimeServiceStatus.hostId,
+      trustState: 'manual_seed' as const,
+      authToken: runtimeServiceStatus.authSecret,
+    } satisfies RuntimeHostRecord;
+  }, [
+    runtimeServiceStatus?.running,
+    runtimeServiceStatus?.host,
+    runtimeServiceStatus?.port,
+    runtimeServiceStatus?.hostId,
+    runtimeServiceStatus?.authSecret,
+  ]);
+  const localLinkProofSignalService = useMemo(() => (
+    localLinkProofHost
+      ? new SignalStreamService({ host: localLinkProofHost })
+      : null
+  ), [localLinkProofHost]);
+  const runtimeLinkProofService = useMemo(() => (
+    localLinkProofSignalService
+      ? createRuntimeLinkProofService({
+          signalService: localLinkProofSignalService,
+          hostService: runtimeHostService,
+        })
+      : null
+  ), [localLinkProofSignalService, runtimeHostService]);
+
+  const syncLocalMeshHosts = async (status: RuntimeServiceStatus | null) => {
+    if (!status?.running) {
+      confirmedMeshReplayKeyRef.current.clear();
+      return;
+    }
+
+    const localHost = status.host === '0.0.0.0' ? '127.0.0.1' : status.host;
+    const runtimeBaseUrl = `http://${formatHostForUrl(localHost)}:${status.port}`;
+    await getRuntimeMeshHostSyncService().syncLocalRuntimeMeshState(
+      runtimeBaseUrl,
+      status.authSecret ?? undefined,
+    );
+  };
+
+  const replayConfirmedMeshPeers = async (
+    status: RuntimeServiceStatus | null,
+    snapshot: { hosts: RuntimeHostSnapshot[] },
+  ) => {
+    if (!status?.running) {
+      confirmedMeshReplayKeyRef.current.clear();
+      return;
+    }
+
+    const confirmedHosts = snapshot.hosts
+      .filter((item) => item.host.trustState === 'confirmed_peer')
+      .map((item) => toLiveRuntimePeerHost(item))
+      .filter((host) => host.hostId);
+
+    for (const host of confirmedHosts) {
+      const replayKey = [
+        status.hostId ?? 'local',
+        status.port,
+        host.hostId,
+        resolveRuntimeHostDialAddress(host),
+      ].join('|');
+
+      if (confirmedMeshReplayKeyRef.current.has(replayKey)) {
+        continue;
+      }
+
+      try {
+        await getRuntimeMeshSyncService().ensurePeerPair(host);
+        confirmedMeshReplayKeyRef.current.add(replayKey);
+      } catch {
+        // Mesh replay is best-effort（运行时 peer 回放失败不阻塞页面刷新）.
+      }
+    }
+  };
 
   const peerPairingRuntimeBaseUrl = useMemo(() => {
     const host = runtimeServiceStatus?.host === '0.0.0.0'
@@ -1012,6 +1238,16 @@ export function AgentsPage() {
 
   const peerPairingLocalHostId = runtimeServiceStatus?.hostId ?? 'local';
   const peerPairingLocalAuthToken = runtimeServiceStatus?.authSecret ?? undefined;
+  const peerPairingKnownHosts = useMemo(
+    () => runtimeHostSnapshots
+      .filter((snapshot) => (
+        snapshot.connectionState === 'online'
+        && !!resolveRuntimeSnapshotPeerId(snapshot)
+        && resolveRuntimeSnapshotPeerId(snapshot) !== peerPairingLocalHostId
+      ))
+      .map((snapshot) => toLiveRuntimePeerHost(snapshot)),
+    [runtimeHostSnapshots, peerPairingLocalHostId],
+  );
 
   const {
     sessions: liveSessions,
@@ -1040,13 +1276,21 @@ export function AgentsPage() {
     setRuntimeExternalAddressDraft(getRuntimeExternalAddress());
   };
 
-  const desiredEmbeddedRuntimeHost = resolveEmbeddedRuntimeBindHost(embeddedRuntimeNetworkMode);
+  const effectiveEmbeddedRuntimeNetworkMode = hasExplicitEmbeddedRuntimeNetworkMode
+    ? embeddedRuntimeNetworkMode
+    : (
+      runtimeServiceStatus?.running
+        ? inferEmbeddedRuntimeNetworkMode(runtimeServiceStatus)
+        : embeddedRuntimeNetworkMode
+    );
+  const desiredEmbeddedRuntimeHost = resolveEmbeddedRuntimeBindHost(effectiveEmbeddedRuntimeNetworkMode);
   const desiredEmbeddedRuntimePort = runtimeServiceStatus?.running
     ? runtimeServiceStatus.port
     : getPreferredEmbeddedRuntimePort();
   const desiredEmbeddedRuntimeAddress = `${desiredEmbeddedRuntimeHost}:${desiredEmbeddedRuntimePort}`;
   const runtimeNeedsRebind = Boolean(
-    runtimeServiceStatus?.running
+    hasExplicitEmbeddedRuntimeNetworkMode
+      && runtimeServiceStatus?.running
       && (runtimeServiceStatus.host !== desiredEmbeddedRuntimeHost
         || runtimeServiceStatus.port !== desiredEmbeddedRuntimePort),
   );
@@ -1062,10 +1306,19 @@ export function AgentsPage() {
     try {
       const routeService = new SignalRouteService({ host });
       const runtimeClient = new RuntimeClient();
-      const [routes, agentsResult, historyResponse, energyResult] = await Promise.all([
+      const runtimeBaseUrl = resolveRuntimeHostBaseUrl(host);
+      const runtimeHeaders = buildRuntimeAuthHeaders(host.authToken);
+      const [routes, agentsResult, businessHistoryResponse, proofHistoryResponse, energyResult] = await Promise.all([
         routeService.listRoutes(),
         runtimeClient.getAgents(host),
-        fetch(`http://${formatHostForUrl(host.host)}:${host.port}/signals/history?limit=120`),
+        fetch(
+          `${runtimeBaseUrl}/signals/history?limit=120&exclude_topic_prefix=${encodeURIComponent(LINK_PROOF_TOPIC_PREFIX)}`,
+          { headers: runtimeHeaders },
+        ).catch(() => null),
+        fetch(
+          `${runtimeBaseUrl}/signals/history?limit=120&topic_prefix=${encodeURIComponent(LINK_PROOF_TOPIC_PREFIX)}`,
+          { headers: runtimeHeaders },
+        ).catch(() => null),
         runtimeClient.getAllEnergy(host).catch(() => ({ ok: false as const, error: { code: 'network' as const, message: 'energy fetch failed' } })),
       ]);
 
@@ -1083,9 +1336,13 @@ export function AgentsPage() {
             energy: energyMap.get(agent.id),
           }))
         : [];
-      const history = historyResponse.ok
-        ? ((await historyResponse.json()) as SignalEvent[])
+      const businessHistory = businessHistoryResponse?.ok
+        ? ((await businessHistoryResponse.json()) as SignalEvent[])
         : [];
+      const proofHistory = proofHistoryResponse?.ok
+        ? ((await proofHistoryResponse.json()) as SignalEvent[])
+        : [];
+      const history = mergeSignalHistoryEvents(businessHistory, proofHistory);
       return {
         hostLabel: `${host.host}:${host.port}`,
         routes,
@@ -1197,8 +1454,12 @@ export function AgentsPage() {
   // Keep ref in sync so the polling interval always calls the latest version.
   fetchPtyAgentsRef.current = fetchPtyAgents;
 
-  const refreshRuntimeSnapshot = async () => {
+  const refreshRuntimeSnapshot = async (
+    statusOverride: RuntimeServiceStatus | null = runtimeServiceStatus,
+  ) => {
+    await syncLocalMeshHosts(statusOverride);
     const snapshot = await getRuntimeManager().refreshSnapshot();
+    await replayConfirmedMeshPeers(statusOverride, snapshot);
     applyRuntimeSnapshot(snapshot);
     await refreshSignalRoutesFromSnapshot(snapshot);
     await fetchPtyAgents();
@@ -1210,12 +1471,14 @@ export function AgentsPage() {
     const runtimeControlService = getRuntimeControlService();
 
     const load = async () => {
-      const [nextDevice, nextRuntimeStatus, nextRuntimeSnapshot] = await Promise.all([
+      const [nextDevice, nextRuntimeStatus] = await Promise.all([
         service.getDeviceView(),
         runtimeControlService.getStatus(),
-        getRuntimeManager().refreshSnapshot(),
       ]);
+      await syncLocalMeshHosts(nextRuntimeStatus);
+      const nextRuntimeSnapshot = await getRuntimeManager().refreshSnapshot();
       if (disposed) return;
+      await replayConfirmedMeshPeers(nextRuntimeStatus, nextRuntimeSnapshot);
       setDeviceGroups(nextDevice);
       setRuntimeServiceStatus(nextRuntimeStatus);
       applyRuntimeSnapshot(nextRuntimeSnapshot);
@@ -1226,8 +1489,12 @@ export function AgentsPage() {
     const refreshInterval = setInterval(() => {
       void (async () => {
         try {
+          const nextRuntimeStatus = await runtimeControlService.getStatus();
+          await syncLocalMeshHosts(nextRuntimeStatus);
           const nextRuntimeSnapshot = await getRuntimeManager().refreshSnapshot();
           if (disposed) return;
+          await replayConfirmedMeshPeers(nextRuntimeStatus, nextRuntimeSnapshot);
+          setRuntimeServiceStatus(nextRuntimeStatus);
           applyRuntimeSnapshot(nextRuntimeSnapshot);
           await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
           await fetchPtyAgentsRef.current();
@@ -1255,11 +1522,243 @@ export function AgentsPage() {
     };
   }, []);
 
-  const refreshRuntimeHosts = async () => {
+  const refreshRuntimeHosts = async (
+    statusOverride: RuntimeServiceStatus | null = runtimeServiceStatus,
+  ) => {
+    await syncLocalMeshHosts(statusOverride);
     const nextSnapshot = await getRuntimeManager().refreshSnapshot();
+    await replayConfirmedMeshPeers(statusOverride, nextSnapshot);
     applyRuntimeSnapshot(nextSnapshot);
     await refreshSignalRoutesFromSnapshot(nextSnapshot);
   };
+
+  useEffect(() => {
+    runtimeHostSnapshotsRef.current = runtimeHostSnapshots;
+  }, [runtimeHostSnapshots]);
+
+  useEffect(() => {
+    runtimeServiceStatusRef.current = runtimeServiceStatus;
+  }, [runtimeServiceStatus]);
+
+  useEffect(() => {
+    if (runtimeServiceStatus?.running && runtimeServiceStatus.hostId) {
+      return;
+    }
+
+    inFlightLinkProofPeerIdsRef.current.clear();
+    inFlightLinkProofSessionIdsRef.current.clear();
+  }, [runtimeServiceStatus?.running, runtimeServiceStatus?.hostId]);
+
+  useEffect(() => {
+    refreshRuntimeHostsRef.current = refreshRuntimeHosts;
+  }, [refreshRuntimeHosts]);
+
+  const trackInFlightLinkProof = (
+    peerId: string,
+    proofSessionId?: string,
+  ): (() => void) => {
+    inFlightLinkProofPeerIdsRef.current.add(peerId);
+    if (proofSessionId) {
+      inFlightLinkProofSessionIdsRef.current.add(proofSessionId);
+    }
+
+    return () => {
+      inFlightLinkProofPeerIdsRef.current.delete(peerId);
+      if (proofSessionId) {
+        inFlightLinkProofSessionIdsRef.current.delete(proofSessionId);
+      }
+    };
+  };
+
+  const maybeAutoAdoptManualLinkProofRequest = useMemo(() => (
+    (event: SignalEvent) => {
+      if (!runtimeLinkProofService) {
+        return;
+      }
+
+      const request = parseLinkProofRequestPayload(event);
+      const localStatus = runtimeServiceStatusRef.current;
+      if (!request || request.trigger !== 'manual_retry' || !localStatus?.hostId) {
+        return;
+      }
+      if (
+        request.target_peer_id !== localStatus.hostId
+        || request.initiated_by_peer_id === localStatus.hostId
+      ) {
+        return;
+      }
+      if (autoAdoptedLinkProofEventIdsRef.current.has(event.id)) {
+        return;
+      }
+      if (
+        inFlightLinkProofPeerIdsRef.current.has(request.initiated_by_peer_id)
+        || inFlightLinkProofSessionIdsRef.current.has(request.proof_session_id)
+      ) {
+        autoAdoptedLinkProofEventIdsRef.current.add(event.id);
+        return;
+      }
+
+      const targetSnapshot = runtimeHostSnapshotsRef.current.find((item) => (
+        item.host.trustState === 'confirmed_peer'
+        && resolveRuntimeSnapshotPeerId(item) === request.initiated_by_peer_id
+      ));
+      if (!targetSnapshot) {
+        return;
+      }
+      if (targetSnapshot.host.verificationStatus === 'running') {
+        return;
+      }
+
+      const localHostId = localStatus.hostId;
+      if (!localHostId) {
+        return;
+      }
+
+      autoAdoptedLinkProofEventIdsRef.current.add(event.id);
+      const releaseInFlightLinkProof = trackInFlightLinkProof(
+        request.initiated_by_peer_id,
+        request.proof_session_id,
+      );
+
+      // Auto-adopt manual device-page verification so one-sided "测试互联" can complete end-to-end.
+      void (async () => {
+        try {
+          await runtimeLinkProofService.runVerification({
+            mode: 'joiner',
+            localPeerId: localHostId,
+            peerId: request.initiated_by_peer_id,
+            runtimeHostRecordId: targetSnapshot.host.id,
+            adoptedRequestEvent: event,
+            trigger: 'manual_retry',
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          log.warn(
+            `[AgentsPage] auto-adopt link proof failed peer=${request.initiated_by_peer_id} session=${request.proof_session_id} error=${message}`,
+          );
+        } finally {
+          releaseInFlightLinkProof();
+          const latestStatus = runtimeServiceStatusRef.current;
+          if (!latestStatus) {
+            return;
+          }
+
+          try {
+            await refreshRuntimeHostsRef.current(latestStatus);
+          } catch {
+            // Passive refresh is best-effort（被动刷新失败不应打断验证结果落盘）.
+          }
+        }
+      })();
+    }
+  ), [runtimeLinkProofService]);
+
+  useEffect(() => {
+    if (
+      !localLinkProofSignalService
+      || !runtimeLinkProofService
+      || !runtimeServiceStatus?.running
+      || !runtimeServiceStatus.hostId
+    ) {
+      return;
+    }
+
+    autoAdoptedLinkProofEventIdsRef.current.clear();
+
+    const unsubscribe = localLinkProofSignalService.onSignal(maybeAutoAdoptManualLinkProofRequest);
+
+    localLinkProofSignalService.start();
+
+    return () => {
+      unsubscribe();
+      localLinkProofSignalService.stop();
+    };
+  }, [
+    localLinkProofSignalService,
+    runtimeLinkProofService,
+    maybeAutoAdoptManualLinkProofRequest,
+    runtimeServiceStatus?.running,
+    runtimeServiceStatus?.hostId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !localLinkProofSignalService
+      || !runtimeLinkProofService
+      || !runtimeServiceStatus?.running
+      || !runtimeServiceStatus.hostId
+    ) {
+      return;
+    }
+
+    let disposed = false;
+    let cursor: string | undefined;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNextPoll = () => {
+      if (disposed) {
+        return;
+      }
+      timer = setTimeout(() => {
+        void poll();
+      }, MANUAL_LINK_PROOF_ADOPTION_POLL_INTERVAL_MS);
+    };
+
+    const poll = async () => {
+      if (disposed) {
+        return;
+      }
+
+      try {
+        const events = await localLinkProofSignalService.history({
+          limit: 50,
+          topicPrefix: LINK_PROOF_TOPIC_PREFIX,
+          afterEventId: cursor,
+        });
+
+        if (events.length > 0) {
+          cursor = events[events.length - 1]?.id;
+        }
+
+        for (const event of events) {
+          maybeAutoAdoptManualLinkProofRequest(event);
+        }
+      } catch {
+        // History fallback is best-effort（兜底轮询失败时等待下一轮重试）.
+      }
+
+      scheduleNextPoll();
+    };
+
+    void (async () => {
+      try {
+        const latestEvents = await localLinkProofSignalService.history({
+          limit: 50,
+          topicPrefix: LINK_PROOF_TOPIC_PREFIX,
+        });
+        if (latestEvents.length > 0) {
+          cursor = latestEvents[latestEvents.length - 1]?.id;
+        }
+      } catch {
+        // Bootstrap failure is non-fatal（初始化游标失败不影响后续轮询重试）.
+      }
+
+      scheduleNextPoll();
+    })();
+
+    return () => {
+      disposed = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [
+    localLinkProofSignalService,
+    runtimeLinkProofService,
+    maybeAutoAdoptManualLinkProofRequest,
+    runtimeServiceStatus?.running,
+    runtimeServiceStatus?.hostId,
+  ]);
 
   const handleAddRuntimeHostFromManagerSheet = async () => {
     try {
@@ -1284,6 +1783,75 @@ export function AgentsPage() {
     }
   };
 
+  const handleVerifyRuntimePeer = async (hostId: string) => {
+    const targetSnapshot = runtimeHostSnapshots.find((item) => item.host.id === hostId);
+    if (!targetSnapshot) {
+      setRuntimeHostError(`runtime host not found（未找到目标节点）: ${hostId}`);
+      return;
+    }
+
+    if (!runtimeServiceStatus?.running || !runtimeServiceStatus.hostId) {
+      setRuntimeHostError('请先启动本机内嵌 RT，再执行测试互联。');
+      return;
+    }
+
+    const targetPeerId = resolveRuntimeSnapshotPeerId(targetSnapshot);
+    if (!targetPeerId) {
+      setRuntimeHostError('目标节点缺少 peer_id，暂时无法验证互通。');
+      return;
+    }
+
+    if (!runtimeLinkProofService) {
+      setRuntimeHostError('链路验证服务尚未就绪，请稍后重试。');
+      return;
+    }
+    if (inFlightLinkProofPeerIdsRef.current.has(targetPeerId)) {
+      setRuntimeHostError('该节点正在验证互通，请等待当前结果。');
+      return;
+    }
+
+    const releaseInFlightLinkProof = trackInFlightLinkProof(targetPeerId);
+
+    try {
+      setRuntimeHostError('');
+      await runtimeHostService.mergeHostMetadata(hostId, {
+        verificationStatus: 'running',
+        lastVerificationTrigger: 'manual_retry',
+        lastVerificationError: null,
+        localInitiatedRttMs: null,
+        peerInitiatedRttMs: null,
+      });
+
+      await runtimeLinkProofService.runVerification({
+        mode: 'owner',
+        localPeerId: runtimeServiceStatus.hostId,
+        peerId: targetPeerId,
+        runtimeHostRecordId: hostId,
+        trigger: 'manual_retry',
+      });
+
+      await refreshRuntimeHosts(runtimeServiceStatus);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeHostError(message);
+
+      try {
+        await runtimeHostService.mergeHostMetadata(hostId, {
+          verificationStatus: 'failed',
+          lastVerificationTrigger: 'manual_retry',
+          lastVerificationError: message,
+          localInitiatedRttMs: null,
+          peerInitiatedRttMs: null,
+        });
+        await refreshRuntimeHosts(runtimeServiceStatus);
+      } catch {
+        // Ignore secondary persistence failures（次级持久化失败仅保留页面错误文案）。
+      }
+    } finally {
+      releaseInFlightLinkProof();
+    }
+  };
+
   const handleRemoveRuntimeHost = async (hostId: string) => {
     try {
       setRuntimeHostError('');
@@ -1305,6 +1873,7 @@ export function AgentsPage() {
     setRuntimeTargetError('');
     setEmbeddedRuntimeNetworkMode(mode);
     setEmbeddedRuntimeNetworkModeValue(mode);
+    setHasExplicitEmbeddedRuntimeNetworkMode(true);
   };
 
   const handleApplyRuntimeExternalAddress = () => {
@@ -1320,32 +1889,46 @@ export function AgentsPage() {
   };
 
   const handleRuntimeStart = async () => {
-    const runtimeControlService = getRuntimeControlService();
-    const targetHost = desiredEmbeddedRuntimeHost;
-    const targetPort = desiredEmbeddedRuntimePort;
-    try {
-      const status = await runtimeControlService.startRuntime({
-        host: targetHost,
-        port: targetPort,
-      });
-      setRuntimeServiceStatus(status);
-      await refreshRuntimeSnapshot();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    if (runtimeStartInFlightRef.current) {
+      await runtimeStartInFlightRef.current;
+      return;
+    }
+
+    const task = (async () => {
+      const runtimeControlService = getRuntimeControlService();
+      const targetHost = desiredEmbeddedRuntimeHost;
+      const targetPort = desiredEmbeddedRuntimePort;
       try {
-        const latestStatus = await runtimeControlService.getStatus();
-        setRuntimeServiceStatus({
-          ...latestStatus,
-          error: latestStatus.error ?? message,
-        });
-      } catch {
-        setRuntimeServiceStatus({
-          running: false,
+        const status = await runtimeControlService.startRuntime({
           host: targetHost,
           port: targetPort,
-          error: message,
         });
+        setRuntimeServiceStatus(status);
+        await refreshRuntimeSnapshot(status);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          const latestStatus = await runtimeControlService.getStatus();
+          setRuntimeServiceStatus({
+            ...latestStatus,
+            error: latestStatus.error ?? message,
+          });
+        } catch {
+          setRuntimeServiceStatus({
+            running: false,
+            host: targetHost,
+            port: targetPort,
+            error: message,
+          });
+        }
       }
+    })();
+
+    runtimeStartInFlightRef.current = task;
+    try {
+      await task;
+    } finally {
+      runtimeStartInFlightRef.current = null;
     }
   };
 
@@ -1356,7 +1939,7 @@ export function AgentsPage() {
     try {
       const status = await runtimeControlService.stopRuntime();
       setRuntimeServiceStatus(status);
-      await refreshRuntimeSnapshot();
+      await refreshRuntimeSnapshot(status);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       try {
@@ -1375,6 +1958,46 @@ export function AgentsPage() {
       }
     }
   };
+
+  useEffect(() => {
+    if (hasExplicitEmbeddedRuntimeNetworkMode || !runtimeServiceStatus?.running) {
+      return;
+    }
+
+    const observedMode = inferEmbeddedRuntimeNetworkMode(runtimeServiceStatus);
+    setEmbeddedRuntimeNetworkModeValue((current) => (current === observedMode ? current : observedMode));
+  }, [hasExplicitEmbeddedRuntimeNetworkMode, runtimeServiceStatus]);
+
+  useEffect(() => {
+    if (
+      runtimeTargetModeValue !== 'embedded'
+      || !runtimeServiceStatus?.running
+      || !runtimeNeedsRebind
+    ) {
+      autoRuntimeRebindKeyRef.current = null;
+      return;
+    }
+
+    const rebindKey = [
+      runtimeServiceStatus.host,
+      runtimeServiceStatus.port,
+      desiredEmbeddedRuntimeHost,
+      desiredEmbeddedRuntimePort,
+    ].join('->');
+
+    if (autoRuntimeRebindKeyRef.current === rebindKey) {
+      return;
+    }
+
+    autoRuntimeRebindKeyRef.current = rebindKey;
+    void handleRuntimeStart();
+  }, [
+    desiredEmbeddedRuntimeHost,
+    desiredEmbeddedRuntimePort,
+    runtimeNeedsRebind,
+    runtimeServiceStatus,
+    runtimeTargetModeValue,
+  ]);
 
   const signalRouteRows = useMemo(
     () => buildSignalRouteRows(signalRoutes, signalRouteHostLabel || undefined),
@@ -1644,7 +2267,7 @@ export function AgentsPage() {
           runtimeHostSnapshots={runtimeHostSnapshots}
           runtimeServiceStatus={runtimeServiceStatus}
           runtimeHostError={runtimeHostError}
-          embeddedRuntimeNetworkMode={embeddedRuntimeNetworkMode}
+          embeddedRuntimeNetworkMode={effectiveEmbeddedRuntimeNetworkMode}
           embeddedRuntimeBindAddress={desiredEmbeddedRuntimeAddress}
           runtimeNeedsRebind={runtimeNeedsRebind}
           runtimeTargetMode={runtimeTargetModeValue}
@@ -1652,6 +2275,7 @@ export function AgentsPage() {
           runtimeTargetError={runtimeTargetError}
           runtimeExternalAddressDraft={runtimeExternalAddressDraft}
           onRuntimeHostProbe={handleProbeRuntimeHost}
+          onVerifyPeer={handleVerifyRuntimePeer}
           onEmbeddedRuntimeNetworkModeChange={handleEmbeddedRuntimeNetworkModeChange}
           onRuntimeStart={handleRuntimeStart}
           onRuntimeStop={handleRuntimeStop}
@@ -2194,7 +2818,7 @@ export function AgentsPage() {
                             <div className="flex flex-col gap-1">
                               <p className="text-[10px] text-muted-foreground">Payload</p>
                               <pre className="overflow-x-auto rounded-lg bg-background p-3 text-[10px] text-foreground">
-                                {formatSignalPayload(historyEvent.payload)}
+                                {formatSignalPayloadDetails(historyEvent.payload)}
                               </pre>
                             </div>
                           </div>
@@ -2422,6 +3046,8 @@ export function AgentsPage() {
         runtimeBaseUrl={peerPairingRuntimeBaseUrl}
         localHostId={peerPairingLocalHostId}
         localAuthToken={peerPairingLocalAuthToken}
+        knownHosts={peerPairingKnownHosts}
+        onPairingSuccess={refreshRuntimeSnapshot}
       />
     </div>
   );

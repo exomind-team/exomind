@@ -40,6 +40,45 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:1919/agents', expect.any(Object));
   });
 
+  it('prefers dial override and auth token for protected runtime requests（优先使用拨号地址 override 并附带鉴权）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        host_id: 'runtime-host-1',
+        hostname: 'android-node',
+        os: 'android',
+        arch: 'arm64',
+        uptime_secs: 100,
+        version: '0.3.6',
+        port: 9124,
+        capabilities: {
+          agent_kinds: ['api'],
+          api_providers: ['openai'],
+        },
+      }),
+    }));
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology({
+      ...SAMPLE_HOST,
+      host: '10.0.2.15',
+      port: 9124,
+      manualOverride: '127.0.0.1:39124',
+      authToken: 'shared-secret',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:39124/topology',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.any(Object),
+      }),
+    );
+    const [, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(requestInit.headers).get('Authorization')).toBe('Bearer shared-secret');
+  });
+
   it('returns timeout error for aborted request（请求中止时返回 timeout 错误）', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('AbortError: The operation was aborted');

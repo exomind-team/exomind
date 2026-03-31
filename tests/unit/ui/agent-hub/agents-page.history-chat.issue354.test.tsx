@@ -124,6 +124,26 @@ const SAMPLE_SIGNAL_HISTORY: SignalEvent[] = [
   },
 ];
 
+const SAMPLE_PROOF_HISTORY: SignalEvent[] = [
+  {
+    schema_version: 1,
+    id: 'sig-003',
+    topic: 'system.link_proof.request',
+    ts: 1741161602000,
+    source: 'ui:runtime_link_proof',
+    origin_host_id: 'local',
+    hop: 0,
+    payload: {
+      proof_session_id: 'proof-session-1',
+      attempt_id: 'attempt-1',
+      initiated_by_peer_id: 'desktop-local-host',
+      target_peer_id: 'paired-phone-host',
+      trigger: 'pairing_auto',
+      sent_at_ms: 1741161602000,
+    },
+  },
+];
+
 describe('agents page signal history + right chat issue-354（历史标签与右侧聊天）', () => {
   const mockMatchMedia = (matches: boolean) => {
     Object.defineProperty(window, 'matchMedia', {
@@ -212,11 +232,18 @@ describe('agents page signal history + right chat issue-354（历史标签与右
           json: async () => SAMPLE_SIGNAL_ROUTES,
         } as Response;
       }
-      if (url.includes('/signals/history')) {
+      if (url.includes('/signals/history') && url.includes('exclude_topic_prefix=system.link_proof.')) {
         return {
           ok: true,
           status: 200,
           json: async () => SAMPLE_SIGNAL_HISTORY,
+        } as Response;
+      }
+      if (url.includes('/signals/history') && url.includes('topic_prefix=system.link_proof.')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => SAMPLE_PROOF_HISTORY,
         } as Response;
       }
 
@@ -246,6 +273,7 @@ describe('agents page signal history + right chat issue-354（历史标签与右
     expect(screen.getByText('user.input.text')).toBeInTheDocument();
     expect(screen.getByText('eventlog.appended')).toBeInTheDocument();
     expect(screen.getByText('hello from signal history')).toBeInTheDocument();
+    expect(screen.getByText('system.link_proof.request')).toBeInTheDocument();
   });
 
   it('supports opening right-panel chat from agent detail（支持从右侧 Agent 详情进入聊天）', async () => {

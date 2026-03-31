@@ -201,6 +201,7 @@ pub struct RuntimeHandle {
     host_id: String,
     signal_pool: Arc<SignalPool>,
     mesh: Arc<MeshState>,
+    runtime_handle: tokio::runtime::Handle,
     mesh_relay: Option<Arc<MeshRelayManager>>,
     mdns: Option<Arc<discovery::MdnsDiscovery>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
@@ -294,7 +295,9 @@ impl RuntimeHandle {
         self.signal_pool.publish(event.clone());
         if let Some(mesh_relay) = &self.mesh_relay {
             let relay = Arc::clone(mesh_relay);
-            tokio::spawn(async move {
+            // Use the runtime captured at startup so Tauri sync commands can publish safely
+            // even when they are not currently executing inside a Tokio reactor.
+            self.runtime_handle.spawn(async move {
                 relay.forward_event_to_peers(event).await;
             });
         }
@@ -457,6 +460,7 @@ pub async fn start_with_options(
 
     let signal_pool = Arc::clone(&state.signal_pool);
     let mesh = Arc::clone(&state.mesh);
+    let runtime_handle = tokio::runtime::Handle::current();
     let mesh_relay = state.mesh_relay.clone();
 
     let mut actor_tasks = Vec::new();
@@ -488,6 +492,10 @@ pub async fn start_with_options(
         ));
         actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(
             Arc::clone(&state.signal_pool),
+        ));
+        actor_tasks.push(signal::actors::link_proof_actor::spawn_link_proof_actor(
+            Arc::clone(&state.signal_pool),
+            options.host_id.clone(),
         ));
         actor_tasks.push(task::actor::spawn_task_store_actor(
             Arc::clone(&state.signal_pool),
@@ -568,6 +576,7 @@ pub async fn start_with_options(
         host_id: options.host_id,
         signal_pool,
         mesh,
+        runtime_handle,
         mesh_relay,
         mdns,
         shutdown_tx: Some(shutdown_tx),
@@ -1700,5 +1709,54 @@ mod tests {
             "resolved project root must contain classifier agent entry: {}",
             resolved.display()
         );
+    }
+
+    #[test]
+    fn publish_signal_uses_captured_runtime_outside_reactor_context() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("tokio runtime should build");
+
+        let mut handle = runtime
+            .block_on(start_with_options(RuntimeStartOptions {
+                bind_host: "127.0.0.1".to_string(),
+                port: 0,
+                host_id: "publish-outside-reactor".to_string(),
+                spawn_builtin_actors: false,
+                spawn_ts_agents: false,
+                enable_mdns: false,
+                ..RuntimeStartOptions::default()
+            }))
+            .expect("runtime should start");
+
+        let signal_pool = handle.clone_signal_pool();
+        let publish_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handle.publish_signal(RuntimePublishRequest {
+                topic: "system.test.publish_outside_reactor".to_string(),
+                source: Some("unit:test".to_string()),
+                payload: serde_json::json!({ "ok": true }),
+                trace_id: None,
+                origin_host_id: None,
+            })
+        }));
+
+        assert!(
+            publish_result.is_ok(),
+            "publish_signal should not panic outside reactor context（离开 reactor 上下文也不能崩）"
+        );
+
+        let events = signal_pool.window().recent_filtered(
+            10,
+            Some("system.test.publish_outside_reactor"),
+            None,
+            None,
+        );
+        assert_eq!(events.len(), 1, "signal should still be published locally");
+
+        runtime
+            .block_on(async { handle.stop().await })
+            .expect("runtime should stop cleanly");
     }
 }

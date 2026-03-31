@@ -51,6 +51,17 @@ export interface RuntimeMeshSyncServiceOptions {
   getReachableAddress?: (remoteHost: RuntimeHostRecord) => Promise<RuntimeReachableAddress | null>;
 }
 
+export interface RuntimeMeshPeerRecord {
+  id: string;
+  base_url: string;
+  enabled: boolean;
+  status?: string;
+  last_seen?: string | null;
+  last_error?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 function isConfirmedPeer(host: RuntimeHostRecord): boolean {
   return host.trustState === 'confirmed_peer' && typeof host.hostId === 'string' && host.hostId.length > 0;
 }
@@ -75,6 +86,44 @@ function resolveRemotePeerBaseUrl(host: RuntimeHostRecord): string | null {
 function resolveLocalRuntimeBaseUrl(status: RuntimeServiceStatus): string {
   const host = status.host === '0.0.0.0' ? '127.0.0.1' : status.host;
   return `http://${formatHostForUrl(host)}:${status.port}`;
+}
+
+function normalizeHostForMatch(host: string): string {
+  return host.trim().replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
+}
+
+function parseBaseUrlHost(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl).hostname;
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeAndroidEmulatorGuestHost(host: string): boolean {
+  return /^10\.0\.(2|3)\.\d+$/.test(normalizeHostForMatch(host));
+}
+
+function isAndroidEmulatorHostAlias(host: string): boolean {
+  const normalized = normalizeHostForMatch(host);
+  return normalized === '10.0.2.2'
+    || normalized === '10.0.3.2'
+    || normalized === '198.18.0.1'
+    || normalized === 'localhost'
+    || normalized === '127.0.0.1';
+}
+
+function shouldSkipReciprocalPeerUpsert(
+  remoteBaseUrl: string,
+  reachableAddress: RuntimeReachableAddress,
+): boolean {
+  const remoteHost = parseBaseUrlHost(remoteBaseUrl);
+  if (!remoteHost) {
+    return false;
+  }
+
+  return looksLikeAndroidEmulatorGuestHost(reachableAddress.host)
+    && isAndroidEmulatorHostAlias(remoteHost);
 }
 
 /** Build headers with optional Bearer auth token for local runtime calls. */
@@ -135,6 +184,10 @@ export class RuntimeMeshSyncService {
     }
 
     if (!reachableAddress?.host || !reachableAddress.port || !reachableAddress.hostId) {
+      return;
+    }
+
+    if (shouldSkipReciprocalPeerUpsert(remoteBaseUrl, reachableAddress)) {
       return;
     }
 
@@ -240,7 +293,7 @@ export class RuntimeMeshSyncService {
   async listMeshPeers(
     runtimeBaseUrl: string,
     localAuthToken?: string,
-  ): Promise<Array<{ id: string; base_url: string; enabled: boolean }>> {
+  ): Promise<RuntimeMeshPeerRecord[]> {
     const url = `${runtimeBaseUrl}/mesh/peers`;
     const response = await this.fetchImpl(url, {
       method: 'GET',
@@ -251,7 +304,23 @@ export class RuntimeMeshSyncService {
         authState: localAuthToken ? 'present' : 'missing',
       });
     }
-    return (await response.json()) as Array<{ id: string; base_url: string; enabled: boolean }>;
+    return (await response.json()) as RuntimeMeshPeerRecord[];
+  }
+
+  /** Enable / disable an existing peer on the LOCAL runtime（启用 / 禁用本地 runtime 上的 peer 记录）. */
+  async setPeerEnabled(
+    localRuntimeBaseUrl: string,
+    peerId: string,
+    peerBaseUrl: string,
+    enabled: boolean,
+    localAuthToken?: string,
+  ): Promise<void> {
+    await this.upsertPeer(localRuntimeBaseUrl, {
+      id: peerId,
+      base_url: peerBaseUrl,
+      enabled,
+      capabilities: [],
+    }, localAuthToken);
   }
 
   // ── Peer Upsert ────────────────────────────────────────────────

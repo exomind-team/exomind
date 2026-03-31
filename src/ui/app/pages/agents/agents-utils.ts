@@ -20,7 +20,11 @@ import type { LucideIcon } from 'lucide-react';
 import { resolveLocalServiceHost } from '@/config/local-service-host';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT, type EmbeddedRuntimeNetworkMode } from '@/config/runtime-target';
 import { VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
-import type { SignalRoute } from '@/lib/types/signal-pool';
+import type {
+  LinkProofAckPayload,
+  LinkProofRequestPayload,
+  SignalRoute,
+} from '@/lib/types/signal-pool';
 import type {
   AgentHubListItem,
   AgentHubListSection,
@@ -363,7 +367,76 @@ export function extractPreferredHostId(rawId: string | null | undefined): string
   return hostId || undefined;
 }
 
-export function formatSignalPayload(payload: unknown): string {
+export function isLinkProofSignalTopic(topic: string): boolean {
+  return topic.startsWith('system.link_proof.');
+}
+
+function formatLinkProofTriggerLabel(trigger: string | undefined): string {
+  if (trigger === 'pairing_auto') return '自动配对';
+  if (trigger === 'manual_retry') return '手动复测';
+  return '未知触发';
+}
+
+function formatLinkProofAckKindLabel(ackKind: string | undefined): string {
+  if (ackKind === 'receipt') return '回执';
+  if (ackKind === 'result') return '结果';
+  return '应答';
+}
+
+function formatLinkProofRequestPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const request = payload as Partial<LinkProofRequestPayload>;
+  if (
+    typeof request.proof_session_id !== 'string'
+    || typeof request.initiated_by_peer_id !== 'string'
+    || typeof request.target_peer_id !== 'string'
+  ) {
+    return null;
+  }
+
+  const triggerLabel = formatLinkProofTriggerLabel(request.trigger);
+  return `链路验证请求 · ${request.initiated_by_peer_id} -> ${request.target_peer_id} · ${triggerLabel} · session ${request.proof_session_id}`;
+}
+
+function formatLinkProofAckPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const ack = payload as Partial<LinkProofAckPayload>;
+  if (
+    typeof ack.proof_session_id !== 'string'
+    || typeof ack.acked_by_peer_id !== 'string'
+    || typeof ack.target_peer_id !== 'string'
+  ) {
+    return null;
+  }
+
+  const ackKindLabel = formatLinkProofAckKindLabel(ack.ack_kind);
+  const rttLabel = typeof ack.observed_rtt_ms === 'number'
+    ? ` · RTT ${ack.observed_rtt_ms} ms`
+    : '';
+  return `链路验证${ackKindLabel} · ${ack.acked_by_peer_id} -> ${ack.target_peer_id}${rttLabel} · session ${ack.proof_session_id}`;
+}
+
+export function formatSignalPayload(payload: unknown, topic?: string): string {
+  if (topic === 'system.link_proof.request') {
+    const formatted = formatLinkProofRequestPayload(payload);
+    if (formatted) {
+      return formatted;
+    }
+  }
+
+  if (topic === 'system.link_proof.ack') {
+    const formatted = formatLinkProofAckPayload(payload);
+    if (formatted) {
+      return formatted;
+    }
+  }
+
   if (typeof payload === 'string') return payload;
   if (payload && typeof payload === 'object' && 'text' in payload) {
     const payloadRecord = payload as Record<string, unknown>;
@@ -373,6 +446,18 @@ export function formatSignalPayload(payload: unknown): string {
   }
   try {
     return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+export function formatSignalPayloadDetails(payload: unknown): string {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+
+  try {
+    return JSON.stringify(payload, null, 2);
   } catch {
     return String(payload);
   }
@@ -409,6 +494,8 @@ export function formatRelativeSignalTime(timestampMs: number): string {
 }
 
 export function signalTopicTint(topic: string): string {
+  if (topic.startsWith('system.link_proof.')) return '#0F766E';
+  if (topic.startsWith('system.')) return '#64748B';
   if (topic.startsWith('agent.')) return '#0D9488';
   if (topic.startsWith('task.')) return '#F59E0B';
   if (topic.startsWith('eventlog.')) return '#1D4ED8';

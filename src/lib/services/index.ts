@@ -70,9 +70,23 @@ export { CommandPaletteServiceImpl, getCommandPaletteService } from './command-p
 export type { CommandPaletteService, CommandPaletteState } from './command-palette.service';
 export { RuntimeAggregatorServiceImpl, getRuntimeAggregatorService } from './runtime-aggregator.service';
 export type { RuntimeAggregatorService, RuntimeAgentInfo, AggregatedRuntimeData } from './runtime-aggregator.service';
+export {
+  RuntimeMeshHostSyncService,
+  getRuntimeMeshHostSyncService,
+  resetRuntimeMeshHostSyncServiceForTests,
+} from './runtime-mesh-host-sync.service';
+export type { RuntimeMeshHostSyncServiceOptions } from './runtime-mesh-host-sync.service';
 
 export { SignalStreamService, getSignalStreamService } from './signal-stream.service';
 export type { SignalStreamServiceOptions, SignalCallback } from './signal-stream.service';
+export { RuntimeLinkProofService, createRuntimeLinkProofService } from './runtime-link-proof.service';
+export type {
+  RuntimeLinkProofServiceOptions,
+  RuntimeLinkProofRunOptions,
+  RuntimeLinkProofResult,
+  RuntimeLinkProofVerifiedResult,
+  RuntimeLinkProofFailedResult,
+} from './runtime-link-proof.service';
 export { HttpSseSignalTransport, buildSignalBaseUrl, buildSignalStreamUrl } from './signal-http-sse-transport';
 export type { SignalTransport, SignalStreamOpenRequest } from './signal-http-sse-transport';
 export { SignalRouteService, getSignalRouteService } from './signal-route.service';

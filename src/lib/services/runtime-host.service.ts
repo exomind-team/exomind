@@ -1,7 +1,13 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment';
 import type { IStoragePort } from '@/lib/environment/interfaces/storage.port';
 import { DEFAULT_EXTERNAL_RUNTIME_PORT, formatHostForUrl } from '@/config/runtime-target';
-import type { RuntimeHostRecord, RuntimeHostStatus, RuntimeHostTrustState } from '@/lib/types/agent-hub';
+import type {
+  RuntimeHostRecord,
+  RuntimeHostStatus,
+  RuntimeHostTrustState,
+  RuntimeHostVerificationStatus,
+  RuntimeHostVerificationTrigger,
+} from '@/lib/types/agent-hub';
 import { createUuidV4 } from '@/lib/utils/uuid';
 
 const RUNTIME_HOST_STORAGE_KEY = 'agent_runtime_hosts_v1';
@@ -19,6 +25,13 @@ export interface AddRuntimeHostInput {
   advertisedListenAddress?: string;
   lastSuccessfulDialAddress?: string;
   manualOverride?: string;
+  authToken?: string;
+  verificationStatus?: RuntimeHostVerificationStatus;
+  lastVerifiedAt?: string;
+  lastVerificationTrigger?: RuntimeHostVerificationTrigger;
+  localInitiatedRttMs?: number;
+  peerInitiatedRttMs?: number;
+  lastVerificationError?: string;
 }
 
 export interface RuntimeHostMetadataPatch {
@@ -27,6 +40,13 @@ export interface RuntimeHostMetadataPatch {
   advertisedListenAddress?: string;
   lastSuccessfulDialAddress?: string;
   manualOverride?: string;
+  authToken?: string;
+  verificationStatus?: RuntimeHostVerificationStatus;
+  lastVerifiedAt?: string | null;
+  lastVerificationTrigger?: RuntimeHostVerificationTrigger | null;
+  localInitiatedRttMs?: number | null;
+  peerInitiatedRttMs?: number | null;
+  lastVerificationError?: string | null;
 }
 
 export interface RuntimeHostService {
@@ -95,6 +115,67 @@ function normalizeOptionalText(value: string | undefined): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
+function normalizeVerificationStatus(
+  value: RuntimeHostVerificationStatus | undefined,
+): RuntimeHostVerificationStatus | undefined {
+  if (value === 'idle' || value === 'running' || value === 'verified' || value === 'failed') {
+    return value;
+  }
+  return undefined;
+}
+
+function normalizeVerificationTrigger(
+  value: RuntimeHostVerificationTrigger | undefined,
+): RuntimeHostVerificationTrigger | undefined {
+  if (value === 'pairing_auto' || value === 'manual_retry') {
+    return value;
+  }
+  return undefined;
+}
+
+function normalizeOptionalNumber(value: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+function hasPatchField<T extends object>(patch: T, field: keyof T): boolean {
+  return Object.prototype.hasOwnProperty.call(patch, field);
+}
+
+function mergeOptionalTextPatch<T extends object>(
+  patch: T,
+  field: keyof T,
+  current: string | undefined,
+): string | undefined {
+  if (!hasPatchField(patch, field)) {
+    return current;
+  }
+  return normalizeOptionalText((patch[field] ?? undefined) as string | undefined);
+}
+
+function mergeOptionalNumberPatch<T extends object>(
+  patch: T,
+  field: keyof T,
+  current: number | undefined,
+): number | undefined {
+  if (!hasPatchField(patch, field)) {
+    return current;
+  }
+  return normalizeOptionalNumber((patch[field] ?? undefined) as number | undefined);
+}
+
+function mergeVerificationTriggerPatch(
+  patch: RuntimeHostMetadataPatch,
+  current: RuntimeHostVerificationTrigger | undefined,
+): RuntimeHostVerificationTrigger | undefined {
+  if (!hasPatchField(patch, 'lastVerificationTrigger')) {
+    return current;
+  }
+  return normalizeVerificationTrigger(patch.lastVerificationTrigger ?? undefined);
+}
+
 function formatDialAddress(host: string, port: number): string {
   const normalizedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
   return `${normalizedHost}:${port}`;
@@ -110,6 +191,13 @@ function normalizeRuntimeHostRecord(record: RuntimeHostRecord): RuntimeHostRecor
     lastSuccessfulDialAddress: normalizeOptionalText(record.lastSuccessfulDialAddress),
     manualOverride: normalizeOptionalText(record.manualOverride)
       ?? (trustState === 'manual_seed' ? formatDialAddress(record.host, record.port) : undefined),
+    authToken: normalizeOptionalText(record.authToken),
+    verificationStatus: normalizeVerificationStatus(record.verificationStatus),
+    lastVerifiedAt: normalizeOptionalText(record.lastVerifiedAt),
+    lastVerificationTrigger: normalizeVerificationTrigger(record.lastVerificationTrigger),
+    localInitiatedRttMs: normalizeOptionalNumber(record.localInitiatedRttMs),
+    peerInitiatedRttMs: normalizeOptionalNumber(record.peerInitiatedRttMs),
+    lastVerificationError: normalizeOptionalText(record.lastVerificationError),
   };
 }
 
@@ -122,6 +210,9 @@ function shouldPromoteToConfirmedPeer(
     return false;
   }
   if (current.trustState === 'confirmed_peer') {
+    return false;
+  }
+  if (current.trustState !== 'manual_seed') {
     return false;
   }
   if (!next.hostId || !next.lastSuccessfulDialAddress) {
@@ -187,6 +278,13 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       lastSuccessfulDialAddress: normalizeOptionalText(input.lastSuccessfulDialAddress),
       manualOverride: normalizeOptionalText(input.manualOverride)
         ?? (trustState === 'manual_seed' ? formatDialAddress(host, port) : undefined),
+      authToken: normalizeOptionalText(input.authToken),
+      verificationStatus: normalizeVerificationStatus(input.verificationStatus),
+      lastVerifiedAt: normalizeOptionalText(input.lastVerifiedAt),
+      lastVerificationTrigger: normalizeVerificationTrigger(input.lastVerificationTrigger),
+      localInitiatedRttMs: normalizeOptionalNumber(input.localInitiatedRttMs),
+      peerInitiatedRttMs: normalizeOptionalNumber(input.peerInitiatedRttMs),
+      lastVerificationError: normalizeOptionalText(input.lastVerificationError),
     };
 
     const existing = await this.readHosts();
@@ -205,11 +303,41 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
     const current = hosts[targetIndex];
     const mergedBase = normalizeRuntimeHostRecord({
       ...current,
-      hostId: patch.hostId ?? current.hostId,
+      hostId: mergeOptionalTextPatch(patch, 'hostId', current.hostId),
       trustState: patch.trustState ?? current.trustState,
-      advertisedListenAddress: patch.advertisedListenAddress ?? current.advertisedListenAddress,
-      lastSuccessfulDialAddress: patch.lastSuccessfulDialAddress ?? current.lastSuccessfulDialAddress,
-      manualOverride: patch.manualOverride ?? current.manualOverride,
+      advertisedListenAddress: mergeOptionalTextPatch(
+        patch,
+        'advertisedListenAddress',
+        current.advertisedListenAddress,
+      ),
+      lastSuccessfulDialAddress: mergeOptionalTextPatch(
+        patch,
+        'lastSuccessfulDialAddress',
+        current.lastSuccessfulDialAddress,
+      ),
+      manualOverride: mergeOptionalTextPatch(patch, 'manualOverride', current.manualOverride),
+      authToken: mergeOptionalTextPatch(patch, 'authToken', current.authToken),
+      verificationStatus: patch.verificationStatus ?? current.verificationStatus,
+      lastVerifiedAt: mergeOptionalTextPatch(patch, 'lastVerifiedAt', current.lastVerifiedAt),
+      lastVerificationTrigger: mergeVerificationTriggerPatch(
+        patch,
+        current.lastVerificationTrigger,
+      ),
+      localInitiatedRttMs: mergeOptionalNumberPatch(
+        patch,
+        'localInitiatedRttMs',
+        current.localInitiatedRttMs,
+      ),
+      peerInitiatedRttMs: mergeOptionalNumberPatch(
+        patch,
+        'peerInitiatedRttMs',
+        current.peerInitiatedRttMs,
+      ),
+      lastVerificationError: mergeOptionalTextPatch(
+        patch,
+        'lastVerificationError',
+        current.lastVerificationError,
+      ),
       updatedAt: toIso(this.now),
     });
     const lockedBase = lockConfirmedPeerHostId(current, mergedBase, patch);

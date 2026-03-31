@@ -48,6 +48,9 @@ fn default_heartbeat_interval() -> u64 {
 struct HistoryQuery {
     #[serde(default = "default_history_limit")]
     limit: usize,
+    topic_prefix: Option<String>,
+    after_event_id: Option<String>,
+    exclude_topic_prefix: Option<String>,
 }
 
 fn default_history_limit() -> usize {
@@ -153,7 +156,12 @@ async fn history_handler(
     State(state): State<AppState>,
     Query(query): Query<HistoryQuery>,
 ) -> Json<Vec<SignalEvent>> {
-    let events = state.signal_pool.window().recent(query.limit);
+    let events = state.signal_pool.window().recent_filtered(
+        query.limit,
+        query.topic_prefix.as_deref(),
+        query.exclude_topic_prefix.as_deref(),
+        query.after_event_id.as_deref(),
+    );
     Json(events)
 }
 
@@ -527,6 +535,127 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/signals/history")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert!(payload.is_empty());
+    }
+
+    #[tokio::test]
+    async fn history_filters_by_topic_prefix_and_after_event_id() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+
+        for (id, topic) in [
+            ("evt-0", "user.input.text"),
+            ("evt-1", "system.link_proof.request"),
+            ("evt-2", "system.link_proof.ack"),
+            ("evt-3", "system.link_proof.ack"),
+        ] {
+            state.signal_pool.publish(SignalEvent {
+                schema_version: 1,
+                id: id.to_string(),
+                topic: topic.to_string(),
+                ts: 1700000000000,
+                source: "test".to_string(),
+                origin_host_id: "local".to_string(),
+                hop: 0,
+                trace_id: None,
+                payload: serde_json::json!({ "id": id }),
+            });
+        }
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/signals/history?limit=10&topic_prefix=system.link_proof.&after_event_id=evt-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.len(), 2);
+        assert_eq!(payload[0]["id"], "evt-2");
+        assert_eq!(payload[1]["id"], "evt-3");
+    }
+
+    #[tokio::test]
+    async fn history_excludes_topic_prefix() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+
+        for (id, topic) in [
+            ("evt-0", "user.input.text"),
+            ("evt-1", "system.link_proof.request"),
+            ("evt-2", "task.created"),
+        ] {
+            state.signal_pool.publish(SignalEvent {
+                schema_version: 1,
+                id: id.to_string(),
+                topic: topic.to_string(),
+                ts: 1700000000000,
+                source: "test".to_string(),
+                origin_host_id: "local".to_string(),
+                hop: 0,
+                trace_id: None,
+                payload: serde_json::json!({ "id": id }),
+            });
+        }
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/signals/history?limit=10&exclude_topic_prefix=system.link_proof.")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        let ids = payload
+            .iter()
+            .map(|item| item["id"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["evt-0".to_string(), "evt-2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn history_strict_cursor_returns_empty_when_after_event_id_is_unknown() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+
+        state.signal_pool.publish(SignalEvent {
+            schema_version: 1,
+            id: "evt-0".to_string(),
+            topic: "system.link_proof.request".to_string(),
+            ts: 1700000000000,
+            source: "test".to_string(),
+            origin_host_id: "local".to_string(),
+            hop: 0,
+            trace_id: None,
+            payload: serde_json::json!({}),
+        });
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/signals/history?limit=10&topic_prefix=system.link_proof.&after_event_id=missing-cursor")
                     .body(Body::empty())
                     .unwrap(),
             )

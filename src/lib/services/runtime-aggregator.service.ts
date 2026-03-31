@@ -1,8 +1,11 @@
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { RuntimeTopologyResponse } from '@/lib/types/runtime-topology';
 import { getRuntimeHostService } from './runtime-host.service';
-import { formatHostForUrl } from '@/config/runtime-target';
 import { log } from '@/lib/logger';
+import {
+  buildRuntimeAuthHeaders,
+  resolveRuntimeHostBaseUrl,
+} from '@/lib/utils/runtime-host-address';
 
 export interface RuntimeAgentInfo {
   id: string;
@@ -102,8 +105,9 @@ export class RuntimeAggregatorServiceImpl implements RuntimeAggregatorService {
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
 
     try {
-      const response = await this.fetchImpl(`http://${formatHostForUrl(host.host)}:${host.port}/agents`, {
+      const response = await this.fetchImpl(`${resolveRuntimeHostBaseUrl(host)}/agents`, {
         method: 'GET',
+        headers: buildRuntimeAuthHeaders(host.authToken),
         signal: controller?.signal,
       });
 
@@ -137,8 +141,9 @@ export class RuntimeAggregatorServiceImpl implements RuntimeAggregatorService {
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
 
     try {
-      const response = await this.fetchImpl(`http://${formatHostForUrl(host.host)}:${host.port}/topology`, {
+      const response = await this.fetchImpl(`${resolveRuntimeHostBaseUrl(host)}/topology`, {
         method: 'GET',
+        headers: buildRuntimeAuthHeaders(host.authToken),
         signal: controller?.signal,
       });
 

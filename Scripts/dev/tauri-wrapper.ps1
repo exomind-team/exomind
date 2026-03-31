@@ -714,10 +714,15 @@ Ensure-AndroidDebugCleartextTraffic -BuildGradlePath $buildGradlePath
 #（兼容仅安装 rustup、但 PATH 缺少 cargo 代理的环境）
 Ensure-CargoFromRustup
 
-# Resolve free dev port for `tauri dev` (为 tauri dev 自动寻找空闲端口)
+# Resolve free dev port for desktop / android dev
+#（桌面与 Android 开发模式都需要感知实例端口）
 $isTauriDev = $TauriArgs -and $TauriArgs.Count -ge 1 -and $TauriArgs[0] -eq "dev"
-if ($isTauriDev) {
+$isAndroidDev = Test-IsAndroidDevCommand -CommandArgs $TauriArgs
+$requiresDynamicDevUrl = $isTauriDev -or $isAndroidDev
+if ($requiresDynamicDevUrl) {
   Resolve-FreeDevPort
+}
+if ($isTauriDev) {
   Resolve-EmbeddedRuntimePort
   Resolve-TauriDevTargetDir -ProjectRoot $projectRoot
 }
@@ -740,7 +745,7 @@ try {
 
     # Inject --config to override devUrl when port differs from default
     # (端口非默认值时，通过 --config 覆盖 devUrl)
-    if ($isTauriDev -and $env:EXOMIND_WEB_PORT -and $env:EXOMIND_WEB_PORT -ne "1420") {
+    if ($requiresDynamicDevUrl -and $env:EXOMIND_WEB_PORT -and $env:EXOMIND_WEB_PORT -ne "1420") {
       $tempConfigPath = Join-Path $env:TEMP ("exomind-tauri-dev-config-{0}.json" -f [Guid]::NewGuid().ToString("N"))
       $devUrlOverride = '{"build":{"devUrl":"http://localhost:' + $env:EXOMIND_WEB_PORT + '"}}'
       Write-TextUtf8NoBom -Path $tempConfigPath -Content $devUrlOverride

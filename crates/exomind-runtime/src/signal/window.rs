@@ -71,6 +71,50 @@ impl WindowCache {
         events.iter().skip(skip).cloned().collect()
     }
 
+    /// Return the most recent filtered events for history polling.
+    ///
+    /// Unlike `since()`, this helper uses strict cursor semantics:
+    /// if `after_event_id` is provided but missing, it returns an empty set.
+    pub fn recent_filtered(
+        &self,
+        limit: usize,
+        topic_prefix: Option<&str>,
+        exclude_topic_prefix: Option<&str>,
+        after_event_id: Option<&str>,
+    ) -> Vec<SignalEvent> {
+        let events = match self.events.read() {
+            Ok(e) => e,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        let start_index = match after_event_id {
+            Some(event_id) => match events.iter().position(|event| event.id == event_id) {
+                Some(index) => index + 1,
+                None => return vec![],
+            },
+            None => 0,
+        };
+
+        let filtered = events
+            .iter()
+            .skip(start_index)
+            .filter(|event| {
+                topic_prefix
+                    .map(|prefix| event.topic.starts_with(prefix))
+                    .unwrap_or(true)
+            })
+            .filter(|event| {
+                exclude_topic_prefix
+                    .map(|prefix| !event.topic.starts_with(prefix))
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let skip = filtered.len().saturating_sub(limit);
+        filtered.into_iter().skip(skip).collect()
+    }
+
     pub fn len(&self) -> usize {
         let events = match self.events.read() {
             Ok(e) => e,
@@ -170,5 +214,32 @@ mod tests {
         assert!(cache.is_empty());
         assert!(cache.recent(10).is_empty());
         assert!(cache.since("anything").is_empty());
+    }
+
+    #[test]
+    fn recent_filtered_applies_topic_filters() {
+        let cache = WindowCache::new();
+        cache.push(make_event("e1", "system.link_proof.request"));
+        cache.push(make_event("e2", "user.input.text"));
+        cache.push(make_event("e3", "system.link_proof.ack"));
+
+        let filtered = cache.recent_filtered(10, Some("system.link_proof."), None, None);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].id, "e1");
+        assert_eq!(filtered[1].id, "e3");
+
+        let excluded = cache.recent_filtered(10, None, Some("system.link_proof."), None);
+        assert_eq!(excluded.len(), 1);
+        assert_eq!(excluded[0].id, "e2");
+    }
+
+    #[test]
+    fn recent_filtered_uses_strict_cursor() {
+        let cache = WindowCache::new();
+        cache.push(make_event("e1", "system.link_proof.request"));
+        cache.push(make_event("e2", "system.link_proof.ack"));
+
+        let filtered = cache.recent_filtered(10, Some("system.link_proof."), None, Some("missing"));
+        assert!(filtered.is_empty());
     }
 }

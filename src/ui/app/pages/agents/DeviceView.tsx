@@ -27,6 +27,7 @@ export interface DeviceViewProps {
   runtimeTargetError: string;
   runtimeExternalAddressDraft: string;
   onRuntimeHostProbe: (hostId: string) => Promise<void>;
+  onVerifyPeer: (hostId: string) => Promise<void>;
   onEmbeddedRuntimeNetworkModeChange: (mode: EmbeddedRuntimeNetworkMode) => void;
   onRuntimeStart: () => Promise<void>;
   onRuntimeStop: () => Promise<void>;
@@ -44,6 +45,73 @@ function renderSectionSummary(count: number, label: string): string {
   return `${count} 个${label}`;
 }
 
+function formatVerificationTriggerLabel(trigger: string | undefined): string | null {
+  if (trigger === 'pairing_auto') {
+    return '自动配对';
+  }
+  if (trigger === 'manual_retry') {
+    return '手动测试互联';
+  }
+  return null;
+}
+
+function formatVerificationTimeLabel(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new Date(value).toLocaleString('zh-CN', {
+      hour12: false,
+    });
+  } catch {
+    return value;
+  }
+}
+
+function resolveVerificationPresentation(item: RuntimeHostSnapshot): {
+  status: 'idle' | 'running' | 'verified' | 'failed';
+  label: string;
+  detail: string;
+  toneClass: string;
+} {
+  const verificationStatus = item.host.verificationStatus ?? 'idle';
+
+  if (verificationStatus === 'running') {
+    return {
+      status: 'running',
+      label: '正在验证互通',
+      detail: '正在执行链路验证协议，请等待双方结果返回。',
+      toneClass: 'text-[#C75B3A]',
+    };
+  }
+
+  if (verificationStatus === 'verified') {
+    return {
+      status: 'verified',
+      label: '已验证互通',
+      detail: '最近一次双向互通验证已完成，可继续发送业务信号。',
+      toneClass: 'text-[#16A34A]',
+    };
+  }
+
+  if (verificationStatus === 'failed') {
+    return {
+      status: 'failed',
+      label: item.connectionState === 'online' ? '在线，但互通验证失败' : '离线，最近验证失败',
+      detail: '请查看最近错误并重新执行测试互联。',
+      toneClass: 'text-[#DC2626]',
+    };
+  }
+
+  return {
+    status: 'idle',
+    label: '未验证互通',
+    detail: '在线 ≠ 已验证',
+    toneClass: 'text-[#B45309]',
+  };
+}
+
 export function DeviceView({
   groups,
   runtimeHostSnapshots,
@@ -57,6 +125,7 @@ export function DeviceView({
   runtimeTargetError,
   runtimeExternalAddressDraft,
   onRuntimeHostProbe,
+  onVerifyPeer,
   onEmbeddedRuntimeNetworkModeChange,
   onRuntimeStart,
   onRuntimeStop,
@@ -86,6 +155,7 @@ export function DeviceView({
     : '先启动内嵌 RT，再把这台设备加入你的 ExoMind-Net。';
   const localNodeId = runtimeServiceStatus?.hostId ?? 'pending（待登记）';
   const canOpenPeerPairing = Boolean(runtimeServiceStatus?.running);
+  const canVerifyConfirmedPeer = Boolean(runtimeServiceStatus?.running);
 
   const renderRuntimePeerCard = (
     item: RuntimeHostSnapshot,
@@ -106,6 +176,12 @@ export function DeviceView({
           ? '离线'
           : '异常 / 待重试'
       : null;
+    const verificationPresentation = mode === 'confirmed'
+      ? resolveVerificationPresentation(item)
+      : null;
+    const verificationTriggerLabel = formatVerificationTriggerLabel(item.host.lastVerificationTrigger);
+    const verificationTimeLabel = formatVerificationTimeLabel(item.host.lastVerifiedAt);
+    const verifyButtonLabel = verificationPresentation?.status === 'running' ? '验证中...' : '测试互联';
 
     return (
       <div
@@ -183,6 +259,78 @@ export function DeviceView({
           <div className="mt-2 rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
             <p className="text-[10px] text-[#A8A29E]">复制状态</p>
             <p className="text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">{replicationStatus}</p>
+          </div>
+        )}
+
+        {verificationPresentation && (
+          <div
+            data-testid={`runtime-host-verification-panel-${item.host.id}`}
+            className="mt-2 rounded-lg border border-[#D6D3D1] bg-white px-2 py-2 dark:border-[#44403C] dark:bg-[#1C1917]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] text-[#A8A29E]">互通验证</p>
+                <p
+                  data-testid={`runtime-host-verification-status-${item.host.id}`}
+                  className={`text-[11px] font-semibold ${verificationPresentation.toneClass}`}
+                >
+                  {verificationPresentation.label}
+                </p>
+                <p className="mt-0.5 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+                  {verificationPresentation.detail}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-testid={`runtime-host-verify-${item.host.id}`}
+                onClick={() => {
+                  void onVerifyPeer(item.host.id);
+                }}
+                disabled={!canVerifyConfirmedPeer || verificationPresentation.status === 'running'}
+                className="rounded bg-[#0D9488] px-2 py-1 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {verifyButtonLabel}
+              </button>
+            </div>
+
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="rounded-md bg-[#FAF7F5] px-2 py-1 dark:bg-[#292524]">
+                <p
+                  data-testid={`runtime-host-local-rtt-${item.host.id}`}
+                  className="text-[10px] font-medium text-[#1C1917] dark:text-[#FAFAF9]"
+                >
+                  {typeof item.host.localInitiatedRttMs === 'number'
+                    ? `本端 RTT ${item.host.localInitiatedRttMs} ms`
+                    : '本端 RTT --'}
+                </p>
+              </div>
+              <div className="rounded-md bg-[#FAF7F5] px-2 py-1 dark:bg-[#292524]">
+                <p
+                  data-testid={`runtime-host-peer-rtt-${item.host.id}`}
+                  className="text-[10px] font-medium text-[#1C1917] dark:text-[#FAFAF9]"
+                >
+                  {typeof item.host.peerInitiatedRttMs === 'number'
+                    ? `对端 RTT ${item.host.peerInitiatedRttMs} ms`
+                    : '对端 RTT --'}
+                </p>
+              </div>
+            </div>
+
+            {(verificationTriggerLabel || verificationTimeLabel) && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+                {verificationTriggerLabel && <span>触发：{verificationTriggerLabel}</span>}
+                {verificationTimeLabel && <span>最近验证：{verificationTimeLabel}</span>}
+              </div>
+            )}
+
+            {item.host.lastVerificationError && verificationPresentation.status === 'failed' && (
+              <p
+                data-testid={`runtime-host-verification-error-${item.host.id}`}
+                className="mt-2 text-[10px] text-[#DC2626]"
+              >
+                {item.host.lastVerificationError}
+              </p>
+            )}
           </div>
         )}
 

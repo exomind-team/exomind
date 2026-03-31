@@ -62,6 +62,41 @@ export interface PublishResponse {
   event_id: string;
 }
 
+// ── Link Proof Protocol（链路验证协议）──────────────────────────
+
+export type LinkProofTrigger = 'pairing_auto' | 'manual_retry';
+export type LinkProofAckKind = 'receipt' | 'result';
+
+export interface LinkProofRequestPayload {
+  proof_session_id: string;
+  attempt_id: string;
+  initiated_by_peer_id: string;
+  target_peer_id: string;
+  trigger: LinkProofTrigger;
+  sent_at_ms: number;
+}
+
+export interface LinkProofAckPayload {
+  proof_session_id: string;
+  attempt_id: string;
+  initiated_by_peer_id: string;
+  target_peer_id: string;
+  receipt_for_target_peer_id?: string;
+  ack_kind: LinkProofAckKind;
+  acked_by_peer_id: string;
+  observed_rtt_ms?: number;
+  completed_at_ms: number;
+}
+
+// ── History API ──────────────────────────────────────────────
+
+export interface SignalHistoryQuery {
+  limit?: number;
+  topicPrefix?: string;
+  afterEventId?: string;
+  excludeTopicPrefix?: string;
+}
+
 // ── Route CRUD API ───────────────────────────────────────────
 
 export interface CreateRouteRequest {

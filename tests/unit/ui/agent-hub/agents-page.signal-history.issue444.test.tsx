@@ -104,6 +104,47 @@ const SAMPLE_SIGNAL_HISTORY: SignalEvent[] = [
   },
 ];
 
+const SAMPLE_PROOF_HISTORY: SignalEvent[] = [
+  {
+    schema_version: 1,
+    id: 'sig-003',
+    topic: 'system.link_proof.request',
+    ts: 1741161602000,
+    source: 'ui:runtime_link_proof',
+    origin_host_id: 'desktop-local-host',
+    hop: 0,
+    trace_id: 'trace-c',
+    payload: {
+      proof_session_id: 'proof-session-1',
+      attempt_id: 'attempt-1',
+      initiated_by_peer_id: 'desktop-local-host',
+      target_peer_id: 'paired-phone-host',
+      trigger: 'pairing_auto',
+      sent_at_ms: 1741161602000,
+    },
+  },
+  {
+    schema_version: 1,
+    id: 'sig-004',
+    topic: 'system.link_proof.ack',
+    ts: 1741161603000,
+    source: 'actor:link_proof',
+    origin_host_id: 'paired-phone-host',
+    hop: 1,
+    trace_id: 'trace-d',
+    payload: {
+      proof_session_id: 'proof-session-1',
+      attempt_id: 'attempt-1',
+      initiated_by_peer_id: 'desktop-local-host',
+      target_peer_id: 'desktop-local-host',
+      ack_kind: 'result',
+      acked_by_peer_id: 'paired-phone-host',
+      observed_rtt_ms: 56,
+      completed_at_ms: 1741161603000,
+    },
+  },
+];
+
 describe('agents page signal history issue-444（信号历史独立交互）', () => {
   beforeEach(() => {
     window.history.pushState({}, '', '/agents');
@@ -164,11 +205,18 @@ describe('agents page signal history issue-444（信号历史独立交互）', (
           json: async () => SAMPLE_SIGNAL_ROUTES,
         } as Response;
       }
-      if (url.includes('/signals/history')) {
+      if (url.includes('/signals/history') && url.includes('exclude_topic_prefix=system.link_proof.')) {
         return {
           ok: true,
           status: 200,
           json: async () => SAMPLE_SIGNAL_HISTORY,
+        } as Response;
+      }
+      if (url.includes('/signals/history') && url.includes('topic_prefix=system.link_proof.')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => SAMPLE_PROOF_HISTORY,
         } as Response;
       }
 
@@ -196,8 +244,10 @@ describe('agents page signal history issue-444（信号历史独立交互）', (
     });
 
     expect(screen.getByTestId('signal-history-filter-all')).toBeInTheDocument();
+    expect(screen.getByTestId('signal-history-filter-link-proof')).toBeInTheDocument();
     expect(screen.getByTestId('signal-history-filter-user.input.text')).toBeInTheDocument();
     expect(screen.getByTestId('signal-history-filter-eventlog.appended')).toBeInTheDocument();
+    expect(screen.queryByTestId('signal-history-filter-system.link_proof.request')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('signal-history-filter-user.input.text'));
 
@@ -206,23 +256,40 @@ describe('agents page signal history issue-444（信号历史独立交互）', (
     });
 
     expect(screen.queryByTestId('signal-history-item-sig-002')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('signal-history-item-sig-003')).not.toBeInTheDocument();
 
     const payloadPanel = screen.getByTestId('signal-history-payload-sig-001');
     fireEvent.click(within(payloadPanel).getByText('展开 payload'));
     expect(screen.getByText(/Payload:/)).toBeInTheDocument();
     expect(within(payloadPanel).getByText(/hello from signal history/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('signal-history-open-sig-001'));
+    fireEvent.click(screen.getByTestId('signal-history-filter-link-proof'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('signal-history-item-sig-003')).toBeInTheDocument();
+      expect(screen.getByTestId('signal-history-item-sig-004')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('signal-history-item-sig-001')).not.toBeInTheDocument();
+    expect(screen.getByTestId('signal-history-system-badge-sig-003')).toHaveTextContent('系统信号');
+    expect(screen.getByText(/链路验证请求 · desktop-local-host -> paired-phone-host · 自动配对 · session proof-session-1/)).toBeInTheDocument();
+    expect(screen.getByText(/链路验证结果 · paired-phone-host -> desktop-local-host · RTT 56 ms · session proof-session-1/)).toBeInTheDocument();
+
+    const proofPayloadPanel = screen.getByTestId('signal-history-payload-sig-003');
+    fireEvent.click(within(proofPayloadPanel).getByText('展开 payload'));
+    expect(within(proofPayloadPanel).getByText(/"proof_session_id": "proof-session-1"/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('signal-history-open-sig-004'));
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-rightpanel-signal-detail')).toBeInTheDocument();
     });
 
     const detail = screen.getByTestId('agent-rightpanel-signal-detail');
-    expect(within(detail).getByText('sig-001')).toBeInTheDocument();
-    expect(within(detail).getByText('ui:test')).toBeInTheDocument();
-    expect(within(detail).getByText('local-host')).toBeInTheDocument();
-    expect(within(detail).getByText('0')).toBeInTheDocument();
-    expect(within(detail).getByText(/hello from signal history/)).toBeInTheDocument();
+    expect(within(detail).getByText('sig-004')).toBeInTheDocument();
+    expect(within(detail).getByText('actor:link_proof')).toBeInTheDocument();
+    expect(within(detail).getByText('paired-phone-host')).toBeInTheDocument();
+    expect(within(detail).getByText('1')).toBeInTheDocument();
+    expect(within(detail).getByText(/"ack_kind": "result"/)).toBeInTheDocument();
   });
 });

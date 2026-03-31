@@ -1,6 +1,6 @@
 import type { AgentEnergySnapshot, RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { RuntimeTopologyResponse } from '@/lib/types/runtime-topology';
-import { DEFAULT_EXTERNAL_RUNTIME_PORT, formatRuntimeTargetAddress } from '@/config/runtime-target';
+import { DEFAULT_EXTERNAL_RUNTIME_PORT } from '@/config/runtime-target';
 import {
   type AddRuntimeHostInput,
   type RuntimeHostMetadataPatch,
@@ -8,6 +8,7 @@ import {
   getRuntimeHostService,
 } from '@/lib/services/runtime-host.service';
 import { getRuntimeMeshSyncService, type RuntimeMeshSyncService } from '@/lib/services/runtime-mesh-sync.service';
+import { resolveRuntimeHostDialAddress } from '@/lib/utils/runtime-host-address';
 import { RuntimeClient, type RuntimeAgentSummary } from './runtime-client';
 
 export type RuntimeHostConnectionState = 'online' | 'error' | 'offline';
@@ -246,10 +247,7 @@ export class RuntimeManager {
 
     const patch: RuntimeHostMetadataPatch = {
       hostId: topology.host_id,
-      lastSuccessfulDialAddress: formatRuntimeTargetAddress({
-        host: host.host,
-        port: host.port,
-      }),
+      lastSuccessfulDialAddress: resolveRuntimeHostDialAddress(host),
     };
 
     if (

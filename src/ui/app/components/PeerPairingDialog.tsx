@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -7,20 +7,51 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { getRuntimeMeshSyncService } from '@/lib/services/runtime-mesh-sync.service';
-import { formatHostForUrl } from '@/config/runtime-target';
+import { formatHostForUrl, parseRuntimeAddress } from '@/config/runtime-target';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import { Loader2, RefreshCw, Check, X, ChevronLeft } from 'lucide-react';
+import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
+import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
+import { resolveRuntimeHostDialAddress } from '@/lib/utils/runtime-host-address';
+import { SignalStreamService } from '@/lib/services/signal-stream.service';
+import {
+  createRuntimeLinkProofService,
+  type RuntimeLinkProofRunOptions,
+} from '@/lib/services/runtime-link-proof.service';
+import type { SignalEvent } from '@/lib/types/signal-pool';
 
 // ── Types ──────────────────────────────────────────────────────
 
 type PairingMode = 'select' | 'initiator' | 'responder';
-type PairingStatus = 'idle' | 'loading' | 'waiting' | 'success' | 'error';
+type PairingStatus =
+  | 'idle'
+  | 'loading'
+  | 'waiting'
+  | 'verifying_pending'
+  | 'verifying'
+  | 'verification_failed'
+  | 'success'
+  | 'error';
 
 interface DiscoveredPeer {
   host_id: string;
   host: string;
   port: number;
 }
+
+interface ResponderPeer extends DiscoveredPeer {
+  sourceLabel: string;
+  priority: number;
+}
+
+type VerificationContext = Omit<RuntimeLinkProofRunOptions, 'trigger'> & {
+  trigger: 'pairing_auto' | 'manual_retry';
+};
+
+const INITIATOR_PEER_POLL_INTERVAL_MS = 2000;
+const RESPONDER_DISCOVERY_POLL_INTERVAL_MS = 3000;
+const ADOPTION_POLL_INTERVAL_MS = 250;
+const ADOPTION_WINDOW_MS = 5000;
 
 export interface PeerPairingDialogProps {
   open: boolean;
@@ -29,6 +60,118 @@ export interface PeerPairingDialogProps {
   localHostId: string;
   /** Admin auth token for the local runtime (required when EXOMIND_RT_SECRET is set). */
   localAuthToken?: string;
+  /** Known online hosts from the device page（设备页里当前已知且在线的设备）. */
+  knownHosts?: RuntimeHostRecord[];
+  onPairingSuccess?: () => Promise<void> | void;
+  timingOverrides?: {
+    initiatorPeerPollIntervalMs?: number;
+    responderDiscoveryPollIntervalMs?: number;
+    adoptionPollIntervalMs?: number;
+    adoptionWindowMs?: number;
+  };
+}
+
+function buildResponderPeerKey(peer: Pick<DiscoveredPeer, 'host_id' | 'host' | 'port'>): string {
+  return peer.host_id || `${peer.host}:${peer.port}`;
+}
+
+function normalizeResponderSourceLabel(labels: Iterable<string>): string {
+  return Array.from(new Set(labels)).join(' · ');
+}
+
+function getKnownHostPeerLabel(host: RuntimeHostRecord): string {
+  if (host.trustState === 'confirmed_peer') {
+    return '已连接';
+  }
+  if (host.trustState === 'discovered_candidate') {
+    return '已知设备';
+  }
+  return '已保存设备';
+}
+
+function getKnownHostPriority(host: RuntimeHostRecord): number {
+  if (host.trustState === 'confirmed_peer') {
+    return 0;
+  }
+  if (host.trustState === 'discovered_candidate') {
+    return 1;
+  }
+  return 2;
+}
+
+function buildResponderPeers(
+  discoveredPeers: DiscoveredPeer[],
+  knownHosts: RuntimeHostRecord[],
+  localHostId: string,
+): ResponderPeer[] {
+  const peers = new Map<string, ResponderPeer>();
+
+  const upsertPeer = (
+    peer: DiscoveredPeer,
+    sourceLabel: string,
+    priority: number,
+    preferAddress: boolean,
+  ) => {
+    const key = buildResponderPeerKey(peer);
+    const existing = peers.get(key);
+    if (!existing) {
+      peers.set(key, {
+        ...peer,
+        sourceLabel,
+        priority,
+      });
+      return;
+    }
+
+    peers.set(key, {
+      host_id: existing.host_id || peer.host_id,
+      host: preferAddress ? peer.host : existing.host,
+      port: preferAddress ? peer.port : existing.port,
+      sourceLabel: normalizeResponderSourceLabel([
+        ...existing.sourceLabel.split(' · '),
+        sourceLabel,
+      ]),
+      priority: Math.min(existing.priority, priority),
+    });
+  };
+
+  for (const peer of discoveredPeers) {
+    if (!peer.host_id || peer.host_id === localHostId) {
+      continue;
+    }
+    upsertPeer(peer, '自动发现', 2, false);
+  }
+
+  for (const host of knownHosts) {
+    if (!host.hostId || host.hostId === localHostId) {
+      continue;
+    }
+
+    let dialAddress: { host: string; port: number };
+    try {
+      dialAddress = parseRuntimeAddress(resolveRuntimeHostDialAddress(host));
+    } catch {
+      continue;
+    }
+
+    upsertPeer(
+      {
+        host_id: host.hostId,
+        host: dialAddress.host,
+        port: dialAddress.port,
+      },
+      getKnownHostPeerLabel(host),
+      getKnownHostPriority(host),
+      true,
+    );
+  }
+
+  return Array.from(peers.values()).sort((left, right) => (
+    left.priority - right.priority
+    || left.host_id.localeCompare(right.host_id)
+    || left.host.localeCompare(right.host)
+    || left.port - right.port
+  ));
 }
 
 function buildInitiatorDiagnosticMessage(
@@ -47,6 +190,50 @@ function buildInitiatorDiagnosticMessage(
   ].join('\n');
 }
 
+function buildLocalRuntimeHost(
+  runtimeBaseUrl: string,
+  localHostId: string,
+  localAuthToken?: string,
+): RuntimeHostRecord {
+  const parsed = new URL(runtimeBaseUrl);
+  const port = Number.parseInt(parsed.port || '80', 10);
+
+  return {
+    id: 'runtime-host-local-proof',
+    name: `Local Runtime (${parsed.hostname}:${port})`,
+    host: parsed.hostname,
+    port,
+    status: 'online',
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    isLocal: true,
+    hostId: localHostId,
+    trustState: 'manual_seed',
+    authToken: localAuthToken,
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isIncomingProofRequest(
+  event: SignalEvent,
+  peerId: string,
+  localHostId: string,
+  minTs: number,
+): boolean {
+  if (event.topic !== 'system.link_proof.request' || event.ts < minTs) {
+    return false;
+  }
+  const payload = event.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+  const record = payload as Record<string, unknown>;
+  return record.initiated_by_peer_id === peerId && record.target_peer_id === localHostId;
+}
+
 // ── Component ──────────────────────────────────────────────────
 
 export function PeerPairingDialog({
@@ -55,6 +242,9 @@ export function PeerPairingDialog({
   runtimeBaseUrl,
   localHostId,
   localAuthToken,
+  knownHosts = [],
+  onPairingSuccess,
+  timingOverrides,
 }: PeerPairingDialogProps) {
   const [mode, setMode] = useState<PairingMode>('select');
   const [status, setStatus] = useState<PairingStatus>('idle');
@@ -66,13 +256,31 @@ export function PeerPairingDialog({
   const [pin, setPin] = useState('');
 
   // Responder state
-  const [peers, setPeers] = useState<DiscoveredPeer[]>([]);
-  const [selectedPeer, setSelectedPeer] = useState<DiscoveredPeer | null>(null);
+  const [discoveredPeers, setDiscoveredPeers] = useState<DiscoveredPeer[]>([]);
+  const [selectedPeer, setSelectedPeer] = useState<ResponderPeer | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [peerToken, setPeerToken] = useState('');
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const verificationContextRef = useRef<VerificationContext | null>(null);
+  const pairingStartedAtRef = useRef<number>(0);
 
   const meshService = getRuntimeMeshSyncService();
+  const hostService = getRuntimeHostService();
+  const localSignalService = useMemo(() => new SignalStreamService({
+    host: buildLocalRuntimeHost(runtimeBaseUrl, localHostId, localAuthToken),
+  }), [runtimeBaseUrl, localHostId, localAuthToken]);
+  const linkProofService = useMemo(() => createRuntimeLinkProofService({
+    signalService: localSignalService,
+    hostService,
+  }), [localSignalService, hostService]);
+  const initiatorPeerPollIntervalMs = timingOverrides?.initiatorPeerPollIntervalMs ?? INITIATOR_PEER_POLL_INTERVAL_MS;
+  const responderDiscoveryPollIntervalMs = timingOverrides?.responderDiscoveryPollIntervalMs ?? RESPONDER_DISCOVERY_POLL_INTERVAL_MS;
+  const adoptionPollIntervalMs = timingOverrides?.adoptionPollIntervalMs ?? ADOPTION_POLL_INTERVAL_MS;
+  const adoptionWindowMs = timingOverrides?.adoptionWindowMs ?? ADOPTION_WINDOW_MS;
+  const responderPeers = useMemo(
+    () => buildResponderPeers(discoveredPeers, knownHosts, localHostId),
+    [discoveredPeers, knownHosts, localHostId],
+  );
 
   // ── Reset on close ──────────────────────────────────────────
 
@@ -83,10 +291,12 @@ export function PeerPairingDialog({
       setErrorMessage('');
       setSessionId('');
       setPin('');
-      setPeers([]);
+      setDiscoveredPeers([]);
       setSelectedPeer(null);
       setPinInput('');
       setPeerToken('');
+      verificationContextRef.current = null;
+      pairingStartedAtRef.current = 0;
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -104,6 +314,71 @@ export function PeerPairingDialog({
     };
   }, []);
 
+  const waitForConfirmedHostRecord = useCallback(async (peerId: string) => {
+    const deadline = Date.now() + adoptionWindowMs;
+    while (Date.now() <= deadline) {
+      const hosts = await hostService.listHosts();
+      const host = hosts.find((item) => item.hostId === peerId && item.trustState === 'confirmed_peer')
+        ?? hosts.find((item) => item.hostId === peerId);
+      if (host) {
+        return host;
+      }
+      await sleep(adoptionPollIntervalMs);
+    }
+    return null;
+  }, [adoptionPollIntervalMs, adoptionWindowMs, hostService]);
+
+  const waitForIncomingProofRequest = useCallback(async (peerId: string, minTs: number) => {
+    const deadline = Date.now() + adoptionWindowMs;
+    let cursor: string | undefined;
+
+    while (Date.now() <= deadline) {
+      const events = await localSignalService.history({
+        limit: 50,
+        topicPrefix: 'system.link_proof.',
+        afterEventId: cursor,
+      });
+
+      if (events.length > 0) {
+        cursor = events[events.length - 1]?.id;
+      }
+
+      const requestEvent = events.find((event) => isIncomingProofRequest(
+        event,
+        peerId,
+        localHostId,
+        minTs,
+      ));
+      if (requestEvent) {
+        return requestEvent;
+      }
+
+      await sleep(adoptionPollIntervalMs);
+    }
+
+    return null;
+  }, [adoptionPollIntervalMs, adoptionWindowMs, localSignalService, localHostId]);
+
+  const runVerification = useCallback(async (
+    context: VerificationContext,
+    options?: { afterSuccess?: () => Promise<void> | void },
+  ) => {
+    verificationContextRef.current = context;
+    setStatus('verifying');
+    setErrorMessage('');
+
+    const result = await linkProofService.runVerification(context);
+    if (result.status === 'verified') {
+      setStatus('success');
+      await options?.afterSuccess?.();
+      return result;
+    }
+
+    setErrorMessage(result.errorMessage);
+    setStatus('verification_failed');
+    return result;
+  }, [linkProofService]);
+
   // ── Initiator flow ──────────────────────────────────────────
 
   const handleInitiate = useCallback(async () => {
@@ -115,6 +390,7 @@ export function PeerPairingDialog({
       setSessionId(result.session_id);
       setPin(result.pin);
       setStatus('waiting');
+      pairingStartedAtRef.current = Date.now();
 
       // Start polling for pairing completion
       const initialPeers = await meshService.listMeshPeers(runtimeBaseUrl, localAuthToken).catch(() => []);
@@ -132,19 +408,52 @@ export function PeerPairingDialog({
               clearInterval(pollTimerRef.current);
               pollTimerRef.current = null;
             }
-            setStatus('success');
+            setStatus('verifying_pending');
+            await onPairingSuccess?.();
+
+            const [hostRecord, adoptedRequestEvent] = await Promise.all([
+              waitForConfirmedHostRecord(newPeer.id),
+              waitForIncomingProofRequest(newPeer.id, pairingStartedAtRef.current),
+            ]);
+
+            if (!hostRecord || !adoptedRequestEvent) {
+              setErrorMessage('等待验证上下文超时');
+              setStatus('verification_failed');
+              return;
+            }
+
+            await runVerification({
+              mode: 'joiner',
+              localPeerId: localHostId,
+              peerId: newPeer.id,
+              runtimeHostRecordId: hostRecord.id,
+              adoptedRequestEvent,
+              trigger: 'pairing_auto',
+            }, {
+              afterSuccess: onPairingSuccess,
+            });
           }
         } catch {
           // Silently retry
         }
-      }, 2000);
+      }, initiatorPeerPollIntervalMs);
     } catch (err) {
       setErrorMessage(
         buildInitiatorDiagnosticMessage(runtimeBaseUrl, localHostId, localAuthToken, err),
       );
       setStatus('error');
     }
-  }, [meshService, runtimeBaseUrl, localAuthToken, localHostId]);
+  }, [
+    meshService,
+    runtimeBaseUrl,
+    localAuthToken,
+    localHostId,
+    onPairingSuccess,
+    runVerification,
+    waitForConfirmedHostRecord,
+    waitForIncomingProofRequest,
+    initiatorPeerPollIntervalMs,
+  ]);
 
   // ── Responder flow ──────────────────────────────────────────
 
@@ -153,7 +462,7 @@ export function PeerPairingDialog({
     setStatus('loading');
     setErrorMessage('');
     setSelectedPeer(null);
-    setPeers([]);
+    setDiscoveredPeers([]);
 
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
@@ -164,7 +473,7 @@ export function PeerPairingDialog({
     const poll = async () => {
       try {
         const discovered = await meshService.listDiscoveredPeers(runtimeBaseUrl, localAuthToken);
-        setPeers(discovered);
+        setDiscoveredPeers(discovered);
         setStatus((currentStatus) => (currentStatus === 'loading' ? 'idle' : currentStatus));
       } catch {
         // Silent retry on poll failure
@@ -172,19 +481,19 @@ export function PeerPairingDialog({
     };
 
     void poll();
-    pollTimerRef.current = setInterval(poll, 3000);
-  }, [meshService, runtimeBaseUrl, localAuthToken]);
+    pollTimerRef.current = setInterval(poll, responderDiscoveryPollIntervalMs);
+  }, [meshService, runtimeBaseUrl, localAuthToken, responderDiscoveryPollIntervalMs]);
 
   const handleRefreshPeers = useCallback(async () => {
     try {
       const discovered = await meshService.listDiscoveredPeers(runtimeBaseUrl, localAuthToken);
-      setPeers(discovered);
+      setDiscoveredPeers(discovered);
     } catch {
       // Silently ignore refresh errors
     }
   }, [meshService, runtimeBaseUrl, localAuthToken]);
 
-  const handleSelectPeer = useCallback((peer: DiscoveredPeer) => {
+  const handleSelectPeer = useCallback((peer: ResponderPeer) => {
     setSelectedPeer(peer);
     setPinInput('');
     setErrorMessage('');
@@ -207,7 +516,16 @@ export function PeerPairingDialog({
       // Generate a per-peer inbound token for the initiator to use when calling us.
       const responderInboundToken = crypto.randomUUID();
 
-      const initiatorBaseUrl = `http://${formatHostForUrl(selectedPeer.host)}:${selectedPeer.port}`;
+      let initiatorBaseUrl = `http://${formatHostForUrl(selectedPeer.host)}:${selectedPeer.port}`;
+      try {
+        const dialAddress = await getRuntimeControlService().getPeerDialAddress(
+          selectedPeer.host,
+          selectedPeer.port,
+        );
+        initiatorBaseUrl = `http://${formatHostForUrl(dialAddress.host)}:${dialAddress.port}`;
+      } catch {
+        // Fall back to the discovered address if dial address resolution fails.
+      }
 
       // Determine our externally-reachable address (what the initiator should use to call us)
       let responderBaseUrl = runtimeBaseUrl;
@@ -243,7 +561,25 @@ export function PeerPairingDialog({
         );
 
         setPeerToken(result.peer_token);
-        setStatus('success');
+        setStatus('verifying');
+        await onPairingSuccess?.();
+
+        const hostRecord = await waitForConfirmedHostRecord(selectedPeer.host_id);
+        if (!hostRecord) {
+          setErrorMessage('未找到已配对设备记录，无法开始验证');
+          setStatus('verification_failed');
+          return;
+        }
+
+        await runVerification({
+          mode: 'owner',
+          localPeerId: localHostId,
+          peerId: selectedPeer.host_id,
+          runtimeHostRecordId: hostRecord.id,
+          trigger: 'pairing_auto',
+        }, {
+          afterSuccess: onPairingSuccess,
+        });
       } else {
         setErrorMessage('PIN 验证失败，请确认后重试');
         setStatus('error');
@@ -252,7 +588,31 @@ export function PeerPairingDialog({
       setErrorMessage(err instanceof Error ? err.message : String(err));
       setStatus('error');
     }
-  }, [selectedPeer, pinInput, meshService, localHostId, runtimeBaseUrl, localAuthToken]);
+  }, [
+    selectedPeer,
+    pinInput,
+    meshService,
+    localHostId,
+    runtimeBaseUrl,
+    localAuthToken,
+    onPairingSuccess,
+    runVerification,
+    waitForConfirmedHostRecord,
+  ]);
+
+  const handleRetryVerification = useCallback(async () => {
+    const context = verificationContextRef.current;
+    if (!context) {
+      return;
+    }
+
+    await runVerification({
+      ...context,
+      trigger: 'manual_retry',
+    }, {
+      afterSuccess: onPairingSuccess,
+    });
+  }, [onPairingSuccess, runVerification]);
 
   // ── PIN input handler with auto-advance ─────────────────────
 
@@ -299,7 +659,11 @@ export function PeerPairingDialog({
           <DialogDescription>
             {mode === 'select' && '选择配对模式，与其他 ExoMind 设备建立安全连接'}
             {mode === 'initiator' && '请在对方设备上输入以下 PIN 码完成配对'}
-            {mode === 'responder' && (selectedPeer ? `正在与 ${selectedPeer.host_id.slice(0, 8)}... 配对` : '通过 mDNS 自动发现的局域网设备')}
+            {mode === 'responder' && (
+              selectedPeer
+                ? `正在与 ${selectedPeer.host_id.slice(0, 8)}... 配对`
+                : '自动发现的局域网设备与已知在线设备'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -356,6 +720,44 @@ export function PeerPairingDialog({
                 </div>
               </>
             )}
+            {status === 'verifying_pending' && (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-[#A8A29E]" />
+                <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">等待验证上下文</p>
+                <p className="text-xs text-[#A8A29E]">正在等待对端 proof request 与 host record 落地</p>
+              </div>
+            )}
+            {status === 'verifying' && (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-[#A8A29E]" />
+                <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">连接验证中</p>
+                <p className="text-xs text-[#A8A29E]">将自动完成双向互通验证</p>
+              </div>
+            )}
+            {status === 'verification_failed' && (
+              <div className="flex flex-col items-center gap-2">
+                <X className="h-8 w-8 text-red-500" />
+                <p className="text-sm text-red-500">{errorMessage}</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleRetryVerification();
+                    }}
+                    className="rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white hover:bg-[#B5502F]"
+                  >
+                    重试验证
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenChange(false)}
+                    className="rounded-xl border border-[#F0ECE8] px-4 py-2 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
+                  >
+                    关闭
+                  </button>
+                </div>
+              </div>
+            )}
             {status === 'error' && (
               <div className="flex flex-col items-center gap-2">
                 <X className="h-8 w-8 text-red-500" />
@@ -380,21 +782,26 @@ export function PeerPairingDialog({
                 <Loader2 className="h-6 w-6 animate-spin text-[#A8A29E]" />
               </div>
             )}
-            {peers.length === 0 && status !== 'loading' && (
+            {responderPeers.length === 0 && status !== 'loading' && (
               <div className="flex flex-col items-center gap-2 py-6 text-sm text-[#78716C]">
-                <p>未发现局域网设备</p>
-                <p className="text-xs text-[#A8A29E]">请确保对方设备已启动 Runtime</p>
+                <p>未发现可用于配对的设备</p>
+                <p className="text-xs text-[#A8A29E]">请确保对方设备已启动 Runtime 并保持在线</p>
               </div>
             )}
-            {peers.map((peer) => (
+            {responderPeers.map((peer) => (
               <button
                 key={peer.host_id}
                 type="button"
                 className="flex w-full items-center rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
                 onClick={() => handleSelectPeer(peer)}
               >
-                <div>
-                  <div className="font-medium font-mono text-xs text-[#1C1917] dark:text-[#FAFAF9]">{peer.host_id.slice(0, 12)}...</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium font-mono text-xs text-[#1C1917] dark:text-[#FAFAF9]">{peer.host_id.slice(0, 12)}...</div>
+                    <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
+                      {peer.sourceLabel}
+                    </span>
+                  </div>
                   <div className="mt-0.5 text-xs text-[#A8A29E]">
                     {peer.host}:{peer.port}
                   </div>
@@ -427,6 +834,37 @@ export function PeerPairingDialog({
           <div className="flex flex-col items-center gap-4 py-4">
             {status === 'loading' && (
               <Loader2 className="h-8 w-8 animate-spin text-[#A8A29E]" />
+            )}
+            {status === 'verifying' && (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-[#A8A29E]" />
+                <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">连接验证中</p>
+                <p className="text-xs text-[#A8A29E]">正在验证双方链路与 RTT</p>
+              </div>
+            )}
+            {status === 'verification_failed' && (
+              <>
+                <X className="h-8 w-8 text-red-500" />
+                <p className="text-sm text-red-500">{errorMessage}</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleRetryVerification();
+                    }}
+                    className="rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F]"
+                  >
+                    重试验证
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenChange(false)}
+                    className="rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
+                  >
+                    关闭
+                  </button>
+                </div>
+              </>
             )}
             {(status === 'idle' || status === 'error') && (
               <>

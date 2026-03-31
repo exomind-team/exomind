@@ -1,8 +1,16 @@
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
-import type { PublishRequest, PublishResponse, SignalEvent } from '@/lib/types/signal-pool';
+import type {
+  PublishRequest,
+  PublishResponse,
+  SignalEvent,
+  SignalHistoryQuery,
+} from '@/lib/types/signal-pool';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { log } from '@/lib/logger';
-import { formatHostForUrl } from '@/config/runtime-target';
+import {
+  buildRuntimeAuthHeaders,
+  resolveRuntimeHostBaseUrl,
+} from '@/lib/utils/runtime-host-address';
 
 export interface SignalStreamOpenRequest {
   agentId: string;
@@ -13,7 +21,7 @@ export interface SignalStreamOpenRequest {
 
 export interface SignalTransport {
   publish(request: PublishRequest): Promise<PublishResponse>;
-  history(limit?: number): Promise<SignalEvent[]>;
+  history(query?: number | SignalHistoryQuery): Promise<SignalEvent[]>;
   openStream(request: SignalStreamOpenRequest): Promise<Response>;
 }
 
@@ -22,7 +30,7 @@ export interface HttpSseSignalTransportOptions {
 }
 
 export function buildSignalBaseUrl(host: RuntimeHostRecord): string {
-  return `http://${formatHostForUrl(host.host)}:${host.port}`;
+  return resolveRuntimeHostBaseUrl(host);
 }
 
 export function buildSignalStreamUrl(baseUrl: string, agentId: string, heartbeatInterval: number, authToken?: string): string {
@@ -56,11 +64,7 @@ export class HttpSseSignalTransport implements SignalTransport {
 
   /** Build common headers with optional Bearer auth token. */
   private authHeaders(extra?: Record<string, string>): Record<string, string> {
-    const headers: Record<string, string> = { ...extra };
-    if (this.host.authToken) {
-      headers['Authorization'] = `Bearer ${this.host.authToken}`;
-    }
-    return headers;
+    return Object.fromEntries(buildRuntimeAuthHeaders(this.host.authToken, extra).entries());
   }
 
   async publish(request: PublishRequest): Promise<PublishResponse> {
@@ -85,8 +89,24 @@ export class HttpSseSignalTransport implements SignalTransport {
     return (await response.json()) as PublishResponse;
   }
 
-  async history(limit?: number): Promise<SignalEvent[]> {
-    const params = limit != null ? `?limit=${limit}` : '';
+  async history(query?: number | SignalHistoryQuery): Promise<SignalEvent[]> {
+    const normalizedQuery = typeof query === 'number'
+      ? { limit: query }
+      : (query ?? {});
+    const search = new URLSearchParams();
+    if (normalizedQuery.limit != null) {
+      search.set('limit', String(normalizedQuery.limit));
+    }
+    if (normalizedQuery.topicPrefix) {
+      search.set('topic_prefix', normalizedQuery.topicPrefix);
+    }
+    if (normalizedQuery.afterEventId) {
+      search.set('after_event_id', normalizedQuery.afterEventId);
+    }
+    if (normalizedQuery.excludeTopicPrefix) {
+      search.set('exclude_topic_prefix', normalizedQuery.excludeTopicPrefix);
+    }
+    const params = search.size > 0 ? `?${search.toString()}` : '';
     const response = await fetch(`${this.baseUrl}/signals/history${params}`, {
       headers: this.authHeaders(),
     });

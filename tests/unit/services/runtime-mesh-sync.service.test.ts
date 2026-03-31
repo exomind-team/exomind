@@ -67,6 +67,43 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
     }));
   });
 
+  it('skips reciprocal remote upsert for emulator guest reachable addresses（Android 模拟器 guest 地址不回写远端 peer）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({}),
+    }));
+    const service = new RuntimeMeshSyncService({
+      fetchImpl,
+      getLocalRuntimeStatus: vi.fn(async () => ({
+        ...LOCAL_STATUS,
+        hostId: 'android-host',
+      })),
+      getReachableAddress: vi.fn(async () => ({
+        host: '10.0.2.15',
+        port: 9124,
+        hostId: 'android-host',
+      })),
+    });
+
+    await service.ensurePeerPair({
+      ...CONFIRMED_DESKTOP,
+      lastSuccessfulDialAddress: '198.18.0.1:25397',
+      manualOverride: '198.18.0.1:25397',
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:4077/mesh/peers', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        id: 'desktop-host',
+        base_url: 'http://198.18.0.1:25397',
+        enabled: true,
+        capabilities: [],
+      }),
+    }));
+  });
+
   it('skips when host is not confirmed peer（未确认 peer 时跳过自动配对）', async () => {
     const fetchImpl = vi.fn();
     const service = new RuntimeMeshSyncService({
@@ -106,6 +143,34 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
         enabled: true,
         capabilities: [],
       }),
+    }));
+  });
+
+  it('can disable an existing local mesh peer via enabled=false upsert（可通过 enabled=false 禁用本地 mesh peer）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    }));
+    const service = new RuntimeMeshSyncService({ fetchImpl });
+
+    await service.setPeerEnabled(
+      'http://127.0.0.1:4077',
+      'desktop-host-old',
+      'http://192.168.1.10:4077',
+      false,
+      'shared-secret',
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:4077/mesh/peers', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        id: 'desktop-host-old',
+        base_url: 'http://192.168.1.10:4077',
+        enabled: false,
+        capabilities: [],
+      }),
+      headers: expect.any(Object),
     }));
   });
 
