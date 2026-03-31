@@ -1,0 +1,26 @@
+src-tauri/src/lib.rs
+  d4aa739ebde62e83 33
+src-tauri/src/commands/runtime_commands.rs
+  d4aa739ebde62e83 938-941
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.23",
+  "base_commit_sha": "3056b7106ef7ae3b96648cd0242c2aecdcdb5154",
+  "prompts": {
+    "d4aa739ebde62e83": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d43d2-b7f8-7e11-aa78-e8b35b7cb919",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442 <61109168+ARCJ137442@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 414,
+      "total_deletions": 384,
+      "accepted_lines": 5,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ca1c9eaeb3600452ffa1a8868ca45c8952ffa10b87d3bbbd3d840d0e1d010db2"
+    }
+  }
+}
