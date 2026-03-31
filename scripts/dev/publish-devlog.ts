@@ -153,8 +153,8 @@ function parseReportFields(dataBlock: string): ManifestEntry {
 
   return {
     date,
-    time: '',   // filled by caller with timestamp
-    title: title || '开发日志',
+    time: '',   // filled by caller with timestamp — also used to resolve daypart title
+    title: title || '开发日志', // will be auto-resolved by caller from time
     file: '',   // filled by caller with timestamp
     publisher,
     weather: weatherLevel ? { level: weatherLevel, emoji: weatherEmoji, label: weatherLabel } : undefined,
@@ -292,6 +292,12 @@ async function main() {
     : new Date().toTimeString().replace(/:/g, '').substring(0, 6);
   entry.time = timeStr;
   entry.file = `${entry.date}-${timeStr}.html`;
+
+  // Auto-resolve daypart title from hour
+  const hour = parseInt(timeStr.substring(0, 2), 10);
+  if (!isNaN(hour)) {
+    entry.title = hour < 6 ? '开发夜报' : hour < 12 ? '开发早报' : hour < 18 ? '开发午报' : '开发晚报';
+  }
 
   console.log(`📅 日期: ${entry.date} ${timeStr}`);
   console.log(`📰 标题: ${entry.title}`);

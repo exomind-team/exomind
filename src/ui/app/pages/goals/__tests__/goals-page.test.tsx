@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { TaskNode } from '@/lib/types/task';
 import { resetGoalStoreForTests } from '../goal-store';
+import { GOAL_NODE_SIZE, ME_NODE_SIZE } from '../components/GoalFlowNode';
 
 const flowApiMocks = vi.hoisted(() => ({
   lastProps: null as null | Record<string, unknown>,
@@ -127,7 +128,11 @@ vi.mock('@xyflow/react', () => ({
           data-testid="mock-react-flow-pane-context"
           onContextMenu={(event) => {
             event.preventDefault();
-            onPaneContextMenu?.({ preventDefault: () => {} });
+            onPaneContextMenu?.({
+              preventDefault: () => {},
+              clientX: event.clientX,
+              clientY: event.clientY,
+            } as unknown as { preventDefault: () => void });
           }}
         >
           pane-context
@@ -142,7 +147,11 @@ vi.mock('@xyflow/react', () => ({
               onClick={() => onNodeClick?.({}, node)}
               onContextMenu={(event) => {
                 event.preventDefault();
-                onNodeContextMenu?.({ preventDefault: () => {}, clientX: 32, clientY: 48 }, node);
+                onNodeContextMenu?.({
+                  preventDefault: () => {},
+                  clientX: event.clientX,
+                  clientY: event.clientY,
+                }, node);
               }}
             >
               {NodeComponent ? <NodeComponent id={node.id} data={node.data ?? {}} /> : node.id}
@@ -157,7 +166,11 @@ vi.mock('@xyflow/react', () => ({
             onClick={() => onEdgeClick?.({}, edge)}
             onContextMenu={(event) => {
               event.preventDefault();
-              onEdgeContextMenu?.({ preventDefault: () => {}, clientX: 64, clientY: 72 }, edge);
+              onEdgeContextMenu?.({
+                preventDefault: () => {},
+                clientX: event.clientX,
+                clientY: event.clientY,
+              }, edge);
             }}
           >
             {edge.id}
@@ -444,6 +457,56 @@ describe('GoalsPage', () => {
     });
   });
 
+  it('clamps the empty-state guide inside the goals page bounds', async () => {
+    const { resolveEmptyStateGuidePosition } = await import('../GoalsPage');
+
+    expect(resolveEmptyStateGuidePosition({
+      meScreenRight: 250,
+      meScreenCenterY: 140,
+      pageWidth: 300,
+      pageHeight: 160,
+      detailPanelOpen: false,
+      isDesktop: true,
+    })).toEqual({
+      left: '64px',
+      top: '84px',
+    });
+  });
+
+  it('keeps the empty-state guide out of the desktop detail panel area', async () => {
+    const { resolveEmptyStateGuidePosition } = await import('../GoalsPage');
+
+    expect(resolveEmptyStateGuidePosition({
+      meScreenRight: 520,
+      meScreenCenterY: 150,
+      pageWidth: 900,
+      pageHeight: 500,
+      detailPanelOpen: true,
+      isDesktop: true,
+    })).toEqual({
+      left: '308px',
+      top: '126px',
+    });
+  });
+
+  it('keeps the empty-state guide anchored next to Me after the viewport moves', async () => {
+    const { GoalsPage } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    const onMove = flowApiMocks.lastProps?.onMove as undefined | ((event: unknown, viewport: { x: number; y: number; zoom: number }) => void);
+    act(() => {
+      onMove?.({}, { x: 48, y: 32, zoom: 1.5 });
+    });
+
+    await waitFor(() => {
+      const guide = screen.getByTestId('goals-empty-state-guide');
+      expect(guide).toHaveStyle({
+        left: '200px',
+        top: '71px',
+      });
+    });
+  });
+
   it('limits completed goal context menu to read-only actions', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);
@@ -468,6 +531,35 @@ describe('GoalsPage', () => {
     expect(screen.getByTestId('goal-context-item-connect')).toBeInTheDocument();
     expect(screen.queryByTestId('goal-context-item-upstream')).toBeNull();
     expect(screen.queryByTestId('goal-context-item-cancel')).toBeNull();
+  });
+
+  it('positions the context menu relative to the goals page instead of raw viewport client coordinates', async () => {
+    const { GoalsPage } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    const page = screen.getByTestId('goals-page');
+    vi.spyOn(page, 'getBoundingClientRect').mockReturnValue({
+      x: 24,
+      y: 96,
+      left: 24,
+      top: 96,
+      right: 1224,
+      bottom: 896,
+      width: 1200,
+      height: 800,
+      toJSON: () => '',
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'), {
+      clientX: 164,
+      clientY: 228,
+    });
+
+    const menu = await screen.findByTestId('goal-context-menu');
+    expect(menu).toHaveStyle({
+      left: '140px',
+      top: '132px',
+    });
   });
 
   it('shows C5 feedback when deleting the last inbound edge', async () => {
@@ -853,6 +945,34 @@ describe('GoalsPage', () => {
     expect(screen.queryByTestId('goals-connect-preview')).toBeNull();
   });
 
+  it('keeps the connect preview start anchored to the source node after the viewport moves', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const goalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    const onMove = flowApiMocks.lastProps?.onMove as undefined | ((event: unknown, viewport: { x: number; y: number; zoom: number }) => void);
+    act(() => {
+      onMove?.({}, { x: 48, y: 32, zoom: 1.5 });
+    });
+
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${goalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-connect'));
+    fireEvent.mouseMove(screen.getByTestId('goals-page'), { clientX: 360, clientY: 280 });
+
+    const preview = screen.getByTestId('goals-connect-preview');
+    const line = preview.querySelector('line');
+    expect(line).not.toBeNull();
+    expect(Number.parseFloat(line?.getAttribute('x1') ?? '0')).toBeCloseTo(271.5, 1);
+    expect(Number.parseFloat(line?.getAttribute('y1') ?? '0')).toBeCloseTo(255.5, 1);
+  });
+
   it('toasts when connect mode is confirmed on the same goal node', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     render(<GoalsPage />);
@@ -928,6 +1048,57 @@ describe('GoalsPage', () => {
     expect(screen.getByTestId('goals-hop-rings')).toBeInTheDocument();
     expect(screen.getByTestId('goals-hop-ring-1')).toBeInTheDocument();
     expect(screen.getByTestId('goals-hop-ring-2')).toBeInTheDocument();
+  });
+
+  it('sizes hop-distance rings from the actual Me-to-goal graph distance for each hop', async () => {
+    const { GoalsPage, useGoalStore } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(1);
+    });
+
+    const firstGoalId = useGoalStore.getState().graph.goals[0]?.id as string;
+    fireEvent.contextMenu(screen.getByTestId(`mock-react-flow-node-${firstGoalId}`));
+    fireEvent.click(screen.getByTestId('goal-context-item-downstream'));
+
+    await waitFor(() => {
+      expect(useGoalStore.getState().graph.goals).toHaveLength(2);
+    });
+
+    const nodes = flowApiMocks.lastProps?.nodes as Array<{ id: string; position: { x: number; y: number } }> | undefined;
+    const meNode = nodes?.find((node) => node.id === 'me');
+    const firstGoalNode = nodes?.find((node) => node.id === firstGoalId);
+    const secondGoalId = useGoalStore.getState().graph.goals[1]?.id as string;
+    const secondGoalNode = nodes?.find((node) => node.id === secondGoalId);
+    expect(meNode).toBeDefined();
+    expect(firstGoalNode).toBeDefined();
+    expect(secondGoalNode).toBeDefined();
+    if (!meNode || !firstGoalNode || !secondGoalNode) {
+      throw new Error('expected Me and two goal nodes for hop ring distance assertions');
+    }
+
+    const meCenter = {
+      x: meNode.position.x + ME_NODE_SIZE / 2,
+      y: meNode.position.y + ME_NODE_SIZE / 2,
+    };
+    const firstHopDistance = Math.hypot(
+      firstGoalNode.position.x + GOAL_NODE_SIZE / 2 - meCenter.x,
+      firstGoalNode.position.y + GOAL_NODE_SIZE / 2 - meCenter.y,
+    );
+    const secondHopDistance = Math.hypot(
+      secondGoalNode.position.x + GOAL_NODE_SIZE / 2 - meCenter.x,
+      secondGoalNode.position.y + GOAL_NODE_SIZE / 2 - meCenter.y,
+    );
+
+    const ring1Radius = Number(screen.getByTestId('goals-hop-ring-1').querySelector('circle')?.getAttribute('r'));
+    const ring2Radius = Number(screen.getByTestId('goals-hop-ring-2').querySelector('circle')?.getAttribute('r'));
+
+    expect(ring1Radius).toBeCloseTo(firstHopDistance, 3);
+    expect(ring2Radius).toBeCloseTo(secondHopDistance, 3);
   });
 
   it('keeps hop-distance rings aligned with the React Flow viewport transform', async () => {

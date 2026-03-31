@@ -375,6 +375,40 @@ async function readViewportTransform(page: Page) {
   });
 }
 
+async function readEmptyStateGuideAnchorMetrics(page: Page) {
+  return page.evaluate(() => {
+    const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+    const guide = document.querySelector('[data-testid="goals-empty-state-guide"]') as HTMLElement | null;
+    if (!me || !guide) return null;
+
+    const meRect = me.getBoundingClientRect();
+    const guideRect = guide.getBoundingClientRect();
+
+    return {
+      horizontalGap: guideRect.left - meRect.right,
+      verticalOffset: (guideRect.top + guideRect.height / 2) - (meRect.top + meRect.height / 2),
+    };
+  });
+}
+
+async function readConnectPreviewAnchorMetrics(page: Page, sourceTestId: string) {
+  return page.evaluate((testId) => {
+    const source = document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null;
+    const preview = document.querySelector('[data-testid="goals-connect-preview"] line') as SVGLineElement | null;
+    const goalsPage = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+    if (!source || !preview || !goalsPage) return null;
+
+    const sourceRect = source.getBoundingClientRect();
+    const pageRect = goalsPage.getBoundingClientRect();
+    return {
+      sourceCenterX: sourceRect.left + sourceRect.width / 2 - pageRect.left,
+      sourceCenterY: sourceRect.top + sourceRect.height / 2 - pageRect.top,
+      previewX1: Number.parseFloat(preview.getAttribute('x1') ?? 'NaN'),
+      previewY1: Number.parseFloat(preview.getAttribute('y1') ?? 'NaN'),
+    };
+  }, sourceTestId);
+}
+
 async function gotoGoalsPage(page: Page) {
   await page.goto('/goals', { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('goals-page')).toBeVisible({ timeout: 20000 });
@@ -3145,6 +3179,102 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps the empty-state guide anchored next to Me in the browser after initial centering', async ({ page }) => {
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goals-empty-state-guide')).toBeVisible({ timeout: 10000 });
+
+    await expect
+      .poll(async () => {
+        const metrics = await readEmptyStateGuideAnchorMetrics(page);
+        if (!metrics) return null;
+        return {
+          horizontalGap: Number(metrics.horizontalGap.toFixed(1)),
+          verticalOffset: Number(metrics.verticalOffset.toFixed(1)),
+        };
+      }, {
+        timeout: 15000,
+        message: 'expected the empty-state guide bubble to stay anchored next to Me after initial centering',
+      })
+      .toEqual({
+        horizontalGap: 26,
+        verticalOffset: 11,
+      });
+  });
+
+  test('keeps the empty-state guide inside the page and clear of the desktop detail panel', async ({ page }) => {
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goals-empty-state-guide')).toBeVisible({ timeout: 10000 });
+
+    await clickFlowNodeCenter(page, 'goal-flow-node-me');
+    await expect(page.getByText('这里是你的目标网络起点。当前共有 0 个目标节点。')).toBeVisible({ timeout: 10000 });
+
+    const guideMetrics = await page.evaluate(() => {
+      const pageEl = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const guide = document.querySelector('[data-testid="goals-empty-state-guide"]') as HTMLElement | null;
+      if (!pageEl || !guide) return null;
+
+      const pageRect = pageEl.getBoundingClientRect();
+      const guideRect = guide.getBoundingClientRect();
+      return {
+        pageRect: {
+          left: pageRect.left,
+          top: pageRect.top,
+          right: pageRect.right,
+          bottom: pageRect.bottom,
+        },
+        guideRect: {
+          left: guideRect.left,
+          top: guideRect.top,
+          right: guideRect.right,
+          bottom: guideRect.bottom,
+        },
+      };
+    });
+
+    expect(guideMetrics, 'empty-state-guide-panel: expected measurable guide geometry').not.toBeNull();
+    expect(guideMetrics?.guideRect.left ?? 0).toBeGreaterThanOrEqual((guideMetrics?.pageRect.left ?? 0) - 1);
+    expect(guideMetrics?.guideRect.top ?? 0).toBeGreaterThanOrEqual((guideMetrics?.pageRect.top ?? 0) - 1);
+    expect(guideMetrics?.guideRect.right ?? 0).toBeLessThanOrEqual((guideMetrics?.pageRect.right ?? 0) + 1);
+    expect(guideMetrics?.guideRect.bottom ?? 0).toBeLessThanOrEqual((guideMetrics?.pageRect.bottom ?? 0) + 1);
+    expect(guideMetrics?.guideRect.right ?? 0).toBeLessThanOrEqual((guideMetrics?.pageRect.right ?? 0) - 362);
+  });
+
+  test('keeps the connect preview start anchored to the source node in the browser after initial centering', async ({ page }) => {
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const sourceTestId = await page.locator('[data-testid^="goal-flow-node-"]').nth(1).getAttribute('data-testid');
+    if (!sourceTestId) {
+      throw new Error('expected a measurable goal node to start connect preview coverage');
+    }
+
+    await openNodeContextMenu(page, sourceTestId, 220, 180);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+    await page.getByTestId('goal-context-item-connect').click();
+
+    await page.mouse.move(360, 280);
+    await expect(page.getByTestId('goals-connect-preview')).toBeVisible({ timeout: 5000 });
+
+    await expect
+      .poll(async () => {
+        const metrics = await readConnectPreviewAnchorMetrics(page, sourceTestId);
+        if (!metrics) return null;
+        return Math.abs(metrics.previewX1 - metrics.sourceCenterX) <= 2
+          && Math.abs(metrics.previewY1 - metrics.sourceCenterY) <= 2;
+      }, {
+        timeout: 15000,
+        message: 'expected the connect preview start to stay anchored to the source node center',
+      })
+      .toBe(true);
+  });
+
   test('renders single-edge arrows and nearest-point anchors in the browser', async ({ page }) => {
     await primeGoalsPageWithGraph(page, makeSingleEdgeGraph());
     await gotoGoalsPage(page);
@@ -3972,7 +4102,6 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
         return null;
       }
 
-      const pageRect = pageEl.getBoundingClientRect();
       const flowSurfaceRect = flowSurfaceEl.getBoundingClientRect();
       const meRect = me.getBoundingClientRect();
       const ring1Rect = ring1.getBoundingClientRect();
@@ -4036,24 +4165,12 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
           x: flowSurfaceRect.x + flowSurfaceRect.width / 2,
           y: flowSurfaceRect.y + flowSurfaceRect.height / 2,
         },
-        pageRect: {
-          left: pageRect.left,
-          top: pageRect.top,
-          right: pageRect.right,
-          bottom: pageRect.bottom,
-        },
         topElementAtMeCenter:
           topElementAtMeCenter?.closest('[data-testid]')?.getAttribute('data-testid')
           ?? topElementAtMeCenter?.tagName
           ?? null,
         nodeLayering,
         labelOverlap: overlap,
-        ring2Rect: {
-          left: ring2Rect.left,
-          top: ring2Rect.top,
-          right: ring2Rect.right,
-          bottom: ring2Rect.bottom,
-        },
       };
     }, visibleNodeTestIds);
 
@@ -4094,10 +4211,6 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((initialMetrics?.ring2.centerY ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(6);
     expect(Math.abs((initialMetrics?.meCenter.x ?? 0) - (initialMetrics?.flowSurfaceCenter.x ?? 0))).toBeLessThan(24);
     expect(Math.abs((initialMetrics?.meCenter.y ?? 0) - (initialMetrics?.flowSurfaceCenter.y ?? 0))).toBeLessThan(24);
-    expect(initialMetrics?.ring2Rect.left ?? 0).toBeGreaterThanOrEqual((initialMetrics?.pageRect.left ?? 0) - 2);
-    expect(initialMetrics?.ring2Rect.top ?? 0).toBeGreaterThanOrEqual((initialMetrics?.pageRect.top ?? 0) - 2);
-    expect(initialMetrics?.ring2Rect.right ?? 0).toBeLessThanOrEqual((initialMetrics?.pageRect.right ?? 0) + 2);
-    expect(initialMetrics?.ring2Rect.bottom ?? 0).toBeLessThanOrEqual((initialMetrics?.pageRect.bottom ?? 0) + 2);
     expect(initialMetrics?.topElementAtMeCenter).toBe('goal-flow-node-me');
     expect(initialMetrics?.nodeLayering).toHaveLength(3);
     for (const nodeLayering of initialMetrics?.nodeLayering ?? []) {
@@ -4119,6 +4232,163 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (settledMetrics?.flowSurfaceCenter.y ?? 0))).toBeLessThan(24);
     expect(Math.abs((settledMetrics?.meCenter.x ?? 0) - (initialMetrics?.meCenter.x ?? 0))).toBeLessThan(2);
     expect(Math.abs((settledMetrics?.meCenter.y ?? 0) - (initialMetrics?.meCenter.y ?? 0))).toBeLessThan(2);
+  });
+
+  test('keeps each hop ring radius tied to its target distance while panning the canvas', async ({ page }) => {
+    const goalWarnings = trackGoalWarnings(page);
+
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', 120, 120);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(2);
+
+    const firstGoal = page.locator('[data-testid^="goal-flow-node-"]').nth(1);
+    const firstGoalId = await firstGoal.getAttribute('data-testid');
+    if (!firstGoalId) {
+      throw new Error('expected first goal node test id for hop ring distance coverage');
+    }
+
+    await openNodeContextMenu(page, firstGoalId, 220, 180);
+    await page.getByTestId('goal-context-item-downstream').click();
+    await expect(page.locator('[data-testid^="goal-flow-node-"]')).toHaveCount(3);
+
+    const secondGoal = page.locator('[data-testid^="goal-flow-node-"]').nth(2);
+    const secondGoalId = await secondGoal.getAttribute('data-testid');
+    if (!secondGoalId) {
+      throw new Error('expected second goal node test id for hop ring distance coverage');
+    }
+
+    await expect
+      .poll(() => goalWarnings.some((entry) => entry.includes('simulation:end')), {
+        timeout: 15000,
+        message: 'expected simulation:end warn log before hop ring distance assertions',
+      })
+      .toBe(true);
+
+    const readHopRingDistanceMetrics = () => page.evaluate(({ firstHopGoalId, secondHopGoalId }) => {
+      const me = document.querySelector('[data-testid="goal-flow-node-me"]') as HTMLElement | null;
+      const firstHopGoal = document.querySelector(`[data-testid="${firstHopGoalId}"]`) as HTMLElement | null;
+      const secondHopGoal = document.querySelector(`[data-testid="${secondHopGoalId}"]`) as HTMLElement | null;
+      const ring1 = document.querySelector('[data-testid="goals-hop-ring-1"] circle') as SVGCircleElement | null;
+      const ring2 = document.querySelector('[data-testid="goals-hop-ring-2"] circle') as SVGCircleElement | null;
+      if (!me || !firstHopGoal || !secondHopGoal || !ring1 || !ring2) {
+        return null;
+      }
+
+      const getCenter = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      };
+
+      const meCenter = getCenter(me);
+      const firstHopGoalCenter = getCenter(firstHopGoal);
+      const secondHopGoalCenter = getCenter(secondHopGoal);
+      const ring1Rect = ring1.getBoundingClientRect();
+      const ring2Rect = ring2.getBoundingClientRect();
+
+      return {
+        ring1GraphRadius: Number(ring1.getAttribute('r')),
+        ring2GraphRadius: Number(ring2.getAttribute('r')),
+        ring1ScreenRadius: ring1Rect.width / 2,
+        ring2ScreenRadius: ring2Rect.width / 2,
+        firstHopGoalScreenDistance: Math.hypot(
+          firstHopGoalCenter.x - meCenter.x,
+          firstHopGoalCenter.y - meCenter.y,
+        ),
+        secondHopGoalScreenDistance: Math.hypot(
+          secondHopGoalCenter.x - meCenter.x,
+          secondHopGoalCenter.y - meCenter.y,
+        ),
+      };
+    }, {
+      firstHopGoalId: firstGoalId,
+      secondHopGoalId: secondGoalId,
+    });
+
+    const baselineMetrics = await readHopRingDistanceMetrics();
+    expect(baselineMetrics, 'hop-ring-distance: expected measurable baseline metrics').not.toBeNull();
+    expect(
+      Math.abs((baselineMetrics?.ring1ScreenRadius ?? 0) - (baselineMetrics?.firstHopGoalScreenDistance ?? 0)),
+      'hop-ring-distance: expected 1-hop ring to match the first-hop target distance before pan',
+    ).toBeLessThan(8);
+    expect(
+      Math.abs((baselineMetrics?.ring2ScreenRadius ?? 0) - (baselineMetrics?.secondHopGoalScreenDistance ?? 0)),
+      'hop-ring-distance: expected 2-hop ring to match the second-hop target distance before pan',
+    ).toBeLessThan(8);
+
+    const viewportBeforePan = await readViewportTransform(page);
+    const pane = page.locator('.react-flow__pane');
+    const paneBox = await pane.boundingBox();
+    expect(paneBox, 'hop-ring-distance: expected pane box for pan gesture').not.toBeNull();
+    if (!paneBox) {
+      throw new Error('expected pane box for hop-ring-distance pan gesture');
+    }
+
+    const panStartX = paneBox.x + Math.min(72, paneBox.width * 0.15);
+    const panStartY = paneBox.y + Math.min(72, paneBox.height * 0.15);
+    await page.mouse.move(panStartX, panStartY);
+    await page.mouse.down();
+    await page.mouse.move(
+      panStartX + 48,
+      panStartY + 32,
+      { steps: 12 },
+    );
+    await page.mouse.up();
+
+    await expect
+      .poll(() => readViewportTransform(page), {
+        timeout: 4000,
+        message: 'expected viewport transform to change after pan in hop-ring distance test',
+      })
+      .not.toEqual(viewportBeforePan);
+
+    let stablePannedMetrics: (NonNullable<Awaited<ReturnType<typeof readHopRingDistanceMetrics>>> & {
+      ring1RadiusDelta: number;
+      ring2RadiusDelta: number;
+    }) | null = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const metrics = await readHopRingDistanceMetrics();
+      if (metrics && baselineMetrics) {
+        const candidate = {
+          ...metrics,
+          ring1RadiusDelta: Math.abs(metrics.ring1GraphRadius - baselineMetrics.ring1GraphRadius),
+          ring2RadiusDelta: Math.abs(metrics.ring2GraphRadius - baselineMetrics.ring2GraphRadius),
+        };
+        const ring1DistanceDelta = Math.abs(candidate.ring1ScreenRadius - candidate.firstHopGoalScreenDistance);
+        const ring2DistanceDelta = Math.abs(candidate.ring2ScreenRadius - candidate.secondHopGoalScreenDistance);
+        if (ring1DistanceDelta <= 8 && ring2DistanceDelta <= 8) {
+          stablePannedMetrics = candidate;
+          break;
+        }
+      }
+      await page.waitForTimeout(200);
+    }
+
+    expect(stablePannedMetrics, 'hop-ring-distance: expected hop ring radius to settle after panning').not.toBeNull();
+    if (!stablePannedMetrics) {
+      throw new Error('expected stable hop ring metrics after panning');
+    }
+    expect(
+      Math.abs(stablePannedMetrics.ring1ScreenRadius - stablePannedMetrics.firstHopGoalScreenDistance),
+      'hop-ring-distance: expected 1-hop ring to stay aligned with the first-hop target after pan',
+    ).toBeLessThan(8);
+    expect(
+      Math.abs(stablePannedMetrics.ring2ScreenRadius - stablePannedMetrics.secondHopGoalScreenDistance),
+      'hop-ring-distance: expected 2-hop ring to stay aligned with the second-hop target after pan',
+    ).toBeLessThan(8);
+    expect(
+      stablePannedMetrics.ring1RadiusDelta,
+      'hop-ring-distance: expected 1-hop ring graph radius to remain invariant while panning',
+    ).toBeLessThan(0.5);
+    expect(
+      stablePannedMetrics.ring2RadiusDelta,
+      'hop-ring-distance: expected 2-hop ring graph radius to remain invariant while panning',
+    ).toBeLessThan(0.5);
   });
 
   test('keeps hop rings aligned with the browser viewport transform during zoom and pan', async ({ page }) => {
@@ -4295,6 +4565,72 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     }
 
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
+  });
+
+  test('keeps the context menu anchored near the pointer while clamping it inside the goals page', async ({ page }) => {
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    const pageBox = await page.getByTestId('goals-page').boundingBox();
+    expect(pageBox, 'context-menu-position: expected measurable goals page bounds').not.toBeNull();
+    if (!pageBox) {
+      throw new Error('expected measurable goals page bounds');
+    }
+
+    const requestedPoint = {
+      clientX: pageBox.x + pageBox.width - 12,
+      clientY: pageBox.y + pageBox.height - 12,
+    };
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', requestedPoint.clientX, requestedPoint.clientY);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+
+    const menuMetrics = await page.evaluate(() => {
+      const pageEl = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const menu = document.querySelector('[data-testid="goal-context-menu"]') as HTMLElement | null;
+      if (!pageEl || !menu) return null;
+
+      const pageRect = pageEl.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      return {
+        pageRect: {
+          left: pageRect.left,
+          top: pageRect.top,
+          right: pageRect.right,
+          bottom: pageRect.bottom,
+        },
+        menuRect: {
+          left: menuRect.left,
+          top: menuRect.top,
+          right: menuRect.right,
+          bottom: menuRect.bottom,
+          width: menuRect.width,
+          height: menuRect.height,
+        },
+      };
+    });
+
+    expect(menuMetrics, 'context-menu-position: expected measurable menu metrics').not.toBeNull();
+    expect(menuMetrics?.menuRect.right ?? 0).toBeLessThanOrEqual((menuMetrics?.pageRect.right ?? 0) + 1);
+    expect(menuMetrics?.menuRect.bottom ?? 0).toBeLessThanOrEqual((menuMetrics?.pageRect.bottom ?? 0) + 1);
+
+    const expectedAnchoredLeft = Math.min(
+      requestedPoint.clientX,
+      (menuMetrics?.pageRect.right ?? 0) - (menuMetrics?.menuRect.width ?? 0),
+    );
+    const expectedAnchoredTop = Math.min(
+      requestedPoint.clientY,
+      (menuMetrics?.pageRect.bottom ?? 0) - (menuMetrics?.menuRect.height ?? 0),
+    );
+
+    expect(
+      Math.abs((menuMetrics?.menuRect.left ?? 0) - expectedAnchoredLeft),
+      'context-menu-position: expected menu left edge to stay near the pointer while clamping to the page',
+    ).toBeLessThan(12);
+    expect(
+      Math.abs((menuMetrics?.menuRect.top ?? 0) - expectedAnchoredTop),
+      'context-menu-position: expected menu top edge to stay near the pointer while clamping to the page',
+    ).toBeLessThan(12);
   });
 
   test('keeps nodes and edges visible through settled selection, detail-open, zoom, and pan interactions', async ({ page }) => {

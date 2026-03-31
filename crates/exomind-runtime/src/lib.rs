@@ -10,7 +10,7 @@ use thiserror::Error;
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use eventlog::EventLogStore;
 use mesh::{MeshRelayManager, MeshState};
@@ -36,6 +36,8 @@ pub mod timeblock;
 pub mod timeblock_sqlite;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const BUILD_GIT_HASH: &str = env!("BUILD_GIT_HASH");
+pub const BUILD_TIME: &str = env!("BUILD_TIME");
 pub const DEFAULT_RT_PORT: u16 = 1949;
 
 #[derive(Debug, Error)]
@@ -71,6 +73,30 @@ pub fn configured_host_id_from_env() -> String {
 
 fn default_runtime_host_id(port: u16) -> String {
     format!("rt-local-{port}")
+}
+
+fn bind_host_is_loopback_or_local(host: &str) -> bool {
+    let normalized = host.trim().trim_matches(['[', ']']);
+    if normalized.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    normalized
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+fn ensure_auth_secret_for_bind_host(options: &mut RuntimeStartOptions) {
+    if options.auth_secret.is_some() || bind_host_is_loopback_or_local(&options.bind_host) {
+        return;
+    }
+
+    tracing::warn!(
+        "EXOMIND_RT_SECRET not configured for non-loopback bind host {}; generating ephemeral admin secret for this runtime session",
+        options.bind_host
+    );
+    options.auth_secret = Some(format!("rt-admin-{}", uuid::Uuid::new_v4()));
 }
 
 /// Runtime startup options（运行时启动选项）.
@@ -405,6 +431,9 @@ pub async fn start() -> Result<RuntimeHandle, RuntimeStartError> {
 pub async fn start_with_options(
     options: RuntimeStartOptions,
 ) -> Result<RuntimeHandle, RuntimeStartError> {
+    let mut options = options;
+    ensure_auth_secret_for_bind_host(&mut options);
+
     let bind_addr_raw = format!("{}:{}", options.bind_host, options.port);
     let bind_addr: SocketAddr =
         bind_addr_raw
@@ -553,7 +582,7 @@ pub async fn start_with_options(
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {
-        axum::serve(listener, app)
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
             .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
             })
@@ -701,7 +730,13 @@ pub fn app_with_state(state: AppState) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
     // CORS must be outermost so that preflight OPTIONS requests (which carry no token) are handled.
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::predicate(|origin, _parts| {
+            origin
+                .to_str()
+                .ok()
+                .map(auth::is_trusted_loopback_origin_value)
+                .unwrap_or(false)
+        }))
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -719,6 +754,7 @@ pub fn app_with_state(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/version", get(version))
         .merge(routes::public_router())
         .merge(protected)
         .layer(cors)
@@ -965,6 +1001,9 @@ impl AppState {
             Arc::clone(&signal_pool),
         ));
 
+        let (eventlog_watch_tx, _rx) = routes::eventlog::eventlog_watch_channel();
+        eventlog_store.set_watch_tx(eventlog_watch_tx.clone());
+
         Self {
             port,
             host_id,
@@ -982,10 +1021,7 @@ impl AppState {
                 let (tx, _rx) = routes::sessions::session_event_channel();
                 Some(tx)
             },
-            eventlog_watch_tx: {
-                let (tx, _rx) = routes::eventlog::eventlog_watch_channel();
-                tx
-            },
+            eventlog_watch_tx,
             timeblock_store: Arc::new(timeblock_store),
             energy_registry,
             tick_manager,
@@ -1035,13 +1071,24 @@ pub type RuntimeState = AppState;
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: &'static str,
-    version: &'static str,
 }
 
 async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok",
+    Json(HealthResponse { status: "ok" })
+}
+
+#[derive(Debug, Serialize)]
+struct VersionResponse {
+    version: &'static str,
+    git_hash: &'static str,
+    build_time: &'static str,
+}
+
+async fn version() -> Json<VersionResponse> {
+    Json(VersionResponse {
         version: RUNTIME_VERSION,
+        git_hash: BUILD_GIT_HASH,
+        build_time: BUILD_TIME,
     })
 }
 
@@ -1068,6 +1115,11 @@ mod tests {
         let host_id = format!("lib-test-{port}");
         let registry_clone = registry.clone();
         let energy_registry = energy::EnergyRegistry::new();
+        let (eventlog_watch_tx, _rx) = routes::eventlog::eventlog_watch_channel();
+        let eventlog_store = Arc::new(eventlog::EventLogStore::new(
+            std::env::temp_dir().join("exomind-test-lib"),
+        ));
+        eventlog_store.set_watch_tx(eventlog_watch_tx.clone());
         AppState {
             port,
             host_id: host_id.clone(),
@@ -1086,10 +1138,7 @@ mod tests {
             task_store: Arc::new(task::TaskStore::new()),
             session_store: Arc::new(session::SessionStore::new()),
             session_event_tx: None,
-            eventlog_watch_tx: {
-                let (tx, _rx) = routes::eventlog::eventlog_watch_channel();
-                tx
-            },
+            eventlog_watch_tx,
             timeblock_store: Arc::new(timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(tick::TickManager::new(
@@ -1099,9 +1148,7 @@ mod tests {
                 Arc::clone(&signal_pool),
             )),
             life_agents: std::collections::HashMap::new(),
-            eventlog_store: Arc::new(eventlog::EventLogStore::new(
-                std::env::temp_dir().join("exomind-test-lib"),
-            )),
+            eventlog_store,
             #[cfg(not(target_os = "android"))]
             pty_manager: Arc::new(pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
@@ -1209,8 +1256,7 @@ mod tests {
         assert_eq!(
             payload,
             serde_json::json!({
-                "status": "ok",
-                "version": RUNTIME_VERSION
+                "status": "ok"
             })
         );
     }
@@ -1320,7 +1366,57 @@ mod tests {
                 .headers()
                 .get("access-control-allow-origin")
                 .and_then(|value| value.to_str().ok()),
-            Some("*")
+            Some("http://127.0.0.1:1420")
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_endpoint_omits_cors_header_for_untrusted_origin() {
+        const TEST_PORT: u16 = 3004;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents")
+                    .header("origin", "https://evil.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+        assert!(
+            response.headers().get("access-control-allow-origin").is_none(),
+            "untrusted origin must not receive a CORS allow header"
+        );
+    }
+
+    #[tokio::test]
+    async fn pairing_initiate_preflight_allows_trusted_local_origin() {
+        const TEST_PORT: u16 = 3004;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/mesh/pairing/initiate")
+                    .header("origin", "http://127.0.0.1:1420")
+                    .header("access-control-request-method", "POST")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            response.status(),
+            StatusCode::OK | StatusCode::NO_CONTENT
+        ));
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|value| value.to_str().ok()),
+            Some("http://127.0.0.1:1420")
         );
     }
 
@@ -1798,6 +1894,38 @@ mod tests {
                 .is_file(),
             "resolved project root must contain classifier agent entry: {}",
             resolved.display()
+        );
+    }
+
+    #[test]
+    fn ensure_auth_secret_for_lan_bind_generates_ephemeral_secret() {
+        let mut options = RuntimeStartOptions {
+            bind_host: "0.0.0.0".to_string(),
+            auth_secret: None,
+            ..RuntimeStartOptions::default()
+        };
+
+        ensure_auth_secret_for_bind_host(&mut options);
+
+        assert!(
+            options.auth_secret.is_some(),
+            "non-loopback bind host must not run without an admin secret"
+        );
+    }
+
+    #[test]
+    fn ensure_auth_secret_for_loopback_bind_keeps_secret_optional() {
+        let mut options = RuntimeStartOptions {
+            bind_host: "127.0.0.1".to_string(),
+            auth_secret: None,
+            ..RuntimeStartOptions::default()
+        };
+
+        ensure_auth_secret_for_bind_host(&mut options);
+
+        assert!(
+            options.auth_secret.is_none(),
+            "loopback bind host may keep secret optional for local-only dev mode"
         );
     }
 }

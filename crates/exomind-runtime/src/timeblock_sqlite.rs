@@ -8,7 +8,6 @@ use crate::timeblock::{
     TimeBlockData, TimeBlockStoreError,
 };
 
-const ACTIVE_BLOCK_SINGLETON_KEY: &str = "current";
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
 
 pub struct SqliteTimeBlockStore {
@@ -31,6 +30,8 @@ impl SqliteTimeBlockStore {
         Ok(store)
     }
 
+    // ── Completed blocks (end_time IS NOT NULL) ──────────────────────
+
     pub fn list_completed(&self) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
         self.list_completed_scoped(DEFAULT_SCOPE_KEY)
     }
@@ -43,9 +44,9 @@ impl SqliteTimeBlockStore {
         let mut statement = connection.prepare(
             "SELECT id, name, start_id, end_id, note, tags_json, start_time, end_time,
                     task_ids_json, task_status_outcomes_json, task_association_log_json,
-                    source_planned_block_id
-             FROM completed_timeblocks
-             WHERE scope_key = ?1
+                    source_planned_block_id, block_type, transitions_json
+             FROM timeblocks
+             WHERE scope_key = ?1 AND end_time IS NOT NULL
              ORDER BY end_time DESC, id DESC",
         )?;
 
@@ -69,6 +70,10 @@ impl SqliteTimeBlockStore {
                 task_association_log: serde_json::from_str(&row.get::<_, String>(10)?)
                     .map_err(to_sqlite_conversion_error)?,
                 source_planned_block_id: row.get(11)?,
+                block_type: row.get(12)?,
+                transitions: row.get::<_, Option<String>>(13)?
+                    .map(|v| serde_json::from_str(&v).unwrap_or_default())
+                    .unwrap_or_default(),
             })
         })?;
 
@@ -88,16 +93,16 @@ impl SqliteTimeBlockStore {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
         tx.execute(
-            "DELETE FROM completed_timeblocks WHERE scope_key = ?1",
+            "DELETE FROM timeblocks WHERE scope_key = ?1 AND end_time IS NOT NULL",
             params![normalize_scope_key(scope_key)],
         )?;
         for block in blocks {
             tx.execute(
-                "INSERT OR REPLACE INTO completed_timeblocks (
+                "INSERT OR REPLACE INTO timeblocks (
                     scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
                     task_ids_json, task_status_outcomes_json, task_association_log_json,
-                    source_planned_block_id
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    source_planned_block_id, block_type, transitions_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     normalize_scope_key(scope_key),
                     block.id,
@@ -116,12 +121,16 @@ impl SqliteTimeBlockStore {
                         .transpose()?,
                     serde_json::to_string(&block.task_association_log)?,
                     block.source_planned_block_id,
+                    block.block_type,
+                    serde_json::to_string(&block.transitions)?,
                 ],
             )?;
         }
         tx.commit()?;
         Ok(())
     }
+
+    // ── Planned blocks ───────────────────────────────────────────────
 
     pub fn list_planned_scoped(
         &self,
@@ -198,6 +207,8 @@ impl SqliteTimeBlockStore {
         Ok(())
     }
 
+    // ── Planner windows ──────────────────────────────────────────────
+
     pub fn list_windows_scoped(
         &self,
         scope_key: &str,
@@ -270,6 +281,8 @@ impl SqliteTimeBlockStore {
         Ok(())
     }
 
+    // ── Active block (end_time IS NULL) ──────────────────────────────
+
     pub fn get_active(&self) -> Result<Option<ActiveBlockData>, TimeBlockStoreError> {
         self.get_active_scoped(DEFAULT_SCOPE_KEY)
     }
@@ -281,8 +294,8 @@ impl SqliteTimeBlockStore {
         let connection = self.connection();
         let payload = connection
             .query_row(
-                "SELECT payload_json FROM active_timeblock WHERE scope_key = ?1 AND singleton_key = ?2",
-                params![normalize_scope_key(scope_key), ACTIVE_BLOCK_SINGLETON_KEY],
+                "SELECT payload_json FROM timeblocks WHERE scope_key = ?1 AND end_time IS NULL ORDER BY start_time DESC LIMIT 1",
+                params![normalize_scope_key(scope_key)],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
@@ -305,15 +318,39 @@ impl SqliteTimeBlockStore {
         scope_key: &str,
         block: &ActiveBlockData,
     ) -> Result<(), TimeBlockStoreError> {
+        let normalized = block.clone().normalize_task_ids();
+        let payload_json = serde_json::to_string(&normalized)?;
         let connection = self.connection();
+        // Use start_id as the row id for the active block
         connection.execute(
-            "INSERT INTO active_timeblock (scope_key, singleton_key, payload_json)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(scope_key, singleton_key) DO UPDATE SET payload_json = excluded.payload_json",
+            "INSERT INTO timeblocks (
+                scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                task_ids_json, task_status_outcomes_json, task_association_log_json,
+                source_planned_block_id, block_type, transitions_json, payload_json
+            ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, '[]', ?5, NULL, ?6, NULL, ?7, ?8, ?9, ?10, ?11)
+            ON CONFLICT(scope_key, id) DO UPDATE SET
+                name = excluded.name,
+                start_id = excluded.start_id,
+                tags_json = excluded.tags_json,
+                start_time = excluded.start_time,
+                task_ids_json = excluded.task_ids_json,
+                task_association_log_json = excluded.task_association_log_json,
+                source_planned_block_id = excluded.source_planned_block_id,
+                block_type = excluded.block_type,
+                transitions_json = excluded.transitions_json,
+                payload_json = excluded.payload_json",
             params![
                 normalize_scope_key(scope_key),
-                ACTIVE_BLOCK_SINGLETON_KEY,
-                serde_json::to_string(&block.clone().normalize_task_ids())?,
+                normalized.start_id,
+                normalized.name,
+                normalized.start_id,
+                normalized.start_time,
+                serde_json::to_string(&normalized.task_ids)?,
+                serde_json::to_string(&normalized.task_association_log)?,
+                normalized.source_planned_block_id,
+                normalized.block_type.as_deref().unwrap_or("active"),
+                serde_json::to_string(&normalized.transitions)?,
+                payload_json,
             ],
         )?;
         Ok(())
@@ -326,8 +363,8 @@ impl SqliteTimeBlockStore {
     pub fn delete_active_scoped(&self, scope_key: &str) -> Result<(), TimeBlockStoreError> {
         let connection = self.connection();
         connection.execute(
-            "DELETE FROM active_timeblock WHERE scope_key = ?1 AND singleton_key = ?2",
-            params![normalize_scope_key(scope_key), ACTIVE_BLOCK_SINGLETON_KEY],
+            "DELETE FROM timeblocks WHERE scope_key = ?1 AND end_time IS NULL",
+            params![normalize_scope_key(scope_key)],
         )?;
         Ok(())
     }
@@ -339,7 +376,7 @@ impl SqliteTimeBlockStore {
     pub fn len_completed_scoped(&self, scope_key: &str) -> Result<usize, TimeBlockStoreError> {
         let connection = self.connection();
         let count: i64 = connection.query_row(
-            "SELECT COUNT(1) FROM completed_timeblocks WHERE scope_key = ?1",
+            "SELECT COUNT(1) FROM timeblocks WHERE scope_key = ?1 AND end_time IS NOT NULL",
             params![normalize_scope_key(scope_key)],
             |row| row.get(0),
         )?;
@@ -368,136 +405,151 @@ impl SqliteTimeBlockStore {
 
     fn init(&self) -> Result<(), TimeBlockStoreError> {
         let connection = self.connection();
-        let has_completed_table: bool = connection.query_row(
+
+        // Enable WAL mode first
+        connection.execute_batch("PRAGMA journal_mode = WAL;")?;
+
+        // ── Step 1: Create the unified timeblocks table ──────────────
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS timeblocks (
+                scope_key                  TEXT    NOT NULL,
+                id                         TEXT    NOT NULL,
+                name                       TEXT    NOT NULL,
+                start_id                   TEXT    NOT NULL,
+                end_id                     TEXT    NULL,
+                note                       TEXT    NULL,
+                tags_json                  TEXT    NOT NULL DEFAULT '[]',
+                start_time                 INTEGER NOT NULL,
+                end_time                   INTEGER NULL,
+                block_type                 TEXT    NULL DEFAULT 'active',
+                transitions_json           TEXT    NOT NULL DEFAULT '[]',
+                task_ids_json              TEXT    NOT NULL DEFAULT '[]',
+                task_status_outcomes_json  TEXT    NULL,
+                task_association_log_json  TEXT    NOT NULL DEFAULT '[]',
+                source_planned_block_id    TEXT    NULL,
+                payload_json               TEXT    NULL,
+                PRIMARY KEY (scope_key, id)
+            );",
+        )?;
+
+        // ── Step 2: Migrate data from legacy tables ──────────────────
+
+        let has_old_completed: bool = connection.query_row(
             "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'completed_timeblocks'",
             [],
             |row| Ok(row.get::<_, i64>(0)? > 0),
         )?;
 
-        if has_completed_table {
-            let columns = completed_timeblock_columns(&connection)?;
-            if !columns.iter().any(|column| column == "scope_key") {
-                connection.execute_batch(
-                    "ALTER TABLE completed_timeblocks RENAME TO completed_timeblocks_legacy;
-                     CREATE TABLE completed_timeblocks (
-                        scope_key TEXT NOT NULL,
-                        id TEXT NOT NULL,
-                        name TEXT NOT NULL,
-                        start_id TEXT NOT NULL,
-                        end_id TEXT NOT NULL,
-                        note TEXT NULL,
-                        tags_json TEXT NOT NULL,
-                        start_time INTEGER NOT NULL,
-                        end_time INTEGER NOT NULL,
-                        task_ids_json TEXT NOT NULL DEFAULT '[]',
-                        task_status_outcomes_json TEXT NULL,
-                        task_association_log_json TEXT NOT NULL DEFAULT '[]',
-                        PRIMARY KEY (scope_key, id)
-                     );
-                     INSERT INTO completed_timeblocks (
+        if has_old_completed {
+            // First apply any pending column migrations on the old table
+            let columns = table_columns(&connection, "completed_timeblocks")?;
+            if columns.iter().any(|c| c == "scope_key") {
+                // Old table has scope_key — migrate column-compatible rows
+                // Build the column list dynamically based on what exists
+                let has_task_ids = columns.iter().any(|c| c == "task_ids_json");
+                let has_outcomes = columns.iter().any(|c| c == "task_status_outcomes_json");
+                let has_assoc_log = columns.iter().any(|c| c == "task_association_log_json");
+                let has_source = columns.iter().any(|c| c == "source_planned_block_id");
+                let has_block_type = columns.iter().any(|c| c == "block_type");
+                let has_transitions = columns.iter().any(|c| c == "transitions_json");
+
+                let select_task_ids = if has_task_ids { "task_ids_json" } else { "'[]'" };
+                let select_outcomes = if has_outcomes { "task_status_outcomes_json" } else { "NULL" };
+                let select_assoc = if has_assoc_log { "task_association_log_json" } else { "'[]'" };
+                let select_source = if has_source { "source_planned_block_id" } else { "NULL" };
+                let select_block_type = if has_block_type { "block_type" } else { "'active'" };
+                let select_transitions = if has_transitions { "transitions_json" } else { "'[]'" };
+
+                let sql = format!(
+                    "INSERT OR IGNORE INTO timeblocks (
                         scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
-                        task_ids_json, task_status_outcomes_json, task_association_log_json
-                     )
-                     SELECT
-                        'anonymous', id, name, start_id, end_id, note, tags_json, start_time, end_time,
-                        '[]', NULL, '[]'
-                      FROM completed_timeblocks_legacy;
-                      DROP TABLE completed_timeblocks_legacy;",
+                        task_ids_json, task_status_outcomes_json, task_association_log_json,
+                        source_planned_block_id, block_type, transitions_json
+                    )
+                    SELECT
+                        scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                        {select_task_ids}, {select_outcomes}, {select_assoc},
+                        {select_source}, {select_block_type}, {select_transitions}
+                    FROM completed_timeblocks"
+                );
+                connection.execute_batch(&sql)?;
+            } else {
+                // Very old table without scope_key — migrate with 'anonymous' scope
+                connection.execute_batch(
+                    "INSERT OR IGNORE INTO timeblocks (
+                        scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time
+                    )
+                    SELECT
+                        'anonymous', id, name, start_id, end_id, note, tags_json, start_time, end_time
+                    FROM completed_timeblocks"
                 )?;
             }
-
-            let columns = completed_timeblock_columns(&connection)?;
-            if !columns.iter().any(|column| column == "task_ids_json") {
-                connection.execute(
-                    "ALTER TABLE completed_timeblocks ADD COLUMN task_ids_json TEXT NOT NULL DEFAULT '[]'",
-                    [],
-                )?;
-            }
-
-            if !columns
-                .iter()
-                .any(|column| column == "task_status_outcomes_json")
-            {
-                connection.execute(
-                    "ALTER TABLE completed_timeblocks ADD COLUMN task_status_outcomes_json TEXT NULL",
-                    [],
-                )?;
-            }
-
-            if !columns
-                .iter()
-                .any(|column| column == "task_association_log_json")
-            {
-                connection.execute(
-                    "ALTER TABLE completed_timeblocks ADD COLUMN task_association_log_json TEXT NOT NULL DEFAULT '[]'",
-                    [],
-                )?;
-            }
-
-            if !columns
-                .iter()
-                .any(|column| column == "source_planned_block_id")
-            {
-                connection.execute(
-                    "ALTER TABLE completed_timeblocks ADD COLUMN source_planned_block_id TEXT NULL",
-                    [],
-                )?;
-            }
+            connection.execute_batch("DROP TABLE completed_timeblocks;")?;
         }
 
-        let has_active_table: bool = connection.query_row(
+        let has_old_active: bool = connection.query_row(
             "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'active_timeblock'",
             [],
             |row| Ok(row.get::<_, i64>(0)? > 0),
         )?;
 
-        if has_active_table {
-            let mut statement = connection.prepare("PRAGMA table_info(active_timeblock)")?;
-            let columns = statement
-                .query_map([], |row| row.get::<_, String>(1))?
+        if has_old_active {
+            // Migrate active block(s) from the JSON-blob table
+            let active_columns = table_columns(&connection, "active_timeblock")?;
+            let has_scope = active_columns.iter().any(|c| c == "scope_key");
+
+            let mut stmt = if has_scope {
+                connection.prepare("SELECT scope_key, payload_json FROM active_timeblock")?
+            } else {
+                connection.prepare("SELECT 'anonymous' AS scope_key, payload_json FROM active_timeblock")?
+            };
+
+            let rows: Vec<(String, String)> = stmt
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
-            if !columns.iter().any(|column| column == "scope_key") {
-                connection.execute_batch(
-                    "ALTER TABLE active_timeblock RENAME TO active_timeblock_legacy;
-                     CREATE TABLE active_timeblock (
-                        scope_key TEXT NOT NULL,
-                        singleton_key TEXT NOT NULL,
-                        payload_json TEXT NOT NULL,
-                        PRIMARY KEY (scope_key, singleton_key)
-                     );
-                     INSERT INTO active_timeblock (scope_key, singleton_key, payload_json)
-                     SELECT 'anonymous', singleton_key, payload_json
-                     FROM active_timeblock_legacy;
-                     DROP TABLE active_timeblock_legacy;",
-                )?;
+
+            for (scope_key, payload_json) in &rows {
+                if let Ok(active) = serde_json::from_str::<ActiveBlockData>(payload_json) {
+                    let normalized = active.normalize_task_ids();
+                    connection.execute(
+                        "INSERT OR IGNORE INTO timeblocks (
+                            scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                            task_ids_json, task_status_outcomes_json, task_association_log_json,
+                            source_planned_block_id, block_type, transitions_json, payload_json
+                        ) VALUES (?1, ?2, ?3, ?4, NULL, NULL, '[]', ?5, NULL, ?6, NULL, ?7, ?8, ?9, ?10, ?11)",
+                        params![
+                            normalize_scope_key(scope_key),
+                            normalized.start_id,
+                            normalized.name,
+                            normalized.start_id,
+                            normalized.start_time,
+                            serde_json::to_string(&normalized.task_ids).unwrap_or_else(|_| "[]".to_string()),
+                            serde_json::to_string(&normalized.task_association_log).unwrap_or_else(|_| "[]".to_string()),
+                            normalized.source_planned_block_id,
+                            normalized.block_type.as_deref().unwrap_or("active"),
+                            serde_json::to_string(&normalized.transitions).unwrap_or_else(|_| "[]".to_string()),
+                            payload_json,
+                        ],
+                    )?;
+                }
             }
+
+            connection.execute_batch("DROP TABLE active_timeblock;")?;
         }
 
+        // ── Step 3: Ensure payload_json column exists (for databases
+        //    that already have the timeblocks table from an older build) ──
+        let tb_columns = table_columns(&connection, "timeblocks")?;
+        if !tb_columns.iter().any(|c| c == "payload_json") {
+            connection.execute(
+                "ALTER TABLE timeblocks ADD COLUMN payload_json TEXT NULL",
+                [],
+            )?;
+        }
+
+        // ── Step 4: Create other tables ──────────────────────────────
         connection.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             CREATE TABLE IF NOT EXISTS completed_timeblocks (
-                scope_key TEXT NOT NULL,
-                id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                start_id TEXT NOT NULL,
-                end_id TEXT NOT NULL,
-                note TEXT NULL,
-                tags_json TEXT NOT NULL,
-                start_time INTEGER NOT NULL,
-                end_time INTEGER NOT NULL,
-                task_ids_json TEXT NOT NULL DEFAULT '[]',
-                task_status_outcomes_json TEXT NULL,
-                task_association_log_json TEXT NOT NULL DEFAULT '[]',
-                source_planned_block_id TEXT NULL,
-                PRIMARY KEY (scope_key, id)
-             );
-             CREATE TABLE IF NOT EXISTS active_timeblock (
-                scope_key TEXT NOT NULL,
-                singleton_key TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                PRIMARY KEY (scope_key, singleton_key)
-             );
-             CREATE TABLE IF NOT EXISTS planned_timeblocks (
+            "CREATE TABLE IF NOT EXISTS planned_timeblocks (
                 scope_key TEXT NOT NULL,
                 id TEXT NOT NULL,
                 date TEXT NOT NULL,
@@ -543,10 +595,11 @@ fn normalize_scope_key(scope_key: &str) -> &str {
     }
 }
 
-fn completed_timeblock_columns(
+fn table_columns(
     connection: &Connection,
+    table_name: &str,
 ) -> Result<Vec<String>, TimeBlockStoreError> {
-    let mut statement = connection.prepare("PRAGMA table_info(completed_timeblocks)")?;
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({})", table_name))?;
     statement
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<Result<Vec<_>, _>>()

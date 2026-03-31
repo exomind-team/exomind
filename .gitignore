@@ -137,6 +137,7 @@ runtime-data/
 # 临时截图和备份
 dark-mode-*.png
 *-backup.md
+.trace747_invalid*/
 
 # 测试输出
 vitest-output.txt

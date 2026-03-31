@@ -178,6 +178,8 @@ async fn exports_sqlite_snapshot_and_backend_status() {
                 source: "block_start".to_string(),
             }],
             source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
         }])
         .unwrap();
     let app = test_router(test_state_with_timeblock_store(store));
@@ -253,6 +255,8 @@ async fn imports_json_backup_with_overwrite() {
             task_status_outcomes: None,
             task_association_log: vec![],
             source_planned_block_id: None,
+            block_type: None,
+                    transitions: vec![],
         }])
         .unwrap();
 

@@ -210,11 +210,11 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
         host: '127.0.0.1',
         port: 48202,
         isLocal: true,
-        authToken: 'embedded-secret',
       }),
     });
+    expect((signalServiceOptions[0].host as { authToken?: string }).authToken).toBeUndefined();
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"port":48202');
-    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"authSecret":"embedded-secret"');
+    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).not.toContain('"authSecret"');
   });
 
   it('bridges eventlog.appended into EventLogService（把 eventlog.appended 桥接进 EventLogService）', async () => {

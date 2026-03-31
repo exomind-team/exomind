@@ -199,7 +199,7 @@ describe('ChatPage 架构边界', () => {
     const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
 
     expect(source).toContain('getEventLogService');
-    expect(source).toContain('loadEvents(');
+    expect(source.includes('loadEvents(') || source.includes('loadEventsDetailed(')).toBe(true);
     expect(source).not.toContain('storageRef.current.addEvent(');
     expect(source).not.toContain('storageRef.current.getEvents(');
     expect(source).not.toContain('storage.getEvents(');

@@ -57,6 +57,7 @@ import {
   subscribeVoiceOverlayBottomOffsetChanges,
 } from '@/config/voice-overlay-preferences';
 import { buildVoiceShortcutStorageEvent } from '@/services/voice-shortcut-eventlog';
+import { recordVolcanoUsageDuration } from '@/config/volcano-usage-stats';
 
 export type VoiceShortcutState = 'idle' | 'arming' | 'recording' | 'recognizing' | 'done' | 'error';
 
@@ -934,6 +935,9 @@ export class VoiceShortcutService {
 
   private async handleResult(result: ASRResult, recognitionMs: number, providerLabel: string): Promise<void> {
     this.latestAudioLevel = 0;
+    if (this.asrProvider === 'volcano' && typeof result.duration === 'number' && result.duration > 0) {
+      recordVolcanoUsageDuration(result.duration);
+    }
     const activeInteractionContext = getActiveInteractionContextService().getContext();
     const foregroundWindow = this.frozenForegroundWindowContext
       ?? await this.frozenForegroundWindowContextPromise
@@ -1085,7 +1089,7 @@ export class VoiceShortcutService {
   private resolveVolcanoQuotaFallback(
     error: unknown,
     config: VolcanoRuntimeConfig,
-  ): { config: VolcanoRuntimeConfig; message: string } | null {
+  ): { config?: VolcanoRuntimeConfig; message: string; switched: boolean } | null {
     const normalizedError = this.stringifyVolcanoError(error).toLowerCase();
     const isQuotaExceeded = normalizedError.includes('45000292') || normalizedError.includes('450000292');
     if (!isQuotaExceeded) {
@@ -1094,21 +1098,25 @@ export class VoiceShortcutService {
 
     let fallbackResourceId: string | null = null;
     if (normalizedError.includes('audio_duration_lifetime')) {
-      fallbackResourceId = config.resourceId === VOLCANO_SEED_DURATION_RESOURCE_ID
-        ? VOLCANO_BIG_DURATION_RESOURCE_ID
+      fallbackResourceId = config.resourceId === VOLCANO_BIG_DURATION_RESOURCE_ID
+        ? VOLCANO_SEED_DURATION_RESOURCE_ID
         : null;
     } else if (normalizedError.includes('audio_concurrent_lifetime')) {
-      fallbackResourceId = config.resourceId === VOLCANO_SEED_CONCURRENT_RESOURCE_ID
-        ? VOLCANO_BIG_CONCURRENT_RESOURCE_ID
+      fallbackResourceId = config.resourceId === VOLCANO_BIG_CONCURRENT_RESOURCE_ID
+        ? VOLCANO_SEED_CONCURRENT_RESOURCE_ID
         : null;
-    } else if (config.resourceId === VOLCANO_SEED_DURATION_RESOURCE_ID) {
-      fallbackResourceId = VOLCANO_BIG_DURATION_RESOURCE_ID;
-    } else if (config.resourceId === VOLCANO_SEED_CONCURRENT_RESOURCE_ID) {
-      fallbackResourceId = VOLCANO_BIG_CONCURRENT_RESOURCE_ID;
+    } else if (config.resourceId === VOLCANO_BIG_DURATION_RESOURCE_ID) {
+      fallbackResourceId = VOLCANO_SEED_DURATION_RESOURCE_ID;
+    } else if (config.resourceId === VOLCANO_BIG_CONCURRENT_RESOURCE_ID) {
+      fallbackResourceId = VOLCANO_SEED_CONCURRENT_RESOURCE_ID;
     }
 
     if (!fallbackResourceId || fallbackResourceId === config.resourceId) {
-      return null;
+      const currentLabel = this.getVolcanoResourceLabel(config.resourceId);
+      return {
+        switched: false,
+        message: `火山 ${currentLabel} 额度报错，当前保持 ${currentLabel}，不会再自动回退到 1.0，请检查控制台配额或资源绑定后重试。`,
+      };
     }
 
     const persistedResourceId = setVolcanoResourceId(fallbackResourceId);
@@ -1125,6 +1133,7 @@ export class VoiceShortcutService {
     );
 
     return {
+      switched: true,
       config: fallbackConfig,
       message: `火山 ${fromLabel} 额度已用尽，已自动切换到 ${toLabel}，请再试一次。`,
     };
@@ -1143,6 +1152,9 @@ export class VoiceShortcutService {
         const fallback = this.resolveVolcanoQuotaFallback(error, config);
         if (!fallback) {
           throw error;
+        }
+        if (!fallback.switched || !fallback.config) {
+          throw new Error(fallback.message);
         }
         return await invoke<ASRResult>('volcano_asr_recognize', {
           audioData: Array.from(pcmAudio),

@@ -923,7 +923,7 @@ export function AgentsPage() {
   const resolveRtAuthToken = (): string | undefined => {
     const activeHost = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
     if (activeHost?.authToken) return activeHost.authToken;
-    return runtimeServiceStatus?.authSecret ?? undefined;
+    return undefined;
   };
 
   const resolveActiveRuntimeHost = (): RuntimeHostRecord => {

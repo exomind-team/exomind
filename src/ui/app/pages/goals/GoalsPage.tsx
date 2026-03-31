@@ -67,6 +67,14 @@ const COMPLETION_ABSORB_DURATION_MS = 520;
 const COMPLETION_ME_PULSE_DURATION_MS = 320;
 const COMPLETION_ABSORB_NODE_SIZE = 72;
 const RENDER_HEALTH_GRACE_MS = 1500;
+const EMPTY_STATE_GUIDE_OFFSET_X = 26;
+const EMPTY_STATE_GUIDE_OFFSET_Y = 24;
+const EMPTY_STATE_GUIDE_MARGIN = 8;
+const EMPTY_STATE_GUIDE_WIDTH = 228;
+const EMPTY_STATE_GUIDE_HEIGHT = 68;
+const DETAIL_PANEL_DESKTOP_WIDTH = 340;
+const DETAIL_PANEL_DESKTOP_RIGHT_INSET = 16;
+const EMPTY_STATE_GUIDE_PANEL_GAP = 8;
 
 interface CompletionAbsorptionAnimation {
   goalId: string;
@@ -115,9 +123,6 @@ function buildVisibleEdges(graph: ReturnType<typeof useGoalStore.getState>['grap
   });
 }
 
-const HOP_RING_SPACING = 100;
-const HOP_RING_LABEL_PADDING = 28;
-
 function buildNodeHandles(size: number) {
   return [
     {
@@ -139,45 +144,60 @@ function buildNodeHandles(size: number) {
   ];
 }
 
+export function resolveEmptyStateGuidePosition({
+  meScreenRight,
+  meScreenCenterY,
+  pageWidth,
+  pageHeight,
+  detailPanelOpen,
+  isDesktop,
+}: {
+  meScreenRight: number;
+  meScreenCenterY: number;
+  pageWidth: number;
+  pageHeight: number;
+  detailPanelOpen: boolean;
+  isDesktop: boolean;
+}) {
+  const desiredLeft = Math.round(meScreenRight + EMPTY_STATE_GUIDE_OFFSET_X);
+  const desiredTop = Math.round(meScreenCenterY - EMPTY_STATE_GUIDE_OFFSET_Y);
+  const panelLeft = detailPanelOpen && isDesktop
+    ? pageWidth - DETAIL_PANEL_DESKTOP_RIGHT_INSET - DETAIL_PANEL_DESKTOP_WIDTH
+    : Number.POSITIVE_INFINITY;
+  const maxLeft = pageWidth > 0
+    ? Math.max(
+      EMPTY_STATE_GUIDE_MARGIN,
+      Math.min(
+        pageWidth - EMPTY_STATE_GUIDE_WIDTH - EMPTY_STATE_GUIDE_MARGIN,
+        panelLeft - EMPTY_STATE_GUIDE_PANEL_GAP - EMPTY_STATE_GUIDE_WIDTH,
+      ),
+    )
+    : desiredLeft;
+  const maxTop = pageHeight > 0
+    ? Math.max(EMPTY_STATE_GUIDE_MARGIN, pageHeight - EMPTY_STATE_GUIDE_HEIGHT - EMPTY_STATE_GUIDE_MARGIN)
+    : desiredTop;
+  return {
+    left: `${Math.max(EMPTY_STATE_GUIDE_MARGIN, Math.min(desiredLeft, maxLeft))}px`,
+    top: `${Math.max(EMPTY_STATE_GUIDE_MARGIN, Math.min(desiredTop, maxTop))}px`,
+  };
+}
+
 function GoalHopRings({
   centerX,
   centerY,
-  maxHop,
+  rings,
   viewportX,
   viewportY,
   zoom,
-  pageWidth,
-  pageHeight,
 }: {
   centerX: number;
   centerY: number;
-  maxHop: number;
+  rings: Array<{ hop: number; radius: number }>;
   viewportX: number;
   viewportY: number;
   zoom: number;
-  pageWidth: number;
-  pageHeight: number;
 }) {
-  if (maxHop < 1) return null;
-
-  const safeZoom = zoom > 0 ? zoom : 1;
-  const screenCenterX = centerX * safeZoom + viewportX;
-  const screenCenterY = centerY * safeZoom + viewportY;
-  const hasPageBounds = pageWidth > 0 && pageHeight > 0;
-  const maxScreenRadius = hasPageBounds
-    ? Math.max(
-        0,
-        Math.min(
-          screenCenterX - HOP_RING_LABEL_PADDING,
-          pageWidth - screenCenterX - HOP_RING_LABEL_PADDING,
-          screenCenterY - HOP_RING_LABEL_PADDING,
-          pageHeight - screenCenterY - HOP_RING_LABEL_PADDING,
-        ),
-      )
-    : Number.POSITIVE_INFINITY;
-  const ringSpacing = maxHop > 0
-    ? Math.min(HOP_RING_SPACING, maxScreenRadius / maxHop / safeZoom)
-    : HOP_RING_SPACING;
+  if (rings.length === 0) return null;
 
   return (
     <svg
@@ -188,9 +208,7 @@ function GoalHopRings({
         transformOrigin: '0 0',
       }}
     >
-      {Array.from({ length: maxHop }, (_, index) => {
-        const hop = index + 1;
-        const radius = hop * ringSpacing;
+      {rings.map(({ hop, radius }) => {
         const labelAngle = -Math.PI / 4;
         const labelX = centerX + Math.cos(labelAngle) * radius;
         const labelY = centerY + Math.sin(labelAngle) * radius;
@@ -550,6 +568,17 @@ export function GoalsPage() {
     });
   }, [connectMode]);
 
+  const resolvePagePoint = useCallback((clientX: number, clientY: number) => {
+    const bounds = pageRef.current?.getBoundingClientRect();
+    if (!bounds) {
+      return { x: clientX, y: clientY };
+    }
+    return {
+      x: clientX - bounds.left,
+      y: clientY - bounds.top,
+    };
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -845,8 +874,9 @@ export function GoalsPage() {
         connectModeTargetable: false,
         connectModeHovering: false,
         onOpenContextMenu: (nodeId: string, x: number, y: number) => {
+          const point = resolvePagePoint(x, y);
           setSelected({ kind: 'me', id: nodeId });
-          openContextMenu({ kind: 'me', id: nodeId, x, y });
+          openContextMenu({ kind: 'me', id: nodeId, x: point.x, y: point.y });
         },
       },
       draggable: mode === 'browse',
@@ -881,8 +911,9 @@ export function GoalsPage() {
           connectMode.setHoverTarget(hovering ? goal.id : null);
         },
         onOpenContextMenu: (nodeId: string, x: number, y: number) => {
+          const point = resolvePagePoint(x, y);
           setSelected({ kind: 'goal', id: nodeId });
-          openContextMenu({ kind: 'goal', id: nodeId, x, y });
+          openContextMenu({ kind: 'goal', id: nodeId, x: point.x, y: point.y });
         },
       },
       draggable: mode === 'browse',
@@ -931,13 +962,14 @@ export function GoalsPage() {
           parallelIndex,
           parallelTotal: siblings.length,
           onOpenContextMenu: (edgeId: string, x: number, y: number) => {
+            const point = resolvePagePoint(x, y);
             setSelected({ kind: 'edge', id: edgeId });
-            openContextMenu({ kind: 'edge', id: edgeId, x, y });
+            openContextMenu({ kind: 'edge', id: edgeId, x: point.x, y: point.y });
           },
         },
       };
     });
-  }, [graph.goals, graph.me.id, highlightedEdgeIds, openContextMenu, positions, resolveEdgeLabel, resolveEdgeStatus, selected, showCancelled, visibleGraph.edges]);
+  }, [graph.goals, graph.me.id, highlightedEdgeIds, openContextMenu, positions, resolveEdgeLabel, resolveEdgeStatus, resolvePagePoint, selected, showCancelled, visibleGraph.edges]);
 
   const connectPreview = useMemo(() => {
     if (!connectMode.isActive || !connectMode.sourceId || !connectMode.previewPoint) return null;
@@ -946,14 +978,16 @@ export function GoalsPage() {
     if (!sourcePosition) return null;
 
     const sourceSize = connectMode.sourceId === graph.me.id ? ME_NODE_SIZE : GOAL_NODE_SIZE;
+    const sourceCenterX = viewport.x + (sourcePosition.x + sourceSize / 2) * viewport.zoom;
+    const sourceCenterY = viewport.y + (sourcePosition.y + sourceSize / 2) * viewport.zoom;
 
     return {
-      x1: sourcePosition.x + sourceSize / 2,
-      y1: sourcePosition.y + sourceSize / 2,
+      x1: sourceCenterX,
+      y1: sourceCenterY,
       x2: connectMode.previewPoint.x,
       y2: connectMode.previewPoint.y,
     };
-  }, [connectMode, graph.me.id, positions]);
+  }, [connectMode, graph.me.id, positions, viewport.x, viewport.y, viewport.zoom]);
 
   const reconnectOverlayEdge = useMemo(() => {
     if (!activeReconnect) return null;
@@ -961,17 +995,35 @@ export function GoalsPage() {
   }, [activeReconnect, edges]);
 
   const hopRingMetrics = useMemo(() => {
-    const finiteDistances = visibleGraph.goals
-      .map((goal) => resolveHopDistance(goal.id))
-      .filter((distance) => Number.isFinite(distance));
-
-    if (finiteDistances.length === 0) return null;
-
     const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
+    const meCenterX = mePosition.x + ME_NODE_SIZE / 2;
+    const meCenterY = mePosition.y + ME_NODE_SIZE / 2;
+    const hopRadiusByDistance = new Map<number, number>();
+
+    for (const goal of visibleGraph.goals) {
+      const hopDistance = resolveHopDistance(goal.id);
+      if (!Number.isFinite(hopDistance) || hopDistance < 1) continue;
+
+      const goalPosition = positions.get(goal.id);
+      if (!goalPosition) continue;
+
+      const goalCenterX = goalPosition.x + GOAL_NODE_SIZE / 2;
+      const goalCenterY = goalPosition.y + GOAL_NODE_SIZE / 2;
+      const radius = Math.hypot(goalCenterX - meCenterX, goalCenterY - meCenterY);
+      const previousRadius = hopRadiusByDistance.get(hopDistance);
+      if (previousRadius === undefined || radius > previousRadius) {
+        hopRadiusByDistance.set(hopDistance, radius);
+      }
+    }
+
+    if (hopRadiusByDistance.size === 0) return null;
+
     return {
-      centerX: mePosition.x + ME_NODE_SIZE / 2,
-      centerY: mePosition.y + ME_NODE_SIZE / 2,
-      maxHop: Math.max(...finiteDistances),
+      centerX: meCenterX,
+      centerY: meCenterY,
+      rings: Array.from(hopRadiusByDistance.entries())
+        .sort(([leftHop], [rightHop]) => leftHop - rightHop)
+        .map(([hop, radius]) => ({ hop, radius })),
     };
   }, [graph.me.id, positions, resolveHopDistance, visibleGraph.goals]);
 
@@ -1009,11 +1061,17 @@ export function GoalsPage() {
 
   const emptyStateGuideStyle = useMemo(() => {
     const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
-    return {
-      left: `${Math.round(mePosition.x + ME_NODE_SIZE + 26)}px`,
-      top: `${Math.round(mePosition.y + ME_NODE_SIZE / 2 - 24)}px`,
-    };
-  }, [graph.me.id, positions]);
+    const meScreenRight = viewport.x + (mePosition.x + ME_NODE_SIZE) * viewport.zoom;
+    const meScreenCenterY = viewport.y + (mePosition.y + ME_NODE_SIZE / 2) * viewport.zoom;
+    return resolveEmptyStateGuidePosition({
+      meScreenRight,
+      meScreenCenterY,
+      pageWidth: pageSize.width,
+      pageHeight: pageSize.height,
+      detailPanelOpen: isDesktop && selected !== null,
+      isDesktop,
+    });
+  }, [graph.me.id, isDesktop, pageSize.height, pageSize.width, positions, selected, viewport.x, viewport.y, viewport.zoom]);
 
   const goalStatusSnapshot = useMemo(
     () => visibleGraph.goals.map((goal) => ({
@@ -1429,9 +1487,6 @@ export function GoalsPage() {
     ];
   }, [connectMode, contextMenu, deleteEdge, graph.edges, graph.goals, resolveGoalStatus]);
 
-  const currentPageWidth = pageSize.width || pageRef.current?.clientWidth || 0;
-  const currentPageHeight = pageSize.height || pageRef.current?.clientHeight || 0;
-
   return (
     <div
       ref={pageRef}
@@ -1468,12 +1523,10 @@ export function GoalsPage() {
         <GoalHopRings
           centerX={hopRingMetrics.centerX}
           centerY={hopRingMetrics.centerY}
-          maxHop={hopRingMetrics.maxHop}
+          rings={hopRingMetrics.rings}
           viewportX={viewport.x}
           viewportY={viewport.y}
           zoom={viewport.zoom}
-          pageWidth={currentPageWidth}
-          pageHeight={currentPageHeight}
         />
       ) : null}
 
@@ -1603,11 +1656,12 @@ export function GoalsPage() {
           });
           updateConnectPreview(event.clientX, event.clientY);
           setSelected(node.id === graph.me.id ? { kind: 'me', id: node.id } : { kind: 'goal', id: node.id });
+          const point = resolvePagePoint(event.clientX, event.clientY);
           openContextMenu({
             kind: node.id === graph.me.id ? 'me' : 'goal',
             id: node.id,
-            x: event.clientX,
-            y: event.clientY,
+            x: point.x,
+            y: point.y,
           });
         }}
         onEdgeContextMenu={(event, edge) => {
@@ -1618,7 +1672,8 @@ export function GoalsPage() {
             clientY: event.clientY,
           });
           setSelected({ kind: 'edge', id: edge.id });
-          openContextMenu({ kind: 'edge', id: edge.id, x: event.clientX, y: event.clientY });
+          const point = resolvePagePoint(event.clientX, event.clientY);
+          openContextMenu({ kind: 'edge', id: edge.id, x: point.x, y: point.y });
         }}
         onConnect={(connection: Connection) => {
           warnGoalDebug('page:interaction-connect', connection as Record<string, unknown>);
@@ -1676,6 +1731,8 @@ export function GoalsPage() {
         <GoalContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
+          pageWidth={pageRef.current?.clientWidth || pageRef.current?.getBoundingClientRect().width || 0}
+          pageHeight={pageRef.current?.clientHeight || pageRef.current?.getBoundingClientRect().height || 0}
           items={contextItems}
           onClose={closeContextMenu}
         />

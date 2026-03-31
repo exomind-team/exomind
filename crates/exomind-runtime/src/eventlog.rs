@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use std::sync::Mutex;
+use tokio::sync::broadcast;
+
 use crate::eventlog_sqlite::SqliteEventLogStore;
 
 const EVENTLOG_DIR_NAME: &str = "eventlog";
@@ -75,6 +78,10 @@ enum EventLogBackend {
 pub struct EventLogStore {
     data_dir: PathBuf,
     backend: EventLogBackend,
+    /// Optional broadcast sender for SSE notifications.
+    /// When present, every mutation (append / clear / replace) automatically
+    /// notifies watchers so callers never need to do it manually.
+    watch_tx: Mutex<Option<broadcast::Sender<String>>>,
 }
 
 impl EventLogStore {
@@ -82,6 +89,7 @@ impl EventLogStore {
         Self {
             data_dir,
             backend: EventLogBackend::JsonFiles,
+            watch_tx: Mutex::new(None),
         }
     }
 
@@ -89,7 +97,22 @@ impl EventLogStore {
         Ok(Self {
             data_dir,
             backend: EventLogBackend::Sqlite(SqliteEventLogStore::open(sqlite_path)?),
+            watch_tx: Mutex::new(None),
         })
+    }
+
+    /// Attach a broadcast sender for automatic SSE notifications on mutations.
+    /// Can be called after construction (even through `&self` / `Arc<Self>`).
+    pub fn set_watch_tx(&self, tx: broadcast::Sender<String>) {
+        *self.watch_tx.lock().unwrap() = Some(tx);
+    }
+
+    /// Fire-and-forget: notify SSE watchers for the given user scope.
+    /// Silently ignores send failures (no active receivers).
+    fn notify_watchers(&self, user_id: Option<&str>) {
+        if let Some(tx) = self.watch_tx.lock().unwrap().as_ref() {
+            let _ = tx.send(sanitize_user_id(user_id));
+        }
     }
 
     // ── public API ──────────────────────────────────────────────
@@ -118,7 +141,7 @@ impl EventLogStore {
 
     pub fn append_event(&self, user_id: Option<&str>, event: EventRecord) -> Result<(), String> {
         let normalized_user = sanitize_user_id(user_id);
-        match &self.backend {
+        let result = match &self.backend {
             EventLogBackend::JsonFiles => {
                 let paths = self.resolve_paths(user_id)?;
                 let mut events = read_events(&paths.events)?;
@@ -139,7 +162,11 @@ impl EventLogStore {
                 let events = store.list_events(&normalized_user)?;
                 sync_markdown_mirror(&paths, &events)
             }
+        };
+        if result.is_ok() {
+            self.notify_watchers(user_id);
         }
+        result
     }
 
     pub fn get_event(
@@ -160,7 +187,7 @@ impl EventLogStore {
 
     pub fn clear_events(&self, user_id: Option<&str>) -> Result<(), String> {
         let normalized_user = sanitize_user_id(user_id);
-        match &self.backend {
+        let result = match &self.backend {
             EventLogBackend::JsonFiles => {
                 let paths = self.resolve_paths(user_id)?;
                 write_events(&paths.events, &[])?;
@@ -171,7 +198,11 @@ impl EventLogStore {
                 store.clear_events(&normalized_user)?;
                 sync_markdown_mirror(&paths, &[])
             }
+        };
+        if result.is_ok() {
+            self.notify_watchers(user_id);
         }
+        result
     }
 
     pub fn mirror_status(&self, user_id: Option<&str>) -> Result<MirrorStatus, String> {
@@ -197,6 +228,11 @@ impl EventLogStore {
         })
     }
 
+    pub fn current_revision(&self, user_id: Option<&str>) -> Result<Option<i64>, String> {
+        let paths = self.resolve_paths(user_id)?;
+        Ok(read_checkpoint(&paths.checkpoint)?.map(|checkpoint| checkpoint.updated_at_ms))
+    }
+
     pub fn rebuild_markdown(&self, user_id: Option<&str>) -> Result<MirrorStatus, String> {
         let paths = self.resolve_paths(user_id)?;
         let events = self.list_events(user_id)?;
@@ -211,7 +247,7 @@ impl EventLogStore {
         events: &[EventRecord],
     ) -> Result<(), String> {
         let normalized_user = sanitize_user_id(user_id);
-        match &self.backend {
+        let result = match &self.backend {
             EventLogBackend::JsonFiles => {
                 let paths = self.resolve_paths(user_id)?;
                 let mut ordered = events.to_vec();
@@ -225,7 +261,11 @@ impl EventLogStore {
                 let current = store.list_events(&normalized_user)?;
                 sync_markdown_mirror(&paths, &current)
             }
+        };
+        if result.is_ok() {
+            self.notify_watchers(user_id);
         }
+        result
     }
 
     pub fn sqlite_snapshot_bytes(&self) -> Result<Option<Vec<u8>>, String> {

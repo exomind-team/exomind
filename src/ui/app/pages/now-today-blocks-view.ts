@@ -1,4 +1,4 @@
-import { resolveTimeBlockRelatedTaskIds, type TimeBlock } from '@/lib/types/event';
+import { resolveTimeBlockRelatedTaskIds, type BlockType, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
 export interface NowTodayLinkedTask {
@@ -14,6 +14,7 @@ export interface NowTodayBlockItem {
   linkedTasks: NowTodayLinkedTask[];
   href: string;
   note?: string;
+  blockType: BlockType;
 }
 
 export interface NowTodayBlocksView {
@@ -60,6 +61,7 @@ export function buildNowTodayBlocksView(input: BuildNowTodayBlocksViewInput): No
       linkedTasks: buildLinkedTasks(block, input.tasksById),
       href: `/eventlog/timeblocks/${block.id}`,
       note: block.note,
+      blockType: (block.blockType ?? 'active') as BlockType,
     }));
 
   return { items };

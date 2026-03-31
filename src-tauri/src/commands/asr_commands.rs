@@ -181,7 +181,7 @@ fn default_model_name() -> String {
 }
 
 fn default_resource_id() -> String {
-    "volc.bigasr.sauc.duration".to_string()
+    "volc.seedasr.sauc.duration".to_string()
 }
 
 fn default_language() -> String {
@@ -1184,6 +1184,11 @@ mod tests {
                 .and_then(|value| value.as_bool()),
             Some(false)
         );
+    }
+
+    #[test]
+    fn volcano_default_resource_id_points_to_bigmodel_2() {
+        assert_eq!(default_resource_id(), "volc.seedasr.sauc.duration".to_string());
     }
 
     #[test]

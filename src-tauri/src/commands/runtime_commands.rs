@@ -64,7 +64,6 @@ pub struct RuntimeServiceStatus {
     pub port: u16,
     pub external_runtime: bool,
     pub host_id: Option<String>,
-    pub auth_secret: Option<String>,
     pub pid: Option<u32>,
     pub started_at: Option<String>,
     pub error: Option<String>,
@@ -280,7 +279,6 @@ fn compose_status(
         port: inner.port,
         external_runtime: inner.external_runtime,
         host_id: inner.host_id.clone(),
-        auth_secret: inner.auth_secret.clone(),
         pid: (running && inner.handle.is_some()).then_some(std::process::id()),
         started_at: inner.started_at.clone(),
         error: error.or_else(|| inner.last_error.clone()),
@@ -884,11 +882,15 @@ mod tests {
         assert!(status.running);
         assert_eq!(status.pid, None);
         assert_eq!(status.host_id.as_deref(), Some("host-local"));
-        assert_eq!(status.auth_secret.as_deref(), Some("embedded-secret"));
+        let serialized = serde_json::to_value(&status).expect("status should serialize");
+        assert!(
+            serialized.get("authSecret").is_none(),
+            "runtime status must not expose authSecret"
+        );
     }
 
     #[test]
-    fn compose_status_includes_auth_secret_for_embedded_runtime() {
+    fn compose_status_hides_auth_secret_for_embedded_runtime() {
         let inner = super::RuntimeInner {
             handle: None,
             host: "127.0.0.1".to_string(),
@@ -902,6 +904,10 @@ mod tests {
         let status = super::compose_status(&inner, true, None);
 
         assert!(status.running);
-        assert_eq!(status.auth_secret.as_deref(), Some("embedded-secret"));
+        let serialized = serde_json::to_value(&status).expect("status should serialize");
+        assert!(
+            serialized.get("authSecret").is_none(),
+            "embedded runtime status must not expose authSecret"
+        );
     }
 }
