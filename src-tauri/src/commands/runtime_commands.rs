@@ -214,6 +214,12 @@ fn parse_adb_forward_tcp_port(raw: &str) -> Option<u16> {
 fn looks_like_android_emulator_guest(host: &str) -> bool {
     host.starts_with("10.0.2.") || host.starts_with("10.0.3.")
 }
+/// Only allow reusing existing ADB forwards for Android emulator guest addresses.
+/// LAN IP addresses should NEVER reuse an existing forward that might
+/// belong to a different device.
+fn should_reuse_existing_adb_forward(remote_host: &str) -> bool {
+    looks_like_android_emulator_guest(remote_host)
+}
 
 fn reserve_local_tcp_port() -> Result<u16, String> {
     let listener = StdTcpListener::bind("127.0.0.1:0")
@@ -332,10 +338,14 @@ async fn resolve_peer_dial_address(remote_host: &str, remote_port: u16) -> Runti
         };
     }
 
-    let adb_forward_port = if looks_like_android_emulator_guest(remote_host) {
+    // Issue 773: Only use ADB forwarding for Android emulator guest addresses.
+    // LAN IP addresses should never reuse an existing ADB forward that might
+    // belong to a different device.
+    let adb_forward_port = if should_reuse_existing_adb_forward(remote_host) {
         ensure_adb_forward_host_port(remote_port).ok().flatten()
     } else {
-        find_adb_forward_host_port(remote_port).ok().flatten()
+        // For LAN addresses, do not use ADB forwarding at all
+        None
     };
 
     if let Some(local_port) = adb_forward_port {
@@ -809,4 +819,27 @@ mod tests {
         assert!(status.running);
         assert_eq!(status.auth_secret.as_deref(), Some("embedded-secret"));
     }
+#[test]
+fn only_android_emulator_guests_may_reuse_existing_adb_forwards() {
+    // Issue 773: LAN phone nodes should not reuse existing ADB forwards
+    // that might belong to a different device. Only Android emulator guest
+    // addresses can safely reuse ADB forwards since they are on a special
+    // virtual network that cannot be reached directly from the host.
+    
+    // Emulator guests CAN reuse ADB forwards
+    assert!(super::should_reuse_existing_adb_forward("10.0.2.15"));
+    assert!(super::should_reuse_existing_adb_forward("10.0.3.15"));
+    
+    // LAN IP addresses should NEVER reuse existing ADB forwards
+    assert!(!super::should_reuse_existing_adb_forward("192.168.1.88"));
+    assert!(!super::should_reuse_existing_adb_forward("192.168.101.5"));
+    // Note: 10.0.2.2 is a special emulator-host alias that IS allowed
+    
+    // Loopback should not use ADB forwarding
+    assert!(!super::should_reuse_existing_adb_forward("127.0.0.1"));
+    assert!(!super::should_reuse_existing_adb_forward("localhost"));
+    
+    // Public IPs should not use ADB forwarding
+    assert!(!super::should_reuse_existing_adb_forward("8.8.8.8"));
+}
 }
