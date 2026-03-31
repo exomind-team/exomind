@@ -115,6 +115,7 @@ mod tests {
             session_event_tx: None,
             eventlog_watch_tx: {
                 let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+                store.set_watch_tx(tx.clone());
                 tx
             },
             timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),

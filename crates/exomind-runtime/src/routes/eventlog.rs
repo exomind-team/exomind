@@ -89,7 +89,6 @@ struct EventLogImportResult {
 
 struct EventLogImportOutcome {
     result: EventLogImportResult,
-    changed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -197,10 +196,6 @@ fn resolve_watch_since_id(
     )?;
 
     Ok(latest.first().map(|event| event.id.clone()))
-}
-
-pub fn notify_eventlog_watchers(state: &AppState, user_id: Option<&str>) {
-    let _ = state.eventlog_watch_tx.send(sanitize_user_id(user_id));
 }
 
 fn eventlog_replication_seq(event: &EventRecord) -> i64 {
@@ -330,7 +325,6 @@ async fn append_event(
         .eventlog_store
         .append_event(query.user_id.as_deref(), event.clone())
         .map_err(internal_error)?;
-    notify_eventlog_watchers(&state, query.user_id.as_deref());
     publish_eventlog_replication_append(&state, &event).await;
     Ok((StatusCode::CREATED, Json(event)))
 }
@@ -426,7 +420,6 @@ async fn clear_events(
         .eventlog_store
         .clear_events(query.user_id.as_deref())
         .map_err(internal_error)?;
-    notify_eventlog_watchers(&state, query.user_id.as_deref());
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -495,9 +488,6 @@ async fn import_eventlog_json(
     let strategy = parse_import_strategy(query.strategy.as_deref()).map_err(internal_error)?;
     let outcome = apply_event_import(&state, query.user_id.as_deref(), payload.events, strategy)
         .map_err(internal_error)?;
-    if outcome.changed {
-        notify_eventlog_watchers(&state, query.user_id.as_deref());
-    }
     Ok(Json(outcome.result))
 }
 
@@ -514,9 +504,6 @@ async fn import_eventlog_sqlite(
         .map_err(internal_error)?;
     let outcome = apply_event_import(&state, query.user_id.as_deref(), imported_events, strategy)
         .map_err(internal_error)?;
-    if outcome.changed {
-        notify_eventlog_watchers(&state, query.user_id.as_deref());
-    }
     Ok(Json(outcome.result))
 }
 
@@ -576,7 +563,6 @@ fn apply_event_import(
     let existing = state.eventlog_store.list_events(user_id)?;
     let outcome = match strategy {
         EventLogImportStrategy::Overwrite => {
-            let changed = existing != incoming;
             state
                 .eventlog_store
                 .replace_all_events(user_id, &incoming)?;
@@ -586,7 +572,6 @@ fn apply_event_import(
                     skipped: 0,
                     total: incoming.len(),
                 },
-                changed,
             }
         }
         EventLogImportStrategy::Merge => {
@@ -614,7 +599,6 @@ fn apply_event_import(
                     skipped,
                     total: next.len(),
                 },
-                changed: imported > 0,
             }
         }
     };
@@ -715,6 +699,8 @@ mod tests {
         let host_id = "eventlog-test".to_string();
         let registry = crate::agent::AgentRegistry::new();
         let energy_registry = crate::energy::EnergyRegistry::new();
+        let (eventlog_watch_tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+        store.set_watch_tx(eventlog_watch_tx.clone());
         AppState {
             port: 0,
             host_id: host_id.clone(),
@@ -732,10 +718,7 @@ mod tests {
             task_store: Arc::new(crate::task::TaskStore::new()),
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
-            eventlog_watch_tx: {
-                let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
-                tx
-            },
+            eventlog_watch_tx,
             timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(crate::tick::TickManager::new(

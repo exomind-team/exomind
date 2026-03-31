@@ -978,6 +978,9 @@ impl AppState {
             Arc::clone(&signal_pool),
         ));
 
+        let (eventlog_watch_tx, _rx) = routes::eventlog::eventlog_watch_channel();
+        eventlog_store.set_watch_tx(eventlog_watch_tx.clone());
+
         Self {
             port,
             host_id,
@@ -994,10 +997,7 @@ impl AppState {
                 let (tx, _rx) = routes::sessions::session_event_channel();
                 Some(tx)
             },
-            eventlog_watch_tx: {
-                let (tx, _rx) = routes::eventlog::eventlog_watch_channel();
-                tx
-            },
+            eventlog_watch_tx,
             timeblock_store: Arc::new(timeblock_store),
             energy_registry,
             tick_manager,
@@ -1091,6 +1091,11 @@ mod tests {
         let host_id = format!("lib-test-{port}");
         let registry_clone = registry.clone();
         let energy_registry = energy::EnergyRegistry::new();
+        let (eventlog_watch_tx, _rx) = routes::eventlog::eventlog_watch_channel();
+        let eventlog_store = Arc::new(eventlog::EventLogStore::new(
+            std::env::temp_dir().join("exomind-test-lib"),
+        ));
+        eventlog_store.set_watch_tx(eventlog_watch_tx.clone());
         AppState {
             port,
             host_id: host_id.clone(),
@@ -1108,10 +1113,7 @@ mod tests {
             task_store: Arc::new(task::TaskStore::new()),
             session_store: Arc::new(session::SessionStore::new()),
             session_event_tx: None,
-            eventlog_watch_tx: {
-                let (tx, _rx) = routes::eventlog::eventlog_watch_channel();
-                tx
-            },
+            eventlog_watch_tx,
             timeblock_store: Arc::new(timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(tick::TickManager::new(
@@ -1121,9 +1123,7 @@ mod tests {
                 Arc::clone(&signal_pool),
             )),
             life_agents: std::collections::HashMap::new(),
-            eventlog_store: Arc::new(eventlog::EventLogStore::new(
-                std::env::temp_dir().join("exomind-test-lib"),
-            )),
+            eventlog_store,
             #[cfg(not(target_os = "android"))]
             pty_manager: Arc::new(pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }

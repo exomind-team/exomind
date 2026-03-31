@@ -973,8 +973,6 @@ fn write_timeblock_eventlog(
 
     if let Err(error) = state.eventlog_store.append_event(scope_key, event) {
         tracing::warn!(error = %error, "failed to write timeblock eventlog");
-    } else {
-        super::eventlog::notify_eventlog_watchers(state, scope_key);
     }
 }
 
@@ -1101,6 +1099,7 @@ mod tests {
             session_event_tx: None,
             eventlog_watch_tx: {
                 let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+                eventlog_store.set_watch_tx(tx.clone());
                 tx
             },
             timeblock_store,
