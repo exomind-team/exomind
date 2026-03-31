@@ -51,6 +51,7 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
             std::env::temp_dir().join("exomind-test-today-planner"),
         )),
+        config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),
         #[cfg(not(target_os = "android"))]
         pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(
             Arc::clone(&signal_pool),

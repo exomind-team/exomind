@@ -40,6 +40,7 @@ const AUDITED_SETTINGS_IDS = [
   'voice-overlay-bottom-offset',
   'now-workbench-overlay-enabled',
   'volcano-engine-key',
+  'volcano-usage-summary',
   'volcano-endpoint',
   'volcano-resource-model',
   'volcano-resource-id',
@@ -48,6 +49,7 @@ const AUDITED_SETTINGS_IDS = [
   'moss-voice-test',
   'volcano-asr-test',
   'ai-registry',
+  'runtime-target-mode',
   'embedded-runtime-open-mode',
   'sync-server-url',
   'eventlog-backend-mode',
@@ -89,7 +91,7 @@ const INLINE_SINGLE_ENUM_IDS = [
 
 const DIALOG_ENUM_IDS = [
   'countdown-end-mode',
-  'sound-preset',
+  'runtime-target-mode',
   'embedded-runtime-open-mode',
   'volcano-endpoint',
   'volcano-language',
@@ -146,6 +148,7 @@ const CUSTOM_ITEM_IDS = [
   'sound-preset',
   'focus-bgm',
   'volcano-engine-key',
+  'volcano-usage-summary',
   'moss-voice-test',
   'volcano-asr-test',
   'ai-registry',
@@ -155,14 +158,17 @@ const CUSTOM_ITEM_IDS = [
 ] as const;
 
 const DEV_ONLY_IDS = [
-  'eventlog-backend-mode',
-  'task-backend-mode',
-  'timeblock-backend-mode',
   'use-mock-data',
   'devtools',
   'feature-toggles',
   'instance-diagnostics',
   'device-pairing',
+] as const;
+
+const TAURI_DEV_ONLY_IDS = [
+  'eventlog-backend-mode',
+  'task-backend-mode',
+  'timeblock-backend-mode',
 ] as const;
 
 function getItem<T extends typeof SETTINGS_REGISTRY[number]['type']>(
@@ -273,7 +279,7 @@ describe('settings registry coverage audit', () => {
     const syncServerUrl = getItem('sync-server-url', 'string');
     expect(syncServerUrl.stringStyle).toBe('dialog');
     expect(syncServerUrl.dialogFieldKind).toBe('plain');
-    expect(syncServerUrl.dialogInputType).toBe('url');
+    expect(syncServerUrl.dialogInputType).toBe('text');
 
     const embeddedRuntimeOpenMode = getItem('embedded-runtime-open-mode', 'enum');
     expect(embeddedRuntimeOpenMode.options.map((option) => option.value)).toEqual(['local', 'lan']);
@@ -334,6 +340,17 @@ describe('settings registry coverage audit', () => {
     DEV_ONLY_IDS.forEach((id) => {
       expect(baseIds).not.toContain(id);
       expect(developerIds).toContain(id);
+    });
+
+    const tauriDevIds = getVisibleSettings({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+      developerMode: true,
+    }).map((item) => item.id);
+    TAURI_DEV_ONLY_IDS.forEach((id) => {
+      expect(baseIds).not.toContain(id);
+      expect(developerIds).not.toContain(id);
+      expect(tauriDevIds).toContain(id);
     });
 
     expect(baseIds).toContain('moss-api-token');

@@ -133,11 +133,10 @@ async function resolveRuntimeTransport(): Promise<RuntimeConfigTransport | null>
         host: status.host,
         port: status.port,
         hostId: status.hostId,
-        authSecret: status.authSecret,
       });
       return {
         baseUrl: toRuntimeBaseUrl({ host: status.host, port: status.port }),
-        authToken: status.authSecret?.trim() || undefined,
+        authToken: undefined,
       };
     }
 
