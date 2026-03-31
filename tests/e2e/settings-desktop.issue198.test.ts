@@ -116,10 +116,10 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('desktop-sidebar-item-tasks')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-me')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-agents')).toBeVisible();
-    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toBeVisible();
+    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toHaveCount(0);
     await expect(page.getByTestId('desktop-sidebar-item-settings')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toHaveCount(0);
-    await expect(page.locator('[data-testid^="desktop-sidebar-item-"]')).toHaveCount(6);
+    await expect(page.locator('[data-testid^="desktop-sidebar-item-"]')).toHaveCount(5);
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
   });
 
@@ -244,16 +244,20 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await page.goto('/settings');
     await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
 
-    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
-
-    const featureTogglesRow = page.getByText('功能开关');
-    await featureTogglesRow.scrollIntoViewIfNeeded();
-    await featureTogglesRow.click();
-
     await page.getByTestId('new-settings-desktop-adaptive-switch').click();
 
     await expect(page.getByTestId('desktop-sidebar')).toBeHidden();
     await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
+  });
+
+  test('developer setting can expose the workbench test nav entry（开发者设置可直接暴露工作台测试入口）', async ({ page }) => {
+    await page.goto('/settings');
+
+    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toHaveCount(0);
+
+    await page.getByTestId('feature-toggle-workbench-test-switch').click();
+
+    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toBeVisible();
   });
 
   test('desktop sidebar nav keeps desktop shell on non-settings route（桌面侧栏跳转非设置后保持桌面壳层）', async ({ page }) => {
