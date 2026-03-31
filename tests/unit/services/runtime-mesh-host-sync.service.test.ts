@@ -61,6 +61,78 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
     }));
   });
 
+  it('refreshes discovered candidate endpoint when the same host_id advertises a new LAN address（同一 host_id 宣告新 LAN 地址时刷新候选节点 endpoint）', async () => {
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch) => ({
+      id: 'runtime-host-desktop',
+      name: patch.name ?? 'Desktop Node',
+      host: patch.host ?? '192.168.85.1',
+      port: patch.port ?? 21753,
+      status: 'unknown' as const,
+      createdAt: '2026-03-30T10:00:00.000Z',
+      updatedAt: '2026-03-30T10:00:00.000Z',
+      hostId: patch.hostId ?? 'rt-desktop',
+      trustState: patch.trustState ?? 'discovered_candidate',
+      advertisedListenAddress: patch.advertisedListenAddress,
+      manualOverride: patch.manualOverride,
+      authToken: patch.authToken,
+    }));
+    const service = new RuntimeMeshHostSyncService({
+      hostService: {
+        listHosts: vi.fn(async () => [{
+          id: 'runtime-host-desktop',
+          name: 'Node rt-deskt (192.168.85.1:21753)',
+          host: '192.168.85.1',
+          port: 21753,
+          status: 'unknown',
+          createdAt: '2026-03-30T10:00:00.000Z',
+          updatedAt: '2026-03-30T10:00:00.000Z',
+          hostId: 'rt-desktop',
+          trustState: 'discovered_candidate',
+          advertisedListenAddress: '192.168.85.1:21753',
+        } satisfies RuntimeHostRecord]),
+        addHost: vi.fn(),
+        mergeHostMetadata,
+        removeHost: vi.fn(),
+      },
+      meshService: {
+        listDiscoveredPeers: vi.fn(async () => [{
+          host_id: 'rt-desktop',
+          host: '192.168.101.5',
+          port: 21753,
+        }]),
+        listMeshPeers: vi.fn(async () => []),
+        setPeerEnabled: vi.fn(async () => undefined),
+      },
+      runtimeControlService: {
+        getPeerDialAddress: vi.fn(async () => ({
+          host: '192.168.101.5',
+          port: 21753,
+        })),
+      },
+    });
+
+    const hosts = await service.syncLocalRuntimeMeshState('http://127.0.0.1:31308', 'shared-secret');
+
+    expect(mergeHostMetadata).toHaveBeenCalledWith(
+      'runtime-host-desktop',
+      expect.objectContaining({
+        hostId: 'rt-desktop',
+        host: '192.168.101.5',
+        port: 21753,
+        name: expect.stringContaining('192.168.101.5:21753'),
+        advertisedListenAddress: '192.168.101.5:21753',
+        manualOverride: undefined,
+        authToken: 'shared-secret',
+      }),
+    );
+    expect(hosts[0]).toEqual(expect.objectContaining({
+      host: '192.168.101.5',
+      port: 21753,
+      advertisedListenAddress: '192.168.101.5:21753',
+      name: expect.stringContaining('192.168.101.5:21753'),
+    }));
+  });
+
   it('promotes paired mesh peer to confirmed host metadata（mesh peer 时升级为 confirmed host 元数据）', async () => {
     const mergeHostMetadata = vi.fn(async (_hostId: string, patch) => ({
       id: 'runtime-host-desktop',

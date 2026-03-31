@@ -35,6 +35,9 @@ export interface AddRuntimeHostInput {
 }
 
 export interface RuntimeHostMetadataPatch {
+  name?: string;
+  host?: string;
+  port?: number;
   hostId?: string;
   trustState?: RuntimeHostTrustState;
   advertisedListenAddress?: string;
@@ -164,6 +167,36 @@ function mergeOptionalNumberPatch<T extends object>(
     return current;
   }
   return normalizeOptionalNumber((patch[field] ?? undefined) as number | undefined);
+}
+
+function mergeHostNamePatch(
+  patch: RuntimeHostMetadataPatch,
+  current: string,
+): string {
+  if (!hasPatchField(patch, 'name')) {
+    return current;
+  }
+  return normalizeOptionalText(patch.name) ?? current;
+}
+
+function mergeHostAddressPatch(
+  patch: RuntimeHostMetadataPatch,
+  current: string,
+): string {
+  if (!hasPatchField(patch, 'host')) {
+    return current;
+  }
+  return ensureHost(patch.host ?? '');
+}
+
+function mergeHostPortPatch(
+  patch: RuntimeHostMetadataPatch,
+  current: number,
+): number {
+  if (!hasPatchField(patch, 'port')) {
+    return current;
+  }
+  return ensurePort(patch.port);
 }
 
 function mergeVerificationTriggerPatch(
@@ -303,6 +336,9 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
     const current = hosts[targetIndex];
     const mergedBase = normalizeRuntimeHostRecord({
       ...current,
+      name: mergeHostNamePatch(patch, current.name),
+      host: mergeHostAddressPatch(patch, current.host),
+      port: mergeHostPortPatch(patch, current.port),
       hostId: mergeOptionalTextPatch(patch, 'hostId', current.hostId),
       trustState: patch.trustState ?? current.trustState,
       advertisedListenAddress: mergeOptionalTextPatch(

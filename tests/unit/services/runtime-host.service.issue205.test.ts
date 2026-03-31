@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IStoragePort, QueryOptions, QueryResult } from '@/lib/environment/interfaces/storage.port';
-import { RuntimeHostServiceImpl } from '@/lib/services/runtime-host.service';
+import {
+  RuntimeHostServiceImpl,
+  type RuntimeHostMetadataPatch,
+} from '@/lib/services/runtime-host.service';
 
 class InMemoryStorageAdapter implements IStoragePort {
   private readonly memory = new Map<string, unknown>();
@@ -304,6 +307,38 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     expect(updated.hostId).toBe('host-android-1');
     expect(updated.manualOverride).toBe('127.0.0.1:39124');
     expect(updated.lastSuccessfulDialAddress).toBe('127.0.0.1:39124');
+  });
+
+  it('updates persisted endpoint fields when peer address is refreshed（对端地址刷新时更新持久化 endpoint 字段）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-30T11:35:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Node rt-deskt (192.168.85.1:21753)',
+      host: '192.168.85.1',
+      port: 21753,
+      trustState: 'discovered_candidate',
+      hostId: 'rt-desktop',
+      advertisedListenAddress: '192.168.85.1:21753',
+    });
+
+    const updated = await service.mergeHostMetadata(created.id, {
+      hostId: 'rt-desktop',
+      advertisedListenAddress: '192.168.101.5:21753',
+      lastSuccessfulDialAddress: '192.168.101.5:21753',
+      host: '192.168.101.5',
+      port: 21753,
+      name: 'Node rt-deskt (192.168.101.5:21753)',
+    } as RuntimeHostMetadataPatch);
+
+    expect(updated.host).toBe('192.168.101.5');
+    expect(updated.port).toBe(21753);
+    expect(updated.name).toBe('Node rt-deskt (192.168.101.5:21753)');
+    expect(updated.advertisedListenAddress).toBe('192.168.101.5:21753');
+    expect(updated.lastSuccessfulDialAddress).toBe('192.168.101.5:21753');
+    expect(updated.trustState).toBe('discovered_candidate');
   });
 
   it('keeps confirmed peer host id stable when dial target drifts（confirmed peer 不应被静默改绑到新 host_id）', async () => {

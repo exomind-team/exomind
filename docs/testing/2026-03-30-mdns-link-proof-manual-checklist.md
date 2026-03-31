@@ -267,3 +267,69 @@ Signal History 是否有 request/ack:
 - `Signal History（信号历史）`：通过
 - `zero-state validation（零状态联调验证）`：通过
 - 备注：本轮仍是 Desktop + Android Emulator 组合；若要验收严格双向 mDNS 首发发现，仍建议追加真机或同局域网双桌面验证
+
+---
+
+## 10. 2026-03-31 严格双向首发 mDNS 验收记录（Desktop + Desktop）
+
+### 10.1 环境
+
+- 日期：2026-03-31
+- 分支：`feature/issue-773-network-node-first`
+- 工作区：`D:\project\exomind-issue-773-network-node-first`
+- 设备组合：Windows Desktop A + Windows Desktop B（同 worktree 下的双桌面隔离实例）
+- 受管实例：
+  - `issue-773-desktop-a`
+  - `issue-773-desktop-b`
+- 运行模式：两端均为 `embedded RT（内嵌运行时） + LAN（局域网）`
+- 说明：当前机器无 Android 真机，因此这轮“严格双向首发 mDNS”最终验收采用双桌面同局域网链路完成
+
+### 10.2 新发现的根因
+
+- Runtime 侧：
+  - Windows 多网卡环境下，mDNS 解析会返回多张网卡地址
+  - 旧逻辑会把 VMware / TUN / overlay 地址错误保留为 peer 地址
+- Frontend 侧：
+  - `runtime host store` 在命中同一 `host_id` 后只更新 metadata，不刷新 `host / port / name`
+  - 导致 `/mesh/discovered` 已经修正为真实 LAN 地址时，设备页仍显示旧虚拟网卡地址
+
+### 10.3 本轮修复
+
+- Runtime：
+  - 在 `crates/exomind-runtime/src/discovery.rs` 引入本机接口打分与首选网段匹配
+  - 同一 `host_id` 多次 `ServiceResolved` 时保留更优地址，不再被后续虚拟地址覆盖
+- Frontend：
+  - 在 `src/lib/services/runtime-mesh-host-sync.service.ts` 里，同步 discovered / confirmed peer 时刷新 `host / port / auto-generated name`
+  - 在 `src/lib/services/runtime-host.service.ts` 里支持 endpoint 字段的持久化刷新
+
+### 10.4 新鲜验收证据
+
+- 首次发现：
+  - Desktop A 设备页显示：`Node rt-c688f (192.168.101.5:27066)`
+  - Desktop B 设备页显示：`Node rt-fbbf5 (192.168.101.5:27067)`
+- `/mesh/discovered`：
+  - `http://127.0.0.1:27067/mesh/discovered` 返回 `192.168.101.5:27066`
+  - `http://127.0.0.1:27066/mesh/discovered` 返回 `192.168.101.5:27067`
+- `/mesh/peers`：
+  - `http://127.0.0.1:27067/mesh/peers` 返回 `http://192.168.101.5:27066`
+  - `http://127.0.0.1:27066/mesh/peers` 返回 `http://192.168.101.5:27067`
+- 自动配对 / proof：
+  - PIN：`018470`
+  - 两端均进入 `已确认 peer`
+  - 两端设备页均显示 `已验证互通`
+  - 触发来源：`自动配对`
+- 手动复测：
+  - 单侧点击 `测试互联` 后，两端均切换为 `触发：手动测试互联`
+  - 两端重新回到 `已验证互通`
+  - RTT 结果：
+    - Desktop A：`本端 RTT 14 ms`，`对端 RTT 13 ms`
+    - Desktop B：`本端 RTT 13 ms`，`对端 RTT 14 ms`
+
+### 10.5 本轮结论
+
+- `strict bidirectional first-discovery mDNS（严格双向首发 mDNS 发现）`：通过
+- `pairing_auto（自动验证）`：通过
+- `manual_retry（手动测试互联）`：通过
+- `/mesh/discovered` 与设备页展示一致性：通过
+- `/mesh/peers` confirmed peer 建立：通过
+- 备注：这轮最终验收环境是双桌面，不是 `Desktop + Android`；Android 真机链路仍可作为后续补充验证

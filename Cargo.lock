@@ -1312,6 +1312,7 @@ dependencies = [
  "dirs 5.0.1",
  "futures-util",
  "http-body-util",
+ "if-addrs",
  "mdns-sd",
  "percent-encoding",
  "portable-pty",

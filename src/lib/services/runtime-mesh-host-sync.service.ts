@@ -44,6 +44,23 @@ function buildPeerName(hostId: string, host: string, port: number): string {
   return shortHostId ? `Node ${shortHostId} (${host}:${port})` : `${host}:${port}`;
 }
 
+function shouldRefreshPeerName(existingHost: RuntimeHostRecord, nextHostId: string): boolean {
+  if (existingHost.trustState === 'manual_seed') {
+    return false;
+  }
+
+  const currentName = existingHost.name.trim();
+  if (!currentName) {
+    return true;
+  }
+
+  return currentName === `${existingHost.host}:${existingHost.port}`
+    || (existingHost.hostId
+      ? currentName === buildPeerName(existingHost.hostId, existingHost.host, existingHost.port)
+      : false)
+    || currentName === buildPeerName(nextHostId, existingHost.host, existingHost.port);
+}
+
 function replaceHost(hosts: RuntimeHostRecord[], nextHost: RuntimeHostRecord): RuntimeHostRecord[] {
   const index = hosts.findIndex((host) => host.id === nextHost.id);
   if (index < 0) {
@@ -338,7 +355,13 @@ export class RuntimeMeshHostSyncService {
       return [...hosts, created];
     }
 
+    const refreshedName = shouldRefreshPeerName(existingHost, peer.host_id)
+      ? buildPeerName(peer.host_id, peer.host, peer.port)
+      : undefined;
     const patch: RuntimeHostMetadataPatch = {
+      name: refreshedName,
+      host: peer.host,
+      port: peer.port,
       hostId: peer.host_id,
       trustState: existingHost.trustState === 'confirmed_peer'
         ? 'confirmed_peer'
@@ -385,7 +408,13 @@ export class RuntimeMeshHostSyncService {
       return [...hosts, created];
     }
 
+    const refreshedName = shouldRefreshPeerName(existingHost, peer.id)
+      ? buildPeerName(peer.id, parsed.host, parsed.port)
+      : undefined;
     const patch: RuntimeHostMetadataPatch = {
+      name: refreshedName,
+      host: parsed.host,
+      port: parsed.port,
       hostId: peer.id,
       trustState: 'confirmed_peer',
       advertisedListenAddress,
