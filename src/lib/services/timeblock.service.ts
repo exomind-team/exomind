@@ -57,9 +57,12 @@ interface BlockPreferenceDecision {
 
 interface TimeBlockRtPort {
   listCompletedBlocks(): Promise<TimeBlockData[]>;
+  /** TODO(#780): migrate backfillGapBlocks to atomic RT primitive, then remove */
   replaceCompletedBlocks(blocks: TimeBlockData[]): Promise<void>;
   getActiveBlock(): Promise<ActiveBlockData | null>;
+  /** TODO(#780): migrate saveActiveBlock/applyReplicatedActiveBlock callers, then remove */
   putActiveBlock(block: ActiveBlockData): Promise<void>;
+  /** @deprecated No callers remain. Route returns 409 since #780 cleanup. */
   deleteActiveBlock(): Promise<void>;
   // #780 new RT routes
   rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
@@ -157,6 +160,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.attachStorageListener();
   }
 
+  /**
+   * TODO(#749): Once Tauri desktop fully migrates to rt-sqlite (MigrationDialog
+   * no longer falls back to legacy), this can be simplified to always return
+   * 'rt-sqlite'. The useInjectedEnvStorage path is test-only.
+   */
   private resolveDefaultBackendMode(): DomainBackendMode {
     if (this.useInjectedEnvStorage) {
       return 'legacy';

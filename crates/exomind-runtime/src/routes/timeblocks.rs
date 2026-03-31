@@ -599,8 +599,12 @@ async fn list_timeblocks(
 }
 
 /// PUT /timeblocks — replace completed blocks list.
-/// TODO(#759): Deprecate once all callers migrate to newBlock primitive.
-/// Current callers: TS writeCompletedBlockData (endBlock, startBlock gap truncation, backfill).
+///
+/// Still used by rt-sqlite mode for:
+///   - `backfillGapBlocks` (bulk insert gap blocks)
+///   - `writeCompletedBlockData` in legacy endBlock/startBlock gap truncation
+///
+/// TODO(#780): Migrate remaining callers to atomic RT primitives, then deprecate.
 async fn replace_timeblocks(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
@@ -634,9 +638,14 @@ async fn get_active_timeblock(
     }
 }
 
-/// TODO(#780): Migrate callers (saveActiveBlock 8 call sites) then deprecate.
-/// Current callers: startBlock, pauseBlock, resumeBlock, markEnding, endBlock (gap creation).
-/// Bypasses gap truncation and newBlock atomicity — replacement needs PATCH or event-driven approach.
+/// PUT /timeblocks/active — raw active block write.
+///
+/// Still used by rt-sqlite mode for:
+///   - `saveActiveBlock` (ECS replication write-back)
+///   - `applyReplicatedActiveBlock` (cross-device sync)
+///
+/// The main lifecycle (start/pause/resume/stop/end) has migrated to POST routes.
+/// TODO(#780): Migrate remaining callers to event-driven or PATCH approach, then deprecate.
 async fn put_active_timeblock(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
@@ -701,38 +710,18 @@ async fn put_active_timeblock(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// DELETE /timeblocks/active — delete active block.
-/// TODO(#759): Deprecate once TS endBlock fully migrates to POST /timeblocks/end.
-/// Current callers: TS endBlock (saves terminal block then deletes active).
-async fn delete_active_timeblock(
-    State(state): State<AppState>,
-    Query(query): Query<ScopeQuery>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let active = state
-        .timeblock_store
-        .get_active_scoped(scope_key)
-        .map_err(|error| internal_error(error.to_string()))?;
-    state
-        .timeblock_store
-        .delete_active_scoped(scope_key)
-        .map_err(|error| internal_error(error.to_string()))?;
-
-    if let Some(block) = active {
-        if is_timeblock_ended(&block) {
-            return Ok(StatusCode::NO_CONTENT);
-        }
-        write_timeblock_eventlog(
-            &state,
-            scope_key,
-            "block_end",
-            &block.name,
-            &block.start_id,
-            &block.task_ids,
-        );
-    }
-
-    Ok(StatusCode::NO_CONTENT)
+/// DELETE /timeblocks/active — **DEPRECATED** (#780 legacy cleanup).
+///
+/// No TS caller uses this route since endBlock migrated to POST /timeblocks/end
+/// (rt-sqlite) and the legacy path writes a terminal ActiveBlockData instead of
+/// deleting.  Returns 409 with a migration hint.
+async fn delete_active_timeblock() -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::CONFLICT,
+        Json(ErrorResponse {
+            error: "DEPRECATED: DELETE /timeblocks/active is no longer supported. Use POST /timeblocks/end instead. See #780.".to_string(),
+        }),
+    )
 }
 
 fn is_timeblock_ended(block: &ActiveBlockData) -> bool {
@@ -1535,61 +1524,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_active_writes_block_end_to_eventlog() {
-        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
-            std::env::temp_dir().join(format!(
-                "exomind-test-timeblock-end-eventlog-{}",
-                uuid::Uuid::new_v4()
-            )),
-        ));
-        let state = test_state_with_timeblock_store_and_eventlog(
+    /// DELETE /timeblocks/active is deprecated (#780) and returns 409.
+    async fn delete_active_returns_409_deprecated() {
+        let state = test_state_with_timeblock_store(
             Arc::new(crate::timeblock::TimeBlockStore::new()),
-            eventlog_store.clone(),
         );
         let app = test_router(state);
-
-        let put_response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&ActiveBlockData {
-                            start_id: "active-1".to_string(),
-                            name: "Morning focus".to_string(),
-                            mode: "countdown".to_string(),
-                            target_minutes: Some(25),
-                            elapsed: 0,
-                            updated_at: Some(1_700_000_101_000),
-                            phase: Some("running".to_string()),
-                            version: Some(1),
-                            actor_id: Some("actor-a".to_string()),
-                            last_transition_at: Some(1_700_000_101_000),
-                            last_resumed_at: Some(1_700_000_101_000),
-                            accumulated_run_ms: Some(0),
-                            start_time: 1_700_000_100_000,
-                            action_ended_at: None,
-                            feedback_started_at: None,
-                            feedback_submitted_at: None,
-                            pause_accumulated_ms: Some(0),
-                            paused: false,
-                            paused_at: None,
-                            task_ids: vec!["task-a".to_string()],
-                            task_association_log: vec![],
-                            source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
-                            task_id: Some("task-a".to_string()),
-                        })
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
         let delete_response = app
             .oneshot(
@@ -1601,12 +1541,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(delete_response.status(), StatusCode::CONFLICT);
 
-        let events = eventlog_store.list_events(None).unwrap();
-        assert_eq!(events.len(), 2);
-        assert!(events.iter().any(|event| event.tags == vec!["block_start".to_string()]));
-        assert!(events.iter().any(|event| event.tags == vec!["block_end".to_string()]));
+        let body = delete_response.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&body).unwrap_or_default();
+        let error_msg = json.get("error").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(error_msg.contains("DEPRECATED"), "error message should indicate deprecation: {error_msg}");
     }
 
     #[tokio::test]

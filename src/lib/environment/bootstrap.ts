@@ -70,6 +70,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
   const asr = new VolcanoEngineASRAdapter();
   const clipboard: IClipboardPort = runtime === 'tauri' ? new TauriClipboardAdapter() : new WebClipboardAdapter();
   const useMockData = options.useMockData ?? getUseMockDataEnabled();
+  // TODO(#749): Remove legacy branches once Tauri migration is fully complete.
   const taskBackendMode = runtime === 'tauri' ? getTaskBackendMode() : 'rt-sqlite';
   const eventlogBackendMode = runtime === 'tauri' ? getEventlogBackendMode() : 'rt-sqlite';
   const task: ITaskPort = useMockData

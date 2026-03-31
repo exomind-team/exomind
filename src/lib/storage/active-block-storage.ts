@@ -1,3 +1,12 @@
+/**
+ * PouchDB-backed active block storage — used ONLY in legacy backend mode.
+ *
+ * In rt-sqlite mode (the default since #780), the TimeBlockRtAdapter talks
+ * directly to the Rust runtime and this module is never instantiated.
+ *
+ * TODO(#749): Remove this file once Tauri desktop no longer falls back to
+ * legacy mode (MigrationDialog skip/failure path).
+ */
 import PouchDB from 'pouchdb';
 import type { ActiveBlockData } from '../types/event';
 import { getCurrentProfileOrLegacyId } from '../profile/profile-storage';

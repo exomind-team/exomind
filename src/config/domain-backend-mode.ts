@@ -1,3 +1,8 @@
+/**
+ * TODO(#749): Once Tauri desktop migration is complete and MigrationDialog no longer
+ * falls back to 'legacy', remove the 'legacy' variant and simplify all consumers
+ * to assume 'rt-sqlite'. See also: bootstrap.ts, timeblock.service.ts, task.service.ts.
+ */
 export type DomainBackendMode = 'legacy' | 'rt-sqlite';
 export type DomainBackendKey = 'eventlog' | 'task' | 'timeblock';
 

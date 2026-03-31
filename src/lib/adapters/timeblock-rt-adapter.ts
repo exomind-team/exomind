@@ -84,15 +84,12 @@ export class TimeBlockRtAdapter {
     }
   }
 
+  /**
+   * @deprecated DELETE /timeblocks/active returns 409 since #780 legacy cleanup.
+   * Use rtEndBlock() or rtStopBlock() instead. Retained only for interface compliance.
+   */
   async deleteActiveBlock(): Promise<void> {
-    const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url('/timeblocks/active', target), {
-      method: 'DELETE',
-      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
-    });
-    if (!response.ok && response.status !== 204) {
-      throw new Error(`RT timeblocks active delete failed: ${response.status}`);
-    }
+    console.warn('[TB-RT] deleteActiveBlock is deprecated. Use rtEndBlock() or rtStopBlock(). See #780.');
   }
 
   // ── #780 新路由方法 ──
