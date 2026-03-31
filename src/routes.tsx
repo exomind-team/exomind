@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
@@ -288,6 +288,7 @@ function MobileShell({
                   || (item.path === '/me' && locationPath.startsWith('/me'))
                   || (item.path === '/goals' && locationPath.startsWith('/goals'))
                   || (item.path === '/agents' && locationPath.startsWith('/agents'))
+                  || (item.path === '/workbench' && locationPath.startsWith('/workbench'))
                   || (item.path === '/settings' && locationPath.startsWith('/settings'));
                 return (
                   <Link
@@ -350,6 +351,13 @@ function DesktopSidebar({
       icon: Waypoints,
       match: (path: string) => path === '/agents' || path.startsWith('/agents/'),
     }] : []),
+    {
+      key: 'workbench-test',
+      title: '工作台测试',
+      path: '/workbench',
+      icon: FlaskConical,
+      match: (path: string) => path === '/workbench' || path.startsWith('/workbench/'),
+    },
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
@@ -617,6 +625,7 @@ function NewLayout() {
     ...(goalsPageEnabled ? [{ title: '目标', path: '/goals', icon: Orbit }] : []),
     ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
+    { title: '工作台测试', path: '/workbench', icon: FlaskConical },
     { title: '设置', path: '/settings', icon: Settings },
   ];
   const selectedShell = resolveAppShellMode({

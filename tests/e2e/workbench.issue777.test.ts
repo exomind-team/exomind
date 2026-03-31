@@ -79,6 +79,28 @@ test.describe('Issue #777 flat workbench（平铺工作台最小可见功能）'
     await expect(page.getByTestId('workbench-legacy-entry')).toContainText('/agents/chat/agent-daily');
     await expect(page.getByText('Agent Chat / agent-daily')).toBeVisible();
   });
+
+  test('exposes workbench in desktop sidebar as a test page（桌面侧栏暴露工作台测试入口）', async ({ page }) => {
+    await page.goto('/settings');
+
+    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toBeVisible();
+    await page.getByTestId('desktop-sidebar-item-workbench-test').click();
+
+    await expect(page).toHaveURL(/\/workbench$/);
+    await expect(page.getByTestId('workbench-page')).toBeVisible();
+  });
+
+  test('exposes workbench in mobile bottom nav as a test page（移动底栏暴露工作台测试入口）', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/tasks');
+
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
+    await expect(page.getByRole('link', { name: '工作台测试' })).toBeVisible();
+    await page.getByRole('link', { name: '工作台测试' }).click();
+
+    await expect(page).toHaveURL(/\/workbench$/);
+    await expect(page.getByTestId('workbench-page')).toBeVisible();
+  });
 });
 
 test.describe('Issue #777 workbench shim guard（工作台 shim 守卫）', () => {
