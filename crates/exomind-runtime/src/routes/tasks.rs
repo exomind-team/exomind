@@ -333,21 +333,6 @@ async fn cancel_task(
     Ok(Json(task))
 }
 
-/// DELETE /tasks/:id — compatibility alias for cancel
-async fn delete_task(
-    Path(id): Path<String>,
-    State(state): State<AppState>,
-    Query(query): Query<ScopeQuery>,
-) -> Result<Json<Task>, (StatusCode, String)> {
-    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
-
-    publish_task_signal(&state, "task.cancelled", &task);
-    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete");
-
-    Ok(Json(task))
-}
-
 async fn export_tasks_json(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
@@ -647,7 +632,7 @@ pub fn router() -> Router<AppState> {
         .route("/tasks/:id/cancel", post(cancel_task))
         .route(
             "/tasks/:id",
-            get(get_task).put(update_task).delete(delete_task),
+            get(get_task).put(update_task),
         )
         .route("/tasks/:id/transition", post(transition_task))
 }
@@ -1389,45 +1374,6 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let cancelled: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(cancelled["status"], "cancelled");
-    }
-
-    #[tokio::test]
-    async fn delete_route_remains_cancel_alias_for_compatibility() {
-        let state = test_state();
-        let task = state.task_store.create(CreateTaskInput {
-            title: "Delete alias".to_string(),
-            description: None,
-            done_condition: None,
-            priority: None,
-            tags: vec![],
-            source: None,
-            parent_id: None,
-            depends_on: vec![],
-            due_at: None,
-            estimated_minutes: None,
-            time_block_ids: vec![],
-        });
-        state
-            .task_store
-            .transition(&task.id, TaskStatus::InProgress)
-            .unwrap();
-        let app = test_router(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri(format!("/tasks/{}", task.id))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let cancelled: Value = serde_json::from_slice(&body).unwrap();
