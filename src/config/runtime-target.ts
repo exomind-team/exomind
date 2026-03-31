@@ -3,12 +3,14 @@ import { resolveLocalServiceHost } from '@/config/local-service-host';
 
 export const RUNTIME_TARGET_MODE_STORAGE_KEY = 'exomind:runtimeTargetMode';
 export const RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY = 'exomind:runtimeExternalAddress';
+export const RUNTIME_EXTERNAL_AUTH_TOKEN_STORAGE_KEY = 'exomind:runtimeExternalAuthToken';
 export const EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY = 'exomind:embeddedRuntimeNetworkMode';
 export const EMBEDDED_RUNTIME_STATUS_STORAGE_KEY = 'exomind:embeddedRuntimeStatus';
 export const RUNTIME_TARGET_CHANGED_EVENT = 'exomind:runtime-target-changed';
 export const EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT = 'exomind:embedded-runtime-network-mode-changed';
 const RUNTIME_TARGET_MODE_VALUE_CHANGED_EVENT = 'exomind:runtime-target-mode-value-changed';
 const RUNTIME_EXTERNAL_ADDRESS_CHANGED_EVENT = 'exomind:runtime-external-address-changed';
+const RUNTIME_EXTERNAL_AUTH_TOKEN_CHANGED_EVENT = 'exomind:runtime-external-auth-token-changed';
 
 export type RuntimeTargetMode = 'embedded' | 'external';
 export type EmbeddedRuntimeNetworkMode = 'local' | 'lan';
@@ -233,6 +235,17 @@ function normalizeRuntimeExternalAddress(rawValue: string | null | undefined): s
   }
 }
 
+function normalizeRuntimeExternalAuthToken(rawValue: string | null | undefined): string {
+  if (!rawValue) {
+    return '';
+  }
+
+  let normalized = rawValue.trim();
+  normalized = normalized.replace(/^['"]|['"]$/g, '');
+  normalized = normalized.replace(/^Bearer\s+/i, '');
+  return normalized.trim();
+}
+
 const runtimeTargetModeModule = createConfigModule<RuntimeTargetMode>({
   storageKey: RUNTIME_TARGET_MODE_STORAGE_KEY,
   eventName: RUNTIME_TARGET_MODE_VALUE_CHANGED_EVENT,
@@ -260,6 +273,15 @@ const runtimeExternalAddressModule = createConfigModule<string>({
     const parsed = parseRuntimeAddress(value);
     return toAddress(parsed.host, parsed.port);
   },
+  persistMode: 'runtime-preferred',
+});
+
+const runtimeExternalAuthTokenModule = createConfigModule<string>({
+  storageKey: RUNTIME_EXTERNAL_AUTH_TOKEN_STORAGE_KEY,
+  eventName: RUNTIME_EXTERNAL_AUTH_TOKEN_CHANGED_EVENT,
+  defaultValue: '',
+  normalize: normalizeRuntimeExternalAuthToken,
+  serialize: (value) => normalizeRuntimeExternalAuthToken(value),
   persistMode: 'runtime-preferred',
 });
 
@@ -307,6 +329,15 @@ export function setRuntimeExternalAddress(address: string): void {
   emitRuntimeTargetChanged();
 }
 
+export function getRuntimeExternalAuthToken(): string {
+  return runtimeExternalAuthTokenModule.get();
+}
+
+export function setRuntimeExternalAuthToken(token: string): void {
+  runtimeExternalAuthTokenModule.set(token);
+  emitRuntimeTargetChanged();
+}
+
 function getExternalRuntimeTarget(): { host: string; port: number } {
   try {
     return parseRuntimeAddress(getRuntimeExternalAddress());
@@ -322,7 +353,13 @@ export function getSelectedRuntimeTarget(): RuntimeTarget {
   const mode = getRuntimeTargetMode();
   if (mode === 'external') {
     const external = getExternalRuntimeTarget();
-    return { mode, host: external.host, port: external.port };
+    const authToken = getRuntimeExternalAuthToken();
+    return {
+      mode,
+      host: external.host,
+      port: external.port,
+      authToken: authToken || undefined,
+    };
   }
 
   return {
@@ -380,7 +417,11 @@ export function subscribeRuntimeTargetChanges(listener: (target: RuntimeTarget) 
   }
 
   const handleStorage = (event: StorageEvent) => {
-    if (event.key !== RUNTIME_TARGET_MODE_STORAGE_KEY && event.key !== RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY) {
+    if (
+      event.key !== RUNTIME_TARGET_MODE_STORAGE_KEY
+      && event.key !== RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY
+      && event.key !== RUNTIME_EXTERNAL_AUTH_TOKEN_STORAGE_KEY
+    ) {
       return;
     }
     listener(getSelectedRuntimeTarget());

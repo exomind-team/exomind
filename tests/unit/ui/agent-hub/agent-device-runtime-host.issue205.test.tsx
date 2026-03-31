@@ -177,9 +177,15 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     }));
     vi.stubGlobal('fetch', fetchMock);
     isTauriMock.mockResolvedValue(true);
-    invokeMock.mockImplementation(async (command: string, payload?: { mode?: string }) => {
+    invokeMock.mockImplementation(async (
+      command: string,
+      payload?: { mode?: string; address?: string },
+    ) => {
       if (command === 'runtime_target_mode_set' || command === 'runtime_network_mode_set') {
         return payload?.mode ?? 'embedded';
+      }
+      if (command === 'runtime_external_address_set') {
+        return payload?.address ?? '';
       }
       return null;
     });
@@ -1300,10 +1306,14 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     fireEvent.change(screen.getByTestId('runtime-target-external-address-input'), {
       target: { value: '10.9.0.8:2999' },
     });
+    fireEvent.change(screen.getByTestId('runtime-target-external-auth-token-input'), {
+      target: { value: 'Bearer external-admin-token' },
+    });
     fireEvent.click(screen.getByTestId('runtime-target-external-apply-button'));
 
     await waitFor(() => {
       expect(window.localStorage.getItem('exomind:runtimeExternalAddress')).toBe('10.9.0.8:2999');
+      expect(window.localStorage.getItem('exomind:runtimeExternalAuthToken')).toBe('external-admin-token');
       expect(window.localStorage.getItem('exomind:runtimeTargetMode')).toBe('external');
     });
   });

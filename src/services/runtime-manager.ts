@@ -154,12 +154,13 @@ export class RuntimeManager {
     return this.hostService.addHost(input);
   }
 
-  async addHostFromAddress(hostAddress: string, name?: string): Promise<RuntimeHostRecord> {
+  async addHostFromAddress(hostAddress: string, name?: string, authToken?: string): Promise<RuntimeHostRecord> {
     const parsed = parseHostAddress(hostAddress);
     return this.hostService.addHost({
       name: name?.trim(),
       host: parsed.host,
       port: parsed.port,
+      authToken,
     });
   }
 

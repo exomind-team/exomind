@@ -285,7 +285,7 @@ export function sortRouteHostsByPriority(hosts: RuntimeHostSnapshot[]): RuntimeH
   });
 }
 
-export function createDirectRuntimeHost(host: string, port: number): RuntimeHostRecord {
+export function createDirectRuntimeHost(host: string, port: number, authToken?: string): RuntimeHostRecord {
   const nowIso = new Date().toISOString();
   return {
     id: `runtime-direct-${host}-${port}`.replace(/[^\w-]/g, '-'),
@@ -295,6 +295,7 @@ export function createDirectRuntimeHost(host: string, port: number): RuntimeHost
     status: 'unknown',
     createdAt: nowIso,
     updatedAt: nowIso,
+    authToken,
     isLocal: true,
   };
 }

@@ -8,9 +8,11 @@ import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   getEmbeddedRuntimeNetworkMode,
   getRuntimeExternalAddress,
+  getRuntimeExternalAuthToken,
   getRuntimeTargetMode,
   resolveEmbeddedRuntimeBindHost,
   setRuntimeExternalAddress,
+  setRuntimeExternalAuthToken,
   setRuntimeTargetMode,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
@@ -84,6 +86,19 @@ export async function setPersistedRuntimeExternalAddress(address: string): Promi
     return persistedAddress;
   } catch (error) {
     setRuntimeExternalAddress(previousAddress);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export async function setPersistedRuntimeExternalAuthToken(token: string): Promise<string> {
+  const previousToken = getRuntimeExternalAuthToken();
+
+  setRuntimeExternalAuthToken(token);
+
+  try {
+    return getRuntimeExternalAuthToken();
+  } catch (error) {
+    setRuntimeExternalAuthToken(previousToken);
     throw error instanceof Error ? error : new Error(String(error));
   }
 }

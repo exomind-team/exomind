@@ -27,6 +27,7 @@ export interface DeviceViewProps {
   runtimeTargetAddress: string;
   runtimeTargetError: string;
   runtimeExternalAddressDraft: string;
+  runtimeExternalAuthTokenDraft: string;
   onRuntimeHostProbe: (hostId: string) => Promise<void>;
   onVerifyPeer: (hostId: string) => Promise<void>;
   onEmbeddedRuntimeNetworkModeChange: (mode: EmbeddedRuntimeNetworkMode) => void;
@@ -34,6 +35,7 @@ export interface DeviceViewProps {
   onRuntimeStop: () => Promise<void>;
   onRuntimeTargetModeChange: (mode: RuntimeTargetMode) => void;
   onRuntimeExternalAddressDraftChange: (value: string) => void;
+  onRuntimeExternalAuthTokenDraftChange: (value: string) => void;
   onApplyRuntimeExternalAddress: () => void;
   onOpenHostManager: () => void;
   onOpenPeerPairing: () => void;
@@ -125,6 +127,7 @@ export function DeviceView({
   runtimeTargetAddress,
   runtimeTargetError,
   runtimeExternalAddressDraft,
+  runtimeExternalAuthTokenDraft,
   onRuntimeHostProbe,
   onVerifyPeer,
   onEmbeddedRuntimeNetworkModeChange,
@@ -132,6 +135,7 @@ export function DeviceView({
   onRuntimeStop,
   onRuntimeTargetModeChange,
   onRuntimeExternalAddressDraftChange,
+  onRuntimeExternalAuthTokenDraftChange,
   onApplyRuntimeExternalAddress,
   onOpenHostManager,
   onOpenPeerPairing,
@@ -666,7 +670,17 @@ export function DeviceView({
                   应用
                 </button>
               </div>
-              <p className="text-[10px] text-[#A8A29E]">外部模式下，SSE 与 timeblock 发布会走该地址。</p>
+              <input
+                data-testid="runtime-target-external-auth-token-input"
+                type="password"
+                value={runtimeExternalAuthTokenDraft}
+                onChange={(event) => onRuntimeExternalAuthTokenDraftChange(event.target.value)}
+                placeholder="Bearer Token（远端启用 EXOMIND_RT_SECRET 时必填）"
+                className="h-7 w-full rounded border border-[#E7E5E4] bg-white px-2 text-[11px] text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              <p className="text-[10px] text-[#A8A29E]">
+                外部模式下，SSE / history / PTY / timeblock 发布都会走该地址；若远端开启 `EXOMIND_RT_SECRET`，这里要填写同一 token。
+              </p>
             </div>
           )}
 

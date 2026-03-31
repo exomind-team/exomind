@@ -65,4 +65,19 @@ describe('runtime target persistence', () => {
     });
     expect(getRuntimeExternalAddress()).toBe('192.168.1.48:9124');
   });
+
+  it('persists external runtime auth token locally for protected remote runtimes', async () => {
+    isTauriMock.mockResolvedValue(true);
+
+    const { setPersistedRuntimeExternalAuthToken } = await import('@/config/runtime-target-mode');
+    const { getSelectedRuntimeTarget, setRuntimeTargetMode } = await import('@/config/runtime-target');
+
+    await setPersistedRuntimeExternalAuthToken('Bearer external-admin-token');
+    setRuntimeTargetMode('external');
+
+    expect(getSelectedRuntimeTarget()).toMatchObject({
+      mode: 'external',
+      authToken: 'external-admin-token',
+    });
+  });
 });

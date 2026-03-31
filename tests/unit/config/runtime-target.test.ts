@@ -3,12 +3,14 @@ import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+  getRuntimeExternalAuthToken,
   getRuntimeExternalAddress,
   getEmbeddedRuntimeNetworkMode,
   getRuntimeTargetMode,
   getSelectedRuntimeTarget,
   resolveEmbeddedRuntimeBindHost,
   setEmbeddedRuntimeNetworkMode,
+  setRuntimeExternalAuthToken,
   setRuntimeExternalAddress,
   setRuntimeTargetMode,
   subscribeRuntimeTargetChanges,
@@ -103,14 +105,14 @@ describe('runtime target config（Runtime 目标配置）', () => {
     });
   });
 
-  it('switches to external runtime with default 1949（切到外部默认 1949）', () => {
+  it('switches to external runtime with the embedded default port（切到外部默认使用内嵌端口）', () => {
     setRuntimeTargetMode('external');
 
     expect(getRuntimeTargetMode()).toBe('external');
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'external',
       host: '127.0.0.1',
-      port: 1949,
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
   });
 
@@ -130,6 +132,20 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(listener).toHaveBeenCalled();
 
     unsubscribe();
+  });
+
+  it('includes external auth token in the selected runtime target（外部 Runtime 应携带鉴权 token）', () => {
+    setRuntimeExternalAddress('192.168.1.48:9124');
+    setRuntimeExternalAuthToken('Bearer external-admin-token');
+    setRuntimeTargetMode('external');
+
+    expect(getRuntimeExternalAuthToken()).toBe('external-admin-token');
+    expect(getSelectedRuntimeTarget()).toMatchObject({
+      mode: 'external',
+      host: '192.168.1.48',
+      port: 9124,
+      authToken: 'external-admin-token',
+    });
   });
 
   it('rejects invalid external address（拒绝非法 host:port）', () => {

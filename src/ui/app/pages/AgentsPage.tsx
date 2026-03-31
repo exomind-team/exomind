@@ -23,6 +23,7 @@ import {
   formatHostForUrl,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
+  getRuntimeExternalAuthToken,
   getSelectedRuntimeTarget,
   resolveEmbeddedRuntimeBindHost,
   subscribeRuntimeTargetChanges,
@@ -32,6 +33,7 @@ import {
 import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
 import {
   setPersistedRuntimeExternalAddress,
+  setPersistedRuntimeExternalAuthToken,
   setPersistedRuntimeTargetMode,
 } from '@/config/runtime-target-mode';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
@@ -338,6 +340,9 @@ export function AgentsPage() {
   );
   const [runtimeExternalAddressDraft, setRuntimeExternalAddressDraft] = useState(
     getRuntimeExternalAddress(),
+  );
+  const [runtimeExternalAuthTokenDraft, setRuntimeExternalAuthTokenDraft] = useState(
+    getRuntimeExternalAuthToken(),
   );
   const [runtimeTargetError, setRuntimeTargetError] = useState('');
   const [rightPanel, setRightPanel] = useState<AgentHubRightPanelContext>({ state: 'CLOSED' });
@@ -897,9 +902,13 @@ export function AgentsPage() {
         const selectedTarget = getSelectedRuntimeTarget();
         const targetAddress = `${selectedTarget.host}:${selectedTarget.port}`;
         try {
-          host = await getRuntimeManager().addHostFromAddress(targetAddress, `Selected Runtime · ${targetAddress}`);
+          host = await getRuntimeManager().addHostFromAddress(
+            targetAddress,
+            `Selected Runtime · ${targetAddress}`,
+            selectedTarget.authToken,
+          );
         } catch {
-          host = createDirectRuntimeHost(selectedTarget.host, selectedTarget.port);
+          host = createDirectRuntimeHost(selectedTarget.host, selectedTarget.port, selectedTarget.authToken);
         }
       }
 
@@ -1038,14 +1047,33 @@ export function AgentsPage() {
   const resolveRtBaseUrl = (): string => {
     const host = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
     if (host) return resolveRuntimeHostBaseUrl(host);
-    return `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`;
+    const target = getSelectedRuntimeTarget();
+    return `http://${formatHostForUrl(target.host)}:${target.port}`;
+  };
+
+  const resolveRuntimeHostAuthToken = (
+    host?: Pick<RuntimeHostRecord, 'host' | 'port' | 'authToken'> | null,
+  ): string | undefined => {
+    if (host?.authToken) {
+      return host.authToken;
+    }
+
+    const selectedTarget = getSelectedRuntimeTarget();
+    if (!selectedTarget.authToken) {
+      return undefined;
+    }
+    if (!host) {
+      return selectedTarget.authToken;
+    }
+    return host.host === selectedTarget.host && host.port === selectedTarget.port
+      ? selectedTarget.authToken
+      : undefined;
   };
 
   /** Resolve the auth token for the currently active RT host. */
   const resolveRtAuthToken = (): string | undefined => {
     const activeHost = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
-    if (activeHost?.authToken) return activeHost.authToken;
-    return undefined;
+    return resolveRuntimeHostAuthToken(activeHost);
   };
 
   const resolveActiveRuntimeHost = (): RuntimeHostRecord => {
@@ -1053,13 +1081,8 @@ export function AgentsPage() {
       ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((snapshot) => snapshot.host)?.host;
     if (directHost) return directHost;
 
-    const resolvedUrl = new URL(resolveRtBaseUrl());
-    const fallbackPort = resolvedUrl.port
-      ? Number(resolvedUrl.port)
-      : resolvedUrl.protocol === 'https:'
-        ? 443
-        : 80;
-    return createDirectRuntimeHost(resolvedUrl.hostname, fallbackPort);
+    const selectedTarget = getSelectedRuntimeTarget();
+    return createDirectRuntimeHost(selectedTarget.host, selectedTarget.port, selectedTarget.authToken);
   };
 
   const resolveRuntimeHostBySourceHostId = (sourceHostId?: string | null): RuntimeHostRecord | null => {
@@ -1098,7 +1121,7 @@ export function AgentsPage() {
     const host = resolveRuntimeHostForSession(session);
     return {
       rtBaseUrl: resolveRuntimeHostBaseUrl(host),
-      authToken: host.authToken ?? resolveRtAuthToken(),
+      authToken: resolveRuntimeHostAuthToken(host),
     };
   };
 
@@ -1107,7 +1130,7 @@ export function AgentsPage() {
     if (matchedHost) {
       return {
         rtBaseUrl: resolveRuntimeHostBaseUrl(matchedHost),
-        authToken: matchedHost.authToken ?? resolveRtAuthToken(),
+        authToken: resolveRuntimeHostAuthToken(matchedHost),
       };
     }
     return {
@@ -1122,7 +1145,7 @@ export function AgentsPage() {
       return sortedHosts.map((snapshot) => ({
         id: resolveRuntimeSnapshotPeerId(snapshot) ?? snapshot.host.id,
         rtBaseUrl: resolveRuntimeHostBaseUrl(snapshot.host),
-        authToken: snapshot.host.authToken ?? resolveRtAuthToken(),
+        authToken: resolveRuntimeHostAuthToken(snapshot.host),
         hostName: snapshot.host.name,
         hostAddress: resolveRuntimeHostDialAddress(snapshot.host),
       }));
@@ -1132,7 +1155,7 @@ export function AgentsPage() {
       return [{
         id: host.id,
         rtBaseUrl: resolveRuntimeHostBaseUrl(host),
-        authToken: host.authToken ?? resolveRtAuthToken(),
+        authToken: resolveRuntimeHostAuthToken(host),
         hostName: host.name,
         hostAddress: resolveRuntimeHostDialAddress(host),
       }];
@@ -1273,6 +1296,7 @@ export function AgentsPage() {
     setRuntimeTargetModeValue(target.mode);
     setRuntimeTargetAddress(formatRuntimeTargetAddress(target));
     setRuntimeExternalAddressDraft(getRuntimeExternalAddress());
+    setRuntimeExternalAuthTokenDraft(getRuntimeExternalAuthToken());
   };
 
   const effectiveEmbeddedRuntimeNetworkMode = hasExplicitEmbeddedRuntimeNetworkMode
@@ -1892,6 +1916,7 @@ export function AgentsPage() {
     const runtimeControlService = getRuntimeControlService();
     try {
       setRuntimeTargetError('');
+      await setPersistedRuntimeExternalAuthToken(runtimeExternalAuthTokenDraft);
       await setPersistedRuntimeExternalAddress(runtimeExternalAddressDraft);
       await setPersistedRuntimeTargetMode('external');
       syncRuntimeTargetState();
@@ -2289,6 +2314,7 @@ export function AgentsPage() {
           runtimeTargetAddress={runtimeTargetAddress}
           runtimeTargetError={runtimeTargetError}
           runtimeExternalAddressDraft={runtimeExternalAddressDraft}
+          runtimeExternalAuthTokenDraft={runtimeExternalAuthTokenDraft}
           onRuntimeHostProbe={handleProbeRuntimeHost}
           onVerifyPeer={handleVerifyRuntimePeer}
           onEmbeddedRuntimeNetworkModeChange={handleEmbeddedRuntimeNetworkModeChange}
@@ -2296,6 +2322,7 @@ export function AgentsPage() {
           onRuntimeStop={handleRuntimeStop}
           onRuntimeTargetModeChange={handleRuntimeTargetModeChange}
           onRuntimeExternalAddressDraftChange={setRuntimeExternalAddressDraft}
+          onRuntimeExternalAuthTokenDraftChange={setRuntimeExternalAuthTokenDraft}
           onApplyRuntimeExternalAddress={handleApplyRuntimeExternalAddress}
           onOpenHostManager={() => setHostManagerOpen(true)}
           onOpenPeerPairing={() => setPeerPairingOpen(true)}
