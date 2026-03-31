@@ -144,7 +144,7 @@ pub fn do_new_block(
 ) -> Result<NewBlockResponse, (StatusCode, Json<ErrorResponse>)> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock error")
         .as_millis() as u64;
 
     let current = store
@@ -332,7 +332,7 @@ async fn stop_block(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        .duration_since(std::time::UNIX_EPOCH).expect("system clock error").as_millis() as u64;
 
     let current = state.timeblock_store
         .get_active_scoped(scope_key)
@@ -379,7 +379,7 @@ async fn pause_block(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        .duration_since(std::time::UNIX_EPOCH).expect("system clock error").as_millis() as u64;
 
     let current = state.timeblock_store
         .get_active_scoped(scope_key)
@@ -434,7 +434,7 @@ async fn resume_block(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        .duration_since(std::time::UNIX_EPOCH).expect("system clock error").as_millis() as u64;
 
     let current = state.timeblock_store
         .get_active_scoped(scope_key)

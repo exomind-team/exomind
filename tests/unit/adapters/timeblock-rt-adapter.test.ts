@@ -68,15 +68,10 @@ describe('TimeBlockRtAdapter（RT 时间块适配器）', () => {
     expect(url.searchParams.get('user_id')).toBe(profileId);
   });
 
-  it('upserts and clears active block via runtime routes', async () => {
+  it('upserts active block via PUT and deleteActiveBlock is a no-op', async () => {
     const profileId = activateProfileScope();
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 204,
-        json: async () => ({}),
-      })
       .mockResolvedValueOnce({
         ok: true,
         status: 204,
@@ -99,7 +94,12 @@ describe('TimeBlockRtAdapter（RT 时间块适配器）', () => {
       taskIds: [],
       taskAssociationLog: [],
     });
+
+    // deleteActiveBlock is deprecated — it only logs a warning, no fetch call
     await adapter.deleteActiveBlock();
+
+    // Only 1 fetch call (the PUT), not 2
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     const [putUrl, putInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
     const putRequestUrl = new URL(putUrl);
@@ -117,11 +117,5 @@ describe('TimeBlockRtAdapter（RT 时间块适配器）', () => {
       taskIds: [],
       taskAssociationLog: [],
     });
-
-    const [deleteUrl, deleteInit] = fetchImpl.mock.calls[1] as [string, RequestInit];
-    const deleteRequestUrl = new URL(deleteUrl);
-    expect(`${deleteRequestUrl.origin}${deleteRequestUrl.pathname}`).toBe('http://127.0.0.1:9124/timeblocks/active');
-    expect(deleteRequestUrl.searchParams.get('user_id')).toBe(profileId);
-    expect(deleteInit.method).toBe('DELETE');
   });
 });
