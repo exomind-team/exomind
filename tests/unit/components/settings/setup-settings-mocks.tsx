@@ -501,6 +501,7 @@ vi.mock('@/config/volcano-asr-settings', () => ({
   subscribeVolcanoLanguageChanges: vi.fn(() => () => {}),
 }));
 
+
 vi.mock('@/services/main-window-shortcut-runtime', () => ({
   syncMainWindowShortcutSelectionWithRuntime: vi.fn(async ({ selection }: { selection?: string[] } = {}) => {
     const nextSelection = selection ?? settingsPagePreferenceState.mainWindowShortcutSelection;

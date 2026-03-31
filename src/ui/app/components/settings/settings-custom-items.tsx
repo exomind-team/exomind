@@ -67,6 +67,7 @@ import {
 } from '@/config/volcano-usage-stats';
 import { importTasksFromFile } from '@/services/impl/settings-data-service';
 import {
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
   getSelectedRuntimeTarget,
   isTauriWindow,
   readEmbeddedRuntimeStatus,
@@ -1024,7 +1025,7 @@ function VolcanoUsageSummaryPanel() {
 
       <div className="space-y-2 rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-4 py-3 text-xs text-[#57534E] dark:border-[#FFFFFF15] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
         <p>本地统计仅覆盖当前设备、当前应用内成功完成的火山语音识别。</p>
-        <p>它不等同火山控制台的官方账单总量；官方总历史用量仍建议在火山控制台查看。</p>
+        <p>资源包总时长可按你已购买的套餐手动填写，面板会基于本地累计识别时长推导剩余估算。</p>
       </div>
 
       <div className="space-y-2">
@@ -1071,17 +1072,19 @@ export function VolcanoUsageSummarySetting(props: { ctx: SettingsContext }) {
       />
       {shouldUseDialog ? (
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="rounded-2xl">
+          <DialogContent className="flex max-h-[calc(100vh-32px)] min-h-0 flex-col overflow-hidden rounded-2xl">
             <DialogHeader>
               <DialogTitle>火山用量概览</DialogTitle>
               <DialogDescription>查看当前设备内的火山语音识别累计时长与剩余估算</DialogDescription>
             </DialogHeader>
-            {detail}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+              {detail}
+            </div>
           </DialogContent>
         </Dialog>
       ) : (
         <Drawer open={open} onOpenChange={setOpen}>
-          <DrawerContent className="dark:bg-[#1C1917]">
+          <DrawerContent className="flex max-h-[85vh] min-h-0 flex-col dark:bg-[#1C1917]">
             <DrawerHeader className="pb-0 text-center">
               <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
                 火山用量概览
@@ -1090,7 +1093,7 @@ export function VolcanoUsageSummarySetting(props: { ctx: SettingsContext }) {
                 查看当前设备内的火山语音识别累计时长与剩余估算
               </DrawerDescription>
             </DrawerHeader>
-            <div className="px-5 pb-8 pt-2">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-2">
               {detail}
             </div>
           </DrawerContent>
@@ -1099,6 +1102,7 @@ export function VolcanoUsageSummarySetting(props: { ctx: SettingsContext }) {
     </>
   );
 }
+
 
 function VolcanoEngineKeyPanel({
   appKey,

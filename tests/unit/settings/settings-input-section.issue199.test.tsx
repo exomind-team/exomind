@@ -174,6 +174,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     });
   });
 
+
   it('switches shortcut voice provider from input section', async () => {
     const setProviderMock = vi.mocked(setVoiceShortcutAsrProvider);
     render(<SettingsPage />);
