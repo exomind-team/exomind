@@ -710,20 +710,6 @@ async fn put_active_timeblock(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// DELETE /timeblocks/active — **DEPRECATED** (#780 legacy cleanup).
-///
-/// No TS caller uses this route since endBlock migrated to POST /timeblocks/end
-/// (rt-sqlite) and the legacy path writes a terminal ActiveBlockData instead of
-/// deleting.  Returns 409 with a migration hint.
-async fn delete_active_timeblock() -> (StatusCode, Json<ErrorResponse>) {
-    (
-        StatusCode::CONFLICT,
-        Json(ErrorResponse {
-            error: "DEPRECATED: DELETE /timeblocks/active is no longer supported. Use POST /timeblocks/end instead. See #780.".to_string(),
-        }),
-    )
-}
-
 fn is_timeblock_ended(block: &ActiveBlockData) -> bool {
     matches!(
         block.phase.as_deref(),
@@ -1025,8 +1011,7 @@ pub fn router() -> Router<AppState> {
         .route(
             "/timeblocks/active",
             get(get_active_timeblock)
-                .put(put_active_timeblock)
-                .delete(delete_active_timeblock),
+                .put(put_active_timeblock),
         )
         .route("/timeblocks/backend/status", get(timeblock_backend_status))
         .route("/timeblocks/backup/json", get(export_timeblocks_json))
@@ -1522,32 +1507,6 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].tags, vec!["block_start".to_string()]);
         assert_eq!(events[0].metadata.as_ref().unwrap()["block_name"], "Morning focus");
-    }
-
-    #[tokio::test]
-    /// DELETE /timeblocks/active is deprecated (#780) and returns 409.
-    async fn delete_active_returns_409_deprecated() {
-        let state = test_state_with_timeblock_store(
-            Arc::new(crate::timeblock::TimeBlockStore::new()),
-        );
-        let app = test_router(state);
-
-        let delete_response = app
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/timeblocks/active")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(delete_response.status(), StatusCode::CONFLICT);
-
-        let body = delete_response.into_body().collect().await.unwrap().to_bytes();
-        let json: Value = serde_json::from_slice(&body).unwrap_or_default();
-        let error_msg = json.get("error").and_then(|v| v.as_str()).unwrap_or("");
-        assert!(error_msg.contains("DEPRECATED"), "error message should indicate deprecation: {error_msg}");
     }
 
     #[tokio::test]

@@ -62,8 +62,6 @@ interface TimeBlockRtPort {
   getActiveBlock(): Promise<ActiveBlockData | null>;
   /** TODO(#780): migrate saveActiveBlock/applyReplicatedActiveBlock callers, then remove */
   putActiveBlock(block: ActiveBlockData): Promise<void>;
-  /** @deprecated No callers remain. Route returns 409 since #780 cleanup. */
-  deleteActiveBlock(): Promise<void>;
   // #780 new RT routes
   rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
   rtStopBlock(): Promise<{ status: string }>;

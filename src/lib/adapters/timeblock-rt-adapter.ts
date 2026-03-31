@@ -84,14 +84,6 @@ export class TimeBlockRtAdapter {
     }
   }
 
-  /**
-   * @deprecated DELETE /timeblocks/active returns 409 since #780 legacy cleanup.
-   * Use rtEndBlock() or rtStopBlock() instead. Retained only for interface compliance.
-   */
-  async deleteActiveBlock(): Promise<void> {
-    console.warn('[TB-RT] deleteActiveBlock is deprecated. Use rtEndBlock() or rtStopBlock(). See #780.');
-  }
-
   // ── #780 新路由方法 ──
 
   async rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }> {
