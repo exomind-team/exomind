@@ -13,10 +13,19 @@ import {
   setRuntimeTargetMode,
   subscribeRuntimeTargetChanges,
 } from '@/config/runtime-target';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('runtime target config（Runtime 目标配置）', () => {
+  const expectedWebEmbeddedPort = window.location.port
+    ? Number(window.location.port)
+    : DEFAULT_EMBEDDED_RUNTIME_PORT;
+
   beforeEach(() => {
     window.localStorage.clear();
+    __resetRuntimeConfigCacheForTests();
   });
 
   it('defaults to current page port in web mode（Web 模式默认走当前页面端口）', () => {
@@ -25,7 +34,7 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(resolveEmbeddedRuntimeBindHost()).toBe('127.0.0.1');
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
-      port: Number(window.location.port),
+      port: expectedWebEmbeddedPort,
     });
   });
 
@@ -72,6 +81,26 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(getEmbeddedRuntimeNetworkMode()).toBe('lan');
     expect(resolveEmbeddedRuntimeBindHost()).toBe('0.0.0.0');
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY)).toBe('lan');
+  });
+
+  it('reads runtime-backed target settings before localStorage（优先读取 Runtime 中的运行时目标配置）', () => {
+    window.localStorage.setItem('exomind:runtimeTargetMode', 'embedded');
+    window.localStorage.setItem('exomind:embeddedRuntimeNetworkMode', 'local');
+    window.localStorage.setItem('exomind:runtimeExternalAddress', '127.0.0.1:1949');
+    __primeRuntimeConfigForTests({
+      'exomind:runtimeTargetMode': 'external',
+      'exomind:embeddedRuntimeNetworkMode': 'lan',
+      'exomind:runtimeExternalAddress': '10.8.0.5:2999',
+    });
+
+    expect(getRuntimeTargetMode()).toBe('external');
+    expect(getEmbeddedRuntimeNetworkMode()).toBe('lan');
+    expect(getRuntimeExternalAddress()).toBe('10.8.0.5:2999');
+    expect(getSelectedRuntimeTarget()).toMatchObject({
+      mode: 'external',
+      host: '10.8.0.5',
+      port: 2999,
+    });
   });
 
   it('switches to external runtime with default 1949（切到外部默认 1949）', () => {

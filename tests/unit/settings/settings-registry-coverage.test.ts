@@ -48,6 +48,7 @@ const AUDITED_SETTINGS_IDS = [
   'moss-voice-test',
   'volcano-asr-test',
   'ai-registry',
+  'runtime-target-mode',
   'embedded-runtime-open-mode',
   'sync-server-url',
   'eventlog-backend-mode',
@@ -89,7 +90,7 @@ const INLINE_SINGLE_ENUM_IDS = [
 
 const DIALOG_ENUM_IDS = [
   'countdown-end-mode',
-  'sound-preset',
+  'runtime-target-mode',
   'embedded-runtime-open-mode',
   'volcano-endpoint',
   'volcano-language',
@@ -143,6 +144,7 @@ const BUTTON_ACTION_IDS = [
 ] as const;
 
 const CUSTOM_ITEM_IDS = [
+  'sound-preset',
   'focus-bgm',
   'volcano-engine-key',
   'moss-voice-test',
@@ -153,10 +155,13 @@ const CUSTOM_ITEM_IDS = [
   'device-pairing',
 ] as const;
 
-const DEV_ONLY_IDS = [
+const TAURI_DEV_ONLY_IDS = [
   'eventlog-backend-mode',
   'task-backend-mode',
   'timeblock-backend-mode',
+] as const;
+
+const DEV_ONLY_IDS = [
   'use-mock-data',
   'devtools',
   'feature-toggles',
@@ -245,8 +250,8 @@ describe('settings registry coverage audit', () => {
     const countdownEndMode = getItem('countdown-end-mode', 'enum');
     expect(countdownEndMode.options.every((option) => Boolean(option.description))).toBe(true);
 
-    const soundPreset = getItem('sound-preset', 'enum');
-    expect(soundPreset.dialogTitle).toBe('选择提示音');
+    const soundPreset = getItem('sound-preset', 'custom');
+    expect(soundPreset.label).toBe('提示音');
 
     const volcanoResourceModel = getItem('volcano-resource-model', 'enum');
     expect(volcanoResourceModel.options.map((option) => option.label)).toEqual([
@@ -272,7 +277,7 @@ describe('settings registry coverage audit', () => {
     const syncServerUrl = getItem('sync-server-url', 'string');
     expect(syncServerUrl.stringStyle).toBe('dialog');
     expect(syncServerUrl.dialogFieldKind).toBe('plain');
-    expect(syncServerUrl.dialogInputType).toBe('url');
+    expect(syncServerUrl.dialogInputType).toBe('text');
 
     const embeddedRuntimeOpenMode = getItem('embedded-runtime-open-mode', 'enum');
     expect(embeddedRuntimeOpenMode.options.map((option) => option.value)).toEqual(['local', 'lan']);
@@ -285,11 +290,23 @@ describe('settings registry coverage audit', () => {
       isTauriWindow: true,
     })).toBe(true);
 
+    const runtimeTargetMode = getItem('runtime-target-mode', 'enum');
+    expect(runtimeTargetMode.options.map((option) => option.value)).toEqual(['embedded', 'external']);
+    expect(runtimeTargetMode.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: false,
+    })).toBe(false);
+    expect(runtimeTargetMode.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+    })).toBe(true);
+
     const featureToggles = getItem('feature-toggles', 'group');
     expect(featureToggles.groupStyle).toBe('adaptive-overlay');
     expect(featureToggles.children.map((child) => child.id)).toEqual([
       'me-page-enabled',
       'agent-page-enabled',
+      'goals-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
     ]);
@@ -323,6 +340,11 @@ describe('settings registry coverage audit', () => {
       ...getBaseCtx(),
       developerMode: true,
     }).map((item) => item.id);
+    const tauriDeveloperIds = getVisibleSettings({
+      ...getBaseCtx(),
+      developerMode: true,
+      isTauriWindow: true,
+    }).map((item) => item.id);
     const volcanoIds = getVisibleSettings({
       ...getBaseCtx(),
       developerMode: true,
@@ -332,6 +354,11 @@ describe('settings registry coverage audit', () => {
     DEV_ONLY_IDS.forEach((id) => {
       expect(baseIds).not.toContain(id);
       expect(developerIds).toContain(id);
+    });
+    TAURI_DEV_ONLY_IDS.forEach((id) => {
+      expect(baseIds).not.toContain(id);
+      expect(developerIds).not.toContain(id);
+      expect(tauriDeveloperIds).toContain(id);
     });
 
     expect(baseIds).toContain('moss-api-token');
@@ -397,6 +424,7 @@ describe('settings registry coverage audit', () => {
     expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
       'me-page-enabled',
       'agent-page-enabled',
+      'goals-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
     ]);

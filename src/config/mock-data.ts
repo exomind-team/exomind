@@ -1,3 +1,6 @@
+import { createConfigModule } from './config-factory';
+import type { SessionInfo } from '@/lib/types/session';
+
 const USE_MOCK_DATA_STORAGE_KEY = 'exomind:useMockData'; // mock data flag（测试数据开关）存储键
 const USE_MOCK_DATA_CHANGED_EVENT = 'exomind:use-mock-data-changed'; // custom event（自定义事件）
 
@@ -5,20 +8,24 @@ function normalizeBoolean(rawValue: string | null | undefined): boolean {
   return rawValue === 'true';
 }
 
+const mockDataModule = createConfigModule<boolean>({
+  storageKey: USE_MOCK_DATA_STORAGE_KEY,
+  eventName: USE_MOCK_DATA_CHANGED_EVENT,
+  defaultValue: false,
+  normalize: normalizeBoolean,
+  serialize: (value) => String(Boolean(value)),
+  persistMode: 'runtime-preferred',
+});
+
 export function getUseMockDataEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  return normalizeBoolean(window.localStorage.getItem(USE_MOCK_DATA_STORAGE_KEY));
+  return mockDataModule.get();
 }
 
 export function setUseMockDataEnabled(enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(USE_MOCK_DATA_STORAGE_KEY, String(enabled));
-  window.dispatchEvent(new CustomEvent<boolean>(USE_MOCK_DATA_CHANGED_EVENT, { detail: enabled }));
+  mockDataModule.set(enabled);
 }
 
 // ── Mock Session Data ──────────────────────────────────────────
-import type { SessionInfo } from '@/lib/types/session';
-
 /** Mock sessions for V1 development — controlled by "使用测试数据" toggle */
 export const MOCK_SESSIONS: SessionInfo[] = [
   {
@@ -102,26 +109,5 @@ export const MOCK_SESSIONS: SessionInfo[] = [
 ];
 
 export function subscribeUseMockDataChanges(listener: (enabled: boolean) => void): () => void {
-  if (typeof window === 'undefined') {
-    return () => {};
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key !== USE_MOCK_DATA_STORAGE_KEY) return;
-    listener(normalizeBoolean(event.newValue));
-  };
-
-  const handleCustomEvent = (event: Event) => {
-    const customEvent = event as CustomEvent<boolean>;
-    listener(Boolean(customEvent.detail));
-  };
-
-  window.addEventListener('storage', handleStorage);
-  window.addEventListener(USE_MOCK_DATA_CHANGED_EVENT, handleCustomEvent);
-
-  return () => {
-    window.removeEventListener('storage', handleStorage);
-    window.removeEventListener(USE_MOCK_DATA_CHANGED_EVENT, handleCustomEvent);
-  };
+  return mockDataModule.subscribe(listener);
 }
-

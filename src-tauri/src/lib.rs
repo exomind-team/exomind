@@ -89,6 +89,13 @@ fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
             std::env::set_var("EXOMIND_RT_SESSION_SQLITE_PATH", session_sqlite_path);
         }
     }
+    if std::env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH").is_none() {
+        let config_sqlite_path = runtime_dir.join("config.sqlite");
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_CONFIG_SQLITE_PATH", config_sqlite_path);
+        }
+    }
 }
 
 fn resolve_embedded_runtime_port() -> u16 {
@@ -194,6 +201,7 @@ pub fn run() {
                 || std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none()
                 || std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none()
                 || std::env::var_os("EXOMIND_RT_SESSION_SQLITE_PATH").is_none()
+                || std::env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH").is_none()
             {
                 match resolve_instance_app_data_dir(&app.handle()) {
                     Ok(app_data_dir) => {
@@ -411,6 +419,7 @@ mod tests {
             "EXOMIND_RT_TASK_SQLITE_PATH",
             "EXOMIND_RT_TIMEBLOCK_SQLITE_PATH",
             "EXOMIND_RT_SESSION_SQLITE_PATH",
+            "EXOMIND_RT_CONFIG_SQLITE_PATH",
         ] {
             // SAFETY: tests mutate process env in a controlled single-threaded scope.
             unsafe {
@@ -445,6 +454,10 @@ mod tests {
         assert_eq!(
             std::env::var_os("EXOMIND_RT_SESSION_SQLITE_PATH"),
             Some(runtime_dir.join("sessions.sqlite").into_os_string())
+        );
+        assert_eq!(
+            std::env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH"),
+            Some(runtime_dir.join("config.sqlite").into_os_string())
         );
 
         clear_runtime_sqlite_envs();

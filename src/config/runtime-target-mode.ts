@@ -1,8 +1,12 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import {
+  resumeRuntimeConfigBootstrap,
+  suspendRuntimeConfigBootstrap,
+} from '@/config/runtime-config-cache';
+import {
+  DEFAULT_EMBEDDED_RUNTIME_PORT,
   getEmbeddedRuntimeNetworkMode,
-  getPreferredEmbeddedRuntimePort,
   getRuntimeTargetMode,
   resolveEmbeddedRuntimeBindHost,
   setRuntimeTargetMode,
@@ -36,10 +40,12 @@ export async function setPersistedRuntimeTargetMode(
     if (persistedMode === 'embedded') {
       await runtimeControlService.startRuntime({
         host: resolveEmbeddedRuntimeBindHost(getEmbeddedRuntimeNetworkMode()),
-        port: getPreferredEmbeddedRuntimePort(),
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
       });
+      resumeRuntimeConfigBootstrap();
     } else {
       await runtimeControlService.stopRuntime();
+      suspendRuntimeConfigBootstrap();
     }
 
     setRuntimeTargetMode(persistedMode);

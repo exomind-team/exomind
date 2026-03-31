@@ -16,6 +16,7 @@
  */
 
 import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../../ports/asr-port';
+import { getMossApiKey } from '@/config/moss-api-key';
 import { log } from '@/lib/logger';
 
 // ========== 配置 ==========
@@ -50,8 +51,6 @@ const DEFAULT_CONFIG: Partial<MOSSASRConfig> = {
   timeout: 60000, // 60秒超时（音频处理可能较慢）
 };
 
-const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
-
 function normalizeApiKey(value?: string): string {
   if (!value) return '';
 
@@ -62,28 +61,7 @@ function normalizeApiKey(value?: string): string {
 }
 
 function readStoredApiKey(): string {
-  const storage = (() => {
-    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-      return window.localStorage;
-    }
-
-    const globalStorage = (globalThis as { localStorage?: Storage }).localStorage;
-    if (typeof globalStorage !== 'undefined') {
-      return globalStorage;
-    }
-
-    return null;
-  })();
-
-  if (!storage) {
-    return '';
-  }
-
-  try {
-    return normalizeApiKey(storage.getItem(MOSS_API_KEY_STORAGE_KEY) || '');
-  } catch {
-    return '';
-  }
+  return normalizeApiKey(getMossApiKey());
 }
 
 // ========== 适配器实现 ==========

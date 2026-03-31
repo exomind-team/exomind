@@ -13,6 +13,7 @@ const _module = createConfigModule<VoiceShortcutSendMode>({
   eventName: 'exomind:voice-shortcut-send-mode-changed',
   defaultValue: 'insert-only',
   normalize: normalizeMode,
+  persistMode: 'runtime-preferred',
 });
 
 export function getVoiceShortcutSendMode(): VoiceShortcutSendMode {

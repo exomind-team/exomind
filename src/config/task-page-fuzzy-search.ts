@@ -10,6 +10,7 @@ const _module = createConfigModule<boolean>({
   defaultValue: true,
   normalize: normalizeBoolean,
   serialize: (value) => String(Boolean(value)),
+  persistMode: 'runtime-preferred',
 });
 
 export function getTaskPageFuzzySearchEnabled(): boolean {

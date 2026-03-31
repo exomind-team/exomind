@@ -1,6 +1,12 @@
 import type { SignalGraphNode, SignalGraphEdge } from './agents-signal-topology';
+import {
+  readRuntimeBackedValue,
+  removeRuntimeBackedValue,
+  writeRuntimeBackedValue,
+} from '@/config/runtime-preference-storage';
 
 export const TOPOLOGY_LAYOUT_STORAGE_KEY = 'exomind:agentHubTopologyLayouts';
+export const TOPOLOGY_LAYOUT_CHANGED_EVENT = 'exomind:agent-hub-topology-layouts-changed';
 
 export type TopologyLayoutMode = 'manual' | 'auto:flow';
 
@@ -41,10 +47,18 @@ type LayoutWorkspaceKey = {
 };
 
 function getDefaultStorage(): StorageLike | null {
-  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+  if (typeof window === 'undefined') {
     return null;
   }
-  return window.localStorage;
+  return {
+    getItem: (key: string) => readRuntimeBackedValue(key),
+    setItem: (key: string, value: string) => {
+      writeRuntimeBackedValue(key, value, TOPOLOGY_LAYOUT_CHANGED_EVENT);
+    },
+    removeItem: (key: string) => {
+      removeRuntimeBackedValue(key);
+    },
+  };
 }
 
 function sortObjectKeys<T extends Record<string, unknown>>(value: T): Record<string, unknown> {

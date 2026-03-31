@@ -7,10 +7,15 @@ import {
   subscribeMainWindowShortcutSelectionChanges,
   validateMainWindowShortcutSelection,
 } from '@/config/main-window-shortcut';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('main window shortcut config（主窗口快捷键配置）', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    __resetRuntimeConfigCacheForTests();
   });
 
   it('uses Ctrl+E as default selection and hotkey', () => {
@@ -38,6 +43,17 @@ describe('main window shortcut config（主窗口快捷键配置）', () => {
 
     expect(getMainWindowShortcutSelection()).toEqual(['Alt', 'E']);
     expect(getResolvedMainWindowShortcutHotkey()).toBe('Alt+E');
+  });
+
+  it('reads selection from runtime snapshot first（优先读取 Runtime 快照组合）', () => {
+    window.localStorage.setItem('exomind:mainWindowShortcutSelection', JSON.stringify(['Ctrl', 'E']));
+    __primeRuntimeConfigForTests({
+      'exomind:mainWindowShortcutSelection': JSON.stringify(['Alt', 'Space']),
+      'exomind:mainWindowShortcutSelectionCustomized': 'true',
+    });
+
+    expect(getMainWindowShortcutSelection()).toEqual(['Alt', 'Space']);
+    expect(getResolvedMainWindowShortcutHotkey()).toBe('Alt+Space');
   });
 
   it('flags multiple primary keys as invalid', () => {

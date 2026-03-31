@@ -9,6 +9,7 @@ const _module = createConfigModule<boolean>({
   eventName: 'exomind:command-palette-enabled-changed',
   defaultValue: false,
   normalize: normalizeBoolean,
+  persistMode: 'runtime-preferred',
 });
 
 export function getCommandPaletteEnabled(): boolean {

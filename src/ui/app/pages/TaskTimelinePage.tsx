@@ -7,6 +7,22 @@ import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop'
 import { getEventLogService, getTaskService, getTimeBlockService } from '@/lib/services'
 import type { Event, TimeBlock } from '@/lib/types/event'
 import type { TaskNode } from '@/lib/types/task'
+import {
+  getTaskTimelineLayoutMode as readPersistedLayoutMode,
+  getTaskTimelineRange as readPersistedRange,
+  getTaskTimelineSelectedTaskId as readPersistedSelectedTaskId,
+  getTaskTimelineShowPending as readPersistedShowPending,
+  serializeTaskTimelineRange as serializeRange,
+  TASK_TIMELINE_LAYOUT_MODE_STORAGE_KEY,
+  TASK_TIMELINE_RANGE_STORAGE_KEY,
+  TASK_TIMELINE_SELECTED_TASK_STORAGE_KEY,
+  TASK_TIMELINE_SHOW_PENDING_STORAGE_KEY,
+  setTaskTimelineLayoutMode as persistTimelineLayoutMode,
+  setTaskTimelineRange as persistTimelineRange,
+  setTaskTimelineSelectedTaskId as persistTimelineSelectedTaskId,
+  setTaskTimelineShowPending as persistTimelineShowPending,
+  type TaskTimelineLayoutMode,
+} from '@/config/task-timeline-preferences'
 import { TASKS_LAST_PATH_KEY } from './task-route-memory'
 import {
   buildTaskTimelineModel,
@@ -56,10 +72,6 @@ const VERTICAL_LANE_WIDTH_PX = VERTICAL_TRACK_WIDTH_PX + 4
 const VERTICAL_TERMINAL_WIDTH_PX = VERTICAL_LANE_WIDTH_PX
 const VERTICAL_TITLE_BUTTON_THICKNESS_PX = VERTICAL_TRACK_WIDTH_PX - 8
 const VERTICAL_TITLE_EDGE_INSET_PX = (VERTICAL_TRACK_WIDTH_PX - VERTICAL_TITLE_BUTTON_THICKNESS_PX) / 2
-const TASK_TIMELINE_RANGE_KEY = 'task-timeline-range'
-const TASK_TIMELINE_SELECTED_TASK_KEY = 'task-timeline-selected-task'
-const TASK_TIMELINE_SHOW_PENDING_KEY = 'task-timeline-show-pending'
-const TASK_TIMELINE_LAYOUT_MODE_KEY = 'task-timeline-layout-mode'
 const CUSTOM_SCALE_SLOT_PADDING_PX = 4
 const TIMELINE_SCALE_OPTIONS = [
   { id: '1h', label: '1h' },
@@ -79,7 +91,6 @@ const TIMELINE_LAYOUT_OPTIONS = [
 ] as const
 
 type TimelinePresetScale = Exclude<(typeof TIMELINE_SCALE_OPTIONS)[number]['id'], 'custom'>
-type TimelineLayoutMode = 'vertical' | 'auto' | 'horizontal'
 type TimelineScaleUnitBounds = Record<TimelineCustomScaleUnit, { min: number; max: number }>
 
 const TIMELINE_SCALE_BOUNDS: TimelineScaleUnitBounds = {
@@ -117,102 +128,6 @@ function formatRangeSummaryLabel(range: TimelineRange): string {
     .replace('d', '天')
     .replace('m', '月')
     .replace('y', '年')
-}
-
-function readPersistedShowPending(): boolean {
-  if (typeof window === 'undefined') {
-    return false
-  }
-  return window.localStorage.getItem(TASK_TIMELINE_SHOW_PENDING_KEY) === '1'
-}
-
-function readPersistedLayoutMode(): TimelineLayoutMode {
-  if (typeof window === 'undefined') {
-    return 'auto'
-  }
-  const rawValue = window.localStorage.getItem(TASK_TIMELINE_LAYOUT_MODE_KEY)
-  return rawValue === 'horizontal' || rawValue === 'vertical' || rawValue === 'auto' ? rawValue : 'auto'
-}
-
-function parseTimelineRange(rawValue: string | null): TimelineRange {
-  const rangeText = rawValue?.trim() || '1d'
-  let range: TimelineRange = '1d'
-  if (rangeText === 'today') {
-    return '1d'
-  }
-  if (rangeText === '1h' || rangeText === '8h' || rangeText === '1d' || rangeText === '3d' || rangeText === '7d' || rangeText === '1m' || rangeText === '3m' || rangeText === '1y') {
-    range = rangeText
-  } else {
-    const customMatch = rangeText.match(/^custom:(\d+)([hdmy])$/i) ?? rangeText.match(/^(\d+)([hdmy])$/i)
-    if (customMatch) {
-      const value = Number.parseInt(customMatch[1] ?? '', 10)
-      const unit = customMatch[2]?.toLowerCase() as TimelineCustomScaleUnit | undefined
-      const bounds = unit ? TIMELINE_SCALE_BOUNDS[unit] : null
-      if (Number.isFinite(value) && value > 0 && unit && bounds) {
-        range = {
-          kind: 'custom',
-          value: clamp(value, bounds.min, bounds.max),
-          unit,
-        }
-      }
-    }
-  }
-
-  return range
-}
-
-function serializeRange(range: TimelineRange): string {
-  if (typeof range === 'string') {
-    return range
-  }
-  return `custom:${range.value}${range.unit}`
-}
-
-function readPersistedRange(): TimelineRange {
-  if (typeof window === 'undefined') {
-    return '1d'
-  }
-  return parseTimelineRange(window.localStorage.getItem(TASK_TIMELINE_RANGE_KEY))
-}
-
-function readPersistedSelectedTaskId(): string | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  const taskId = window.localStorage.getItem(TASK_TIMELINE_SELECTED_TASK_KEY)
-  return taskId && taskId.trim().length > 0 ? taskId : null
-}
-
-function persistTimelineRange(range: TimelineRange): void {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.localStorage.setItem(TASK_TIMELINE_RANGE_KEY, serializeRange(range))
-}
-
-function persistTimelineShowPending(showPending: boolean): void {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.localStorage.setItem(TASK_TIMELINE_SHOW_PENDING_KEY, showPending ? '1' : '0')
-}
-
-function persistTimelineSelectedTaskId(taskId: string | null): void {
-  if (typeof window === 'undefined') {
-    return
-  }
-  if (!taskId) {
-    window.localStorage.removeItem(TASK_TIMELINE_SELECTED_TASK_KEY)
-    return
-  }
-  window.localStorage.setItem(TASK_TIMELINE_SELECTED_TASK_KEY, taskId)
-}
-
-function persistTimelineLayoutMode(layoutMode: TimelineLayoutMode): void {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.localStorage.setItem(TASK_TIMELINE_LAYOUT_MODE_KEY, layoutMode)
 }
 
 function resolveCustomScaleDraft(range: TimelineRange): TimelineCustomRange {
@@ -325,7 +240,7 @@ function resolveRangeScale(range: TimelineRange): TimelineCustomRange {
   }
 }
 
-function resolveTimelineIsHorizontal(layoutMode: TimelineLayoutMode, isDesktop: boolean): boolean {
+function resolveTimelineIsHorizontal(layoutMode: TaskTimelineLayoutMode, isDesktop: boolean): boolean {
   if (layoutMode === 'horizontal') {
     return true
   }
@@ -1006,7 +921,7 @@ export function TaskTimelinePage() {
   const [range, setRange] = useState<TimelineRange>(initialRange)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => readPersistedSelectedTaskId())
   const [showPending, setShowPending] = useState(() => readPersistedShowPending())
-  const [layoutMode, setLayoutMode] = useState<TimelineLayoutMode>(() => readPersistedLayoutMode())
+  const [layoutMode, setLayoutMode] = useState<TaskTimelineLayoutMode>(() => readPersistedLayoutMode())
   const [isCustomScaleEditing, setIsCustomScaleEditing] = useState(false)
   const [customScaleDraft, setCustomScaleDraft] = useState(initialCustomScaleDraft)
   const [timelineViewportSize, setTimelineViewportSize] = useState({ width: 0, height: 0 })
@@ -1026,7 +941,7 @@ export function TaskTimelinePage() {
     setShowPending(nextShowPending)
   }
 
-  const handleSetLayoutMode = (nextLayoutMode: TimelineLayoutMode) => {
+  const handleSetLayoutMode = (nextLayoutMode: TaskTimelineLayoutMode) => {
     persistTimelineLayoutMode(nextLayoutMode)
     setLayoutMode(nextLayoutMode)
   }
@@ -1047,6 +962,39 @@ export function TaskTimelinePage() {
 
   useEffect(() => {
     sessionStorage.setItem(TASKS_LAST_PATH_KEY, '/tasks/timeline')
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return () => {}
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      switch (event.key) {
+        case TASK_TIMELINE_RANGE_STORAGE_KEY: {
+          const nextRange = readPersistedRange()
+          setRange(nextRange)
+          setCustomScaleDraft(resolveCustomScaleDraftText(nextRange))
+          return
+        }
+        case TASK_TIMELINE_SELECTED_TASK_STORAGE_KEY:
+          setSelectedTaskId(readPersistedSelectedTaskId())
+          return
+        case TASK_TIMELINE_SHOW_PENDING_STORAGE_KEY:
+          setShowPending(readPersistedShowPending())
+          return
+        case TASK_TIMELINE_LAYOUT_MODE_STORAGE_KEY:
+          setLayoutMode(readPersistedLayoutMode())
+          return
+        default:
+          return
+      }
+    }
+
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+    }
   }, [])
 
   useEffect(() => {

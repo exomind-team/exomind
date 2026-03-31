@@ -25,6 +25,7 @@ export interface RuntimeServiceStatus {
   running: boolean;
   host: string;
   port: number;
+  externalRuntime?: boolean; // external_runtime（由其他管理程序托管的 Runtime）
   hostId?: string; // host_id（逻辑主机 ID）
   pid?: number;
   startedAt?: string;

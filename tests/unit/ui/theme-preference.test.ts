@@ -6,12 +6,17 @@ import {
   setThemePreference,
   subscribeThemePreferenceChanges,
 } from '@/config/theme';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('theme preference', () => {
   beforeEach(() => {
     window.localStorage.clear();
     document.documentElement.classList.remove('dark');
     document.documentElement.style.colorScheme = '';
+    __resetRuntimeConfigCacheForTests();
   });
 
   it('defaults to system when not set', () => {
@@ -21,6 +26,13 @@ describe('theme preference', () => {
   it('falls back to system for invalid stored values', () => {
     window.localStorage.setItem('exomind:themePreference', 'nope');
     expect(getThemePreference()).toBe('system');
+  });
+
+  it('prefers runtime snapshot over localStorage when available（优先读取 Runtime 快照）', () => {
+    window.localStorage.setItem('exomind:themePreference', 'light');
+    __primeRuntimeConfigForTests({ 'exomind:themePreference': 'dark' });
+
+    expect(getThemePreference()).toBe('dark');
   });
 
   it('persists preference and notifies subscribers', () => {
@@ -82,4 +94,3 @@ describe('theme preference', () => {
     window.matchMedia = originalMatchMedia;
   });
 });
-

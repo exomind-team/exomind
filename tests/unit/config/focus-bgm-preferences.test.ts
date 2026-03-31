@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('focus bgm preferences（专注背景音偏好）', () => {
   let storage: Record<string, string>;
 
   beforeEach(() => {
-    vi.resetModules();
     storage = {};
+    __resetRuntimeConfigCacheForTests();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
       value: {
@@ -85,6 +89,41 @@ describe('focus bgm preferences（专注背景音偏好）', () => {
     expect(listener).toHaveBeenCalledWith(next);
 
     unsubscribe();
+  });
+
+  it('reads runtime-backed preferences before localStorage（优先读取 Runtime 中的背景音偏好）', async () => {
+    storage['exomind:focusBgmPreferences'] = JSON.stringify({
+      enabled: false,
+      sourceType: 'preset',
+      presetId: 'white-noise',
+      customTracks: [],
+      playbackMode: 'loop',
+      stopBehavior: 'manual-end',
+      volume: 60,
+    });
+    __primeRuntimeConfigForTests({
+      'exomind:focusBgmPreferences': JSON.stringify({
+        enabled: true,
+        sourceType: 'preset',
+        presetId: 'brown-noise',
+        customTracks: [],
+        playbackMode: 'sequence',
+        stopBehavior: 'timer-end',
+        volume: 32,
+      }),
+    });
+
+    const module = await import('@/config/focus-bgm-preferences');
+
+    expect(module.getFocusBgmPreferences()).toEqual({
+      enabled: true,
+      sourceType: 'preset',
+      presetId: 'brown-noise',
+      customTracks: [],
+      playbackMode: 'sequence',
+      stopBehavior: 'timer-end',
+      volume: 32,
+    });
   });
 
   it('syncs through storage events（支持 storage 事件同步）', async () => {

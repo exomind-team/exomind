@@ -1,8 +1,11 @@
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TaskDagPage, getNextTaskDagMode } from '@/ui/app/pages/TaskDagPage';
 import type { TaskNode } from '@/lib/types/task';
+
+const invokeMock = vi.hoisted(() => vi.fn());
+const isTauriMock = vi.hoisted(() => vi.fn());
 
 const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
 const onTaskChangeMock = vi.fn(() => () => {});
@@ -34,6 +37,11 @@ const navigateMock = vi.hoisted(() => vi.fn());
 const isDesktopMock = vi.hoisted(() => vi.fn(() => true));
 const toastMock = vi.hoisted(() => vi.fn());
 const locationState = vi.hoisted(() => ({ pathname: '/tasks/dag', searchStr: '' }));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: invokeMock,
+  isTauri: isTauriMock,
+}));
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
@@ -176,6 +184,12 @@ vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
   useIsDesktop: () => isDesktopMock(),
 }));
 
+async function flushMicrotasks(times = 6): Promise<void> {
+  for (let index = 0; index < times; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }): TaskNode {
   return {
     id: overrides.id,
@@ -192,7 +206,9 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
 }
 
 describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () => {
-  beforeEach(() => {
+  let originalFetch: typeof globalThis.fetch | undefined;
+
+  beforeEach(async () => {
     locationState.pathname = '/tasks/dag';
     locationState.searchStr = '';
     flowApiMocks.setCenter.mockReset();
@@ -222,6 +238,16 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     removeTaskFromBlockMock.mockReset();
     onBlockEndForTasksMock.mockReset();
     appendEventDataMock.mockReset();
+    invokeMock.mockReset();
+    isTauriMock.mockReset();
+    isTauriMock.mockResolvedValue(false);
+    invokeMock.mockResolvedValue({
+      running: true,
+      host: '127.0.0.1',
+      port: 9124,
+      authSecret: 'secret-123',
+    });
+    originalFetch = globalThis.fetch;
 
     loadActiveBlockMock.mockResolvedValue(null);
     markEndingMock.mockResolvedValue(undefined);
@@ -238,6 +264,9 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     removeDependencyMock.mockResolvedValue(null);
     window.localStorage.clear();
     window.sessionStorage.clear();
+
+    const cacheModule = await import('@/config/runtime-config-cache');
+    cacheModule.__resetRuntimeConfigCacheForTests();
 
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-a', title: '梳理 DAG 基础层', createdAt: 10, updatedAt: 10 }),
@@ -258,6 +287,15 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
         dependsOn: [{ taskId: 'task-a', type: 'soft' }],
       }),
     ]);
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    if (originalFetch) {
+      (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
+    }
+    const cacheModule = await import('@/config/runtime-config-cache');
+    cacheModule.__resetRuntimeConfigCacheForTests();
   });
 
   it('renders full-canvas workspace with floating controls and three enabled modes', async () => {
@@ -483,6 +521,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
   it('restores the saved dag viewport instead of refitting when revisiting the page', async () => {
     window.localStorage.setItem('exomind:dag-viewport', JSON.stringify({
+      surface: 'desktop',
       direction: 'auto',
       x: -320,
       y: -180,
@@ -503,6 +542,57 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       });
     });
     expect(flowApiMocks.fitView).not.toHaveBeenCalled();
+  });
+
+  it('reacts to late storage-backed mode updates after mount（挂载后会响应晚到的 DAG 模式同步）', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBeNull();
+
+    await act(async () => {
+      window.localStorage.setItem('exomind:dag-mode', 'execute');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'exomind:dag-mode',
+        newValue: 'execute',
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-mode-execute').className).toContain('font-semibold');
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-a', { mode: 'countup' });
+    });
+  });
+
+  it('keeps late runtime dag mode instead of overwriting it on first mount（晚到 Runtime 模式不应被首帧旧值覆盖）', async () => {
+    window.localStorage.setItem('exomind:dag-mode', 'browse');
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('task-dag-mode-browse').className).toContain('font-semibold');
+
+    await act(async () => {
+      window.localStorage.setItem('exomind:dag-mode', 'execute');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'exomind:dag-mode',
+        newValue: 'execute',
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-mode-execute').className).toContain('font-semibold');
+      expect(window.localStorage.getItem('exomind:dag-mode')).toBe('execute');
+    });
   });
 
   it('switches dag direction, persists selection, and re-fits the viewport', async () => {
@@ -546,7 +636,8 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     const lastProps = flowApiMocks.lastProps as {
       nodes: Array<{ sourcePosition: string; targetPosition: string }>;
     };
-    expect(window.localStorage.getItem('exomind:dag-direction')).toBe('auto');
+    // Default mobile auto layout should not backfill storage on first mount（首帧不应回写默认方向）
+    expect(window.localStorage.getItem('exomind:dag-direction')).toBeNull();
     expect(lastProps.nodes[0]).toMatchObject({
       sourcePosition: 'bottom',
       targetPosition: 'top',
@@ -997,10 +1088,13 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
 
     fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true });
-    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('browse');
+    // Ctrl-only arrows should not mutate mode persistence（仅 Ctrl 不应把默认 browse 回写进存储）
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBeNull();
 
     fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true, altKey: true });
-    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
+    await waitFor(() => {
+      expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
+    });
 
     fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
     expect(screen.getByText('准备硬依赖')).toBeInTheDocument();
@@ -1011,7 +1105,9 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
 
     fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true, altKey: true });
-    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('execute');
+    await waitFor(() => {
+      expect(window.localStorage.getItem('exomind:dag-mode')).toBe('execute');
+    });
 
     fireEvent.keyDown(document, { key: 'ArrowLeft' });
     expect(flowApiMocks.setViewport).toHaveBeenCalledWith({

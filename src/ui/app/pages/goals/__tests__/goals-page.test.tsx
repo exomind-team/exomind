@@ -284,6 +284,44 @@ describe('GoalsPage', () => {
     expect(screen.getByTestId(`mock-react-flow-node-${goalId}`)).toBeInTheDocument();
   });
 
+  it('does not persist fallback page preferences on mount and reacts to late storage sync（挂载时不回写默认偏好，并响应晚到同步）', async () => {
+    const { GoalsPage } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    await screen.findByTestId('mock-react-flow');
+    expect(window.localStorage.getItem('exomind:goals-mode')).toBeNull();
+    expect(window.localStorage.getItem('exomind:goals-show-cancelled')).toBeNull();
+    expect(window.localStorage.getItem('exomind:goals-guide-hidden')).toBeNull();
+    expect(screen.getByTestId('goals-empty-state-guide')).toBeInTheDocument();
+    expect(screen.getByLabelText('显示已取消')).not.toBeChecked();
+
+    await act(async () => {
+      window.localStorage.setItem('exomind:goals-mode', 'edit');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'exomind:goals-mode',
+        newValue: 'edit',
+      }));
+
+      window.localStorage.setItem('exomind:goals-show-cancelled', 'true');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'exomind:goals-show-cancelled',
+        newValue: 'true',
+      }));
+
+      window.localStorage.setItem('exomind:goals-guide-hidden', 'true');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'exomind:goals-guide-hidden',
+        newValue: 'true',
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '编辑' }).className).toContain('bg-orange-400/15');
+      expect(screen.getByLabelText('显示已取消')).toBeChecked();
+      expect(screen.queryByTestId('goals-empty-state-guide')).not.toBeInTheDocument();
+    });
+  });
+
   it('emits suspect render warnings when visible goals lose their force-layout positions', async () => {
     const { GoalsPage, useGoalStore } = await loadGoalsPage();
     forceLayoutMocks.emitEnabled = false;

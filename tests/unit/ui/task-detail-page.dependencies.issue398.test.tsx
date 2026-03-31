@@ -67,45 +67,49 @@ const onBlockChangeMock = vi.fn(() => () => {});
 const pauseBlockMock = vi.fn<() => Promise<void>>();
 
 const calculateSpentMinutesMock = vi.fn<(taskId: string) => Promise<number>>();
-const getEventsMock = vi.fn<() => Promise<Array<{ id: string; content: string; createdAt: string; type?: string }>>>();
+const loadEventsMock = vi.fn<
+  () => Promise<Array<{ id: string; content: string; timestamp: number; tags: Set<string> }>>
+>();
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
   useParams: () => ({ taskId: 'task-1' }),
   useNavigate: () => navigateMock,
+  useLocation: () => ({ pathname: window.location.pathname, searchStr: window.location.search }),
 }));
 
-vi.mock('@/lib/services', () => ({
-  getTaskService: () => ({
-    getTask: getTaskMock,
-    listTasks: listTasksMock,
-    addDependency: addDependencyMock,
-    removeDependency: removeDependencyMock,
-    onTaskChange: onTaskChangeMock,
-    getAvailableTransitions: vi.fn(),
-    getChildTasks: vi.fn(async () => []),
-    checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
-    transitionTask: vi.fn(),
-    updateTask: vi.fn(),
-    cancelTask: vi.fn(),
-  }),
-  getTimeBlockService: () => ({
-    loadTimeBlocks: loadTimeBlocksMock,
-    loadActiveBlock: loadActiveBlockMock,
-    onBlockChange: onBlockChangeMock,
-    pauseBlock: pauseBlockMock,
-  }),
-  getTaskTimerService: () => ({
-    calculateSpentMinutes: calculateSpentMinutesMock,
-    startBlockForTask: vi.fn(),
-  }),
-}));
-
-vi.mock('@/lib/storage/event-storage', () => ({
-  getEventStorage: () => ({
-    getEvents: getEventsMock,
-  }),
-}));
+vi.mock('@/lib/services', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/services')>();
+  return {
+    ...actual,
+    getTaskService: () => ({
+      getTask: getTaskMock,
+      listTasks: listTasksMock,
+      addDependency: addDependencyMock,
+      removeDependency: removeDependencyMock,
+      onTaskChange: onTaskChangeMock,
+      getAvailableTransitions: vi.fn(),
+      getChildTasks: vi.fn(async () => []),
+      checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
+      transitionTask: vi.fn(),
+      updateTask: vi.fn(),
+      cancelTask: vi.fn(),
+    }),
+    getTimeBlockService: () => ({
+      loadTimeBlocks: loadTimeBlocksMock,
+      loadActiveBlock: loadActiveBlockMock,
+      onBlockChange: onBlockChangeMock,
+      pauseBlock: pauseBlockMock,
+    }),
+    getEventLogService: () => ({
+      loadEvents: loadEventsMock,
+    }),
+    getTaskTimerService: () => ({
+      calculateSpentMinutes: calculateSpentMinutesMock,
+      startBlockForTask: vi.fn(),
+    }),
+  };
+});
 
 function mockMatchMedia(matches: boolean): void {
   Object.defineProperty(window, 'matchMedia', {
@@ -204,14 +208,14 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
 
     calculateSpentMinutesMock.mockReset();
     calculateSpentMinutesMock.mockResolvedValue(15);
-    getEventsMock.mockReset();
-    getEventsMock.mockResolvedValue([]);
+    loadEventsMock.mockReset();
+    loadEventsMock.mockResolvedValue([]);
   });
 
   it('renders current dependencies and reverse dependencies（渲染当前依赖与反向依赖）', async () => {
     renderPage(false);
 
-    expect(await screen.findByText('依赖关系')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '依赖关系' })).toBeInTheDocument();
 
     const currentItem = await screen.findByTestId('dependency-item-task-2');
     expect(within(currentItem).getByText('补 task.service 单测')).toBeInTheDocument();

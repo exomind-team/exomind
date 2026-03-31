@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SignalGraph } from '@/ui/app/pages/agents-signal-topology';
 import {
+  TOPOLOGY_LAYOUT_STORAGE_KEY,
   applyManualLayoutSnapshot,
   buildAutoFlowLayout,
   buildTopologyDatasetKey,
@@ -76,7 +77,38 @@ function createMemoryStorage(initialStore?: Record<string, string>) {
   };
 }
 
+function installStorageStub(storage: Record<string, string>): void {
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => (key in storage ? storage[key] : null),
+      setItem: (key: string, value: string) => {
+        storage[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete storage[key];
+      },
+      clear: () => {
+        for (const key of Object.keys(storage)) {
+          delete storage[key];
+        }
+      },
+      key: (index: number) => Object.keys(storage)[index] ?? null,
+      get length() {
+        return Object.keys(storage).length;
+      },
+    },
+  });
+}
+
 describe('topology layout helpers issue-382（拓扑布局持久化纯函数）', () => {
+  beforeEach(async () => {
+    installStorageStub({});
+
+    const cacheModule = await import('@/config/runtime-config-cache');
+    cacheModule.__resetRuntimeConfigCacheForTests();
+  });
+
   it('keeps datasetKey stable when only status changes（仅状态变化时 datasetKey 保持稳定）', () => {
     const baseKey = buildTopologyDatasetKey(SAMPLE_GRAPH);
     const changedStatusKey = buildTopologyDatasetKey({
@@ -199,6 +231,36 @@ describe('topology layout helpers issue-382（拓扑布局持久化纯函数）'
     writeTopologyLayoutStore(store, storage);
 
     expect(readTopologyLayoutStore(storage)).toEqual({
+      [datasetKey]: {
+        global: {
+          'nodesFilter=all': snapshot,
+        },
+      },
+    });
+  });
+
+  it('reads default store from runtime-backed storage（默认存储应优先读取 Runtime）', async () => {
+    const datasetKey = buildTopologyDatasetKey(SAMPLE_GRAPH);
+    const snapshot: TopologyLayoutSnapshot = {
+      manualPositions: {
+        'agent:classifier': { x: 700, y: 200 },
+      },
+      viewport: { x: 1, y: 2, zoom: 0.9 },
+      updatedAt: '2026-03-06T12:34:56.000Z',
+    };
+
+    const cacheModule = await import('@/config/runtime-config-cache');
+    cacheModule.__primeRuntimeConfigForTests({
+      [TOPOLOGY_LAYOUT_STORAGE_KEY]: JSON.stringify({
+        [datasetKey]: {
+          global: {
+            'nodesFilter=all': snapshot,
+          },
+        },
+      }),
+    });
+
+    expect(readTopologyLayoutStore()).toEqual({
       [datasetKey]: {
         global: {
           'nodesFilter=all': snapshot,

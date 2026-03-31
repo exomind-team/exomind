@@ -1,3 +1,5 @@
+import { createConfigModule } from './config-factory';
+
 export const VOICE_OVERLAY_OPACITY_STORAGE_KEY = 'exomind:voiceOverlayOpacity';
 export const VOICE_OVERLAY_OPACITY_CHANGED_EVENT = 'exomind:voice-overlay-opacity-changed';
 export const VOICE_OVERLAY_SHOW_DIAGNOSTICS_STORAGE_KEY = 'exomind:voiceOverlayShowDiagnostics';
@@ -17,15 +19,6 @@ export const MAX_VOICE_OVERLAY_TRANSCRIPT_LINES = 5;
 export const DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET = 56;
 export const MIN_VOICE_OVERLAY_BOTTOM_OFFSET = 24;
 export const MAX_VOICE_OVERLAY_BOTTOM_OFFSET = 160;
-
-function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
-  if (typeof window === 'undefined') return null;
-  const localStorageLike = window.localStorage as Partial<Storage> | undefined;
-  if (!localStorageLike) return null;
-  if (typeof localStorageLike.getItem !== 'function') return null;
-  if (typeof localStorageLike.setItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
-}
 
 function clampOverlayOpacity(value: number): number {
   if (!Number.isFinite(value)) {
@@ -67,258 +60,94 @@ function clampOverlayBottomOffset(value: number): number {
   );
 }
 
-function subscribeNumericPreference(
-  changedEvent: string,
-  storageKey: string,
-  fallback: () => number,
-  clamp: (value: number) => number,
-  listener: (value: number) => void,
-): () => void {
-  if (typeof window === 'undefined') {
-    return () => {};
-  }
+const opacityModule = createConfigModule<number>({
+  storageKey: VOICE_OVERLAY_OPACITY_STORAGE_KEY,
+  eventName: VOICE_OVERLAY_OPACITY_CHANGED_EVENT,
+  defaultValue: DEFAULT_VOICE_OVERLAY_OPACITY,
+  normalize: (rawValue) => clampOverlayOpacity(Number.parseInt(rawValue ?? '', 10)),
+  serialize: (value) => String(clampOverlayOpacity(value)),
+  persistMode: 'runtime-preferred',
+});
 
-  const handler = (event: Event) => {
-    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-    if (detail && typeof detail.value === 'number') {
-      listener(clamp(detail.value));
-      return;
-    }
+const diagnosticsModule = createConfigModule<boolean>({
+  storageKey: VOICE_OVERLAY_SHOW_DIAGNOSTICS_STORAGE_KEY,
+  eventName: VOICE_OVERLAY_SHOW_DIAGNOSTICS_CHANGED_EVENT,
+  defaultValue: DEFAULT_VOICE_OVERLAY_SHOW_DIAGNOSTICS,
+  normalize: (rawValue) => normalizeBoolean(rawValue, DEFAULT_VOICE_OVERLAY_SHOW_DIAGNOSTICS),
+  serialize: (value) => String(Boolean(value)),
+  persistMode: 'runtime-preferred',
+});
 
-    listener(fallback());
-  };
+const transcriptLinesModule = createConfigModule<number>({
+  storageKey: VOICE_OVERLAY_TRANSCRIPT_LINES_STORAGE_KEY,
+  eventName: VOICE_OVERLAY_TRANSCRIPT_LINES_CHANGED_EVENT,
+  defaultValue: DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES,
+  normalize: (rawValue) => clampOverlayTranscriptLines(Number.parseInt(rawValue ?? '', 10)),
+  serialize: (value) => String(clampOverlayTranscriptLines(value)),
+  persistMode: 'runtime-preferred',
+});
 
-  const storageHandler = (event: StorageEvent) => {
-    if (event.key !== storageKey) {
-      return;
-    }
-    if (typeof event.newValue === 'string') {
-      listener(clamp(Number.parseInt(event.newValue, 10)));
-      return;
-    }
-    listener(fallback());
-  };
-
-  window.addEventListener(changedEvent, handler);
-  window.addEventListener('storage', storageHandler);
-  return () => {
-    window.removeEventListener(changedEvent, handler);
-    window.removeEventListener('storage', storageHandler);
-  };
-}
-
-function subscribeBooleanPreference(
-  changedEvent: string,
-  storageKey: string,
-  fallback: () => boolean,
-  listener: (value: boolean) => void,
-): () => void {
-  if (typeof window === 'undefined') {
-    return () => {};
-  }
-
-  const handler = (event: Event) => {
-    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-    if (detail && typeof detail.value === 'boolean') {
-      listener(detail.value);
-      return;
-    }
-
-    listener(fallback());
-  };
-
-  const storageHandler = (event: StorageEvent) => {
-    if (event.key !== storageKey) {
-      return;
-    }
-    listener(normalizeBoolean(event.newValue, fallback()));
-  };
-
-  window.addEventListener(changedEvent, handler);
-  window.addEventListener('storage', storageHandler);
-  return () => {
-    window.removeEventListener(changedEvent, handler);
-    window.removeEventListener('storage', storageHandler);
-  };
-}
+const bottomOffsetModule = createConfigModule<number>({
+  storageKey: VOICE_OVERLAY_BOTTOM_OFFSET_STORAGE_KEY,
+  eventName: VOICE_OVERLAY_BOTTOM_OFFSET_CHANGED_EVENT,
+  defaultValue: DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET,
+  normalize: (rawValue) => clampOverlayBottomOffset(Number.parseInt(rawValue ?? '', 10)),
+  serialize: (value) => String(clampOverlayBottomOffset(value)),
+  persistMode: 'runtime-preferred',
+});
 
 export function getVoiceOverlayOpacity(): number {
-  const storage = getStorage();
-  if (!storage) return DEFAULT_VOICE_OVERLAY_OPACITY;
-  try {
-    const rawValue = storage.getItem(VOICE_OVERLAY_OPACITY_STORAGE_KEY);
-    if (!rawValue) {
-      return DEFAULT_VOICE_OVERLAY_OPACITY;
-    }
-
-    return clampOverlayOpacity(Number.parseInt(rawValue, 10));
-  } catch {
-    return DEFAULT_VOICE_OVERLAY_OPACITY;
-  }
+  return opacityModule.get();
 }
 
 export function setVoiceOverlayOpacity(value: number): number {
-  const normalizedValue = clampOverlayOpacity(value);
-  const storage = getStorage();
-  if (!storage) return normalizedValue;
-
-  try {
-    storage.setItem(VOICE_OVERLAY_OPACITY_STORAGE_KEY, String(normalizedValue));
-    window.dispatchEvent(
-      new CustomEvent(VOICE_OVERLAY_OPACITY_CHANGED_EVENT, {
-        detail: { value: normalizedValue },
-      }),
-    );
-  } catch {
-    // ignore localStorage write errors
-  }
-
-  return normalizedValue;
+  return opacityModule.set(value);
 }
 
 export function subscribeVoiceOverlayOpacityChanges(
   listener: (value: number) => void,
 ): () => void {
-  return subscribeNumericPreference(
-    VOICE_OVERLAY_OPACITY_CHANGED_EVENT,
-    VOICE_OVERLAY_OPACITY_STORAGE_KEY,
-    getVoiceOverlayOpacity,
-    clampOverlayOpacity,
-    listener,
-  );
+  return opacityModule.subscribe(listener);
 }
 
 export function getVoiceOverlayShowDiagnostics(): boolean {
-  const storage = getStorage();
-  if (!storage) return DEFAULT_VOICE_OVERLAY_SHOW_DIAGNOSTICS;
-
-  try {
-    return normalizeBoolean(
-      storage.getItem(VOICE_OVERLAY_SHOW_DIAGNOSTICS_STORAGE_KEY),
-      DEFAULT_VOICE_OVERLAY_SHOW_DIAGNOSTICS,
-    );
-  } catch {
-    return DEFAULT_VOICE_OVERLAY_SHOW_DIAGNOSTICS;
-  }
+  return diagnosticsModule.get();
 }
 
 export function setVoiceOverlayShowDiagnostics(value: boolean): boolean {
-  const normalizedValue = Boolean(value);
-  const storage = getStorage();
-  if (!storage) return normalizedValue;
-
-  try {
-    storage.setItem(VOICE_OVERLAY_SHOW_DIAGNOSTICS_STORAGE_KEY, String(normalizedValue));
-    window.dispatchEvent(new CustomEvent(
-      VOICE_OVERLAY_SHOW_DIAGNOSTICS_CHANGED_EVENT,
-      { detail: { value: normalizedValue } },
-    ));
-  } catch {
-    // ignore localStorage write errors
-  }
-
-  return normalizedValue;
+  return diagnosticsModule.set(value);
 }
 
 export function subscribeVoiceOverlayShowDiagnosticsChanges(
   listener: (value: boolean) => void,
 ): () => void {
-  return subscribeBooleanPreference(
-    VOICE_OVERLAY_SHOW_DIAGNOSTICS_CHANGED_EVENT,
-    VOICE_OVERLAY_SHOW_DIAGNOSTICS_STORAGE_KEY,
-    getVoiceOverlayShowDiagnostics,
-    listener,
-  );
+  return diagnosticsModule.subscribe(listener);
 }
 
 export function getVoiceOverlayTranscriptLines(): number {
-  const storage = getStorage();
-  if (!storage) return DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES;
-
-  try {
-    const rawValue = storage.getItem(VOICE_OVERLAY_TRANSCRIPT_LINES_STORAGE_KEY);
-    if (!rawValue) {
-      return DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES;
-    }
-
-    return clampOverlayTranscriptLines(Number.parseInt(rawValue, 10));
-  } catch {
-    return DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES;
-  }
+  return transcriptLinesModule.get();
 }
 
 export function setVoiceOverlayTranscriptLines(value: number): number {
-  const normalizedValue = clampOverlayTranscriptLines(value);
-  const storage = getStorage();
-  if (!storage) return normalizedValue;
-
-  try {
-    storage.setItem(VOICE_OVERLAY_TRANSCRIPT_LINES_STORAGE_KEY, String(normalizedValue));
-    window.dispatchEvent(new CustomEvent(
-      VOICE_OVERLAY_TRANSCRIPT_LINES_CHANGED_EVENT,
-      { detail: { value: normalizedValue } },
-    ));
-  } catch {
-    // ignore localStorage write errors
-  }
-
-  return normalizedValue;
+  return transcriptLinesModule.set(value);
 }
 
 export function subscribeVoiceOverlayTranscriptLinesChanges(
   listener: (value: number) => void,
 ): () => void {
-  return subscribeNumericPreference(
-    VOICE_OVERLAY_TRANSCRIPT_LINES_CHANGED_EVENT,
-    VOICE_OVERLAY_TRANSCRIPT_LINES_STORAGE_KEY,
-    getVoiceOverlayTranscriptLines,
-    clampOverlayTranscriptLines,
-    listener,
-  );
+  return transcriptLinesModule.subscribe(listener);
 }
 
 export function getVoiceOverlayBottomOffset(): number {
-  const storage = getStorage();
-  if (!storage) return DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET;
-
-  try {
-    const rawValue = storage.getItem(VOICE_OVERLAY_BOTTOM_OFFSET_STORAGE_KEY);
-    if (!rawValue) {
-      return DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET;
-    }
-
-    return clampOverlayBottomOffset(Number.parseInt(rawValue, 10));
-  } catch {
-    return DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET;
-  }
+  return bottomOffsetModule.get();
 }
 
 export function setVoiceOverlayBottomOffset(value: number): number {
-  const normalizedValue = clampOverlayBottomOffset(value);
-  const storage = getStorage();
-  if (!storage) return normalizedValue;
-
-  try {
-    storage.setItem(VOICE_OVERLAY_BOTTOM_OFFSET_STORAGE_KEY, String(normalizedValue));
-    window.dispatchEvent(new CustomEvent(
-      VOICE_OVERLAY_BOTTOM_OFFSET_CHANGED_EVENT,
-      { detail: { value: normalizedValue } },
-    ));
-  } catch {
-    // ignore localStorage write errors
-  }
-
-  return normalizedValue;
+  return bottomOffsetModule.set(value);
 }
 
 export function subscribeVoiceOverlayBottomOffsetChanges(
   listener: (value: number) => void,
 ): () => void {
-  return subscribeNumericPreference(
-    VOICE_OVERLAY_BOTTOM_OFFSET_CHANGED_EVENT,
-    VOICE_OVERLAY_BOTTOM_OFFSET_STORAGE_KEY,
-    getVoiceOverlayBottomOffset,
-    clampOverlayBottomOffset,
-    listener,
-  );
+  return bottomOffsetModule.subscribe(listener);
 }

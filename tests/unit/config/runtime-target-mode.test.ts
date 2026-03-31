@@ -2,9 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.fn();
 const isTauriMock = vi.fn();
+const runtimeConfigStore = vi.hoisted(() => new Map<string, string>());
 const runtimeControlMocks = {
   startRuntime: vi.fn(),
   stopRuntime: vi.fn(),
+};
+const runtimeConfigCacheMocks = {
+  resume: vi.fn(),
+  suspend: vi.fn(),
 };
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -14,6 +19,16 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
   getRuntimeControlService: () => runtimeControlMocks,
+}));
+
+vi.mock('@/config/runtime-config-cache', () => ({
+  getRuntimeConfigValueSync: (key: string) => runtimeConfigStore.get(key) ?? null,
+  setRuntimeConfigValue: (key: string, value: string) => {
+    runtimeConfigStore.set(key, value);
+    window.localStorage.setItem(key, value);
+  },
+  resumeRuntimeConfigBootstrap: () => runtimeConfigCacheMocks.resume(),
+  suspendRuntimeConfigBootstrap: () => runtimeConfigCacheMocks.suspend(),
 }));
 
 import {
@@ -27,6 +42,7 @@ import { setPersistedRuntimeTargetMode } from '@/config/runtime-target-mode';
 describe('runtime target mode persistence（RT 配置持久化）', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    runtimeConfigStore.clear();
     vi.clearAllMocks();
     isTauriMock.mockResolvedValue(true);
     invokeMock.mockImplementation(async (command: string, payload?: { mode?: string }) => {
@@ -58,6 +74,8 @@ describe('runtime target mode persistence（RT 配置持久化）', () => {
       host: '0.0.0.0',
       port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
+    expect(runtimeConfigCacheMocks.resume).toHaveBeenCalledTimes(1);
+    expect(runtimeConfigCacheMocks.suspend).not.toHaveBeenCalled();
     expect(getRuntimeTargetMode()).toBe('embedded');
   });
 
@@ -68,6 +86,8 @@ describe('runtime target mode persistence（RT 配置持久化）', () => {
 
     expect(invokeMock).toHaveBeenCalledWith('runtime_target_mode_set', { mode: 'external' });
     expect(runtimeControlMocks.stopRuntime).toHaveBeenCalledTimes(1);
+    expect(runtimeConfigCacheMocks.suspend).toHaveBeenCalledTimes(1);
+    expect(runtimeConfigCacheMocks.resume).not.toHaveBeenCalled();
     expect(getRuntimeTargetMode()).toBe('external');
   });
 
@@ -89,6 +109,8 @@ describe('runtime target mode persistence（RT 配置持久化）', () => {
 
     expect(invokeMock).not.toHaveBeenCalled();
     expect(runtimeControlMocks.stopRuntime).not.toHaveBeenCalled();
+    expect(runtimeConfigCacheMocks.suspend).not.toHaveBeenCalled();
+    expect(runtimeConfigCacheMocks.resume).not.toHaveBeenCalled();
     expect(getRuntimeTargetMode()).toBe('external');
   });
 });

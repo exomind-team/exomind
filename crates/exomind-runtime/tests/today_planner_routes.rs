@@ -32,6 +32,7 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         auth_secret: None,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
+        config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         session_store: Arc::new(exomind_runtime::session::SessionStore::new()),
         session_event_tx: None,

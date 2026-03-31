@@ -14,6 +14,18 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
+import {
+  getGoalsPageGuideHidden,
+  getGoalsPageMode,
+  getGoalsPageShowCancelled,
+  GOALS_PAGE_GUIDE_HIDDEN_STORAGE_KEY,
+  GOALS_PAGE_MODE_STORAGE_KEY,
+  GOALS_PAGE_SHOW_CANCELLED_STORAGE_KEY,
+  setGoalsPageGuideHidden,
+  setGoalsPageMode,
+  setGoalsPageShowCancelled,
+  type GoalsPageMode,
+} from '@/config/goals-page-preferences';
 import { toast } from '@/components/ui/toast-hook';
 import { getTaskService } from '@/lib/services/task.service';
 import { cn } from '@/lib/utils';
@@ -45,16 +57,12 @@ import {
 import { useConnectMode } from './hooks/useConnectMode';
 import { useContextMenu } from './hooks/useContextMenu';
 
-type GoalPageMode = 'browse' | 'edit';
 type Selection = { kind: 'goal' | 'edge' | 'me'; id: string } | null;
 type ActiveReconnect = {
   edgeId: string;
   handleType: 'source' | 'target';
 } | null;
 
-const MODE_STORAGE_KEY = 'exomind:goals-mode';
-const SHOW_CANCELLED_STORAGE_KEY = 'exomind:goals-show-cancelled';
-const GUIDE_HIDDEN_STORAGE_KEY = 'exomind:goals-guide-hidden';
 const COMPLETION_ABSORB_DURATION_MS = 520;
 const COMPLETION_ME_PULSE_DURATION_MS = 320;
 const COMPLETION_ABSORB_NODE_SIZE = 72;
@@ -77,24 +85,12 @@ interface CompletionAbsorptionAnimation {
   toY: number;
 }
 
-function readBooleanStorage(key: string, fallback: boolean): boolean {
-  if (typeof window === 'undefined') return fallback;
-  const raw = window.localStorage.getItem(key);
-  return raw === null ? fallback : raw === 'true';
-}
-
-function readModeStorage(): GoalPageMode {
-  if (typeof window === 'undefined') return 'browse';
-  const raw = window.localStorage.getItem(MODE_STORAGE_KEY);
-  return raw === 'edit' ? 'edit' : 'browse';
-}
-
 function GoalModeSelector({
   mode,
   onChange,
 }: {
-  mode: GoalPageMode;
-  onChange: (mode: GoalPageMode) => void;
+  mode: GoalsPageMode;
+  onChange: (mode: GoalsPageMode) => void;
 }) {
   return (
     <div className="pointer-events-auto absolute left-3 top-3 z-10 flex items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/90 p-1 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
@@ -522,9 +518,9 @@ export function GoalsPage() {
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
-  const [mode, setMode] = useState<GoalPageMode>(() => readModeStorage());
-  const [showCancelled, setShowCancelled] = useState(() => readBooleanStorage(SHOW_CANCELLED_STORAGE_KEY, false));
-  const [guideHidden, setGuideHidden] = useState(() => readBooleanStorage(GUIDE_HIDDEN_STORAGE_KEY, false));
+  const [mode, setMode] = useState<GoalsPageMode>(() => getGoalsPageMode());
+  const [showCancelled, setShowCancelled] = useState(() => getGoalsPageShowCancelled());
+  const [guideHidden, setGuideHidden] = useState(() => getGoalsPageGuideHidden());
   const [selected, setSelected] = useState<Selection>(null);
   const [cancelGoalId, setCancelGoalId] = useState<string | null>(null);
   const [cancelCascadeInTasks, setCancelCascadeInTasks] = useState(false);
@@ -539,6 +535,9 @@ export function GoalsPage() {
   const [mePulseActive, setMePulseActive] = useState(false);
   const [activeReconnect, setActiveReconnect] = useState<ActiveReconnect>(null);
   const [renderHealthProbe, setRenderHealthProbe] = useState(0);
+  const hasPersistedInitialModeRef = useRef(false);
+  const hasPersistedInitialShowCancelledRef = useRef(false);
+  const hasPersistedInitialGuideHiddenRef = useRef(false);
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
   const connectMode = useConnectMode();
   const pageRef = useRef<HTMLDivElement | null>(null);
@@ -598,6 +597,29 @@ export function GoalsPage() {
   useEffect(() => (
     subscribeDeveloperModeChanges(setDeveloperModeEnabled)
   ), []);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      switch (event.key) {
+        case GOALS_PAGE_MODE_STORAGE_KEY:
+          setMode(getGoalsPageMode());
+          return;
+        case GOALS_PAGE_SHOW_CANCELLED_STORAGE_KEY:
+          setShowCancelled(getGoalsPageShowCancelled());
+          return;
+        case GOALS_PAGE_GUIDE_HIDDEN_STORAGE_KEY:
+          setGuideHidden(getGoalsPageGuideHidden());
+          return;
+        default:
+          return;
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const element = pageRef.current;
@@ -732,15 +754,27 @@ export function GoalsPage() {
   }, [getTaskTitleByRef, graph.edges]);
 
   useEffect(() => {
-    window.localStorage.setItem(MODE_STORAGE_KEY, mode);
+    if (!hasPersistedInitialModeRef.current) {
+      hasPersistedInitialModeRef.current = true;
+      return;
+    }
+    setGoalsPageMode(mode);
   }, [mode]);
 
   useEffect(() => {
-    window.localStorage.setItem(SHOW_CANCELLED_STORAGE_KEY, String(showCancelled));
+    if (!hasPersistedInitialShowCancelledRef.current) {
+      hasPersistedInitialShowCancelledRef.current = true;
+      return;
+    }
+    setGoalsPageShowCancelled(showCancelled);
   }, [showCancelled]);
 
   useEffect(() => {
-    window.localStorage.setItem(GUIDE_HIDDEN_STORAGE_KEY, String(guideHidden));
+    if (!hasPersistedInitialGuideHiddenRef.current) {
+      hasPersistedInitialGuideHiddenRef.current = true;
+      return;
+    }
+    setGoalsPageGuideHidden(guideHidden);
   }, [guideHidden]);
 
   useEffect(() => {
