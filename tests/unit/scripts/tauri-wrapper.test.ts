@@ -259,6 +259,60 @@ describeWindowsOnly('tauri-wrapper', () => {
     }
   }, 20000);
 
+  it('overrides android devUrl when EXOMIND_WEB_PORT is set（android dev 应跟随实例端口覆盖 devUrl）', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-android-devurl-'));
+    const fakeBinDir = join(tempDir, 'bin');
+    const fakeTauriCmd = join(fakeBinDir, 'tauri.cmd');
+    const wrapperPath = join(process.cwd(), 'Scripts', 'dev', 'tauri-wrapper.ps1');
+
+    try {
+      spawnSync('cmd.exe', ['/c', 'mkdir', fakeBinDir], { stdio: 'ignore' });
+
+      writeFileSync(
+        fakeTauriCmd,
+        [
+          '@echo off',
+          'echo ARGS=%*',
+          'set CONFIG=',
+          ':loop',
+          'if "%~1"=="" goto after',
+          'if /I "%~1"=="--config" (',
+          '  set CONFIG=%~2',
+          ')',
+          'shift',
+          'goto loop',
+          ':after',
+          'if not "%CONFIG%"=="" (',
+          '  echo CONFIG_FILE=%CONFIG%',
+          '  type "%CONFIG%"',
+          ')',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      const result = spawnSync(
+        POWERSHELL_PATH,
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath, 'android', 'dev'],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${fakeBinDir};${process.env.PATH ?? ''}`,
+            EXOMIND_WEB_PORT: '1520',
+          },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('ARGS=android dev --config');
+      expect(result.stdout).toContain('"devUrl":"http://localhost:1520"');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }, 20000);
+
   it('falls back to adb install for android dev install failures（android dev 安装失败时走 adb 兜底安装）', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-android-fallback-'));
     const fakeBinDir = join(tempDir, 'bin');

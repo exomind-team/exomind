@@ -51,6 +51,17 @@ export interface RuntimeMeshSyncServiceOptions {
   getReachableAddress?: (remoteHost: RuntimeHostRecord) => Promise<RuntimeReachableAddress | null>;
 }
 
+export interface RuntimeMeshPeerRecord {
+  id: string;
+  base_url: string;
+  enabled: boolean;
+  status?: string;
+  last_seen?: string | null;
+  last_error?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 function isConfirmedPeer(host: RuntimeHostRecord): boolean {
   return host.trustState === 'confirmed_peer' && typeof host.hostId === 'string' && host.hostId.length > 0;
 }
@@ -75,6 +86,76 @@ function resolveRemotePeerBaseUrl(host: RuntimeHostRecord): string | null {
 function resolveLocalRuntimeBaseUrl(status: RuntimeServiceStatus): string {
   const host = status.host === '0.0.0.0' ? '127.0.0.1' : status.host;
   return `http://${formatHostForUrl(host)}:${status.port}`;
+}
+
+function normalizeHostForMatch(host: string): string {
+  return host.trim().replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
+}
+
+function parseBaseUrlHost(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl).hostname;
+  } catch {
+    return null;
+  }
+}
+
+function parseBaseUrlAddress(baseUrl: string): { host: string; port: number } | null {
+  try {
+    const parsed = new URL(baseUrl);
+    const defaultPort = parsed.protocol === 'https:' ? 443 : 80;
+    const port = Number.parseInt(parsed.port || String(defaultPort), 10);
+    if (!parsed.hostname || !Number.isInteger(port) || port <= 0) {
+      return null;
+    }
+
+    return {
+      host: parsed.hostname,
+      port,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveAndroidEmulatorHostAlias(host: string): string | null {
+  const normalized = normalizeHostForMatch(host);
+  if (normalized.startsWith('10.0.2.') && normalized !== '10.0.2.2') {
+    return '10.0.2.2';
+  }
+  if (normalized.startsWith('10.0.3.') && normalized !== '10.0.3.2') {
+    return '10.0.3.2';
+  }
+  return null;
+}
+
+function isAndroidEmulatorGuestHost(host: string): boolean {
+  const normalized = normalizeHostForMatch(host);
+  return /^10\.0\.(2|3)\.\d+$/.test(normalized)
+    && normalized !== '10.0.2.2'
+    && normalized !== '10.0.3.2';
+}
+
+function isAndroidEmulatorHostAlias(host: string): boolean {
+  const normalized = normalizeHostForMatch(host);
+  return normalized === '10.0.2.2'
+    || normalized === '10.0.3.2'
+    || normalized === '198.18.0.1'
+    || normalized === 'localhost'
+    || normalized === '127.0.0.1';
+}
+
+function shouldSkipReciprocalPeerUpsert(
+  remoteBaseUrl: string,
+  reachableAddress: RuntimeReachableAddress,
+): boolean {
+  const remoteHost = parseBaseUrlHost(remoteBaseUrl);
+  if (!remoteHost) {
+    return false;
+  }
+
+  return isAndroidEmulatorGuestHost(reachableAddress.host)
+    && isAndroidEmulatorHostAlias(remoteHost);
 }
 
 /** Build headers with optional Bearer auth token for local runtime calls. */
@@ -127,14 +208,44 @@ export class RuntimeMeshSyncService {
       capabilities: [],
     });
 
+    const remoteBaseUrlHost = parseBaseUrlHost(remoteBaseUrl);
+    const emulatorHostAlias = resolveAndroidEmulatorHostAlias(host.host);
+    if (localStatus.hostId && remoteBaseUrlHost && emulatorHostAlias && isAndroidEmulatorHostAlias(remoteBaseUrlHost)) {
+      // When the local device reaches an Android emulator through ADB / bridge loopback,
+      // the emulator must call the host back via 10.0.2.2 / 10.0.3.2
+      // （桌面通过 ADB/桥接拨号 Android 模拟器时，反向地址必须写 host alias）.
+      await this.upsertPeer(remoteBaseUrl, {
+        id: localStatus.hostId,
+        base_url: `http://${formatHostForUrl(emulatorHostAlias)}:${localStatus.port}`,
+        enabled: true,
+        capabilities: [],
+      });
+      return;
+    }
+
     let reachableAddress: RuntimeReachableAddress | null = null;
     try {
-      reachableAddress = await this.getReachableAddress(host);
+      const reachableProbeTarget = parseBaseUrlAddress(remoteBaseUrl);
+      // Probe the resolved remote base_url（使用解析后的远端 base_url 求可达地址）,
+      // so emulator bridge aliases like 10.0.2.2 / 10.0.3.2 are preserved.
+      reachableAddress = await this.getReachableAddress(
+        reachableProbeTarget
+          ? {
+              ...host,
+              host: reachableProbeTarget.host,
+              port: reachableProbeTarget.port,
+            }
+          : host,
+      );
     } catch {
       reachableAddress = null;
     }
 
     if (!reachableAddress?.host || !reachableAddress.port || !reachableAddress.hostId) {
+      return;
+    }
+
+    if (shouldSkipReciprocalPeerUpsert(remoteBaseUrl, reachableAddress)) {
       return;
     }
 
@@ -240,7 +351,7 @@ export class RuntimeMeshSyncService {
   async listMeshPeers(
     runtimeBaseUrl: string,
     localAuthToken?: string,
-  ): Promise<Array<{ id: string; base_url: string; enabled: boolean }>> {
+  ): Promise<RuntimeMeshPeerRecord[]> {
     const url = `${runtimeBaseUrl}/mesh/peers`;
     const response = await this.fetchImpl(url, {
       method: 'GET',
@@ -251,7 +362,23 @@ export class RuntimeMeshSyncService {
         authState: localAuthToken ? 'present' : 'missing',
       });
     }
-    return (await response.json()) as Array<{ id: string; base_url: string; enabled: boolean }>;
+    return (await response.json()) as RuntimeMeshPeerRecord[];
+  }
+
+  /** Enable / disable an existing peer on the LOCAL runtime（启用 / 禁用本地 runtime 上的 peer 记录）. */
+  async setPeerEnabled(
+    localRuntimeBaseUrl: string,
+    peerId: string,
+    peerBaseUrl: string,
+    enabled: boolean,
+    localAuthToken?: string,
+  ): Promise<void> {
+    await this.upsertPeer(localRuntimeBaseUrl, {
+      id: peerId,
+      base_url: peerBaseUrl,
+      enabled,
+      capabilities: [],
+    }, localAuthToken);
   }
 
   // ── Peer Upsert ────────────────────────────────────────────────

@@ -7,7 +7,10 @@ import type {
   RuntimeTopologyCapabilities,
   RuntimeTopologyResponse,
 } from '@/lib/types/runtime-topology';
-import { formatHostForUrl } from '@/config/runtime-target';
+import {
+  buildRuntimeAuthHeaders,
+  resolveRuntimeHostBaseUrl,
+} from '@/lib/utils/runtime-host-address';
 
 export type RuntimeClientErrorCode = 'timeout' | 'network' | 'http' | 'invalid_payload';
 
@@ -97,7 +100,7 @@ export interface RuntimeAgentConversationChunk {
 const DEFAULT_TIMEOUT_MS = 3500;
 
 function buildBaseUrl(host: RuntimeHostRecord): string {
-  return `http://${formatHostForUrl(host.host)}:${host.port}`;
+  return resolveRuntimeHostBaseUrl(host);
 }
 
 function buildAgentChatUrl(host: RuntimeHostRecord, agentId: string): string {
@@ -429,7 +432,7 @@ export class RuntimeClient {
   }
 
   async getAgents(host: RuntimeHostRecord): Promise<RuntimeClientResult<RuntimeAgentSummary[]>> {
-    const response = await this.getJson(`${buildBaseUrl(host)}/agents`);
+    const response = await this.getJson(`${buildBaseUrl(host)}/agents`, host.authToken);
     if (!response.ok) {
       return response;
     }
@@ -466,7 +469,7 @@ export class RuntimeClient {
   }
 
   async getTopology(host: RuntimeHostRecord): Promise<RuntimeClientResult<RuntimeTopologyResponse>> {
-    const response = await this.getJson(`${buildBaseUrl(host)}/topology`);
+    const response = await this.getJson(`${buildBaseUrl(host)}/topology`, host.authToken);
     if (!response.ok) {
       return response;
     }
@@ -496,6 +499,7 @@ export class RuntimeClient {
       `${buildBaseUrl(host)}/agents`,
       'POST',
       normalizeCreateAgentRequest(request),
+      host.authToken,
     );
     if (!response.ok) {
       return response;
@@ -525,6 +529,8 @@ export class RuntimeClient {
     const response = await this.sendJson(
       `${buildBaseUrl(host)}/agents/${encodeURIComponent(agentId)}`,
       'DELETE',
+      undefined,
+      host.authToken,
     );
     if (!response.ok) {
       return response;
@@ -565,6 +571,8 @@ export class RuntimeClient {
     const response = await this.sendJson(
       `${buildBaseUrl(host)}/pty/${encodeURIComponent(ptyId)}/stop`,
       'POST',
+      undefined,
+      host.authToken,
     );
     if (!response.ok) {
       return response;
@@ -590,7 +598,7 @@ export class RuntimeClient {
   async getAllEnergy(
     host: RuntimeHostRecord,
   ): Promise<RuntimeClientResult<AgentEnergySnapshot[]>> {
-    const response = await this.getJson(`${buildBaseUrl(host)}/energy`);
+    const response = await this.getJson(`${buildBaseUrl(host)}/energy`, host.authToken);
     if (!response.ok) {
       return response;
     }
@@ -617,6 +625,7 @@ export class RuntimeClient {
   ): Promise<AgentEnergySnapshot | null> {
     const result = await this.getJson(
       `${buildBaseUrl(host)}/agents/${encodeURIComponent(agentId)}/energy`,
+      host.authToken,
     );
     if (!result.ok) return null;
     const data = result.data;
@@ -633,6 +642,7 @@ export class RuntimeClient {
       `${buildBaseUrl(host)}/agents/${encodeURIComponent(agentId)}/energy/refill`,
       'POST',
       { amount },
+      host.authToken,
     );
     if (!response.ok) {
       return response;
@@ -669,10 +679,10 @@ export class RuntimeClient {
     try {
       response = await this.fetchImpl(buildAgentChatUrl(host, request.agentId), {
         method: 'POST',
-        headers: {
+        headers: Object.fromEntries(buildRuntimeAuthHeaders(host.authToken, {
           Accept: 'text/event-stream',
           'Content-Type': 'application/json',
-        },
+        }).entries()),
         body: JSON.stringify({
           message: request.message,
           session_id: request.sessionId,
@@ -744,7 +754,7 @@ export class RuntimeClient {
     status?: string,
   ): Promise<RuntimeClientResult<SessionInfo[]>> {
     const params = status ? `?status=${encodeURIComponent(status)}` : '';
-    const response = await this.getJson(`${buildBaseUrl(host)}/sessions${params}`);
+    const response = await this.getJson(`${buildBaseUrl(host)}/sessions${params}`, host.authToken);
     if (!response.ok) return response;
     if (!Array.isArray(response.data)) {
       return {
@@ -761,6 +771,7 @@ export class RuntimeClient {
   ): Promise<RuntimeClientResult<SessionInfo>> {
     const response = await this.getJson(
       `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}`,
+      host.authToken,
     );
     if (!response.ok) return response;
     return { ok: true, data: response.data as SessionInfo };
@@ -774,6 +785,7 @@ export class RuntimeClient {
       `${buildBaseUrl(host)}/sessions`,
       'POST',
       request,
+      host.authToken,
     );
     if (!response.ok) return response;
     return { ok: true, data: response.data as SessionInfo };
@@ -788,6 +800,7 @@ export class RuntimeClient {
       `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}`,
       'PATCH',
       request,
+      host.authToken,
     );
     if (!response.ok) return response;
     return { ok: true, data: response.data as SessionInfo };
@@ -800,6 +813,8 @@ export class RuntimeClient {
     const response = await this.sendJson(
       `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}`,
       'DELETE',
+      undefined,
+      host.authToken,
     );
     if (!response.ok) return response;
     return { ok: true, data: response.data as SessionInfo };
@@ -814,6 +829,7 @@ export class RuntimeClient {
       `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/quick-action`,
       'POST',
       response,
+      host.authToken,
     );
     if (!result.ok) return result;
     return { ok: true, data: result.data as SessionInfo };
@@ -826,6 +842,8 @@ export class RuntimeClient {
     const result = await this.sendJson(
       `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/mark-waiting`,
       'POST',
+      undefined,
+      host.authToken,
     );
     if (!result.ok) return result;
     return { ok: true, data: result.data as SessionInfo };
@@ -837,6 +855,7 @@ export class RuntimeClient {
   ): Promise<RuntimeClientResult<SessionInfo[]>> {
     const result = await this.getJson(
       `${buildBaseUrl(host)}/sessions/${encodeURIComponent(parentSessionId)}/children`,
+      host.authToken,
     );
     if (!result.ok) return result;
     return { ok: true, data: result.data as SessionInfo[] };
@@ -851,19 +870,21 @@ export class RuntimeClient {
       `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/messages`,
       'POST',
       input,
+      host.authToken,
     );
     if (!result.ok) return result;
     return { ok: true, data: result.data as SessionMessage };
   }
 
-  private async getJson(url: string): Promise<RuntimeClientResult<unknown>> {
-    return this.sendJson(url, 'GET');
+  private async getJson(url: string, authToken?: string): Promise<RuntimeClientResult<unknown>> {
+    return this.sendJson(url, 'GET', undefined, authToken);
   }
 
   private async sendJson(
     url: string,
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     payload?: unknown,
+    authToken?: string,
   ): Promise<RuntimeClientResult<unknown>> {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
@@ -871,7 +892,12 @@ export class RuntimeClient {
     try {
       const response = await this.fetchImpl(url, {
         method,
-        headers: payload != null ? { 'Content-Type': 'application/json' } : undefined,
+        headers: Object.fromEntries(
+          buildRuntimeAuthHeaders(
+            authToken,
+            payload != null ? { 'Content-Type': 'application/json' } : undefined,
+          ).entries(),
+        ),
         body: payload != null ? JSON.stringify(payload) : undefined,
         signal: controller?.signal,
       });

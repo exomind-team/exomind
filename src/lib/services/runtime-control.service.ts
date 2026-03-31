@@ -1,4 +1,5 @@
 import type {
+  RuntimeDialAddress,
   IRuntimePort,
   RuntimeReachableAddress,
   StartRuntimeInput,
@@ -11,9 +12,10 @@ export interface RuntimeControlService {
   stopRuntime(): Promise<RuntimeServiceStatus>;
   getStatus(): Promise<RuntimeServiceStatus>;
   getReachableAddress(remoteHost: string, remotePort: number): Promise<RuntimeReachableAddress>;
+  getPeerDialAddress(remoteHost: string, remotePort: number): Promise<RuntimeDialAddress>;
 }
 
-export type { RuntimeReachableAddress, StartRuntimeInput };
+export type { RuntimeDialAddress, RuntimeReachableAddress, StartRuntimeInput };
 
 export class RuntimeControlServiceImpl implements RuntimeControlService {
   constructor(private readonly runtimePort: IRuntimePort) {}
@@ -32,6 +34,10 @@ export class RuntimeControlServiceImpl implements RuntimeControlService {
 
   async getReachableAddress(remoteHost: string, remotePort: number): Promise<RuntimeReachableAddress> {
     return this.runtimePort.getReachableAddress(remoteHost, remotePort);
+  }
+
+  async getPeerDialAddress(remoteHost: string, remotePort: number): Promise<RuntimeDialAddress> {
+    return this.runtimePort.getPeerDialAddress(remoteHost, remotePort);
   }
 }
 

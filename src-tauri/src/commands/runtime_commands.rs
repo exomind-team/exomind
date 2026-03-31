@@ -9,8 +9,9 @@ use exomind_runtime::{
     RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, TcpListener as StdTcpListener, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -76,6 +77,13 @@ pub struct RuntimeReachableAddress {
     pub host: String,
     pub port: u16,
     pub host_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDialAddress {
+    pub host: String,
+    pub port: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -339,6 +347,179 @@ fn resolve_reachable_host(remote_host: &str, remote_port: u16) -> Result<String,
         .local_addr()
         .map_err(|error| format!("failed to inspect local udp address: {error}"))?;
     Ok(local_addr.ip().to_string())
+}
+
+fn adb_command_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    for env_key in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
+        if let Some(raw) = std::env::var_os(env_key) {
+            let sdk_adb = PathBuf::from(raw).join("platform-tools").join(if cfg!(windows) {
+                "adb.exe"
+            } else {
+                "adb"
+            });
+            candidates.push(sdk_adb);
+        }
+    }
+
+    candidates.push(PathBuf::from(if cfg!(windows) { "adb.exe" } else { "adb" }));
+    candidates.push(PathBuf::from("adb"));
+    candidates
+}
+
+fn parse_adb_forward_tcp_port(raw: &str) -> Option<u16> {
+    raw.strip_prefix("tcp:")?.parse::<u16>().ok()
+}
+
+fn looks_like_android_emulator_guest(host: &str) -> bool {
+    host.starts_with("10.0.2.") || host.starts_with("10.0.3.")
+}
+/// Only allow reusing existing ADB forwards for Android emulator guest addresses.
+/// LAN IP addresses should NEVER reuse an existing forward that might
+/// belong to a different device.
+fn should_reuse_existing_adb_forward(remote_host: &str) -> bool {
+    looks_like_android_emulator_guest(remote_host)
+}
+
+fn reserve_local_tcp_port() -> Result<u16, String> {
+    let listener = StdTcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("failed to reserve local tcp port: {error}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| format!("failed to inspect reserved local tcp port: {error}"))?
+        .port();
+    drop(listener);
+    Ok(port)
+}
+
+fn run_adb_forward_command(args: &[String]) -> Result<(), String> {
+    let mut last_error: Option<String> = None;
+
+    for candidate in adb_command_candidates() {
+        let output = Command::new(&candidate).args(args).output();
+        match output {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                last_error = Some(if stderr.is_empty() {
+                    format!(
+                        "{} {} failed with status {}",
+                        candidate.display(),
+                        args.join(" "),
+                        output.status
+                    )
+                } else {
+                    stderr
+                });
+            }
+            Err(error) => {
+                last_error = Some(format!(
+                    "failed to run {} {}: {error}",
+                    candidate.display(),
+                    args.join(" ")
+                ));
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| "adb command unavailable".to_string()))
+}
+
+fn ensure_adb_forward_host_port(remote_port: u16) -> Result<Option<u16>, String> {
+    if let Some(existing_port) = find_adb_forward_host_port(remote_port)? {
+        return Ok(Some(existing_port));
+    }
+
+    let local_port = reserve_local_tcp_port()?;
+    run_adb_forward_command(&[
+        "forward".to_string(),
+        format!("tcp:{local_port}"),
+        format!("tcp:{remote_port}"),
+    ])?;
+    Ok(Some(local_port))
+}
+
+fn find_adb_forward_host_port(remote_port: u16) -> Result<Option<u16>, String> {
+    let mut last_error: Option<String> = None;
+
+    for candidate in adb_command_candidates() {
+        let output = Command::new(&candidate).args(["forward", "--list"]).output();
+        match output {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    let columns = line.split_whitespace().collect::<Vec<_>>();
+                    if columns.len() < 3 {
+                        continue;
+                    }
+
+                    let Some(local_port) = parse_adb_forward_tcp_port(columns[1]) else {
+                        continue;
+                    };
+                    let Some(mapped_remote_port) = parse_adb_forward_tcp_port(columns[2]) else {
+                        continue;
+                    };
+
+                    if mapped_remote_port == remote_port {
+                        return Ok(Some(local_port));
+                    }
+                }
+
+                return Ok(None);
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                last_error = Some(if stderr.is_empty() {
+                    format!(
+                        "adb forward --list failed with status {}",
+                        output.status
+                    )
+                } else {
+                    stderr
+                });
+            }
+            Err(error) => {
+                last_error = Some(format!(
+                    "failed to run {}: {error}",
+                    candidate.display()
+                ));
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| "adb command unavailable".to_string()))
+}
+
+async fn resolve_peer_dial_address(remote_host: &str, remote_port: u16) -> RuntimeDialAddress {
+    if probe_runtime_health(remote_host, remote_port).await {
+        return RuntimeDialAddress {
+            host: remote_host.to_string(),
+            port: remote_port,
+        };
+    }
+
+    // Issue 773: Only use ADB forwarding for Android emulator guest addresses.
+    // LAN IP addresses should never reuse an existing ADB forward that might
+    // belong to a different device.
+    let adb_forward_port = if should_reuse_existing_adb_forward(remote_host) {
+        ensure_adb_forward_host_port(remote_port).ok().flatten()
+    } else {
+        // For LAN addresses, do not use ADB forwarding at all
+        None
+    };
+
+    if let Some(local_port) = adb_forward_port {
+        return RuntimeDialAddress {
+            host: "127.0.0.1".to_string(),
+            port: local_port,
+        };
+    }
+
+    RuntimeDialAddress {
+        host: remote_host.to_string(),
+        port: remote_port,
+    }
 }
 
 async fn probe_runtime_health(host: &str, port: u16) -> bool {
@@ -674,11 +855,19 @@ pub fn runtime_service_reachable_address(
 }
 
 #[tauri::command]
+pub async fn runtime_service_peer_dial_address(
+    remote_host: String,
+    remote_port: u16,
+) -> Result<RuntimeDialAddress, String> {
+    Ok(resolve_peer_dial_address(&remote_host, remote_port).await)
+}
+
+#[tauri::command]
 pub fn signal_publish_fast(
     state: State<'_, Arc<RuntimeProcessState>>,
     request: SignalPublishFastRequest,
 ) -> Result<SignalPublishFastResponse, String> {
-    let (signal_pool, host_id) = {
+    let event_id = {
         let inner = lock_or_error(state.inner())?;
         let handle = match inner.handle.as_ref() {
             Some(handle) if handle.is_running() => handle,
@@ -691,20 +880,14 @@ pub fn signal_publish_fast(
             }
             None => return Err("embedded runtime not running".to_string()),
         };
-        (handle.clone_signal_pool(), handle.host_id().to_string())
-    };
-
-    let event_id = RuntimeHandle::publish_signal_to_pool(
-        &signal_pool,
-        &host_id,
-        RuntimePublishRequest {
+        handle.publish_signal(RuntimePublishRequest {
             topic: request.topic,
             source: request.source,
             payload: request.payload,
             trace_id: request.trace_id,
             origin_host_id: request.origin_host_id,
-        },
-    );
+        })
+    };
 
     Ok(SignalPublishFastResponse {
         accepted: true,
@@ -838,6 +1021,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_adb_forward_tcp_ports() {
+        assert_eq!(super::parse_adb_forward_tcp_port("tcp:39124"), Some(39124));
+        assert_eq!(super::parse_adb_forward_tcp_port("udp:39124"), None);
+    }
+
+    #[test]
+    fn detects_android_emulator_guest_hosts() {
+        assert!(super::looks_like_android_emulator_guest("10.0.2.15"));
+        assert!(super::looks_like_android_emulator_guest("10.0.3.15"));
+        assert!(!super::looks_like_android_emulator_guest("192.168.1.88"));
+    }
+
+    #[test]
     fn compose_status_hides_pid_for_external_runtime() {
         let inner = super::RuntimeInner {
             handle: None,
@@ -899,4 +1095,27 @@ mod tests {
             "embedded runtime status must not expose authSecret"
         );
     }
+#[test]
+fn only_android_emulator_guests_may_reuse_existing_adb_forwards() {
+    // Issue 773: LAN phone nodes should not reuse existing ADB forwards
+    // that might belong to a different device. Only Android emulator guest
+    // addresses can safely reuse ADB forwards since they are on a special
+    // virtual network that cannot be reached directly from the host.
+    
+    // Emulator guests CAN reuse ADB forwards
+    assert!(super::should_reuse_existing_adb_forward("10.0.2.15"));
+    assert!(super::should_reuse_existing_adb_forward("10.0.3.15"));
+    
+    // LAN IP addresses should NEVER reuse existing ADB forwards
+    assert!(!super::should_reuse_existing_adb_forward("192.168.1.88"));
+    assert!(!super::should_reuse_existing_adb_forward("192.168.101.5"));
+    // Note: 10.0.2.2 is a special emulator-host alias that IS allowed
+    
+    // Loopback should not use ADB forwarding
+    assert!(!super::should_reuse_existing_adb_forward("127.0.0.1"));
+    assert!(!super::should_reuse_existing_adb_forward("localhost"));
+    
+    // Public IPs should not use ADB forwarding
+    assert!(!super::should_reuse_existing_adb_forward("8.8.8.8"));
+}
 }

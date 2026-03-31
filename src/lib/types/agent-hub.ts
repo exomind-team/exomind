@@ -3,6 +3,8 @@ export type {
   RuntimeHostStatus,
   RuntimeHostRecord,
   RuntimeHostTrustState,
+  RuntimeHostVerificationStatus,
+  RuntimeHostVerificationTrigger,
   RuntimeServiceStatus,
 } from './agent-hub-runtime';
 export type { AgentMarketCategory, AgentMarketItem } from './agent-hub-market';
@@ -244,4 +246,3 @@ export interface AgentEnergySnapshot {
   phase: string; // 'normal' | 'slowing' | 'critical' | 'dying' | 'dormant'
   is_dormant: boolean;
 }
-

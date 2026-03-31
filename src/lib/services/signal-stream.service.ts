@@ -6,7 +6,12 @@
  */
 
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
-import type { SignalEvent, PublishRequest, PublishResponse } from '@/lib/types/signal-pool';
+import type {
+  SignalEvent,
+  PublishRequest,
+  PublishResponse,
+  SignalHistoryQuery,
+} from '@/lib/types/signal-pool';
 import {
   buildSignalBaseUrl,
   buildSignalStreamUrl,
@@ -87,8 +92,8 @@ export class SignalStreamService {
   }
 
   /** Fetch recent signal history from the RT. */
-  async history(limit?: number): Promise<SignalEvent[]> {
-    return this.transport.history(limit);
+  async history(query?: number | SignalHistoryQuery): Promise<SignalEvent[]> {
+    return this.transport.history(query);
   }
 
   get isConnected(): boolean {

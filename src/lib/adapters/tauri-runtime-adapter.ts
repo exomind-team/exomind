@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type {
   IRuntimePort,
+  RuntimeDialAddress,
   RuntimeReachableAddress,
   StartRuntimeInput,
 } from '@/lib/environment/interfaces/runtime.port';
@@ -64,6 +65,19 @@ export class TauriRuntimeAdapter implements IRuntimePort {
       };
     }
     return invoke<RuntimeReachableAddress>('runtime_service_reachable_address', {
+      remoteHost,
+      remotePort,
+    });
+  }
+
+  async getPeerDialAddress(remoteHost: string, remotePort: number): Promise<RuntimeDialAddress> {
+    if (!(await isTauri())) {
+      return {
+        host: remoteHost,
+        port: remotePort,
+      };
+    }
+    return invoke<RuntimeDialAddress>('runtime_service_peer_dial_address', {
       remoteHost,
       remotePort,
     });

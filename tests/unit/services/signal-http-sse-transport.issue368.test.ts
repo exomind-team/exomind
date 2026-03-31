@@ -138,6 +138,7 @@ describe('HttpSseSignalTransport（HTTP/SSE 传输适配器）', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
       body: { getReader: vi.fn() },
+      headers: { get: vi.fn(() => 'text/event-stream') },
     } as unknown as Response);
 
     const transport = new HttpSseSignalTransport({ host: HOST });
@@ -157,6 +158,38 @@ describe('HttpSseSignalTransport（HTTP/SSE 传输适配器）', () => {
           'Last-Event-ID': 'evt-last-1',
         }),
       })
+    );
+  });
+
+  it('builds filtered history query for proof polling（history 查询支持 proof 过滤参数）', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ([]),
+    } as Response);
+
+    const transport = new HttpSseSignalTransport({
+      host: {
+        ...HOST,
+        authToken: 'proof-token',
+      },
+    });
+
+    await (transport as unknown as {
+      history: (query: unknown) => Promise<unknown>;
+    }).history({
+      limit: 40,
+      topicPrefix: 'system.link_proof.',
+      afterEventId: 'evt-last-proof',
+      excludeTopicPrefix: 'system.link_proof.resultless',
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/signals/history?limit=40&topic_prefix=system.link_proof.&after_event_id=evt-last-proof&exclude_topic_prefix=system.link_proof.resultless',
+      {
+        headers: {
+          Authorization: 'Bearer proof-token',
+        },
+      },
     );
   });
 });

@@ -51,6 +51,7 @@
 ## 开发指南
 
 - [快速上手](development/quickstart.md) -- 开发环境搭建指南
+- [设备配对流程](development/device-pairing-flow.md) -- node-first 配对、地址解析、Android 模拟器特殊规则
 - [Git 规范](development/git-spec.md) -- Git 工作流规范（权威版）
 - [Runtime Agent API](development/exomind-runtime-agents-api.md) -- Runtime Agent HTTP/SSE 接口说明
 - [Issue 追踪罗盘](development/issue-tracking-compass.md) -- Issue 去重/决策/新建/追加流程
@@ -157,6 +158,7 @@
 
 > 以下文档位于项目根目录（非 docs/ 内），此处提供交叉引用。
 
+- [src/docs/user-guide.md](../src/docs/user-guide.md) -- 用户指南，包含设备配对与多端互联说明
 - [README.md](../README.md) -- 项目介绍、快速上手、**多实例管理器用法（tauri:manager）**
 - [CLAUDE.md](../CLAUDE.md) -- Claude Code 专用指令
 - [AGENTS.md](../AGENTS.md) -- Codex 专用指令
@@ -174,5 +176,5 @@
 
 ---
 
-> 最后更新: 2026-03-15
-> 导航版本: v4.1
+> 最后更新: 2026-03-31
+> 导航版本: v4.2

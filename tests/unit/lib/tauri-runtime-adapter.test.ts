@@ -29,4 +29,23 @@ describe('TauriRuntimeAdapter（Tauri 运行时适配器）', () => {
 
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).not.toContain('"authSecret"');
   });
+
+  it('invokes peer dial address command（调用 peer 拨号地址命令）', async () => {
+    invokeMock.mockResolvedValue({
+      host: '127.0.0.1',
+      port: 39124,
+    });
+
+    const adapter = new TauriRuntimeAdapter();
+    const result = await adapter.getPeerDialAddress('10.0.2.15', 9124);
+
+    expect(result).toEqual({
+      host: '127.0.0.1',
+      port: 39124,
+    });
+    expect(invokeMock).toHaveBeenCalledWith('runtime_service_peer_dial_address', {
+      remoteHost: '10.0.2.15',
+      remotePort: 9124,
+    });
+  });
 });

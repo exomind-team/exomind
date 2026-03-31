@@ -1524,7 +1524,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   },
   {
     id: 'device-pairing',
-    label: '设备配对',
+    label: '高级设备配对',
     category: 'developer',
     type: 'custom',
     visible: devOnly,

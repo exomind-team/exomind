@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IStoragePort, QueryOptions, QueryResult } from '@/lib/environment/interfaces/storage.port';
-import { RuntimeHostServiceImpl } from '@/lib/services/runtime-host.service';
+import {
+  RuntimeHostServiceImpl,
+  type RuntimeHostMetadataPatch,
+} from '@/lib/services/runtime-host.service';
 
 class InMemoryStorageAdapter implements IStoragePort {
   private readonly memory = new Map<string, unknown>();
@@ -135,6 +138,127 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     expect(updated.trustState).toBe('confirmed_peer');
   });
 
+  it('persists verification result fields across service instances（验证结果字段应跨实例持久化）', async () => {
+    const serviceA = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-30T08:00:00.000Z'),
+    });
+    const created = await serviceA.addHost({
+      name: 'Verified Peer',
+      host: '10.0.0.21',
+      port: 1949,
+    });
+
+    const updated = await serviceA.mergeHostMetadata(created.id, {
+      hostId: 'host-verified-1',
+      lastSuccessfulDialAddress: '10.0.0.21:1949',
+      advertisedListenAddress: '10.0.0.21:1949',
+      verificationStatus: 'verified',
+      lastVerifiedAt: '2026-03-30T08:00:00.000Z',
+      lastVerificationTrigger: 'pairing_auto',
+      localInitiatedRttMs: 42,
+      peerInitiatedRttMs: 57,
+      lastVerificationError: 'stale error should still persist',
+    });
+
+    expect(updated.verificationStatus).toBe('verified');
+    expect(updated.lastVerifiedAt).toBe('2026-03-30T08:00:00.000Z');
+    expect(updated.lastVerificationTrigger).toBe('pairing_auto');
+    expect(updated.localInitiatedRttMs).toBe(42);
+    expect(updated.peerInitiatedRttMs).toBe(57);
+    expect(updated.lastVerificationError).toBe('stale error should still persist');
+
+    const serviceB = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+    });
+    const hosts = await serviceB.listHosts();
+
+    expect(hosts[0]).toEqual(expect.objectContaining({
+      id: created.id,
+      trustState: 'confirmed_peer',
+      verificationStatus: 'verified',
+      lastVerifiedAt: '2026-03-30T08:00:00.000Z',
+      lastVerificationTrigger: 'pairing_auto',
+      localInitiatedRttMs: 42,
+      peerInitiatedRttMs: 57,
+      lastVerificationError: 'stale error should still persist',
+    }));
+  });
+
+  it('preserves confirmed peer idle verification status when reading storage（confirmed_peer 的 idle 验证状态读取时不能被吞掉）', async () => {
+    await storage.write('agent_runtime_hosts_v1', [{
+      id: 'confirmed-peer-idle',
+      name: 'Trusted But Unverified',
+      host: '10.0.0.55',
+      port: 1949,
+      status: 'online',
+      createdAt: '2026-03-30T07:00:00.000Z',
+      updatedAt: '2026-03-30T07:00:00.000Z',
+      trustState: 'confirmed_peer',
+      hostId: 'host-confirmed-idle',
+      manualOverride: '10.0.0.55:1949',
+      lastSuccessfulDialAddress: '10.0.0.55:1949',
+      advertisedListenAddress: '10.0.0.55:1949',
+      verificationStatus: 'idle',
+      lastVerifiedAt: '2026-03-30T06:59:00.000Z',
+      lastVerificationTrigger: 'manual_retry',
+      localInitiatedRttMs: 18,
+      peerInitiatedRttMs: 23,
+      lastVerificationError: 'waiting for first proof',
+    }]);
+
+    const service = new RuntimeHostServiceImpl({ storage, fetchImpl: vi.fn() });
+    const [host] = await service.listHosts();
+
+    expect(host).toEqual(expect.objectContaining({
+      id: 'confirmed-peer-idle',
+      trustState: 'confirmed_peer',
+      verificationStatus: 'idle',
+      lastVerifiedAt: '2026-03-30T06:59:00.000Z',
+      lastVerificationTrigger: 'manual_retry',
+      localInitiatedRttMs: 18,
+      peerInitiatedRttMs: 23,
+      lastVerificationError: 'waiting for first proof',
+    }));
+  });
+
+  it('allows clearing verification fields with null patch（允许用 null 清空验证字段）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-30T09:00:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Clearable Peer',
+      host: '10.0.0.88',
+      port: 1949,
+      verificationStatus: 'failed',
+      lastVerifiedAt: '2026-03-30T08:59:00.000Z',
+      lastVerificationTrigger: 'manual_retry',
+      localInitiatedRttMs: 91,
+      peerInitiatedRttMs: 73,
+      lastVerificationError: 'stale verification error',
+    });
+
+    const cleared = await service.mergeHostMetadata(created.id, {
+      verificationStatus: 'running',
+      lastVerifiedAt: null,
+      lastVerificationTrigger: null,
+      localInitiatedRttMs: null,
+      peerInitiatedRttMs: null,
+      lastVerificationError: null,
+    });
+
+    expect(cleared.verificationStatus).toBe('running');
+    expect(cleared.lastVerifiedAt).toBeUndefined();
+    expect(cleared.lastVerificationTrigger).toBeUndefined();
+    expect(cleared.localInitiatedRttMs).toBeUndefined();
+    expect(cleared.peerInitiatedRttMs).toBeUndefined();
+    expect(cleared.lastVerificationError).toBeUndefined();
+  });
+
   it('does not auto-promote discovered candidate without manual save（候选节点不会自动升级 confirmed）', async () => {
     const service = new RuntimeHostServiceImpl({
       storage,
@@ -157,6 +281,64 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     expect(updated.trustState).toBe('discovered_candidate');
     expect(updated.hostId).toBe('host-candidate-1');
     expect(updated.lastSuccessfulDialAddress).toBe('10.0.0.30:1949');
+  });
+
+  it('does not auto-promote discovered candidate even with adb-forward override（候选节点带 adb-forward 也不会自动升级 confirmed）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-07T11:35:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Discovered Android Candidate',
+      host: '10.0.2.15',
+      port: 9124,
+      trustState: 'discovered_candidate',
+      advertisedListenAddress: '10.0.2.15:9124',
+      manualOverride: '127.0.0.1:39124',
+    });
+
+    const updated = await service.mergeHostMetadata(created.id, {
+      hostId: 'host-android-1',
+      lastSuccessfulDialAddress: '127.0.0.1:39124',
+    });
+
+    expect(updated.trustState).toBe('discovered_candidate');
+    expect(updated.hostId).toBe('host-android-1');
+    expect(updated.manualOverride).toBe('127.0.0.1:39124');
+    expect(updated.lastSuccessfulDialAddress).toBe('127.0.0.1:39124');
+  });
+
+  it('updates persisted endpoint fields when peer address is refreshed（对端地址刷新时更新持久化 endpoint 字段）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-30T11:35:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Node rt-deskt (192.168.85.1:21753)',
+      host: '192.168.85.1',
+      port: 21753,
+      trustState: 'discovered_candidate',
+      hostId: 'rt-desktop',
+      advertisedListenAddress: '192.168.85.1:21753',
+    });
+
+    const updated = await service.mergeHostMetadata(created.id, {
+      hostId: 'rt-desktop',
+      advertisedListenAddress: '192.168.101.5:21753',
+      lastSuccessfulDialAddress: '192.168.101.5:21753',
+      host: '192.168.101.5',
+      port: 21753,
+      name: 'Node rt-deskt (192.168.101.5:21753)',
+    } as RuntimeHostMetadataPatch);
+
+    expect(updated.host).toBe('192.168.101.5');
+    expect(updated.port).toBe(21753);
+    expect(updated.name).toBe('Node rt-deskt (192.168.101.5:21753)');
+    expect(updated.advertisedListenAddress).toBe('192.168.101.5:21753');
+    expect(updated.lastSuccessfulDialAddress).toBe('192.168.101.5:21753');
+    expect(updated.trustState).toBe('discovered_candidate');
   });
 
   it('keeps confirmed peer host id stable when dial target drifts（confirmed peer 不应被静默改绑到新 host_id）', async () => {
