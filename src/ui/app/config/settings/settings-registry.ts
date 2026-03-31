@@ -228,6 +228,7 @@ import {
   SoundPresetSetting,
   MossVoiceTestSetting,
   VolcanoEngineKeySetting,
+  VolcanoUsageSummarySetting,
   VolcanoVoiceTestSetting,
 } from '@/ui/app/components/settings/settings-custom-items';
 import { AIRegistrySetting } from '@/ui/app/components/settings/ai-registry-settings-card';
@@ -956,6 +957,14 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     type: 'custom',
     visible: volcanoOnly,
     component: VolcanoEngineKeySetting,
+  },
+  {
+    id: 'volcano-usage-summary',
+    label: '火山用量概览',
+    category: 'input',
+    type: 'custom',
+    visible: volcanoOnly,
+    component: VolcanoUsageSummarySetting,
   },
   {
     id: 'volcano-endpoint',

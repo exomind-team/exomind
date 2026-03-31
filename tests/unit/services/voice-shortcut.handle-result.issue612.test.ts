@@ -5,6 +5,7 @@ const writeClipboardMock = vi.fn();
 const publishVoiceTranscriptSignalMock = vi.fn();
 const appendEventWithEcsReplicationMock = vi.fn();
 const buildVoiceShortcutStorageEventMock = vi.fn();
+const recordVolcanoUsageDurationMock = vi.fn();
 
 const runtimeState = {
   voiceAutoRecordEnabled: true,
@@ -40,6 +41,10 @@ vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
 
 vi.mock('@/services/voice-shortcut-eventlog', () => ({
   buildVoiceShortcutStorageEvent: (...args: unknown[]) => buildVoiceShortcutStorageEventMock(...args),
+}));
+
+vi.mock('@/config/volcano-usage-stats', () => ({
+  recordVolcanoUsageDuration: (...args: unknown[]) => recordVolcanoUsageDurationMock(...args),
 }));
 
 vi.mock('@/config/voice-auto-record', () => ({
@@ -87,6 +92,7 @@ describe('VoiceShortcutService handleResult (#612)', () => {
       },
     });
     invokeMock.mockResolvedValue(null);
+    recordVolcanoUsageDurationMock.mockReset();
   });
 
   it('publishes signal and appends storage event when auto-record is enabled', async () => {
@@ -182,5 +188,18 @@ describe('VoiceShortcutService handleResult (#612)', () => {
     );
     expect(buildVoiceShortcutStorageEventMock).not.toHaveBeenCalled();
     expect(appendEventWithEcsReplicationMock).not.toHaveBeenCalled();
+  });
+
+  it('records volcano duration stats when provider is volcano（火山识别结果会累计本地时长）', async () => {
+    const service = new VoiceShortcutService();
+    (service as any).asrProvider = 'volcano';
+
+    await (service as any).handleResult(
+      { text: '火山统计', confidence: 0.97, lang: 'zh-CN', duration: 4_200 },
+      66,
+      '火山 2.0 小时版 · 双向流式优化版（推荐）',
+    );
+
+    expect(recordVolcanoUsageDurationMock).toHaveBeenCalledWith(4_200);
   });
 });

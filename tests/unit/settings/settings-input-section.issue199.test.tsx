@@ -131,6 +131,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
       expect(screen.getByText('火山资源模型')).toBeInTheDocument();
       expect(screen.getByText('火山 Resource ID')).toBeInTheDocument();
       expect(screen.getByText('火山识别语言')).toBeInTheDocument();
+      expect(screen.getByText('火山用量概览')).toBeInTheDocument();
     });
 
     expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();

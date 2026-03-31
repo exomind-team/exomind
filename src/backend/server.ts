@@ -65,7 +65,7 @@ const ENV_DEFAULTS = {
   ),
   APP_KEY: process.env.VOLCANO_APP_KEY || process.env.VITE_VOLCANO_APP_KEY || '',
   ACCESS_KEY: process.env.VOLCANO_ACCESS_KEY || process.env.VITE_VOLCANO_ACCESS_KEY || '',
-  RESOURCE_ID: process.env.VOLCANO_RESOURCE_ID || process.env.VITE_VOLCANO_RESOURCE_ID || 'volc.bigasr.sauc.duration',
+  RESOURCE_ID: process.env.VOLCANO_RESOURCE_ID || process.env.VITE_VOLCANO_RESOURCE_ID || 'volc.seedasr.sauc.duration',
   ASR_AUTH_TOKEN: process.env.EXOMIND_ASR_AUTH_TOKEN || '',
 } as const;
 

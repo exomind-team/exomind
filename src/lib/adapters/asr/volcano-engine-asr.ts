@@ -40,7 +40,7 @@ export interface VolcanoEngineASRConfig {
 const DEFAULT_CONFIG: VolcanoEngineASRConfig = {
   appKey: (import.meta.env?.VITE_VOLCANO_APP_KEY as string) || '',
   accessKey: (import.meta.env?.VITE_VOLCANO_ACCESS_KEY as string) || '',
-  resourceId: (import.meta.env?.VITE_VOLCANO_RESOURCE_ID as string) || 'volc.bigasr.sauc.duration',
+  resourceId: (import.meta.env?.VITE_VOLCANO_RESOURCE_ID as string) || 'volc.seedasr.sauc.duration',
 };
 
 // ========== 请求/响应 类型 ==========

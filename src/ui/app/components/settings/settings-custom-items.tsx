@@ -58,6 +58,13 @@ import {
   subscribeVolcanoAccessKeyChanges,
   subscribeVolcanoAppKeyChanges,
 } from '@/config/volcano-asr-settings';
+import {
+  DEFAULT_VOLCANO_PACKAGE_HOURS,
+  getVolcanoUsageStats,
+  getVolcanoUsageSummary,
+  setVolcanoPackageHours,
+  subscribeVolcanoUsageStatsChanges,
+} from '@/config/volcano-usage-stats';
 import { importTasksFromFile } from '@/services/impl/settings-data-service';
 import {
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
@@ -977,6 +984,119 @@ function formatVolcanoEngineKeySummary(appKey: string, accessKey: string): strin
     return '部分配置';
   }
   return '未配置';
+}
+
+function formatHoursFromSeconds(seconds: number): string {
+  return `${(seconds / 3600).toFixed(2)}h`;
+}
+
+function formatEstimatedDays(days: number | null): string {
+  if (days == null || !Number.isFinite(days)) {
+    return '暂无估算';
+  }
+  return `${days.toFixed(1)} 天`;
+}
+
+function VolcanoUsageSummaryPanel() {
+  const [stats, setStats] = useSettingValue(
+    () => getVolcanoUsageStats(),
+    subscribeVolcanoUsageStatsChanges,
+  );
+  const [packageHoursDraft, setPackageHoursDraft] = useState(() => String(getVolcanoUsageStats().packageHours));
+  const summary = getVolcanoUsageSummary(stats);
+
+  useEffect(() => {
+    setPackageHoursDraft(String(stats.packageHours));
+  }, [stats.packageHours]);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3">
+        <DiagnosticsValue label="资源包总时长" value={`${stats.packageHours}h`} />
+        <DiagnosticsValue label="本地累计识别" value={formatHoursFromSeconds(summary.totalUsedSeconds)} />
+        <DiagnosticsValue label="今日识别时长" value={formatHoursFromSeconds(summary.todayUsedSeconds)} />
+        <DiagnosticsValue label="本地剩余估算" value={formatHoursFromSeconds(summary.remainingSeconds)} />
+        <DiagnosticsValue label="已用占比" value={`${(summary.usedRatio * 100).toFixed(1)}%`} />
+        <DiagnosticsValue label="近 7 日累计" value={formatHoursFromSeconds(summary.last7DaysUsedSeconds)} />
+        <DiagnosticsValue label="预计剩余可用" value={formatEstimatedDays(summary.estimatedRemainingDays)} />
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-4 py-3 text-xs text-[#57534E] dark:border-[#FFFFFF15] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+        <p>本地统计仅覆盖当前设备、当前应用内成功完成的火山语音识别。</p>
+        <p>它不等同火山控制台的官方账单总量；官方总历史用量仍建议在火山控制台查看。</p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">资源包总时长（小时）</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={packageHoursDraft}
+            onChange={(event) => setPackageHoursDraft(event.target.value)}
+            className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+          />
+          <button
+            type="button"
+            onClick={() => setStats(setVolcanoPackageHours(Number.parseInt(packageHoursDraft || '0', 10) || DEFAULT_VOLCANO_PACKAGE_HOURS))}
+            className="shrink-0 rounded-xl bg-[#1C1917] px-4 py-3 text-sm text-white transition-colors hover:bg-[#292524] dark:bg-[#FAFAF9] dark:text-[#1C1917]"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function VolcanoUsageSummarySetting(props: { ctx: SettingsContext }) {
+  const [open, setOpen] = useState(false);
+  const [stats] = useSettingValue(
+    () => getVolcanoUsageStats(),
+    subscribeVolcanoUsageStatsChanges,
+  );
+  const summary = getVolcanoUsageSummary(stats);
+  const shouldUseDialog = props.ctx.isDesktop || Boolean(props.ctx.isLandscape);
+  const detail = <VolcanoUsageSummaryPanel />;
+
+  return (
+    <>
+      <SettingRow
+        icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="火山用量概览"
+        onClick={() => setOpen(true)}
+        right={<SecondaryValue value={`已用 ${formatHoursFromSeconds(summary.totalUsedSeconds)} / ${stats.packageHours}h`} />}
+      />
+      {shouldUseDialog ? (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent className="rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>火山用量概览</DialogTitle>
+              <DialogDescription>查看当前设备内的火山语音识别累计时长与剩余估算</DialogDescription>
+            </DialogHeader>
+            {detail}
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <Drawer open={open} onOpenChange={setOpen}>
+          <DrawerContent className="dark:bg-[#1C1917]">
+            <DrawerHeader className="pb-0 text-center">
+              <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                火山用量概览
+              </DrawerTitle>
+              <DrawerDescription className="text-xs text-[#A8A29E]">
+                查看当前设备内的火山语音识别累计时长与剩余估算
+              </DrawerDescription>
+            </DrawerHeader>
+            <div className="px-5 pb-8 pt-2">
+              {detail}
+            </div>
+          </DrawerContent>
+        </Drawer>
+      )}
+    </>
+  );
 }
 
 function VolcanoEngineKeyPanel({

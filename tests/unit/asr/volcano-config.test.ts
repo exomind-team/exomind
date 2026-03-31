@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_VOLCANO_ASR_OPTIONS,
+  DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_RESOURCE_PRESETS,
   buildVolcanoHttpRequestPayload,
@@ -20,6 +21,7 @@ describe('volcano-config', () => {
       'volc.seedasr.sauc.duration',
       'volc.seedasr.sauc.concurrent',
     ]);
+    expect(DEFAULT_VOLCANO_RESOURCE_ID).toBe('volc.seedasr.sauc.duration');
   });
 
   it('keeps the endpoint menu aligned with official websocket paths', () => {

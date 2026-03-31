@@ -38,6 +38,7 @@ import {
   subscribeVolcanoResourceIdChanges,
 } from '@/config/volcano-asr-settings';
 import { isTauriWindow } from '@/config/runtime-target';
+import { recordVolcanoUsageDuration } from '@/config/volcano-usage-stats';
 
 type RecordingState = 'idle' | 'recording' | 'recognizing';
 
@@ -283,6 +284,9 @@ export function VolcanoASRTestPage() {
       config: buildRuntimeConfig(),
     })) as AsrResult;
 
+    if (typeof res.duration === 'number' && res.duration > 0) {
+      recordVolcanoUsageDuration(res.duration);
+    }
     const elapsed = Date.now() - startMs;
     setResult(res);
     setState('idle');
@@ -321,6 +325,9 @@ export function VolcanoASRTestPage() {
     }
 
     const res = (await response.json()) as AsrResult;
+    if (typeof res.duration === 'number' && res.duration > 0) {
+      recordVolcanoUsageDuration(res.duration);
+    }
     const elapsed = Date.now() - startMs;
     setResult(res);
     setState('idle');
