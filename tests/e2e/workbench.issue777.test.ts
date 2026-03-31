@@ -5,6 +5,7 @@ async function setupIssue777Flags(page: Page) {
     localStorage.setItem('exomind:uiMode', 'new');
     localStorage.setItem('exomind:desktopAdaptiveEnabled', 'true');
     localStorage.setItem('exomind:agentPageEnabled', 'true');
+    localStorage.setItem('exomind:useMockData', 'true');
     localStorage.setItem('exomind:workbenchLegacyShimEnabled', 'true');
     localStorage.setItem('exomind:workbench:phase1-flat:v1', JSON.stringify({
       version: 1,
@@ -25,6 +26,7 @@ async function setupIssue777Flags(page: Page) {
           bindingType: 'agent-session',
           status: 'running',
           description: 'Primary planner session',
+          openPath: '/agents/chat/agent-review?workbenchBypass=true',
         },
         {
           id: 'pane-ssh-review',
@@ -33,6 +35,7 @@ async function setupIssue777Flags(page: Page) {
           bindingType: 'ssh-runtime',
           status: 'attached',
           description: 'Remote shell attachment',
+          openPath: '/agents?workbenchBypass=true&focusSession=session-terminal',
         },
       ],
     }));
@@ -55,12 +58,23 @@ test.describe('Issue #777 flat workbench（平铺工作台最小可见功能）'
     await expect(page.getByTestId('workbench-pane-ssh-runtime')).toBeVisible();
     await expect(page.getByText('Planner Agent')).toBeVisible();
     await expect(page.getByText('Remote shell attachment')).toBeVisible();
+    await expect(page.getByTestId('workbench-pane-open-pane-agent-review')).toBeVisible();
 
     await page.reload();
 
     await expect(page.getByTestId('workbench-space-name')).toHaveText('Review Space');
     await expect(page.getByText('Planner Agent')).toBeVisible();
     await expect(page.getByText('Remote shell attachment')).toBeVisible();
+  });
+
+  test('clicking a pane reaches a meaningful legacy destination（点击 pane 会到达有意义的旧入口）', async ({ page }) => {
+    await page.goto('/workbench');
+
+    await expect(page.getByTestId('workbench-pane-open-pane-agent-review')).toBeVisible();
+    await page.getByTestId('workbench-pane-open-pane-agent-review').click();
+
+    await expect(page).toHaveURL(/\/agents\/chat\/agent-review\?workbenchBypass=true$/);
+    await expect(page.getByTestId('workbench-page')).toHaveCount(0);
   });
 
   test('routes /agents to the workbench when shim is enabled（开启 shim 后 /agents 落到工作台）', async ({ page }) => {

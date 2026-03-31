@@ -1,3 +1,5 @@
+import type { SessionInfo, SessionStatus } from '@/lib/types/session';
+
 export const WORKBENCH_PHASE1_STORAGE_KEY = 'exomind:workbench:phase1-flat:v1';
 
 export type WorkbenchBindingType =
@@ -8,7 +10,13 @@ export type WorkbenchBindingType =
 
 export type WorkbenchViewKind = 'session-view' | 'runtime-view' | 'inspector-view';
 
-export type WorkbenchPaneStatus = 'running' | 'attached' | 'ready' | 'idle' | 'error';
+export type WorkbenchPaneStatus =
+  | 'running'
+  | 'attached'
+  | 'ready'
+  | 'waiting'
+  | 'idle'
+  | 'error';
 
 export type WorkbenchSurfaceState = {
   id: string;
@@ -22,6 +30,15 @@ export type WorkbenchPaneState = {
   bindingType: WorkbenchBindingType;
   status: WorkbenchPaneStatus;
   description: string;
+  sessionId?: string;
+  agentId?: string;
+  ptyId?: string;
+  /**
+   * Navigation path / 导航路径:
+   * agent-session -> legacy chat（旧聊天页）
+   * runtime pane -> legacy agents hub（旧网络页）
+   */
+  openPath?: string;
 };
 
 export type WorkbenchSpaceState = {
@@ -38,28 +55,36 @@ export type WorkbenchFlatState = {
 };
 
 export type WorkbenchLegacyIntent =
-  | {
-      source: 'agents-hub';
-      route: '/agents';
-    }
-  | {
-      source: 'agent-chat';
-      route: string;
-      agentId: string;
-    };
+  | { source: 'agents-hub'; route: '/agents' }
+  | { source: 'agent-chat'; route: string; agentId: string };
+
+const WORKBENCH_BINDING_TYPES: WorkbenchBindingType[] = [
+  'agent-session',
+  'pty-runtime',
+  'ssh-runtime',
+  'browser-runtime',
+];
+
+const WORKBENCH_VIEW_KINDS: WorkbenchViewKind[] = [
+  'session-view',
+  'runtime-view',
+  'inspector-view',
+];
+
+const WORKBENCH_PANE_STATUSES: WorkbenchPaneStatus[] = [
+  'running',
+  'attached',
+  'ready',
+  'waiting',
+  'idle',
+  'error',
+];
 
 function createDefaultWorkbenchFlatState(nowIso: string): WorkbenchFlatState {
   return {
     version: 1,
-    space: {
-      id: 'default-space',
-      name: 'Agent Workbench',
-      restoredAt: nowIso,
-    },
-    surface: {
-      id: 'surface-main',
-      layoutPreset: 'flat-2up',
-    },
+    space: { id: 'default-space', name: 'Agent Workbench', restoredAt: nowIso },
+    surface: { id: 'surface-main', layoutPreset: 'flat-2up' },
     panes: [
       {
         id: 'pane-agent-daily',
@@ -81,34 +106,14 @@ function createDefaultWorkbenchFlatState(nowIso: string): WorkbenchFlatState {
   };
 }
 
-const WORKBENCH_BINDING_TYPES: WorkbenchBindingType[] = [
-  'agent-session',
-  'pty-runtime',
-  'ssh-runtime',
-  'browser-runtime',
-];
-
-const WORKBENCH_VIEW_KINDS: WorkbenchViewKind[] = [
-  'session-view',
-  'runtime-view',
-  'inspector-view',
-];
-
-const WORKBENCH_PANE_STATUSES: WorkbenchPaneStatus[] = [
-  'running',
-  'attached',
-  'ready',
-  'idle',
-  'error',
-];
-
 function isWorkbenchPaneState(value: unknown): value is WorkbenchPaneState {
   if (!value || typeof value !== 'object') {
     return false;
   }
 
   const candidate = value as Partial<WorkbenchPaneState>;
-  return typeof candidate.id === 'string'
+  return (
+    typeof candidate.id === 'string'
     && typeof candidate.title === 'string'
     && typeof candidate.description === 'string'
     && typeof candidate.viewKind === 'string'
@@ -117,7 +122,7 @@ function isWorkbenchPaneState(value: unknown): value is WorkbenchPaneState {
     && WORKBENCH_BINDING_TYPES.includes(candidate.bindingType as WorkbenchBindingType)
     && typeof candidate.status === 'string'
     && WORKBENCH_PANE_STATUSES.includes(candidate.status as WorkbenchPaneStatus)
-    && typeof candidate.description === 'string';
+  );
 }
 
 function isWorkbenchSurfaceState(value: unknown): value is WorkbenchSurfaceState {
@@ -136,89 +141,12 @@ function hasValidWorkbenchPanes(value: unknown): value is WorkbenchPaneState[] {
     && value.every((pane) => isWorkbenchPaneState(pane));
 }
 
-function isLegacyWorkbenchFlatState(value: unknown): value is {
-  version: 1;
-  space: WorkbenchSpaceState;
-  panes: Array<{
-    id: string;
-    title: string;
-    runtimeKind: 'agent-session' | 'ssh-runtime';
-    status: 'running' | 'attached';
-    description: string;
-  }>;
-} {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const candidate = value as {
-    version?: number;
-    space?: WorkbenchSpaceState;
-    panes?: Array<{
-      id: string;
-      title: string;
-      runtimeKind: 'agent-session' | 'ssh-runtime';
-      status: 'running' | 'attached';
-      description: string;
-    }>;
-  };
-
-  return candidate.version === 1
-    && !!candidate.space
-    && typeof candidate.space.id === 'string'
-    && typeof candidate.space.name === 'string'
-    && typeof candidate.space.restoredAt === 'string'
-    && Array.isArray(candidate.panes)
-    && candidate.panes.every((pane) =>
-      typeof pane.id === 'string'
-      && typeof pane.title === 'string'
-      && (pane.runtimeKind === 'agent-session' || pane.runtimeKind === 'ssh-runtime')
-      && (pane.status === 'running' || pane.status === 'attached')
-      && typeof pane.description === 'string'
-    );
+function isLegacyWorkbenchFlatState(_value: unknown): boolean {
+  return false;
 }
 
-function normalizeLegacyWorkbenchFlatState(legacy: {
-  version: 1;
-  space: WorkbenchSpaceState;
-  panes: Array<{
-    id: string;
-    title: string;
-    runtimeKind: 'agent-session' | 'ssh-runtime';
-    status: 'running' | 'attached';
-    description: string;
-  }>;
-}): WorkbenchFlatState {
-  return {
-    version: legacy.version,
-    space: legacy.space,
-    surface: {
-      id: 'surface-main',
-      layoutPreset: 'flat-2up',
-    },
-    panes: legacy.panes.map((pane) => ({
-      id: pane.id,
-      title: pane.title,
-      viewKind: pane.runtimeKind === 'agent-session' ? 'session-view' : 'runtime-view',
-      bindingType: pane.runtimeKind,
-      status: pane.status,
-      description: pane.description,
-    })),
-  };
-}
-
-function parseWorkbenchFlatState(raw: string): WorkbenchFlatState | null {
-  const parsed = JSON.parse(raw) as unknown;
-
-  if (isWorkbenchFlatState(parsed)) {
-    return parsed;
-  }
-
-  if (isLegacyWorkbenchFlatState(parsed)) {
-    return normalizeLegacyWorkbenchFlatState(parsed);
-  }
-
-  return null;
+function normalizeLegacyWorkbenchFlatState(_legacy: unknown): WorkbenchFlatState {
+  throw new Error('legacy migration not implemented in this commit');
 }
 
 function isWorkbenchFlatState(value: unknown): value is WorkbenchFlatState {
@@ -230,14 +158,32 @@ function isWorkbenchFlatState(value: unknown): value is WorkbenchFlatState {
   const space = candidate.space as Partial<WorkbenchSpaceState> | undefined;
   const surface = candidate.surface as Partial<WorkbenchSurfaceState> | undefined;
 
-  return candidate.version === 1
+  return (
+    candidate.version === 1
     && !!space
     && typeof space.id === 'string'
     && typeof space.name === 'string'
     && typeof space.restoredAt === 'string'
     && !!surface
     && isWorkbenchSurfaceState(surface)
-    && hasValidWorkbenchPanes(candidate.panes);
+    && hasValidWorkbenchPanes(candidate.panes)
+  );
+}
+
+function parseWorkbenchFlatState(raw: string): WorkbenchFlatState | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (isWorkbenchFlatState(parsed)) {
+      return parsed;
+    }
+    if (isLegacyWorkbenchFlatState(parsed)) {
+      return normalizeLegacyWorkbenchFlatState(parsed);
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 export function writeWorkbenchFlatState(state: WorkbenchFlatState): void {
@@ -248,7 +194,7 @@ export function writeWorkbenchFlatState(state: WorkbenchFlatState): void {
   try {
     window.localStorage.setItem(WORKBENCH_PHASE1_STORAGE_KEY, JSON.stringify(state));
   } catch {
-    // Storage is a best-effort cache during Phase 1 bootstrap.
+    // Best-effort cache only / 尽力缓存即可。
   }
 }
 
@@ -262,14 +208,15 @@ export function readWorkbenchFlatState(): WorkbenchFlatState | null {
     if (!raw) {
       return null;
     }
-
     return parseWorkbenchFlatState(raw);
   } catch {
     return null;
   }
 }
 
-export function readOrCreateWorkbenchFlatState(now: () => string = () => new Date().toISOString()): WorkbenchFlatState {
+export function readOrCreateWorkbenchFlatState(
+  now: () => string = () => new Date().toISOString(),
+): WorkbenchFlatState {
   const stored = readWorkbenchFlatState();
   if (stored) {
     return stored;
@@ -286,10 +233,7 @@ export function resolveWorkbenchLegacyIntent(search: string): WorkbenchLegacyInt
   const legacySource = params.get('legacySource');
 
   if (legacySource === 'agents-hub') {
-    return {
-      source: 'agents-hub',
-      route: '/agents',
-    };
+    return { source: 'agents-hub', route: '/agents' };
   }
 
   if (legacySource === 'agent-chat') {
@@ -297,7 +241,6 @@ export function resolveWorkbenchLegacyIntent(search: string): WorkbenchLegacyInt
     if (!agentId) {
       return null;
     }
-
     return {
       source: 'agent-chat',
       route: `/agents/chat/${agentId}`,
@@ -312,11 +255,7 @@ export function applyWorkbenchLegacyIntent(
   state: WorkbenchFlatState,
   intent: WorkbenchLegacyIntent | null,
 ): WorkbenchFlatState {
-  if (!intent) {
-    return state;
-  }
-
-  if (intent.source !== 'agent-chat') {
+  if (!intent || intent.source !== 'agent-chat') {
     return state;
   }
 
@@ -331,11 +270,97 @@ export function applyWorkbenchLegacyIntent(
       ...pane,
       title: `Agent Chat / ${intent.agentId}`,
       description: `Legacy handoff from ${intent.route} / 来自旧聊天入口的接力`,
+      agentId: intent.agentId,
+      openPath: `${intent.route}?workbenchBypass=true`,
     };
   });
 
-  return {
-    ...state,
-    panes,
-  };
+  return { ...state, panes };
+}
+
+function mapSessionStatus(status: SessionStatus): WorkbenchPaneStatus {
+  switch (status) {
+    case 'running':
+      return 'running';
+    case 'waiting_input':
+      return 'waiting';
+    case 'completed':
+    case 'paused':
+    case 'archived':
+      return 'idle';
+    case 'error':
+      return 'error';
+    default:
+      return 'idle';
+  }
+}
+
+export function buildWorkbenchPaneHref(session: SessionInfo): string {
+  const focusSession = `/agents?workbenchBypass=true&focusSession=${encodeURIComponent(session.id)}`;
+  if (session.interaction_mode === 'terminal') {
+    return focusSession;
+  }
+
+  const agentId = session.agent_id?.trim();
+  if (!agentId) {
+    return focusSession;
+  }
+
+  return `/agents/chat/${encodeURIComponent(agentId)}?workbenchBypass=true`;
+}
+
+function readFallbackWorkbenchPanes(): WorkbenchPaneState[] {
+  const stored = readWorkbenchFlatState();
+  if (stored?.panes.length) {
+    return stored.panes;
+  }
+
+  return createDefaultWorkbenchFlatState(new Date().toISOString()).panes;
+}
+
+export function mergeWorkbenchPaneState(
+  runtimePanes: WorkbenchPaneState[],
+  fallbackPanes?: WorkbenchPaneState[],
+): WorkbenchPaneState[] {
+  if (runtimePanes.length > 0) {
+    return runtimePanes;
+  }
+
+  if (fallbackPanes && fallbackPanes.length > 0) {
+    return fallbackPanes;
+  }
+
+  return readFallbackWorkbenchPanes();
+}
+
+export function buildWorkbenchPanesFromSessions(
+  sessions: SessionInfo[],
+  fallbackPanes?: WorkbenchPaneState[],
+): WorkbenchPaneState[] {
+  const runtimePanes = sessions.map((session): WorkbenchPaneState => {
+    const isTerminal = session.interaction_mode === 'terminal';
+    const hasPty = Boolean(session.pty_id);
+    const bindingType: WorkbenchBindingType = isTerminal
+      ? (hasPty ? 'pty-runtime' : 'ssh-runtime')
+      : 'agent-session';
+    const viewKind: WorkbenchViewKind = isTerminal ? 'runtime-view' : 'session-view';
+    const status = isTerminal && hasPty && session.status === 'running'
+      ? 'attached'
+      : mapSessionStatus(session.status);
+
+    return {
+      id: `pane-${session.id}`,
+      title: session.role || session.summary || 'Untitled Session',
+      viewKind,
+      bindingType,
+      status,
+      description: session.summary || session.last_output_preview || 'Runtime session pane / 运行时会话面板',
+      sessionId: session.id,
+      agentId: session.agent_id,
+      ptyId: session.pty_id,
+      openPath: buildWorkbenchPaneHref(session),
+    };
+  });
+
+  return mergeWorkbenchPaneState(runtimePanes, fallbackPanes);
 }

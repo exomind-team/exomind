@@ -1,13 +1,22 @@
 import { useLocation } from '@tanstack/react-router';
-import { Bot, Network, TerminalSquare } from 'lucide-react';
-import { useMemo } from 'react';
+import { Bot, ExternalLink, Network, TerminalSquare } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 
+import {
+  getSelectedRuntimeTarget,
+  subscribeRuntimeTargetChanges,
+  toRuntimeBaseUrl,
+  type RuntimeTarget,
+} from '@/config/runtime-target';
+import { useSessionStream } from '@/hooks/useSessionStream';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
 import {
   applyWorkbenchLegacyIntent,
+  buildWorkbenchPanesFromSessions,
   readOrCreateWorkbenchFlatState,
   resolveWorkbenchLegacyIntent,
+  writeWorkbenchFlatState,
   type WorkbenchBindingType,
   type WorkbenchPaneState,
 } from './workbench-storage';
@@ -41,6 +50,15 @@ const PANE_PRESENTATIONS: Record<WorkbenchBindingType, PanePresentation> = {
   },
 };
 
+function openWorkbenchPane(path: string | undefined) {
+  if (!path || typeof window === 'undefined') {
+    return;
+  }
+
+  window.history.pushState({}, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 function WorkbenchPaneCard({ pane }: { pane: WorkbenchPaneState }) {
   const presentation = PANE_PRESENTATIONS[pane.bindingType];
   const Icon = presentation.icon;
@@ -48,7 +66,7 @@ function WorkbenchPaneCard({ pane }: { pane: WorkbenchPaneState }) {
   return (
     <article
       data-testid={`workbench-pane-${pane.bindingType}`}
-      className="flex min-h-[220px] flex-col gap-4 rounded-[24px] border border-[#E7E0D8] bg-white/95 p-5 shadow-[0_20px_50px_-34px_rgba(28,25,23,0.28)] dark:border-[#2A2523] dark:bg-[#171312]"
+      className="flex min-h-[240px] flex-col gap-4 rounded-[24px] border border-[#E7E0D8] bg-white/95 p-5 shadow-[0_20px_50px_-34px_rgba(28,25,23,0.28)] dark:border-[#2A2523] dark:bg-[#171312]"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-2">
@@ -78,12 +96,31 @@ function WorkbenchPaneCard({ pane }: { pane: WorkbenchPaneState }) {
           Phase 1 Flat Workbench / 平铺工作台
         </div>
         <div className="mt-4 space-y-2 text-xs leading-5 text-[#78716C] dark:text-[#A8A29E]">
-          <p>View kind（视图类型）: <code>{pane.viewKind}</code></p>
-          <p>Binding type（绑定类型）: <code>{pane.bindingType}</code></p>
-          <p>Source of truth（事实源）: EventTape ready / 事实层预留</p>
-          <p>Current focus（当前焦点）: visible pane / 当前可见工作面</p>
+          <p>
+            View kind（视图类型）: <code>{pane.viewKind}</code>
+          </p>
+          <p>
+            Binding type（绑定类型）: <code>{pane.bindingType}</code>
+          </p>
+          <p>
+            Session id（会话 ID）: <code>{pane.sessionId ?? 'fallback-pane'}</code>
+          </p>
+          <p>
+            Destination（目标页）: <code>{pane.openPath ?? 'not available / 暂不可跳转'}</code>
+          </p>
         </div>
       </div>
+
+      <button
+        type="button"
+        data-testid={`workbench-pane-open-${pane.id}`}
+        onClick={() => openWorkbenchPane(pane.openPath)}
+        disabled={!pane.openPath}
+        className="inline-flex items-center justify-center gap-2 rounded-[16px] border border-[#E7E0D8] bg-[#FFF7F2] px-4 py-3 text-sm font-semibold text-[#9A3412] transition hover:bg-[#FDEDDC] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3A2B24] dark:bg-[#201714] dark:text-[#FDBA74]"
+      >
+        <ExternalLink size={16} />
+        Open legacy destination / 打开旧目标
+      </button>
     </article>
   );
 }
@@ -91,14 +128,37 @@ function WorkbenchPaneCard({ pane }: { pane: WorkbenchPaneState }) {
 export function WorkbenchPage() {
   const isDesktop = useIsDesktop(1024);
   const location = useLocation();
+  const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>(() => getSelectedRuntimeTarget());
+
+  useEffect(() => subscribeRuntimeTargetChanges(setRuntimeTarget), []);
+
   const legacyIntent = useMemo(
     () => resolveWorkbenchLegacyIntent(location.searchStr ?? ''),
     [location.searchStr],
   );
-  const state = useMemo(
+
+  const storedState = useMemo(
     () => applyWorkbenchLegacyIntent(readOrCreateWorkbenchFlatState(), legacyIntent),
     [legacyIntent],
   );
+
+  const { sessions, loading, error } = useSessionStream({
+    rtBaseUrl: toRuntimeBaseUrl(runtimeTarget),
+    authToken: runtimeTarget.authToken,
+    enabled: true,
+  });
+
+  const panes = useMemo(
+    () => buildWorkbenchPanesFromSessions(sessions, storedState.panes),
+    [sessions, storedState.panes],
+  );
+
+  useEffect(() => {
+    writeWorkbenchFlatState({
+      ...storedState,
+      panes,
+    });
+  }, [panes, storedState]);
 
   return (
     <div
@@ -117,7 +177,8 @@ export function WorkbenchPage() {
                   Agent Workbench / Agent 工作台
                 </h1>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-[#57534E] dark:text-[#D6D3D1]">
-                  先交付一个稳定的多 pane 工作面，把 agent session 与 SSH runtime 放进同一个共享空间语义里。
+                  先交付一个稳定的多 pane 工作面，把 runtime session 映射成可点击的 pane；
+                  drag-and-drop（拖拽编排）仍未实现。
                 </p>
               </div>
             </div>
@@ -131,25 +192,25 @@ export function WorkbenchPage() {
                   data-testid="workbench-space-name"
                   className="mt-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
                 >
-                  {state.space.name}
+                  {storedState.space.name}
                 </div>
                 <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                  {state.space.id}
+                  {storedState.space.id}
                 </div>
                 <div className="mt-1 text-[11px] text-[#A8A29E]">
-                  {state.surface.id} / {state.surface.layoutPreset}
+                  {storedState.surface.id} / {storedState.surface.layoutPreset}
                 </div>
               </div>
 
               <div className="rounded-[20px] border border-[#E7E0D8] bg-[#FAF7F5] px-4 py-3 dark:border-[#302A27] dark:bg-[#120F0E]">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#A8A29E]">
-                  Restore Marker
+                  Runtime Feed
                 </div>
                 <div className="mt-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
-                  Recent panes ready
+                  {loading ? 'Streaming… / 正在连接' : `${panes.length} panes ready / 已准备 ${panes.length} 个 pane`}
                 </div>
                 <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                  {state.space.restoredAt}
+                  {error ? `Fallback mode / 回退模式: ${error}` : `RT ${runtimeTarget.host}:${runtimeTarget.port}`}
                 </div>
               </div>
             </div>
@@ -166,10 +227,16 @@ export function WorkbenchPage() {
         ) : null}
 
         <section
+          className="rounded-[20px] border border-[#E7E0D8] bg-white/80 px-4 py-3 text-sm text-[#57534E] dark:border-[#2A2523] dark:bg-[#171312]/80 dark:text-[#D6D3D1]"
+        >
+          Phase 1 note / 阶段说明：当前工作台负责“恢复空间 + 展示 pane + 跳回旧入口”，不负责拖拽布局与 pane 内联交互。
+        </section>
+
+        <section
           data-testid="workbench-pane-grid"
           className={isDesktop ? 'grid grid-cols-2 gap-5' : 'grid grid-cols-1 gap-4'}
         >
-          {state.panes.map((pane) => (
+          {panes.map((pane) => (
             <WorkbenchPaneCard key={pane.id} pane={pane} />
           ))}
         </section>

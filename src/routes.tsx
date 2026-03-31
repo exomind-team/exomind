@@ -196,9 +196,14 @@ function LegacyWorkbenchShim({
   children: React.ReactNode;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const bypassWorkbenchShim = useMemo(
+    () => new URLSearchParams(location.searchStr ?? '').get('workbenchBypass') === 'true',
+    [location.searchStr],
+  );
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || bypassWorkbenchShim) {
       return;
     }
 
@@ -207,9 +212,9 @@ function LegacyWorkbenchShim({
       search,
       replace: true,
     });
-  }, [enabled, navigate, search]);
+  }, [bypassWorkbenchShim, enabled, navigate, search]);
 
-  if (enabled) {
+  if (enabled && !bypassWorkbenchShim) {
     return null;
   }
 
