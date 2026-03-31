@@ -1158,14 +1158,12 @@ export function AgentsPage() {
       isLocal: true,
       hostId: runtimeServiceStatus.hostId,
       trustState: 'manual_seed' as const,
-      authToken: runtimeServiceStatus.authSecret,
     } satisfies RuntimeHostRecord;
   }, [
     runtimeServiceStatus?.running,
     runtimeServiceStatus?.host,
     runtimeServiceStatus?.port,
     runtimeServiceStatus?.hostId,
-    runtimeServiceStatus?.authSecret,
   ]);
   const localLinkProofSignalService = useMemo(() => (
     localLinkProofHost
@@ -1191,7 +1189,6 @@ export function AgentsPage() {
     const runtimeBaseUrl = `http://${formatHostForUrl(localHost)}:${status.port}`;
     await getRuntimeMeshHostSyncService().syncLocalRuntimeMeshState(
       runtimeBaseUrl,
-      status.authSecret ?? undefined,
     );
   };
 
@@ -1239,7 +1236,7 @@ export function AgentsPage() {
   }, [runtimeServiceStatus]);
 
   const peerPairingLocalHostId = runtimeServiceStatus?.hostId ?? 'local';
-  const peerPairingLocalAuthToken = runtimeServiceStatus?.authSecret ?? undefined;
+  const peerPairingLocalAuthToken = undefined;
   const peerPairingKnownHosts = useMemo(
     () => runtimeHostSnapshots
       .filter((snapshot) => (

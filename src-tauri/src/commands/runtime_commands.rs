@@ -13,7 +13,7 @@ use std::net::{IpAddr, TcpListener as StdTcpListener, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, timeout, Duration};
 
