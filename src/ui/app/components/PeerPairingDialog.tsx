@@ -42,6 +42,8 @@ interface DiscoveredPeer {
 interface ResponderPeer extends DiscoveredPeer {
   sourceLabel: string;
   priority: number;
+  dialHost?: string;
+  dialPort?: number;
 }
 
 type VerificationContext = Omit<RuntimeLinkProofRunOptions, 'trigger'> & {
@@ -110,7 +112,7 @@ function buildResponderPeers(
     peer: DiscoveredPeer,
     sourceLabel: string,
     priority: number,
-    preferAddress: boolean,
+    dialAddress?: { host: string; port: number },
   ) => {
     const key = buildResponderPeerKey(peer);
     const existing = peers.get(key);
@@ -119,19 +121,23 @@ function buildResponderPeers(
         ...peer,
         sourceLabel,
         priority,
+        dialHost: dialAddress?.host,
+        dialPort: dialAddress?.port,
       });
       return;
     }
 
     peers.set(key, {
       host_id: existing.host_id || peer.host_id,
-      host: preferAddress ? peer.host : existing.host,
-      port: preferAddress ? peer.port : existing.port,
+      host: existing.host || peer.host,
+      port: existing.port || peer.port,
       sourceLabel: normalizeResponderSourceLabel([
         ...existing.sourceLabel.split(' · '),
         sourceLabel,
       ]),
       priority: Math.min(existing.priority, priority),
+      dialHost: dialAddress?.host ?? existing.dialHost,
+      dialPort: dialAddress?.port ?? existing.dialPort,
     });
   };
 
@@ -139,7 +145,7 @@ function buildResponderPeers(
     if (!peer.host_id || peer.host_id === localHostId) {
       continue;
     }
-    upsertPeer(peer, '自动发现', 2, false);
+    upsertPeer(peer, '自动发现', 2);
   }
 
   for (const host of knownHosts) {
@@ -157,12 +163,12 @@ function buildResponderPeers(
     upsertPeer(
       {
         host_id: host.hostId,
-        host: dialAddress.host,
-        port: dialAddress.port,
+        host: host.host,
+        port: host.port,
       },
       getKnownHostPeerLabel(host),
       getKnownHostPriority(host),
-      true,
+      dialAddress,
     );
   }
 
@@ -172,6 +178,22 @@ function buildResponderPeers(
     || left.host.localeCompare(right.host)
     || left.port - right.port
   ));
+}
+
+function resolveAndroidEmulatorHostAlias(host: string): string | null {
+  if (host.startsWith('10.0.2.')) {
+    return '10.0.2.2';
+  }
+  if (host.startsWith('10.0.3.')) {
+    return '10.0.3.2';
+  }
+  return null;
+}
+
+function resolveResponderPeerDisplayAddress(peer: ResponderPeer): string {
+  const host = peer.dialHost ?? peer.host;
+  const port = peer.dialPort ?? peer.port;
+  return `${host}:${port}`;
 }
 
 function buildInitiatorDiagnosticMessage(
@@ -524,21 +546,33 @@ export function PeerPairingDialog({
         );
         initiatorBaseUrl = `http://${formatHostForUrl(dialAddress.host)}:${dialAddress.port}`;
       } catch {
-        // Fall back to the discovered address if dial address resolution fails.
+        // Prefer the locally-known dial override（优先复用本机已知拨号地址）.
+        if (selectedPeer.dialHost && selectedPeer.dialPort) {
+          initiatorBaseUrl = `http://${formatHostForUrl(selectedPeer.dialHost)}:${selectedPeer.dialPort}`;
+        }
       }
 
       // Determine our externally-reachable address (what the initiator should use to call us)
       let responderBaseUrl = runtimeBaseUrl;
-      try {
-        const reachable = await getRuntimeControlService().getReachableAddress(
-          selectedPeer.host,
-          selectedPeer.port,
-        );
-        if (reachable.host) {
-          responderBaseUrl = `http://${formatHostForUrl(reachable.host)}:${reachable.port}`;
+      const emulatorHostAlias = resolveAndroidEmulatorHostAlias(selectedPeer.host);
+      if (emulatorHostAlias) {
+        // Android emulator guests must call the host via 10.0.2.2 / 10.0.3.2,
+        // never via loopback / proxy bridge aliases（模拟器回拨桌面必须走 host alias）.
+        const runtimeUrl = new URL(runtimeBaseUrl);
+        const runtimePort = Number.parseInt(runtimeUrl.port || '80', 10);
+        responderBaseUrl = `http://${formatHostForUrl(emulatorHostAlias)}:${runtimePort}`;
+      } else {
+        try {
+          const reachable = await getRuntimeControlService().getReachableAddress(
+            selectedPeer.host,
+            selectedPeer.port,
+          );
+          if (reachable.host) {
+            responderBaseUrl = `http://${formatHostForUrl(reachable.host)}:${reachable.port}`;
+          }
+        } catch {
+          // Fall back to runtimeBaseUrl if reachable address resolution fails
         }
-      } catch {
-        // Fall back to runtimeBaseUrl if reachable address resolution fails
       }
 
       const result = await meshService.respondToPairing(
@@ -803,7 +837,7 @@ export function PeerPairingDialog({
                     </span>
                   </div>
                   <div className="mt-0.5 text-xs text-[#A8A29E]">
-                    {peer.host}:{peer.port}
+                    {resolveResponderPeerDisplayAddress(peer)}
                   </div>
                 </div>
               </button>

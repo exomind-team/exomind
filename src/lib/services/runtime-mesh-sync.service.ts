@@ -100,8 +100,40 @@ function parseBaseUrlHost(baseUrl: string): string | null {
   }
 }
 
-function looksLikeAndroidEmulatorGuestHost(host: string): boolean {
-  return /^10\.0\.(2|3)\.\d+$/.test(normalizeHostForMatch(host));
+function parseBaseUrlAddress(baseUrl: string): { host: string; port: number } | null {
+  try {
+    const parsed = new URL(baseUrl);
+    const defaultPort = parsed.protocol === 'https:' ? 443 : 80;
+    const port = Number.parseInt(parsed.port || String(defaultPort), 10);
+    if (!parsed.hostname || !Number.isInteger(port) || port <= 0) {
+      return null;
+    }
+
+    return {
+      host: parsed.hostname,
+      port,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveAndroidEmulatorHostAlias(host: string): string | null {
+  const normalized = normalizeHostForMatch(host);
+  if (normalized.startsWith('10.0.2.') && normalized !== '10.0.2.2') {
+    return '10.0.2.2';
+  }
+  if (normalized.startsWith('10.0.3.') && normalized !== '10.0.3.2') {
+    return '10.0.3.2';
+  }
+  return null;
+}
+
+function isAndroidEmulatorGuestHost(host: string): boolean {
+  const normalized = normalizeHostForMatch(host);
+  return /^10\.0\.(2|3)\.\d+$/.test(normalized)
+    && normalized !== '10.0.2.2'
+    && normalized !== '10.0.3.2';
 }
 
 function isAndroidEmulatorHostAlias(host: string): boolean {
@@ -122,7 +154,7 @@ function shouldSkipReciprocalPeerUpsert(
     return false;
   }
 
-  return looksLikeAndroidEmulatorGuestHost(reachableAddress.host)
+  return isAndroidEmulatorGuestHost(reachableAddress.host)
     && isAndroidEmulatorHostAlias(remoteHost);
 }
 
@@ -176,9 +208,35 @@ export class RuntimeMeshSyncService {
       capabilities: [],
     });
 
+    const remoteBaseUrlHost = parseBaseUrlHost(remoteBaseUrl);
+    const emulatorHostAlias = resolveAndroidEmulatorHostAlias(host.host);
+    if (localStatus.hostId && remoteBaseUrlHost && emulatorHostAlias && isAndroidEmulatorHostAlias(remoteBaseUrlHost)) {
+      // When the local device reaches an Android emulator through ADB / bridge loopback,
+      // the emulator must call the host back via 10.0.2.2 / 10.0.3.2
+      // （桌面通过 ADB/桥接拨号 Android 模拟器时，反向地址必须写 host alias）.
+      await this.upsertPeer(remoteBaseUrl, {
+        id: localStatus.hostId,
+        base_url: `http://${formatHostForUrl(emulatorHostAlias)}:${localStatus.port}`,
+        enabled: true,
+        capabilities: [],
+      });
+      return;
+    }
+
     let reachableAddress: RuntimeReachableAddress | null = null;
     try {
-      reachableAddress = await this.getReachableAddress(host);
+      const reachableProbeTarget = parseBaseUrlAddress(remoteBaseUrl);
+      // Probe the resolved remote base_url（使用解析后的远端 base_url 求可达地址）,
+      // so emulator bridge aliases like 10.0.2.2 / 10.0.3.2 are preserved.
+      reachableAddress = await this.getReachableAddress(
+        reachableProbeTarget
+          ? {
+              ...host,
+              host: reachableProbeTarget.host,
+              port: reachableProbeTarget.port,
+            }
+          : host,
+      );
     } catch {
       reachableAddress = null;
     }

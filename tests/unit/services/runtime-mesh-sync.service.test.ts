@@ -104,6 +104,158 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
     }));
   });
 
+  it('derives reciprocal reachable address from the resolved remote base url（反向可达地址应基于解析后的远端 base_url）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({}),
+    }));
+    const getReachableAddress = vi.fn(async (remoteHost: RuntimeHostRecord) => {
+      if (remoteHost.host === '10.0.2.2' && remoteHost.port === 29375) {
+        return {
+          host: '10.0.2.15',
+          port: 9124,
+          hostId: 'android-host',
+        };
+      }
+
+      return {
+        host: '127.0.0.1',
+        port: 9124,
+        hostId: 'android-host',
+      };
+    });
+    const service = new RuntimeMeshSyncService({
+      fetchImpl,
+      getLocalRuntimeStatus: vi.fn(async () => ({
+        ...LOCAL_STATUS,
+        hostId: 'android-host',
+      })),
+      getReachableAddress,
+    });
+
+    await service.ensurePeerPair({
+      ...CONFIRMED_DESKTOP,
+      host: '127.0.0.1',
+      port: 29375,
+      lastSuccessfulDialAddress: '10.0.2.2:29375',
+      manualOverride: '10.0.2.2:29375',
+    });
+
+    expect(getReachableAddress).toHaveBeenCalledWith(expect.objectContaining({
+      host: '10.0.2.2',
+      port: 29375,
+    }));
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:4077/mesh/peers', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        id: 'desktop-host',
+        base_url: 'http://10.0.2.2:29375',
+        enabled: true,
+        capabilities: [],
+      }),
+    }));
+  });
+
+  it('keeps emulator host alias when adb dial override points to loopback（ADB 回环拨号时反向 peer 仍应写入模拟器 host alias）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({}),
+    }));
+    const getReachableAddress = vi.fn(async () => ({
+      host: '127.0.0.1',
+      port: 4077,
+      hostId: 'desktop-host',
+    }));
+    const service = new RuntimeMeshSyncService({
+      fetchImpl,
+      getLocalRuntimeStatus: vi.fn(async () => ({
+        ...LOCAL_STATUS,
+        hostId: 'desktop-host',
+      })),
+      getReachableAddress,
+    });
+
+    await service.ensurePeerPair({
+      ...CONFIRMED_DESKTOP,
+      id: 'runtime-host-android',
+      name: 'Android emulator',
+      host: '10.0.2.15',
+      port: 9124,
+      hostId: 'android-host',
+      lastSuccessfulDialAddress: '127.0.0.1:39124',
+      manualOverride: '127.0.0.1:39124',
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:4077/mesh/peers', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        id: 'android-host',
+        base_url: 'http://127.0.0.1:39124',
+        enabled: true,
+        capabilities: [],
+      }),
+    }));
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:39124/mesh/peers', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        id: 'desktop-host',
+        base_url: 'http://10.0.2.2:4077',
+        enabled: true,
+        capabilities: [],
+      }),
+    }));
+  });
+
+  it('does not rewrite reciprocal desktop peer when confirmed peer already uses emulator host alias（confirmed peer 已是 host alias 时不应把 Android 自己回写给桌面）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({}),
+    }));
+    const getReachableAddress = vi.fn(async () => ({
+      host: '10.0.2.15',
+      port: 9124,
+      hostId: 'android-host',
+    }));
+    const service = new RuntimeMeshSyncService({
+      fetchImpl,
+      getLocalRuntimeStatus: vi.fn(async () => ({
+        ...LOCAL_STATUS,
+        hostId: 'android-host',
+      })),
+      getReachableAddress,
+    });
+
+    await service.ensurePeerPair({
+      ...CONFIRMED_DESKTOP,
+      id: 'runtime-host-desktop',
+      host: '10.0.2.2',
+      port: 11240,
+      hostId: 'desktop-host',
+      lastSuccessfulDialAddress: '10.0.2.2:11240',
+      manualOverride: '10.0.2.2:11240',
+    });
+
+    expect(getReachableAddress).toHaveBeenCalledWith(expect.objectContaining({
+      host: '10.0.2.2',
+      port: 11240,
+    }));
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:4077/mesh/peers', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        id: 'desktop-host',
+        base_url: 'http://10.0.2.2:11240',
+        enabled: true,
+        capabilities: [],
+      }),
+    }));
+  });
+
   it('skips when host is not confirmed peer（未确认 peer 时跳过自动配对）', async () => {
     const fetchImpl = vi.fn();
     const service = new RuntimeMeshSyncService({

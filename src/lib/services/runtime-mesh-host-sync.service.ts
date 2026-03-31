@@ -117,6 +117,17 @@ function parsePeerBaseUrl(baseUrl: string): { host: string; port: number } | nul
   }
 }
 
+function normalizeHostForMatch(host: string): string {
+  return host.trim().replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
+}
+
+function isAndroidEmulatorGuestHost(host: string): boolean {
+  const normalized = normalizeHostForMatch(host);
+  return /^10\.0\.(2|3)\.\d+$/.test(normalized)
+    && normalized !== '10.0.2.2'
+    && normalized !== '10.0.3.2';
+}
+
 function buildHostSyncKey(input: {
   hostId?: string;
   advertisedListenAddress?: string;
@@ -384,15 +395,34 @@ export class RuntimeMeshHostSyncService {
       return hosts;
     }
 
-    const advertisedListenAddress = formatRuntimeTargetAddress(parsed);
-    const dialAddress = await this.resolvePeerDialAddress(parsed.host, parsed.port);
-    const manualOverride = dialAddress !== advertisedListenAddress ? dialAddress : undefined;
     const existingHost = findExistingHost(hosts, {
       hostId: peer.id,
       host: parsed.host,
       port: parsed.port,
-      advertisedListenAddress,
+      advertisedListenAddress: formatRuntimeTargetAddress(parsed),
     });
+    const shouldPreserveGuestEndpoint = Boolean(
+      existingHost
+      && isBridgeAliasHost(parsed.host)
+      && isAndroidEmulatorGuestHost(existingHost.host),
+    );
+    const hostAddress = shouldPreserveGuestEndpoint
+      ? {
+          host: existingHost!.host,
+          port: existingHost!.port,
+        }
+      : parsed;
+    const advertisedListenAddress = shouldPreserveGuestEndpoint
+      ? (
+          existingHost!.advertisedListenAddress
+          ?? formatRuntimeTargetAddress({
+            host: existingHost!.host,
+            port: existingHost!.port,
+          })
+        )
+      : formatRuntimeTargetAddress(parsed);
+    const dialAddress = await this.resolvePeerDialAddress(parsed.host, parsed.port);
+    const manualOverride = dialAddress !== advertisedListenAddress ? dialAddress : undefined;
 
     if (!existingHost) {
       const created = await this.hostService.addHost({
@@ -409,12 +439,12 @@ export class RuntimeMeshHostSyncService {
     }
 
     const refreshedName = shouldRefreshPeerName(existingHost, peer.id)
-      ? buildPeerName(peer.id, parsed.host, parsed.port)
+      ? buildPeerName(peer.id, hostAddress.host, hostAddress.port)
       : undefined;
     const patch: RuntimeHostMetadataPatch = {
       name: refreshedName,
-      host: parsed.host,
-      port: parsed.port,
+      host: hostAddress.host,
+      port: hostAddress.port,
       hostId: peer.id,
       trustState: 'confirmed_peer',
       advertisedListenAddress,

@@ -200,6 +200,84 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
     }));
   });
 
+  it('keeps emulator guest endpoint when confirmed peer is represented by adb loopback base url（confirmed peer 使用 adb 回环 base_url 时保留 guest endpoint）', async () => {
+    const existingAndroidHost: RuntimeHostRecord = {
+      id: 'runtime-host-android',
+      name: 'Node rt-andro (10.0.2.15:9124)',
+      host: '10.0.2.15',
+      port: 9124,
+      status: 'unknown',
+      createdAt: '2026-03-30T10:00:00.000Z',
+      updatedAt: '2026-03-30T10:00:00.000Z',
+      hostId: 'rt-android',
+      trustState: 'discovered_candidate',
+      advertisedListenAddress: '10.0.2.15:9124',
+      manualOverride: '127.0.0.1:39124',
+      lastSuccessfulDialAddress: '127.0.0.1:39124',
+    };
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch) => ({
+      ...existingAndroidHost,
+      name: patch.name ?? existingAndroidHost.name,
+      host: patch.host ?? existingAndroidHost.host,
+      port: patch.port ?? existingAndroidHost.port,
+      updatedAt: '2026-03-30T10:05:00.000Z',
+      hostId: patch.hostId ?? existingAndroidHost.hostId,
+      trustState: patch.trustState ?? existingAndroidHost.trustState,
+      advertisedListenAddress: patch.advertisedListenAddress ?? existingAndroidHost.advertisedListenAddress,
+      manualOverride: Object.prototype.hasOwnProperty.call(patch, 'manualOverride')
+        ? patch.manualOverride
+        : existingAndroidHost.manualOverride,
+      lastSuccessfulDialAddress: existingAndroidHost.lastSuccessfulDialAddress,
+      authToken: patch.authToken,
+    }));
+    const service = new RuntimeMeshHostSyncService({
+      hostService: {
+        listHosts: vi.fn(async () => [existingAndroidHost]),
+        addHost: vi.fn(),
+        mergeHostMetadata,
+        removeHost: vi.fn(),
+      },
+      meshService: {
+        listDiscoveredPeers: vi.fn(async () => []),
+        listMeshPeers: vi.fn(async () => [{
+          id: 'rt-android',
+          base_url: 'http://127.0.0.1:39124',
+          enabled: true,
+        }]),
+        setPeerEnabled: vi.fn(async () => undefined),
+      },
+      runtimeControlService: {
+        getPeerDialAddress: vi.fn(async () => ({
+          host: '127.0.0.1',
+          port: 39124,
+        })),
+      },
+    });
+
+    const hosts = await service.syncLocalRuntimeMeshState('http://127.0.0.1:31308', 'shared-secret');
+
+    expect(mergeHostMetadata).toHaveBeenCalledWith(
+      'runtime-host-android',
+      expect.objectContaining({
+        hostId: 'rt-android',
+        trustState: 'confirmed_peer',
+        host: '10.0.2.15',
+        port: 9124,
+        advertisedListenAddress: '10.0.2.15:9124',
+        manualOverride: '127.0.0.1:39124',
+        authToken: 'shared-secret',
+      }),
+    );
+    expect(hosts[0]).toEqual(expect.objectContaining({
+      host: '10.0.2.15',
+      port: 9124,
+      trustState: 'confirmed_peer',
+      advertisedListenAddress: '10.0.2.15:9124',
+      manualOverride: '127.0.0.1:39124',
+      lastSuccessfulDialAddress: '127.0.0.1:39124',
+    }));
+  });
+
   it('keeps discovered node separate when endpoint is reused by a stale confirmed peer（同 endpoint 复用但 host_id 已变化时保留新发现节点）', async () => {
     const addHost = vi.fn(async (input) => ({
       id: 'runtime-host-current-android',

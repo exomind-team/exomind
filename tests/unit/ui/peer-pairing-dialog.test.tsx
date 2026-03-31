@@ -9,6 +9,7 @@ const listMeshPeersMock = vi.hoisted(() => vi.fn());
 const respondToPairingMock = vi.hoisted(() => vi.fn());
 const registerPeerLocallyMock = vi.hoisted(() => vi.fn());
 const getPeerDialAddressMock = vi.hoisted(() => vi.fn());
+const getReachableAddressMock = vi.hoisted(() => vi.fn());
 const listHostsMock = vi.hoisted(() => vi.fn());
 const signalHistoryMock = vi.hoisted(() => vi.fn());
 const runVerificationMock = vi.hoisted(() => vi.fn());
@@ -45,11 +46,7 @@ vi.mock('@/lib/services/runtime-link-proof.service', () => ({
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
   getRuntimeControlService: () => ({
-    getReachableAddress: vi.fn(async () => ({
-      host: '10.0.2.2',
-      port: 9124,
-      hostId: 'desktop-host',
-    })),
+    getReachableAddress: getReachableAddressMock,
     getPeerDialAddress: getPeerDialAddressMock,
   }),
 }));
@@ -62,12 +59,18 @@ describe('PeerPairingDialog（设备配对弹窗）', () => {
     respondToPairingMock.mockReset();
     registerPeerLocallyMock.mockReset();
     getPeerDialAddressMock.mockReset();
+    getReachableAddressMock.mockReset();
     listHostsMock.mockReset();
     signalHistoryMock.mockReset();
     runVerificationMock.mockReset();
     getPeerDialAddressMock.mockResolvedValue({
       host: '127.0.0.1',
       port: 39124,
+    });
+    getReachableAddressMock.mockResolvedValue({
+      host: '10.0.2.2',
+      port: 4077,
+      hostId: 'desktop-host',
     });
   });
 
@@ -241,7 +244,7 @@ describe('PeerPairingDialog（设备配对弹窗）', () => {
         '',
         '123456',
         'desktop-host',
-        'http://10.0.2.2:9124',
+        'http://10.0.2.2:4077',
         expect.any(String),
       );
       expect(registerPeerLocallyMock).toHaveBeenCalledWith(
@@ -251,6 +254,84 @@ describe('PeerPairingDialog（设备配对弹窗）', () => {
         'initiator-inbound-1',
         expect.any(String),
         'embedded-secret',
+      );
+    });
+  });
+
+  it('keeps emulator guest host for responder reachability even when known host has adb dial override（known host 带 adb 拨号地址时仍应用 guest 地址推导 responder 可达地址）', async () => {
+    listDiscoveredPeersMock.mockResolvedValue([
+      {
+        host_id: 'android-host-id',
+        host: '10.0.2.15',
+        port: 9124,
+      },
+    ]);
+    getReachableAddressMock.mockImplementation(async (host: string, port: number) => {
+      if (host === '127.0.0.1' && port === 39124) {
+        return {
+          host: '127.0.0.1',
+          port: 4077,
+          hostId: 'desktop-host',
+        };
+      }
+      return {
+        host: '198.18.0.1',
+        port: 4077,
+        hostId: 'desktop-host',
+      };
+    });
+    respondToPairingMock.mockResolvedValue({
+      paired: true,
+      peer_token: 'peer-token-2',
+      initiator_inbound_token: 'initiator-inbound-2',
+    });
+    registerPeerLocallyMock.mockResolvedValue(undefined);
+
+    const knownHost: RuntimeHostRecord = {
+      id: 'runtime-host-android',
+      name: 'Android Phone',
+      host: '10.0.2.15',
+      port: 9124,
+      status: 'online',
+      createdAt: '2026-03-30T10:00:00.000Z',
+      updatedAt: '2026-03-30T10:00:00.000Z',
+      hostId: 'android-host-id',
+      trustState: 'discovered_candidate',
+      manualOverride: '127.0.0.1:39124',
+      lastSuccessfulDialAddress: '127.0.0.1:39124',
+    };
+
+    render(
+      <PeerPairingDialog
+        open
+        onOpenChange={() => {}}
+        runtimeBaseUrl="http://127.0.0.1:4077"
+        localHostId="desktop-host"
+        localAuthToken="embedded-secret"
+        knownHosts={[knownHost]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '响应配对 扫描局域网设备，输入对方的 PIN 码' }));
+
+    const peerDialAddress = await screen.findByText(/127\.0\.0\.1:39124/);
+    fireEvent.click(peerDialAddress.closest('button')!);
+
+    const inputs = await screen.findAllByRole('textbox');
+    '654321'.split('').forEach((digit, index) => {
+      fireEvent.change(inputs[index]!, { target: { value: digit } });
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认配对' }));
+
+    await waitFor(() => {
+      expect(getPeerDialAddressMock).toHaveBeenCalledWith('10.0.2.15', 9124);
+      expect(respondToPairingMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:39124',
+        '',
+        '654321',
+        'desktop-host',
+        'http://10.0.2.2:4077',
+        expect.any(String),
       );
     });
   });
