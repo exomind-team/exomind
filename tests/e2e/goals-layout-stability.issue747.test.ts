@@ -3202,6 +3202,45 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
       });
   });
 
+  test('keeps the empty-state guide inside the page and clear of the desktop detail panel', async ({ page }) => {
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('goals-empty-state-guide')).toBeVisible({ timeout: 10000 });
+
+    await clickFlowNodeCenter(page, 'goal-flow-node-me');
+    await expect(page.getByText('这里是你的目标网络起点。当前共有 0 个目标节点。')).toBeVisible({ timeout: 10000 });
+
+    const guideMetrics = await page.evaluate(() => {
+      const pageEl = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const guide = document.querySelector('[data-testid="goals-empty-state-guide"]') as HTMLElement | null;
+      if (!pageEl || !guide) return null;
+
+      const pageRect = pageEl.getBoundingClientRect();
+      const guideRect = guide.getBoundingClientRect();
+      return {
+        pageRect: {
+          left: pageRect.left,
+          top: pageRect.top,
+          right: pageRect.right,
+          bottom: pageRect.bottom,
+        },
+        guideRect: {
+          left: guideRect.left,
+          top: guideRect.top,
+          right: guideRect.right,
+          bottom: guideRect.bottom,
+        },
+      };
+    });
+
+    expect(guideMetrics, 'empty-state-guide-panel: expected measurable guide geometry').not.toBeNull();
+    expect(guideMetrics?.guideRect.left ?? 0).toBeGreaterThanOrEqual((guideMetrics?.pageRect.left ?? 0) - 1);
+    expect(guideMetrics?.guideRect.top ?? 0).toBeGreaterThanOrEqual((guideMetrics?.pageRect.top ?? 0) - 1);
+    expect(guideMetrics?.guideRect.right ?? 0).toBeLessThanOrEqual((guideMetrics?.pageRect.right ?? 0) + 1);
+    expect(guideMetrics?.guideRect.bottom ?? 0).toBeLessThanOrEqual((guideMetrics?.pageRect.bottom ?? 0) + 1);
+    expect(guideMetrics?.guideRect.right ?? 0).toBeLessThanOrEqual((guideMetrics?.pageRect.right ?? 0) - 362);
+  });
+
   test('keeps the connect preview start anchored to the source node in the browser after initial centering', async ({ page }) => {
     await gotoGoalsPage(page);
     await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });

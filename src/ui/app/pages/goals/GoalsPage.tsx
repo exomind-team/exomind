@@ -59,6 +59,14 @@ const COMPLETION_ABSORB_DURATION_MS = 520;
 const COMPLETION_ME_PULSE_DURATION_MS = 320;
 const COMPLETION_ABSORB_NODE_SIZE = 72;
 const RENDER_HEALTH_GRACE_MS = 1500;
+const EMPTY_STATE_GUIDE_OFFSET_X = 26;
+const EMPTY_STATE_GUIDE_OFFSET_Y = 24;
+const EMPTY_STATE_GUIDE_MARGIN = 8;
+const EMPTY_STATE_GUIDE_WIDTH = 228;
+const EMPTY_STATE_GUIDE_HEIGHT = 68;
+const DETAIL_PANEL_DESKTOP_WIDTH = 340;
+const DETAIL_PANEL_DESKTOP_RIGHT_INSET = 16;
+const EMPTY_STATE_GUIDE_PANEL_GAP = 8;
 
 interface CompletionAbsorptionAnimation {
   goalId: string;
@@ -138,6 +146,44 @@ function buildNodeHandles(size: number) {
       height: size,
     },
   ];
+}
+
+export function resolveEmptyStateGuidePosition({
+  meScreenRight,
+  meScreenCenterY,
+  pageWidth,
+  pageHeight,
+  detailPanelOpen,
+  isDesktop,
+}: {
+  meScreenRight: number;
+  meScreenCenterY: number;
+  pageWidth: number;
+  pageHeight: number;
+  detailPanelOpen: boolean;
+  isDesktop: boolean;
+}) {
+  const desiredLeft = Math.round(meScreenRight + EMPTY_STATE_GUIDE_OFFSET_X);
+  const desiredTop = Math.round(meScreenCenterY - EMPTY_STATE_GUIDE_OFFSET_Y);
+  const panelLeft = detailPanelOpen && isDesktop
+    ? pageWidth - DETAIL_PANEL_DESKTOP_RIGHT_INSET - DETAIL_PANEL_DESKTOP_WIDTH
+    : Number.POSITIVE_INFINITY;
+  const maxLeft = pageWidth > 0
+    ? Math.max(
+      EMPTY_STATE_GUIDE_MARGIN,
+      Math.min(
+        pageWidth - EMPTY_STATE_GUIDE_WIDTH - EMPTY_STATE_GUIDE_MARGIN,
+        panelLeft - EMPTY_STATE_GUIDE_PANEL_GAP - EMPTY_STATE_GUIDE_WIDTH,
+      ),
+    )
+    : desiredLeft;
+  const maxTop = pageHeight > 0
+    ? Math.max(EMPTY_STATE_GUIDE_MARGIN, pageHeight - EMPTY_STATE_GUIDE_HEIGHT - EMPTY_STATE_GUIDE_MARGIN)
+    : desiredTop;
+  return {
+    left: `${Math.max(EMPTY_STATE_GUIDE_MARGIN, Math.min(desiredLeft, maxLeft))}px`,
+    top: `${Math.max(EMPTY_STATE_GUIDE_MARGIN, Math.min(desiredTop, maxTop))}px`,
+  };
 }
 
 function GoalHopRings({
@@ -474,6 +520,7 @@ export function GoalsPage() {
   const [positions, setPositions] = useState<PositionMap>(new Map());
   const [taskMetaById, setTaskMetaById] = useState<Map<string, { title: string; status: TaskEdgeStatus }>>(() => new Map());
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
+  const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [mode, setMode] = useState<GoalPageMode>(() => readModeStorage());
   const [showCancelled, setShowCancelled] = useState(() => readBooleanStorage(SHOW_CANCELLED_STORAGE_KEY, false));
@@ -551,6 +598,33 @@ export function GoalsPage() {
   useEffect(() => (
     subscribeDeveloperModeChanges(setDeveloperModeEnabled)
   ), []);
+
+  useLayoutEffect(() => {
+    const element = pageRef.current;
+    if (!element) return;
+
+    const updatePageSize = (width: number, height: number) => {
+      setPageSize((current) => (
+        current.width === width && current.height === height
+          ? current
+          : { width, height }
+      ));
+    };
+
+    updatePageSize(element.clientWidth, element.clientHeight);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      updatePageSize(Math.round(entry.contentRect.width), Math.round(entry.contentRect.height));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => () => {
     highlightTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
@@ -955,11 +1029,15 @@ export function GoalsPage() {
     const mePosition = positions.get(graph.me.id) ?? { x: 0, y: 0 };
     const meScreenRight = viewport.x + (mePosition.x + ME_NODE_SIZE) * viewport.zoom;
     const meScreenCenterY = viewport.y + (mePosition.y + ME_NODE_SIZE / 2) * viewport.zoom;
-    return {
-      left: `${Math.round(meScreenRight + 26)}px`,
-      top: `${Math.round(meScreenCenterY - 24)}px`,
-    };
-  }, [graph.me.id, positions, viewport.x, viewport.y, viewport.zoom]);
+    return resolveEmptyStateGuidePosition({
+      meScreenRight,
+      meScreenCenterY,
+      pageWidth: pageSize.width,
+      pageHeight: pageSize.height,
+      detailPanelOpen: isDesktop && selected !== null,
+      isDesktop,
+    });
+  }, [graph.me.id, isDesktop, pageSize.height, pageSize.width, positions, selected, viewport.x, viewport.y, viewport.zoom]);
 
   const goalStatusSnapshot = useMemo(
     () => visibleGraph.goals.map((goal) => ({

@@ -419,6 +419,38 @@ describe('GoalsPage', () => {
     });
   });
 
+  it('clamps the empty-state guide inside the goals page bounds', async () => {
+    const { resolveEmptyStateGuidePosition } = await import('../GoalsPage');
+
+    expect(resolveEmptyStateGuidePosition({
+      meScreenRight: 250,
+      meScreenCenterY: 140,
+      pageWidth: 300,
+      pageHeight: 160,
+      detailPanelOpen: false,
+      isDesktop: true,
+    })).toEqual({
+      left: '64px',
+      top: '84px',
+    });
+  });
+
+  it('keeps the empty-state guide out of the desktop detail panel area', async () => {
+    const { resolveEmptyStateGuidePosition } = await import('../GoalsPage');
+
+    expect(resolveEmptyStateGuidePosition({
+      meScreenRight: 520,
+      meScreenCenterY: 150,
+      pageWidth: 900,
+      pageHeight: 500,
+      detailPanelOpen: true,
+      isDesktop: true,
+    })).toEqual({
+      left: '308px',
+      top: '126px',
+    });
+  });
+
   it('keeps the empty-state guide anchored next to Me after the viewport moves', async () => {
     const { GoalsPage } = await loadGoalsPage();
     render(<GoalsPage />);
