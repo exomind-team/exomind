@@ -1,6 +1,7 @@
 //! Runtime 服务命令（embedded mode，内嵌模式）
 //! 提供桌面端 Runtime 的启动、停止与状态查询。
 
+use crate::dev_instance_paths::resolve_instance_app_data_dir;
 use chrono::Utc;
 use exomind_android_keepalive::AndroidRuntimeKeepaliveExt;
 use exomind_runtime::{
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, timeout, Duration};
 
@@ -220,18 +221,12 @@ fn save_runtime_target_mode_to_path(path: &Path, mode: RuntimeTargetMode) -> Res
 }
 
 pub fn load_persisted_runtime_network_mode(app: &AppHandle) -> Result<RuntimeNetworkMode, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
     load_runtime_network_mode_from_path(&runtime_network_mode_path(&app_data_dir))
 }
 
 pub fn load_persisted_runtime_target_mode(app: &AppHandle) -> Result<RuntimeTargetMode, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
     load_runtime_target_mode_from_path(&runtime_target_mode_path(&app_data_dir))
 }
 
@@ -239,10 +234,7 @@ fn save_persisted_runtime_network_mode(
     app: &AppHandle,
     mode: RuntimeNetworkMode,
 ) -> Result<RuntimeNetworkMode, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
     save_runtime_network_mode_to_path(&runtime_network_mode_path(&app_data_dir), mode)?;
     Ok(mode)
 }
@@ -251,10 +243,7 @@ fn save_persisted_runtime_target_mode(
     app: &AppHandle,
     mode: RuntimeTargetMode,
 ) -> Result<RuntimeTargetMode, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
     save_runtime_target_mode_to_path(&runtime_target_mode_path(&app_data_dir), mode)?;
     Ok(mode)
 }

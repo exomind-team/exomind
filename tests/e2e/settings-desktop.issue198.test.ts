@@ -116,9 +116,10 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('desktop-sidebar-item-tasks')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-me')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-agents')).toBeVisible();
+    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-settings')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toHaveCount(0);
-    await expect(page.locator('[data-testid^="desktop-sidebar-item-"]')).toHaveCount(5);
+    await expect(page.locator('[data-testid^="desktop-sidebar-item-"]')).toHaveCount(6);
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
   });
 

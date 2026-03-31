@@ -7,6 +7,7 @@
 ## 架构与设计
 
 - [架构总览](architecture/overview.md) -- 分层模型、Port/Service、Phase 路线（唯一权威）
+- [Agent Workbench 共享工作图谱](architecture/agent-workbench-shared-graph-spec.md) -- Agent Workbench 长期架构规格与实施阶段
 - [信号池架构](architecture/ARCH-signal-pool-agent-process.md) -- SignalPool 进程模型与信号流
 - [同步架构](architecture/ARCH-SYNC.md) -- 多设备同步模块架构分析
 - [ECS 通信栈](architecture/ECS-communication-stack.md) -- ExoMind Communication Stack 协议栈架构
@@ -93,6 +94,7 @@
 > 以下文件均为进行中的计划，已完成的计划已移至 [ARCHIVE-INDEX.md](ARCHIVE-INDEX.md)。
 
 - [产品规划](plans/product-plan.md) -- 外心产品规划与实施计划
+- [Agent Workbench Phase 1 平铺工作台](plans/2026-03-30-agent-workbench-phase1-flat-workbench-design.md) -- Agent Workbench 第一阶段设计
 - [任务 MCP 集成](plans/task-mcp-integration.md) -- 任务系统通过 MCP 接入 Agent
 - [同步服务器统一数据架构](plans/2026-03-01-sync-server-unified-data-architecture.md) -- 讨论稿
 - [Agent Hub Claude/Codex 调研](plans/2026-03-06-agent-hub-claude-codex-runtime-research.md) -- Agent Runtime 对接调研

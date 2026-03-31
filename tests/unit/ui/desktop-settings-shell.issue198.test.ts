@@ -34,6 +34,10 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(desktopNavBlock).toContain("title: '网络'");
     expect(desktopNavBlock).toContain("path: '/agents'");
     expect(desktopNavBlock).toContain('icon: Waypoints');
+    expect(desktopNavBlock).toContain("key: 'workbench-test'");
+    expect(desktopNavBlock).toContain("title: '工作台测试'");
+    expect(desktopNavBlock).toContain("path: '/workbench'");
+    expect(desktopNavBlock).toContain('icon: FlaskConical');
     expect(desktopNavBlock).toContain("title: '设置', path: '/settings'");
     expect(desktopNavBlock).not.toContain("title: '总览', path: '/dashboard'");
     expect(desktopNavBlock).not.toContain('事件日志');

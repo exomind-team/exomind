@@ -1,10 +1,11 @@
 //! 文件操作命令
 //! 用于消息持久化存储 - 重构版（同步版本）
 
+use crate::dev_instance_paths::resolve_instance_app_data_dir;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{ipc::InvokeError, AppHandle, Manager};
+use tauri::{ipc::InvokeError, AppHandle};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_fs::{FsExt, OpenOptions};
 use thiserror::Error;
@@ -45,9 +46,9 @@ impl std::convert::From<FileError> for InvokeError {
 
 /// 获取应用数据目录
 fn get_data_dir(app: &AppHandle) -> Result<PathBuf, FileError> {
-    let path = app.path().app_data_dir().map_err(|e| FileError::IoError {
+    let path = resolve_instance_app_data_dir(app).map_err(|e| FileError::IoError {
         message: format!("获取应用数据目录失败: {}", e),
-        source: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+        source: std::io::Error::other(e),
     })?;
 
     // 确保目录存在
@@ -538,10 +539,7 @@ pub fn save_binary_file(
     default_name: String,
     filters: Option<Vec<String>>,
 ) -> FileResult<Option<String>> {
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_file_name(&default_name);
+    let mut dialog = app.dialog().file().set_file_name(&default_name);
 
     if let Some(filters) = filters.as_ref() {
         if !filters.is_empty() {

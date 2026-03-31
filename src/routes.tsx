@@ -1,10 +1,11 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
 import { getGoalsPageEnabled, subscribeGoalsPageEnabledChanges } from '@/config/goals-page-enabled';
+import { getWorkbenchLegacyShimEnabled } from '@/config/workbench-legacy-shim-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
@@ -111,6 +112,11 @@ const AgentsPage = lazy(async () => {
   return { default: module.AgentsPage };
 });
 
+const WorkbenchPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/workbench/WorkbenchPage');
+  return { default: module.WorkbenchPage };
+});
+
 const GoalsPage = lazy(async () => {
   const module = await import('@/ui/app/pages/goals/GoalsPage');
   return { default: module.GoalsPage };
@@ -156,6 +162,41 @@ function PageFallback() {
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
+}
+
+function LegacyWorkbenchShim({
+  enabled,
+  search,
+  children,
+}: {
+  enabled: boolean;
+  search: Record<string, string>;
+  children: React.ReactNode;
+}) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const bypassWorkbenchShim = useMemo(
+    () => new URLSearchParams(location.searchStr ?? '').get('workbenchBypass') === 'true',
+    [location.searchStr],
+  );
+
+  useEffect(() => {
+    if (!enabled || bypassWorkbenchShim) {
+      return;
+    }
+
+    void navigate({
+      to: '/workbench',
+      search,
+      replace: true,
+    });
+  }, [bypassWorkbenchShim, enabled, navigate, search]);
+
+  if (enabled && !bypassWorkbenchShim) {
+    return null;
+  }
+
+  return <>{children}</>;
 }
 
 function resolveRuntimePlatform(): 'web' | 'tauri' | 'unknown' {
@@ -230,6 +271,7 @@ function MobileShell({
                   || (item.path === '/me' && locationPath.startsWith('/me'))
                   || (item.path === '/goals' && locationPath.startsWith('/goals'))
                   || (item.path === '/agents' && locationPath.startsWith('/agents'))
+                  || (item.path === '/workbench' && locationPath.startsWith('/workbench'))
                   || (item.path === '/settings' && locationPath.startsWith('/settings'));
                 return (
                   <Link
@@ -292,6 +334,13 @@ function DesktopSidebar({
       icon: Waypoints,
       match: (path: string) => path === '/agents' || path.startsWith('/agents/'),
     }] : []),
+    {
+      key: 'workbench-test',
+      title: '工作台测试',
+      path: '/workbench',
+      icon: FlaskConical,
+      match: (path: string) => path === '/workbench' || path.startsWith('/workbench/'),
+    },
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
@@ -559,6 +608,7 @@ function NewLayout() {
     ...(goalsPageEnabled ? [{ title: '目标', path: '/goals', icon: Orbit }] : []),
     ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
+    { title: '工作台测试', path: '/workbench', icon: FlaskConical },
     { title: '设置', path: '/settings', icon: Settings },
   ];
   const selectedShell = resolveAppShellMode({
@@ -908,8 +958,25 @@ const newAgentsRoute = createRoute({
   path: '/agents',
   component: function NewAgents() {
     return (
+      <LegacyWorkbenchShim
+        enabled={getWorkbenchLegacyShimEnabled()}
+        search={{ legacySource: 'agents-hub' }}
+      >
+        <LazyPage>
+          <AgentsPage />
+        </LazyPage>
+      </LegacyWorkbenchShim>
+    );
+  },
+});
+
+const newWorkbenchRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/workbench',
+  component: function NewWorkbench() {
+    return (
       <LazyPage>
-        <AgentsPage />
+        <WorkbenchPage />
       </LazyPage>
     );
   },
@@ -970,10 +1037,19 @@ const newAgentConversationRoute = createRoute({
   path: '/agents/chat/$agentId',
   component: function NewAgentConversation() {
     const { agentId } = useParams({ strict: false }) as { agentId?: string };
+    const legacyShimEnabled = getWorkbenchLegacyShimEnabled();
     return (
-      <LazyPage>
-        <AgentConversationPage agentId={agentId} />
-      </LazyPage>
+      <LegacyWorkbenchShim
+        enabled={legacyShimEnabled && Boolean(agentId)}
+        search={{
+          legacySource: 'agent-chat',
+          agentId: agentId ?? '',
+        }}
+      >
+        <LazyPage>
+          <AgentConversationPage agentId={agentId} />
+        </LazyPage>
+      </LegacyWorkbenchShim>
     );
   },
 });
@@ -1011,6 +1087,7 @@ const newRouteTree = newRootRoute.addChildren([
   newVolcanoAsrTestRoute,
   newSyncTestRoute,
   newAgentsRoute,
+  newWorkbenchRoute,
   newUpdateRoute,
   newAgentDetailRoute,
   newActorDetailRoute,
@@ -1022,4 +1099,3 @@ const newRouteTree = newRootRoute.addChildren([
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
-

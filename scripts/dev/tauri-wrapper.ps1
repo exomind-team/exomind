@@ -430,6 +430,30 @@ function Resolve-TauriDevTargetDir {
   Write-Host "[tauri-wrapper] Cargo target dir resolved: $resolved"
 }
 
+function Resolve-TauriDevInstancePaths {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectRoot
+  )
+
+  $scriptPath = Join-Path $PSScriptRoot "tauri-dev-instance-paths.ts"
+  if (-not (Test-Path -LiteralPath $scriptPath)) {
+    throw "tauri dev instance path resolver script not found: $scriptPath"
+  }
+
+  $raw = (& bun $scriptPath $ProjectRoot 2>$null | Select-Object -First 1)
+  if (-not $raw) {
+    throw "failed to resolve tauri dev instance paths"
+  }
+
+  $payload = $raw.Trim() | ConvertFrom-Json
+  if (-not $payload) {
+    throw "resolved tauri dev instance path payload is empty"
+  }
+
+  return $payload
+}
+
 function Test-TruthyEnvValue {
   param(
     [string]$Value
@@ -720,6 +744,27 @@ if ($isTauriDev) {
   Resolve-FreeDevPort
   Resolve-EmbeddedRuntimePort
   Resolve-TauriDevTargetDir -ProjectRoot $projectRoot
+
+  $instancePaths = Resolve-TauriDevInstancePaths -ProjectRoot $projectRoot
+  $env:EXOMIND_DEV_INSTANCE_NAME = "$($instancePaths.instanceName)"
+  $env:EXOMIND_DEV_APP_DATA_DIR = "$($instancePaths.appDataDir)"
+  $env:EXOMIND_DEV_RUNTIME_DATA_DIR = "$($instancePaths.runtimeDataDir)"
+  $env:EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR = "$($instancePaths.webviewMainDataDir)"
+  $env:EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT = "$($instancePaths.webviewOverlayDataRoot)"
+  $env:EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR = "$($instancePaths.legacySharedAppDataDir)"
+  $env:EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR = "$($instancePaths.legacySharedRuntimeDir)"
+  $env:EXOMIND_MCP_BRIDGE_BASE_PORT = "$($instancePaths.mcpBridgeBasePort)"
+
+  foreach ($dir in @(
+    $env:EXOMIND_DEV_APP_DATA_DIR,
+    $env:EXOMIND_DEV_RUNTIME_DATA_DIR,
+    $env:EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR,
+    $env:EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT
+  )) {
+    if (-not [string]::IsNullOrWhiteSpace($dir)) {
+      New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+  }
 }
 
 # Sync launcher icons before android build/dev/run/init (构建前同步 Android 图标)
@@ -738,12 +783,20 @@ try {
   if ($TauriArgs -and $TauriArgs.Count -gt 0) {
     $tauriCommandArgs = Add-TauriDevDefaultFlags -CommandArgs $TauriArgs
 
-    # Inject --config to override devUrl when port differs from default
-    # (端口非默认值时，通过 --config 覆盖 devUrl)
-    if ($isTauriDev -and $env:EXOMIND_WEB_PORT -and $env:EXOMIND_WEB_PORT -ne "1420") {
+    # Inject --config for devUrl override only
+    #（仅通过 --config 覆盖 devUrl；主窗口 data directory 走 Rust builder 绝对路径注入）
+    if ($isTauriDev) {
       $tempConfigPath = Join-Path $env:TEMP ("exomind-tauri-dev-config-{0}.json" -f [Guid]::NewGuid().ToString("N"))
-      $devUrlOverride = '{"build":{"devUrl":"http://localhost:' + $env:EXOMIND_WEB_PORT + '"}}'
-      Write-TextUtf8NoBom -Path $tempConfigPath -Content $devUrlOverride
+      $tempConfig = @{}
+
+      if ($env:EXOMIND_WEB_PORT) {
+        $tempConfig.build = @{
+          devUrl = "http://localhost:$($env:EXOMIND_WEB_PORT)"
+        }
+      }
+
+      $devConfigOverride = $tempConfig | ConvertTo-Json -Compress -Depth 10
+      Write-TextUtf8NoBom -Path $tempConfigPath -Content $devConfigOverride
       $tauriCommandArgs += @("--config", $tempConfigPath)
     }
   }
