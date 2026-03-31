@@ -528,7 +528,6 @@ function NewLayout() {
   const [goalsPageEnabled, setGoalsPageEnabled] = useState(() => getGoalsPageEnabled());
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => getPersistedDesktopSidebarCollapsed());
   const [workbenchTestPageEnabled, setWorkbenchTestPageEnabled] = useState(() => getWorkbenchTestPageEnabled());
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => getPersistedDesktopSidebarCollapsed());
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
