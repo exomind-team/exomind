@@ -515,7 +515,7 @@ pub fn router() -> Router<AppState> {
         .route("/eventlog/backup/sqlite", get(export_eventlog_sqlite))
         .route("/eventlog/import/json", post(import_eventlog_json))
         .route("/eventlog/import/sqlite", post(import_eventlog_sqlite))
-        .route("/eventlog/events/:id", get(get_event))
+        .route("/eventlog/:id", get(get_event))
 }
 
 fn parse_import_strategy(raw: Option<&str>) -> Result<EventLogImportStrategy, String> {
@@ -1160,7 +1160,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri(format!("/eventlog/events/{appended_id}"))
+                    .uri(format!("/eventlog/{appended_id}"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1185,7 +1185,7 @@ mod tests {
         let resp = app
             .oneshot(
                 Request::builder()
-                    .uri("/eventlog/events/no-such-id")
+                    .uri("/eventlog/no-such-id")
                     .body(Body::empty())
                     .unwrap(),
             )

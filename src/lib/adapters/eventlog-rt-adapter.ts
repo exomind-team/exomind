@@ -112,7 +112,7 @@ export class EventLogRtAdapter implements IEventLogPort {
 
   async getEvent(id: string): Promise<EventData | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(`/eventlog/events/${encodeURIComponent(id)}`, target), {
+    const response = await this.fetchImpl(this.url(`/eventlog/${encodeURIComponent(id)}`, target), {
       method: 'GET',
       headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });

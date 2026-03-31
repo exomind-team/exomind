@@ -8,7 +8,7 @@ import type { EventData } from '../../../../src/lib/types/event';
  * Endpoint mapping:
  *   GET    /eventlog               → listEvents
  *   POST   /eventlog               → appendEvent
- *   GET    /eventlog/events/:id    → getEvent
+ *   GET    /eventlog/:id           → getEvent
  *   DELETE /eventlog               → clearEvents
  */
 export class RtEventLogPort implements IEventLogPort {
@@ -56,7 +56,7 @@ export class RtEventLogPort implements IEventLogPort {
 
   async getEvent(id: string): Promise<EventData | null> {
     const res = await fetch(
-      `${this.baseUrl}/eventlog/events/${encodeURIComponent(id)}?user_id=${encodeURIComponent(this.userId)}`,
+      `${this.baseUrl}/eventlog/${encodeURIComponent(id)}?user_id=${encodeURIComponent(this.userId)}`,
       { headers: { ...this.authHeaders() } },
     );
     if (res.status === 404) return null;
