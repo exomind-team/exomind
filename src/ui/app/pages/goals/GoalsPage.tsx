@@ -522,6 +522,17 @@ export function GoalsPage() {
     });
   }, [connectMode]);
 
+  const resolvePagePoint = useCallback((clientX: number, clientY: number) => {
+    const bounds = pageRef.current?.getBoundingClientRect();
+    if (!bounds) {
+      return { x: clientX, y: clientY };
+    }
+    return {
+      x: clientX - bounds.left,
+      y: clientY - bounds.top,
+    };
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -755,8 +766,9 @@ export function GoalsPage() {
         connectModeTargetable: false,
         connectModeHovering: false,
         onOpenContextMenu: (nodeId: string, x: number, y: number) => {
+          const point = resolvePagePoint(x, y);
           setSelected({ kind: 'me', id: nodeId });
-          openContextMenu({ kind: 'me', id: nodeId, x, y });
+          openContextMenu({ kind: 'me', id: nodeId, x: point.x, y: point.y });
         },
       },
       draggable: mode === 'browse',
@@ -791,8 +803,9 @@ export function GoalsPage() {
           connectMode.setHoverTarget(hovering ? goal.id : null);
         },
         onOpenContextMenu: (nodeId: string, x: number, y: number) => {
+          const point = resolvePagePoint(x, y);
           setSelected({ kind: 'goal', id: nodeId });
-          openContextMenu({ kind: 'goal', id: nodeId, x, y });
+          openContextMenu({ kind: 'goal', id: nodeId, x: point.x, y: point.y });
         },
       },
       draggable: mode === 'browse',
@@ -841,13 +854,14 @@ export function GoalsPage() {
           parallelIndex,
           parallelTotal: siblings.length,
           onOpenContextMenu: (edgeId: string, x: number, y: number) => {
+            const point = resolvePagePoint(x, y);
             setSelected({ kind: 'edge', id: edgeId });
-            openContextMenu({ kind: 'edge', id: edgeId, x, y });
+            openContextMenu({ kind: 'edge', id: edgeId, x: point.x, y: point.y });
           },
         },
       };
     });
-  }, [graph.goals, graph.me.id, highlightedEdgeIds, openContextMenu, positions, resolveEdgeLabel, resolveEdgeStatus, selected, showCancelled, visibleGraph.edges]);
+  }, [graph.goals, graph.me.id, highlightedEdgeIds, openContextMenu, positions, resolveEdgeLabel, resolveEdgeStatus, resolvePagePoint, selected, showCancelled, visibleGraph.edges]);
 
   const connectPreview = useMemo(() => {
     if (!connectMode.isActive || !connectMode.sourceId || !connectMode.previewPoint) return null;
@@ -1530,11 +1544,12 @@ export function GoalsPage() {
           });
           updateConnectPreview(event.clientX, event.clientY);
           setSelected(node.id === graph.me.id ? { kind: 'me', id: node.id } : { kind: 'goal', id: node.id });
+          const point = resolvePagePoint(event.clientX, event.clientY);
           openContextMenu({
             kind: node.id === graph.me.id ? 'me' : 'goal',
             id: node.id,
-            x: event.clientX,
-            y: event.clientY,
+            x: point.x,
+            y: point.y,
           });
         }}
         onEdgeContextMenu={(event, edge) => {
@@ -1545,7 +1560,8 @@ export function GoalsPage() {
             clientY: event.clientY,
           });
           setSelected({ kind: 'edge', id: edge.id });
-          openContextMenu({ kind: 'edge', id: edge.id, x: event.clientX, y: event.clientY });
+          const point = resolvePagePoint(event.clientX, event.clientY);
+          openContextMenu({ kind: 'edge', id: edge.id, x: point.x, y: point.y });
         }}
         onConnect={(connection: Connection) => {
           warnGoalDebug('page:interaction-connect', connection as Record<string, unknown>);
@@ -1603,6 +1619,8 @@ export function GoalsPage() {
         <GoalContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
+          pageWidth={pageRef.current?.clientWidth || pageRef.current?.getBoundingClientRect().width || 0}
+          pageHeight={pageRef.current?.clientHeight || pageRef.current?.getBoundingClientRect().height || 0}
           items={contextItems}
           onClose={closeContextMenu}
         />

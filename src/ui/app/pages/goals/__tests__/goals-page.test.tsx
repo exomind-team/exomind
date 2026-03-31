@@ -128,7 +128,11 @@ vi.mock('@xyflow/react', () => ({
           data-testid="mock-react-flow-pane-context"
           onContextMenu={(event) => {
             event.preventDefault();
-            onPaneContextMenu?.({ preventDefault: () => {} });
+            onPaneContextMenu?.({
+              preventDefault: () => {},
+              clientX: event.clientX,
+              clientY: event.clientY,
+            } as unknown as { preventDefault: () => void });
           }}
         >
           pane-context
@@ -143,7 +147,11 @@ vi.mock('@xyflow/react', () => ({
               onClick={() => onNodeClick?.({}, node)}
               onContextMenu={(event) => {
                 event.preventDefault();
-                onNodeContextMenu?.({ preventDefault: () => {}, clientX: 32, clientY: 48 }, node);
+                onNodeContextMenu?.({
+                  preventDefault: () => {},
+                  clientX: event.clientX,
+                  clientY: event.clientY,
+                }, node);
               }}
             >
               {NodeComponent ? <NodeComponent id={node.id} data={node.data ?? {}} /> : node.id}
@@ -158,7 +166,11 @@ vi.mock('@xyflow/react', () => ({
             onClick={() => onEdgeClick?.({}, edge)}
             onContextMenu={(event) => {
               event.preventDefault();
-              onEdgeContextMenu?.({ preventDefault: () => {}, clientX: 64, clientY: 72 }, edge);
+              onEdgeContextMenu?.({
+                preventDefault: () => {},
+                clientX: event.clientX,
+                clientY: event.clientY,
+              }, edge);
             }}
           >
             {edge.id}
@@ -449,6 +461,35 @@ describe('GoalsPage', () => {
     expect(screen.getByTestId('goal-context-item-connect')).toBeInTheDocument();
     expect(screen.queryByTestId('goal-context-item-upstream')).toBeNull();
     expect(screen.queryByTestId('goal-context-item-cancel')).toBeNull();
+  });
+
+  it('positions the context menu relative to the goals page instead of raw viewport client coordinates', async () => {
+    const { GoalsPage } = await loadGoalsPage();
+    render(<GoalsPage />);
+
+    const page = screen.getByTestId('goals-page');
+    vi.spyOn(page, 'getBoundingClientRect').mockReturnValue({
+      x: 24,
+      y: 96,
+      left: 24,
+      top: 96,
+      right: 1224,
+      bottom: 896,
+      width: 1200,
+      height: 800,
+      toJSON: () => '',
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-me'), {
+      clientX: 164,
+      clientY: 228,
+    });
+
+    const menu = await screen.findByTestId('goal-context-menu');
+    expect(menu).toHaveStyle({
+      left: '140px',
+      top: '132px',
+    });
   });
 
   it('shows C5 feedback when deleting the last inbound edge', async () => {

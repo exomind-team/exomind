@@ -4528,6 +4528,72 @@ test.describe('Issue #747 goal layout stability diagnostics', () => {
     expect(goalWarnings.some((entry) => entry.includes('page:suspect-render-state'))).toBe(false);
   });
 
+  test('keeps the context menu anchored near the pointer while clamping it inside the goals page', async ({ page }) => {
+    await gotoGoalsPage(page);
+    await expect(page.getByTestId('goal-flow-node-me')).toBeVisible({ timeout: 10000 });
+
+    const pageBox = await page.getByTestId('goals-page').boundingBox();
+    expect(pageBox, 'context-menu-position: expected measurable goals page bounds').not.toBeNull();
+    if (!pageBox) {
+      throw new Error('expected measurable goals page bounds');
+    }
+
+    const requestedPoint = {
+      clientX: pageBox.x + pageBox.width - 12,
+      clientY: pageBox.y + pageBox.height - 12,
+    };
+
+    await openNodeContextMenu(page, 'goal-flow-node-me', requestedPoint.clientX, requestedPoint.clientY);
+    await expect(page.getByTestId('goal-context-menu')).toBeVisible();
+
+    const menuMetrics = await page.evaluate(() => {
+      const pageEl = document.querySelector('[data-testid="goals-page"]') as HTMLElement | null;
+      const menu = document.querySelector('[data-testid="goal-context-menu"]') as HTMLElement | null;
+      if (!pageEl || !menu) return null;
+
+      const pageRect = pageEl.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      return {
+        pageRect: {
+          left: pageRect.left,
+          top: pageRect.top,
+          right: pageRect.right,
+          bottom: pageRect.bottom,
+        },
+        menuRect: {
+          left: menuRect.left,
+          top: menuRect.top,
+          right: menuRect.right,
+          bottom: menuRect.bottom,
+          width: menuRect.width,
+          height: menuRect.height,
+        },
+      };
+    });
+
+    expect(menuMetrics, 'context-menu-position: expected measurable menu metrics').not.toBeNull();
+    expect(menuMetrics?.menuRect.right ?? 0).toBeLessThanOrEqual((menuMetrics?.pageRect.right ?? 0) + 1);
+    expect(menuMetrics?.menuRect.bottom ?? 0).toBeLessThanOrEqual((menuMetrics?.pageRect.bottom ?? 0) + 1);
+
+    const expectedAnchoredLeft = Math.min(
+      requestedPoint.clientX,
+      (menuMetrics?.pageRect.right ?? 0) - (menuMetrics?.menuRect.width ?? 0),
+    );
+    const expectedAnchoredTop = Math.min(
+      requestedPoint.clientY,
+      (menuMetrics?.pageRect.bottom ?? 0) - (menuMetrics?.menuRect.height ?? 0),
+    );
+
+    expect(
+      Math.abs((menuMetrics?.menuRect.left ?? 0) - expectedAnchoredLeft),
+      'context-menu-position: expected menu left edge to stay near the pointer while clamping to the page',
+    ).toBeLessThan(12);
+    expect(
+      Math.abs((menuMetrics?.menuRect.top ?? 0) - expectedAnchoredTop),
+      'context-menu-position: expected menu top edge to stay near the pointer while clamping to the page',
+    ).toBeLessThan(12);
+  });
+
   test('keeps nodes and edges visible through settled selection, detail-open, zoom, and pan interactions', async ({ page }) => {
     const goalWarnings = trackGoalWarnings(page);
 
