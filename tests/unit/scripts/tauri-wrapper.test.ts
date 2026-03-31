@@ -120,6 +120,63 @@ describeWindowsOnly('tauri-wrapper', () => {
     }
   }, 20000);
 
+  it('injects isolated instance dirs for tauri dev（tauri dev 应注入实例级数据目录）', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-instance-paths-'));
+    const fakeBinDir = join(tempDir, 'bin');
+    const fakeTauriCmd = join(fakeBinDir, 'tauri.cmd');
+    const wrapperPath = join(process.cwd(), 'Scripts', 'dev', 'tauri-wrapper.ps1');
+
+    try {
+      spawnSync('cmd.exe', ['/c', 'mkdir', fakeBinDir], { stdio: 'ignore' });
+
+      writeFileSync(
+        fakeTauriCmd,
+        [
+          '@echo off',
+          'echo EXOMIND_DEV_INSTANCE_NAME=%EXOMIND_DEV_INSTANCE_NAME%',
+          'echo EXOMIND_DEV_APP_DATA_DIR=%EXOMIND_DEV_APP_DATA_DIR%',
+          'echo EXOMIND_DEV_RUNTIME_DATA_DIR=%EXOMIND_DEV_RUNTIME_DATA_DIR%',
+          'echo EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR=%EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR%',
+          'echo EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT=%EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT%',
+          'echo EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=%EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR%',
+          'echo EXOMIND_MCP_BRIDGE_BASE_PORT=%EXOMIND_MCP_BRIDGE_BASE_PORT%',
+          'if /I "%3"=="--config" type "%4"',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      const result = spawnSync(
+        POWERSHELL_PATH,
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath, 'dev'],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${fakeBinDir};${process.env.PATH ?? ''}`,
+            APPDATA: 'C:\\Users\\starlin\\AppData\\Roaming',
+            LOCALAPPDATA: 'C:\\Users\\starlin\\AppData\\Local',
+            EXOMIND_TAURI_INSTANCE_NAME: 'desktop',
+            EXOMIND_WEB_PORT: '1520',
+            EXOMIND_HMR_PORT: '1521',
+            EXOMIND_RT_PORT: '1949',
+          },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('EXOMIND_DEV_INSTANCE_NAME=desktop');
+      expect(result.stdout).toContain('.tmp\\tauri-dev-state\\desktop\\app-data');
+      expect(result.stdout).toContain('.tmp\\tauri-dev-state\\desktop\\webview\\main');
+      expect(result.stdout).toContain('EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=C:\\Users\\starlin\\AppData\\Roaming\\com.exomind.app\\runtime');
+      expect(result.stdout).toContain('EXOMIND_MCP_BRIDGE_BASE_PORT=9323');
+      expect(result.stdout).toContain('"devUrl":"http://localhost:1520"');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }, 20000);
+
   it('disables tauri watcher by default for dev（默认关闭 tauri watcher 避免无关改动触发黑屏重启）', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-no-watch-'));
     const fakeBinDir = join(tempDir, 'bin');

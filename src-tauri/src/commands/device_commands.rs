@@ -1,16 +1,14 @@
 //! 设备标识命令
 //! 提供稳定 device id（持久化到 app data）
 
+use crate::dev_instance_paths::resolve_instance_app_data_dir;
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use uuid::Uuid;
 
 fn resolve_device_id_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
+    let data_dir = resolve_instance_app_data_dir(app)?;
 
     if !data_dir.exists() {
         fs::create_dir_all(&data_dir)
