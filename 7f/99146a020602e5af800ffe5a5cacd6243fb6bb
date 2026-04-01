@@ -1,0 +1,39 @@
+docs/plans/PLAN-timeblock-cleanup-and-bugfix.md
+  824d706963a06c3b 1,4-5,7,18-19,26-27,39,157,160-171,175-176,178,180,182-186,188,190-196,198,200-202,217-218,241-243,258-259,261-265,297-300,308,310-311,317
+  f453b14f4c9c119d 3,6,15-17,20,22,24-25,28,36-38,40,44-51,55,60-63,65,67-68,70,72-76,78,80,82-86,88,90-91,93,95,97-100,102,104-106,112,117,120,124,126-127,129,131,133-134,136,138-142,144,146-147,151-153,173,204,206,208-212,214,216,220,222,224-227,229,231-235,237,239-240,247,249,254-256,266,271,273,276,283-287,293-296,301-303,305-306,315-316,318-320,322-323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "7f99146a020602e5af800ffe5a5cacd6243fb6bb",
+  "prompts": {
+    "824d706963a06c3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4764-3ca6-7582-80d6-21b1e8f907f8",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 63,
+      "total_deletions": 44,
+      "accepted_lines": 63,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/9d45c53edc4d6022ab5eb886bcff47c338d8b12bd9caf190f2818d8537de281f"
+    },
+    "f453b14f4c9c119d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4768-c3df-7bf0-835c-1e4c34ae86ad",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 181,
+      "total_deletions": 190,
+      "accepted_lines": 147,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/fd50407599b15395b6626e55abc6770470603d99e9e0eceddabf6ece46932080"
+    }
+  }
+}
