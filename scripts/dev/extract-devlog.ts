@@ -232,7 +232,7 @@ function reportToText(dataBlock: string, timeHint?: string): string {
   // Pool Health (战场清点)
   const poolBlock = dataBlock.match(/poolHealth:\s*\{([\s\S]*?)\n  \},/);
   if (poolBlock) {
-    lines.push('## 战场清点');
+    lines.push('## Issue 时效清点');
     // PR→Issue 断裂
     const mismatchPattern = /\{\s*pr:\s*(\d+),\s*issue:\s*(\d+)/g;
     let pm;

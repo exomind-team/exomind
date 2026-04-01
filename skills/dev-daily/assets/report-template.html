@@ -366,7 +366,10 @@ const REPORT = {
     // 🏷 未编入：无 P0/P1/P2 优先级标签的 issue 数
     noPriority: { current: 0, previous: 0 },
     // 📦 陈年阵地：创建超 30 天仍 open 的 issue
-    aging: { oldCount: 0, total: 0, pct: 0 },
+    // samples: 最老的 5-8 个 issue，让读者看到具体是什么在积压
+    aging: { oldCount: 0, total: 0, pct: 0, samples: [
+      // { num: 25, title: 'v4架构统一', ageDays: 50, priority: 'P1' },
+    ] },
   },
 
   // ── 建议行动 (可勾选, localStorage 持久化) ────────────────────
@@ -521,11 +524,11 @@ function render() {
   // ── Pool Health (战场清点) ──
   if (R.poolHealth) {
     const ph = R.poolHealth;
-    html += renderCollapsible('⚑ 战场清点', '', 'd6', () => {
+    html += renderCollapsible('🕒 Issue 时效清点', '', 'd6', () => {
       let c = '';
       // PR→Issue 断裂
       if (ph.prIssueMismatch.length > 0) {
-        c += '<div style="margin-bottom:.8rem"><div style="font-size:.85rem;font-weight:700;color:var(--p1);margin-bottom:.3rem">⚑ 战果未清</div>';
+        c += '<div style="margin-bottom:.8rem"><div style="font-size:.85rem;font-weight:700;color:var(--p1);margin-bottom:.3rem">🚩 战果未清</div>';
         ph.prIssueMismatch.forEach(m => {
           c += `<div style="font-size:.82rem;color:var(--text-dim);padding:.2rem 0">PR ${prLink(m.pr)} 已合并 → ${ghLink(m.issue)} 仍 OPEN</div>`;
         });
@@ -542,17 +545,23 @@ function render() {
         });
         c += '</div>';
       }
-      // 无优先级 + 陈年阵地
+      // 无优先级
       const npText = ph.noPriority.current === 0
         ? `<span style="color:var(--green)">全部编入 ✅</span>`
         : `<span style="color:var(--p1)">${ph.noPriority.current}</span>`;
       const npDelta = ph.noPriority.previous !== ph.noPriority.current
         ? ` <span style="color:var(--text-faint)">(上期 ${ph.noPriority.previous})</span>` : '';
+      c += `<div style="font-size:.82rem;color:var(--text-dim);margin-top:.5rem">🏷 未编入 ${npText}${npDelta}</div>`;
+      // 陈年阵地 — 总览 + 具体 issue 列表
       const agePct = ph.aging.pct;
       const ageColor = agePct > 40 ? 'var(--p0)' : agePct > 25 ? 'var(--p1)' : 'var(--text-dim)';
-      c += `<div style="display:flex;gap:2rem;font-size:.82rem;color:var(--text-dim);margin-top:.5rem">`;
-      c += `<div>🏷 未编入 ${npText}${npDelta}</div>`;
-      c += `<div>📦 陈年阵地 <span style="color:${ageColor}">${agePct}%</span> &gt;30d (${ph.aging.oldCount}/${ph.aging.total})</div>`;
+      c += `<div style="margin-top:.8rem"><div style="font-size:.85rem;font-weight:700;color:${ageColor};margin-bottom:.3rem">📦 陈年阵地 ${agePct}% &gt;30d (${ph.aging.oldCount}/${ph.aging.total})</div>`;
+      if (ph.aging.samples && ph.aging.samples.length > 0) {
+        ph.aging.samples.forEach(s => {
+          const pColor = s.priority === 'P0' ? 'var(--p0)' : s.priority === 'P1' ? 'var(--p1)' : 'var(--text-faint)';
+          c += `<div style="font-size:.82rem;color:var(--text-dim);padding:.15rem 0">${ghLink(s.num)} <span style="color:${pColor}">${s.priority}</span> <span style="color:var(--text-faint)">${s.ageDays}d</span> ${s.title}</div>`;
+        });
+      }
       c += '</div>';
       return c;
     });
