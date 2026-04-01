@@ -352,6 +352,23 @@ const REPORT = {
     ],
   },
 
+  // ── 战场清点 ──────────────────────────────────────────────────
+  // Issue 池后勤体征：4 个信号快速暴露治理盲区
+  poolHealth: {
+    // ⚑ 战果未清：已合并 PR 对应的 issue 仍 open
+    prIssueMismatch: [
+      // { pr: 772, issue: 769, prTitle: 'fix: incremental refresh', issueTitle: 'ChatPage全量拉取' },
+    ],
+    // ⏳ 僵持线：P0/P1 超过 7 天无关联 commit/PR（只列超过 7 天的）
+    staleHighPriority: [
+      // { num: 532, title: 'RT+ECS 跨端同步', priority: 'P0', staleDays: 17 },
+    ],
+    // 🏷 未编入：无 P0/P1/P2 优先级标签的 issue 数
+    noPriority: { current: 0, previous: 0 },
+    // 📦 陈年阵地：创建超 30 天仍 open 的 issue
+    aging: { oldCount: 0, total: 0, pct: 0 },
+  },
+
   // ── 建议行动 (可勾选, localStorage 持久化) ────────────────────
   actions: [
     { text: '优先 #717 图模型对齐', detail: 'v0.2 spec 已就绪，是 #718~#721 全部后续的前置依赖' },
@@ -500,6 +517,46 @@ function render() {
     if (R.truth.stillOpen.length) t += renderTruthGroup('仍 OPEN · 代码已修复 ⚠️', R.truth.stillOpen);
     return t;
   });
+
+  // ── Pool Health (战场清点) ──
+  if (R.poolHealth) {
+    const ph = R.poolHealth;
+    html += renderCollapsible('⚑ 战场清点', '', 'd6', () => {
+      let c = '';
+      // PR→Issue 断裂
+      if (ph.prIssueMismatch.length > 0) {
+        c += '<div style="margin-bottom:.8rem"><div style="font-size:.85rem;font-weight:700;color:var(--p1);margin-bottom:.3rem">⚑ 战果未清</div>';
+        ph.prIssueMismatch.forEach(m => {
+          c += `<div style="font-size:.82rem;color:var(--text-dim);padding:.2rem 0">PR ${prLink(m.pr)} 已合并 → ${ghLink(m.issue)} 仍 OPEN</div>`;
+        });
+        c += '</div>';
+      }
+      // P0/P1 停滞
+      if (ph.staleHighPriority.length > 0) {
+        c += '<div style="margin-bottom:.8rem"><div style="font-size:.85rem;font-weight:700;color:var(--p0);margin-bottom:.3rem">⏳ 僵持线</div>';
+        ph.staleHighPriority.forEach(s => {
+          const barLen = Math.min(Math.round(s.staleDays / 2), 15);
+          const bar = '█'.repeat(barLen) + '░'.repeat(Math.max(15 - barLen, 0));
+          const cls = s.priority === 'P0' ? 'color:var(--p0)' : 'color:var(--p1)';
+          c += `<div style="font-size:.82rem;color:var(--text-dim);padding:.2rem 0;font-family:'JetBrains Mono',monospace">${ghLink(s.num)} <span style="${cls}">${s.priority}</span> <span style="color:var(--text-faint)">${bar}</span> ${s.staleDays}d ${s.title}</div>`;
+        });
+        c += '</div>';
+      }
+      // 无优先级 + 陈年阵地
+      const npText = ph.noPriority.current === 0
+        ? `<span style="color:var(--green)">全部编入 ✅</span>`
+        : `<span style="color:var(--p1)">${ph.noPriority.current}</span>`;
+      const npDelta = ph.noPriority.previous !== ph.noPriority.current
+        ? ` <span style="color:var(--text-faint)">(上期 ${ph.noPriority.previous})</span>` : '';
+      const agePct = ph.aging.pct;
+      const ageColor = agePct > 40 ? 'var(--p0)' : agePct > 25 ? 'var(--p1)' : 'var(--text-dim)';
+      c += `<div style="display:flex;gap:2rem;font-size:.82rem;color:var(--text-dim);margin-top:.5rem">`;
+      c += `<div>🏷 未编入 ${npText}${npDelta}</div>`;
+      c += `<div>📦 陈年阵地 <span style="color:${ageColor}">${agePct}%</span> &gt;30d (${ph.aging.oldCount}/${ph.aging.total})</div>`;
+      c += '</div>';
+      return c;
+    });
+  }
 
   // ── Actions ──
   html += `<div class="section-title animate d6">建议行动</div>`;

@@ -50,6 +50,14 @@ ExoMind 的每一条系统级约束都必须具备**双层表述**，缺一不�
 | **测试框架** | Vitest                      | -            | 单元测试框架   |
 | **目标平台** | Windows/macOS/Linux/Android | -            | 全平台支持     |
 
+> **⚠️ Termux (Android) 开发环境能力提醒**
+>
+> 当前 Termux 环境已安装完整工具链，**不要假设它缺少某项能力**，先实测再下结论：
+> - **Rust**: `cargo 1.93.1` / `rustc 1.93.1` — `cargo check` / `cargo test` 可用（首次编译约 2 分钟）
+> - **Node/Bun**: `npx tsc --noEmit` / `npx vitest run` / `bun dev` 均可用
+> - **Git/GitHub CLI**: `git` / `gh` / `jj` 均可用
+> - **不可用**: Playwright E2E（需 Chromium）、Tauri 桌面窗口交互验证、Android APK 安装测试
+
 ---
 
 ## 核心架构

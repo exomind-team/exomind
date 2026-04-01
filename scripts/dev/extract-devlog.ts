@@ -229,6 +229,45 @@ function reportToText(dataBlock: string, timeHint?: string): string {
     lines.push('');
   }
 
+  // Pool Health (战场清点)
+  const poolBlock = dataBlock.match(/poolHealth:\s*\{([\s\S]*?)\n  \},/);
+  if (poolBlock) {
+    lines.push('## 战场清点');
+    // PR→Issue 断裂
+    const mismatchPattern = /\{\s*pr:\s*(\d+),\s*issue:\s*(\d+)/g;
+    let pm;
+    const mismatches: string[] = [];
+    while ((pm = mismatchPattern.exec(poolBlock[1])) !== null) {
+      mismatches.push(`PR #${pm[1]} 已合并 → #${pm[2]} 仍 OPEN`);
+    }
+    if (mismatches.length > 0) {
+      lines.push(`⚑ 战果未清: ${mismatches.length} 条`);
+      mismatches.forEach(m => lines.push(`  ${m}`));
+    }
+    // P0/P1 停滞
+    const stalePattern = /\{\s*num:\s*(\d+),\s*title:\s*'([^']*)',\s*priority:\s*'([^']*)',\s*staleDays:\s*(\d+)/g;
+    let sm;
+    const stales: string[] = [];
+    while ((sm = stalePattern.exec(poolBlock[1])) !== null) {
+      stales.push(`#${sm[1]} ${sm[3]} ${sm[4]}d ${sm[2]}`);
+    }
+    if (stales.length > 0) {
+      lines.push(`⏳ 僵持线:`);
+      stales.forEach(s => lines.push(`  ${s}`));
+    }
+    // 无优先级
+    const npMatch = poolBlock[1].match(/noPriority:\s*\{\s*current:\s*(\d+),\s*previous:\s*(\d+)/);
+    if (npMatch) {
+      lines.push(`🏷 未编入: ${npMatch[1]} (上期 ${npMatch[2]})`);
+    }
+    // 陈年阵地
+    const ageMatch = poolBlock[1].match(/aging:\s*\{\s*oldCount:\s*(\d+),\s*total:\s*(\d+),\s*pct:\s*(\d+)/);
+    if (ageMatch) {
+      lines.push(`📦 陈年阵地: ${ageMatch[3]}% >30d (${ageMatch[1]}/${ageMatch[2]})`);
+    }
+    lines.push('');
+  }
+
   // Actions
   const actionsBlock = dataBlock.match(/actions:\s*\[([\s\S]*?)\],\s*\n/);
   if (actionsBlock) {

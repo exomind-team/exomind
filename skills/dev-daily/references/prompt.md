@@ -104,6 +104,15 @@ gh issue list --state open --limit 500 --json labels --jq '[.[].labels[].name] |
 
 # 9. dev 最新提交
 git log --oneline -15 dev
+
+# 10. 战场清点 — 无优先级 issue 数
+gh issue list --state open --limit 500 --json number,labels --jq '[.[] | select(([.labels[].name] | map(select(startswith("P"))) | length) == 0)] | length'
+
+# 11. 战场清点 — 陈年阵地（>30 天的 open issue 数）
+gh issue list --state open --limit 500 --json createdAt --jq "[.[] | select(.createdAt < \"$(date -d '30 days ago' +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -v-30d +%Y-%m-%dT%H:%M:%S)\")] | length"
+
+# 12. 战场清点 — P0/P1 创建日期（用于计算停滞天数）
+gh issue list --state open --limit 500 --json number,title,labels,createdAt --jq '.[] | select([.labels[].name] | any(. == "P0" or . == "P1")) | "\(.number)|\(.title[:50])|\([.labels[].name] | map(select(startswith("P"))) | first)|\(.createdAt[:10])"'
 ```
 
 #### 采集防护规则
@@ -139,6 +148,11 @@ git log --oneline -15 dev
 3. **Issue 标签分布**：按数量降序，P0/P1 行标注具体编号
 4. **3-5 条主线**：找 epic/P0 产品目标，估算完成百分比
 5. **天气等级**：☀️晴 / ⛅晴转多云 / 🌥️多云 / 🌧️阵雨 / ⛈️雷暴
+6. **战场清点**（4 信号）：
+   - **⚑ 战果未清**：对比 merged PRs 标题中的 `#NNN` 与 issue state，列出已合并但 issue 仍 OPEN 的条目
+   - **⏳ 僵持线**：P0/P1 issue 的 `createdAt` 距今超过 7 天且无近期关联 commit，列出编号 + 停滞天数
+   - **🏷 未编入**：无 P0/P1/P2 标签的 issue 数（与上期对比）
+   - **📦 陈年阵地**：创建超 30 天的 open issue 占比（>25% ⚠️ / >40% 🔴）
 
 ### 质量红线
 
