@@ -1,4 +1,4 @@
-# 实施计划：Agent API（RT 工具调用框架）
+# 实施计划：Agent API — RT 逻辑端
 
 > **状态**：待执行
 > **设计文档**：[2026-04-01-agent-api-and-proposal-system-design.md](./2026-04-01-agent-api-and-proposal-system-design.md)

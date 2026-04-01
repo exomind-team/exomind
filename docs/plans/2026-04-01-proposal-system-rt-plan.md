@@ -1,10 +1,11 @@
-# 实施计划：提案系统（Proposal System）
+# 实施计划：提案系统 — RT 逻辑端
 
 > **状态**：待执行
 > **设计文档**：[2026-04-01-agent-api-and-proposal-system-design.md](./2026-04-01-agent-api-and-proposal-system-design.md)
 > **关联 Issue**：#677
-> **分支**：`feature/proposal-system`
-> **验收标准**：外部 Agent 通过 `curl POST /api/proposals` 提交 `create_task` 提案，用户在 UI 中批准后任务实际创建并写入 EventLog
+> **分支**：`feature/proposal-system-rt`
+> **验收标准**：外部 Agent 通过 `curl POST /api/proposals` 提交 `create_task` 提案，`curl PATCH` 批准后任务实际创建并写入 EventLog
+> **下游依赖**：完成后，`proposal-system-ui-plan.md` 可启动
 
 ---
 
@@ -31,11 +32,15 @@ ls crates/exomind-runtime/src/ | grep sqlite
 
 ---
 
-## Phase 1：RT 后端（Rust）
-
-### 步骤 1：提案数据模型
+## 步骤 1：提案数据模型
 
 **新建文件**：`crates/exomind-runtime/src/proposal/mod.rs`
+
+**在 `lib.rs` 注册模块**：
+```rust
+// 现有代码位置：crates/exomind-runtime/src/lib.rs 顶部 mod 声明区域
+pub mod proposal;  // ★ 新增
+```
 
 ```rust
 use chrono::{DateTime, Utc};
@@ -127,7 +132,7 @@ pub struct Comment {
 }
 ```
 
-#### 1.2 验证
+### 验证
 
 ```bash
 cargo check -p exomind-runtime
@@ -135,7 +140,7 @@ cargo check -p exomind-runtime
 
 ---
 
-### 步骤 2：提案存储（SQLite）
+## 步骤 2：提案存储（SQLite）
 
 **新建文件**：`crates/exomind-runtime/src/proposal/store.rs`
 
@@ -172,9 +177,11 @@ impl ProposalStore {
 }
 ```
 
-**注意**：`id` 不可更新，`status` 不允许从终态（`approved`/`rejected`）回退。
+**不变量**：
+- `id` 不可更新，SQLite `AUTOINCREMENT` 确保永久递增
+- `status` 不允许从终态（`approved`/`rejected`）回退，store 层需校验
 
-#### 2.2 验证
+### 验证
 
 ```bash
 cargo test -p exomind-runtime proposal
@@ -182,7 +189,7 @@ cargo test -p exomind-runtime proposal
 
 ---
 
-### 步骤 3：提案执行器
+## 步骤 3：提案执行器
 
 **新建文件**：`crates/exomind-runtime/src/proposal/executor.rs`
 
@@ -224,7 +231,7 @@ impl ProposalExecutor {
 }
 ```
 
-#### 3.2 验证
+### 验证
 
 ```bash
 cargo test -p exomind-runtime proposal::executor
@@ -232,7 +239,7 @@ cargo test -p exomind-runtime proposal::executor
 
 ---
 
-### 步骤 4：HTTP 路由
+## 步骤 4：HTTP 路由
 
 **新建文件**：`crates/exomind-runtime/src/routes/proposals.rs`
 
@@ -286,7 +293,7 @@ pub mod proposals;  // ★ 新增
 pub proposal_store: Arc<proposal::ProposalStore>,  // ★ 新增
 ```
 
-#### 4.2 验证
+### 验证
 
 ```bash
 cargo check -p exomind-runtime
@@ -300,12 +307,15 @@ curl -s -X POST http://127.0.0.1:1949/api/proposals \
     "body": "检测到今天有未记录的会议事件",
     "action_type": "create_task",
     "action_params": {"title": "整理会议记录", "tags": ["工作"]},
-    "references": [{"ref_type": "Event", "id": "evt-001", "display_text": "09:32 团队会议"}],
+    "references": [{"ref_type": "event", "id": "evt-001", "display_text": "09:32 团队会议"}],
     "publisher": {"publisher_type": "agent", "id": "test-agent", "name": "测试 Agent"}
   }' | jq .
 
 # 验证列表
 curl -s http://127.0.0.1:1949/api/proposals | jq .
+
+# 验证状态过滤
+curl -s 'http://127.0.0.1:1949/api/proposals?status=pending' | jq .
 
 # 验证批准执行（创建任务）
 curl -s -X PATCH http://127.0.0.1:1949/api/proposals/1 \
@@ -314,127 +324,9 @@ curl -s -X PATCH http://127.0.0.1:1949/api/proposals/1 \
 
 # 验证任务是否创建
 curl -s http://127.0.0.1:1949/tasks | jq '.[] | select(.title == "整理会议记录")'
-```
 
----
-
-## Phase 2：前端（TypeScript / React）
-
-### 步骤 5：类型定义与 API 客户端
-
-**新建文件**：`src/lib/types/proposal.ts`
-
-```typescript
-export type ProposalStatus = 'pending' | 'in_review' | 'approved' | 'rejected' | 'snoozed';
-export type ActionType = 'create_task' | 'append_event' | 'start_timeblock' | 'approve_agent_access';
-export type RefType = 'event' | 'timeblock' | 'task';
-export type PublisherType = 'agent' | 'human';
-
-export interface ProposalRef {
-  ref_type: RefType;
-  id: string;
-  display_text: string;
-}
-
-export interface Publisher {
-  publisher_type: PublisherType;
-  id: string;
-  name: string;
-}
-
-export interface Comment {
-  author: Publisher;
-  content: string;
-  created_at: string;
-}
-
-export interface Proposal {
-  id: number;
-  title: string;
-  body: string;
-  action_type: ActionType;
-  action_params: Record<string, unknown>;
-  references: ProposalRef[];
-  status: ProposalStatus;
-  publisher: Publisher;
-  comments: Comment[];
-  created_at: string;
-  updated_at: string;
-}
-```
-
-**新建文件**：`src/lib/adapters/proposal-rt-adapter.ts`
-
-```typescript
-// 参考 eventlog-rt-adapter.ts 的实现模式
-export async function listProposals(filter?: { status?: ProposalStatus }): Promise<Proposal[]>;
-export async function createProposal(payload: CreateProposalPayload): Promise<Proposal>;
-export async function updateProposal(id: number, patch: UpdateProposalPatch): Promise<Proposal>;
-export async function addComment(id: number, content: string, author: Publisher): Promise<Proposal>;
-```
-
-#### 5.2 验证
-
-```bash
-npx tsc --noEmit
-```
-
----
-
-### 步骤 6：全局通知徽章
-
-**新建文件**：`src/ui/app/components/ProposalNotificationBadge.tsx`
-
-- 轮询 `GET /api/proposals?status=pending` （每 30 秒或通过 WebSocket 推送）
-- 显示未处理数量，点击跳转到请求箱页面
-- 插入位置：`src/ui/app/layout/AppSidebar.tsx` 导航栏（确认前先 `grep -n "导航\|Sidebar\|nav" src/ui/app/layout/ -r`）
-
-#### 6.2 验证
-
-```bash
-npx tsc --noEmit
-# 手动验证：curl 添加提案后，徽章显示数量变化
-```
-
----
-
-### 步骤 7：请求箱页面
-
-**新建文件**：`src/ui/app/pages/ProposalInboxPage.tsx`
-
-**布局**：
-- 左侧列表：按状态分组（pending/in_review 优先），显示编号、标题、发布者、时间
-- 右侧详情：标题、理由、引用列表（文字 + 跳转按钮）、动作参数编辑区、评论区、操作按钮
-
-**引用跳转**（MVP）：
-```typescript
-function jumpToRef(ref: ProposalRef) {
-  switch (ref.ref_type) {
-    case 'event': navigate(`/eventlog?highlight=${ref.id}`); break;
-    case 'timeblock': navigate(`/timeblocks?highlight=${ref.id}`); break;
-    case 'task': navigate(`/tasks?highlight=${ref.id}`); break;
-  }
-}
-```
-
-**操作按钮**：
-- 同意执行：`PATCH /api/proposals/:id { status: 'approved' }`
-- 编辑后执行：先更新 `action_params`，再变更状态为 `approved`
-- 拒绝：`{ status: 'rejected' }`
-- 暂缓：`{ status: 'snoozed', snooze_until?: ... }`
-
-**在路由中注册**：
-```bash
-# 先确认路由注册位置
-grep -n "routes\|RouterConfig\|path" src/ui/app/router.tsx | head -20
-```
-
-#### 7.2 验证
-
-```bash
-npx tsc --noEmit
-npx vite --host 0.0.0.0 --port 5173
-# 手动验证全流程：curl 提交提案 → UI 显示 → 批准 → 任务创建
+# 验证 EventLog 是否记录
+curl -s http://127.0.0.1:1949/eventlog | jq '.[] | select(.tags[] == "agent-action")'
 ```
 
 ---
@@ -443,10 +335,10 @@ npx vite --host 0.0.0.0 --port 5173
 
 1. **提案 id 自增不可重置**：SQLite `AUTOINCREMENT` 确保 id 永久递增，即使删除记录
 2. **状态不可回退终态**：`approved` / `rejected` 后不允许再改状态，store 层需校验
-3. **执行失败处理**：批准后执行失败不应回滚状态（提案已批准，记录操作记录），需要日志或额外通知
-4. **`snoozed` 的语义**：暂缓不是终态，需要唤醒机制（MVP 可以不实现定时唤醒，仅用手动解除）
-5. **并发审批**：`in_review` 状态防止两人同时审批，`PATCH status: in_review` 需要 compare-and-swap
-6. **action_params 校验**：`create_task` 至少需要 `title` 字段，store 层创建时需验证
+3. **执行失败处理**：批准后执行失败不应回滚状态（提案已批准），需记录错误日志或写入 comment
+4. **`snoozed` 的语义**：暂缓不是终态，MVP 仅支持手动解除（不实现定时唤醒）
+5. **并发审批**：`in_review` 防止两人同时审批，`PATCH status: in_review` 需 compare-and-swap（先读当前状态再写）
+6. **action_params 校验**：`create_task` 至少需要 `title`，store 创建时需验证
 
 ---
 
@@ -457,13 +349,14 @@ npx vite --host 0.0.0.0 --port 5173
 | curl 提交提案 | `POST /api/proposals` | 返回带自增 id 的 Proposal 对象 |
 | 列表查询 | `GET /api/proposals` | 返回提案列表 |
 | 状态过滤 | `GET /api/proposals?status=pending` | 只返回 pending 状态 |
-| 批准执行 | `PATCH /api/proposals/1 {status:approved}` | 返回 approved 提案，任务已创建，EventLog 已写入 |
+| 批准执行 | `PATCH {status:approved}` | 提案 approved，任务已创建，EventLog 已写入 |
 | 拒绝 | `PATCH {status:rejected}` | 状态变为 rejected，不执行 |
-| UI 徽章 | 提交提案后 | 导航栏显示数量徽章 |
-| 请求箱页面 | 打开页面 | 列表显示所有提案 |
-| 引用跳转 | 点击引用 | 跳转到对应实体详情 |
-| 编辑后执行 | 修改 action_params 后批准 | 以修改后的参数执行 |
-| `npx tsc --noEmit` | 运行 | 0 errors |
+| 暂缓 | `PATCH {status:snoozed}` | 状态变为 snoozed |
+| 编辑参数 | `PATCH {action_params:{...}}` | 参数更新，状态不变 |
+| 添加评论 | `POST /proposals/:id/comments` | 评论追加到列表 |
+| 终态保护 | 已 approved 再 PATCH status | 返回 4xx 错误 |
+| `cargo check` | 运行 | 0 errors |
+| `cargo test` | 运行 | 0 failed |
 
 ---
 
@@ -475,6 +368,3 @@ npx vite --host 0.0.0.0 --port 5173
 | 步骤 2 存储层 | | | |
 | 步骤 3 执行器 | | | |
 | 步骤 4 HTTP 路由 | | | |
-| 步骤 5 前端类型+适配器 | | | |
-| 步骤 6 通知徽章 | | | |
-| 步骤 7 请求箱页面 | | | |
