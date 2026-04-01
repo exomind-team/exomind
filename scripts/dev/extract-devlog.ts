@@ -5,7 +5,7 @@
  *
  * 读取顺序（--source auto）：
  *   1. GitHub Pages 子 manifest + data JSON + latest.json 一致性校验
- *   2. 本地 exomind-devlog 发布仓库（仅 fallback）
+ *   2. 本地 exomind-devlog 发布仓库（仅 JSON fallback）
  *   3. 本地 temp/ HTML（仅 fallback）
  *
  * 用法:
@@ -324,17 +324,16 @@ async function resolveFromPublishedProvider(docType: DocType, requestedSource: S
   let trust: SourceInfo['trust'] = provider.label === 'pages' ? 'high' : 'medium';
   let consistency: SourceInfo['consistency'] = 'ok';
   let resolvedSource = `${provider.label}-json`;
-  let htmlRef: string | undefined;
   let dataRef: string | undefined = chosenEntry.dataFile ? provider.entryRef(chosenEntry.dataFile) : undefined;
 
-  let data: Record<string, any> | null = null;
-  if (chosenEntry.dataFile) {
-    try {
-      data = await provider.readJson(provider.entryRef(chosenEntry.dataFile));
-    } catch (error) {
-      notes.push(`标准 JSON 不可用：${error instanceof Error ? error.message : String(error)}`);
-      data = null;
-    }
+  if (!chosenEntry.dataFile) {
+    throw new SourceConsistencyError('manifest 条目缺少 dataFile；已发布标准入口必须提供 JSON 数据层');
+  }
+  let data: Record<string, any>;
+  try {
+    data = await provider.readJson(provider.entryRef(chosenEntry.dataFile));
+  } catch (error) {
+    throw new SourceUnavailableError(`标准 JSON 不可用：${error instanceof Error ? error.message : String(error)}`);
   }
 
   let latestData: Record<string, any> | null = null;
@@ -354,35 +353,14 @@ async function resolveFromPublishedProvider(docType: DocType, requestedSource: S
     dataFile: chosenEntry.dataFile,
   };
 
-  if (data) {
-    const dataPointer = parsePublishedPointer(data, entryPointer);
-    assertPointerMatch('manifest.entry', entryPointer, 'data', dataPointer);
-    if (latestData) {
-      const latestPointer = parsePublishedPointer(latestData, entryPointer);
-      assertPointerMatch('manifest.entry', entryPointer, 'latest', latestPointer);
-      assertPointerMatch('data', dataPointer, 'latest', latestPointer);
-    } else {
-      notes.push('已校验 manifest 与 data；latest.json 缺失，当前为中等可信度');
-    }
-  } else if (chosenEntry.file) {
-    htmlRef = provider.entryRef(chosenEntry.file);
-    const html = await provider.readText(htmlRef);
-    data = await resolveFromHtml(docType, html, provider.label === 'devlog'
-      ? { localFilePath: htmlRef }
-      : { remoteDataRef: htmlRef, remoteReadJson: provider.readJson });
-    resolvedSource = `${provider.label}-html-compat`;
-    consistency = 'partial';
-    trust = provider.label === 'pages' ? 'medium' : 'low';
-    notes.push('标准 JSON 缺失，使用 HTML 兼容解析；这是迁移期兜底，不是主链');
-
-    const dataPointer = parsePublishedPointer(data, entryPointer);
-    assertPointerMatch('manifest.entry', entryPointer, 'html-data', dataPointer);
-    if (latestData) {
-      const latestPointer = parsePublishedPointer(latestData, entryPointer);
-      assertPointerMatch('manifest.entry', entryPointer, 'latest', latestPointer);
-    }
+  const dataPointer = parsePublishedPointer(data, entryPointer);
+  assertPointerMatch('manifest.entry', entryPointer, 'data', dataPointer);
+  if (latestData) {
+    const latestPointer = parsePublishedPointer(latestData, entryPointer);
+    assertPointerMatch('manifest.entry', entryPointer, 'latest', latestPointer);
+    assertPointerMatch('data', dataPointer, 'latest', latestPointer);
   } else {
-    throw new SourceConsistencyError('manifest 条目既没有 dataFile，也没有 file');
+    notes.push('已校验 manifest 与 data；latest.json 缺失，当前为中等可信度');
   }
 
   return {
@@ -399,7 +377,6 @@ async function resolveFromPublishedProvider(docType: DocType, requestedSource: S
       manifest: provider.manifestRef,
       data: dataRef,
       latest: provider.latestRef,
-      html: htmlRef,
       fallbackUsed: resolvedSource !== 'pages-json' && requestedSource === 'auto',
       notes,
     },

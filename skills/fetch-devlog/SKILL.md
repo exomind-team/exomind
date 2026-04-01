@@ -29,6 +29,7 @@ description: Fetch and parse the latest ExoMind development report or route data
 3. 同目录 `latest.json` 一致性校验
 
 `raw.githubusercontent.com`、本地 `temp/`、本地 `exomind-devlog` 只作为 fallback，不是默认入口。
+已发布归档必须通过 `dataFile` JSON 读取；HTML 解析仅保留给显式 `--file` 或本地 `temp/`。
 
 ## Commands
 

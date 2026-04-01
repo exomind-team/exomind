@@ -37,6 +37,7 @@ bun run devlog:extract --type route --source pages # 强制从 GitHub Pages 读�
 When generating a new route, read the previous route first to compare batch status changes and detect triggers.
 
 `devlog:extract` 默认按 `GitHub Pages routes/manifest.json -> data JSON -> latest.json` 读取，并在输出顶部返回 `[devlog-source]` 或 `_devlogSource`。
+已发布归档现在要求 `dataFile` 必须存在；HTML 解析仅保留给显式 `--file` 或本地 `temp/` 兜底。
 必须检查该来源块，确认：
 - 来源是否为 `pages-json`
 - `trust` 是否为 `high`
