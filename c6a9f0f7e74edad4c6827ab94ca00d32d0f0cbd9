@@ -1,0 +1,26 @@
+tests/unit/settings/settings-danger-section.test.tsx
+  7383623589f936ce 37-38
+tests/unit/settings/settings-registry-coverage.test.ts
+  7383623589f936ce 43,77,152,403-404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "c6a9f0f7e74edad4c6827ab94ca00d32d0f0cbd9",
+  "prompts": {
+    "7383623589f936ce": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4702-ee0a-7dd0-bda1-600ae5bb74c9",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 105,
+      "total_deletions": 27,
+      "accepted_lines": 9,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/3f9339ccd4278827d986341a4b1cb08dd29bcb4722af60d91c4da1f03df2eee1"
+    }
+  }
+}
