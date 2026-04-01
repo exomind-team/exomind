@@ -29,14 +29,14 @@ ExoMind（外心）是一个**个人/集体的生命成长助手**，探索人�
 | 模块 | 文件 | 状态 |
 |------|------|------|
 | 加密适配器 | `adapters/crypto-adapter.ts` | 已实现 |
-| PouchDB 同步 | `adapters/pouch-sync.ts` | 已实现 |
+| RT Mesh + RT SQLite 同步 | `ecs-*.service.ts` + `useSignalStream.ts` | 主链路 |
 | Agent Web 适配器 | `lib/adapters/agent-web-adapter.ts` | 已实现 |
 | ASR 适配器（3种） | `lib/adapters/asr/` (moss, volcano-engine, volcano-http) | 已实现 |
 | 剪贴板适配器（Web/Tauri） | `lib/adapters/clipboard-*-adapter.ts` | 已实现 |
 | Cursor HTTP 适配器 | `lib/adapters/cursor-http-adapter.ts` | 已实现 |
 | Me 适配器（Web/Mock） | `lib/adapters/me-*-adapter.ts` | 已实现 |
-| Reminder PouchDB 适配器 | `lib/adapters/reminder-pouch-adapter.ts` | 已实现 |
-| Task 适配器（PouchDB/RT/Mock） | `lib/adapters/task-*-adapter.ts` | 已实现 |
+| Reminder RT 适配器 | `lib/adapters/reminder-rt-adapter.ts` | 已实现 |
+| Task 适配器（RT/Mock） | `lib/adapters/task-*-adapter.ts` | 已实现 |
 | EventLog 存储适配器（Tauri/Web） | `lib/adapters/tauri-eventlog-storage.ts`, `web-eventlog-storage.ts` | 已实现 |
 | Runtime 适配器 | `lib/adapters/tauri-runtime-adapter.ts` | 已实现 |
 | Web Speech ASR | `lib/adapters/web-speech-asr.ts` | 已实现 |
@@ -203,7 +203,6 @@ TypeScript Agent 命令行工具，包含多个开发计划版本（v1-v4）。
 
 | 文件 | 功能 |
 |------|------|
-| `pouchdb-server.js` | PouchDB 同步服务器（端口 6984） |
 | `agent-runtime-server.js` | Agent 运行时服务 |
 | `config.js` / `config.json` | 服务配置 |
 | `startup-guard.js` | 启动守护 |
@@ -223,7 +222,7 @@ TypeScript Agent 命令行工具，包含多个开发计划版本（v1-v4）。
 | zustand | ^5.0.11 |
 | @tanstack/react-router | ^1.158.0 |
 | @tauri-apps/api | ^2 |
-| PouchDB | ^9.0.0 |
+| RT SQLite | Rust runtime + rusqlite |
 | lucide-react | ^0.563.0 |
 | @xyflow/react | ^12.10.1 |
 | Vitest | ^4.0.18 |
@@ -265,7 +264,7 @@ TypeScript Agent 命令行工具，包含多个开发计划版本（v1-v4）。
 | 组件测试 | `tests/components/` | UI 组件 |
 | 数据库测试 | `tests/db/` | 存储层 |
 | 存储测试 | `tests/storage/` | 存储适配器 |
-| 同步测试 | `tests/sync/` | PouchDB 同步 |
+| 同步测试 | `tests/e2e/*issue794*.test.ts` + `tests/unit/services/ecs-*.test.ts` | RT mesh / RT SQLite |
 | CI 配置 | `tests/ci/` | CI 辅助 |
 
 E2E 测试脚本覆盖了 issue-27, 77, 82, 120, 198, 201, 204, 205, 213, 215, 243, 245f 等多个 Issue。

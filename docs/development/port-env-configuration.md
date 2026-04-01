@@ -1,9 +1,15 @@
-# 多 Worktree 端口配置指南
+# 多 Worktree 端口配置指南（RT-only）
 
 ## 背景
 
-当同一台机器同时运行多个 ExoMind worktree（例如功能测试分支 + 部署验证分支）时，默认端口会冲突。  
-Issue: `#79`
+同一台机器并行运行多个 ExoMind worktree 时，主要需要隔离的是：
+
+- Web / HMR
+- Embedded RT
+- ASR
+- MCP Bridge
+
+`PouchDB sync server` 已不再是主链路，本指南只描述当前仍在主路径中的端口与环境变量。
 
 ## 支持的环境变量
 
@@ -11,28 +17,21 @@ Issue: `#79`
 |---|---:|---|
 | `EXOMIND_WEB_PORT` | `1420` | Vite 开发服务端口 |
 | `EXOMIND_HMR_PORT` | `1421` | Vite HMR WebSocket 端口 |
-| `EXOMIND_POUCHDB_PORT` | `6984` | PouchDB 同步服务端口 |
-| `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | PouchDB 同步服务监听地址（默认仅本机访问；局域网联调时设为 `0.0.0.0`） |
+| `EXOMIND_RT_PORT` | `9124` | Embedded RT HTTP 端口 |
+| `EXOMIND_RT_BIND` | `127.0.0.1` | Embedded RT 监听地址；局域网联调可设为 `0.0.0.0` |
 | `EXOMIND_ASR_PORT` | `1949` | ASR 后端服务端口 |
-| `EXOMIND_BFF_ALLOWED_ORIGINS` | 见下方规则 | ASR BFF 的 CORS 白名单（逗号分隔；`*` 表示全放行） |
-| `VITE_SYNC_SERVER_URL` | `http://localhost:6984` | 前端同步服务地址（优先级高于 `EXOMIND_POUCHDB_PORT`） |
-| `VITE_ASR_SERVER_URL` | `http://localhost:1949` | 前端 ASR 服务地址（优先级高于 `EXOMIND_ASR_PORT`） |
+| `VITE_ASR_SERVER_URL` | 自动推导 | 前端 ASR 服务地址（优先级高于 `EXOMIND_ASR_PORT`） |
+| `EXOMIND_BFF_ALLOWED_ORIGINS` | 见规则 | ASR BFF 的 CORS 白名单 |
 
 ## 优先级规则
 
-1. 前端同步地址：`VITE_SYNC_SERVER_URL` > `EXOMIND_POUCHDB_PORT + 当前浏览器 hostname` 组装地址 > 默认地址  
-2. 前端 ASR 地址：`VITE_ASR_SERVER_URL` > `EXOMIND_ASR_PORT` 组装地址 > 默认地址  
-3. Vite 端口：`EXOMIND_WEB_PORT` 和 `EXOMIND_HMR_PORT`（若未设置 HMR 端口，则自动使用 `WEB_PORT + 1`）
-4. ASR BFF CORS：
-   - 若设置 `EXOMIND_BFF_ALLOWED_ORIGINS='*'`：全部放行（仅建议开发临时使用）
-   - 若设置具体白名单（逗号分隔）：仅放行白名单
-   - 未设置时：`development` 默认放行；`production` 默认仅放行 `http://<hostname>:<EXOMIND_WEB_PORT>`
-
-## 本地模式与 LAN 测试模式
-
-1. 本地模式（默认，安全）：不设置 `EXOMIND_POUCHDB_HOST`，服务仅监听 `127.0.0.1`。  
-2. LAN 测试模式（显式开启）：设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，允许手机/其他设备访问。  
-3. 生产部署请使用受控网络与鉴权，不建议直接暴露开发同步服务。
+1. 前端 ASR 地址：`VITE_ASR_SERVER_URL` > `EXOMIND_ASR_PORT + 当前 hostname`
+2. Vite 端口：`EXOMIND_WEB_PORT` 和 `EXOMIND_HMR_PORT`
+3. Embedded RT：`EXOMIND_RT_PORT` + `EXOMIND_RT_BIND`
+4. BFF CORS：
+   - `EXOMIND_BFF_ALLOWED_ORIGINS='*'`：全部放行，仅建议本地开发临时使用
+   - 显式白名单：仅放行白名单
+   - 未设置：`development` 默认放行；`production` 默认只放行 `http://<hostname>:<EXOMIND_WEB_PORT>`
 
 ## 推荐：每个 worktree 一组端口
 
@@ -41,9 +40,9 @@ Issue: `#79`
 ```powershell
 $env:EXOMIND_WEB_PORT='1420'
 $env:EXOMIND_HMR_PORT='1421'
-$env:EXOMIND_POUCHDB_PORT='6984'
+$env:EXOMIND_RT_PORT='9124'
 $env:EXOMIND_ASR_PORT='1949'
-bun run dev:sync
+bun run dev
 ```
 
 ### Worktree B
@@ -51,52 +50,27 @@ bun run dev:sync
 ```powershell
 $env:EXOMIND_WEB_PORT='1520'
 $env:EXOMIND_HMR_PORT='1521'
-$env:EXOMIND_POUCHDB_PORT='7084'
+$env:EXOMIND_RT_PORT='9224'
 $env:EXOMIND_ASR_PORT='2049'
-bun run dev:sync
-```
-
-## 仅前端开发（不启动同步脚本）
-
-```powershell
-$env:EXOMIND_WEB_PORT='1919'
-$env:EXOMIND_HMR_PORT='1920'
 bun run dev
 ```
+
+## 局域网联调
+
+```powershell
+$env:EXOMIND_RT_BIND='0.0.0.0'
+$env:EXOMIND_RT_PORT='9124'
+bun run tauri dev
+```
+
+说明：
+
+- 真正的多设备同步主路径是 `device pairing + RT net + RT SQLite`
+- 不再需要单独启动 `6984` 的 Pouch 同步服务
 
 ## 验证要点
 
-1. 启动日志中 Web/PouchDB/ASR 端口与环境变量一致。  
-2. 浏览器访问地址与 `EXOMIND_WEB_PORT` 一致。  
-3. 同步页面默认服务器地址与端口配置一致。  
-4. ASR BFF 启动日志会打印当前 CORS 策略（`*` 或白名单）。
-5. 修改环境变量后，重启进程即可生效。
-
-## Issue #27（多设备 EventLog 同步）最小联调步骤
-
-1. 同步服务首次安装依赖（避免 `sqlite3` 可选依赖在新环境失败）：
-
-```powershell
-cd D:\project\exomind\server
-bun install --omit optional
-```
-
-2. 启动服务（示例端口）：
-
-```powershell
-# 终端1
-cd D:\project\exomind
-$env:EXOMIND_POUCHDB_HOST='0.0.0.0'
-$env:EXOMIND_POUCHDB_PORT='7184'
-bun run server
-
-# 终端2
-cd D:\project\exomind
-$env:EXOMIND_WEB_PORT='1620'
-$env:EXOMIND_HMR_PORT='1621'
-$env:VITE_SYNC_SERVER_URL='http://<你的局域网IP>:7184'
-bun run dev
-```
-
-3. 两台设备打开同一前端地址，分别注册并登录同一用户名；在 A 端 `eventlog` 发送消息，在 B 端确认收到。
-
+1. 启动日志中的 Web / RT / ASR 端口与环境变量一致
+2. `bun scripts/dev/tauri-dev-manager.ts list` 中实例状态正常
+3. Android / 桌面联调时，RT 可通过 `/health` 正常响应
+4. 多设备同步以真实业务域落库为准，不以 UI 连接状态为准
