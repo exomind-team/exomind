@@ -56,7 +56,6 @@ export type SourceInfo = {
   manifest?: string;
   data?: string;
   latest?: string;
-  html?: string;
   filePath?: string;
   fallbackUsed: boolean;
   notes: string[];
@@ -74,7 +73,6 @@ type Provider = {
   latestRef: string;
   entryRef: (subpath: string) => string;
   readJson: (ref: string) => Promise<any>;
-  readText: (ref: string) => Promise<string>;
 };
 
 const DEVLOG_PAGES_BASE = 'https://exomind-team.github.io/exomind-devlog';
@@ -217,8 +215,6 @@ function extractLoaderDataFile(html: string): string | null {
 
 async function resolveFromHtml(docType: DocType, html: string, opts: {
   localFilePath?: string;
-  remoteDataRef?: string;
-  remoteReadJson?: (ref: string) => Promise<any>;
 }): Promise<Record<string, any>> {
   const variableName = variableNameFor(docType);
 
@@ -235,11 +231,6 @@ async function resolveFromHtml(docType: DocType, html: string, opts: {
     const jsonPath = join(dirname(opts.localFilePath), dataFile);
     if (!existsSync(jsonPath)) throw new SourceConsistencyError(`HTML loader 指向的 JSON 不存在: ${jsonPath}`);
     return JSON.parse(readFileSync(jsonPath, 'utf-8'));
-  }
-
-  if (opts.remoteDataRef && opts.remoteReadJson) {
-    const remoteRef = new URL(dataFile, opts.remoteDataRef).toString();
-    return opts.remoteReadJson(remoteRef);
   }
 
   throw new SourceConsistencyError('无法解析 loader HTML 对应的 JSON 数据源');
@@ -264,17 +255,6 @@ function createPagesProvider(docType: DocType): Provider {
       }
       return response.json();
     },
-    async readText(ref: string) {
-      const response = await fetch(ref, {
-        headers: { 'Cache-Control': 'no-cache' },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!response.ok) {
-        const error = new SourceUnavailableError(`HTTP ${response.status}: ${ref}`);
-        throw error;
-      }
-      return response.text();
-    },
   };
 }
 
@@ -289,10 +269,6 @@ function createLocalProvider(docType: DocType): Provider {
     async readJson(ref: string) {
       if (!existsSync(ref)) throw new SourceUnavailableError(`本地文件不存在: ${ref}`);
       return JSON.parse(readFileSync(ref, 'utf-8'));
-    },
-    async readText(ref: string) {
-      if (!existsSync(ref)) throw new SourceUnavailableError(`本地文件不存在: ${ref}`);
-      return readFileSync(ref, 'utf-8');
     },
   };
 }
@@ -323,8 +299,8 @@ async function resolveFromPublishedProvider(docType: DocType, requestedSource: S
   const notes: string[] = [];
   let trust: SourceInfo['trust'] = provider.label === 'pages' ? 'high' : 'medium';
   let consistency: SourceInfo['consistency'] = 'ok';
-  let resolvedSource = `${provider.label}-json`;
-  let dataRef: string | undefined = chosenEntry.dataFile ? provider.entryRef(chosenEntry.dataFile) : undefined;
+  const resolvedSource = `${provider.label}-json`;
+  const dataRef = chosenEntry.dataFile ? provider.entryRef(chosenEntry.dataFile) : undefined;
 
   if (!chosenEntry.dataFile) {
     throw new SourceConsistencyError('manifest 条目缺少 dataFile；已发布标准入口必须提供 JSON 数据层');
@@ -538,7 +514,6 @@ export function renderSourceBlock(source: SourceInfo): string {
   if (source.manifest) lines.push(`manifest: ${source.manifest}`);
   if (source.data) lines.push(`data: ${source.data}`);
   if (source.latest) lines.push(`latest: ${source.latest}`);
-  if (source.html) lines.push(`html: ${source.html}`);
   if (source.filePath) lines.push(`file: ${source.filePath}`);
   lines.push(`fallbackUsed: ${source.fallbackUsed ? 'yes' : 'no'}`);
   if (source.notes.length) lines.push(`notes: ${source.notes.join(' | ')}`);
