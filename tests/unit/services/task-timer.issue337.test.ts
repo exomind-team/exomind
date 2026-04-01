@@ -467,6 +467,32 @@ describe('#418 multi-task association', () => {
     }))
   })
 
+  it('addTaskToBlock consecutive appends do not replace last item（#761 回归：连续追加不替换最后一项）', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],
+      ['task-2', makeTask({ id: 'task-2', status: 'in_progress' })],
+      ['task-3', makeTask({ id: 'task-3', status: 'pending' })],
+      ['task-4', makeTask({ id: 'task-4', status: 'suspended' })],
+    ])
+    const activeBlock = makeActiveBlock({
+      startId: 'block-live',
+      taskIds: ['task-1', 'task-2'],
+      taskAssociationLog: [],
+    })
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService(activeBlock)
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await svc.addTaskToBlock('task-3')
+    await svc.addTaskToBlock('task-4')
+
+    const calls = (tbSvc.updateActiveBlock as ReturnType<typeof vi.fn>).mock.calls
+    const firstCall = calls[0][0] as { taskIds: string[] }
+    const secondCall = calls[1][0] as { taskIds: string[] }
+    expect(firstCall.taskIds).toEqual(['task-1', 'task-2', 'task-3'])
+    expect(secondCall.taskIds).toEqual(['task-1', 'task-2', 'task-3', 'task-4'])
+  })
+
   it('addTaskToBlock rejects tasks blocked by hard dependencies', async () => {
     const tasks = new Map([
       ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],

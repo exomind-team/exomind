@@ -16,7 +16,7 @@ import {
   getCurrentSyncUserId,
   type ActiveBlockStorage,
 } from '../storage/active-block-storage';
-import { getTimeblockBackendMode, type DomainBackendMode } from '@/config/domain-backend-mode';
+import { type DomainBackendMode } from '@/config/domain-backend-mode';
 import { TimeBlockRtAdapter } from '@/lib/adapters/timeblock-rt-adapter';
 import {
   normalizeActiveBlockTaskIds,
@@ -152,23 +152,21 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.rtAdapter = this.backendMode === 'rt-sqlite'
       ? (options.rtAdapter ?? new TimeBlockRtAdapter())
       : null;
-    if (this.backendMode === 'legacy' && !this.useInjectedEnvStorage) {
-      this.switchActiveStorage();
-    }
     this.attachStorageListener();
   }
 
   /**
-   * TODO(#749): Once Tauri desktop fully migrates to rt-sqlite (MigrationDialog
-   * no longer falls back to legacy), this can be simplified to always return
-   * 'rt-sqlite'. The useInjectedEnvStorage path is test-only.
+   * The useInjectedEnvStorage path (test-only) returns 'legacy' so that the
+   * in-memory env storage is used instead of the RT adapter. Production is
+   * always 'rt-sqlite' since getTimeblockBackendMode() is now pinned.
+   * TODO(#749): Once MigrationDialog is removed, clean up the injected-env path too.
    */
   private resolveDefaultBackendMode(): DomainBackendMode {
     if (this.useInjectedEnvStorage) {
       return 'legacy';
     }
 
-    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'rt-sqlite';
+    return 'rt-sqlite';
   }
 
   async loadTimeBlocks(): Promise<TimeBlock[]> {

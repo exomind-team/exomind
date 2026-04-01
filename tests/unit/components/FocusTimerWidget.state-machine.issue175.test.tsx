@@ -541,6 +541,38 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     expect(transitionTaskMock).toHaveBeenCalledWith('task-2', 'in_progress');
   });
 
+  it('transitions suspended preselected task to in_progress on block start（#745 suspended 任务启动后转为 in_progress）', async () => {
+    listTasksMock.mockResolvedValue([
+      { id: 'task-suspended', title: '挂起任务', status: 'suspended' },
+      { id: 'task-pending', title: '待办任务', status: 'pending' },
+      { id: 'task-active', title: '进行中任务', status: 'in_progress' },
+    ]);
+
+    render(
+      <FocusTimerWidget
+        prestartSelectedTaskIds={['task-suspended', 'task-pending', 'task-active']}
+        onPrestartSelectedTaskIdsChange={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(checkDependenciesMetMock).toHaveBeenCalledWith('task-suspended');
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '混合状态任务启动' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(startBlockMock).toHaveBeenCalled();
+    });
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-suspended', 'in_progress');
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-pending', 'in_progress');
+    expect(transitionTaskMock).not.toHaveBeenCalledWith('task-active', expect.anything());
+  });
+
   it('restores countdown overtime after remount（倒计时超时在重载后可恢复）', async () => {
     const now = Date.now();
     const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);

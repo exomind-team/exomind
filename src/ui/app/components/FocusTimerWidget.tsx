@@ -498,7 +498,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       log.warn(`[TB-UI] prestart selection skipped ${JSON.stringify({ skippedTaskIds })}`);
     }
     for (const task of selectedTasks) {
-      if (task.status === 'pending') {
+      if (task.status === 'pending' || task.status === 'suspended') {
         await getTaskService().transitionTask(task.id, 'in_progress');
       }
     }
