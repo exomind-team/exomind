@@ -46,12 +46,14 @@ export default defineConfig(({ mode }) => {
     "**/website/**",
     "**/packages/ts-agent-cli/**",
   ];
+  const runtimePort = parsePort(readEnvValue(envMap, 'EXOMIND_RT_PORT'), 9124);
+  const runtimeProxyTarget = `http://127.0.0.1:${runtimePort}`;
   const devInstanceMeta = {
     branch: readCurrentBranch(projectRoot),
     worktreeName: path.basename(projectRoot),
     webPort: devPorts.web,
     hmrPort: devPorts.hmr,
-    rtPort: parsePort(readEnvValue(envMap, 'EXOMIND_RT_PORT'), 9124),
+    rtPort: runtimePort,
     mcpPort: parsePort(
       readEnvValue(envMap, 'EXOMIND_MCP_PORT')
       ?? readEnvValue(envMap, 'EXOMIND_MCP_BRIDGE_PORT')
@@ -122,6 +124,12 @@ export default defineConfig(({ mode }) => {
       port: devPorts.web,
       strictPort: Boolean(process.env.EXOMIND_WEB_PORT),
       host: "0.0.0.0",
+      proxy: {
+        '/api/proposals': {
+          target: runtimeProxyTarget,
+          changeOrigin: false,
+        },
+      },
       hmr: {
         protocol: "ws",
         ...(tauriDevHost ? { host: tauriDevHost } : {}),

@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, Inbox, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
@@ -21,6 +21,7 @@ import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { resolveAppShellMode } from '@/ui/app/layout/shell-mode';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
+import { ProposalNotificationBadge } from '@/ui/app/components/ProposalNotificationBadge';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
 import { UpdateToast } from '@/ui/components/UpdateToast';
 import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
@@ -70,6 +71,11 @@ const TaskTimelinePage = lazy(async () => {
 const RemindersPage = lazy(async () => {
   const module = await import('@/ui/app/pages/RemindersPage');
   return { default: module.RemindersPage };
+});
+
+const ProposalInboxPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/proposals/ProposalInboxPage');
+  return { default: module.ProposalInboxPage };
 });
 
 const TaskDetailPage = lazy(async () => {
@@ -258,6 +264,8 @@ function MobileShell({
           <CommandPalette context={commandContext} />
         ) : null}
 
+        {!fullscreenRoute ? <ProposalNotificationBadge placement="mobile-floating" /> : null}
+
         {!fullscreenRoute ? (
           <nav
             data-testid="mobile-bottom-tab"
@@ -313,6 +321,7 @@ function DesktopSidebar({
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/' || path === '/eventlog' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
+    { key: 'proposals', title: '请求箱', path: '/proposals', icon: Inbox, match: (path: string) => path === '/proposals' || path.startsWith('/proposals/') },
     ...(goalsPageEnabled ? [{
       key: 'goals',
       title: '目标',
@@ -398,7 +407,7 @@ function DesktopSidebar({
           const Icon = item.icon;
           const active = item.match(activePath);
           const itemClassName = cn(
-            'flex w-full items-center rounded-md text-sm transition-colors',
+            'relative flex w-full items-center rounded-md text-sm transition-colors',
             collapsed ? 'justify-center px-0 py-3' : 'gap-2 px-3 py-2',
             active
               ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
@@ -415,6 +424,9 @@ function DesktopSidebar({
             >
               <Icon size={16} />
               {collapsed ? <span className="sr-only">{item.title}</span> : <span>{item.title}</span>}
+              {item.key === 'proposals' ? (
+                <ProposalNotificationBadge placement={collapsed ? 'desktop-compact' : 'desktop'} />
+              ) : null}
             </Link>
           );
         })}
@@ -787,6 +799,18 @@ const newTasksRoute = createRoute({
   },
 });
 
+const newProposalsRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/proposals',
+  component: function NewProposals() {
+    return (
+      <LazyPage>
+        <ProposalInboxPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newRemindersRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/reminders',
@@ -1072,6 +1096,7 @@ const newRouteTree = newRootRoute.addChildren([
   newEventlogRoute,
   newEventlogTimeblockDetailRoute,
   newTasksRoute,
+  newProposalsRoute,
   newTaskDagRoute,
   newTaskTimeblocksRoute,
   newTaskTimelineRoute,

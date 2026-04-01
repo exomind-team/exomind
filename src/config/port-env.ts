@@ -4,9 +4,13 @@ export const DEFAULT_PORTS = {
   web: 1420,
   hmr: 1421,
   asr: 1949,
+  sync: 6984,
 } as const;
 
 type EnvMap = Record<string, string | undefined>;
+type ResolveSyncServerUrlOptions = {
+  hostname?: string;
+};
 type ResolveAsrServerUrlOptions = {
   hostname?: string;
 };
@@ -51,6 +55,16 @@ function resolveRuntimeHostname(hostname?: string): string {
 function normalizeAsrOptions(
   options: ResolveAsrServerUrlOptions | string | undefined
 ): ResolveAsrServerUrlOptions {
+  if (typeof options === 'string') {
+    return { hostname: options };
+  }
+
+  return options ?? {};
+}
+
+function normalizeSyncOptions(
+  options: ResolveSyncServerUrlOptions | string | undefined,
+): ResolveSyncServerUrlOptions {
   if (typeof options === 'string') {
     return { hostname: options };
   }
@@ -140,6 +154,21 @@ export function resolveAsrServerUrl(
   }
 
   const port = parsePort(env.EXOMIND_ASR_PORT, DEFAULT_PORTS.asr);
+  const host = formatHostForUrl(resolveRuntimeHostname(normalizedOptions.hostname));
+  return `http://${host}:${port}`;
+}
+
+export function resolveSyncServerUrl(
+  env: EnvMap,
+  options: ResolveSyncServerUrlOptions | string = {},
+): string {
+  const normalizedOptions = normalizeSyncOptions(options);
+
+  if (env.VITE_SYNC_SERVER_URL) {
+    return normalizeBaseUrl(env.VITE_SYNC_SERVER_URL);
+  }
+
+  const port = parsePort(env.EXOMIND_POUCHDB_PORT, DEFAULT_PORTS.sync);
   const host = formatHostForUrl(resolveRuntimeHostname(normalizedOptions.hostname));
   return `http://${host}:${port}`;
 }
