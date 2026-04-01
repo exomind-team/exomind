@@ -1,0 +1,80 @@
+tests/unit/ui/agent-hub/agent-device-runtime-port-recovery.issue205.test.tsx
+  affffec5b91d9d34 83,91
+tests/unit/settings/data-transfer-legacy-guard.issue506.test.tsx
+  affffec5b91d9d34 26,81
+tests/unit/ui/task-command-palette.issue243.test.tsx
+  affffec5b91d9d34 14-22
+tests/unit/ui/ritual-session-storage.test.ts
+  affffec5b91d9d34 3-8
+tests/unit/ui/tasks-page.issue546-draft.test.tsx
+  affffec5b91d9d34 9-17
+tests/ci/release-selfhosted-bun-install.test.ts
+  affffec5b91d9d34 39-40
+tests/unit/components/ChatPage.profile-placeholder.test.tsx
+  affffec5b91d9d34 75,88-92,95,149,157-163
+tests/unit/pages/ritual-home-shutdown.test.tsx
+  affffec5b91d9d34 5-8
+tests/unit/ui/tasks-page.quick-add-estimate.test.tsx
+  affffec5b91d9d34 23-31
+tests/home-page.test.ts
+  affffec5b91d9d34 13,22
+tests/unit/pages/ritual-home-page.test.tsx
+  affffec5b91d9d34 5-8
+tests/unit/ui/task-tab-filters.issue338.test.ts
+  affffec5b91d9d34 117,121-122
+tests/unit/pages/ritual-home-interactions.test.tsx
+  affffec5b91d9d34 5-9
+tests/unit/settings/task-backend-diagnostics.issue481.test.tsx
+  affffec5b91d9d34 24
+tests/unit/sync/remote-url-wiring.test.ts
+  affffec5b91d9d34 14
+tests/unit/components/TimeBlockWidget.feedback-shortcuts.test.tsx
+  affffec5b91d9d34 145,148-151
+tests/unit/ui/ritual-recommendation.test.ts
+  affffec5b91d9d34 3-6
+tests/unit/ui/task-title-fuzzy-search.issue546.test.ts
+  affffec5b91d9d34 25
+tests/unit/ui/tasks-page.issue546-fuzzy-search.test.tsx
+  affffec5b91d9d34 51-59
+tests/unit/components/FocusTimerWidget.bgm.issue136.test.tsx
+  affffec5b91d9d34 25-27
+tests/unit/pages/VolcanoASRTestPage.test.tsx
+  affffec5b91d9d34 14-16
+tests/unit/settings/settings-input-section.issue199.test.tsx
+  affffec5b91d9d34 504,508
+tests/unit/ui/ritual-session.test.ts
+  affffec5b91d9d34 3-7
+tests/unit/services/runtime-manager.issue201.test.ts
+  affffec5b91d9d34 119,139
+tests/unit/components/FocusTimerWidget.countdown-end-settings.issue182.test.tsx
+  affffec5b91d9d34 63-68
+tests/unit/settings/eventlog-backend-diagnostics.issue484.test.tsx
+  affffec5b91d9d34 24
+tests/unit/settings/timeblock-backend-diagnostics.issue485.test.tsx
+  affffec5b91d9d34 24
+tests/unit/ui/now-input-row.issue175-pencil-align.test.ts
+  affffec5b91d9d34 15
+tests/unit/ui/multi-task-end-dialog.issue564-overflow.test.tsx
+  affffec5b91d9d34 101,106,141-143,146-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "e903c53b7866bf56a7bb5ff03588c0daf85ad8f7",
+  "prompts": {
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 143,
+      "total_deletions": 77,
+      "accepted_lines": 136,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/1f88f5ad72eac5f78e5912d4b65257ed9b321e42e97480ae2d885c77e4587b32"
+    }
+  }
+}
