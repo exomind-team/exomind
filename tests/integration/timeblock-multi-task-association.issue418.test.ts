@@ -8,10 +8,14 @@ import type { TaskNode, TaskStatus } from '@/lib/types/task';
 const {
   getEventStorageMock,
   addEventMock,
+  loadEventsMock,
+  getEventLogServiceMock,
   getFeedbackPreferencesMock,
 } = vi.hoisted(() => ({
   getEventStorageMock: vi.fn(),
-  addEventMock: vi.fn(),
+  addEventMock: vi.fn().mockResolvedValue({ id: 'evt-mock', timestamp: 1700000000000, content: '', tags: [] }),
+  loadEventsMock: vi.fn(),
+  getEventLogServiceMock: vi.fn(),
   getFeedbackPreferencesMock: vi.fn(),
 }));
 
@@ -22,6 +26,16 @@ vi.mock('@/lib/storage/event-storage', () => ({
 vi.mock('@/config/feedback-preferences', () => ({
   getFeedbackPreferences: getFeedbackPreferencesMock,
 }));
+
+vi.mock('@/lib/services/ecs-eventlog-replication.service', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return { ...actual, appendEventWithEcsReplication: addEventMock };
+});
+
+vi.mock('@/lib/services/eventlog.service', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return { ...actual, getEventLogService: getEventLogServiceMock };
+});
 
 type MemoryEnv = {
   storage: {
@@ -146,6 +160,11 @@ describe('TimeBlock multi-task association integration（#418 多任务时间块
   beforeEach(() => {
     window.localStorage.clear();
     addEventMock.mockReset();
+    addEventMock.mockResolvedValue({ id: 'evt-mock', timestamp: 1700000000000, content: '', tags: [] });
+    loadEventsMock.mockReset();
+    loadEventsMock.mockResolvedValue([]);
+    getEventLogServiceMock.mockReset();
+    getEventLogServiceMock.mockReturnValue({ loadEvents: loadEventsMock });
     getEventStorageMock.mockReset();
     getFeedbackPreferencesMock.mockReset();
     getEventStorageMock.mockReturnValue(createStorage());

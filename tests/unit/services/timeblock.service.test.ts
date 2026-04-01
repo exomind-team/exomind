@@ -3,10 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   getEventStorageMock,
   addEventMock,
+  loadEventsMock,
+  getEventLogServiceMock,
   getFeedbackPreferencesMock,
 } = vi.hoisted(() => ({
   getEventStorageMock: vi.fn(),
-  addEventMock: vi.fn(),
+  // addEventMock intercepts appendEventWithEcsReplication (RT eventlog write path).
+  addEventMock: vi.fn().mockResolvedValue({ id: 'evt-mock', timestamp: 1700000000000, content: '', tags: [] }),
+  loadEventsMock: vi.fn(),
+  getEventLogServiceMock: vi.fn(),
   getFeedbackPreferencesMock: vi.fn(),
 }));
 
@@ -31,6 +36,19 @@ vi.mock('@tauri-apps/api/core', () => ({
   isTauri: tauriMocks.isTauri,
   invoke: tauriMocks.invoke,
 }));
+
+// RT eventlog write path: intercept appendEventWithEcsReplication so event writes
+// don't hit globalThis.fetch (which is reserved for signal publish assertions).
+vi.mock('@/lib/services/ecs-eventlog-replication.service', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return { ...actual, appendEventWithEcsReplication: addEventMock };
+});
+
+// RT eventlog read path: intercept getEventLogService so loadEvents() uses loadEventsMock.
+vi.mock('@/lib/services/eventlog.service', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return { ...actual, getEventLogService: getEventLogServiceMock };
+});
 
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
@@ -71,6 +89,11 @@ describe('TimeBlockServiceImpl', () => {
   beforeEach(() => {
     window.localStorage.clear();
     addEventMock.mockReset();
+    addEventMock.mockResolvedValue({ id: 'evt-mock', timestamp: 1700000000000, content: '', tags: [] });
+    loadEventsMock.mockReset();
+    loadEventsMock.mockResolvedValue([]);
+    getEventLogServiceMock.mockReset();
+    getEventLogServiceMock.mockReturnValue({ loadEvents: loadEventsMock });
     getEventStorageMock.mockReset();
     getEventStorageMock.mockReturnValue(createStorage());
     getFeedbackPreferencesMock.mockReset();
@@ -303,26 +326,21 @@ describe('TimeBlockServiceImpl', () => {
     }));
   });
 
-  it('resolves EventStorage at write time so user switches do not write to stale storage', async () => {
+  it('writes block_start, block_end, and block_feedback events for a full block lifecycle', async () => {
     const env = createMemoryEnv();
-    const startAddEventMock = vi.fn();
-    const switchedUserAddEventMock = vi.fn();
-
-    getEventStorageMock
-      .mockReturnValueOnce(createStorage(startAddEventMock))
-      .mockReturnValueOnce(createStorage(switchedUserAddEventMock))
-      .mockReturnValueOnce(createStorage(switchedUserAddEventMock))
-      .mockReturnValueOnce(createStorage(switchedUserAddEventMock));
 
     const service = new TimeBlockServiceImpl(env as never);
     await service.startBlock('focus', { mode: 'countup' });
     await service.markEnding();
     await service.endBlock('done');
 
-    expect(getEventStorageMock).toHaveBeenCalledTimes(4);
-    expect(startAddEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_start' }));
-    expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
-    expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({
+    const types = addEventMock.mock.calls.map(([event]) => (event as { type?: string }).type);
+    expect(types).toContain('block_start');
+    expect(types).toContain('block_end');
+    expect(types).toContain('block_feedback');
+    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_start' }));
+    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
+    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'block_feedback',
       content: expect.stringContaining('done'),
     }));
@@ -481,8 +499,11 @@ describe('TimeBlockServiceImpl', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
+    // In non-Tauri environments resolveEmbeddedPort() uses window.location.port when set
+    // (Vite proxy path, #775), so the expected URL uses the jsdom default port.
+    const embeddedPort = window.location.port || DEFAULT_EMBEDDED_RUNTIME_PORT;
     expect(networkMocks.fetch).toHaveBeenCalledWith(
-      `http://${window.location.hostname || 'localhost'}:${DEFAULT_EMBEDDED_RUNTIME_PORT}/signals/publish`,
+      `http://${window.location.hostname || 'localhost'}:${embeddedPort}/signals/publish`,
       expect.objectContaining({ method: 'POST' }),
     );
   });
@@ -514,8 +535,9 @@ describe('TimeBlockServiceImpl', () => {
     }
 
     expect(networkMocks.fetch).toHaveBeenCalled();
+    const embeddedPort = window.location.port || DEFAULT_EMBEDDED_RUNTIME_PORT;
     expect(networkMocks.fetch).toHaveBeenCalledWith(
-      `http://${window.location.hostname || 'localhost'}:${DEFAULT_EMBEDDED_RUNTIME_PORT}/signals/publish`,
+      `http://${window.location.hostname || 'localhost'}:${embeddedPort}/signals/publish`,
       expect.objectContaining({ method: 'POST' }),
     );
   });
@@ -640,26 +662,22 @@ describe('TimeBlockServiceImpl', () => {
     window.localStorage.setItem('exomind:runtimeExternalAddress', '127.0.0.1:1949');
 
     const env = createMemoryEnv();
+    // loadEvents() returns events newest-first. Provide 25 events sorted descending
+    // so slice(0, 20) yields event-25..event-6 as the test expects.
     const seededEvents = Array.from({ length: 25 }, (_, index) => ({
-      id: `event-${index + 1}`,
-      content: `event-${index + 1}`,
-      createdAt: new Date(index + 1).toISOString(),
-      type: 'note',
+      id: `event-${25 - index}`,
+      content: `event-${25 - index}`,
+      timestamp: 25 - index,
+      tags: [],
       metadata: {},
     }));
-    const addEvent = vi.fn();
-    const getEvents = vi.fn().mockResolvedValue(seededEvents);
+    loadEventsMock.mockResolvedValue(seededEvents);
+
     networkMocks.fetch.mockReset();
     networkMocks.fetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ accepted: true, event_id: 'evt-recent-20' }),
-    });
-
-    getEventStorageMock.mockReset();
-    getEventStorageMock.mockReturnValue({
-      addEvent,
-      getEvents,
     });
 
     const service = new TimeBlockServiceImpl(env as never);

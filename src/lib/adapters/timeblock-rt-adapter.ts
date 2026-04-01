@@ -84,6 +84,14 @@ export class TimeBlockRtAdapter {
     }
   }
 
+  /**
+   * @deprecated No-op in RT mode. Active block lifecycle is managed via
+   * rtStartBlock / rtEndBlock / rtStopBlock. Kept for interface compatibility.
+   */
+  async deleteActiveBlock(): Promise<void> {
+    console.warn('[TB-RT] deleteActiveBlock is a no-op in RT mode');
+  }
+
   // ── #780 新路由方法 ──
 
   async rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }> {
