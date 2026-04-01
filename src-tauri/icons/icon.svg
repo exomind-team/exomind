@@ -26,9 +26,22 @@
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.82" />
       <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
     </radialGradient>
+    <radialGradient id="heartSpecular" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(188 98) rotate(-12) scale(66 44)">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.96" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+    </radialGradient>
     <radialGradient id="heartWarmGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(272 198) rotate(32) scale(136 108)">
       <stop offset="0" stop-color="#FFD0C2" stop-opacity="0.72" />
       <stop offset="1" stop-color="#FFD0C2" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="heartEdgeHighlight" x1="154" y1="86" x2="336" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.55" />
+      <stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0.14" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <radialGradient id="heartInnerShadow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(284 244) rotate(-32) scale(86 64)">
+      <stop offset="0" stop-color="#D946EF" stop-opacity="0.18" />
+      <stop offset="1" stop-color="#D946EF" stop-opacity="0" />
     </radialGradient>
     <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
       <feGaussianBlur stdDeviation="10" />
@@ -52,16 +65,16 @@
     filter="url(#softGlow)"
   />
   <path
-    d="M78 170C94 195 122 223 157 254C194 287 218 327 214 365C211 403 176 440 116 478"
+    d="M76 166C95 191 126 219 162 250C196 280 217 322 214 362C211 401 177 439 118 477"
     stroke="url(#leftArmGradient)"
-    stroke-width="27"
+    stroke-width="28"
     stroke-linecap="round"
     stroke-linejoin="round"
   />
   <path
-    d="M436 172C417 196 388 223 353 252C317 283 294 323 298 363C302 403 338 440 396 478"
+    d="M438 168C418 193 388 220 352 250C317 281 295 322 298 362C301 401 336 439 394 477"
     stroke="url(#rightArmGradient)"
-    stroke-width="27"
+    stroke-width="28"
     stroke-linecap="round"
     stroke-linejoin="round"
   />
@@ -76,11 +89,32 @@
       fill-opacity="0.1"
     />
     <ellipse cx="210" cy="128" rx="94" ry="72" transform="rotate(-18 210 128)" fill="url(#heartHighlight)" />
+    <ellipse cx="188" cy="98" rx="66" ry="44" transform="rotate(-12 188 98)" fill="url(#heartSpecular)" />
     <ellipse cx="278" cy="198" rx="126" ry="96" transform="rotate(18 278 198)" fill="url(#heartWarmGlow)" />
+    <ellipse cx="284" cy="244" rx="86" ry="64" transform="rotate(-32 284 244)" fill="url(#heartInnerShadow)" />
+    <path
+      d="M256 352C164 291 92 220 92 130C92 79 131 40 183 40C217 40 241 55 256 81C271 55 295 40 329 40C381 40 420 79 420 130C420 220 348 291 256 352Z"
+      fill="none"
+      stroke="url(#heartEdgeHighlight)"
+      stroke-width="11"
+      stroke-linejoin="round"
+    />
     <path
       d="M158 102C174 74 204 58 236 62C213 68 192 83 178 103C168 117 162 132 160 148C153 138 152 118 158 102Z"
       fill="#FFFFFF"
       fill-opacity="0.34"
+    />
+    <path
+      d="M150 112C166 82 199 67 228 74C204 80 182 93 170 114C163 127 159 139 157 151C150 141 147 124 150 112Z"
+      fill="#FFFFFF"
+      fill-opacity="0.24"
+    />
+    <path
+      d="M310 90C322 96 334 107 342 120"
+      stroke="#FFFFFF"
+      stroke-opacity="0.28"
+      stroke-width="8"
+      stroke-linecap="round"
     />
   </g>
 </svg>
