@@ -17,26 +17,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readLatestDevlog, renderSourceBlock } from './extract-devlog';
 
 // ── Types ──
-
-type ManifestEntry = {
-  date: string;
-  time: string;
-  title: string;
-  file: string;
-  publisher?: string;
-  status?: { level: string; emoji: string; label: string };
-  metrics?: { label: string; value: string; note: string }[];
-};
-
-type Manifest = {
-  generated: string;
-  repo: string;
-  routes: ManifestEntry[];
-};
 
 type BatchIssue = {
   num: number;
@@ -53,81 +36,17 @@ type Batch = {
   issues: BatchIssue[];
 };
 
+type QueryResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string };
+
 // ── Helpers ──
 
 function gh(...args: string[]): string {
   return execFileSync('gh', args, { encoding: 'utf-8' }).trim();
 }
 
-function getDevlogDir(): string {
-  return resolve(join(import.meta.dir, '..', '..', '..', 'exomind-devlog'));
-}
-
-function loadManifest(): Manifest | null {
-  const manifestPath = join(getDevlogDir(), 'routes', 'manifest.json');
-  if (!existsSync(manifestPath)) return null;
-  try {
-    return JSON.parse(readFileSync(manifestPath, 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-function loadLatestRouteData(): string | null {
-  const manifest = loadManifest();
-  if (!manifest || !manifest.routes.length) return null;
-
-  const latest = manifest.routes[0];
-  const routePath = join(getDevlogDir(), 'routes', latest.file);
-  if (!existsSync(routePath)) return null;
-
-  return readFileSync(routePath, 'utf-8');
-}
-
-function extractBatches(html: string): Batch[] {
-  // Extract the ROUTE data block and parse batches
-  const startMarker = 'const ROUTE = {';
-  const startIdx = html.indexOf(startMarker);
-  if (startIdx === -1) return [];
-
-  // Find batches array
-  const batchesStart = html.indexOf('batches:', startIdx);
-  if (batchesStart === -1) return [];
-
-  // Simple extraction: find issue numbers from batches
-  const batches: Batch[] = [];
-  const batchPattern = /\{\s*id:\s*'([^']*)'\s*,\s*name:\s*'([^']*)'\s*,\s*track:\s*'([^']*)'\s*,\s*status:\s*'([^']*)'/g;
-  let match;
-
-  while ((match = batchPattern.exec(html)) !== null) {
-    const batchId = match[1];
-    const batchName = match[2];
-    const track = match[3];
-    const status = match[4];
-
-    // Extract issues for this batch
-    const batchStart = match.index;
-    const issuesStart = html.indexOf('issues:', batchStart);
-    if (issuesStart === -1) continue;
-
-    const issuesEnd = html.indexOf('],', issuesStart);
-    if (issuesEnd === -1) continue;
-
-    const issuesBlock = html.substring(issuesStart, issuesEnd);
-    const issuePattern = /num:\s*(\d+)/g;
-    const issues: BatchIssue[] = [];
-    let im;
-    while ((im = issuePattern.exec(issuesBlock)) !== null) {
-      issues.push({ num: parseInt(im[1]), title: '', priority: 'P1', done: false });
-    }
-
-    batches.push({ id: batchId, name: batchName, track, status, issues });
-  }
-
-  return batches;
-}
-
-function getOpenIssueNumbers(): Set<number> {
+function getOpenIssueNumbers(): QueryResult<Set<number>> {
   try {
     const result = gh(
       'issue', 'list',
@@ -137,14 +56,16 @@ function getOpenIssueNumbers(): Set<number> {
       '--json', 'number',
       '--jq', '.[].number'
     );
-    return new Set(result.split('\n').filter(Boolean).map(Number));
-  } catch {
-    console.error('⚠️ 无法获取 open issues，跳过状态检查');
-    return new Set();
+    return { ok: true, value: new Set(result.split('\n').filter(Boolean).map(Number)) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
-function getRecentIssues(sinceDays: number): { number: number; labels: string[] }[] {
+function getRecentIssues(sinceDays: number): QueryResult<{ number: number; labels: string[] }[]> {
   try {
     const since = new Date(Date.now() - sinceDays * 86400_000).toISOString().split('T')[0];
     const result = gh(
@@ -155,26 +76,73 @@ function getRecentIssues(sinceDays: number): { number: number; labels: string[] 
       '--json', 'number,labels,createdAt',
       '--jq', `[.[] | select(.createdAt >= "${since}") | {number, labels: [.labels[].name]}]`
     );
-    return JSON.parse(result || '[]');
-  } catch {
-    return [];
+    return { ok: true, value: JSON.parse(result || '[]') };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
 // ── Main ──
 
-function main() {
-  const manifest = loadManifest();
+async function main() {
   const reasons: string[] = [];
+  const checkNotes: string[] = [];
+  let checkTrust: 'high' | 'partial' = 'high';
   let trigger = false;
+  let latestRouteDate: string | null = null;
+  let batches: Batch[] = [];
+  let sourceBlock = [
+    '[devlog-source]',
+    'requested: auto',
+    'resolved: unavailable',
+    'trust: low',
+    'consistency: partial',
+    'guarantee: 最新航线读取失败，无法确认主链来源',
+    'fallbackUsed: no',
+    '[/devlog-source]',
+  ].join('\n');
+
+  try {
+    const latestRoute = await readLatestDevlog({ type: 'route', source: 'auto' });
+    sourceBlock = renderSourceBlock(latestRoute.source);
+    latestRouteDate = latestRoute.data?._published?.date ?? latestRoute.data?.meta?.date ?? null;
+    batches = Array.isArray(latestRoute.data?.batches) ? latestRoute.data.batches : [];
+    if (
+      latestRoute.source.resolvedSource !== 'pages-json' ||
+      latestRoute.source.trust !== 'high' ||
+      latestRoute.source.consistency !== 'ok'
+    ) {
+      checkTrust = 'partial';
+      checkNotes.push('最新航线读取未命中高可信 GitHub Pages JSON 主链，请勿视为最新线上权威结果');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    sourceBlock = [
+      '[devlog-source]',
+      'requested: auto',
+      'resolved: unavailable',
+      'trust: low',
+      'consistency: partial',
+      'guarantee: 最新航线读取失败，无法确认主链来源',
+      'fallbackUsed: no',
+      `notes: ${message}`,
+      '[/devlog-source]',
+    ].join('\n');
+    checkTrust = 'partial';
+    checkNotes.push(`最新航线读取失败: ${message}`);
+    reasons.push(`读取最新航线失败: ${message}`);
+    trigger = true;
+  }
 
   // Check 1: 过期检查（上次航线超过 7 天）
-  if (!manifest || !manifest.routes.length) {
+  if (!latestRouteDate) {
     trigger = true;
     reasons.push('无历史航线记录');
   } else {
-    const latest = manifest.routes[0];
-    const latestDate = new Date(latest.date);
+    const latestDate = new Date(latestRouteDate);
     const daysSince = Math.floor((Date.now() - latestDate.getTime()) / 86400_000);
 
     if (daysSince >= 7) {
@@ -184,26 +152,34 @@ function main() {
   }
 
   // Check 2: 批次完成检查
-  const routeHtml = loadLatestRouteData();
-  if (routeHtml) {
-    const batches = extractBatches(routeHtml);
-    const openIssues = getOpenIssueNumbers();
+  if (batches.length) {
+    const openIssuesResult = getOpenIssueNumbers();
 
-    for (const batch of batches) {
-      if (batch.status === 'done') continue; // Already marked done
-      if (batch.issues.length === 0) continue;
+    if (!openIssuesResult.ok) {
+      checkTrust = 'partial';
+      checkNotes.push(`GitHub open issue 查询失败：${openIssuesResult.error}`);
+    } else {
+      const openIssues = openIssuesResult.value;
+      for (const batch of batches) {
+        if (batch.status === 'done') continue;
+        if (batch.issues.length === 0) continue;
 
-      const allClosed = batch.issues.every(i => !openIssues.has(i.num));
-      if (allClosed) {
-        trigger = true;
-        reasons.push(`批次 ${batch.id}(${batch.name}) 的 ${batch.issues.length} 个 issue 全部关闭`);
+        const allClosed = batch.issues.every(issue => !openIssues.has(issue.num));
+        if (allClosed) {
+          trigger = true;
+          reasons.push(`批次 ${batch.id}(${batch.name}) 的 ${batch.issues.length} 个 issue 全部关闭`);
+        }
       }
     }
   }
 
   // Check 3: 单日新增 >5 个同领域 issue
-  const recentIssues = getRecentIssues(1);
-  if (recentIssues.length > 0) {
+  const recentIssuesResult = getRecentIssues(1);
+  if (!recentIssuesResult.ok) {
+    checkTrust = 'partial';
+    checkNotes.push(`GitHub 近期 issue 查询失败：${recentIssuesResult.error}`);
+  } else if (recentIssuesResult.value.length > 0) {
+    const recentIssues = recentIssuesResult.value;
     // Group by label (domain)
     const labelCounts = new Map<string, number>();
     for (const issue of recentIssues) {
@@ -221,6 +197,9 @@ function main() {
 
   // Output
   const reason = reasons.length ? reasons.join('; ') : '未触发任何条件';
+  console.log(sourceBlock);
+  console.log(`checkTrust=${checkTrust}`);
+  console.log(`checkNotes=${checkNotes.length ? checkNotes.join('; ') : 'none'}`);
   console.log(`TRIGGER=${trigger}`);
   console.log(`reason=${reason}`);
 
@@ -231,4 +210,7 @@ function main() {
   }
 }
 
-main();
+main().catch(error => {
+  console.error(`\n❌ 错误: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+});

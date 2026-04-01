@@ -1,8 +1,8 @@
 # 开发航线 — 提示词入口
 
-本文件包含两个独立的提示词入口，用户选择一个**全文复制**给任意 Agent 即可执行。
+本文件包含三个独立的提示词入口，用户选择一个**全文复制**给任意 Agent 即可执行。
 
-两个入口共享同一套采集与聚类流程（见下方「共用流程」），区别仅在输出格式。
+三个入口共享同一套采集与聚类流程（见下方「共用流程」），区别仅在输出格式和是否公开发布。
 
 ---
 
@@ -16,18 +16,38 @@ docs/agents/dev-route/prompt.md「共用流程」执行数据采集与聚类分�
 
 输出模式：本地 HTML 航线仪表盘
 1. 复制 docs/agents/dev-route/route-template.html
-   到 temp/exomind-route-YYYY-MM-DD.html
+   到 temp/exomind-route-YYYY-MM-DD-HHmmss.html
 2. 只修改顶部 ROUTE 数据对象，不改渲染代码
 3. 必须填写 publisher 四个字段（identity/os/model/version）
 4. 完成后执行：
    python3 -m http.server 8765 --directory temp --bind 0.0.0.0 &
-   termux-open-url http://localhost:8765/exomind-route-YYYY-MM-DD.html
+   termux-open-url http://localhost:8765/exomind-route-YYYY-MM-DD-HHmmss.html
 5. 告知用户文件路径和访问地址
 ```
 
 ---
 
-## 入口 B：ASCII 终端航线
+## 入口 B：公开发布航线
+
+> 适用场景：推送到 GitHub Pages，作为正式批次规划归档
+
+```text
+请阅读 docs/agents/dev-route/AGENTS.md 了解完整方法论，然后按
+docs/agents/dev-route/prompt.md「共用流程」执行数据采集与聚类分析。
+
+输出模式：公开发布到 GitHub Pages
+1. 先按「入口 A」生成本地 HTML 到 temp/exomind-route-YYYY-MM-DD-HHmmss.html
+2. 执行 bun run route:publish 发布
+3. 脚本自动：标准化生成 `routes/*.json` + loader `routes/*.html` + `routes/latest.json` + `routes/manifest.json` → push → 等待 Pages 构建 → 回读 GitHub Pages 默认入口校验
+4. 完成后输出公开链接：
+   - 归档首页: https://exomind-team.github.io/exomind-devlog/
+   - 本期航线: https://exomind-team.github.io/exomind-devlog/routes/YYYY-MM-DD-HHmmss.html
+   - 数据文件: https://exomind-team.github.io/exomind-devlog/routes/YYYY-MM-DD-HHmmss.json
+```
+
+---
+
+## 入口 C：ASCII 终端航线
 
 > 适用场景：终端环境、快速概览、无浏览器
 
@@ -153,7 +173,8 @@ gh issue list --state closed --limit 30 --json number,title,closedAt
 
 按所选入口格式输出：
 - **入口 A**：复制模板 → 填充 ROUTE → 起服务 → 打开浏览器
-- **入口 B**：渲染 ASCII 文本 → 直接输出到终端
+- **入口 B**：复制模板 → 执行 `bun run route:publish` → 输出公开链接
+- **入口 C**：渲染 ASCII 文本 → 直接输出到终端
 
 ### 质量红线
 

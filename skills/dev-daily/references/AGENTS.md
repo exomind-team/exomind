@@ -499,8 +499,10 @@ exomind-devlog/
 │   ├── report-style.css    # 共享样式（从 report-template.html 提取）
 │   └── report-engine.js    # 共享渲染引擎（从 report-template.html 提取）
 ├── reports/
-│   ├── manifest.json       # 日志元数据索引（自动生成）
-│   └── YYYY-MM-DD-HHmmss.html  # 薄 HTML（仅含 REPORT 数据 + 资源引用）
+│   ├── manifest.json       # 日志元数据索引（标准读取入口）
+│   ├── latest.json         # 最新报告 JSON
+│   ├── YYYY-MM-DD-HHmmss.json  # 标准数据层
+│   └── YYYY-MM-DD-HHmmss.html  # loader HTML（仅含 dataFile + 资源引用）
 └── standalone/             # 离线可用的完整单文件副本
 ```
 
@@ -515,12 +517,13 @@ bun run devlog:publish --dry-run                 # 预览，不提交推送
 ```
 
 脚本自动完成：
-1. 提取 `REPORT` 数据对象
-2. 生成薄 HTML（引用共享 CSS/JS）
-3. 更新 `reports/manifest.json`
+1. 标准化生成 `reports/*.json` 数据层
+2. 生成 loader HTML（引用共享 CSS/JS）
+3. 刷新 `reports/latest.json` 与 `reports/manifest.json`
 4. 提交并推送到 `exomind-devlog` 仓库
 5. 等待 GitHub Pages 构建完成
-6. 输出最终公开 URL
+6. 回读 GitHub Pages 默认入口，确认 `pages-json / high / ok`
+7. 输出最终公开 URL
 
 ### 首页排序与高亮
 
@@ -533,7 +536,7 @@ bun run devlog:publish --dry-run                 # 预览，不提交推送
 
 | # | 位置 | 路径 | 影响范围 |
 |---|------|------|----------|
-| 1 | **devlog 运行时资产** | `exomind-devlog/assets/{report,route}-{style.css,engine.js}` | 所有已发布的薄 HTML 页面（立即生效） |
+| 1 | **devlog 运行时资产** | `exomind-devlog/assets/{report,route}-{style.css,engine.js}` | 所有已发布的 loader 页面（立即生效） |
 | 2 | **exomind 模板源文件** | `docs/agents/dev-{daily,route}/*-template.html` | 未来生成的 standalone HTML |
 | 3 | **exomind skills 副本** | `skills/dev-{daily,route}/assets/*-template.html` | Skill 加载时的模板引用 |
 

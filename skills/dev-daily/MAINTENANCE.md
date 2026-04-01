@@ -21,15 +21,20 @@ exomind-devlog 仓库（发布）
 │   ├── report-engine.js             ← 渲染引擎（从模板提取）
 │   └── report-style.css             ← 样式（从模板提取）
 └── reports/
-    └── YYYY-MM-DD-HHmmss.html       ← 薄 HTML（数据 + 引用）
+    ├── YYYY-MM-DD-HHmmss.json       ← 标准数据层
+    ├── YYYY-MM-DD-HHmmss.html       ← loader HTML（仅含 dataFile + engine/style 引用）
+    ├── latest.json                  ← 最新报告 JSON
+    └── manifest.json                ← 发布索引（标准入口）
 ```
 
 ### 发布流程
 
 1. Agent 生成完整 HTML → `temp/exomind-daily-report-*.html`
-2. 发布脚本提取数据 → 生成薄 HTML
-3. 薄 HTML 引用 `../assets/report-engine.js` 和 `../assets/report-style.css`
-4. 推送到 GitHub Pages
+2. 发布脚本提取 `REPORT` → 生成 `reports/*.json`
+3. 发布脚本生成 loader HTML → `reports/*.html`
+4. 发布脚本刷新 `reports/latest.json` 与 `reports/manifest.json`
+5. loader HTML 引用 `../assets/report-engine.js` 和 `../assets/report-style.css`
+6. 推送到 GitHub Pages
 
 ---
 
@@ -45,11 +50,11 @@ exomind-devlog 仓库（发布）
 **根本原因**：
 - 在 `report-template.html` 中添加了 `poolHealth` 渲染逻辑
 - 但 `exomind-devlog/assets/report-engine.js` 没有同步更新
-- 发布的薄 HTML 引用的是旧版本的渲染引擎
+- 发布的 loader HTML 引用的是旧版本的渲染引擎
 
 **为什么质量拦截没发现**：
 - 质量拦截只检查本地完整 HTML 的数据完整性
-- 不检查发布后的薄 HTML 是否能正确渲染
+- 不检查发布后的 loader HTML 是否能正确渲染
 
 **防范措施**：
 
@@ -149,7 +154,7 @@ function syncRenderEngine(reportPath: string, devlogDir: string): boolean {
 ### 🚀 修改 publish-devlog.ts
 
 - [ ] 更新质量拦截逻辑
-- [ ] 更新薄 HTML 生成逻辑
+- [ ] 更新 `reports/*.json` / `reports/*.html` / `reports/latest.json` / `reports/manifest.json` 生成逻辑
 - [ ] 测试：运行 `bun scripts/dev/publish-devlog.ts --dry-run`
 
 ---
@@ -191,10 +196,10 @@ termux-open-url "http://127.0.0.1:8766/exomind-daily-report-*.html"
 
 ## 常见问题
 
-### Q: 为什么要用"薄 HTML"而不是完整 HTML？
+### Q: 为什么要用"JSON + loader HTML"而不是完整 HTML？
 
 **A**:
-- **优势**：减少重复代码，渲染引擎和样式可以共享，更新一次所有日报都生效
+- **优势**：数据与渲染分离，读取侧可以直接读 JSON，渲染引擎和样式也能共享
 - **劣势**：需要同步两个仓库，容易出现本次这样的翻车
 
 ### Q: 能否合并两个仓库？

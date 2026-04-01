@@ -1,20 +1,25 @@
 #!/usr/bin/env bun
 
 /**
- * publish-route.ts — 将开发航线发布到 exomind-devlog GitHub Pages 仓库
+ * publish-route.ts — 统一发布开发航线到 exomind-devlog GitHub Pages 仓库
+ *
+ * 标准产物：
+ * - routes/YYYY-MM-DD-HHmmss.json
+ * - routes/YYYY-MM-DD-HHmmss.html
+ * - routes/latest.json
+ * - routes/manifest.json
  *
  * 用法:
- *   bun run route:publish                           # 发布 temp/ 下最新的航线
- *   bun run route:publish --route <path>            # 指定航线文件
- *   bun run route:publish --devlog-dir <path>       # 指定 devlog 仓库路径
- *   bun run route:publish --dry-run                 # 预览，不提交推送
+ *   bun run route:publish
+ *   bun run route:publish --route <path>
+ *   bun run route:publish --devlog-dir <path>
+ *   bun run route:publish --dry-run
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
-
-// ── Types ──
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import { readLatestDevlog, renderSourceBlock } from './extract-devlog';
 
 type Options = {
   routePath: string | null;
@@ -22,23 +27,44 @@ type Options = {
   dryRun: boolean;
 };
 
+type RouteData = {
+  schema: 'exomind-devlog-route';
+  version: '1.0';
+  generated: string;
+  _published: {
+    kind: 'route';
+    date: string;
+    time: string;
+    file: string;
+    dataFile: string;
+  };
+  [key: string]: any;
+};
+
 type ManifestEntry = {
   date: string;
-  time: string;    // HHmmss
+  time: string;
   title: string;
   file: string;
-  publisher?: string;  // 自我身份·所在系统 [名称 版本]
+  dataFile: string;
+  publisher?: string;
   status?: { level: string; emoji: string; label: string };
   metrics?: { label: string; value: string; note: string }[];
+  url?: string;
+  dataUrl?: string;
 };
 
 type Manifest = {
   generated: string;
   repo: string;
+  latest?: {
+    file: string;
+    dataFile: string;
+    date: string;
+    time: string;
+  };
   routes: ManifestEntry[];
 };
-
-// ── Arg Parsing ──
 
 function parseArgs(): Options {
   const args = process.argv.slice(2);
@@ -59,309 +85,240 @@ function parseArgs(): Options {
   return { routePath, devlogDir, dryRun };
 }
 
-// ── Find Latest Route ──
-
 function findLatestRoute(): string {
   const tempDir = resolve(join(import.meta.dir, '..', '..', 'temp'));
-  if (!existsSync(tempDir)) {
-    throw new Error(`temp/ 目录不存在: ${tempDir}`);
-  }
+  if (!existsSync(tempDir)) throw new Error(`temp/ 目录不存在: ${tempDir}`);
 
   const files = readdirSync(tempDir)
-    .filter(f => f.startsWith('exomind-route-') && f.endsWith('.html'))
+    .filter(file => file.startsWith('exomind-route-') && file.endsWith('.html'))
     .sort()
     .reverse();
 
-  if (!files.length) {
-    throw new Error('temp/ 下未找到航线文件 (exomind-route-*.html)');
-  }
-
+  if (!files.length) throw new Error('temp/ 下未找到航线文件 (exomind-route-*.html)');
   return join(tempDir, files[0]);
 }
 
-// ── Extract ROUTE Data ──
-
-function extractRouteData(html: string): string {
-  // Find the ROUTE object: starts with "const ROUTE = {" and ends before the rendering engine comment
-  const startMarker = 'const ROUTE = {';
-  const endMarker = '// ═══';
-
+function extractObjectBlock(html: string, variableName: 'ROUTE'): string {
+  const startMarker = `const ${variableName} = {`;
   const startIdx = html.indexOf(startMarker);
-  if (startIdx === -1) {
-    throw new Error('未找到 ROUTE 数据对象 (const ROUTE = {)');
-  }
+  if (startIdx === -1) throw new Error(`未找到 ${startMarker}`);
 
-  const endIdx = html.indexOf(endMarker, startIdx);
-  if (endIdx === -1) {
-    throw new Error('未找到渲染引擎注释边界 (// ═══)');
-  }
+  let braceCount = 0;
+  let inString = false;
+  let stringChar = '';
+  let endIdx = -1;
 
-  // Extract from "const ROUTE = {" to the end of the object ("};" before the comment)
-  let data = html.substring(startIdx, endIdx).trimEnd();
+  for (let i = startIdx + startMarker.length - 1; i < html.length; i++) {
+    const char = html[i];
+    const prevChar = i > 0 ? html[i - 1] : '';
 
-  // Remove trailing whitespace/newlines and ensure it ends with };
-  if (!data.endsWith('};')) {
-    const lastSemicolon = data.lastIndexOf('};');
-    if (lastSemicolon !== -1) {
-      data = data.substring(0, lastSemicolon + 2);
-    }
-  }
-
-  return data;
-}
-
-// ── Parse ROUTE fields for manifest ──
-
-function parseRouteFields(dataBlock: string): ManifestEntry {
-  // Using a safe approach: regex extraction of key fields
-  const getStr = (key: string): string => {
-    const m = dataBlock.match(new RegExp(`${key}:\\s*'([^']*)'`));
-    return m ? m[1] : '';
-  };
-
-  const date = getStr('date');
-  const title = getStr('title');
-
-  if (!date) throw new Error('ROUTE.meta.date 为空');
-
-  // Status
-  const statusLevel = getStr('level');
-  const statusEmoji = getStr('emoji');
-  const statusLabel = getStr('label');
-
-  // Metrics — extract array entries (航线 metrics 用 note 而非 delta/trend)
-  const metricsBlock = dataBlock.match(/metrics:\s*\[([\s\S]*?)\],\s*\n\s*(?:tracks|\/\/)/);
-  const metrics: ManifestEntry['metrics'] = [];
-
-  if (metricsBlock) {
-    const metricPattern = /\{\s*label:\s*'([^']*)',\s*value:\s*'([^']*)',\s*note:\s*'([^']*)'/g;
-    let m;
-    while ((m = metricPattern.exec(metricsBlock[1])) !== null) {
-      metrics.push({ label: m[1], value: m[2], note: m[3] });
-    }
-  }
-
-  // Publisher
-  const pubIdentity = getStr('identity');
-  const pubOs = getStr('os');
-  const pubModel = getStr('model');
-  const pubVersion = getStr('version');
-  const publisher = pubIdentity
-    ? `${pubIdentity}·${pubOs} [${pubModel} ${pubVersion}]`
-    : undefined;
-
-  return {
-    date,
-    time: '',   // filled by caller with timestamp
-    title: title || '开发航线',
-    file: '',   // filled by caller with timestamp
-    publisher,
-    status: statusLevel ? { level: statusLevel, emoji: statusEmoji, label: statusLabel } : undefined,
-    metrics: metrics.length ? metrics : undefined,
-  };
-}
-
-// ── Route Completeness Validation ──
-
-function validateRouteCompleteness(dataBlock: string): void {
-  const errors: string[] = [];
-
-  // Helper: check if a field exists and is not empty/placeholder
-  const checkField = (pattern: RegExp, fieldName: string, minLength = 1): boolean => {
-    const match = dataBlock.match(pattern);
-    if (!match) {
-      errors.push(`${fieldName} 字段缺失`);
-      return false;
-    }
-    const value = match[1]?.trim();
-    if (!value || value.length < minLength) {
-      errors.push(`${fieldName} 为空或过短`);
-      return false;
-    }
-    // Check for placeholder text
-    if (/数据缺失|暂无数据|查询失败|聚类失败|TODO|请填写|placeholder/i.test(value)) {
-      errors.push(`${fieldName} 包含占位符或警告文本: "${value}"`);
-      return false;
-    }
-    return true;
-  };
-
-  // 1. Meta fields
-  checkField(/date:\s*'([^']+)'/, 'meta.date', 10);
-  checkField(/baseline:\s*'([^']+)'/, 'meta.baseline', 7);
-
-  // 2. Publisher fields (all 4 required)
-  checkField(/identity:\s*'([^']+)'/, 'publisher.identity', 2);
-  checkField(/os:\s*'([^']+)'/, 'publisher.os', 2);
-  checkField(/model:\s*'([^']+)'/, 'publisher.model', 2);
-  checkField(/version:\s*'([^']+)'/, 'publisher.version', 2);
-
-  // 3. Status (must have level, emoji, label)
-  checkField(/status:\s*\{[\s\S]*?level:\s*'([^']+)'/, 'status.level', 2);
-  checkField(/status:\s*\{[\s\S]*?emoji:\s*'([^']+)'/, 'status.emoji', 1);
-  checkField(/status:\s*\{[\s\S]*?label:\s*'([^']+)'/, 'status.label', 2);
-
-  // 4. Metrics (must have at least 3 entries)
-  const metricsBlock = dataBlock.match(/metrics:\s*\[([\s\S]*?)\],/);
-  if (!metricsBlock) {
-    errors.push('metrics 数组缺失');
-  } else {
-    const metricCount = (metricsBlock[1].match(/\{/g) || []).length;
-    if (metricCount < 3) {
-      errors.push(`metrics 数组只有 ${metricCount} 项，至少需要 3 项`);
-    }
-    // Check for placeholder values
-    if (/value:\s*'[?-]'/.test(metricsBlock[1])) {
-      errors.push('metrics 包含占位符值 (? 或 -)');
-    }
-  }
-
-  // 5. Batches (must have at least 3 batches, each with 3-12 issues)
-  const batchesBlock = dataBlock.match(/batches:\s*\[([\s\S]*?)\],\s*\n\s*(?:heatmap|\/\/)/);
-  if (!batchesBlock) {
-    errors.push('batches 数组缺失');
-  } else {
-    const batchCount = (batchesBlock[1].match(/\{\s*id:/g) || []).length;
-    if (batchCount < 3) {
-      errors.push(`batches 数组只有 ${batchCount} 项，至少需要 3 个批次`);
-    }
-
-    // Check each batch has issues array with 3-12 items
-    const issuesArrays = batchesBlock[1].match(/issues:\s*\[([\s\S]*?)\]/g) || [];
-    issuesArrays.forEach((issuesStr, idx) => {
-      const issueCount = (issuesStr.match(/\{/g) || []).length;
-      if (issueCount < 3 || issueCount > 12) {
-        errors.push(`批次 #${idx + 1} 的 issues 数量为 ${issueCount}，必须在 3-12 范围内`);
+    if ((char === '"' || char === "'" || char === '`') && prevChar !== '\\') {
+      if (!inString) {
+        inString = true;
+        stringChar = char;
+      } else if (char === stringChar) {
+        inString = false;
       }
-    });
-
-    // Check for placeholder text in batches
-    if (/数据缺失|暂无|TODO|聚类失败/i.test(batchesBlock[1])) {
-      errors.push('batches 包含占位符或警告文本');
     }
 
-    // Check for track assignment (each batch must have a track)
-    const trackCount = (batchesBlock[1].match(/track:\s*'[^']+'/g) || []).length;
-    if (trackCount < batchCount) {
-      errors.push(`部分批次缺少 track 字段（${trackCount}/${batchCount}）`);
+    if (!inString) {
+      if (char === '{') braceCount++;
+      if (char === '}') braceCount--;
+      if (braceCount === 0 && char === '}') {
+        endIdx = i + 1;
+        break;
+      }
     }
   }
 
-  // 6. Heatmap (must have data array with at least 1 entry)
-  const heatmapBlock = dataBlock.match(/heatmap:\s*\{[\s\S]*?data:\s*\[([\s\S]*?)\]/);
-  if (!heatmapBlock) {
-    errors.push('heatmap.data 数组缺失');
-  } else {
-    const heatmapCount = (heatmapBlock[1].match(/\{/g) || []).length;
-    if (heatmapCount < 1) {
-      errors.push('heatmap.data 数组为空');
+  if (endIdx === -1) throw new Error(`未找到 ${variableName} 对象的结束位置`);
+  return html.substring(startIdx, endIdx);
+}
+
+function parseObjectBlock(block: string, variableName: 'ROUTE'): Record<string, any> {
+  const objectLiteral = block.replace(new RegExp(`^const\\s+${variableName}\\s*=\\s*`), '');
+  const parsed = Function(`"use strict"; return (${objectLiteral});`)();
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${variableName} 解析结果不是对象`);
+  }
+  return parsed as Record<string, any>;
+}
+
+function ensureString(value: unknown, field: string, errors: string[], minLength = 1) {
+  if (typeof value !== 'string' || value.trim().length < minLength) {
+    errors.push(`${field} 为空或过短`);
+  }
+}
+
+function ensureArray(value: unknown, field: string, errors: string[], minLength = 1) {
+  if (!Array.isArray(value) || value.length < minLength) {
+    errors.push(`${field} 数组缺失或长度不足`);
+  }
+}
+
+function collectPlaceholderTexts(value: unknown, hits: string[], path = 'root') {
+  const placeholderPattern = /数据缺失|暂无数据|查询失败|聚类失败|TODO|请填写|placeholder/i;
+  if (typeof value === 'string') {
+    if (placeholderPattern.test(value)) hits.push(`${path}: ${value}`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectPlaceholderTexts(item, hits, `${path}[${index}]`));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value)) {
+      collectPlaceholderTexts(nested, hits, `${path}.${key}`);
     }
   }
+}
 
-  // 7. Actions (must have at least 1 action with specific batch/issue reference)
-  const actionsBlock = dataBlock.match(/actions:\s*\[([\s\S]*?)\]/);
-  if (!actionsBlock) {
-    errors.push('actions 数组缺失');
-  } else {
-    const actionCount = (actionsBlock[1].match(/'/g) || []).length / 2;
-    if (actionCount < 1) {
-      errors.push('actions 数组为空，至少需要 1 条建议航向');
+function validateRouteData(route: Record<string, any>) {
+  const errors: string[] = [];
+  const meta = route.meta ?? {};
+  const publisher = route.publisher ?? {};
+  const status = route.status ?? {};
+  const metrics = Array.isArray(route.metrics) ? route.metrics : [];
+  const batches = Array.isArray(route.batches) ? route.batches : [];
+  const actions = Array.isArray(route.actions) ? route.actions : [];
+  const heatmap = route.heatmap ?? {};
+  const insight = typeof route.insight === 'string'
+    ? route.insight
+    : typeof route.insight?.text === 'string'
+      ? route.insight.text
+      : '';
+
+  ensureString(meta.date, 'meta.date', errors, 10);
+  ensureString(meta.baseline, 'meta.baseline', errors, 7);
+  ensureString(publisher.identity, 'publisher.identity', errors, 2);
+  ensureString(publisher.os, 'publisher.os', errors, 2);
+  ensureString(publisher.model, 'publisher.model', errors, 2);
+  ensureString(publisher.version, 'publisher.version', errors, 2);
+
+  ensureString(status.level, 'status.level', errors, 2);
+  ensureString(status.emoji, 'status.emoji', errors, 1);
+  ensureString(status.label, 'status.label', errors, 2);
+
+  ensureArray(metrics, 'metrics', errors, 3);
+  ensureArray(batches, 'batches', errors, 3);
+  ensureArray(heatmap.data, 'heatmap.data', errors, 1);
+  ensureArray(actions, 'actions', errors, 1);
+  ensureString(insight, 'insight', errors, 20);
+
+  batches.forEach((batch, index) => {
+    const issues = Array.isArray(batch?.issues) ? batch.issues : [];
+    if (issues.length < 3 || issues.length > 12) {
+      errors.push(`batches[${index}].issues 数量为 ${issues.length}，必须在 3-12 范围内`);
     }
-    // Check for vague actions
-    if (/持续关注|继续观察|保持/i.test(actionsBlock[1])) {
-      errors.push('actions 包含模糊表述（"持续关注"），必须指向具体批次和 issue');
+    if (typeof batch?.track !== 'string' || !batch.track.trim()) {
+      errors.push(`batches[${index}].track 缺失`);
     }
-    // Check for placeholder text
-    if (/数据缺失|暂无|TODO/i.test(actionsBlock[1])) {
-      errors.push('actions 包含占位符或警告文本');
-    }
+  });
+
+  const vagueActions = actions
+    .map(item => typeof item === 'string' ? item : item?.text)
+    .filter((item): item is string => typeof item === 'string')
+    .filter(item => /持续关注|继续观察|保持/i.test(item));
+  if (vagueActions.length) {
+    errors.push('actions 包含模糊表述，必须指向具体批次或 issue');
   }
 
-  // 8. Insight (must exist and be non-empty)
-  checkField(/insight:\s*'([\s\S]*?)'(?:\s*\n\s*\};|\s*,)/, 'insight', 20);
+  const placeholders: string[] = [];
+  collectPlaceholderTexts(route, placeholders);
+  if (placeholders.length) {
+    errors.push(`发现占位符文本: ${placeholders.slice(0, 3).join(' | ')}`);
+  }
 
-  if (errors.length > 0) {
+  if (errors.length) {
     throw new Error(
-      '❌ 发布失败：航线数据不完整或包含占位符。\n\n' +
-      '质量红线违反：\n' +
-      errors.map(e => `   · ${e}`).join('\n') + '\n\n' +
-      '修复建议：\n' +
-      '   1. 检查所有必填字段是否填充完整\n' +
-      '   2. 移除所有"数据缺失"、"TODO"、"聚类失败"等占位符\n' +
-      '   3. 确保每个批次有 3-12 个 issue\n' +
-      '   4. 确保每个批次分配了唯一轨道（track）\n' +
-      '   5. 确保 actions 指向具体批次和 issue，不是"持续关注"\n' +
-      '   6. 重新运行数据采集和聚类分析，确保所有数据来自本次查询\n\n' +
-      '如果数据采集或聚类失败，Agent 应该停止生成并输出失败诊断，而不是生成带占位符的半成品。'
+      '❌ 发布失败：航线数据不完整或包含占位符。\n' +
+      errors.map(error => `   · ${error}`).join('\n')
     );
   }
 }
 
-// ── Generate Thin HTML ──
+function toRouteJson(route: Record<string, any>, time: string): RouteData {
+  const meta = { ...(route.meta ?? {}) };
+  const date = meta.date ?? '';
+  const fileStem = `${date}-${time}`;
 
-function generateThinHtml(entry: ManifestEntry, dataBlock: string): string {
-  const date = entry.date;
-  const title = entry.title || '开发航线';
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ExoMind ${title} · ${date}</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"><\/script>
-<link rel="stylesheet" href="../assets/route-style.css">
-</head>
-<body>
-<div class="container" id="app"></div>
-<script>
-${dataBlock}
-<\/script>
-<script src="../assets/route-engine.js"><\/script>
-</body>
-</html>
-`;
+  return {
+    schema: 'exomind-devlog-route',
+    version: '1.0',
+    generated: new Date().toISOString(),
+    _published: {
+      kind: 'route',
+      date,
+      time,
+      file: `${fileStem}.html`,
+      dataFile: `${fileStem}.json`,
+    },
+    ...route,
+    meta,
+  };
 }
 
-// ── Update Manifest ──
+function buildManifestEntry(route: RouteData): ManifestEntry {
+  const meta = route.meta ?? {};
+  const publisher = route.publisher ?? {};
+  const status = route.status ?? {};
+  const metrics = Array.isArray(route.metrics) ? route.metrics : [];
+  const published = route._published;
+
+  return {
+    date: published.date,
+    time: published.time,
+    title: meta.title || '开发航线',
+    file: published.file,
+    dataFile: published.dataFile,
+    publisher: publisher.identity ? `${publisher.identity}·${publisher.os} [${publisher.model} ${publisher.version}]` : undefined,
+    status: status.level ? { level: status.level, emoji: status.emoji, label: status.label } : undefined,
+    metrics,
+    url: `https://exomind-team.github.io/exomind-devlog/routes/${published.file}`,
+    dataUrl: `https://exomind-team.github.io/exomind-devlog/routes/${published.dataFile}`,
+  };
+}
+
+function generateLoaderHtml(dataFile: string): string {
+  const templatePath = join(import.meta.dir, '..', '..', 'skills', 'dev-route', 'assets', 'route-loader.html');
+  const template = readFileSync(templatePath, 'utf-8');
+  return template.replace(/dataFile:\s*'DATA_FILENAME\.json'/, `dataFile: '${dataFile}'`);
+}
 
 function updateManifest(devlogDir: string, entry: ManifestEntry): Manifest {
   const routesDir = join(devlogDir, 'routes');
-  if (!existsSync(routesDir)) {
-    mkdirSync(routesDir, { recursive: true });
-  }
+  if (!existsSync(routesDir)) mkdirSync(routesDir, { recursive: true });
 
   const manifestPath = join(routesDir, 'manifest.json');
-  let manifest: Manifest;
+  const existing = existsSync(manifestPath)
+    ? JSON.parse(readFileSync(manifestPath, 'utf-8')) as Partial<Manifest>
+    : {};
 
-  if (existsSync(manifestPath)) {
-    manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-  } else {
-    manifest = { generated: '', repo: 'exomind-team/exomind', routes: [] };
-  }
+  const manifest: Manifest = {
+    generated: new Date().toISOString(),
+    repo: existing.repo || 'exomind-team/exomind',
+    latest: {
+      file: entry.file,
+      dataFile: entry.dataFile,
+      date: entry.date,
+      time: entry.time,
+    },
+    routes: Array.isArray(existing.routes) ? existing.routes : [],
+  };
 
-  // Remove existing entry for same file (allow multiple per day)
-  manifest.routes = manifest.routes.filter(r => r.file !== entry.file);
-  // Add new entry
-  manifest.routes.push(entry);
-  // Sort by date+time descending (newest first)
-  manifest.routes.sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
-  // Update timestamp
-  manifest.generated = new Date().toISOString();
+  manifest.routes = manifest.routes.filter(item => item.file !== entry.file && item.dataFile !== entry.dataFile);
+  manifest.routes.unshift(entry);
+  manifest.routes.sort((left, right) => `${right.date}${right.time}`.localeCompare(`${left.date}${left.time}`));
 
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   return manifest;
 }
 
-// ── Git Operations ──
-
-function git(cwd: string, ...args: string[]): string {
+function git(cwd: string, ...args: string[]) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
 }
 
-// ── GitHub Pages Build Monitor ──
-
-function gh(...args: string[]): string {
+function gh(...args: string[]) {
   return execFileSync('gh', args, { encoding: 'utf-8' }).trim();
 }
 
@@ -373,10 +330,7 @@ async function waitForPagesBuild(maxWaitMs = 120_000, intervalMs = 5_000): Promi
 
   while (Date.now() - startTime < maxWaitMs) {
     try {
-      const result = gh(
-        'api', 'repos/exomind-team/exomind-devlog/pages/builds',
-        '--jq', '.[0] | "\\(.status) \\(.created_at)"'
-      );
+      const result = gh('api', 'repos/exomind-team/exomind-devlog/pages/builds', '--jq', '.[0] | "\\(.status) \\(.created_at)"');
       const [status, createdAt] = result.split(' ');
 
       if (status === 'built' && createdAt >= pushTime.substring(0, 16)) {
@@ -392,116 +346,146 @@ async function waitForPagesBuild(maxWaitMs = 120_000, intervalMs = 5_000): Promi
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       process.stdout.write(`\r  状态: ${status || 'queued'} (${elapsed}s)`);
     } catch {
-      // API call failed, retry
+      // ignore and retry
     }
 
-    await new Promise(r => setTimeout(r, intervalMs));
+    await new Promise(resolvePromise => setTimeout(resolvePromise, intervalMs));
   }
 
   console.log('\n⚠️ 等待超时，请手动检查 Pages 状态');
   return false;
 }
 
-// ── Main ──
+async function verifyPagesPublication(entry: ManifestEntry, maxWaitMs = 120_000, intervalMs = 5_000) {
+  const startTime = Date.now();
+  let lastError = 'unknown';
+
+  console.log('\n🔍 回读 GitHub Pages 默认入口...');
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const result = await readLatestDevlog({ type: 'route', source: 'pages' });
+      const published = result.data?._published ?? {};
+
+      if (
+        result.source.resolvedSource !== 'pages-json' ||
+        result.source.trust !== 'high' ||
+        result.source.consistency !== 'ok'
+      ) {
+        throw new Error(
+          `默认入口未达发布标准: resolved=${result.source.resolvedSource}, trust=${result.source.trust}, consistency=${result.source.consistency}`
+        );
+      }
+
+      if (
+        published.file !== entry.file ||
+        published.dataFile !== entry.dataFile ||
+        published.date !== entry.date ||
+        published.time !== entry.time
+      ) {
+        throw new Error(
+          `Pages 仍指向旧条目: file=${published.file ?? 'unknown'}, dataFile=${published.dataFile ?? 'unknown'}`
+        );
+      }
+
+      console.log('✓ GitHub Pages 默认入口已更新并通过一致性校验');
+      console.log(renderSourceBlock(result.source));
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+
+    await new Promise(resolvePromise => setTimeout(resolvePromise, intervalMs));
+  }
+
+  throw new Error(`GitHub Pages 默认入口验证失败: ${lastError}`);
+}
 
 async function main() {
-  const opts = parseArgs();
-
-  // 1. Find route
-  const routePath = opts.routePath || findLatestRoute();
+  const options = parseArgs();
+  const routePath = options.routePath || findLatestRoute();
   console.log(`📄 航线文件: ${routePath}`);
 
-  if (!existsSync(routePath)) {
-    throw new Error(`文件不存在: ${routePath}`);
+  if (!existsSync(routePath)) throw new Error(`文件不存在: ${routePath}`);
+  if (!existsSync(options.devlogDir)) {
+    throw new Error(`devlog 仓库不存在: ${options.devlogDir}\n请先克隆: gh repo clone exomind-team/exomind-devlog ${options.devlogDir}`);
   }
 
-  // 2. Validate devlog dir
-  if (!existsSync(opts.devlogDir)) {
-    throw new Error(`devlog 仓库不存在: ${opts.devlogDir}\n请先克隆: gh repo clone exomind-team/exomind-devlog ${opts.devlogDir}`);
-  }
-
-  // 3. Ensure routes/ directory exists
-  const routesDir = join(opts.devlogDir, 'routes');
-  if (!existsSync(routesDir)) {
-    mkdirSync(routesDir, { recursive: true });
-  }
-
-  // 4. Read and extract
   const html = readFileSync(routePath, 'utf-8');
-  const dataBlock = extractRouteData(html);
-  const entry = parseRouteFields(dataBlock);
+  const routeBlock = extractObjectBlock(html, 'ROUTE');
+  const routeObject = parseObjectBlock(routeBlock, 'ROUTE');
+  validateRouteData(routeObject);
 
-  // ── 质量拦截：完整性校验（必须填充，否则拒绝发布）──
-  validateRouteCompleteness(dataBlock);
+  const filenameMatch = basename(routePath).match(/(\d{4}-\d{2}-\d{2})-(\d{6})/);
+  const time = filenameMatch ? filenameMatch[2] : new Date().toTimeString().replace(/:/g, '').slice(0, 6);
+  const routeJson = toRouteJson(routeObject, time);
+  const entry = buildManifestEntry(routeJson);
+  const loaderHtml = generateLoaderHtml(entry.dataFile);
 
-  // Derive time from source filename (YYYY-MM-DD-HHmmss) or use current time
-  const fnameMatch = basename(routePath).match(/(\d{4}-\d{2}-\d{2})-(\d{6})/);
-  const timeStr = fnameMatch
-    ? fnameMatch[2]
-    : new Date().toTimeString().replace(/:/g, '').substring(0, 6);
-  entry.time = timeStr;
-  entry.file = `${entry.date}-${timeStr}.html`;
+  const routesDir = join(options.devlogDir, 'routes');
+  const standaloneDir = join(options.devlogDir, 'standalone');
+  const jsonPath = join(routesDir, entry.dataFile);
+  const htmlPath = join(routesDir, entry.file);
+  const latestJsonPath = join(routesDir, 'latest.json');
+  const standalonePath = join(standaloneDir, basename(routePath));
 
-  console.log(`📅 日期: ${entry.date} ${timeStr}`);
+  console.log(`📅 日期: ${entry.date} ${entry.time}`);
   console.log(`📰 标题: ${entry.title}`);
   if (entry.publisher) console.log(`👤 发布者: ${entry.publisher}`);
   console.log(`⛅ 状态: ${entry.status?.emoji || '?'} ${entry.status?.label || '?'}`);
-  console.log(`📊 指标: ${(entry.metrics || []).map(m => `${m.label}=${m.value}`).join(' · ')}`);
+  console.log(`📊 指标: ${(entry.metrics || []).map(metric => `${metric.label}=${metric.value}`).join(' · ')}`);
+  console.log(`\n🧱 产物模型: routes/${entry.dataFile} + routes/${entry.file} + routes/latest.json + routes/manifest.json`);
 
-  // 5. Generate thin HTML
-  const thinHtml = generateThinHtml(entry, dataBlock);
-  const outputPath = join(routesDir, entry.file);
-
-  console.log(`\n📝 生成薄 HTML: routes/${entry.file}`);
-
-  if (opts.dryRun) {
-    console.log(`\n[dry-run] 将写入 ${outputPath}`);
-    console.log(`[dry-run] 将更新 routes/manifest.json`);
-    console.log('[dry-run] 未执行任何操作');
+  if (options.dryRun) {
+    console.log(`\n[dry-run] 将写入 ${jsonPath}`);
+    console.log(`[dry-run] 将写入 ${htmlPath}`);
+    console.log(`[dry-run] 将刷新 ${latestJsonPath}`);
+    console.log('[dry-run] 将更新 routes/manifest.json');
     return;
   }
 
-  // 6. Write files
-  writeFileSync(outputPath, thinHtml, 'utf-8');
-  console.log(`✓ 已写入: ${outputPath}`);
+  if (!existsSync(routesDir)) mkdirSync(routesDir, { recursive: true });
+  if (!existsSync(standaloneDir)) mkdirSync(standaloneDir, { recursive: true });
 
-  // 7. Update manifest
-  const manifest = updateManifest(opts.devlogDir, entry);
+  writeFileSync(jsonPath, JSON.stringify(routeJson, null, 2) + '\n', 'utf-8');
+  console.log(`✓ JSON: routes/${entry.dataFile}`);
+
+  writeFileSync(htmlPath, loaderHtml, 'utf-8');
+  console.log(`✓ HTML Loader: routes/${entry.file}`);
+
+  copyFileSync(jsonPath, latestJsonPath);
+  console.log(`✓ latest.json → ${entry.dataFile}`);
+
+  const manifest = updateManifest(options.devlogDir, entry);
   console.log(`✓ manifest 已更新 (共 ${manifest.routes.length} 份航线)`);
 
-  // 8. Also copy standalone version
-  const standaloneDir = join(opts.devlogDir, 'standalone');
-  if (!existsSync(standaloneDir)) {
-    mkdirSync(standaloneDir, { recursive: true });
-  }
-  const standalonePath = join(standaloneDir, basename(routePath));
   writeFileSync(standalonePath, html, 'utf-8');
   console.log(`✓ standalone 副本: standalone/${basename(routePath)}`);
 
-  // 9. Git commit & push
   try {
-    git(opts.devlogDir, 'add', '.');
-    git(opts.devlogDir, 'commit', '-m', `route: ${entry.date} ${entry.title}`);
-    console.log(`\n✓ 已提交`);
-
-    git(opts.devlogDir, 'push', 'origin', 'main');
+    git(options.devlogDir, 'add', '.');
+    git(options.devlogDir, 'commit', '-m', `route: ${entry.date} ${entry.title}`);
+    console.log('\n✓ 已提交');
+    git(options.devlogDir, 'push', 'origin', 'main');
     console.log('✓ 已推送到 origin/main');
-  } catch (e: any) {
-    console.error(`\n⚠️ Git 操作失败: ${e.message}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`\n⚠️ Git 操作失败: ${message}`);
     console.error('文件已写入，请手动提交推送');
     return;
   }
 
-  // 10. Wait for GitHub Pages build
-  const routeUrl = `https://exomind-team.github.io/exomind-devlog/routes/${entry.file}`;
-  const indexUrl = 'https://exomind-team.github.io/exomind-devlog/';
-
   const built = await waitForPagesBuild();
   if (built) {
-    console.log(`\n📋 发布完成`);
-    console.log(`   归档首页: ${indexUrl}`);
-    console.log(`   本期航线: ${routeUrl}`);
+    await verifyPagesPublication(entry);
+    console.log('\n📋 发布完成');
+    console.log(`   归档首页: https://exomind-team.github.io/exomind-devlog/`);
+    console.log(`   本期航线: https://exomind-team.github.io/exomind-devlog/routes/${entry.file}`);
+    console.log(`   数据文件: https://exomind-team.github.io/exomind-devlog/routes/${entry.dataFile}`);
   }
 }
 
-main();
+main().catch(error => {
+  console.error(`\n❌ 错误: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+});

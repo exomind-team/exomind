@@ -393,12 +393,12 @@ YYYY-MM-DD · dev@<hash> · 发布者信息
 ## 文件命名规范
 
 ```
-exomind-route-YYYY-MM-DD.html
+exomind-route-YYYY-MM-DD-HHmmss.html
 ```
 
 **本地输出目录**：`temp/`（gitignored）
 
-同一天可生成多份（需求变化后重新聚类），后者覆盖前者。
+同一天可生成多份（需求变化后重新聚类），按时间戳并存归档。
 
 ---
 
@@ -410,10 +410,10 @@ exomind-route-YYYY-MM-DD.html
 
 ### 使用方法
 
-1. **复制模板**到 `temp/exomind-route-YYYY-MM-DD.html`
+1. **复制模板**到 `temp/exomind-route-YYYY-MM-DD-HHmmss.html`
 2. **修改顶部 `ROUTE` 数据对象**——只改数据，不改渲染代码
 3. **起本地服务查看**：`python3 -m http.server 8765 --directory temp`
-4. 浏览器打开 `http://localhost:8765/exomind-route-YYYY-MM-DD.html`
+4. 浏览器打开 `http://localhost:8765/exomind-route-YYYY-MM-DD-HHmmss.html`
 
 ### 技术依赖
 
@@ -454,25 +454,21 @@ exomind-route-YYYY-MM-DD.html
 
 ### 获取最新航线数据
 
-**方式 1：从本地 temp/ 读取**（最新、最完整）
+**标准方式：使用统一读取器**
 
 ```bash
-# 找到最新的航线文件
-ls -t temp/exomind-route-*.html | head -1
+bun run devlog:extract --type route
+bun run devlog:extract --type route --format json
 ```
 
-然后从 HTML 文件中提取 `ROUTE` 数据对象：
-- 开始标记：`const ROUTE = {`
-- 结束标记：`// ═══`（注释边界之前）
-- 提取的是纯 JavaScript 对象字面量，可直接解析
+默认链路是：
+1. `https://exomind-team.github.io/exomind-devlog/routes/manifest.json`
+2. manifest 指向的 `dataFile` JSON
+3. `https://exomind-team.github.io/exomind-devlog/routes/latest.json` 一致性校验
 
-**方式 2：从 devlog 仓库 manifest 读取**（已发布的）
+只有标准入口不可用时，读取器才允许 fallback 到本地 `exomind-devlog` 或 `temp/`，并在输出里的 `[devlog-source]` / `_devlogSource` 显式标注来源、可信度与校验状态。
 
-```bash
-cat /data/data/com.termux/files/home/A137442/exomind-devlog/routes/manifest.json
-```
-
-manifest 只有摘要（日期、标题、状态、指标），不含完整批次数据。如需完整数据，读取对应的 HTML 文件。
+**禁止**把“本地 temp/ 更完整”作为默认真相源；它可能是未发布或过期数据。
 
 ### 提取特定批次
 
@@ -495,10 +491,10 @@ manifest 只有摘要（日期、标题、状态、指标），不含完整批�
 }
 ```
 
-Agent 可以用正则或 JSON 解析提取特定批次，例如：
+Agent 应优先用统一读取器返回的 JSON 提取特定批次，例如：
 ```bash
 # 快速查看批次 M 的 issue 编号
-grep -A 50 "id: 'M'" temp/exomind-route-*.html | grep "num:" | head -20
+bun run devlog:extract --type route --format json | jq '.batches[] | select(.id == "M") | .issues[].num'
 ```
 
 ### 从批次到实施计划的衔接（计划撰写方法论）
@@ -662,7 +658,7 @@ bun run route:check
 用户：批次 O 里有哪些 issue？
 
 Agent：
-1. 读取 temp/ 下最新航线
+1. 用 `bun run devlog:extract --type route` 读取最新已发布航线
 2. 提取批次 O 数据
 3. 输出：
 

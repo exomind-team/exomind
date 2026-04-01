@@ -58,12 +58,13 @@ docs/agents/dev-daily/prompt.md「共用流程」执行数据采集与分析。
 输出模式：公开发布到 GitHub Pages
 1. 先按「入口 B」生成本地 HTML 到 temp/exomind-daily-report-YYYY-MM-DD-HHmmss.html
 2. 执行 bun run devlog:publish 发布
-3. 脚本自动：提取数据 → 生成薄HTML → 更新manifest → push → 等待Pages构建
+3. 脚本自动：标准化生成 `reports/*.json` + loader `reports/*.html` + `reports/latest.json` + `reports/manifest.json` → push → 等待 Pages 构建 → 回读 GitHub Pages 默认入口校验
 4. 完成后输出公开链接：
    - 归档首页: https://exomind-team.github.io/exomind-devlog/
    - 本期日报: https://exomind-team.github.io/exomind-devlog/reports/YYYY-MM-DD-HHmmss.html
+   - 数据文件: https://exomind-team.github.io/exomind-devlog/reports/YYYY-MM-DD-HHmmss.json
 
-devlog 仓库本地路径默认：../exomind-devlog
+发布目标仓库本地工作树默认：../exomind-devlog
 若不存在请先 gh repo clone exomind-team/exomind-devlog ../exomind-devlog
 ```
 

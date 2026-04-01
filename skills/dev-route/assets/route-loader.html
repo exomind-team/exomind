@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ExoMind 开发日报</title>
+<title>ExoMind 开发航线</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<link rel="stylesheet" href="../assets/report-style.css">
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<link rel="stylesheet" href="../assets/route-style.css">
 <style>
 .loading,.error{max-width:760px;margin:4rem auto;padding:2rem;background:var(--card,#0d1117);border:1px solid var(--border,#21262d);border-radius:10px}
 .loading{text-align:center;color:var(--text-dim,#8b949e)}
@@ -28,22 +28,22 @@
 <div class="container" id="app">
   <div class="loading">
     <div class="spinner">⏳</div>
-    <div>加载报告数据中...</div>
+    <div>加载航线数据中...</div>
   </div>
 </div>
 
 <script>
 const CONFIG = {
   dataFile: 'DATA_FILENAME.json',
-  schema: 'exomind-devlog-report',
-  engineUrl: '../assets/report-engine.js',
+  schema: 'exomind-devlog-route',
+  engineUrl: '../assets/route-engine.js',
   debug: new URLSearchParams(window.location.search).has('debug'),
 };
 
 const log = {
-  info: (...args) => CONFIG.debug && console.log('[ReportLoader]', ...args),
-  warn: (...args) => console.warn('[ReportLoader]', ...args),
-  error: (...args) => console.error('[ReportLoader]', ...args),
+  info: (...args) => CONFIG.debug && console.log('[RouteLoader]', ...args),
+  warn: (...args) => console.warn('[RouteLoader]', ...args),
+  error: (...args) => console.error('[RouteLoader]', ...args),
 };
 
 const stages = {
@@ -85,7 +85,7 @@ function showError(failedStage, error) {
 
   document.getElementById('app').innerHTML = `
     <div class="error">
-      <h2><span>⚠️</span><span>报告加载失败</span></h2>
+      <h2><span>⚠️</span><span>航线加载失败</span></h2>
       <p>在「${stages[failedStage].name}」阶段遇到错误。</p>
       <div style="margin-top:1.5rem;">${stageList}</div>
       <details>
@@ -131,8 +131,8 @@ async function fetchData() {
 function validateData(data) {
   updateStage('validate', 'running', '检查 schema 与必填字段...');
   if (data.schema !== CONFIG.schema) throw new Error(`Schema 不匹配: ${data.schema}`);
-  if (!data.meta || !data.weather || !Array.isArray(data.metrics) || !Array.isArray(data.headlines)) {
-    throw new Error('报告数据缺少关键字段');
+  if (!data.meta || !data.status || !Array.isArray(data.metrics) || !Array.isArray(data.batches)) {
+    throw new Error('航线数据缺少关键字段');
   }
   updateStage('validate', 'success', `Schema: ${data.schema} v${data.version || '?'}`);
   return data;
@@ -160,7 +160,7 @@ function loadEngine() {
     updateStage('parse', 'running', '解析页面配置...');
     updateStage('parse', 'success', `数据文件: ${CONFIG.dataFile}`);
     const data = validateData(await fetchData());
-    window.REPORT = data;
+    window.ROUTE = data;
     document.title = `ExoMind ${data.meta.title} · ${data.meta.date}`;
     await loadEngine();
     updateStage('render', 'success', '渲染完成');

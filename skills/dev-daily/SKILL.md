@@ -31,10 +31,18 @@ To extract structured data from a published report (Agent-friendly text or JSON)
 bun run devlog:extract --type report              # 最新日报 → 纯文本摘要
 bun run devlog:extract --type report --format json # 最新日报 → JSON
 bun run devlog:extract --file <path>               # 指定 HTML 文件
-bun run devlog:extract --type report --source devlog # 从 devlog 仓库读取
+bun run devlog:extract --type report --source pages # 强制从 GitHub Pages 读取
 ```
 
 When generating a new report, read the previous report first to compare trends and fill the scorecard.
+
+`devlog:extract` 默认按 `GitHub Pages reports/manifest.json -> data JSON -> latest.json` 读取，并在输出顶部返回 `[devlog-source]` 或 `_devlogSource`。
+必须检查该来源块，确认：
+- 来源是否为 `pages-json`
+- `trust` 是否为 `high`
+- `consistency` 是否为 `ok`
+
+如果来源块显示 fallback、本地来源、HTML 兼容解析或一致性不完整，必须在后续输出中明确说明，不得把它表述为“最新已发布状态”。
 
 ## Core Rules
 
@@ -42,3 +50,4 @@ When generating a new report, read the previous report first to compare trends a
 - Fetch the latest `dev` branch before collecting status when the workflow requires it.
 - Preserve the report naming and daypart rules defined in the reference docs.
 - Keep the entry skill concise; put detailed reporting logic in the reference files.
+- 发布链只认正式命令 `bun run devlog:publish`；不再使用或宣传 `v1/v2` 区分。

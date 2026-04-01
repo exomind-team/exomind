@@ -1,466 +1,719 @@
 #!/usr/bin/env bun
 
 /**
- * extract-devlog.ts — 从 devlog HTML 中提取 REPORT/ROUTE 数据，生成 Agent 友好的文本或 JSON
+ * extract-devlog.ts — 统一读取开发日报/开发航线，默认走 GitHub Pages 子 manifest
+ *
+ * 读取顺序（--source auto）：
+ *   1. GitHub Pages 子 manifest + data JSON + latest.json 一致性校验
+ *   2. 本地 exomind-devlog 发布仓库（仅 fallback）
+ *   3. 本地 temp/ HTML（仅 fallback）
  *
  * 用法:
- *   bun scripts/dev/extract-devlog.ts --type report                # 最新日报，文本格式
- *   bun scripts/dev/extract-devlog.ts --type route                 # 最新航线，文本格式
- *   bun scripts/dev/extract-devlog.ts --type report --format json  # JSON 格式
- *   bun scripts/dev/extract-devlog.ts --file <path>                # 指定文件（自动检测类型）
- *   bun scripts/dev/extract-devlog.ts --type report --source devlog # 从 devlog 仓库读取
+ *   bun run devlog:extract --type report
+ *   bun run devlog:extract --type route
+ *   bun run devlog:extract --type report --format json
+ *   bun run devlog:extract --type report --source pages
+ *   bun run devlog:extract --type route --source devlog
+ *   bun run devlog:extract --file <path>
  */
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 
-// ── Types ──
-
-type Format = 'text' | 'json';
-type DocType = 'report' | 'route';
+export type Format = 'text' | 'json';
+export type DocType = 'report' | 'route';
+export type SourceMode = 'auto' | 'pages' | 'temp' | 'devlog';
 
 type Options = {
   type: DocType | null;
   format: Format;
   file: string | null;
-  source: 'temp' | 'devlog';
+  source: SourceMode;
 };
 
-// ── Arg Parsing ──
+type Entry = {
+  date?: string;
+  time?: string;
+  file?: string;
+  dataFile?: string;
+  [key: string]: unknown;
+};
+
+type PublishedPointer = {
+  kind?: DocType;
+  date?: string;
+  time?: string;
+  file?: string;
+  dataFile?: string;
+};
+
+export type SourceInfo = {
+  requestedSource: SourceMode | 'file';
+  resolvedSource: string;
+  trust: 'high' | 'medium' | 'low';
+  consistency: 'ok' | 'partial';
+  guarantee: string;
+  manifest?: string;
+  data?: string;
+  latest?: string;
+  html?: string;
+  filePath?: string;
+  fallbackUsed: boolean;
+  notes: string[];
+};
+
+export type ResolvedDevlog<T = Record<string, any>> = {
+  type: DocType;
+  data: T;
+  source: SourceInfo;
+};
+
+type Provider = {
+  label: 'pages' | 'devlog';
+  manifestRef: string;
+  latestRef: string;
+  entryRef: (subpath: string) => string;
+  readJson: (ref: string) => Promise<any>;
+  readText: (ref: string) => Promise<string>;
+};
+
+const DEVLOG_PAGES_BASE = 'https://exomind-team.github.io/exomind-devlog';
+const LOCAL_DEVLOG_DIR = resolve(join(import.meta.dir, '..', '..', '..', 'exomind-devlog'));
+
+class SourceUnavailableError extends Error {}
+class SourceConsistencyError extends Error {}
 
 function parseArgs(): Options {
   const args = process.argv.slice(2);
   let type: DocType | null = null;
   let format: Format = 'text';
   let file: string | null = null;
-  let source: 'temp' | 'devlog' = 'temp';
+  let source: SourceMode = 'auto';
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--type' && args[i + 1]) {
-      const t = args[++i];
-      if (t === 'report' || t === 'route') type = t;
-      else throw new Error(`未知类型: ${t}（支持 report / route）`);
+      const next = args[++i];
+      if (next === 'report' || next === 'route') type = next;
+      else throw new Error(`未知类型: ${next}（支持 report / route）`);
     } else if (args[i] === '--format' && args[i + 1]) {
-      const f = args[++i];
-      if (f === 'text' || f === 'json') format = f;
-      else throw new Error(`未知格式: ${f}（支持 text / json）`);
+      const next = args[++i];
+      if (next === 'text' || next === 'json') format = next;
+      else throw new Error(`未知格式: ${next}（支持 text / json）`);
     } else if (args[i] === '--file' && args[i + 1]) {
       file = resolve(args[++i]);
     } else if (args[i] === '--source' && args[i + 1]) {
-      const s = args[++i];
-      if (s === 'temp' || s === 'devlog') source = s;
+      const next = args[++i];
+      if (next === 'auto' || next === 'pages' || next === 'temp' || next === 'devlog') source = next;
+      else throw new Error(`未知来源: ${next}（支持 auto / pages / temp / devlog）`);
     }
   }
 
   return { type, format, file, source };
 }
 
-// ── File Discovery ──
-
-function findLatestFile(docType: DocType, source: 'temp' | 'devlog'): string {
-  if (source === 'devlog') {
-    const devlogDir = resolve(join(import.meta.dir, '..', '..', '..', 'exomind-devlog'));
-    const subdir = docType === 'report' ? 'reports' : 'routes';
-    const dir = join(devlogDir, subdir);
-    if (!existsSync(dir)) throw new Error(`devlog 目录不存在: ${dir}`);
-    const files = readdirSync(dir).filter(f => f.endsWith('.html')).sort().reverse();
-    if (!files.length) throw new Error(`${dir} 下无 HTML 文件`);
-    return join(dir, files[0]);
-  }
-
-  const tempDir = resolve(join(import.meta.dir, '..', '..', 'temp'));
-  if (!existsSync(tempDir)) throw new Error(`temp/ 目录不存在: ${tempDir}`);
-
-  const prefix = docType === 'report' ? 'exomind-daily-report-' : 'exomind-route-';
-  const files = readdirSync(tempDir)
-    .filter(f => f.startsWith(prefix) && f.endsWith('.html'))
-    .sort()
-    .reverse();
-
-  if (!files.length) throw new Error(`temp/ 下未找到 ${prefix}*.html`);
-  return join(tempDir, files[0]);
+function subdirFor(docType: DocType): 'reports' | 'routes' {
+  return docType === 'report' ? 'reports' : 'routes';
 }
 
-function detectType(html: string): DocType {
-  if (html.includes('const REPORT = {')) return 'report';
-  if (html.includes('const ROUTE = {')) return 'route';
-  throw new Error('无法检测文件类型：未找到 REPORT 或 ROUTE 数据对象');
+function variableNameFor(docType: DocType): 'REPORT' | 'ROUTE' {
+  return docType === 'report' ? 'REPORT' : 'ROUTE';
 }
 
-// ── Data Extraction (reuse patterns from publish-devlog.ts / publish-route.ts) ──
-
-function extractDataBlock(html: string, docType: DocType): string {
-  const startMarker = docType === 'report' ? 'const REPORT = {' : 'const ROUTE = {';
-  const endMarkers = ['// ╔══', '// ═══', '</script>'];
-
-  const startIdx = html.indexOf(startMarker);
-  if (startIdx === -1) throw new Error(`未找到 ${startMarker}`);
-
-  let endIdx = -1;
-  for (const marker of endMarkers) {
-    const idx = html.indexOf(marker, startIdx + startMarker.length);
-    if (idx !== -1 && (endIdx === -1 || idx < endIdx)) endIdx = idx;
-  }
-  if (endIdx === -1) throw new Error('未找到数据对象结束边界');
-
-  let data = html.substring(startIdx, endIdx).trimEnd();
-  if (!data.endsWith('};')) {
-    const lastSemicolon = data.lastIndexOf('};');
-    if (lastSemicolon !== -1) data = data.substring(0, lastSemicolon + 2);
-  }
-  return data;
+function prefixFor(docType: DocType): string {
+  return docType === 'report' ? 'exomind-daily-report-' : 'exomind-route-';
 }
 
-function getStr(dataBlock: string, key: string): string {
-  const m = dataBlock.match(new RegExp(`${key}:\\s*'([^']*)'`));
-  return m ? m[1] : '';
-}
-
-function resolveDaypart(hour: number): string {
+function resolveDaypart(time?: string): string {
+  const hour = Number.parseInt(time?.slice(0, 2) ?? '', 10);
+  if (!Number.isFinite(hour)) return '开发日志';
   return hour < 6 ? '开发夜报' : hour < 12 ? '开发早报' : hour < 18 ? '开发午报' : '开发晚报';
 }
 
-function getStrArray(dataBlock: string, key: string): string[] {
-  const m = dataBlock.match(new RegExp(`${key}:\\s*\\[([\\s\\S]*?)\\]`));
-  if (!m) return [];
-  const items: string[] = [];
-  const pattern = /'([^']*)'/g;
-  let match;
-  while ((match = pattern.exec(m[1])) !== null) items.push(match[1]);
-  return items;
+function parsePublishedPointer(data: Record<string, any> | null | undefined, fallback?: Partial<PublishedPointer>): PublishedPointer {
+  const published = data?._published && typeof data._published === 'object' ? data._published : {};
+  const meta = data?.meta && typeof data.meta === 'object' ? data.meta : {};
+  return {
+    kind: published.kind ?? fallback?.kind,
+    date: published.date ?? meta.date ?? fallback?.date,
+    time: published.time ?? fallback?.time,
+    file: published.file ?? fallback?.file,
+    dataFile: published.dataFile ?? fallback?.dataFile,
+  };
 }
 
-// ── Report Text Generation ──
-
-function reportToText(dataBlock: string, timeHint?: string): string {
-  const lines: string[] = [];
-
-  // Meta
-  let title = getStr(dataBlock, 'title');
-  const date = getStr(dataBlock, 'date');
-  const coverage = getStr(dataBlock, 'coverage');
-  const baseline = getStr(dataBlock, 'baseline');
-
-  // Auto-resolve daypart from HHmmss time (passed via second arg or extracted from coverage)
-  // Priority: explicit timeHint > 6-digit time pattern in coverage > skip
-  const coverageHourMatch = coverage.match(/(\d{2}):(\d{2})(?:\s*~|$)/);
-  const hourStr = timeHint?.substring(0, 2) || (coverageHourMatch ? coverageHourMatch[1] : '');
-  if (hourStr) {
-    const hour = parseInt(hourStr, 10);
-    if (!isNaN(hour)) title = resolveDaypart(hour);
-  }
-
-  // Publisher
-  const pubIdentity = getStr(dataBlock, 'identity');
-  const pubOs = getStr(dataBlock, 'os');
-  const pubModel = getStr(dataBlock, 'model');
-  const pubVersion = getStr(dataBlock, 'version');
-  const publisher = pubIdentity ? `${pubIdentity}·${pubOs} [${pubModel} ${pubVersion}]` : '';
-
-  // Weather
-  const weatherEmoji = getStr(dataBlock, 'emoji');
-  const weatherLabel = getStr(dataBlock, 'label');
-
-  lines.push(`# ExoMind ${title} ${date}`);
-  if (publisher) lines.push(`发布者: ${publisher}`);
-  lines.push(`天气: ${weatherEmoji} ${weatherLabel}`);
-  if (coverage) lines.push(`覆盖: ${coverage}`);
-  if (baseline) lines.push(`基线: ${baseline.startsWith('dev@') ? baseline : `dev@${baseline}`}`);
-  lines.push('');
-
-  // Metrics
-  const metricsBlock = dataBlock.match(/metrics:\s*\[([\s\S]*?)\],\s*\n/);
-  if (metricsBlock) {
-    lines.push('## 指标');
-    const metricPattern = /\{\s*label:\s*'([^']*)',\s*value:\s*'([^']*)',\s*delta:\s*'([^']*)',\s*trend:\s*'([^']*)'/g;
-    let m;
-    while ((m = metricPattern.exec(metricsBlock[1])) !== null) {
-      const arrow = m[4] === 'up' ? '↑' : m[4] === 'down' ? '↓' : '→';
-      lines.push(`- ${m[1]}: ${m[2]} (${m[3]}, ${arrow})`);
+function assertPointerMatch(leftLabel: string, left: Partial<PublishedPointer>, rightLabel: string, right: Partial<PublishedPointer>) {
+  const fields: (keyof PublishedPointer)[] = ['kind', 'date', 'time', 'file', 'dataFile'];
+  for (const field of fields) {
+    if (left[field] && right[field] && left[field] !== right[field]) {
+      throw new SourceConsistencyError(`${leftLabel}.${field}=${left[field]} 与 ${rightLabel}.${field}=${right[field]} 不一致`);
     }
-    lines.push('');
   }
+}
 
-  // Headlines
-  const headlinesBlock = dataBlock.match(/headlines:\s*\[([\s\S]*?)\],\s*\n/);
-  if (headlinesBlock) {
-    lines.push('## 头条');
-    const headlinePattern = /\{\s*emoji:\s*'([^']*)',\s*title:\s*'([^']*)',\s*(?:color:\s*'[^']*',\s*)?body:\s*'([^']*)'/g;
-    let m;
-    let idx = 1;
-    while ((m = headlinePattern.exec(headlinesBlock[1])) !== null) {
-      lines.push(`${idx++}. ${m[1]} ${m[2]} — ${m[3]}`);
-    }
-    lines.push('');
-  }
+function extractObjectBlock(html: string, variableName: 'REPORT' | 'ROUTE'): string {
+  const startMarker = `const ${variableName} = {`;
+  const startIdx = html.indexOf(startMarker);
+  if (startIdx === -1) throw new SourceConsistencyError(`未找到 ${startMarker}`);
 
-  // Mainlines
-  const mainlinesBlock = dataBlock.match(/mainlines:\s*\[([\s\S]*?)\],\s*\n\s*\/\//);
-  if (mainlinesBlock) {
-    lines.push('## 主线');
-    const mainlinePattern = /\{\s*name:\s*'([^']*)'[^}]*?pct:\s*(\d+)[^}]*?subtasks:\s*\[([\s\S]*?)\]\s*\}/g;
-    let m;
-    let idx = 1;
-    while ((m = mainlinePattern.exec(mainlinesBlock[1])) !== null) {
-      const subtasks = m[3];
-      const taskItems: string[] = [];
-      const taskPattern = /\{\s*text:\s*'([^']*)',\s*done:\s*(true|false)/g;
-      let t;
-      while ((t = taskPattern.exec(subtasks)) !== null) {
-        taskItems.push(`${t[2] === 'true' ? '✅' : '○'}${t[1]}`);
+  let braceCount = 0;
+  let inString = false;
+  let stringChar = '';
+  let endIdx = -1;
+
+  for (let i = startIdx + startMarker.length - 1; i < html.length; i++) {
+    const char = html[i];
+    const prevChar = i > 0 ? html[i - 1] : '';
+
+    if ((char === '"' || char === "'" || char === '`') && prevChar !== '\\') {
+      if (!inString) {
+        inString = true;
+        stringChar = char;
+      } else if (char === stringChar) {
+        inString = false;
       }
-      lines.push(`${idx++}. ${m[1]} [${m[2]}%] ${taskItems.join(' ')}`);
     }
-    lines.push('');
-  }
 
-  // PR Board
-  const prsBlock = dataBlock.match(/prs:\s*\{([\s\S]*?)\},\s*\n/);
-  if (prsBlock) {
-    lines.push('## PR 看板');
-    const openPrs: string[] = [];
-    const prPattern = /\{\s*num:\s*(\d+),\s*title:\s*'([^']*)',\s*status:\s*'([^']*)'/g;
-    let m;
-    while ((m = prPattern.exec(prsBlock[1])) !== null) {
-      openPrs.push(`#${m[1]} ${m[3]}`);
-    }
-    if (openPrs.length) lines.push(`Open: ${openPrs.join(' | ')}`);
-    else lines.push('Open: (无)');
-    lines.push('');
-  }
-
-  // Pool Health (战场清点)
-  const poolBlock = dataBlock.match(/poolHealth:\s*\{([\s\S]*?)\n  \},/);
-  if (poolBlock) {
-    lines.push('## Issue 时效清点');
-    // PR→Issue 断裂
-    const mismatchPattern = /\{\s*pr:\s*(\d+),\s*issue:\s*(\d+)/g;
-    let pm;
-    const mismatches: string[] = [];
-    while ((pm = mismatchPattern.exec(poolBlock[1])) !== null) {
-      mismatches.push(`PR #${pm[1]} 已合并 → #${pm[2]} 仍 OPEN`);
-    }
-    if (mismatches.length > 0) {
-      lines.push(`⚑ 战果未清: ${mismatches.length} 条`);
-      mismatches.forEach(m => lines.push(`  ${m}`));
-    }
-    // P0/P1 停滞
-    const stalePattern = /\{\s*num:\s*(\d+),\s*title:\s*'([^']*)',\s*priority:\s*'([^']*)',\s*staleDays:\s*(\d+)/g;
-    let sm;
-    const stales: string[] = [];
-    while ((sm = stalePattern.exec(poolBlock[1])) !== null) {
-      stales.push(`#${sm[1]} ${sm[3]} ${sm[4]}d ${sm[2]}`);
-    }
-    if (stales.length > 0) {
-      lines.push(`⏳ 僵持线:`);
-      stales.forEach(s => lines.push(`  ${s}`));
-    }
-    // 无优先级
-    const npMatch = poolBlock[1].match(/noPriority:\s*\{\s*current:\s*(\d+),\s*previous:\s*(\d+)/);
-    if (npMatch) {
-      lines.push(`🏷 未编入: ${npMatch[1]} (上期 ${npMatch[2]})`);
-    }
-    // 陈年阵地
-    const ageMatch = poolBlock[1].match(/aging:\s*\{\s*oldCount:\s*(\d+),\s*total:\s*(\d+),\s*pct:\s*(\d+)/);
-    if (ageMatch) {
-      lines.push(`📦 陈年阵地: ${ageMatch[3]}% >30d (${ageMatch[1]}/${ageMatch[2]})`);
-    }
-    lines.push('');
-  }
-
-  // Actions
-  const actionsBlock = dataBlock.match(/actions:\s*\[([\s\S]*?)\],\s*\n/);
-  if (actionsBlock) {
-    lines.push('## 建议行动');
-    const actionPattern = /\{\s*text:\s*'([^']*)'/g;
-    let m;
-    let idx = 1;
-    while ((m = actionPattern.exec(actionsBlock[1])) !== null) {
-      lines.push(`${idx++}. ${m[1]}`);
-    }
-    lines.push('');
-  }
-
-  // Insight
-  const insightBlock = dataBlock.match(/insight:\s*\{([\s\S]*?)\}/);
-  if (insightBlock) {
-    const insightText = insightBlock[1].match(/text:\s*'([^']*)'/);
-    if (insightText) {
-      lines.push('## 洞察');
-      lines.push(insightText[1]);
-      lines.push('');
-    }
-  }
-
-  return lines.join('\n');
-}
-
-// ── Route Text Generation ──
-
-function routeToText(dataBlock: string): string {
-  const lines: string[] = [];
-
-  // Meta
-  const title = getStr(dataBlock, 'title');
-  const date = getStr(dataBlock, 'date');
-  const baseline = getStr(dataBlock, 'baseline');
-
-  // Publisher
-  const pubIdentity = getStr(dataBlock, 'identity');
-  const pubOs = getStr(dataBlock, 'os');
-  const pubModel = getStr(dataBlock, 'model');
-  const pubVersion = getStr(dataBlock, 'version');
-  const publisher = pubIdentity ? `${pubIdentity}·${pubOs} [${pubModel} ${pubVersion}]` : '';
-
-  // Status
-  const statusEmoji = getStr(dataBlock, 'emoji');
-  const statusLabel = getStr(dataBlock, 'label');
-  const statusSummary = getStr(dataBlock, 'summary');
-
-  lines.push(`# ExoMind ${title} ${date}`);
-  if (publisher) lines.push(`发布者: ${publisher}`);
-  lines.push(`航况: ${statusEmoji} ${statusLabel}`);
-  if (statusSummary) lines.push(`概要: ${statusSummary}`);
-  if (baseline) lines.push(`基线: ${baseline.startsWith('dev@') ? baseline : `dev@${baseline}`}`);
-  lines.push('');
-
-  // Metrics
-  const metricsBlock = dataBlock.match(/metrics:\s*\[([\s\S]*?)\],\s*\n\s*tracks/);
-  if (metricsBlock) {
-    lines.push('## 指标');
-    const metricPattern = /\{\s*label:\s*'([^']*)',\s*value:\s*'([^']*)',\s*note:\s*'([^']*)'/g;
-    let m;
-    while ((m = metricPattern.exec(metricsBlock[1])) !== null) {
-      lines.push(`- ${m[1]}: ${m[2]} (${m[3]})`);
-    }
-    lines.push('');
-  }
-
-  // Batches
-  const batchesBlock = dataBlock.match(/batches:\s*\[([\s\S]*?)\],\s*\n\s*heatmap/);
-  if (batchesBlock) {
-    lines.push('## 批次总览');
-    const batchPattern = /\{\s*id:\s*'([^']*)',\s*name:\s*'([^']*)',\s*track:\s*'([^']*)',\s*status:\s*'([^']*)',\s*priority:\s*'([^']*)',\s*pct:\s*(\d+)/g;
-    const deps: string[] = [];
-    let m;
-    while ((m = batchPattern.exec(batchesBlock[1])) !== null) {
-      // Count issues in this batch
-      const batchStart = batchesBlock[1].indexOf(`id: '${m[1]}'`);
-      const nextBatchIdx = batchesBlock[1].indexOf(`id: '`, batchStart + 5);
-      const batchSlice = nextBatchIdx === -1
-        ? batchesBlock[1].substring(batchStart)
-        : batchesBlock[1].substring(batchStart, nextBatchIdx);
-      const issueCount = (batchSlice.match(/num:\s*\d+/g) || []).length;
-
-      let statusStr = m[4];
-      // Extract deps
-      const depsMatch = batchSlice.match(/deps:\s*\[([\s\S]*?)\]/);
-      if (depsMatch && depsMatch[1].trim()) {
-        const depPattern = /id:\s*'([^']*)',\s*reason:\s*'([^']*)'/g;
-        let d;
-        while ((d = depPattern.exec(depsMatch[1])) !== null) {
-          statusStr = `blocked-by-${d[1]}`;
-          deps.push(`${m[1]} blocked by ${d[1]} (${d[2]})`);
-        }
+    if (!inString) {
+      if (char === '{') braceCount++;
+      if (char === '}') braceCount--;
+      if (braceCount === 0 && char === '}') {
+        endIdx = i + 1;
+        break;
       }
-
-      lines.push(`${m[1]}: ${m[2]} [${m[3]}] ${statusStr} ${m[6]}% (${issueCount} issues, ${m[5]})`);
-    }
-    lines.push('');
-
-    // Dependency chain
-    if (deps.length) {
-      lines.push('## 依赖链');
-      deps.forEach(d => lines.push(`- ${d}`));
-      lines.push('');
     }
   }
 
-  // Actions
-  const actionsBlock = dataBlock.match(/actions:\s*\[([\s\S]*?)\],\s*\n/);
-  if (actionsBlock) {
-    lines.push('## 建议航向');
-    const actionPattern = /\{\s*text:\s*'([^']*)'/g;
-    let m;
-    let idx = 1;
-    while ((m = actionPattern.exec(actionsBlock[1])) !== null) {
-      lines.push(`${idx++}. ${m[1]}`);
-    }
-    lines.push('');
-  }
-
-  // Insight
-  const insightBlock = dataBlock.match(/insight:\s*\{([\s\S]*?)\}/);
-  if (insightBlock) {
-    const insightText = insightBlock[1].match(/text:\s*'([^']*)'/);
-    if (insightText) {
-      lines.push('## 洞察');
-      lines.push(insightText[1]);
-      lines.push('');
-    }
-  }
-
-  return lines.join('\n');
+  if (endIdx === -1) throw new SourceConsistencyError(`未找到 ${variableName} 对象的结束位置`);
+  return html.substring(startIdx, endIdx);
 }
 
-// ── JSON Output ──
+function parseObjectBlock(block: string, variableName: 'REPORT' | 'ROUTE'): Record<string, any> {
+  const objectLiteral = block.replace(new RegExp(`^const\\s+${variableName}\\s*=\\s*`), '');
+  const parsed = Function(`"use strict"; return (${objectLiteral});`)();
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new SourceConsistencyError(`${variableName} 解析结果不是对象`);
+  }
+  return parsed as Record<string, any>;
+}
 
-function dataBlockToJson(dataBlock: string): string {
-  // Strip "const REPORT = " or "const ROUTE = " prefix and trailing ";"
-  let obj = dataBlock.replace(/^const\s+\w+\s*=\s*/, '').replace(/;\s*$/, '');
-  // Convert JS object literal to JSON:
-  // 1. Replace single quotes with double quotes
-  obj = obj.replace(/'/g, '"');
-  // 2. Remove trailing commas before } or ]
-  obj = obj.replace(/,\s*([}\]])/g, '$1');
-  // 3. Quote unquoted keys
-  obj = obj.replace(/(\s)(\w+):\s/g, '$1"$2": ');
-  // 4. Remove JS comments
-  obj = obj.replace(/\/\/[^\n]*/g, '');
+function detectTypeFromHtml(html: string): DocType {
+  if (html.includes('const REPORT = {')) return 'report';
+  if (html.includes('const ROUTE = {')) return 'route';
+  throw new SourceConsistencyError('无法从 HTML 检测开发日志类型');
+}
 
+function detectTypeFromJson(data: Record<string, any>): DocType {
+  if (data.schema === 'exomind-devlog-report') return 'report';
+  if (data.schema === 'exomind-devlog-route') return 'route';
+  if (data.meta && data.weather) return 'report';
+  if (data.meta && data.status && Array.isArray(data.batches)) return 'route';
+  throw new SourceConsistencyError(`无法从 JSON 检测开发日志类型（schema=${data.schema ?? 'unknown'}）`);
+}
+
+function extractLoaderDataFile(html: string): string | null {
+  const match = html.match(/dataFile:\s*'([^']+\.json)'/);
+  return match ? match[1] : null;
+}
+
+async function resolveFromHtml(docType: DocType, html: string, opts: {
+  localFilePath?: string;
+  remoteDataRef?: string;
+  remoteReadJson?: (ref: string) => Promise<any>;
+}): Promise<Record<string, any>> {
+  const variableName = variableNameFor(docType);
+
+  if (html.includes(`const ${variableName} = {`)) {
+    return parseObjectBlock(extractObjectBlock(html, variableName), variableName);
+  }
+
+  const dataFile = extractLoaderDataFile(html);
+  if (!dataFile) {
+    throw new SourceConsistencyError('HTML 既不含内联数据对象，也没有 dataFile loader 配置');
+  }
+
+  if (opts.localFilePath) {
+    const jsonPath = join(dirname(opts.localFilePath), dataFile);
+    if (!existsSync(jsonPath)) throw new SourceConsistencyError(`HTML loader 指向的 JSON 不存在: ${jsonPath}`);
+    return JSON.parse(readFileSync(jsonPath, 'utf-8'));
+  }
+
+  if (opts.remoteDataRef && opts.remoteReadJson) {
+    const remoteRef = new URL(dataFile, opts.remoteDataRef).toString();
+    return opts.remoteReadJson(remoteRef);
+  }
+
+  throw new SourceConsistencyError('无法解析 loader HTML 对应的 JSON 数据源');
+}
+
+function createPagesProvider(docType: DocType): Provider {
+  const subdir = subdirFor(docType);
+  const base = `${DEVLOG_PAGES_BASE}/${subdir}`;
+  return {
+    label: 'pages',
+    manifestRef: `${base}/manifest.json`,
+    latestRef: `${base}/latest.json`,
+    entryRef: (subpath: string) => `${base}/${subpath}`,
+    async readJson(ref: string) {
+      const response = await fetch(ref, {
+        headers: { 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) {
+        const error = new SourceUnavailableError(`HTTP ${response.status}: ${ref}`);
+        throw error;
+      }
+      return response.json();
+    },
+    async readText(ref: string) {
+      const response = await fetch(ref, {
+        headers: { 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) {
+        const error = new SourceUnavailableError(`HTTP ${response.status}: ${ref}`);
+        throw error;
+      }
+      return response.text();
+    },
+  };
+}
+
+function createLocalProvider(docType: DocType): Provider {
+  const subdir = subdirFor(docType);
+  const baseDir = join(LOCAL_DEVLOG_DIR, subdir);
+  return {
+    label: 'devlog',
+    manifestRef: join(baseDir, 'manifest.json'),
+    latestRef: join(baseDir, 'latest.json'),
+    entryRef: (subpath: string) => join(baseDir, subpath),
+    async readJson(ref: string) {
+      if (!existsSync(ref)) throw new SourceUnavailableError(`本地文件不存在: ${ref}`);
+      return JSON.parse(readFileSync(ref, 'utf-8'));
+    },
+    async readText(ref: string) {
+      if (!existsSync(ref)) throw new SourceUnavailableError(`本地文件不存在: ${ref}`);
+      return readFileSync(ref, 'utf-8');
+    },
+  };
+}
+
+async function resolveFromPublishedProvider(docType: DocType, requestedSource: SourceMode | 'file', provider: Provider): Promise<ResolvedDevlog> {
+  const manifest = await provider.readJson(provider.manifestRef);
+  const listKey = docType === 'report' ? 'reports' : 'routes';
+  const entries = Array.isArray(manifest[listKey]) ? manifest[listKey] as Entry[] : [];
+  if (!entries.length) throw new SourceUnavailableError(`${provider.manifestRef} 中没有 ${listKey}`);
+
+  const firstEntry = entries[0];
+  const latestEntry = manifest.latest && typeof manifest.latest === 'object' ? manifest.latest as Entry : null;
+  const chosenEntry: Entry = latestEntry
+    ? {
+        ...firstEntry,
+        ...latestEntry,
+        file: latestEntry.file ?? firstEntry.file,
+        dataFile: latestEntry.dataFile ?? firstEntry.dataFile,
+        date: latestEntry.date ?? firstEntry.date,
+        time: latestEntry.time ?? firstEntry.time,
+      }
+    : { ...firstEntry };
+
+  if (latestEntry) {
+    assertPointerMatch('manifest.latest', latestEntry, `${listKey}[0]`, firstEntry);
+  }
+
+  const notes: string[] = [];
+  let trust: SourceInfo['trust'] = provider.label === 'pages' ? 'high' : 'medium';
+  let consistency: SourceInfo['consistency'] = 'ok';
+  let resolvedSource = `${provider.label}-json`;
+  let htmlRef: string | undefined;
+  let dataRef: string | undefined = chosenEntry.dataFile ? provider.entryRef(chosenEntry.dataFile) : undefined;
+
+  let data: Record<string, any> | null = null;
+  if (chosenEntry.dataFile) {
+    try {
+      data = await provider.readJson(provider.entryRef(chosenEntry.dataFile));
+    } catch (error) {
+      notes.push(`标准 JSON 不可用：${error instanceof Error ? error.message : String(error)}`);
+      data = null;
+    }
+  }
+
+  let latestData: Record<string, any> | null = null;
   try {
-    const parsed = JSON.parse(obj);
-    return JSON.stringify(parsed, null, 2);
-  } catch {
-    // Fallback: return the raw data block as-is
-    return dataBlock;
+    latestData = await provider.readJson(provider.latestRef);
+  } catch (error) {
+    consistency = 'partial';
+    trust = provider.label === 'pages' ? 'medium' : 'low';
+    notes.push(`latest.json 不可用：${error instanceof Error ? error.message : String(error)}`);
   }
+
+  const entryPointer: Partial<PublishedPointer> = {
+    kind: docType,
+    date: chosenEntry.date,
+    time: chosenEntry.time,
+    file: chosenEntry.file,
+    dataFile: chosenEntry.dataFile,
+  };
+
+  if (data) {
+    const dataPointer = parsePublishedPointer(data, entryPointer);
+    assertPointerMatch('manifest.entry', entryPointer, 'data', dataPointer);
+    if (latestData) {
+      const latestPointer = parsePublishedPointer(latestData, entryPointer);
+      assertPointerMatch('manifest.entry', entryPointer, 'latest', latestPointer);
+      assertPointerMatch('data', dataPointer, 'latest', latestPointer);
+    } else {
+      notes.push('已校验 manifest 与 data；latest.json 缺失，当前为中等可信度');
+    }
+  } else if (chosenEntry.file) {
+    htmlRef = provider.entryRef(chosenEntry.file);
+    const html = await provider.readText(htmlRef);
+    data = await resolveFromHtml(docType, html, provider.label === 'devlog'
+      ? { localFilePath: htmlRef }
+      : { remoteDataRef: htmlRef, remoteReadJson: provider.readJson });
+    resolvedSource = `${provider.label}-html-compat`;
+    consistency = 'partial';
+    trust = provider.label === 'pages' ? 'medium' : 'low';
+    notes.push('标准 JSON 缺失，使用 HTML 兼容解析；这是迁移期兜底，不是主链');
+
+    const dataPointer = parsePublishedPointer(data, entryPointer);
+    assertPointerMatch('manifest.entry', entryPointer, 'html-data', dataPointer);
+    if (latestData) {
+      const latestPointer = parsePublishedPointer(latestData, entryPointer);
+      assertPointerMatch('manifest.entry', entryPointer, 'latest', latestPointer);
+    }
+  } else {
+    throw new SourceConsistencyError('manifest 条目既没有 dataFile，也没有 file');
+  }
+
+  return {
+    type: docType,
+    data,
+    source: {
+      requestedSource,
+      resolvedSource,
+      trust,
+      consistency,
+      guarantee: consistency === 'ok'
+        ? 'manifest + data + latest 已一致校验'
+        : '仅部分校验通过；请查看 notes 了解缺口',
+      manifest: provider.manifestRef,
+      data: dataRef,
+      latest: provider.latestRef,
+      html: htmlRef,
+      fallbackUsed: resolvedSource !== 'pages-json' && requestedSource === 'auto',
+      notes,
+    },
+  };
 }
 
-// ── Main ──
+async function resolveFromTemp(docType: DocType, requestedSource: SourceMode | 'file'): Promise<ResolvedDevlog> {
+  const tempDir = resolve(join(import.meta.dir, '..', '..', 'temp'));
+  if (!existsSync(tempDir)) throw new SourceUnavailableError(`temp/ 目录不存在: ${tempDir}`);
 
-function main() {
-  const opts = parseArgs();
+  const files = readdirSync(tempDir)
+    .filter(file => file.startsWith(prefixFor(docType)) && file.endsWith('.html'))
+    .sort()
+    .reverse();
 
-  // Resolve file
-  let filePath: string;
-  let docType: DocType;
+  if (!files.length) throw new SourceUnavailableError(`temp/ 下未找到 ${prefixFor(docType)}*.html`);
 
-  if (opts.file) {
-    filePath = opts.file;
-    if (!existsSync(filePath)) throw new Error(`文件不存在: ${filePath}`);
-    const html = readFileSync(filePath, 'utf-8');
-    docType = opts.type || detectType(html);
-  } else if (opts.type) {
-    docType = opts.type;
-    filePath = findLatestFile(docType, opts.source);
-  } else {
-    throw new Error('请指定 --type report/route 或 --file <path>');
+  const filePath = join(tempDir, files[0]);
+  const html = readFileSync(filePath, 'utf-8');
+  const detectedType = detectTypeFromHtml(html);
+  if (detectedType !== docType) throw new SourceConsistencyError(`temp 文件类型不匹配: ${filePath}`);
+
+  const data = await resolveFromHtml(docType, html, { localFilePath: filePath });
+  return {
+    type: docType,
+    data,
+    source: {
+      requestedSource,
+      resolvedSource: 'temp-html',
+      trust: 'low',
+      consistency: 'partial',
+      guarantee: '仅本地 temp 兜底；不保证等于最新已发布状态',
+      filePath,
+      fallbackUsed: requestedSource === 'auto',
+      notes: ['temp/ 可能包含未发布或过期文件，只能作为低可信度 fallback'],
+    },
+  };
+}
+
+async function resolveFromExplicitFile(filePath: string, explicitType: DocType | null, source: SourceMode): Promise<ResolvedDevlog> {
+  if (!existsSync(filePath)) throw new Error(`文件不存在: ${filePath}`);
+
+  const extension = extname(filePath).toLowerCase();
+  if (extension === '.json') {
+    const data = JSON.parse(readFileSync(filePath, 'utf-8'));
+    const detectedType = explicitType || detectTypeFromJson(data);
+    return {
+      type: detectedType,
+      data,
+      source: {
+        requestedSource: 'file',
+        resolvedSource: 'explicit-file-json',
+        trust: 'medium',
+        consistency: 'partial',
+        guarantee: '显式文件输入；由调用者负责其新鲜度',
+        filePath,
+        fallbackUsed: false,
+        notes: source === 'auto' ? [] : [`显式文件绕过了 --source=${source} 的自动发现逻辑`],
+      },
+    };
   }
 
   const html = readFileSync(filePath, 'utf-8');
-  const dataBlock = extractDataBlock(html, docType);
-
-  // Extract time hint from filename (HHmmss portion)
-  const fnameTimeMatch = basename(filePath).match(/(\d{4}-\d{2}-\d{2})-(\d{6})/);
-  const timeHint = fnameTimeMatch ? fnameTimeMatch[2] : undefined;
-
-  if (opts.format === 'json') {
-    console.log(dataBlockToJson(dataBlock));
+  let detectedType: DocType;
+  if (explicitType) {
+    detectedType = explicitType;
   } else {
-    const text = docType === 'report' ? reportToText(dataBlock, timeHint) : routeToText(dataBlock);
-    console.log(text);
+    try {
+      detectedType = detectTypeFromHtml(html);
+    } catch {
+      const dataFile = extractLoaderDataFile(html);
+      if (!dataFile) throw new SourceConsistencyError('显式 HTML 文件既无内联数据，也无法从 loader 推断类型');
+      const jsonPath = join(dirname(filePath), dataFile);
+      if (!existsSync(jsonPath)) throw new SourceConsistencyError(`显式 loader HTML 对应的 JSON 不存在: ${jsonPath}`);
+      detectedType = detectTypeFromJson(JSON.parse(readFileSync(jsonPath, 'utf-8')));
+    }
   }
+  const data = await resolveFromHtml(detectedType, html, { localFilePath: filePath });
+  return {
+    type: detectedType,
+    data,
+    source: {
+      requestedSource: 'file',
+      resolvedSource: 'explicit-file-html',
+      trust: 'medium',
+      consistency: 'partial',
+      guarantee: '显式文件输入；由调用者负责其新鲜度',
+      filePath,
+      fallbackUsed: false,
+      notes: source === 'auto' ? [] : [`显式文件绕过了 --source=${source} 的自动发现逻辑`],
+    },
+  };
 }
 
-main();
+export async function readLatestDevlog(options: Partial<Options> = {}): Promise<ResolvedDevlog> {
+  const source = options.source ?? 'auto';
+
+  if (options.file) {
+    return resolveFromExplicitFile(options.file, options.type ?? null, source);
+  }
+
+  if (!options.type) {
+    throw new Error('请指定 --type report/route 或 --file <path>');
+  }
+
+  const docType = options.type;
+
+  if (source === 'pages') {
+    return resolveFromPublishedProvider(docType, source, createPagesProvider(docType));
+  }
+
+  if (source === 'devlog') {
+    return resolveFromPublishedProvider(docType, source, createLocalProvider(docType));
+  }
+
+  if (source === 'temp') {
+    return resolveFromTemp(docType, source);
+  }
+
+  const errors: string[] = [];
+  for (const candidate of [
+    () => resolveFromPublishedProvider(docType, source, createPagesProvider(docType)),
+    () => resolveFromPublishedProvider(docType, source, createLocalProvider(docType)),
+    () => resolveFromTemp(docType, source),
+  ]) {
+    try {
+      return await candidate();
+    } catch (error) {
+      if (error instanceof SourceConsistencyError) throw error;
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  throw new SourceUnavailableError(`所有来源均不可用: ${errors.join(' | ')}`);
+}
+
+function formatMetric(metric: any): string {
+  if (!metric || typeof metric !== 'object') return '';
+  const extras = [metric.delta, metric.note].filter(Boolean).join(', ');
+  return extras ? `${metric.label}: ${metric.value} (${extras})` : `${metric.label}: ${metric.value}`;
+}
+
+function formatAction(action: any): string {
+  if (typeof action === 'string') return action;
+  if (typeof action?.text === 'string' && typeof action?.detail === 'string') return `${action.text} — ${action.detail}`;
+  return action?.text ?? '';
+}
+
+export function renderSourceBlock(source: SourceInfo): string {
+  const lines = [
+    '[devlog-source]',
+    `requested: ${source.requestedSource}`,
+    `resolved: ${source.resolvedSource}`,
+    `trust: ${source.trust}`,
+    `consistency: ${source.consistency}`,
+    `guarantee: ${source.guarantee}`,
+  ];
+
+  if (source.manifest) lines.push(`manifest: ${source.manifest}`);
+  if (source.data) lines.push(`data: ${source.data}`);
+  if (source.latest) lines.push(`latest: ${source.latest}`);
+  if (source.html) lines.push(`html: ${source.html}`);
+  if (source.filePath) lines.push(`file: ${source.filePath}`);
+  lines.push(`fallbackUsed: ${source.fallbackUsed ? 'yes' : 'no'}`);
+  if (source.notes.length) lines.push(`notes: ${source.notes.join(' | ')}`);
+  lines.push('[/devlog-source]');
+  return lines.join('\n');
+}
+
+function renderReportText(data: Record<string, any>, source: SourceInfo): string {
+  const meta = data.meta ?? {};
+  const published = parsePublishedPointer(data);
+  const publisher = data.publisher ?? {};
+  const weather = data.weather ?? {};
+  const metrics = Array.isArray(data.metrics) ? data.metrics : [];
+  const headlines = Array.isArray(data.headlines) ? data.headlines : [];
+  const mainlines = Array.isArray(data.mainlines) ? data.mainlines : [];
+  const actions = Array.isArray(data.actions)
+    ? data.actions
+    : Array.isArray(weather.actions)
+      ? weather.actions
+      : [];
+  const insight = typeof data.insight === 'string' ? data.insight : data.insight?.text;
+  const title = meta.title || resolveDaypart(published.time);
+
+  const lines: string[] = [renderSourceBlock(source), '', `# ExoMind ${title} ${meta.date ?? ''}`];
+
+  if (publisher.identity) {
+    lines.push(`发布者: ${publisher.identity}·${publisher.os} [${publisher.model} ${publisher.version}]`);
+  }
+  if (weather.emoji || weather.label) lines.push(`天气: ${weather.emoji ?? ''} ${weather.label ?? ''}`.trim());
+  if (meta.coverage) lines.push(`覆盖: ${meta.coverage}`);
+  if (meta.baseline) lines.push(`基线: ${String(meta.baseline).startsWith('dev@') ? meta.baseline : `dev@${meta.baseline}`}`);
+  lines.push('');
+
+  if (metrics.length) {
+    lines.push('## 指标');
+    metrics.forEach(metric => lines.push(`- ${formatMetric(metric)}`));
+    lines.push('');
+  }
+
+  if (headlines.length) {
+    lines.push('## 头条');
+    headlines.forEach((headline, index) => lines.push(`${index + 1}. ${headline.emoji ? `${headline.emoji} ` : ''}${headline.title} — ${headline.body}`));
+    lines.push('');
+  }
+
+  if (mainlines.length) {
+    lines.push('## 主线');
+    mainlines.forEach((mainline: any, index: number) => {
+      const subtasks = Array.isArray(mainline?.subtasks)
+        ? mainline.subtasks
+          .map((task: any) => `${task?.done ? '✅' : '○'}${task?.text ?? ''}`)
+          .join(' ')
+        : '';
+      lines.push(`${index + 1}. ${mainline.name} [${mainline.pct ?? '?'}%] ${subtasks}`.trim());
+    });
+    lines.push('');
+  }
+
+  if (Array.isArray(actions) && actions.length) {
+    lines.push('## 建议行动');
+    actions.map(formatAction).filter(Boolean).forEach((action, index) => lines.push(`${index + 1}. ${action}`));
+    lines.push('');
+  }
+
+  if (insight) {
+    lines.push('## 洞察');
+    lines.push(String(insight));
+    lines.push('');
+  }
+
+  return lines.join('\n').trimEnd();
+}
+
+function renderRouteText(data: Record<string, any>, source: SourceInfo): string {
+  const meta = data.meta ?? {};
+  const published = parsePublishedPointer(data);
+  const publisher = data.publisher ?? {};
+  const status = data.status ?? {};
+  const metrics = Array.isArray(data.metrics) ? data.metrics : [];
+  const batches = Array.isArray(data.batches) ? data.batches : [];
+  const actions = Array.isArray(data.actions) ? data.actions : [];
+  const insight = typeof data.insight === 'string' ? data.insight : data.insight?.text;
+
+  const lines: string[] = [renderSourceBlock(source), '', `# ExoMind ${meta.title ?? '开发航线'} ${meta.date ?? published.date ?? ''}`];
+
+  if (publisher.identity) {
+    lines.push(`发布者: ${publisher.identity}·${publisher.os} [${publisher.model} ${publisher.version}]`);
+  }
+  if (status.emoji || status.label) lines.push(`航况: ${status.emoji ?? ''} ${status.label ?? ''}`.trim());
+  if (status.summary) lines.push(`概要: ${status.summary}`);
+  if (meta.baseline) lines.push(`基线: ${String(meta.baseline).startsWith('dev@') ? meta.baseline : `dev@${meta.baseline}`}`);
+  lines.push('');
+
+  if (metrics.length) {
+    lines.push('## 指标');
+    metrics.forEach(metric => lines.push(`- ${formatMetric(metric)}`));
+    lines.push('');
+  }
+
+  if (batches.length) {
+    lines.push('## 批次总览');
+    batches.forEach((batch: any) => {
+      const issueCount = Array.isArray(batch?.issues) ? batch.issues.length : 0;
+      lines.push(`${batch.id}: ${batch.name} [${batch.track}] ${batch.status} ${batch.pct ?? '?'}% (${issueCount} issues, ${batch.priority ?? '?'})`);
+      if (Array.isArray(batch?.deps) && batch.deps.length) {
+        batch.deps.forEach((dep: any) => lines.push(`  - dep ${dep.id}: ${dep.reason}`));
+      }
+    });
+    lines.push('');
+  }
+
+  if (actions.length) {
+    lines.push('## 建议航向');
+    actions.map(formatAction).filter(Boolean).forEach((action, index) => lines.push(`${index + 1}. ${action}`));
+    lines.push('');
+  }
+
+  if (insight) {
+    lines.push('## 洞察');
+    lines.push(String(insight));
+    lines.push('');
+  }
+
+  return lines.join('\n').trimEnd();
+}
+
+function serializeJson(result: ResolvedDevlog): string {
+  return JSON.stringify({
+    _devlogSource: result.source,
+    ...result.data,
+  }, null, 2);
+}
+
+async function main() {
+  const options = parseArgs();
+  const result = await readLatestDevlog(options);
+
+  if (options.format === 'json') {
+    console.log(serializeJson(result));
+    return;
+  }
+
+  const text = result.type === 'report'
+    ? renderReportText(result.data, result.source)
+    : renderRouteText(result.data, result.source);
+
+  console.log(text);
+}
+
+if (import.meta.main) {
+  main().catch(error => {
+    console.error(`\n❌ 错误: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

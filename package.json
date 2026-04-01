@@ -12,8 +12,6 @@
     "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
     "build:tag": "bun scripts/dev/build-tag.ts",
     "devlog:publish": "bun scripts/dev/publish-devlog.ts",
-    "devlog:publish:v2": "bun scripts/dev/publish-devlog-v2.ts",
-    "devlog:json": "bun scripts/dev/generate-report-json.ts",
     "route:publish": "bun scripts/dev/publish-route.ts",
     "route:check": "bun scripts/dev/check-route-trigger.ts",
     "devlog:extract": "bun scripts/dev/extract-devlog.ts",
