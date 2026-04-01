@@ -17,10 +17,11 @@ Use this skill when the user asks for:
 
 ## Load Order
 
-1. **Read the previous report first**: run `bun run devlog:extract --type report` to get the latest published report as Agent-friendly text. This is required for trend comparison, coverage interval calculation, and scorecard evaluation.
-2. Read `references/AGENTS.md` for the reporting workflow, data collection rules, and output structure.
-3. Read `references/prompt.md` if you need the original execution prompt wording.
-4. Use `assets/report-template.html` when the requested output needs the existing HTML template.
+1. **Read MAINTENANCE.md first** if you are modifying this skill. It contains critical lessons from past failures and a checklist to avoid repeating mistakes.
+2. **Read the previous report first**: run `bun run devlog:extract --type report` to get the latest published report as Agent-friendly text. This is required for trend comparison, coverage interval calculation, and scorecard evaluation.
+3. Read `references/AGENTS.md` for the reporting workflow, data collection rules, and output structure.
+4. Read `references/prompt.md` if you need the original execution prompt wording.
+5. Use `assets/report-template.html` when the requested output needs the existing HTML template.
 
 ## Reading Past Reports
 
