@@ -1,0 +1,32 @@
+tests/unit/services/task-timer.issue337.test.ts
+  affffec5b91d9d34 470-495
+src/config/domain-backend-mode.ts
+  affffec5b91d9d34 9-12,66-69
+src/ui/app/components/FocusTimerWidget.tsx
+  affffec5b91d9d34 501
+src/lib/services/timeblock.service.ts
+  affffec5b91d9d34 19,159-162,169
+tests/unit/components/FocusTimerWidget.state-machine.issue175.test.tsx
+  affffec5b91d9d34 544-575
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "5a562885f6884400dbd129ec4adb05f35af9856e",
+  "prompts": {
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 73,
+      "total_deletions": 10,
+      "accepted_lines": 73,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e4fbd6034d85ccc116bea627801a87b7640c9e30a2eab45fd47c0fdb268be2de"
+    }
+  }
+}
