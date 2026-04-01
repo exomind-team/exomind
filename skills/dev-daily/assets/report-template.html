@@ -524,13 +524,22 @@ function render() {
   // ── Pool Health (Issue 时效清点) ──
   if (R.poolHealth) {
     const ph = R.poolHealth;
+    // Detect unfilled template placeholder: all arrays empty AND aging.total === 0
+    const isPlaceholder = ph.prIssueMismatch.length === 0
+      && ph.staleHighPriority.length === 0
+      && ph.aging.total === 0;
+    if (isPlaceholder) {
+      html += `<div class="section-title animate d6">🕒 Issue 时效清点</div>`;
+      html += `<div style="background:rgba(248,81,73,.08);border:1px solid var(--p0);border-radius:var(--radius);padding:1rem 1.2rem;margin-bottom:.6rem;color:var(--p0);font-size:.88rem">⚠️ <b>Issue 时效清点数据未填充</b> — Agent 必须运行 gh 采集命令填充 poolHealth 字段（参见 prompt.md #10-#12）</div>`;
+    } else {
     // Build summary chips for collapsible header (like PR board)
     const phChips = [];
     if (ph.prIssueMismatch.length > 0) phChips.push(`<span style="color:var(--p1)">${ph.prIssueMismatch.length} 战果未清</span>`);
     if (ph.staleHighPriority.length > 0) phChips.push(`<span style="color:var(--p0)">${ph.staleHighPriority.length} 僵持</span>`);
     if (ph.noPriority.current > 0) phChips.push(`<span style="color:var(--p1)">${ph.noPriority.current} 未编入</span>`);
+    else phChips.push(`<span style="color:var(--green)">全编入</span>`);
     if (ph.aging.pct > 0) phChips.push(`<span style="color:${ph.aging.pct > 40 ? 'var(--p0)' : ph.aging.pct > 25 ? 'var(--p1)' : 'var(--text-faint)'}">${ph.aging.pct}% 陈年</span>`);
-    const phSummary = phChips.length ? ' · ' + phChips.join(' · ') : '';
+    const phSummary = ' · ' + phChips.join(' · ');
     html += renderCollapsible('🕒 Issue 时效清点', phSummary, 'd6', () => {
       let c = '';
       // PR→Issue 断裂
@@ -572,6 +581,7 @@ function render() {
       c += '</div>';
       return c;
     });
+    } // end else (not placeholder)
   }
 
   // ── Actions ──
