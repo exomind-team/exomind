@@ -521,10 +521,17 @@ function render() {
     return t;
   });
 
-  // ── Pool Health (战场清点) ──
+  // ── Pool Health (Issue 时效清点) ──
   if (R.poolHealth) {
     const ph = R.poolHealth;
-    html += renderCollapsible('🕒 Issue 时效清点', '', 'd6', () => {
+    // Build summary chips for collapsible header (like PR board)
+    const phChips = [];
+    if (ph.prIssueMismatch.length > 0) phChips.push(`<span style="color:var(--p1)">${ph.prIssueMismatch.length} 战果未清</span>`);
+    if (ph.staleHighPriority.length > 0) phChips.push(`<span style="color:var(--p0)">${ph.staleHighPriority.length} 僵持</span>`);
+    if (ph.noPriority.current > 0) phChips.push(`<span style="color:var(--p1)">${ph.noPriority.current} 未编入</span>`);
+    if (ph.aging.pct > 0) phChips.push(`<span style="color:${ph.aging.pct > 40 ? 'var(--p0)' : ph.aging.pct > 25 ? 'var(--p1)' : 'var(--text-faint)'}">${ph.aging.pct}% 陈年</span>`);
+    const phSummary = phChips.length ? ' · ' + phChips.join(' · ') : '';
+    html += renderCollapsible('🕒 Issue 时效清点', phSummary, 'd6', () => {
       let c = '';
       // PR→Issue 断裂
       if (ph.prIssueMismatch.length > 0) {
