@@ -1,0 +1,28 @@
+tests/unit/services/timeblock.service.test.ts
+  affffec5b91d9d34 6-7,11-14,40-52,92-96,329,337-343,502-504,506,538,540,665-666,668-671,674-675
+src/lib/adapters/timeblock-rt-adapter.ts
+  affffec5b91d9d34 87-94
+tests/integration/timeblock-multi-task-association.issue418.test.ts
+  affffec5b91d9d34 11-12,16-18,30-38,163-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "35ebc3faa9ff983de7f2e66068f15235b9553e50",
+  "prompts": {
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 74,
+      "total_deletions": 29,
+      "accepted_lines": 74,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/dcef914af6827a68abf48e607d79e9b746c7e44f3481a8b0a69ce1270aca08ca"
+    }
+  }
+}
