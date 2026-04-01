@@ -1,0 +1,59 @@
+crates/exomind-runtime/src/proposal/store.rs
+  84f135f36334fea5 1-804
+crates/exomind-runtime/src/routes/config.rs
+  84f135f36334fea5 207
+crates/exomind-runtime/src/routes/signals.rs
+  84f135f36334fea5 413
+crates/exomind-runtime/tests/agent_lifecycle_routes.rs
+  84f135f36334fea5 38
+crates/exomind-runtime/src/proposal/mod.rs
+  84f135f36334fea5 1-131
+crates/exomind-runtime/tests/timeblock_routes.rs
+  84f135f36334fea5 40
+crates/exomind-runtime/tests/today_planner_routes.rs
+  84f135f36334fea5 37,39
+crates/exomind-runtime/src/routes/eventlog.rs
+  84f135f36334fea5 703
+crates/exomind-runtime/src/proposal/executor.rs
+  84f135f36334fea5 1-258
+crates/exomind-runtime/src/lib.rs
+  84f135f36334fea5 28,794,823,843-845,874-877,1017-1026,1081,1204
+crates/exomind-runtime/src/routes/proposals.rs
+  84f135f36334fea5 1-770
+crates/exomind-runtime/src/routes/profiles.rs
+  84f135f36334fea5 117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "6e6e95fe2f31e0a3b2358eb9c89ae19eab48b296",
+  "prompts": {
+    "84f135f36334fea5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d49bf-9168-7120-84d5-0a3eb246d470",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 2377,
+      "total_deletions": 184,
+      "accepted_lines": 2375,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/9babbd04f5f365c813f6d9505153cb33dbd0d872095b6d93a84b1910eba56d83"
+    },
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
