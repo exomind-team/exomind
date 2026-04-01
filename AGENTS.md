@@ -9,6 +9,12 @@
 3. Tauri / Android 构建验证属于后置环节，在 Web 链路通过后再执行。
 4. 默认联调端口：Web `5173`，同步服务 `6984`（多 worktree 并行时按约定分配独立端口）。
 
+## 符号链接兼容（Windows / Linux）
+
+1. 仓库中的 `.claude/agents`、`.claude/skills` 与 `.codex/skills` 依赖相对符号链接。
+2. Windows 与 Linux 混合开发时，Git 必须启用符号链接支持：`git config --global core.symlinks true`，至少保证当前仓库 `git config --local core.symlinks true`。
+3. Windows 端首次配置前应开启 Developer Mode 或使用具备创建符号链接权限的终端，否则 checkout 后可能退化为内容为 `../skills` 或 `../agents` 的普通文本文件。
+
 ## 目标
 
 1. `dev` 是开发主线。
