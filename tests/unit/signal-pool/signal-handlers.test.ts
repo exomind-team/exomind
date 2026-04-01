@@ -14,8 +14,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   startSignalHandlers,
   type ActiveBlockReplicationSnapshotPayload,
+  type ReminderReplicationUpsertedPayload,
+  type TimeBlockCompletedReplicationPayload,
   type TaskChangedPayload,
   type TaskCancelledPayload,
+  type TaskReplicationUpsertedPayload,
   type TaskAutoCreatedPayload,
   type TaskTransitionedPayload,
   type EventLogAppendedPayload,
@@ -294,6 +297,115 @@ describe('signal-handlers: active_block.replication.snapshot', () => {
 
     expect(onActiveBlockReplicationSnapshot).toHaveBeenCalledTimes(1);
     expect(onActiveBlockReplicationSnapshot).toHaveBeenCalledWith(payload);
+  });
+});
+
+describe('signal-handlers: task.replication.upserted', () => {
+  it('calls onTaskReplicationUpserted when topic is task.replication.upserted', async () => {
+    const onTaskReplicationUpserted = vi
+      .fn<[TaskReplicationUpsertedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onTaskReplicationUpserted });
+    const payload: TaskReplicationUpsertedPayload = {
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'task_snapshot',
+        taskId: 'task-rep-1',
+        updatedAt: 1_700_000_001_000,
+        originHostId: 'desktop-host',
+      },
+      task: {
+        id: 'task-rep-1',
+        title: 'Replicated task',
+        status: 'pending',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_001_000,
+        timeBlockIds: [],
+      },
+    };
+
+    await handler(makeSignalEvent('task.replication.upserted', payload));
+
+    expect(onTaskReplicationUpserted).toHaveBeenCalledTimes(1);
+    expect(onTaskReplicationUpserted).toHaveBeenCalledWith(payload);
+  });
+});
+
+describe('signal-handlers: reminder.replication.upserted', () => {
+  it('calls onReminderReplicationUpserted when topic is reminder.replication.upserted', async () => {
+    const onReminderReplicationUpserted = vi
+      .fn<[ReminderReplicationUpsertedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onReminderReplicationUpserted });
+    const payload: ReminderReplicationUpsertedPayload = {
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'reminder_snapshot',
+        reminderId: 'reminder-rep-1',
+        updatedAt: 1_700_000_001_000,
+        originHostId: 'desktop-host',
+      },
+      reminder: {
+        id: 'reminder-rep-1',
+        title: 'Replicated reminder',
+        content: 'from peer',
+        dueAt: 1_700_000_100_000,
+        status: 'pending',
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_001_000,
+      },
+    };
+
+    await handler(makeSignalEvent('reminder.replication.upserted', payload));
+
+    expect(onReminderReplicationUpserted).toHaveBeenCalledTimes(1);
+    expect(onReminderReplicationUpserted).toHaveBeenCalledWith(payload);
+  });
+});
+
+describe('signal-handlers: timeblock.replication.completed', () => {
+  it('calls onTimeBlockCompletedReplication when topic is timeblock.replication.completed', async () => {
+    const onTimeBlockCompletedReplication = vi
+      .fn<[TimeBlockCompletedReplicationPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onTimeBlockCompletedReplication });
+    const payload: TimeBlockCompletedReplicationPayload = {
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'timeblock_completed',
+        blockId: 'tb-rep-1',
+        completedAt: 1_700_000_060_000,
+        originHostId: 'desktop-host',
+      },
+      block: {
+        id: 'tb-rep-1',
+        name: 'Replicated block',
+        startId: 'tb-rep-1',
+        endId: 'end-rep-1',
+        note: 'done',
+        tags: ['block_feedback'],
+        startTime: 1_700_000_000_000,
+        endTime: 1_700_000_060_000,
+        blockType: 'active',
+        taskIds: [],
+        taskAssociationLog: [],
+        transitions: [],
+      },
+    };
+
+    await handler(makeSignalEvent('timeblock.replication.completed', payload));
+
+    expect(onTimeBlockCompletedReplication).toHaveBeenCalledTimes(1);
+    expect(onTimeBlockCompletedReplication).toHaveBeenCalledWith(payload);
   });
 });
 

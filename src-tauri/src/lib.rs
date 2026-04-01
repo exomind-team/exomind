@@ -40,6 +40,7 @@ use commands::shortcut_commands::{
     register_main_window_shortcut, register_voice_shortcut, simulate_enter, simulate_paste,
     voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, MainWindowShortcutState,
+    foreground_window_focus,
     VoiceShortcutState,
 };
 use commands::workspace_commands::{
@@ -55,6 +56,42 @@ use dev_instance_paths::{
 };
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+
+const DEFAULT_SIGNAL_ROUTES_FILE_NAME: &str = "signal-routes.default.json";
+const DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON: &str =
+    include_str!("../../config/signal-routes.default.json");
+
+fn seed_runtime_default_signal_routes_path(runtime_dir: &std::path::Path) {
+    if std::env::var_os("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT").is_some() {
+        return;
+    }
+
+    let bundled_routes_dir = runtime_dir.join("config");
+    if let Err(error) = std::fs::create_dir_all(&bundled_routes_dir) {
+        log::error!("failed to create runtime config dir for signal routes: {error}");
+        return;
+    }
+
+    let bundled_routes_path = bundled_routes_dir.join(DEFAULT_SIGNAL_ROUTES_FILE_NAME);
+    let should_write = match std::fs::read_to_string(&bundled_routes_path) {
+        Ok(existing) => existing != DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON,
+        Err(_) => true,
+    };
+
+    if should_write {
+        if let Err(error) =
+            std::fs::write(&bundled_routes_path, DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON)
+        {
+            log::error!("failed to seed bundled signal routes file: {error}");
+            return;
+        }
+    }
+
+    // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+    unsafe {
+        std::env::set_var("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT", &bundled_routes_path);
+    }
+}
 
 fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
     if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
@@ -99,6 +136,15 @@ fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
             std::env::set_var("EXOMIND_RT_CONFIG_SQLITE_PATH", config_sqlite_path);
         }
     }
+    if std::env::var_os("EXOMIND_RT_REMINDER_SQLITE_PATH").is_none() {
+        let reminder_sqlite_path = runtime_dir.join("reminders.sqlite");
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_REMINDER_SQLITE_PATH", reminder_sqlite_path);
+        }
+    }
+
+    seed_runtime_default_signal_routes_path(runtime_dir);
 }
 
 fn resolve_embedded_runtime_port() -> u16 {
@@ -375,6 +421,7 @@ pub fn run() {
             main_window_shortcut_take_pending_activation,
             voice_recording_set_active,
             foreground_window_get,
+            foreground_window_focus,
             // ASR 语音识别命令
             volcano_asr_recognize,
             volcano_asr_check_config,
@@ -422,6 +469,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::seed_runtime_sqlite_env_paths;
+    use uuid::Uuid;
 
     fn clear_runtime_sqlite_envs() {
         for key in [
@@ -431,6 +479,8 @@ mod tests {
             "EXOMIND_RT_TIMEBLOCK_SQLITE_PATH",
             "EXOMIND_RT_SESSION_SQLITE_PATH",
             "EXOMIND_RT_CONFIG_SQLITE_PATH",
+            "EXOMIND_RT_REMINDER_SQLITE_PATH",
+            "EXOMIND_RT_SIGNAL_ROUTES_DEFAULT",
         ] {
             // SAFETY: tests mutate process env in a controlled single-threaded scope.
             unsafe {
@@ -470,7 +520,41 @@ mod tests {
             std::env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH"),
             Some(runtime_dir.join("config.sqlite").into_os_string())
         );
+        assert_eq!(
+            std::env::var_os("EXOMIND_RT_REMINDER_SQLITE_PATH"),
+            Some(runtime_dir.join("reminders.sqlite").into_os_string())
+        );
 
+        clear_runtime_sqlite_envs();
+    }
+
+    #[test]
+    fn seed_runtime_sqlite_env_paths_sets_default_signal_routes_path() {
+        let runtime_dir = std::env::temp_dir().join(format!(
+            "exomind-tauri-runtime-routes-test-{}",
+            Uuid::new_v4()
+        ));
+        clear_runtime_sqlite_envs();
+
+        seed_runtime_sqlite_env_paths(&runtime_dir);
+
+        let routes_path = std::env::var_os("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT")
+            .expect("default signal routes path should be seeded");
+        let routes_path = std::path::PathBuf::from(routes_path);
+        assert!(
+            routes_path.is_file(),
+            "seeded default signal routes file must exist: {}",
+            routes_path.display()
+        );
+
+        let routes_content = std::fs::read_to_string(&routes_path)
+            .expect("seeded default signal routes should be readable");
+        assert!(
+            routes_content.contains("\"target_type\": \"frontend\""),
+            "seeded routes should preserve bundled frontend route"
+        );
+
+        std::fs::remove_dir_all(&runtime_dir).ok();
         clear_runtime_sqlite_envs();
     }
 }

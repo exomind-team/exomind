@@ -14,11 +14,10 @@ describe('Hybrid identity sync coordinators（混合身份同步协调器）', (
     expect(source).not.toContain('const currentUser = useSyncStore');
   });
 
-  it('ReminderSyncCoordinator uses remote sync key instead of currentUser', () => {
+  it('ReminderSyncCoordinator is retired after RT cutover（Reminder 旧同步协调器已退役）', () => {
     const source = readFileSync(reminderCoordinatorPath, 'utf-8');
 
-    expect(source).toContain('resolveRemoteSyncKey');
-    expect(source).not.toContain('buildReminderRemoteDbUrl(syncServerUrl, currentUser)');
-    expect(source).not.toContain('const currentUser = useSyncStore');
+    expect(source).toContain('Legacy ReminderSyncCoordinator has been retired');
+    expect(source).not.toContain('resolveRemoteSyncKey');
   });
 });

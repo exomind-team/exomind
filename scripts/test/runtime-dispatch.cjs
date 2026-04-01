@@ -112,13 +112,6 @@ function getStepsForPreset(runtime, name, args) {
     return [{ command: 'node', args: [viteCli], ignoreStdin: true }];
   }
 
-  if (name === 'server-start') {
-    if (runtime === 'bun') {
-      return [{ command: 'bun', args: ['run', 'start'] }];
-    }
-    return [{ command: 'node', args: ['pouchdb-server.js'] }];
-  }
-
   if (name === 'issue77-preview') {
     const [port] = args;
     if (!port) {
@@ -153,7 +146,7 @@ function getStepsForPreset(runtime, name, args) {
 
 async function main() {
   if (!preset) {
-    fail('Missing preset. Use one of: playwright|vite-dev|server-start|issue77-preview');
+    fail('Missing preset. Use one of: playwright|vite-dev|issue77-preview');
   }
 
   const runtime = resolveRuntime();

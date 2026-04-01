@@ -1,5 +1,6 @@
 import { getTimeblockBackendMode } from '@/config/domain-backend-mode';
 import { getSelectedRuntimeTarget } from '@/config/runtime-target';
+import { getCurrentProfileOrLegacyId } from '@/lib/profile/profile-storage';
 import { getActiveBlockStorage } from '@/lib/storage/active-block-storage';
 import type { ActiveBlockData } from '@/lib/types/event';
 import { SignalStreamService } from './signal-stream.service';
@@ -17,6 +18,7 @@ export interface ActiveBlockReplicationCursor {
 
 export interface ActiveBlockReplicationSnapshotPayload {
   schemaVersion: 1;
+  scopeKey?: string;
   block: ActiveBlockData;
   cursor: ActiveBlockReplicationCursor;
 }
@@ -41,6 +43,7 @@ function buildRuntimeHostRecord() {
 function buildReplicationPayload(block: ActiveBlockData): ActiveBlockReplicationSnapshotPayload {
   return {
     schemaVersion: 1,
+    scopeKey: getCurrentProfileOrLegacyId(),
     block,
     cursor: {
       kind: 'active_block_snapshot',
@@ -69,6 +72,11 @@ export async function projectActiveBlockReplicationSnapshot(
   payload: ActiveBlockReplicationSnapshotPayload,
   userId?: string,
 ): Promise<void> {
+  const currentScopeKey = userId ?? getCurrentProfileOrLegacyId();
+  if (typeof payload.scopeKey === 'string' && payload.scopeKey.length > 0 && payload.scopeKey !== currentScopeKey) {
+    return;
+  }
+
   if (getTimeblockBackendMode() === 'rt-sqlite') {
     await getTimeBlockService().applyReplicatedActiveBlock(payload.block);
     return;

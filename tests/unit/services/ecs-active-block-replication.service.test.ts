@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getTimeblockBackendMode: vi.fn(),
   projectReplicatedActiveBlock: vi.fn(),
   applyReplicatedActiveBlock: vi.fn(),
+  getCurrentProfileOrLegacyId: vi.fn(),
 }));
 
 vi.mock('@/config/domain-backend-mode', () => ({
@@ -20,6 +21,10 @@ vi.mock('@/lib/services/timeblock.service', () => ({
   getTimeBlockService: () => ({
     applyReplicatedActiveBlock: mocks.applyReplicatedActiveBlock,
   }),
+}));
+
+vi.mock('@/lib/profile/profile-storage', () => ({
+  getCurrentProfileOrLegacyId: mocks.getCurrentProfileOrLegacyId,
 }));
 
 vi.mock('@/config/runtime-target', () => ({
@@ -39,6 +44,7 @@ import { projectActiveBlockReplicationSnapshot } from '@/lib/services/ecs-active
 describe('ecs-active-block-replication.service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getCurrentProfileOrLegacyId.mockReturnValue('profile-local');
   });
 
   it('projects replicated active block into TimeBlockService in rt-sqlite mode', async () => {
@@ -63,6 +69,32 @@ describe('ecs-active-block-replication.service', () => {
     });
 
     expect(mocks.applyReplicatedActiveBlock).toHaveBeenCalledWith(expect.objectContaining({ startId: 'active-1' }));
+    expect(mocks.projectReplicatedActiveBlock).not.toHaveBeenCalled();
+  });
+
+  it('ignores active block snapshot from another profile scope（不同档案作用域的活跃块快照不应串档）', async () => {
+    mocks.getTimeblockBackendMode.mockReturnValue('rt-sqlite');
+
+    await projectActiveBlockReplicationSnapshot({
+      schemaVersion: 1,
+      scopeKey: 'profile-remote',
+      block: {
+        startId: 'active-foreign',
+        name: 'Foreign block',
+        mode: 'countup',
+        elapsed: 1000,
+        paused: false,
+        startTime: 1700000000000,
+      },
+      cursor: {
+        kind: 'active_block_snapshot',
+        startId: 'active-foreign',
+        version: 1,
+        lastTransitionAt: 1700000000000,
+      },
+    });
+
+    expect(mocks.applyReplicatedActiveBlock).not.toHaveBeenCalled();
     expect(mocks.projectReplicatedActiveBlock).not.toHaveBeenCalled();
   });
 });

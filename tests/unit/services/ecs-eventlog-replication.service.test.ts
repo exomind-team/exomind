@@ -12,6 +12,7 @@ const replicationMocks = vi.hoisted(() => ({
   getEventPortMock: vi.fn(),
   getSelectedRuntimeTargetMock: vi.fn(),
   signalStreamConstructorMock: vi.fn(),
+  getCurrentProfileOrLegacyIdMock: vi.fn(),
 }));
 
 vi.mock('@/config/runtime-target', () => ({
@@ -55,6 +56,10 @@ vi.mock('@/lib/environment/environment', () => ({
       },
     }),
   },
+}));
+
+vi.mock('@/lib/profile/profile-storage', () => ({
+  getCurrentProfileOrLegacyId: replicationMocks.getCurrentProfileOrLegacyIdMock,
 }));
 
 import {
@@ -110,6 +115,7 @@ describe('ecs-eventlog-replication.service', () => {
       port: 1949,
     });
     replicationMocks.signalStreamConstructorMock.mockReset();
+    replicationMocks.getCurrentProfileOrLegacyIdMock.mockReset().mockReturnValue('profile-local');
   });
 
   it('publishes replication append with replication_seq cursor（发布 replicationSeq 光标）', async () => {
@@ -151,6 +157,27 @@ describe('ecs-eventlog-replication.service', () => {
 
     await expect(projectEventLogReplicationAppend(payload)).resolves.toBe('inserted');
     expect(replicationMocks.projectReplicatedEventMock).toHaveBeenCalledWith(payload.event);
+  });
+
+  it('ignores replication payload from another profile scope（不同档案作用域的复制事件不应串档）', async () => {
+    const payload: EventLogReplicationAppendedPayload & { scopeKey: string } = {
+      schemaVersion: 1,
+      scopeKey: 'profile-remote',
+      replicationSeq: 43,
+      cursor: {
+        kind: 'replication_seq',
+        value: 43,
+      },
+      event: {
+        ...sampleEvent,
+        id: 'evt-remote-foreign-scope',
+        replicationSeq: 43,
+      },
+    };
+
+    await expect(projectEventLogReplicationAppend(payload)).resolves.toBe('duplicate');
+    expect(replicationMocks.projectReplicatedEventMock).not.toHaveBeenCalled();
+    expect(replicationMocks.appendEventDataMock).not.toHaveBeenCalled();
   });
 
   it('appends to RT eventlog instead of Pouch EventStorage in rt-sqlite mode', async () => {
