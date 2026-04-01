@@ -162,6 +162,45 @@ function parseReportFields(dataBlock: string): ManifestEntry {
   };
 }
 
+// ── poolHealth Validation ──
+
+function validatePoolHealth(dataBlock: string): void {
+  const poolBlock = dataBlock.match(/poolHealth:\s*\{([\s\S]*?)\n  \},/);
+  if (!poolBlock) {
+    throw new Error(
+      '❌ 发布失败：REPORT.poolHealth 字段不存在。\n' +
+      '   Agent 必须在 REPORT 数据中填充 poolHealth 对象（参见 prompt.md #10-#12 采集命令）。'
+    );
+  }
+
+  const block = poolBlock[1];
+  const errors: string[] = [];
+
+  // aging.total must be > 0 (impossible for a real repo to have 0 total issues)
+  const agingTotal = block.match(/total:\s*(\d+)/);
+  if (!agingTotal || parseInt(agingTotal[1], 10) === 0) {
+    errors.push('aging.total = 0（必须填写实际 open issue 总数）');
+  }
+
+  // aging.samples must have at least 1 entry (not just comments)
+  const hasSamples = /samples:\s*\[\s*\{/.test(block);
+  if (!hasSamples) {
+    errors.push('aging.samples 为空（必须列出最老的 5-8 个 open issue）');
+  }
+
+  // noPriority.current or previous should reflect real data
+  // (we check that the line is not just the template default 0/0 while aging.total > 0)
+  // This is a soft check — 0 is valid if triage was just done
+
+  if (errors.length > 0) {
+    throw new Error(
+      '❌ 发布失败：poolHealth 数据未完整填充。\n' +
+      errors.map(e => `   · ${e}`).join('\n') + '\n' +
+      '   请运行 prompt.md 中 #10-#12 的 gh 采集命令，填充真实数据后重试。'
+    );
+  }
+}
+
 // ── Generate Thin HTML ──
 
 function generateThinHtml(entry: ManifestEntry, dataBlock: string): string {
@@ -298,6 +337,9 @@ async function main() {
   if (!isNaN(hour)) {
     entry.title = hour < 6 ? '开发夜报' : hour < 12 ? '开发早报' : hour < 18 ? '开发午报' : '开发晚报';
   }
+
+  // ── poolHealth 完整性校验（必须填充，否则拒绝发布）──
+  validatePoolHealth(dataBlock);
 
   console.log(`📅 日期: ${entry.date} ${timeStr}`);
   console.log(`📰 标题: ${entry.title}`);
