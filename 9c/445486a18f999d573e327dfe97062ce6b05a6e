@@ -1,0 +1,40 @@
+src/config/port-env.ts
+  84f135f36334fea5 7,11-13,65-67,160-171
+vite.config.ts
+  84f135f36334fea5 49-50,56,127-132
+src/ui/app/components/ProposalNotificationBadge.tsx
+  84f135f36334fea5 1-97
+src/config/dev-instance-diagnostics.ts
+  84f135f36334fea5 1,18-19,26,42-43,97-98,122-128,141
+src/routes.tsx
+  84f135f36334fea5 3,24,76-80,267-268,324,410,427-429,802-808,1099
+src/lib/types/index.ts
+  84f135f36334fea5 19-21
+src/lib/types/proposal.ts
+  84f135f36334fea5 1-63
+src/lib/adapters/proposal-rt-adapter.test.ts
+  84f135f36334fea5 1-228
+src/lib/adapters/proposal-rt-adapter.ts
+  84f135f36334fea5 1-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "9c445486a18f999d573e327dfe97062ce6b05a6e",
+  "prompts": {
+    "84f135f36334fea5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d49bf-9168-7120-84d5-0a3eb246d470",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 3361,
+      "total_deletions": 429,
+      "accepted_lines": 3357,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2a68c24c862ae012d85cca6b01e7d87f37a3196727bcb36464372dd9fc2de152"
+    }
+  }
+}
