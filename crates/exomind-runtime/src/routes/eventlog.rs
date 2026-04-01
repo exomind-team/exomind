@@ -700,6 +700,7 @@ mod tests {
             config_store: Arc::new(crate::config::ConfigStore::new()),
             reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
+            proposal_store: Arc::new(crate::proposal::ProposalStore::new()),
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
             eventlog_watch_tx,

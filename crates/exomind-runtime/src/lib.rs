@@ -25,6 +25,7 @@ pub mod eventlog;
 pub mod eventlog_sqlite;
 pub mod mesh;
 pub mod pairing;
+pub mod proposal;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod reminder;
@@ -790,6 +791,7 @@ pub struct AppState {
     pub config_store: Arc<config::ConfigStore>,
     pub reminder_store: Arc<reminder::ReminderStore>,
     pub task_store: Arc<task::TaskStore>,
+    pub proposal_store: Arc<proposal::ProposalStore>,
     pub session_store: Arc<session::SessionStore>,
     pub session_event_tx: Option<tokio::sync::broadcast::Sender<routes::sessions::SessionEvent>>,
     pub eventlog_watch_tx: tokio::sync::broadcast::Sender<String>,
@@ -818,6 +820,7 @@ struct RuntimeStoragePaths {
     config_sqlite_path: Option<PathBuf>,
     reminder_sqlite_path: Option<PathBuf>,
     task_sqlite_path: Option<PathBuf>,
+    proposal_sqlite_path: Option<PathBuf>,
     timeblock_sqlite_path: Option<PathBuf>,
     session_sqlite_path: Option<PathBuf>,
 }
@@ -835,6 +838,9 @@ fn runtime_storage_paths_from_env() -> RuntimeStoragePaths {
             .ok()
             .map(PathBuf::from),
         task_sqlite_path: env::var("EXOMIND_RT_TASK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        proposal_sqlite_path: env::var("EXOMIND_RT_PROPOSAL_SQLITE_PATH")
             .ok()
             .map(PathBuf::from),
         timeblock_sqlite_path: env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
@@ -865,6 +871,10 @@ fn runtime_storage_paths_for_persistent_start(data_dir: Option<PathBuf>) -> Runt
             .ok()
             .map(PathBuf::from)
             .or_else(|| Some(data_dir.join("tasks.sqlite"))),
+        proposal_sqlite_path: env::var("EXOMIND_RT_PROPOSAL_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("proposals.sqlite"))),
         timeblock_sqlite_path: env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
             .ok()
             .map(PathBuf::from)
@@ -1004,6 +1014,19 @@ impl AppState {
                 })
             })
             .unwrap_or_default();
+        let proposal_store = storage_paths
+            .proposal_sqlite_path
+            .map(|path| {
+                proposal::ProposalStore::with_sqlite_path(&path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "proposal sqlite init failed, falling back to in-memory store (Proposal SQLite 初始化失败，降级到内存存储)"
+                    );
+                    proposal::ProposalStore::new()
+                })
+            })
+            .unwrap_or_default();
         let timeblock_store = storage_paths
             .timeblock_sqlite_path
             .map(|path| {
@@ -1055,6 +1078,7 @@ impl AppState {
             config_store: Arc::new(config_store),
             reminder_store: Arc::new(reminder_store),
             task_store: Arc::new(task_store),
+            proposal_store: Arc::new(proposal_store),
             session_store: Arc::new(session_store),
             session_event_tx: {
                 let (tx, _rx) = routes::sessions::session_event_channel();
@@ -1177,6 +1201,7 @@ mod tests {
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),
             task_store: Arc::new(task::TaskStore::new()),
+            proposal_store: Arc::new(proposal::ProposalStore::new()),
             session_store: Arc::new(session::SessionStore::new()),
             session_event_tx: None,
             eventlog_watch_tx,
