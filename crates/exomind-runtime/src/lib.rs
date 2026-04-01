@@ -27,6 +27,7 @@ pub mod mesh;
 pub mod pairing;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
+pub mod reminder;
 pub mod routes;
 pub mod session;
 pub mod signal;
@@ -782,6 +783,7 @@ pub struct AppState {
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub pairing: Arc<pairing::PairingManager>,
     pub config_store: Arc<config::ConfigStore>,
+    pub reminder_store: Arc<reminder::ReminderStore>,
     pub task_store: Arc<task::TaskStore>,
     pub session_store: Arc<session::SessionStore>,
     pub session_event_tx: Option<tokio::sync::broadcast::Sender<routes::sessions::SessionEvent>>,
@@ -809,6 +811,7 @@ struct RuntimeStoragePaths {
     data_dir: PathBuf,
     eventlog_sqlite_path: Option<PathBuf>,
     config_sqlite_path: Option<PathBuf>,
+    reminder_sqlite_path: Option<PathBuf>,
     task_sqlite_path: Option<PathBuf>,
     timeblock_sqlite_path: Option<PathBuf>,
     session_sqlite_path: Option<PathBuf>,
@@ -821,6 +824,9 @@ fn runtime_storage_paths_from_env() -> RuntimeStoragePaths {
             .ok()
             .map(PathBuf::from),
         config_sqlite_path: env::var("EXOMIND_RT_CONFIG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from),
+        reminder_sqlite_path: env::var("EXOMIND_RT_REMINDER_SQLITE_PATH")
             .ok()
             .map(PathBuf::from),
         task_sqlite_path: env::var("EXOMIND_RT_TASK_SQLITE_PATH")
@@ -846,6 +852,10 @@ fn runtime_storage_paths_for_persistent_start(data_dir: Option<PathBuf>) -> Runt
             .ok()
             .map(PathBuf::from)
             .or_else(|| Some(data_dir.join("config.sqlite"))),
+        reminder_sqlite_path: env::var("EXOMIND_RT_REMINDER_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| Some(data_dir.join("reminders.sqlite"))),
         task_sqlite_path: env::var("EXOMIND_RT_TASK_SQLITE_PATH")
             .ok()
             .map(PathBuf::from)
@@ -963,6 +973,19 @@ impl AppState {
                 })
             })
             .unwrap_or_default();
+        let reminder_store = storage_paths
+            .reminder_sqlite_path
+            .map(|path| {
+                reminder::ReminderStore::with_sqlite_path(&path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "reminder sqlite init failed, falling back to in-memory store (Reminder SQLite 初始化失败，降级到内存存储)"
+                    );
+                    reminder::ReminderStore::new()
+                })
+            })
+            .unwrap_or_default();
         let task_store = storage_paths
             .task_sqlite_path
             .map(|path| {
@@ -1024,6 +1047,7 @@ impl AppState {
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config_store),
+            reminder_store: Arc::new(reminder_store),
             task_store: Arc::new(task_store),
             session_store: Arc::new(session_store),
             session_event_tx: {
@@ -1144,6 +1168,7 @@ mod tests {
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
+            reminder_store: Arc::new(reminder::ReminderStore::new()),
             task_store: Arc::new(task::TaskStore::new()),
             session_store: Arc::new(session::SessionStore::new()),
             session_event_tx: None,

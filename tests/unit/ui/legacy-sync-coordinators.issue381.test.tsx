@@ -88,9 +88,9 @@ describe('legacy sync coordinators issue-381（旧同步协调器门控）', () 
     render(<ReminderSyncCoordinator />);
 
     await waitFor(() => {
-      expect(reminderService.stopSync).toHaveBeenCalled();
+      expect(reminderService.startSync).not.toHaveBeenCalled();
     });
-
+    expect(reminderService.stopSync).not.toHaveBeenCalled();
     expect(reminderService.startSync).not.toHaveBeenCalled();
   });
 
@@ -104,13 +104,13 @@ describe('legacy sync coordinators issue-381（旧同步协调器门控）', () 
     });
   });
 
-  it('ReminderSyncCoordinator still starts legacy sync after explicit legacy connection（显式连接后仍保留旧链路）', async () => {
+  it('ReminderSyncCoordinator no longer starts legacy sync after explicit legacy connection（显式连接后也不再启动旧提醒同步）', async () => {
     syncStoreState.status.state = 'connected';
 
     render(<ReminderSyncCoordinator />);
 
     await waitFor(() => {
-      expect(reminderService.startSync).toHaveBeenCalledWith('http://127.0.0.1:6984/remote-space__reminders');
+      expect(reminderService.startSync).not.toHaveBeenCalled();
     });
   });
 
@@ -124,13 +124,13 @@ describe('legacy sync coordinators issue-381（旧同步协调器门控）', () 
     });
   });
 
-  it('ReminderSyncCoordinator keeps legacy sync alive while sync-store is syncing（手动同步中不应误停）', async () => {
+  it('ReminderSyncCoordinator stays inert while sync-store is syncing（手动同步中也保持 inert）', async () => {
     syncStoreState.status.state = 'syncing';
 
     render(<ReminderSyncCoordinator />);
 
     await waitFor(() => {
-      expect(reminderService.startSync).toHaveBeenCalledWith('http://127.0.0.1:6984/remote-space__reminders');
+      expect(reminderService.startSync).not.toHaveBeenCalled();
     });
   });
 });

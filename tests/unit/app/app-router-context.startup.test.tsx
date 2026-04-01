@@ -54,6 +54,10 @@ vi.mock('@/ui/app/components/ReminderSyncCoordinator', () => ({
   ReminderSyncCoordinator: () => null,
 }));
 
+vi.mock('@/ui/app/components/RtDomainBackfillCoordinator', () => ({
+  RtDomainBackfillCoordinator: () => null,
+}));
+
 vi.mock('@/ui/hooks/useSignalStream', () => ({
   useSignalStream: vi.fn(),
 }));
@@ -128,6 +132,11 @@ describe('App startup router context', () => {
   it('does not mount legacy TaskSyncCoordinator after RT task cutover（任务切到 RT 后不再挂载旧同步协调器）', () => {
     const source = fs.readFileSync(path.resolve('src/App.tsx'), 'utf-8');
     expect(source).not.toContain('TaskSyncCoordinator');
+  });
+
+  it('does not mount legacy ReminderSyncCoordinator after RT cutover（主应用入口不再挂载旧 Reminder 同步协调器）', () => {
+    const source = fs.readFileSync(path.resolve('src/App.tsx'), 'utf-8');
+    expect(source).not.toContain('ReminderSyncCoordinator');
   });
 
   it('initializes and disposes now overlay service on startup（启动时初始化并释放当下悬浮工作台服务）', async () => {

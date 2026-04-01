@@ -211,6 +211,48 @@ export class TaskRtAdapter implements ITaskPort {
     return ALL_STATUSES.filter((status) => canTransition(task.status, status));
   }
 
+  async applyReplicationSnapshot(
+    task: TaskNode,
+    sourceHostId?: string,
+  ): Promise<'inserted' | 'updated' | 'ignored'> {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/tasks/replication/upsert', target), {
+      method: 'POST',
+      headers: buildRuntimeAuthHeaders(target, {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      }),
+      body: JSON.stringify({
+        task: {
+          id: task.id,
+          title: task.title,
+          description: task.description ?? null,
+          done_condition: task.doneCondition ?? null,
+          status: task.status,
+          priority: task.priority,
+          tags: task.tags,
+          source: task.source ?? null,
+          parent_id: task.parentId ?? null,
+          depends_on: task.dependsOn.map(toRuntimeDependency),
+          due_at: task.dueAt ?? null,
+          estimated_minutes: task.estimatedMinutes ?? null,
+          time_block_ids: task.timeBlockIds ?? [],
+          created_at: task.createdAt,
+          updated_at: task.updatedAt,
+          completed_at: task.completedAt ?? null,
+        },
+        source_host_id: sourceHostId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`RT task replication upsert failed: ${response.status}`);
+    }
+
+    const payload = await response.json() as { status?: 'inserted' | 'updated' | 'ignored' };
+    return payload.status ?? 'ignored';
+  }
+
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const target = this.resolveTarget();
     const response = await this.fetchImpl(this.url(path, target), {

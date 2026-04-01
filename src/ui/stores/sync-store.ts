@@ -1,11 +1,9 @@
 /**
  * 同步状态 Store
  *
- * 使用 Zustand 管理同步相关的状态
- * 集成 PouchSyncAdapter 实现真正的同步逻辑
+ * 使用 Zustand 管理档案与远端身份相关状态
+ * 不再承担 Pouch transport（传输层）职责
  * 集成 CryptoAdapter 实现密码哈希（SPEC-302）
- *
- * 注意：PouchSyncAdapter 使用动态导入，避免在应用启动时加载 PouchDB
  */
 
 import { create } from 'zustand';
@@ -39,13 +37,9 @@ import {
   revokeIdentityLink,
 } from '@/lib/profile/identity-link-storage';
 
-// 类型延迟导入（不实际加载模块）
-import type { PouchSyncAdapter } from '@/adapters/pouch-sync';
-
-// 存储动态导入的适配器实例
-let syncAdapter: PouchSyncAdapter | null = null;
 const USERNAME_WHITESPACE_PATTERN = /\s/;
 const SYNC_STORE_KEY = 'exomind:sync-store';
+const LEGACY_SYNC_REMOVED_MESSAGE = 'Pouch 同步主链路已移除，请使用设备配对与 RT 同步';
 const DEFAULT_PROFILE_SESSION = {
   version: 1 as const,
   activeProfileId: null,
@@ -75,21 +69,6 @@ function readLegacyUsersMirror(): Array<{ username: string; passwordHash: string
 
 function writeLegacyUsersMirror(users: Array<{ username: string; passwordHash: string; createdAt: string }>): void {
   localStorage.setItem('exomind:users', JSON.stringify(users));
-}
-
-// 动态导入 PouchSyncAdapter（浏览器兼容）
-async function loadSyncAdapter(): Promise<typeof import('@/adapters/pouch-sync')> {
-  const module = await import('@/adapters/pouch-sync');
-  return module;
-}
-
-// 初始化同步适配器（在用户登录后调用）
-export async function initSyncAdapter(): Promise<PouchSyncAdapter> {
-  if (!syncAdapter) {
-    const module = await loadSyncAdapter();
-    syncAdapter = new module.PouchSyncAdapter();
-  }
-  return syncAdapter;
 }
 
 function getDeviceInfo(): { deviceName: string; deviceType: DeviceType; platform: string } {
@@ -425,48 +404,16 @@ export const useSyncStore = create<SyncState>()(
         set({
           status: {
             ...get().status,
-            state: 'connecting',
+            state: 'error',
+            error: LEGACY_SYNC_REMOVED_MESSAGE,
           },
         });
-
-        try {
-          // 初始化适配器（动态加载 PouchDB）
-          const adapter = await initSyncAdapter();
-          await adapter.connect(url, credentials);
-
-          set({
-            status: {
-              ...get().status,
-              state: 'connected',
-            },
-          });
-
-          // 尝试同步事件和配置
-          await adapter.syncEvents();
-          await adapter.syncConfig();
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : '连接失败';
-          set({
-            status: {
-              ...get().status,
-              state: 'error',
-              error: errorMessage,
-            },
-          });
-          throw error;
-        }
+        void url;
+        throw new Error(LEGACY_SYNC_REMOVED_MESSAGE);
       },
 
       // 断开连接
       async disconnect() {
-        try {
-          // 尝试初始化并断开
-          const adapter = await initSyncAdapter();
-          await adapter.disconnect();
-        } catch {
-          // 忽略断开连接时的错误（可能还未初始化）
-        }
-
         set({
           status: {
             state: 'disconnected',
@@ -484,40 +431,11 @@ export const useSyncStore = create<SyncState>()(
         set({
           status: {
             ...get().status,
-            state: 'syncing',
+            state: 'error',
+            error: LEGACY_SYNC_REMOVED_MESSAGE,
           },
         });
-
-        try {
-          const adapter = await initSyncAdapter();
-          const result = await adapter.syncEvents();
-
-          // 更新冲突计数
-          const conflicts = await adapter.getConflicts();
-
-          set({
-            status: {
-              ...get().status,
-              state: 'connected',
-              lastSync: Date.now(),
-              pendingChanges: 0,
-              conflictCount: conflicts.length,
-            },
-            conflicts,
-          });
-
-          return result;
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : '同步失败';
-          set({
-            status: {
-              ...get().status,
-              state: 'error',
-              error: errorMessage,
-            },
-          });
-          throw error;
-        }
+        throw new Error(LEGACY_SYNC_REMOVED_MESSAGE);
       },
 
       // 同步配置
@@ -525,73 +443,30 @@ export const useSyncStore = create<SyncState>()(
         set({
           status: {
             ...get().status,
-            state: 'syncing',
+            state: 'error',
+            error: LEGACY_SYNC_REMOVED_MESSAGE,
           },
         });
-
-        try {
-          const adapter = await initSyncAdapter();
-          const result = await adapter.syncConfig();
-
-          // 更新冲突计数
-          const conflicts = await adapter.getConflicts();
-
-          set({
-            status: {
-              ...get().status,
-              state: 'connected',
-              lastSync: Date.now(),
-              conflictCount: conflicts.length,
-            },
-            conflicts,
-          });
-
-          return result;
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : '同步失败';
-          set({
-            status: {
-              ...get().status,
-              state: 'error',
-              error: errorMessage,
-            },
-          });
-          throw error;
-        }
+        throw new Error(LEGACY_SYNC_REMOVED_MESSAGE);
       },
 
       // 获取冲突列表
       async getConflicts() {
-        try {
-          const adapter = await initSyncAdapter();
-          const conflicts = await adapter.getConflicts();
-
-          set({
-            conflicts,
-            status: {
-              ...get().status,
-              conflictCount: conflicts.length,
-            },
-          });
-
-          return conflicts;
-        } catch {
-          return [];
-        }
+        set({
+          conflicts: [],
+          status: {
+            ...get().status,
+            conflictCount: 0,
+          },
+        });
+        return [];
       },
 
       // 解决冲突
       async resolveConflict(docId: string, resolution: 'local' | 'remote' | 'merge') {
-        try {
-          const adapter = await initSyncAdapter();
-          await adapter.resolveConflict(docId, resolution);
-
-          // 更新冲突列表
-          await get().getConflicts();
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : '解决冲突失败';
-          throw new Error(errorMessage);
-        }
+        void docId;
+        void resolution;
+        throw new Error(LEGACY_SYNC_REMOVED_MESSAGE);
       },
     });
     },

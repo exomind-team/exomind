@@ -213,16 +213,21 @@ fn eventlog_created_at(timestamp: i64) -> String {
         .to_rfc3339()
 }
 
-fn build_eventlog_replication_payload(event: &EventRecord) -> serde_json::Value {
+fn build_eventlog_replication_payload(
+    event: &EventRecord,
+    user_id: Option<&str>,
+) -> serde_json::Value {
     let replication_seq = eventlog_replication_seq(event);
     let event_type = event
         .tags
         .first()
         .cloned()
         .unwrap_or_else(|| "note".to_string());
+    let scope_key = sanitize_user_id(user_id);
 
     serde_json::json!({
         "schemaVersion": 1,
+        "scopeKey": scope_key,
         "replicationSeq": replication_seq,
         "cursor": {
             "kind": "replication_seq",
@@ -239,7 +244,11 @@ fn build_eventlog_replication_payload(event: &EventRecord) -> serde_json::Value 
     })
 }
 
-async fn publish_eventlog_replication_append(state: &AppState, event: &EventRecord) {
+async fn publish_eventlog_replication_append(
+    state: &AppState,
+    user_id: Option<&str>,
+    event: &EventRecord,
+) {
     let signal = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
@@ -249,7 +258,7 @@ async fn publish_eventlog_replication_append(state: &AppState, event: &EventReco
         origin_host_id: state.host_id.clone(),
         hop: 0,
         trace_id: Some(format!("eventlog:{}", event.id)),
-        payload: build_eventlog_replication_payload(event),
+        payload: build_eventlog_replication_payload(event, user_id),
     };
 
     state.signal_pool.publish(signal.clone());
@@ -325,7 +334,7 @@ async fn append_event(
         .eventlog_store
         .append_event(query.user_id.as_deref(), event.clone())
         .map_err(internal_error)?;
-    publish_eventlog_replication_append(&state, &event).await;
+    publish_eventlog_replication_append(&state, query.user_id.as_deref(), &event).await;
     Ok((StatusCode::CREATED, Json(event)))
 }
 
@@ -688,6 +697,7 @@ mod tests {
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             config_store: Arc::new(crate::config::ConfigStore::new()),
+            reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
@@ -984,6 +994,43 @@ mod tests {
         assert_eq!(
             replication.payload["event"]["metadata"]["source"]["deviceId"],
             serde_json::json!("desktop-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn scoped_eventlog_replication_payload_includes_user_scope_key() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let state = test_state_with_eventlog(store);
+        let app = test_router(state.clone());
+
+        let appended = append_event_via_api(
+            &app,
+            r#"{
+                "timestamp":1700000000000,
+                "content":"hello scoped replication",
+                "tags":["note"]
+            }"#,
+            "/eventlog?user_id=profile-argon",
+        )
+        .await;
+        let appended_id = appended["id"].as_str().unwrap();
+
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| event.topic == "eventlog.replication.appended")
+            .expect("scoped append should publish replication signal");
+
+        assert_eq!(
+            replication.payload["scopeKey"],
+            serde_json::json!("profile-argon")
+        );
+        assert_eq!(
+            replication.payload["event"]["id"],
+            serde_json::json!(appended_id)
         );
     }
 

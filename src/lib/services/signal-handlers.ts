@@ -12,6 +12,8 @@
 import type { SignalEvent } from '../types/signal-pool';
 import type { Event as StorageEvent } from '../storage/event-storage';
 import type { ActiveBlockData } from '../types/event';
+import type { Reminder } from '../types/reminder';
+import type { TaskNode } from '../types/task';
 
 /** Payload shape for task.auto-created signals. */
 export interface TaskAutoCreatedPayload {
@@ -37,12 +39,48 @@ export interface TaskTransitionedPayload {
   new_status: string;
 }
 
+/** Payload shape for task.replication.upserted signals. */
+export interface TaskReplicationUpsertedPayload {
+  schemaVersion: 1;
+  scopeKey?: string;
+  cursor: {
+    kind: 'task_snapshot';
+    taskId: string;
+    updatedAt: number;
+    originHostId?: string;
+  };
+  task: TaskNode;
+}
+
+/** Payload shape for reminder.replication.upserted signals. */
+export interface ReminderReplicationUpsertedPayload {
+  schemaVersion: 1;
+  scopeKey?: string;
+  cursor: {
+    kind: 'reminder_snapshot';
+    reminderId: string;
+    updatedAt: number;
+    originHostId?: string;
+  };
+  reminder: Reminder;
+}
+
 /** Payload shape for eventlog.appended signals. */
 export interface EventLogAppendedPayload {
   text: string;
   ts: number;
   inputMode?: string;
   captureSource?: string;
+  targetScope?: string;
+  window?: {
+    title?: string;
+    processName?: string;
+  };
+  agentContext?: {
+    agentId?: string;
+    agentName?: string;
+    sessionId?: string;
+  };
 }
 
 /** Payload shape for eventlog.replication.appended signals. */
@@ -69,6 +107,19 @@ export interface ActiveBlockReplicationSnapshotPayload {
   };
 }
 
+/** Payload shape for timeblock.replication.completed signals. */
+export interface TimeBlockCompletedReplicationPayload {
+  schemaVersion: 1;
+  scopeKey?: string;
+  cursor: {
+    kind: 'timeblock_completed';
+    blockId: string;
+    completedAt: number;
+    originHostId?: string;
+  };
+  block: import('../types/event').TimeBlockData;
+}
+
 /** Payload shape for review.completed signals. */
 export interface ReviewCompletedPayload {
   effective: string;
@@ -93,9 +144,12 @@ export interface SignalHandlerOptions {
   onTaskUpdated?: (payload: TaskChangedPayload) => Promise<void>;
   onTaskTransitioned?: (payload: TaskTransitionedPayload) => Promise<void>;
   onTaskCancelled?: (payload: TaskCancelledPayload) => Promise<void>;
+  onTaskReplicationUpserted?: (payload: TaskReplicationUpsertedPayload) => Promise<void>;
+  onReminderReplicationUpserted?: (payload: ReminderReplicationUpsertedPayload) => Promise<void>;
   onEventLogAppended?: (payload: EventLogAppendedPayload) => Promise<void>;
   onEventLogReplicationAppended?: (payload: EventLogReplicationAppendedPayload) => Promise<void>;
   onActiveBlockReplicationSnapshot?: (payload: ActiveBlockReplicationSnapshotPayload) => Promise<void>;
+  onTimeBlockCompletedReplication?: (payload: TimeBlockCompletedReplicationPayload) => Promise<void>;
   onReviewCompleted?: (payload: ReviewCompletedPayload) => Promise<void>;
   onKeyboardStateChanged?: (payload: KeyboardStatePayload) => Promise<void>;
 }
@@ -152,6 +206,18 @@ export function startSignalHandlers(
         }
         break;
 
+      case 'task.replication.upserted':
+        if (options.onTaskReplicationUpserted) {
+          await options.onTaskReplicationUpserted(event.payload as TaskReplicationUpsertedPayload);
+        }
+        break;
+
+      case 'reminder.replication.upserted':
+        if (options.onReminderReplicationUpserted) {
+          await options.onReminderReplicationUpserted(event.payload as ReminderReplicationUpsertedPayload);
+        }
+        break;
+
       case 'eventlog.appended':
         if (options.onEventLogAppended) {
           await options.onEventLogAppended(event.payload as EventLogAppendedPayload);
@@ -167,6 +233,12 @@ export function startSignalHandlers(
       case 'active_block.replication.snapshot':
         if (options.onActiveBlockReplicationSnapshot) {
           await options.onActiveBlockReplicationSnapshot(event.payload as ActiveBlockReplicationSnapshotPayload);
+        }
+        break;
+
+      case 'timeblock.replication.completed':
+        if (options.onTimeBlockCompletedReplication) {
+          await options.onTimeBlockCompletedReplication(event.payload as TimeBlockCompletedReplicationPayload);
         }
         break;
 
