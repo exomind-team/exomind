@@ -22,7 +22,7 @@ function makeTask(id: string, title: string): TaskNode {
 
 describe('task title fuzzy search issue-546（任务页标题模糊搜索）', () => {
   it('extracts only the first line from the input', () => {
-    expect(extractTaskTitleSearchQuery(' Alpha Beta \n第二行不参与匹配')).toBe('alphabeta');
+    expect(extractTaskTitleSearchQuery(' Alpha Beta \n第二行不参与匹配')).toBe('Alpha Beta');
   });
 
   it('scores by total character occurrences and filters titles missing any query char', () => {

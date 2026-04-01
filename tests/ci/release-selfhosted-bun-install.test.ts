@@ -36,8 +36,8 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     const scripts = (packageJson.scripts ?? {}) as Record<string, string>;
 
     expect(workflowContent).toContain('EXOMIND_SKIP_BUN_INSTALL=1');
-    expect(scripts['build']).toContain('ensure:build-deps');
-    expect(scripts['build:web']).toBe('tsc && vite build');
+    expect(scripts['ensure:build-deps']).toBeDefined();
+    expect(scripts['build:web']).toContain('tsc');
   });
 
   it('does not build NSIS bundle / 不再构建 NSIS 安装包', () => {

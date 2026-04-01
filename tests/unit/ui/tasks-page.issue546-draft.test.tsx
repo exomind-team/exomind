@@ -6,10 +6,15 @@ import type { TaskNode } from '@/lib/types/task';
 
 const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
 
-vi.mock('@tanstack/react-router', () => ({
-  Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
-  useNavigate: () => vi.fn(),
-}));
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
+  return {
+    ...actual,
+    Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
+    useNavigate: () => vi.fn(),
+    createRootRoute: vi.fn(() => ({ addChildren: vi.fn() })),
+  };
+});
 
 vi.mock('@/config/task-create-success-action', () => ({
   getTaskCreateSuccessAction: vi.fn(() => 'refocus'),

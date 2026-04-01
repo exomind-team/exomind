@@ -98,12 +98,12 @@ describe('MultiTaskEndDialog overflow regression', () => {
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith({
         feedback: '',
-        outcomes: { 'task-1': 'continue' },
+        outcomes: { 'task-1': 'suspended' },
       });
     });
   });
 
-  it('submits on Ctrl+Enter by default and follows enter-send setting', async () => {
+  it('submits on Ctrl+Enter regardless of enter-send setting', async () => {
     const onSubmit = vi.fn(async () => undefined);
 
     const { rerender } = render(
@@ -138,12 +138,13 @@ describe('MultiTaskEndDialog overflow regression', () => {
     );
 
     const textareaWithEnterSend = screen.getByTestId('task-dag-end-dialog-feedback');
-    fireEvent.change(textareaWithEnterSend, { target: { value: 'Enter 模式提交' } });
-    fireEvent.keyDown(textareaWithEnterSend, { key: 'Enter', code: 'Enter', ctrlKey: true });
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(textareaWithEnterSend).toHaveValue('Enter 模式提交\n');
-
+    fireEvent.change(textareaWithEnterSend, { target: { value: 'Ctrl+Enter 仍提交' } });
+    // Plain Enter does NOT submit (ctrl-enter-only mode ignores inputSendMode)
     fireEvent.keyDown(textareaWithEnterSend, { key: 'Enter', code: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Ctrl+Enter always submits in ctrl-enter-only mode
+    fireEvent.keyDown(textareaWithEnterSend, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledTimes(1);

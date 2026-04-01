@@ -21,6 +21,7 @@ describe('SettingsPage timeblock backend diagnostics (issue-485)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     settingsPagePreferenceState.developerMode = true;
+    settingsPagePreferenceState.isTauriWindow = true;
     settingsPageDomainBackendState.eventlog = 'rt-sqlite';
     settingsPageDomainBackendState.task = 'rt-sqlite';
     settingsPageDomainBackendState.timeblock = 'rt-sqlite';

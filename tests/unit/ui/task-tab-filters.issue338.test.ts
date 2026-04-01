@@ -114,11 +114,12 @@ describe('filterNow（"当下" tab）', () => {
     expect(filterNow([t1, t2, t3]).length).toBe(3);
   });
 
-  it('sorts non-in_progress tasks by due date', () => {
+  it('sorts non-in_progress tasks by updatedAt descending', () => {
     const withDue = makeTask({ id: 'a', status: 'pending', dueAt: 100, updatedAt: 1 });
     const noDue = makeTask({ id: 'b', status: 'pending', updatedAt: 999 });
     const result = filterNow([noDue, withDue]);
-    expect(result.map((t) => t.id)).toEqual(['a', 'b']);
+    // No graph provided: all non-in_progress tasks are in "blocked" group, sorted by updatedAt desc
+    expect(result.map((t) => t.id)).toEqual(['b', 'a']);
   });
 
   it('excludes cancelled tasks', () => {

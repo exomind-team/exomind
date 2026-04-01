@@ -116,7 +116,7 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
     });
   });
 
-  it('defaults host-only input to port 1949（仅输入 host 时默认端口 1949）', async () => {
+  it('defaults host-only input to port 9124（仅输入 host 时默认端口 9124）', async () => {
     const addHost = vi.fn(async () => HOST_A);
     const hostService = {
       listHosts: vi.fn(async () => [HOST_A]),
@@ -136,7 +136,7 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
     expect(addHost).toHaveBeenCalledWith({
       name: 'LAN Runtime',
       host: '10.1.2.3',
-      port: 1949,
+      port: 9124,
     });
   });
 

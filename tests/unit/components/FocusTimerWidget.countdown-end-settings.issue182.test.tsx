@@ -60,6 +60,12 @@ vi.mock('@/lib/services', () => ({
     startSync: startSyncMock,
     stopSync: stopSyncMock,
   }),
+  getTaskService: () => ({
+    getTask: vi.fn().mockResolvedValue(null),
+    listTasks: vi.fn().mockResolvedValue([]),
+    checkDependenciesMet: vi.fn().mockResolvedValue({ blocking: [] }),
+    onTaskChange: vi.fn(() => () => {}),
+  }),
 }));
 
 describe('FocusTimerWidget countdown end behavior（新计时器结束分支）', () => {

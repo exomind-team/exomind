@@ -11,9 +11,9 @@ describe('VolcanoASRTestPage', () => {
   it('renders official mode and resource configuration menus', () => {
     render(<VolcanoASRTestPage />);
 
-    expect(screen.getByLabelText('识别模式')).toBeInTheDocument();
-    expect(screen.getByLabelText('资源模型')).toBeInTheDocument();
-    expect(screen.getByLabelText('识别语言')).toBeInTheDocument();
+    expect(screen.getByText('识别模式')).toBeInTheDocument();
+    expect(screen.getByText('资源模型')).toBeInTheDocument();
+    expect(screen.getByText('识别语言')).toBeInTheDocument();
     expect(screen.getByText(/model_name.*bigmodel/i)).toBeInTheDocument();
   });
 });

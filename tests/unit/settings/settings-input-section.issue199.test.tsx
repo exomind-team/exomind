@@ -501,11 +501,11 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     fireEvent.click(screen.getByText('RT 地址'));
 
     expect(screen.getByText('需要连接另一台电脑或手机上的 ExoMind 时，在这里填写对方显示的地址；平时只在本机使用就不用改。')).toBeInTheDocument();
-    expect(screen.getByText('填写你想连接的那台设备地址，例如 192.168.1.23:1949。保存后，当前设备会切换到这个地址继续连接。')).toBeInTheDocument();
+    expect(screen.getByText('填写你想连接的那台设备地址，例如 192.168.1.23:9124。保存后，当前设备会切换到这个地址继续连接。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '显示 Token' })).toBeNull();
     expect(screen.queryByRole('button', { name: '清空' })).toBeNull();
 
-    const syncInput = screen.getByPlaceholderText('192.168.1.23:1949');
+    const syncInput = screen.getByPlaceholderText('192.168.1.23:9124');
     expect(syncInput).toHaveAttribute('type', 'text');
 
     const cancelButton = screen.getByRole('button', { name: '取消' });

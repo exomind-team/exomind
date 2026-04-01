@@ -48,10 +48,15 @@ const taskCreateSuccessActionState = vi.hoisted(() => {
   };
 });
 
-vi.mock('@tanstack/react-router', () => ({
-  Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
-  useNavigate: () => navigateMock,
-}));
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
+  return {
+    ...actual,
+    Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
+    useNavigate: () => navigateMock,
+    createRootRoute: vi.fn(() => ({ addChildren: vi.fn() })),
+  };
+});
 
 vi.mock('@/lib/services', () => ({
   getTaskService: () => ({

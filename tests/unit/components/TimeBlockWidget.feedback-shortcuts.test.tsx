@@ -142,7 +142,13 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
     const feedback = await screen.findByTestId('timeblock-feedback-textarea');
     fireEvent.change(feedback, { target: { value: 'Enter 模式结束' } });
+    // TimeBlockWidget uses submitMode: 'ctrl-enter-only', so plain Enter does NOT submit
     fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter' });
+
+    expect(endBlockMock).not.toHaveBeenCalled();
+
+    // Ctrl+Enter always submits regardless of inputSendMode
+    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
     await waitFor(() => {
       expect(endBlockMock).toHaveBeenCalledWith('Enter 模式结束');

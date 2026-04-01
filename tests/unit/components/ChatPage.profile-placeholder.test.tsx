@@ -72,6 +72,7 @@ const baseEvent: Event = {
 describe('ChatPage profile placeholder', () => {
   const unsubscribe = vi.fn();
   const loadEvents = vi.fn<() => Promise<Event[]>>();
+  const loadEventsDetailed = vi.fn();
   const onEvent = vi.fn(() => unsubscribe);
 
   beforeEach(() => {
@@ -84,8 +85,14 @@ describe('ChatPage profile placeholder', () => {
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
     loadEvents.mockResolvedValue([baseEvent]);
+    loadEventsDetailed.mockResolvedValue({
+      events: [baseEvent],
+      semantics: 'full',
+      snapshotRevision: null,
+    });
     mockGetEventLogService.mockReturnValue({
       loadEvents,
+      loadEventsDetailed,
       addEvent: vi.fn(),
       appendEventData: vi.fn(),
       exportEventsAsJson: vi.fn(),
@@ -139,7 +146,7 @@ describe('ChatPage profile placeholder', () => {
       activeProfileId: 'profile-alice',
     } as never);
 
-    loadEvents.mockResolvedValue([{
+    const voiceEvent: Event = {
       ...baseEvent,
       id: 'event-voice-1',
       content: '这是一条语音输入事件',
@@ -147,7 +154,13 @@ describe('ChatPage profile placeholder', () => {
         ...baseEvent.metadata,
         inputSource: 'voice',
       },
-    }]);
+    };
+
+    loadEventsDetailed.mockResolvedValue({
+      events: [voiceEvent],
+      semantics: 'full',
+      snapshotRevision: null,
+    });
 
     render(<ChatPage variant="new-mobile" />);
 

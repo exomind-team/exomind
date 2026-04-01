@@ -11,7 +11,7 @@ describe('eventlog sync remote url wiring', () => {
   it('ChatPage should read/write events through EventLogService', () => {
     expect(chatPage).toContain("from '@/lib/services/eventlog.service'");
     expect(chatPage).toContain('getEventLogService()');
-    expect(chatPage).toContain('loadEvents()');
+    expect(chatPage).toContain('loadEventsDetailed()');
   });
 
   it('PouchSyncAdapter should use shared remote DB URL builder', () => {

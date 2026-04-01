@@ -23,6 +23,7 @@ describe('SettingsPage unified data transfer legacy guard (issue-506)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     settingsPagePreferenceState.developerMode = false;
+    settingsPagePreferenceState.isTauriWindow = true;
     settingsPageDomainBackendState.eventlog = 'rt-sqlite';
     settingsPageDomainBackendState.task = 'legacy';
     settingsPageDomainBackendState.timeblock = 'rt-sqlite';
@@ -77,6 +78,7 @@ describe('SettingsPage unified data transfer legacy guard (issue-506)', () => {
 
   it('disables unified export outside tauri even when backend preference is rt-sqlite', () => {
     delete (window as { __TAURI__?: unknown }).__TAURI__;
+    settingsPagePreferenceState.isTauriWindow = false;
     settingsPageDomainBackendState.task = 'rt-sqlite';
 
     render(<SettingsPage />);

@@ -22,6 +22,9 @@ vi.mock('@/lib/services', () => ({
   }),
   getTaskService: () => ({
     getTask: vi.fn().mockResolvedValue(null),
+    listTasks: vi.fn().mockResolvedValue([]),
+    checkDependenciesMet: vi.fn().mockResolvedValue({ blocking: [] }),
+    onTaskChange: vi.fn(() => () => {}),
   }),
   getTaskTimerService: () => ({
     startBlockForTask: vi.fn(),

@@ -21,6 +21,7 @@ describe('SettingsPage eventlog backend diagnostics (issue-484)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     settingsPagePreferenceState.developerMode = true;
+    settingsPagePreferenceState.isTauriWindow = true;
     settingsPageDomainBackendState.eventlog = 'rt-sqlite';
     settingsPageDomainBackendState.task = 'rt-sqlite';
     settingsPageDomainBackendState.timeblock = 'legacy';

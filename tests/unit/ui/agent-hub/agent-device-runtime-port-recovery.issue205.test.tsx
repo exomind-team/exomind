@@ -80,7 +80,7 @@ describe('agent device runtime port recovery issue-205（设备页端口恢复�
     await waitFor(() => {
       expect(screen.getByTestId('runtime-current-address')).toHaveTextContent('not running');
       expect(screen.getByTestId('runtime-last-attempt-address')).toHaveTextContent('127.0.0.1:43637');
-      expect(screen.getByTestId('runtime-local-bind-address')).toHaveTextContent('127.0.0.1:1950');
+      expect(screen.getByTestId('runtime-local-bind-address')).toHaveTextContent('127.0.0.1:3000');
     });
 
     fireEvent.click(screen.getByTestId('runtime-local-start-button'));
@@ -88,7 +88,7 @@ describe('agent device runtime port recovery issue-205（设备页端口恢复�
     await waitFor(() => {
       expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
         host: '127.0.0.1',
-        port: 1950,
+        port: 3000,
       });
     });
   });
