@@ -201,6 +201,135 @@ function validatePoolHealth(dataBlock: string): void {
   }
 }
 
+// ── Report Completeness Validation ──
+
+function validateReportCompleteness(dataBlock: string): void {
+  const errors: string[] = [];
+
+  // Helper: check if a field exists and is not empty/placeholder
+  const checkField = (pattern: RegExp, fieldName: string, minLength = 1): boolean => {
+    const match = dataBlock.match(pattern);
+    if (!match) {
+      errors.push(`${fieldName} 字段缺失`);
+      return false;
+    }
+    const value = match[1]?.trim();
+    if (!value || value.length < minLength) {
+      errors.push(`${fieldName} 为空或过短`);
+      return false;
+    }
+    // Check for placeholder text
+    if (/数据缺失|暂无数据|查询失败|TODO|请填写|placeholder/i.test(value)) {
+      errors.push(`${fieldName} 包含占位符或警告文本: "${value}"`);
+      return false;
+    }
+    return true;
+  };
+
+  // 1. Meta fields
+  checkField(/date:\s*'([^']+)'/, 'meta.date', 10);
+  checkField(/baseline:\s*'([^']+)'/, 'meta.baseline', 7);
+
+  // 2. Publisher fields (all 4 required)
+  checkField(/identity:\s*'([^']+)'/, 'publisher.identity', 2);
+  checkField(/os:\s*'([^']+)'/, 'publisher.os', 2);
+  checkField(/model:\s*'([^']+)'/, 'publisher.model', 2);
+  checkField(/version:\s*'([^']+)'/, 'publisher.version', 2);
+
+  // 3. Metrics (must have 4 entries with non-zero values)
+  const metricsBlock = dataBlock.match(/metrics:\s*\[([\s\S]*?)\],/);
+  if (!metricsBlock) {
+    errors.push('metrics 数组缺失');
+  } else {
+    const metricCount = (metricsBlock[1].match(/\{/g) || []).length;
+    if (metricCount < 4) {
+      errors.push(`metrics 数组只有 ${metricCount} 项，至少需要 4 项`);
+    }
+    // Check for placeholder values in metrics
+    if (/value:\s*'[?-]'/.test(metricsBlock[1])) {
+      errors.push('metrics 包含占位符值 (? 或 -)');
+    }
+  }
+
+  // 4. Headlines (must have at least 2 entries with issue/PR numbers)
+  const headlinesBlock = dataBlock.match(/headlines:\s*\[([\s\S]*?)\],/);
+  if (!headlinesBlock) {
+    errors.push('headlines 数组缺失');
+  } else {
+    const headlineCount = (headlinesBlock[1].match(/\{/g) || []).length;
+    if (headlineCount < 2) {
+      errors.push(`headlines 数组只有 ${headlineCount} 项，至少需要 2 项`);
+    }
+    // Check for issue/PR numbers (#123)
+    if (!/\#\d+/.test(headlinesBlock[1])) {
+      errors.push('headlines 缺少具体 Issue/PR 编号 (#123)');
+    }
+    // Check for placeholder text
+    if (/数据缺失|暂无|TODO/i.test(headlinesBlock[1])) {
+      errors.push('headlines 包含占位符或警告文本');
+    }
+  }
+
+  // 5. Mainlines (must have at least 3 entries)
+  const mainlinesBlock = dataBlock.match(/mainlines:\s*\[([\s\S]*?)\],/);
+  if (!mainlinesBlock) {
+    errors.push('mainlines 数组缺失');
+  } else {
+    const mainlineCount = (mainlinesBlock[1].match(/\{/g) || []).length;
+    if (mainlineCount < 3) {
+      errors.push(`mainlines 数组只有 ${mainlineCount} 项，至少需要 3 项`);
+    }
+    // Check for placeholder text
+    if (/数据缺失|暂无|TODO/i.test(mainlinesBlock[1])) {
+      errors.push('mainlines 包含占位符或警告文本');
+    }
+  }
+
+  // 6. Weather (must have level, emoji, label, and at least 1 action)
+  checkField(/weather:\s*\{[\s\S]*?level:\s*'([^']+)'/, 'weather.level', 2);
+  checkField(/weather:\s*\{[\s\S]*?emoji:\s*'([^']+)'/, 'weather.emoji', 1);
+  checkField(/weather:\s*\{[\s\S]*?label:\s*'([^']+)'/, 'weather.label', 1);
+
+  const actionsBlock = dataBlock.match(/actions:\s*\[([\s\S]*?)\]/);
+  if (!actionsBlock) {
+    errors.push('weather.actions 数组缺失');
+  } else {
+    const actionCount = (actionsBlock[1].match(/'/g) || []).length / 2; // count string pairs
+    if (actionCount < 1) {
+      errors.push('weather.actions 数组为空，至少需要 1 条建议行动');
+    }
+    // Check for vague actions
+    if (/持续关注|继续观察|保持/i.test(actionsBlock[1])) {
+      errors.push('weather.actions 包含模糊表述（"持续关注"），必须是具体操作');
+    }
+    // Check for placeholder text
+    if (/数据缺失|暂无|TODO/i.test(actionsBlock[1])) {
+      errors.push('weather.actions 包含占位符或警告文本');
+    }
+  }
+
+  // 7. Truth table (must have stillOpen array, can be empty but must exist)
+  const truthBlock = dataBlock.match(/truth:\s*\{[\s\S]*?stillOpen:\s*\[/);
+  if (!truthBlock) {
+    errors.push('truth.stillOpen 数组缺失');
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      '❌ 发布失败：日报数据不完整或包含占位符。\n\n' +
+      '质量红线违反：\n' +
+      errors.map(e => `   · ${e}`).join('\n') + '\n\n' +
+      '修复建议：\n' +
+      '   1. 检查所有必填字段是否填充完整\n' +
+      '   2. 移除所有"数据缺失"、"TODO"、"请填写"等占位符\n' +
+      '   3. 确保 headlines 包含具体 Issue/PR 编号\n' +
+      '   4. 确保 weather.actions 是具体操作，不是"持续关注"\n' +
+      '   5. 重新运行数据采集命令，确保所有数据来自本次查询\n\n' +
+      '如果数据采集失败，Agent 应该停止生成并输出失败诊断，而不是生成带占位符的半成品。'
+    );
+  }
+}
+
 // ── Generate Thin HTML ──
 
 function generateThinHtml(entry: ManifestEntry, dataBlock: string): string {
@@ -338,8 +467,9 @@ async function main() {
     entry.title = hour < 6 ? '开发夜报' : hour < 12 ? '开发早报' : hour < 18 ? '开发午报' : '开发晚报';
   }
 
-  // ── poolHealth 完整性校验（必须填充，否则拒绝发布）──
+  // ── 质量拦截：完整性校验（必须填充，否则拒绝发布）──
   validatePoolHealth(dataBlock);
+  validateReportCompleteness(dataBlock);
 
   console.log(`📅 日期: ${entry.date} ${timeStr}`);
   console.log(`📰 标题: ${entry.title}`);

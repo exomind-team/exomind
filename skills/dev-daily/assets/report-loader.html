@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ExoMind 开发日报</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="../assets/report-style.css">
+<style>
+.loading, .error {
+  max-width: 600px;
+  margin: 4rem auto;
+  padding: 2rem;
+  text-align: center;
+  background: var(--card, #0d1117);
+  border: 1px solid var(--border, #21262d);
+  border-radius: 10px;
+}
+.loading { color: var(--text-dim, #8b949e); }
+.error { color: var(--p0, #f85149); }
+.error h2 { margin-bottom: 1rem; font-size: 1.5rem; }
+.error details { margin-top: 1.5rem; text-align: left; }
+.error summary { cursor: pointer; color: var(--accent, #58a6ff); }
+.error pre {
+  margin-top: 0.5rem;
+  padding: 1rem;
+  background: var(--bg, #06080d);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  color: var(--text, #e6edf3);
+}
+</style>
+</head>
+<body>
+<div class="container" id="app">
+  <div class="loading">
+    <div style="font-size: 2rem; margin-bottom: 1rem;">⏳</div>
+    <div>加载报告数据中...</div>
+  </div>
+</div>
+
+<script>
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  ExoMind 开发日报 · 数据加载器                                  ║
+// ║                                                                  ║
+// ║  支持三种加载模式（按优先级）:                                   ║
+// ║  1. URL 参数: ?data=<json-url>                                   ║
+// ║  2. 外部 JSON: CONFIG.dataUrl                                    ║
+// ║  3. 内联数据: CONFIG.inlineData                                  ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+const CONFIG = {
+  // 外部 JSON 文件路径（相对于当前 HTML）
+  dataUrl: './REPORT_FILENAME.json',
+
+  // 内联数据（降级方案，可选）
+  // 如果设置为 null，则在外部加载失败时显示错误
+  // 如果设置为对象，则作为最后的降级数据源
+  inlineData: null,
+
+  // 渲染引擎路径
+  engineUrl: '../assets/report-engine.js',
+};
+
+// ── 数据加载器 ──
+(async function loadAndRender() {
+  let data = null;
+  let dataSource = '';
+
+  // 1. 尝试从 URL 参数加载
+  const params = new URLSearchParams(window.location.search);
+  const urlData = params.get('data');
+  if (urlData) {
+    try {
+      console.log('[Loader] 尝试从 URL 参数加载:', urlData);
+      const res = await fetch(urlData);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+      dataSource = 'URL 参数';
+      console.log('[Loader] ✓ 从 URL 参数加载成功');
+    } catch (e) {
+      console.warn('[Loader] ✗ URL 参数加载失败:', e.message);
+    }
+  }
+
+  // 2. 尝试加载外部 JSON
+  if (!data && CONFIG.dataUrl) {
+    try {
+      console.log('[Loader] 尝试加载外部 JSON:', CONFIG.dataUrl);
+      const res = await fetch(CONFIG.dataUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+      dataSource = '外部 JSON';
+      console.log('[Loader] ✓ 外部 JSON 加载成功');
+    } catch (e) {
+      console.warn('[Loader] ✗ 外部 JSON 加载失败:', e.message);
+    }
+  }
+
+  // 3. 降级到内联数据
+  if (!data && CONFIG.inlineData) {
+    data = CONFIG.inlineData;
+    dataSource = '内联数据';
+    console.log('[Loader] ✓ 使用内联数据');
+  }
+
+  // 4. 所有加载方式都失败
+  if (!data) {
+    console.error('[Loader] ✗ 所有数据源加载失败');
+    document.getElementById('app').innerHTML = `
+      <div class="error">
+        <h2>数据加载失败</h2>
+        <p>无法加载报告数据，请检查网络连接或文件路径。</p>
+        <details>
+          <summary>调试信息</summary>
+          <pre>配置的数据源:
+  - dataUrl: ${CONFIG.dataUrl || '(未配置)'}
+  - urlParam: ${urlData || '(未提供)'}
+  - inlineData: ${CONFIG.inlineData ? '已配置' : '未配置'}
+
+尝试的加载顺序:
+  1. URL 参数 (?data=...) ${urlData ? '✗ 失败' : '○ 跳过'}
+  2. 外部 JSON (${CONFIG.dataUrl}) ${CONFIG.dataUrl ? '✗ 失败' : '○ 跳过'}
+  3. 内联数据 ${CONFIG.inlineData ? '✗ 失败' : '○ 未配置'}
+
+建议:
+  - 检查 JSON 文件是否存在
+  - 检查文件路径是否正确
+  - 检查浏览器控制台的网络请求</pre>
+        </details>
+      </div>
+    `;
+    return;
+  }
+
+  // 5. 数据加载成功，验证 schema
+  if (data.schema !== 'exomind-devlog-report') {
+    console.warn('[Loader] ⚠ 数据 schema 不匹配:', data.schema);
+  }
+
+  console.log(`[Loader] ✓ 数据加载成功 (来源: ${dataSource})`);
+  console.log('[Loader] 报告日期:', data.meta?.date);
+  console.log('[Loader] 报告标题:', data.meta?.title);
+
+  // 6. 将数据挂载到全局（供渲染引擎使用）
+  window.REPORT = data;
+
+  // 7. 加载渲染引擎
+  console.log('[Loader] 加载渲染引擎:', CONFIG.engineUrl);
+  const script = document.createElement('script');
+  script.src = CONFIG.engineUrl;
+
+  script.onload = function() {
+    console.log('[Loader] ✓ 渲染引擎加载成功');
+  };
+
+  script.onerror = function() {
+    console.error('[Loader] ✗ 渲染引擎加载失败');
+    document.getElementById('app').innerHTML = `
+      <div class="error">
+        <h2>渲染引擎加载失败</h2>
+        <p>数据已加载（来源: ${dataSource}），但渲染引擎不可用。</p>
+        <details>
+          <summary>查看原始数据</summary>
+          <pre>${JSON.stringify(data, null, 2)}</pre>
+        </details>
+      </div>
+    `;
+  };
+
+  document.head.appendChild(script);
+})();
+</script>
+</body>
+</html>

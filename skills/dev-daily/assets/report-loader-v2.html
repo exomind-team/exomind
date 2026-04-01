@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ExoMind 开发日报</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="../assets/report-style.css">
+<style>
+.loading, .error {
+  max-width: 700px;
+  margin: 4rem auto;
+  padding: 2rem;
+  background: var(--card, #0d1117);
+  border: 1px solid var(--border, #21262d);
+  border-radius: 10px;
+}
+.loading {
+  text-align: center;
+  color: var(--text-dim, #8b949e);
+}
+.loading .spinner {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  animation: spin 2s linear infinite;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.error {
+  color: var(--p0, #f85149);
+}
+.error h2 {
+  margin-bottom: 1rem;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.error .stage {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: var(--bg, #06080d);
+  border-left: 3px solid var(--border, #21262d);
+  border-radius: 6px;
+}
+.error .stage.success { border-left-color: var(--green, #2ea043); }
+.error .stage.failed { border-left-color: var(--p0, #f85149); }
+.error .stage-title {
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.error .stage-detail {
+  font-size: 0.9rem;
+  color: var(--text-dim, #8b949e);
+  margin-top: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+.error details {
+  margin-top: 1.5rem;
+  cursor: pointer;
+}
+.error summary {
+  color: var(--accent, #58a6ff);
+  font-weight: 500;
+}
+.error pre {
+  margin-top: 0.5rem;
+  padding: 1rem;
+  background: var(--bg, #06080d);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  color: var(--text, #e6edf3);
+  max-height: 400px;
+  overflow-y: auto;
+}
+.error .actions {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border, #21262d);
+}
+.error .actions h3 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+  color: var(--text, #e6edf3);
+}
+.error .actions ul {
+  list-style: none;
+  padding: 0;
+}
+.error .actions li {
+  padding: 0.5rem 0;
+  color: var(--text-dim, #8b949e);
+}
+.error .actions li::before {
+  content: '→';
+  margin-right: 0.5rem;
+  color: var(--accent, #58a6ff);
+}
+</style>
+</head>
+<body>
+<div class="container" id="app">
+  <div class="loading">
+    <div class="spinner">⏳</div>
+    <div>加载报告数据中...</div>
+  </div>
+</div>
+
+<script>
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  ExoMind 开发日报 · 分阶段加载器                                ║
+// ║                                                                  ║
+// ║  加载流程:                                                       ║
+// ║  1. 解析 URL 参数或配置                                          ║
+// ║  2. 加载 JSON 数据（支持多种来源）                               ║
+// ║  3. 验证数据格式                                                 ║
+// ║  4. 加载渲染引擎                                                 ║
+// ║  5. 执行渲染                                                     ║
+// ║                                                                  ║
+// ║  每个阶段独立追踪，异常时输出详细诊断信息                        ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+// ── Configuration ──
+const CONFIG = {
+  // 数据文件名（由发布脚本填充）
+  dataFile: 'DATA_FILENAME.json',
+
+  // 数据源优先级
+  dataSources: [
+    { type: 'url-param', key: 'data' },           // ?data=<url>
+    { type: 'relative', path: null },              // ./DATA_FILENAME.json (filled by dataFile)
+    { type: 'github-raw', repo: 'exomind-team/exomind-devlog', path: 'reports/latest.json' },
+  ],
+
+  // 渲染引擎路径
+  engineUrl: '../assets/report-engine.js',
+
+  // 调试模式（显示详细日志）
+  debug: new URLSearchParams(window.location.search).has('debug'),
+};
+
+// ── Logging ──
+const log = {
+  info: (...args) => CONFIG.debug && console.log('[Loader]', ...args),
+  warn: (...args) => console.warn('[Loader]', ...args),
+  error: (...args) => console.error('[Loader]', ...args),
+};
+
+// ── Stage Tracker ──
+const stages = {
+  parse: { name: '解析配置', status: 'pending', detail: '' },
+  fetch: { name: '加载数据', status: 'pending', detail: '', source: '' },
+  validate: { name: '验证数据', status: 'pending', detail: '' },
+  engine: { name: '加载引擎', status: 'pending', detail: '' },
+  render: { name: '执行渲染', status: 'pending', detail: '' },
+};
+
+function updateStage(stage, status, detail = '') {
+  stages[stage].status = status;
+  stages[stage].detail = detail;
+  log.info(`[${stage}] ${status}:`, detail);
+}
+
+// ── Error Display ──
+function showError(failedStage, error) {
+  const stageList = Object.entries(stages).map(([key, stage]) => {
+    const icon = stage.status === 'success' ? '✓'
+      : stage.status === 'failed' ? '✗'
+      : '○';
+    const className = stage.status === 'success' ? 'success'
+      : stage.status === 'failed' ? 'failed'
+      : '';
+
+    let detail = stage.detail;
+    if (key === 'fetch' && stage.source) {
+      detail += ` (来源: ${stage.source})`;
+    }
+
+    return `
+      <div class="stage ${className}">
+        <div class="stage-title">${icon} ${stage.name}</div>
+        ${detail ? `<div class="stage-detail">${detail}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  const debugInfo = {
+    failedStage,
+    error: error.message,
+    stack: error.stack,
+    config: CONFIG,
+    stages,
+    userAgent: navigator.userAgent,
+    url: window.location.href,
+  };
+
+  document.getElementById('app').innerHTML = `
+    <div class="error">
+      <h2>
+        <span>⚠️</span>
+        <span>报告加载失败</span>
+      </h2>
+      <p>在「${stages[failedStage].name}」阶段遇到错误。</p>
+
+      <div style="margin-top: 1.5rem;">
+        ${stageList}
+      </div>
+
+      <div class="actions">
+        <h3>建议操作</h3>
+        <ul>
+          ${failedStage === 'fetch' ? `
+            <li>检查网络连接是否正常</li>
+            <li>确认数据文件是否存在: <code>${CONFIG.dataFile}</code></li>
+            <li>尝试直接访问: <a href="./${CONFIG.dataFile}" target="_blank">${CONFIG.dataFile}</a></li>
+          ` : ''}
+          ${failedStage === 'validate' ? `
+            <li>数据文件可能损坏或格式不正确</li>
+            <li>检查 JSON 格式是否有效</li>
+            <li>确认 schema 版本是否匹配</li>
+          ` : ''}
+          ${failedStage === 'engine' ? `
+            <li>检查渲染引擎文件是否存在: <code>${CONFIG.engineUrl}</code></li>
+            <li>尝试直接访问: <a href="${CONFIG.engineUrl}" target="_blank">渲染引擎</a></li>
+          ` : ''}
+          <li>刷新页面重试</li>
+          <li>查看浏览器控制台获取详细错误信息</li>
+        </ul>
+      </div>
+
+      <details>
+        <summary>查看调试信息</summary>
+        <pre>${JSON.stringify(debugInfo, null, 2)}</pre>
+      </details>
+
+      <details>
+        <summary>查看原始错误</summary>
+        <pre>${error.stack || error.message}</pre>
+      </details>
+    </div>
+  `;
+}
+
+// ── Data Fetcher ──
+async function fetchData() {
+  updateStage('fetch', 'running', '尝试多个数据源...');
+
+  // Build data sources list
+  const sources = [];
+
+  // 1. URL parameter
+  const params = new URLSearchParams(window.location.search);
+  const urlData = params.get('data');
+  if (urlData) {
+    sources.push({ type: 'url-param', url: urlData });
+  }
+
+  // 2. Relative path
+  if (CONFIG.dataFile && CONFIG.dataFile !== 'DATA_FILENAME.json') {
+    sources.push({ type: 'relative', url: `./${CONFIG.dataFile}` });
+  }
+
+  // 3. GitHub raw
+  const ghUrl = `https://raw.githubusercontent.com/${CONFIG.dataSources[2].repo}/main/${CONFIG.dataSources[2].path}`;
+  sources.push({ type: 'github-raw', url: ghUrl });
+
+  // Try each source
+  for (const source of sources) {
+    try {
+      log.info(`尝试加载: ${source.type} - ${source.url}`);
+      const res = await fetch(source.url, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      updateStage('fetch', 'success', `成功加载 (${source.type})`);
+      stages.fetch.source = source.type;
+      return data;
+    } catch (e) {
+      log.warn(`${source.type} 加载失败:`, e.message);
+    }
+  }
+
+  throw new Error('所有数据源加载失败');
+}
+
+// ── Data Validator ──
+function validateData(data) {
+  updateStage('validate', 'running', '检查数据格式...');
+
+  // Check schema
+  if (data.schema !== 'exomind-devlog-report') {
+    throw new Error(`Schema 不匹配: ${data.schema}`);
+  }
+
+  // Check required fields
+  const required = ['meta', 'weather', 'metrics', 'headlines'];
+  for (const field of required) {
+    if (!data[field]) {
+      throw new Error(`缺少必填字段: ${field}`);
+    }
+  }
+
+  // Check meta fields
+  if (!data.meta.date || !data.meta.title) {
+    throw new Error('meta 字段不完整');
+  }
+
+  updateStage('validate', 'success', `Schema: ${data.schema} v${data.version}`);
+  return data;
+}
+
+// ── Engine Loader ──
+function loadEngine() {
+  return new Promise((resolve, reject) => {
+    updateStage('engine', 'running', `加载: ${CONFIG.engineUrl}`);
+
+    const script = document.createElement('script');
+    script.src = CONFIG.engineUrl;
+
+    script.onload = () => {
+      updateStage('engine', 'success', '渲染引擎已加载');
+      resolve();
+    };
+
+    script.onerror = () => {
+      updateStage('engine', 'failed', '渲染引擎加载失败');
+      reject(new Error(`无法加载渲染引擎: ${CONFIG.engineUrl}`));
+    };
+
+    document.head.appendChild(script);
+  });
+}
+
+// ── Main Loader ──
+(async function main() {
+  try {
+    // Stage 1: Parse configuration
+    updateStage('parse', 'running', '解析 URL 参数和配置...');
+    // Configuration is already parsed in CONFIG
+    updateStage('parse', 'success', `数据文件: ${CONFIG.dataFile}`);
+
+    // Stage 2: Fetch data
+    const data = await fetchData();
+
+    // Stage 3: Validate data
+    validateData(data);
+
+    // Stage 4: Mount data to global scope
+    window.REPORT = data;
+    document.title = `ExoMind ${data.meta.title} · ${data.meta.date}`;
+
+    // Stage 5: Load rendering engine
+    await loadEngine();
+
+    // Stage 6: Render (handled by engine)
+    updateStage('render', 'success', '渲染完成');
+
+    log.info('✓ 报告加载完成');
+  } catch (error) {
+    // Find which stage failed
+    const failedStage = Object.keys(stages).find(key => stages[key].status === 'running' || stages[key].status === 'failed');
+    if (failedStage) {
+      updateStage(failedStage, 'failed', error.message);
+    }
+
+    log.error('✗ 加载失败:', error);
+    showError(failedStage || 'unknown', error);
+  }
+})();
+</script>
+</body>
+</html>
