@@ -1,0 +1,71 @@
+skills/dev-daily/SKILL.md
+  9d74646c9382ac4c 45-46,53
+skills/dev-route/SKILL.md
+  9d74646c9382ac4c 44-46,52
+skills/dev-route/references/AGENTS.md
+  07823afac32f3ac5 661
+scripts/dev/extract-devlog.ts
+  824d706963a06c3b 78,82,162,197-198,200-201,217,228,239,243,246,280,299,318,338-339,636,711
+  9d74646c9382ac4c 279,298,467-494,497-498,500-502,504-506,508-515,518-533,535-536,539-542,545-548,552-569,572-595,598,600,604,606,610,612-619,623-625,629-631,635,638-646,648,650-655,658,660,664,666-670,672,676,678,682-685,688,691-695,698-700,702-704,707-709,714-719
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "9cde93b6dbfb3dfe4813c33bcd3f213fdefe10fa",
+  "prompts": {
+    "07823afac32f3ac5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d48e2-f1c7-7e61-853c-b6eddc04b93a",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/5870ec3d33bced107985f0312d7b111f55c6ce0e72bea24522e71dabc99e745c"
+    },
+    "824d706963a06c3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4764-3ca6-7582-80d6-21b1e8f907f8",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 79,
+      "overriden_lines": 0
+    },
+    "9d74646c9382ac4c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d47ed-a515-7250-a3ac-af6cf488fd72",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 347,
+      "overriden_lines": 2,
+      "messages_url": "https://usegitai.com/cas/b5e01806f616bf387f5f561e3310dc8ffc666837151a6aee0e35f9dccbe0aeca"
+    },
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
