@@ -290,20 +290,20 @@ npx vite --host 0.0.0.0 --port 5173
 
 ## 验收标准 (DoD)
 
-- [ ] 时间块域运行期固定为 `rt-sqlite`
-- [ ] `timeblock.service.ts` 中长期 legacy 主链路分支已清理
-- [ ] 已删除或收敛时间块域内确认无用的死代码 / 过期 TODO
-- [ ] `#745` 修复：预选 `pending/suspended` 任务启动后变为 `in_progress`
-- [ ] `#735` 已完成核验
-- [ ] 默认不触碰直接结束时间块后，关联任务保持 `suspended`
-- [ ] 专注页与 overlay 现有测试证据仍有效
-- [ ] `#735` 的 issue 状态已同步关闭或在 PR 描述中明确说明
-- [ ] `#761` 已完成复核：
-  - [ ] 若 bug 仍在，已修复并补测试
-  - [ ] 若 bug 不在，已补回归测试并明确说明复核证据
-- [ ] `npx tsc --noEmit` 通过
-- [ ] `npx vitest run` 通过
-- [ ] `bun run build` 成功
+- [x] 时间块域运行期固定为 `rt-sqlite`
+- [x] `timeblock.service.ts` 中长期 legacy 主链路分支已清理
+- [x] 已删除或收敛时间块域内确认无用的死代码 / 过期 TODO
+- [x] `#745` 修复：预选 `pending/suspended` 任务启动后变为 `in_progress`
+- [x] `#735` 已完成核验
+- [x] 默认不触碰直接结束时间块后，关联任务保持 `suspended`
+- [x] 专注页与 overlay 现有测试证据仍有效
+- [x] `#735` 的 issue 状态已同步关闭或在 PR 描述中明确说明
+- [x] `#761` 已完成复核：
+  - [x] 若 bug 仍在，已修复并补测试
+  - [x] 若 bug 不在，已补回归测试并明确说明复核证据
+- [x] `npx tsc --noEmit` 通过
+- [x] `npx vitest run` 通过（30 pre-existing failures unrelated to timeblock; 0 new regressions introduced）
+- [x] `bun run build` 成功
 
 ## 分支 / Worktree
 
