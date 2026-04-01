@@ -122,6 +122,8 @@ pub struct RuntimeStartOptions {
     pub signal_storage_path: Option<PathBuf>,
     /// optional bearer token secret for HTTP auth（可选 Bearer Token 鉴权密钥）.
     pub auth_secret: Option<String>,
+    /// allow private-network clients to skip token auth（允许局域网客户端免 Token 访问）.
+    pub allow_lan_without_auth: bool,
     /// enable mDNS service discovery for LAN peer auto-detection（启用 mDNS 局域网自动发现）.
     pub enable_mdns: bool,
     /// optional data directory for agent workspaces（可选 Agent workspace 数据目录）.
@@ -158,6 +160,7 @@ impl Default for RuntimeStartOptions {
                 .ok()
                 .map(PathBuf::from),
             auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
+            allow_lan_without_auth: false,
             enable_mdns,
             data_dir: env::var("EXOMIND_RT_DATA_DIR").ok().map(PathBuf::from),
         }
@@ -465,6 +468,7 @@ pub async fn start_with_options(
         options.auth_secret.clone(),
         runtime_storage_paths_for_persistent_start(options.data_dir.clone()),
     );
+    state.allow_lan_without_auth = options.allow_lan_without_auth;
 
     // mDNS discovery setup.
     let mdns = if options.enable_mdns {
@@ -779,6 +783,7 @@ pub struct AppState {
     pub mesh: Arc<MeshState>,
     pub mesh_relay: Option<Arc<MeshRelayManager>>,
     pub auth_secret: Option<String>,
+    pub allow_lan_without_auth: bool,
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub pairing: Arc<pairing::PairingManager>,
     pub config_store: Arc<config::ConfigStore>,
@@ -1021,6 +1026,7 @@ impl AppState {
             mesh,
             mesh_relay,
             auth_secret,
+            allow_lan_without_auth: false,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config_store),
@@ -1141,6 +1147,7 @@ mod tests {
             )),
             mesh_relay: None,
             auth_secret: None,
+            allow_lan_without_auth: false,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
@@ -1427,6 +1434,50 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("http://127.0.0.1:1420")
         );
+    }
+
+    #[tokio::test]
+    async fn protected_routes_allow_private_lan_requests_without_token_when_enabled() {
+        const TEST_PORT: u16 = 3005;
+        let registry = agent::AgentRegistry::new();
+        let signal_pool = Arc::new(signal::SignalPool::new(None));
+        let mut state = app_state_with_registry(TEST_PORT, registry, signal_pool);
+        state.auth_secret = Some("lan-secret".to_string());
+        state.allow_lan_without_auth = true;
+
+        let mut request = Request::builder()
+            .uri("/topology")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(axum::extract::ConnectInfo(
+            std::net::SocketAddr::from(([192, 168, 1, 48], 42000)),
+        ));
+
+        let response = app_with_state(state).oneshot(request).await.unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+    }
+
+    #[tokio::test]
+    async fn protected_routes_still_require_token_for_public_ips_even_when_lan_bypass_enabled() {
+        const TEST_PORT: u16 = 3006;
+        let registry = agent::AgentRegistry::new();
+        let signal_pool = Arc::new(signal::SignalPool::new(None));
+        let mut state = app_state_with_registry(TEST_PORT, registry, signal_pool);
+        state.auth_secret = Some("lan-secret".to_string());
+        state.allow_lan_without_auth = true;
+
+        let mut request = Request::builder()
+            .uri("/topology")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(axum::extract::ConnectInfo(
+            std::net::SocketAddr::from(([8, 8, 8, 8], 42000)),
+        ));
+
+        let response = app_with_state(state).oneshot(request).await.unwrap();
+
+        assert_eq!(StatusCode::UNAUTHORIZED, response.status());
     }
 
     #[test]

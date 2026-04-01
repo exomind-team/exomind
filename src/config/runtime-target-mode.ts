@@ -6,14 +6,18 @@ import {
 } from '@/config/runtime-config-cache';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
+  getEmbeddedRuntimeAllowLanWithoutAuth,
   getEmbeddedRuntimeNetworkMode,
   getRuntimeExternalAddress,
   getRuntimeExternalAuthToken,
   getRuntimeTargetMode,
+  setEmbeddedRuntimeAllowLanWithoutAuth,
+  setEmbeddedRuntimeNetworkMode,
   resolveEmbeddedRuntimeBindHost,
   setRuntimeExternalAddress,
   setRuntimeExternalAuthToken,
   setRuntimeTargetMode,
+  type EmbeddedRuntimeNetworkMode,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
 
@@ -29,6 +33,16 @@ function normalizeRuntimeExternalAddress(address: string | null | undefined): st
   }
   const trimmed = address.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeEmbeddedRuntimeNetworkMode(
+  mode: string | null | undefined,
+): EmbeddedRuntimeNetworkMode {
+  return mode === 'lan' ? 'lan' : 'local';
+}
+
+function normalizeLanNoAuthValue(value: boolean | null | undefined): boolean {
+  return value === true;
 }
 
 export async function setPersistedRuntimeTargetMode(
@@ -103,15 +117,44 @@ export async function setPersistedRuntimeExternalAuthToken(token: string): Promi
   }
 }
 
+export async function setPersistedEmbeddedRuntimeAllowLanWithoutAuth(
+  enabled: boolean,
+): Promise<boolean> {
+  const previousValue = getEmbeddedRuntimeAllowLanWithoutAuth();
+  const normalized = normalizeLanNoAuthValue(enabled);
+
+  setEmbeddedRuntimeAllowLanWithoutAuth(normalized);
+
+  if (!await isTauri()) {
+    return normalized;
+  }
+
+  try {
+    const persistedValue = normalizeLanNoAuthValue(
+      await invoke<boolean>('runtime_lan_no_auth_set', { enabled: normalized }),
+    );
+    setEmbeddedRuntimeAllowLanWithoutAuth(persistedValue);
+    return persistedValue;
+  } catch (error) {
+    setEmbeddedRuntimeAllowLanWithoutAuth(previousValue);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
 export async function hydratePersistedRuntimeTargetConfig(): Promise<void> {
   if (!await isTauri()) {
     return;
   }
 
-  const [persistedMode, persistedAddress] = await Promise.all([
+  const [persistedMode, persistedNetworkMode, persistedAddress, persistedLanNoAuth] = await Promise.all([
     invoke<string>('runtime_target_mode_get').catch(() => null),
+    invoke<string>('runtime_network_mode_get').catch(() => null),
     invoke<string>('runtime_external_address_get').catch(() => null),
+    invoke<boolean>('runtime_lan_no_auth_get').catch(() => null),
   ]);
+
+  setEmbeddedRuntimeNetworkMode(normalizeEmbeddedRuntimeNetworkMode(persistedNetworkMode));
+  setEmbeddedRuntimeAllowLanWithoutAuth(normalizeLanNoAuthValue(persistedLanNoAuth));
 
   const normalizedAddress = normalizeRuntimeExternalAddress(persistedAddress);
   if (normalizedAddress) {

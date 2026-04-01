@@ -5,9 +5,11 @@ export const RUNTIME_TARGET_MODE_STORAGE_KEY = 'exomind:runtimeTargetMode';
 export const RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY = 'exomind:runtimeExternalAddress';
 export const RUNTIME_EXTERNAL_AUTH_TOKEN_STORAGE_KEY = 'exomind:runtimeExternalAuthToken';
 export const EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY = 'exomind:embeddedRuntimeNetworkMode';
+export const EMBEDDED_RUNTIME_ALLOW_LAN_NO_AUTH_STORAGE_KEY = 'exomind:embeddedRuntimeAllowLanNoAuth';
 export const EMBEDDED_RUNTIME_STATUS_STORAGE_KEY = 'exomind:embeddedRuntimeStatus';
 export const RUNTIME_TARGET_CHANGED_EVENT = 'exomind:runtime-target-changed';
 export const EMBEDDED_RUNTIME_NETWORK_MODE_CHANGED_EVENT = 'exomind:embedded-runtime-network-mode-changed';
+export const EMBEDDED_RUNTIME_ALLOW_LAN_NO_AUTH_CHANGED_EVENT = 'exomind:embedded-runtime-allow-lan-no-auth-changed';
 const RUNTIME_TARGET_MODE_VALUE_CHANGED_EVENT = 'exomind:runtime-target-mode-value-changed';
 const RUNTIME_EXTERNAL_ADDRESS_CHANGED_EVENT = 'exomind:runtime-external-address-changed';
 const RUNTIME_EXTERNAL_AUTH_TOKEN_CHANGED_EVENT = 'exomind:runtime-external-auth-token-changed';
@@ -45,6 +47,7 @@ const DEFAULT_EXTERNAL_RUNTIME_HOST = '127.0.0.1';
 export const DEFAULT_EXTERNAL_RUNTIME_PORT = DEFAULT_EMBEDDED_RUNTIME_PORT;
 const DEFAULT_RUNTIME_TARGET_MODE: RuntimeTargetMode = 'embedded';
 const DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE: EmbeddedRuntimeNetworkMode = 'local';
+const DEFAULT_EMBEDDED_RUNTIME_ALLOW_LAN_NO_AUTH = false;
 const DEFAULT_RUNTIME_EXTERNAL_ADDRESS = `${DEFAULT_EXTERNAL_RUNTIME_HOST}:${DEFAULT_EXTERNAL_RUNTIME_PORT}`;
 
 function normalizeRuntimeMode(rawValue: string | null | undefined): RuntimeTargetMode {
@@ -55,6 +58,12 @@ function normalizeEmbeddedRuntimeNetworkMode(
   rawValue: string | null | undefined,
 ): EmbeddedRuntimeNetworkMode {
   return rawValue === 'lan' ? 'lan' : 'local';
+}
+
+function normalizeEmbeddedRuntimeAllowLanWithoutAuth(
+  rawValue: string | null | undefined,
+): boolean {
+  return rawValue === 'true';
 }
 
 function formatHostForAddress(host: string): string {
@@ -264,6 +273,15 @@ const embeddedRuntimeNetworkModeModule = createConfigModule<EmbeddedRuntimeNetwo
   persistMode: 'runtime-preferred',
 });
 
+const embeddedRuntimeAllowLanWithoutAuthModule = createConfigModule<boolean>({
+  storageKey: EMBEDDED_RUNTIME_ALLOW_LAN_NO_AUTH_STORAGE_KEY,
+  eventName: EMBEDDED_RUNTIME_ALLOW_LAN_NO_AUTH_CHANGED_EVENT,
+  defaultValue: DEFAULT_EMBEDDED_RUNTIME_ALLOW_LAN_NO_AUTH,
+  normalize: normalizeEmbeddedRuntimeAllowLanWithoutAuth,
+  serialize: (value) => String(value === true),
+  persistMode: 'runtime-preferred',
+});
+
 const runtimeExternalAddressModule = createConfigModule<string>({
   storageKey: RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY,
   eventName: RUNTIME_EXTERNAL_ADDRESS_CHANGED_EVENT,
@@ -305,6 +323,10 @@ export function getEmbeddedRuntimeNetworkMode(): EmbeddedRuntimeNetworkMode {
   return embeddedRuntimeNetworkModeModule.get();
 }
 
+export function getEmbeddedRuntimeAllowLanWithoutAuth(): boolean {
+  return embeddedRuntimeAllowLanWithoutAuthModule.get();
+}
+
 export function setRuntimeTargetMode(mode: RuntimeTargetMode): void {
   runtimeTargetModeModule.set(mode);
   emitRuntimeTargetChanged();
@@ -314,10 +336,20 @@ export function setEmbeddedRuntimeNetworkMode(mode: EmbeddedRuntimeNetworkMode):
   embeddedRuntimeNetworkModeModule.set(mode);
 }
 
+export function setEmbeddedRuntimeAllowLanWithoutAuth(enabled: boolean): void {
+  embeddedRuntimeAllowLanWithoutAuthModule.set(enabled);
+}
+
 export function subscribeEmbeddedRuntimeNetworkModeChanges(
   listener: (mode: EmbeddedRuntimeNetworkMode) => void,
 ): () => void {
   return embeddedRuntimeNetworkModeModule.subscribe(listener);
+}
+
+export function subscribeEmbeddedRuntimeAllowLanWithoutAuthChanges(
+  listener: (enabled: boolean) => void,
+): () => void {
+  return embeddedRuntimeAllowLanWithoutAuthModule.subscribe(listener);
 }
 
 export function getRuntimeExternalAddress(): string {

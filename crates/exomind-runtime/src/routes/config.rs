@@ -136,17 +136,7 @@ async fn import_frontend_config(
     for entry in payload.entries {
         if state
             .config_store
-            .get(&payload.scope, &entry.key)
-            .map_err(internal_error)?
-            .is_some()
-        {
-            skipped += 1;
-            continue;
-        }
-
-        state
-            .config_store
-            .put(PutConfigEntryInput {
+            .put_if_absent(PutConfigEntryInput {
                 scope: payload.scope.clone(),
                 key: entry.key,
                 value: entry.value,
@@ -154,8 +144,12 @@ async fn import_frontend_config(
                 source: entry.source,
                 source_origin: entry.source_origin,
             })
-            .map_err(internal_error)?;
-        imported += 1;
+            .map_err(internal_error)?
+        {
+            imported += 1;
+        } else {
+            skipped += 1;
+        }
     }
 
     Ok(Json(ImportResponse {
@@ -202,9 +196,10 @@ mod tests {
                 Arc::clone(&signal_pool),
                 None,
             )),
-            mesh_relay: None,
-            auth_secret: None,
-            mdns: None,
+        mesh_relay: None,
+        auth_secret: None,
+        allow_lan_without_auth: false,
+        mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             config_store: Arc::new(crate::config::ConfigStore::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),

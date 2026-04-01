@@ -223,7 +223,7 @@ window.addEventListener('storage', (event) => {
 
 | 步骤 | 状态 | commit | 备注 |
 |------|------|--------|------|
-| 步骤 1 Bug 1 | | | |
-| 步骤 2 Bug 5 | | | |
-| 步骤 3 Bug 6 | | | |
-| 步骤 4 Bug 4 | | | |
+| 步骤 1 Bug 1 | 已完成 | 待提交 | 已新增 `put_if_absent` 并改为原子导入；`cargo test -p exomind-runtime --lib config::store`、`cargo test -p exomind-runtime --lib routes::config` 通过 |
+| 步骤 2 Bug 5 | 已完成 | 待提交 | localStorage mirror 的 read/write/remove 异常已改为 `console.warn`，相关 Vitest 通过 |
+| 步骤 3 Bug 6 | 已完成 | 待提交 | runtime snapshot 已加最小 JSON 校验与 malformed entry 过滤，相关 Vitest 通过 |
+| 步骤 4 Bug 4 | 已完成 | 待提交 | 已增加 `storage` 事件同步 Runtime cache，并验证订阅者能读到更新值 |

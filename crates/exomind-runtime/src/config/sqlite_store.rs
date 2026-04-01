@@ -95,6 +95,26 @@ impl SqliteConfigStore {
         Ok(entry)
     }
 
+    pub fn put_if_absent(&self, input: PutConfigEntryInput) -> Result<bool, ConfigStoreError> {
+        let conn = self.connection();
+        let changes = conn.execute(
+            "INSERT OR IGNORE INTO runtime_config_entries (
+                scope, entry_key, value, sensitive, updated_at, source, source_origin
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                input.scope,
+                input.key,
+                input.value,
+                i64::from(input.sensitive),
+                chrono::Utc::now().to_rfc3339(),
+                input.source,
+                input.source_origin,
+            ],
+        )?;
+
+        Ok(changes > 0)
+    }
+
     pub fn get(&self, scope: &str, key: &str) -> Result<Option<ConfigEntry>, ConfigStoreError> {
         let conn = self.connection();
         let mut stmt = conn.prepare(

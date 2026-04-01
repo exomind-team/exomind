@@ -2,7 +2,7 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use crate::AppState;
 
@@ -38,6 +38,21 @@ fn is_loopback_request(request: &Request) -> bool {
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|ConnectInfo(addr)| addr.ip().is_loopback())
+        .unwrap_or(false)
+}
+
+fn is_private_network_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => ipv4.is_private() || ipv4.is_link_local(),
+        IpAddr::V6(ipv6) => ipv6.is_unique_local() || ipv6.is_unicast_link_local(),
+    }
+}
+
+fn is_private_network_request(request: &Request) -> bool {
+    request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| is_private_network_ip(addr.ip()) && !addr.ip().is_loopback())
         .unwrap_or(false)
 }
 
@@ -119,6 +134,10 @@ pub async fn require_auth(
     next: Next,
 ) -> Result<Response, StatusCode> {
     if is_loopback_request(&request) && has_trusted_loopback_origin(&request) {
+        return Ok(next.run(request).await);
+    }
+
+    if state.allow_lan_without_auth && is_private_network_request(&request) {
         return Ok(next.run(request).await);
     }
 

@@ -40,6 +40,7 @@ const AUDITED_SETTINGS_IDS = [
   'voice-overlay-bottom-offset',
   'now-workbench-overlay-enabled',
   'volcano-engine-key',
+  'volcano-usage-summary',
   'volcano-endpoint',
   'volcano-resource-model',
   'volcano-resource-id',
@@ -73,6 +74,7 @@ const AUDITED_SETTINGS_IDS = [
   'feature-toggles',
   'instance-diagnostics',
   'device-pairing',
+  'embedded-runtime-lan-no-auth',
   'clear-local-cache',
   'reset-all-settings',
 ] as const;
@@ -147,6 +149,7 @@ const CUSTOM_ITEM_IDS = [
   'sound-preset',
   'focus-bgm',
   'volcano-engine-key',
+  'volcano-usage-summary',
   'moss-voice-test',
   'volcano-asr-test',
   'ai-registry',
@@ -397,6 +400,8 @@ describe('settings registry coverage audit', () => {
         ...getBaseCtx(),
         isDesktop: true,
         isTauriWindow: true,
+        runtimeTargetMode: 'embedded',
+        embeddedRuntimeNetworkMode: 'lan',
       },
       {
         ...getBaseCtx(),

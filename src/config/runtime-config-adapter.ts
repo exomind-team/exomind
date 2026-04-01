@@ -41,6 +41,7 @@ export const RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS = [
   'exomind:focusBgmPreferences',
   'exomind:runtimeTargetMode',
   'exomind:embeddedRuntimeNetworkMode',
+  'exomind:embeddedRuntimeAllowLanNoAuth',
   'exomind:runtimeExternalAddress',
   'exomind:eventlogBackendMode',
   'exomind:taskBackendMode',
@@ -234,7 +235,23 @@ async function fetchRuntimeSnapshot(
   if (!response.ok) {
     throw new Error(`runtime config snapshot failed: ${response.status}`);
   }
-  return response.json() as Promise<RuntimeConfigEntryRecord[]>;
+  const data: unknown = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error(`runtime config snapshot: expected array, got ${typeof data}`);
+  }
+
+  return data.filter((entry): entry is RuntimeConfigEntryRecord => {
+    if (typeof entry !== 'object' || entry === null) {
+      return false;
+    }
+
+    const record = entry as Record<string, unknown>;
+    return typeof record.key === 'string'
+      && typeof record.value === 'string'
+      && (record.sensitive === undefined || typeof record.sensitive === 'boolean')
+      && (record.source === undefined || typeof record.source === 'string')
+      && (record.sourceOrigin === undefined || typeof record.sourceOrigin === 'string');
+  });
 }
 
 async function importFrontendEntriesIfEmpty(

@@ -29,6 +29,7 @@ fn test_app_state(port: u16, host_id: &str, signal_pool: Arc<SignalPool>) -> App
         )),
         mesh_relay: None,
         auth_secret: None,
+        allow_lan_without_auth: false,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),

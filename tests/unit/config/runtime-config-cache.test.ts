@@ -846,4 +846,110 @@ describe('runtime config cache（Runtime 配置缓存）', () => {
     expect(cacheModule.getRuntimeConfigValueSync('moss_api_key')).toBe('sqlite-only-secret');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('filters malformed runtime snapshot entries without crashing（异常 snapshot 条目会被过滤）', async () => {
+    isTauriMock.mockResolvedValue(true);
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([
+        { key: 'exomind:themePreference', value: 'dark' },
+        null,
+        { key: 'broken:boolean', value: true },
+        { key: 7, value: 'invalid-key' },
+        { key: 'missing-value' },
+      ]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    (globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    const cacheModule = await import('@/config/runtime-config-cache');
+    await cacheModule.bootstrapRuntimeConfig();
+
+    expect(cacheModule.isRuntimeConfigEnabled()).toBe(true);
+    expect(cacheModule.getRuntimeConfigValueSync('exomind:themePreference')).toBe('dark');
+    expect(cacheModule.getRuntimeConfigValueSync('broken:boolean')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs localStorage mirror failures without crashing（本地镜像失败只记日志不崩溃）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const getItemSpy = vi.spyOn(window.localStorage, 'getItem')
+      .mockImplementationOnce(() => {
+        throw new Error('read failed');
+      });
+    const setItemSpy = vi.spyOn(window.localStorage, 'setItem')
+      .mockImplementationOnce(() => {
+        throw new Error('write failed');
+      });
+    const removeItemSpy = vi.spyOn(window.localStorage, 'removeItem')
+      .mockImplementationOnce(() => {
+        throw new Error('remove failed');
+      });
+
+    const cacheModule = await import('@/config/runtime-config-cache');
+
+    expect(cacheModule.getRuntimeConfigValueSync('exomind:themePreference')).toBeNull();
+
+    cacheModule.__primeRuntimeConfigForTests({});
+    cacheModule.setRuntimeConfigValue('exomind:themePreference', 'dark');
+    cacheModule.removeRuntimeConfigValue('exomind:themePreference');
+    await flushMicrotasks();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[runtime-config] localStorage mirror read failed:',
+      'exomind:themePreference',
+      expect.any(Error),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[runtime-config] localStorage mirror write failed:',
+      'exomind:themePreference',
+      expect.any(Error),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[runtime-config] localStorage mirror remove failed:',
+      'exomind:themePreference',
+      expect.any(Error),
+    );
+    expect(cacheModule.getRuntimeConfigValueSync('exomind:themePreference')).toBeNull();
+
+    getItemSpy.mockRestore();
+    setItemSpy.mockRestore();
+    removeItemSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it('updates runtime-backed cache before storage subscribers run（跨窗口 storage 事件会先刷新 Runtime 缓存）', async () => {
+    isTauriMock.mockResolvedValue(true);
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([
+        { key: 'exomind:themePreference', value: 'dark' },
+      ]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    (globalThis as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    const cacheModule = await import('@/config/runtime-config-cache');
+    const themeModule = await import('@/config/theme');
+    const listener = vi.fn();
+    const unsubscribe = themeModule.subscribeThemePreferenceChanges(listener);
+
+    await cacheModule.bootstrapRuntimeConfig();
+
+    window.localStorage.setItem('exomind:themePreference', 'light');
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'exomind:themePreference',
+      newValue: 'light',
+      storageArea: window.localStorage,
+      url: window.location.href,
+    }));
+
+    expect(cacheModule.getRuntimeConfigValueSync('exomind:themePreference')).toBe('light');
+    expect(themeModule.getThemePreference()).toBe('light');
+    expect(listener).toHaveBeenCalledWith('light');
+
+    unsubscribe();
+  });
 });

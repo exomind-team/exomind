@@ -135,6 +135,12 @@ struct RuntimeExternalAddressPersisted {
     address: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeLanNoAuthPersisted {
+    allow_lan_without_auth: bool,
+}
+
 impl RuntimeNetworkMode {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -192,6 +198,12 @@ fn runtime_external_address_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir
         .join("settings")
         .join("runtime-external-address.json")
+}
+
+fn runtime_lan_no_auth_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir
+        .join("settings")
+        .join("runtime-lan-no-auth.json")
 }
 
 fn load_runtime_network_mode_from_path(path: &Path) -> Result<RuntimeNetworkMode, String> {
@@ -317,6 +329,31 @@ fn save_runtime_external_address_to_path(path: &Path, address: &str) -> Result<S
     Ok(normalized)
 }
 
+fn load_runtime_lan_no_auth_from_path(path: &Path) -> Result<bool, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str::<RuntimeLanNoAuthPersisted>(&raw)
+            .map(|persisted| persisted.allow_lan_without_auth)
+            .map_err(|error| format!("failed to parse runtime lan no-auth file: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("failed to read runtime lan no-auth file: {error}")),
+    }
+}
+
+fn save_runtime_lan_no_auth_to_path(path: &Path, enabled: bool) -> Result<bool, String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create runtime settings dir: {error}"))?;
+    }
+
+    let payload = serde_json::to_string_pretty(&RuntimeLanNoAuthPersisted {
+        allow_lan_without_auth: enabled,
+    })
+    .map_err(|error| format!("failed to serialize runtime lan no-auth setting: {error}"))?;
+    std::fs::write(path, payload)
+        .map_err(|error| format!("failed to write runtime lan no-auth file: {error}"))?;
+    Ok(enabled)
+}
+
 pub fn load_persisted_runtime_network_mode(app: &AppHandle) -> Result<RuntimeNetworkMode, String> {
     let app_data_dir = resolve_instance_app_data_dir(app)?;
     load_runtime_network_mode_from_path(&runtime_network_mode_path(&app_data_dir))
@@ -333,6 +370,11 @@ pub fn load_persisted_runtime_external_address(app: &AppHandle) -> Result<String
         .app_data_dir()
         .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
     load_runtime_external_address_from_path(&runtime_external_address_path(&app_data_dir))
+}
+
+pub fn load_persisted_runtime_lan_no_auth(app: &AppHandle) -> Result<bool, String> {
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
+    load_runtime_lan_no_auth_from_path(&runtime_lan_no_auth_path(&app_data_dir))
 }
 
 fn save_persisted_runtime_network_mode(
@@ -362,6 +404,14 @@ fn save_persisted_runtime_external_address(
         .app_data_dir()
         .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
     save_runtime_external_address_to_path(&runtime_external_address_path(&app_data_dir), address)
+}
+
+fn save_persisted_runtime_lan_no_auth(
+    app: &AppHandle,
+    enabled: bool,
+) -> Result<bool, String> {
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
+    save_runtime_lan_no_auth_to_path(&runtime_lan_no_auth_path(&app_data_dir), enabled)
 }
 
 fn lock_or_error<'a>(
@@ -695,6 +745,7 @@ pub fn sync_android_runtime_keepalive(app: &AppHandle, enabled: bool, host: &str
 }
 
 pub async fn ensure_runtime_started(
+    app: &AppHandle,
     state: Arc<RuntimeProcessState>,
     host: Option<String>,
     port: Option<u16>,
@@ -719,6 +770,12 @@ pub async fn ensure_runtime_started(
     if let Some(runtime_port) = port {
         options.port = runtime_port;
     }
+    options.allow_lan_without_auth = load_persisted_runtime_lan_no_auth(app).unwrap_or_else(|error| {
+        log::warn!(
+            "failed to load persisted runtime LAN no-auth setting, fallback to disabled: {error}"
+        );
+        false
+    });
     let requested_host = options.bind_host.clone();
     let requested_port = options.port;
     let requested_auth_secret = options.auth_secret.clone();
@@ -897,7 +954,7 @@ pub async fn runtime_service_start(
     host: Option<String>,
     port: Option<u16>,
 ) -> Result<RuntimeServiceStatus, String> {
-    let status = ensure_runtime_started(state.inner().clone(), host, port).await?;
+    let status = ensure_runtime_started(&app, state.inner().clone(), host, port).await?;
     sync_android_runtime_keepalive(&app, true, &status.host, status.port);
     Ok(status)
 }
@@ -928,6 +985,12 @@ pub fn runtime_network_mode_set(app: AppHandle, mode: String) -> Result<String, 
 }
 
 #[tauri::command]
+pub fn runtime_network_mode_get(app: AppHandle) -> Result<String, String> {
+    let mode = load_persisted_runtime_network_mode(&app)?;
+    Ok(mode.as_str().to_string())
+}
+
+#[tauri::command]
 pub fn runtime_target_mode_set(app: AppHandle, mode: String) -> Result<String, String> {
     let parsed = RuntimeTargetMode::parse(&mode)?;
     Ok(save_persisted_runtime_target_mode(&app, parsed)?
@@ -949,6 +1012,16 @@ pub fn runtime_external_address_set(app: AppHandle, address: String) -> Result<S
 #[tauri::command]
 pub fn runtime_external_address_get(app: AppHandle) -> Result<String, String> {
     load_persisted_runtime_external_address(&app)
+}
+
+#[tauri::command]
+pub fn runtime_lan_no_auth_set(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    save_persisted_runtime_lan_no_auth(&app, enabled)
+}
+
+#[tauri::command]
+pub fn runtime_lan_no_auth_get(app: AppHandle) -> Result<bool, String> {
+    load_persisted_runtime_lan_no_auth(&app)
 }
 
 #[tauri::command]
@@ -1106,6 +1179,36 @@ mod tests {
         let loaded = super::load_runtime_network_mode_from_path(&path)
             .expect("missing runtime network mode file should fall back");
         assert_eq!(loaded, super::RuntimeNetworkMode::Local);
+    }
+
+    #[test]
+    fn runtime_lan_no_auth_file_roundtrip() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("exomind-rt-lan-no-auth-{}", uuid::Uuid::new_v4()));
+        let path = temp_dir.join("runtime-lan-no-auth.json");
+
+        let saved = super::save_runtime_lan_no_auth_to_path(&path, true)
+            .expect("runtime lan no-auth setting should persist");
+        assert!(saved);
+
+        let loaded = super::load_runtime_lan_no_auth_from_path(&path)
+            .expect("runtime lan no-auth setting should load");
+        assert!(loaded);
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn missing_runtime_lan_no_auth_file_defaults_to_disabled() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "exomind-rt-lan-no-auth-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let path = temp_dir.join("missing-runtime-lan-no-auth.json");
+
+        let loaded = super::load_runtime_lan_no_auth_from_path(&path)
+            .expect("missing runtime lan no-auth file should fall back");
+        assert!(!loaded);
     }
 
     #[test]

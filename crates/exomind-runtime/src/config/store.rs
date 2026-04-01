@@ -47,20 +47,31 @@ impl ConfigStore {
         match &self.backend {
             ConfigStoreBackend::Sqlite(store) => store.put(input),
             ConfigStoreBackend::Memory(_) => {
-                let entry = ConfigEntry {
-                    scope: input.scope,
-                    key: input.key,
-                    value: input.value,
-                    sensitive: input.sensitive,
-                    updated_at: chrono::Utc::now().to_rfc3339(),
-                    source: input.source,
-                    source_origin: input.source_origin,
-                };
+                let entry = Self::build_entry(input);
                 self.with_memory_mut(|entries| {
                     entries.insert((entry.scope.clone(), entry.key.clone()), entry.clone());
                     Ok(entry)
                 })
             }
+        }
+    }
+
+    pub fn put_if_absent(&self, input: PutConfigEntryInput) -> Result<bool, ConfigStoreError> {
+        match &self.backend {
+            ConfigStoreBackend::Sqlite(store) => store.put_if_absent(input),
+            ConfigStoreBackend::Memory(_) => self.with_memory_mut(|entries| {
+                use std::collections::hash_map::Entry;
+
+                let entry = Self::build_entry(input);
+                let key = (entry.scope.clone(), entry.key.clone());
+                match entries.entry(key) {
+                    Entry::Occupied(_) => Ok(false),
+                    Entry::Vacant(slot) => {
+                        slot.insert(entry);
+                        Ok(true)
+                    }
+                }
+            }),
         }
     }
 
@@ -124,6 +135,18 @@ impl ConfigStore {
         }
     }
 
+    fn build_entry(input: PutConfigEntryInput) -> ConfigEntry {
+        ConfigEntry {
+            scope: input.scope,
+            key: input.key,
+            value: input.value,
+            sensitive: input.sensitive,
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            source: input.source,
+            source_origin: input.source_origin,
+        }
+    }
+
     fn with_memory_mut<R>(
         &self,
         f: impl FnOnce(&mut HashMap<(String, String), ConfigEntry>) -> R,
@@ -148,6 +171,9 @@ impl Default for ConfigStore {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
     use tempfile::tempdir;
 
     use super::*;
@@ -237,5 +263,54 @@ mod tests {
 
         assert!(deleted.is_some());
         assert!(store.get(USER_CONFIG_SCOPE, "exomind:inputSendMode").unwrap().is_none());
+    }
+
+    #[test]
+    fn put_if_absent_does_not_overwrite_existing_entry() {
+        let store = ConfigStore::new();
+        store
+            .put(put_input(USER_CONFIG_SCOPE, "exomind:themePreference", "dark"))
+            .unwrap();
+
+        let inserted = store
+            .put_if_absent(put_input(USER_CONFIG_SCOPE, "exomind:themePreference", "light"))
+            .unwrap();
+        let entry = store.get(USER_CONFIG_SCOPE, "exomind:themePreference").unwrap().unwrap();
+
+        assert!(!inserted);
+        assert_eq!(entry.value, "dark");
+    }
+
+    #[test]
+    fn concurrent_import_respects_first_writer() {
+        let store = Arc::new(ConfigStore::new());
+        let barrier = Arc::new(Barrier::new(2));
+
+        let handles: Vec<_> = ["dark", "light"]
+            .into_iter()
+            .map(|value| {
+                let store = Arc::clone(&store);
+                let barrier = Arc::clone(&barrier);
+                let value = value.to_string();
+
+                thread::spawn(move || {
+                    barrier.wait();
+                    store.put_if_absent(put_input(
+                        USER_CONFIG_SCOPE,
+                        "exomind:themePreference",
+                        &value,
+                    ))
+                })
+            })
+            .collect();
+
+        let results: Vec<bool> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap().unwrap())
+            .collect();
+        let entry = store.get(USER_CONFIG_SCOPE, "exomind:themePreference").unwrap().unwrap();
+
+        assert_eq!(results.into_iter().filter(|inserted| *inserted).count(), 1);
+        assert!(matches!(entry.value.as_str(), "dark" | "light"));
     }
 }

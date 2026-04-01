@@ -35,11 +35,13 @@ import {
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
   DEFAULT_EXTERNAL_RUNTIME_PORT,
   formatRuntimeTargetAddress,
+  getEmbeddedRuntimeAllowLanWithoutAuth,
   getEmbeddedRuntimeNetworkMode,
   getRuntimeExternalAddress,
   getRuntimeTargetMode,
   isDesktopOperatingSystem,
   parseRuntimeAddress,
+  subscribeEmbeddedRuntimeAllowLanWithoutAuthChanges,
   subscribeRuntimeTargetChanges,
   subscribeEmbeddedRuntimeNetworkModeChanges,
 } from '@/config/runtime-target';
@@ -233,6 +235,7 @@ import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import { openExternalUrl } from '@/lib/utils/open-external';
 import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
 import {
+  setPersistedEmbeddedRuntimeAllowLanWithoutAuth,
   setPersistedRuntimeExternalAddress,
   setPersistedRuntimeTargetMode,
 } from '@/config/runtime-target-mode';
@@ -417,6 +420,10 @@ function tauriWindowOnly(ctx: SettingsContext): boolean {
 
 function embeddedRuntimeOnly(ctx: SettingsContext): boolean {
   return Boolean(ctx.isTauriWindow) && (ctx.runtimeTargetMode ?? 'embedded') === 'embedded';
+}
+
+function embeddedRuntimeLanOnly(ctx: SettingsContext): boolean {
+  return embeddedRuntimeOnly(ctx) && (ctx.embeddedRuntimeNetworkMode ?? 'local') === 'lan';
 }
 
 function externalRuntimeOnly(ctx: SettingsContext): boolean {
@@ -1532,6 +1539,24 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     type: 'custom',
     visible: devOnly,
     component: DevicePairingSetting,
+  },
+  {
+    id: 'embedded-runtime-lan-no-auth',
+    label: '局域网免 Token',
+    description: '仅在“内嵌 RT + RT 开放模式 = 局域网”时生效。开启后，局域网设备可直接访问受保护接口，不再需要 Bearer Token；修改后在下次启动或手动重启 RT 时生效。',
+    icon: Shield,
+    category: 'danger',
+    type: 'boolean',
+    rowTestId: 'new-settings-embedded-runtime-lan-no-auth-row',
+    controlTestId: 'new-settings-embedded-runtime-lan-no-auth-switch',
+    visible: embeddedRuntimeLanOnly,
+    get: getEmbeddedRuntimeAllowLanWithoutAuth,
+    set: async (value: boolean) => await setPersistedEmbeddedRuntimeAllowLanWithoutAuth(value),
+    subscribe: subscribeEmbeddedRuntimeAllowLanWithoutAuthChanges,
+    successMessage: (value: boolean) => value
+      ? '已允许局域网设备免 Token 访问内嵌 RT'
+      : '已恢复局域网访问需携带 Token',
+    errorMessagePrefix: '局域网免 Token 设置保存失败',
   },
   {
     id: 'clear-local-cache',

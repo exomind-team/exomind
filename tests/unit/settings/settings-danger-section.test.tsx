@@ -34,8 +34,8 @@ describe('SettingsPage danger section（危险区域样式与按钮动作）', (
     expect(dangerCard).not.toBeNull();
     expect(dangerCard?.getAttribute('style') ?? '').toContain('--settings-tone-color: #DC2626');
 
-    expect(screen.getByText('将清除设备上的临时设置与缓存')).toBeInTheDocument();
-    expect(screen.getByText('恢复默认配置，不影响历史事件数据')).toBeInTheDocument();
+    expect(screen.getByText('清除 UI 偏好与临时缓存，不影响事件日志、任务和时间块数据')).toBeInTheDocument();
+    expect(screen.getByText('将所有设置项恢复为默认值，不影响事件日志、任务和时间块数据')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '立即清空' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '恢复默认' })).toBeInTheDocument();
   });

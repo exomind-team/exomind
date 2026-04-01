@@ -97,6 +97,7 @@ export const settingsPagePreferenceState = {
   agentPageEnabled: false,
   mePageEnabled: false,
   desktopAdaptiveEnabled: true,
+  embeddedRuntimeAllowLanWithoutAuth: false,
   isTauriWindow: false,
   isDesktopOperatingSystem: false,
   voiceShortcutAsrProvider: 'moss' as string,
@@ -209,6 +210,12 @@ vi.mock('@/config/runtime-target', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/config/runtime-target')>();
   return {
     ...actual,
+    getEmbeddedRuntimeAllowLanWithoutAuth: vi.fn(() => settingsPagePreferenceState.embeddedRuntimeAllowLanWithoutAuth),
+    setEmbeddedRuntimeAllowLanWithoutAuth: vi.fn((value: boolean) => {
+      settingsPagePreferenceState.embeddedRuntimeAllowLanWithoutAuth = value;
+      return value;
+    }),
+    subscribeEmbeddedRuntimeAllowLanWithoutAuthChanges: vi.fn(() => () => {}),
     isTauriWindow: vi.fn(() => settingsPagePreferenceState.isTauriWindow),
     isDesktopOperatingSystem: vi.fn(() => settingsPagePreferenceState.isDesktopOperatingSystem),
   };

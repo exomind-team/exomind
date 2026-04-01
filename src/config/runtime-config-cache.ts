@@ -51,6 +51,8 @@ const state: RuntimeConfigCacheState = {
   bootstrapRetryTimer: null,
 };
 
+let runtimeStorageSyncHandler: ((event: StorageEvent) => void) | null = null;
+
 function readLocalStorageValue(key: string): string | null {
   if (typeof window === 'undefined') {
     return null;
@@ -58,7 +60,8 @@ function readLocalStorageValue(key: string): string | null {
 
   try {
     return window.localStorage.getItem(key);
-  } catch {
+  } catch (error) {
+    console.warn('[runtime-config] localStorage mirror read failed:', key, error);
     return null;
   }
 }
@@ -70,8 +73,8 @@ function writeLocalStorageValue(key: string, value: string): void {
 
   try {
     window.localStorage.setItem(key, value);
-  } catch {
-    // Ignore local mirror failures（忽略本地镜像写入失败）
+  } catch (error) {
+    console.warn('[runtime-config] localStorage mirror write failed:', key, error);
   }
 }
 
@@ -82,8 +85,8 @@ function removeLocalStorageValue(key: string): void {
 
   try {
     window.localStorage.removeItem(key);
-  } catch {
-    // Ignore local mirror removal failures（忽略本地镜像删除失败）
+  } catch (error) {
+    console.warn('[runtime-config] localStorage mirror remove failed:', key, error);
   }
 }
 
@@ -259,6 +262,56 @@ function clearBootstrapRetryTimer(): void {
   state.bootstrapRetryTimer = null;
 }
 
+function ensureRuntimeStorageSync(): void {
+  if (typeof window === 'undefined' || runtimeStorageSyncHandler) {
+    return;
+  }
+
+  runtimeStorageSyncHandler = (event: StorageEvent) => {
+    const { key, newValue } = event;
+    if (!key || state.pendingMutations.has(key)) {
+      return;
+    }
+    if (event.storageArea && event.storageArea !== window.localStorage) {
+      return;
+    }
+
+    const hasRuntimeEntry = state.entries.has(key);
+    const hasSuspendedEntry = state.suspendedEntries.has(key);
+    if (!hasRuntimeEntry && !hasSuspendedEntry) {
+      return;
+    }
+
+    if (newValue == null) {
+      if (hasRuntimeEntry) {
+        state.entries.delete(key);
+      }
+      if (hasSuspendedEntry) {
+        state.suspendedEntries.delete(key);
+      }
+      return;
+    }
+
+    if (hasRuntimeEntry) {
+      state.entries.set(key, newValue);
+    }
+    if (hasSuspendedEntry) {
+      state.suspendedEntries.set(key, newValue);
+    }
+  };
+
+  window.addEventListener('storage', runtimeStorageSyncHandler, true);
+}
+
+function clearRuntimeStorageSync(): void {
+  if (typeof window === 'undefined' || !runtimeStorageSyncHandler) {
+    return;
+  }
+
+  window.removeEventListener('storage', runtimeStorageSyncHandler, true);
+  runtimeStorageSyncHandler = null;
+}
+
 function scheduleBootstrapRetry(): void {
   if (typeof window === 'undefined') {
     return;
@@ -401,6 +454,7 @@ export async function bootstrapRuntimeConfig(): Promise<void> {
       state.entries = nextEntries;
       state.suspendedEntries.clear();
       replacePersistedValues(payload.entries);
+      ensureRuntimeStorageSync();
       notifyEffectiveValueChanges(previousValues, changedKeys);
       replayPendingMutations();
     } catch (error) {
@@ -487,6 +541,7 @@ export function __primeRuntimeConfigForTests(entries: Record<string, string>): v
 }
 
 export function __resetRuntimeConfigCacheForTests(): void {
+  clearRuntimeStorageSync();
   clearBootstrapRetryTimer();
   state.bootstrapped = false;
   state.bootstrapSuspended = false;

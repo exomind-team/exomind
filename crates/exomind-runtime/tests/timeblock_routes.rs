@@ -31,6 +31,7 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         )),
         mesh_relay: None,
         auth_secret: None,
+        allow_lan_without_auth: false,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),

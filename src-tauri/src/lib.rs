@@ -28,7 +28,8 @@ use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_peer_dial_address,
     load_persisted_runtime_network_mode, load_persisted_runtime_target_mode,
     runtime_external_address_get,
-    runtime_external_address_set, runtime_network_mode_set,
+    runtime_external_address_set, runtime_lan_no_auth_get, runtime_lan_no_auth_set,
+    runtime_network_mode_get, runtime_network_mode_set,
     runtime_service_reachable_address, runtime_service_start, runtime_service_status,
     runtime_service_stop, runtime_target_mode_get, runtime_target_mode_set, signal_publish_fast,
     sync_android_runtime_keepalive, RuntimeProcessState, RuntimeTargetMode,
@@ -278,6 +279,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     // Keep embedded runtime port aligned with EXOMIND_RT_PORT（与前端端口配置保持一致）.
                     match ensure_runtime_started(
+                        &app_handle,
                         runtime_state,
                         Some(runtime_bind_host),
                         Some(runtime_port),
@@ -344,10 +346,13 @@ pub fn run() {
             runtime_service_stop,
             runtime_service_status,
             runtime_network_mode_set,
+            runtime_network_mode_get,
             runtime_target_mode_set,
             runtime_target_mode_get,
             runtime_external_address_set,
             runtime_external_address_get,
+            runtime_lan_no_auth_set,
+            runtime_lan_no_auth_get,
             runtime_service_reachable_address,
             runtime_service_peer_dial_address,
             signal_publish_fast,

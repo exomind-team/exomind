@@ -70,11 +70,7 @@ async fn runtime_spawns_reviewer_and_classifier_with_rt_url() {
         spawn_ts_agents: true,
         ts_agent_command: "bun".to_string(),
         ts_agent_workdir: Some(root.clone()),
-        mesh_state_path: None,
-        signal_storage_path: None,
-        auth_secret: None,
-        enable_mdns: false,
-        data_dir: None,
+        ..RuntimeStartOptions::default()
     })
     .await
     .expect("runtime should start with ts agents");
