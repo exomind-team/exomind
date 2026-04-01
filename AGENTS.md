@@ -89,11 +89,11 @@
 ## 图标刷新命令
 
 - 全量刷新（推荐）：`bun run icon:all`
-  - 用途：以 `app_qwen_icon.png` 为母版图（source icon，源图）同步并生成 Tauri + Web 全部图标。
+  - 用途：以 `src-tauri/icons/icon.svg` 为母版图（source icon，源图）生成 Tauri + Web 全部图标，并同步 `src-tauri/app-icon.png` 兼容旧链路。
 - 分步命令（按需）：
-  - `bun run icon:sync-source`：同步源图到 `src-tauri/app-icon.png`
-  - `bun run icon:tauri`：生成 `src-tauri/icons/` 的桌面/移动图标资源
-  - `bun run icon:web`：生成 `public/icons/` 的 Web 图标（16/32/180/192/512）
+  - `bun run icon:tauri`：从 `src-tauri/icons/icon.svg` 生成 `src-tauri/icons/` 的桌面/移动图标资源
+  - `bun run icon:sync-source`：把生成后的 `src-tauri/icons/icon.png` 同步到 `src-tauri/app-icon.png`
+  - `bun run icon:web`：从 `src-tauri/icons/icon.svg` 生成 `public/icons/` 的 Web 图标（16/32/180/192/512）
 
 ## 发布流程
 
