@@ -51,8 +51,6 @@ vi.mock('@/lib/services/reminder.service', () => ({
 }));
 
 vi.mock('@/config/port-env', () => ({
-  SYNC_SERVER_URL_CHANGED_EVENT: 'exomind:test-sync-server-url-changed',
-  resolveSyncServerUrl: vi.fn(() => 'http://127.0.0.1:6984'),
   resolveAsrServerUrl: vi.fn(() => 'http://127.0.0.1:1949'),
 }));
 
@@ -78,9 +76,10 @@ describe('legacy sync coordinators issue-381（旧同步协调器门控）', () 
     render(<TaskSyncCoordinator />);
 
     await waitFor(() => {
-      expect(taskService.stopSync).toHaveBeenCalled();
+      expect(taskService.startSync).not.toHaveBeenCalled();
     });
 
+    expect(taskService.stopSync).not.toHaveBeenCalled();
     expect(taskService.startSync).not.toHaveBeenCalled();
   });
 
@@ -94,13 +93,13 @@ describe('legacy sync coordinators issue-381（旧同步协调器门控）', () 
     expect(reminderService.startSync).not.toHaveBeenCalled();
   });
 
-  it('TaskSyncCoordinator still starts legacy sync after explicit legacy connection（显式连接后仍保留旧链路）', async () => {
+  it('TaskSyncCoordinator no longer starts legacy sync after explicit legacy connection（显式连接后也不再启动旧任务同步）', async () => {
     syncStoreState.status.state = 'connected';
 
     render(<TaskSyncCoordinator />);
 
     await waitFor(() => {
-      expect(taskService.startSync).toHaveBeenCalledWith('http://127.0.0.1:6984/remote-space');
+      expect(taskService.startSync).not.toHaveBeenCalled();
     });
   });
 
@@ -114,13 +113,13 @@ describe('legacy sync coordinators issue-381（旧同步协调器门控）', () 
     });
   });
 
-  it('TaskSyncCoordinator keeps legacy sync alive while sync-store is syncing（手动同步中不应误停）', async () => {
+  it('TaskSyncCoordinator stays inert while sync-store is syncing（手动同步中也保持 inert）', async () => {
     syncStoreState.status.state = 'syncing';
 
     render(<TaskSyncCoordinator />);
 
     await waitFor(() => {
-      expect(taskService.startSync).toHaveBeenCalledWith('http://127.0.0.1:6984/remote-space');
+      expect(taskService.startSync).not.toHaveBeenCalled();
     });
   });
 

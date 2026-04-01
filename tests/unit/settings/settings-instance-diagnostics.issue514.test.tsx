@@ -26,14 +26,12 @@ vi.mock('@/config/dev-instance-diagnostics', () => ({
     webPort: 5173,
     rtPort: 6984,
     mcpPort: 9232,
-    syncServerUrl: 'http://localhost:6984',
     asrServerUrl: 'http://localhost:1949',
     pid: runtime?.pid ?? null,
     envStatus: {
       VITE_MOSS_API_KEY: { sensitive: true, configured: false },
       VITE_VOLCANO_APP_KEY: { sensitive: true, configured: true },
       EXOMIND_RT_SECRET: { sensitive: true, configured: true },
-      VITE_SYNC_SERVER_URL: { sensitive: false, configured: true, value: 'http://localhost:6984' },
     },
   }),
   isDevInstanceDiagnosticsEnabled: () => true,
@@ -63,11 +61,6 @@ vi.mock('@/lib/services', () => ({
   getTimeBlockBackupService: () => ({ getBackendStatus: vi.fn().mockResolvedValue(backendStatusStub) }),
 }));
 
-vi.mock('@/config/port-env', () => ({
-  getSyncServerUrlOverride: () => null,
-  resolveSyncServerUrl: () => 'http://127.0.0.1:6984',
-  setSyncServerUrlOverride: vi.fn(),
-}));
 
 vi.mock('@/config/theme', () => ({
   getThemePreference: () => 'system',

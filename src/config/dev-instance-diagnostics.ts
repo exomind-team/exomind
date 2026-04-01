@@ -1,4 +1,4 @@
-import { resolveAsrServerUrl, resolveSyncServerUrl } from '@/config/port-env';
+import { resolveAsrServerUrl } from '@/config/port-env';
 import { getHardwareKeyboardState } from '@/config/hardware-keyboard';
 import { isDesktopOperatingSystem, isTauriWindow } from '@/config/runtime-target';
 
@@ -15,15 +15,12 @@ export type DevInstanceMeta = {
   hmrPort: number;
   rtPort: number;
   mcpPort: number;
-  pouchdbPort: number;
   asrPort: number;
-  syncServerEnvUrl?: string;
   asrServerEnvUrl?: string;
   envStatus: Record<string, DevInstanceEnvStatus>;
 };
 
 export type DevInstanceDiagnosticsSnapshot = DevInstanceMeta & {
-  syncServerUrl: string;
   asrServerUrl: string;
   pid: number | null;
   isDesktopOS: boolean;
@@ -39,9 +36,7 @@ const DEFAULT_DEV_INSTANCE_META: DevInstanceMeta = {
   hmrPort: 1421,
   rtPort: 9124,
   mcpPort: 9232,
-  pouchdbPort: 6984,
   asrPort: 1949,
-  syncServerEnvUrl: undefined,
   asrServerEnvUrl: undefined,
   envStatus: {},
 };
@@ -94,9 +89,7 @@ function readInjectedMeta(): DevInstanceMeta {
     hmrPort: normalizeNumber(record.hmrPort, DEFAULT_DEV_INSTANCE_META.hmrPort),
     rtPort: normalizeNumber(record.rtPort, DEFAULT_DEV_INSTANCE_META.rtPort),
     mcpPort: normalizeNumber(record.mcpPort, DEFAULT_DEV_INSTANCE_META.mcpPort),
-    pouchdbPort: normalizeNumber(record.pouchdbPort, DEFAULT_DEV_INSTANCE_META.pouchdbPort),
     asrPort: normalizeNumber(record.asrPort, DEFAULT_DEV_INSTANCE_META.asrPort),
-    syncServerEnvUrl: normalizeString(record.syncServerEnvUrl, ''),
     asrServerEnvUrl: normalizeString(record.asrServerEnvUrl, ''),
     envStatus: normalizeEnvStatus(record.envStatus),
   };
@@ -119,13 +112,6 @@ export function getDevInstanceDiagnosticsSnapshot(
 ): DevInstanceDiagnosticsSnapshot {
   const meta = readInjectedMeta();
   const hostname = resolveRuntimeHostname();
-  const syncServerUrl = resolveSyncServerUrl(
-    {
-      VITE_SYNC_SERVER_URL: meta.syncServerEnvUrl,
-      EXOMIND_POUCHDB_PORT: String(meta.pouchdbPort),
-    },
-    { hostname },
-  );
   const asrServerUrl = resolveAsrServerUrl(
     {
       VITE_ASR_SERVER_URL: meta.asrServerEnvUrl,
@@ -138,7 +124,6 @@ export function getDevInstanceDiagnosticsSnapshot(
 
   return {
     ...meta,
-    syncServerUrl,
     asrServerUrl,
     pid: typeof runtime.pid === 'number' ? runtime.pid : null,
     isDesktopOS: isDesktopOperatingSystem(),
