@@ -5,7 +5,7 @@ import { ThemeController } from "@/components/ThemeController";
 import { Toaster } from "@/components/ui/toaster";
 import { DevInstanceTitleSync } from "@/ui/app/components/DevInstanceTitleSync";
 import { TimeBlockSyncCoordinator } from "@/ui/app/components/TimeBlockSyncCoordinator";
-import { ReminderSyncCoordinator } from "@/ui/app/components/ReminderSyncCoordinator";
+import { RtDomainBackfillCoordinator } from "@/ui/app/components/RtDomainBackfillCoordinator";
 import { FocusBgmCoordinator } from "@/ui/app/components/FocusBgmCoordinator";
 import { MigrationDialogController } from "@/ui/components/MigrationDialogController";
 import {
@@ -46,7 +46,7 @@ function App() {
       <DevInstanceTitleSync />
       <ThemeController />
       <TimeBlockSyncCoordinator />
-      <ReminderSyncCoordinator />
+      <RtDomainBackfillCoordinator />
       <FocusBgmCoordinator />
       <MigrationDialogController />
       <RouterProvider router={appRouter} />

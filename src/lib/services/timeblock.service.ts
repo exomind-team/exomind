@@ -816,7 +816,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return this.backendMode !== 'rt-sqlite'
   }
 
-  private notifyChange(block: ActiveBlockData | null): void {
+  notifyChange(block: ActiveBlockData | null): void {
     console.log('[TB-SVC] notifyChange', block ? { startId: block.startId, phase: block.phase, paused: block.paused, feedbackSubmittedAt: block.feedbackSubmittedAt } : 'NULL', new Error().stack?.split('\n').slice(1, 4).join(' <- '));
     this.listeners.forEach(cb => cb(block));
   }
@@ -1575,4 +1575,14 @@ export function getTimeBlockService(): TimeBlockService {
     timeBlockServiceInstance = new TimeBlockServiceImpl();
   }
   return timeBlockServiceInstance;
+}
+
+export function notifyTimeBlockDataChanged(): void {
+  if (timeBlockServiceInstance && timeBlockServiceInstance instanceof TimeBlockServiceImpl) {
+    void timeBlockServiceInstance.loadActiveBlock().then((block) => {
+      (timeBlockServiceInstance as TimeBlockServiceImpl).notifyChange(block);
+    }).catch(() => {
+      (timeBlockServiceInstance as TimeBlockServiceImpl).notifyChange(null);
+    });
+  }
 }

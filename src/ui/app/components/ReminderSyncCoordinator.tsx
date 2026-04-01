@@ -1,59 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { resolveSyncServerUrl, SYNC_SERVER_URL_CHANGED_EVENT } from '@/config/port-env';
-import { getReminderService } from '@/lib/services/reminder.service';
-import { buildSyncErrorLog } from '@/lib/storage/sync-error';
-import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
-import { resolveRemoteSyncKey, useSyncStore } from '@/ui/stores/sync-store';
-import { log } from '@/lib/logger';
-
-const REMINDER_REMOTE_DB_SUFFIX = 'reminders';
-
-function buildReminderRemoteDbUrl(baseUrl: string, remoteDbKey: string): string {
-  return buildRemoteDbUrl(baseUrl, `${remoteDbKey}__${REMINDER_REMOTE_DB_SUFFIX}`);
-}
-
+/**
+ * Legacy ReminderSyncCoordinator has been retired.
+ * Reminder now uses RT SQLite as the local source of truth（Reminder 已切到 RT SQLite 本地真相源）.
+ */
 export function ReminderSyncCoordinator(): null {
-  const reminderServiceRef = useRef(getReminderService());
-  const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
-  const remoteDbKey = useSyncStore((state) => resolveRemoteSyncKey(state.credentials));
-  const legacySyncState = useSyncStore((state) => state.status.state);
-  const legacySyncActive = legacySyncState === 'connected' || legacySyncState === 'syncing';
-  const [syncServerUrl, setSyncServerUrl] = useState(() =>
-    resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
-  );
-
-  useEffect(() => {
-    const refreshSyncServerUrl = () => {
-      setSyncServerUrl(resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>));
-    };
-
-    refreshSyncServerUrl();
-    window.addEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
-    return () => {
-      window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isLoggedIn || !remoteDbKey || !legacySyncActive) {
-      void reminderServiceRef.current.stopSync();
-      return;
-    }
-
-    let cancelled = false;
-    const remoteUrl = buildReminderRemoteDbUrl(syncServerUrl, remoteDbKey);
-
-    void reminderServiceRef.current.startSync(remoteUrl).catch((error) => {
-      if (cancelled) return;
-      const [message, payload] = buildSyncErrorLog('ReminderSyncCoordinator', remoteUrl, error);
-      log.error(`${message} ${JSON.stringify(payload)}`);
-    });
-
-    return () => {
-      cancelled = true;
-      void reminderServiceRef.current.stopSync();
-    };
-  }, [isLoggedIn, legacySyncActive, remoteDbKey, syncServerUrl]);
-
   return null;
 }

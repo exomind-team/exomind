@@ -65,6 +65,32 @@ function Ensure-CargoFromRustup {
   Write-Host "[tauri-wrapper] Added cargo path from rustup: $cargoBinDir"
 }
 
+function Ensure-BunWindowsShim {
+  if ($env:OS -ne 'Windows_NT') {
+    return
+  }
+
+  $bunExe = Get-Command bun.exe -ErrorAction SilentlyContinue
+  if (-not $bunExe) {
+    return
+  }
+
+  $bunDir = Split-Path -Parent $bunExe.Source
+  if ([string]::IsNullOrWhiteSpace($bunDir)) {
+    return
+  }
+
+  $bunBatPath = Join-Path $bunDir 'bun.bat'
+  if (Test-Path -LiteralPath $bunBatPath) {
+    return
+  }
+
+  $bunExePath = $bunExe.Source.Replace('"', '""')
+  $shimContent = "@echo off`r`n""$bunExePath"" %*`r`n"
+  Write-TextUtf8NoBom -Path $bunBatPath -Content $shimContent
+  Write-Host "[tauri-wrapper] Created bun.bat shim: $bunBatPath"
+}
+
 function Ensure-AndroidManifestPermissions {
   param(
     [Parameter(Mandatory = $true)]
@@ -513,6 +539,38 @@ function Test-IsAndroidDevCommand {
   return $CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "android" -and $CommandArgs[1] -eq "dev"
 }
 
+function Add-AndroidDevDeviceArgument {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$CommandArgs
+  )
+
+  if (-not (Test-IsAndroidDevCommand -CommandArgs $CommandArgs)) {
+    return @($CommandArgs)
+  }
+
+  if ($CommandArgs.Count -ge 3 -and -not [string]::IsNullOrWhiteSpace($CommandArgs[2]) -and -not $CommandArgs[2].StartsWith("-")) {
+    return @($CommandArgs)
+  }
+
+  $resolvedDevice = $null
+  if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_SERIAL)) {
+    $resolvedDevice = $env:ANDROID_SERIAL.Trim()
+  } else {
+    $adbPath = Resolve-AdbCommandPath
+    if ($adbPath) {
+      $resolvedDevice = Resolve-AndroidDeviceName -CommandArgs $CommandArgs -AdbPath $adbPath
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($resolvedDevice)) {
+    return @($CommandArgs)
+  }
+
+  Write-Host "[tauri-wrapper] Auto-selected Android device: $resolvedDevice"
+  return @($CommandArgs[0], $CommandArgs[1], $resolvedDevice) + @($CommandArgs | Select-Object -Skip 2)
+}
+
 function Test-AndroidInstallFailureOutput {
   param(
     [AllowNull()]
@@ -570,6 +628,40 @@ function Resolve-AndroidDeviceSerial {
   }
 
   return $null
+}
+
+function Resolve-AndroidDeviceName {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$CommandArgs,
+    [Parameter(Mandatory = $true)]
+    [string]$AdbPath
+  )
+
+  if ($CommandArgs.Count -ge 3 -and -not [string]::IsNullOrWhiteSpace($CommandArgs[2]) -and -not $CommandArgs[2].StartsWith("-")) {
+    return $CommandArgs[2]
+  }
+
+  $deviceSerial = Resolve-AndroidDeviceSerial -CommandArgs $CommandArgs -AdbPath $AdbPath
+  if ([string]::IsNullOrWhiteSpace($deviceSerial)) {
+    return $null
+  }
+
+  if (-not $deviceSerial.StartsWith("emulator-")) {
+    return $deviceSerial
+  }
+
+  $avdName = (& $AdbPath -s $deviceSerial emu avd name 2>$null | Select-Object -First 1)
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($avdName)) {
+    return $avdName.Trim()
+  }
+
+  $qemuAvdName = (& $AdbPath -s $deviceSerial shell getprop ro.boot.qemu.avd_name 2>$null | Select-Object -First 1)
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($qemuAvdName)) {
+    return $qemuAvdName.Trim()
+  }
+
+  return $deviceSerial
 }
 
 function Resolve-AndroidTargetAbi {
@@ -737,6 +829,7 @@ Ensure-AndroidDebugCleartextTraffic -BuildGradlePath $buildGradlePath
 # Ensure cargo is resolvable even when rustup shim is partial.
 #（兼容仅安装 rustup、但 PATH 缺少 cargo 代理的环境）
 Ensure-CargoFromRustup
+Ensure-BunWindowsShim
 
 # Resolve free dev port for desktop / android dev
 #（桌面与 Android 开发模式都需要感知实例端口）
@@ -787,6 +880,7 @@ try {
   $tauriCommandArgs = @()
   if ($TauriArgs -and $TauriArgs.Count -gt 0) {
     $tauriCommandArgs = Add-TauriDevDefaultFlags -CommandArgs $TauriArgs
+    $tauriCommandArgs = Add-AndroidDevDeviceArgument -CommandArgs $tauriCommandArgs
 
     # Inject --config for devUrl override only
     #（仅通过 --config 覆盖 devUrl；主窗口 data directory 走 Rust builder 绝对路径注入）

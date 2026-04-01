@@ -48,6 +48,18 @@ struct ScopeQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct TaskReplicationUpsertRequest {
+    task: Task,
+    #[serde(default)]
+    source_host_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskReplicationUpsertResponse {
+    status: &'static str,
+}
+
+#[derive(Debug, Deserialize)]
 struct TransitionQuery {
     #[serde(default)]
     profile_id: Option<String>,
@@ -143,6 +155,7 @@ async fn create_task(
     let task = state.task_store.create_scoped(scope_key, input);
 
     publish_task_signal(&state, "task.created", &task);
+    publish_task_replication_signal(&state, scope_key, &task).await;
 
     (StatusCode::CREATED, Json(task))
 }
@@ -164,6 +177,7 @@ async fn update_task(
         })?;
 
     publish_task_signal(&state, "task.updated", &task);
+    publish_task_replication_signal(&state, scope_key, &task).await;
 
     Ok(Json(task))
 }
@@ -188,6 +202,7 @@ async fn transition_task(
 
         for (old_status, task) in &steps {
             publish_task_transition_signal(&state, *old_status, task);
+            publish_task_replication_signal(&state, scope_key, task).await;
             write_task_transition_eventlog(
                 &state,
                 scope_key,
@@ -206,6 +221,7 @@ async fn transition_task(
         .map_err(map_task_store_error)?;
 
     publish_task_transition_signal(&state, old_status, &task);
+    publish_task_replication_signal(&state, scope_key, &task).await;
     write_task_transition_eventlog(
         &state,
         scope_key,
@@ -229,48 +245,64 @@ async fn batch_transition_tasks(
     let mut failed = 0usize;
 
     for item in input.tasks {
-        let result = if use_shortcut {
-            state
+        if use_shortcut {
+            match state
                 .task_store
                 .transition_with_shortcut_scoped(scope_key, &item.id, item.status)
-                .map(|steps| {
-                    for (old_status, task) in &steps {
-                        publish_task_transition_signal(&state, *old_status, task);
+                .and_then(|steps| {
+                    steps.last().cloned().ok_or(TaskStoreError::InvalidTransition {
+                        from: item.status,
+                        to: item.status,
+                    }).map(|last| (steps, last))
+                }) {
+                Ok((steps, (old_status, task))) => {
+                    for (step_old_status, step_task) in &steps {
+                        publish_task_transition_signal(&state, *step_old_status, step_task);
+                        publish_task_replication_signal(&state, scope_key, step_task).await;
                         write_task_transition_eventlog(
                             &state,
                             scope_key,
-                            task,
-                            *old_status,
+                            step_task,
+                            *step_old_status,
                             "http:tasks/batch-transition",
                         );
                     }
-                    steps.last().cloned()
-                })
-                .and_then(|maybe_step| {
-                    maybe_step.ok_or(TaskStoreError::InvalidTransition {
-                        from: item.status,
-                        to: item.status,
-                    })
-                })
-        } else {
-            state
-                .task_store
-                .transition_scoped(scope_key, &item.id, item.status)
-                .map(|(old_status, task)| {
-                    publish_task_transition_signal(&state, old_status, &task);
-                    write_task_transition_eventlog(
-                        &state,
-                        scope_key,
-                        &task,
-                        old_status,
-                        "http:tasks/batch-transition",
-                    );
-                    (old_status, task)
-                })
-        };
+                    succeeded += 1;
+                    results.push(BatchTransitionResult {
+                        id: item.id,
+                        success: true,
+                        old_status: Some(old_status),
+                        new_status: Some(task.status),
+                        error: None,
+                    });
+                }
+                Err(error) => {
+                    failed += 1;
+                    results.push(BatchTransitionResult {
+                        id: item.id,
+                        success: false,
+                        old_status: None,
+                        new_status: None,
+                        error: Some(error.to_string()),
+                    });
+                }
+            }
+            continue;
+        }
 
-        match result {
+        match state
+            .task_store
+            .transition_scoped(scope_key, &item.id, item.status) {
             Ok((old_status, task)) => {
+                publish_task_transition_signal(&state, old_status, &task);
+                publish_task_replication_signal(&state, scope_key, &task).await;
+                write_task_transition_eventlog(
+                    &state,
+                    scope_key,
+                    &task,
+                    old_status,
+                    "http:tasks/batch-transition",
+                );
                 succeeded += 1;
                 results.push(BatchTransitionResult {
                     id: item.id,
@@ -328,7 +360,24 @@ async fn cancel_task(
     let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
 
     publish_task_signal(&state, "task.cancelled", &task);
+    publish_task_replication_signal(&state, scope_key, &task).await;
     write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/cancel");
+
+    Ok(Json(task))
+}
+
+/// DELETE /tasks/:id — compatibility alias for cancel
+async fn delete_task(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<Task>, (StatusCode, String)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
+
+    publish_task_signal(&state, "task.cancelled", &task);
+    publish_task_replication_signal(&state, scope_key, &task).await;
+    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete");
 
     Ok(Json(task))
 }
@@ -407,6 +456,55 @@ async fn task_backend_status(State(state): State<AppState>) -> Json<TaskBackendS
 
 // ── Helpers ─────────────────────────────────────────────────────
 
+fn normalize_scope_key(scope_key: Option<&str>) -> String {
+    scope_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("anonymous")
+        .to_string()
+}
+
+fn build_task_replication_payload(
+    state: &AppState,
+    scope_key: Option<&str>,
+    task: &Task,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "task_snapshot",
+            "taskId": task.id,
+            "updatedAt": task.updated_at,
+            "originHostId": state.host_id,
+        },
+        "task": task,
+    })
+}
+
+async fn publish_task_replication_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    task: &Task,
+) {
+    let event = SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "task.replication.upserted".to_string(),
+        ts: chrono::Utc::now().timestamp_millis() as u64,
+        source: "http:tasks".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 0,
+        trace_id: Some(format!("task:{}", task.id)),
+        payload: build_task_replication_payload(state, scope_key, task),
+    };
+
+    state.signal_pool.publish(event.clone());
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.forward_event_to_peers(event).await;
+    }
+}
+
 fn publish_task_signal(state: &AppState, topic: &str, task: &Task) {
     let event = SignalEvent {
         schema_version: 1,
@@ -420,6 +518,70 @@ fn publish_task_signal(state: &AppState, topic: &str, task: &Task) {
         payload: serde_json::to_value(task).unwrap_or_default(),
     };
     state.signal_pool.publish(event);
+}
+
+fn should_accept_replicated_task(
+    existing: &Task,
+    incoming: &Task,
+    source_host_id: Option<&str>,
+    local_host_id: &str,
+) -> bool {
+    if incoming.updated_at > existing.updated_at {
+        return true;
+    }
+    if incoming.updated_at < existing.updated_at {
+        return false;
+    }
+
+    if incoming.status.is_terminal() != existing.status.is_terminal() {
+        return incoming.status.is_terminal();
+    }
+
+    if incoming.completed_at.unwrap_or(0) > existing.completed_at.unwrap_or(0) {
+        return true;
+    }
+
+    if incoming.completed_at.unwrap_or(0) == existing.completed_at.unwrap_or(0) {
+        if let Some(source_host_id) = source_host_id {
+            return source_host_id > local_host_id;
+        }
+    }
+
+    false
+}
+
+async fn replication_upsert_task(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+    Json(payload): Json<TaskReplicationUpsertRequest>,
+) -> Result<Json<TaskReplicationUpsertResponse>, (StatusCode, String)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let existing = state.task_store.get_scoped(scope_key, &payload.task.id);
+
+    let status = match existing {
+        None => {
+            state
+                .task_store
+                .upsert_scoped(scope_key, payload.task)
+                .map_err(map_task_store_error)?;
+            "inserted"
+        }
+        Some(current) if should_accept_replicated_task(
+            &current,
+            &payload.task,
+            payload.source_host_id.as_deref(),
+            &state.host_id,
+        ) => {
+            state
+                .task_store
+                .upsert_scoped(scope_key, payload.task)
+                .map_err(map_task_store_error)?;
+            "updated"
+        }
+        Some(_) => "ignored",
+    };
+
+    Ok(Json(TaskReplicationUpsertResponse { status }))
 }
 
 fn publish_task_transition_signal(state: &AppState, old_status: TaskStatus, task: &Task) {
@@ -629,10 +791,11 @@ pub fn router() -> Router<AppState> {
         .route("/tasks/backup/sqlite", get(export_tasks_sqlite))
         .route("/tasks/import/json", post(import_tasks_json))
         .route("/tasks/import/sqlite", post(import_tasks_sqlite))
+        .route("/tasks/replication/upsert", post(replication_upsert_task))
         .route("/tasks/:id/cancel", post(cancel_task))
         .route(
             "/tasks/:id",
-            get(get_task).put(update_task),
+            get(get_task).put(update_task).delete(delete_task),
         )
         .route("/tasks/:id/transition", post(transition_task))
 }
@@ -690,6 +853,7 @@ mod tests {
         mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             config_store: Arc::new(crate::config::ConfigStore::new()),
+            reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
             task_store,
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
@@ -1375,6 +1539,45 @@ mod tests {
             )
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let cancelled: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+    }
+
+    #[tokio::test]
+    async fn delete_route_remains_cancel_alias_for_compatibility() {
+        let state = test_state();
+        let task = state.task_store.create(CreateTaskInput {
+            title: "Delete alias".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap();
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/tasks/{}", task.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let cancelled: Value = serde_json::from_slice(&body).unwrap();
@@ -2124,5 +2327,129 @@ mod tests {
             "default anonymous scope should stay isolated"
         );
         assert_eq!(task_store.list_in_scope(Some("user-a")).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn scoped_task_replication_payload_includes_scope_key() {
+        let state = test_state();
+        let app = test_router(state.clone());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks?user_id=profile-argon")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Scoped replication task"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| event.topic == "task.replication.upserted")
+            .expect("task create should publish task.replication.upserted");
+
+        assert_eq!(
+            replication.payload["scopeKey"],
+            serde_json::json!("profile-argon")
+        );
+        assert_eq!(
+            replication.payload["cursor"]["kind"],
+            serde_json::json!("task_snapshot")
+        );
+    }
+
+    #[tokio::test]
+    async fn replication_upsert_inserts_scoped_task_and_ignores_older_snapshot() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-replication.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/replication/upsert?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{
+                        "task": {
+                            "id": "task-rep-1",
+                            "title": "Replicated task",
+                            "description": null,
+                            "done_condition": null,
+                            "status": "pending",
+                            "priority": "medium",
+                            "tags": [],
+                            "source": null,
+                            "parent_id": null,
+                            "depends_on": [],
+                            "due_at": null,
+                            "estimated_minutes": null,
+                            "time_block_ids": [],
+                            "created_at": 1000,
+                            "updated_at": 2000,
+                            "completed_at": null
+                        },
+                        "source_host_id": "desktop-host"
+                    }"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/replication/upsert?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{
+                        "task": {
+                            "id": "task-rep-1",
+                            "title": "Replicated task older",
+                            "description": null,
+                            "done_condition": null,
+                            "status": "pending",
+                            "priority": "medium",
+                            "tags": [],
+                            "source": null,
+                            "parent_id": null,
+                            "depends_on": [],
+                            "due_at": null,
+                            "estimated_minutes": null,
+                            "time_block_ids": [],
+                            "created_at": 1000,
+                            "updated_at": 1500,
+                            "completed_at": null
+                        },
+                        "source_host_id": "mobile-host"
+                    }"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["status"], "ignored");
+
+        let scoped_tasks = task_store.list_in_scope(Some("user-a"));
+        assert_eq!(scoped_tasks.len(), 1);
+        assert_eq!(scoped_tasks[0].title, "Replicated task");
+        assert_eq!(scoped_tasks[0].updated_at, 2000);
+        assert!(
+            task_store.list().is_empty(),
+            "anonymous scope should remain isolated from replicated scoped data"
+        );
     }
 }

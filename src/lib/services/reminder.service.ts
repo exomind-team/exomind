@@ -1,4 +1,4 @@
-import { ReminderPouchAdapter } from '@/lib/adapters/reminder-pouch-adapter';
+import { ReminderRtAdapter } from '@/lib/adapters/reminder-rt-adapter';
 import type { IReminderPort } from '@/lib/environment/interfaces/reminder.port';
 import type {
   CreateReminderInput,
@@ -21,6 +21,8 @@ export interface ReminderService {
   onReminderChange(callback: () => void): () => void;
 }
 
+let reminderServiceInstance: ReminderService | null = null;
+
 function normalizeDueAt(value: number): number {
   if (!Number.isFinite(value)) {
     throw new Error('提醒时间无效');
@@ -42,7 +44,7 @@ export class ReminderServiceImpl implements ReminderService {
   private changeListeners = new Set<() => void>();
 
   constructor(port?: IReminderPort) {
-    this.port = port ?? new ReminderPouchAdapter();
+    this.port = port ?? new ReminderRtAdapter();
   }
 
   listReminders(): Promise<Reminder[]> {
@@ -163,7 +165,7 @@ export class ReminderServiceImpl implements ReminderService {
     };
   }
 
-  private notifyChangeListeners(): void {
+  public notifyChangeListeners(): void {
     for (const listener of this.changeListeners) {
       try {
         listener();
@@ -174,11 +176,16 @@ export class ReminderServiceImpl implements ReminderService {
   }
 }
 
-let reminderServiceInstance: ReminderService | null = null;
-
 export function getReminderService(): ReminderService {
   if (!reminderServiceInstance) {
     reminderServiceInstance = new ReminderServiceImpl();
   }
   return reminderServiceInstance;
+}
+
+export function notifyReminderDataChanged(): void {
+  if (!(reminderServiceInstance instanceof ReminderServiceImpl)) {
+    return;
+  }
+  reminderServiceInstance.notifyChangeListeners();
 }

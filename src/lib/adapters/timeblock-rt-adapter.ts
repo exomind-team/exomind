@@ -122,6 +122,24 @@ export class TimeBlockRtAdapter {
     return this.postJson(`/timeblocks/${blockId}/describe`, params);
   }
 
+  async applyReplicationCompletedBlock(block: TimeBlockData): Promise<'inserted' | 'ignored'> {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/timeblocks/replication/completed', target), {
+      method: 'POST',
+      headers: buildRuntimeAuthHeaders(target, {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      }),
+      body: JSON.stringify({ block }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '(no body)');
+      throw new Error(`RT /timeblocks/replication/completed failed: ${response.status} — ${text}`);
+    }
+    const payload = await response.json() as { status?: 'inserted' | 'ignored' };
+    return payload.status ?? 'ignored';
+  }
+
   private async postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
     const target = this.resolveTarget();
     const response = await this.fetchImpl(this.url(path, target), {

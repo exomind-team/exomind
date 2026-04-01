@@ -259,10 +259,88 @@ describeWindowsOnly('tauri-wrapper', () => {
     }
   }, 20000);
 
+  it('injects the only connected Android device name into tauri android dev（单个在线 Android 设备应自动注入可识别设备名）', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-android-device-'));
+    const fakeBinDir = join(tempDir, 'bin');
+    const fakeTauriCmd = join(fakeBinDir, 'tauri.cmd');
+    const fakeBunCmd = join(fakeBinDir, 'bun.cmd');
+    const fakeAdbCmd = join(fakeBinDir, 'adb.cmd');
+    const wrapperPath = join(process.cwd(), 'Scripts', 'dev', 'tauri-wrapper.ps1');
+
+    try {
+      spawnSync('cmd.exe', ['/c', 'mkdir', fakeBinDir], { stdio: 'ignore' });
+
+      writeFileSync(
+        fakeTauriCmd,
+        [
+          '@echo off',
+          'if /I "%1"=="icon" (',
+          '  mkdir "%4\\android\\mipmap-mdpi" >nul 2>&1',
+          '  type nul > "%4\\android\\mipmap-mdpi\\ic_launcher.png"',
+          '  exit /b 0',
+          ')',
+          'echo ARGS=%*',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      writeFileSync(
+        fakeBunCmd,
+        [
+          '@echo off',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      writeFileSync(
+        fakeAdbCmd,
+        [
+          '@echo off',
+          'if /I "%1"=="-s" if /I "%3"=="emu" if /I "%4"=="avd" if /I "%5"=="name" (',
+          '  echo test3_Tablet',
+          '  exit /b 0',
+          ')',
+          'if /I "%1"=="devices" (',
+          '  echo List of devices attached',
+          '  echo emulator-5556	device',
+          '  exit /b 0',
+          ')',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      const result = spawnSync(
+        POWERSHELL_PATH,
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath, 'android', 'dev', '--target', 'x86_64'],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${fakeBinDir};${process.env.PATH ?? ''}`,
+            EXOMIND_WEB_PORT: '1520',
+            EXOMIND_HMR_PORT: '1521',
+          },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('ARGS=android dev test3_Tablet --target x86_64');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }, 20000);
+
   it('overrides android devUrl when EXOMIND_WEB_PORT is set（android dev 应跟随实例端口覆盖 devUrl）', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-android-devurl-'));
     const fakeBinDir = join(tempDir, 'bin');
     const fakeTauriCmd = join(fakeBinDir, 'tauri.cmd');
+    const fakeAdbCmd = join(fakeBinDir, 'adb.cmd');
     const wrapperPath = join(process.cwd(), 'Scripts', 'dev', 'tauri-wrapper.ps1');
 
     try {
@@ -292,6 +370,25 @@ describeWindowsOnly('tauri-wrapper', () => {
         'utf8',
       );
 
+      writeFileSync(
+        fakeAdbCmd,
+        [
+          '@echo off',
+          'if /I "%1"=="-s" if /I "%3"=="emu" if /I "%4"=="avd" if /I "%5"=="name" (',
+          '  echo test3_Tablet',
+          '  exit /b 0',
+          ')',
+          'if /I "%1"=="devices" (',
+          '  echo List of devices attached',
+          '  echo emulator-5556	device',
+          '  exit /b 0',
+          ')',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
       const result = spawnSync(
         POWERSHELL_PATH,
         ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath, 'android', 'dev'],
@@ -306,7 +403,7 @@ describeWindowsOnly('tauri-wrapper', () => {
       );
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('ARGS=android dev --config');
+      expect(result.stdout).toContain('ARGS=android dev test3_Tablet --config');
       expect(result.stdout).toContain('"devUrl":"http://localhost:1520"');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -391,6 +488,50 @@ describeWindowsOnly('tauri-wrapper', () => {
       }).stdout;
       expect(adbLog).toContain('-s emulator-5554 install -r -d -g -t');
       expect(adbLog).toMatch(/shell monkey -p com\.exomind\.app -c android\.intent\.category\.LAUNCHER/);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it('creates bun.bat shim when only bun.exe exists in PATH（仅有 bun.exe 时自动补 bun.bat 兼容层）', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-bun-shim-'));
+    const fakeBinDir = join(tempDir, 'bin');
+    const fakeTauriCmd = join(fakeBinDir, 'tauri.cmd');
+    const fakeBunExe = join(fakeBinDir, 'bun.exe');
+    const wrapperPath = join(process.cwd(), 'Scripts', 'dev', 'tauri-wrapper.ps1');
+
+    try {
+      spawnSync('cmd.exe', ['/c', 'mkdir', fakeBinDir], { stdio: 'ignore' });
+
+      writeFileSync(
+        fakeTauriCmd,
+        [
+          '@echo off',
+          'if not exist "%~dp0bun.bat" exit /b 87',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      writeFileSync(fakeBunExe, 'not-a-real-exe', 'utf8');
+
+      const result = spawnSync(
+        POWERSHELL_PATH,
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath, 'info'],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: fakeBinDir,
+          },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('Created bun.bat shim');
+      const shimPath = join(fakeBinDir, 'bun.bat');
+      expect(shimPath).toBeDefined();
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

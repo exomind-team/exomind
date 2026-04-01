@@ -7,6 +7,7 @@ import {
   type ProjectReplicatedEventResult,
 } from '@/lib/storage/event-storage';
 import type { Event as EventLogEvent, EventData } from '@/lib/types/event';
+import { getCurrentProfileOrLegacyId } from '@/lib/profile/profile-storage';
 import { getEventLogService } from './eventlog.service';
 import { SignalStreamService } from './signal-stream.service';
 import { log } from '@/lib/logger';
@@ -20,6 +21,7 @@ export interface EventLogReplicationCursor {
 
 export interface EventLogReplicationAppendedPayload {
   schemaVersion: 1;
+  scopeKey?: string;
   replicationSeq: number;
   cursor: EventLogReplicationCursor;
   event: StorageEvent;
@@ -51,6 +53,7 @@ function buildReplicationPayload(event: StorageEvent): EventLogReplicationAppend
 
   return {
     schemaVersion: 1,
+    scopeKey: getCurrentProfileOrLegacyId(),
     replicationSeq: event.replicationSeq!,
     cursor: {
       kind: 'replication_seq',
@@ -142,6 +145,11 @@ export async function projectEventLogReplicationAppend(
   payload: EventLogReplicationAppendedPayload,
   userId?: string,
 ): Promise<ProjectReplicatedEventResult> {
+  const currentScopeKey = userId ?? getCurrentProfileOrLegacyId();
+  if (typeof payload.scopeKey === 'string' && payload.scopeKey.length > 0 && payload.scopeKey !== currentScopeKey) {
+    return 'duplicate';
+  }
+
   const environment = ExoMindEnvironment.getInstance();
   if (getEventlogBackendMode() === 'rt-sqlite') {
     const existing = await environment.eventlog.getEvent(payload.event.id);

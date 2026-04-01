@@ -5,6 +5,14 @@ export type Issue381SeedOptions = {
   profileId: string;
   displayName: string;
   remoteIdentityKey: string;
+  confirmedPeers?: Array<{
+    id: string;
+    name: string;
+    host: string;
+    port: number;
+    hostId: string;
+    dialAddress: string;
+  }>;
 };
 
 export function attachLegacySyncRequestCollector(context: BrowserContext, sink: string[]): void {
@@ -75,5 +83,25 @@ export async function seedIssue381Page(page: Page, options: Issue381SeedOptions)
         version: 0,
       }),
     );
+
+    if (Array.isArray(seed.confirmedPeers) && seed.confirmedPeers.length > 0) {
+      localStorage.setItem(
+        'agent_runtime_hosts_v1',
+        JSON.stringify(seed.confirmedPeers.map((peer) => ({
+          id: peer.id,
+          name: peer.name,
+          host: peer.host,
+          port: peer.port,
+          status: 'online',
+          createdAt: '2026-03-07T00:00:00.000Z',
+          updatedAt: '2026-03-07T00:00:00.000Z',
+          isLocal: false,
+          hostId: peer.hostId,
+          trustState: 'confirmed_peer',
+          advertisedListenAddress: `${peer.host}:${peer.port}`,
+          lastSuccessfulDialAddress: peer.dialAddress,
+        }))),
+      );
+    }
   }, options);
 }
