@@ -93,6 +93,15 @@ export { HttpSseSignalTransport, buildSignalBaseUrl, buildSignalStreamUrl } from
 export type { SignalTransport, SignalStreamOpenRequest } from './signal-http-sse-transport';
 export { SignalRouteService, getSignalRouteService } from './signal-route.service';
 export type { SignalRouteServiceOptions } from './signal-route.service';
+export {
+  RtDomainBackfillService,
+  getRtDomainBackfillService,
+  resetRtDomainBackfillServiceForTests,
+} from './rt-domain-backfill.service';
+export type {
+  RtDomainBackfillServiceOptions,
+  RtDomainBackfillSummary,
+} from './rt-domain-backfill.service';
 
 // 重新导出类型（这些类型在 types/event 中定义）
 export type { TimerMode, TimerConfig } from '../types/event';

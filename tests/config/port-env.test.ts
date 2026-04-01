@@ -5,7 +5,6 @@ import {
   resolveBffCorsPolicy,
   resolveAsrServerUrl,
   resolveDevPorts,
-  resolveSyncServerUrl,
 } from '@/config/port-env';
 
 describe('port env resolver', () => {
@@ -40,73 +39,6 @@ describe('port env resolver', () => {
 
     expect(ports.web).toBe(1810);
     expect(ports.hmr).toBe(1811);
-  });
-
-  it('resolveSyncServerUrl should prefer VITE_SYNC_SERVER_URL', () => {
-    const serverUrl = resolveSyncServerUrl({
-      VITE_SYNC_SERVER_URL: 'http://localhost:18080/',
-      EXOMIND_POUCHDB_PORT: '1930',
-    });
-
-    expect(serverUrl).toBe('http://localhost:18080');
-  });
-
-  it('resolveSyncServerUrl should fallback to EXOMIND_POUCHDB_PORT', () => {
-    const serverUrl = resolveSyncServerUrl(
-      {
-        EXOMIND_POUCHDB_PORT: '1930',
-      },
-      '192.168.1.88'
-    );
-
-    expect(serverUrl).toBe('http://192.168.1.88:1930');
-  });
-
-  it('resolveSyncServerUrl should default to localhost when runtime hostname absent', () => {
-    const serverUrl = resolveSyncServerUrl({
-      EXOMIND_POUCHDB_PORT: '1930',
-    });
-
-    expect(serverUrl).toBe('http://localhost:1930');
-  });
-
-  it('resolveSyncServerUrl should use local override url', () => {
-    const serverUrl = resolveSyncServerUrl(
-      {
-        EXOMIND_POUCHDB_PORT: '1930',
-      },
-      {
-        syncServerOverride: 'http://192.168.1.10:6984/',
-      }
-    );
-
-    expect(serverUrl).toBe('http://192.168.1.10:6984');
-  });
-
-  it('resolveSyncServerUrl should fallback to runtime hostname when provided', () => {
-    const serverUrl = resolveSyncServerUrl(
-      {
-        EXOMIND_POUCHDB_PORT: '1930',
-      },
-      {
-        hostname: '192.168.1.20',
-      }
-    );
-
-    expect(serverUrl).toBe('http://192.168.1.20:1930');
-  });
-
-  it('resolveSyncServerUrl should normalize tauri.localhost to loopback（Tauri 本地域名应映射到回环地址）', () => {
-    const serverUrl = resolveSyncServerUrl(
-      {
-        EXOMIND_POUCHDB_PORT: '1930',
-      },
-      {
-        hostname: 'tauri.localhost',
-      }
-    );
-
-    expect(serverUrl).toBe('http://127.0.0.1:1930');
   });
 
   it('resolveAsrServerUrl should prefer VITE_ASR_SERVER_URL', () => {

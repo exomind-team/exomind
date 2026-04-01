@@ -6,6 +6,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
+use crate::signal::types::SignalEvent;
 use crate::timeblock::{ActiveBlockData, BlockTransition, BlockTransitionType, TimeBlockData, TimeBlockStore};
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +90,58 @@ fn conflict(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
     )
 }
 
+fn normalize_scope_key(scope_key: Option<&str>) -> String {
+    scope_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("anonymous")
+        .to_string()
+}
+
+fn build_completed_timeblock_replication_payload(
+    state: &AppState,
+    scope_key: Option<&str>,
+    block: &TimeBlockData,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "timeblock_completed",
+            "blockId": block.start_id,
+            "completedAt": block.end_time,
+            "originHostId": state.host_id,
+        },
+        "block": block,
+    })
+}
+
+async fn publish_completed_timeblock_replication_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    block: &TimeBlockData,
+) {
+    let signal = SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "timeblock.replication.completed".to_string(),
+        ts: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock error")
+            .as_millis() as u64,
+        source: "http:timeblocks".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 0,
+        trace_id: Some(format!("timeblock:{}", block.start_id)),
+        payload: build_completed_timeblock_replication_payload(state, scope_key, block),
+    };
+
+    state.signal_pool.publish(signal.clone());
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.forward_event_to_peers(signal).await;
+    }
+}
+
 // ── #759 newBlock primitive ─────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +179,17 @@ fn default_mode() -> String { "countup".to_string() }
 struct EndBlockRequest {
     feedback: Option<String>,
     task_status_outcomes: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletedReplicationRequest {
+    block: TimeBlockData,
+}
+
+#[derive(Debug, Serialize)]
+struct CompletedReplicationResponse {
+    status: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -318,9 +382,34 @@ async fn end_block(
     // Gap block creation does NOT write EventLog (per #759 design)
     if let Some(ref completed) = result.completed {
         write_timeblock_eventlog(&state, scope_key, "block_feedback", &completed.name, &completed.start_id, &completed.task_ids);
+        publish_completed_timeblock_replication_signal(&state, scope_key, completed).await;
     }
 
     Ok(Json(result))
+}
+
+async fn replication_completed_block(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+    Json(payload): Json<CompletedReplicationRequest>,
+) -> Result<Json<CompletedReplicationResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let mut blocks = state
+        .timeblock_store
+        .list_completed_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    if blocks.iter().any(|existing| existing.start_id == payload.block.start_id) {
+        return Ok(Json(CompletedReplicationResponse { status: "ignored" }));
+    }
+
+    blocks.push(payload.block);
+    state
+        .timeblock_store
+        .replace_completed_scoped(scope_key, &blocks)
+        .map_err(|e| internal_error(e.to_string()))?;
+
+    Ok(Json(CompletedReplicationResponse { status: "inserted" }))
 }
 
 // ── #780 stop/pause/resume ──────────────────────────────────────────
@@ -1003,6 +1092,7 @@ pub fn router() -> Router<AppState> {
         .route("/timeblocks/new", post(new_block))
         .route("/timeblocks/start", post(start_block))
         .route("/timeblocks/end", post(end_block))
+        .route("/timeblocks/replication/completed", post(replication_completed_block))
         .route("/timeblocks/stop", post(stop_block))
         .route("/timeblocks/pause", post(pause_block))
         .route("/timeblocks/resume", post(resume_block))
@@ -1070,6 +1160,7 @@ mod tests {
         mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             config_store: Arc::new(crate::config::ConfigStore::new()),
+            reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
             session_store: Arc::new(crate::session::SessionStore::new()),
             session_event_tx: None,
@@ -1713,5 +1804,138 @@ mod tests {
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 2);
         assert!(events.iter().any(|event| event.tags == vec!["block_pause".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn scoped_completed_timeblock_replication_payload_includes_scope_key() {
+        let state = test_state_with_timeblock_store(
+            Arc::new(crate::timeblock::TimeBlockStore::new()),
+        );
+        state.timeblock_store.put_active_scoped(
+            Some("profile-argon"),
+            ActiveBlockData {
+                start_id: "active-scoped-1".to_string(),
+                name: "Scoped focus".to_string(),
+                mode: "countdown".to_string(),
+                target_minutes: Some(25),
+                elapsed: 0,
+                updated_at: Some(1_700_000_101_000),
+                phase: Some("feedback_in_progress".to_string()),
+                version: Some(2),
+                actor_id: Some("actor-a".to_string()),
+                last_transition_at: Some(1_700_000_130_000),
+                last_resumed_at: Some(1_700_000_101_000),
+                accumulated_run_ms: Some(1_800_000),
+                start_time: 1_700_000_100_000,
+                action_ended_at: Some(1_700_000_130_000),
+                feedback_started_at: Some(1_700_000_130_000),
+                feedback_submitted_at: None,
+                pause_accumulated_ms: Some(0),
+                paused: false,
+                paused_at: None,
+                task_ids: vec!["task-a".to_string()],
+                task_association_log: vec![],
+                source_planned_block_id: None,
+                block_type: Some("active".to_string()),
+                transitions: vec![],
+                task_id: Some("task-a".to_string()),
+            },
+        ).unwrap();
+        let app = test_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/end?user_id=profile-argon")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"feedback":"done"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| event.topic == "timeblock.replication.completed")
+            .expect("timeblock end should publish timeblock.replication.completed");
+
+        assert_eq!(
+            replication.payload["scopeKey"],
+            serde_json::json!("profile-argon")
+        );
+        assert_eq!(
+            replication.payload["cursor"]["kind"],
+            serde_json::json!("timeblock_completed")
+        );
+    }
+
+    #[tokio::test]
+    async fn replication_completed_upsert_inserts_scoped_block_and_ignores_duplicate() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("timeblocks-replication.sqlite");
+        let timeblock_store =
+            Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
+        let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
+
+        let payload = serde_json::json!({
+            "block": {
+                "id": "tb-rep-1",
+                "name": "Replicated block",
+                "startId": "tb-rep-1",
+                "endId": "end-rep-1",
+                "note": "done",
+                "tags": ["block_feedback"],
+                "startTime": 1000,
+                "endTime": 2000,
+                "blockType": "active",
+                "taskIds": [],
+                "taskAssociationLog": [],
+                "sourcePlannedBlockId": null,
+                "transitions": []
+            }
+        }).to_string();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/replication/completed?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/replication/completed?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["status"], "ignored");
+
+        let scoped_blocks = timeblock_store.list_completed_in_scope(Some("user-a")).unwrap();
+        assert_eq!(scoped_blocks.len(), 1);
+        assert_eq!(scoped_blocks[0].id, "tb-rep-1");
+        assert!(
+            timeblock_store.list_completed().unwrap().is_empty(),
+            "anonymous scope should remain isolated from replicated scoped timeblocks"
+        );
     }
 }

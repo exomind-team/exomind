@@ -265,27 +265,13 @@ async fn run_agent_session(
 
 ---
 
-## MVP 执行计划（并行）
+## MVP 实施计划（3 份，并行）
 
-### 提案系统 MVP
-
-**验收标准**：外部 Agent 通过 `curl` 调用 `POST /api/proposals` 提交一条 `create_task` 提案，用户在 UI 中看到通知、点击批准后实际创建任务，同时一条 `append_event`（内容为"Agent 助理建议了一个任务"）写入 EventLog。
-
-**关键文件**（待新建）：
-- `crates/exomind-runtime/src/proposal/mod.rs` — 提案数据模型
-- `crates/exomind-runtime/src/proposal/api.rs` — HTTP 路由
-- `crates/exomind-runtime/src/proposal/storage.rs` — SQLite 持久化
-- `src/ui/app/pages/ProposalInboxPage.tsx` — 请求箱页面
-- `src/ui/app/components/ProposalNotificationBadge.tsx` — 全局通知徽章
-
-### Agent API MVP
-
-**验收标准**：RT 内部触发 `cognition` Agent，Agent 调用 `get_recent_events(20)` 获取近期事件日志，基于内容输出一段分析文本，结果返回给触发方并记录到 RT 数据库。
-
-**关键文件**（待新建/修改）：
-- `crates/exomind-runtime/src/agent/session.rs` — AgentSession 服务层
-- `crates/exomind-runtime/src/agent/tools/mod.rs` — 工具注册与派发
-- `crates/exomind-runtime/src/agent/tools/eventlog.rs` — `get_recent_events` 工具实现
+| 计划 | 文件 | 执行者 | 依赖 |
+|------|------|--------|------|
+| 提案系统 RT 逻辑端 | [proposal-system-rt-plan.md](./2026-04-01-proposal-system-rt-plan.md) | Codex (Rust) | 无 |
+| 提案系统 UI 端 | [proposal-system-ui-plan.md](./2026-04-01-proposal-system-ui-plan.md) | Claude Code (TS) | 依赖 RT 计划完成 |
+| Agent API RT 逻辑端 | [agent-api-rt-plan.md](./2026-04-01-agent-api-rt-plan.md) | Codex (Rust) | 无 |
 
 ---
 

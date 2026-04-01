@@ -13,7 +13,12 @@ const {
   appendEventDataMock,
   notifyEventLogChangedMock,
   notifyTaskDataChangedMock,
+  notifyReminderDataChangedMock,
+  notifyTimeBlockDataChangedMock,
   projectActiveBlockSnapshotMock,
+  projectReminderReplicationUpsertMock,
+  projectTaskReplicationUpsertMock,
+  projectTimeBlockCompletedReplicationMock,
   MockSignalStreamService,
 } = vi.hoisted(() => {
   const queuedStatuses: RuntimeStatus[] = [];
@@ -36,7 +41,12 @@ const {
   const queuedAppendEventDataMock = vi.fn(async () => undefined);
   const queuedNotifyEventLogChangedMock = vi.fn();
   const queuedNotifyTaskDataChangedMock = vi.fn();
+  const queuedNotifyReminderDataChangedMock = vi.fn();
+  const queuedNotifyTimeBlockDataChangedMock = vi.fn();
   const queuedProjectActiveBlockSnapshotMock = vi.fn(async () => undefined);
+  const queuedProjectReminderReplicationUpsertMock = vi.fn(async () => 'inserted');
+  const queuedProjectTaskReplicationUpsertMock = vi.fn(async () => 'inserted');
+  const queuedProjectTimeBlockCompletedReplicationMock = vi.fn(async () => 'inserted');
 
   class HoistedMockSignalStreamService {
     constructor(options: Record<string, unknown>) {
@@ -59,7 +69,12 @@ const {
     appendEventDataMock: queuedAppendEventDataMock,
     notifyEventLogChangedMock: queuedNotifyEventLogChangedMock,
     notifyTaskDataChangedMock: queuedNotifyTaskDataChangedMock,
+    notifyReminderDataChangedMock: queuedNotifyReminderDataChangedMock,
+    notifyTimeBlockDataChangedMock: queuedNotifyTimeBlockDataChangedMock,
     projectActiveBlockSnapshotMock: queuedProjectActiveBlockSnapshotMock,
+    projectReminderReplicationUpsertMock: queuedProjectReminderReplicationUpsertMock,
+    projectTaskReplicationUpsertMock: queuedProjectTaskReplicationUpsertMock,
+    projectTimeBlockCompletedReplicationMock: queuedProjectTimeBlockCompletedReplicationMock,
     MockSignalStreamService: HoistedMockSignalStreamService,
   };
 });
@@ -102,6 +117,14 @@ vi.mock('@/lib/services/task.service', () => ({
   notifyTaskDataChanged: notifyTaskDataChangedMock,
 }));
 
+vi.mock('@/lib/services/reminder.service', () => ({
+  notifyReminderDataChanged: notifyReminderDataChangedMock,
+}));
+
+vi.mock('@/lib/services/timeblock.service', () => ({
+  notifyTimeBlockDataChanged: notifyTimeBlockDataChangedMock,
+}));
+
 vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
   appendEventWithEcsReplication: vi.fn(),
   projectEventLogReplicationAppend: vi.fn(async () => 'inserted'),
@@ -109,6 +132,18 @@ vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
 
 vi.mock('@/lib/services/ecs-active-block-replication.service', () => ({
   projectActiveBlockReplicationSnapshot: projectActiveBlockSnapshotMock,
+}));
+
+vi.mock('@/lib/services/ecs-reminder-replication.service', () => ({
+  projectReminderReplicationUpsert: projectReminderReplicationUpsertMock,
+}));
+
+vi.mock('@/lib/services/ecs-task-replication.service', () => ({
+  projectTaskReplicationUpsert: projectTaskReplicationUpsertMock,
+}));
+
+vi.mock('@/lib/services/ecs-timeblock-completed-replication.service', () => ({
+  projectTimeBlockCompletedReplication: projectTimeBlockCompletedReplicationMock,
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
@@ -152,7 +187,12 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     appendEventDataMock.mockClear();
     notifyEventLogChangedMock.mockClear();
     notifyTaskDataChangedMock.mockClear();
+    notifyReminderDataChangedMock.mockClear();
+    notifyTimeBlockDataChangedMock.mockClear();
     projectActiveBlockSnapshotMock.mockClear();
+    projectReminderReplicationUpsertMock.mockClear();
+    projectTaskReplicationUpsertMock.mockClear();
+    projectTimeBlockCompletedReplicationMock.mockClear();
     setRuntimeTargetMode('embedded');
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
@@ -253,7 +293,63 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     }));
   });
 
-  it('ignores voice eventlog.appended payloads to avoid duplicate writes（忽略 voice eventlog.appended，避免重复写入）', async () => {
+  it('bridges global-shortcut voice eventlog.appended into EventLogService（全局语音快捷键事件会桥接进 EventLogService）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    const onEventLogAppended = signalHandlerOptions[0].onEventLogAppended as
+      | ((payload: {
+        text: string;
+        ts: number;
+        inputMode?: string;
+        captureSource?: string;
+        targetScope?: string;
+        window?: { title?: string; processName?: string };
+        agentContext?: { agentId?: string; agentName?: string; sessionId?: string };
+      }) => Promise<void>)
+      | undefined;
+
+    await onEventLogAppended?.({
+      text: 'voice shortcut appended',
+      ts: 1773810310000,
+      inputMode: 'voice',
+      captureSource: 'global-shortcut',
+      targetScope: 'agent-chat',
+      window: {
+        title: 'Cursor - ExoMind',
+        processName: 'Cursor.exe',
+      },
+      agentContext: {
+        agentId: 'codex',
+        agentName: 'Codex',
+        sessionId: 'session-1',
+      },
+    });
+
+    expect(appendEventDataMock).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'voice shortcut appended',
+      timestamp: 1773810310000,
+      tags: ['voice'],
+      metadata: expect.objectContaining({
+        inputSource: 'voice',
+        inputMethod: 'recognition',
+        signal: expect.objectContaining({
+          captureSource: 'global-shortcut',
+          targetScope: 'agent-chat',
+        }),
+      }),
+    }));
+  });
+
+  it('ignores non-shortcut voice eventlog.appended payloads to avoid draft duplication（忽略非快捷键 voice eventlog.appended，避免草稿输入被自动记日志）', async () => {
     runtimeStatuses.push({
       running: true,
       host: '127.0.0.1',
@@ -270,10 +366,10 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
       | undefined;
 
     await onEventLogAppended?.({
-      text: 'voice duplicate candidate',
+      text: 'voice draft candidate',
       ts: 1773810310000,
       inputMode: 'voice',
-      captureSource: 'global-shortcut',
+      captureSource: 'frontend:now-input-row',
     });
 
     expect(appendEventDataMock).not.toHaveBeenCalled();
@@ -427,5 +523,120 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
 
     expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(4);
     expect(notifyEventLogChangedMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('projects task replication payload and then notifies task listeners（任务复制快照投影后再触发列表刷新）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    await signalHandlerOptions[0].onTaskReplicationUpserted?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'task_snapshot',
+        taskId: 'task-rep-1',
+        updatedAt: 1_700_000_001_000,
+        originHostId: 'desktop-host',
+      },
+      task: {
+        id: 'task-rep-1',
+        title: 'Replicated task',
+        status: 'pending',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_001_000,
+        timeBlockIds: [],
+      },
+    });
+
+    expect(projectTaskReplicationUpsertMock).toHaveBeenCalledTimes(1);
+    expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('projects reminder replication payload and then notifies reminder listeners（提醒复制快照投影后再触发提醒刷新）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    await signalHandlerOptions[0].onReminderReplicationUpserted?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'reminder_snapshot',
+        reminderId: 'reminder-rep-1',
+        updatedAt: 1_700_000_001_000,
+        originHostId: 'desktop-host',
+      },
+      reminder: {
+        id: 'reminder-rep-1',
+        title: 'Replicated reminder',
+        content: 'from peer',
+        dueAt: 1_700_000_100_000,
+        status: 'pending',
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_001_000,
+      },
+    });
+
+    expect(projectReminderReplicationUpsertMock).toHaveBeenCalledTimes(1);
+    expect(notifyReminderDataChangedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('projects completed timeblock replication payload and then notifies timeblock listeners（已完成时间块复制快照投影后再触发时间块刷新）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    await signalHandlerOptions[0].onTimeBlockCompletedReplication?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'timeblock_completed',
+        blockId: 'tb-rep-1',
+        completedAt: 1_700_000_060_000,
+        originHostId: 'desktop-host',
+      },
+      block: {
+        id: 'tb-rep-1',
+        name: 'Replicated block',
+        startId: 'tb-rep-1',
+        endId: 'end-rep-1',
+        note: 'done',
+        tags: ['block_feedback'],
+        startTime: 1_700_000_000_000,
+        endTime: 1_700_000_060_000,
+        blockType: 'active',
+        taskIds: [],
+        taskAssociationLog: [],
+        transitions: [],
+      },
+    });
+
+    expect(projectTimeBlockCompletedReplicationMock).toHaveBeenCalledTimes(1);
+    expect(notifyTimeBlockDataChangedMock).toHaveBeenCalledTimes(1);
   });
 });

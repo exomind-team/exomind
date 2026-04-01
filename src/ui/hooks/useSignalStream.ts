@@ -26,6 +26,9 @@ import {
 } from '@/lib/services/ecs-eventlog-replication.service';
 import type { ActiveBlockReplicationSnapshotPayload } from '@/lib/services/ecs-active-block-replication.service';
 import { projectActiveBlockReplicationSnapshot as projectActiveBlockSnapshot } from '@/lib/services/ecs-active-block-replication.service';
+import { projectTaskReplicationUpsert } from '@/lib/services/ecs-task-replication.service';
+import { projectReminderReplicationUpsert } from '@/lib/services/ecs-reminder-replication.service';
+import { projectTimeBlockCompletedReplication } from '@/lib/services/ecs-timeblock-completed-replication.service';
 import {
   getSelectedRuntimeTarget,
   persistEmbeddedRuntimeStatus,
@@ -34,7 +37,9 @@ import {
 } from '@/config/runtime-target';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import { getEventLogService, notifyEventLogChanged } from '@/lib/services/eventlog.service';
+import { notifyReminderDataChanged } from '@/lib/services/reminder.service';
 import { notifyTaskDataChanged } from '@/lib/services/task.service';
+import { notifyTimeBlockDataChanged } from '@/lib/services/timeblock.service';
 import { log } from '@/lib/logger';
 
 const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
@@ -207,8 +212,25 @@ export function useSignalStream(): void {
         notifyTaskDataChanged();
         notifyEventLogChanged();
       },
+      onTaskReplicationUpserted: async (payload) => {
+        const result = await projectTaskReplicationUpsert(payload);
+        if (result !== 'ignored') {
+          notifyTaskDataChanged();
+        }
+      },
+      onReminderReplicationUpserted: async (payload) => {
+        const result = await projectReminderReplicationUpsert(payload);
+        if (result !== 'ignored') {
+          notifyReminderDataChanged();
+        }
+      },
       onEventLogAppended: async (payload: EventLogAppendedPayload) => {
-        if (payload.inputMode !== 'external') {
+        const isExternalInput = payload.inputMode === 'external';
+        const isGlobalShortcutVoice =
+          payload.inputMode === 'voice'
+          && payload.captureSource === 'global-shortcut';
+
+        if (!isExternalInput && !isGlobalShortcutVoice) {
           return;
         }
 
@@ -229,13 +251,20 @@ export function useSignalStream(): void {
           }),
           timestamp,
           content,
-          tags: ['note'],
+          tags: [isGlobalShortcutVoice ? 'voice' : 'note'],
           metadata: {
             source: getEventSourceMetadata(),
+            ...(isGlobalShortcutVoice ? {
+              inputSource: 'voice',
+              inputMethod: 'recognition',
+            } : {}),
             signal: {
               topic: 'eventlog.appended',
               inputMode: payload.inputMode ?? null,
               captureSource: payload.captureSource ?? null,
+              targetScope: payload.targetScope ?? null,
+              window: payload.window ?? null,
+              agentContext: payload.agentContext ?? null,
             },
           },
         });
@@ -292,6 +321,12 @@ export function useSignalStream(): void {
           }
         };
       })(),
+      onTimeBlockCompletedReplication: async (payload) => {
+        const result = await projectTimeBlockCompletedReplication(payload);
+        if (result !== 'ignored') {
+          notifyTimeBlockDataChanged();
+        }
+      },
       onReviewCompleted: async (payload) => {
         const content = formatReviewAsMarkdown(payload);
         await appendEventWithEcsReplication({

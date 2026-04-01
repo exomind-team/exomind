@@ -12,13 +12,11 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
       hmrPort: 5174,
       rtPort: 6984,
       mcpPort: 9232,
-      syncServerEnvUrl: 'http://localhost:6984',
       asrServerEnvUrl: 'http://localhost:1949',
       envStatus: {
         VITE_MOSS_API_KEY: { sensitive: true, configured: false },
         VITE_VOLCANO_APP_KEY: { sensitive: true, configured: true },
         EXOMIND_RT_SECRET: { sensitive: true, configured: true },
-        VITE_SYNC_SERVER_URL: { sensitive: false, configured: true, value: 'http://localhost:6984' },
       },
     };
   });
@@ -53,7 +51,7 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
     }));
   });
 
-  it('derives sync and asr urls from the runtime hostname when no explicit url is configured（未显式配置时应按运行时 hostname 推导服务地址）', async () => {
+  it('derives asr url from the runtime hostname when no explicit url is configured（未显式配置时应按运行时 hostname 推导 ASR 地址）', async () => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: {
@@ -70,9 +68,7 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
       hmrPort: 5174,
       rtPort: 6984,
       mcpPort: 9232,
-      pouchdbPort: 6984,
       asrPort: 1949,
-      syncServerEnvUrl: '',
       asrServerEnvUrl: '',
       envStatus: {},
     };
@@ -80,7 +76,6 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
     const module = await import('@/config/dev-instance-diagnostics');
     const snapshot = module.getDevInstanceDiagnosticsSnapshot();
 
-    expect(snapshot.syncServerUrl).toBe('http://192.168.1.88:6984');
     expect(snapshot.asrServerUrl).toBe('http://192.168.1.88:1949');
   });
 
@@ -93,9 +88,7 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
       webPort: 5173,
       hmrPort: 5174,
       rtPort: 6984,
-      pouchdbPort: 6984,
       asrPort: 1949,
-      syncServerEnvUrl: '',
       asrServerEnvUrl: '',
       envStatus: {},
     };
