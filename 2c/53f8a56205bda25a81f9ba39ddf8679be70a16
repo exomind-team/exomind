@@ -1,0 +1,22 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "2c53f8a56205bda25a81f9ba39ddf8679be70a16",
+  "prompts": {
+    "4d289c2dd5fa9339": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d476f-9d08-7031-877b-a97e81ccae97",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 181,
+      "total_deletions": 189,
+      "accepted_lines": 181,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/4614766c0c7b7cc3a3e238c461ea99f14c04d6c452593807e40ddf5f1e688cd5"
+    }
+  }
+}
