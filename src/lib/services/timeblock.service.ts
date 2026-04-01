@@ -152,6 +152,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.rtAdapter = this.backendMode === 'rt-sqlite'
       ? (options.rtAdapter ?? new TimeBlockRtAdapter())
       : null;
+    // Legacy storage init: only reached in tests that explicitly set backendMode:'legacy'
+    // (production is always 'rt-sqlite'). Initializes the active block storage for the
+    // local user so switchActiveStorage() callers find it already populated.
+    if (this.backendMode === 'legacy' && !this.useInjectedEnvStorage) {
+      this.switchActiveStorage();
+    }
     this.attachStorageListener();
   }
 
