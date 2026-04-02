@@ -1164,6 +1164,7 @@ mod tests {
             task_store: Arc::new(crate::task::TaskStore::new()),
             proposal_store: Arc::new(crate::proposal::ProposalStore::new()),
             session_store: Arc::new(crate::session::SessionStore::new()),
+            agent_api_session_store: Arc::new(crate::agent::session::AgentSessionStore::new()),
             session_event_tx: None,
             eventlog_watch_tx: {
                 let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
