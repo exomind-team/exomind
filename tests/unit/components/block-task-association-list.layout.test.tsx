@@ -73,6 +73,7 @@ describe('BlockTaskAssociationList layout', () => {
     expect(content.className).toContain('space-y-3');
     expect(content).toContainElement(linkedList);
     expect(content).toContainElement(actions);
+    expect(select.tagName).not.toBe('SELECT');
     expect(select.className).toContain('min-w-0');
     expect(select.className).toContain('flex-1');
     expect(select.className).toContain('h-[44px]');

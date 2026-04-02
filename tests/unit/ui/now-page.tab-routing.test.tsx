@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { NowPage } from '@/ui/app/pages/NowPage';
@@ -16,57 +15,37 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigateMock,
 }));
 
-const TabsContext = createContext<{
-  value: string;
-  onValueChange?: (value: string) => void;
-} | null>(null);
-
-vi.mock('@/components/ui/tabs', () => ({
-  Tabs: ({
-    value,
-    onValueChange,
+vi.mock('@/ui/app/components/PageTabs', () => ({
+  PageTabs: ({
+    tabs,
+    activeTab,
+    onTabChange,
     children,
   }: {
-    value: string;
-    onValueChange?: (value: string) => void;
+    tabs: Array<{ id: string; label: string }>;
+    activeTab: string;
+    onTabChange: (value: string) => void;
     children: ReactNode;
   }) => (
-    <TabsContext.Provider value={{ value, onValueChange }}>
-      <div data-testid="mock-tabs-root">{children}</div>
-    </TabsContext.Provider>
+    <div data-testid="now-page-page-tabs">
+      <div role="tablist">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => onTabChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {Array.isArray(children)
+        ? children.find((child) => child?.props?.['data-tab-id'] === activeTab) ?? null
+        : children}
+    </div>
   ),
-  TabsList: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  TabsTrigger: ({
-    value,
-    children,
-  }: {
-    value: string;
-    children: ReactNode;
-  }) => {
-    const context = useContext(TabsContext);
-    return (
-      <button
-        type="button"
-        role="tab"
-        aria-selected={context?.value === value}
-        onClick={() => context?.onValueChange?.(value)}
-      >
-        {children}
-      </button>
-    );
-  },
-  TabsContent: ({
-    value,
-    children,
-    className,
-  }: {
-    value: string;
-    children: ReactNode;
-    className?: string;
-  }) => {
-    const context = useContext(TabsContext);
-    return context?.value === value ? <div data-testid={`tab-content-${value}`} className={className}>{children}</div> : null;
-  },
 }));
 
 vi.mock('@/components/Chat/ChatPage', () => ({
@@ -98,6 +77,7 @@ describe('NowPage tab routing', () => {
   it('defaults to focus tab when search is empty（默认进入专注页）', () => {
     render(<NowPage />);
 
+    expect(screen.getByTestId('now-page-page-tabs')).toBeInTheDocument();
     expect(screen.getByTestId('now-page-focus-widget')).toBeInTheDocument();
     expect(screen.getByTestId('now-page-association-list')).toBeInTheDocument();
     expect(screen.queryByTestId('now-page-record')).toBeNull();
@@ -107,7 +87,7 @@ describe('NowPage tab routing', () => {
   it('lets the focus tab own page scrolling instead of clipping children（专注页由页面容器滚动而非截断子组件）', () => {
     render(<NowPage />);
 
-    const focusContent = screen.getByTestId('tab-content-focus');
+    const focusContent = screen.getByTestId('now-page-focus-panel');
     expect(focusContent.className).toContain('overflow-y-auto');
     expect(focusContent.className).not.toContain('overflow-hidden');
   });

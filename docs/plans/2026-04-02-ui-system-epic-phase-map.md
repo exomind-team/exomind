@@ -601,7 +601,7 @@ Phase 6 CLI / GUI / Voice 全客户端化
 
 ### 推荐工作区目录名
 
-`C:\Users\starlin\.config\superpowers\worktrees\exomind\issue-807-ui-unification`
+`D:\project\issue-807-ui-unification`
 
 ### 推荐 PR 范围标题
 

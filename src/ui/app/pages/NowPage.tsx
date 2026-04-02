@@ -1,8 +1,8 @@
 import { ChatPage } from '@/components/Chat/ChatPage';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
+import { PageTabs } from '@/ui/app/components/PageTabs';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import {
@@ -38,9 +38,9 @@ export function NowPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-page dark:bg-page-dark">
-      <Tabs
-        value={activeTab}
-        onValueChange={(nextValue) => {
+      <PageTabs
+        activeTab={activeTab}
+        onTabChange={(nextValue) => {
           const nextTab = EVENTLOG_TAB_VALUES.includes(nextValue as NowTabValue) ? (nextValue as NowTabValue) : 'focus';
           setEventlogLastTab(nextTab);
           void navigate({
@@ -49,17 +49,18 @@ export function NowPage() {
             replace: true,
           });
         }}
+        tabs={[
+          { id: 'focus', label: '专注' },
+          { id: 'record', label: '记录' },
+          { id: 'today', label: '今日' },
+        ]}
         className="flex h-full min-h-0 flex-col"
       >
-        <div className="border-b border-border-page px-4 py-3 md:px-6">
-          <TabsList className="grid h-auto w-full grid-cols-3 rounded-xl border border-border-card bg-card p-1 shadow-sm">
-            <TabsTrigger value="focus" className="rounded-xl text-sm">专注</TabsTrigger>
-            <TabsTrigger value="record" className="rounded-xl text-sm">记录</TabsTrigger>
-            <TabsTrigger value="today" className="rounded-xl text-sm">今日</TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="focus" className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+        <div
+          data-tab-id="focus"
+          data-testid="now-page-focus-panel"
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6"
+        >
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
             <FocusTimerWidget
               prestartSelectedTaskIds={prestartSelectedTaskIds}
@@ -71,18 +72,18 @@ export function NowPage() {
               onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
             />
           </div>
-        </TabsContent>
+        </div>
 
-        <TabsContent value="record" className="mt-0 min-h-0 flex-1">
+        <div data-tab-id="record" className="min-h-0 flex-1">
           <ChatPage variant="new-mobile" hideHeader showTimerWidget={false} />
-        </TabsContent>
+        </div>
 
-        <TabsContent value="today" className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+        <div data-tab-id="today" className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
           <div className="mx-auto w-full max-w-3xl">
             <NowTodayTab />
           </div>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </PageTabs>
     </div>
   );
 }
