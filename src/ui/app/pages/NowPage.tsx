@@ -29,8 +29,7 @@ function NowViewBar({
   onChange: (value: NowTabValue) => void;
 }) {
   return (
-    <div className="shrink-0">
-      <div className="flex items-center gap-1 rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
+    <div data-testid="now-page-view-bar" className="flex items-center gap-1 self-start rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
         {NOW_VIEW_ITEMS.map((item) => {
           const Icon = item.icon;
           const active = value === item.id;
@@ -42,7 +41,7 @@ function NowViewBar({
               data-testid={`now-page-view-toggle-${item.id}`}
               aria-selected={active}
               onClick={() => onChange(item.id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
                 active
                   ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
                   : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
@@ -53,7 +52,6 @@ function NowViewBar({
             </button>
           );
         })}
-      </div>
     </div>
   );
 }
@@ -82,10 +80,15 @@ export function NowPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-page dark:bg-page-dark">
-      <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+    <div className="relative flex h-full min-h-full flex-col bg-page dark:bg-page-dark">
+      <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">当下</h1>
+        </div>
         <NowViewBar value={activeTab} onChange={handleViewChange} />
+      </header>
 
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
         {activeTab === 'focus' ? (
           <div
             role="tabpanel"

@@ -44,11 +44,26 @@ describe('NowPage tab routing', () => {
   it('defaults to focus tab when search is empty（默认进入专注页）', () => {
     render(<NowPage />);
 
+    expect(screen.getByRole('heading', { name: '当下' })).toBeInTheDocument();
     expect(screen.getByTestId('now-page-view-toggle-focus')).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('now-page-focus-widget')).toBeInTheDocument();
     expect(screen.getByTestId('now-page-association-list')).toBeInTheDocument();
     expect(screen.queryByTestId('now-page-record')).toBeNull();
     expect(screen.queryByTestId('now-page-today')).toBeNull();
+  });
+
+  it('uses a signal-network style header and left-aligned fixed-width toggles（头部样式对齐网络页且切换条左对齐）', () => {
+    render(<NowPage />);
+
+    const heading = screen.getByRole('heading', { name: '当下' });
+    const toggleBar = screen.getByTestId('now-page-view-bar');
+    const focusToggle = screen.getByTestId('now-page-view-toggle-focus');
+
+    expect(heading.className).toContain('text-lg');
+    expect(heading.className).toContain('font-semibold');
+    expect(toggleBar.className).toContain('self-start');
+    expect(focusToggle.className).not.toContain('flex-1');
+    expect(focusToggle.className).toContain('px-3');
   });
 
   it('lets the focus tab own page scrolling instead of clipping children（专注页由页面容器滚动而非截断子组件）', () => {
