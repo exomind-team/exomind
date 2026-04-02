@@ -1,4 +1,3 @@
-import { Clock, Waypoints } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { getTaskService } from '@/lib/services';
@@ -6,6 +5,7 @@ import type { TaskNode } from '@/lib/types/task';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
+import { TaskDomainTabs } from '@/ui/app/components/TaskDomainTabs';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { filterNow } from './task-tab-filters';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
@@ -175,25 +175,10 @@ export function TasksPage() {
   return (
     <PageShell
       title="任务"
+      headerBottom={<TaskDomainTabs active="list" />}
       contentClassName="min-h-0 flex-1"
       headerAction={(
-        <div className="flex items-center gap-2">
-          <Link
-            to="/tasks/timeline"
-            className="inline-flex items-center gap-1 rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-          >
-            <Clock size={16} />
-            <span className="hidden md:inline">时间线</span>
-          </Link>
-          <Link
-            to="/tasks/dag"
-            className="inline-flex items-center gap-1 rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-          >
-            <Waypoints size={16} />
-            <span className="hidden md:inline">依赖图</span>
-          </Link>
-          <PageMoreMenu />
-        </div>
+        <PageMoreMenu />
       )}
     >
       <div className="min-h-0 flex-1 overflow-y-auto bg-page px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 dark:bg-page-dark md:px-8 md:pb-24 lg:px-10" data-testid="new-tasks-page">

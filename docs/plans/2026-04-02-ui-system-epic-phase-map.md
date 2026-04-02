@@ -282,6 +282,14 @@ UI、CLI、Voice 只负责：
 - 共享层足以承载 70% 以上高频普通 UI
 - 客户端不再继续发明“带业务语义的临时局部动作组件”
 
+当前进度（2026-04-02）：
+
+- `PageShell / PageTabs / Select` 已建立并接入高频页面
+- `Now / Tasks / Proposal Inbox` 头部骨架已开始共享
+- 任务域视图导航已开始统一到同一条顶部 tabs 体系
+- 高频普通页面中的原生 `<select>` 已基本收口
+- `Workbench` 仍按特殊 surface 处理，只纳入头部一致性规划，不在本轮深改骨架
+
 ### Phase 2: 高价值普通页面迁移（High-Value Page Migration，高价值普通页面迁移）
 
 目标：
