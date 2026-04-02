@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { getTaskService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
+import { PageShell } from '@/ui/app/components/PageShell';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
@@ -172,9 +173,10 @@ export function TasksPage() {
   const emptyText = taskPageFuzzySearchEnabled && taskTitleSearchQuery ? EMPTY_SEARCH_TEXT : EMPTY_TEXT;
 
   return (
-    <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-tasks-page">
-      <header className="flex items-center justify-between border-b border-[#F0ECE8] px-6 py-3 dark:border-[#292524] md:px-8 lg:px-10">
-        <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
+    <PageShell
+      title="任务"
+      contentClassName="min-h-0 flex-1"
+      headerAction={(
         <div className="flex items-center gap-2">
           <Link
             to="/tasks/timeline"
@@ -192,9 +194,9 @@ export function TasksPage() {
           </Link>
           <PageMoreMenu />
         </div>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-24 lg:px-10">
+      )}
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto bg-page px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 dark:bg-page-dark md:px-8 md:pb-24 lg:px-10" data-testid="new-tasks-page">
         <TaskCurrentRootCard
           graph={taskGraph}
           taskById={taskById}
@@ -254,6 +256,6 @@ export function TasksPage() {
         placeholder="添加任务与描述..."
         draftStorageKey={TASKS_QUICK_ADD_DRAFT_KEY}
       />
-    </div>
+    </PageShell>
   );
 }

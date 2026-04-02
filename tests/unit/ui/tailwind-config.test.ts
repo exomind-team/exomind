@@ -23,4 +23,12 @@ describe('tailwind config', () => {
     expect(content).toContain('colors');
     expect(content).toContain('borderRadius');
   });
+
+  it('should expose shared page-level semantic colors（暴露页面级语义颜色）', () => {
+    const content = fs.readFileSync(configPath, 'utf-8');
+    expect(content).toContain('page:');
+    expect(content).toContain('active:');
+    expect(content).toContain('inactive:');
+    expect(content).toContain("'border-page'");
+  });
 });

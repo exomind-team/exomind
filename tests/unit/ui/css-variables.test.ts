@@ -28,6 +28,15 @@ describe('CSS variables', () => {
     expect(content).toContain('--radius');
   });
 
+  it('should define page-level UI tokens for shared surfaces（定义共享页面表面的页面级 token）', () => {
+    const content = fs.readFileSync(cssPath, 'utf-8');
+    expect(content).toContain('--page-bg');
+    expect(content).toContain('--page-bg-dark');
+    expect(content).toContain('--active-bg');
+    expect(content).toContain('--inactive-bg');
+    expect(content).toContain('--border-page');
+  });
+
   it('should define .dark mode variables', () => {
     const content = fs.readFileSync(cssPath, 'utf-8');
     expect(content).toContain('.dark');

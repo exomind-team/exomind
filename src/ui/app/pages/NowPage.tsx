@@ -37,7 +37,7 @@ export function NowPage() {
   }, [explicitTab]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]">
+    <div className="flex h-full min-h-0 flex-col bg-page dark:bg-page-dark">
       <Tabs
         value={activeTab}
         onValueChange={(nextValue) => {
@@ -51,8 +51,8 @@ export function NowPage() {
         }}
         className="flex h-full min-h-0 flex-col"
       >
-        <div className="border-b border-[#E7E5E4] px-4 py-3 dark:border-[#292524] md:px-6">
-          <TabsList className="grid h-auto w-full grid-cols-3 rounded-2xl border border-[#E7E5E4] bg-white p-1 dark:border-[#292524] dark:bg-[#1C1917]">
+        <div className="border-b border-border-page px-4 py-3 md:px-6">
+          <TabsList className="grid h-auto w-full grid-cols-3 rounded-xl border border-border-card bg-card p-1 shadow-sm">
             <TabsTrigger value="focus" className="rounded-xl text-sm">专注</TabsTrigger>
             <TabsTrigger value="record" className="rounded-xl text-sm">记录</TabsTrigger>
             <TabsTrigger value="today" className="rounded-xl text-sm">今日</TabsTrigger>
