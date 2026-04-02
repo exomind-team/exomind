@@ -376,10 +376,6 @@ export class VoiceShortcutService {
       return;
     }
     this.destroyed = true;
-    const runtime = getVoiceShortcutGlobalRuntime();
-    if (runtime.instance === this) {
-      runtime.instance = null;
-    }
     this.initEpoch += 1;
     this.unlisten?.();
     this.unlisten = null;

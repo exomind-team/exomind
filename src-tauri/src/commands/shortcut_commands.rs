@@ -718,23 +718,50 @@ fn position_voice_overlay(app: &AppHandle, window: &WebviewWindow) -> Result<(),
         .map_err(|error| error.to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyntheticShortcutStep {
+    PressControl,
+    ClickV,
+    ReleaseControl,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn paste_shortcut_steps() -> [SyntheticShortcutStep; 3] {
+    [
+        SyntheticShortcutStep::PressControl,
+        SyntheticShortcutStep::ClickV,
+        SyntheticShortcutStep::ReleaseControl,
+    ]
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// Simulate Ctrl+V paste via enigo.
 #[tauri::command]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn simulate_paste() -> Result<(), String> {
     // Run in blocking thread since enigo is not Send on all platforms
     tokio::task::spawn_blocking(|| {
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
         let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-        enigo
-            .key(Key::Control, Direction::Press)
-            .map_err(|e| e.to_string())?;
-        enigo
-            .key(Key::Unicode('v'), Direction::Click)
-            .map_err(|e| e.to_string())?;
-        enigo
-            .key(Key::Control, Direction::Release)
-            .map_err(|e| e.to_string())?;
+        for step in paste_shortcut_steps() {
+            match step {
+                SyntheticShortcutStep::PressControl => {
+                    enigo
+                        .key(Key::Control, Direction::Press)
+                        .map_err(|e| e.to_string())?;
+                }
+                SyntheticShortcutStep::ClickV => {
+                    enigo
+                        .key(Key::V, Direction::Click)
+                        .map_err(|e| e.to_string())?;
+                }
+                SyntheticShortcutStep::ReleaseControl => {
+                    enigo
+                        .key(Key::Control, Direction::Release)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+        }
         Ok(())
     })
     .await
@@ -958,7 +985,8 @@ pub async fn foreground_window_focus(_window_handle: String) -> Result<bool, Str
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_overlay_position, choose_voice_overlay_anchor, cursor_in_monitor,
+        calculate_overlay_position, choose_voice_overlay_anchor, cursor_in_monitor, paste_shortcut_steps,
+        SyntheticShortcutStep,
         MonitorGeometry,
     };
 
@@ -1089,5 +1117,17 @@ mod tests {
         // Monitor with taskbar offset: work area starts at y=40
         assert!(cursor_in_monitor(960, 100, 0, 40, 1920, 1000));
         assert!(!cursor_in_monitor(960, 39, 0, 40, 1920, 1000));
+    }
+
+    #[test]
+    fn paste_shortcut_uses_physical_v_key_instead_of_unicode_character() {
+        assert_eq!(
+            paste_shortcut_steps(),
+            [
+                SyntheticShortcutStep::PressControl,
+                SyntheticShortcutStep::ClickV,
+                SyntheticShortcutStep::ReleaseControl,
+            ]
+        );
     }
 }

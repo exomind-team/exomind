@@ -180,7 +180,7 @@ vi.mock('@/lib/asr/volcano-streaming-capture', () => ({
   },
 }));
 
-import { VoiceShortcutService } from '@/services/voice-shortcut.service';
+import { getVoiceShortcutService, VoiceShortcutService } from '@/services/voice-shortcut.service';
 
 async function emitVoiceShortcut(payload: 'start' | 'stop' | 'cancel'): Promise<void> {
   const listeners = Array.from(tauriEventListeners.get('voice-shortcut') ?? []);
@@ -427,6 +427,14 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     expect(tauriEventListeners.get('voice-shortcut')).toBeFalsy();
     expect(tauriEventListeners.get('volcano-asr-stream-event')).toBeFalsy();
+  });
+
+  it('reuses the singleton service instance across destroy and re-init（destroy 后再次获取仍复用同一全局实例）', () => {
+    const first = getVoiceShortcutService();
+    first.destroy();
+    const second = getVoiceShortcutService();
+
+    expect(second).toBe(first);
   });
 
   it('handles a duplicated start event only once across multiple service instances（多实例同时监听时同一次 start 只允许一轮录音）', async () => {
