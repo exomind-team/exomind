@@ -42,7 +42,7 @@ export function PageTabs({
         <TabsContent
           key={panelId}
           value={panelId}
-          className={cn('mt-0 min-h-0 flex-1 overflow-hidden', contentClassName)}
+          className={cn('mt-0 flex min-h-0 flex-1 flex-col overflow-hidden', contentClassName)}
         >
           {child}
         </TabsContent>

@@ -57,6 +57,8 @@ describe('PageTabs（统一标签页容器）', () => {
     const panel = screen.getByRole('tabpanel');
 
     expect(tabList.className).toContain('shrink-0');
+    expect(panel.className).toContain('flex');
+    expect(panel.className).toContain('flex-col');
     expect(panel.className).toContain('overflow-hidden');
   });
 });
