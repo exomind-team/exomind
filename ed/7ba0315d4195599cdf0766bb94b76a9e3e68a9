@@ -1,0 +1,75 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "ed7ba0315d4195599cdf0766bb94b76a9e3e68a9",
+  "prompts": {
+    "7b1e378cd63b35c2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4c4f-9ea6-7b61-a808-2e5ecb75062a",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/5b4acc0879948892500b0f3cc7a9ec71a3581b79849fcf23d4a27e770a80cd35"
+    },
+    "824d706963a06c3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4764-3ca6-7582-80d6-21b1e8f907f8",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 208,
+      "overriden_lines": 0
+    },
+    "9d74646c9382ac4c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d47ed-a515-7250-a3ac-af6cf488fd72",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 93,
+      "overriden_lines": 0
+    },
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    },
+    "dc67460798bd45e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4b67-be99-7a73-8f32-36344056b820",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2f8cf0b85b050b34c28d5deb24b21f9649fc8c930f20dfe1eb187d57df68a630"
+    }
+  }
+}
