@@ -1,48 +1,35 @@
+import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { isDesktopAdaptiveShellPath, resolveAppShellMode } from '@/ui/app/layout/shell-mode';
 
-describe('shell-mode', () => {
-  it('covers primary app child routes in desktop adaptive shell paths', () => {
-    expect(isDesktopAdaptiveShellPath('/')).toBe(true);
-    expect(isDesktopAdaptiveShellPath('/eventlog')).toBe(true);
-    expect(isDesktopAdaptiveShellPath('/eventlog/timeblocks/block-1')).toBe(true);
-    expect(isDesktopAdaptiveShellPath('/tasks')).toBe(true);
-    expect(isDesktopAdaptiveShellPath('/tasks/task-1')).toBe(true);
-    expect(isDesktopAdaptiveShellPath('/settings')).toBe(true);
-    expect(isDesktopAdaptiveShellPath('/settings/legal-support')).toBe(true);
-    expect(isDesktopAdaptiveShellPath('/agents')).toBe(true);
-    expect(isDesktopAdaptiveShellPath('/agents/chat/abc')).toBe(true);
+describe('app shell selection（应用壳层选择）', () => {
+  const sourcePath = path.resolve('src/routes.tsx');
+  const source = readFileSync(sourcePath, 'utf-8');
+  const selectionStart = source.indexOf('const selectedShell =');
+  const desktopBranchStart = source.indexOf("if (selectedShell === 'desktop')");
+  const selectionBlock = source.slice(selectionStart, desktopBranchStart);
+
+  it('inlines shell selection in routes（在路由处内联壳层选择）', () => {
+    expect(source).not.toContain("@/ui/app/layout/shell-mode");
+    expect(source).not.toContain('resolveAppShellMode');
+    expect(selectionBlock).toContain(
+      "const selectedShell = isDesktop && desktopAdaptiveEnabled ? 'desktop' : 'mobile';",
+    );
   });
 
-  it('keeps non-primary routes out of desktop shell matching', () => {
-    expect(isDesktopAdaptiveShellPath('/sync-test')).toBe(false);
-    expect(isDesktopAdaptiveShellPath('/users')).toBe(false);
-    expect(isDesktopAdaptiveShellPath('/volcano-asr-test')).toBe(false);
+  it('does not keep a route whitelist for desktop shell（不保留桌面壳白名单）', () => {
+    expect(selectionBlock).not.toContain('pathname');
+    expect(selectionBlock).not.toContain('startsWith');
+    expect(selectionBlock).not.toContain('/eventlog');
+    expect(selectionBlock).not.toContain('/tasks');
+    expect(selectionBlock).not.toContain('/proposals');
+    expect(selectionBlock).not.toContain('/sync-test');
+    expect(selectionBlock).not.toContain('/volcano-asr-test');
   });
 
-  it('resolves shell mode from desktop width, adaptive flag, and route scope', () => {
-    expect(resolveAppShellMode({
-      pathname: '/eventlog/timeblocks/block-1',
-      isDesktop: true,
-      desktopAdaptiveEnabled: true,
-    })).toBe('desktop');
-
-    expect(resolveAppShellMode({
-      pathname: '/eventlog/timeblocks/block-1',
-      isDesktop: false,
-      desktopAdaptiveEnabled: true,
-    })).toBe('mobile');
-
-    expect(resolveAppShellMode({
-      pathname: '/sync-test',
-      isDesktop: true,
-      desktopAdaptiveEnabled: true,
-    })).toBe('mobile');
-
-    expect(resolveAppShellMode({
-      pathname: '/tasks/task-1',
-      isDesktop: true,
-      desktopAdaptiveEnabled: false,
-    })).toBe('mobile');
+  it('keeps shell choice only on viewport + adaptive toggle（壳层只由视口与桌面适配开关决定）', () => {
+    expect(selectionBlock).toContain('isDesktop');
+    expect(selectionBlock).toContain('desktopAdaptiveEnabled');
+    expect(selectionBlock).not.toContain('location.pathname');
   });
 });

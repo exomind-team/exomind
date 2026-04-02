@@ -18,7 +18,6 @@ import { getCommandPaletteService } from '@/lib/services/command-palette.service
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
 import { useTauriFullscreenShortcut } from '@/ui/app/hooks/useTauriFullscreenShortcut';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
-import { resolveAppShellMode } from '@/ui/app/layout/shell-mode';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ProposalNotificationBadge } from '@/ui/app/components/ProposalNotificationBadge';
@@ -623,11 +622,7 @@ function NewLayout() {
     { title: '工作台测试', path: '/workbench', icon: FlaskConical },
     { title: '设置', path: '/settings', icon: Settings },
   ];
-  const selectedShell = resolveAppShellMode({
-    pathname: location.pathname,
-    isDesktop,
-    desktopAdaptiveEnabled,
-  });
+  const selectedShell = isDesktop && desktopAdaptiveEnabled ? 'desktop' : 'mobile';
 
   if (selectedShell === 'desktop') {
     return (
