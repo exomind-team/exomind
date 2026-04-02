@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ExoMind Agent 系统功能验收</title>
+  <style>
+    :root {
+      --bg: #f4efe9;
+      --panel: rgba(255, 250, 246, 0.88);
+      --panel-strong: #fffaf6;
+      --line: #ddd2c7;
+      --text: #2f241e;
+      --muted: #786b62;
+      --accent: #b45a3c;
+      --accent-soft: rgba(180, 90, 60, 0.12);
+      --ok: #1f7a44;
+      --shadow: 0 24px 60px -36px rgba(47, 36, 30, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(180, 90, 60, 0.08), transparent 28%),
+        radial-gradient(circle at right 20%, rgba(120, 107, 98, 0.08), transparent 20%),
+        linear-gradient(180deg, #f8f3ee 0%, var(--bg) 100%);
+    }
+
+    .wrap { width: min(1120px, calc(100vw - 32px)); margin: 24px auto 48px; }
+    .hero, .side, .main-card {
+      border: 1px solid rgba(221, 210, 199, 0.95);
+      border-radius: 24px;
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+      box-shadow: var(--shadow);
+    }
+    .hero { padding: 28px 30px; }
+    .grid { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; margin-top: 18px; }
+    .side { padding: 18px; height: fit-content; position: sticky; top: 18px; }
+    .main-card { padding: 20px; }
+    .eyebrow {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    h1 { margin: 14px 0 10px; font-size: clamp(28px, 4vw, 42px); line-height: 1.15; }
+    .lead { margin: 0; color: var(--muted); line-height: 1.75; font-size: 15px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 10px 14px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:hover { background: var(--accent-soft); }
+    .progress { margin-left: auto; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; }
+    .bar { width: 220px; height: 10px; border-radius: 999px; overflow: hidden; background: #eadfd4; }
+    .bar > span { display: block; width: 0%; height: 100%; background: linear-gradient(90deg, #d08a6f, var(--accent)); transition: width 0.3s; }
+    .section { border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,0.48); padding: 18px; margin-bottom: 16px; }
+    .section-header { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: baseline; margin-bottom: 12px; }
+    .section-title { margin: 0; font-size: 20px; }
+    .section-note { color: var(--muted); font-size: 13px; }
+    .item { border-top: 1px dashed var(--line); padding-top: 14px; margin-top: 14px; }
+    .item:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+    .item-top { display: flex; gap: 12px; align-items: flex-start; }
+    .item-top input[type="checkbox"] { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--accent); flex-shrink: 0; }
+    .item-body { flex: 1; min-width: 0; }
+    .issue { display: inline-block; min-width: 36px; margin-right: 8px; color: var(--accent); font-weight: 700; }
+    .item-title { font-size: 16px; font-weight: 700; line-height: 1.5; }
+    .steps, .expect { margin: 8px 0 0; color: var(--muted); line-height: 1.8; font-size: 14px; }
+    .expect strong { color: var(--ok); }
+    .cmd-block {
+      display: block;
+      margin: 6px 0;
+      padding: 8px 12px;
+      background: rgba(47, 36, 30, 0.06);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text);
+      cursor: pointer;
+      position: relative;
+    }
+    .cmd-block:hover::after {
+      content: "点击复制";
+      position: absolute;
+      right: 8px;
+      top: 8px;
+      font-size: 11px;
+      color: var(--accent);
+      font-family: inherit;
+    }
+    .evidence { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .evidence input, .memo textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.9);
+      color: var(--text);
+      padding: 10px 12px;
+      font: inherit;
+    }
+    .memo textarea { min-height: 86px; resize: vertical; margin-top: 10px; }
+    .done .item-title { text-decoration: line-through; color: #8a7d74; }
+    .footer { margin-top: 18px; color: var(--muted); font-size: 13px; text-align: center; }
+    .side h2 { font-size: 16px; margin: 0 0 12px; }
+    .side ul { padding-left: 18px; margin: 0; }
+    .side li { font-size: 13px; color: var(--muted); line-height: 1.8; }
+    .side .env-info { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); }
+    .side .env-info h3 { font-size: 14px; margin: 0 0 8px; color: var(--text); }
+    .side .env-info code { font-size: 12px; background: rgba(47,36,30,0.06); padding: 2px 6px; border-radius: 6px; }
+    @media (max-width: 920px) {
+      .grid { grid-template-columns: 1fr; }
+      .side { position: static; }
+      .progress { width: 100%; margin-left: 0; }
+      .bar { flex: 1; width: auto; }
+      .evidence { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Hero -->
+    <section class="hero">
+      <span class="eyebrow">人工验收页</span>
+      <h1>ExoMind Agent 系统功能验收</h1>
+      <p class="lead">
+        逐项验证提案系统（Proposal System）和 Agent API（Agent Sessions）的 API 功能与 UI 交互。<br>
+        共 15 项验收，覆盖 API 端点、业务逻辑、终态保护、UI 交互。勾选每项并记录证据，页面自动保存进度。
+      </p>
+      <div class="toolbar">
+        <button id="expand-all" type="button">展开全部说明</button>
+        <button id="collapse-all" type="button">收起说明</button>
+        <button id="clear-checks" type="button">清空所有勾选</button>
+        <button id="clear-notes" type="button">清空备注与证据</button>
+        <div class="progress">
+          <span id="progress-text">0 / 15 已验证</span>
+          <div class="bar"><span id="progress-bar"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <!-- Sidebar -->
+      <aside class="side">
+        <h2>使用方式</h2>
+        <ul>
+          <li>确保 RT 服务运行在 <code>http://127.0.0.1:1949</code></li>
+          <li>按顺序执行每项操作，第 1~8 项有依赖关系</li>
+          <li>点击命令块可复制 curl 命令到剪贴板</li>
+          <li>在"证据"栏粘贴返回的关键 JSON 片段或截图路径</li>
+          <li>在"备注"栏记录偏差、异常或复现条件</li>
+          <li>勾选复选框标记"已验证"，进度自动统计</li>
+          <li>所有状态保存在浏览器 localStorage，刷新不丢失</li>
+        </ul>
+        <div class="env-info">
+          <h3>环境要求</h3>
+          <p style="font-size:13px;color:var(--muted);margin:0 0 6px;">
+            RT 端点：<code>http://127.0.0.1:1949</code><br>
+            UI 地址：<code>http://127.0.0.1:5173</code><br>
+            工具：<code>curl</code>, <code>jq</code>
+          </p>
+          <h3 style="margin-top:12px;">启动命令</h3>
+          <p style="font-size:12px;color:var(--muted);margin:0;font-family:monospace;">
+            bun dev<br>
+            node server/pouchdb-server.js
+          </p>
+        </div>
+      </aside>
+
+      <!-- Main -->
+      <main class="main-card">
+
+        <!-- ====== 准备项 ====== -->
+        <section class="section">
+          <div class="section-header">
+            <h2 class="section-title">准备项</h2>
+            <span class="section-note">开始验收前确认以下条件</span>
+          </div>
+
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">P1</span>RT 服务可用</div>
+                <p class="steps">
+                  在终端执行以下命令，确认 RT 服务已启动且可响应：
+                </p>
+                <code class="cmd-block">curl -sS -D - -o /dev/null http://127.0.0.1:1949 | head -n 8</code>
+                <p class="expect"><strong>期望：</strong>返回 HTTP 200 或服务根路径的有效响应</p>
+                <div class="evidence">
+                  <input placeholder="HTTP 状态码">
+                  <input placeholder="响应时间">
+                  <input placeholder="其他证据">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">P2</span>UI 开发服务可用</div>
+                <p class="steps">
+                  确认 Vite 开发服务已启动（UI 验收项需要）：
+                </p>
+                <code class="cmd-block">curl -sS -D - -o /dev/null http://127.0.0.1:5173 | head -n 8</code>
+                <p class="expect"><strong>期望：</strong>返回 HTTP 200</p>
+                <div class="evidence">
+                  <input placeholder="HTTP 状态码">
+                  <input placeholder="其他证据">
+                  <input placeholder="">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ====== 第一组：提案系统 API ====== -->
+        <section class="section">
+          <div class="section-header">
+            <h2 class="section-title">一、提案系统 (Proposal System)</h2>
+            <span class="section-note">8 项 API 验收，端点 http://127.0.0.1:1949，按顺序执行</span>
+          </div>
+
+          <!-- 1. 创建提案 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#1</span>创建提案</div>
+                <p class="steps">在终端执行以下 curl 命令创建一条测试提案：</p>
+                <code class="cmd-block">curl -X POST http://127.0.0.1:1949/api/proposals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "测试提案：整理会议记录",
+    "body": "验收测试",
+    "action_type": "create_task",
+    "action_params": {
+      "title": "整理会议记录",
+      "tags": ["测试"]
+    },
+    "references": [{
+      "ref_type": "event",
+      "id": "evt-test",
+      "display_text": "测试事件引用"
+    }],
+    "publisher": {
+      "publisher_type": "agent",
+      "id": "test-agent",
+      "name": "验收测试Agent"
+    }
+  }'</code>
+                <p class="expect"><strong>期望：</strong>返回 JSON 包含 <code>id</code> 字段（如 <code>"id": 1</code>），status 为 <code>"pending"</code>，title/body/action_type/references/publisher 与请求一致</p>
+                <div class="evidence">
+                  <input placeholder="返回的 id 值">
+                  <input placeholder="返回的 status 值">
+                  <input placeholder="完整 JSON 片段或截图路径">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 列表查询 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#2</span>列表查询</div>
+                <p class="steps">查询所有提案列表：</p>
+                <code class="cmd-block">curl http://127.0.0.1:1949/api/proposals</code>
+                <p class="expect"><strong>期望：</strong>返回 JSON 数组，包含上一步创建的提案（title 为"测试提案：整理会议记录"）</p>
+                <div class="evidence">
+                  <input placeholder="数组长度">
+                  <input placeholder="是否包含测试提案">
+                  <input placeholder="其他证据">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. 状态过滤 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#3</span>状态过滤</div>
+                <p class="steps">使用 status 查询参数过滤提案：</p>
+                <code class="cmd-block">curl 'http://127.0.0.1:1949/api/proposals?status=pending'</code>
+                <p class="expect"><strong>期望：</strong>返回数组，所有提案的 status 均为 <code>"pending"</code>，包含第 1 步创建的提案</p>
+                <div class="evidence">
+                  <input placeholder="返回数量">
+                  <input placeholder="所有 status 是否为 pending">
+                  <input placeholder="其他证据">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. 添加评论 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#4</span>添加评论</div>
+                <p class="steps">对提案 ID=1 添加一条评论：</p>
+                <code class="cmd-block">curl -X POST http://127.0.0.1:1949/api/proposals/1/comments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "审阅通过",
+    "author": {
+      "publisher_type": "human",
+      "id": "reviewer",
+      "name": "审阅者"
+    }
+  }'</code>
+                <p class="expect"><strong>期望：</strong>返回更新后的提案 JSON，<code>comments</code> 数组包含新评论，评论含 content="审阅通过" 和 author 信息</p>
+                <div class="evidence">
+                  <input placeholder="comments 数组长度">
+                  <input placeholder="评论 content 值">
+                  <input placeholder="评论 author.name 值">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. 批准执行 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#5</span>批准执行（创建任务）</div>
+                <p class="steps">将提案 ID=1 的状态改为 approved：</p>
+                <code class="cmd-block">curl -X PATCH http://127.0.0.1:1949/api/proposals/1 \
+  -H "Content-Type: application/json" \
+  -d '{"status": "approved"}'</code>
+                <p class="expect"><strong>期望：</strong>返回提案 JSON，status 变为 <code>"approved"</code>。后台应自动触发 action_type="create_task" 的任务创建</p>
+                <div class="evidence">
+                  <input placeholder="返回的 status 值">
+                  <input placeholder="HTTP 状态码">
+                  <input placeholder="其他证据">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 6. 验证任务创建 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#6</span>验证任务创建</div>
+                <p class="steps">查询任务列表，确认提案批准后自动创建了对应任务：</p>
+                <code class="cmd-block">curl http://127.0.0.1:1949/tasks | jq '.[] | select(.title == "整理会议记录")'</code>
+                <p class="expect"><strong>期望：</strong>返回 title 为"整理会议记录"的任务对象，tags 包含"测试"</p>
+                <div class="evidence">
+                  <input placeholder="任务 title">
+                  <input placeholder="任务 tags">
+                  <input placeholder="任务 id 或完整 JSON">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 7. 验证 EventLog -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#7</span>验证 EventLog 记录</div>
+                <p class="steps">查询事件日志，确认提案批准操作被记录：</p>
+                <code class="cmd-block">curl http://127.0.0.1:1949/eventlog | jq '.[] | select(.tags[] == "agent-action")'</code>
+                <p class="expect"><strong>期望：</strong>返回包含"提案已批准"相关描述的事件记录，tags 包含 <code>"agent-action"</code></p>
+                <div class="evidence">
+                  <input placeholder="事件描述内容">
+                  <input placeholder="事件 tags">
+                  <input placeholder="事件时间戳">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 8. 终态保护 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#8</span>终态保护</div>
+                <p class="steps">尝试对已 approved 的提案再次修改状态为 rejected（应被拒绝）：</p>
+                <code class="cmd-block">curl -X PATCH http://127.0.0.1:1949/api/proposals/1 \
+  -H "Content-Type: application/json" \
+  -d '{"status": "rejected"}'</code>
+                <p class="expect"><strong>期望：</strong>返回 HTTP 4xx 错误（如 400 或 409），响应体包含错误信息说明已处于终态的提案不可再更改状态</p>
+                <div class="evidence">
+                  <input placeholder="HTTP 状态码">
+                  <input placeholder="错误信息内容">
+                  <input placeholder="其他证据">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ====== 第二组：Agent API ====== -->
+        <section class="section">
+          <div class="section-header">
+            <h2 class="section-title">二、Agent API (Agent Sessions)</h2>
+            <span class="section-note">2 项 API 验收，需要 LLM API Key 配置</span>
+          </div>
+
+          <!-- 9. 触发 Agent 会话 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#9</span>触发 Agent 会话</div>
+                <p class="steps">发起一个 Agent 会话请求：</p>
+                <code class="cmd-block">curl -X POST http://127.0.0.1:1949/agent-sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "列出最近的事件日志",
+    "tools": ["get_recent_events"]
+  }'</code>
+                <p class="expect"><strong>期望：</strong>返回 JSON 包含 <code>session_id</code> 和 <code>content</code> 字段。<br>
+                <em>备注：如果未配置 LLM API Key，应返回明确的错误信息（如 401 或包含配置提示的错误 JSON），而非 500 崩溃</em></p>
+                <div class="evidence">
+                  <input placeholder="session_id 值">
+                  <input placeholder="content 摘要或错误信息">
+                  <input placeholder="HTTP 状态码">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 是否配置了 API Key / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 10. 查询会话结果 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#10</span>查询会话结果</div>
+                <p class="steps">使用上一步返回的 session_id 查询会话记录（将 <code>{session_id}</code> 替换为实际值）：</p>
+                <code class="cmd-block">curl http://127.0.0.1:1949/agent-sessions/{session_id}</code>
+                <p class="expect"><strong>期望：</strong>返回该会话的完整记录 JSON，包含 prompt、tools、content 等字段</p>
+                <div class="evidence">
+                  <input placeholder="返回的 session_id">
+                  <input placeholder="是否包含 prompt 字段">
+                  <input placeholder="是否包含 content 字段">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ====== 第三组：UI 验收 ====== -->
+        <section class="section">
+          <div class="section-header">
+            <h2 class="section-title">三、UI 验收</h2>
+            <span class="section-note">5 项 UI 交互验收，需要在浏览器中操作 ExoMind 界面</span>
+          </div>
+
+          <!-- 11. 请求箱导航 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#11</span>请求箱导航</div>
+                <p class="steps">
+                  1. 在浏览器打开 ExoMind UI（<code>http://127.0.0.1:5173</code>）<br>
+                  2. 在侧边栏找到"请求箱"图标并点击
+                </p>
+                <p class="expect"><strong>期望：</strong>页面跳转到 <code>/proposals</code> 路由，显示请求箱/提案列表页面</p>
+                <div class="evidence">
+                  <input placeholder="URL 是否为 /proposals">
+                  <input placeholder="页面标题或主要内容">
+                  <input placeholder="截图路径">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 12. 通知徽章 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#12</span>通知徽章</div>
+                <p class="steps">
+                  1. 使用 curl 创建一条新的 pending 提案（参考第 1 项的命令，修改 title 以区分）<br>
+                  2. 回到浏览器刷新 ExoMind UI 页面<br>
+                  3. 观察侧边栏导航中"请求箱"图标附近
+                </p>
+                <p class="expect"><strong>期望：</strong>导航栏的"请求箱"图标旁显示待处理数量徽章（badge），数字与 pending 状态的提案数量一致</p>
+                <div class="evidence">
+                  <input placeholder="徽章数字">
+                  <input placeholder="pending 提案数量">
+                  <input placeholder="截图路径">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 13. 提案详情 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#13</span>提案详情</div>
+                <p class="steps">
+                  1. 进入请求箱页面（<code>/proposals</code>）<br>
+                  2. 点击列表中的某个提案条目
+                </p>
+                <p class="expect"><strong>期望：</strong>展开或跳转到提案详情视图，包含以下区域：<br>
+                  - 提案标题和理由（body）<br>
+                  - 引用列表（references）<br>
+                  - 操作参数编辑区（action_params）<br>
+                  - 评论区（comments）<br>
+                  - 操作按钮（批准/拒绝）
+                </p>
+                <div class="evidence">
+                  <input placeholder="是否显示标题和理由">
+                  <input placeholder="是否显示引用和参数">
+                  <input placeholder="截图路径">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 14. 引用跳转 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#14</span>引用跳转</div>
+                <p class="steps">
+                  1. 在提案详情中找到引用列表（references）<br>
+                  2. 点击引用链接（如"测试事件引用"）
+                </p>
+                <p class="expect"><strong>期望：</strong>页面跳转到对应的事件/任务/时间块详情页面，URL 路由与引用类型匹配</p>
+                <div class="evidence">
+                  <input placeholder="跳转后的 URL">
+                  <input placeholder="目标页面内容">
+                  <input placeholder="截图路径">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件（引用目标不存在时是否有友好提示？）"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 15. 批准操作 -->
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">#15</span>批准操作</div>
+                <p class="steps">
+                  1. 用 curl 先创建一条新的 pending 提案（action_type 为 create_task）<br>
+                  2. 在 UI 的请求箱中打开该提案<br>
+                  3. 点击"批准执行"按钮
+                </p>
+                <p class="expect"><strong>期望：</strong>
+                  - 提案状态在 UI 中变为 <code>approved</code><br>
+                  - 对应的任务被自动创建（可通过 <code>curl http://127.0.0.1:1949/tasks</code> 验证）<br>
+                  - 按钮变为不可操作状态或消失
+                </p>
+                <div class="evidence">
+                  <input placeholder="UI 状态变化">
+                  <input placeholder="任务是否创建">
+                  <input placeholder="截图路径">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="footer">
+          ExoMind Agent 系统功能验收 &mdash; 生成于 2026-04-02 &mdash; 共 15 项验收（不含 2 项准备项）
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const storageKey = "exomind-agent-system-verification-v1";
+    const checks = Array.from(document.querySelectorAll("[data-check]"));
+    const items = Array.from(document.querySelectorAll("[data-item]"));
+    const inputs = Array.from(document.querySelectorAll(".evidence input, .memo textarea"));
+    const progressText = document.getElementById("progress-text");
+    const progressBar = document.getElementById("progress-bar");
+
+    // Total only counts non-prep items (skip first 2 prep items)
+    const PREP_COUNT = 2;
+    const VERIFY_COUNT = checks.length - PREP_COUNT;
+
+    function saveState() {
+      const data = {
+        checks: checks.map((el) => el.checked),
+        inputs: inputs.map((el) => el.value)
+      };
+      localStorage.setItem(storageKey, JSON.stringify(data));
+      updateProgress();
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        (data.checks || []).forEach((value, index) => {
+          if (checks[index]) checks[index].checked = Boolean(value);
+        });
+        (data.inputs || []).forEach((value, index) => {
+          if (inputs[index]) inputs[index].value = value || "";
+        });
+      } catch (e) {}
+      updateProgress();
+    }
+
+    function updateProgress() {
+      let done = 0;
+      checks.forEach((check, index) => {
+        const item = items[index];
+        if (!item) return;
+        if (check.checked) {
+          if (index >= PREP_COUNT) done += 1;
+          item.classList.add("done");
+        } else {
+          item.classList.remove("done");
+        }
+      });
+      const percent = VERIFY_COUNT === 0 ? 0 : Math.round((done / VERIFY_COUNT) * 100);
+      progressText.textContent = `${done} / ${VERIFY_COUNT} 已验证`;
+      progressBar.style.width = `${percent}%`;
+    }
+
+    checks.forEach((check) => check.addEventListener("change", saveState));
+    inputs.forEach((input) => input.addEventListener("input", saveState));
+
+    document.getElementById("clear-checks").addEventListener("click", () => {
+      if (!confirm("确定清空所有勾选状态？")) return;
+      checks.forEach((check) => check.checked = false);
+      saveState();
+    });
+
+    document.getElementById("clear-notes").addEventListener("click", () => {
+      if (!confirm("确定清空所有备注与证据？")) return;
+      inputs.forEach((input) => input.value = "");
+      saveState();
+    });
+
+    document.getElementById("expand-all").addEventListener("click", () => {
+      document.querySelectorAll(".steps, .expect, .evidence, .memo, .cmd-block").forEach((el) => {
+        el.style.display = "";
+      });
+    });
+
+    document.getElementById("collapse-all").addEventListener("click", () => {
+      document.querySelectorAll(".steps, .expect, .evidence, .memo, .cmd-block").forEach((el) => {
+        el.style.display = "none";
+      });
+    });
+
+    // Click-to-copy for command blocks
+    document.querySelectorAll(".cmd-block").forEach((block) => {
+      block.addEventListener("click", () => {
+        const text = block.textContent.replace(/点击复制$/, "").trim();
+        navigator.clipboard.writeText(text).then(() => {
+          const original = block.style.borderColor;
+          block.style.borderColor = "var(--ok)";
+          setTimeout(() => { block.style.borderColor = original; }, 600);
+        }).catch(() => {
+          // Fallback: select text
+          const range = document.createRange();
+          range.selectNodeContents(block);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        });
+      });
+    });
+
+    loadState();
+  </script>
+</body>
+</html>
