@@ -11,6 +11,7 @@ import type { TaskNode } from '@/lib/types/task';
 import { buildTimeBlockDetailView } from './timeblock-detail-view';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { buildTaskDomainBackLink } from './task-domain-routing';
 
 function resolveActiveTaskIds(block: ActiveBlockData): string[] {
   return resolveActiveBlockTaskIds(block);
@@ -77,9 +78,10 @@ export function TimeBlockDetailPage() {
   const [eventLogs, setEventLogs] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const isNowDomain = location.pathname.startsWith('/eventlog/');
+  const taskDomainBackLink = buildTaskDomainBackLink(null, 'list');
   const backLink = isNowDomain
     ? { label: '当下', to: '/eventlog' }
-    : { label: '任务', to: '/tasks' };
+    : { label: taskDomainBackLink.sourceLabel, to: taskDomainBackLink.to, search: { main: '1' } };
   const returnTo = block
     ? (isNowDomain ? `/eventlog/timeblocks/${block.startId}` : `/tasks/block/${block.startId}`)
     : undefined;
