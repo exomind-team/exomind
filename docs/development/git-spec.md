@@ -270,6 +270,39 @@ git branch -d hotfix/v1.2.1
 
 ---
 
+## Windows 开发环境 Git 配置
+
+Windows 上 clone 项目后，需要额外执行以下一次性配置，否则部分功能会静默损坏。
+
+### core.symlinks — 软链接支持
+
+**问题**：项目中 `.codex/agents` 和 `.codex/skills` 在 git 中以软链接（mode `120000`）存储。
+Windows 的 `core.symlinks` 默认值为 `false`，checkout 时会将软链接**静默降级为普通文本文件**（内容为目标路径），导致 Codex 启动报错：
+
+```
+Error loading configuration: 目录名称无效。 (os error 267)
+```
+
+**前提条件**：Windows Developer Mode 已开启（设置 → 开发者选项 → 开发者模式）
+
+**修复命令**（clone 后只需执行一次）：
+
+```bash
+git config core.symlinks true
+git checkout .codex/agents .codex/skills
+```
+
+**验证**：
+
+```powershell
+Get-Item .codex\agents | Select-Object Name, LinkType, Target
+# 预期输出: agents  SymbolicLink  {..\agents}
+```
+
+> 相关 Issue：[#808](https://github.com/exomind-team/exomind/issues/808)
+
+---
+
 # Worktree 使用规范
 
 ## 为什么使用 Worktree
