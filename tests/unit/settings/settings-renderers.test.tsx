@@ -356,6 +356,28 @@ describe('SettingsItemRenderer', () => {
     expect(setValue).toHaveBeenCalledWith('192.168.1.88:1949');
   });
 
+  it('renders select-style enum items with the shared select primitive（select 风格枚举使用共享 Select 组件）', () => {
+    const item: SingleEnumSettingsItem = {
+      id: 'runtime-target-mode',
+      label: '连接目标',
+      category: 'connection',
+      type: 'enum',
+      enumStyle: 'select',
+      options: [
+        { label: '本机 RT', value: 'embedded' },
+        { label: '远端 RT', value: 'external' },
+      ],
+      get: () => 'embedded',
+      set: vi.fn(),
+    };
+
+    render(<SettingsItemRenderer item={item} ctx={ctx} />);
+
+    const trigger = screen.getByRole('combobox', { name: '连接目标' });
+    expect(trigger.tagName).not.toBe('SELECT');
+    expect(trigger).toHaveTextContent('本机 RT');
+  });
+
   it('renders dialog enum items with descriptions inside a dialog picker', () => {
     const item = {
       id: 'countdown-end-mode',

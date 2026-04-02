@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import { Check, ChevronRight } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { getClipboardService } from '@/lib/services';
 import { Divider, SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
@@ -638,21 +639,27 @@ function EnumRenderer({ item }: { item: EnumSettingsItem }) {
           icon={renderRowIcon(item.icon)}
           label={item.label}
           right={(
-            <select
-              data-testid={item.controlTestId}
-              aria-label={item.label}
-              className="h-9 min-w-[186px] rounded-[10px] border border-[#E7E5E4] bg-white px-3 text-xs"
+            <Select
               value={value as string}
-              onChange={(event) => {
-                handleChange(event.target.value);
+              onValueChange={(nextValue) => {
+                handleChange(nextValue);
               }}
             >
-              {item.options.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                data-testid={item.controlTestId}
+                aria-label={item.label}
+                className="h-9 min-w-[186px] rounded-[10px] text-xs"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {item.options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
         />
         <HelperBlock message={item.description ?? null} />
