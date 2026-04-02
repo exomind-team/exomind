@@ -14,6 +14,7 @@ import type {
   ProposalStatus,
 } from '@/lib/types/proposal';
 import { cn } from '@/lib/utils';
+import { PageShell } from '@/ui/app/components/PageShell';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import {
   MessageSquarePlus,
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getEventlogPathForTab } from '@/ui/app/pages/eventlog-route-memory';
 import {
   formatProposalAbsoluteTime,
   formatProposalRelativeTime,
@@ -167,11 +169,7 @@ function ProposalReferenceAction({
       type="button"
       onClick={() => {
         void navigate({
-          to: '/eventlog',
-          search: {
-            tab: 'record',
-            focusEventId: reference.id,
-          } as never,
+          to: getEventlogPathForTab('record'),
         });
       }}
       className="inline-flex items-center rounded-full border border-[#E7E5E4] px-3 py-1.5 text-xs font-medium text-[#57534E] transition-colors hover:bg-[#F5F0ED] dark:border-[#292524] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
@@ -467,34 +465,29 @@ export function ProposalInboxPage() {
   }
 
   return (
-    <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="proposal-inbox-page">
-      <header className="border-b border-[#F0ECE8] px-6 py-4 dark:border-[#292524] md:px-8 lg:px-10">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">Proposal Inbox</p>
-            <h1 className="mt-1 text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">请求箱</h1>
-            <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
-              Agent 的操作先进入请求箱，再由你决定批准、拒绝还是暂缓。
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void loadProposals({ silent: true });
-            }}
-            disabled={refreshing}
-            className="gap-2 rounded-full"
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
-            刷新
-          </Button>
-        </div>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+96px)] pt-4 md:px-8 md:pb-24 lg:px-10">
-        <div className="mx-auto max-w-7xl space-y-4">
+    <PageShell
+      title="请求箱"
+      eyebrow="Proposal Inbox"
+      subtitle="Agent 的操作先进入请求箱，再由你决定批准、拒绝还是暂缓。"
+      headerAction={(
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            void loadProposals({ silent: true });
+          }}
+          disabled={refreshing}
+          className="gap-2 rounded-full"
+        >
+          <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
+          刷新
+        </Button>
+      )}
+      className="bg-[#FAF7F5] dark:bg-[#0C0A09]"
+      contentClassName="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+96px)] pt-4 md:px-8 md:pb-24 lg:px-10"
+    >
+      <div data-testid="proposal-inbox-page" className="mx-auto max-w-7xl space-y-4">
           {endpointMissing ? (
             <section className="rounded-3xl border border-dashed border-[#F5C7B8] bg-[#FFF7ED] px-5 py-5 dark:border-[#7C2D12] dark:bg-[#1C1917]">
               <h2 className="text-base font-semibold text-[#9A3412] dark:text-[#FDBA74]">
@@ -825,7 +818,6 @@ export function ProposalInboxPage() {
             </section>
           </div>
         </div>
-      </div>
-    </div>
+    </PageShell>
   );
 }

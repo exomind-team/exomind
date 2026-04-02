@@ -15,6 +15,26 @@ describe('PageShell（统一页面壳层）', () => {
     expect(screen.getByText('内容区')).toBeInTheDocument();
     expect(screen.getByTestId('page-shell-root')).toBeInTheDocument();
   });
+
+  it('supports eyebrow, subtitle, header action, and header bottom（支持统一页面头部结构）', () => {
+    render(
+      <PageShell
+        title="请求箱"
+        eyebrow="Proposal Inbox"
+        subtitle="统一的页面头部结构"
+        headerAction={<button type="button">刷新</button>}
+        headerBottom={<div data-testid="page-shell-header-bottom">切换条</div>}
+      >
+        <div>内容区</div>
+      </PageShell>,
+    );
+
+    expect(screen.getByText('Proposal Inbox')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '请求箱' })).toBeInTheDocument();
+    expect(screen.getByText('统一的页面头部结构')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument();
+    expect(screen.getByTestId('page-shell-header-bottom')).toHaveTextContent('切换条');
+  });
 });
 
 describe('PageTabs（统一标签页容器）', () => {

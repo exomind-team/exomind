@@ -3,6 +3,7 @@ import { ChatPage } from '@/components/Chat/ChatPage';
 import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
+import { PageShell } from '@/ui/app/components/PageShell';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import {
@@ -80,15 +81,11 @@ export function NowPage() {
   };
 
   return (
-    <div className="relative flex h-full min-h-full flex-col bg-page dark:bg-page-dark">
-      <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">当下</h1>
-        </div>
-        <NowViewBar value={activeTab} onChange={handleViewChange} />
-      </header>
-
-      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+    <PageShell
+      title="当下"
+      headerBottom={<NowViewBar value={activeTab} onChange={handleViewChange} />}
+      contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+    >
         {activeTab === 'focus' ? (
           <div
             role="tabpanel"
@@ -132,7 +129,6 @@ export function NowPage() {
             </div>
           </div>
         ) : null}
-      </div>
-    </div>
+    </PageShell>
   );
 }
