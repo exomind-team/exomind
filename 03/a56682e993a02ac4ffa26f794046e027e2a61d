@@ -1,0 +1,77 @@
+docs/plans/2026-04-02-issue-806-terminal-lifecycle-plan.md
+  1a41af24de2969d9 7,25-34,43-47,49-54,58-59,71,75,90-98,100-101,107,109,111,114-122,124-128,131,141,144-148,150,154-156,172,174,176-187,189-193,197-198,218-223,226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "03a56682e993a02ac4ffa26f794046e027e2a61d",
+  "prompts": {
+    "1a41af24de2969d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf8ed489-bbfb-4304-80cd-f871d236ee50",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 97,
+      "total_deletions": 47,
+      "accepted_lines": 96,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e800e24ad0144b0a343b687be2391dcb4b56b14bb1b9515ed14665187610854e"
+    },
+    "7b1e378cd63b35c2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4c4f-9ea6-7b61-a808-2e5ecb75062a",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/5b4acc0879948892500b0f3cc7a9ec71a3581b79849fcf23d4a27e770a80cd35"
+    },
+    "824d706963a06c3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4764-3ca6-7582-80d6-21b1e8f907f8",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 78,
+      "overriden_lines": 131
+    },
+    "9d74646c9382ac4c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d47ed-a515-7250-a3ac-af6cf488fd72",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 79,
+      "overriden_lines": 13
+    },
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
