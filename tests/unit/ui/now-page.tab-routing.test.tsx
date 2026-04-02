@@ -92,6 +92,20 @@ describe('NowPage tab routing', () => {
     expect(focusContent.className).not.toContain('overflow-hidden');
   });
 
+  it('keeps the record tab panel clipped so ChatPage owns the inner scroll（记录页由 ChatPage 接管内部滚动）', () => {
+    locationState = {
+      pathname: '/eventlog',
+      searchStr: '?tab=record',
+    };
+
+    render(<NowPage />);
+
+    const recordPanel = screen.getByTestId('now-page-record-panel');
+    expect(recordPanel.className).toContain('overflow-hidden');
+    expect(recordPanel.className).toContain('min-h-0');
+    expect(recordPanel.className).toContain('flex-1');
+  });
+
   it('reads tab from search and routes tab switch through navigate（读取 search 并通过路由切换页签）', () => {
     locationState = {
       pathname: '/eventlog',

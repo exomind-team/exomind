@@ -74,7 +74,7 @@ export function NowPage() {
           </div>
         </div>
 
-        <div data-tab-id="record" className="min-h-0 flex-1">
+        <div data-tab-id="record" data-testid="now-page-record-panel" className="min-h-0 flex-1 overflow-hidden">
           <ChatPage variant="new-mobile" hideHeader showTimerWidget={false} />
         </div>
 

@@ -37,4 +37,26 @@ describe('PageTabs（统一标签页容器）', () => {
     expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('概览面板')).toBeInTheDocument();
   });
+
+  it('keeps tablist outside scroll content and clips panel overflow（标签栏固定在内容滚动层之外）', () => {
+    render(
+      <PageTabs
+        activeTab="overview"
+        onTabChange={() => {}}
+        tabs={[
+          { id: 'overview', label: '概览' },
+          { id: 'details', label: '详情' },
+        ]}
+      >
+        <div data-tab-id="overview">概览面板</div>
+        <div data-tab-id="details">详情面板</div>
+      </PageTabs>,
+    );
+
+    const tabList = screen.getByRole('tablist');
+    const panel = screen.getByRole('tabpanel');
+
+    expect(tabList.className).toContain('shrink-0');
+    expect(panel.className).toContain('overflow-hidden');
+  });
 });

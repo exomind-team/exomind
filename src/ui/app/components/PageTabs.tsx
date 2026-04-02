@@ -39,7 +39,11 @@ export function PageTabs({
       }
 
       return (
-        <TabsContent key={panelId} value={panelId} className={cn('mt-0 min-h-0 flex-1', contentClassName)}>
+        <TabsContent
+          key={panelId}
+          value={panelId}
+          className={cn('mt-0 min-h-0 flex-1 overflow-hidden', contentClassName)}
+        >
           {child}
         </TabsContent>
       );
@@ -47,12 +51,16 @@ export function PageTabs({
     .filter(Boolean);
 
   return (
-    <Tabs value={activeTab} onValueChange={onTabChange} className={cn('flex min-h-0 flex-col gap-3', className)}>
+    <Tabs
+      value={activeTab}
+      onValueChange={onTabChange}
+      className={cn('flex min-h-0 flex-col gap-3 overflow-hidden', className)}
+    >
       <TabsList
         className={cn(
           variant === 'grid'
-            ? 'grid h-auto w-full rounded-xl border border-border-card bg-card p-1 shadow-sm'
-            : 'scrollbar-none flex h-auto w-full gap-2 overflow-x-auto rounded-xl border border-border-card bg-card p-1 shadow-sm',
+            ? 'grid h-auto w-full shrink-0 rounded-xl border border-border-card bg-card p-1 shadow-sm'
+            : 'scrollbar-none flex h-auto w-full shrink-0 gap-2 overflow-x-auto rounded-xl border border-border-card bg-card p-1 shadow-sm',
           listClassName,
         )}
         style={variant === 'grid' ? { gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` } : undefined}
