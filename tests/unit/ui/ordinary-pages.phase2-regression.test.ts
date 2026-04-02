@@ -29,7 +29,8 @@ describe('ordinary pages phase 2 regression（普通页面阶段二回归）', (
     const source = readSource('src/ui/app/pages/proposals/ProposalInboxPage.tsx');
 
     expect(source).toContain('<PageShell');
-    expect(source).toContain('title="请求箱"');
+    expect(source).not.toContain('TaskBreadcrumb');
+    expect(source).toContain('title="任务"');
     expect(source).toContain('eyebrow="Proposal Inbox"');
     expect(source).toContain('headerBottom={<TaskDomainTabs active="proposals" />}');
   });
@@ -52,5 +53,25 @@ describe('ordinary pages phase 2 regression（普通页面阶段二回归）', (
 
     expect(source).toContain('<PageShell title="设置" hideHeader');
     expect(source).toContain('<PageShell title="设置" contentClassName=');
+  });
+
+  it('places task timeline domain tabs near the title area instead of below metric chips（时间线页任务域 tabs 不应掉到指标胶囊下面）', () => {
+    const source = readSource('src/ui/app/pages/TaskTimelinePage.tsx');
+    const tabsIndex = source.indexOf('<TaskDomainTabs active="timeline" />');
+    const metricsIndex = source.indexOf("比例尺：");
+
+    expect(tabsIndex).toBeGreaterThan(-1);
+    expect(metricsIndex).toBeGreaterThan(-1);
+    expect(tabsIndex).toBeLessThan(metricsIndex);
+  });
+
+  it('removes breadcrumb/url-like bars from task subviews that already use top tabs（已使用顶部 tabs 的任务子页不再显示面包屑条）', () => {
+    const timelineSource = readSource('src/ui/app/pages/TaskTimelinePage.tsx');
+    const dagSource = readSource('src/ui/app/pages/TaskDagPage.tsx');
+    const proposalSource = readSource('src/ui/app/pages/proposals/ProposalInboxPage.tsx');
+
+    expect(timelineSource).not.toContain('TaskBreadcrumb');
+    expect(dagSource).not.toContain('TaskBreadcrumb');
+    expect(proposalSource).not.toContain('TaskBreadcrumb');
   });
 });

@@ -467,9 +467,9 @@ export function ProposalInboxPage() {
 
   return (
     <PageShell
-      title="请求箱"
+      title="任务"
       eyebrow="Proposal Inbox"
-      subtitle="Agent 的操作先进入请求箱，再由你决定批准、拒绝还是暂缓。"
+      subtitle="请求箱视图：Agent 的操作先进入请求箱，再由你决定批准、拒绝还是暂缓。"
       headerBottom={<TaskDomainTabs active="proposals" />}
       headerAction={(
         <Button

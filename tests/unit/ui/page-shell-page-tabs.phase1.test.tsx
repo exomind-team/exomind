@@ -20,6 +20,7 @@ describe('PageShell（统一页面壳层）', () => {
     render(
       <PageShell
         title="请求箱"
+        headerTop={<div data-testid="page-shell-header-top">面包屑</div>}
         eyebrow="Proposal Inbox"
         subtitle="统一的页面头部结构"
         headerAction={<button type="button">刷新</button>}
@@ -29,6 +30,7 @@ describe('PageShell（统一页面壳层）', () => {
       </PageShell>,
     );
 
+    expect(screen.getByTestId('page-shell-header-top')).toHaveTextContent('面包屑');
     expect(screen.getByText('Proposal Inbox')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '请求箱' })).toBeInTheDocument();
     expect(screen.getByText('统一的页面头部结构')).toBeInTheDocument();

@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 
 interface PageShellProps {
   title: string;
+  headerTop?: ReactNode;
   eyebrow?: string;
   subtitle?: string;
   headerAction?: ReactNode;
@@ -17,6 +18,7 @@ interface PageShellProps {
 
 export function PageShell({
   title,
+  headerTop,
   eyebrow,
   subtitle,
   headerAction,
@@ -39,6 +41,7 @@ export function PageShell({
             headerClassName,
           )}
         >
+          {headerTop ? <div className="min-w-0">{headerTop}</div> : null}
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
               {eyebrow ? (
