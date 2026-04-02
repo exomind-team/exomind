@@ -1,8 +1,9 @@
 # 设计文档：Agent API 与提案系统
 
-> **状态**：设计阶段
-> **日期**：2026-04-01
-> **关联 Issue**：#677（提案系统 = 请求箱实现）
+> **状态**：第一阶段已实现，第二阶段计划中
+> **日期**：2026-04-01（设计）→ 2026-04-02（归档更新）
+> **关联 Issue**：#677（提案系统）、#793（Agent API）、#806（终端 Agent，并行迭代）
+> **UI 命名**：提案系统的 UI 入口名为「提案集」（原「请求箱」），未来将整合进「任务」页面
 
 ---
 
@@ -265,13 +266,29 @@ async fn run_agent_session(
 
 ---
 
-## MVP 实施计划（3 份，并行）
+## 实施计划索引
 
-| 计划 | 文件 | 执行者 | 依赖 |
-|------|------|--------|------|
-| 提案系统 RT 逻辑端 | [proposal-system-rt-plan.md](./2026-04-01-proposal-system-rt-plan.md) | Codex (Rust) | 无 |
-| 提案系统 UI 端 | [proposal-system-ui-plan.md](./2026-04-01-proposal-system-ui-plan.md) | Claude Code (TS) | 依赖 RT 计划完成 |
-| Agent API RT 逻辑端 | [agent-api-rt-plan.md](./2026-04-01-agent-api-rt-plan.md) | Codex (Rust) | 无 |
+### 第一阶段（✅ 已实现）
+
+| 计划 | 文件 | 状态 |
+|------|------|------|
+| 提案系统 RT 逻辑端 | [proposal-system-rt-plan.md](./2026-04-01-proposal-system-rt-plan.md) | ✅ 已实现，7/7 测试通过 |
+| 提案系统 UI 端 | [proposal-system-ui-plan.md](./2026-04-01-proposal-system-ui-plan.md) | ✅ 已实现，tsc 通过 |
+| Agent API RT 逻辑端 | [agent-api-rt-plan.md](./2026-04-01-agent-api-rt-plan.md) | ✅ 已实现，3 个测试待修复 |
+
+### 第二阶段（待执行）
+
+| 计划 | 文件 | 执行者 |
+|------|------|--------|
+| Agent API 稳定化 + 提案联动 | [agent-api-phase2-plan.md](./2026-04-02-agent-api-phase2-plan.md) | Codex (Rust) |
+
+### 并行迭代关系
+
+```
+终端 Agent (#806)  ←→  API Agent (本设计)  ←→  提案集（本设计）
+   PTY 生命周期         HTTP 工具调用           待审批操作队列
+   互不阻塞             互不阻塞               未来整合进「任务」页面
+```
 
 ---
 

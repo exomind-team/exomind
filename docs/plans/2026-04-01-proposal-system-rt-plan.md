@@ -1,6 +1,6 @@
 # 实施计划：提案系统 — RT 逻辑端
 
-> **状态**：待执行
+> **状态**：✅ 已实现（Codex 执行，2026-04-01）— 代码已在 dev 分支，7/7 测试通过
 > **设计文档**：[2026-04-01-agent-api-and-proposal-system-design.md](./2026-04-01-agent-api-and-proposal-system-design.md)
 > **关联 Issue**：#677
 > **分支**：`feature/proposal-system-rt`
