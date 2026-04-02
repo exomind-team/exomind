@@ -144,7 +144,16 @@ fn watch_pty_lifecycle(state: AppState, id: String) {
         loop {
             match state.pty_manager.refresh_process_state(&id).await {
                 Ok(Some(info)) => match info.status {
-                    crate::pty::PtyAgentStatus::Exited { .. } => {
+                    crate::pty::PtyAgentStatus::Exited { code } => {
+                        if code != 0 {
+                            tracing::warn!(
+                                pty_id = %id,
+                                session_id = ?info.session_id,
+                                command = %info.command,
+                                exit_code = code,
+                                "PTY process exited with non-zero status"
+                            );
+                        }
                         match complete_pty_session(&state, &id) {
                             Ok(Some(updated)) => {
                                 broadcast_session_updated(
@@ -205,7 +214,20 @@ async fn resume_pty_agent(
     State(state): State<AppState>,
     Json(req): Json<PtyResumeRequest>,
 ) -> Result<(StatusCode, Json<PtyAgentInfo>), (StatusCode, String)> {
-    let info = state.pty_manager.resume(req).await.map_err(map_pty_error)?;
+    let session_id = req.session_id.clone();
+    let agent_type = req.agent_type;
+    let info = match state.pty_manager.resume(req).await {
+        Ok(info) => info,
+        Err(error) => {
+            tracing::warn!(
+                ?agent_type,
+                session_id = %session_id,
+                error = %error,
+                "failed to resume PTY agent"
+            );
+            return Err(map_pty_error(error));
+        }
+    };
     if let Err(error) = register_pty_session(&state, &info) {
         let _ = state.pty_manager.remove(&info.id).await;
         return Err(error);
