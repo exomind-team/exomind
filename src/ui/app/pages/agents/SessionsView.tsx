@@ -14,6 +14,8 @@ export interface SessionsViewProps {
   onSessionClick?: (session: SessionInfo) => void;
   /** Callback when user stops a PTY session（停止 PTY 会话） */
   onStopSession?: (session: SessionInfo) => void;
+  /** Callback when user archives a completed session（归档已完成会话） */
+  onArchiveSession?: (session: SessionInfo) => void;
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -26,6 +28,7 @@ export function SessionsView({
   onRefresh,
   onSessionClick,
   onStopSession,
+  onArchiveSession,
 }: SessionsViewProps) {
   // Sort: attention-needing first, then by last_active_at desc
   const sortedSessions = [...sessions].sort((a, b) => {
@@ -35,10 +38,9 @@ export function SessionsView({
     return new Date(b.last_active_at).getTime() - new Date(a.last_active_at).getTime();
   });
 
-  // Filter: only show active sessions (not completed/archived per D8)
-  const activeSessions = sortedSessions.filter(
-    (s) => s.status !== 'completed' && s.status !== 'archived',
-  );
+  const visibleSessions = sortedSessions.filter((s) => s.status !== 'archived');
+  const activeSessions = visibleSessions.filter((s) => s.status !== 'completed');
+  const completedSessions = visibleSessions.filter((s) => s.status === 'completed');
 
   if (loading && sessions.length === 0) {
     return (
@@ -48,7 +50,7 @@ export function SessionsView({
     );
   }
 
-  if (activeSessions.length === 0) {
+  if (visibleSessions.length === 0) {
     return (
       <div
         data-testid="sessions-empty-state"
@@ -74,12 +76,11 @@ export function SessionsView({
 
   return (
     <div data-testid="sessions-view" className="space-y-3">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-[#78716C] dark:text-[#A8A29E]">
-          活跃会话
+          会话
           <span className="ml-1.5 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] dark:bg-[#292524]">
-            {activeSessions.length}
+            {visibleSessions.length}
           </span>
         </h2>
         {!useMockData && (
@@ -101,17 +102,51 @@ export function SessionsView({
         </div>
       )}
 
-      {/* Session cards grid */}
-      <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-2">
-        {activeSessions.map((session) => (
-          <SessionCard
-            key={session.id}
-            session={session}
-            onClick={onSessionClick}
-            onStop={onStopSession}
-          />
-        ))}
+      <div data-testid="sessions-active-section" className="space-y-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-medium text-[#78716C] dark:text-[#A8A29E]">活跃会话</h3>
+          <span className="rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] dark:bg-[#292524]">
+            {activeSessions.length}
+          </span>
+        </div>
+        {activeSessions.length > 0 ? (
+          <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-2">
+            {activeSessions.map((session) => (
+              <SessionCard
+                key={session.id}
+                session={session}
+                onClick={onSessionClick}
+                onStop={onStopSession}
+                onArchive={onArchiveSession}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-[#A8A29E] dark:text-[#57534E]">暂无活跃会话</p>
+        )}
       </div>
+
+      {completedSessions.length > 0 && (
+        <div data-testid="sessions-completed-section" className="space-y-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-[#78716C] dark:text-[#A8A29E]">已完成</h3>
+            <span className="rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] dark:bg-[#292524]">
+              {completedSessions.length}
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-2">
+            {completedSessions.map((session) => (
+              <SessionCard
+                key={session.id}
+                session={session}
+                onClick={onSessionClick}
+                onStop={onStopSession}
+                onArchive={onArchiveSession}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

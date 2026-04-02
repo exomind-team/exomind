@@ -857,6 +857,16 @@ export function AgentsPage() {
     }
   };
 
+  const handleArchiveSession = async (session: SessionInfo) => {
+    const host = resolveRuntimeHostForSession(session);
+    setRuntimeHostError('');
+    const runtimeClient = new RuntimeClient();
+    const result = await runtimeClient.updateSession(host, session.id, { status: 'archived' });
+    if (!result.ok) {
+      setRuntimeHostError(`归档会话失败: ${result.error.message}`);
+    }
+  };
+
   const handleCreateManualAgent = async () => {
     setIsAgentCreating(true);
     setAgentCreateError('');
@@ -2217,28 +2227,28 @@ export function AgentsPage() {
             if (!session.pty_id) return;
             void handleStopPtyAgent(session.pty_id, session.source_host_id);
           }}
+          onArchiveSession={(session) => {
+            void handleArchiveSession(session);
+          }}
         />
       );
     }
     if (viewMode === 'tiled') {
-      // Filter active sessions for tiled view
-      const activeSessions = dashboardSessions.filter(
-        (s) => s.status !== 'completed' && s.status !== 'archived',
-      );
+      const visibleSessions = dashboardSessions.filter((s) => s.status !== 'archived');
       return (
         <div className="flex h-full flex-col gap-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">
-                {activeSessions.length} 个活跃会话
+                {visibleSessions.length} 个会话
               </span>
-              <GlobalStatusIndicator sessions={activeSessions} />
+              <GlobalStatusIndicator sessions={visibleSessions} />
             </div>
             <LayoutSelector value={tiledLayout} onChange={setTiledLayout} />
           </div>
           <div className="flex-1 min-h-0">
             <TiledGrid
-              sessions={activeSessions}
+              sessions={visibleSessions}
               layout={tiledLayout}
               resolveSessionConnection={resolveRuntimeConnectionForSession}
               focusedIndex={tiledFocusedIndex}
@@ -2257,6 +2267,9 @@ export function AgentsPage() {
               onStopSession={(session) => {
                 if (!session.pty_id) return;
                 void handleStopPtyAgent(session.pty_id, session.source_host_id);
+              }}
+              onArchiveSession={(session) => {
+                void handleArchiveSession(session);
               }}
             />
           </div>

@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical } from 'lucide-react';
+import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical, X } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -51,6 +51,8 @@ export interface TiledGridProps {
   onMarkWaiting?: (session: SessionInfo) => void;
   /** Callback when user stops a terminal session */
   onStopSession?: (session: SessionInfo) => void;
+  /** Callback when user archives a completed session */
+  onArchiveSession?: (session: SessionInfo) => void;
 }
 
 // ── Layout config ──────────────────────────────────────────────
@@ -76,6 +78,7 @@ export function TiledGrid({
   onQuickAction,
   onMarkWaiting,
   onStopSession,
+  onArchiveSession,
 }: TiledGridProps) {
   const config = LAYOUT_CONFIG[layout];
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
@@ -156,6 +159,7 @@ export function TiledGrid({
           onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
           onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
           onStop={() => onStopSession?.(session)}
+          onArchive={() => onArchiveSession?.(session)}
         />
       </div>
     );
@@ -185,6 +189,7 @@ export function TiledGrid({
               onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
               onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
               onStop={() => onStopSession?.(session)}
+              onArchive={() => onArchiveSession?.(session)}
             />
           ))}
           {/* Empty pane placeholders */}
@@ -259,6 +264,7 @@ interface SortablePaneProps {
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
   onStop?: () => void;
+  onArchive?: () => void;
 }
 
 function SortablePane(props: SortablePaneProps) {
@@ -306,6 +312,7 @@ interface SessionPaneProps {
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
   onStop?: () => void;
+  onArchive?: () => void;
 }
 
 function SessionPane({
@@ -321,18 +328,20 @@ function SessionPane({
   onQuickAction,
   onMarkWaiting,
   onStop,
+  onArchive,
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const needsAttention = sessionNeedsAttention(session.status);
   const connection = resolveSessionConnection(session);
+  const isCompleted = session.status === 'completed';
   const showQuickActions =
     session.status === 'waiting_input' && (session.quick_actions?.length ?? 0) > 0;
   const showManualMarkWaiting =
     session.interaction_mode === 'terminal'
     && session.status === 'running'
     && (session.quick_actions?.length ?? 0) === 0;
-  // Stop PTY session（停止 PTY 会话）
-  const canStopPty = session.interaction_mode === 'terminal' && !!session.pty_id;
+  const canStopPty = !isCompleted && session.interaction_mode === 'terminal' && !!session.pty_id;
+  const canArchive = isCompleted;
 
   return (
     <div
@@ -472,21 +481,38 @@ function SessionPane({
           >
             <Pause size={10} />
           </button>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!canStopPty) return;
-              onStop?.();
-            }}
-            data-testid={`tiled-grid-stop-${session.id}`}
-            aria-label="停止"
-            disabled={!canStopPty || !onStop}
-            className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:opacity-50 disabled:hover:text-[#57534E]"
-            title="停止"
-          >
-            <Square size={10} />
-          </button>
+          {canArchive ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onArchive?.();
+              }}
+              data-testid={`tiled-grid-archive-${session.id}`}
+              aria-label="归档"
+              disabled={!onArchive}
+              className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:opacity-50 disabled:hover:text-[#57534E]"
+              title="归档"
+            >
+              <X size={10} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!canStopPty) return;
+                onStop?.();
+              }}
+              data-testid={`tiled-grid-stop-${session.id}`}
+              aria-label="停止"
+              disabled={!canStopPty || !onStop}
+              className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:opacity-50 disabled:hover:text-[#57534E]"
+              title="停止"
+            >
+              <Square size={10} />
+            </button>
+          )}
         </div>
       </div>
     </div>
