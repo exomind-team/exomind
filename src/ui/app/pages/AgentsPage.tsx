@@ -21,6 +21,7 @@ import {
   getEmbeddedRuntimeNetworkMode,
   getPreferredEmbeddedRuntimePort,
   formatHostForUrl,
+  parseRuntimeAddress,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
   getRuntimeExternalAuthToken,
@@ -67,6 +68,7 @@ import type {
 import {
   getRuntimeManager,
   findPreferredRuntimeHostForAgent,
+  shouldAutoPollRuntimeHost,
   type RuntimeAggregatedAgent,
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
@@ -306,6 +308,7 @@ export function AgentsPage() {
   const runtimeStartInFlightRef = useRef<Promise<void> | null>(null);
   const autoRuntimeRebindKeyRef = useRef<string | null>(null);
   const confirmedMeshReplayKeyRef = useRef<Set<string>>(new Set());
+  const missingRuntimeAuthWarningKeysRef = useRef<Set<string>>(new Set());
   const autoAdoptedLinkProofEventIdsRef = useRef<Set<string>>(new Set());
   const inFlightLinkProofPeerIdsRef = useRef<Set<string>>(new Set());
   const inFlightLinkProofSessionIdsRef = useRef<Set<string>>(new Set());
@@ -1085,22 +1088,49 @@ export function AgentsPage() {
   };
 
   const resolveRuntimeHostAuthToken = (
-    host?: Pick<RuntimeHostRecord, 'host' | 'port' | 'authToken'> | null,
+    host?: Pick<RuntimeHostRecord, 'id' | 'name' | 'host' | 'port' | 'authToken'> | null,
   ): string | undefined => {
     if (host?.authToken) {
       return host.authToken;
     }
 
     const selectedTarget = getSelectedRuntimeTarget();
-    if (!selectedTarget.authToken) {
-      return undefined;
-    }
+    const matchesSelectedTarget = Boolean(
+      host
+      && host.host === selectedTarget.host
+      && host.port === selectedTarget.port,
+    );
     if (!host) {
+      return selectedTarget.authToken || undefined;
+    }
+
+    if (selectedTarget.authToken && matchesSelectedTarget) {
       return selectedTarget.authToken;
     }
-    return host.host === selectedTarget.host && host.port === selectedTarget.port
-      ? selectedTarget.authToken
-      : undefined;
+
+    const isLikelyRemoteHost = !['127.0.0.1', 'localhost', '0.0.0.0', '::1', '[::1]'].includes(host.host);
+    if (isLikelyRemoteHost && selectedTarget.mode === 'external' && selectedTarget.authToken) {
+      const warningKey = [
+        host.id ?? formatRuntimeTargetAddress(host),
+        selectedTarget.mode,
+        formatRuntimeTargetAddress(selectedTarget),
+        selectedTarget.authToken ? 'selected-with-token' : 'selected-without-token',
+      ].join('|');
+      if (!missingRuntimeAuthWarningKeysRef.current.has(warningKey)) {
+        missingRuntimeAuthWarningKeysRef.current.add(warningKey);
+        console.warn('[agent-hub][auth] unresolved runtime host auth token', {
+          hostId: host.id,
+          hostName: host.name,
+          hostAddress: formatRuntimeTargetAddress(host),
+          selectedTargetMode: selectedTarget.mode,
+          selectedTargetAddress: formatRuntimeTargetAddress(selectedTarget),
+          selectedTargetAuthTokenPresent: Boolean(selectedTarget.authToken),
+          matchedSelectedTarget: matchesSelectedTarget,
+        });
+      }
+    }
+
+    return undefined;
   };
 
   /** Resolve the auth token for the currently active RT host. */
@@ -1173,7 +1203,9 @@ export function AgentsPage() {
   };
 
   const sessionStreamTargets = useMemo(() => {
-    const sortedHosts = sortRouteHostsByPriority(runtimeHostSnapshots);
+    const sortedHosts = sortRouteHostsByPriority(
+      runtimeHostSnapshots.filter((snapshot) => shouldAutoPollRuntimeHost(snapshot.host)),
+    );
     if (sortedHosts.length > 0) {
       return sortedHosts.map((snapshot) => ({
         id: resolveRuntimeSnapshotPeerId(snapshot) ?? snapshot.host.id,
@@ -1366,6 +1398,31 @@ export function AgentsPage() {
     setRuntimeTargetAddress(formatRuntimeTargetAddress(target));
     setRuntimeExternalAddressDraft(getRuntimeExternalAddress());
     setRuntimeExternalAuthTokenDraft(getRuntimeExternalAuthToken());
+  };
+
+  const syncMatchingExternalTargetAuthToken = async (
+    target = getSelectedRuntimeTarget(),
+  ): Promise<void> => {
+    if (target.mode !== 'external' || !target.authToken) {
+      return;
+    }
+
+    const hosts = await runtimeHostService.listHosts();
+    const matchingHosts = hosts.filter((host) => (
+      host.host === target.host
+      && host.port === target.port
+      && host.authToken !== target.authToken
+    ));
+
+    if (matchingHosts.length === 0) {
+      return;
+    }
+
+    await Promise.all(matchingHosts.map((host) => (
+      runtimeHostService.mergeHostMetadata(host.id, {
+        authToken: target.authToken,
+      })
+    )));
   };
 
   const effectiveEmbeddedRuntimeNetworkMode = hasExplicitEmbeddedRuntimeNetworkMode
@@ -1855,7 +1912,25 @@ export function AgentsPage() {
   const handleAddRuntimeHostFromManagerSheet = async () => {
     try {
       setRuntimeHostError('');
-      await getRuntimeManager().addHostFromAddress(runtimeHostModalAddress, runtimeHostModalName.trim());
+      const selectedTarget = getSelectedRuntimeTarget();
+      let authToken: string | undefined;
+      if (selectedTarget.mode === 'external' && selectedTarget.authToken) {
+        const trimmedAddress = runtimeHostModalAddress.trim();
+        const normalizedAddress = trimmedAddress.includes(':')
+          ? parseRuntimeAddress(trimmedAddress)
+          : { host: trimmedAddress, port: DEFAULT_EXTERNAL_RUNTIME_PORT };
+        if (
+          normalizedAddress.host === selectedTarget.host
+          && normalizedAddress.port === selectedTarget.port
+        ) {
+          authToken = selectedTarget.authToken;
+        }
+      }
+      await getRuntimeManager().addHostFromAddress(
+        runtimeHostModalAddress,
+        runtimeHostModalName.trim(),
+        authToken,
+      );
       setRuntimeHostModalName('');
       await refreshRuntimeHosts();
     } catch (error) {
@@ -1988,7 +2063,9 @@ export function AgentsPage() {
       await setPersistedRuntimeExternalAuthToken(runtimeExternalAuthTokenDraft);
       await setPersistedRuntimeExternalAddress(runtimeExternalAddressDraft);
       await setPersistedRuntimeTargetMode('external');
-      syncRuntimeTargetState();
+      const appliedTarget = getSelectedRuntimeTarget();
+      await syncMatchingExternalTargetAuthToken(appliedTarget);
+      syncRuntimeTargetState(appliedTarget);
       setRuntimeServiceStatus(await runtimeControlService.getStatus());
       await refreshRuntimeSnapshot();
     } catch (error) {

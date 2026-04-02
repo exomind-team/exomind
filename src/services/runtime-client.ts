@@ -12,6 +12,8 @@ import {
   resolveRuntimeHostBaseUrl,
 } from '@/lib/utils/runtime-host-address';
 
+const unauthorizedRuntimeRequestWarnings = new Set<string>();
+
 export type RuntimeClientErrorCode = 'timeout' | 'network' | 'http' | 'invalid_payload';
 
 export interface RuntimeClientError {
@@ -903,6 +905,17 @@ export class RuntimeClient {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          const warningKey = `${method}|${url}|${authToken ? 'with-token' : 'without-token'}`;
+          if (!unauthorizedRuntimeRequestWarnings.has(warningKey)) {
+            unauthorizedRuntimeRequestWarnings.add(warningKey);
+            console.warn('[runtime-client][auth] unauthorized runtime request', {
+              method,
+              url,
+              authTokenPresent: Boolean(authToken),
+            });
+          }
+        }
         return {
           ok: false,
           error: {

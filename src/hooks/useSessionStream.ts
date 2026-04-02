@@ -33,6 +33,14 @@ export interface UseSessionStreamResult {
   refresh: () => void;
 }
 
+function isLikelyLocalSessionTarget(target: Pick<SessionStreamTarget, 'rtBaseUrl' | 'hostAddress'>): boolean {
+  const raw = `${target.hostAddress ?? target.rtBaseUrl}`.toLowerCase();
+  return raw.includes('127.0.0.1')
+    || raw.includes('localhost')
+    || raw.includes('0.0.0.0')
+    || raw.includes('::1');
+}
+
 /**
  * Hook that fetches sessions from the runtime and subscribes to SSE updates.
  * Uses a single multiplexed SSE connection for all session events.
@@ -47,6 +55,7 @@ export function useSessionStream({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const eventSourcesRef = useRef<EventSource[]>([]);
+  const authWarningKeysRef = useRef<Set<string>>(new Set());
   const supportsEventSource = typeof EventSource !== 'undefined';
 
   const resolvedTargets = (targets && targets.length > 0)
@@ -88,6 +97,19 @@ export function useSessionStream({
         if (target.authToken) headers['Authorization'] = `Bearer ${target.authToken}`;
         const response = await fetch(`${target.rtBaseUrl}/sessions`, { headers });
         if (!response.ok) {
+          if (response.status === 401) {
+            const warningKey = `${target.id}|sessions|${target.authToken ? 'with-token' : 'without-token'}`;
+            if (!authWarningKeysRef.current.has(warningKey)) {
+              authWarningKeysRef.current.add(warningKey);
+              console.warn('[session-stream][auth] unauthorized session fetch', {
+                targetId: target.id,
+                rtBaseUrl: target.rtBaseUrl,
+                hostName: target.hostName,
+                hostAddress: target.hostAddress,
+                authTokenPresent: Boolean(target.authToken),
+              });
+            }
+          }
           throw new Error(`${target.hostName ?? target.rtBaseUrl}: HTTP ${response.status}`);
         }
         const data: SessionInfo[] = await response.json();
@@ -123,6 +145,18 @@ export function useSessionStream({
     void fetchSessions();
 
     for (const target of resolvedTargets) {
+      if (!target.authToken && !isLikelyLocalSessionTarget(target)) {
+        const warningKey = `${target.id}|sessions-stream|without-token`;
+        if (!authWarningKeysRef.current.has(warningKey)) {
+          authWarningKeysRef.current.add(warningKey);
+          console.warn('[session-stream][auth] opening session stream without auth token', {
+            targetId: target.id,
+            rtBaseUrl: target.rtBaseUrl,
+            hostName: target.hostName,
+            hostAddress: target.hostAddress,
+          });
+        }
+      }
       const streamUrl = target.authToken
         ? `${target.rtBaseUrl}/sessions/stream?token=${encodeURIComponent(target.authToken)}`
         : `${target.rtBaseUrl}/sessions/stream`;

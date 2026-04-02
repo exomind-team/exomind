@@ -29,6 +29,7 @@ vi.mock('@/lib/services', () => ({
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
   findPreferredRuntimeHostForAgent: vi.fn(() => null),
+  shouldAutoPollRuntimeHost: vi.fn(() => true),
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({

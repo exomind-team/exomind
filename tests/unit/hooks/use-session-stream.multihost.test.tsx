@@ -116,4 +116,43 @@ describe('useSessionStream multi-host aggregation（多主机会话流聚合）'
       'http://192.168.1.22:2919/sessions/stream',
     ]));
   });
+
+  it('warns when protected runtime session fetch returns 401（受保护 runtime 会话拉取 401 时输出告警）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'unauthorized' }),
+    } as Response));
+
+    vi.stubGlobal('fetch', fetchMock);
+    const targets = [{
+      id: 'protected-host',
+      rtBaseUrl: 'http://192.168.1.48:9124',
+      hostName: 'Protected Runtime',
+      hostAddress: '192.168.1.48:9124',
+      authToken: 'bad-token',
+    }];
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.error).toBe('Protected Runtime: HTTP 401');
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[session-stream][auth] unauthorized session fetch',
+      expect.objectContaining({
+        targetId: 'protected-host',
+        rtBaseUrl: 'http://192.168.1.48:9124',
+        authTokenPresent: true,
+      }),
+    );
+
+    warnSpy.mockRestore();
+  });
 });

@@ -109,6 +109,7 @@ const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
   findPreferredRuntimeHostForAgent: vi.fn(() => null),
+  shouldAutoPollRuntimeHost: vi.fn(() => true),
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({

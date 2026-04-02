@@ -28,6 +28,7 @@ vi.mock('@/services/runtime-manager', () => ({
     const match = snapshots.find((snapshot: any) => snapshot.agents.some((agent: any) => agent.id === agentId));
     return match?.host ?? null;
   }),
+  shouldAutoPollRuntimeHost: vi.fn(() => true),
 }));
 
 vi.mock('@/services/runtime-client', async (importOriginal) => {

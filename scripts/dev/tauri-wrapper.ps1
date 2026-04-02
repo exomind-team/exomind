@@ -878,10 +878,10 @@ $exitCode = 0
 $tempConfigPath = $null
 $tauriOutput = @()
 try {
-  $tauriCommandArgs = @()
+  [string[]]$tauriCommandArgs = @()
   if ($TauriArgs -and $TauriArgs.Count -gt 0) {
-    $tauriCommandArgs = Add-TauriDevDefaultFlags -CommandArgs $TauriArgs
-    $tauriCommandArgs = Add-AndroidDevDeviceArgument -CommandArgs $tauriCommandArgs
+    $tauriCommandArgs = @(Add-TauriDevDefaultFlags -CommandArgs $TauriArgs)
+    $tauriCommandArgs = @(Add-AndroidDevDeviceArgument -CommandArgs $tauriCommandArgs)
 
     # Inject --config for devUrl override only
     #（仅通过 --config 覆盖 devUrl；主窗口 data directory 走 Rust builder 绝对路径注入）
@@ -897,7 +897,7 @@ try {
 
       $devConfigOverride = $tempConfig | ConvertTo-Json -Compress -Depth 10
       Write-TextUtf8NoBom -Path $tempConfigPath -Content $devConfigOverride
-      $tauriCommandArgs += @("--config", $tempConfigPath)
+      $tauriCommandArgs += [string[]]@("--config", $tempConfigPath)
     }
   }
 
