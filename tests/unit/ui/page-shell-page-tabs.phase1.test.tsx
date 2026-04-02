@@ -57,8 +57,27 @@ describe('PageTabs（统一标签页容器）', () => {
     const panel = screen.getByRole('tabpanel');
 
     expect(tabList.className).toContain('shrink-0');
-    expect(panel.className).toContain('flex');
-    expect(panel.className).toContain('flex-col');
+    expect(panel.className).toContain('data-[state=active]:flex');
+    expect(panel.className).toContain('data-[state=inactive]:hidden');
     expect(panel.className).toContain('overflow-hidden');
+  });
+
+  it('keeps inactive panels hidden so they do not occupy layout height（未激活面板不占布局高度）', () => {
+    render(
+      <PageTabs
+        activeTab="overview"
+        onTabChange={() => {}}
+        tabs={[
+          { id: 'overview', label: '概览' },
+          { id: 'details', label: '详情' },
+        ]}
+      >
+        <div data-tab-id="overview">概览面板</div>
+        <div data-tab-id="details">详情面板</div>
+      </PageTabs>,
+    );
+
+    expect(screen.getByText('概览面板')).toBeVisible();
+    expect(screen.queryByText('详情面板')).toBeNull();
   });
 });
