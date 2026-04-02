@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
 import type {
@@ -150,6 +151,7 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
   });
 
   it('renders a 15-minute timeline and creates a scheduling window from drag selection（15 分钟时间线拖拽创建可调度区间）', async () => {
+    const user = userEvent.setup();
     const createdWindow = makeWindow({
       id: 'window-1',
       title: '上午深度工作',
@@ -203,10 +205,13 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
 
     expect(await screen.findByTestId('today-planner-window-draft')).toHaveTextContent('08:15');
     expect(screen.getByTestId('today-planner-window-draft')).toHaveTextContent('09:15');
+    expect(screen.getByRole('combobox', { name: '节奏预设' }).tagName).not.toBe('SELECT');
 
     fireEvent.change(screen.getByLabelText('区间标题'), {
       target: { value: '上午深度工作' },
     });
+    await user.click(screen.getByRole('combobox', { name: '节奏预设' }));
+    await user.click(await screen.findByRole('option', { name: '45 / 10 · Focus' }));
     fireEvent.click(screen.getByRole('button', { name: '创建可调度区间' }));
 
     await waitFor(() => {
@@ -215,7 +220,7 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
         title: '上午深度工作',
         plannedStartAt: plannerTs('08:15'),
         plannedEndAt: plannerTs('09:15'),
-        rhythmPresetKey: 'pomodoro_25_5',
+        rhythmPresetKey: 'focus_45_10',
       });
     });
 
@@ -303,6 +308,7 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
   });
 
   it('shows only the first 10 task chips and uses a dropdown for overflow tasks（任务过多时只平铺前 10 个，其余走下拉）', async () => {
+    const user = userEvent.setup();
     const snapshotWindow = makeWindow({
       id: 'window-overflow',
       title: '任务太多测试',
@@ -357,9 +363,8 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
     expect(screen.getByTestId('planner-segment-task-task-10')).toBeInTheDocument();
     expect(screen.queryByTestId('planner-segment-task-task-11')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('更多任务'), {
-      target: { value: 'task-11' },
-    });
+    await user.click(screen.getByRole('combobox', { name: '更多任务' }));
+    await user.click(await screen.findByRole('option', { name: '任务 11 · 待办' }));
     fireEvent.click(screen.getByRole('button', { name: '保存工作片段' }));
 
     await waitFor(() => {

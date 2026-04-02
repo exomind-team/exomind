@@ -1,5 +1,6 @@
 import { useUpdateStore } from '@/ui/stores/update-store';
 import type { CheckInterval } from '@/lib/services/update.service';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const INTERVAL_LABELS: Record<CheckInterval, string> = {
   hourly: '每小时',
@@ -67,17 +68,24 @@ export function UpdateSettingsCard() {
         <h2 className="text-sm font-medium text-stone-700 dark:text-stone-300 mb-3">
           检查频率
         </h2>
-        <select
+        <Select
           value={checkInterval}
-          onChange={(e) => setCheckInterval(e.target.value as CheckInterval)}
-          className="w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-stone-100 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C75B3A]/50 focus:border-[#C75B3A] transition-colors"
+          onValueChange={(value) => setCheckInterval(value as CheckInterval)}
         >
-          {(Object.keys(INTERVAL_LABELS) as CheckInterval[]).map((key) => (
-            <option key={key} value={key}>
-              {INTERVAL_LABELS[key]}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label="检查频率"
+            className="w-full rounded-lg border-stone-300 bg-stone-50 text-sm text-stone-900 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(INTERVAL_LABELS) as CheckInterval[]).map((key) => (
+              <SelectItem key={key} value={key}>
+                {INTERVAL_LABELS[key]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </section>
 
       {/* Preview 设置 — 仅 preview 通道显示 */}

@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast-hook';
 import { getTimeBlockService, TimerMode, TimerConfig } from '@/lib/services';
@@ -844,19 +845,26 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
               {countdownEndSoundEnabled && (<div className="space-y-1">
                 <Label htmlFor="countdown-end-sound-preset" className="text-sm">提示音预设</Label>
-                <select
-                  id="countdown-end-sound-preset"
+                <Select
                   value={countdownEndSoundPresetId}
-                  onChange={(e) => setCountdownEndSoundPresetId(e.target.value as TimerEndSoundPresetId)}
+                  onValueChange={(value) => setCountdownEndSoundPresetId(value as TimerEndSoundPresetId)}
                   disabled={!isIdle || !countdownEndSoundEnabled}
-                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  {TIMER_END_SOUND_PRESETS.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.label}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger
+                    id="countdown-end-sound-preset"
+                    aria-label="提示音预设"
+                    className="h-8 rounded-md text-sm"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIMER_END_SOUND_PRESETS.map((preset) => (
+                      <SelectItem key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>)}
 
               <div className="flex items-center justify-between">
