@@ -77,9 +77,11 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
   variant = 'default',
 }: VoiceMessageInputProps, ref) {
   const [value, setValue] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [inputSendMode, setInputSendMode] = useState<InputSendMode>(() => getInputSendMode());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
+  const submittingRef = useRef(false);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -109,8 +111,12 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
 
   // 发送消息
   const handleSend = useCallback(async () => {
+    if (submittingRef.current) return;
+
     const trimmed = value.trim();
     if (trimmed) {
+      submittingRef.current = true;
+      setIsSubmitting(true);
       const saved = value;
       setValue('');
       try {
@@ -119,6 +125,9 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
         setValue(saved);
         log.error(`[VoiceMessageInput] send failed: ${error instanceof Error ? error.message : String(error)}`);
         toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
+      } finally {
+        submittingRef.current = false;
+        setIsSubmitting(false);
       }
     }
   }, [value, onSend]);
@@ -233,7 +242,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
         {/* 发送按钮 */}
         <Button
           onClick={handleSend}
-          disabled={!value.trim()}
+          disabled={isSubmitting || !value.trim()}
           size="icon"
           className={sendButtonClassName}
           type="button"

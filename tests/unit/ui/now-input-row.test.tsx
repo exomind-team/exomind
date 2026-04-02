@@ -238,6 +238,45 @@ describe('NowInputRow', () => {
     expect(onSend).toHaveBeenCalledWith('直接回车发送');
   });
 
+  it('submits only once for repeated Enter keydown in auto-enter-send mode（按住回车自动连发时也只发送一次）', () => {
+    const onSend = vi.fn();
+    emitInputSendMode('enter-send');
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    fireEvent.change(textarea, { target: { value: '重复提交保护' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', repeat: true });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith('重复提交保护');
+  });
+
+  it('prevents duplicate submit while onSend is still pending（发送未返回前禁止重复提交）', async () => {
+    let resolveSend: (() => void) | null = null;
+    const onSend = vi.fn(() => new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    }));
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    const sendButton = screen.getByTestId('new-now-send-button');
+    fireEvent.change(textarea, { target: { value: 'pending 期间只发一次' } });
+
+    await act(async () => {
+      fireEvent.click(sendButton);
+      fireEvent.click(sendButton);
+      await Promise.resolve();
+    });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSend?.();
+      await Promise.resolve();
+    });
+  });
+
   it('keeps Shift+Enter as newline in auto-enter-send mode', () => {
     const onSend = vi.fn();
     emitInputSendMode('enter-send');

@@ -98,6 +98,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
 }, ref) {
   const effectiveDraftStorageKey = draftStorageKey === null ? null : draftStorageKey ?? buildAutoDraftStorageKey(placeholder);
   const [value, setValue] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [voiceTranscriptSendMode, setVoiceTranscriptSendMode] = useState<VoiceTranscriptSendMode>(() => getVoiceTranscriptSendMode());
   const [inputSendMode, setInputSendMode] = useState<InputSendMode>(() => getInputSendMode());
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
@@ -108,6 +109,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attachmentFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submittingRef = useRef(false);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -182,8 +184,12 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   }, [draftDebounceMs, effectiveDraftStorageKey, value]);
 
   const submitInput = useCallback(async () => {
+    if (submittingRef.current) return;
+
     const trimmed = value.trim();
     if (!trimmed) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
     const saved = value;
     setValue('');
     try {
@@ -208,6 +214,9 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       focusTextarea(textareaRef.current);
       log.error(`[NowInputRow] send failed: ${error instanceof Error ? error.message : String(error)}`);
       toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
     }
   }, [effectiveDraftStorageKey, onSend, value]);
 
@@ -422,7 +431,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
             type="button"
             size="icon"
             onClick={submitInput}
-            disabled={!value.trim()}
+            disabled={isSubmitting || !value.trim()}
             className="h-9 w-9 shrink-0 rounded-full bg-[#C75B3A] text-white hover:bg-[#B24D2F] data-[disabled]:bg-[#D1D5DB] data-[disabled]:text-white"
             data-testid="new-now-send-button"
           >

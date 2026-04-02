@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 
 const { startVoiceSpy } = vi.hoisted(() => ({
   startVoiceSpy: vi.fn(),
@@ -61,6 +61,43 @@ describe('VoiceMessageInput Issue-120 behaviors', () => {
 
     expect(onSend).not.toHaveBeenCalled();
     expect(startVoiceSpy).not.toHaveBeenCalled();
+  });
+
+  it('pressing repeated Ctrl+Enter should only send once（按住快捷发送键不应重复提交）', () => {
+    const onSend = vi.fn();
+    render(<VoiceMessageInput onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('event-input-textarea');
+    fireEvent.change(textarea, { target: { value: '桌面重复提交保护' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true, repeat: true });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith('桌面重复提交保护');
+  });
+
+  it('prevents duplicate submit while desktop send is pending（桌面输入发送未完成前不应重入）', async () => {
+    let resolveSend: (() => void) | null = null;
+    const onSend = vi.fn(() => new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    }));
+    render(<VoiceMessageInput onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('event-input-textarea');
+    fireEvent.change(textarea, { target: { value: '桌面 pending 去重' } });
+
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
+      fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
+      await Promise.resolve();
+    });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSend?.();
+      await Promise.resolve();
+    });
   });
 
   it('pressing Escape should blur the textarea', () => {
