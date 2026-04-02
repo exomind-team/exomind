@@ -1,0 +1,75 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "53daf0fc4f061ccf1ada32bd0308f6819185c394",
+  "prompts": {
+    "1a41af24de2969d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf8ed489-bbfb-4304-80cd-f871d236ee50",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 172,
+      "total_deletions": 0,
+      "accepted_lines": 172,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/aaed633790118e6d67e9ccdc57010c7dec6841fe59b748f1d0bc6d95d9123beb"
+    },
+    "824d706963a06c3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4764-3ca6-7582-80d6-21b1e8f907f8",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 208,
+      "overriden_lines": 0
+    },
+    "84f135f36334fea5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d49bf-9168-7120-84d5-0a3eb246d470",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d801c2bcd5119e28899b755ac5230a2fcd73234ae8a42a8b5b38e6b7dac7a532"
+    },
+    "9d74646c9382ac4c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d47ed-a515-7250-a3ac-af6cf488fd72",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 93,
+      "overriden_lines": 0
+    },
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
