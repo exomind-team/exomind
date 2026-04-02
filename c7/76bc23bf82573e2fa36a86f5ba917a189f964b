@@ -1,0 +1,54 @@
+crates/exomind-runtime/src/agent/api.rs
+  84f135f36334fea5 1,6,73,81-99,419-526,528-531,541,554,569-751,753-761,829-938
+  dc67460798bd45e4 527,532-533,752,762-763,939
+crates/exomind-runtime/src/agent/session.rs
+  84f135f36334fea5 1-22,52-306,314-317,319-323,331-332,334-340,349-359,361-373,380,382-383,385-386,388-393,395-434,437-460,480-526,528-543,545-1109
+  dc67460798bd45e4 23-51,307-313,318,324-330,333,341-348,360,374-379,381,384,387,394,435-436,461-479,527,544
+crates/exomind-runtime/src/routes/mod.rs
+  84f135f36334fea5 15,36
+  dc67460798bd45e4 6,29
+crates/exomind-runtime/tests/today_planner_routes.rs
+  84f135f36334fea5 114-121,152-155,210-213,215-218,231-236,240-243,283-286,351-354,383-384
+  dc67460798bd45e4 41
+crates/exomind-runtime/tests/timeblock_routes.rs
+  dc67460798bd45e4 42
+  84f135f36334fea5 186,263
+crates/exomind-runtime/src/routes/agent_sessions.rs
+  dc67460798bd45e4 10-11,45-46,50,73-74
+  84f135f36334fea5 1-9,12-44,47-49,51-72,75-323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "c776bc23bf82573e2fa36a86f5ba917a189f964b",
+  "prompts": {
+    "84f135f36334fea5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d49bf-9168-7120-84d5-0a3eb246d470",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2500,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2a68c24c862ae012d85cca6b01e7d87f37a3196727bcb36464372dd9fc2de152"
+    },
+    "dc67460798bd45e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4b67-be99-7a73-8f32-36344056b820",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 100,
+      "total_deletions": 71,
+      "accepted_lines": 459,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/b5734a64c2d4d24e36e574b56da61fdd911686ade1b8e1dca020ba0d75239fce"
+    }
+  }
+}
