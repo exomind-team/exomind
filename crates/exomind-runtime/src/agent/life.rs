@@ -3,6 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
+use super::session::{
+    AgentSessionRuntime, AgentTrigger, SessionError, build_tool_registry_for_runtime,
+    resolve_provider_profile_with_runtime, run_agent_session_with_runtime,
+};
+use super::tools::GET_RECENT_EVENTS_TOOL;
 use super::cognition::{
     BodyStatus, CognitionContext, CognitionEngine, CognitionOutput, KnowledgeOp,
 };
@@ -31,6 +36,42 @@ const DEFAULT_SOUL: &str = r#"# 认知生命体 Alpha
 - 谨慎行动
 "#;
 
+#[derive(Clone)]
+pub struct AgentApiTickTrigger {
+    runtime: AgentSessionRuntime,
+    scope_key: Option<String>,
+    system_prompt: Option<String>,
+    prompt: String,
+    requested_tools: Vec<String>,
+    min_energy_ratio: f64,
+}
+
+impl AgentApiTickTrigger {
+    pub fn new(runtime: AgentSessionRuntime) -> Self {
+        Self {
+            runtime,
+            scope_key: None,
+            system_prompt: Some(
+                "你是外心认知助理。你必须先调用 get_recent_events 工具读取最近 20 条事件，再基于事件内容输出一段简明分析。"
+                    .to_string(),
+            ),
+            prompt: "请调用 get_recent_events(limit=20)，总结用户近期主要活动，并给出一句下一步建议。"
+                .to_string(),
+            requested_tools: vec![GET_RECENT_EVENTS_TOOL.to_string()],
+            min_energy_ratio: 0.3,
+        }
+    }
+
+    pub fn with_scope_key(mut self, scope_key: Option<String>) -> Self {
+        self.scope_key = scope_key;
+        self
+    }
+
+    fn should_run(&self, energy_ratio: f64) -> bool {
+        energy_ratio >= self.min_energy_ratio
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CognitiveLifeAgent — the first cognitive life form
 // ---------------------------------------------------------------------------
@@ -40,6 +81,7 @@ pub struct CognitiveLifeAgent {
     name: String,
     workspace: AgentWorkspace,
     cognition: Box<dyn CognitionEngine>,
+    agent_api_tick_trigger: Option<AgentApiTickTrigger>,
     tick_count: AtomicU64,
 }
 
@@ -59,6 +101,7 @@ impl CognitiveLifeAgent {
             name: name.into(),
             workspace,
             cognition,
+            agent_api_tick_trigger: None,
             tick_count: AtomicU64::new(0),
         }
     }
@@ -66,6 +109,11 @@ impl CognitiveLifeAgent {
     /// Access the workspace (for REST / Tauri endpoints).
     pub fn workspace(&self) -> &AgentWorkspace {
         &self.workspace
+    }
+
+    pub fn with_agent_api_tick_trigger(mut self, trigger: AgentApiTickTrigger) -> Self {
+        self.agent_api_tick_trigger = Some(trigger);
+        self
     }
 
     /// Build body status from workspace state.
@@ -138,6 +186,92 @@ impl CognitiveLifeAgent {
         };
         if let Err(e) = self.workspace.action_log().append(&entry) {
             tracing::warn!("action log append failed: {e}");
+        }
+    }
+
+    async fn run_agent_api_tick_session(&self, energy_ratio: f64) -> Option<String> {
+        let Some(trigger) = self.agent_api_tick_trigger.clone() else {
+            return None;
+        };
+
+        if !trigger.should_run(energy_ratio) {
+            return None;
+        }
+
+        let profile = match resolve_provider_profile_with_runtime(&trigger.runtime, None) {
+            Ok(profile) => profile,
+            Err(SessionError::MissingRuntimeConfig(error))
+            | Err(SessionError::InvalidProviderProfile(error)) => {
+                tracing::debug!(
+                    agent_id = %self.id,
+                    error = %error,
+                    "life agent agent-api tick skipped because runtime provider config is unavailable"
+                );
+                return None;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    agent_id = %self.id,
+                    error = %error,
+                    "life agent agent-api tick failed before request"
+                );
+                return None;
+            }
+        };
+
+        let tools = match build_tool_registry_for_runtime(
+            &trigger.runtime,
+            trigger.scope_key.clone(),
+            &trigger.requested_tools,
+        ) {
+            Ok(tools) => tools,
+            Err(error) => {
+                tracing::warn!(
+                    agent_id = %self.id,
+                    error = %error,
+                    "life agent agent-api tick tool registry build failed"
+                );
+                return None;
+            }
+        };
+
+        match run_agent_session_with_runtime(
+            profile,
+            trigger.system_prompt.clone(),
+            trigger.prompt.clone(),
+            &tools,
+            AgentTrigger::Internal {
+                source: format!("{}-tick", self.id),
+            },
+            &trigger.runtime,
+        )
+        .await
+        {
+            Ok(record) => {
+                tracing::info!(
+                    agent_id = %self.id,
+                    session_id = %record.session_id,
+                    "life agent persisted internal agent-api session"
+                );
+                Some(record.session_id)
+            }
+            Err(SessionError::MissingRuntimeConfig(error))
+            | Err(SessionError::InvalidProviderProfile(error)) => {
+                tracing::debug!(
+                    agent_id = %self.id,
+                    error = %error,
+                    "life agent agent-api tick skipped because runtime provider config became unavailable"
+                );
+                None
+            }
+            Err(error) => {
+                tracing::warn!(
+                    agent_id = %self.id,
+                    error = %error,
+                    "life agent agent-api tick request failed"
+                );
+                None
+            }
         }
     }
 }
@@ -245,12 +379,15 @@ impl Agent for CognitiveLifeAgent {
                 energy_current.saturating_sub(1), // approximate post-tick
             );
 
+            let agent_api_session_id = self.run_agent_api_tick_session(energy_ratio).await;
+
             // Save cognitive state to agent.state.json.
             match self.cognition.save_state().await {
                 Ok(cog_state) => {
                     let state = serde_json::json!({
                         "tick_count": tick,
                         "strategy": self.body_status().current_strategy,
+                        "agent_api_session_id": agent_api_session_id,
                         "cognition_state": {
                             "engine_type": cog_state.engine_type,
                             "data_len": cog_state.data.len(),
@@ -277,7 +414,19 @@ impl Agent for CognitiveLifeAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::session::{AgentSessionRuntime, AgentSessionStore};
     use crate::agent::llm_cognition::LlmCognition;
+    use crate::config::PutConfigEntryInput;
+    use crate::config::types::USER_CONFIG_SCOPE;
+    use crate::eventlog::{EventLogStore, EventRecord};
+    use axum::extract::State as AxumState;
+    use axum::{Json, Router, routing::post};
+    use serde_json::{Value, json};
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
 
     fn make_life_agent(name: &str) -> (tempfile::TempDir, CognitiveLifeAgent) {
         let tmp = tempfile::tempdir().expect("create temp dir");
@@ -285,6 +434,73 @@ mod tests {
         let cognition = Box::new(LlmCognition::new(name, DEFAULT_SOUL));
         let agent = CognitiveLifeAgent::new(name, format!("Life Agent {name}"), ws, cognition);
         (tmp, agent)
+    }
+
+    fn put_config(key: &str, value: String, sensitive: bool) -> PutConfigEntryInput {
+        PutConfigEntryInput {
+            scope: USER_CONFIG_SCOPE.to_string(),
+            key: key.to_string(),
+            value,
+            sensitive,
+            source: Some("test".to_string()),
+            source_origin: Some("unit-test".to_string()),
+        }
+    }
+
+    async fn fake_openai_handler(
+        AxumState(call_count): AxumState<Arc<AtomicUsize>>,
+        Json(payload): Json<Value>,
+    ) -> Json<Value> {
+        let turn = call_count.fetch_add(1, AtomicOrdering::SeqCst);
+        if turn == 0 {
+            assert_eq!(payload["tools"][0]["function"]["name"], GET_RECENT_EVENTS_TOOL);
+            return Json(json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": GET_RECENT_EVENTS_TOOL,
+                                "arguments": "{\"limit\":2}"
+                            }
+                        }]
+                    }
+                }]
+            }));
+        }
+
+        Json(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "最近两条事件说明你正在推进 RT Agent API 落地。",
+                    "tool_calls": []
+                }
+            }]
+        }))
+    }
+
+    async fn spawn_openai_mock_server() -> (String, oneshot::Sender<()>) {
+        let app = Router::new()
+            .route("/chat/completions", post(fake_openai_handler))
+            .with_state(Arc::new(AtomicUsize::new(0)));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        (format!("http://{addr}"), shutdown_tx)
     }
 
     #[test]
@@ -388,5 +604,89 @@ mod tests {
         let diary = agent.workspace().read_knowledge("diary.md").unwrap();
         assert!(diary.contains("Tick 1"));
         assert!(diary.contains("Tick 3"));
+    }
+
+    #[tokio::test]
+    async fn on_tick_can_persist_internal_agent_api_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = AgentWorkspace::init("life-alpha", tmp.path()).unwrap();
+        let cognition = Box::new(LlmCognition::new("life-alpha", DEFAULT_SOUL));
+        let config_store = Arc::new(crate::config::ConfigStore::new());
+        let eventlog_store = Arc::new(EventLogStore::new(tmp.path().join("eventlog")));
+        let agent_session_store = Arc::new(AgentSessionStore::new());
+        let runtime = AgentSessionRuntime::new(
+            Arc::clone(&config_store),
+            Arc::clone(&eventlog_store),
+            Arc::clone(&agent_session_store),
+        );
+
+        eventlog_store
+            .append_event(
+                None,
+                EventRecord {
+                    id: "evt-1".to_string(),
+                    timestamp: 1,
+                    content: "梳理 agent session 持久化".to_string(),
+                    tags: vec!["analysis".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        eventlog_store
+            .append_event(
+                None,
+                EventRecord {
+                    id: "evt-2".to_string(),
+                    timestamp: 2,
+                    content: "接入 runtime HTTP route".to_string(),
+                    tags: vec!["code".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
+
+        let (base_url, shutdown_tx) = spawn_openai_mock_server().await;
+        config_store
+            .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+            .unwrap();
+        config_store
+            .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+            .unwrap();
+        config_store
+            .put(put_config("exomind:agentApiBaseUrl", base_url, false))
+            .unwrap();
+        config_store
+            .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+            .unwrap();
+
+        let agent = CognitiveLifeAgent::new(
+            "life-alpha",
+            "认知生命体 Alpha",
+            workspace,
+            cognition,
+        )
+        .with_agent_api_tick_trigger(AgentApiTickTrigger::new(runtime));
+
+        let energy = AgentEnergySnapshot {
+            agent_id: "life-alpha".to_string(),
+            current: 90,
+            max: 100,
+            ratio: 0.9,
+            tick_cost: 10,
+            phase: "normal".to_string(),
+            is_dormant: false,
+        };
+
+        let signals = agent.on_tick(&energy).await;
+        assert!(!signals.is_empty());
+
+        let state = agent.workspace().load_state().unwrap();
+        let session_id = state["agent_api_session_id"].as_str().unwrap();
+        let record = agent_session_store.get(session_id).unwrap().unwrap();
+        assert_eq!(record.trigger_source, "life-alpha-tick");
+        assert_eq!(record.tool_calls.len(), 1);
+        assert!(record.content.contains("RT Agent API"));
+
+        let _ = shutdown_tx.send(());
     }
 }

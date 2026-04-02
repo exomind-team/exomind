@@ -38,6 +38,7 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         proposal_store: Arc::new(exomind_runtime::proposal::ProposalStore::new()),
         session_store: Arc::new(exomind_runtime::session::SessionStore::new()),
+        agent_api_session_store: Arc::new(exomind_runtime::agent::session::AgentSessionStore::new()),
         session_event_tx: None,
         eventlog_watch_tx: {
             let (tx, _rx) = exomind_runtime::routes::eventlog::eventlog_watch_channel();
@@ -110,8 +111,14 @@ async fn today_planner_windows_create_start_and_reflow() {
     assert_eq!(create_payload["date"], "2026-03-27");
     assert_eq!(create_payload["segments"].as_array().unwrap().len(), 3);
 
-    let work_segment_id = create_payload["segments"][0]["id"].as_str().unwrap().to_string();
-    let break_segment_id = create_payload["segments"][1]["id"].as_str().unwrap().to_string();
+    let work_segment_id = create_payload["segments"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let break_segment_id = create_payload["segments"][1]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let update_segment_response = app
         .clone()
@@ -142,7 +149,10 @@ async fn today_planner_windows_create_start_and_reflow() {
         .to_bytes();
     let update_segment_payload: Value = serde_json::from_slice(&update_segment_body).unwrap();
     assert_eq!(update_segment_payload["title"], "Deep Work A");
-    assert_eq!(update_segment_payload["linkedTaskIds"], json!(["task-a", "task-b"]));
+    assert_eq!(
+        update_segment_payload["linkedTaskIds"],
+        json!(["task-a", "task-b"])
+    );
 
     let start_response = app
         .clone()
@@ -197,9 +207,15 @@ async fn today_planner_windows_create_start_and_reflow() {
         .to_bytes();
     let reflow_payload: Value = serde_json::from_slice(&reflow_body).unwrap();
     assert_eq!(reflow_payload["id"], window_id);
-    assert_eq!(reflow_payload["segments"][0]["plannedEndAt"], json!(1_774_575_300_000u64));
+    assert_eq!(
+        reflow_payload["segments"][0]["plannedEndAt"],
+        json!(1_774_575_300_000u64)
+    );
     assert_eq!(reflow_payload["segments"][1]["id"], break_segment_id);
-    assert_eq!(reflow_payload["segments"][1]["plannedStartAt"], json!(1_774_575_300_000u64));
+    assert_eq!(
+        reflow_payload["segments"][1]["plannedStartAt"],
+        json!(1_774_575_300_000u64)
+    );
 
     let list_response = app
         .clone()
@@ -212,11 +228,19 @@ async fn today_planner_windows_create_start_and_reflow() {
         .await
         .unwrap();
     assert_eq!(list_response.status(), StatusCode::OK);
-    let list_body = list_response.into_body().collect().await.unwrap().to_bytes();
+    let list_body = list_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let list_payload: Value = serde_json::from_slice(&list_body).unwrap();
     assert_eq!(list_payload["date"], "2026-03-27");
     assert_eq!(list_payload["windows"][0]["id"], window_id);
-    assert_eq!(list_payload["windows"][0]["segments"][0]["status"], "active");
+    assert_eq!(
+        list_payload["windows"][0]["segments"][0]["status"],
+        "active"
+    );
 }
 
 #[tokio::test]
@@ -256,7 +280,10 @@ async fn today_planner_work_segment_inherits_window_title_before_edit() {
         .unwrap()
         .to_bytes();
     let create_payload: Value = serde_json::from_slice(&create_body).unwrap();
-    let work_segment_id = create_payload["segments"][0]["id"].as_str().unwrap().to_string();
+    let work_segment_id = create_payload["segments"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert_eq!(create_payload["segments"][0]["title"], "Morning Focus");
 
     let start_response = app
@@ -321,7 +348,10 @@ async fn today_planner_start_conflicts_while_feedback_is_still_in_progress() {
         .unwrap()
         .to_bytes();
     let create_payload: Value = serde_json::from_slice(&create_body).unwrap();
-    let work_segment_id = create_payload["segments"][0]["id"].as_str().unwrap().to_string();
+    let work_segment_id = create_payload["segments"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     store
         .put_active_scoped(
@@ -350,8 +380,8 @@ async fn today_planner_start_conflicts_while_feedback_is_still_in_progress() {
                 task_association_log: vec![],
                 source_planned_block_id: Some("finished-segment".to_string()),
                 task_id: None,
-                    block_type: None,
-                    transitions: vec![],
+                block_type: None,
+                transitions: vec![],
             },
         )
         .unwrap();

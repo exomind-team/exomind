@@ -39,6 +39,7 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         proposal_store: Arc::new(exomind_runtime::proposal::ProposalStore::new()),
         session_store: Arc::new(exomind_runtime::session::SessionStore::new()),
+        agent_api_session_store: Arc::new(exomind_runtime::agent::session::AgentSessionStore::new()),
         session_event_tx: None,
         eventlog_watch_tx: {
             let (tx, _rx) = exomind_runtime::routes::eventlog::eventlog_watch_channel();
@@ -182,7 +183,7 @@ async fn exports_sqlite_snapshot_and_backend_status() {
             }],
             source_planned_block_id: None,
             block_type: None,
-                    transitions: vec![],
+            transitions: vec![],
         }])
         .unwrap();
     let app = test_router(test_state_with_timeblock_store(store));
@@ -259,7 +260,7 @@ async fn imports_json_backup_with_overwrite() {
             task_association_log: vec![],
             source_planned_block_id: None,
             block_type: None,
-                    transitions: vec![],
+            transitions: vec![],
         }])
         .unwrap();
 

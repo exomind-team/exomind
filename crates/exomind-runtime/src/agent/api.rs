@@ -1,8 +1,9 @@
+use super::tools::{ToolDef, ToolResult, ToolUse};
 use super::{Agent, ChatChunk, ChatRequest, SessionInfo};
 use chrono::{DateTime, SecondsFormat, Utc};
 use futures_util::stream::{self, BoxStream, StreamExt};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard};
@@ -69,12 +70,33 @@ impl ApiSessionSnapshot {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ApiProviderProfile {
     pub provider: String,
     pub model: String,
     pub base_url: Option<String>,
     pub api_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProviderConversationTurn {
+    User {
+        text: String,
+    },
+    Assistant {
+        text: Option<String>,
+        tool_uses: Vec<ToolUse>,
+    },
+    ToolResults {
+        results: Vec<ToolResult>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderCompletion {
+    pub text: String,
+    pub tool_uses: Vec<ToolUse>,
+    pub stop_reason: Option<String>,
 }
 
 /// Managed API agent（运行在 Runtime 中的 API Agent）.
@@ -394,6 +416,121 @@ impl Agent for ApiAgent {
     }
 }
 
+pub async fn complete_turn_with_tools(
+    client: &reqwest::Client,
+    profile: &ApiProviderProfile,
+    system_prompt: Option<&str>,
+    history: &[ProviderConversationTurn],
+    tools: &[ToolDef],
+) -> Result<ProviderCompletion, String> {
+    match profile.provider.as_str() {
+        "openai" => complete_openai_turn(client, profile, system_prompt, history, tools).await,
+        "anthropic" => {
+            complete_anthropic_turn(client, profile, system_prompt, history, tools).await
+        }
+        other => Err(format!("不支持的 API provider: {other}")),
+    }
+}
+
+async fn complete_openai_turn(
+    client: &reqwest::Client,
+    profile: &ApiProviderProfile,
+    system_prompt: Option<&str>,
+    history: &[ProviderConversationTurn],
+    tools: &[ToolDef],
+) -> Result<ProviderCompletion, String> {
+    let mut messages = build_openai_messages(history);
+    if let Some(system_prompt) = system_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        messages.insert(0, json!({ "role": "system", "content": system_prompt }));
+    }
+
+    let mut body = json!({
+        "model": profile.model,
+        "messages": messages,
+        "stream": false,
+    });
+    if !tools.is_empty() {
+        body["tools"] = Value::Array(build_openai_tool_defs(tools));
+    }
+
+    let response = client
+        .post(build_openai_endpoint(profile.base_url.as_deref()))
+        .header(CONTENT_TYPE, "application/json")
+        .header(AUTHORIZATION, format!("Bearer {}", profile.api_key))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| format!("OpenAI 请求失败: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("OpenAI 响应读取失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("OpenAI HTTP {}: {}", status, body));
+    }
+
+    let parsed: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("OpenAI 响应解析失败: {error}; body={body}"))?;
+    parse_openai_completion(&parsed)
+}
+
+async fn complete_anthropic_turn(
+    client: &reqwest::Client,
+    profile: &ApiProviderProfile,
+    system_prompt: Option<&str>,
+    history: &[ProviderConversationTurn],
+    tools: &[ToolDef],
+) -> Result<ProviderCompletion, String> {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(
+        "x-api-key",
+        HeaderValue::from_str(&profile.api_key)
+            .map_err(|error| format!("Anthropic API key 无效: {error}"))?,
+    );
+    headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+
+    let mut body = json!({
+        "model": profile.model,
+        "max_tokens": 4096,
+        "messages": build_anthropic_messages(history),
+        "stream": false,
+    });
+    if let Some(system_prompt) = system_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        body["system"] = Value::String(system_prompt.to_string());
+    }
+    if !tools.is_empty() {
+        body["tools"] = Value::Array(build_anthropic_tool_defs(tools));
+    }
+
+    let response = client
+        .post(build_anthropic_endpoint(profile.base_url.as_deref()))
+        .headers(headers)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| format!("Anthropic 请求失败: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Anthropic 响应读取失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("Anthropic HTTP {}: {}", status, body));
+    }
+
+    let parsed: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("Anthropic 响应解析失败: {error}; body={body}"))?;
+    parse_anthropic_completion(&parsed)
+}
+
 fn normalize_session_id(session_id: Option<&str>) -> Option<String> {
     session_id
         .map(str::trim)
@@ -401,7 +538,7 @@ fn normalize_session_id(session_id: Option<&str>) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn build_openai_endpoint(base_url: Option<&str>) -> String {
+pub(crate) fn build_openai_endpoint(base_url: Option<&str>) -> String {
     let base = base_url
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -414,7 +551,7 @@ fn build_openai_endpoint(base_url: Option<&str>) -> String {
     }
 }
 
-fn build_anthropic_endpoint(base_url: Option<&str>) -> String {
+pub(crate) fn build_anthropic_endpoint(base_url: Option<&str>) -> String {
     let base = base_url
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -427,6 +564,201 @@ fn build_anthropic_endpoint(base_url: Option<&str>) -> String {
     } else {
         format!("{base}/v1/messages")
     }
+}
+
+fn build_openai_messages(history: &[ProviderConversationTurn]) -> Vec<Value> {
+    let mut messages = Vec::new();
+    for turn in history {
+        match turn {
+            ProviderConversationTurn::User { text } => {
+                messages.push(json!({ "role": "user", "content": text }));
+            }
+            ProviderConversationTurn::Assistant { text, tool_uses } => {
+                let content = text
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| Value::String(value.to_string()))
+                    .unwrap_or(Value::Null);
+                let mut message = json!({
+                    "role": "assistant",
+                    "content": content,
+                });
+                if !tool_uses.is_empty() {
+                    message["tool_calls"] =
+                        Value::Array(tool_uses.iter().map(build_openai_tool_call).collect());
+                }
+                messages.push(message);
+            }
+            ProviderConversationTurn::ToolResults { results } => {
+                for result in results {
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": result.tool_use_id,
+                        "content": result.content,
+                    }));
+                }
+            }
+        }
+    }
+    messages
+}
+
+fn build_anthropic_messages(history: &[ProviderConversationTurn]) -> Vec<Value> {
+    let mut messages = Vec::new();
+    for turn in history {
+        match turn {
+            ProviderConversationTurn::User { text } => {
+                messages.push(json!({
+                    "role": "user",
+                    "content": [{ "type": "text", "text": text }],
+                }));
+            }
+            ProviderConversationTurn::Assistant { text, tool_uses } => {
+                let mut content = Vec::new();
+                if let Some(text) = text
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    content.push(json!({ "type": "text", "text": text }));
+                }
+                content.extend(tool_uses.iter().map(|tool_use| {
+                    json!({
+                        "type": "tool_use",
+                        "id": tool_use.id,
+                        "name": tool_use.name,
+                        "input": tool_use.input,
+                    })
+                }));
+                messages.push(json!({
+                    "role": "assistant",
+                    "content": content,
+                }));
+            }
+            ProviderConversationTurn::ToolResults { results } => {
+                let content = results
+                    .iter()
+                    .map(|result| {
+                        json!({
+                            "type": "tool_result",
+                            "tool_use_id": result.tool_use_id,
+                            "content": result.content,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                messages.push(json!({
+                    "role": "user",
+                    "content": content,
+                }));
+            }
+        }
+    }
+    messages
+}
+
+fn build_openai_tool_defs(tools: &[ToolDef]) -> Vec<Value> {
+    tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.input_schema,
+                }
+            })
+        })
+        .collect()
+}
+
+fn build_anthropic_tool_defs(tools: &[ToolDef]) -> Vec<Value> {
+    tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+            })
+        })
+        .collect()
+}
+
+fn build_openai_tool_call(tool_use: &ToolUse) -> Value {
+    json!({
+        "id": tool_use.id,
+        "type": "function",
+        "function": {
+            "name": tool_use.name,
+            "arguments": tool_use.input.to_string(),
+        }
+    })
+}
+
+fn parse_openai_completion(parsed: &Value) -> Result<ProviderCompletion, String> {
+    let choice = parsed
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .ok_or_else(|| "OpenAI 响应缺少 choices[0]".to_string())?;
+    let message = choice
+        .get("message")
+        .ok_or_else(|| "OpenAI 响应缺少 message".to_string())?;
+    Ok(ProviderCompletion {
+        text: extract_openai_message_text(message),
+        tool_uses: parse_openai_tool_calls(message)?,
+        stop_reason: choice
+            .get("finish_reason")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+fn parse_anthropic_completion(parsed: &Value) -> Result<ProviderCompletion, String> {
+    let content = parsed
+        .get("content")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Anthropic 响应缺少 content[]".to_string())?;
+    let mut text_parts = Vec::new();
+    let mut tool_uses = Vec::new();
+
+    for block in content {
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    text_parts.push(text.to_string());
+                }
+            }
+            Some("tool_use") => {
+                let id = block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "Anthropic tool_use 缺少 id".to_string())?;
+                let name = block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "Anthropic tool_use 缺少 name".to_string())?;
+                let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
+                tool_uses.push(ToolUse {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    input,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ProviderCompletion {
+        text: text_parts.join(""),
+        tool_uses,
+        stop_reason: parsed
+            .get("stop_reason")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+    })
 }
 
 fn split_sse_events(buffer: &mut String) -> Vec<String> {
@@ -493,4 +825,115 @@ async fn emit_error_chunk(sender: &mpsc::Sender<ChatChunk>, message: String) {
 
 fn format_utc_iso8601(value: DateTime<Utc>) -> String {
     value.to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+fn extract_openai_message_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+fn parse_openai_tool_calls(message: &Value) -> Result<Vec<ToolUse>, String> {
+    let Some(tool_calls) = message.get("tool_calls") else {
+        return Ok(Vec::new());
+    };
+    let array = tool_calls
+        .as_array()
+        .ok_or_else(|| "OpenAI tool_calls 必须是数组".to_string())?;
+    let mut parsed = Vec::with_capacity(array.len());
+    for tool_call in array {
+        let id = tool_call
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "OpenAI tool_call 缺少 id".to_string())?;
+        let function = tool_call
+            .get("function")
+            .ok_or_else(|| "OpenAI tool_call 缺少 function".to_string())?;
+        let name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "OpenAI tool_call 缺少 function.name".to_string())?;
+        let arguments = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let input = if arguments.trim().is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(arguments)
+                .map_err(|error| format!("OpenAI tool arguments 解析失败: {error}"))?
+        };
+        parsed.push(ToolUse {
+            id: id.to_string(),
+            name: name.to_string(),
+            input,
+        });
+    }
+    Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_openai_completion_collects_text_and_tool_calls() {
+        let parsed = json!({
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": "先看一下近期事件。",
+                    "tool_calls": [{
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "get_recent_events",
+                            "arguments": "{\"limit\":2}"
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let completion = parse_openai_completion(&parsed).unwrap();
+        assert_eq!(completion.text, "先看一下近期事件。");
+        assert_eq!(completion.tool_uses.len(), 1);
+        assert_eq!(completion.tool_uses[0].name, "get_recent_events");
+        assert_eq!(completion.tool_uses[0].input["limit"], 2);
+    }
+
+    #[test]
+    fn build_anthropic_messages_keeps_tool_results_in_user_turn() {
+        let messages = build_anthropic_messages(&[
+            ProviderConversationTurn::User {
+                text: "分析最近事件".to_string(),
+            },
+            ProviderConversationTurn::Assistant {
+                text: Some("我先读取一下。".to_string()),
+                tool_uses: vec![ToolUse {
+                    id: "tool-1".to_string(),
+                    name: "get_recent_events".to_string(),
+                    input: json!({ "limit": 2 }),
+                }],
+            },
+            ProviderConversationTurn::ToolResults {
+                results: vec![ToolResult {
+                    tool_use_id: "tool-1".to_string(),
+                    content: "event 1".to_string(),
+                }],
+            },
+        ]);
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"][1]["type"], "tool_use");
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"][0]["type"], "tool_result");
+    }
 }

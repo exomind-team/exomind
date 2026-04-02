@@ -564,12 +564,17 @@ pub async fn start_with_options(
                 let soul = workspace.load_soul().unwrap_or_default();
                 let cognition =
                     Box::new(agent::llm_cognition::LlmCognition::new("life-alpha", soul));
-                let life_agent = Arc::new(agent::life::CognitiveLifeAgent::new(
-                    "life-alpha",
-                    "认知生命体 Alpha",
-                    workspace,
-                    cognition,
-                ));
+                let life_agent = Arc::new(
+                    agent::life::CognitiveLifeAgent::new(
+                        "life-alpha",
+                        "认知生命体 Alpha",
+                        workspace,
+                        cognition,
+                    )
+                    .with_agent_api_tick_trigger(agent::life::AgentApiTickTrigger::new(
+                        agent::session::AgentSessionRuntime::from_state(&state),
+                    )),
+                );
                 state
                     .registry
                     .register(Arc::clone(&life_agent) as Arc<dyn agent::Agent>);
@@ -793,6 +798,7 @@ pub struct AppState {
     pub task_store: Arc<task::TaskStore>,
     pub proposal_store: Arc<proposal::ProposalStore>,
     pub session_store: Arc<session::SessionStore>,
+    pub agent_api_session_store: Arc<agent::session::AgentSessionStore>,
     pub session_event_tx: Option<tokio::sync::broadcast::Sender<routes::sessions::SessionEvent>>,
     pub eventlog_watch_tx: tokio::sync::broadcast::Sender<String>,
     pub timeblock_store: Arc<timeblock::TimeBlockStore>,
@@ -1040,8 +1046,9 @@ impl AppState {
                 })
             })
             .unwrap_or_default();
-        let session_store = storage_paths
-            .session_sqlite_path
+        let session_sqlite_path = storage_paths.session_sqlite_path.clone();
+        let session_store = session_sqlite_path
+            .clone()
             .map(|path| {
                 session::SessionStore::with_sqlite_path(&path).unwrap_or_else(|error| {
                     tracing::warn!(
@@ -1051,6 +1058,20 @@ impl AppState {
                     );
                     session::SessionStore::new()
                 })
+            })
+            .unwrap_or_default();
+        let agent_api_session_store = session_sqlite_path
+            .map(|path| {
+                agent::session::AgentSessionStore::with_sqlite_path(&path).unwrap_or_else(
+                    |error| {
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %error,
+                            "agent api session sqlite init failed, falling back to in-memory store (Agent API Session SQLite 初始化失败，降级到内存存储)"
+                        );
+                        agent::session::AgentSessionStore::new()
+                    },
+                )
             })
             .unwrap_or_default();
         let energy_registry = energy::EnergyRegistry::new();
@@ -1080,6 +1101,7 @@ impl AppState {
             task_store: Arc::new(task_store),
             proposal_store: Arc::new(proposal_store),
             session_store: Arc::new(session_store),
+            agent_api_session_store: Arc::new(agent_api_session_store),
             session_event_tx: {
                 let (tx, _rx) = routes::sessions::session_event_channel();
                 Some(tx)
@@ -1203,6 +1225,7 @@ mod tests {
             task_store: Arc::new(task::TaskStore::new()),
             proposal_store: Arc::new(proposal::ProposalStore::new()),
             session_store: Arc::new(session::SessionStore::new()),
+            agent_api_session_store: Arc::new(agent::session::AgentSessionStore::new()),
             session_event_tx: None,
             eventlog_watch_tx,
             timeblock_store: Arc::new(timeblock::TimeBlockStore::new()),
