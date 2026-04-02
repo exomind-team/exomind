@@ -6,10 +6,13 @@ pub const DEV_RUNTIME_DATA_DIR_ENV: &str = "EXOMIND_DEV_RUNTIME_DATA_DIR";
 pub const DEV_WEBVIEW_MAIN_DATA_DIR_ENV: &str = "EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR";
 pub const DEV_WEBVIEW_OVERLAY_DATA_ROOT_ENV: &str = "EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT";
 pub const DEV_LEGACY_SHARED_APP_DATA_DIR_ENV: &str = "EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR";
+pub const DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR_ENV: &str =
+    "EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR";
 pub const DEV_LEGACY_SHARED_RUNTIME_DIR_ENV: &str = "EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR";
 
 const RUNTIME_DIR_NAME: &str = "runtime";
 const APP_DATA_LEGACY_SEED_MARKER_NAME: &str = ".legacy-app-data-seeded";
+const WEBVIEW_MAIN_LEGACY_SEED_MARKER_NAME: &str = ".legacy-webview-main-seeded";
 const RUNTIME_LEGACY_SEED_MARKER_NAME: &str = ".legacy-runtime-seeded";
 const APP_DATA_SEED_ENTRY_NAMES: &[&str] = &[".exomind", "eventlog", "settings"];
 const RUNTIME_SQLITE_BASENAMES: &[&str] = &[
@@ -71,6 +74,10 @@ pub fn resolve_main_webview_data_dir() -> Option<PathBuf> {
 
 pub fn resolve_legacy_shared_app_data_dir() -> Option<PathBuf> {
     resolve_env_path(DEV_LEGACY_SHARED_APP_DATA_DIR_ENV)
+}
+
+pub fn resolve_legacy_shared_webview_main_data_dir() -> Option<PathBuf> {
+    resolve_env_path(DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR_ENV)
 }
 
 pub fn resolve_legacy_shared_runtime_dir() -> Option<PathBuf> {
@@ -216,6 +223,49 @@ pub fn seed_instance_runtime_dir_if_needed(
     }
 
     write_seed_marker(runtime_dir, RUNTIME_LEGACY_SEED_MARKER_NAME)
+}
+
+pub fn seed_instance_webview_main_data_dir_if_needed(
+    webview_main_data_dir: &Path,
+    legacy_webview_main_data_dir: &Path,
+) -> Result<(), String> {
+    ensure_dir(webview_main_data_dir)?;
+
+    let marker_path = webview_main_data_dir.join(WEBVIEW_MAIN_LEGACY_SEED_MARKER_NAME);
+    if marker_path.exists() {
+      return Ok(());
+    }
+
+    if legacy_webview_main_data_dir.exists() {
+        if webview_main_data_dir.exists() {
+            std::fs::remove_dir_all(webview_main_data_dir).map_err(|error| {
+                format!(
+                    "failed to reset webview main data dir {:?}: {error}",
+                    webview_main_data_dir
+                )
+            })?;
+        }
+        ensure_dir(webview_main_data_dir)?;
+
+        let entry_names = std::fs::read_dir(legacy_webview_main_data_dir)
+            .map_err(|error| {
+                format!(
+                    "failed to read legacy webview dir {:?}: {error}",
+                    legacy_webview_main_data_dir
+                )
+            })?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        seed_named_entries_if_missing(
+            webview_main_data_dir,
+            legacy_webview_main_data_dir,
+            &entry_names,
+        )?;
+    }
+
+    write_seed_marker(webview_main_data_dir, WEBVIEW_MAIN_LEGACY_SEED_MARKER_NAME)
 }
 
 #[cfg(test)]
@@ -499,6 +549,69 @@ mod tests {
         );
 
         fs::remove_dir_all(&runtime_dir).ok();
+        fs::remove_dir_all(&legacy_dir).ok();
+    }
+
+    #[test]
+    fn dev_instance_paths_webview_seed_replaces_unseeded_isolated_dir_with_legacy_contents() {
+        let webview_dir = temp_path("webview-main-target");
+        let legacy_dir = temp_path("webview-main-legacy");
+
+        fs::create_dir_all(webview_dir.join("EBWebView").join("Default"))
+            .expect("isolated webview dir should be created");
+        fs::write(
+            webview_dir.join("EBWebView").join("Default").join("Preferences"),
+            "fresh-empty-profile",
+        )
+        .expect("isolated webview placeholder should be written");
+
+        fs::create_dir_all(
+            legacy_dir
+                .join("EBWebView")
+                .join("Default")
+                .join("Local Storage")
+                .join("leveldb"),
+        )
+        .expect("legacy webview local storage should exist");
+        fs::write(
+            legacy_dir
+                .join("EBWebView")
+                .join("Default")
+                .join("Local Storage")
+                .join("leveldb")
+                .join("000001.ldb"),
+            "exomind:profiles:index profile-v2",
+        )
+        .expect("legacy webview leveldb should be written");
+
+        seed_instance_webview_main_data_dir_if_needed(&webview_dir, &legacy_dir)
+            .expect("webview seed should succeed");
+
+        assert_eq!(
+            fs::read_to_string(
+                webview_dir
+                    .join("EBWebView")
+                    .join("Default")
+                    .join("Local Storage")
+                    .join("leveldb")
+                    .join("000001.ldb")
+            )
+            .expect("seeded webview leveldb should exist"),
+            "exomind:profiles:index profile-v2"
+        );
+        assert!(
+            !webview_dir
+                .join("EBWebView")
+                .join("Default")
+                .join("Preferences")
+                .exists(),
+            "unseeded isolated placeholder should be replaced by legacy snapshot"
+        );
+
+        seed_instance_webview_main_data_dir_if_needed(&webview_dir, &legacy_dir)
+            .expect("second webview seed should be a no-op");
+
+        fs::remove_dir_all(&webview_dir).ok();
         fs::remove_dir_all(&legacy_dir).ok();
     }
 }

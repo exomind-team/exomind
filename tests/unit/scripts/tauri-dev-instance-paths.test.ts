@@ -35,6 +35,7 @@ describe('tauri-dev-instance-paths', () => {
     expect(desktop.appDataDir).toBe(path.join(projectRoot, '.tmp', 'tauri-dev-state', 'desktop', 'app-data'));
     expect(desktop.runtimeDataDir).toBe(path.join(projectRoot, '.tmp', 'tauri-dev-state', 'desktop', 'app-data', 'runtime'));
     expect(desktop.legacySharedAppDataDir).toBe(path.join('C:\\Users\\starlin\\AppData\\Roaming', 'com.exomind.app'));
+    expect(desktop.legacySharedWebviewMainDataDir).toBe(path.join('C:\\Users\\starlin\\AppData\\Local', 'com.exomind.app'));
     expect(desktop.legacySharedRuntimeDir).toBe(path.join('C:\\Users\\starlin\\AppData\\Roaming', 'com.exomind.app', 'runtime'));
     expect(desktop.mcpBridgeBasePort).toBe(9223);
     expect(issue773.mcpBridgeBasePort).toBe(9233);

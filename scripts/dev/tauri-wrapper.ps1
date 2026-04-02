@@ -850,6 +850,7 @@ if ($isTauriDev) {
   $env:EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR = "$($instancePaths.webviewMainDataDir)"
   $env:EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT = "$($instancePaths.webviewOverlayDataRoot)"
   $env:EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR = "$($instancePaths.legacySharedAppDataDir)"
+  $env:EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR = "$($instancePaths.legacySharedWebviewMainDataDir)"
   $env:EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR = "$($instancePaths.legacySharedRuntimeDir)"
   $env:EXOMIND_MCP_BRIDGE_BASE_PORT = "$($instancePaths.mcpBridgeBasePort)"
 

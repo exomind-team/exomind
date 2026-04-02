@@ -51,8 +51,10 @@ use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, Ws
 use dev_instance_paths::{
     resolve_instance_app_data_dir, resolve_instance_runtime_dir_from_app_data_dir,
     resolve_legacy_shared_app_data_dir, resolve_legacy_shared_runtime_dir,
+    resolve_legacy_shared_webview_main_data_dir,
     resolve_main_webview_data_dir, resolve_mcp_bridge_base_port,
     seed_instance_app_data_dir_if_needed, seed_instance_runtime_dir_if_needed,
+    seed_instance_webview_main_data_dir_if_needed,
 };
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
@@ -222,6 +224,16 @@ pub fn run() {
         .setup(move |app| {
             #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
             if let Some((main_window_config, main_data_dir)) = main_window_override.as_ref() {
+                if let Some(legacy_webview_dir) = resolve_legacy_shared_webview_main_data_dir() {
+                    if let Err(error) = seed_instance_webview_main_data_dir_if_needed(
+                        main_data_dir,
+                        &legacy_webview_dir,
+                    ) {
+                        log::warn!(
+                            "instance webview main data seed incomplete, will retry on next launch: {error}"
+                        );
+                    }
+                }
                 if app.get_webview_window("main").is_none() {
                     tauri::WebviewWindowBuilder::from_config(app.handle(), main_window_config)?
                         .data_directory(main_data_dir.clone())

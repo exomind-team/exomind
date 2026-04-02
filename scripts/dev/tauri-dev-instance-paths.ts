@@ -12,6 +12,7 @@ export type TauriDevInstancePaths = {
   appDataDir: string;
   runtimeDataDir: string;
   legacySharedAppDataDir: string;
+  legacySharedWebviewMainDataDir: string;
   legacySharedRuntimeDir: string;
   mcpBridgeBasePort: number;
 };
@@ -68,6 +69,10 @@ export function resolveTauriDevInstancePaths(
     env.APPDATA?.trim() || env.LOCALAPPDATA?.trim() || '',
     'com.exomind.app',
   );
+  const legacySharedWebviewMainDataDir = path.join(
+    env.LOCALAPPDATA?.trim() || env.APPDATA?.trim() || '',
+    'com.exomind.app',
+  );
 
   return {
     instanceName,
@@ -77,6 +82,7 @@ export function resolveTauriDevInstancePaths(
     appDataDir,
     runtimeDataDir,
     legacySharedAppDataDir,
+    legacySharedWebviewMainDataDir,
     legacySharedRuntimeDir: path.join(legacySharedAppDataDir, 'runtime'),
     mcpBridgeBasePort: resolveMcpBridgeBasePort(env),
   };
