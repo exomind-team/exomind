@@ -8,7 +8,7 @@ import {
   TerminalSquare,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getUseMockDataEnabled,
   MOCK_SESSIONS,
@@ -74,7 +74,7 @@ import {
 } from '@/services/runtime-manager';
 import { RuntimeClient } from '@/services/runtime-client';
 import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
-import type { QuickActionResponse, SessionInfo } from '@/lib/types/session';
+import type { QuickActionResponse, SessionInfo, UpdateSessionRequest } from '@/lib/types/session';
 import {
   createProviderProfile,
   listProviderProfiles,
@@ -372,6 +372,7 @@ export function AgentsPage() {
   const [isPtyStopping, setIsPtyStopping] = useState(false);
   const [hasLoadedPtyAgents, setHasLoadedPtyAgents] = useState(false);
   const [ptyAgents, setPtyAgents] = useState<Array<{ id: string; name: string; status: string; workdir: string }>>([]);
+  const [failedPtyConnectionIds, setFailedPtyConnectionIds] = useState<string[]>([]);
   /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
   const [activePtyId, setActivePtyId] = useState<string | null>(initialTiledState.fullscreenPtyId ?? null);
   const [activePtyHostId, setActivePtyHostId] = useState<string | null>(null);
@@ -859,12 +860,59 @@ export function AgentsPage() {
 
   const handleStopPtyAgent = async (ptyId: string, sourceHostId?: string | null) => {
     const host = resolveRuntimeHostBySourceHostId(sourceHostId) ?? resolveActiveRuntimeHost();
+    const matchingSession = dashboardSessions.find((session) => (
+      session.pty_id === ptyId
+      && (sourceHostId == null || session.source_host_id === sourceHostId)
+    ));
     setRuntimeHostError('');
     setIsPtyStopping(true);
     try {
       const runtimeClient = new RuntimeClient();
       const result = await runtimeClient.stopPtyAgent(host, ptyId);
       if (!result.ok) {
+        if (
+          result.error.status === 404
+          && matchingSession
+          && matchingSession.interaction_mode === 'terminal'
+        ) {
+          let recoveredSession = matchingSession;
+          const recoverySteps: UpdateSessionRequest[] = [];
+
+          if (recoveredSession.status === 'running') {
+            recoverySteps.push({ status: 'completed' });
+          } else if (
+            recoveredSession.status === 'waiting_input'
+            || recoveredSession.status === 'paused'
+            || recoveredSession.status === 'error'
+          ) {
+            recoverySteps.push({ status: 'running' }, { status: 'completed' });
+          }
+
+          let recoveryFailedMessage: string | null = null;
+          for (const step of recoverySteps) {
+            const recoveryResult = await runtimeClient.updateSession(host, recoveredSession.id, step);
+            if (!recoveryResult.ok) {
+              recoveryFailedMessage = recoveryResult.error.message;
+              break;
+            }
+            recoveredSession = recoveryResult.data;
+          }
+
+          if (!recoveryFailedMessage) {
+            if (activePtyId === ptyId) {
+              setActivePtyId(null);
+              setActivePtyHostId(null);
+            }
+            closeRightPanel();
+            await fetchPtyAgents();
+            refreshSessions();
+            setRuntimeHostError('当前 PTY 已不存在，已将异常会话收敛为“已完成”，可继续归档。');
+            return;
+          }
+
+          setRuntimeHostError(`停止 Terminal Agent 失败: ${result.error.message}；会话收敛失败: ${recoveryFailedMessage}`);
+          return;
+        }
         setRuntimeHostError(`停止 Terminal Agent 失败: ${result.error.message}`);
         return;
       }
@@ -875,6 +923,15 @@ export function AgentsPage() {
       closeRightPanel();
       await fetchPtyAgents();
       refreshSessions();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[agent-hub][pty] stop action threw', {
+        ptyId,
+        sourceHostId: sourceHostId ?? null,
+        hostAddress: `${host.host}:${host.port}`,
+        message,
+      });
+      setRuntimeHostError(`停止 Terminal Agent 失败: ${message}`);
     } finally {
       setIsPtyStopping(false);
     }
@@ -1051,9 +1108,7 @@ export function AgentsPage() {
   const [peerPairingOpen, setPeerPairingOpen] = useState(false);
 
   const openPtyTerminal = (ptyId: string, hostId?: string) => {
-    if (!ptyAgents.some((pty) => pty.id === ptyId)) {
-      setHasLoadedPtyAgents(false);
-    }
+    setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== ptyId));
     setActivePtyId(ptyId);
     setActivePtyHostId(hostId ?? null);
     setRightPanel({ state: 'PTY_TERMINAL', ptyId });
@@ -1387,6 +1442,32 @@ export function AgentsPage() {
     () => activePtyHostId ?? dashboardSessions.find((session) => session.pty_id === activePtyId)?.source_host_id ?? null,
     [activePtyHostId, activePtyId, dashboardSessions],
   );
+  const knownPtyIds = useMemo(
+    () => new Set(ptyAgents.map((pty) => pty.id)),
+    [ptyAgents],
+  );
+  const disconnectedSessionPtyIds = useMemo(() => {
+    const disconnectedIds = new Set(failedPtyConnectionIds);
+    if (!hasLoadedPtyAgents) {
+      return disconnectedIds;
+    }
+
+    dashboardSessions.forEach((session) => {
+      if (
+        session.interaction_mode === 'terminal'
+        && session.pty_id
+        && !knownPtyIds.has(session.pty_id)
+      ) {
+        disconnectedIds.add(session.pty_id);
+      }
+    });
+
+    return disconnectedIds;
+  }, [dashboardSessions, failedPtyConnectionIds, hasLoadedPtyAgents, knownPtyIds]);
+  const isSessionPtyDisconnected = useCallback(
+    (session: SessionInfo) => !!session.pty_id && disconnectedSessionPtyIds.has(session.pty_id),
+    [disconnectedSessionPtyIds],
+  );
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
@@ -1598,9 +1679,20 @@ export function AgentsPage() {
   // Keep ref in sync so the polling interval always calls the latest version.
   fetchPtyAgentsRef.current = fetchPtyAgents;
 
+  useEffect(() => {
+    if (ptyAgents.length === 0) return;
+    setFailedPtyConnectionIds((prev) => prev.filter((ptyId) => !knownPtyIds.has(ptyId)));
+  }, [knownPtyIds, ptyAgents.length]);
+
   const isActivePtyDisconnected = useMemo(
-    () => !!activePtyId && hasLoadedPtyAgents && !ptyAgents.some((pty) => pty.id === activePtyId),
-    [activePtyId, hasLoadedPtyAgents, ptyAgents],
+    () => (
+      !!activePtyId
+      && (
+        failedPtyConnectionIds.includes(activePtyId)
+        || (hasLoadedPtyAgents && !knownPtyIds.has(activePtyId))
+      )
+    ),
+    [activePtyId, failedPtyConnectionIds, hasLoadedPtyAgents, knownPtyIds],
   );
 
   const refreshRuntimeSnapshot = async (
@@ -2381,6 +2473,7 @@ export function AgentsPage() {
               sessions={visibleSessions}
               layout={tiledLayout}
               resolveSessionConnection={resolveRuntimeConnectionForSession}
+              isSessionDisconnected={isSessionPtyDisconnected}
               focusedIndex={tiledFocusedIndex}
               onFocusPane={setTiledFocusedIndex}
               onSessionClick={(session) => {
@@ -2670,7 +2763,7 @@ export function AgentsPage() {
                     onClick={() => {
                       void handleStopPtyAgent(rightPanel.ptyId!, resolvedActivePtyHostId);
                     }}
-                    disabled={isPtyStopping || isActivePtyDisconnected}
+                    disabled={isPtyStopping}
                     className="flex h-7 items-center justify-center rounded px-2 text-xs text-destructive hover:text-destructive/80 disabled:opacity-60"
                     aria-label="结束 Terminal Agent"
                   >
@@ -3150,7 +3243,7 @@ export function AgentsPage() {
                       <div className="space-y-1">
                         <p className="text-sm font-semibold text-[#FAFAF9]">终端已断开</p>
                         <p className="text-xs text-[#A8A29E]">
-                          当前 PTY 已不存在，RT 可能已经重启。你可以关闭面板，或保留它等待手动恢复。
+                          当前 PTY 已不存在，RT 可能已经重启。可点击上方“结束”将会话收敛为已完成，再继续归档。
                         </p>
                       </div>
                       <button
@@ -3173,6 +3266,12 @@ export function AgentsPage() {
                         rtBaseUrl={connection.rtBaseUrl}
                         ptyId={activePtyId}
                         authToken={connection.authToken}
+                        onInitialConnectionFailure={() => {
+                          setFailedPtyConnectionIds((prev) => (
+                            prev.includes(activePtyId) ? prev : [...prev, activePtyId]
+                          ));
+                          void fetchPtyAgentsRef.current();
+                        }}
                       />
                     );
                   })()}

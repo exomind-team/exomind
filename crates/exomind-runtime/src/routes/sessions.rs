@@ -433,15 +433,15 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/sessions", post(create_session).get(list_sessions))
         .route(
-            "/sessions/{id}",
+            "/sessions/:id",
             get(get_session)
                 .patch(update_session)
                 .delete(delete_session),
         )
-        .route("/sessions/{id}/quick-action", post(submit_quick_action))
-        .route("/sessions/{id}/mark-waiting", post(mark_waiting))
-        .route("/sessions/{id}/children", get(list_children))
-        .route("/sessions/{id}/messages", post(send_message))
+        .route("/sessions/:id/quick-action", post(submit_quick_action))
+        .route("/sessions/:id/mark-waiting", post(mark_waiting))
+        .route("/sessions/:id/children", get(list_children))
+        .route("/sessions/:id/messages", post(send_message))
         .route("/sessions/stream", get(session_stream))
 }
 
@@ -692,5 +692,84 @@ mod tests {
 
         assert_eq!(error.0, StatusCode::CONFLICT);
         assert!(error.1.contains("missing-pty"));
+    }
+
+    #[tokio::test]
+    async fn update_session_route_accepts_colon_path() {
+        let state = test_state("session-host-6");
+        state
+            .session_store
+            .create(CreateSessionInput {
+                id: Some("sid-route-update".to_string()),
+                agent_kind: "claude".to_string(),
+                agent_id: None,
+                source_host_id: Some("session-host-6".to_string()),
+                role: Some("route-update".to_string()),
+                context: None,
+                interaction: Some(crate::session::InteractionMode::Terminal),
+                pty_id: Some("pty-route-update".to_string()),
+                inner_session_id: None,
+                parent_session_id: None,
+            })
+            .unwrap();
+
+        let app = router().with_state(state);
+        let payload = serde_json::json!({
+            "status": "completed",
+        });
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/sessions/sid-route-update")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let session: AgentSession = serde_json::from_slice(&body).unwrap();
+        assert_eq!(session.status, SessionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn mark_waiting_route_accepts_colon_path() {
+        let state = test_state("session-host-7");
+        state
+            .session_store
+            .create(CreateSessionInput {
+                id: Some("sid-route-mark".to_string()),
+                agent_kind: "claude".to_string(),
+                agent_id: None,
+                source_host_id: Some("session-host-7".to_string()),
+                role: Some("route-mark".to_string()),
+                context: None,
+                interaction: Some(crate::session::InteractionMode::Terminal),
+                pty_id: Some("pty-route-mark".to_string()),
+                inner_session_id: None,
+                parent_session_id: None,
+            })
+            .unwrap();
+
+        let app = router().with_state(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/sid-route-mark/mark-waiting")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let session: AgentSession = serde_json::from_slice(&body).unwrap();
+        assert_eq!(session.status, SessionStatus::WaitingInput);
     }
 }

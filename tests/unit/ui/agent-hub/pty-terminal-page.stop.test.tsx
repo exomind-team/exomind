@@ -86,4 +86,99 @@ describe('pty terminal page stop action（全屏终端页结束动作）', () =>
     expect(screen.queryByTestId('mock-pty-terminal')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '返回 Agents' })).toBeInTheDocument();
   });
+
+  it('reconciles a stale terminal session when stop returns 404（丢失 PTY 时可将会话收敛为已完成）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [{ id: 'pty-other' }],
+        } as Response;
+      }
+      if (url.endsWith('/pty/pty-123/stop')) {
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({ error: 'not found' }),
+        } as Response;
+      }
+      if (url.endsWith('/sessions')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [{
+            id: 'session-pty-123',
+            agent_kind: 'claude',
+            role: 'Recovered Terminal',
+            summary: '',
+            status: 'running',
+            interaction_mode: 'terminal',
+            pty_id: 'pty-123',
+            context: {
+              issue_refs: [],
+              labels: [],
+            },
+            created_at: '2026-03-14T00:00:00.000Z',
+            last_active_at: '2026-03-14T00:00:00.000Z',
+            turn_count: 0,
+          }],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/session-pty-123') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'session-pty-123',
+            agent_kind: 'claude',
+            role: 'Recovered Terminal',
+            summary: '',
+            status: 'completed',
+            interaction_mode: 'terminal',
+            pty_id: 'pty-123',
+            context: {
+              issue_refs: [],
+              labels: [],
+            },
+            created_at: '2026-03-14T00:00:00.000Z',
+            last_active_at: '2026-03-14T00:00:00.000Z',
+            turn_count: 0,
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<PtyTerminalPage ptyId="pty-123" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-terminal-page-disconnected')).toBeInTheDocument();
+      expect(screen.getByTestId('pty-terminal-page-stop')).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId('pty-terminal-page-stop'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/sessions/session-pty-123',
+        expect.objectContaining({
+          method: 'PATCH',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer token-123',
+            'Content-Type': 'application/json',
+          }),
+          body: JSON.stringify({ status: 'completed' }),
+        }),
+      );
+      expect(window.location.pathname).toBe('/agents');
+    });
+  });
 });

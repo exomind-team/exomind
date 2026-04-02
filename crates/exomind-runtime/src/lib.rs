@@ -571,9 +571,11 @@ pub async fn start_with_options(
                         workspace,
                         cognition,
                     )
-                    .with_agent_api_tick_trigger(agent::life::AgentApiTickTrigger::new(
-                        agent::session::AgentSessionRuntime::from_state(&state),
-                    )),
+                    .with_agent_api_tick_trigger(
+                        agent::life::AgentApiTickTrigger::new(
+                            agent::session::AgentSessionRuntime::from_state(&state),
+                        ),
+                    ),
                 );
                 state
                     .registry
@@ -601,11 +603,14 @@ pub async fn start_with_options(
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {
-        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
     });
 
     if let Some(mesh_relay) = &mesh_relay {
@@ -760,6 +765,7 @@ pub fn app_with_state(state: AppState) -> Router {
         .allow_methods([
             Method::GET,
             Method::POST,
+            Method::PATCH,
             Method::PUT,
             Method::DELETE,
             Method::OPTIONS,
@@ -1475,7 +1481,10 @@ mod tests {
 
         assert_eq!(StatusCode::OK, response.status());
         assert!(
-            response.headers().get("access-control-allow-origin").is_none(),
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .is_none(),
             "untrusted origin must not receive a CORS allow header"
         );
     }
@@ -1510,6 +1519,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sessions_patch_preflight_allows_trusted_local_origin() {
+        const TEST_PORT: u16 = 3007;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/sessions/test-session")
+                    .header("origin", "http://127.0.0.1:1420")
+                    .header("access-control-request-method", "PATCH")
+                    .header("access-control-request-headers", "content-type")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            response.status(),
+            StatusCode::OK | StatusCode::NO_CONTENT
+        ));
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|value| value.to_str().ok()),
+            Some("http://127.0.0.1:1420")
+        );
+        assert!(
+            response
+                .headers()
+                .get("access-control-allow-methods")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.contains("PATCH"))
+                .unwrap_or(false),
+            "PATCH must be included in the CORS allow-methods preflight response"
+        );
+    }
+
+    #[tokio::test]
     async fn protected_routes_allow_private_lan_requests_without_token_when_enabled() {
         const TEST_PORT: u16 = 3005;
         let registry = agent::AgentRegistry::new();
@@ -1522,9 +1570,12 @@ mod tests {
             .uri("/topology")
             .body(Body::empty())
             .unwrap();
-        request.extensions_mut().insert(axum::extract::ConnectInfo(
-            std::net::SocketAddr::from(([192, 168, 1, 48], 42000)),
-        ));
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [192, 168, 1, 48],
+                42000,
+            ))));
 
         let response = app_with_state(state).oneshot(request).await.unwrap();
 
@@ -1544,9 +1595,12 @@ mod tests {
             .uri("/topology")
             .body(Body::empty())
             .unwrap();
-        request.extensions_mut().insert(axum::extract::ConnectInfo(
-            std::net::SocketAddr::from(([8, 8, 8, 8], 42000)),
-        ));
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [8, 8, 8, 8],
+                42000,
+            ))));
 
         let response = app_with_state(state).oneshot(request).await.unwrap();
 

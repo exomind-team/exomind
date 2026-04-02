@@ -97,4 +97,30 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
 
     expect(onStopSession).toHaveBeenCalledWith(session);
   });
+
+  it('shows a disconnected placeholder instead of mounting a missing PTY terminal（失效 PTY 应渲染断开占位而非继续挂载终端）', () => {
+    render(
+      <TiledGrid
+        sessions={[
+          buildSession({
+            id: 'terminal-stale',
+            status: 'running',
+            interaction_mode: 'terminal',
+            pty_id: 'pty-stale',
+          }),
+        ]}
+        layout="1x1"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        isSessionDisconnected={(session) => session.id === 'terminal-stale'}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('tiled-grid-pty-disconnected-terminal-stale')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-pty-terminal')).not.toBeInTheDocument();
+    expect(screen.getByTitle('停止')).toBeInTheDocument();
+  });
 });

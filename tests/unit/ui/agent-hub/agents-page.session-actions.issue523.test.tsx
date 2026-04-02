@@ -35,6 +35,7 @@ const runtimeClientMocks = vi.hoisted(() => ({
   createAgent: vi.fn(),
   deleteAgent: vi.fn(),
   stopPtyAgent: vi.fn(),
+  updateSession: vi.fn(),
   submitQuickAction: vi.fn(),
   markSessionWaiting: vi.fn(),
 }));
@@ -124,6 +125,8 @@ vi.mock('@/services/runtime-client', async (importOriginal) => {
     deleteAgent = runtimeClientMocks.deleteAgent;
 
     stopPtyAgent = runtimeClientMocks.stopPtyAgent;
+
+    updateSession = runtimeClientMocks.updateSession;
 
     submitQuickAction = runtimeClientMocks.submitQuickAction;
 
@@ -256,6 +259,17 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         created_at: '2026-03-14T00:00:00.000Z',
       },
     });
+    runtimeClientMocks.updateSession.mockImplementation(async (
+      _host: unknown,
+      sessionId: string,
+      request: { status?: SessionInfo['status'] },
+    ) => ({
+      ok: true,
+      data: buildSession({
+        id: sessionId,
+        status: request.status ?? 'running',
+      }),
+    }));
     runtimeClientMocks.submitQuickAction.mockResolvedValue({
       ok: true,
       data: buildSession({
@@ -554,6 +568,183 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         'pty-523',
       );
     });
+  });
+
+  it('reconciles stale terminal sessions from the right panel when PTY stop returns 404（右侧面板可将丢失 PTY 的会话收敛为已完成）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-stale-stop',
+        role: 'Stale Terminal',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-stale',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    runtimeClientMocks.stopPtyAgent.mockResolvedValue({
+      ok: false,
+      error: {
+        status: 404,
+        message: 'PTY instance not found: pty-stale',
+      },
+    });
+    runtimeClientMocks.updateSession.mockResolvedValue({
+      ok: true,
+      data: buildSession({
+        id: 'session-stale-stop',
+        role: 'Stale Terminal',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-stale',
+        source_host_id: 'runtime-host-523',
+      }),
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => SAMPLE_SIGNAL_ROUTES,
+        } as Response;
+      }
+      if (url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    fireEvent.click(await screen.findByTestId('session-card-session-stale-stop'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-stop-pty')).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'pty-stale',
+      );
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'session-stale-stop',
+        { status: 'completed' },
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows an error when terminal stop throws a network error（右侧面板停止终端遇到网络异常时不再静默）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-stop-network-error',
+        role: 'Stale Terminal',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-network-error',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    runtimeClientMocks.stopPtyAgent.mockRejectedValue(new Error('Failed to fetch'));
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => SAMPLE_SIGNAL_ROUTES,
+        } as Response;
+      }
+      if (url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-stop-network-error'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'pty-network-error',
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        '[agent-hub][pty] stop action threw',
+        expect.objectContaining({
+          ptyId: 'pty-network-error',
+          sourceHostId: 'runtime-host-523',
+          hostAddress: '127.0.0.1:1919',
+          message: 'Failed to fetch',
+        }),
+      );
+    });
+
+    consoleWarnSpy.mockRestore();
   });
 
   it('opens PTY spawn dialog and resumes codex history（Agents 页可恢复 Codex 历史会话）', async () => {

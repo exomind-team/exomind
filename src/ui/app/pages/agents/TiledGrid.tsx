@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical, X } from 'lucide-react';
 import {
   DndContext,
@@ -53,6 +53,8 @@ export interface TiledGridProps {
   onStopSession?: (session: SessionInfo) => void;
   /** Callback when user archives a completed session */
   onArchiveSession?: (session: SessionInfo) => void;
+  /** Whether a terminal session currently points to a missing PTY */
+  isSessionDisconnected?: (session: SessionInfo) => boolean;
 }
 
 type TiledPaneEntry =
@@ -90,6 +92,7 @@ export function TiledGrid({
   onMarkWaiting,
   onStopSession,
   onArchiveSession,
+  isSessionDisconnected,
 }: TiledGridProps) {
   const config = LAYOUT_CONFIG[layout];
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
@@ -209,6 +212,7 @@ export function TiledGrid({
           <SessionPane
             session={pane.session}
             resolveSessionConnection={resolveSessionConnection}
+            isDisconnected={isSessionDisconnected?.(pane.session) ?? false}
             isFocused={true}
             isExpanded={true}
             isDragging={false}
@@ -251,6 +255,7 @@ export function TiledGrid({
               key={pane.id}
               pane={pane}
               resolveSessionConnection={resolveSessionConnection}
+              isSessionDisconnected={isSessionDisconnected}
               isFocused={focusedIndex === index}
               isExpanded={false}
               onDoubleClick={() => handleDoubleClick(index)}
@@ -339,6 +344,7 @@ interface SortablePaneProps {
     rtBaseUrl: string;
     authToken?: string;
   };
+  isSessionDisconnected?: (session: SessionInfo) => boolean;
   isFocused: boolean;
   isExpanded: boolean;
   onDoubleClick: () => void;
@@ -373,6 +379,7 @@ function SortablePane(props: SortablePaneProps) {
         <SessionPane
           session={props.pane.session}
           resolveSessionConnection={props.resolveSessionConnection}
+          isDisconnected={props.isSessionDisconnected?.(props.pane.session) ?? false}
           isFocused={props.isFocused}
           isExpanded={props.isExpanded}
           isDragging={isDragging}
@@ -510,6 +517,7 @@ interface SessionPaneProps {
     rtBaseUrl: string;
     authToken?: string;
   };
+  isDisconnected: boolean;
   isFocused: boolean;
   isExpanded: boolean;
   isDragging: boolean;
@@ -526,6 +534,7 @@ interface SessionPaneProps {
 function SessionPane({
   session,
   resolveSessionConnection,
+  isDisconnected,
   isFocused,
   isExpanded,
   isDragging,
@@ -542,14 +551,24 @@ function SessionPane({
   const needsAttention = sessionNeedsAttention(session.status);
   const connection = resolveSessionConnection(session);
   const isCompleted = session.status === 'completed';
+  const [initialConnectionFailed, setInitialConnectionFailed] = useState(false);
+  const showDisconnected = isDisconnected || initialConnectionFailed;
   const showQuickActions =
-    session.status === 'waiting_input' && (session.quick_actions?.length ?? 0) > 0;
+    !showDisconnected
+    && session.status === 'waiting_input'
+    && (session.quick_actions?.length ?? 0) > 0;
   const showManualMarkWaiting =
+    !showDisconnected
+    &&
     session.interaction_mode === 'terminal'
     && session.status === 'running'
     && (session.quick_actions?.length ?? 0) === 0;
   const canStopPty = !isCompleted && session.interaction_mode === 'terminal' && !!session.pty_id;
   const canArchive = isCompleted;
+
+  useEffect(() => {
+    setInitialConnectionFailed(false);
+  }, [session.id, session.pty_id]);
 
   return (
     <div
@@ -646,11 +665,28 @@ function SessionPane({
       {/* Pane content: Terminal or summary */}
       <div className="flex-1 min-h-0 overflow-hidden bg-[#1C1917]">
         {session.interaction_mode === 'terminal' && session.pty_id ? (
-          <PtyTerminal
-            rtBaseUrl={connection.rtBaseUrl}
-            ptyId={session.pty_id}
-            authToken={connection.authToken}
-          />
+          showDisconnected ? (
+            <div
+              data-testid={`tiled-grid-pty-disconnected-${session.id}`}
+              className="flex h-full items-center justify-center px-4 text-center"
+            >
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-[#FAFAF9]">终端已断开</p>
+                <p className="text-xs text-[#A8A29E]">
+                  当前 PTY 已不存在，RT 可能已经重启。可点击停止，将会话收敛为已完成后再归档。
+                </p>
+              </div>
+            </div>
+          ) : (
+            <PtyTerminal
+              rtBaseUrl={connection.rtBaseUrl}
+              ptyId={session.pty_id}
+              authToken={connection.authToken}
+              onInitialConnectionFailure={() => {
+                setInitialConnectionFailed(true);
+              }}
+            />
+          )
         ) : (
           <div className="h-full overflow-auto p-2">
             <p className="whitespace-pre-wrap text-xs text-[#A8A29E] font-mono">

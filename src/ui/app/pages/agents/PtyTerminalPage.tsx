@@ -2,6 +2,7 @@ import { ChevronLeft, Square } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { PtyTerminal } from '../../components/PtyTerminal';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
+import type { SessionInfo, UpdateSessionRequest } from '@/lib/types/session';
 
 export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
   const [isStopping, setIsStopping] = useState(false);
@@ -22,6 +23,16 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
     (typeof window !== 'undefined'
       ? (window.history.state as Record<string, unknown> | null)?.ptyToken
       : undefined) as string | undefined;
+  const buildHeaders = (includeJsonContentType = false): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    if (includeJsonContentType) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+    return headers;
+  };
 
   useEffect(() => {
     if (!ptyId) {
@@ -31,17 +42,13 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
     }
 
     let disposed = false;
-    const headers: Record<string, string> = {};
-    if (authToken) {
-      headers.Authorization = `Bearer ${authToken}`;
-    }
 
     const verifyPty = async () => {
       setIsCheckingPty(true);
       setIsDisconnected(false);
 
       try {
-        const response = await fetch(`${rtBaseUrl}/pty`, { headers });
+        const response = await fetch(`${rtBaseUrl}/pty`, { headers: buildHeaders() });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -75,23 +82,75 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
     }
   };
 
+  const recoverDisconnectedSession = async (): Promise<boolean> => {
+    if (!ptyId) return false;
+
+    const sessionsResponse = await fetch(`${rtBaseUrl}/sessions`, {
+      headers: buildHeaders(),
+    });
+    if (!sessionsResponse.ok) {
+      throw new Error(`HTTP ${sessionsResponse.status}`);
+    }
+
+    const sessions = await sessionsResponse.json() as SessionInfo[];
+    let matchingSession = sessions.find((session) => (
+      session.interaction_mode === 'terminal'
+      && session.pty_id === ptyId
+    ));
+
+    if (!matchingSession) {
+      return false;
+    }
+
+    const recoverySteps: UpdateSessionRequest[] = [];
+    if (matchingSession.status === 'running') {
+      recoverySteps.push({ status: 'completed' });
+    } else if (
+      matchingSession.status === 'waiting_input'
+      || matchingSession.status === 'paused'
+      || matchingSession.status === 'error'
+    ) {
+      recoverySteps.push({ status: 'running' }, { status: 'completed' });
+    } else if (matchingSession.status === 'completed') {
+      return true;
+    } else {
+      return false;
+    }
+
+    for (const step of recoverySteps) {
+      const response = await fetch(`${rtBaseUrl}/sessions/${encodeURIComponent(matchingSession.id)}`, {
+        method: 'PATCH',
+        headers: buildHeaders(true),
+        body: JSON.stringify(step),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      matchingSession = await response.json() as SessionInfo;
+    }
+
+    return true;
+  };
+
   const handleStop = async () => {
-    if (!ptyId || isStopping || isDisconnected) return;
+    if (!ptyId || isStopping || isCheckingPty) return;
     setIsStopping(true);
     setStopError('');
 
     try {
-      const headers: Record<string, string> = {};
-      if (authToken) {
-        headers.Authorization = `Bearer ${authToken}`;
-      }
-
       const response = await fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/stop`, {
         method: 'POST',
-        headers,
+        headers: buildHeaders(),
       });
 
       if (!response.ok) {
+        if (response.status === 404) {
+          const recovered = await recoverDisconnectedSession();
+          if (recovered) {
+            navigateBack();
+            return;
+          }
+        }
         throw new Error(`HTTP ${response.status}`);
       }
 
@@ -129,7 +188,7 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
           onClick={() => {
             void handleStop();
           }}
-          disabled={isStopping || isDisconnected || isCheckingPty}
+          disabled={isStopping || isCheckingPty}
           className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[#FCA5A5] hover:text-[#FECACA] disabled:opacity-60"
           aria-label="结束 Terminal Agent"
         >
@@ -150,7 +209,7 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
           >
             <div className="space-y-1">
               <p className="text-sm font-semibold text-[#FAFAF9]">终端已断开</p>
-              <p className="text-xs text-[#A8A29E]">对应 PTY 已不存在，RT 可能已经重启。</p>
+              <p className="text-xs text-[#A8A29E]">对应 PTY 已不存在，RT 可能已经重启。可点击上方“结束”将会话收敛为已完成。</p>
             </div>
             <button
               type="button"
