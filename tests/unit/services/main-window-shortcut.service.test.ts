@@ -99,8 +99,7 @@ describe('MainWindowShortcutService', () => {
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
 
     expect(navigateMock).toHaveBeenCalledWith({
-      to: '/eventlog',
-      search: { tab: 'record' },
+      to: '/eventlog/record',
     });
     expect(requestFocusTargetMock).toHaveBeenCalledWith('eventlog-record-input');
 

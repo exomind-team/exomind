@@ -30,7 +30,11 @@ import {
   resolveTasksRestorePath,
   shouldForceTasksMain,
 } from '@/ui/app/pages/task-route-memory';
-import { resolveEventlogRestoreTab } from '@/ui/app/pages/eventlog-route-memory';
+import {
+  getEventlogPathForTab,
+  resolveEventlogRestoreTab,
+  resolveLegacyEventlogTabSearch,
+} from '@/ui/app/pages/eventlog-route-memory';
 
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
@@ -274,6 +278,7 @@ function MobileShell({
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = locationPath === item.path
+                  || (item.path === '/eventlog' && locationPath.startsWith('/eventlog'))
                   || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
                   || (item.path === '/me' && locationPath.startsWith('/me'))
                   || (item.path === '/goals' && locationPath.startsWith('/goals'))
@@ -318,7 +323,7 @@ function DesktopSidebar({
   onToggleCollapsed: () => void;
 }) {
   const desktopNavItems = [
-    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/' || path === '/eventlog' },
+    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/' || path.startsWith('/eventlog') },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
     { key: 'proposals', title: '请求箱', path: '/proposals', icon: Inbox, match: (path: string) => path === '/proposals' || path.startsWith('/proposals/') },
     ...(goalsPageEnabled ? [{
@@ -729,18 +734,50 @@ const newEventlogRoute = createRoute({
 
     useEffect(() => {
       const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+      const legacyTab = resolveLegacyEventlogTabSearch(currentSearch);
+      if (legacyTab && legacyTab !== 'focus') {
+        void navigate({
+          to: getEventlogPathForTab(legacyTab),
+          replace: true,
+        });
+        return;
+      }
+
       const restoreTab = resolveEventlogRestoreTab(currentSearch);
       if (!restoreTab) {
         return;
       }
 
       void navigate({
-        to: '/eventlog',
-        search: { tab: restoreTab },
+        to: getEventlogPathForTab(restoreTab),
         replace: true,
       });
     }, [navigate]);
 
+    return (
+      <LazyPage>
+        <FocusPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newEventlogRecordRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/eventlog/record',
+  component: function NewEventlogRecord() {
+    return (
+      <LazyPage>
+        <FocusPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newEventlogTodayRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/eventlog/today',
+  component: function NewEventlogToday() {
     return (
       <LazyPage>
         <FocusPage />
@@ -1089,6 +1126,8 @@ const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newDashboardRoute,
   newEventlogRoute,
+  newEventlogRecordRoute,
+  newEventlogTodayRoute,
   newEventlogTimeblockDetailRoute,
   newTasksRoute,
   newProposalsRoute,

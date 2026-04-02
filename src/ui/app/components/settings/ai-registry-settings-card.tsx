@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getLLMSettings } from "@/config/llm-settings";
 import {
   COMMON_AI_CAPABILITY_OPTIONS,
@@ -70,6 +71,7 @@ const CHECKBOX_ROW_CLASS =
   "flex items-center gap-2 rounded-xl border border-[#F0ECE8] bg-white px-3 py-3 text-sm text-[#57534E] dark:border-[#292524] dark:bg-[#0C0A09] dark:text-[#D6D3D1]";
 const DANGER_BUTTON_CLASS =
   "rounded-xl border border-[#F0ECE8] px-3 py-2 text-sm font-medium text-[#B91C1C] hover:bg-[#FEF2F2] dark:border-[#7F1D1D] dark:text-[#FCA5A5] dark:hover:bg-[#2A1111]";
+const AI_REGISTRY_UNSET_SELECT_VALUE = "__unset__";
 
 function SecondaryValue({ value }: { value: string }) {
   return (
@@ -698,41 +700,49 @@ export function AIRegistrySetting(_props: { ctx: SettingsContext }) {
                       </div>
                       <div className="space-y-1.5">
                         <label className={FIELD_LABEL_CLASS}>稳定性</label>
-                        <select
-                          value={draft.stabilityLevelManual}
-                          onChange={(event) =>
+                        <Select
+                          value={draft.stabilityLevelManual || AI_REGISTRY_UNSET_SELECT_VALUE}
+                          onValueChange={(value) =>
                             setDraft((current) => ({
                               ...current,
-                              stabilityLevelManual: event.target.value,
+                              stabilityLevelManual: value === AI_REGISTRY_UNSET_SELECT_VALUE ? "" : value,
                             }))
                           }
-                          className={TEXT_INPUT_CLASS}
                         >
-                          <option value="">未设置</option>
-                          <option value="unknown">unknown</option>
-                          <option value="low">low</option>
-                          <option value="medium">medium</option>
-                          <option value="high">high</option>
-                        </select>
+                          <SelectTrigger className={TEXT_INPUT_CLASS}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={AI_REGISTRY_UNSET_SELECT_VALUE}>未设置</SelectItem>
+                            <SelectItem value="unknown">unknown</SelectItem>
+                            <SelectItem value="low">low</SelectItem>
+                            <SelectItem value="medium">medium</SelectItem>
+                            <SelectItem value="high">high</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-1.5">
                         <label className={FIELD_LABEL_CLASS}>延迟档</label>
-                        <select
-                          value={draft.latencyTierManual}
-                          onChange={(event) =>
+                        <Select
+                          value={draft.latencyTierManual || AI_REGISTRY_UNSET_SELECT_VALUE}
+                          onValueChange={(value) =>
                             setDraft((current) => ({
                               ...current,
-                              latencyTierManual: event.target.value,
+                              latencyTierManual: value === AI_REGISTRY_UNSET_SELECT_VALUE ? "" : value,
                             }))
                           }
-                          className={TEXT_INPUT_CLASS}
                         >
-                          <option value="">未设置</option>
-                          <option value="unknown">unknown</option>
-                          <option value="slow">slow</option>
-                          <option value="normal">normal</option>
-                          <option value="fast">fast</option>
-                        </select>
+                          <SelectTrigger className={TEXT_INPUT_CLASS}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={AI_REGISTRY_UNSET_SELECT_VALUE}>未设置</SelectItem>
+                            <SelectItem value="unknown">unknown</SelectItem>
+                            <SelectItem value="slow">slow</SelectItem>
+                            <SelectItem value="normal">normal</SelectItem>
+                            <SelectItem value="fast">fast</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
 

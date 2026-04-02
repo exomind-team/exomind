@@ -2,6 +2,7 @@ import { ChevronDown, Clock } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { SlidingSegmentedControl } from '@/ui/app/components/SlidingSegmentedControl'
+import { TaskDomainTabs } from '@/ui/app/components/TaskDomainTabs'
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb'
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop'
 import { getEventLogService, getTaskService, getTimeBlockService } from '@/lib/services'
@@ -1305,6 +1306,9 @@ export function TaskTimelinePage() {
           <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">比例尺：{formatRangeSummaryLabel(range)}</span>
           <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">任务：{model.entries.length}</span>
           <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">泳道：{model.lanes.length}</span>
+        </div>
+        <div className="mt-3">
+          <TaskDomainTabs active="timeline" />
         </div>
       </header>
 

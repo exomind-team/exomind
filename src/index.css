@@ -39,8 +39,15 @@
     --text-muted: 215.4 16.3% 56.9%;
     --bg-card: 0 0% 100%;
     --bg-surface: 40 20% 98%;
+    --page-bg: 30 33% 98%;
+    --page-bg-dark: 20 14% 4%;
+    --active-bg: 14 56% 50%;
+    --active-bg-hover: 14 59% 44%;
+    --inactive-bg: 30 26% 94%;
+    --inactive-bg-dark: 24 10% 10%;
     --border-card: 30 20% 94%;
     --border-subtle: 30 10% 91%;
+    --border-page: 30 20% 92%;
     --brand-accent: 14 76% 66%;
     --brand-gradient: 14 76% 66%, 14 68% 53%, 14 64% 48%;
     --sidebar: 24 33% 96%;
@@ -92,8 +99,15 @@
     --text-muted: 25 5% 45%;         /* #78716C Stone-500 */
     --bg-card: 24 10% 10%;           /* #1C1917 Stone-900 */
     --bg-surface: 20 14% 4%;         /* #0C0A09 Stone-950 */
+    --page-bg: 30 33% 98%;
+    --page-bg-dark: 20 14% 4%;
+    --active-bg: 14 56% 50%;
+    --active-bg-hover: 14 59% 44%;
+    --inactive-bg: 30 26% 94%;
+    --inactive-bg-dark: 24 10% 10%;
     --border-card: 12 6% 15%;        /* #292524 Stone-800 */
     --border-subtle: 20 5% 12%;      /* #211F1E Stone-850 approx */
+    --border-page: 12 6% 15%;
     --brand-accent: 14 56% 50%;      /* #C75B3A */
     --brand-gradient: 14 56% 50%, 14 60% 42%, 14 65% 35%;
     --sidebar: 24 13% 10%;

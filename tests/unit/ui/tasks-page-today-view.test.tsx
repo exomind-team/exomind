@@ -136,7 +136,7 @@ describe('TasksPage current layout（任务页当前布局）', () => {
     expect(screen.getByTestId('task-current-root-badge-task-2')).toBeInTheDocument();
   });
 
-  it('renders top navigation links for timeline and dag', async () => {
+  it('renders top navigation links for timeline, dag, and proposal inbox', async () => {
     render(<TasksPage />);
 
     await waitFor(() => {
@@ -145,6 +145,7 @@ describe('TasksPage current layout（任务页当前布局）', () => {
 
     expect(screen.getByText('时间线').closest('a')).toHaveAttribute('to', '/tasks/timeline');
     expect(screen.getByText('依赖图').closest('a')).toHaveAttribute('to', '/tasks/dag');
+    expect(screen.getByText('请求箱').closest('a')).toHaveAttribute('to', '/proposals');
   });
 
   it('keeps quick add input visible on the tasks page', async () => {
@@ -172,4 +173,3 @@ describe('TasksPage current layout（任务页当前布局）', () => {
     vi.useRealTimers();
   });
 });
-

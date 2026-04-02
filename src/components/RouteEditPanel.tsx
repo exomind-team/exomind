@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SignalRoute, TargetType } from '@/lib/types/signal-pool';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export interface RouteEditPanelProps {
   route: SignalRoute | null;
@@ -69,37 +70,41 @@ export function RouteEditPanel({
       {/* Target Type */}
       <label className="flex flex-col gap-1">
         <span className="text-xs font-medium text-muted-foreground">Target Type</span>
-        <select
+        <Select
           value={targetType}
-          onChange={(e) => {
-            setTargetType(e.target.value as TargetType);
+          onValueChange={(value) => {
+            setTargetType(value as TargetType);
             setTargetRef('');
           }}
-          className="rounded-lg border border-border-card bg-card px-3 py-2 text-sm text-foreground focus:border-[#C75B3A] focus:outline-none"
         >
-          <option value="agent">Agent</option>
-          <option value="actor">Actor</option>
-          <option value="frontend">Frontend</option>
-          <option value="remote">Remote</option>
-        </select>
+          <SelectTrigger aria-label="Target Type" className="rounded-lg border-border-card bg-card text-sm text-foreground">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="agent">Agent</SelectItem>
+            <SelectItem value="actor">Actor</SelectItem>
+            <SelectItem value="frontend">Frontend</SelectItem>
+            <SelectItem value="remote">Remote</SelectItem>
+          </SelectContent>
+        </Select>
       </label>
 
       {/* Target Ref */}
       <label className="flex flex-col gap-1">
         <span className="text-xs font-medium text-muted-foreground">Target Ref</span>
         {targetOptions.length > 0 ? (
-          <select
-            value={targetRef}
-            onChange={(e) => setTargetRef(e.target.value)}
-            className="rounded-lg border border-border-card bg-card px-3 py-2 text-sm text-foreground focus:border-[#C75B3A] focus:outline-none"
-          >
-            <option value="">选择目标…</option>
-            {targetOptions.map((opt) => (
-              <option key={opt.id} value={opt.id}>
-                {opt.name || opt.id}
-              </option>
-            ))}
-          </select>
+          <Select value={targetRef} onValueChange={setTargetRef}>
+            <SelectTrigger aria-label="Target Ref" className="rounded-lg border-border-card bg-card text-sm text-foreground">
+              <SelectValue placeholder="选择目标…" />
+            </SelectTrigger>
+            <SelectContent>
+              {targetOptions.map((opt) => (
+                <SelectItem key={opt.id} value={opt.id}>
+                  {opt.name || opt.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         ) : (
           <input
             type="text"

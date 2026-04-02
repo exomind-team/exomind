@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
 
 describe('route edit panel theme（路由编辑面板主题）', () => {
@@ -30,7 +30,15 @@ describe('route edit panel theme（路由编辑面板主题）', () => {
   it('uses semantic theme tokens for target ref input after switching to remote（切换到 remote 后目标输入框仍应接入全局主题 token）', () => {
     render(
       <RouteEditPanel
-        route={null}
+        route={{
+          id: 'route-1',
+          topic: 'voice.input.transcript',
+          target_type: 'remote',
+          target_ref: '',
+          enabled: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }}
         availableTopics={['voice.input.transcript']}
         availableAgents={[{ id: 'classifier', name: 'Classifier Agent' }]}
         availableActors={[]}
@@ -38,9 +46,6 @@ describe('route edit panel theme（路由编辑面板主题）', () => {
         onCancel={vi.fn()}
       />
     );
-
-    const comboboxes = screen.getAllByRole('combobox');
-    fireEvent.change(comboboxes[1]!, { target: { value: 'remote' } });
 
     const textboxes = screen.getAllByRole('textbox');
     const targetRefInput = textboxes.find((element) => (element as HTMLInputElement).placeholder === 'e.g. ui');

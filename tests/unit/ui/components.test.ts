@@ -60,6 +60,32 @@ describe('shadcn components', () => {
     });
   });
 
+  describe('Select', () => {
+    it('should be importable', async () => {
+      const {
+        Select,
+        SelectTrigger,
+        SelectValue,
+        SelectContent,
+        SelectItem,
+      } = await import('@/components/ui/select');
+      expect(Select).toBeDefined();
+      expect(SelectTrigger).toBeDefined();
+      expect(SelectValue).toBeDefined();
+      expect(SelectContent).toBeDefined();
+      expect(SelectItem).toBeDefined();
+    });
+  });
+
+  describe('PageShell and PageTabs', () => {
+    it('should be importable', async () => {
+      const { PageShell } = await import('@/ui/app/components/PageShell');
+      const { PageTabs } = await import('@/ui/app/components/PageTabs');
+      expect(PageShell).toBeDefined();
+      expect(PageTabs).toBeDefined();
+    });
+  });
+
   describe('Badge', () => {
     it('should be importable', async () => {
       const { Badge } = await import('@/components/ui/badge');

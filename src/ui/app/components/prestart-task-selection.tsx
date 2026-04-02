@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getTaskService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 
@@ -145,11 +146,9 @@ export function PrestartTaskSelectionList({
             <span>{overflowSelectLabel ?? 'More tasks / 更多任务'}</span>
             <span className="text-[11px] text-[#A8A29E]">{overflowTasks.length} 个候选</span>
           </span>
-          <select
-            aria-label={overflowSelectLabel ?? '更多任务'}
+          <Select
             value={overflowSelection}
-            onChange={(event) => {
-              const nextTaskId = event.target.value;
+            onValueChange={(nextTaskId) => {
               setOverflowSelection(nextTaskId);
               if (!nextTaskId) {
                 return;
@@ -157,19 +156,25 @@ export function PrestartTaskSelectionList({
               toggleTask(nextTaskId);
               setOverflowSelection('');
             }}
-            className="w-full rounded-[10px] border border-[#E7E5E4] bg-white px-3 py-2 text-[12px] outline-none focus:border-[#C75B3A] dark:border-[#FFFFFF20] dark:bg-[#120F0D] dark:text-[#D6D3D1]"
           >
-            <option value="">从下拉里查看和选择更多任务</option>
-            {overflowTasks.map((task) => {
-              const selected = selectedTaskIdSet.has(task.id);
-              const statusLabel = resolvePrestartTaskStatusLabel(task, selected);
-              return (
-                <option key={task.id} value={task.id}>
-                  {`${selected ? '[已选] ' : ''}${task.title} · ${statusLabel}`}
-                </option>
-              );
-            })}
-          </select>
+            <SelectTrigger
+              aria-label={overflowSelectLabel ?? '更多任务'}
+              className="w-full rounded-[10px] border-[#E7E5E4] bg-white px-3 py-2 text-[12px] dark:border-[#FFFFFF20] dark:bg-[#120F0D] dark:text-[#D6D3D1]"
+            >
+              <SelectValue placeholder="从下拉里查看和选择更多任务" />
+            </SelectTrigger>
+            <SelectContent>
+              {overflowTasks.map((task) => {
+                const selected = selectedTaskIdSet.has(task.id);
+                const statusLabel = resolvePrestartTaskStatusLabel(task, selected);
+                return (
+                  <SelectItem key={task.id} value={task.id}>
+                    {`${selected ? '[已选] ' : ''}${task.title} · ${statusLabel}`}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
         </label>
       ) : null}
     </div>

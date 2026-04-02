@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getMeService } from '@/lib/services';
+import { PageShell } from '@/ui/app/components/PageShell';
+import { PageTabs } from '@/ui/app/components/PageTabs';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import type {
   MeBehaviorPattern,
@@ -19,12 +21,6 @@ import type {
   MeStatusMetric,
   MeViewType,
 } from '@/lib/types/me';
-
-function tabClass(active: boolean): string {
-  return active
-    ? 'bg-[#C75B3A] font-semibold text-white'
-    : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]';
-}
 
 function metricToneClass(metric: MeStatusMetric): string {
   if (metric.tone === 'green') return 'bg-[#F0FDF4] dark:bg-[#1E2B22]';
@@ -79,50 +75,30 @@ export function MePage() {
 
   if (!data) {
     return (
-      <div className="min-h-full bg-[#FAF7F5] px-6 py-6 text-sm text-[#A8A29E] dark:bg-[#0C0A09] md:px-8 lg:px-10" data-testid="new-me-page">
+      <div className="min-h-full bg-page px-6 py-6 text-sm text-muted dark:bg-page-dark md:px-8 lg:px-10" data-testid="new-me-page">
         Me 数据加载中...
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-me-page">
-      <header className="flex items-center justify-between border-b border-[#F0ECE8] px-6 py-3 dark:border-[#292524] md:px-8 lg:px-10">
-        <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Me</h1>
-      </header>
-
-      <div className="px-5 pb-1 pt-3 md:px-8 lg:px-10">
-        <div className="flex justify-center gap-1">
-          <button
-            type="button"
-            className={`shrink-0 rounded-2xl px-4 py-1.5 text-[13px] ${tabClass(activeTab === 'status')}`}
-            onClick={() => setActiveTab('status')}
-            aria-pressed={activeTab === 'status'}
-          >
-            状态
-          </button>
-          <button
-            type="button"
-            className={`shrink-0 rounded-2xl px-4 py-1.5 text-[13px] ${tabClass(activeTab === 'learn')}`}
-            onClick={() => setActiveTab('learn')}
-            aria-pressed={activeTab === 'learn'}
-          >
-            学习
-          </button>
-          <button
-            type="button"
-            className={`shrink-0 rounded-2xl px-4 py-1.5 text-[13px] ${tabClass(activeTab === 'implicit')}`}
-            onClick={() => setActiveTab('implicit')}
-            aria-pressed={activeTab === 'implicit'}
-          >
-            内隐
-          </button>
-        </div>
-      </div>
-
-      <div className={`min-h-0 flex-1 overflow-y-auto space-y-4 px-5 pt-4 md:px-8 lg:px-10 ${isDesktop ? 'pb-8' : 'pb-[calc(env(safe-area-inset-bottom,0px)+92px)]'}`}>
-        {activeTab === 'status' ? (
-          <>
+    <PageShell
+      title="Me"
+      className="min-h-full"
+      contentClassName={isDesktop ? 'px-5 pb-8 pt-3 md:px-8 lg:px-10' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+92px)] pt-3 md:px-8 lg:px-10'}
+    >
+      <div data-testid="new-me-page" className="min-h-0 flex h-full flex-col">
+        <PageTabs
+          activeTab={activeTab}
+          onTabChange={(nextTab) => setActiveTab(nextTab as MeViewType)}
+          tabs={[
+            { id: 'status', label: '状态' },
+            { id: 'learn', label: '学习' },
+            { id: 'implicit', label: '内隐' },
+          ]}
+          className="min-h-0 flex-1"
+        >
+          <div data-tab-id="status" className={`space-y-4 ${isDesktop ? '' : ''}`}>
             <section
               className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
               data-testid="me-status-summary-card"
@@ -191,11 +167,9 @@ export function MePage() {
                 </article>
               ))}
             </section>
-          </>
-        ) : null}
+          </div>
 
-        {activeTab === 'learn' ? (
-          <>
+          <div data-tab-id="learn" className="space-y-4">
             <section
               className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
               data-testid="me-learn-urgent-card"
@@ -243,11 +217,9 @@ export function MePage() {
                 </article>
               ))}
             </section>
-          </>
-        ) : null}
+          </div>
 
-        {activeTab === 'implicit' ? (
-          <>
+          <div data-tab-id="implicit" className="space-y-4">
             <section
               className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
               data-testid="me-implicit-belief-card"
@@ -301,9 +273,9 @@ export function MePage() {
                 </article>
               ))}
             </section>
-          </>
-        ) : null}
+          </div>
+        </PageTabs>
       </div>
-    </div>
+    </PageShell>
   );
 }

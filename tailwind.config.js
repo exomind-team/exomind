@@ -62,9 +62,22 @@ export default {
         // 语义化颜色 - 背景
         card: "hsl(var(--bg-card))",
         surface: "hsl(var(--bg-surface))",
+        page: {
+          DEFAULT: "hsl(var(--page-bg))",
+          dark: "hsl(var(--page-bg-dark))",
+        },
+        active: {
+          DEFAULT: "hsl(var(--active-bg))",
+          hover: "hsl(var(--active-bg-hover))",
+        },
+        inactive: {
+          DEFAULT: "hsl(var(--inactive-bg))",
+          dark: "hsl(var(--inactive-bg-dark))",
+        },
         // 语义化颜色 - 边框
         'border-card': "hsl(var(--border-card))",
         'border-subtle': "hsl(var(--border-subtle))",
+        'border-page': "hsl(var(--border-page))",
         // 语义化颜色 - 品牌色
         'brand-accent': "hsl(var(--brand-accent))",
         'brand-gradient': "var(--brand-gradient)",

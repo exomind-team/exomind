@@ -14,6 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getReminderService } from '@/lib/services/reminder.service';
 import type { Reminder } from '@/lib/types/reminder';
+import { PageShell } from '@/ui/app/components/PageShell';
+import { PageTabs } from '@/ui/app/components/PageTabs';
 import { useReminderUiStore } from '@/ui/stores/reminder-ui-store';
 
 type ReminderTab = 'pending' | 'triggered' | 'completed';
@@ -267,116 +269,110 @@ export function RemindersPage() {
   };
 
   return (
-    <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="reminders-page">
-      <header className="flex items-center justify-between border-b border-[#F0ECE8] px-6 py-3 dark:border-[#292524] md:px-8 lg:px-10">
-        <div>
-          <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">提醒</h1>
-          <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">替代微信提醒的应用内定时提醒</p>
-        </div>
+    <PageShell
+      title="提醒"
+      subtitle="替代微信提醒的应用内定时提醒"
+      contentClassName="min-h-0 flex-1"
+      headerAction={(
         <Button
           type="button"
           size="sm"
           onClick={openCreateDialog}
-          className="h-9 gap-1 rounded-full bg-[#C75B3A] px-3 text-white hover:bg-[#B24D2F]"
+          className="h-9 gap-1 rounded-full bg-active px-3 text-white hover:bg-active-hover"
         >
           <Plus size={16} />
           新建
         </Button>
-      </header>
+      )}
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto bg-page px-5 pb-[calc(env(safe-area-inset-bottom,0px)+88px)] pt-3 dark:bg-page-dark md:px-8 md:pb-24 lg:px-10" data-testid="reminders-page">
+        <PageTabs
+          activeTab={activeTab}
+          onTabChange={(nextTab) => setActiveTab(nextTab as ReminderTab)}
+          tabs={(Object.keys(TAB_LABEL) as ReminderTab[]).map((tab) => ({
+            id: tab,
+            label: `${TAB_LABEL[tab]} (${tabCounts[tab]})`,
+          }))}
+          className="min-h-0 flex-1"
+          contentClassName="mt-1"
+        >
+          {(Object.keys(TAB_LABEL) as ReminderTab[]).map((tab) => (
+            <div key={tab} data-tab-id={tab}>
+              {loading ? (
+                <p className="text-sm text-[#A8A29E]">提醒加载中...</p>
+              ) : tab !== activeTab ? null : visibleReminders.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-4 py-5 text-center text-sm text-[#A8A29E] dark:border-[#3A3432] dark:bg-[#1C1917] dark:text-[#B8B1AC]">
+                  {TAB_EMPTY_TEXT[activeTab]}
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {visibleReminders.map((reminder) => (
+                    <article
+                      id={`reminder-card-${reminder.id}`}
+                      key={reminder.id}
+                      className={`rounded-2xl border bg-white p-4 transition-colors dark:bg-[#1C1917] ${
+                        highlightedReminderId === reminder.id
+                          ? 'border-[#C75B3A] shadow-[0_0_0_2px_rgba(199,91,58,0.15)]'
+                          : 'border-[#E7E5E4] dark:border-[#292524]'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="truncate text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                            {reminder.title}
+                          </h2>
+                          <p className="mt-1 text-xs text-[#A8A29E]">
+                            {formatDueAt(reminder.dueAt)} · {formatRelativeDue(reminder.dueAt, nowMs)}
+                          </p>
+                        </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+88px)] pt-3 md:px-8 md:pb-24 lg:px-10">
-        <div className="mb-4 flex gap-1 overflow-x-auto pb-1">
-          {(Object.keys(TAB_LABEL) as ReminderTab[]).map((tab) => {
-            const active = tab === activeTab;
-            return (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setActiveTab(tab)}
-                className={`shrink-0 rounded-2xl px-4 py-1.5 text-[13px] ${
-                  active
-                    ? 'bg-[#C75B3A] font-semibold text-white'
-                    : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'
-                }`}
-              >
-                {TAB_LABEL[tab]} ({tabCounts[tab]})
-              </button>
-            );
-          })}
-        </div>
+                        <div className="flex items-center gap-2">
+                          {reminder.status === 'pending' ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openEditDialog(reminder)}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#EDE6E0] dark:bg-[#292524] dark:text-[#A8A29E]"
+                                aria-label="编辑提醒"
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleCompleteReminder(reminder.id);
+                                }}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#E8F5E9] text-[#15803D] transition-colors hover:bg-[#DCF0DE]"
+                                aria-label="标记已处理"
+                              >
+                                <Check size={14} />
+                              </button>
+                            </>
+                          ) : reminder.status === 'triggered' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleCompleteReminder(reminder.id);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-full bg-[#E8F5E9] px-3 py-1.5 text-xs font-medium text-[#15803D] transition-colors hover:bg-[#DCF0DE]"
+                            >
+                              <Check size={14} />
+                              已处理
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
 
-        {loading ? (
-          <p className="text-sm text-[#A8A29E]">提醒加载中...</p>
-        ) : visibleReminders.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-4 py-5 text-center text-sm text-[#A8A29E] dark:border-[#3A3432] dark:bg-[#1C1917] dark:text-[#B8B1AC]">
-            {TAB_EMPTY_TEXT[activeTab]}
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {visibleReminders.map((reminder) => (
-              <article
-                id={`reminder-card-${reminder.id}`}
-                key={reminder.id}
-                className={`rounded-2xl border bg-white p-4 transition-colors dark:bg-[#1C1917] ${
-                  highlightedReminderId === reminder.id
-                    ? 'border-[#C75B3A] shadow-[0_0_0_2px_rgba(199,91,58,0.15)]'
-                    : 'border-[#E7E5E4] dark:border-[#292524]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h2 className="truncate text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
-                      {reminder.title}
-                    </h2>
-                    <p className="mt-1 text-xs text-[#A8A29E]">
-                      {formatDueAt(reminder.dueAt)} · {formatRelativeDue(reminder.dueAt, nowMs)}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {reminder.status === 'pending' ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => openEditDialog(reminder)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#EDE6E0] dark:bg-[#292524] dark:text-[#A8A29E]"
-                          aria-label="编辑提醒"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleCompleteReminder(reminder.id);
-                          }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#E8F5E9] text-[#15803D] transition-colors hover:bg-[#DCF0DE]"
-                          aria-label="标记已处理"
-                        >
-                          <Check size={14} />
-                        </button>
-                      </>
-                    ) : reminder.status === 'triggered' ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleCompleteReminder(reminder.id);
-                        }}
-                        className="inline-flex items-center gap-1 rounded-full bg-[#E8F5E9] px-3 py-1.5 text-xs font-medium text-[#15803D] transition-colors hover:bg-[#DCF0DE]"
-                      >
-                        <Check size={14} />
-                        已处理
-                      </button>
-                    ) : null}
-                  </div>
+                      <div className="mt-3 rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#0F0D0C]">
+                        <EventMarkdown content={reminder.content || '*（无正文）*'} />
+                      </div>
+                    </article>
+                  ))}
                 </div>
-
-                <div className="mt-3 rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#0F0D0C]">
-                  <EventMarkdown content={reminder.content || '*（无正文）*'} />
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
+              )}
+            </div>
+          ))}
+        </PageTabs>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -445,6 +441,6 @@ export function RemindersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

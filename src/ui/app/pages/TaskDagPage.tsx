@@ -51,6 +51,7 @@ import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { ensureNodeVisible, useTaskDagKeyboard } from '@/ui/app/hooks/useTaskDagKeyboard';
 import { useEffectAfterMount } from '@/ui/app/hooks/useEffectAfterMount';
 import { TaskDagModeSelector, type TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
+import { TaskDomainTabs } from '@/ui/app/components/TaskDomainTabs';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import {
   TaskStatusSelector,
@@ -1822,6 +1823,9 @@ export function TaskDagPage() {
             <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务依赖图</h1>
             <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{subtitle}</p>
           </div>
+        </div>
+        <div className="mt-3">
+          <TaskDomainTabs active="dag" />
         </div>
       </header>
 

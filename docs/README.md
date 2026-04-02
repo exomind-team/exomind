@@ -51,6 +51,7 @@
 ## 开发指南
 
 - [快速上手](development/quickstart.md) -- 开发环境搭建指南
+- [前端设计规范](development/ui-spec.md) -- ExoMind 前端 UI 统一规范，含 token、页面分类、例外边界与评审清单
 - [设备配对流程](development/device-pairing-flow.md) -- node-first 配对、地址解析、Android 模拟器特殊规则
 - [Git 规范](development/git-spec.md) -- Git 工作流规范（权威版）
 - [Runtime Agent API](development/exomind-runtime-agents-api.md) -- Runtime Agent HTTP/SSE 接口说明
@@ -126,6 +127,8 @@
 - [Now Workbench Overlay v2](plans/2026-03-12-now-workbench-overlay-v2-design.md) -- Issue #516 双层气泡设计
 - [文档体系重组设计](plans/2026-03-14-docs-reorganization-design.md) -- Issue #529 文档重组方案
 - [文档体系重组计划](plans/2026-03-14-docs-reorganization-plan.md) -- Issue #529 实施计划
+- [Issue #807 UI 总览入口](plans/PLAN-ui-ux-unification.md) -- 前端 UI/UX 统一重构总览、评审摘要与文档跳转
+- [Issue #807 UI 实施计划](plans/2026-04-02-issue-807-ui-unification-implementation-plan.md) -- 修订后的前端统一化实施计划
 
 ### 归档计划
 

@@ -1,6 +1,7 @@
 import { NotepadText, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
@@ -202,18 +203,24 @@ export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = 
 
         <div data-testid="task-association-actions">
           <div className="flex gap-2">
-            <select
+            <Select
               value={selectedTaskId}
-              onChange={(event) => setSelectedTaskId(event.target.value)}
-              className="h-[44px] min-w-0 flex-1 rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+              onValueChange={setSelectedTaskId}
             >
-              <option value="">选择任务</option>
-              {availableTasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.title}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                aria-label="选择任务"
+                className="h-[44px] min-w-0 flex-1 rounded-xl border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+              >
+                <SelectValue placeholder="选择任务" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableTasks.map((task) => (
+                  <SelectItem key={task.id} value={task.id}>
+                    {task.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <button
               type="button"
               disabled={!selectedTaskId}
