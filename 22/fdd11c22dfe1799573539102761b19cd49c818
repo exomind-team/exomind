@@ -1,0 +1,68 @@
+skills/triaging-test-suite/references/root-cause-taxonomy.md
+  affffec5b91d9d34 1-108
+skills/triaging-test-suite/SKILL.md
+  affffec5b91d9d34 1-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "22fdd11c22dfe1799573539102761b19cd49c818",
+  "prompts": {
+    "84f135f36334fea5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d49bf-9168-7120-84d5-0a3eb246d470",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 669,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2a68c24c862ae012d85cca6b01e7d87f37a3196727bcb36464372dd9fc2de152"
+    },
+    "947817da86d5bd65": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d49c5-47ad-7fb2-9916-1cf4aff2fd5d",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 5,
+      "accepted_lines": 5,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ff064a7b943e650b9fef6288da9932a81a6f3cdefb7b2d33eda108ee57566d03"
+    },
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 213,
+      "total_deletions": 102,
+      "accepted_lines": 196,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/519c21161771dd088c446539a19324d874288a465cf17f9f1d287dba72b1fe18"
+    },
+    "dc67460798bd45e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4b67-be99-7a73-8f32-36344056b820",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 233,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f61533049501d8cf100318521565729c6d84237aeb63b843c4c8dd83f6651720"
+    }
+  }
+}
