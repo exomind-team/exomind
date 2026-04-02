@@ -70,6 +70,14 @@ L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
 
 ## 工作流程
 
+### 前端 UI 规范入口（Issue #807）
+
+1. 凡是前端 UI 改动，先阅读 `docs/development/ui-spec.md`，它是当前项目级前端设计规范。
+2. 凡是前端统一化或页面迁移工作，实施顺序以 `docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md` 为准。
+3. 不要把所有“看起来像 Tab 的 UI”都改成 `Tabs`；要先区分它是 `tab panel（标签页面板）`、`mode switch（模式切换）` 还是 `anchor navigation（锚点导航）`。
+4. 不要把所有页面都强行套进 `PageShell`；`graph / topology / overlay（图谱 / 拓扑 / 浮层）` 页面属于特殊表面，应优先统一基础设施，而不是先统一骨架。
+5. Settings 页是当前最成熟的统一基线。新增普通页面或改造普通页面时，优先复用 Settings 已验证的 token、section、row、dialog/drawer 规则。
+
 ### 分支与发布治理（2026-02）
 
 #### 分支角色

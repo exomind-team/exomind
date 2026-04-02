@@ -74,6 +74,14 @@
 11. 推送后必须在 PR 评论同步变更摘要、测试命令、结果证据；若一个 PR 覆盖两个相关 issue，需同步更新 PR 描述。
 12. 合并前先检查是否有新的 blocking review；无阻塞且关键回归通过后再合并到 `dev`。
 
+## 前端 UI 规范入口（Issue #807）
+
+1. 只要任务涉及前端页面、组件、样式、交互、表单、弹层或导航，默认先阅读 `docs/development/ui-spec.md`。
+2. 实施顺序和范围边界以 `docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md` 为准。
+3. 禁止把所有“像 Tab 的控件”都强行改成 `Tabs`；先判断它是 `tab panel（标签页面板）`、`mode switch（模式切换）`，还是 `anchor navigation（锚点导航）`。
+4. 禁止把所有页面都强行套进 `PageShell`；`GoalsPage`、`AgentsPage` 主拓扑、overlay（悬浮窗 / 浮层）属于特殊表面，优先治理基础设施，不先重做骨架。
+5. 默认优先复用 Settings 已验证过的统一层：token、row、section、dialog/drawer 规则，再考虑页面级特化。
+
 ## Multi-Agent 协作最佳实践（多代理协作）
 
 1. 仅在任务可拆成 **2 个及以上相互独立子问题** 时启用 multi-agent（多代理）；共享同一文件或强顺序依赖的问题优先单线程处理。
