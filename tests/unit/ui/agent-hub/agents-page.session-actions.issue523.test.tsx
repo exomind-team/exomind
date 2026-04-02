@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SignalRoute } from '@/lib/types/signal-pool';
 import type { SessionInfo } from '@/lib/types/session';
+import { AGENTS_TILED_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-tiled-persistence';
 
 const serviceMocks = vi.hoisted(() => ({
   getDeviceView: vi.fn(),
@@ -584,5 +585,57 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         }),
       );
     });
+  });
+
+  it('keeps persisted fullscreen PTY visible as disconnected after RT state loss（持久化全屏 PTY 丢失后保留断开态）', async () => {
+    sessionStreamState.sessions = [];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: [],
+        fullscreenPtyId: 'pty-missing',
+      }),
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
+
+    expect(localStorage.getItem(AGENTS_TILED_PERSISTENCE_STORAGE_KEY)).toContain('pty-missing');
   });
 });

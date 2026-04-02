@@ -11,11 +11,17 @@ export interface PtyTerminalProps {
   rtBaseUrl: string;  // e.g., "http://127.0.0.1:1949"
   ptyId: string;
   authToken?: string;
+  onInitialConnectionFailure?: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────
 
-export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
+export function PtyTerminal({
+  rtBaseUrl,
+  ptyId,
+  authToken,
+  onInitialConnectionFailure,
+}: PtyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -163,6 +169,8 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     let connectScheduled = false;
     let initialLayoutReady = false;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
+    let initialStreamConnected = false;
+    let initialFailureNotified = false;
 
     const syncTerminalLayout = () => {
       // Wait for a measurable container before attaching stream output.
@@ -209,7 +217,12 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       eventSourceRef.current = es;
       eventSource = es;
 
+      es.onopen = () => {
+        initialStreamConnected = true;
+      };
+
       es.addEventListener('output', (event) => {
+        initialStreamConnected = true;
         try {
           const decoded = atob(event.data);
           const bytes = new Uint8Array(decoded.length);
@@ -223,10 +236,23 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       });
 
       es.addEventListener('eof', () => {
+        initialStreamConnected = true;
         terminal.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
       });
 
       es.onerror = () => {
+        if (!initialStreamConnected && !initialFailureNotified && onInitialConnectionFailure) {
+          initialFailureNotified = true;
+          onInitialConnectionFailure();
+          es.close();
+          if (eventSourceRef.current === es) {
+            eventSourceRef.current = null;
+          }
+          if (eventSource === es) {
+            eventSource = null;
+          }
+          return;
+        }
         // EventSource will auto-reconnect by default
       };
     };
@@ -272,7 +298,7 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [rtBaseUrl, ptyId, authToken]);
+  }, [authToken, onInitialConnectionFailure, ptyId, rtBaseUrl]);
 
   return (
     <div

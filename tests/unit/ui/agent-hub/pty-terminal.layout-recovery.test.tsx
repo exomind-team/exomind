@@ -64,13 +64,19 @@ vi.mock('@xterm/addon-web-links', () => ({
 }));
 
 class MockEventSource {
+  static instances: MockEventSource[] = [];
+
   close = vi.fn();
 
   addEventListener = vi.fn();
 
   onerror: ((this: EventSource, ev: Event) => unknown) | null = null;
 
-  constructor(_url: string) {}
+  onopen: ((this: EventSource, ev: Event) => unknown) | null = null;
+
+  constructor(_url: string) {
+    MockEventSource.instances.push(this);
+  }
 }
 
 describe('PtyTerminal layout recovery（终端布局恢复）', () => {
@@ -87,6 +93,7 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     vi.clearAllMocks();
     sizeReady = false;
     resizeObservers = [];
+    MockEventSource.instances = [];
 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 204 })));
 
@@ -172,5 +179,28 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
       'http://127.0.0.1:1949/pty/pty-layout-1/resize',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('reports initial stream failure before the first successful connection（首个 SSE 连接失败时上报断开）', async () => {
+    const onInitialConnectionFailure = vi.fn();
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-2"
+        onInitialConnectionFailure={onInitialConnectionFailure}
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await vi.runOnlyPendingTimersAsync();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    MockEventSource.instances[0]?.onerror?.call({} as EventSource, new Event('error'));
+
+    expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.instances[0]?.close).toHaveBeenCalledTimes(1);
   });
 });

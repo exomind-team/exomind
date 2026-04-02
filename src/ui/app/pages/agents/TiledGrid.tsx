@@ -55,6 +55,17 @@ export interface TiledGridProps {
   onArchiveSession?: (session: SessionInfo) => void;
 }
 
+type TiledPaneEntry =
+  | {
+    id: string;
+    kind: 'session';
+    session: SessionInfo;
+  }
+  | {
+    id: string;
+    kind: 'disconnected';
+  };
+
 // ── Layout config ──────────────────────────────────────────────
 
 const LAYOUT_CONFIG: Record<TiledLayout, { cols: number; rows: number; maxPanes: number }> = {
@@ -84,24 +95,52 @@ export function TiledGrid({
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   // Build ordered panes: respect paneOrder if provided, then fill remaining
-  const orderedPanes = useMemo(() => {
+  const orderedPanes = useMemo<TiledPaneEntry[]>(() => {
     if (!paneOrder || paneOrder.length === 0) {
-      return sessions.slice(0, config.maxPanes);
+      return sessions.slice(0, config.maxPanes).map((session) => ({
+        id: session.id,
+        kind: 'session' as const,
+        session,
+      }));
     }
+
     const sessionMap = new Map(sessions.map((s) => [s.id, s]));
-    const ordered: SessionInfo[] = [];
+    const ordered: TiledPaneEntry[] = [];
+    const seenIds = new Set<string>();
+
     for (const id of paneOrder) {
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
       const s = sessionMap.get(id);
-      if (s) ordered.push(s);
+      if (s) {
+        ordered.push({
+          id,
+          kind: 'session',
+          session: s,
+        });
+      } else {
+        ordered.push({
+          id,
+          kind: 'disconnected',
+        });
+      }
     }
+
     // Append any sessions not in paneOrder
     for (const s of sessions) {
-      if (!paneOrder.includes(s.id)) ordered.push(s);
+      if (seenIds.has(s.id)) continue;
+      seenIds.add(s.id);
+      ordered.push({
+        id: s.id,
+        kind: 'session',
+        session: s,
+      });
     }
+
     return ordered.slice(0, config.maxPanes);
   }, [sessions, paneOrder, config.maxPanes]);
 
-  const paneIds = useMemo(() => orderedPanes.map((s) => s.id), [orderedPanes]);
+  const paneIds = useMemo(() => orderedPanes.map((pane) => pane.id), [orderedPanes]);
 
   // DnD sensors: require 8px drag distance to avoid conflicting with clicks
   const sensors = useSensors(
@@ -142,25 +181,56 @@ export function TiledGrid({
     [],
   );
 
+  const handleCloseDisconnectedPane = useCallback(
+    (sessionId: string) => {
+      if (!onReorder) return;
+
+      const paneIndex = paneIds.indexOf(sessionId);
+      if (paneIndex === -1) return;
+
+      onReorder(paneIds.filter((id) => id !== sessionId));
+
+      if (focusedIndex === null) return;
+      if (focusedIndex === paneIndex) {
+        onFocusPane(null);
+      } else if (focusedIndex > paneIndex) {
+        onFocusPane(focusedIndex - 1);
+      }
+    },
+    [focusedIndex, onFocusPane, onReorder, paneIds],
+  );
+
   // If a pane is expanded (double-click fullscreen), show only that pane
   if (expandedIndex !== null && orderedPanes[expandedIndex]) {
-    const session = orderedPanes[expandedIndex];
+    const pane = orderedPanes[expandedIndex];
     return (
       <div data-testid="tiled-grid" className="flex h-full flex-col">
-        <SessionPane
-          session={session}
-          resolveSessionConnection={resolveSessionConnection}
-          isFocused={true}
-          isExpanded={true}
-          isDragging={false}
-          onDoubleClick={() => handleDoubleClick(expandedIndex)}
-          onFocus={() => onFocusPane(expandedIndex)}
-          onClick={() => onSessionClick?.(session)}
-          onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
-          onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
-          onStop={() => onStopSession?.(session)}
-          onArchive={() => onArchiveSession?.(session)}
-        />
+        {pane.kind === 'session' ? (
+          <SessionPane
+            session={pane.session}
+            resolveSessionConnection={resolveSessionConnection}
+            isFocused={true}
+            isExpanded={true}
+            isDragging={false}
+            onDoubleClick={() => handleDoubleClick(expandedIndex)}
+            onFocus={() => onFocusPane(expandedIndex)}
+            onClick={() => onSessionClick?.(pane.session)}
+            onQuickAction={onQuickAction ? (r) => onQuickAction(pane.session, r) : undefined}
+            onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(pane.session) : undefined}
+            onStop={() => onStopSession?.(pane.session)}
+            onArchive={() => onArchiveSession?.(pane.session)}
+          />
+        ) : (
+          <DisconnectedPane
+            sessionId={pane.id}
+            isFocused={true}
+            isExpanded={true}
+            isDragging={false}
+            onDoubleClick={() => handleDoubleClick(expandedIndex)}
+            onFocus={() => onFocusPane(expandedIndex)}
+            onClose={() => handleCloseDisconnectedPane(pane.id)}
+          />
+        )}
       </div>
     );
   }
@@ -176,20 +246,33 @@ export function TiledGrid({
             gridTemplateRows: `repeat(${config.rows}, 1fr)`,
           }}
         >
-          {orderedPanes.map((session, index) => (
+          {orderedPanes.map((pane, index) => (
             <SortablePane
-              key={session.id}
-              session={session}
+              key={pane.id}
+              pane={pane}
               resolveSessionConnection={resolveSessionConnection}
               isFocused={focusedIndex === index}
               isExpanded={false}
               onDoubleClick={() => handleDoubleClick(index)}
               onFocus={() => onFocusPane(index)}
-              onClick={() => onSessionClick?.(session)}
-              onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
-              onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
-              onStop={() => onStopSession?.(session)}
-              onArchive={() => onArchiveSession?.(session)}
+              onClick={pane.kind === 'session' ? () => onSessionClick?.(pane.session) : undefined}
+              onQuickAction={
+                pane.kind === 'session' && onQuickAction
+                  ? (r) => onQuickAction(pane.session, r)
+                  : undefined
+              }
+              onMarkWaiting={
+                pane.kind === 'session' && onMarkWaiting
+                  ? () => onMarkWaiting(pane.session)
+                  : undefined
+              }
+              onStop={pane.kind === 'session' ? () => onStopSession?.(pane.session) : undefined}
+              onArchive={pane.kind === 'session' ? () => onArchiveSession?.(pane.session) : undefined}
+              onCloseDisconnectedPane={
+                pane.kind === 'disconnected'
+                  ? () => handleCloseDisconnectedPane(pane.id)
+                  : undefined
+              }
             />
           ))}
           {/* Empty pane placeholders */}
@@ -251,7 +334,7 @@ export function GlobalStatusIndicator({ sessions }: GlobalStatusProps) {
 // ── SortablePane (dnd-kit wrapper) ──────────────────────────────
 
 interface SortablePaneProps {
-  session: SessionInfo;
+  pane: TiledPaneEntry;
   resolveSessionConnection: (session: SessionInfo) => {
     rtBaseUrl: string;
     authToken?: string;
@@ -265,6 +348,7 @@ interface SortablePaneProps {
   onMarkWaiting?: () => void;
   onStop?: () => void;
   onArchive?: () => void;
+  onCloseDisconnectedPane?: () => void;
 }
 
 function SortablePane(props: SortablePaneProps) {
@@ -275,7 +359,7 @@ function SortablePane(props: SortablePaneProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: props.session.id });
+  } = useSortable({ id: props.pane.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -285,11 +369,135 @@ function SortablePane(props: SortablePaneProps) {
 
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
-      <SessionPane
-        {...props}
-        isDragging={isDragging}
-        dragListeners={listeners}
-      />
+      {props.pane.kind === 'session' ? (
+        <SessionPane
+          session={props.pane.session}
+          resolveSessionConnection={props.resolveSessionConnection}
+          isFocused={props.isFocused}
+          isExpanded={props.isExpanded}
+          isDragging={isDragging}
+          onDoubleClick={props.onDoubleClick}
+          onFocus={props.onFocus}
+          onClick={props.onClick}
+          dragListeners={listeners}
+          onQuickAction={props.onQuickAction}
+          onMarkWaiting={props.onMarkWaiting}
+          onStop={props.onStop}
+          onArchive={props.onArchive}
+        />
+      ) : (
+        <DisconnectedPane
+          sessionId={props.pane.id}
+          isFocused={props.isFocused}
+          isExpanded={props.isExpanded}
+          isDragging={isDragging}
+          onDoubleClick={props.onDoubleClick}
+          onFocus={props.onFocus}
+          onClose={props.onCloseDisconnectedPane}
+          dragListeners={listeners}
+        />
+      )}
+    </div>
+  );
+}
+
+interface DisconnectedPaneProps {
+  sessionId: string;
+  isFocused: boolean;
+  isExpanded: boolean;
+  isDragging: boolean;
+  onDoubleClick: () => void;
+  onFocus: () => void;
+  onClose?: () => void;
+  dragListeners?: Record<string, Function>;
+}
+
+function DisconnectedPane({
+  sessionId,
+  isFocused,
+  isExpanded,
+  isDragging,
+  onDoubleClick,
+  onFocus,
+  onClose,
+  dragListeners,
+}: DisconnectedPaneProps) {
+  return (
+    <div
+      data-testid={`tiled-grid-disconnected-${sessionId}`}
+      className={`
+        flex h-full flex-col overflow-hidden rounded-lg border transition-all
+        ${isDragging ? 'opacity-50 shadow-2xl ring-2 ring-[#A8A29E]/40' : ''}
+        ${isFocused
+          ? 'border-[#78716C]/60 shadow-[0_0_0_1px_rgba(120,113,108,0.2)]'
+          : 'border-[#D6D3D1] bg-[#F5F5F4] dark:border-[#44403C] dark:bg-[#1C1917]'
+        }
+      `}
+      onClick={onFocus}
+    >
+      <div
+        className="flex items-center justify-between gap-2 border-b border-[#D6D3D1] bg-[#F5F5F4] px-2 py-1 dark:border-[#44403C] dark:bg-[#1C1917]"
+        onDoubleClick={onDoubleClick}
+      >
+        <div className="flex min-w-0 items-center gap-1.5">
+          {dragListeners && (
+            <button
+              type="button"
+              className="flex-shrink-0 cursor-grab text-[#A8A29E] hover:text-[#78716C] active:cursor-grabbing dark:hover:text-[#D6D3D1]"
+              {...dragListeners}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <GripVertical size={10} />
+            </button>
+          )}
+          <span className="text-xs text-[#78716C]">✕</span>
+          <span className="truncate text-xs font-semibold text-[#57534E] dark:text-[#D6D3D1]">
+            已断开
+          </span>
+          {!isExpanded && (
+            <span className="truncate text-[9px] text-[#A8A29E]">
+              {sessionId}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDoubleClick();
+            }}
+            className="flex h-5 w-5 items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+            title={isExpanded ? '还原' : '全屏'}
+          >
+            {isExpanded ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
+          </button>
+          <button
+            type="button"
+            data-testid={`tiled-grid-disconnected-close-${sessionId}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose?.();
+            }}
+            className="flex h-5 w-5 items-center justify-center rounded text-[#78716C] hover:text-[#57534E] disabled:opacity-50 dark:hover:text-[#D6D3D1]"
+            title="关闭"
+            aria-label="关闭断开的会话窗格"
+            disabled={!onClose}
+          >
+            <X size={10} />
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-1 items-center justify-center bg-[#F5F5F4] px-4 text-center dark:bg-[#1C1917]">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-[#57534E] dark:text-[#D6D3D1]">
+            会话已断开
+          </p>
+          <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+            RT 可能已重启，此窗格保留原位置，关闭后会从布局中移除。
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

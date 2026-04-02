@@ -1,11 +1,13 @@
 import { ChevronLeft, Square } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PtyTerminal } from '../../components/PtyTerminal';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
 
 export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
   const [isStopping, setIsStopping] = useState(false);
   const [stopError, setStopError] = useState('');
+  const [isCheckingPty, setIsCheckingPty] = useState(false);
+  const [isDisconnected, setIsDisconnected] = useState(false);
   // Read baseUrl and token from URL search params — set by AgentsPage when navigating.
   // This avoids re-guessing the host inside the page and ensures the correct auth token
   // is used regardless of whether it is an embedded RT or a remote peer RT.
@@ -21,6 +23,51 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
       ? (window.history.state as Record<string, unknown> | null)?.ptyToken
       : undefined) as string | undefined;
 
+  useEffect(() => {
+    if (!ptyId) {
+      setIsCheckingPty(false);
+      setIsDisconnected(false);
+      return;
+    }
+
+    let disposed = false;
+    const headers: Record<string, string> = {};
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+
+    const verifyPty = async () => {
+      setIsCheckingPty(true);
+      setIsDisconnected(false);
+
+      try {
+        const response = await fetch(`${rtBaseUrl}/pty`, { headers });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const ptyAgents = await response.json() as Array<{ id: string }>;
+        if (!disposed) {
+          setIsDisconnected(!ptyAgents.some((agent) => agent.id === ptyId));
+        }
+      } catch {
+        if (!disposed) {
+          setIsDisconnected(true);
+        }
+      } finally {
+        if (!disposed) {
+          setIsCheckingPty(false);
+        }
+      }
+    };
+
+    void verifyPty();
+
+    return () => {
+      disposed = true;
+    };
+  }, [authToken, ptyId, rtBaseUrl]);
+
   const navigateBack = () => {
     if (typeof window !== 'undefined') {
       window.history.pushState({}, '', '/agents');
@@ -29,7 +76,7 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
   };
 
   const handleStop = async () => {
-    if (!ptyId || isStopping) return;
+    if (!ptyId || isStopping || isDisconnected) return;
     setIsStopping(true);
     setStopError('');
 
@@ -82,7 +129,7 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
           onClick={() => {
             void handleStop();
           }}
-          disabled={isStopping}
+          disabled={isStopping || isDisconnected || isCheckingPty}
           className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[#FCA5A5] hover:text-[#FECACA] disabled:opacity-60"
           aria-label="结束 Terminal Agent"
         >
@@ -96,7 +143,33 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
         </div>
       )}
       <div className="flex-1 overflow-hidden">
-        <PtyTerminal rtBaseUrl={rtBaseUrl} ptyId={ptyId} authToken={authToken} />
+        {isDisconnected ? (
+          <div
+            data-testid="pty-terminal-page-disconnected"
+            className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
+          >
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-[#FAFAF9]">终端已断开</p>
+              <p className="text-xs text-[#A8A29E]">对应 PTY 已不存在，RT 可能已经重启。</p>
+            </div>
+            <button
+              type="button"
+              onClick={navigateBack}
+              className="rounded border border-[#44403C] px-3 py-1.5 text-xs text-[#E7E5E4] hover:border-[#57534E]"
+            >
+              返回 Agents
+            </button>
+          </div>
+        ) : (
+          <PtyTerminal
+            rtBaseUrl={rtBaseUrl}
+            ptyId={ptyId}
+            authToken={authToken}
+            onInitialConnectionFailure={() => {
+              setIsDisconnected(true);
+            }}
+          />
+        )}
       </div>
     </div>
   );

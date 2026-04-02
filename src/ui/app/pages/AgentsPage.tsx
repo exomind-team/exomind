@@ -122,6 +122,10 @@ import { TiledGrid, LayoutSelector, GlobalStatusIndicator, type TiledLayout } fr
 import { useSessionStream } from '@/hooks/useSessionStream';
 import { buildPtyGraphNodes, findSessionForPty } from './agents/pty-graph-nodes';
 import { applySpawnedSessionToTiledPaneOrder } from './agents/tiled-pane-order';
+import {
+  readAgentsTiledPersistState,
+  writeAgentsTiledPersistState,
+} from './agents/agents-tiled-persistence';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -290,6 +294,7 @@ function TabBar({
 export function AgentsPage() {
   const supportsInlineRightPanel = useIsDesktop(1024);
   const initialRuntimeTarget = getSelectedRuntimeTarget();
+  const initialTiledState = useMemo(() => readAgentsTiledPersistState(), []);
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [topologyLayoutMode, setTopologyLayoutMode] = useState<TopologyLayoutMode>('manual');
@@ -304,15 +309,16 @@ export function AgentsPage() {
   const autoAdoptedLinkProofEventIdsRef = useRef<Set<string>>(new Set());
   const inFlightLinkProofPeerIdsRef = useRef<Set<string>>(new Set());
   const inFlightLinkProofSessionIdsRef = useRef<Set<string>>(new Set());
+  const isAgentsPageDisposedRef = useRef(false);
   const runtimeHostSnapshotsRef = useRef<RuntimeHostSnapshot[]>([]);
   const runtimeServiceStatusRef = useRef<RuntimeServiceStatus | null>(null);
   const refreshRuntimeHostsRef = useRef<(statusOverride?: RuntimeServiceStatus | null) => Promise<void>>(
     async () => {},
   );
   // ── Tiled view state ──
-  const [tiledLayout, setTiledLayout] = useState<TiledLayout>('2x2');
+  const [tiledLayout, setTiledLayout] = useState<TiledLayout>(initialTiledState.layout);
   const [tiledFocusedIndex, setTiledFocusedIndex] = useState<number | null>(null);
-  const [tiledPaneOrder, setTiledPaneOrder] = useState<string[]>([]);
+  const [tiledPaneOrder, setTiledPaneOrder] = useState<string[]>(initialTiledState.paneOrder);
   const [useMockData, setUseMockData] = useState(getUseMockDataEnabled);
 
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
@@ -347,7 +353,11 @@ export function AgentsPage() {
     getRuntimeExternalAuthToken(),
   );
   const [runtimeTargetError, setRuntimeTargetError] = useState('');
-  const [rightPanel, setRightPanel] = useState<AgentHubRightPanelContext>({ state: 'CLOSED' });
+  const [rightPanel, setRightPanel] = useState<AgentHubRightPanelContext>(() => (
+    supportsInlineRightPanel && initialTiledState.fullscreenPtyId
+      ? { state: 'PTY_TERMINAL', ptyId: initialTiledState.fullscreenPtyId }
+      : { state: 'CLOSED' }
+  ));
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<AgentConversationMessage[]>([]);
   const [chatSessionId, setChatSessionId] = useState<string | null>(null);
@@ -357,9 +367,10 @@ export function AgentsPage() {
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
   const [isPtyStopping, setIsPtyStopping] = useState(false);
+  const [hasLoadedPtyAgents, setHasLoadedPtyAgents] = useState(false);
   const [ptyAgents, setPtyAgents] = useState<Array<{ id: string; name: string; status: string; workdir: string }>>([]);
   /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
-  const [activePtyId, setActivePtyId] = useState<string | null>(null);
+  const [activePtyId, setActivePtyId] = useState<string | null>(initialTiledState.fullscreenPtyId ?? null);
   const [activePtyHostId, setActivePtyHostId] = useState<string | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
@@ -381,6 +392,13 @@ export function AgentsPage() {
   };
 
   useEffect(() => subscribeUseMockDataChanges(setUseMockData), []);
+
+  useEffect(() => {
+    isAgentsPageDisposedRef.current = false;
+    return () => {
+      isAgentsPageDisposedRef.current = true;
+    };
+  }, []);
 
   const openRouteEdit = (routeId: string | null = null) => {
     setRightPanel({ state: 'ROUTE_EDIT', routeId });
@@ -1030,6 +1048,9 @@ export function AgentsPage() {
   const [peerPairingOpen, setPeerPairingOpen] = useState(false);
 
   const openPtyTerminal = (ptyId: string, hostId?: string) => {
+    if (!ptyAgents.some((pty) => pty.id === ptyId)) {
+      setHasLoadedPtyAgents(false);
+    }
     setActivePtyId(ptyId);
     setActivePtyHostId(hostId ?? null);
     setRightPanel({ state: 'PTY_TERMINAL', ptyId });
@@ -1299,6 +1320,42 @@ export function AgentsPage() {
     [liveSessions, useMockData],
   );
 
+  useEffect(() => {
+    writeAgentsTiledPersistState({
+      layout: tiledLayout,
+      paneOrder: tiledPaneOrder,
+      ...(activePtyId ? { fullscreenPtyId: activePtyId } : {}),
+    });
+  }, [activePtyId, tiledLayout, tiledPaneOrder]);
+
+  useEffect(() => {
+    const archivedSessionIds = new Set(
+      dashboardSessions
+        .filter((session) => session.status === 'archived')
+        .map((session) => session.id),
+    );
+    if (archivedSessionIds.size === 0) return;
+
+    setTiledPaneOrder((prev) => {
+      const next = prev.filter((id) => !archivedSessionIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [dashboardSessions]);
+
+  useEffect(() => {
+    if (!activePtyId || activePtyHostId) return;
+
+    const matchingSession = dashboardSessions.find((session) => session.pty_id === activePtyId);
+    if (matchingSession?.source_host_id) {
+      setActivePtyHostId(matchingSession.source_host_id);
+    }
+  }, [activePtyHostId, activePtyId, dashboardSessions]);
+
+  const resolvedActivePtyHostId = useMemo(
+    () => activePtyHostId ?? dashboardSessions.find((session) => session.pty_id === activePtyId)?.source_host_id ?? null,
+    [activePtyHostId, activePtyId, dashboardSessions],
+  );
+
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
     setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
@@ -1461,6 +1518,7 @@ export function AgentsPage() {
       const resp = await fetch(`${rtUrl}/pty`, { headers });
       if (resp.ok) {
         const data = await resp.json() as Array<{ id: string; name: string; status: string; workdir: string }>;
+        if (isAgentsPageDisposedRef.current) return;
         setPtyAgents(prev => {
           if (
             prev.length === data.length &&
@@ -1472,22 +1530,21 @@ export function AgentsPage() {
           }
           return data;
         });
-        // Clear activePtyId if the PTY agent was removed
-        setActivePtyId(prev => {
-          if (prev && !data.some(d => d.id === prev)) return null;
-          return prev;
-        });
-        setActivePtyHostId(prev => {
-          if (activePtyId && prev && !data.some(d => d.id === activePtyId)) return null;
-          return prev;
-        });
       }
     } catch {
       // PTY endpoint may not be available; silently ignore
+    } finally {
+      if (isAgentsPageDisposedRef.current) return;
+      setHasLoadedPtyAgents(true);
     }
   };
   // Keep ref in sync so the polling interval always calls the latest version.
   fetchPtyAgentsRef.current = fetchPtyAgents;
+
+  const isActivePtyDisconnected = useMemo(
+    () => !!activePtyId && hasLoadedPtyAgents && !ptyAgents.some((pty) => pty.id === activePtyId),
+    [activePtyId, hasLoadedPtyAgents, ptyAgents],
+  );
 
   const refreshRuntimeSnapshot = async (
     statusOverride: RuntimeServiceStatus | null = runtimeServiceStatus,
@@ -2516,7 +2573,7 @@ export function AgentsPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const connection = resolveRuntimeConnectionForHostId(activePtyHostId);
+                      const connection = resolveRuntimeConnectionForHostId(resolvedActivePtyHostId);
                       const ptyParams = new URLSearchParams({ baseUrl: connection.rtBaseUrl });
                       const tok = connection.authToken;
                       const ptyState: Record<string, unknown> = tok ? { ptyToken: tok } : {};
@@ -2534,9 +2591,9 @@ export function AgentsPage() {
                     type="button"
                     data-testid="agent-rightpanel-stop-pty"
                     onClick={() => {
-                      void handleStopPtyAgent(rightPanel.ptyId!, activePtyHostId);
+                      void handleStopPtyAgent(rightPanel.ptyId!, resolvedActivePtyHostId);
                     }}
-                    disabled={isPtyStopping}
+                    disabled={isPtyStopping || isActivePtyDisconnected}
                     className="flex h-7 items-center justify-center rounded px-2 text-xs text-destructive hover:text-destructive/80 disabled:opacity-60"
                     aria-label="结束 Terminal Agent"
                   >
@@ -3008,10 +3065,34 @@ export function AgentsPage() {
                   className="flex h-full flex-col overflow-hidden"
                   style={rightPanel.state !== 'PTY_TERMINAL' ? { display: 'none' } : undefined}
                 >
-                  {(() => {
-                    const connection = resolveRuntimeConnectionForHostId(activePtyHostId);
+                  {isActivePtyDisconnected ? (
+                    <div
+                      data-testid="agent-rightpanel-pty-disconnected"
+                      className="flex h-full flex-col items-center justify-center gap-4 bg-[#1C1917] px-6 text-center"
+                    >
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-[#FAFAF9]">终端已断开</p>
+                        <p className="text-xs text-[#A8A29E]">
+                          当前 PTY 已不存在，RT 可能已经重启。你可以关闭面板，或保留它等待手动恢复。
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="agent-rightpanel-pty-disconnected-close"
+                        onClick={() => {
+                          setActivePtyId(null);
+                          setActivePtyHostId(null);
+                          closeRightPanel();
+                        }}
+                        className="rounded border border-[#44403C] px-3 py-1.5 text-xs text-[#E7E5E4] hover:border-[#57534E]"
+                      >
+                        关闭终端
+                      </button>
+                    </div>
+                  ) : (() => {
+                    const connection = resolveRuntimeConnectionForHostId(resolvedActivePtyHostId);
                     return (
-                  <PtyTerminal
+                      <PtyTerminal
                         rtBaseUrl={connection.rtBaseUrl}
                         ptyId={activePtyId}
                         authToken={connection.authToken}

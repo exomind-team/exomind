@@ -47,6 +47,7 @@ export function useSessionStream({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const eventSourcesRef = useRef<EventSource[]>([]);
+  const supportsEventSource = typeof EventSource !== 'undefined';
 
   const resolvedTargets = (targets && targets.length > 0)
     ? targets
@@ -112,6 +113,12 @@ export function useSessionStream({
       return;
     }
 
+    // Tests and non-browser environments may not provide EventSource.
+    // In real browsers this stays always-on; in unsupported environments we no-op.
+    if (!supportsEventSource) {
+      return;
+    }
+
     // Fetch initial data
     void fetchSessions();
 
@@ -167,7 +174,7 @@ export function useSessionStream({
       }
       eventSourcesRef.current = [];
     };
-  }, [buildSessionKey, decorateSession, enabled, fetchSessions, resolvedTargets]);
+  }, [buildSessionKey, decorateSession, enabled, fetchSessions, resolvedTargets, supportsEventSource]);
 
   return {
     sessions,
