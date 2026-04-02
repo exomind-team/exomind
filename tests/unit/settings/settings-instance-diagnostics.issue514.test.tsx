@@ -26,7 +26,8 @@ vi.mock('@/config/dev-instance-diagnostics', () => ({
     webPort: 5173,
     rtPort: 6984,
     mcpPort: 9232,
-    asrServerUrl: 'http://localhost:1949',
+    syncServerUrl: 'http://192.168.123.45:6984/_session/diagnostics/very/long/path/for/layout-check',
+    asrServerUrl: 'http://192.168.123.45:1949/asr/diagnostics/very/long/path/for/layout-check',
     pid: runtime?.pid ?? null,
     envStatus: {
       VITE_MOSS_API_KEY: { sensitive: true, configured: false },
@@ -282,5 +283,32 @@ describe('issue-514 instance diagnostics setting（实例诊断设置项）', ()
     await waitFor(() => expect(screen.getByText('43120')).toBeInTheDocument());
     expect(screen.getAllByText('已配置').length).toBeGreaterThan(0);
     expect(screen.getAllByText('未配置').length).toBeGreaterThan(0);
+  });
+
+  it('keeps long diagnostic addresses visible with wrapping-friendly value layout（长地址应可见且支持换行）', async () => {
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '开发者' }));
+    fireEvent.click(screen.getByRole('button', { name: /实例诊断信息/ }));
+
+    const syncValue = await screen.findByText('http://192.168.123.45:6984/_session/diagnostics/very/long/path/for/layout-check');
+    const asrValue = screen.getByText('http://192.168.123.45:1949/asr/diagnostics/very/long/path/for/layout-check');
+
+    expect(syncValue.className).toContain('break-all');
+    expect(asrValue.className).toContain('break-all');
+  });
+
+  it('uses a viewport-safe scroll shell for diagnostics details（诊断详情应有限高并允许内部滚动）', async () => {
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '开发者' }));
+    fireEvent.click(screen.getByRole('button', { name: /实例诊断信息/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: '实例诊断信息' });
+    const scrollRegion = screen.getByTestId('settings-instance-diagnostics-scroll-region');
+
+    expect(dialog.className).toContain('max-h');
+    expect(dialog.className).toContain('overflow-hidden');
+    expect(scrollRegion.className).toContain('overflow-y-auto');
   });
 });

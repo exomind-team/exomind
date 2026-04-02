@@ -138,8 +138,8 @@ function DiagnosticsValue({
 }) {
   return (
     <div className="flex items-start justify-between gap-3 rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-4 py-3 dark:border-[#FFFFFF15] dark:bg-[#1C1917]">
-      <span className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">{label}</span>
-      <span className="text-right text-sm text-[#1C1917] dark:text-[#FAFAF9]">{value}</span>
+      <span className="shrink-0 text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">{label}</span>
+      <span className="min-w-0 flex-1 break-all text-right text-sm text-[#1C1917] dark:text-[#FAFAF9]">{value}</span>
     </div>
   );
 }
@@ -836,17 +836,22 @@ export function DevInstanceDiagnosticsSetting(props: { ctx: SettingsContext }) {
       />
       {shouldUseDialog ? (
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="max-w-2xl rounded-2xl">
+          <DialogContent className="flex max-h-[calc(100vh-32px)] min-h-0 max-w-2xl flex-col overflow-hidden rounded-2xl">
             <DialogHeader>
               <DialogTitle>实例诊断信息</DialogTitle>
               <DialogDescription>查看当前开发实例的标题辨认与环境诊断信息</DialogDescription>
             </DialogHeader>
-            {detailContent}
+            <div
+              data-testid="settings-instance-diagnostics-scroll-region"
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
+            >
+              {detailContent}
+            </div>
           </DialogContent>
         </Dialog>
       ) : (
         <Drawer open={open} onOpenChange={setOpen}>
-          <DrawerContent className="dark:bg-[#1C1917]">
+          <DrawerContent className="flex max-h-[85vh] min-h-0 flex-col dark:bg-[#1C1917]">
             <DrawerHeader className="pb-0 text-center">
               <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
                 实例诊断信息
@@ -855,7 +860,10 @@ export function DevInstanceDiagnosticsSetting(props: { ctx: SettingsContext }) {
                 查看当前开发实例的标题辨认与环境诊断信息
               </DrawerDescription>
             </DrawerHeader>
-            <div className="px-5 pb-8 pt-2">
+            <div
+              data-testid="settings-instance-diagnostics-scroll-region"
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-8 pt-2"
+            >
               {detailContent}
             </div>
           </DrawerContent>
