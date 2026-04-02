@@ -121,6 +121,7 @@ import { SessionsView } from './agents/SessionsView';
 import { TiledGrid, LayoutSelector, GlobalStatusIndicator, type TiledLayout } from './agents/TiledGrid';
 import { useSessionStream } from '@/hooks/useSessionStream';
 import { buildPtyGraphNodes, findSessionForPty } from './agents/pty-graph-nodes';
+import { applySpawnedSessionToTiledPaneOrder } from './agents/tiled-pane-order';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -3033,6 +3034,12 @@ export function AgentsPage() {
         authToken={resolveRtAuthToken()}
         defaultWorkdir={import.meta.env.VITE_PTY_DEFAULT_WORKDIR ?? ''}
         onSpawned={(info) => {
+          setTiledPaneOrder((prev) => applySpawnedSessionToTiledPaneOrder({
+            layout: tiledLayout,
+            paneOrder: prev,
+            sessions: dashboardSessions,
+            newSessionId: info.id,
+          }));
           openPtyTerminal(info.id);
           void refreshRuntimeSnapshot();
         }}
