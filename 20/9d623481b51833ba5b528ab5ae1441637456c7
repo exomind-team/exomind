@@ -1,0 +1,91 @@
+docs/plans/2026-04-02-issue-806-terminal-lifecycle-plan.md
+  1a41af24de2969d9 1-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "209d623481b51833ba5b528ab5ae1441637456c7",
+  "prompts": {
+    "1a41af24de2969d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf8ed489-bbfb-4304-80cd-f871d236ee50",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 105,
+      "total_deletions": 101,
+      "accepted_lines": 176,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d4dcd416fc83902fb5ec7a36b6fde2b6b63819b7c7677fb74880be0fe2b8a821"
+    },
+    "824d706963a06c3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d4764-3ca6-7582-80d6-21b1e8f907f8",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 208,
+      "overriden_lines": 0
+    },
+    "84f135f36334fea5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d49bf-9168-7120-84d5-0a3eb246d470",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d801c2bcd5119e28899b755ac5230a2fcd73234ae8a42a8b5b38e6b7dac7a532"
+    },
+    "9d74646c9382ac4c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d47ed-a515-7250-a3ac-af6cf488fd72",
+        "model": "gpt-5.4"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 93,
+      "overriden_lines": 0
+    },
+    "affffec5b91d9d34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cffbf557-b870-40c8-bbeb-791c1f5be21a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    },
+    "c2d2c4013cd3b84f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8705b08d-47b7-49ea-ba97-40704234736b",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 23,
+      "total_deletions": 0,
+      "accepted_lines": 23,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ec770435034709a8bc175aae83b94448d5ca894d74df4931376a1ee576b7e7d3"
+    }
+  }
+}
