@@ -65,6 +65,8 @@ pub struct MainWindowShortcutState {
 pub struct ForegroundWindowContext {
     pub title: Option<String>,
     pub process_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_handle: Option<String>,
 }
 
 impl VoiceShortcutState {
@@ -424,7 +426,6 @@ fn register_cancel_shortcut_listener(app: &AppHandle) -> Result<(), String> {
                         return;
                     }
                     app.emit("voice-shortcut", "cancel").ok();
-                    let _ = voice_overlay_hide_internal(app);
                 }
                 ShortcutState::Released => {
                     VOICE_CANCEL_KEY_DOWN.store(false, Ordering::SeqCst);
@@ -581,6 +582,7 @@ fn foreground_window_context() -> ForegroundWindowContext {
     ForegroundWindowContext {
         title: read_window_title(hwnd),
         process_name: read_process_name(process_id),
+        window_handle: Some((hwnd as usize).to_string()),
     }
 }
 
@@ -913,6 +915,44 @@ pub async fn foreground_window_get() -> Result<ForegroundWindowContext, String> 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn foreground_window_get() -> Result<ForegroundWindowContext, String> {
     Ok(ForegroundWindowContext::default())
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
+pub async fn foreground_window_focus(window_handle: String) -> Result<bool, String> {
+    type Hwnd = *mut std::ffi::c_void;
+
+    const SW_RESTORE: i32 = 9;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetForegroundWindow(h_wnd: Hwnd) -> i32;
+        fn IsIconic(h_wnd: Hwnd) -> i32;
+        fn ShowWindow(h_wnd: Hwnd, n_cmd_show: i32) -> i32;
+    }
+
+    let parsed = window_handle
+        .trim()
+        .parse::<usize>()
+        .map_err(|error| format!("invalid foreground window handle: {error}"))?;
+    let hwnd = parsed as Hwnd;
+
+    if hwnd.is_null() {
+        return Ok(false);
+    }
+
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        Ok(SetForegroundWindow(hwnd) != 0)
+    }
+}
+
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub async fn foreground_window_focus(_window_handle: String) -> Result<bool, String> {
+    Ok(false)
 }
 
 #[cfg(test)]

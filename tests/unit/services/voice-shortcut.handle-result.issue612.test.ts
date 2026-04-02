@@ -95,7 +95,7 @@ describe('VoiceShortcutService handleResult (#612)', () => {
     recordVolcanoUsageDurationMock.mockReset();
   });
 
-  it('publishes signal and appends storage event when auto-record is enabled', async () => {
+  it('publishes signal and defers auto-record persistence to signal bridge when auto-record is enabled', async () => {
     runtimeState.interactionContext = {
       targetScope: 'agent-chat',
       agentContext: {
@@ -139,24 +139,58 @@ describe('VoiceShortcutService handleResult (#612)', () => {
         },
       }),
     );
-    expect(buildVoiceShortcutStorageEventMock).toHaveBeenCalledWith(expect.objectContaining({
-      text: '测试语音',
-      startedAtMs: 1_700_000_000_000,
-      targetScope: 'agent-chat',
-      window: {
-        title: 'Cursor - ExoMind',
-        processName: 'Cursor.exe',
-      },
-      agentContext: {
-        agentId: 'codex',
-        agentName: 'Codex',
-        sessionId: 'session-1',
-      },
-    }));
-    expect(appendEventWithEcsReplicationMock).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'voice-event-1',
-      content: '测试语音',
-    }));
+    expect(buildVoiceShortcutStorageEventMock).not.toHaveBeenCalled();
+    expect(appendEventWithEcsReplicationMock).not.toHaveBeenCalled();
+  });
+
+  it('does not append storage event immediately when signal publish succeeds（信号成功时不应前端直写事件日志）', async () => {
+    const service = new VoiceShortcutService();
+    (service as any).traceStartedAtMs = 1_700_000_000_000;
+    (service as any).currentTraceId = 'trace-success-only-signal';
+    (service as any).frozenForegroundWindowContext = {
+      title: 'Cursor - ExoMind',
+      processName: 'Cursor.exe',
+    };
+
+    await (service as any).handleResult(
+      { text: '只走信号链路', confidence: 0.98, lang: 'zh-CN' },
+      120,
+      'MOSS',
+    );
+
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '只走信号链路' }),
+      expect.objectContaining({
+        captureSource: 'global-shortcut',
+        traceId: 'trace-success-only-signal',
+      }),
+    );
+    expect(appendEventWithEcsReplicationMock).not.toHaveBeenCalled();
+  });
+
+  it('restores captured foreground window before simulate_paste（粘贴前先恢复目标窗口焦点）', async () => {
+    const service = new VoiceShortcutService();
+    (service as any).traceStartedAtMs = 1_700_000_000_000;
+    (service as any).currentTraceId = 'trace-focus-restore';
+    (service as any).frozenForegroundWindowContext = {
+      title: 'Cursor - ExoMind',
+      processName: 'Cursor.exe',
+      windowHandle: '4660',
+    };
+
+    await (service as any).handleResult(
+      { text: '恢复焦点后粘贴', confidence: 0.98, lang: 'zh-CN' },
+      120,
+      'MOSS',
+    );
+
+    expect(invokeMock).toHaveBeenCalledWith('foreground_window_focus', {
+      windowHandle: '4660',
+    });
+    const focusCallIndex = invokeMock.mock.calls.findIndex(([command]) => command === 'foreground_window_focus');
+    const pasteCallIndex = invokeMock.mock.calls.findIndex(([command]) => command === 'simulate_paste');
+    expect(focusCallIndex).toBeGreaterThanOrEqual(0);
+    expect(pasteCallIndex).toBeGreaterThan(focusCallIndex);
   });
 
   it('skips storage event append when auto-record is disabled', async () => {

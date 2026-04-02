@@ -117,6 +117,7 @@ type VolcanoAsrStreamEventPayload = {
 type ForegroundWindowContext = {
   title?: string | null;
   processName?: string | null;
+  windowHandle?: string | null;
 };
 
 export class VoiceShortcutService {
@@ -345,6 +346,19 @@ export class VoiceShortcutService {
     await new Promise<void>((resolve) => {
       window.setTimeout(resolve, AUTO_ENTER_SEND_DELAY_MS);
     });
+  }
+
+  private async restoreForegroundWindowFocus(windowHandle?: string | null): Promise<void> {
+    const normalizedHandle = windowHandle?.trim();
+    if (!normalizedHandle) {
+      return;
+    }
+
+    try {
+      await invoke('foreground_window_focus', { windowHandle: normalizedHandle });
+    } catch (error) {
+      this.debugWarn(LOG_TAG, 'failed to restore foreground window focus:', error);
+    }
   }
 
   private beginActivationTracking(): void {
@@ -945,23 +959,11 @@ export class VoiceShortcutService {
     const traceId = this.currentTraceId ?? undefined;
     const targetScope = activeInteractionContext?.targetScope ?? (foregroundWindow ? 'external-window' : 'unknown');
     const shouldAutoRecord = getVoiceAutoRecordEnabled();
-    const storageEvent = shouldAutoRecord
-      ? await buildVoiceShortcutStorageEvent({
-        text: result.text,
-        startedAtMs: this.traceStartedAtMs ?? Date.now(),
-        targetScope,
-        window: foregroundWindow ? {
-          title: foregroundWindow.title ?? undefined,
-          processName: foregroundWindow.processName ?? undefined,
-        } : undefined,
-        agentContext: activeInteractionContext?.agentContext,
-      })
-      : null;
-
-    const [clipboardResult, signalPublishResult, eventlogAppendResult] = await Promise.allSettled([
+    const [clipboardResult, signalPublishResult] = await Promise.allSettled([
       (async () => {
         const writeResult = await getClipboardService().writeText(result.text);
         if (!writeResult.ok) throw new Error(writeResult.title);
+        await this.restoreForegroundWindowFocus(foregroundWindow?.windowHandle);
         await invoke('simulate_paste');
         if (getVoiceShortcutSendMode() === 'auto-enter-send') {
           await this.waitForAutoEnterSend();
@@ -979,19 +981,31 @@ export class VoiceShortcutService {
         } : undefined,
         agentContext: activeInteractionContext?.agentContext,
       }),
-      storageEvent ? appendEventWithEcsReplication(storageEvent) : Promise.resolve(undefined),
     ]);
 
     if (clipboardResult.status === 'rejected') {
       this.debugError(LOG_TAG, 'clipboard paste failed:', clipboardResult.reason);
     }
 
-    if (eventlogAppendResult.status === 'rejected') {
-      this.debugError(LOG_TAG, 'eventlog append failed:', eventlogAppendResult.reason);
-    }
-
     if (signalPublishResult.status === 'rejected') {
       this.debugError(LOG_TAG, 'voice signal publish failed (RT may be unavailable):', signalPublishResult.reason);
+      if (shouldAutoRecord) {
+        try {
+          const storageEvent = await buildVoiceShortcutStorageEvent({
+            text: result.text,
+            startedAtMs: this.traceStartedAtMs ?? Date.now(),
+            targetScope,
+            window: foregroundWindow ? {
+              title: foregroundWindow.title ?? undefined,
+              processName: foregroundWindow.processName ?? undefined,
+            } : undefined,
+            agentContext: activeInteractionContext?.agentContext,
+          });
+          await appendEventWithEcsReplication(storageEvent);
+        } catch (eventlogError) {
+          this.debugError(LOG_TAG, 'eventlog fallback append failed:', eventlogError);
+        }
+      }
     }
 
     this.emitOverlayState('done', {

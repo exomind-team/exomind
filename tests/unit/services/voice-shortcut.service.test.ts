@@ -381,7 +381,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(convertWebmBlobToWavMock).toHaveBeenCalledTimes(2);
     expect(transcribeMock).toHaveBeenCalledTimes(2);
     expect(writeClipboardMock).toHaveBeenCalledTimes(2);
-    expect(addEventMock).toHaveBeenCalledTimes(2);
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledTimes(2);
+    expect(addEventMock).not.toHaveBeenCalled();
 
     const hasDecodeFailureLog = errorSpy.mock.calls.some((call) =>
       call.some((item) => String(item).includes('EncodingError') || String(item).includes('识别失败'))
@@ -478,7 +479,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
-  it('appends voice storage event by default（默认自动记录语音输入）', async () => {
+  it('publishes voice signal by default and leaves persistence to the signal bridge（默认发布语音信号，由信号桥接负责落日志）', async () => {
     const service = new VoiceShortcutService();
     await service.init();
 
@@ -487,7 +488,14 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await emitVoiceShortcut('start');
     await flushPipeline();
 
-    expectLastVoiceStorageEvent('连续识别文本');
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '连续识别文本' }),
+      expect.objectContaining({
+        source: 'tauri:voice-shortcut',
+        captureSource: 'global-shortcut',
+      }),
+    );
+    expect(addEventMock).not.toHaveBeenCalled();
 
     service.destroy();
   });
@@ -1214,8 +1222,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         targetScope: 'unknown',
       }),
     );
-    // 语音输入始终写入 EventLog（前端直写）
-    expect(addEventMock).toHaveBeenCalled();
+    expect(addEventMock).not.toHaveBeenCalled();
 
     service.destroy();
   });
@@ -1311,7 +1318,14 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushPipeline();
 
     expect(writeClipboardMock).toHaveBeenCalledWith('火山实时结果');
-    expectLastVoiceStorageEvent('火山实时结果');
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '火山实时结果' }),
+      expect.objectContaining({
+        source: 'tauri:voice-shortcut',
+        captureSource: 'global-shortcut',
+      }),
+    );
+    expect(addEventMock).not.toHaveBeenCalled();
 
     service.destroy();
   });
@@ -1476,18 +1490,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         },
       }),
     );
-    expectLastVoiceStorageEvent('连续识别文本', {
-      targetScope: 'agent-chat',
-      window: {
-        title: 'Cursor - ExoMind',
-        processName: 'Cursor.exe',
-      },
-      agentContext: {
-        agentId: 'codex',
-        agentName: 'Codex',
-        sessionId: 'session-xyz',
-      },
-    });
+    expect(addEventMock).not.toHaveBeenCalled();
 
     service.destroy();
   });
@@ -1535,13 +1538,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         },
       }),
     );
-    expectLastVoiceStorageEvent('冻结窗口测试', {
-      targetScope: 'external-window',
-      window: {
-        title: 'Window A',
-        processName: 'AppA.exe',
-      },
-    });
+    expect(addEventMock).not.toHaveBeenCalled();
 
     service.destroy();
   });
