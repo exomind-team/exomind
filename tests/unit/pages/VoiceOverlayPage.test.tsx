@@ -264,4 +264,24 @@ describe('VoiceOverlayPage', () => {
     expect(screen.getByText('火山收口阶段')).toBeInTheDocument();
     expect(screen.getByText('识别中... · Alt+Q 开始新一轮 · Esc 取消')).toBeInTheDocument();
   });
+
+  it('prefers shortcut carried by overlay event payload over local overlay storage（优先显示主窗口事件带来的快捷键，而不是 overlay 自己的默认存储）', async () => {
+    render(<VoiceOverlayPage />);
+
+    await act(async () => {
+      overlayListener?.({
+        payload: {
+          state: 'recording',
+          duration: 1,
+          text: '快捷键提示同步测试',
+          shortcut: 'Ctrl+Space',
+          activationMs: 92,
+        },
+      });
+    });
+
+    expect(
+      screen.getByText((_, element) => element?.textContent === '00:01唤起 92ms再按 Ctrl+Space 结束 · Esc 取消')
+    ).toBeInTheDocument();
+  });
 });

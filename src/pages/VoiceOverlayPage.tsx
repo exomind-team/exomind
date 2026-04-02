@@ -30,6 +30,7 @@ interface OverlayData {
   state: OverlayState;
   duration: number;
   text: string;
+  shortcut?: VoiceShortcutHotkey;
   audioLevel?: number;
   hintText?: string;
   isLivePreview?: boolean;
@@ -251,6 +252,7 @@ export function VoiceOverlayPage() {
           <StatusText
             state={data.state}
             shortcut={shortcut}
+            shortcutOverride={data.shortcut}
             duration={data.duration}
             text={data.text}
             hintText={data.hintText}
@@ -317,6 +319,7 @@ function StatusIndicator({ state }: { state: OverlayState }) {
 function StatusText({
   state,
   shortcut,
+  shortcutOverride,
   duration,
   text,
   hintText,
@@ -338,6 +341,7 @@ function StatusText({
 }: {
   state: OverlayState;
   shortcut: VoiceShortcutHotkey;
+  shortcutOverride?: VoiceShortcutHotkey;
   duration: number;
   text: string;
   hintText?: string;
@@ -357,6 +361,7 @@ function StatusText({
   transcriptRef: RefObject<HTMLDivElement>;
   onTranscriptScroll: () => void;
 }) {
+  const effectiveShortcut = shortcutOverride ?? shortcut;
   const transcript = text.trim();
   const statusHint = hintText?.trim();
   const providerMeta = providerLabel?.trim();
@@ -398,7 +403,7 @@ function StatusText({
             {typeof activationMs === 'number' ? (
               <span className="overlay-activation">{`唤起 ${formatLatency(activationMs)}`}</span>
             ) : null}
-            <span>{`${isLivePreview ? '实时预览 · ' : ''}再按 ${shortcut} 结束 · Esc 取消`}</span>
+            <span>{`${isLivePreview ? '实时预览 · ' : ''}再按 ${effectiveShortcut} 结束 · Esc 取消`}</span>
           </span>
           {showDiagnostics && (typeof firstFrameMs === 'number'
             || typeof inputReadyMs === 'number'
@@ -433,7 +438,7 @@ function StatusText({
           >
             <span className="overlay-text">{transcript || '识别中…'}</span>
           </div>
-          <span className="overlay-text overlay-text--secondary">{`识别中... · ${shortcut} 开始新一轮 · Esc 取消`}</span>
+          <span className="overlay-text overlay-text--secondary">{`识别中... · ${effectiveShortcut} 开始新一轮 · Esc 取消`}</span>
           {showDiagnostics && (typeof firstFrameMs === 'number'
             || typeof inputReadyMs === 'number'
             || typeof sessionReadyMs === 'number'
