@@ -35,6 +35,14 @@ pub async fn start_test_runtime_with_secret(
     host_id: &str,
     secret: Option<String>,
 ) -> RuntimeHandle {
+    start_test_runtime_with_secret_and_lan(host_id, secret, false).await
+}
+
+pub async fn start_test_runtime_with_secret_and_lan(
+    host_id: &str,
+    secret: Option<String>,
+    allow_lan_without_auth: bool,
+) -> RuntimeHandle {
     start_with_options(RuntimeStartOptions {
         bind_host: "127.0.0.1".to_string(),
         port: 0,
@@ -43,6 +51,7 @@ pub async fn start_test_runtime_with_secret(
         spawn_ts_agents: false,
         mesh_state_path: None,
         auth_secret: secret,
+        allow_lan_without_auth,
         ..Default::default()
     })
     .await

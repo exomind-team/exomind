@@ -41,18 +41,22 @@ fn is_loopback_request(request: &Request) -> bool {
         .unwrap_or(false)
 }
 
-fn is_private_network_ip(ip: IpAddr) -> bool {
+fn is_local_or_private_network_ip(ip: IpAddr) -> bool {
+    if ip.is_loopback() {
+        return true;
+    }
+
     match ip {
         IpAddr::V4(ipv4) => ipv4.is_private() || ipv4.is_link_local(),
         IpAddr::V6(ipv6) => ipv6.is_unique_local() || ipv6.is_unicast_link_local(),
     }
 }
 
-fn is_private_network_request(request: &Request) -> bool {
+fn is_local_or_private_network_request(request: &Request) -> bool {
     request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
-        .map(|ConnectInfo(addr)| is_private_network_ip(addr.ip()) && !addr.ip().is_loopback())
+        .map(|ConnectInfo(addr)| is_local_or_private_network_ip(addr.ip()))
         .unwrap_or(false)
 }
 
@@ -99,7 +103,10 @@ pub(crate) fn is_trusted_loopback_origin_value(origin: &str) -> bool {
         return false;
     };
 
-    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "tauri") {
+    if !matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "tauri"
+    ) {
         return false;
     }
 
@@ -137,7 +144,7 @@ pub async fn require_auth(
         return Ok(next.run(request).await);
     }
 
-    if state.allow_lan_without_auth && is_private_network_request(&request) {
+    if state.allow_lan_without_auth && is_local_or_private_network_request(&request) {
         return Ok(next.run(request).await);
     }
 
