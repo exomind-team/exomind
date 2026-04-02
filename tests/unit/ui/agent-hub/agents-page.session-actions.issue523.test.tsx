@@ -462,6 +462,71 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
   });
 
+  it('uses matching session host context when opening a pty topology node（点击 pty 拓扑节点时优先使用匹配 session 的 host 上下文）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-topology-pty',
+        role: 'Issue 806 Terminal',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+        source_host_id: 'runtime-host-remote',
+      }),
+    ];
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-03-14T10:00:00.000Z',
+      agents: [],
+      hosts: [
+        ...buildRuntimeSnapshot().hosts,
+        {
+          host: {
+            id: 'host-remote',
+            name: '127.0.0.1:9124',
+            host: '127.0.0.1',
+            port: 9124,
+            status: 'unknown' as const,
+            createdAt: '2026-03-14T00:00:00.000Z',
+            updatedAt: '2026-03-14T00:00:00.000Z',
+          },
+          connectionState: 'online' as const,
+          agents: [],
+          topology: {
+            host_id: 'runtime-host-remote',
+            hostname: 'runtime-host-remote',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 90,
+            version: '0.3.6',
+            port: 9124,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+        },
+      ],
+    });
+
+    render(<AgentsPage />);
+
+    const topologyNode = await screen.findByTestId('mock-react-flow-node-pty-pty-523');
+    expect(topologyNode).toHaveTextContent('Issue 806 Terminal');
+
+    fireEvent.click(topologyNode);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-stop-pty')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 9124 }),
+        'pty-523',
+      );
+    });
+  });
+
   it('stops PTY terminal agent from session list card（会话列表卡片可真正停止 Terminal Agent）', async () => {
     sessionStreamState.sessions = [
       buildSession({

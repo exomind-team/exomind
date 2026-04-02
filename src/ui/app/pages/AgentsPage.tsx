@@ -120,6 +120,7 @@ import { WorkspaceTabs } from './agents/WorkspaceTabs';
 import { SessionsView } from './agents/SessionsView';
 import { TiledGrid, LayoutSelector, GlobalStatusIndicator, type TiledLayout } from './agents/TiledGrid';
 import { useSessionStream } from '@/hooks/useSessionStream';
+import { buildPtyGraphNodes, findSessionForPty } from './agents/pty-graph-nodes';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -1289,7 +1290,7 @@ export function AgentsPage() {
   } = useSessionStream({
     rtBaseUrl: null,
     targets: sessionStreamTargets,
-    enabled: (viewMode === 'sessions' || viewMode === 'tiled') && !useMockData,
+    enabled: !useMockData,
   });
 
   const dashboardSessions = useMemo(
@@ -2087,14 +2088,8 @@ export function AgentsPage() {
     [topologyDatasetKey, topologyFilterKey, topologyLayoutStore]
   );
   const ptyGraphNodes = useMemo((): SignalGraphNode[] => {
-    return ptyAgents.map((pty, idx) => ({
-      id: `pty-${pty.id}`,
-      type: 'agent' as const,
-      label: pty.name,
-      status: pty.status === 'running' ? 'Terminal · running' : 'Terminal · offline',
-      position: { x: 600, y: 80 + idx * 100 },
-    }));
-  }, [ptyAgents]);
+    return buildPtyGraphNodes(ptyAgents, dashboardSessions);
+  }, [dashboardSessions, ptyAgents]);
   const allGraphNodes = useMemo(
     () => [...baseSignalGraph.nodes, ...ptyGraphNodes],
     [baseSignalGraph.nodes, ptyGraphNodes]
@@ -2356,13 +2351,17 @@ export function AgentsPage() {
           // PTY nodes: open terminal panel or navigate on mobile
           if (nodeId.startsWith('pty-')) {
             const ptyId = nodeId.replace('pty-', '');
+            const matchingSession = findSessionForPty(ptyId, dashboardSessions);
+            const resolvedPtyId = matchingSession?.pty_id ?? ptyId;
+            const resolvedHostId = matchingSession?.source_host_id;
             if (supportsInlineRightPanel) {
-              openPtyTerminal(ptyId);
+              openPtyTerminal(resolvedPtyId, resolvedHostId);
             } else {
-              const ptyParams = new URLSearchParams({ baseUrl: resolveRtBaseUrl() });
-              const tok = resolveRtAuthToken();
+              const connection = resolveRuntimeConnectionForHostId(resolvedHostId);
+              const ptyParams = new URLSearchParams({ baseUrl: connection.rtBaseUrl });
+              const tok = connection.authToken;
               const ptyState: Record<string, unknown> = tok ? { ptyToken: tok } : {};
-              navigateToSecondaryPage(`/agents/pty/${encodeURIComponent(ptyId)}?${ptyParams.toString()}`, ptyState);
+              navigateToSecondaryPage(`/agents/pty/${encodeURIComponent(resolvedPtyId)}?${ptyParams.toString()}`, ptyState);
             }
             return;
           }
@@ -2414,6 +2413,8 @@ export function AgentsPage() {
     tiledFocusedIndex,
     tiledPaneOrder,
     resolveRuntimeConnectionForSession,
+    resolveRuntimeConnectionForHostId,
+    supportsInlineRightPanel,
   ]);
 
   return (
