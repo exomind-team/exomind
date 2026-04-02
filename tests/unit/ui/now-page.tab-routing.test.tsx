@@ -15,39 +15,6 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigateMock,
 }));
 
-vi.mock('@/ui/app/components/PageTabs', () => ({
-  PageTabs: ({
-    tabs,
-    activeTab,
-    onTabChange,
-    children,
-  }: {
-    tabs: Array<{ id: string; label: string }>;
-    activeTab: string;
-    onTabChange: (value: string) => void;
-    children: ReactNode;
-  }) => (
-    <div data-testid="now-page-page-tabs">
-      <div role="tablist">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab.id}
-            onClick={() => onTabChange(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      {Array.isArray(children)
-        ? children.find((child) => child?.props?.['data-tab-id'] === activeTab) ?? null
-        : children}
-    </div>
-  ),
-}));
-
 vi.mock('@/components/Chat/ChatPage', () => ({
   ChatPage: () => <div data-testid="now-page-record">记录页</div>,
 }));
@@ -77,7 +44,7 @@ describe('NowPage tab routing', () => {
   it('defaults to focus tab when search is empty（默认进入专注页）', () => {
     render(<NowPage />);
 
-    expect(screen.getByTestId('now-page-page-tabs')).toBeInTheDocument();
+    expect(screen.getByTestId('now-page-view-toggle-focus')).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('now-page-focus-widget')).toBeInTheDocument();
     expect(screen.getByTestId('now-page-association-list')).toBeInTheDocument();
     expect(screen.queryByTestId('now-page-record')).toBeNull();
@@ -94,8 +61,8 @@ describe('NowPage tab routing', () => {
 
   it('keeps the record tab panel clipped so ChatPage owns the inner scroll（记录页由 ChatPage 接管内部滚动）', () => {
     locationState = {
-      pathname: '/eventlog',
-      searchStr: '?tab=record',
+      pathname: '/eventlog/record',
+      searchStr: '',
     };
 
     render(<NowPage />);
@@ -108,8 +75,8 @@ describe('NowPage tab routing', () => {
 
   it('reads tab from search and routes tab switch through navigate（读取 search 并通过路由切换页签）', () => {
     locationState = {
-      pathname: '/eventlog',
-      searchStr: '?tab=today',
+      pathname: '/eventlog/today',
+      searchStr: '',
     };
 
     render(<NowPage />);
@@ -121,7 +88,6 @@ describe('NowPage tab routing', () => {
 
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/eventlog',
-      search: {},
       replace: true,
     });
   });

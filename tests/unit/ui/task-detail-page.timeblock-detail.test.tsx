@@ -378,7 +378,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 120 });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -400,7 +400,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 60 });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -457,7 +457,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countup' });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -487,7 +487,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -528,7 +528,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -581,7 +581,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(addTaskToBlockMock).toHaveBeenCalledWith('task-1');
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -657,7 +657,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(pauseBlockMock).toHaveBeenCalled();
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 

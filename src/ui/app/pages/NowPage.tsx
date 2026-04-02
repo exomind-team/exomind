@@ -1,89 +1,135 @@
+import { ListTodo, NotebookPen, Target } from 'lucide-react';
 import { ChatPage } from '@/components/Chat/ChatPage';
 import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
-import { PageTabs } from '@/ui/app/components/PageTabs';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import {
   EVENTLOG_TAB_VALUES,
-  normalizeEventlogTab,
+  getEventlogPathForTab,
+  resolveLegacyEventlogTabSearch,
+  resolveEventlogTabFromLocation,
   setEventlogLastTab,
 } from '@/ui/app/pages/eventlog-route-memory';
 
 type NowTabValue = (typeof EVENTLOG_TAB_VALUES)[number];
 
-function readExplicitNowTab(searchStr: string): NowTabValue | null {
-  const rawValue = new URLSearchParams(searchStr).get('tab');
-  return EVENTLOG_TAB_VALUES.includes(rawValue as NowTabValue) ? rawValue as NowTabValue : null;
-}
+const NOW_VIEW_ITEMS: Array<{ id: NowTabValue; label: string; icon: typeof Target }> = [
+  { id: 'focus', label: '专注', icon: Target },
+  { id: 'record', label: '记录', icon: NotebookPen },
+  { id: 'today', label: '今日', icon: ListTodo },
+];
 
-function resolveNowTab(searchStr: string): NowTabValue {
-  return normalizeEventlogTab(new URLSearchParams(searchStr).get('tab'));
+function NowViewBar({
+  value,
+  onChange,
+}: {
+  value: NowTabValue;
+  onChange: (value: NowTabValue) => void;
+}) {
+  return (
+    <div className="shrink-0">
+      <div className="flex items-center gap-1 rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
+        {NOW_VIEW_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const active = value === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              data-testid={`now-page-view-toggle-${item.id}`}
+              aria-selected={active}
+              onClick={() => onChange(item.id)}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
+                active
+                  ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
+                  : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
+              }`}
+            >
+              <Icon size={14} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function NowPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [prestartSelectedTaskIds, setPrestartSelectedTaskIds] = useState<string[]>([]);
-  const activeTab = resolveNowTab(location.searchStr ?? '');
-  const currentPath = location.pathname === '/' ? '/' : '/eventlog';
-  const explicitTab = readExplicitNowTab(location.searchStr ?? '');
+  const activeTab = resolveEventlogTabFromLocation(location.pathname, location.searchStr ?? '');
 
   useEffect(() => {
-    if (explicitTab) {
-      setEventlogLastTab(explicitTab);
+    const hasExplicitLegacyTab = resolveLegacyEventlogTabSearch(location.searchStr ?? '') !== null;
+    if (location.pathname === '/eventlog' && !hasExplicitLegacyTab) {
+      return;
     }
-  }, [explicitTab]);
+    setEventlogLastTab(activeTab);
+  }, [activeTab, location.pathname, location.searchStr]);
+
+  const handleViewChange = (nextTab: NowTabValue) => {
+    const normalized = EVENTLOG_TAB_VALUES.includes(nextTab) ? nextTab : 'focus';
+    setEventlogLastTab(normalized);
+    void navigate({
+      to: getEventlogPathForTab(normalized),
+      replace: true,
+    });
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-page dark:bg-page-dark">
-      <PageTabs
-        activeTab={activeTab}
-        onTabChange={(nextValue) => {
-          const nextTab = EVENTLOG_TAB_VALUES.includes(nextValue as NowTabValue) ? (nextValue as NowTabValue) : 'focus';
-          setEventlogLastTab(nextTab);
-          void navigate({
-            to: currentPath,
-            search: nextTab === 'focus' ? {} : { tab: nextTab },
-            replace: true,
-          });
-        }}
-        tabs={[
-          { id: 'focus', label: '专注' },
-          { id: 'record', label: '记录' },
-          { id: 'today', label: '今日' },
-        ]}
-        className="flex h-full min-h-0 flex-col"
-      >
-        <div
-          data-tab-id="focus"
-          data-testid="now-page-focus-panel"
-          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6"
-        >
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-            <FocusTimerWidget
-              prestartSelectedTaskIds={prestartSelectedTaskIds}
-              onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
-              showRunningLinkedTasks={false}
-            />
-            <BlockTaskAssociationList
-              prestartSelectedTaskIds={prestartSelectedTaskIds}
-              onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
-            />
-          </div>
-        </div>
+      <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+        <NowViewBar value={activeTab} onChange={handleViewChange} />
 
-        <div data-tab-id="record" data-testid="now-page-record-panel" className="min-h-0 flex-1 overflow-hidden">
-          <ChatPage variant="new-mobile" hideHeader showTimerWidget={false} />
-        </div>
-
-        <div data-tab-id="today" className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
-          <div className="mx-auto w-full max-w-3xl">
-            <NowTodayTab />
+        {activeTab === 'focus' ? (
+          <div
+            role="tabpanel"
+            data-state="active"
+            data-testid="now-page-focus-panel"
+            className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6"
+          >
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+              <FocusTimerWidget
+                prestartSelectedTaskIds={prestartSelectedTaskIds}
+                onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
+                showRunningLinkedTasks={false}
+              />
+              <BlockTaskAssociationList
+                prestartSelectedTaskIds={prestartSelectedTaskIds}
+                onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
+              />
+            </div>
           </div>
-        </div>
-      </PageTabs>
+        ) : null}
+
+        {activeTab === 'record' ? (
+          <div
+            role="tabpanel"
+            data-state="active"
+            data-testid="now-page-record-panel"
+            className="min-h-0 flex-1 overflow-hidden"
+          >
+            <ChatPage variant="new-mobile" hideHeader showTimerWidget={false} />
+          </div>
+        ) : null}
+
+        {activeTab === 'today' ? (
+          <div
+            role="tabpanel"
+            data-state="active"
+            className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6"
+          >
+            <div className="mx-auto w-full max-w-3xl">
+              <NowTodayTab />
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
