@@ -31,6 +31,7 @@ interface OverlayData {
   duration: number;
   text: string;
   shortcut?: VoiceShortcutHotkey;
+  showDiagnostics?: boolean;
   audioLevel?: number;
   hintText?: string;
   isLivePreview?: boolean;
@@ -268,7 +269,7 @@ export function VoiceOverlayPage() {
             firstFrameMs={firstFrameMs ?? undefined}
             recognitionMs={data.recognitionMs}
             errorMessage={data.errorMessage}
-            showDiagnostics={showDiagnostics}
+            showDiagnostics={data.showDiagnostics ?? showDiagnostics}
             transcriptRef={transcriptRef}
             onTranscriptScroll={handleTranscriptScroll}
           />

@@ -284,4 +284,31 @@ describe('VoiceOverlayPage', () => {
       screen.getByText((_, element) => element?.textContent === '00:01唤起 92ms再按 Ctrl+Space 结束 · Esc 取消')
     ).toBeInTheDocument();
   });
+
+  it('prefers diagnostics visibility carried by overlay event payload over local overlay storage（优先显示主窗口事件带来的诊断开关状态）', async () => {
+    render(<VoiceOverlayPage />);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1120);
+
+    await act(async () => {
+      overlayListener?.({
+        payload: {
+          state: 'recording',
+          duration: 1,
+          text: '诊断信息同步测试',
+          showDiagnostics: true,
+          traceStartedAtMs: 1000,
+          debugTraceId: 'trace-diag',
+          firstTextMs: 80,
+          activationMs: 92,
+        },
+      });
+    });
+
+    expect(screen.getAllByText((_, element) =>
+      element?.textContent?.includes('首帧 120ms')
+      && element?.textContent?.includes('录音 92ms')
+      && element?.textContent?.includes('首字 80ms')
+    ).length).toBeGreaterThan(0);
+    nowSpy.mockRestore();
+  });
 });
