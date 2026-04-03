@@ -3,6 +3,7 @@ import {
   parseRuntimeAddress,
   toRuntimeBaseUrl,
 } from '@/config/runtime-target';
+import { resolveLocalServiceHost } from '@/config/local-service-host';
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 
 function normalizeOptionalText(value: string | undefined): string | undefined {
@@ -24,9 +25,19 @@ export function resolveRuntimeHostAdvertisedAddress(
 export function resolveRuntimeHostDialAddress(
   host: Pick<RuntimeHostRecord, 'host' | 'port' | 'lastSuccessfulDialAddress' | 'manualOverride'>,
 ): string {
-  return normalizeOptionalText(host.lastSuccessfulDialAddress)
+  const candidate = normalizeOptionalText(host.lastSuccessfulDialAddress)
     ?? normalizeOptionalText(host.manualOverride)
     ?? formatRuntimeTargetAddress({ host: host.host, port: host.port });
+
+  const parsed = parseRuntimeAddress(candidate);
+  const normalizedHost = parsed.host === 'localhost'
+    ? '127.0.0.1'
+    : resolveLocalServiceHost(parsed.host);
+
+  return formatRuntimeTargetAddress({
+    host: normalizedHost,
+    port: parsed.port,
+  });
 }
 
 export function resolveRuntimeHostBaseUrl(

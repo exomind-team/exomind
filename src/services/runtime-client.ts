@@ -100,6 +100,7 @@ export interface RuntimeAgentConversationChunk {
 }
 
 const DEFAULT_TIMEOUT_MS = 3500;
+const PTY_STOP_TIMEOUT_MS = 10000;
 
 function buildBaseUrl(host: RuntimeHostRecord): string {
   return resolveRuntimeHostBaseUrl(host);
@@ -575,6 +576,7 @@ export class RuntimeClient {
       'POST',
       undefined,
       host.authToken,
+      PTY_STOP_TIMEOUT_MS,
     );
     if (!response.ok) {
       return response;
@@ -887,9 +889,10 @@ export class RuntimeClient {
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     payload?: unknown,
     authToken?: string,
+    timeoutMs: number = this.timeoutMs,
   ): Promise<RuntimeClientResult<unknown>> {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
     try {
       const response = await this.fetchImpl(url, {

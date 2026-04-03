@@ -657,6 +657,66 @@
   - 再单独 stop/start RT
   - 最后再单独轮询 `/sessions` 验证恢复结果
 
+### 阶段补记：#806 stop/归档请求地址漂移与反馈补齐（2026-04-03 下午）
+
+#### 阶段目标
+
+- 复现并修复“网络/会话”页里点击 `停止/结束` 像没反应的问题。
+- 确认 stop 链路不再错误打到 `http://localhost:9124/...`，并让断开态会话能在 UI 内完成：
+  - `stop -> completed -> archive`
+
+#### 观察结果
+
+- 当前 Tauri MCP 官方 `driver_session` 可直接使用，`main` 窗口 URL 为：
+  - `http://localhost:1420/agents`
+- 在 WebView 里包一层 `window.fetch` 追踪后，现场明确观察到旧问题：
+  - 相同 stop 请求若走 `http://localhost:9124/...`，会挂住直到前端超时
+  - 同一路径改成 `http://127.0.0.1:9124/...`，会在几十毫秒内返回真实 `404`
+- 修复后再次在真实窗口复测：
+  - 右栏断开态点击 `结束`
+  - 实际请求：
+    - `POST http://127.0.0.1:9124/pty/<id>/stop` -> `404`
+    - `PATCH http://127.0.0.1:9124/sessions/<id>` -> `200`
+  - 页面出现 toast：
+    - `已收敛失联 Terminal 会话`
+  - `console` 出现结构化日志：
+    - `[agent-hub][pty][stop] start`
+    - `[agent-hub][pty][stop] reconciled missing PTY session`
+- 随后切到 `Sessions` 视图，现场确认：
+  - 该会话进入 `已完成`
+  - 出现 `归档` 按钮
+  - 再点归档后，卡片从列表消失，`会话` 总数与 `已完成` 计数同步减少
+
+#### 结论
+
+- 这次“按钮点了个寂寞”的主因不是 stop 后端慢，而是：
+  - 前端链路在某些 host 上下文里用了会挂住的 `localhost`
+- 修复策略应同时包含三层：
+  - 地址归一化：`localhost -> 127.0.0.1`
+  - 行为反馈：toast + inline error banner + console trace
+  - 失联收敛：stop 返回 `404/timeout/network` 时，先复核 live `/pty`，再把会话收敛为 `completed`
+- 实窗结果证明：
+  - stop 不再静默失败
+  - 异常 PTY 现在可以从 UI 内真正结束并归档
+
+#### 可复用操作套路
+
+1. 用 `webview_execute_js` 包装 `window.fetch`
+   - 记录 `url / method / status / elapsedMs`
+   - 先看真实请求是不是打到了错误的 host
+2. 用 `webview_dom_snapshot` 拿 accessibility tree
+   - 找右栏断开态按钮
+   - 直接用 `ref=e...` 精确点击，不要靠猜坐标
+3. 点击按钮后同时查三层证据：
+   - toast 文本
+   - `window.__ptyFetchLog`
+   - `read_logs source=console filter=agent-hub`
+4. 验证“可归档”不要停在 stop 成功
+   - 还要切到 `Sessions`
+   - 确认进入 `已完成`
+   - 再点一次 `归档`
+   - 最后确认卡片从 DOM 中消失
+
 ## 持续更新约定
 
 - 每完成一个 Tauri MCP 阶段目标，就在本文档追加：

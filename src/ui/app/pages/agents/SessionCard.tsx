@@ -1,4 +1,4 @@
-import { Clock, ExternalLink, Square, X } from 'lucide-react';
+import { Clock, ExternalLink, Loader2, Square, X } from 'lucide-react';
 import type { SessionInfo } from '@/lib/types/session';
 import {
   AGENT_KIND_LABELS,
@@ -15,11 +15,18 @@ export interface SessionCardProps {
   onClick?: (session: SessionInfo) => void;
   onStop?: (session: SessionInfo) => void;
   onArchive?: (session: SessionInfo) => void;
+  stopDisabled?: boolean;
 }
 
 // ── Component ──────────────────────────────────────────────────
 
-export function SessionCard({ session, onClick, onStop, onArchive }: SessionCardProps) {
+export function SessionCard({
+  session,
+  onClick,
+  onStop,
+  onArchive,
+  stopDisabled = false,
+}: SessionCardProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const agentColor = AGENT_KIND_COLORS[session.agent_kind];
   const agentLabel = AGENT_KIND_LABELS[session.agent_kind];
@@ -154,16 +161,18 @@ export function SessionCard({ session, onClick, onStop, onArchive }: SessionCard
         <button
           type="button"
           data-testid={`session-card-stop-${session.id}`}
-          aria-label="停止"
-          title="停止"
+          aria-label={stopDisabled ? '停止中' : '停止'}
+          title={stopDisabled ? '停止中' : '停止'}
+          disabled={stopDisabled}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
+            if (stopDisabled) return;
             onStop(session);
           }}
-          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#E7E5E4] hover:text-[#1C1917] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#44403C] dark:hover:text-[#FAFAF9]"
+          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#E7E5E4] hover:text-[#1C1917] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-[#F5F0ED] disabled:hover:text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#44403C] dark:hover:text-[#FAFAF9] dark:disabled:hover:bg-[#292524] dark:disabled:hover:text-[#A8A29E]"
         >
-          <Square size={12} />
+          {stopDisabled ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}
         </button>
       )}
     </div>

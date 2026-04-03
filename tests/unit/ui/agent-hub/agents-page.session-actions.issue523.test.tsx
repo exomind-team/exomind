@@ -40,6 +40,12 @@ const runtimeClientMocks = vi.hoisted(() => ({
   markSessionWaiting: vi.fn(),
 }));
 
+const toastMocks = vi.hoisted(() => ({
+  toast: vi.fn(),
+  update: vi.fn(),
+  dismiss: vi.fn(),
+}));
+
 const sessionStreamState = vi.hoisted(() => ({
   sessions: [] as SessionInfo[],
   refresh: vi.fn(),
@@ -108,6 +114,17 @@ vi.mock('@/hooks/useSessionStream', () => ({
     error: null,
     refresh: sessionStreamState.refresh,
   }),
+}));
+
+vi.mock('@/components/ui/toast-hook', () => ({
+  toast: (...args: unknown[]) => {
+    toastMocks.toast(...args);
+    return {
+      id: 'toast-523',
+      update: toastMocks.update,
+      dismiss: toastMocks.dismiss,
+    };
+  },
 }));
 
 vi.mock('@/services/runtime-client', async (importOriginal) => {
@@ -222,6 +239,9 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     localStorage.clear();
     vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
     sessionStreamState.refresh.mockReset();
+    toastMocks.toast.mockReset();
+    toastMocks.update.mockReset();
+    toastMocks.dismiss.mockReset();
 
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: true,
@@ -669,9 +689,101 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         'session-stale-stop',
         { status: 'completed' },
       );
+      expect(toastMocks.toast).toHaveBeenCalledWith(expect.objectContaining({
+        title: '正在结束 Terminal Agent',
+      }));
+      expect(toastMocks.update).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'toast-523',
+        title: '已收敛失联 Terminal 会话',
+      }));
     });
     await waitFor(() => {
       expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
+    });
+  });
+
+  it('reconciles a disconnected session when stop times out but the PTY is already gone（stop 超时但 PTY 已缺失时仍会收敛会话）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-timeout-reconcile',
+        role: 'Timeout Reconcile',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-timeout-reconcile',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    runtimeClientMocks.stopPtyAgent.mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'timeout',
+        message: 'request timeout（请求超时）',
+      },
+    });
+    runtimeClientMocks.updateSession.mockResolvedValue({
+      ok: true,
+      data: buildSession({
+        id: 'session-timeout-reconcile',
+        role: 'Timeout Reconcile',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-timeout-reconcile',
+        source_host_id: 'runtime-host-523',
+      }),
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-timeout-reconcile'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-stop-pty')).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'session-timeout-reconcile',
+        { status: 'completed' },
+      );
+      expect(toastMocks.update).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'toast-523',
+        title: '已收敛失联 Terminal 会话',
+      }));
     });
   });
 
@@ -862,13 +974,21 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         'pty-network-error',
       );
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        '[agent-hub][pty] stop action threw',
+        '[agent-hub][pty][stop] action threw',
         expect.objectContaining({
           ptyId: 'pty-network-error',
           sourceHostId: 'runtime-host-523',
           hostAddress: '127.0.0.1:1919',
           message: 'Failed to fetch',
         }),
+      );
+      expect(toastMocks.update).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'toast-523',
+        title: '结束 Terminal Agent 失败',
+        variant: 'destructive',
+      }));
+      expect(screen.getByTestId('agent-runtime-error-banner')).toHaveTextContent(
+        '停止 Terminal Agent 失败: Failed to fetch',
       );
     });
 

@@ -139,6 +139,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { toast } from '@/components/ui/toast-hook';
 import { log } from '@/lib/logger';
 import {
   buildRuntimeAuthHeaders,
@@ -205,6 +206,15 @@ function parseSessionWallClockMs(session: Pick<SessionInfo, 'last_active_at' | '
     return createdAtMs;
   }
   return 0;
+}
+
+function resolveDialAddressFromBaseUrl(rtBaseUrl: string): string | undefined {
+  try {
+    const url = new URL(rtBaseUrl);
+    return url.port ? `${url.hostname}:${url.port}` : url.hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 function isOpenRecoverableTerminalSession(session: SessionInfo): boolean {
@@ -434,7 +444,7 @@ export function AgentsPage() {
   const [isChatSending, setIsChatSending] = useState(false);
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
-  const [isPtyStopping, setIsPtyStopping] = useState(false);
+  const [stoppingPtyIds, setStoppingPtyIds] = useState<string[]>([]);
   const [hasLoadedPtyAgents, setHasLoadedPtyAgents] = useState(false);
   const [loadedPtyHostId, setLoadedPtyHostId] = useState<string | null>(null);
   const [ptyAgents, setPtyAgents] = useState<Array<{
@@ -935,15 +945,64 @@ export function AgentsPage() {
     }
   };
 
+  const isPtyStopPending = useCallback(
+    (ptyId?: string | null) => Boolean(ptyId && stoppingPtyIds.includes(ptyId)),
+    [stoppingPtyIds],
+  );
+
   const handleStopPtyAgent = async (ptyId: string, sourceHostId?: string | null) => {
+    if (isPtyStopPending(ptyId)) {
+      return;
+    }
     const host = resolveRuntimeHostBySourceHostId(sourceHostId) ?? resolveActiveRuntimeHost();
+    const connection = resolveRuntimeConnectionForHostId(sourceHostId);
+    const dialAddress = resolveDialAddressFromBaseUrl(connection.rtBaseUrl);
+    const requestHost = dialAddress
+      ? {
+          ...host,
+          authToken: connection.authToken ?? host.authToken,
+          lastSuccessfulDialAddress: dialAddress,
+        }
+      : {
+          ...host,
+          authToken: connection.authToken ?? host.authToken,
+        };
+    const matchingLocalSession = dashboardSessions.find((session) => (
+      session.interaction_mode === 'terminal'
+      && session.pty_id === ptyId
+      && (sourceHostId == null || session.source_host_id === sourceHostId)
+    )) ?? dashboardSessions.find((session) => (
+      session.interaction_mode === 'terminal' && session.pty_id === ptyId
+    )) ?? null;
+    const targetLabel = matchingLocalSession?.role || ptyId;
+    const stopToast = toast({
+      title: '正在结束 Terminal Agent',
+      description: `会话：${targetLabel}`,
+      duration: 5000,
+    });
     setRuntimeHostError('');
-    setIsPtyStopping(true);
+    setStoppingPtyIds((prev) => (prev.includes(ptyId) ? prev : [...prev, ptyId]));
+    console.info('[agent-hub][pty][stop] start', {
+      ptyId,
+      sourceHostId: sourceHostId ?? null,
+      hostAddress: dialAddress ?? `${host.host}:${host.port}`,
+      targetLabel,
+    });
     try {
-      const runtimeClient = new RuntimeClient();
-      const result = await runtimeClient.stopPtyAgent(host, ptyId);
+      const runtimeClient = new RuntimeClient({ timeoutMs: 10000 });
+      const result = await runtimeClient.stopPtyAgent(requestHost, ptyId);
       if (!result.ok) {
-        if (result.error.status === 404) {
+        let shouldAttemptReconciliation = result.error.status === 404;
+        if (!shouldAttemptReconciliation && (result.error.code === 'timeout' || result.error.code === 'network')) {
+          const livePtys = await fetchPtyList(
+            connection.rtBaseUrl,
+            connection.authToken,
+            sourceHostId ?? undefined,
+          ).catch(() => null);
+          shouldAttemptReconciliation = Boolean(livePtys && !livePtys.some((pty) => pty.id === ptyId));
+        }
+
+        if (shouldAttemptReconciliation) {
           const matchesPtySession = (session: SessionInfo) => (
             session.interaction_mode === 'terminal' && session.pty_id === ptyId
           );
@@ -955,7 +1014,7 @@ export function AgentsPage() {
 
           let recoveredSession = fallbackLocalMatch ?? null;
           if (!recoveredSession) {
-            const freshSessions = await fetchSessionList(resolveRuntimeHostBaseUrl(host), host.authToken);
+            const freshSessions = await fetchSessionList(connection.rtBaseUrl, connection.authToken);
             const exactRemoteMatch = freshSessions?.find((session) => (
               matchesPtySession(session)
               && (sourceHostId == null || session.source_host_id === sourceHostId)
@@ -967,7 +1026,7 @@ export function AgentsPage() {
                 sourceHostId: sourceHostId ?? null,
                 matchedSessionId: recoveredSession.id,
                 matchedSessionSourceHostId: recoveredSession.source_host_id ?? null,
-                hostAddress: `${host.host}:${host.port}`,
+                hostAddress: dialAddress ?? `${host.host}:${host.port}`,
               });
             }
           } else if (sourceHostId && recoveredSession.source_host_id !== sourceHostId) {
@@ -976,20 +1035,28 @@ export function AgentsPage() {
               sourceHostId,
               matchedSessionId: recoveredSession.id,
               matchedSessionSourceHostId: recoveredSession.source_host_id ?? null,
-              hostAddress: `${host.host}:${host.port}`,
+              hostAddress: dialAddress ?? `${host.host}:${host.port}`,
             });
           }
 
           if (!recoveredSession) {
-            console.warn('[agent-hub][pty] stop reconciliation skipped because matching session was not found', {
+            const failureMessage = '当前 PTY 已不存在，但未找到对应会话，无法自动收敛。请刷新后重试或直接归档。';
+            console.warn('[agent-hub][pty][stop] reconciliation skipped because matching session was not found', {
               ptyId,
               sourceHostId: sourceHostId ?? null,
-              hostAddress: `${host.host}:${host.port}`,
+              hostAddress: dialAddress ?? `${host.host}:${host.port}`,
               dashboardSessionIds: dashboardSessions
                 .filter((session) => session.pty_id === ptyId)
                 .map((session) => session.id),
             });
-            setRuntimeHostError('当前 PTY 已不存在，但未找到对应会话，无法自动收敛。请刷新后重试或直接归档。');
+            setRuntimeHostError(failureMessage);
+            stopToast.update({
+              id: stopToast.id,
+              title: '结束 Terminal Agent 失败',
+              description: failureMessage,
+              variant: 'destructive',
+              duration: 6000,
+            });
             return;
           }
 
@@ -1007,7 +1074,7 @@ export function AgentsPage() {
 
           let recoveryFailedMessage: string | null = null;
           for (const step of recoverySteps) {
-            const recoveryResult = await runtimeClient.updateSession(host, recoveredSession.id, step);
+            const recoveryResult = await runtimeClient.updateSession(requestHost, recoveredSession.id, step);
             if (!recoveryResult.ok) {
               recoveryFailedMessage = recoveryResult.error.message;
               break;
@@ -1023,14 +1090,56 @@ export function AgentsPage() {
             closeRightPanel();
             await fetchPtyAgents();
             refreshSessions();
-            setRuntimeHostError('当前 PTY 已不存在，已将异常会话收敛为“已完成”，可继续归档。');
+            console.warn('[agent-hub][pty][stop] reconciled missing PTY session', {
+              ptyId,
+              sourceHostId: sourceHostId ?? null,
+              recoveredSessionId: recoveredSession.id,
+              hostAddress: dialAddress ?? `${host.host}:${host.port}`,
+              reason: result.error.code,
+            });
+            stopToast.update({
+              id: stopToast.id,
+              title: '已收敛失联 Terminal 会话',
+              description: '当前 PTY 已不存在，已将会话标记为已完成，可继续归档。',
+              duration: 6000,
+            });
             return;
           }
 
-          setRuntimeHostError(`停止 Terminal Agent 失败: ${result.error.message}；会话收敛失败: ${recoveryFailedMessage}`);
+          const failureMessage = `停止 Terminal Agent 失败: ${result.error.message}；会话收敛失败: ${recoveryFailedMessage}`;
+          console.warn('[agent-hub][pty][stop] reconciliation failed', {
+            ptyId,
+            sourceHostId: sourceHostId ?? null,
+            recoveredSessionId: recoveredSession.id,
+            hostAddress: dialAddress ?? `${host.host}:${host.port}`,
+            stopError: result.error.message,
+            recoveryFailedMessage,
+          });
+          setRuntimeHostError(failureMessage);
+          stopToast.update({
+            id: stopToast.id,
+            title: '结束 Terminal Agent 失败',
+            description: failureMessage,
+            variant: 'destructive',
+            duration: 6000,
+          });
           return;
         }
-        setRuntimeHostError(`停止 Terminal Agent 失败: ${result.error.message}`);
+        const failureMessage = `停止 Terminal Agent 失败: ${result.error.message}`;
+        console.warn('[agent-hub][pty][stop] failed', {
+          ptyId,
+          sourceHostId: sourceHostId ?? null,
+          hostAddress: dialAddress ?? `${host.host}:${host.port}`,
+          error: result.error,
+        });
+        setRuntimeHostError(failureMessage);
+        stopToast.update({
+          id: stopToast.id,
+          title: '结束 Terminal Agent 失败',
+          description: failureMessage,
+          variant: 'destructive',
+          duration: 6000,
+        });
         return;
       }
       if (activePtyId === ptyId) {
@@ -1040,17 +1149,37 @@ export function AgentsPage() {
       closeRightPanel();
       await fetchPtyAgents();
       refreshSessions();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn('[agent-hub][pty] stop action threw', {
+      console.info('[agent-hub][pty][stop] success', {
         ptyId,
         sourceHostId: sourceHostId ?? null,
-        hostAddress: `${host.host}:${host.port}`,
+        hostAddress: dialAddress ?? `${host.host}:${host.port}`,
+        status: result.data.status,
+      });
+      stopToast.update({
+        id: stopToast.id,
+        title: '已结束 Terminal Agent',
+        description: `会话：${targetLabel}`,
+        duration: 4000,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failureMessage = `停止 Terminal Agent 失败: ${message}`;
+      console.warn('[agent-hub][pty][stop] action threw', {
+        ptyId,
+        sourceHostId: sourceHostId ?? null,
+        hostAddress: dialAddress ?? `${host.host}:${host.port}`,
         message,
       });
-      setRuntimeHostError(`停止 Terminal Agent 失败: ${message}`);
+      setRuntimeHostError(failureMessage);
+      stopToast.update({
+        id: stopToast.id,
+        title: '结束 Terminal Agent 失败',
+        description: failureMessage,
+        variant: 'destructive',
+        duration: 6000,
+      });
     } finally {
-      setIsPtyStopping(false);
+      setStoppingPtyIds((prev) => prev.filter((id) => id !== ptyId));
     }
   };
 
@@ -3210,6 +3339,7 @@ export function AgentsPage() {
           loading={sessionLoading}
           error={sessionError}
           useMockData={useMockData}
+          isSessionStopping={(session) => isPtyStopPending(session.pty_id)}
           onRefresh={refreshSessions}
           onSessionClick={(session) => {
             void handleOpenSessionTerminal(session);
@@ -3243,6 +3373,7 @@ export function AgentsPage() {
               layout={tiledLayout}
               resolveSessionConnection={resolveRuntimeConnectionForSession}
               isSessionDisconnected={isSessionPtyDisconnected}
+              isSessionStopping={(session) => isPtyStopPending(session.pty_id)}
               focusedIndex={tiledFocusedIndex}
               onFocusPane={setTiledFocusedIndex}
               onSessionClick={(session) => {
@@ -3411,6 +3542,7 @@ export function AgentsPage() {
     tiledPaneOrder,
     resolveRuntimeConnectionForSession,
     resolveRuntimeConnectionForHostId,
+    isPtyStopPending,
     supportsInlineRightPanel,
   ]);
 
@@ -3462,6 +3594,14 @@ export function AgentsPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
         <div className={`flex-1 min-h-0 ${viewMode === 'topology' || viewMode === 'tiled' ? 'overflow-hidden' : 'overflow-auto'} ${viewMode === 'topology' ? '' : viewMode === 'tiled' ? 'px-2 py-2' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
+          {runtimeHostError && (
+            <div
+              data-testid="agent-runtime-error-banner"
+              className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400"
+            >
+              {runtimeHostError}
+            </div>
+          )}
           {content}
         </div>
 
@@ -3544,11 +3684,11 @@ export function AgentsPage() {
                     onClick={() => {
                       void handleStopPtyAgent(rightPanel.ptyId!, resolvedActivePtyHostId);
                     }}
-                    disabled={isPtyStopping}
+                    disabled={isPtyStopPending(rightPanel.ptyId)}
                     className="flex h-7 items-center justify-center rounded px-2 text-xs text-destructive hover:text-destructive/80 disabled:opacity-60"
                     aria-label="结束 Terminal Agent"
                   >
-                    {isPtyStopping ? '停止中' : '结束'}
+                    {isPtyStopPending(rightPanel.ptyId) ? '停止中' : '结束'}
                   </button>
                 ) : null}
                 <button

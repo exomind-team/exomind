@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical, X } from 'lucide-react';
+import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical, Loader2, X } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -55,6 +55,7 @@ export interface TiledGridProps {
   onArchiveSession?: (session: SessionInfo) => void;
   /** Whether a terminal session currently points to a missing PTY */
   isSessionDisconnected?: (session: SessionInfo) => boolean;
+  isSessionStopping?: (session: SessionInfo) => boolean;
 }
 
 type TiledPaneEntry =
@@ -93,6 +94,7 @@ export function TiledGrid({
   onStopSession,
   onArchiveSession,
   isSessionDisconnected,
+  isSessionStopping,
 }: TiledGridProps) {
   const config = LAYOUT_CONFIG[layout];
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
@@ -222,6 +224,7 @@ export function TiledGrid({
             onQuickAction={onQuickAction ? (r) => onQuickAction(pane.session, r) : undefined}
             onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(pane.session) : undefined}
             onStop={() => onStopSession?.(pane.session)}
+            stopDisabled={isSessionStopping?.(pane.session) ?? false}
             onArchive={() => onArchiveSession?.(pane.session)}
           />
         ) : (
@@ -272,6 +275,7 @@ export function TiledGrid({
                   : undefined
               }
               onStop={pane.kind === 'session' ? () => onStopSession?.(pane.session) : undefined}
+              stopDisabled={pane.kind === 'session' ? (isSessionStopping?.(pane.session) ?? false) : false}
               onArchive={pane.kind === 'session' ? () => onArchiveSession?.(pane.session) : undefined}
               onCloseDisconnectedPane={
                 pane.kind === 'disconnected'
@@ -353,6 +357,7 @@ interface SortablePaneProps {
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
   onStop?: () => void;
+  stopDisabled?: boolean;
   onArchive?: () => void;
   onCloseDisconnectedPane?: () => void;
 }
@@ -390,6 +395,7 @@ function SortablePane(props: SortablePaneProps) {
           onQuickAction={props.onQuickAction}
           onMarkWaiting={props.onMarkWaiting}
           onStop={props.onStop}
+          stopDisabled={props.stopDisabled}
           onArchive={props.onArchive}
         />
       ) : (
@@ -528,6 +534,7 @@ interface SessionPaneProps {
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
   onStop?: () => void;
+  stopDisabled?: boolean;
   onArchive?: () => void;
 }
 
@@ -545,6 +552,7 @@ function SessionPane({
   onQuickAction,
   onMarkWaiting,
   onStop,
+  stopDisabled = false,
   onArchive,
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
@@ -745,16 +753,16 @@ function SessionPane({
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
-                if (!canStopPty) return;
+                if (!canStopPty || stopDisabled) return;
                 onStop?.();
               }}
               data-testid={`tiled-grid-stop-${session.id}`}
-              aria-label="停止"
-              disabled={!canStopPty || !onStop}
-              className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:opacity-50 disabled:hover:text-[#57534E]"
-              title="停止"
+              aria-label={stopDisabled ? '停止中' : '停止'}
+              disabled={!canStopPty || !onStop || stopDisabled}
+              className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-[#57534E]"
+              title={stopDisabled ? '停止中' : '停止'}
             >
-              <Square size={10} />
+              {stopDisabled ? <Loader2 size={10} className="animate-spin" /> : <Square size={10} />}
             </button>
           )}
         </div>

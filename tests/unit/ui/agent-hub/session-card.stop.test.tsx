@@ -77,6 +77,22 @@ describe('session card stop action（列表卡片停止动作）', () => {
     expect(onStopSession).toHaveBeenCalledWith(session);
   });
 
+  it('disables the stop button while a stop action is pending（停止进行中时禁用列表卡片按钮）', () => {
+    const session = buildSession({ id: 'session-stop-pending' });
+
+    render(
+      <SessionCard
+        session={session}
+        onStop={vi.fn()}
+        stopDisabled
+      />,
+    );
+
+    const stopButton = screen.getByTestId('session-card-stop-session-stop-pending');
+    expect(stopButton).toBeDisabled();
+    expect(stopButton).toHaveAttribute('title', '停止中');
+  });
+
   it('shows archive button for completed PTY sessions and does not trigger stop/main click（已完成 PTY 会话显示归档按钮且不触发停止或主点击）', () => {
     const session = buildSession({
       id: 'session-completed',
@@ -155,6 +171,32 @@ describe('tiled grid terminal lifecycle actions（平铺视图终端生命周期
     fireEvent.click(screen.getByTestId('tiled-grid-stop-terminal-pty'));
 
     expect(onStopSession).toHaveBeenCalledWith(session);
+  });
+
+  it('disables tiled stop button while stop is pending（停止进行中时禁用平铺窗格按钮）', () => {
+    const session = buildSession({
+      id: 'terminal-pty-pending',
+      interaction_mode: 'terminal',
+      pty_id: 'pty-523',
+    });
+
+    render(
+      <TiledGrid
+        sessions={[session]}
+        layout="1x1"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+        onStopSession={vi.fn()}
+        isSessionStopping={() => true}
+      />,
+    );
+
+    const stopButton = screen.getByTestId('tiled-grid-stop-terminal-pty-pending');
+    expect(stopButton).toBeDisabled();
+    expect(stopButton).toHaveAttribute('title', '停止中');
   });
 
   it('shows archive button instead of stop for completed panes（已完成窗格显示归档按钮而非停止按钮）', () => {

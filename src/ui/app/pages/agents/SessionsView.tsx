@@ -16,6 +16,8 @@ export interface SessionsViewProps {
   onStopSession?: (session: SessionInfo) => void;
   /** Callback when user archives a completed session（归档已完成会话） */
   onArchiveSession?: (session: SessionInfo) => void;
+  /** Whether a PTY stop action is currently in flight for this session */
+  isSessionStopping?: (session: SessionInfo) => boolean;
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -29,6 +31,7 @@ export function SessionsView({
   onSessionClick,
   onStopSession,
   onArchiveSession,
+  isSessionStopping,
 }: SessionsViewProps) {
   // Sort: attention-needing first, then by last_active_at desc
   const sortedSessions = [...sessions].sort((a, b) => {
@@ -118,6 +121,7 @@ export function SessionsView({
                 onClick={onSessionClick}
                 onStop={onStopSession}
                 onArchive={onArchiveSession}
+                stopDisabled={isSessionStopping?.(session) ?? false}
               />
             ))}
           </div>
@@ -142,6 +146,7 @@ export function SessionsView({
                 onClick={onSessionClick}
                 onStop={onStopSession}
                 onArchive={onArchiveSession}
+                stopDisabled={isSessionStopping?.(session) ?? false}
               />
             ))}
           </div>
