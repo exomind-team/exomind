@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { WheelEvent as ReactWheelEvent } from 'react';
 import { PageShell } from '@/ui/app/components/PageShell';
 import {
   Background,
@@ -8,6 +9,7 @@ import {
   Handle,
   Position,
   ReactFlow,
+  type HandleType,
   type NodeProps as FlowNodeProps,
   type EdgeTypes,
   type NodeTypes,
@@ -28,8 +30,10 @@ import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { appendTaskStatusChangeDescription } from '@/lib/task/task-status-change-description';
 import {
   calculateTaskDagCollapseScope,
+  classifyVisibleTaskGraphTerminalNodesForSmartMode,
   type TaskDagVisibilityState,
   EMPTY_TASK_DAG_VISIBILITY_STATE,
+  findVisibleTaskGraphConnectedComponentNodeIds,
   projectVisibleTaskGraph,
   type VisibleTaskGraph,
 } from '@/lib/task/task-dag-visibility';
@@ -39,6 +43,7 @@ import { MultiTaskEndDialog } from '@/ui/app/components/MultiTaskEndDialog';
 import {
   TaskDagControlPanel,
   type TaskDagBackgroundMode,
+  type TaskDagLayoutMode,
   type TaskDagTerminalFilterMode,
 } from '@/ui/app/components/TaskDagControlPanel';
 import { TaskDagKeyHints } from '@/ui/app/components/TaskDagKeyHints';
@@ -67,32 +72,50 @@ import {
   getTaskDagBackgroundMode as readStoredBackgroundMode,
   getTaskDagDirection as readStoredDagDirection,
   getTaskDagImmersive as readStoredImmersive,
+  getTaskDagLayoutMode as readStoredDagLayoutMode,
   getTaskDagMode as readStoredDagMode,
   TASK_DAG_BACKGROUND_STORAGE_KEY,
   TASK_DAG_DIRECTION_STORAGE_KEY,
   TASK_DAG_HIDE_TERMINAL_STORAGE_KEY,
   TASK_DAG_IMMERSIVE_STORAGE_KEY,
+  TASK_DAG_LAYOUT_MODE_STORAGE_KEY,
   TASK_DAG_MODE_STORAGE_KEY,
+  TASK_DAG_FOCUSED_SERIES_STORAGE_KEY,
   TASK_DAG_SEARCH_DRAFT_STORAGE_KEY,
   TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY,
+  TASK_DAG_TAG_FILTER_STORAGE_KEY,
   TASK_DAG_VIEWPORT_STORAGE_KEY,
   TASK_DAG_VISIBILITY_STORAGE_KEY,
+  getTaskDagTagFilter as readStoredTagFilter,
   getTaskDagSearchDraft as readStoredSearchDraft,
+  getTaskDagFocusedSeriesAnchorId as readStoredFocusedSeriesAnchorId,
   getTaskDagSearchOptions as readStoredSearchOptions,
   getTaskDagTerminalFilterMode as readStoredTerminalFilterMode,
   getTaskDagViewport as readStoredDagViewport,
   getTaskDagVisibility as readStoredDagVisibility,
   setTaskDagBackgroundMode as persistTaskDagBackgroundMode,
   setTaskDagDirection as persistTaskDagDirection,
+  setTaskDagFocusedSeriesAnchorId as persistTaskDagFocusedSeriesAnchorId,
   setTaskDagImmersive as persistTaskDagImmersive,
+  setTaskDagLayoutMode as persistTaskDagLayoutMode,
   setTaskDagMode as persistTaskDagMode,
   setTaskDagSearchDraft as persistTaskDagSearchDraft,
   setTaskDagSearchOptions as persistTaskDagSearchOptions,
+  setTaskDagTagFilter as persistTaskDagTagFilter,
   setTaskDagTerminalFilterMode as persistTaskDagTerminalFilterMode,
   setTaskDagViewport as writeStoredDagViewport,
   setTaskDagVisibility as persistTaskDagVisibility,
+  type TaskDagTagFilter,
   type TaskDagViewportSurface,
 } from '@/config/task-dag-preferences';
+import {
+  getTaskDagManualLayoutSnapshot,
+  pruneTaskDagManualLayoutSnapshot,
+  setTaskDagManualLayoutSnapshot,
+  TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY,
+  updateTaskDagManualLayoutPosition,
+  type TaskDagManualLayoutSnapshot,
+} from './task-dag-layout-store';
 import {
   buildVisibleTaskDagFlow,
   TASK_DAG_NODE_HEIGHT,
@@ -117,6 +140,7 @@ type QuickCreateDependencyContext = {
   type: DagConnectType;
   direction: 'upstream' | 'downstream';
 } | null;
+type TaskDagDropPosition = { x: number; y: number } | null;
 
 const TASK_DAG_EXECUTE_DEBUG_TAG = '[TaskDag][ExecuteDebug]';
 const TASK_DAG_MODE_ORDER: TaskDagMode[] = ['browse', 'connect', 'execute'];
@@ -433,6 +457,36 @@ function shouldCreateUpstreamFromPaneEvent(event: unknown): boolean {
   return false;
 }
 
+function resolveQuickCreateDirectionFromHandleType(
+  handleType: HandleType | null | undefined,
+): 'upstream' | 'downstream' | null {
+  if (handleType === 'target') {
+    return 'upstream';
+  }
+  if (handleType === 'source') {
+    return 'downstream';
+  }
+  return null;
+}
+
+function extractClientPositionFromPointerEvent(event: unknown): TaskDagDropPosition {
+  if (
+    event
+    && typeof event === 'object'
+    && 'clientX' in event
+    && 'clientY' in event
+    && typeof (event as { clientX?: unknown }).clientX === 'number'
+    && typeof (event as { clientY?: unknown }).clientY === 'number'
+  ) {
+    return {
+      x: (event as { clientX: number }).clientX,
+      y: (event as { clientY: number }).clientY,
+    };
+  }
+
+  return null;
+}
+
 function isPaneInteractionTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -571,53 +625,53 @@ function filterVisibleGraphByNodeIds(
   };
 }
 
-function filterTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGraph): VisibleTaskGraph {
-  const terminalNodeIds = visibleGraph.nodes
-    .filter((node) => isTerminalStatus(node.status))
-    .map((node) => node.id);
-  if (terminalNodeIds.length === 0) {
+function filterVisibleGraphByTags(
+  visibleGraph: VisibleTaskGraph,
+  tagFilter: TaskDagTagFilter,
+  taskById: ReadonlyMap<string, TaskNode>,
+): VisibleTaskGraph {
+  if (tagFilter.selectedTags.length === 0) {
     return visibleGraph;
   }
 
-  const nodeById = new Map(visibleGraph.nodes.map((node) => [node.id, node]));
-  const downstream = new Map<string, string[]>();
-  for (const edge of visibleGraph.edges) {
-    const targets = downstream.get(edge.source) ?? [];
-    targets.push(edge.target);
-    downstream.set(edge.source, targets);
-  }
-
-  function hasActiveDownstream(nodeId: string, visited: Set<string>): boolean {
-    if (visited.has(nodeId)) {
-      return false;
-    }
-
-    visited.add(nodeId);
-    const children = downstream.get(nodeId) ?? [];
-    for (const childId of children) {
-      const child = nodeById.get(childId);
-      if (!child) {
-        continue;
-      }
-      if (!isTerminalStatus(child.status)) {
-        return true;
-      }
-      if (hasActiveDownstream(childId, visited)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  const safeToHide = terminalNodeIds.filter((nodeId) => !hasActiveDownstream(nodeId, new Set()));
-  return filterVisibleGraphByNodeIds(
-    {
-      ...visibleGraph,
-      hiddenNodeIds: Array.from(new Set([...visibleGraph.hiddenNodeIds, ...safeToHide])),
-    },
-    new Set(visibleGraph.nodes.filter((node) => !safeToHide.includes(node.id)).map((node) => node.id)),
+  const selectedTagSet = new Set(tagFilter.selectedTags);
+  const visibleNodeIds = new Set(
+    visibleGraph.nodes
+      .filter((node) => {
+        const nodeTagSet = new Set((taskById.get(node.id)?.tags ?? []).map((tag) => tag.trim()).filter(Boolean));
+        if (tagFilter.matchMode === 'or') {
+          return [...selectedTagSet].some((tag) => nodeTagSet.has(tag));
+        }
+        return [...selectedTagSet].every((tag) => nodeTagSet.has(tag));
+      })
+      .map((node) => node.id),
   );
+
+  return filterVisibleGraphByNodeIds(visibleGraph, visibleNodeIds);
+}
+
+function projectVisibleGraphForSmartTerminalMode(visibleGraph: VisibleTaskGraph): {
+  visibleGraph: VisibleTaskGraph;
+  secondaryNodeIds: Set<string>;
+} {
+  const smartModeResult = classifyVisibleTaskGraphTerminalNodesForSmartMode(visibleGraph);
+  return {
+    visibleGraph: smartModeResult.hiddenNodeIds.size === 0
+      ? visibleGraph
+      : filterVisibleGraphByNodeIds(
+        {
+          ...visibleGraph,
+          hiddenNodeIds: Array.from(new Set([
+            ...visibleGraph.hiddenNodeIds,
+            ...smartModeResult.hiddenNodeIds,
+          ])),
+        },
+        new Set(visibleGraph.nodes
+          .filter((node) => !smartModeResult.hiddenNodeIds.has(node.id))
+          .map((node) => node.id)),
+      ),
+    secondaryNodeIds: smartModeResult.secondaryNodeIds,
+  };
 }
 
 function filterStrictTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGraph): VisibleTaskGraph {
@@ -678,7 +732,7 @@ function TaskDagNode({
                   ? 'border-[2.5px] border-[#16A34A]/60 ring-[3px] ring-[#22C55E]/20 bg-[#F0FDF4] shadow-[0_12px_28px_-18px_rgba(34,197,94,0.7)] dark:border-[#22C55E]/60 dark:bg-[#052E16]'
                   : nodeData.executeState === 'blocked'
                     ? 'border-[2.5px] border-[#EAB308]/60 ring-[3px] ring-[#EAB308]/15 opacity-60'
-                    : nodeData.executeState === 'terminal'
+                    : nodeData.isSecondaryNode
                       ? 'border-[2.5px] border-[#D6D3D1] ring-[3px] ring-[#D6D3D1]/15 opacity-35 grayscale dark:border-[#44403C] dark:ring-[#57534E]/15'
                       : nodeData.isCurrentRoot
                         ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
@@ -689,7 +743,11 @@ function TaskDagNode({
                             : nodeData.isBlocked
                               ? 'border-[#EAB308]/60'
                               : 'border-[#E7E5E4] dark:border-[#292524]',
-        nodeData.isSearchDimmed && !nodeData.isSelected && nodeData.executeState !== 'active' ? 'opacity-35 saturate-[0.7]' : '',
+        (
+          (nodeData.isSearchDimmed || nodeData.isFocusDimmed)
+          && !nodeData.isSelected
+          && nodeData.executeState !== 'active'
+        ) ? 'opacity-35 saturate-[0.7]' : '',
       ].join(' ')}
     >
       <Handle type="target" position={targetPosition} style={handleStyle} />
@@ -768,6 +826,7 @@ export function TaskDagPage() {
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
   const [tasks, setTasks] = useState<TaskNode[]>([]);
+  const [hasLoadedTasksOnce, setHasLoadedTasksOnce] = useState(false);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(() => readStoredDagVisibility());
@@ -782,8 +841,16 @@ export function TaskDagPage() {
   const [searchDraft, setSearchDraft] = useState(() => readStoredSearchDraft());
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOptions, setSearchOptions] = useState<TaskDagSearchOptions>(() => readStoredSearchOptions());
+  const [tagFilter, setTagFilter] = useState<TaskDagTagFilter>(() => readStoredTagFilter());
+  const [focusedSeriesAnchorId, setFocusedSeriesAnchorId] = useState<string | null>(
+    () => readStoredFocusedSeriesAnchorId(),
+  );
   const [dagDirection, setDagDirection] = useState<DagDirection>(() => readStoredDagDirection());
+  const [layoutMode, setLayoutMode] = useState<TaskDagLayoutMode>(() => readStoredDagLayoutMode());
   const [mode, setMode] = useState<TaskDagMode>(() => readStoredDagMode());
+  const [manualLayoutSnapshot, setManualLayoutSnapshotState] = useState<TaskDagManualLayoutSnapshot | null>(
+    () => getTaskDagManualLayoutSnapshot(),
+  );
   const [connectState, setConnectState] = useState<DagConnectState>(null);
   const [endingDialogOpen, setEndingDialogOpen] = useState(false);
   const [endingTaskIds, setEndingTaskIds] = useState<string[]>([]);
@@ -791,6 +858,7 @@ export function TaskDagPage() {
   const [quickCreateDependency, setQuickCreateDependency] = useState<QuickCreateDependencyContext>(null);
   const [quickCreateDirection, setQuickCreateDirection] = useState<'upstream' | 'downstream' | null>(null);
   const [quickCreateFromNodeId, setQuickCreateFromNodeId] = useState<string | null>(null);
+  const [quickCreateDropPosition, setQuickCreateDropPosition] = useState<TaskDagDropPosition>(null);
   const [pendingFocusTaskId, setPendingFocusTaskId] = useState<string | null>(null);
   const [disassociateDialogOpen, setDisassociateDialogOpen] = useState(false);
   const [disassociateTargetTaskId, setDisassociateTargetTaskId] = useState<string | null>(null);
@@ -801,6 +869,9 @@ export function TaskDagPage() {
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
   const wheelListenerRef = useRef<HTMLDivElement | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
+  const connectDragQuickCreateRef = useRef<QuickCreateDependencyContext>(null);
+  const quickCreateDropPositionRef = useRef<TaskDagDropPosition>(null);
+  const pendingManualLayoutNodeIdsRef = useRef(new Set<string>());
   const hasMountedDirectionRef = useRef(false);
   const hasAppliedInitialViewportRef = useRef(false);
   const lastHandledFocusSearchRef = useRef<string | null>(null);
@@ -830,6 +901,10 @@ export function TaskDagPage() {
   }, [dagDirection]);
 
   useEffectAfterMount(() => {
+    persistTaskDagLayoutMode(layoutMode);
+  }, [layoutMode]);
+
+  useEffectAfterMount(() => {
     persistTaskDagTerminalFilterMode(terminalFilterMode);
   }, [terminalFilterMode]);
 
@@ -848,6 +923,14 @@ export function TaskDagPage() {
   useEffectAfterMount(() => {
     persistTaskDagSearchDraft(searchDraft);
   }, [searchDraft]);
+
+  useEffectAfterMount(() => {
+    persistTaskDagTagFilter(tagFilter);
+  }, [tagFilter]);
+
+  useEffectAfterMount(() => {
+    persistTaskDagFocusedSeriesAnchorId(focusedSeriesAnchorId);
+  }, [focusedSeriesAnchorId]);
 
   useEffectAfterMount(() => {
     persistTaskDagVisibility(dagVisibility);
@@ -894,7 +977,11 @@ export function TaskDagPage() {
         requestId,
         taskIds: list.map((task) => task.id),
       });
+      for (const task of list) {
+        pendingManualLayoutNodeIdsRef.current.delete(task.id);
+      }
       setTasks(list);
+      setHasLoadedTasksOnce(true);
     };
 
     void load('mount');
@@ -972,8 +1059,16 @@ export function TaskDagPage() {
     if (mode !== 'connect') {
       setConnectState(null);
       setPaneContextMenu(null);
+      connectDragQuickCreateRef.current = null;
     }
   }, [mode]);
+
+  useEffect(() => {
+    if (!quickCreateOpen) {
+      quickCreateDropPositionRef.current = null;
+      setQuickCreateDropPosition(null);
+    }
+  }, [quickCreateOpen]);
 
   useEffect(() => {
     if (activeBlock) return;
@@ -985,6 +1080,10 @@ export function TaskDagPage() {
   useEffect(() => subscribeTaskDagZoomSpeedChanges(setZoomSpeed), []);
 
   const viewportSurface: TaskDagViewportSurface = isDesktop ? 'desktop' : 'mobile';
+  const setManualLayoutSnapshot = useCallback((snapshot: TaskDagManualLayoutSnapshot | null) => {
+    setTaskDagManualLayoutSnapshot(snapshot);
+    setManualLayoutSnapshotState(snapshot);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -998,6 +1097,9 @@ export function TaskDagPage() {
           return;
         case TASK_DAG_DIRECTION_STORAGE_KEY:
           setDagDirection(readStoredDagDirection());
+          return;
+        case TASK_DAG_LAYOUT_MODE_STORAGE_KEY:
+          setLayoutMode(readStoredDagLayoutMode());
           return;
         case TASK_DAG_HIDE_TERMINAL_STORAGE_KEY:
           setTerminalFilterMode(readStoredTerminalFilterMode());
@@ -1014,6 +1116,12 @@ export function TaskDagPage() {
         case TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY:
           setSearchOptions(readStoredSearchOptions());
           return;
+        case TASK_DAG_TAG_FILTER_STORAGE_KEY:
+          setTagFilter(readStoredTagFilter());
+          return;
+        case TASK_DAG_FOCUSED_SERIES_STORAGE_KEY:
+          setFocusedSeriesAnchorId(readStoredFocusedSeriesAnchorId());
+          return;
         case TASK_DAG_VISIBILITY_STORAGE_KEY:
           setDagVisibility(readStoredDagVisibility());
           return;
@@ -1026,6 +1134,9 @@ export function TaskDagPage() {
           flowInstanceRef.current?.setViewport(nextViewport);
           return;
         }
+        case TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY:
+          setManualLayoutSnapshotState(getTaskDagManualLayoutSnapshot());
+          return;
         default:
           return;
       }
@@ -1070,19 +1181,51 @@ export function TaskDagPage() {
   const graphNodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
   const activeTaskIds = useMemo(() => resolveActiveBlockTaskIds(activeBlock), [activeBlock]);
   const activeTaskIdSet = useMemo(() => new Set(activeTaskIds), [activeTaskIds]);
+
+  useEffect(() => {
+    if (!hasLoadedTasksOnce) {
+      return;
+    }
+    const prunedSnapshot = pruneTaskDagManualLayoutSnapshot(
+      manualLayoutSnapshot,
+      [
+        ...graph.nodes.map((node) => node.id),
+        ...pendingManualLayoutNodeIdsRef.current,
+      ],
+    );
+    if (JSON.stringify(prunedSnapshot) === JSON.stringify(manualLayoutSnapshot)) {
+      return;
+    }
+    setManualLayoutSnapshot(prunedSnapshot);
+  }, [graph.nodes, hasLoadedTasksOnce, manualLayoutSnapshot, setManualLayoutSnapshot]);
+
   const interactionGraph = useMemo(() => (
     terminalFilterMode === 'hide'
       ? buildTaskGraph(tasks.filter((task) => !isTerminalStatus(task.status)))
       : graph
   ), [graph, terminalFilterMode, tasks]);
   const visibleGraph = useMemo(() => projectVisibleTaskGraph(graph, dagVisibility), [graph, dagVisibility]);
+  const availableTags = useMemo(() => Array.from(new Set(
+    tasks.flatMap((task) => task.tags.map((tag) => tag.trim()).filter(Boolean)),
+  )).sort((left, right) => left.localeCompare(right, 'zh-CN')), [tasks]);
+  const tagFilteredVisibleGraph = useMemo(() => (
+    filterVisibleGraphByTags(visibleGraph, tagFilter, taskById)
+  ), [tagFilter, taskById, visibleGraph]);
+  const smartTerminalProjection = useMemo(
+    () => projectVisibleGraphForSmartTerminalMode(tagFilteredVisibleGraph),
+    [tagFilteredVisibleGraph],
+  );
   const terminalFilteredVisibleGraph = useMemo(() => (
     terminalFilterMode === 'smart'
-      ? filterTerminalNodesFromVisibleGraph(visibleGraph)
+      ? smartTerminalProjection.visibleGraph
       : terminalFilterMode === 'hide'
-        ? filterStrictTerminalNodesFromVisibleGraph(visibleGraph)
-        : visibleGraph
-  ), [terminalFilterMode, visibleGraph]);
+        ? filterStrictTerminalNodesFromVisibleGraph(tagFilteredVisibleGraph)
+        : tagFilteredVisibleGraph
+  ), [smartTerminalProjection.visibleGraph, tagFilteredVisibleGraph, terminalFilterMode]);
+  const secondaryNodeIds = useMemo(
+    () => (terminalFilterMode === 'smart' ? smartTerminalProjection.secondaryNodeIds : new Set<string>()),
+    [smartTerminalProjection.secondaryNodeIds, terminalFilterMode],
+  );
   const renderedVisibleNodeById = useMemo(
     () => new Map(terminalFilteredVisibleGraph.nodes.map((node) => [node.id, node])),
     [terminalFilteredVisibleGraph.nodes],
@@ -1105,12 +1248,39 @@ export function TaskDagPage() {
     () => new Set(renderedVisibleGraph.nodes.map((node) => node.id)),
     [renderedVisibleGraph.nodes],
   );
+  const visibleFocusedSeriesNodeIds = useMemo(() => (
+    focusedSeriesAnchorId
+      ? findVisibleTaskGraphConnectedComponentNodeIds(renderedVisibleGraph, focusedSeriesAnchorId)
+      : new Set<string>()
+  ), [focusedSeriesAnchorId, renderedVisibleGraph]);
+  const hasVisibleFocusedSeries = visibleFocusedSeriesNodeIds.size > 0;
   const searchMatchCount = useMemo(() => {
     if (!searchQuery) return 0;
     return terminalFilteredVisibleGraph.nodes.reduce((count, node) => (
       searchMatchedTaskIds.has(node.id) ? count + 1 : count
     ), 0);
   }, [searchMatchedTaskIds, searchQuery, terminalFilteredVisibleGraph.nodes]);
+  const hiddenRunningByTagFilterCount = useMemo(() => {
+    if (tagFilter.selectedTags.length === 0) {
+      return 0;
+    }
+
+    const tagVisibleNodeIds = new Set(tagFilteredVisibleGraph.nodes.map((node) => node.id));
+    const runningNodeIds = visibleGraph.nodes
+      .filter((node) => (
+        (taskById.get(node.id)?.status === 'in_progress' || activeTaskIdSet.has(node.id))
+        && !tagVisibleNodeIds.has(node.id)
+      ))
+      .map((node) => node.id);
+
+    return new Set(runningNodeIds).size;
+  }, [
+    activeTaskIdSet,
+    tagFilter.selectedTags.length,
+    tagFilteredVisibleGraph.nodes,
+    taskById,
+    visibleGraph.nodes,
+  ]);
 
   useEffect(() => {
     debugTaskDagExecute('visibleGraph:update', {
@@ -1143,9 +1313,23 @@ export function TaskDagPage() {
     edges: renderedVisibleGraph.edges.map((edge) => [edge.id, edge.source, edge.target, edge.type]),
   }), [renderedVisibleGraph.edges, renderedVisibleGraph.nodes, resolvedDirection]);
 
+  const manualPositions = layoutMode === 'manual'
+    ? (manualLayoutSnapshot?.manualPositions ?? undefined)
+    : undefined;
+
   const layoutFlowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
     direction: resolvedDirection,
-  }), [layoutSignature, renderedVisibleGraph, resolvedDirection]);
+    focusedSeriesNodeIds: visibleFocusedSeriesNodeIds,
+    manualPositions,
+    secondaryNodeIds,
+  }), [
+    layoutSignature,
+    manualPositions,
+    renderedVisibleGraph,
+    resolvedDirection,
+    secondaryNodeIds,
+    visibleFocusedSeriesNodeIds,
+  ]);
 
   const flowGraph = useMemo(() => {
     const hasActiveSearch = Boolean(searchQuery);
@@ -1170,6 +1354,8 @@ export function TaskDagPage() {
             isSelected: node.id === selectedTaskId,
             isSearchMatch: hasActiveSearch && searchMatchedTaskIds.has(node.id),
             isSearchDimmed: hasActiveSearch && !searchMatchedTaskIds.has(node.id),
+            isFocusDimmed: hasVisibleFocusedSeries && !visibleFocusedSeriesNodeIds.has(node.id),
+            isSecondaryNode: secondaryNodeIds.has(node.id),
             isCurrentRoot: node.id === renderedVisibleGraph.visibleCurrentRootNodeId,
             isCollapsedTarget: visibleNode?.isCollapsedTarget ?? node.data.isCollapsedTarget,
             isCollapsedUpstreamTarget: visibleNode?.isCollapsedUpstreamTarget ?? node.data.isCollapsedUpstreamTarget,
@@ -1197,10 +1383,13 @@ export function TaskDagPage() {
     layoutFlowGraph.nodes,
     renderedVisibleGraph,
     renderedVisibleNodeById,
+    hasVisibleFocusedSeries,
     searchMatchedTaskIds,
     searchQuery,
+    secondaryNodeIds,
     selectedTaskId,
     taskById,
+    visibleFocusedSeriesNodeIds,
     mode,
   ]);
 
@@ -1230,34 +1419,21 @@ export function TaskDagPage() {
     setMode((current) => getNextTaskDagMode(current, delta));
   }, []);
 
-  useEffect(() => {
+  const handleCanvasModeWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     const wheelRegion = wheelListenerRef.current;
     if (!wheelRegion) {
       return;
     }
-
-    const handleWheel = (event: WheelEvent) => {
-      if (!(event.target instanceof Node) || !wheelRegion.contains(event.target)) {
-        return;
-      }
-      if (!event.ctrlKey || !event.altKey || event.deltaY === 0) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      cycleTaskDagMode(event.deltaY > 0 ? 1 : -1);
-    };
-
-    document.addEventListener('wheel', handleWheel, {
-      capture: true,
-      passive: false,
-    });
-
-    return () => {
-      document.removeEventListener('wheel', handleWheel, {
-        capture: true,
-      });
-    };
+    const target = event.target;
+    if (!(target instanceof Node) || !wheelRegion.contains(target)) {
+      return;
+    }
+    if (!event.ctrlKey || !event.altKey || event.deltaY === 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    cycleTaskDagMode(event.deltaY > 0 ? 1 : -1);
   }, [cycleTaskDagMode]);
 
   useEffect(() => {
@@ -1370,10 +1546,20 @@ export function TaskDagPage() {
     const downstream = resolveCollapseActionState('downstream', nodeId);
     return {
       showEndBlock: mode === 'execute' && activeTaskIds.length > 0,
+      focusSeries: {
+        visible: mode === 'browse',
+        active: hasVisibleFocusedSeries && visibleFocusedSeriesNodeIds.has(nodeId),
+      },
       upstream,
       downstream,
     };
-  }, [activeTaskIds.length, mode, resolveCollapseActionState]);
+  }, [
+    activeTaskIds.length,
+    hasVisibleFocusedSeries,
+    mode,
+    resolveCollapseActionState,
+    visibleFocusedSeriesNodeIds,
+  ]);
 
   const contextMenuState = useMemo(() => (
     contextMenu ? resolveContextMenuState(contextMenu.nodeId) : null
@@ -1442,6 +1628,8 @@ export function TaskDagPage() {
     } : null);
     setQuickCreateDirection(dependencyType ? null : 'upstream');
     setQuickCreateFromNodeId(dependencyType ? null : fromNodeId);
+    quickCreateDropPositionRef.current = null;
+    setQuickCreateDropPosition(null);
     setConnectState(null);
     setQuickCreateOpen(true);
   };
@@ -1455,6 +1643,8 @@ export function TaskDagPage() {
     } : null);
     setQuickCreateDirection(dependencyType ? null : 'downstream');
     setQuickCreateFromNodeId(dependencyType ? null : fromNodeId);
+    quickCreateDropPositionRef.current = null;
+    setQuickCreateDropPosition(null);
     setConnectState(null);
     setQuickCreateOpen(true);
   };
@@ -1465,6 +1655,8 @@ export function TaskDagPage() {
         title,
         description: description || undefined,
       });
+      const createdTaskId = created?.id;
+      const persistedDropPosition = quickCreateDropPositionRef.current ?? quickCreateDropPosition;
 
       if (quickCreateDirection && quickCreateFromNodeId) {
         if (quickCreateDirection === 'downstream') {
@@ -1496,8 +1688,24 @@ export function TaskDagPage() {
         setQuickCreateDependency(null);
       }
 
+      if (
+        persistedDropPosition
+        && createdTaskId
+        && (layoutMode === 'manual' || readStoredDagLayoutMode() === 'manual')
+      ) {
+        pendingManualLayoutNodeIdsRef.current.add(createdTaskId);
+        setManualLayoutSnapshot(updateTaskDagManualLayoutPosition(
+          manualLayoutSnapshot,
+          createdTaskId,
+          persistedDropPosition,
+        ));
+        setPendingFocusTaskId(createdTaskId);
+      }
+
       setQuickCreateDirection(null);
       setQuickCreateFromNodeId(null);
+      quickCreateDropPositionRef.current = null;
+      setQuickCreateDropPosition(null);
 
       toast({
         title: '任务已创建',
@@ -1700,6 +1908,7 @@ export function TaskDagPage() {
     mode,
     immersive,
     selectedTaskId,
+    focusedSeriesAnchorTaskId: focusedSeriesAnchorId,
     connectState,
     flowNodes: flowGraph.nodes,
     flowInstance: flowInstanceRef.current,
@@ -1708,6 +1917,11 @@ export function TaskDagPage() {
     onModeChange: setMode,
     onImmersiveChange: setImmersive,
     onSelectedTaskIdChange: setSelectedTaskId,
+    onClearFocusedSeries: () => {
+      setFocusedSeriesAnchorId(null);
+      setContextMenu(null);
+      setPaneContextMenu(null);
+    },
     onBrowseActivate: (nodeId) => {
       setSelectedTaskId(nodeId);
       setContextMenu(null);
@@ -1731,9 +1945,9 @@ export function TaskDagPage() {
     if (mode === 'connect') {
       if (connectState) {
         const sourceTitle = taskById.get(connectState.sourceId)?.title ?? connectState.sourceId;
-        return `连接模式：已选“${sourceTitle}”作为${connectState.type === 'hard' ? '硬依赖' : '软依赖'}起点，再点目标节点即可。`;
+        return `编辑模式：已选“${sourceTitle}”作为${connectState.type === 'hard' ? '硬依赖' : '软依赖'}起点，再点目标节点即可。`;
       }
-      return '连接模式：拖拽节点两端句柄，或依次点击两个节点建立依赖；再次点击同一节点可切换硬/软依赖。';
+      return '编辑模式：拖拽节点两端句柄，或依次点击两个节点建立依赖；再次点击同一节点可切换硬/软依赖。';
     }
 
     if (mode === 'execute') {
@@ -1832,9 +2046,13 @@ export function TaskDagPage() {
             <TaskDagControlPanel
               isDesktop={isDesktop}
               direction={dagDirection}
+              layoutMode={layoutMode}
               searchValue={searchDraft}
               searchMatchCount={searchMatchCount}
               searchOptions={searchOptions}
+              availableTags={availableTags}
+              tagFilter={tagFilter}
+              hiddenRunningByTagFilterCount={hiddenRunningByTagFilterCount}
               terminalFilterMode={terminalFilterMode}
               backgroundMode={backgroundMode}
               hasActiveBlock={activeTaskIds.length > 0}
@@ -1842,12 +2060,36 @@ export function TaskDagPage() {
               mobileSearchOpen={mobileSearchOpen}
               mobileToolsOpen={mobileToolsOpen}
               onDirectionChange={setDagDirection}
+              onLayoutModeChange={setLayoutMode}
               onSearchValueChange={setSearchDraft}
               onSearchOptionToggle={(key) => {
                 setSearchOptions((current) => ({
                   ...current,
                   [key]: !current[key],
                 }));
+              }}
+              onTagToggle={(tag) => {
+                setTagFilter((current) => {
+                  const selectedTagSet = new Set(current.selectedTags);
+                  if (selectedTagSet.has(tag)) {
+                    selectedTagSet.delete(tag);
+                  } else {
+                    selectedTagSet.add(tag);
+                  }
+                  return {
+                    ...current,
+                    selectedTags: Array.from(selectedTagSet).sort((left, right) => left.localeCompare(right, 'zh-CN')),
+                  };
+                });
+              }}
+              onTagFilterModeChange={(matchMode) => {
+                setTagFilter((current) => ({
+                  ...current,
+                  matchMode,
+                }));
+              }}
+              onClearTagFilter={() => {
+                setTagFilter({ selectedTags: [], matchMode: 'and' });
               }}
               onCycleTerminalFilterMode={() => {
                 setTerminalFilterMode((current) => {
@@ -1874,6 +2116,7 @@ export function TaskDagPage() {
           data-testid="task-dag-wheel-listener"
           ref={wheelListenerRef}
           className="h-full w-full"
+          onWheelCapture={handleCanvasModeWheel}
           onDoubleClick={(event) => {
             if (mode !== 'connect' || !isPaneInteractionTarget(event.target)) {
               return;
@@ -1902,7 +2145,7 @@ export function TaskDagPage() {
             proOptions={{ hideAttribution: true }}
             minZoom={TASK_DAG_MIN_ZOOM}
             fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}
-            nodesDraggable={false}
+            nodesDraggable={layoutMode === 'manual'}
             nodesConnectable={mode === 'connect'}
             elementsSelectable
             zoomOnDoubleClick={false}
@@ -1960,6 +2203,16 @@ export function TaskDagPage() {
               setMobileToolsOpen(false);
             }}
             onNodeClick={handleNodeClick}
+            onNodeDragStop={(_event, node) => {
+              if (layoutMode !== 'manual') {
+                return;
+              }
+              setManualLayoutSnapshot(updateTaskDagManualLayoutPosition(
+                manualLayoutSnapshot,
+                node.id,
+                node.position,
+              ));
+            }}
             onNodeDoubleClick={(_event, node) => {
               setContextMenu(null);
               if (mode === 'connect') {
@@ -1967,10 +2220,19 @@ export function TaskDagPage() {
               }
               handleNavigateToTaskDetail(node.id);
             }}
-            onConnectStart={(event) => {
+            onConnectStart={(event, params) => {
               connectDragTypeRef.current = resolveConnectTypeFromEvent(event);
+              const direction = resolveQuickCreateDirectionFromHandleType(params.handleType);
+              connectDragQuickCreateRef.current = params.nodeId && direction
+                ? {
+                  sourceTaskId: params.nodeId,
+                  type: connectDragTypeRef.current,
+                  direction,
+                }
+                : null;
             }}
             onConnect={(connection) => {
+              connectDragQuickCreateRef.current = null;
               setConnectState(null);
               void applyDependencyMutation(
                 connection.source?.trim() ?? '',
@@ -1978,11 +2240,47 @@ export function TaskDagPage() {
                 connectDragTypeRef.current,
               );
             }}
+            onConnectEnd={(event, connectionState) => {
+              const blankDropQuickCreate = connectDragQuickCreateRef.current;
+              connectDragQuickCreateRef.current = null;
+              if (
+                mode !== 'connect'
+                || !blankDropQuickCreate
+                || connectionState.toNode
+                || connectionState.isValid
+                || !isPaneInteractionTarget((event as { target?: EventTarget | null }).target ?? null)
+              ) {
+                return;
+              }
+
+              const clientPosition = extractClientPositionFromPointerEvent(event);
+              const dropPosition = clientPosition
+                ? (flowInstanceRef.current?.screenToFlowPosition(clientPosition) ?? clientPosition)
+                : null;
+
+              setConnectState(null);
+              setPaneContextMenu(null);
+              setQuickCreateDirection(null);
+              setQuickCreateFromNodeId(null);
+              setQuickCreateDependency(blankDropQuickCreate);
+              quickCreateDropPositionRef.current = dropPosition;
+              setQuickCreateDropPosition(dropPosition);
+              setQuickCreateOpen(true);
+            }}
             onNodeContextMenu={(event, node) => {
               event.preventDefault();
               setPaneContextMenu(null);
+              if (mode === 'browse') {
+                setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+                return;
+              }
               const menuState = resolveContextMenuState(node.id);
-              if (!menuState.showEndBlock && !menuState.upstream.visible && !menuState.downstream.visible) {
+              if (
+                !menuState.showEndBlock
+                && !menuState.focusSeries.visible
+                && !menuState.upstream.visible
+                && !menuState.downstream.visible
+              ) {
                 setContextMenu(null);
                 return;
               }
@@ -2004,6 +2302,7 @@ export function TaskDagPage() {
           isDesktop={isDesktop}
           mode={mode}
           hasSelectedNode={Boolean(selectedTaskId)}
+          hasFocusedSeries={Boolean(focusedSeriesAnchorId)}
           hasConnectSource={Boolean(connectState)}
           immersive={immersive}
           mobileOpen={mobileHintsOpen}
@@ -2012,6 +2311,7 @@ export function TaskDagPage() {
 
         {contextMenu ? (
           <div
+            data-testid="task-dag-context-menu"
             className="fixed z-50 rounded-lg border border-[#E7E5E4] bg-white py-1 shadow-lg dark:border-[#292524] dark:bg-[#1C1917]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
@@ -2026,6 +2326,19 @@ export function TaskDagPage() {
                 }}
               >
                 结束时间块
+              </button>
+            ) : null}
+            {contextMenuState?.focusSeries.visible ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-toggle-focus-series"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  setFocusedSeriesAnchorId(contextMenuState.focusSeries.active ? null : contextMenu.nodeId);
+                  setContextMenu(null);
+                }}
+              >
+                {contextMenuState.focusSeries.active ? '取消聚焦此系列' : '聚焦此系列'}
               </button>
             ) : null}
             {contextMenuState?.upstream.visible ? (
@@ -2072,6 +2385,8 @@ export function TaskDagPage() {
                 setQuickCreateDependency(null);
                 setQuickCreateDirection(null);
                 setQuickCreateFromNodeId(null);
+                quickCreateDropPositionRef.current = null;
+                setQuickCreateDropPosition(null);
                 setQuickCreateOpen(true);
               }}
             >

@@ -193,4 +193,48 @@ describe('useTaskDagKeyboard helpers', () => {
     requestAnimationFrameSpy.mockRestore();
     cancelAnimationFrameSpy.mockRestore();
   });
+
+  it('clears selected node before clearing the focused series with Esc and J（先清节点再清系列）', () => {
+    let selectedTaskId: string | null = 'task-a';
+    let focusedSeriesAnchorTaskId: string | null = 'task-a';
+    const onSelectedTaskIdChange = vi.fn();
+    const onClearFocusedSeries = vi.fn();
+
+    const { rerender } = renderHook(() => useTaskDagKeyboard({
+      mode: 'browse',
+      immersive: false,
+      selectedTaskId,
+      focusedSeriesAnchorTaskId,
+      connectState: null,
+      flowNodes: [makeNode('task-a', 0, 0)],
+      flowInstance: null,
+      panSpeed: 480,
+      zoomSpeed: 30,
+      onModeChange: vi.fn(),
+      onImmersiveChange: vi.fn(),
+      onSelectedTaskIdChange,
+      onClearFocusedSeries,
+      onConnectStateChange: vi.fn(),
+      onConnectExecute: vi.fn(),
+      onQuickCreateUpstream: vi.fn(),
+      onQuickCreateDownstream: vi.fn(),
+      onToggleCollapse: vi.fn(),
+      canToggleCollapse: vi.fn(() => false),
+    }));
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onSelectedTaskIdChange).toHaveBeenCalledWith(null);
+    expect(onClearFocusedSeries).not.toHaveBeenCalled();
+
+    onSelectedTaskIdChange.mockReset();
+    selectedTaskId = null;
+    rerender();
+
+    focusedSeriesAnchorTaskId = 'task-a';
+    rerender();
+
+    fireEvent.keyDown(document, { key: 'j' });
+    expect(onSelectedTaskIdChange).not.toHaveBeenCalled();
+    expect(onClearFocusedSeries).toHaveBeenCalledTimes(1);
+  });
 });

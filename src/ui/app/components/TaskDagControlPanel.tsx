@@ -1,17 +1,23 @@
 import { EyeOff, Grid2X2, LocateFixed, Maximize2, Search, Settings2 } from 'lucide-react';
+import type { TaskDagTagFilter } from '@/config/task-dag-preferences';
 import type { DagDirection } from '@/ui/app/pages/task-dag-layout';
 import { SlidingSegmentedControl } from '@/ui/app/components/SlidingSegmentedControl';
 import type { TaskDagSearchOptions } from '@/ui/app/pages/task-title-fuzzy-search';
 
 export type TaskDagTerminalFilterMode = 'show' | 'smart' | 'hide';
 export type TaskDagBackgroundMode = 'none' | 'dots' | 'lines';
+export type TaskDagLayoutMode = 'auto' | 'manual';
 
 interface TaskDagControlPanelProps {
   isDesktop: boolean;
   direction: DagDirection;
+  layoutMode: TaskDagLayoutMode;
   searchValue: string;
   searchMatchCount: number;
   searchOptions: TaskDagSearchOptions;
+  availableTags: string[];
+  tagFilter: TaskDagTagFilter;
+  hiddenRunningByTagFilterCount: number;
   terminalFilterMode: TaskDagTerminalFilterMode;
   backgroundMode: TaskDagBackgroundMode;
   hasActiveBlock: boolean;
@@ -19,8 +25,12 @@ interface TaskDagControlPanelProps {
   mobileSearchOpen: boolean;
   mobileToolsOpen: boolean;
   onDirectionChange: (direction: DagDirection) => void;
+  onLayoutModeChange: (mode: TaskDagLayoutMode) => void;
   onSearchValueChange: (value: string) => void;
   onSearchOptionToggle: (key: keyof TaskDagSearchOptions) => void;
+  onTagToggle: (tag: string) => void;
+  onTagFilterModeChange: (mode: TaskDagTagFilter['matchMode']) => void;
+  onClearTagFilter: () => void;
   onCycleTerminalFilterMode: () => void;
   onBackgroundModeChange: (mode: TaskDagBackgroundMode) => void;
   onFitView: () => void;
@@ -56,9 +66,13 @@ const DIRECTION_OPTIONS: ReadonlyArray<{
 export function TaskDagControlPanel({
   isDesktop,
   direction,
+  layoutMode,
   searchValue,
   searchMatchCount,
   searchOptions,
+  availableTags,
+  tagFilter,
+  hiddenRunningByTagFilterCount,
   terminalFilterMode,
   backgroundMode,
   hasActiveBlock,
@@ -66,8 +80,12 @@ export function TaskDagControlPanel({
   mobileSearchOpen,
   mobileToolsOpen,
   onDirectionChange,
+  onLayoutModeChange,
   onSearchValueChange,
   onSearchOptionToggle,
+  onTagToggle,
+  onTagFilterModeChange,
+  onClearTagFilter,
   onCycleTerminalFilterMode,
   onBackgroundModeChange,
   onFitView: _onFitView,
@@ -85,6 +103,7 @@ export function TaskDagControlPanel({
     { key: 'fuzzy', label: '模糊', testId: 'task-dag-search-option-fuzzy' },
     { key: 'filterMode', label: '过滤', testId: 'task-dag-search-option-filter' },
   ];
+  const hasTagFilter = tagFilter.selectedTags.length > 0;
   const terminalFilterLabels: Record<TaskDagTerminalFilterMode, string> = {
     show: '显示全部',
     smart: '智能隐藏',
@@ -95,54 +114,145 @@ export function TaskDagControlPanel({
     { key: 'dots', label: '点阵', testId: 'task-dag-background-dots' },
     { key: 'lines', label: '网格', testId: 'task-dag-background-lines' },
   ];
+  const layoutModeOptions: Array<{ key: TaskDagLayoutMode; label: string; testId: string }> = [
+    { key: 'auto', label: '自动布局', testId: 'task-dag-layout-mode-auto' },
+    { key: 'manual', label: '手动布局', testId: 'task-dag-layout-mode-manual' },
+  ];
 
   const searchPanel = (
     <div
       data-testid="task-dag-search-panel"
       className={[
-        'pointer-events-auto flex w-full items-center gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 text-[11px] text-[#57534E] shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]',
+        'pointer-events-auto flex w-full flex-col gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 text-[11px] text-[#57534E] shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]',
         immersiveFadeClass,
       ].join(' ')}
     >
-      <label className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/80 px-3 py-2 text-[11px] text-[#57534E] dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E]">
-        <Search size={12} />
-        <input
-          data-testid="task-dag-search-input"
-          value={searchValue}
-          onChange={(event) => onSearchValueChange(event.target.value)}
-          placeholder="搜索节点标题..."
-          className="w-full min-w-0 bg-transparent outline-none placeholder:text-[#A8A29E]"
-        />
-        {hasSearch ? (
-          <span
-            data-testid="task-dag-search-match-count"
-            className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
-          >
-            {searchMatchCount}
-          </span>
-        ) : null}
-      </label>
-
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-        {searchOptionLabels.map(({ key, label, testId }) => {
-          const active = searchOptions[key];
-          return (
-            <button
-              key={key}
-              type="button"
-              data-testid={testId}
-              onClick={() => onSearchOptionToggle(key)}
-              className={`rounded-full px-2 py-1 text-[10px] font-medium transition-colors ${
-                active
-                  ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
-                  : 'text-[#A8A29E] hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]'
-              }`}
+      <div className="flex w-full items-center gap-2">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/80 px-3 py-2 text-[11px] text-[#57534E] dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E]">
+          <Search size={12} />
+          <input
+            data-testid="task-dag-search-input"
+            value={searchValue}
+            onChange={(event) => onSearchValueChange(event.target.value)}
+            placeholder="搜索节点标题..."
+            className="w-full min-w-0 bg-transparent outline-none placeholder:text-[#A8A29E]"
+          />
+          {hasSearch ? (
+            <span
+              data-testid="task-dag-search-match-count"
+              className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
             >
-              {label}
-            </button>
-          );
-        })}
+              {searchMatchCount}
+            </span>
+          ) : null}
+        </label>
+
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+          {searchOptionLabels.map(({ key, label, testId }) => {
+            const active = searchOptions[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                data-testid={testId}
+                onClick={() => onSearchOptionToggle(key)}
+                className={`rounded-full px-2 py-1 text-[10px] font-medium transition-colors ${
+                  active
+                    ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                    : 'text-[#A8A29E] hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {availableTags.length > 0 ? (
+        <div className="flex w-full flex-col gap-2 rounded-2xl border border-[#E7E3E0]/80 bg-[#FAF7F5]/80 px-3 py-2 dark:border-[#3C3836]/80 dark:bg-[#120F0D]/80">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">
+              标签
+            </span>
+            {hasTagFilter ? (
+              <span
+                data-testid="task-dag-tag-filter-summary"
+                className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
+              >
+                已过滤
+              </span>
+            ) : null}
+            {hiddenRunningByTagFilterCount > 0 ? (
+              <span
+                data-testid="task-dag-hidden-running-filter-notice"
+                className="rounded-full bg-[#FEF2F2] px-2 py-0.5 text-[10px] font-medium text-[#B91C1C] dark:bg-[#2F1313] dark:text-[#FCA5A5]"
+              >
+                {hiddenRunningByTagFilterCount}
+                {' '}
+                个进行中任务已被过滤
+              </span>
+            ) : null}
+            {hasTagFilter ? (
+              <button
+                type="button"
+                data-testid="task-dag-tag-filter-clear"
+                onClick={onClearTagFilter}
+                className="rounded-full px-2 py-1 text-[10px] font-medium text-[#A8A29E] transition-colors hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]"
+              >
+                清除过滤
+              </button>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1">
+            {availableTags.map((tag) => {
+              const active = tagFilter.selectedTags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  data-testid={`task-dag-tag-filter-${tag}`}
+                  onClick={() => onTagToggle(tag)}
+                  className={`rounded-full border px-2 py-1 text-[10px] font-medium transition-colors ${
+                    active
+                      ? 'border-[#C75B3A] bg-[#FFF7ED] text-[#C75B3A] dark:border-[#FDBA74] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                      : 'border-[#E7E3E0] bg-white/80 text-[#78716C] hover:text-[#57534E] dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E] dark:hover:text-[#D6D3D1]'
+                  }`}
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-[#A8A29E]">
+              多标签匹配
+            </span>
+            <div className="flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 p-1 dark:border-[#3C3836] dark:bg-[#120F0D]">
+              {(['and', 'or'] as const).map((mode) => {
+                const active = tagFilter.matchMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    data-testid={`task-dag-tag-filter-mode-${mode}`}
+                    onClick={() => onTagFilterModeChange(mode)}
+                    className={`rounded-full px-3 py-1 text-[10px] font-medium transition-colors ${
+                      active
+                        ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                        : 'text-[#A8A29E] hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]'
+                    }`}
+                  >
+                    {mode.toUpperCase()}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -209,6 +319,24 @@ export function TaskDagControlPanel({
         buttonClassName="h-7 px-2"
         minButtonWidthClassName="min-w-[32px]"
       />
+
+      <div className="flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 px-1 py-1 dark:border-[#3C3836] dark:bg-[#120F0D]">
+        {layoutModeOptions.map(({ key, label, testId }) => (
+          <button
+            key={key}
+            type="button"
+            data-testid={testId}
+            onClick={() => onLayoutModeChange(key)}
+            className={`rounded-full px-3 py-1 text-[10px] font-medium transition-colors ${
+              layoutMode === key
+                ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                : 'text-[#A8A29E] hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <button
         type="button"

@@ -8,6 +8,7 @@ import {
   type DagLayoutPoint,
   type ResolvedDagDirection,
 } from './task-dag-layout';
+import type { TaskDagManualLayoutSnapshot } from './task-dag-layout-store';
 
 export const TASK_DAG_NODE_WIDTH = 256;
 export const TASK_DAG_NODE_HEIGHT = 140;
@@ -47,6 +48,8 @@ export type TaskDagFlowNodeData = {
   isSelected: boolean;
   isSearchMatch: boolean;
   isSearchDimmed: boolean;
+  isFocusDimmed: boolean;
+  isSecondaryNode: boolean;
   isCurrentRoot: boolean;
   isCollapsedTarget: boolean;
   isCollapsedUpstreamTarget: boolean;
@@ -65,6 +68,7 @@ export type TaskDagFlowNode = Node<TaskDagFlowNodeData, 'taskDag'>;
 export type TaskDagFlowEdgeData = {
   points?: DagLayoutPoint[] | null;
   hardEdge?: boolean;
+  isFocusDimmed?: boolean;
 };
 
 export type TaskDagFlowEdge = Edge<TaskDagFlowEdgeData>;
@@ -74,6 +78,33 @@ export interface BuildTaskDagFlowOptions {
   searchMatchedTaskIds?: ReadonlySet<string>;
   hasActiveSearch?: boolean;
   direction?: ResolvedDagDirection;
+  manualPositions?: TaskDagManualLayoutSnapshot['manualPositions'] | null;
+  focusedSeriesNodeIds?: ReadonlySet<string>;
+  secondaryNodeIds?: ReadonlySet<string>;
+}
+
+function overlayManualPositions(
+  nodePositions: Map<string, { x: number; y: number }>,
+  orderedNodeIds: string[],
+  manualPositions: TaskDagManualLayoutSnapshot['manualPositions'] | null | undefined,
+): Map<string, { x: number; y: number }> {
+  if (!manualPositions) {
+    return nodePositions;
+  }
+
+  const validNodeIds = new Set(orderedNodeIds);
+  const mergedPositions = new Map(nodePositions);
+  for (const [nodeId, position] of Object.entries(manualPositions)) {
+    if (!validNodeIds.has(nodeId)) {
+      continue;
+    }
+    mergedPositions.set(nodeId, {
+      x: position.x,
+      y: position.y,
+    });
+  }
+
+  return mergedPositions;
 }
 
 function buildFallbackPositions(
@@ -112,6 +143,7 @@ function resolveNodePositions(
   orderedNodeIds: string[],
   edges: Array<{ source: string; target: string }>,
   direction: ResolvedDagDirection,
+  manualPositions?: TaskDagManualLayoutSnapshot['manualPositions'] | null,
 ): {
   nodePositions: Map<string, { x: number; y: number }>;
   edgePoints: Map<string, DagLayoutPoint[]>;
@@ -125,14 +157,17 @@ function resolveNodePositions(
       direction,
     );
     if (layoutResult.nodePositions.size > 0) {
-      return layoutResult;
+      return {
+        nodePositions: overlayManualPositions(layoutResult.nodePositions, orderedNodeIds, manualPositions),
+        edgePoints: layoutResult.edgePoints,
+      };
     }
   } catch {
     // Fall back to the old depth-based layout when dagre fails.
   }
 
   return {
-    nodePositions: fallbackPositions,
+    nodePositions: overlayManualPositions(fallbackPositions, orderedNodeIds, manualPositions),
     edgePoints: new Map<string, DagLayoutPoint[]>(),
   };
 }
@@ -157,9 +192,14 @@ function resolveHandlePositions(direction: ResolvedDagDirection): {
 function buildEdges(
   edges: Array<{ id: string; source: string; target: string; type: 'hard' | 'soft' }>,
   edgePoints: Map<string, DagLayoutPoint[]>,
+  focusedSeriesNodeIds?: ReadonlySet<string>,
 ): TaskDagFlowEdge[] {
+  const hasFocusedSeries = Boolean(focusedSeriesNodeIds && focusedSeriesNodeIds.size > 0);
   return edges.map((edge) => {
     const hardEdge = edge.type === 'hard';
+    const isFocusDimmed = hasFocusedSeries
+      ? !focusedSeriesNodeIds?.has(edge.source) || !focusedSeriesNodeIds?.has(edge.target)
+      : false;
     return {
       id: edge.id,
       source: edge.source,
@@ -168,12 +208,13 @@ function buildEdges(
       data: {
         points: edgePoints.get(buildDagLayoutEdgeKey(edge.source, edge.target)) ?? null,
         hardEdge,
+        isFocusDimmed,
       },
       animated: false,
       selectable: false,
       style: hardEdge
-        ? { stroke: '#C75B3A', strokeWidth: 2.25 }
-        : { stroke: '#78716C', strokeWidth: 1.75, strokeDasharray: '7 5' },
+        ? { stroke: '#C75B3A', strokeWidth: 2.25, opacity: isFocusDimmed ? 0.28 : 1 }
+        : { stroke: '#78716C', strokeWidth: 1.75, strokeDasharray: '7 5', opacity: isFocusDimmed ? 0.28 : 1 },
       markerEnd: {
         type: MarkerType.ArrowClosed,
         color: hardEdge ? '#C75B3A' : '#78716C',
@@ -191,7 +232,12 @@ export function buildTaskDagFlow(
 } {
   const direction = options.direction ?? 'LR';
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const { nodePositions, edgePoints } = resolveNodePositions(graph.topologicalOrder, graph.edges, direction);
+  const resolvedPositions = resolveNodePositions(
+    graph.topologicalOrder,
+    graph.edges,
+    direction,
+    options.manualPositions,
+  );
   const handlePositions = resolveHandlePositions(direction);
 
   const nodes = graph.topologicalOrder
@@ -200,7 +246,7 @@ export function buildTaskDagFlow(
     .map((node) => ({
       id: node.id,
       type: 'taskDag',
-      position: nodePositions.get(node.id) ?? { x: 0, y: 0 },
+      position: resolvedPositions.nodePositions.get(node.id) ?? { x: 0, y: 0 },
       sourcePosition: handlePositions.sourcePosition,
       targetPosition: handlePositions.targetPosition,
       draggable: false,
@@ -212,6 +258,8 @@ export function buildTaskDagFlow(
         isSelected: false,
         isSearchMatch: false,
         isSearchDimmed: false,
+        isFocusDimmed: false,
+        isSecondaryNode: false,
         isCurrentRoot: node.id === graph.currentRootNodeId,
         isCollapsedTarget: false,
         isCollapsedUpstreamTarget: false,
@@ -227,7 +275,7 @@ export function buildTaskDagFlow(
       },
     } satisfies TaskDagFlowNode));
 
-  return { nodes, edges: buildEdges(graph.edges, edgePoints) };
+  return { nodes, edges: buildEdges(graph.edges, resolvedPositions.edgePoints, options.focusedSeriesNodeIds) };
 }
 
 export function buildVisibleTaskDagFlow(
@@ -241,9 +289,17 @@ export function buildVisibleTaskDagFlow(
   const searchMatchedTaskIds = options.searchMatchedTaskIds ?? new Set<string>();
   const hasActiveSearch = options.hasActiveSearch ?? false;
   const direction = options.direction ?? 'LR';
+  const focusedSeriesNodeIds = options.focusedSeriesNodeIds;
+  const hasFocusedSeries = Boolean(focusedSeriesNodeIds && focusedSeriesNodeIds.size > 0);
+  const secondaryNodeIds = options.secondaryNodeIds;
   const nodeById = new Map(visibleGraph.nodes.map((node) => [node.id, node]));
   const topologicalOrder = visibleGraph.nodes.map((node) => node.id);
-  const { nodePositions, edgePoints } = resolveNodePositions(topologicalOrder, visibleGraph.edges, direction);
+  const resolvedPositions = resolveNodePositions(
+    topologicalOrder,
+    visibleGraph.edges,
+    direction,
+    options.manualPositions,
+  );
   const handlePositions = resolveHandlePositions(direction);
 
   const nodes = topologicalOrder
@@ -252,7 +308,7 @@ export function buildVisibleTaskDagFlow(
     .map((node) => ({
       id: node.id,
       type: 'taskDag',
-      position: nodePositions.get(node.id) ?? { x: 0, y: 0 },
+      position: resolvedPositions.nodePositions.get(node.id) ?? { x: 0, y: 0 },
       sourcePosition: handlePositions.sourcePosition,
       targetPosition: handlePositions.targetPosition,
       draggable: false,
@@ -264,6 +320,8 @@ export function buildVisibleTaskDagFlow(
         isSelected: node.id === selectedTaskId,
         isSearchMatch: hasActiveSearch && searchMatchedTaskIds.has(node.id),
         isSearchDimmed: hasActiveSearch && !searchMatchedTaskIds.has(node.id),
+        isFocusDimmed: hasFocusedSeries && !focusedSeriesNodeIds?.has(node.id),
+        isSecondaryNode: Boolean(secondaryNodeIds?.has(node.id)),
         isCurrentRoot: node.id === visibleGraph.visibleCurrentRootNodeId,
         isCollapsedTarget: node.isCollapsedTarget,
         isCollapsedUpstreamTarget: node.isCollapsedUpstreamTarget,
@@ -279,5 +337,8 @@ export function buildVisibleTaskDagFlow(
       },
     } satisfies TaskDagFlowNode));
 
-  return { nodes, edges: buildEdges(visibleGraph.edges, edgePoints) };
+  return {
+    nodes,
+    edges: buildEdges(visibleGraph.edges, resolvedPositions.edgePoints, focusedSeriesNodeIds),
+  };
 }

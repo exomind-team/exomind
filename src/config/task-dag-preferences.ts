@@ -2,10 +2,12 @@ import type { TaskDagVisibilityState } from '@/lib/task/task-dag-visibility';
 import type { DagDirection } from '@/ui/app/pages/task-dag-layout';
 import {
   readRuntimeBackedValue,
+  removeRuntimeBackedValue,
   writeRuntimeBackedValue,
 } from './runtime-preference-storage';
 
 export type TaskDagMode = 'browse' | 'connect' | 'execute';
+export type TaskDagLayoutMode = 'auto' | 'manual';
 export type TaskDagTerminalFilterMode = 'show' | 'smart' | 'hide';
 export type TaskDagBackgroundMode = 'none' | 'dots' | 'lines';
 export type TaskDagViewportSurface = 'desktop' | 'mobile';
@@ -13,6 +15,10 @@ export type TaskDagSearchOptions = {
   includeDescription: boolean;
   fuzzy: boolean;
   filterMode: boolean;
+};
+export type TaskDagTagFilter = {
+  selectedTags: string[];
+  matchMode: 'and' | 'or';
 };
 export type TaskDagViewport = {
   x: number;
@@ -22,27 +28,37 @@ export type TaskDagViewport = {
 
 export const TASK_DAG_MODE_STORAGE_KEY = 'exomind:dag-mode';
 export const TASK_DAG_DIRECTION_STORAGE_KEY = 'exomind:dag-direction';
+export const TASK_DAG_LAYOUT_MODE_STORAGE_KEY = 'exomind:dag-layout-mode';
 export const TASK_DAG_HIDE_TERMINAL_STORAGE_KEY = 'exomind:dag-hide-terminal';
 export const TASK_DAG_BACKGROUND_STORAGE_KEY = 'exomind:dag-background-mode';
 export const TASK_DAG_IMMERSIVE_STORAGE_KEY = 'exomind:dag-immersive';
 export const TASK_DAG_VIEWPORT_STORAGE_KEY = 'exomind:dag-viewport';
 export const TASK_DAG_SEARCH_DRAFT_STORAGE_KEY = 'exomind:dag-search-draft';
 export const TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY = 'exomind:dag-search-options';
+export const TASK_DAG_TAG_FILTER_STORAGE_KEY = 'exomind:dag-tag-filter';
+export const TASK_DAG_FOCUSED_SERIES_STORAGE_KEY = 'exomind:dag-focused-series';
 export const TASK_DAG_VISIBILITY_STORAGE_KEY = 'exomind:dag-visibility';
 export const TASK_DAG_MODE_CHANGED_EVENT = 'exomind:dag-mode-changed';
 export const TASK_DAG_DIRECTION_CHANGED_EVENT = 'exomind:dag-direction-changed';
+export const TASK_DAG_LAYOUT_MODE_CHANGED_EVENT = 'exomind:dag-layout-mode-changed';
 export const TASK_DAG_HIDE_TERMINAL_CHANGED_EVENT = 'exomind:dag-hide-terminal-changed';
 export const TASK_DAG_BACKGROUND_CHANGED_EVENT = 'exomind:dag-background-mode-changed';
 export const TASK_DAG_IMMERSIVE_CHANGED_EVENT = 'exomind:dag-immersive-changed';
 export const TASK_DAG_VIEWPORT_CHANGED_EVENT = 'exomind:dag-viewport-changed';
 export const TASK_DAG_SEARCH_DRAFT_CHANGED_EVENT = 'exomind:dag-search-draft-changed';
 export const TASK_DAG_SEARCH_OPTIONS_CHANGED_EVENT = 'exomind:dag-search-options-changed';
+export const TASK_DAG_TAG_FILTER_CHANGED_EVENT = 'exomind:dag-tag-filter-changed';
+export const TASK_DAG_FOCUSED_SERIES_CHANGED_EVENT = 'exomind:dag-focused-series-changed';
 export const TASK_DAG_VISIBILITY_CHANGED_EVENT = 'exomind:dag-visibility-changed';
 
 const DEFAULT_TASK_DAG_SEARCH_OPTIONS: TaskDagSearchOptions = {
   includeDescription: false,
   fuzzy: true,
   filterMode: false,
+};
+const DEFAULT_TASK_DAG_TAG_FILTER: TaskDagTagFilter = {
+  selectedTags: [],
+  matchMode: 'and',
 };
 
 const EMPTY_TASK_DAG_VISIBILITY_STATE: TaskDagVisibilityState = {
@@ -72,6 +88,20 @@ export function setTaskDagMode(mode: TaskDagMode): TaskDagMode {
 export function getTaskDagDirection(): DagDirection {
   const saved = readRuntimeBackedValue(TASK_DAG_DIRECTION_STORAGE_KEY);
   return saved === 'TB' || saved === 'LR' || saved === 'auto' ? saved : 'auto';
+}
+
+export function getTaskDagLayoutMode(): TaskDagLayoutMode {
+  return readRuntimeBackedValue(TASK_DAG_LAYOUT_MODE_STORAGE_KEY) === 'manual' ? 'manual' : 'auto';
+}
+
+export function setTaskDagLayoutMode(mode: TaskDagLayoutMode): TaskDagLayoutMode {
+  const normalized = mode === 'manual' ? 'manual' : 'auto';
+  writeRuntimeBackedValue(
+    TASK_DAG_LAYOUT_MODE_STORAGE_KEY,
+    normalized,
+    TASK_DAG_LAYOUT_MODE_CHANGED_EVENT,
+  );
+  return normalized;
 }
 
 export function setTaskDagDirection(direction: DagDirection): DagDirection {
@@ -177,6 +207,69 @@ export function setTaskDagSearchDraft(draft: string): string {
     TASK_DAG_SEARCH_DRAFT_STORAGE_KEY,
     normalized,
     TASK_DAG_SEARCH_DRAFT_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagTagFilter(): TaskDagTagFilter {
+  try {
+    const raw = readRuntimeBackedValue(TASK_DAG_TAG_FILTER_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_TASK_DAG_TAG_FILTER;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<TaskDagTagFilter>;
+    return {
+      selectedTags: Array.isArray(parsed.selectedTags)
+        ? parsed.selectedTags
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter(Boolean)
+        : [],
+      matchMode: parsed.matchMode === 'or' ? 'or' : 'and',
+    };
+  } catch {
+    return DEFAULT_TASK_DAG_TAG_FILTER;
+  }
+}
+
+export function setTaskDagTagFilter(tagFilter: TaskDagTagFilter): TaskDagTagFilter {
+  const normalized: TaskDagTagFilter = {
+    selectedTags: Array.isArray(tagFilter.selectedTags)
+      ? Array.from(new Set(
+        tagFilter.selectedTags
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ))
+      : [],
+    matchMode: tagFilter.matchMode === 'or' ? 'or' : 'and',
+  };
+  writeRuntimeBackedValue(
+    TASK_DAG_TAG_FILTER_STORAGE_KEY,
+    JSON.stringify(normalized),
+    TASK_DAG_TAG_FILTER_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagFocusedSeriesAnchorId(): string | null {
+  const saved = readRuntimeBackedValue(TASK_DAG_FOCUSED_SERIES_STORAGE_KEY);
+  const normalized = saved?.trim();
+  return normalized ? normalized : null;
+}
+
+export function setTaskDagFocusedSeriesAnchorId(anchorId: string | null): string | null {
+  const normalized = anchorId?.trim() ?? null;
+  if (!normalized) {
+    removeRuntimeBackedValue(TASK_DAG_FOCUSED_SERIES_STORAGE_KEY);
+    return null;
+  }
+
+  writeRuntimeBackedValue(
+    TASK_DAG_FOCUSED_SERIES_STORAGE_KEY,
+    normalized,
+    TASK_DAG_FOCUSED_SERIES_CHANGED_EVENT,
   );
   return normalized;
 }

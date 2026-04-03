@@ -34,6 +34,7 @@ export interface TaskDagKeyboardOptions {
   mode: TaskDagMode;
   immersive: boolean;
   selectedTaskId: string | null;
+  focusedSeriesAnchorTaskId?: string | null;
   connectState: { sourceId: string; type: 'hard' | 'soft' } | null;
   flowNodes: TaskDagFlowNode[];
   flowInstance: ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null;
@@ -42,6 +43,7 @@ export interface TaskDagKeyboardOptions {
   onModeChange: (mode: TaskDagMode) => void;
   onImmersiveChange: (immersive: boolean) => void;
   onSelectedTaskIdChange: (taskId: string | null) => void;
+  onClearFocusedSeries?: () => void;
   onBrowseActivate?: (nodeId: string) => void;
   onConnectStateChange: (state: { sourceId: string; type: 'hard' | 'soft' } | null) => void;
   onConnectExecute: (sourceId: string, targetId: string, type: 'hard' | 'soft') => void;
@@ -238,6 +240,7 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     mode,
     immersive,
     selectedTaskId,
+    focusedSeriesAnchorTaskId,
     connectState,
     flowNodes,
     flowInstance,
@@ -246,6 +249,7 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     onModeChange,
     onImmersiveChange,
     onSelectedTaskIdChange,
+    onClearFocusedSeries,
     onBrowseActivate,
     onConnectStateChange,
     onConnectExecute,
@@ -392,6 +396,20 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     const normalizedKey = normalizeContinuousKey(key);
     const focusNodeId = resolveFocusNodeId();
 
+    const tryClearSelectionOrFocus = () => {
+      if (selectedTaskId) {
+        onSelectedTaskIdChange(null);
+        event.preventDefault();
+        return true;
+      }
+      if (focusedSeriesAnchorTaskId) {
+        onClearFocusedSeries?.();
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    };
+
     if (normalizedKey === 'Shift') {
       pressedKeysRef.current.add('Shift');
       return;
@@ -408,10 +426,12 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
         event.preventDefault();
         return;
       }
-      if (selectedTaskId) {
-        onSelectedTaskIdChange(null);
-        event.preventDefault();
-      }
+      tryClearSelectionOrFocus();
+      return;
+    }
+
+    if ((key === 'j' || key === 'J') && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      tryClearSelectionOrFocus();
       return;
     }
 
@@ -532,10 +552,13 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     onQuickCreateDownstream,
     onQuickCreateUpstream,
     onBrowseActivate,
+    onClearFocusedSeries,
     onSelectedTaskIdChange,
     onConnectExecute,
     onToggleCollapse,
+    focusedSeriesAnchorTaskId,
     resolveFocusNodeId,
+    selectedTaskId,
     startContinuousAction,
   ]);
 

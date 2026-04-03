@@ -41,6 +41,7 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
 
     expect(module.getTaskDagMode()).toBe('browse');
     expect(module.getTaskDagDirection()).toBe('auto');
+    expect(module.getTaskDagLayoutMode()).toBe('auto');
     expect(module.getTaskDagTerminalFilterMode()).toBe('show');
     expect(module.getTaskDagBackgroundMode()).toBe('dots');
     expect(module.getTaskDagImmersive()).toBe(false);
@@ -49,6 +50,10 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       includeDescription: false,
       fuzzy: true,
       filterMode: false,
+    });
+    expect(module.getTaskDagTagFilter()).toEqual({
+      selectedTags: [],
+      matchMode: 'and',
     });
     expect(module.getTaskDagVisibility()).toEqual({
       collapsedUpstreamOf: [],
@@ -68,6 +73,7 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
     cacheModule.__primeRuntimeConfigForTests({
       'exomind:dag-mode': 'execute',
       'exomind:dag-direction': 'LR',
+      'exomind:dag-layout-mode': 'manual',
       'exomind:dag-hide-terminal': 'smart',
       'exomind:dag-background-mode': 'lines',
       'exomind:dag-immersive': '1',
@@ -76,6 +82,10 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
         includeDescription: true,
         fuzzy: false,
         filterMode: true,
+      }),
+      'exomind:dag-tag-filter': JSON.stringify({
+        selectedTags: ['backend', 'dag'],
+        matchMode: 'or',
       }),
       'exomind:dag-visibility': JSON.stringify({
         collapsedUpstreamOf: ['task-a'],
@@ -94,6 +104,7 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
 
     expect(module.getTaskDagMode()).toBe('execute');
     expect(module.getTaskDagDirection()).toBe('LR');
+    expect(module.getTaskDagLayoutMode()).toBe('manual');
     expect(module.getTaskDagTerminalFilterMode()).toBe('smart');
     expect(module.getTaskDagBackgroundMode()).toBe('lines');
     expect(module.getTaskDagImmersive()).toBe(true);
@@ -102,6 +113,10 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       includeDescription: true,
       fuzzy: false,
       filterMode: true,
+    });
+    expect(module.getTaskDagTagFilter()).toEqual({
+      selectedTags: ['backend', 'dag'],
+      matchMode: 'or',
     });
     expect(module.getTaskDagVisibility()).toEqual({
       collapsedUpstreamOf: ['task-a'],
@@ -118,6 +133,9 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
 
     expect(module.setTaskDagDirection('TB')).toBe('TB');
     expect(storage[module.TASK_DAG_DIRECTION_STORAGE_KEY]).toBe('TB');
+
+    expect(module.setTaskDagLayoutMode('manual')).toBe('manual');
+    expect(storage[module.TASK_DAG_LAYOUT_MODE_STORAGE_KEY]).toBe('manual');
 
     expect(module.setTaskDagTerminalFilterMode('hide')).toBe('hide');
     expect(storage[module.TASK_DAG_HIDE_TERMINAL_STORAGE_KEY]).toBe('hide');
@@ -144,6 +162,18 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       includeDescription: true,
       fuzzy: false,
       filterMode: true,
+    });
+
+    expect(module.setTaskDagTagFilter({
+      selectedTags: ['backend', 'dag'],
+      matchMode: 'or',
+    })).toEqual({
+      selectedTags: ['backend', 'dag'],
+      matchMode: 'or',
+    });
+    expect(JSON.parse(storage[module.TASK_DAG_TAG_FILTER_STORAGE_KEY] ?? '{}')).toEqual({
+      selectedTags: ['backend', 'dag'],
+      matchMode: 'or',
     });
 
     expect(module.setTaskDagVisibility({

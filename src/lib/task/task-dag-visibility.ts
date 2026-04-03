@@ -30,6 +30,97 @@ export const EMPTY_TASK_DAG_VISIBILITY_STATE: TaskDagVisibilityState = {
   collapsedDownstreamOf: [],
 }
 
+function buildVisibleGraphNeighborIdsByNodeId(
+  visibleGraph: VisibleTaskGraph,
+): Map<string, Set<string>> {
+  const neighborIdsByNodeId = new Map<string, Set<string>>()
+  for (const node of visibleGraph.nodes) {
+    neighborIdsByNodeId.set(node.id, new Set())
+  }
+
+  for (const edge of visibleGraph.edges) {
+    if (!neighborIdsByNodeId.has(edge.source) || !neighborIdsByNodeId.has(edge.target)) {
+      continue
+    }
+
+    neighborIdsByNodeId.get(edge.source)?.add(edge.target)
+    neighborIdsByNodeId.get(edge.target)?.add(edge.source)
+  }
+
+  return neighborIdsByNodeId
+}
+
+export function findVisibleTaskGraphConnectedComponentNodeIds(
+  visibleGraph: VisibleTaskGraph,
+  anchorId: string,
+): Set<string> {
+  const neighborIdsByNodeId = buildVisibleGraphNeighborIdsByNodeId(visibleGraph)
+  if (!neighborIdsByNodeId.has(anchorId)) {
+    return new Set()
+  }
+
+  const componentNodeIds = new Set<string>()
+  const pendingNodeIds = [anchorId]
+
+  while (pendingNodeIds.length > 0) {
+    const nodeId = pendingNodeIds.pop()
+    if (!nodeId || componentNodeIds.has(nodeId)) {
+      continue
+    }
+
+    componentNodeIds.add(nodeId)
+    for (const neighborNodeId of neighborIdsByNodeId.get(nodeId) ?? []) {
+      if (!componentNodeIds.has(neighborNodeId)) {
+        pendingNodeIds.push(neighborNodeId)
+      }
+    }
+  }
+
+  return componentNodeIds
+}
+
+export function classifyVisibleTaskGraphTerminalNodesForSmartMode(
+  visibleGraph: VisibleTaskGraph,
+): {
+  hiddenNodeIds: Set<string>
+  secondaryNodeIds: Set<string>
+} {
+  const nodeById = new Map(visibleGraph.nodes.map((node) => [node.id, node]))
+  const visitedNodeIds = new Set<string>()
+  const hiddenNodeIds = new Set<string>()
+  const secondaryNodeIds = new Set<string>()
+
+  for (const node of visibleGraph.nodes) {
+    if (visitedNodeIds.has(node.id)) {
+      continue
+    }
+
+    const componentNodeIds = findVisibleTaskGraphConnectedComponentNodeIds(visibleGraph, node.id)
+    for (const componentNodeId of componentNodeIds) {
+      visitedNodeIds.add(componentNodeId)
+    }
+
+    const componentNodes = [...componentNodeIds]
+      .map((componentNodeId) => nodeById.get(componentNodeId))
+      .filter((componentNode): componentNode is VisibleTaskGraphNode => Boolean(componentNode))
+    const componentTerminalNodes = componentNodes.filter((componentNode) => isTerminalStatus(componentNode.status))
+    if (componentTerminalNodes.length === 0) {
+      continue
+    }
+
+    const hasUnfinishedNode = componentNodes.some((componentNode) => !isTerminalStatus(componentNode.status))
+    const targetSet = hasUnfinishedNode ? secondaryNodeIds : hiddenNodeIds
+    for (const terminalNode of componentTerminalNodes) {
+      targetSet.add(terminalNode.id)
+    }
+  }
+
+  return {
+    hiddenNodeIds,
+    secondaryNodeIds,
+  }
+}
+
 function isTerminalStatus(status: TaskGraphNode['status']): boolean {
   return status === 'completed' || status === 'cancelled'
 }

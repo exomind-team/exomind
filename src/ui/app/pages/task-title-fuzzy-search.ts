@@ -1,5 +1,13 @@
 import type { TaskNode } from '@/lib/types/task';
 
+const TASK_SEARCH_STATUS_PRIORITY: Record<TaskNode['status'], number> = {
+  in_progress: 0,
+  suspended: 1,
+  pending: 2,
+  completed: 3,
+  cancelled: 4,
+};
+
 function normalizeFuzzyText(value: string): string {
   return value.toLocaleLowerCase().replace(/\s+/g, '');
 }
@@ -75,7 +83,10 @@ export function filterTasksByTitleFuzzySearch(tasks: TaskNode[], query: string):
     })
     .filter((entry): entry is { task: TaskNode; score: number; longestSubstringLength: number } => entry.score !== null)
     .sort((left, right) => (
-      right.longestSubstringLength - left.longestSubstringLength
+      (TASK_SEARCH_STATUS_PRIORITY[left.task.status] ?? Number.MAX_SAFE_INTEGER)
+        - (TASK_SEARCH_STATUS_PRIORITY[right.task.status] ?? Number.MAX_SAFE_INTEGER)
+      || right.task.createdAt - left.task.createdAt
+      || right.longestSubstringLength - left.longestSubstringLength
       || right.score - left.score
       || left.task.title.localeCompare(right.task.title, 'zh-CN')
     ))
