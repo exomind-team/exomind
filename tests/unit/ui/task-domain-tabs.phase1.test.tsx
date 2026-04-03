@@ -17,14 +17,16 @@ vi.mock('@/config/proposal-inbox-enabled', () => ({
 }));
 
 describe('TaskDomainTabs（任务域顶部导航）', () => {
-  it('renders task domain tabs with the active item highlighted（渲染任务域顶部切换并标记激活项）', () => {
+  it('renders task domain links with the active item highlighted（渲染任务域导航并标记当前路由）', () => {
     render(<TaskDomainTabs active="proposals" />);
 
+    expect(screen.getByRole('navigation', { name: '任务域导航' })).toBeInTheDocument();
     expect(screen.getByTestId('task-domain-tab-list')).toHaveAttribute('to', '/tasks');
     expect(screen.getByTestId('task-domain-tab-timeline')).toHaveAttribute('to', '/tasks/timeline');
     expect(screen.getByTestId('task-domain-tab-dag')).toHaveAttribute('to', '/tasks/dag');
     expect(screen.getByTestId('task-domain-tab-proposals')).toHaveAttribute('to', '/proposals');
-    expect(screen.getByTestId('task-domain-tab-proposals')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('task-domain-tab-proposals')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('task-domain-tab-proposals')).not.toHaveAttribute('role', 'tab');
   });
 
   it('hides proposals tab outside the proposals page when proposal inbox flag is off（请求箱开关关闭时在非请求箱页隐藏任务域入口）', () => {

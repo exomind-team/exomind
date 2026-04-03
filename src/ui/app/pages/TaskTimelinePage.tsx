@@ -1,6 +1,7 @@
 import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { PageShell } from '@/ui/app/components/PageShell'
 import { SlidingSegmentedControl } from '@/ui/app/components/SlidingSegmentedControl'
 import { TaskDomainTabs } from '@/ui/app/components/TaskDomainTabs'
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop'
@@ -1181,175 +1182,170 @@ export function TaskTimelinePage() {
   }
 
   return (
-    <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="task-timeline-page">
-      <header className="border-b border-[#F0ECE8] px-5 py-4 dark:border-[#292524] md:px-8 lg:px-10">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
-            <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
-              时间线视图：以任务为主语纵览完整时间轴，比例尺决定单屏能容纳的时间跨度。
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-3">
-          <TaskDomainTabs active="timeline" />
-        </div>
-
-        <div className="mt-3 flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-[min(100%,40rem)] max-w-full shrink-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-white/80 p-1 dark:border-[#292524] dark:bg-[#1C1917]">
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute bottom-1 left-1 top-1 rounded-[8px] border border-brand-accent/40 bg-brand-accent/15 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out"
-                style={{
-                  width: `calc((100% - ${CUSTOM_SCALE_SLOT_PADDING_PX * 2}px) / ${scaleOptions.length})`,
-                  transform: `translateX(${selectedScaleIndex * 100}%)`,
-                }}
-              />
-              <div
-                className="relative z-10 grid min-w-0 gap-0"
-                style={{ gridTemplateColumns: `repeat(${scaleOptions.length}, minmax(0, 1fr))` }}
-              >
-                {scaleOptions.map((option) => (
-                  option.id === 'custom' ? (
-                    isCustomScaleEditing ? (
-                      <input
-                        key={option.id}
-                        ref={customScaleInputRef}
-                        data-testid="task-timeline-custom-scale-input"
-                        value={customScaleDraft}
-                        onChange={(event) => {
-                          setCustomScaleDraft(event.target.value.replace(/[^0-9hdmyHDMY\s]/g, ''))
-                        }}
-                        onBlur={handleApplyCustomScale}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault()
-                            handleApplyCustomScale()
-                          }
-                          if (event.key === 'Escape') {
-                            event.preventDefault()
-                            setCustomScaleDraft(resolveCustomScaleDraftText(range))
-                            closeCustomScaleEditor()
-                          }
-                        }}
-                        aria-label="自定义比例尺（Custom timeline scale）"
-                        placeholder="12h"
-                        className="relative z-10 h-8 w-full min-w-0 max-w-full rounded-[8px] border-transparent bg-transparent px-[8px] text-center text-[12px] font-semibold text-[#1C1917] outline-none ring-0 focus-visible:ring-0 dark:text-[#FAFAF9]"
-                      />
+    <PageShell
+      title="任务"
+      subtitle="时间线视图：以任务为主语纵览完整时间轴，比例尺决定单屏能容纳的时间跨度。"
+      headerBottom={<TaskDomainTabs active="timeline" />}
+      className="min-h-full"
+      contentClassName="min-h-0 flex flex-1 flex-col overflow-hidden"
+    >
+      <div data-testid="task-timeline-page" className="flex min-h-0 flex-1 flex-col">
+        <div className="border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-[min(100%,40rem)] max-w-full shrink-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-white/80 p-1 dark:border-[#292524] dark:bg-[#1C1917]">
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute bottom-1 left-1 top-1 rounded-[8px] border border-brand-accent/40 bg-brand-accent/15 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out"
+                  style={{
+                    width: `calc((100% - ${CUSTOM_SCALE_SLOT_PADDING_PX * 2}px) / ${scaleOptions.length})`,
+                    transform: `translateX(${selectedScaleIndex * 100}%)`,
+                  }}
+                />
+                <div
+                  className="relative z-10 grid min-w-0 gap-0"
+                  style={{ gridTemplateColumns: `repeat(${scaleOptions.length}, minmax(0, 1fr))` }}
+                >
+                  {scaleOptions.map((option) => (
+                    option.id === 'custom' ? (
+                      isCustomScaleEditing ? (
+                        <input
+                          key={option.id}
+                          ref={customScaleInputRef}
+                          data-testid="task-timeline-custom-scale-input"
+                          value={customScaleDraft}
+                          onChange={(event) => {
+                            setCustomScaleDraft(event.target.value.replace(/[^0-9hdmyHDMY\s]/g, ''))
+                          }}
+                          onBlur={handleApplyCustomScale}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              handleApplyCustomScale()
+                            }
+                            if (event.key === 'Escape') {
+                              event.preventDefault()
+                              setCustomScaleDraft(resolveCustomScaleDraftText(range))
+                              closeCustomScaleEditor()
+                            }
+                          }}
+                          aria-label="自定义比例尺（Custom timeline scale）"
+                          placeholder="12h"
+                          className="relative z-10 h-8 w-full min-w-0 max-w-full rounded-[8px] border-transparent bg-transparent px-[8px] text-center text-[12px] font-semibold text-[#1C1917] outline-none ring-0 focus-visible:ring-0 dark:text-[#FAFAF9]"
+                        />
+                      ) : (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={openCustomScaleEditor}
+                          className={`relative z-10 flex h-8 w-full min-w-0 max-w-full select-none items-center justify-center overflow-hidden rounded-[8px] px-2 text-center text-[12px] transition-colors duration-200 ${
+                            typeof range === 'object'
+                              ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9]'
+                              : 'text-[#C75B3A] hover:text-[#B24D2F]'
+                          }`}
+                          aria-label="自定义比例尺（Custom timeline scale）"
+                        >
+                          {typeof range === 'object' ? <ChevronDown size={12} className="mr-1 transition-transform" /> : null}
+                          <span className={typeof range === 'object' ? 'truncate' : ''}>
+                            {typeof range === 'object' ? `${range.value}${range.unit}` : option.label}
+                          </span>
+                        </button>
+                      )
                     ) : (
                       <button
                         key={option.id}
                         type="button"
-                        onClick={openCustomScaleEditor}
-                        className={`relative z-10 flex h-8 w-full min-w-0 max-w-full select-none items-center justify-center overflow-hidden rounded-[8px] px-2 text-center text-[12px] transition-colors duration-200 ${
-                          typeof range === 'object'
+                        onClick={() => {
+                          handleSetRange(option.id as TimelinePresetScale)
+                          closeCustomScaleEditor()
+                        }}
+                        className={`relative z-10 h-8 min-w-[64px] select-none rounded-[8px] px-3 text-center text-[12px] transition-colors duration-200 ${
+                          range === option.id
                             ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9]'
-                            : 'text-[#C75B3A] hover:text-[#B24D2F]'
+                            : 'text-[#78716C] hover:text-[#57534E] dark:hover:text-[#D6D3D1]'
                         }`}
-                        aria-label="自定义比例尺（Custom timeline scale）"
                       >
-                        {typeof range === 'object' ? <ChevronDown size={12} className="mr-1 transition-transform" /> : null}
-                        <span className={typeof range === 'object' ? 'truncate' : ''}>
-                          {typeof range === 'object' ? `${range.value}${range.unit}` : option.label}
-                        </span>
+                        {option.label}
                       </button>
                     )
-                  ) : (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => {
-                        handleSetRange(option.id as TimelinePresetScale)
-                        closeCustomScaleEditor()
-                      }}
-                      className={`relative z-10 h-8 min-w-[64px] select-none rounded-[8px] px-3 text-center text-[12px] transition-colors duration-200 ${
-                        range === option.id
-                          ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9]'
-                          : 'text-[#78716C] hover:text-[#57534E] dark:hover:text-[#D6D3D1]'
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  )
-                ))}
+                  ))}
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => handleSetShowPending(!showPending)}
+                aria-pressed={showPending}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  showPending
+                    ? 'border-[#C75B3A] bg-[#FFF7ED] text-[#C75B3A] dark:border-[#FDBA74] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                    : 'border-[#E7E3E0] bg-white text-[#57534E] hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917] dark:text-[#A8A29E]'
+                }`}
+              >
+                显示待办段
+              </button>
+              <button
+                type="button"
+                onClick={handleJumpToNow}
+                className="rounded-full border border-[#E7E3E0] bg-white px-3 py-1.5 text-xs font-medium text-[#57534E] transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917] dark:text-[#A8A29E]"
+              >
+                回到当下
+              </button>
+              <SlidingSegmentedControl
+                options={TIMELINE_LAYOUT_OPTIONS}
+                value={layoutMode}
+                onChange={handleSetLayoutMode}
+                className="bg-white/80 dark:border-[#292524] dark:bg-[#1C1917]"
+                buttonClassName="h-8 px-2 text-[12px]"
+                minButtonWidthClassName="min-w-[40px]"
+              />
             </div>
-            <button
-              type="button"
-              onClick={() => handleSetShowPending(!showPending)}
-              aria-pressed={showPending}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                showPending
-                  ? 'border-[#C75B3A] bg-[#FFF7ED] text-[#C75B3A] dark:border-[#FDBA74] dark:bg-[#2A231B] dark:text-[#FDBA74]'
-                  : 'border-[#E7E3E0] bg-white text-[#57534E] hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917] dark:text-[#A8A29E]'
-              }`}
-            >
-              显示待办段
-            </button>
-            <button
-              type="button"
-              onClick={handleJumpToNow}
-              className="rounded-full border border-[#E7E3E0] bg-white px-3 py-1.5 text-xs font-medium text-[#57534E] transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917] dark:text-[#A8A29E]"
-            >
-              回到当下
-            </button>
-            <SlidingSegmentedControl
-              options={TIMELINE_LAYOUT_OPTIONS}
-              value={layoutMode}
-              onChange={handleSetLayoutMode}
-              className="bg-white/80 dark:border-[#292524] dark:bg-[#1C1917]"
-              buttonClassName="h-8 px-2 text-[12px]"
-              minButtonWidthClassName="min-w-[40px]"
-            />
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-            <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">比例尺：{formatRangeSummaryLabel(range)}</span>
-            <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">任务：{model.entries.length}</span>
-            <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">泳道：{model.lanes.length}</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+              <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">比例尺：{formatRangeSummaryLabel(range)}</span>
+              <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">任务：{model.entries.length}</span>
+              <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">泳道：{model.lanes.length}</span>
+            </div>
           </div>
         </div>
-      </header>
 
-      <div
-        ref={scrollViewportRef}
-        data-testid="task-timeline-scroll-viewport"
-        onWheel={handleTimelineWheel}
-        onClick={(event) => {
-          const target = event.target
-          if (target instanceof HTMLElement && target === event.currentTarget) {
-            handleTimelineBackgroundClick()
-          }
-        }}
-        className="min-h-0 flex-1 overflow-auto px-5 pb-4 pt-0 md:px-8 lg:px-10"
-      >
-        <TimelineSwimLane
-          model={model}
-          displayTimeRange={displayTimeRange}
-          range={range}
-          isHorizontal={isHorizontalTimeline}
-          selectedTaskId={selectedTaskId}
-          onSelectTask={handleSelectTask}
-          onBackgroundClick={handleTimelineBackgroundClick}
-          primaryCanvasSize={timelineMetrics.primaryCanvasSize}
-        />
-      </div>
-
-      {selectedEntry ? (
-        <TimelineDetailPanel
-          entry={selectedEntry}
-          onClose={() => handleSelectTask(null)}
-          onOpenDetail={() => {
-            void navigate({
-              to: '/tasks/$taskId',
-              params: { taskId: selectedEntry.taskId },
-              search: { from: 'timeline' },
-            })
+        <div
+          ref={scrollViewportRef}
+          data-testid="task-timeline-scroll-viewport"
+          onWheel={handleTimelineWheel}
+          onClick={(event) => {
+            const target = event.target
+            if (target instanceof HTMLElement && target === event.currentTarget) {
+              handleTimelineBackgroundClick()
+            }
           }}
-        />
-      ) : null}
-    </div>
+          className="min-h-0 flex-1 overflow-auto px-5 pb-4 pt-0 md:px-8 lg:px-10"
+        >
+          <TimelineSwimLane
+            model={model}
+            displayTimeRange={displayTimeRange}
+            range={range}
+            isHorizontal={isHorizontalTimeline}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={handleSelectTask}
+            onBackgroundClick={handleTimelineBackgroundClick}
+            primaryCanvasSize={timelineMetrics.primaryCanvasSize}
+          />
+        </div>
+
+        {selectedEntry ? (
+          <TimelineDetailPanel
+            entry={selectedEntry}
+            onClose={() => handleSelectTask(null)}
+            onOpenDetail={() => {
+              void navigate({
+                to: '/tasks/$taskId',
+                params: { taskId: selectedEntry.taskId },
+                search: { from: 'timeline' },
+              })
+            }}
+          />
+        ) : null}
+      </div>
+    </PageShell>
   )
 }

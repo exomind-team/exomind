@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PageShell } from '@/ui/app/components/PageShell';
 import {
   Background,
   BackgroundVariant,
@@ -1807,73 +1808,67 @@ export function TaskDagPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="task-dag-page">
-      <header
-        data-testid="task-dag-page-header"
-        className={immersive ? 'hidden' : 'px-5 py-4 md:px-8 lg:px-10'}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
-            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{subtitle}</p>
-          </div>
-        </div>
-        <div className="mt-3">
-          <TaskDomainTabs active="dag" />
-        </div>
-      </header>
-
-      <div
-        data-testid="task-dag-canvas-shell"
-        className="relative flex-1 min-h-0 overflow-hidden border-t border-[#F0ECE8] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]"
-      >
-        <TaskDagModeSelector
-          mode={mode}
-          enabledModes={['browse', 'connect', 'execute']}
-          onChange={setMode}
-          immersive={immersive}
-        />
-        {hideControlPanel ? null : (
-          <TaskDagControlPanel
-            isDesktop={isDesktop}
-            direction={dagDirection}
-            searchValue={searchDraft}
-            searchMatchCount={searchMatchCount}
-            searchOptions={searchOptions}
-            terminalFilterMode={terminalFilterMode}
-            backgroundMode={backgroundMode}
-            hasActiveBlock={activeTaskIds.length > 0}
+    <PageShell
+      title="任务"
+      subtitle={subtitle}
+      headerBottom={<TaskDomainTabs active="dag" />}
+      headerTestId="task-dag-page-header"
+      headerClassName={immersive ? 'hidden' : undefined}
+      className="min-h-full"
+      contentClassName="min-h-0 flex-1 overflow-hidden"
+    >
+      <div className="flex h-full min-h-0 flex-col" data-testid="task-dag-page">
+        <div
+          data-testid="task-dag-canvas-shell"
+          className="relative flex-1 min-h-0 overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]"
+        >
+          <TaskDagModeSelector
+            mode={mode}
+            enabledModes={['browse', 'connect', 'execute']}
+            onChange={setMode}
             immersive={immersive}
-            mobileSearchOpen={mobileSearchOpen}
-            mobileToolsOpen={mobileToolsOpen}
-            onDirectionChange={setDagDirection}
-            onSearchValueChange={setSearchDraft}
-            onSearchOptionToggle={(key) => {
-              setSearchOptions((current) => ({
-                ...current,
-                [key]: !current[key],
-              }));
-            }}
-            onCycleTerminalFilterMode={() => {
-              setTerminalFilterMode((current) => {
-                if (current === 'show') return 'smart';
-                if (current === 'smart') return 'hide';
-                return 'show';
-              });
-            }}
-            onBackgroundModeChange={setBackgroundMode}
-            onToggleImmersive={() => setImmersive((value) => !value)}
-            onFitView={() => {
-              debugTaskDagExecute('viewport:fitView:manual', {
-                viewportBefore: snapshotViewport(flowInstanceRef.current),
-              });
-              void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
-            }}
-            onJumpToCurrentRoot={handleJumpToCurrentRoot}
-            onMobileSearchOpenChange={setMobileSearchOpen}
-            onMobileToolsOpenChange={setMobileToolsOpen}
           />
-        )}
+          {hideControlPanel ? null : (
+            <TaskDagControlPanel
+              isDesktop={isDesktop}
+              direction={dagDirection}
+              searchValue={searchDraft}
+              searchMatchCount={searchMatchCount}
+              searchOptions={searchOptions}
+              terminalFilterMode={terminalFilterMode}
+              backgroundMode={backgroundMode}
+              hasActiveBlock={activeTaskIds.length > 0}
+              immersive={immersive}
+              mobileSearchOpen={mobileSearchOpen}
+              mobileToolsOpen={mobileToolsOpen}
+              onDirectionChange={setDagDirection}
+              onSearchValueChange={setSearchDraft}
+              onSearchOptionToggle={(key) => {
+                setSearchOptions((current) => ({
+                  ...current,
+                  [key]: !current[key],
+                }));
+              }}
+              onCycleTerminalFilterMode={() => {
+                setTerminalFilterMode((current) => {
+                  if (current === 'show') return 'smart';
+                  if (current === 'smart') return 'hide';
+                  return 'show';
+                });
+              }}
+              onBackgroundModeChange={setBackgroundMode}
+              onToggleImmersive={() => setImmersive((value) => !value)}
+              onFitView={() => {
+                debugTaskDagExecute('viewport:fitView:manual', {
+                  viewportBefore: snapshotViewport(flowInstanceRef.current),
+                });
+                void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
+              }}
+              onJumpToCurrentRoot={handleJumpToCurrentRoot}
+              onMobileSearchOpenChange={setMobileSearchOpen}
+              onMobileToolsOpenChange={setMobileToolsOpen}
+            />
+          )}
 
         <div
           data-testid="task-dag-wheel-listener"
@@ -2114,72 +2109,73 @@ export function TaskDagPage() {
           }}
           onSubmit={handleQuickCreateTask}
         />
-        <Dialog
-          open={disassociateDialogOpen}
-          onOpenChange={(open) => {
-            setDisassociateDialogOpen(open);
-            if (!open) {
-              setDisassociateTargetTaskId(null);
-              setDisassociateChoice('suspended');
-              setDisassociateDescription('');
-            }
-          }}
-        >
-          <DialogContent
-            data-testid="task-dag-disassociate-dialog"
-            className="w-[calc(100vw-2rem)] max-w-md rounded-2xl"
+          <Dialog
+            open={disassociateDialogOpen}
+            onOpenChange={(open) => {
+              setDisassociateDialogOpen(open);
+              if (!open) {
+                setDisassociateTargetTaskId(null);
+                setDisassociateChoice('suspended');
+                setDisassociateDescription('');
+              }
+            }}
           >
-            <DialogHeader>
-              <DialogTitle>
-                {disassociateTargetTask ? `取消关联「${disassociateTargetTask.title}」` : '取消关联任务'}
-              </DialogTitle>
-              <DialogDescription>
-                从当前时间块移除该任务时，可同步选择它的下一步状态。
-              </DialogDescription>
-            </DialogHeader>
-            <TaskStatusSelector
-              value={disassociateChoice}
-              onChange={setDisassociateChoice}
-              allowedChoices={TASK_STATUS_SELECTOR_END_OPTIONS}
-              helperHint="取消关联后，请选择任务状态。"
-              optionTestIdPrefix="task-dag-disassociate-status"
-              data-testid="task-dag-disassociate-status-selector"
-            />
-            <textarea
-              data-testid="task-dag-disassociate-description"
-              value={disassociateDescription}
-              onChange={(event) => setDisassociateDescription(event.target.value)}
-              placeholder="补充状态变化说明（可选）..."
-              className="min-h-[88px] resize-none rounded-xl border border-[#E7E5E4] bg-transparent px-3 py-2 text-sm text-[#1C1917] outline-none focus:border-[#C75B3A] dark:border-[#292524] dark:text-[#FAFAF9]"
-            />
-            <DialogFooter>
-              <button
-                type="button"
-                data-testid="task-dag-disassociate-cancel"
-                onClick={() => {
-                  setDisassociateDialogOpen(false);
-                  setDisassociateTargetTaskId(null);
-                  setDisassociateChoice('suspended');
-                  setDisassociateDescription('');
-                }}
-                className="rounded-full px-4 py-2 text-sm font-medium text-[#78716C] transition-colors hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
-              >
-                关闭
-              </button>
-              <button
-                type="button"
-                data-testid="task-dag-disassociate-submit"
-                onClick={() => {
-                  void handleDisassociateSubmit();
-                }}
-                className="inline-flex items-center justify-center rounded-full bg-[#C75B3A] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                确认取消关联
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            <DialogContent
+              data-testid="task-dag-disassociate-dialog"
+              className="w-[calc(100vw-2rem)] max-w-md rounded-2xl"
+            >
+              <DialogHeader>
+                <DialogTitle>
+                  {disassociateTargetTask ? `取消关联「${disassociateTargetTask.title}」` : '取消关联任务'}
+                </DialogTitle>
+                <DialogDescription>
+                  从当前时间块移除该任务时，可同步选择它的下一步状态。
+                </DialogDescription>
+              </DialogHeader>
+              <TaskStatusSelector
+                value={disassociateChoice}
+                onChange={setDisassociateChoice}
+                allowedChoices={TASK_STATUS_SELECTOR_END_OPTIONS}
+                helperHint="取消关联后，请选择任务状态。"
+                optionTestIdPrefix="task-dag-disassociate-status"
+                data-testid="task-dag-disassociate-status-selector"
+              />
+              <textarea
+                data-testid="task-dag-disassociate-description"
+                value={disassociateDescription}
+                onChange={(event) => setDisassociateDescription(event.target.value)}
+                placeholder="补充状态变化说明（可选）..."
+                className="min-h-[88px] resize-none rounded-xl border border-[#E7E5E4] bg-transparent px-3 py-2 text-sm text-[#1C1917] outline-none focus:border-[#C75B3A] dark:border-[#292524] dark:text-[#FAFAF9]"
+              />
+              <DialogFooter>
+                <button
+                  type="button"
+                  data-testid="task-dag-disassociate-cancel"
+                  onClick={() => {
+                    setDisassociateDialogOpen(false);
+                    setDisassociateTargetTaskId(null);
+                    setDisassociateChoice('suspended');
+                    setDisassociateDescription('');
+                  }}
+                  className="rounded-full px-4 py-2 text-sm font-medium text-[#78716C] transition-colors hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+                >
+                  关闭
+                </button>
+                <button
+                  type="button"
+                  data-testid="task-dag-disassociate-submit"
+                  onClick={() => {
+                    void handleDisassociateSubmit();
+                  }}
+                  className="inline-flex items-center justify-center rounded-full bg-[#C75B3A] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  确认取消关联
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

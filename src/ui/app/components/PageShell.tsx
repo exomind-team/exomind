@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 interface PageShellProps {
   title: string;
   headerTop?: ReactNode;
+  headerTestId?: string;
   eyebrow?: string;
   subtitle?: string;
   headerAction?: ReactNode;
@@ -19,6 +20,7 @@ interface PageShellProps {
 export function PageShell({
   title,
   headerTop,
+  headerTestId,
   eyebrow,
   subtitle,
   headerAction,
@@ -36,6 +38,7 @@ export function PageShell({
     >
       {!hideHeader ? (
         <header
+          data-testid={headerTestId}
           className={cn(
             'flex flex-col gap-2 border-b border-border-page px-5 py-3 md:px-8 lg:px-10',
             headerClassName,

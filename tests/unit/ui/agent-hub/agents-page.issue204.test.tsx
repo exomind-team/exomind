@@ -207,11 +207,11 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
       expect(screen.getByText('session.end → reviewer')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '节点' }));
+    fireEvent.click(screen.getByRole('tab', { name: '节点' }));
     expect(screen.getByText('全部')).toBeInTheDocument();
     expect(screen.getByText('Echo Agent')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '设备' }));
+    fireEvent.click(screen.getByRole('tab', { name: '设备' }));
     expect(screen.getByTestId('agent-device-view')).toBeInTheDocument();
     expect(screen.getByTestId('agent-device-overview-card')).toBeInTheDocument();
   });

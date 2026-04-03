@@ -58,14 +58,17 @@ describe('ordinary pages phase 2 regression（普通页面阶段二回归）', (
   it('places task timeline domain tabs below the title block and before timeline controls（时间线页任务域 tabs 应位于标题之后、时间线控件之前）', () => {
     const source = readSource('src/ui/app/pages/TaskTimelinePage.tsx');
     const tabsIndex = source.indexOf('<TaskDomainTabs active="timeline" />');
-    const headingIndex = source.indexOf('<h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>');
+    const shellIndex = source.indexOf('<PageShell');
+    const headingIndex = source.indexOf('title="任务"');
     const rangeControlsIndex = source.indexOf('显示待办段');
     const metricsIndex = source.indexOf("比例尺：");
 
     expect(tabsIndex).toBeGreaterThan(-1);
+    expect(shellIndex).toBeGreaterThan(-1);
     expect(headingIndex).toBeGreaterThan(-1);
     expect(rangeControlsIndex).toBeGreaterThan(-1);
     expect(metricsIndex).toBeGreaterThan(-1);
+    expect(source).toContain('headerBottom={<TaskDomainTabs active="timeline" />}');
     expect(tabsIndex).toBeGreaterThan(headingIndex);
     expect(tabsIndex).toBeLessThan(rangeControlsIndex);
     expect(tabsIndex).toBeLessThan(metricsIndex);
@@ -74,10 +77,13 @@ describe('ordinary pages phase 2 regression（普通页面阶段二回归）', (
   it('places task dag domain tabs below the title block（依赖图页任务域 tabs 应位于标题之后）', () => {
     const source = readSource('src/ui/app/pages/TaskDagPage.tsx');
     const tabsIndex = source.indexOf('<TaskDomainTabs active="dag" />');
-    const headingIndex = source.indexOf('<h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>');
+    const shellIndex = source.indexOf('<PageShell');
+    const headingIndex = source.indexOf('title="任务"');
 
     expect(tabsIndex).toBeGreaterThan(-1);
+    expect(shellIndex).toBeGreaterThan(-1);
     expect(headingIndex).toBeGreaterThan(-1);
+    expect(source).toContain('headerBottom={<TaskDomainTabs active="dag" />}');
     expect(tabsIndex).toBeGreaterThan(headingIndex);
   });
 

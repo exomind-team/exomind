@@ -2,6 +2,7 @@ import { ListTodo, NotebookPen, Target } from 'lucide-react';
 import { ChatPage } from '@/components/Chat/ChatPage';
 import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
+import { PageHeaderNav } from '@/ui/app/components/PageHeaderNav';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { useLocation, useNavigate } from '@tanstack/react-router';
@@ -30,30 +31,16 @@ function NowViewBar({
   onChange: (value: NowTabValue) => void;
 }) {
   return (
-    <div data-testid="now-page-view-bar" className="flex items-center gap-1 self-start rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
-        {NOW_VIEW_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const active = value === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              data-testid={`now-page-view-toggle-${item.id}`}
-              aria-selected={active}
-              onClick={() => onChange(item.id)}
-              className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
-                active
-                  ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
-                  : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
-              }`}
-            >
-              <Icon size={14} />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-    </div>
+    <PageHeaderNav
+      mode="buttons"
+      rootTestId="now-page-view-bar"
+      activeId={value}
+      onChange={onChange}
+      items={NOW_VIEW_ITEMS.map((item) => ({
+        ...item,
+        testId: `now-page-view-toggle-${item.id}`,
+      }))}
+    />
   );
 }
 
