@@ -625,29 +625,35 @@ function filterVisibleGraphByNodeIds(
   };
 }
 
-function filterVisibleGraphByTags(
-  visibleGraph: VisibleTaskGraph,
+function matchesTaskDagTextSearch(
+  task: TaskNode,
+  query: string,
+  options: Pick<TaskDagSearchOptions, 'includeDescription' | 'fuzzy'>,
+): boolean {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return true;
+  }
+
+  return filterTasksBySearch([task], trimmedQuery, options).length > 0;
+}
+
+function matchesTaskDagTagSearch(
+  task: TaskNode,
   tagFilter: TaskDagTagFilter,
-  taskById: ReadonlyMap<string, TaskNode>,
-): VisibleTaskGraph {
+): boolean {
   if (tagFilter.selectedTags.length === 0) {
-    return visibleGraph;
+    return true;
   }
 
   const selectedTagSet = new Set(tagFilter.selectedTags);
-  const visibleNodeIds = new Set(
-    visibleGraph.nodes
-      .filter((node) => {
-        const nodeTagSet = new Set((taskById.get(node.id)?.tags ?? []).map((tag) => tag.trim()).filter(Boolean));
-        if (tagFilter.matchMode === 'or') {
-          return [...selectedTagSet].some((tag) => nodeTagSet.has(tag));
-        }
-        return [...selectedTagSet].every((tag) => nodeTagSet.has(tag));
-      })
-      .map((node) => node.id),
-  );
+  const taskTagSet = new Set(task.tags.map((tag) => tag.trim()).filter(Boolean));
 
-  return filterVisibleGraphByNodeIds(visibleGraph, visibleNodeIds);
+  if (tagFilter.matchMode === 'or') {
+    return [...selectedTagSet].some((tag) => taskTagSet.has(tag));
+  }
+
+  return [...selectedTagSet].every((tag) => taskTagSet.has(tag));
 }
 
 function projectVisibleGraphForSmartTerminalMode(visibleGraph: VisibleTaskGraph): {
@@ -1208,20 +1214,34 @@ export function TaskDagPage() {
   const availableTags = useMemo(() => Array.from(new Set(
     tasks.flatMap((task) => task.tags.map((tag) => tag.trim()).filter(Boolean)),
   )).sort((left, right) => left.localeCompare(right, 'zh-CN')), [tasks]);
-  const tagFilteredVisibleGraph = useMemo(() => (
-    filterVisibleGraphByTags(visibleGraph, tagFilter, taskById)
-  ), [tagFilter, taskById, visibleGraph]);
+  const hasActiveUnifiedSearch = searchQuery.trim().length > 0 || tagFilter.selectedTags.length > 0;
+  const unifiedSearchMatchedTaskIds = useMemo(() => new Set(
+    visibleGraph.nodes
+      .filter((node) => {
+        const task = taskById.get(node.id);
+        return task
+          ? matchesTaskDagTextSearch(task, searchQuery, searchOptions)
+            && matchesTaskDagTagSearch(task, tagFilter)
+          : false;
+      })
+      .map((node) => node.id),
+  ), [searchOptions, searchQuery, tagFilter, taskById, visibleGraph.nodes]);
+  const unifiedSearchFilteredVisibleGraph = useMemo(() => (
+    hasActiveUnifiedSearch && searchOptions.filterMode
+      ? filterVisibleGraphByNodeIds(visibleGraph, unifiedSearchMatchedTaskIds)
+      : visibleGraph
+  ), [hasActiveUnifiedSearch, searchOptions.filterMode, unifiedSearchMatchedTaskIds, visibleGraph]);
   const smartTerminalProjection = useMemo(
-    () => projectVisibleGraphForSmartTerminalMode(tagFilteredVisibleGraph),
-    [tagFilteredVisibleGraph],
+    () => projectVisibleGraphForSmartTerminalMode(unifiedSearchFilteredVisibleGraph),
+    [unifiedSearchFilteredVisibleGraph],
   );
   const terminalFilteredVisibleGraph = useMemo(() => (
     terminalFilterMode === 'smart'
       ? smartTerminalProjection.visibleGraph
       : terminalFilterMode === 'hide'
-        ? filterStrictTerminalNodesFromVisibleGraph(tagFilteredVisibleGraph)
-        : tagFilteredVisibleGraph
-  ), [smartTerminalProjection.visibleGraph, tagFilteredVisibleGraph, terminalFilterMode]);
+        ? filterStrictTerminalNodesFromVisibleGraph(unifiedSearchFilteredVisibleGraph)
+        : unifiedSearchFilteredVisibleGraph
+  ), [smartTerminalProjection.visibleGraph, terminalFilterMode, unifiedSearchFilteredVisibleGraph]);
   const secondaryNodeIds = useMemo(
     () => (terminalFilterMode === 'smart' ? smartTerminalProjection.secondaryNodeIds : new Set<string>()),
     [smartTerminalProjection.secondaryNodeIds, terminalFilterMode],
@@ -1230,20 +1250,7 @@ export function TaskDagPage() {
     () => new Map(terminalFilteredVisibleGraph.nodes.map((node) => [node.id, node])),
     [terminalFilteredVisibleGraph.nodes],
   );
-  const searchMatchedTaskIds = useMemo(() => {
-    if (!searchQuery) {
-      return new Set<string>();
-    }
-    return new Set(
-      filterTasksBySearch(tasks, searchQuery, searchOptions).map((task) => task.id),
-    );
-  }, [searchOptions, searchQuery, tasks]);
-  const renderedVisibleGraph = useMemo(() => {
-    if (!searchOptions.filterMode || !searchQuery) {
-      return terminalFilteredVisibleGraph;
-    }
-    return filterVisibleGraphByNodeIds(terminalFilteredVisibleGraph, searchMatchedTaskIds);
-  }, [searchMatchedTaskIds, searchOptions.filterMode, searchQuery, terminalFilteredVisibleGraph]);
+  const renderedVisibleGraph = terminalFilteredVisibleGraph;
   const visibleNodeIdSet = useMemo(
     () => new Set(renderedVisibleGraph.nodes.map((node) => node.id)),
     [renderedVisibleGraph.nodes],
@@ -1255,30 +1262,30 @@ export function TaskDagPage() {
   ), [focusedSeriesAnchorId, renderedVisibleGraph]);
   const hasVisibleFocusedSeries = visibleFocusedSeriesNodeIds.size > 0;
   const searchMatchCount = useMemo(() => {
-    if (!searchQuery) return 0;
+    if (!hasActiveUnifiedSearch) return 0;
     return terminalFilteredVisibleGraph.nodes.reduce((count, node) => (
-      searchMatchedTaskIds.has(node.id) ? count + 1 : count
+      unifiedSearchMatchedTaskIds.has(node.id) ? count + 1 : count
     ), 0);
-  }, [searchMatchedTaskIds, searchQuery, terminalFilteredVisibleGraph.nodes]);
-  const hiddenRunningByTagFilterCount = useMemo(() => {
-    if (tagFilter.selectedTags.length === 0) {
+  }, [hasActiveUnifiedSearch, terminalFilteredVisibleGraph.nodes, unifiedSearchMatchedTaskIds]);
+  const hiddenRunningByUnifiedSearchCount = useMemo(() => {
+    if (!hasActiveUnifiedSearch || !searchOptions.filterMode) {
       return 0;
     }
 
-    const tagVisibleNodeIds = new Set(tagFilteredVisibleGraph.nodes.map((node) => node.id));
     const runningNodeIds = visibleGraph.nodes
       .filter((node) => (
         (taskById.get(node.id)?.status === 'in_progress' || activeTaskIdSet.has(node.id))
-        && !tagVisibleNodeIds.has(node.id)
+        && !unifiedSearchMatchedTaskIds.has(node.id)
       ))
       .map((node) => node.id);
 
     return new Set(runningNodeIds).size;
   }, [
     activeTaskIdSet,
-    tagFilter.selectedTags.length,
-    tagFilteredVisibleGraph.nodes,
+    hasActiveUnifiedSearch,
+    searchOptions.filterMode,
     taskById,
+    unifiedSearchMatchedTaskIds,
     visibleGraph.nodes,
   ]);
 
@@ -1332,8 +1339,6 @@ export function TaskDagPage() {
   ]);
 
   const flowGraph = useMemo(() => {
-    const hasActiveSearch = Boolean(searchQuery);
-
     return {
       nodes: layoutFlowGraph.nodes.map((node) => {
         const task = taskById.get(node.id);
@@ -1352,8 +1357,8 @@ export function TaskDagPage() {
               ? resolveTaskDagExecutionLabel(task, graphNode.isBlocked, graphNode.isExecutable)
               : node.data.executionLabel,
             isSelected: node.id === selectedTaskId,
-            isSearchMatch: hasActiveSearch && searchMatchedTaskIds.has(node.id),
-            isSearchDimmed: hasActiveSearch && !searchMatchedTaskIds.has(node.id),
+            isSearchMatch: hasActiveUnifiedSearch && unifiedSearchMatchedTaskIds.has(node.id),
+            isSearchDimmed: hasActiveUnifiedSearch && !unifiedSearchMatchedTaskIds.has(node.id),
             isFocusDimmed: hasVisibleFocusedSeries && !visibleFocusedSeriesNodeIds.has(node.id),
             isSecondaryNode: secondaryNodeIds.has(node.id),
             isCurrentRoot: node.id === renderedVisibleGraph.visibleCurrentRootNodeId,
@@ -1384,11 +1389,11 @@ export function TaskDagPage() {
     renderedVisibleGraph,
     renderedVisibleNodeById,
     hasVisibleFocusedSeries,
-    searchMatchedTaskIds,
-    searchQuery,
+    hasActiveUnifiedSearch,
     secondaryNodeIds,
     selectedTaskId,
     taskById,
+    unifiedSearchMatchedTaskIds,
     visibleFocusedSeriesNodeIds,
     mode,
   ]);
@@ -2049,10 +2054,11 @@ export function TaskDagPage() {
               layoutMode={layoutMode}
               searchValue={searchDraft}
               searchMatchCount={searchMatchCount}
+              hasActiveUnifiedSearch={hasActiveUnifiedSearch}
               searchOptions={searchOptions}
               availableTags={availableTags}
               tagFilter={tagFilter}
-              hiddenRunningByTagFilterCount={hiddenRunningByTagFilterCount}
+              hiddenRunningByTagFilterCount={hiddenRunningByUnifiedSearchCount}
               terminalFilterMode={terminalFilterMode}
               backgroundMode={backgroundMode}
               hasActiveBlock={activeTaskIds.length > 0}

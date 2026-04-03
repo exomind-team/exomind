@@ -14,6 +14,7 @@ interface TaskDagControlPanelProps {
   layoutMode: TaskDagLayoutMode;
   searchValue: string;
   searchMatchCount: number;
+  hasActiveUnifiedSearch: boolean;
   searchOptions: TaskDagSearchOptions;
   availableTags: string[];
   tagFilter: TaskDagTagFilter;
@@ -69,6 +70,7 @@ export function TaskDagControlPanel({
   layoutMode,
   searchValue,
   searchMatchCount,
+  hasActiveUnifiedSearch,
   searchOptions,
   availableTags,
   tagFilter,
@@ -97,7 +99,6 @@ export function TaskDagControlPanel({
   const immersiveFadeClass = immersive && isDesktop
     ? 'opacity-0 hover:opacity-100 focus-within:opacity-100'
     : '';
-  const hasSearch = searchValue.trim().length > 0;
   const searchOptionLabels: Array<{ key: keyof TaskDagSearchOptions; label: string; testId: string }> = [
     { key: 'includeDescription', label: '描述', testId: 'task-dag-search-option-description' },
     { key: 'fuzzy', label: '模糊', testId: 'task-dag-search-option-fuzzy' },
@@ -137,7 +138,7 @@ export function TaskDagControlPanel({
             placeholder="搜索节点标题..."
             className="w-full min-w-0 bg-transparent outline-none placeholder:text-[#A8A29E]"
           />
-          {hasSearch ? (
+          {hasActiveUnifiedSearch ? (
             <span
               data-testid="task-dag-search-match-count"
               className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
@@ -180,7 +181,7 @@ export function TaskDagControlPanel({
                 data-testid="task-dag-tag-filter-summary"
                 className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
               >
-                已过滤
+                已选标签
               </span>
             ) : null}
             {hiddenRunningByTagFilterCount > 0 ? (
@@ -190,7 +191,7 @@ export function TaskDagControlPanel({
               >
                 {hiddenRunningByTagFilterCount}
                 {' '}
-                个进行中任务已被过滤
+                个进行中任务已被隐藏
               </span>
             ) : null}
             {hasTagFilter ? (
@@ -200,7 +201,7 @@ export function TaskDagControlPanel({
                 onClick={onClearTagFilter}
                 className="rounded-full px-2 py-1 text-[10px] font-medium text-[#A8A29E] transition-colors hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]"
               >
-                清除过滤
+                清除标签
               </button>
             ) : null}
           </div>

@@ -990,7 +990,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
-  it('filters nodes by tags with AND/OR persistence and true hiding semantics', async () => {
+  it('treats tag selection as unified DAG search criteria and only hard-hides when filter mode is enabled', async () => {
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-a', title: '前端节点', tags: ['frontend'], createdAt: 10, updatedAt: 10 }),
       makeTask({ id: 'task-b', title: '前端 DAG', tags: ['frontend', 'dag'], createdAt: 20, updatedAt: 20 }),
@@ -1007,28 +1007,46 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     fireEvent.click(screen.getByTestId('task-dag-tag-filter-backend'));
     await waitFor(() => {
-      expect(screen.queryByTestId('mock-react-flow-node-task-a')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('mock-react-flow-node-task-b')).not.toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-search-match-count')).toHaveTextContent('1');
       expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
-      expect(screen.queryByTestId('mock-react-flow-node-task-d')).not.toBeInTheDocument();
-      expect(screen.getByTestId('task-dag-tag-filter-summary')).toHaveTextContent('已过滤');
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-d')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-node-task-a').className).toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-b').className).toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-c').className).not.toContain('opacity-35');
     });
 
     fireEvent.click(screen.getByTestId('task-dag-tag-filter-dag'));
     await waitFor(() => {
       expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
-      expect(screen.queryByTestId('mock-react-flow-node-task-b')).not.toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-node-task-b').className).toContain('opacity-35');
     });
 
     fireEvent.click(screen.getByTestId('task-dag-tag-filter-mode-or'));
     await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-match-count')).toHaveTextContent('2');
       expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
       expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-node-task-b').className).not.toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-c').className).not.toContain('opacity-35');
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-search-option-filter'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-a')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-d')).not.toBeInTheDocument();
     });
 
     expect(JSON.parse(window.localStorage.getItem('exomind:dag-tag-filter') ?? '{}')).toEqual({
       selectedTags: ['backend', 'dag'],
       matchMode: 'or',
+    });
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-search-options') ?? '{}')).toMatchObject({
+      filterMode: true,
     });
 
     view.unmount();
@@ -1042,7 +1060,39 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
-  it('clears selection and shows a hidden-running notice when tag filtering hides the current running task', async () => {
+  it('applies text search and tag search with AND semantics before filter-mode hiding', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '前端节点', tags: ['frontend'], createdAt: 10, updatedAt: 10 }),
+      makeTask({ id: 'task-b', title: '前端 DAG', tags: ['frontend', 'dag'], createdAt: 20, updatedAt: 20 }),
+      makeTask({ id: 'task-c', title: '后端 DAG', tags: ['backend', 'dag'], createdAt: 30, updatedAt: 30 }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('task-dag-search-input'), { target: { value: 'DAG' } });
+    fireEvent.click(screen.getByTestId('task-dag-tag-filter-frontend'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-match-count')).toHaveTextContent('1');
+      expect(screen.getByTestId('task-dag-node-task-b').className).not.toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-a').className).toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-c').className).toContain('opacity-35');
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-search-option-filter'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-a')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
+    });
+  });
+
+  it('clears selection and shows a hidden-running notice only when unified filter mode hides the current running task', async () => {
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-a', title: '运行中的前端任务', tags: ['frontend'], status: 'in_progress', createdAt: 10, updatedAt: 10 }),
       makeTask({ id: 'task-b', title: '后端任务', tags: ['backend'], createdAt: 20, updatedAt: 20 }),
@@ -1076,6 +1126,24 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'exomind:dag-tag-filter',
         newValue: JSON.stringify({ selectedTags: ['backend'], matchMode: 'and' }),
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-detail-panel-desktop')).toBeInTheDocument();
+      expect(screen.queryByTestId('task-dag-hidden-running-filter-notice')).not.toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      window.localStorage.setItem('exomind:dag-search-options', JSON.stringify({
+        includeDescription: false,
+        fuzzy: false,
+        filterMode: true,
+      }));
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'exomind:dag-search-options',
+        newValue: JSON.stringify({ includeDescription: false, fuzzy: false, filterMode: true }),
       }));
     });
 
