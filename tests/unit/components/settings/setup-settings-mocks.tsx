@@ -96,6 +96,7 @@ export const settingsPagePreferenceState = {
   developerMode: false,
   agentPageEnabled: false,
   mePageEnabled: false,
+  proposalInboxEnabled: true,
   desktopAdaptiveEnabled: true,
   embeddedRuntimeAllowLanWithoutAuth: false,
   isTauriWindow: false,
@@ -200,6 +201,12 @@ vi.mock('@/config/me-page-enabled', () => ({
   getMePageEnabled: vi.fn(() => settingsPagePreferenceState.mePageEnabled),
   setMePageEnabled: vi.fn(),
   subscribeMePageEnabledChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/proposal-inbox-enabled', () => ({
+  getProposalInboxEnabled: vi.fn(() => settingsPagePreferenceState.proposalInboxEnabled),
+  setProposalInboxEnabled: vi.fn(),
+  subscribeProposalInboxEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({

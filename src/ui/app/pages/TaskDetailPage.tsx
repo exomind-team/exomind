@@ -2,6 +2,7 @@ import { ArrowLeft, Ellipsis, NotepadText, Target, Play } from 'lucide-react';
 import { Link, useNavigate, useParams, useLocation } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { TASKS_LAST_PATH_KEY, buildTasksMainSearch } from './task-route-memory';
+import { buildTaskDomainBackLink } from './task-domain-routing';
 import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/TaskBreadcrumb';
 import { getEventLogService, getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { isTerminalTaskStatus } from '@/lib/types/task';
@@ -46,11 +47,6 @@ import remarkBreaks from 'remark-breaks';
 import { getEventlogPathForTab } from './eventlog-route-memory';
 
 type DependencyType = 'soft' | 'hard';
-const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
-  dag: { label: '依赖图', to: '/tasks/dag' },
-  timeblocks: { label: '时间线', to: '/tasks/timeline' },
-  timeline: { label: '时间线', to: '/tasks/timeline' },
-};
 interface TimeblockSourceBackLink {
   to: string;
   search?: Record<string, string>;
@@ -249,13 +245,7 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
     };
   }
   const from = searchParams.get('from')?.trim();
-  const sourceConfig = from ? SOURCE_CONFIG[from] : undefined;
-
-  return {
-    to: sourceConfig?.to ?? '/tasks',
-    label: `← 返回${sourceConfig?.label ?? '任务'}`,
-    sourceLabel: sourceConfig?.label ?? '任务',
-  };
+  return buildTaskDomainBackLink(from, 'list');
 }
 
 function buildDetailBreadcrumbSegments(backLink: TimeblockSourceBackLink): TaskBreadcrumbSegment[] {
@@ -870,7 +860,7 @@ function MobileTimeblockDetail({
           <ArrowLeft size={16} />
         </Link>
         <div className="min-w-0 flex-1 pt-0.5">
-          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务详情</h1>
+          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
         </div>
         <button
           type="button"
@@ -1190,7 +1180,7 @@ function DesktopTimeblockDetail({
       >
         <TaskBreadcrumb
           segments={buildDetailBreadcrumbSegments(backLink)}
-          current={{ label: '任务详情', icon: NotepadText }}
+          current={{ label: '任务', icon: NotepadText }}
         />
       </header>
       <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">

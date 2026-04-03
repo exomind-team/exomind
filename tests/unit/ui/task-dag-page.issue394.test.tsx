@@ -310,7 +310,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(screen.getByTestId('task-dag-mode-browse')).toBeEnabled();
     expect(screen.getByTestId('task-dag-mode-connect')).toBeEnabled();
     expect(screen.getByTestId('task-dag-mode-execute')).toBeEnabled();
-    expect(screen.getByText('任务依赖图')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '任务' })).toBeInTheDocument();
     expect(screen.getByText('依赖图')).toBeInTheDocument();
     expect(screen.getByTestId('task-dag-legend-hard-chip')).toBeInTheDocument();
     expect(screen.getByTestId('task-dag-legend-soft-chip')).toBeInTheDocument();

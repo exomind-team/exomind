@@ -1,4 +1,3 @@
-import { Waypoints } from 'lucide-react';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -52,7 +51,6 @@ import { ensureNodeVisible, useTaskDagKeyboard } from '@/ui/app/hooks/useTaskDag
 import { useEffectAfterMount } from '@/ui/app/hooks/useEffectAfterMount';
 import { TaskDagModeSelector, type TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 import { TaskDomainTabs } from '@/ui/app/components/TaskDomainTabs';
-import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import {
   TaskStatusSelector,
   TASK_STATUS_SELECTOR_END_OPTIONS,
@@ -1814,13 +1812,9 @@ export function TaskDagPage() {
         data-testid="task-dag-page-header"
         className={immersive ? 'hidden' : 'px-5 py-4 md:px-8 lg:px-10'}
       >
-        <TaskBreadcrumb
-          segments={[{ label: '任务', to: '/tasks' }]}
-          current={{ label: '依赖图', icon: Waypoints }}
-        />
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务依赖图</h1>
+            <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
             <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{subtitle}</p>
           </div>
         </div>

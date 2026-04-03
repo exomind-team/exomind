@@ -220,7 +220,6 @@ describe('timeblock detail back link issue #406', () => {
 
     const breadcrumb = screen.getByTestId('task-detail-desktop-breadcrumb');
     expect(breadcrumb).toHaveTextContent('任务');
-    expect(breadcrumb).toHaveTextContent('任务详情');
     const backLink = breadcrumb.querySelector('a');
     expect(backLink).not.toBeNull();
     expect(backLink).toHaveAttribute('href', '/tasks?main=1');

@@ -1,6 +1,7 @@
 import { Link, useLocation } from '@tanstack/react-router';
 import { Inbox } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { getProposalInboxEnabled, subscribeProposalInboxEnabledChanges } from '@/config/proposal-inbox-enabled';
 import { getProposalRtAdapter } from '@/lib/adapters/proposal-rt-adapter';
 
 type ProposalNotificationBadgePlacement =
@@ -22,6 +23,9 @@ export function ProposalNotificationBadge({
 }) {
   const location = useLocation();
   const [pendingCount, setPendingCount] = useState(0);
+  const [proposalInboxEnabled, setProposalInboxEnabled] = useState(() => getProposalInboxEnabled());
+
+  useEffect(() => subscribeProposalInboxEnabledChanges(setProposalInboxEnabled), []);
 
   useEffect(() => {
     let disposed = false;
@@ -51,7 +55,7 @@ export function ProposalNotificationBadge({
     };
   }, []);
 
-  if (pendingCount <= 0) {
+  if (!proposalInboxEnabled || pendingCount <= 0) {
     return null;
   }
 

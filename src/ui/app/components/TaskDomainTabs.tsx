@@ -1,6 +1,8 @@
 import { Inbox, ListTodo, Waypoints, Clock3 } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
 
+import { getProposalInboxEnabled, subscribeProposalInboxEnabledChanges } from '@/config/proposal-inbox-enabled';
 import { buildTasksMainSearch } from '@/ui/app/pages/task-route-memory';
 
 type TaskDomainTabId = 'list' | 'timeline' | 'dag' | 'proposals';
@@ -19,12 +21,20 @@ const TASK_DOMAIN_ITEMS: Array<{
 ];
 
 export function TaskDomainTabs({ active }: { active: TaskDomainTabId }) {
+  const [proposalInboxEnabled, setProposalInboxEnabled] = useState(() => getProposalInboxEnabled());
+
+  useEffect(() => subscribeProposalInboxEnabledChanges(setProposalInboxEnabled), []);
+
+  const visibleItems = TASK_DOMAIN_ITEMS.filter((item) => (
+    item.id !== 'proposals' || proposalInboxEnabled || active === 'proposals'
+  ));
+
   return (
     <div
       data-testid="task-domain-tabs"
       className="flex items-center gap-1 self-start rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]"
     >
-      {TASK_DOMAIN_ITEMS.map((item) => {
+      {visibleItems.map((item) => {
         const Icon = item.icon;
         const isActive = item.id === active;
 
