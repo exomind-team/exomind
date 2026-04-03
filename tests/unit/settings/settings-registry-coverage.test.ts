@@ -447,6 +447,13 @@ describe('settings registry coverage audit', () => {
         developerMode: true,
         voiceShortcutAsrProvider: 'volcano',
       },
+      {
+        ...getBaseCtx(),
+        isDesktop: true,
+        isTauriWindow: true,
+        developerMode: true,
+        voiceShortcutAsrProvider: 'qwen-omni',
+      },
     ];
 
     const qwenVisibleIds = getVisibleSettings(qwenCtx).map((item) => item.id);
