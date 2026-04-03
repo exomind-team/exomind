@@ -124,6 +124,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { log } from '@/lib/logger';
+import { PageHeaderNav } from '@/ui/app/components/PageHeaderNav';
 import {
   buildRuntimeAuthHeaders,
   resolveRuntimeHostBaseUrl,
@@ -258,29 +259,17 @@ function TabBar({
   onChange: (value: AgentHubViewMode) => void;
 }) {
   return (
-    <div className="flex items-center gap-1 rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
-      {VIEW_ITEMS.map((item) => {
-        const Icon = item.icon;
-        const active = value === item.id;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            data-testid={`agent-view-toggle-${item.id}`}
-            onClick={() => onChange(item.id)}
-            className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
-              active
-                ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
-                : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
-            }`}
-            aria-selected={active}
-          >
-            <Icon size={14} />
-            {item.label}
-          </button>
-        );
-      })}
-    </div>
+    <PageHeaderNav
+      mode="buttons"
+      activeId={value}
+      onChange={onChange}
+      items={VIEW_ITEMS.map((item) => ({
+        id: item.id,
+        label: item.label,
+        icon: item.icon,
+        testId: `agent-view-toggle-${item.id}`,
+      }))}
+    />
   );
 }
 

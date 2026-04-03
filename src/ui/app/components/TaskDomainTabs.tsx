@@ -1,8 +1,8 @@
 import { Inbox, ListTodo, Waypoints, Clock3 } from 'lucide-react';
-import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
 import { getProposalInboxEnabled, subscribeProposalInboxEnabledChanges } from '@/config/proposal-inbox-enabled';
+import { PageHeaderNav } from '@/ui/app/components/PageHeaderNav';
 import { buildTasksMainSearch } from '@/ui/app/pages/task-route-memory';
 
 type TaskDomainTabId = 'list' | 'timeline' | 'dag' | 'proposals';
@@ -30,33 +30,15 @@ export function TaskDomainTabs({ active }: { active: TaskDomainTabId }) {
   ));
 
   return (
-    <div
-      data-testid="task-domain-tabs"
-      className="flex items-center gap-1 self-start rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]"
-    >
-      {visibleItems.map((item) => {
-        const Icon = item.icon;
-        const isActive = item.id === active;
-
-        return (
-          <Link
-            key={item.id}
-            to={item.to}
-            search={item.search as never}
-            role="tab"
-            aria-selected={isActive}
-            data-testid={`task-domain-tab-${item.id}`}
-            className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
-              isActive
-                ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
-                : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
-            }`}
-          >
-            <Icon size={14} />
-            <span>{item.label}</span>
-          </Link>
-        );
-      })}
-    </div>
+    <PageHeaderNav
+      mode="links"
+      rootTestId="task-domain-tabs"
+      navLabel="任务域导航"
+      activeId={active}
+      items={visibleItems.map((item) => ({
+        ...item,
+        testId: `task-domain-tab-${item.id}`,
+      }))}
+    />
   );
 }
