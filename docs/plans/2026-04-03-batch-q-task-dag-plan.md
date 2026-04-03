@@ -4,7 +4,7 @@
 
 **Goal:** Split batch Q into three executable segments and land the Task DAG interaction upgrades in a stable order without blocking on batch N.
 
-**Architecture:** Batch Q stays inside the Task DAG web surface. Q-A fixes interaction semantics and task-search ordering, Q-B adds manual layout and blank-drop creation on top of the existing ReactFlow + quick-create pipeline, and Q-C adds focus/ghost visualization as page-local view state instead of changing the shared task truth model.
+**Architecture:** Batch Q stays inside the Task DAG web surface. Q-A fixes interaction semantics and task-search ordering, Q-B adds unified manual layout and blank-drop creation on top of the existing ReactFlow + quick-create pipeline, and Q-C adds focus-series, tag filtering, and smart terminal-node weakening without turning view-state into shared task truth.
 
 **Tech Stack:** React, TypeScript, `@xyflow/react`, Vitest, TanStack Router, local/runtime-backed preference storage
 
@@ -15,7 +15,7 @@
 - Latest published route checked on `2026-04-03` still lists batch Q as `#501 #701 #700 #660 #653 #639 #698 #694`.
 - This plan supersedes the older scope assumptions in `docs/plans/2026-04-01-batch-q-task-dag-interaction-plan.md`.
 - Batch Q is treated as a Task DAG web-only batch. Do not block Q-A or Q-B on batch N.
-- The only remaining soft semantic coupling to batch N is in Q-C naming and UX wording. Implementation should stay on task-local semantics.
+- The only remaining soft semantic coupling to batch N is in Q-C UX wording. Implementation should stay on task-local semantics.
 - `PouchDB` is explicitly out of scope. Do not add any `PouchDB` startup, sync-server startup, or `6984` verification steps to this plan.
 
 ## Segment Order
@@ -201,12 +201,17 @@ export type TaskDagLayoutMode = 'auto' | 'manual';
 
 export type TaskDagManualLayoutSnapshot = {
   manualPositions: Record<string, { x: number; y: number }>;
-  viewport?: { x: number; y: number; zoom: number };
   updatedAt: string;
 };
 ```
 
 Use `src/config/task-dag-preferences.ts` only for the lightweight `layoutMode` preference key, not for the full snapshot merge logic.
+
+Snapshot contract:
+- use one unified manual snapshot for the DAG
+- do not split snapshots by `TB / LR`
+- do not split snapshots by `desktop / mobile`
+- keep the storage model abstracted so a later RT-backed migration stays possible without reshaping the UI contract
 
 - [ ] **Step 3: Merge manual positions into DAG flow output**
 
@@ -216,6 +221,8 @@ Cover cleanup rules:
 - stale node ids are dropped
 - new node ids fall back to generated layout
 - status-only graph changes do not wipe manual positions
+- direction changes reuse the same manual positions
+- desktop/mobile rendering reuses the same manual positions
 
 - [ ] **Step 4: Add control-surface UI for layout mode**
 
@@ -231,7 +238,7 @@ Requirements:
 Update `src/ui/app/pages/TaskDagPage.tsx` so:
 - manual mode enables dragging
 - drag-stop commits position
-- manual viewport can optionally restore with the same snapshot
+- do not add viewport restore to the manual snapshot contract in this round
 
 ### Task 3: Q-B Blank-Drop Create
 
@@ -314,6 +321,9 @@ Cover:
 - focus dims non-component nodes/edges without removing them
 - collapsed hidden nodes do not reappear because of focus
 - focus can be cleared cleanly
+- browse-mode context menu shows `聚焦此系列` / `取消聚焦此系列` as a toggle
+- focus state survives leaving and re-entering `/tasks/dag`
+- hiding the focus anchor via tag filtering or terminal hiding keeps implicit focus and restores it when visibility returns
 
 - [ ] **Step 2: Implement connected-component helpers**
 
@@ -330,14 +340,16 @@ Add focus-series view state locally in `src/ui/app/pages/TaskDagPage.tsx`.
 Requirements:
 - focus affects emphasis only
 - focus does not change which nodes exist in the graph
-- right-click affordance can enter focus mode
-- clear action can be keyboard-driven if issue confirmation keeps the `J` shortcut
+- focus entry appears only in browse-mode node context menu
+- connect / execute mode do not expose a focus toggle entry, but an existing focus effect remains active
+- clear action supports `Esc / J` and follows the contract `clear selected node first, then clear focused series`
+- persistence should align with the current DAG search draft/options behavior: a single runtime-backed UI state, not split by desktop/mobile or direction
 
 - [ ] **Step 4: Reflect focus styling in flow nodes and edges**
 
 Update `src/ui/app/pages/task-dag-flow.ts` so nodes/edges can carry `isFocusDimmed`-style flags without changing graph truth.
 
-### Task 5: Q-C Tag Ghost Filter
+### Task 5: Q-C Tag Filter + Smart Terminal Weakening
 
 **Files:**
 - Modify: `src/ui/app/pages/TaskDagPage.tsx`
@@ -346,13 +358,17 @@ Update `src/ui/app/pages/task-dag-flow.ts` so nodes/edges can carry `isFocusDimm
 - Test: `tests/unit/ui/task-dag-page.issue394.test.tsx`
 - Test: `tests/unit/ui/task-dag-flow.issue564.test.ts`
 
-- [ ] **Step 1: Add failing tests for tag ghost filtering**
+- [ ] **Step 1: Add failing tests for tag filtering and smart terminal weakening**
 
 Cover:
-- selecting a tag weakens non-matching nodes into ghost nodes
-- ghost nodes keep their connecting edges
-- ghost nodes cannot be selected or acted on
-- search `filterMode` still behaves as a true filter and is not rewritten into ghost semantics
+- tag filtering uses true hiding rather than weakened placeholders
+- hiding a selected node clears selection
+- hiding active/running nodes is allowed and surfaces a visible hidden-count notice plus clear-filter entry
+- tag filter selection and `AND / OR` mode both persist locally
+- search `filterMode` still behaves as a true filter and is not rewritten into another semantic layer
+- terminal nodes in `smart` mode are hidden when isolated
+- terminal nodes in `smart` mode remain as visually weakened secondary nodes when either side still connects to unfinished work
+- `strict` mode hides all terminal nodes
 
 - [ ] **Step 2: Implement tag-only filter UI**
 
@@ -361,17 +377,22 @@ Update `src/ui/app/components/TaskDagControlPanel.tsx` with tag-filter UI.
 Constraint:
 - use `标签` wording
 - do not introduce `领域` wording in this phase
+- place the control inside the existing search/filter surface
+- provide `AND / OR` mode toggle inside the same surface
+- show an inline `已过滤`-style state and hidden-running count notice with a clear-filter affordance
 
-- [ ] **Step 3: Add ghost-node rendering flags**
+- [ ] **Step 3: Add secondary-node rendering flags for smart terminal mode**
 
-Update `src/ui/app/pages/task-dag-flow.ts` and `src/ui/app/pages/TaskDagPage.tsx` so ghost nodes:
+Update `src/ui/app/pages/task-dag-flow.ts`, `src/ui/app/pages/TaskDagPage.tsx`, and `src/lib/task/task-dag-visibility.ts` so secondary nodes:
+- only come from smart terminal handling, not tag filtering
 - remain in topology
 - appear visually weakened
-- do not support select/connect/execute interactions
+- restore normal terminal brightness when selected
+- do not add a second interaction-restriction system; keep existing terminal-node semantics in browse/connect/execute
 
 - [ ] **Step 4: Keep Q-C state page-local unless explicitly approved otherwise**
 
-Do not expand shared `TaskDagVisibilityState` or `TaskDetailPage` behavior in this task. Keep focus/tag ghost state local to the DAG page.
+Do not expand shared `TaskDagVisibilityState` just to hold tag filter or focus-series UI state. Keep focus/tag-filter UI state local to the DAG page and use runtime-backed UI preference storage where persistence is required.
 
 - [ ] **Step 5: Re-run Q-C tests**
 
@@ -396,8 +417,9 @@ curl -sS -D - -o /dev/null http://127.0.0.1:5173 | head -n 8
 Verify in browser:
 - focus-series dims non-component nodes and edges
 - clearing focus restores normal emphasis
-- tag filtering turns non-matching nodes into ghost nodes instead of removing them
-- ghost nodes do not respond to selection or action gestures
+- tag filtering truly hides non-matching nodes and surfaces `已过滤` plus hidden-running notice
+- smart terminal mode weakens only the required terminal nodes as secondary nodes
+- secondary nodes still follow existing terminal-node interaction semantics
 
 ### Task 6: Final Batch-Q Rollup
 
@@ -442,6 +464,7 @@ Verify:
 - `#698`: `/tasks` search ranks by status priority, then `createdAt` descending
 - `#639`: manual layout persists and restores
 - `#701`: handle-drag-to-blank opens quick-create and creates linked tasks correctly
-- `#660`: focus-series dims non-component nodes/edges without mutating graph membership
-- `#653`: tag filtering produces ghost nodes with disabled interaction, not topology deletion
+- `#660`: focus-series dims non-component nodes/edges without mutating graph membership and restores from runtime-backed UI state on re-entry
+- `#653`: tag filtering remains true hiding with local persistence, inline filter status, and hidden-running notice
+- smart terminal mode weakens eligible terminal nodes as secondary nodes instead of deleting them
 - No `PouchDB` workflow or verification appears anywhere in the batch Q implementation path
