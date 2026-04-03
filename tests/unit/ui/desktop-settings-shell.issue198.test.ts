@@ -23,6 +23,8 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   it('keeps me entry behind feature flag in desktop nav（桌面导航中的 Me 入口受功能开关控制）', () => {
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
     expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
+    expect(desktopNavBlock).not.toContain("title: '请求箱'");
+    expect(desktopNavBlock).not.toContain("path: '/proposals'");
     expect(desktopNavBlock).toContain('...(goalsPageEnabled ? [{');
     expect(desktopNavBlock).toContain("title: '目标'");
     expect(desktopNavBlock).toContain("path: '/goals'");

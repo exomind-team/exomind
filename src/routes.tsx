@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, Inbox, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
@@ -325,7 +325,6 @@ function DesktopSidebar({
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/' || path.startsWith('/eventlog') },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
-    { key: 'proposals', title: '请求箱', path: '/proposals', icon: Inbox, match: (path: string) => path === '/proposals' || path.startsWith('/proposals/') },
     ...(goalsPageEnabled ? [{
       key: 'goals',
       title: '目标',
@@ -428,9 +427,6 @@ function DesktopSidebar({
             >
               <Icon size={16} />
               {collapsed ? <span className="sr-only">{item.title}</span> : <span>{item.title}</span>}
-              {item.key === 'proposals' ? (
-                <ProposalNotificationBadge placement={collapsed ? 'desktop-compact' : 'desktop'} />
-              ) : null}
             </Link>
           );
         })}

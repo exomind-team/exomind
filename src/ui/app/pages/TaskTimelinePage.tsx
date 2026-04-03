@@ -1183,17 +1183,20 @@ export function TaskTimelinePage() {
   return (
     <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="task-timeline-page">
       <header className="border-b border-[#F0ECE8] px-5 py-4 dark:border-[#292524] md:px-8 lg:px-10">
-        <div>
-          <TaskDomainTabs active="timeline" />
-        </div>
-        <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
             <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
               时间线视图：以任务为主语纵览完整时间轴，比例尺决定单屏能容纳的时间跨度。
             </p>
           </div>
+        </div>
 
+        <div className="mt-3">
+          <TaskDomainTabs active="timeline" />
+        </div>
+
+        <div className="mt-3 flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative w-[min(100%,40rem)] max-w-full shrink-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-white/80 p-1 dark:border-[#292524] dark:bg-[#1C1917]">
               <div
@@ -1301,12 +1304,12 @@ export function TaskTimelinePage() {
               minButtonWidthClassName="min-w-[40px]"
             />
           </div>
-        </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-          <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">比例尺：{formatRangeSummaryLabel(range)}</span>
-          <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">任务：{model.entries.length}</span>
-          <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">泳道：{model.lanes.length}</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+            <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">比例尺：{formatRangeSummaryLabel(range)}</span>
+            <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">任务：{model.entries.length}</span>
+            <span className="rounded-full bg-[#F5F0ED] px-2 py-1 dark:bg-[#292524]">泳道：{model.lanes.length}</span>
+          </div>
         </div>
       </header>
 

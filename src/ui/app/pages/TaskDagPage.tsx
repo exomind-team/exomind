@@ -1812,14 +1812,14 @@ export function TaskDagPage() {
         data-testid="task-dag-page-header"
         className={immersive ? 'hidden' : 'px-5 py-4 md:px-8 lg:px-10'}
       >
-        <div>
-          <TaskDomainTabs active="dag" />
-        </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
             <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{subtitle}</p>
           </div>
+        </div>
+        <div className="mt-3">
+          <TaskDomainTabs active="dag" />
         </div>
       </header>
 

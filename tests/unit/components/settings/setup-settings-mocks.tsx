@@ -96,6 +96,7 @@ export const settingsPagePreferenceState = {
   developerMode: false,
   agentPageEnabled: false,
   mePageEnabled: false,
+  proposalInboxEnabled: true,
   desktopAdaptiveEnabled: true,
   embeddedRuntimeAllowLanWithoutAuth: false,
   isTauriWindow: false,
@@ -156,6 +157,7 @@ vi.mock('@/config/domain-backend-mode', () => ({
 
 vi.mock('@/config/port-env', () => ({
   resolveAsrServerUrl: vi.fn(() => 'http://localhost:1949'),
+  resolveSyncServerUrl: vi.fn(() => 'http://127.0.0.1:6984'),
 }));
 
 vi.mock('@/config/version-build-info', () => ({
@@ -195,6 +197,12 @@ vi.mock('@/config/me-page-enabled', () => ({
   getMePageEnabled: vi.fn(() => settingsPagePreferenceState.mePageEnabled),
   setMePageEnabled: vi.fn(),
   subscribeMePageEnabledChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/proposal-inbox-enabled', () => ({
+  getProposalInboxEnabled: vi.fn(() => settingsPagePreferenceState.proposalInboxEnabled),
+  setProposalInboxEnabled: vi.fn(),
+  subscribeProposalInboxEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({

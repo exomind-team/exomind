@@ -10,6 +10,7 @@ import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setDevtoolsEnabled } from '@/config/devtools-mode';
 import { setCommandPaletteEnabled } from '@/config/command-palette-enabled';
 import { setMePageEnabled } from '@/config/me-page-enabled';
+import { setProposalInboxEnabled } from '@/config/proposal-inbox-enabled';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
@@ -18,17 +19,12 @@ beforeEach(() => {
 });
 
 describe('SettingsPage - Developer Section (developerMode=true)', () => {
-  it('renders feature toggles row', () => {
+  it('renders inline feature toggles directly inside developer section（直接在开发者分组渲染功能开关）', () => {
     render(<SettingsPage />);
-    expect(screen.getByText('功能开关')).toBeInTheDocument();
-  });
-
-  it('opens feature toggles drawer on click', () => {
-    render(<SettingsPage />);
-    const row = screen.getByText('功能开关');
-    fireEvent.click(row);
     expect(screen.getByText('Me 页面')).toBeInTheDocument();
     expect(screen.getByText('网络页面')).toBeInTheDocument();
+    expect(screen.getByText('请求箱（任务域）')).toBeInTheDocument();
+    expect(screen.getByText('桌面端适配')).toBeInTheDocument();
     expect(screen.getByText('命令面板')).toBeInTheDocument();
   });
 
@@ -52,8 +48,6 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
 
   it('updates command palette state inside feature toggles drawer', () => {
     render(<SettingsPage />);
-    fireEvent.click(screen.getByText('功能开关'));
-
     const toggle = screen.getByTestId('feature-toggle-command-palette-switch');
     fireEvent.click(toggle);
 
@@ -62,11 +56,17 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
 
   it('updates me page state inside feature toggles drawer', () => {
     render(<SettingsPage />);
-    fireEvent.click(screen.getByText('功能开关'));
-
     const toggle = screen.getByTestId('feature-toggle-me-page-switch');
     fireEvent.click(toggle);
 
     expect(vi.mocked(setMePageEnabled)).toHaveBeenCalledWith(true);
+  });
+
+  it('updates proposal inbox state inline（直接更新请求箱任务域开关）', () => {
+    render(<SettingsPage />);
+    const toggle = screen.getByTestId('feature-toggle-proposal-inbox-switch');
+    fireEvent.click(toggle);
+
+    expect(vi.mocked(setProposalInboxEnabled)).toHaveBeenCalledWith(false);
   });
 });

@@ -71,7 +71,12 @@ const AUDITED_SETTINGS_IDS = [
   'developer-mode',
   'use-mock-data',
   'devtools',
-  'feature-toggles',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'proposal-inbox-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
   'instance-diagnostics',
   'device-pairing',
   'embedded-runtime-lan-no-auth',
@@ -115,6 +120,12 @@ const BOOLEAN_IDS = [
   'developer-mode',
   'use-mock-data',
   'devtools',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'proposal-inbox-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
 ] as const;
 
 const NUMBER_IDS = [
@@ -167,7 +178,12 @@ const TAURI_DEV_ONLY_IDS = [
 const DEV_ONLY_IDS = [
   'use-mock-data',
   'devtools',
-  'feature-toggles',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'proposal-inbox-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
   'instance-diagnostics',
   'device-pairing',
 ] as const;
@@ -304,15 +320,12 @@ describe('settings registry coverage audit', () => {
       isTauriWindow: true,
     })).toBe(true);
 
-    const featureToggles = getItem('feature-toggles', 'group');
-    expect(featureToggles.groupStyle).toBe('adaptive-overlay');
-    expect(featureToggles.children.map((child) => child.id)).toEqual([
-      'me-page-enabled',
-      'agent-page-enabled',
-      'goals-page-enabled',
-      'desktop-adaptive',
-      'command-palette-enabled',
-    ]);
+    expect(getItem('me-page-enabled', 'boolean').category).toBe('developer');
+    expect(getItem('agent-page-enabled', 'boolean').category).toBe('developer');
+    expect(getItem('goals-page-enabled', 'boolean').category).toBe('developer');
+    expect(getItem('proposal-inbox-enabled', 'boolean').category).toBe('developer');
+    expect(getItem('desktop-adaptive', 'boolean').category).toBe('developer');
+    expect(getItem('command-palette-enabled', 'boolean').category).toBe('developer');
 
     const clearLocalCache = getItem('clear-local-cache', 'action');
     expect(clearLocalCache.confirmMessage).toContain('确认清空本地缓存');
@@ -430,6 +443,7 @@ describe('settings registry coverage audit', () => {
       'me-page-enabled',
       'agent-page-enabled',
       'goals-page-enabled',
+      'proposal-inbox-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
     ]);
