@@ -48,6 +48,11 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(desktopNavBlock).not.toContain('available');
   });
 
+  it('treats proposals as part of the task domain for active nav matching（请求箱路由应归入任务导航高亮）', () => {
+    expect(desktopNavBlock).toContain("path === '/tasks' || path.startsWith('/tasks/') || path === '/proposals' || path.startsWith('/proposals/')");
+    expect(source).toContain("(item.path === '/tasks' && (locationPath.startsWith('/tasks') || locationPath === '/proposals' || locationPath.startsWith('/proposals/')))");
+  });
+
   it('uses network label and waypoints icon in mobile shell nav（移动端底栏使用网络文案与拓扑图标）', () => {
     expect(source).toContain("{ title: '当下', path: '/eventlog', icon: Target }");
     expect(source).toContain("...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : [])");

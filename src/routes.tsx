@@ -279,7 +279,7 @@ function MobileShell({
                 const Icon = item.icon;
                 const active = locationPath === item.path
                   || (item.path === '/eventlog' && locationPath.startsWith('/eventlog'))
-                  || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
+                  || (item.path === '/tasks' && (locationPath.startsWith('/tasks') || locationPath === '/proposals' || locationPath.startsWith('/proposals/')))
                   || (item.path === '/me' && locationPath.startsWith('/me'))
                   || (item.path === '/goals' && locationPath.startsWith('/goals'))
                   || (item.path === '/agents' && locationPath.startsWith('/agents'))
@@ -324,7 +324,7 @@ function DesktopSidebar({
 }) {
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/' || path.startsWith('/eventlog') },
-    { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
+    { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') || path === '/proposals' || path.startsWith('/proposals/') },
     ...(goalsPageEnabled ? [{
       key: 'goals',
       title: '目标',
