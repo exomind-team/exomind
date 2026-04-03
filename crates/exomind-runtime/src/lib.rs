@@ -961,9 +961,10 @@ impl AppState {
         let mesh_relay =
             enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
         #[cfg(not(target_os = "android"))]
-        let pty_manager = Arc::new(pty::PtyManager::new(
+        let pty_manager = Arc::new(pty::PtyManager::new_with_transcript_dir(
             Arc::clone(&signal_pool),
             host_id.clone(),
+            Some(storage_paths.data_dir.join("pty-transcripts")),
         ));
 
         let data_dir = storage_paths.data_dir;

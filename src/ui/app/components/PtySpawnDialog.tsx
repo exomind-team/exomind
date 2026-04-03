@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Loader2, Terminal } from 'lucide-react';
+import { detectAndPersistHistoricalSessionId } from '@/ui/app/pages/agents/pty-session-recovery';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -246,6 +247,7 @@ export function PtySpawnDialog({
 
     try {
       const body = buildSpawnPayload();
+      const startedAtMs = Date.now();
 
       const res = await fetch(`${rtBaseUrl}/pty/spawn`, {
         method: 'POST',
@@ -258,7 +260,30 @@ export function PtySpawnDialog({
         throw new Error(text || `HTTP ${res.status}`);
       }
 
-      const result: { id: string; name: string } = await res.json();
+      const result: { id: string; name: string; workdir?: string } = await res.json();
+      if (agentType === 'claude' || agentType === 'codex') {
+        const resolvedWorkdir = typeof result.workdir === 'string' && result.workdir.trim()
+          ? result.workdir.trim()
+          : typeof body.workdir === 'string'
+            ? body.workdir
+            : workdir.trim();
+        void detectAndPersistHistoricalSessionId({
+          rtBaseUrl,
+          authToken,
+          sessionRecordId: result.id,
+          agentType,
+          baselineSessionIds: sessions.map((session) => session.session_id),
+          expectedWorkdir: resolvedWorkdir,
+          startedAtMs,
+        }).catch((persistError) => {
+          console.warn('[agent-hub][pty] failed to persist spawned terminal inner session id', {
+            ptyId: result.id,
+            agentType,
+            expectedWorkdir: resolvedWorkdir,
+            message: persistError instanceof Error ? persistError.message : String(persistError),
+          });
+        });
+      }
       onSpawned(result);
       onOpenChange(false);
     } catch (err) {
@@ -266,7 +291,17 @@ export function PtySpawnDialog({
     } finally {
       setLoading(false);
     }
-  }, [buildHeaders, buildSpawnPayload, onOpenChange, onSpawned, rtBaseUrl]);
+  }, [
+    agentType,
+    buildHeaders,
+    buildSpawnPayload,
+    onOpenChange,
+    onSpawned,
+    authToken,
+    rtBaseUrl,
+    sessions,
+    workdir,
+  ]);
 
   // ── Resume existing session ─────────────────────────────────
 

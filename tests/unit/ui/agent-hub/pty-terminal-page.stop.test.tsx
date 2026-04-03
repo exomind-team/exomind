@@ -5,11 +5,13 @@ import { PtyTerminalPage } from '@/ui/app/pages/agents/PtyTerminalPage';
 vi.mock('@/ui/app/components/PtyTerminal', () => ({
   PtyTerminal: ({
     ptyId,
+    interactive = true,
     onInitialConnectionFailure: _onInitialConnectionFailure,
   }: {
     ptyId: string;
+    interactive?: boolean;
     onInitialConnectionFailure?: () => void;
-  }) => <div data-testid="mock-pty-terminal">PTY:{ptyId}</div>,
+  }) => <div data-testid="mock-pty-terminal">PTY:{ptyId}:{interactive ? 'live' : 'readonly'}</div>,
 }));
 
 describe('pty terminal page stop action（全屏终端页结束动作）', () => {
@@ -83,7 +85,7 @@ describe('pty terminal page stop action（全屏终端页结束动作）', () =>
       expect(screen.getByTestId('pty-terminal-page-disconnected')).toBeInTheDocument();
     });
 
-    expect(screen.queryByTestId('mock-pty-terminal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mock-pty-terminal')).toHaveTextContent('PTY:pty-123:readonly');
     expect(screen.getByRole('button', { name: '返回 Agents' })).toBeInTheDocument();
   });
 

@@ -41,6 +41,21 @@ function isLikelyLocalSessionTarget(target: Pick<SessionStreamTarget, 'rtBaseUrl
     || raw.includes('::1');
 }
 
+function dedupeSessionsById(sessions: SessionInfo[]): SessionInfo[] {
+  const seen = new Set<string>();
+  const deduped: SessionInfo[] = [];
+
+  for (const session of sessions) {
+    if (seen.has(session.id)) {
+      continue;
+    }
+    seen.add(session.id);
+    deduped.push(session);
+  }
+
+  return deduped;
+}
+
 /**
  * Hook that fetches sessions from the runtime and subscribes to SSE updates.
  * Uses a single multiplexed SSE connection for all session events.
@@ -79,13 +94,6 @@ export function useSessionStream({
     [],
   );
 
-  const buildSessionKey = useCallback(
-    (session: Pick<SessionInfo, 'id' | 'source_host_id'>, targetId?: string) => (
-      `${targetId ?? session.source_host_id ?? 'default'}::${session.id}`
-    ),
-    [],
-  );
-
   const fetchSessions = useCallback(async () => {
     if (resolvedTargets.length === 0) return;
 
@@ -115,7 +123,7 @@ export function useSessionStream({
         const data: SessionInfo[] = await response.json();
         return data.map((session) => decorateSession(session, target));
       }));
-      setSessions(results.flat());
+      setSessions(dedupeSessionsById(results.flat()));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -170,23 +178,18 @@ export function useSessionStream({
             switch (event.type) {
               case 'session.created': {
                 const session = decorateSession(data.session as SessionInfo, target);
-                const sessionKey = buildSessionKey(session);
-                if (prev.some((item) => buildSessionKey(item) === sessionKey)) return prev;
-                return [session, ...prev];
+                return dedupeSessionsById([session, ...prev]);
               }
               case 'session.updated': {
                 const session = decorateSession(data.session as SessionInfo, target);
-                const sessionKey = buildSessionKey(session);
-                return prev.map((item) => (
-                  buildSessionKey(item) === sessionKey ? session : item
-                ));
+                return dedupeSessionsById([
+                  session,
+                  ...prev.filter((item) => item.id !== session.id),
+                ]);
               }
               case 'session.deleted': {
                 const sessionId = data.session_id as string;
-                return prev.filter((item) => buildSessionKey(item) !== buildSessionKey({
-                  id: sessionId,
-                  source_host_id: target.id,
-                }, target.id));
+                return prev.filter((item) => item.id !== sessionId);
               }
               default:
                 return prev;
@@ -208,7 +211,7 @@ export function useSessionStream({
       }
       eventSourcesRef.current = [];
     };
-  }, [buildSessionKey, decorateSession, enabled, fetchSessions, resolvedTargets, supportsEventSource]);
+  }, [decorateSession, enabled, fetchSessions, resolvedTargets, supportsEventSource]);
 
   return {
     sessions,

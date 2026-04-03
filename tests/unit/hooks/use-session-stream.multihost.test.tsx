@@ -117,6 +117,65 @@ describe('useSessionStream multi-host aggregation（多主机会话流聚合）'
     ]));
   });
 
+  it('deduplicates duplicate session ids across targets（同一 session id 跨 target 只保留一条）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === 'http://127.0.0.1:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({ id: 'session-shared', role: '本机会话' })],
+        } as Response;
+      }
+
+      if (url === 'http://localhost:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({ id: 'session-shared', role: '同一会话的重复来源' })],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [
+        {
+          id: 'host-127',
+          rtBaseUrl: 'http://127.0.0.1:1919',
+          hostName: '127.0.0.1:1919',
+          hostAddress: '127.0.0.1:1919',
+        },
+        {
+          id: 'host-localhost',
+          rtBaseUrl: 'http://localhost:1919',
+          hostName: 'localhost:1919',
+          hostAddress: 'localhost:1919',
+        },
+      ],
+    }));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    expect(result.current.sessions[0]).toMatchObject({
+      id: 'session-shared',
+      role: '本机会话',
+      source_host_id: 'host-127',
+    });
+  });
+
   it('warns when protected runtime session fetch returns 401（受保护 runtime 会话拉取 401 时输出告警）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fetchMock = vi.fn(async () => ({

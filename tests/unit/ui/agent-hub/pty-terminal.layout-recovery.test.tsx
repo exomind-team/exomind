@@ -181,7 +181,7 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     );
   });
 
-  it('reports initial stream failure before the first successful connection（首个 SSE 连接失败时上报断开）', async () => {
+  it('retries initial stream failures before reporting disconnect（首个 SSE 失败会先重试再上报断开）', async () => {
     const onInitialConnectionFailure = vi.fn();
 
     render(
@@ -199,8 +199,48 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     expect(MockEventSource.instances).toHaveLength(1);
     MockEventSource.instances[0]?.onerror?.call({} as EventSource, new Event('error'));
+    expect(onInitialConnectionFailure).not.toHaveBeenCalled();
+    expect(MockEventSource.instances[0]?.close).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(MockEventSource.instances).toHaveLength(2);
+    MockEventSource.instances[1]?.onerror?.call({} as EventSource, new Event('error'));
+    expect(onInitialConnectionFailure).not.toHaveBeenCalled();
+    expect(MockEventSource.instances[1]?.close).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(MockEventSource.instances).toHaveLength(3);
+    MockEventSource.instances[2]?.onerror?.call({} as EventSource, new Event('error'));
 
     expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
-    expect(MockEventSource.instances[0]?.close).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.instances[2]?.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report disconnect when a retry connects successfully（重试成功后不再上报断开）', async () => {
+    const onInitialConnectionFailure = vi.fn();
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-3"
+        onInitialConnectionFailure={onInitialConnectionFailure}
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await vi.runOnlyPendingTimersAsync();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    MockEventSource.instances[0]?.onerror?.call({} as EventSource, new Event('error'));
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(MockEventSource.instances).toHaveLength(2);
+
+    MockEventSource.instances[1]?.onopen?.call({} as EventSource, new Event('open'));
+    MockEventSource.instances[1]?.onerror?.call({} as EventSource, new Event('error'));
+
+    expect(onInitialConnectionFailure).not.toHaveBeenCalled();
   });
 });

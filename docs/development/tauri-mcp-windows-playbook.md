@@ -402,6 +402,75 @@
   - 再看 `localStorage` 的 `fullscreenPtyId`
   - 再看右栏 `.xterm` 是否已挂载
 
+### 阶段补记：#806 Claude/CMD 恢复链路终验（2026-04-03）
+
+#### 本轮阶段目标
+
+- 用正在运行的 Tauri dev 实例，把 #806 的两条核心终端用户故事在真实桌面窗口里跑通：
+  - Claude/Codex Terminal 在 RT stop/start 后，能够自动恢复并继续原对话
+  - 普通终端（CMD）在 RT stop/start 后不自动恢复，但关闭前 transcript 仍可查看
+- 同时沉淀一套 raw bridge + 页面内 `fetch`/`EventSource` 的最小可复用验收套路
+
+#### 本轮关键实现结论
+
+- `PtySpawnDialog` 不再只给 Codex 补 `inner_session_id`
+  - Claude / Codex 都会在 spawn 后轮询 `/pty/sessions?agent_type=...`
+  - 命中唯一且工作目录匹配的历史 session 后，回写 `PATCH /sessions/:id`
+- Claude 的历史 session 目录比对不能照抄 Codex：
+  - Codex 用绝对路径比较
+  - Claude 用编码后的 `project_path` 比较，例如：
+  - `H:/A137442/Develop/AGI/exomind` -> `H--A137442-Develop-AGI-exomind`
+- 自动恢复前必须再次校验当前 `inner_session_id` 仍属于同一工作目录
+  - 不能只因为 session id 存在就直接 `POST /pty/resume`
+  - 否则断线后可能把旧 PTY 串到错误的历史会话
+- `AgentsPage` 需要额外的 in-flight 锁
+  - 否则 RT 刚恢复可达时，自动恢复逻辑可能并发双发 `/pty/resume`
+
+#### 本轮真实窗口验证
+
+- 当前桌面实例：
+  - 窗口标题 `ExoMind [feature/issue-806-terminal-lifecycle] [Web:1420 RT:9124]`
+  - raw bridge `ws://127.0.0.1:9223` 可用
+- Claude 创建后，首次真实交互前不一定立刻出现在 `/pty/sessions?agent_type=claude`
+  - 至少发起一次真实对话后，历史 session 才会稳定出现
+- 向 PTY 发输入时，页面内请求体必须是：
+  - `POST /pty/:id/input`
+  - `{ "data": "<base64>" }`
+  - 不是 `{ "input": "..." }`
+- Claude 历史 session 补绑已在现场验证通过：
+  - 创建 Claude PTY
+  - 发送一次真实对话
+  - `/sessions` 中对应 unified session 自动出现 `inner_session_id`
+- Claude 自动恢复已在现场验证通过：
+  - `runtime_service_stop`
+  - `runtime_service_start`
+  - 旧 unified session 被归档
+  - 新 PTY 自动接管右栏/持久化位置
+  - 再次发问时，Claude 能回答 stop 前的旧上下文，不是新空会话
+- CMD 用户故事也已在现场验证通过：
+  - spawn 普通 `cmd`
+  - 执行 marker 命令并确认输出
+  - stop/start RT 后不会自动 resume 出新 PTY
+  - 右栏断开态仍能显示关闭前 transcript
+
+#### 现场验证的最低成本套路
+
+1. 用 raw bridge 执行 `window.__TAURI__.core.invoke('runtime_service_status')`
+2. 在页面上下文里直接 `fetch('http://127.0.0.1:9124/sessions')` / `fetch('/pty')`
+3. 需要验证 transcript 时，直接在页面里建 `EventSource('/pty/:id/stream')`
+4. 收到 `output` 事件后做 base64 解码，再断言 marker 文本
+5. 需要确认按钮逻辑是否真正命中 React 时，优先取 DOM 上的 `__reactProps$*` 并直接调 `onClick(...)`
+
+#### 对后续 Agent 的直接提醒
+
+- 不要假设 Claude spawn 后立刻就能从 `/pty/sessions?agent_type=claude` 查到历史 session
+- 不要把 `button.click()` 是否生效，直接等同于“产品逻辑是否正确触发”
+- 不要在断线恢复场景里只看 UI；至少同时看：
+  - `/sessions`
+  - `/pty`
+  - `localStorage['exomind:agentHubTiledState']`
+  - `/pty/:id/stream` 的 transcript 内容
+
 ## 持续更新约定
 
 - 每完成一个 Tauri MCP 阶段目标，就在本文档追加：

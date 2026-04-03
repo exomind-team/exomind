@@ -109,6 +109,7 @@ export interface UpdateSessionRequest {
   summary?: string;
   status?: SessionStatus;
   context?: Partial<WorkContext>;
+  inner_session_id?: string;
 }
 
 /** SSE event types for session stream */

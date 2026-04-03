@@ -261,14 +261,30 @@ async fn stream_pty_output(
 ) -> Result<Sse<ReceiverStream<Result<Event, Infallible>>>, (StatusCode, String)> {
     let (event_tx, event_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(1024);
 
-    let (buffer_snapshot, mut rx) = state
-        .pty_manager
-        .subscribe_output(&id)
-        .await
-        .map_err(map_pty_error)?;
+    let live_subscription = match state.pty_manager.subscribe_output(&id).await {
+        Ok((buffer_snapshot, rx)) => Some((buffer_snapshot, rx)),
+        Err(PtyError::NotFound { .. }) => None,
+        Err(error) => return Err(map_pty_error(error)),
+    };
+    let persisted_snapshot = if live_subscription.is_none() {
+        match state.pty_manager.load_persisted_output(&id).await {
+            Ok(Some(buffer_snapshot)) => Some(buffer_snapshot),
+            Ok(None) => {
+                return Err(map_pty_error(PtyError::NotFound { id }));
+            }
+            Err(error) => return Err(map_pty_error(error)),
+        }
+    } else {
+        None
+    };
 
     // Forward broadcast → mpsc in a spawned task.
     tokio::spawn(async move {
+        let (buffer_snapshot, rx) = match live_subscription {
+            Some((buffer_snapshot, rx)) => (buffer_snapshot, Some(rx)),
+            None => (persisted_snapshot.unwrap_or_default(), None),
+        };
+
         // 1. Replay scrollback buffer.
         if !buffer_snapshot.is_empty() {
             for chunk in buffer_snapshot.chunks(4096) {
@@ -280,9 +296,17 @@ async fn stream_pty_output(
             }
         }
 
+        if rx.is_none() {
+            let _ = event_tx
+                .send(Ok(Event::default().event("eof").data("")))
+                .await;
+            return;
+        }
+
         // 2. Stream live output from the broadcast channel.
         let mut keep_alive_interval = tokio::time::interval(std::time::Duration::from_secs(15));
         keep_alive_interval.tick().await;
+        let mut rx = rx.expect("live subscription should include broadcast receiver");
 
         loop {
             tokio::select! {

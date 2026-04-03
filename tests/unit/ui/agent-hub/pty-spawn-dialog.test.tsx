@@ -73,6 +73,140 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
     });
   });
 
+  it('persists the detected Codex inner session id after spawning with runtime-resolved workdir（新建 Codex 后会用 RT 返回的绝对目录补写 inner_session_id）', async () => {
+    let codexHistoryCalls = 0;
+    const detectedAt = new Date().toISOString();
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.includes('/pty/sessions?agent_type=claude')) {
+        return { ok: true, json: async () => [] } as Response;
+      }
+      if (input.includes('/pty/sessions?agent_type=codex')) {
+        codexHistoryCalls += 1;
+        return {
+          ok: true,
+          json: async () => (codexHistoryCalls === 1
+            ? []
+            : [{
+                agent_type: 'codex',
+                session_id: 'codex-thread-new',
+                project_path: 'H:/A137442/Develop/AGI/exomind',
+                last_modified: detectedAt,
+              }]),
+        } as Response;
+      }
+      if (input.endsWith('/pty/spawn')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'pty-codex-new',
+            name: 'codex-main',
+            workdir: 'H:/A137442/Develop/AGI/exomind',
+          }),
+        } as Response;
+      }
+      if (input.endsWith('/sessions/pty-codex-new') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ id: 'pty-codex-new', inner_session_id: 'codex-thread-new' }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${input} ${JSON.stringify(init)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <PtySpawnDialog
+        open={true}
+        onOpenChange={() => {}}
+        rtBaseUrl="http://127.0.0.1:1949"
+        defaultWorkdir=""
+        onSpawned={() => {}}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('pty-agent-type'), { target: { value: 'codex' } });
+    fireEvent.change(screen.getByTestId('pty-session-name'), { target: { value: 'codex-main' } });
+    fireEvent.click(screen.getByTestId('pty-spawn-submit'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1949/sessions/pty-codex-new',
+        expect.objectContaining({
+          method: 'PATCH',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+          }),
+          body: JSON.stringify({ inner_session_id: 'codex-thread-new' }),
+        }),
+      );
+    });
+  });
+
+  it('persists the detected Claude inner session id after spawning（新建 Claude 后也会补写 inner_session_id）', async () => {
+    let claudeHistoryCalls = 0;
+    const detectedAt = new Date().toISOString();
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.includes('/pty/sessions?agent_type=claude')) {
+        claudeHistoryCalls += 1;
+        return {
+          ok: true,
+          json: async () => (claudeHistoryCalls === 1
+            ? []
+            : [{
+                agent_type: 'claude',
+                session_id: 'claude-thread-new',
+                project_path: 'H--A137442-Develop-AGI-exomind',
+                last_modified: detectedAt,
+              }]),
+        } as Response;
+      }
+      if (input.endsWith('/pty/spawn')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'pty-claude-new',
+            name: 'claude-main',
+            workdir: 'H:/A137442/Develop/AGI/exomind',
+          }),
+        } as Response;
+      }
+      if (input.endsWith('/sessions/pty-claude-new') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ id: 'pty-claude-new', inner_session_id: 'claude-thread-new' }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${input} ${JSON.stringify(init)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <PtySpawnDialog
+        open={true}
+        onOpenChange={() => {}}
+        rtBaseUrl="http://127.0.0.1:1949"
+        defaultWorkdir=""
+        onSpawned={() => {}}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('pty-session-name'), { target: { value: 'claude-main' } });
+    fireEvent.click(screen.getByTestId('pty-spawn-submit'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1949/sessions/pty-claude-new',
+        expect.objectContaining({
+          method: 'PATCH',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+          }),
+          body: JSON.stringify({ inner_session_id: 'claude-thread-new' }),
+        }),
+      );
+    });
+  });
+
   it('resumes codex historical session with agent_type（按 Agent 类型恢复 Codex 历史会话）', async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input.includes('/pty/sessions?agent_type=claude')) {

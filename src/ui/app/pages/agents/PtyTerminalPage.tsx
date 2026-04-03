@@ -205,19 +205,31 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
         {isDisconnected ? (
           <div
             data-testid="pty-terminal-page-disconnected"
-            className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
+            className="flex h-full flex-col bg-[#1C1917]"
           >
-            <div className="space-y-1">
+            <div className="border-b border-[#292524] px-6 py-4 text-center">
               <p className="text-sm font-semibold text-[#FAFAF9]">终端已断开</p>
-              <p className="text-xs text-[#A8A29E]">对应 PTY 已不存在，RT 可能已经重启。可点击上方“结束”将会话收敛为已完成。</p>
+              <p className="mt-1 text-xs text-[#A8A29E]">
+                对应 PTY 已不存在，RT 可能已经重启。下方保留关闭前历史；如需结束，可点击上方“结束”将会话收敛为已完成。
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={navigateBack}
-              className="rounded border border-[#44403C] px-3 py-1.5 text-xs text-[#E7E5E4] hover:border-[#57534E]"
-            >
-              返回 Agents
-            </button>
+            <div className="flex-1 overflow-hidden">
+              <PtyTerminal
+                rtBaseUrl={rtBaseUrl}
+                ptyId={ptyId}
+                authToken={authToken}
+                interactive={false}
+              />
+            </div>
+            <div className="border-t border-[#292524] px-4 py-3">
+              <button
+                type="button"
+                onClick={navigateBack}
+                className="rounded border border-[#44403C] px-3 py-1.5 text-xs text-[#E7E5E4] hover:border-[#57534E]"
+              >
+                返回 Agents
+              </button>
+            </div>
           </div>
         ) : (
           <PtyTerminal

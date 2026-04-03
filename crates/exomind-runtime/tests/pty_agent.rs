@@ -5,17 +5,27 @@
 //! Gate the entire file to keep the test suite green on Android / Termux.
 #![cfg(not(target_os = "android"))]
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use exomind_runtime::{RuntimeStartOptions, start_with_options};
 use serde_json::Value;
 use std::time::Duration;
+use tempfile::TempDir;
 
 /// Helper: start a lightweight runtime with no builtin actors or TS agents.
 async fn start_test_runtime() -> (exomind_runtime::RuntimeHandle, String) {
+    start_test_runtime_with_data_dir(None).await
+}
+
+async fn start_test_runtime_with_data_dir(
+    data_dir: Option<std::path::PathBuf>,
+) -> (exomind_runtime::RuntimeHandle, String) {
     let handle = start_with_options(RuntimeStartOptions {
         bind_host: "127.0.0.1".to_string(),
         port: 0,
         spawn_builtin_actors: false,
         spawn_ts_agents: false,
+        data_dir,
         ..Default::default()
     })
     .await
@@ -23,6 +33,101 @@ async fn start_test_runtime() -> (exomind_runtime::RuntimeHandle, String) {
 
     let base_url = format!("http://127.0.0.1:{}", handle.port());
     (handle, base_url)
+}
+
+fn short_lived_echo_spawn_body(marker: &str) -> serde_json::Value {
+    if cfg!(windows) {
+        serde_json::json!({
+            "name": format!("echo-{marker}"),
+            "workdir": ".",
+            "command": "cmd",
+            "args": ["/C", "echo", marker]
+        })
+    } else {
+        serde_json::json!({
+            "name": format!("echo-{marker}"),
+            "workdir": ".",
+            "command": "echo",
+            "args": [marker]
+        })
+    }
+}
+
+async fn spawn_short_lived_echo(client: &reqwest::Client, base_url: &str, marker: &str) -> String {
+    let spawn_resp = client
+        .post(format!("{base_url}/pty/spawn"))
+        .json(&short_lived_echo_spawn_body(marker))
+        .send()
+        .await
+        .expect("spawn request should succeed");
+    assert_eq!(spawn_resp.status().as_u16(), 201);
+
+    let spawn_payload: Value = spawn_resp
+        .json()
+        .await
+        .expect("spawn response should be JSON");
+    spawn_payload["id"]
+        .as_str()
+        .expect("spawn response should include PTY id")
+        .to_string()
+}
+
+async fn wait_for_session_completed(client: &reqwest::Client, base_url: &str, pty_id: &str) {
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_secs(5) {
+        let payload: Value = client
+            .get(format!("{base_url}/sessions"))
+            .send()
+            .await
+            .expect("sessions request should succeed")
+            .json()
+            .await
+            .expect("sessions response should be JSON");
+        let completed = payload
+            .as_array()
+            .and_then(|sessions| {
+                sessions
+                    .iter()
+                    .find(|session| session["id"].as_str() == Some(pty_id))
+            })
+            .map(|session| session["status"] == "completed")
+            .unwrap_or(false);
+        if completed {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    panic!("short-lived PTY should auto-complete unified session");
+}
+
+fn decode_pty_sse_output(body: &str) -> (String, bool) {
+    let mut output = Vec::new();
+    let mut current_event = String::new();
+    let mut saw_eof = false;
+
+    for line in body.lines() {
+        if let Some(event) = line.strip_prefix("event: ") {
+            current_event = event.to_string();
+            continue;
+        }
+
+        if let Some(data) = line.strip_prefix("data: ") {
+            match current_event.as_str() {
+                "output" => {
+                    let chunk = BASE64
+                        .decode(data)
+                        .expect("output data should be valid base64");
+                    output.extend_from_slice(&chunk);
+                }
+                "eof" => saw_eof = true,
+                _ => {}
+            }
+        }
+    }
+
+    (String::from_utf8_lossy(&output).to_string(), saw_eof)
 }
 
 #[tokio::test]
@@ -67,6 +172,17 @@ async fn pty_spawn_and_interact() {
     assert!(
         !pty_id.is_empty(),
         "PTY id should be a non-empty UUID string"
+    );
+    let spawn_workdir = spawn_payload["workdir"]
+        .as_str()
+        .expect("spawn response should include resolved workdir");
+    assert!(
+        std::path::Path::new(spawn_workdir).is_absolute(),
+        "spawn response workdir should be absolute, got {spawn_workdir}"
+    );
+    assert_ne!(
+        spawn_workdir, ".",
+        "spawn response workdir should not keep the unresolved relative path"
     );
     assert_eq!(
         spawn_payload["status"], "running",
@@ -391,4 +507,102 @@ async fn pty_natural_exit_completes_session_and_stop_remains_idempotent() {
     );
 
     handle.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn pty_stream_replays_persisted_history_after_remove() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let (mut handle, base_url) =
+        start_test_runtime_with_data_dir(Some(temp_dir.path().to_path_buf())).await;
+    let client = reqwest::Client::new();
+    let marker = "persisted-remove-history";
+
+    let pty_id = spawn_short_lived_echo(&client, &base_url, marker).await;
+    wait_for_session_completed(&client, &base_url, &pty_id).await;
+
+    let delete_resp = client
+        .delete(format!("{base_url}/pty/{pty_id}"))
+        .send()
+        .await
+        .expect("delete request should succeed");
+    assert_eq!(delete_resp.status().as_u16(), 200);
+
+    let stream_resp = client
+        .get(format!("{base_url}/pty/{pty_id}/stream"))
+        .send()
+        .await
+        .expect("stream request should succeed for persisted transcript");
+    assert_eq!(stream_resp.status().as_u16(), 200);
+
+    let body = stream_resp
+        .text()
+        .await
+        .expect("persisted transcript stream should complete");
+    let (output, saw_eof) = decode_pty_sse_output(&body);
+    assert!(
+        output.contains(marker),
+        "persisted stream should replay terminal history, got {output:?}"
+    );
+    assert!(saw_eof, "persisted stream should end with eof event");
+
+    handle.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn pty_stream_replays_persisted_history_after_runtime_restart() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let client = reqwest::Client::new();
+    let marker = "persisted-restart-history";
+
+    let pty_id = {
+        let (mut handle, base_url) =
+            start_test_runtime_with_data_dir(Some(temp_dir.path().to_path_buf())).await;
+        let pty_id = spawn_short_lived_echo(&client, &base_url, marker).await;
+        wait_for_session_completed(&client, &base_url, &pty_id).await;
+
+        handle.stop().await.expect("runtime should stop");
+        pty_id
+    };
+
+    let (mut restarted_handle, restarted_base_url) =
+        start_test_runtime_with_data_dir(Some(temp_dir.path().to_path_buf())).await;
+
+    let live_ptys: Value = client
+        .get(format!("{restarted_base_url}/pty"))
+        .send()
+        .await
+        .expect("pty list request should succeed")
+        .json()
+        .await
+        .expect("pty list response should be JSON");
+    assert!(
+        live_ptys.as_array().is_some_and(|items| items.is_empty()),
+        "restarted runtime should not auto-recreate live PTY instances"
+    );
+
+    let stream_resp = client
+        .get(format!("{restarted_base_url}/pty/{pty_id}/stream"))
+        .send()
+        .await
+        .expect("stream request should succeed after restart");
+    assert_eq!(stream_resp.status().as_u16(), 200);
+
+    let body = stream_resp
+        .text()
+        .await
+        .expect("persisted transcript stream should complete after restart");
+    let (output, saw_eof) = decode_pty_sse_output(&body);
+    assert!(
+        output.contains(marker),
+        "restarted runtime should replay persisted terminal history, got {output:?}"
+    );
+    assert!(
+        saw_eof,
+        "restarted runtime persisted stream should end with eof event"
+    );
+
+    restarted_handle
+        .stop()
+        .await
+        .expect("restarted runtime should stop");
 }

@@ -11,8 +11,12 @@ export interface PtyTerminalProps {
   rtBaseUrl: string;  // e.g., "http://127.0.0.1:1949"
   ptyId: string;
   authToken?: string;
+  interactive?: boolean;
   onInitialConnectionFailure?: () => void;
 }
+
+const INITIAL_STREAM_CONNECT_RETRY_LIMIT = 2;
+const INITIAL_STREAM_CONNECT_RETRY_DELAY_MS = 250;
 
 // ── Component ──────────────────────────────────────────────────
 
@@ -20,6 +24,7 @@ export function PtyTerminal({
   rtBaseUrl,
   ptyId,
   authToken,
+  interactive = true,
   onInitialConnectionFailure,
 }: PtyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +56,9 @@ export function PtyTerminal({
     };
 
     const sendResize = (rows: number, cols: number) => {
+      if (!interactive) {
+        return;
+      }
       fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize`, {
         method: 'POST',
         headers: buildHeaders(),
@@ -71,8 +79,9 @@ export function PtyTerminal({
       },
       fontSize: 13,
       fontFamily: "'Cascadia Code', 'Fira Code', Consolas, monospace",
-      cursorBlink: true,
+      cursorBlink: interactive,
       allowProposedApi: true,
+      disableStdin: !interactive,
     });
 
     const fitAddon = new FitAddon();
@@ -103,29 +112,33 @@ export function PtyTerminal({
 
     // ── Handle user input → POST to backend ──────────────────
 
-    const inputDisposable = terminal.onData((data) => {
-      sendTextInput(data);
-    });
+    const inputDisposable = interactive
+      ? terminal.onData((data) => {
+        sendTextInput(data);
+      })
+      : { dispose() {} };
 
     // ── Clipboard: Ctrl+Shift+C copy, Ctrl+V / Ctrl+Shift+V paste ──
 
-    terminal.attachCustomKeyEventHandler((e) => {
-      // Ctrl+Shift+C → copy selection
-      if (e.ctrlKey && e.shiftKey && e.code === 'KeyC' && e.type === 'keydown') {
-        const sel = terminal.getSelection();
-        if (sel) void navigator.clipboard.writeText(sel);
-        return false;
-      }
-      // Ctrl+V or Ctrl+Shift+V → paste from clipboard
-      if (e.ctrlKey && (e.code === 'KeyV') && e.type === 'keydown') {
-        e.preventDefault(); // Prevent browser paste event (avoids double input from simulate_paste)
-        void navigator.clipboard.readText().then((text) => {
-          if (text) sendTextInput(text);
-        });
-        return false;
-      }
-      return true;
-    });
+    if (interactive) {
+      terminal.attachCustomKeyEventHandler((e) => {
+        // Ctrl+Shift+C → copy selection
+        if (e.ctrlKey && e.shiftKey && e.code === 'KeyC' && e.type === 'keydown') {
+          const sel = terminal.getSelection();
+          if (sel) void navigator.clipboard.writeText(sel);
+          return false;
+        }
+        // Ctrl+V or Ctrl+Shift+V → paste from clipboard
+        if (e.ctrlKey && (e.code === 'KeyV') && e.type === 'keydown') {
+          e.preventDefault(); // Prevent browser paste event (avoids double input from simulate_paste)
+          void navigator.clipboard.readText().then((text) => {
+            if (text) sendTextInput(text);
+          });
+          return false;
+        }
+        return true;
+      });
+    }
 
     // ── Browser paste event ──────────────────────────────────
     // Listen on DOCUMENT level to capture paste events even when focus is
@@ -153,10 +166,14 @@ export function PtyTerminal({
       if (text) {
         sendTextInput(text);
         // Refocus terminal after paste (voice shortcut may have moved focus)
-        terminal.focus();
+        if (interactive) {
+          terminal.focus();
+        }
       }
     };
-    document.addEventListener('paste', documentPasteHandler);
+    if (interactive) {
+      document.addEventListener('paste', documentPasteHandler);
+    }
 
     // ── Handle resize → POST to backend ──────────────────────
 
@@ -171,6 +188,28 @@ export function PtyTerminal({
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
     let initialStreamConnected = false;
     let initialFailureNotified = false;
+    let initialStreamRetryCount = 0;
+
+    const clearConnectedEventSource = (es: EventSource) => {
+      if (eventSourceRef.current === es) {
+        eventSourceRef.current = null;
+      }
+      if (eventSource === es) {
+        eventSource = null;
+      }
+    };
+
+    const scheduleConnect = (delayMs: number) => {
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+      }
+      connectScheduled = true;
+      connectTimer = setTimeout(() => {
+        connectTimer = null;
+        connectScheduled = false;
+        connectSSE();
+      }, delayMs);
+    };
 
     const syncTerminalLayout = () => {
       // Wait for a measurable container before attaching stream output.
@@ -185,15 +224,13 @@ export function PtyTerminal({
         // Ignore fit/refresh errors during rapid resizing
       }
 
-      sendResize(terminal.rows, terminal.cols);
+      if (interactive) {
+        sendResize(terminal.rows, terminal.cols);
+      }
 
       if (!initialLayoutReady && !connectScheduled) {
         initialLayoutReady = true;
-        connectScheduled = true;
-        connectTimer = setTimeout(() => {
-          connectTimer = null;
-          connectSSE();
-        }, 50);
+        scheduleConnect(50);
       }
 
       return true;
@@ -219,6 +256,7 @@ export function PtyTerminal({
 
       es.onopen = () => {
         initialStreamConnected = true;
+        initialStreamRetryCount = 0;
       };
 
       es.addEventListener('output', (event) => {
@@ -241,16 +279,24 @@ export function PtyTerminal({
       });
 
       es.onerror = () => {
-        if (!initialStreamConnected && !initialFailureNotified && onInitialConnectionFailure) {
-          initialFailureNotified = true;
-          onInitialConnectionFailure();
+        if (!initialStreamConnected) {
+          if (initialStreamRetryCount < INITIAL_STREAM_CONNECT_RETRY_LIMIT) {
+            initialStreamRetryCount += 1;
+            log.warn(
+              `[PtyTerminal] initial stream connection failed for PTY ${ptyId}; retry ${initialStreamRetryCount}/${INITIAL_STREAM_CONNECT_RETRY_LIMIT}`,
+            );
+            es.close();
+            clearConnectedEventSource(es);
+            scheduleConnect(INITIAL_STREAM_CONNECT_RETRY_DELAY_MS);
+            return;
+          }
+
+          if (!initialFailureNotified && onInitialConnectionFailure) {
+            initialFailureNotified = true;
+            onInitialConnectionFailure();
+          }
           es.close();
-          if (eventSourceRef.current === es) {
-            eventSourceRef.current = null;
-          }
-          if (eventSource === es) {
-            eventSource = null;
-          }
+          clearConnectedEventSource(es);
           return;
         }
         // EventSource will auto-reconnect by default
@@ -265,14 +311,18 @@ export function PtyTerminal({
     requestAnimationFrame(() => {
       if (syncTerminalLayout()) {
         // Auto-focus the terminal only when layout is ready
-        terminal.focus();
+        if (interactive) {
+          terminal.focus();
+        }
       }
     });
 
     // ── Cleanup ──────────────────────────────────────────────
 
     return () => {
-      document.removeEventListener('paste', documentPasteHandler);
+      if (interactive) {
+        document.removeEventListener('paste', documentPasteHandler);
+      }
       inputDisposable.dispose();
       resizeDisposable.dispose();
 
@@ -298,7 +348,7 @@ export function PtyTerminal({
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [authToken, onInitialConnectionFailure, ptyId, rtBaseUrl]);
+  }, [authToken, interactive, onInitialConnectionFailure, ptyId, rtBaseUrl]);
 
   return (
     <div
