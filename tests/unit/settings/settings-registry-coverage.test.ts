@@ -438,7 +438,7 @@ describe('settings registry coverage audit', () => {
     settingsPagePreferenceState.isDesktopOperatingSystem = false;
   });
 
-  it('keeps the feature toggles drawer checklist in sync with its audited child settings', () => {
+  it('keeps the inline developer toggle checklist in sync with its audited child settings（开发者分组内联开关清单与审计项保持一致）', () => {
     expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
       'me-page-enabled',
       'agent-page-enabled',

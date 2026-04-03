@@ -46,7 +46,7 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     expect(vi.mocked(syncDevtoolsWithSettings)).toHaveBeenCalled();
   });
 
-  it('updates command palette state inside feature toggles drawer', () => {
+  it('updates command palette state inline in developer section（在开发者分组内联更新命令面板开关）', () => {
     render(<SettingsPage />);
     const toggle = screen.getByTestId('feature-toggle-command-palette-switch');
     fireEvent.click(toggle);
@@ -54,7 +54,7 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     expect(vi.mocked(setCommandPaletteEnabled)).toHaveBeenCalledWith(true);
   });
 
-  it('updates me page state inside feature toggles drawer', () => {
+  it('updates me page state inline in developer section（在开发者分组内联更新 Me 页面开关）', () => {
     render(<SettingsPage />);
     const toggle = screen.getByTestId('feature-toggle-me-page-switch');
     fireEvent.click(toggle);
