@@ -717,6 +717,178 @@
    - 再点一次 `归档`
    - 最后确认卡片从 DOM 中消失
 
+### 阶段补记：#824 会话卡片打开反馈闭环与 superseded PTY 清理补丁（2026-04-03 晚）
+
+#### 阶段目标
+
+- 继续用 Tauri MCP 真窗验证 `#824` 的两条核心验收：
+  - `网络/会话` 页的活跃会话数 `<5`
+  - 点击每张活跃卡片后，右栏要么正常打开 Terminal，要么明确显示失败/断开态，并留下可追溯的 `agent-hub` 日志
+- 在此基础上，补掉 superseded session 被退休后仍残留 live PTY 的清理漏洞。
+
+#### 观察结果
+
+- 本轮前半段官方 `driver_session` 可直接使用：
+  - 主窗口标题：`ExoMind [feature/issue-806-terminal-lifecycle] [Web:1420 RT:9124]`
+  - URL：`http://localhost:1420/agents`
+- 在真实窗口内先看到：
+  - `会话 14`
+  - `活跃会话 3`
+- 三张活跃卡片逐张点击结果：
+  - `86381039-a91d-440a-8c66-5992b962fcb6`
+    - 正常打开右栏 Terminal
+    - 现场日志：
+      - `[agent-hub][pty][open] requested`
+      - `[agent-hub][pty][open] terminal panel opened`
+  - `5e994c0d-a8b7-4ecd-94a7-027046c824e6`
+    - 正常打开右栏 Terminal
+    - 现场日志同样命中：
+      - `requested`
+      - `terminal panel opened`
+  - `96a9ae3a-d423-4d52-872e-7202227dce02`
+    - 不再停留在旧 Terminal
+    - 右栏明确显示断开/失败提示：
+      - `Terminal 已断开，自动恢复失败；下方将展示关闭前历史，可结束后归档。`
+    - 现场日志命中：
+      - `[agent-hub][pty][open] requested`
+      - `[agent-hub][pty][open] session PTY is disconnected`
+      - `[agent-hub][pty][open] disconnected terminal history panel opened`
+      - `[agent-hub][pty][open] auto-resume failed; falling back to disconnected history view`
+- 在继续复验 superseded/重复历史 session 收敛时，又观察到一个尾巴问题：
+  - 某些 superseded session 已被 `PATCH /sessions/:id` 推进到 `archived`
+  - 但它绑定的旧 PTY 仍可能残留在 live `/pty` 列表里
+  - 根因是部分前端路径只做了 session retirement，没有稳定先 stop superseded PTY
+- 为此，本轮新增前端补丁：
+  - duplicate historical session / occupied historical session 的退休路径统一改走 `reconcileSupersededTerminalSession(...)`
+  - superseded PTY 的 stop 不再依赖本地 `knownPtyIds` 命中才执行，而是直接尝试 stop，并把 `404` 视为已清理
+  - 新增单测确保“即便本地 live PTY 列表尚未刷新，也会先 stop superseded PTY 再退休 session”
+- 代码侧验证结果：
+  - `bunx tsc --noEmit`
+  - `bunx vitest run tests/unit/ui/agent-hub/agents-page.issue806.test.tsx tests/unit/ui/agent-hub/agents-page.session-actions.issue523.test.tsx tests/unit/hooks/use-session-stream.multihost.test.tsx`
+  - 结果：`3` 个测试文件、`30` 个测试全部通过
+
+#### 结论
+
+- `#824` 的主用户故事已经在 Tauri 真窗里打通：
+  - 活跃会话数保持 `<5`
+  - 点击活跃卡片不再“点了没反应/卡在旧 Terminal”
+  - live 会话能正常打开，stale/disconnected 会话会明确失败并留下 trace log
+- 本轮新增补丁进一步收紧了 superseded session 的尾部清理：
+  - 不再只把旧 session 状态推进到 `archived`
+  - 还会主动尝试 stop 旧 PTY，减少“session 已退休但 live PTY 还挂着”的残留
+- 另一个与业务无关、但需要记住的事实：
+  - 官方 `driver_session` 在本轮后半段再次出现 `Transport closed`
+  - 这类 bridge 断连不能直接等同于产品回归，先区分“工具链断桥”与“应用行为失效”
+
+#### 可复用操作套路
+
+1. 先用 `webview_dom_snapshot(type=accessibility)` 记录：
+   - `会话`
+   - `活跃会话`
+   - 右栏是否出现断开提示
+2. 再用 `webview_execute_js` 读取当前 `session-card-*`，拿到精确 session id 后逐张点击。
+3. 点击后同时取证三层：
+   - 右栏文本是否变成 live terminal 或 disconnected history
+   - `agent-hub` 的 `requested / terminal panel opened / session PTY is disconnected / auto-resume failed`
+   - 必要时补查 RT `/sessions` 与 `/pty`
+4. 如果官方 `driver_session` 中途掉成 `Transport closed`：
+   - 先确认 `1420 / 9124 / 9223` 端口是否还活着
+   - 再判断是 bridge 工具层问题，还是应用/RT 本身真的挂了
+5. 遇到 superseded/重复历史 session 时，不要只验 session 状态是否变成 `archived`
+   - 还要同步确认旧 PTY 是否被 stop
+   - 否则容易留下“UI 看起来干净，但 RT 里还有 live PTY”的假收敛
+
+### 阶段补记：#824 断开历史面板占焦点时不再反向退休新 live 会话（2026-04-03 深夜）
+
+#### 阶段目标
+
+- 修复并复验一个更隐蔽的 `#824` 现场：
+  - 某个 recoverable 断开会话仍占着右栏/fullscreen 焦点
+  - 用户点击它后会自动恢复出新的 live PTY
+  - 但旧的 canonical 打分会把“占焦点的断开旧会话”误判成 canonical，进而把新 live session 也一起 retirement，留下 orphan PTY
+- 额外确认：
+  - `活跃会话` 计数仍与 RT `/sessions` 对齐
+  - 点击活跃卡片后要么进入明确断开态，要么恢复出新 Terminal，不再出现“两个 session 都被归档但 PTY 还活着”的反向收敛
+
+#### 观察结果
+
+- 新问题根因已在代码里坐实：
+  - historical canonical 选择时，旧逻辑会给 `activePtyId` / `tiledPaneOrder` 加高权重
+  - 即便该 PTY 已经断开，只要它还占着右栏或平铺位，分数仍可能压过刚恢复出来的新 live session
+  - 同时，本地 `knownPtyIds` 之前把 `/pty` 列表里的 `stopped` PTY 也当成“已知 live PTY”
+- 现场日志曾出现典型互退迹象：
+  - `retired superseded terminal session { sessionId: <new>, supersededBySessionId: <old> }`
+  - 随后又出现：
+  - `retired superseded terminal session { sessionId: <old>, supersededBySessionId: <new> }`
+  - 最终表现为：
+  - UI 活跃数下降了
+  - 但 RT `/pty` 里还有孤儿 running PTY
+
+#### 本轮修复
+
+- `AgentsPage` 的 historical occupancy 打分改成只让 **live PTY** 吃到这些 canonical 加分：
+  - `activePtyId`
+  - `tiledPaneOrder`
+  - `knownPtyIds`
+- `knownPtyIds` 现在只收录 `/pty` 返回里 `status === "running"` 的 PTY。
+- 新增回归测试：
+  - `does not retire a freshly recovered live session just because a disconnected history panel was focused`
+
+#### 真窗复验
+
+- 当前 Tauri 主窗口：
+  - `ExoMind [feature/issue-806-terminal-lifecycle] [Web:1420 RT:9124]`
+  - URL：`http://localhost:1420/agents`
+- 修复后，`会话` 视图现场为：
+  - `会话 12`
+  - `活跃会话 1`
+- 同时直接查 RT：
+  - `/sessions` -> `runningCount = 1`
+  - 初始 `/pty` 里只有旧条目，且没有 live PTY
+- 点击唯一活跃卡片 `86381039-a91d-440a-8c66-5992b962fcb6` 后，真实窗口链路为：
+  - 先进入断开历史视图
+  - 控制台依次出现：
+    - `[agent-hub][pty][open] requested`
+    - `[agent-hub][pty][open] session PTY is disconnected`
+    - `[agent-hub][pty][open] disconnected terminal history panel opened`
+    - `[agent-hub][pty][open] resumed disconnected terminal session`
+    - `[agent-hub][pty] superseded terminal session retirement step already satisfied after conflict`
+  - 右栏最终显示 live Terminal，而不是卡住或停留在旧断开态
+- 点击后的 RT 真相：
+  - `/sessions` 只剩新的 running session：
+    - `8d6efe7d-4814-46ca-a6f7-95136b13a21f`
+  - `/pty` 里新的 running PTY 与之对应：
+    - `8d6efe7d-4814-46ca-a6f7-95136b13a21f`
+  - 旧 session `86381039-a91d-440a-8c66-5992b962fcb6` 被退休
+  - 没再出现“新 session 也被反向归档，只剩 orphan PTY”的现场
+
+#### 结论
+
+- 这轮修复后，historical canonical 的优先级终于与真实“live/断开”状态对齐：
+  - 断开旧会话即便占着右栏焦点，也不会再压过新恢复出来的 live session
+- `#824` 的验收在本轮实窗里进一步收紧：
+  - 活跃会话数 `<5`
+  - UI 与 `/sessions` running 数一致
+  - 点击活跃卡片会给出明确断开反馈并恢复，或明确失败，不再反向制造 orphan PTY
+
+#### 可复用操作套路
+
+1. 遇到“点击 recoverable 断开卡片后，活跃数变少了但 RT 里还有 PTY”时，先怀疑 canonical 打分而不是先怀疑 resume 本身。
+2. 同时看三层证据：
+   - `webview_dom_snapshot` 里的 `活跃会话`
+   - RT `/sessions`
+   - RT `/pty`
+3. 如果日志里出现双向 superseded retirement：
+   - `new -> old`
+   - `old -> new`
+   优先检查：
+   - `activePtyId` 是否给了断开会话额外加分
+   - `/pty` 的 `stopped` 条目是否被误当成 live
+4. 验证“不再 orphan”不要只看 UI：
+   - 点击恢复后再查一次 `/sessions`
+   - 再查一次 `/pty`
+   - 确认 running session 与 running PTY 一一对应
+
 ## 持续更新约定
 
 - 每完成一个 Tauri MCP 阶段目标，就在本文档追加：
@@ -725,3 +897,83 @@
   - 结论
   - 对后续 Agent 有复用价值的操作套路
 - 不另建新的临时“排查总结”文档，避免经验碎片化。
+
+### 阶段补记：#828 清理残留进程后，#806 / #824 真窗链路恢复验证（2026-04-03）
+
+#### 阶段目标
+
+- 在用户手动执行 `taskkill bun.exe node.exe cargo.exe` 后，确认这次故障是否主要属于 `#828` 的环境层残留进程问题，而不是新的 `#806 / #824` 产品回归。
+- 用 Tauri MCP 重新实测两条主线：
+  - `网络 -> 会话` 页的活跃会话数是否 `< 5`，且与 RT 侧 running PTY / 非 archived session 口径一致
+  - 点击会话卡片进入右侧 `Terminal` 时，是否能够“正常打开”或“明确失败并给出 UI + console trace”
+- 顺带确认 `请求箱` 不再停在“请求箱加载中...”。
+
+#### 观察结果
+
+- `driver_session` 可正常连上桌面实例：
+  - 主窗口标题：`ExoMind [feature/issue-806-terminal-lifecycle] [Web:1420 RT:9124]`
+  - 主窗口 URL：`http://localhost:1420/agents`
+- 当前 RT 直查结果：
+  - `GET http://127.0.0.1:9124/health` -> `{"status":"ok"}`
+  - `GET http://127.0.0.1:9124/pty` -> `ptyTotal = 2`，其中 `ptyRunning = 1`
+  - `GET http://127.0.0.1:9124/sessions` -> `total = 103`
+  - 按前端当前口径过滤 `status !== "archived"` 后：
+    - `visible = 12`
+    - `active = 1`
+    - `completed = 11`
+- `会话` 页真实窗口与 RT 口径一致：
+  - UI 显示：`会话 12`
+  - UI 显示：`活跃会话 1`
+  - 这与 `/sessions` 过滤后的 `visible = 12 / active = 1` 一致
+  - 也与 `/pty` 的 `ptyRunning = 1` 一致
+- 点击唯一活跃卡片后：
+  - console 出现：
+    - `[agent-hub][pty][open] requested`
+    - `[agent-hub][pty][open] terminal panel opened`
+  - 未出现“点了没反应”或无限卡住
+- 点击一个已完成卡片后：
+  - UI 明确出现红色提示：
+    - `Terminal 已断开，无法恢复；下方将展示关闭前历史，可结束后归档。`
+  - 右栏同时出现两段明确说明：
+    - `当前 PTY 已不存在，RT 可能已经重启。下方保留关闭前历史；如需结束，可点击上方“结束”收敛后归档。`
+    - `Terminal 已断开，无法恢复；下方将展示关闭前历史，可结束后归档。`
+  - console 出现：
+    - `[agent-hub][pty][open] requested`
+    - `[agent-hub][pty][open] session PTY is disconnected`
+    - `[agent-hub][pty][open] disconnected terminal history panel opened`
+- 切到 `请求箱` 页后：
+  - 页面正常进入并渲染统计卡与筛选按钮
+  - 未再停在 `请求箱加载中...`
+  - 本轮现场为零提案空状态，但页面可用
+
+#### 结论
+
+- 这轮现场里，“界面卡住 / 请求箱加载中”在 `taskkill bun/node/cargo` 后恢复，进一步坐实：
+  - 残留进程占住 `9124` 属于独立环境层问题，应该继续放在 `#828` 跟踪
+  - 它会把 `#806 / #824` 的前端表现伪装成“页面卡死”或“Terminal 没反应”
+- 在清掉残留进程后，当前实现分支上的 `#806 / #824` 主链路已经能在 Tauri MCP 真窗里通过：
+  - 活跃会话数 `< 5`
+  - UI 与 RT 过滤口径一致
+  - 点击 live 会话可打开 Terminal
+  - 点击 stale/completed 会话会明确失败并留下 trace
+  - 请求箱可正常加载
+- 因此后续排查必须先区分：
+  - `#828` 环境层：端口占用 / embedded RT 自启动失败 / bridge 异常
+  - `#806 / #824` 产品层：会话生命周期、Terminal 打开、失败反馈、请求箱加载
+
+#### 可复用操作套路
+
+1. 先查三层基础活性：
+   - `driver_session status`
+   - `GET /health`
+   - `Get-NetTCPConnection -LocalPort 9124`
+2. 再用 RT 直查和 UI 对数：
+   - `/pty` 看 running PTY 数
+   - `/sessions` 按 `status !== "archived"` 统计 `visible / active / completed`
+   - 去 `网络 -> 会话` 看 UI 是否一致
+3. 点卡片时同时取两层证据：
+   - UI 是否进入 live Terminal 或明确失败态
+   - `read_logs source=console` 是否命中 `agent-hub][pty][open] ...`
+4. 如果用户说“请求箱加载中...”：
+   - 先不要急着判定是 `ProposalInboxPage` 回归
+   - 先排除 `9124` 被残留 `bun/node/cargo` 占住，导致 embedded RT 自启动失败

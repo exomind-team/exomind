@@ -66,6 +66,13 @@ ExoMind 的每一条系统级约束都必须具备**双层表述**，缺一不�
 
 L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
 
+## 开发知识索引
+
+- Tauri MCP / Windows 联调经验库：
+  [docs/development/tauri-mcp-windows-playbook.md](docs/development/tauri-mcp-windows-playbook.md)
+  - 用于持续沉淀桌面外心在 Windows 上通过 Tauri MCP 调试、验证、排障的经验
+  - 先确认当前 `tauri dev` 实例目录，再判断配置与日志，不要直接把 legacy `%APPDATA%` 目录当作当前实例
+
 ---
 
 ## 工作流程

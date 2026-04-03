@@ -74,6 +74,16 @@
 11. 推送后必须在 PR 评论同步变更摘要、测试命令、结果证据；若一个 PR 覆盖两个相关 issue，需同步更新 PR 描述。
 12. 合并前先检查是否有新的 blocking review；无阻塞且关键回归通过后再合并到 `dev`。
 
+## Tauri MCP 经验库
+
+1. Windows 下凡是使用 Tauri MCP 调试外心桌面应用，优先查阅并持续更新 [docs/development/tauri-mcp-windows-playbook.md](docs/development/tauri-mcp-windows-playbook.md)。
+2. 这份文档是持续追加的经验库，不新建零散排查总结；每达成一个阶段性目标都要补充：
+   - 阶段目标
+   - 观察结果
+   - 结论
+   - 可复用的操作套路
+3. `bun run tauri dev` 默认使用 worktree 级实例目录，先确认 `.tmp/tauri-dev-state/<instance>/`，不要直接把 `%APPDATA%/com.exomind.app` 视为当前实例真相。
+
 ## Multi-Agent 协作最佳实践（多代理协作）
 
 1. 仅在任务可拆成 **2 个及以上相互独立子问题** 时启用 multi-agent（多代理）；共享同一文件或强顺序依赖的问题优先单线程处理。
