@@ -9,7 +9,7 @@ async function setupIssue201Flags(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('exomind:uiMode', 'new');
     localStorage.setItem('exomind:agentPageEnabled', 'true');
-    localStorage.setItem('exomind:useMockData', 'true');
+    localStorage.setItem('exomind:useMockData', 'false');
   });
 }
 
@@ -46,12 +46,17 @@ test.describe('Issue #201 AgentsPage runtime aggregation（真实 runtime 多主
       if (request.url === '/topology') {
         response.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
         response.end(JSON.stringify({
+          host_id: 'runtime-host-201',
           hostname: 'local-runtime',
           os: 'Windows 11',
           arch: 'x86_64',
           uptime_secs: 99,
           version: '0.1.0',
           port: RUNTIME_PORT,
+          capabilities: {
+            agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+            api_providers: ['openai', 'anthropic'],
+          },
         }));
         return;
       }
@@ -85,7 +90,7 @@ test.describe('Issue #201 AgentsPage runtime aggregation（真实 runtime 多主
 
   test('aggregates runtime list and switches to offline after server stop（聚合渲染并在服务关闭后显示 offline）', async ({ page }) => {
     await page.goto('/agents');
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
 
     await page.getByTestId('agent-add-node-button').click();
     await page.getByTestId('agent-add-node-option-device').click();

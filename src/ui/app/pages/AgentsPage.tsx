@@ -284,6 +284,12 @@ function TabBar({
   );
 }
 
+function readFocusSessionHandoff(): string | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('focusSession');
+}
+
 
 export function AgentsPage() {
   const supportsInlineRightPanel = useIsDesktop(1024);
@@ -1286,6 +1292,17 @@ export function AgentsPage() {
     () => (useMockData ? MOCK_SESSIONS : liveSessions),
     [liveSessions, useMockData],
   );
+
+  useEffect(() => {
+    const focusSessionId = readFocusSessionHandoff();
+    if (!focusSessionId) return;
+
+    const targetSession = dashboardSessions.find((session) => session.id === focusSessionId);
+    if (!targetSession?.pty_id) return;
+    if (rightPanel.state === 'PTY_TERMINAL' && activePtyId === targetSession.pty_id) return;
+
+    openPtyTerminal(targetSession.pty_id, targetSession.source_host_id);
+  }, [activePtyId, dashboardSessions, rightPanel.state]);
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);

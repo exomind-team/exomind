@@ -5,6 +5,8 @@ async function setupIssue777Flags(page: Page) {
     localStorage.setItem('exomind:uiMode', 'new');
     localStorage.setItem('exomind:desktopAdaptiveEnabled', 'true');
     localStorage.setItem('exomind:agentPageEnabled', 'true');
+    localStorage.setItem('exomind:developerMode', 'true');
+    localStorage.setItem('exomind:workbenchTestPageEnabled', 'true');
     localStorage.setItem('exomind:useMockData', 'true');
     localStorage.setItem('exomind:workbenchLegacyShimEnabled', 'true');
     localStorage.setItem('exomind:workbench:phase1-flat:v1', JSON.stringify({
@@ -114,6 +116,22 @@ test.describe('Issue #777 flat workbench（平铺工作台最小可见功能）'
 
     await expect(page).toHaveURL(/\/workbench$/);
     await expect(page.getByTestId('workbench-page')).toBeVisible();
+  });
+
+  test('keeps workbench test nav hidden until the flag is enabled（未开启开关前隐藏工作台测试入口）', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('exomind:uiMode', 'new');
+      localStorage.setItem('exomind:desktopAdaptiveEnabled', 'true');
+      localStorage.setItem('exomind:agentPageEnabled', 'true');
+      localStorage.setItem('exomind:developerMode', 'true');
+      localStorage.removeItem('exomind:workbenchTestPageEnabled');
+    });
+
+    await page.goto('/settings');
+
+    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toHaveCount(0);
+    await page.getByTestId('feature-toggle-workbench-test-switch').click();
+    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toBeVisible();
   });
 });
 

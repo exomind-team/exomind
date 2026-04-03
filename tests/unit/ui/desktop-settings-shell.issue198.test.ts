@@ -35,6 +35,7 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(desktopNavBlock).toContain("title: '网络'");
     expect(desktopNavBlock).toContain("path: '/agents'");
     expect(desktopNavBlock).toContain('icon: Waypoints');
+    expect(desktopNavBlock).toContain('...(workbenchTestPageEnabled ? [{');
     expect(desktopNavBlock).toContain("key: 'workbench-test'");
     expect(desktopNavBlock).toContain("title: '工作台测试'");
     expect(desktopNavBlock).toContain("path: '/workbench'");
@@ -49,6 +50,7 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   it('uses network label and waypoints icon in mobile shell nav（移动端底栏使用网络文案与拓扑图标）', () => {
     expect(source).toContain("{ title: '当下', path: '/eventlog', icon: Target }");
     expect(source).toContain("...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : [])");
+    expect(source).toContain("...(workbenchTestPageEnabled ? [{ title: '工作台测试', path: '/workbench', icon: FlaskConical }] : [])");
     expect(source).not.toContain("...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : [])");
   });
 

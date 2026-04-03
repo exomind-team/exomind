@@ -1,4 +1,8 @@
-import type { SessionInfo, SessionStatus } from '@/lib/types/session';
+import type { SessionInfo } from '@/lib/types/session';
+import {
+  buildWorkbenchSessionProjection,
+  type WorkbenchSessionProjection,
+} from './workbench-session-interop';
 
 export const WORKBENCH_PHASE1_STORAGE_KEY = 'exomind:workbench:phase1-flat:v1';
 
@@ -278,23 +282,6 @@ export function applyWorkbenchLegacyIntent(
   return { ...state, panes };
 }
 
-function mapSessionStatus(status: SessionStatus): WorkbenchPaneStatus {
-  switch (status) {
-    case 'running':
-      return 'running';
-    case 'waiting_input':
-      return 'waiting';
-    case 'completed':
-    case 'paused':
-    case 'archived':
-      return 'idle';
-    case 'error':
-      return 'error';
-    default:
-      return 'idle';
-  }
-}
-
 export function buildWorkbenchPaneHref(session: SessionInfo): string {
   const focusSession = `/agents?workbenchBypass=true&focusSession=${encodeURIComponent(session.id)}`;
   if (session.interaction_mode === 'terminal') {
@@ -333,34 +320,47 @@ export function mergeWorkbenchPaneState(
   return readFallbackWorkbenchPanes();
 }
 
-export function buildWorkbenchPanesFromSessions(
-  sessions: SessionInfo[],
+export function buildWorkbenchPanesFromProjection(
+  projection: WorkbenchSessionProjection,
   fallbackPanes?: WorkbenchPaneState[],
 ): WorkbenchPaneState[] {
-  const runtimePanes = sessions.map((session): WorkbenchPaneState => {
-    const isTerminal = session.interaction_mode === 'terminal';
-    const hasPty = Boolean(session.pty_id);
-    const bindingType: WorkbenchBindingType = isTerminal
-      ? (hasPty ? 'pty-runtime' : 'ssh-runtime')
-      : 'agent-session';
-    const viewKind: WorkbenchViewKind = isTerminal ? 'runtime-view' : 'session-view';
-    const status = isTerminal && hasPty && session.status === 'running'
+  const runtimePanes = projection.sessions.map((session): WorkbenchPaneState => {
+    const binding = projection.bindings.find((candidate) => candidate.sessionId === session.id);
+    const bindingType = binding?.bindingType ?? 'agent-session';
+    const viewKind: WorkbenchViewKind = bindingType === 'agent-session'
+      ? 'session-view'
+      : 'runtime-view';
+    const status: WorkbenchPaneStatus = bindingType === 'pty-runtime' && session.status === 'running'
       ? 'attached'
-      : mapSessionStatus(session.status);
+      : session.status;
 
     return {
       id: `pane-${session.id}`,
-      title: session.role || session.summary || 'Untitled Session',
+      title: session.title,
       viewKind,
       bindingType,
       status,
-      description: session.summary || session.last_output_preview || 'Runtime session pane / 运行时会话面板',
+      description: session.legacyIntent
+        ? `Legacy handoff from ${session.legacyIntent.route} / 来自旧聊天入口的接力`
+        : (session.summary || 'Runtime session pane / 运行时会话面板'),
       sessionId: session.id,
-      agentId: session.agent_id,
-      ptyId: session.pty_id,
-      openPath: buildWorkbenchPaneHref(session),
+      agentId: session.agentId,
+      ptyId: session.ptyId,
+      openPath: bindingType === 'agent-session'
+        ? `/agents/chat/${encodeURIComponent(session.agentId ?? session.id)}?workbenchBypass=true`
+        : `/agents?workbenchBypass=true&focusSession=${encodeURIComponent(session.id)}`,
     };
   });
 
   return mergeWorkbenchPaneState(runtimePanes, fallbackPanes);
+}
+
+export function buildWorkbenchPanesFromSessions(
+  sessions: SessionInfo[],
+  fallbackPanes?: WorkbenchPaneState[],
+): WorkbenchPaneState[] {
+  return buildWorkbenchPanesFromProjection(
+    buildWorkbenchSessionProjection(sessions),
+    fallbackPanes,
+  );
 }

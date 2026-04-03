@@ -13,13 +13,17 @@ import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
 import {
   applyWorkbenchLegacyIntent,
-  buildWorkbenchPanesFromSessions,
+  buildWorkbenchPanesFromProjection,
   readOrCreateWorkbenchFlatState,
   resolveWorkbenchLegacyIntent,
   writeWorkbenchFlatState,
   type WorkbenchBindingType,
   type WorkbenchPaneState,
 } from './workbench-storage';
+import {
+  buildWorkbenchSessionProjection,
+  mergeWorkbenchLegacyIntentIntoProjection,
+} from './workbench-session-interop';
 
 type PanePresentation = {
   badge: string;
@@ -148,10 +152,13 @@ export function WorkbenchPage() {
     enabled: true,
   });
 
-  const panes = useMemo(
-    () => buildWorkbenchPanesFromSessions(sessions, storedState.panes),
-    [sessions, storedState.panes],
-  );
+  const panes = useMemo(() => {
+    const projection = mergeWorkbenchLegacyIntentIntoProjection(
+      buildWorkbenchSessionProjection(sessions),
+      legacyIntent,
+    );
+    return buildWorkbenchPanesFromProjection(projection, storedState.panes);
+  }, [legacyIntent, sessions, storedState.panes]);
 
   useEffect(() => {
     writeWorkbenchFlatState({

@@ -96,6 +96,7 @@ export const settingsPagePreferenceState = {
   developerMode: false,
   agentPageEnabled: false,
   mePageEnabled: false,
+  workbenchTestPageEnabled: false,
   desktopAdaptiveEnabled: true,
   embeddedRuntimeAllowLanWithoutAuth: false,
   isTauriWindow: false,
@@ -206,6 +207,12 @@ vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: vi.fn(() => settingsPagePreferenceState.desktopAdaptiveEnabled),
   setDesktopAdaptiveEnabled: vi.fn(),
   subscribeDesktopAdaptiveChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/workbench-test-page-enabled', () => ({
+  getWorkbenchTestPageEnabled: vi.fn(() => settingsPagePreferenceState.workbenchTestPageEnabled),
+  setWorkbenchTestPageEnabled: vi.fn(),
+  subscribeWorkbenchTestPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/runtime-target', async (importOriginal) => {

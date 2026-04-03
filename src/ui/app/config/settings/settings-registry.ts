@@ -100,6 +100,11 @@ import {
   subscribeCommandPaletteEnabledChanges,
 } from '@/config/command-palette-enabled';
 import {
+  getWorkbenchTestPageEnabled,
+  setWorkbenchTestPageEnabled,
+  subscribeWorkbenchTestPageEnabledChanges,
+} from '@/config/workbench-test-page-enabled';
+import {
   getVoiceTranscriptSendMode,
   setVoiceTranscriptSendMode,
   subscribeVoiceTranscriptSendModeChanges,
@@ -629,6 +634,7 @@ export const FEATURE_TOGGLE_SETTING_IDS = [
   'goals-page-enabled',
   'desktop-adaptive',
   'command-palette-enabled',
+  'workbench-test-page-enabled',
 ] as const;
 
 export const FEATURE_TOGGLE_SETTINGS = [
@@ -681,6 +687,16 @@ export const FEATURE_TOGGLE_SETTINGS = [
     get: getCommandPaletteEnabled,
     set: setCommandPaletteEnabled,
     subscribe: subscribeCommandPaletteEnabledChanges,
+  },
+  {
+    id: 'workbench-test-page-enabled',
+    label: '工作台测试',
+    icon: Bot,
+    rowTestId: 'feature-toggle-workbench-test-row',
+    controlTestId: 'feature-toggle-workbench-test-switch',
+    get: getWorkbenchTestPageEnabled,
+    set: setWorkbenchTestPageEnabled,
+    subscribe: subscribeWorkbenchTestPageEnabledChanges,
   },
 ] as const;
 
@@ -1566,29 +1582,19 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     set: setDevtoolsEnabledWithSync,
     subscribe: subscribeDevtoolsChanges,
   },
-  {
-    id: 'feature-toggles',
-    label: '功能开关',
-    icon: Bot,
-    category: 'developer',
-    type: 'group',
-    groupStyle: 'adaptive-overlay',
-    dialogTitle: '功能开关',
-    dialogDescription: '启用或关闭实验性功能',
+  ...FEATURE_TOGGLE_SETTINGS.map((setting) => ({
+    id: setting.id,
+    label: setting.label,
+    icon: setting.icon,
+    category: 'developer' as const,
+    type: 'boolean' as const,
     visible: devOnly,
-    children: FEATURE_TOGGLE_SETTINGS.map((setting) => ({
-      id: setting.id,
-      label: setting.label,
-      icon: setting.icon,
-      category: 'developer',
-      type: 'boolean' as const,
-      rowTestId: setting.rowTestId,
-      controlTestId: setting.controlTestId,
-      get: setting.get,
-      set: setting.set,
-      subscribe: setting.subscribe,
-    })),
-  },
+    rowTestId: setting.rowTestId,
+    controlTestId: setting.controlTestId,
+    get: setting.get,
+    set: setting.set,
+    subscribe: setting.subscribe,
+  })),
   {
     id: 'instance-diagnostics',
     label: '实例诊断信息',

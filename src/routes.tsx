@@ -13,6 +13,7 @@ import {
   getDesktopSidebarCollapsed as getPersistedDesktopSidebarCollapsed,
   setDesktopSidebarCollapsed as setPersistedDesktopSidebarCollapsed,
 } from '@/config/desktop-sidebar-preferences';
+import { getWorkbenchTestPageEnabled, subscribeWorkbenchTestPageEnabledChanges } from '@/config/workbench-test-page-enabled';
 import { getCommandRegistryService } from '@/lib/services/command-registry.service';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
@@ -312,6 +313,7 @@ function DesktopSidebar({
   agentPageEnabled,
   mePageEnabled,
   goalsPageEnabled,
+  workbenchTestPageEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
@@ -319,6 +321,7 @@ function DesktopSidebar({
   agentPageEnabled: boolean;
   mePageEnabled: boolean;
   goalsPageEnabled: boolean;
+  workbenchTestPageEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -347,13 +350,13 @@ function DesktopSidebar({
       icon: Waypoints,
       match: (path: string) => path === '/agents' || path.startsWith('/agents/'),
     }] : []),
-    {
+    ...(workbenchTestPageEnabled ? [{
       key: 'workbench-test',
       title: '工作台测试',
       path: '/workbench',
       icon: FlaskConical,
       match: (path: string) => path === '/workbench' || path.startsWith('/workbench/'),
-    },
+    }] : []),
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
@@ -448,6 +451,7 @@ function DesktopLayout({
   agentPageEnabled,
   mePageEnabled,
   goalsPageEnabled,
+  workbenchTestPageEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
@@ -455,6 +459,7 @@ function DesktopLayout({
   agentPageEnabled: boolean;
   mePageEnabled: boolean;
   goalsPageEnabled: boolean;
+  workbenchTestPageEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -466,6 +471,7 @@ function DesktopLayout({
           agentPageEnabled={agentPageEnabled}
           mePageEnabled={mePageEnabled}
           goalsPageEnabled={goalsPageEnabled}
+          workbenchTestPageEnabled={workbenchTestPageEnabled}
           collapsed={collapsed}
           onToggleCollapsed={onToggleCollapsed}
         />
@@ -537,6 +543,7 @@ function NewLayout() {
   const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
   const [goalsPageEnabled, setGoalsPageEnabled] = useState(() => getGoalsPageEnabled());
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => getPersistedDesktopSidebarCollapsed());
+  const [workbenchTestPageEnabled, setWorkbenchTestPageEnabled] = useState(() => getWorkbenchTestPageEnabled());
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
@@ -552,6 +559,9 @@ function NewLayout() {
   }, []);
   useEffect(() => {
     return subscribeGoalsPageEnabledChanges(setGoalsPageEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeWorkbenchTestPageEnabledChanges(setWorkbenchTestPageEnabled);
   }, []);
   useEffect(() => {
     return subscribeDesktopAdaptiveChanges(setDesktopAdaptiveEnabledState);
@@ -624,7 +634,7 @@ function NewLayout() {
     ...(goalsPageEnabled ? [{ title: '目标', path: '/goals', icon: Orbit }] : []),
     ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
-    { title: '工作台测试', path: '/workbench', icon: FlaskConical },
+    ...(workbenchTestPageEnabled ? [{ title: '工作台测试', path: '/workbench', icon: FlaskConical }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
   const selectedShell = isDesktop && desktopAdaptiveEnabled ? 'desktop' : 'mobile';
@@ -637,6 +647,7 @@ function NewLayout() {
           agentPageEnabled={agentPageEnabled}
           mePageEnabled={mePageEnabled}
           goalsPageEnabled={goalsPageEnabled}
+          workbenchTestPageEnabled={workbenchTestPageEnabled}
           collapsed={desktopSidebarCollapsed}
           onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
         />

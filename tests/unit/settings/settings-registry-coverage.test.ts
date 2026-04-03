@@ -71,7 +71,12 @@ const AUDITED_SETTINGS_IDS = [
   'developer-mode',
   'use-mock-data',
   'devtools',
-  'feature-toggles',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
+  'workbench-test-page-enabled',
   'instance-diagnostics',
   'device-pairing',
   'embedded-runtime-lan-no-auth',
@@ -115,6 +120,12 @@ const BOOLEAN_IDS = [
   'developer-mode',
   'use-mock-data',
   'devtools',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
+  'workbench-test-page-enabled',
 ] as const;
 
 const NUMBER_IDS = [
@@ -158,18 +169,22 @@ const CUSTOM_ITEM_IDS = [
   'device-pairing',
 ] as const;
 
+const DEV_ONLY_IDS = [
+  'use-mock-data',
+  'devtools',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
+  'workbench-test-page-enabled',
+  'instance-diagnostics',
+  'device-pairing',
+] as const;
 const TAURI_DEV_ONLY_IDS = [
   'eventlog-backend-mode',
   'task-backend-mode',
   'timeblock-backend-mode',
-] as const;
-
-const DEV_ONLY_IDS = [
-  'use-mock-data',
-  'devtools',
-  'feature-toggles',
-  'instance-diagnostics',
-  'device-pairing',
 ] as const;
 
 function getItem<T extends typeof SETTINGS_REGISTRY[number]['type']>(
@@ -273,6 +288,9 @@ describe('settings registry coverage audit', () => {
     const volcanoEngineKey = getItem('volcano-engine-key', 'custom');
     expect(volcanoEngineKey.label).toBe('火山引擎 Key');
 
+    const volcanoUsageSummary = getItem('volcano-usage-summary', 'custom');
+    expect(volcanoUsageSummary.label).toBe('火山用量概览');
+
     const volcanoResourceId = getItem('volcano-resource-id', 'string');
     expect(volcanoResourceId.stringStyle).toBe('dialog');
     expect(volcanoResourceId.dialogFieldKind).toBe('plain');
@@ -303,15 +321,13 @@ describe('settings registry coverage audit', () => {
       ...getBaseCtx(),
       isTauriWindow: true,
     })).toBe(true);
-
-    const featureToggles = getItem('feature-toggles', 'group');
-    expect(featureToggles.groupStyle).toBe('adaptive-overlay');
-    expect(featureToggles.children.map((child) => child.id)).toEqual([
+    expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
       'me-page-enabled',
       'agent-page-enabled',
       'goals-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
+      'workbench-test-page-enabled',
     ]);
 
     const clearLocalCache = getItem('clear-local-cache', 'action');
@@ -364,6 +380,11 @@ describe('settings registry coverage audit', () => {
       expect(tauriDeveloperIds).toContain(id);
     });
 
+    TAURI_DEV_ONLY_IDS.forEach((id) => {
+      expect(baseIds).not.toContain(id);
+      expect(developerIds).not.toContain(id);
+    });
+
     expect(baseIds).toContain('moss-api-token');
     expect(developerIds).toContain('moss-api-token');
     expect(volcanoIds).not.toContain('moss-api-token');
@@ -412,6 +433,12 @@ describe('settings registry coverage audit', () => {
         isDesktop: true,
         isTauriWindow: true,
         developerMode: true,
+      },
+      {
+        ...getBaseCtx(),
+        isDesktop: true,
+        isTauriWindow: true,
+        developerMode: true,
         voiceShortcutAsrProvider: 'volcano',
       },
     ];
@@ -432,6 +459,7 @@ describe('settings registry coverage audit', () => {
       'goals-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
+      'workbench-test-page-enabled',
     ]);
     expect(FEATURE_TOGGLE_SETTINGS.map((item) => item.id)).toEqual(FEATURE_TOGGLE_SETTING_IDS);
     FEATURE_TOGGLE_SETTINGS.forEach((item) => {
