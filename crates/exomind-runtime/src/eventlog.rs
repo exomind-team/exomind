@@ -101,6 +101,10 @@ impl EventLogStore {
         })
     }
 
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
     /// Attach a broadcast sender for automatic SSE notifications on mutations.
     /// Can be called after construction (even through `&self` / `Arc<Self>`).
     pub fn set_watch_tx(&self, tx: broadcast::Sender<String>) {

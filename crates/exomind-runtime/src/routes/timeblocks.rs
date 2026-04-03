@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::signal::types::SignalEvent;
-use crate::timeblock::{ActiveBlockData, BlockTransition, BlockTransitionType, TimeBlockData, TimeBlockStore};
+use crate::timeblock::{
+    ActiveBlockData, BlockTransition, BlockTransitionType, TimeBlockData, TimeBlockStore,
+};
 
 #[derive(Debug, Deserialize)]
 struct ImportQuery {
@@ -86,7 +88,9 @@ fn internal_error(message: String) -> (StatusCode, Json<ErrorResponse>) {
 fn conflict(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::CONFLICT,
-        Json(ErrorResponse { error: message.into() }),
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
     )
 }
 
@@ -172,7 +176,9 @@ struct StartBlockRequest {
     source_planned_block_id: Option<String>,
 }
 
-fn default_mode() -> String { "countup".to_string() }
+fn default_mode() -> String {
+    "countup".to_string()
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -223,7 +229,11 @@ pub fn do_new_block(
             start_id: active.start_id.clone(),
             end_id: format!("end-{}", uuid::Uuid::new_v4()),
             note: req.feedback.clone(),
-            tags: if active.block_type.as_deref() == Some("gap") { vec![] } else { vec!["block_feedback".to_string()] },
+            tags: if active.block_type.as_deref() == Some("gap") {
+                vec![]
+            } else {
+                vec!["block_feedback".to_string()]
+            },
             start_time: active.start_time,
             end_time: now,
             block_type: active.block_type.clone(),
@@ -234,9 +244,17 @@ pub fn do_new_block(
             transitions: {
                 let mut t = active.transitions.clone();
                 if req.feedback.is_some() {
-                    t.push(BlockTransition { transition_type: BlockTransitionType::FeedbackSubmit, at: now, actor_id: Some("rt:newblock".to_string()) });
+                    t.push(BlockTransition {
+                        transition_type: BlockTransitionType::FeedbackSubmit,
+                        at: now,
+                        actor_id: Some("rt:newblock".to_string()),
+                    });
                 }
-                t.push(BlockTransition { transition_type: BlockTransitionType::End, at: now, actor_id: Some("rt:newblock".to_string()) });
+                t.push(BlockTransition {
+                    transition_type: BlockTransitionType::End,
+                    at: now,
+                    actor_id: Some("rt:newblock".to_string()),
+                });
                 t
             },
         };
@@ -262,8 +280,16 @@ pub fn do_new_block(
         } else {
             format!("tb-{}", uuid::Uuid::new_v4())
         },
-        name: if is_gap { String::new() } else { req.name.clone().unwrap_or_default() },
-        mode: if is_gap { "countup".to_string() } else { req.mode.clone().unwrap_or_else(|| "countup".to_string()) },
+        name: if is_gap {
+            String::new()
+        } else {
+            req.name.clone().unwrap_or_default()
+        },
+        mode: if is_gap {
+            "countup".to_string()
+        } else {
+            req.mode.clone().unwrap_or_else(|| "countup".to_string())
+        },
         target_minutes: if is_gap { None } else { req.target_minutes },
         block_type: Some(req.block_type.clone()),
         transitions: vec![BlockTransition {
@@ -273,9 +299,15 @@ pub fn do_new_block(
         }],
         elapsed: if !is_gap && req.mode.as_deref() == Some("countdown") {
             req.target_minutes.unwrap_or(25) * 60 * 1000
-        } else { 0 },
+        } else {
+            0
+        },
         updated_at: Some(now),
-        phase: if is_gap { None } else { Some("running".to_string()) },
+        phase: if is_gap {
+            None
+        } else {
+            Some("running".to_string())
+        },
         version: Some(1),
         actor_id: Some("rt:newblock".to_string()),
         last_transition_at: Some(now),
@@ -288,9 +320,17 @@ pub fn do_new_block(
         pause_accumulated_ms: if is_gap { None } else { Some(0) },
         paused: false,
         paused_at: None,
-        task_ids: if is_gap { vec![] } else { req.task_ids.clone().unwrap_or_default() },
+        task_ids: if is_gap {
+            vec![]
+        } else {
+            req.task_ids.clone().unwrap_or_default()
+        },
         task_association_log: vec![],
-        source_planned_block_id: if is_gap { None } else { req.source_planned_block_id.clone() },
+        source_planned_block_id: if is_gap {
+            None
+        } else {
+            req.source_planned_block_id.clone()
+        },
         task_id: None,
     };
 
@@ -298,7 +338,10 @@ pub fn do_new_block(
         .put_active_scoped(scope_key, new_active.clone())
         .map_err(|e| internal_error(e.to_string()))?;
 
-    Ok(NewBlockResponse { completed, active: new_active })
+    Ok(NewBlockResponse {
+        completed,
+        active: new_active,
+    })
 }
 
 /// POST /timeblocks/new — raw primitive, no guard. For Agent/script use.
@@ -320,27 +363,40 @@ async fn start_block(
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
 
     // Guard: reject if current block is active (not gap, not completed)
-    if let Some(current) = state.timeblock_store.get_active_scoped(scope_key)
-        .map_err(|e| internal_error(e.to_string()))? {
-        if current.block_type.as_deref() != Some("gap")
-            && current.feedback_submitted_at.is_none() {
+    if let Some(current) = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+    {
+        if current.block_type.as_deref() != Some("gap") && current.feedback_submitted_at.is_none() {
             return Err(conflict("cannot start: active block in progress"));
         }
     }
 
-    let result = do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
-        block_type: "active".to_string(),
-        name: Some(payload.name),
-        mode: Some(payload.mode),
-        target_minutes: payload.target_minutes,
-        task_ids: Some(payload.task_ids),
-        source_planned_block_id: payload.source_planned_block_id,
-        feedback: None,
-        task_status_outcomes: None,
-    })?;
+    let result = do_new_block(
+        &state.timeblock_store,
+        scope_key,
+        &NewBlockRequest {
+            block_type: "active".to_string(),
+            name: Some(payload.name),
+            mode: Some(payload.mode),
+            target_minutes: payload.target_minutes,
+            task_ids: Some(payload.task_ids),
+            source_planned_block_id: payload.source_planned_block_id,
+            feedback: None,
+            task_status_outcomes: None,
+        },
+    )?;
 
     // Transition → EventLog linkage (active blocks only, gap skipped)
-    write_timeblock_eventlog(&state, scope_key, "block_start", &result.active.name, &result.active.start_id, &result.active.task_ids);
+    write_timeblock_eventlog(
+        &state,
+        scope_key,
+        "block_start",
+        &result.active.name,
+        &result.active.start_id,
+        &result.active.task_ids,
+    );
 
     Ok(Json(result))
 }
@@ -354,7 +410,9 @@ async fn end_block(
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
 
     // Guard: reject if current block is gap (or empty)
-    let current = state.timeblock_store.get_active_scoped(scope_key)
+    let current = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
         .ok_or_else(|| conflict("cannot end: no active block"))?;
 
@@ -364,24 +422,37 @@ async fn end_block(
 
     // Guard: must have stopped first (feedback phase required for active blocks)
     if current.action_ended_at.is_none() && current.feedback_started_at.is_none() {
-        return Err(conflict("cannot end: must stop first (use POST /timeblocks/stop)"));
+        return Err(conflict(
+            "cannot end: must stop first (use POST /timeblocks/stop)",
+        ));
     }
 
-    let result = do_new_block(&state.timeblock_store, scope_key, &NewBlockRequest {
-        block_type: "gap".to_string(),
-        name: None,
-        mode: None,
-        target_minutes: None,
-        task_ids: None,
-        source_planned_block_id: None,
-        feedback: payload.feedback,
-        task_status_outcomes: payload.task_status_outcomes,
-    })?;
+    let result = do_new_block(
+        &state.timeblock_store,
+        scope_key,
+        &NewBlockRequest {
+            block_type: "gap".to_string(),
+            name: None,
+            mode: None,
+            target_minutes: None,
+            task_ids: None,
+            source_planned_block_id: None,
+            feedback: payload.feedback,
+            task_status_outcomes: payload.task_status_outcomes,
+        },
+    )?;
 
     // Transition → EventLog linkage: write block_feedback for the completed active block
     // Gap block creation does NOT write EventLog (per #759 design)
     if let Some(ref completed) = result.completed {
-        write_timeblock_eventlog(&state, scope_key, "block_feedback", &completed.name, &completed.start_id, &completed.task_ids);
+        write_timeblock_eventlog(
+            &state,
+            scope_key,
+            "block_feedback",
+            &completed.name,
+            &completed.start_id,
+            &completed.task_ids,
+        );
         publish_completed_timeblock_replication_signal(&state, scope_key, completed).await;
     }
 
@@ -399,7 +470,10 @@ async fn replication_completed_block(
         .list_completed_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?;
 
-    if blocks.iter().any(|existing| existing.start_id == payload.block.start_id) {
+    if blocks
+        .iter()
+        .any(|existing| existing.start_id == payload.block.start_id)
+    {
         return Ok(Json(CompletedReplicationResponse { status: "ignored" }));
     }
 
@@ -421,9 +495,12 @@ async fn stop_block(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).expect("system clock error").as_millis() as u64;
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock error")
+        .as_millis() as u64;
 
-    let current = state.timeblock_store
+    let current = state
+        .timeblock_store
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
         .ok_or_else(|| conflict("cannot stop: no active block"))?;
@@ -445,20 +522,24 @@ async fn stop_block(
     updated.updated_at = Some(now);
     updated.transitions.push(BlockTransition {
         transition_type: BlockTransitionType::FeedbackStart,
-        at: now, actor_id: Some("rt:stop".to_string()),
+        at: now,
+        actor_id: Some("rt:stop".to_string()),
     });
 
     let name = updated.name.clone();
     let start_id = updated.start_id.clone();
     let task_ids = updated.task_ids.clone();
 
-    state.timeblock_store
+    state
+        .timeblock_store
         .put_active_scoped(scope_key, updated)
         .map_err(|e| internal_error(e.to_string()))?;
 
     write_timeblock_eventlog(&state, scope_key, "block_end", &name, &start_id, &task_ids);
 
-    Ok(Json(serde_json::json!({ "status": "stopped", "phase": "feedback_in_progress" })))
+    Ok(Json(
+        serde_json::json!({ "status": "stopped", "phase": "feedback_in_progress" }),
+    ))
 }
 
 /// POST /timeblocks/pause — pause the current active block
@@ -468,9 +549,12 @@ async fn pause_block(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).expect("system clock error").as_millis() as u64;
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock error")
+        .as_millis() as u64;
 
-    let current = state.timeblock_store
+    let current = state
+        .timeblock_store
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
         .ok_or_else(|| conflict("cannot pause: no active block"))?;
@@ -500,18 +584,27 @@ async fn pause_block(
     updated.updated_at = Some(now);
     updated.transitions.push(BlockTransition {
         transition_type: BlockTransitionType::Pause,
-        at: now, actor_id: Some("rt:pause".to_string()),
+        at: now,
+        actor_id: Some("rt:pause".to_string()),
     });
 
     let name = updated.name.clone();
     let start_id = updated.start_id.clone();
     let task_ids = updated.task_ids.clone();
 
-    state.timeblock_store
+    state
+        .timeblock_store
         .put_active_scoped(scope_key, updated)
         .map_err(|e| internal_error(e.to_string()))?;
 
-    write_timeblock_eventlog(&state, scope_key, "block_pause", &name, &start_id, &task_ids);
+    write_timeblock_eventlog(
+        &state,
+        scope_key,
+        "block_pause",
+        &name,
+        &start_id,
+        &task_ids,
+    );
 
     Ok(Json(serde_json::json!({ "status": "paused" })))
 }
@@ -523,9 +616,12 @@ async fn resume_block(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).expect("system clock error").as_millis() as u64;
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock error")
+        .as_millis() as u64;
 
-    let current = state.timeblock_store
+    let current = state
+        .timeblock_store
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
         .ok_or_else(|| conflict("cannot resume: no active block"))?;
@@ -553,18 +649,27 @@ async fn resume_block(
     updated.updated_at = Some(now);
     updated.transitions.push(BlockTransition {
         transition_type: BlockTransitionType::Resume,
-        at: now, actor_id: Some("rt:resume".to_string()),
+        at: now,
+        actor_id: Some("rt:resume".to_string()),
     });
 
     let name = updated.name.clone();
     let start_id = updated.start_id.clone();
     let task_ids = updated.task_ids.clone();
 
-    state.timeblock_store
+    state
+        .timeblock_store
         .put_active_scoped(scope_key, updated)
         .map_err(|e| internal_error(e.to_string()))?;
 
-    write_timeblock_eventlog(&state, scope_key, "block_resume", &name, &start_id, &task_ids);
+    write_timeblock_eventlog(
+        &state,
+        scope_key,
+        "block_resume",
+        &name,
+        &start_id,
+        &task_ids,
+    );
 
     Ok(Json(serde_json::json!({ "status": "resumed" })))
 }
@@ -577,10 +682,18 @@ async fn describe_current_block(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
 
-    let mut active = state.timeblock_store
+    let mut active = state
+        .timeblock_store
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(ErrorResponse { error: "no active block".into() })))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "no active block".into(),
+                }),
+            )
+        })?;
 
     if let Some(name) = payload.name {
         active.name = name;
@@ -589,11 +702,14 @@ async fn describe_current_block(
 
     let block_id = active.start_id.clone();
 
-    state.timeblock_store
+    state
+        .timeblock_store
         .put_active_scoped(scope_key, active)
         .map_err(|e| internal_error(e.to_string()))?;
 
-    Ok(Json(serde_json::json!({ "updated": "current", "blockId": block_id })))
+    Ok(Json(
+        serde_json::json!({ "updated": "current", "blockId": block_id }),
+    ))
 }
 
 // ── #759 describe: modify name/note of a timeblock by ID ────────────
@@ -626,23 +742,29 @@ async fn describe_block(
     let block_id = &path.block_id;
 
     // Try active block first
-    if let Some(mut active) = state.timeblock_store
+    if let Some(mut active) = state
+        .timeblock_store
         .get_active_scoped(scope_key)
-        .map_err(|e| internal_error(e.to_string()))? {
+        .map_err(|e| internal_error(e.to_string()))?
+    {
         if active.start_id == *block_id {
             if let Some(name) = payload.name {
                 active.name = name;
             }
             // Active blocks don't have note field — skip silently
-            state.timeblock_store
+            state
+                .timeblock_store
                 .put_active_scoped(scope_key, active.clone())
                 .map_err(|e| internal_error(e.to_string()))?;
-            return Ok(Json(serde_json::json!({ "updated": "active", "blockId": block_id })));
+            return Ok(Json(
+                serde_json::json!({ "updated": "active", "blockId": block_id }),
+            ));
         }
     }
 
     // Try completed blocks
-    let mut blocks = state.timeblock_store
+    let mut blocks = state
+        .timeblock_store
         .list_completed_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?;
 
@@ -653,7 +775,9 @@ async fn describe_block(
             let block = &blocks[i];
             // Immutability: completed active blocks cannot be modified
             if block.block_type.as_deref() != Some("gap") {
-                return Err(conflict("cannot describe: completed active blocks are immutable"));
+                return Err(conflict(
+                    "cannot describe: completed active blocks are immutable",
+                ));
             }
             // Gap block: allow describe (retroactive naming)
             if let Some(name) = payload.name {
@@ -662,10 +786,13 @@ async fn describe_block(
             if let Some(note) = payload.note {
                 blocks[i].note = Some(note);
             }
-            state.timeblock_store
+            state
+                .timeblock_store
                 .replace_completed_scoped(scope_key, &blocks)
                 .map_err(|e| internal_error(e.to_string()))?;
-            Ok(Json(serde_json::json!({ "updated": "completed_gap", "blockId": block_id })))
+            Ok(Json(
+                serde_json::json!({ "updated": "completed_gap", "blockId": block_id }),
+            ))
         }
     }
 }
@@ -681,7 +808,10 @@ async fn list_timeblocks(
         .map_err(|error| internal_error(error.to_string()))?;
     // #759: filter by blockType if specified
     let filtered = match query.block_type.as_deref() {
-        Some(bt) => blocks.into_iter().filter(|b| b.block_type.as_deref() == Some(bt)).collect(),
+        Some(bt) => blocks
+            .into_iter()
+            .filter(|b| b.block_type.as_deref() == Some(bt))
+            .collect(),
         None => blocks,
     };
     Ok(Json(filtered))
@@ -1092,7 +1222,10 @@ pub fn router() -> Router<AppState> {
         .route("/timeblocks/new", post(new_block))
         .route("/timeblocks/start", post(start_block))
         .route("/timeblocks/end", post(end_block))
-        .route("/timeblocks/replication/completed", post(replication_completed_block))
+        .route(
+            "/timeblocks/replication/completed",
+            post(replication_completed_block),
+        )
         .route("/timeblocks/stop", post(stop_block))
         .route("/timeblocks/pause", post(pause_block))
         .route("/timeblocks/resume", post(resume_block))
@@ -1100,8 +1233,7 @@ pub fn router() -> Router<AppState> {
         .route("/timeblocks/:block_id/describe", post(describe_block))
         .route(
             "/timeblocks/active",
-            get(get_active_timeblock)
-                .put(put_active_timeblock),
+            get(get_active_timeblock).put(put_active_timeblock),
         )
         .route("/timeblocks/backend/status", get(timeblock_backend_status))
         .route("/timeblocks/backup/json", get(export_timeblocks_json))
@@ -1128,10 +1260,8 @@ mod tests {
         test_state_with_timeblock_store_and_eventlog(
             timeblock_store,
             Arc::new(crate::eventlog::EventLogStore::new(
-                std::env::temp_dir().join(format!(
-                    "exomind-test-timeblocks-{}",
-                    uuid::Uuid::new_v4()
-                )),
+                std::env::temp_dir()
+                    .join(format!("exomind-test-timeblocks-{}", uuid::Uuid::new_v4())),
             )),
         )
     }
@@ -1154,10 +1284,10 @@ mod tests {
                 Arc::clone(&signal_pool),
                 None,
             )),
-        mesh_relay: None,
-        auth_secret: None,
-        allow_lan_without_auth: false,
-        mdns: None,
+            mesh_relay: None,
+            auth_secret: None,
+            allow_lan_without_auth: false,
+            mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             config_store: Arc::new(crate::config::ConfigStore::new()),
             reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
@@ -1222,8 +1352,8 @@ mod tests {
                             task_status_outcomes: None,
                             task_association_log: vec![],
                             source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
+                            block_type: None,
+                            transitions: vec![],
                         }])
                         .unwrap(),
                     ))
@@ -1265,8 +1395,8 @@ mod tests {
                                 },
                             ],
                             source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
+                            block_type: None,
+                            transitions: vec![],
                         }])
                         .unwrap(),
                     ))
@@ -1315,8 +1445,8 @@ mod tests {
                                 },
                             ],
                             source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
+                            block_type: None,
+                            transitions: vec![],
                             task_id: Some("task-profile-a".to_string()),
                         })
                         .unwrap(),
@@ -1431,8 +1561,8 @@ mod tests {
                                 },
                             ],
                             source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
+                            block_type: None,
+                            transitions: vec![],
                         }])
                         .unwrap(),
                     ))
@@ -1481,8 +1611,8 @@ mod tests {
                                 },
                             ],
                             source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
+                            block_type: None,
+                            transitions: vec![],
                             task_id: Some("task-user-a".to_string()),
                         })
                         .unwrap(),
@@ -1585,8 +1715,8 @@ mod tests {
                             task_ids: vec!["task-a".to_string()],
                             task_association_log: vec![],
                             source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
+                            block_type: None,
+                            transitions: vec![],
                             task_id: Some("task-a".to_string()),
                         })
                         .unwrap(),
@@ -1600,7 +1730,10 @@ mod tests {
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].tags, vec!["block_start".to_string()]);
-        assert_eq!(events[0].metadata.as_ref().unwrap()["block_name"], "Morning focus");
+        assert_eq!(
+            events[0].metadata.as_ref().unwrap()["block_name"],
+            "Morning focus"
+        );
     }
 
     #[tokio::test]
@@ -1640,8 +1773,8 @@ mod tests {
             task_ids: vec!["task-a".to_string()],
             task_association_log: vec![],
             source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
+            block_type: None,
+            transitions: vec![],
             task_id: Some("task-a".to_string()),
         };
 
@@ -1686,7 +1819,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(feedback_in_progress_response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            feedback_in_progress_response.status(),
+            StatusCode::NO_CONTENT
+        );
 
         let feedback_submitted_response = app
             .oneshot(
@@ -1764,8 +1900,8 @@ mod tests {
             task_ids: vec!["task-a".to_string()],
             task_association_log: vec![],
             source_planned_block_id: None,
-                    block_type: None,
-                    transitions: vec![],
+            block_type: None,
+            transitions: vec![],
             task_id: Some("task-a".to_string()),
         };
 
@@ -1805,44 +1941,50 @@ mod tests {
 
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 2);
-        assert!(events.iter().any(|event| event.tags == vec!["block_pause".to_string()]));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.tags == vec!["block_pause".to_string()])
+        );
     }
 
     #[tokio::test]
     async fn scoped_completed_timeblock_replication_payload_includes_scope_key() {
-        let state = test_state_with_timeblock_store(
-            Arc::new(crate::timeblock::TimeBlockStore::new()),
-        );
-        state.timeblock_store.put_active_scoped(
-            Some("profile-argon"),
-            ActiveBlockData {
-                start_id: "active-scoped-1".to_string(),
-                name: "Scoped focus".to_string(),
-                mode: "countdown".to_string(),
-                target_minutes: Some(25),
-                elapsed: 0,
-                updated_at: Some(1_700_000_101_000),
-                phase: Some("feedback_in_progress".to_string()),
-                version: Some(2),
-                actor_id: Some("actor-a".to_string()),
-                last_transition_at: Some(1_700_000_130_000),
-                last_resumed_at: Some(1_700_000_101_000),
-                accumulated_run_ms: Some(1_800_000),
-                start_time: 1_700_000_100_000,
-                action_ended_at: Some(1_700_000_130_000),
-                feedback_started_at: Some(1_700_000_130_000),
-                feedback_submitted_at: None,
-                pause_accumulated_ms: Some(0),
-                paused: false,
-                paused_at: None,
-                task_ids: vec!["task-a".to_string()],
-                task_association_log: vec![],
-                source_planned_block_id: None,
-                block_type: Some("active".to_string()),
-                transitions: vec![],
-                task_id: Some("task-a".to_string()),
-            },
-        ).unwrap();
+        let state =
+            test_state_with_timeblock_store(Arc::new(crate::timeblock::TimeBlockStore::new()));
+        state
+            .timeblock_store
+            .put_active_scoped(
+                Some("profile-argon"),
+                ActiveBlockData {
+                    start_id: "active-scoped-1".to_string(),
+                    name: "Scoped focus".to_string(),
+                    mode: "countdown".to_string(),
+                    target_minutes: Some(25),
+                    elapsed: 0,
+                    updated_at: Some(1_700_000_101_000),
+                    phase: Some("feedback_in_progress".to_string()),
+                    version: Some(2),
+                    actor_id: Some("actor-a".to_string()),
+                    last_transition_at: Some(1_700_000_130_000),
+                    last_resumed_at: Some(1_700_000_101_000),
+                    accumulated_run_ms: Some(1_800_000),
+                    start_time: 1_700_000_100_000,
+                    action_ended_at: Some(1_700_000_130_000),
+                    feedback_started_at: Some(1_700_000_130_000),
+                    feedback_submitted_at: None,
+                    pause_accumulated_ms: Some(0),
+                    paused: false,
+                    paused_at: None,
+                    task_ids: vec!["task-a".to_string()],
+                    task_association_log: vec![],
+                    source_planned_block_id: None,
+                    block_type: Some("active".to_string()),
+                    transitions: vec![],
+                    task_id: Some("task-a".to_string()),
+                },
+            )
+            .unwrap();
         let app = test_router(state.clone());
 
         let response = app
@@ -1900,7 +2042,8 @@ mod tests {
                 "sourcePlannedBlockId": null,
                 "transitions": []
             }
-        }).to_string();
+        })
+        .to_string();
 
         let response = app
             .clone()
@@ -1932,7 +2075,9 @@ mod tests {
         let result: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(result["status"], "ignored");
 
-        let scoped_blocks = timeblock_store.list_completed_in_scope(Some("user-a")).unwrap();
+        let scoped_blocks = timeblock_store
+            .list_completed_in_scope(Some("user-a"))
+            .unwrap();
         assert_eq!(scoped_blocks.len(), 1);
         assert_eq!(scoped_blocks[0].id, "tb-rep-1");
         assert!(

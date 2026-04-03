@@ -5,10 +5,10 @@ use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::AppState;
+use crate::reminder::store::ReminderStoreError;
 use crate::reminder::{
     CreateReminderInput, Reminder, ReminderStatus, ReminderTransitionInput, UpdateReminderInput,
 };
-use crate::reminder::store::ReminderStoreError;
 use crate::signal::types::SignalEvent;
 
 #[derive(Debug, Deserialize)]
@@ -46,7 +46,10 @@ pub fn router() -> Router<AppState> {
         .route("/reminders", get(list_reminders).post(create_reminder))
         .route("/reminders/:id", get(get_reminder).put(update_reminder))
         .route("/reminders/:id/transition", post(transition_reminder))
-        .route("/reminders/replication/upsert", post(reminder_replication_upsert))
+        .route(
+            "/reminders/replication/upsert",
+            post(reminder_replication_upsert),
+        )
 }
 
 async fn list_reminders(
@@ -126,7 +129,9 @@ async fn reminder_replication_upsert(
     Json(request): Json<ReminderReplicationUpsertRequest>,
 ) -> Result<Json<ReminderReplicationUpsertResponse>, StatusCode> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let existing = state.reminder_store.get_scoped(scope_key, &request.reminder.id);
+    let existing = state
+        .reminder_store
+        .get_scoped(scope_key, &request.reminder.id);
     let status = if let Some(existing_reminder) = existing {
         if request.reminder.updated_at < existing_reminder.updated_at {
             "ignored"

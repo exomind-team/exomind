@@ -2,8 +2,8 @@ use axum::{Router, routing::get};
 
 use crate::AppState;
 
-pub mod agents;
 pub mod agent_sessions;
+pub mod agents;
 pub mod config;
 pub mod energy;
 pub mod eventlog;
@@ -16,8 +16,8 @@ pub mod reminders;
 pub mod sessions;
 pub mod signals;
 pub mod tasks;
-pub mod today_planner;
 pub mod timeblocks;
+pub mod today_planner;
 pub mod topology;
 pub mod workspace;
 

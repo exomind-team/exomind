@@ -41,7 +41,11 @@ pub fn spawn_link_proof_actor(
 }
 
 fn handle_link_proof_request(pool: &SignalPool, local_host_id: &str, event: &SignalEvent) {
-    let target_peer_id = match event.payload.get("target_peer_id").and_then(|value| value.as_str()) {
+    let target_peer_id = match event
+        .payload
+        .get("target_peer_id")
+        .and_then(|value| value.as_str())
+    {
         Some(value) if value == local_host_id => value,
         _ => return,
     };
@@ -188,6 +192,9 @@ mod tests {
         assert_eq!(first.topic, LINK_PROOF_REQUEST_TOPIC);
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
-        assert!(result.is_err(), "non-targeted request should not emit receipt ack");
+        assert!(
+            result.is_err(),
+            "non-targeted request should not emit receipt ack"
+        );
     }
 }

@@ -569,7 +569,12 @@ impl TimeBlockStore {
         Ok(self
             .list_windows_scoped(scope_key)?
             .into_iter()
-            .find(|window| window.segments.iter().any(|segment| segment.id == normalized_segment_id)))
+            .find(|window| {
+                window
+                    .segments
+                    .iter()
+                    .any(|segment| segment.id == normalized_segment_id)
+            }))
     }
 
     pub fn list_completed_scoped(
@@ -779,7 +784,9 @@ fn sorted_planned_blocks(mut blocks: Vec<PlannedTimeBlockData>) -> Vec<PlannedTi
 }
 
 fn normalize_segment(mut segment: PlannedSegmentData) -> PlannedSegmentData {
-    segment.linked_task_ids.retain(|task_id| !task_id.trim().is_empty());
+    segment
+        .linked_task_ids
+        .retain(|task_id| !task_id.trim().is_empty());
     segment
 }
 
@@ -843,12 +850,7 @@ mod tests {
         }
     }
 
-    fn sample_window(
-        id: &str,
-        date: &str,
-        start_at: u64,
-        end_at: u64,
-    ) -> SchedulingWindowData {
+    fn sample_window(id: &str, date: &str, start_at: u64, end_at: u64) -> SchedulingWindowData {
         SchedulingWindowData {
             id: id.to_string(),
             date: date.to_string(),

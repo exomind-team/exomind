@@ -341,7 +341,11 @@ pub fn build_tool_registry(
     user_id: Option<String>,
     requested_tools: &[String],
 ) -> Result<ToolRegistry, SessionError> {
-    build_tool_registry_for_runtime(&AgentSessionRuntime::from_state(state), user_id, requested_tools)
+    build_tool_registry_for_runtime(
+        &AgentSessionRuntime::from_state(state),
+        user_id,
+        requested_tools,
+    )
 }
 
 pub fn build_tool_registry_for_runtime(

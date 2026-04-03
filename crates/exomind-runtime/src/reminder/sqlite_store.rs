@@ -220,12 +220,9 @@ fn parse_status(raw: String) -> Result<ReminderStatus, ReminderStoreError> {
 
 fn map_reminder_row(row: &rusqlite::Row<'_>) -> Result<Reminder, rusqlite::Error> {
     let status_raw: String = row.get(4)?;
-    let status = parse_status(status_raw)
-        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(
-            4,
-            rusqlite::types::Type::Text,
-            Box::new(error),
-        ))?;
+    let status = parse_status(status_raw).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(error))
+    })?;
 
     Ok(Reminder {
         id: row.get(0)?,

@@ -37,14 +37,8 @@ fn put_config(key: &str, value: String, sensitive: bool) -> PutConfigEntryInput 
 }
 
 fn make_test_state(data_dir: &Path) -> AppState {
-    let mut state = AppState::new_runtime(
-        0,
-        "agent-api-rt-test".to_string(),
-        None,
-        None,
-        false,
-        None,
-    );
+    let mut state =
+        AppState::new_runtime(0, "agent-api-rt-test".to_string(), None, None, false, None);
     let eventlog_store = Arc::new(EventLogStore::new(data_dir.join("eventlog")));
     let agent_api_session_store = Arc::new(AgentSessionStore::new());
     let config_store = Arc::new(ConfigStore::new());
@@ -65,7 +59,10 @@ async fn fake_openai_handler(
     let turn = call_count.fetch_add(1, Ordering::SeqCst);
     if turn == 0 {
         assert_eq!(payload["stream"], false);
-        assert_eq!(payload["tools"][0]["function"]["name"], GET_RECENT_EVENTS_TOOL);
+        assert_eq!(
+            payload["tools"][0]["function"]["name"],
+            GET_RECENT_EVENTS_TOOL
+        );
         return Json(json!({
             "choices": [{
                 "message": {
@@ -157,11 +154,19 @@ async fn route_runs_session_with_runtime_config_fallback() {
     let (base_url, shutdown_tx) = spawn_fake_openai_server().await;
     state
         .config_store
-        .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+        .put(put_config(
+            "exomind:agentApiProvider",
+            "openai".to_string(),
+            false,
+        ))
         .unwrap();
     state
         .config_store
-        .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+        .put(put_config(
+            "exomind:agentApiModel",
+            "gpt-test".to_string(),
+            false,
+        ))
         .unwrap();
     state
         .config_store
@@ -169,7 +174,11 @@ async fn route_runs_session_with_runtime_config_fallback() {
         .unwrap();
     state
         .config_store
-        .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+        .put(put_config(
+            "exomind:agentApiApiKey",
+            "sk-test".to_string(),
+            true,
+        ))
         .unwrap();
 
     let app = agent_sessions::router().with_state(state);
@@ -199,7 +208,10 @@ async fn route_runs_session_with_runtime_config_fallback() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let created: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(created["toolCalls"].as_array().unwrap().len(), 1);
-    assert_eq!(created["content"], "最近主要在推进 runtime RT Agent API 落地。");
+    assert_eq!(
+        created["content"],
+        "最近主要在推进 runtime RT Agent API 落地。"
+    );
 
     let session_id = created["sessionId"].as_str().unwrap();
     let fetch_response = app
@@ -265,16 +277,28 @@ async fn life_tick_persists_internal_agent_session() {
 
     let (base_url, shutdown_tx) = spawn_fake_openai_server().await;
     config_store
-        .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+        .put(put_config(
+            "exomind:agentApiProvider",
+            "openai".to_string(),
+            false,
+        ))
         .unwrap();
     config_store
-        .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+        .put(put_config(
+            "exomind:agentApiModel",
+            "gpt-test".to_string(),
+            false,
+        ))
         .unwrap();
     config_store
         .put(put_config("exomind:agentApiBaseUrl", base_url, false))
         .unwrap();
     config_store
-        .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+        .put(put_config(
+            "exomind:agentApiApiKey",
+            "sk-test".to_string(),
+            true,
+        ))
         .unwrap();
 
     let workspace = AgentWorkspace::init("life-alpha", temp.path()).unwrap();

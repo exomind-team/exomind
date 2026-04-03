@@ -106,11 +106,7 @@ impl ReminderStore {
         }
     }
 
-    pub fn create_scoped(
-        &self,
-        scope_key: Option<&str>,
-        input: CreateReminderInput,
-    ) -> Reminder {
+    pub fn create_scoped(&self, scope_key: Option<&str>, input: CreateReminderInput) -> Reminder {
         if let ReminderStoreBackend::Sqlite(store) = &self.backend {
             return store
                 .create_scoped(normalize_scope_key(scope_key), input)
@@ -236,7 +232,9 @@ impl ReminderStore {
                     .or_default();
                 f(scope);
             }
-            ReminderStoreBackend::Sqlite(_) => unreachable!("memory reminder mutation on sqlite backend"),
+            ReminderStoreBackend::Sqlite(_) => {
+                unreachable!("memory reminder mutation on sqlite backend")
+            }
         }
     }
 }

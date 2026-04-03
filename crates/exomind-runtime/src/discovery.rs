@@ -50,8 +50,7 @@ impl PreferredLocalNetwork {
                 (u32::from(local) & u32::from(mask)) == (u32::from(candidate) & u32::from(mask))
             }
             (IpAddr::V6(local), IpAddr::V6(mask), IpAddr::V6(candidate)) => {
-                (u128::from(local) & u128::from(mask))
-                    == (u128::from(candidate) & u128::from(mask))
+                (u128::from(local) & u128::from(mask)) == (u128::from(candidate) & u128::from(mask))
             }
             _ => false,
         }
@@ -62,7 +61,8 @@ fn pick_best_address_for_network(
     addrs: &std::collections::HashSet<IpAddr>,
     preferred_network: Option<&PreferredLocalNetwork>,
 ) -> Option<IpAddr> {
-    addrs.iter()
+    addrs
+        .iter()
         .copied()
         .max_by_key(|addr| address_sort_key(*addr, preferred_network))
 }
@@ -459,8 +459,8 @@ impl Drop for MdnsDiscovery {
 #[cfg(test)]
 mod tests {
     use super::{
-        better_discovered_peer, local_interface_rank, pick_best_address_for_network,
-        DiscoveredPeer, PreferredLocalNetwork,
+        DiscoveredPeer, PreferredLocalNetwork, better_discovered_peer, local_interface_rank,
+        pick_best_address_for_network,
     };
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -513,26 +513,17 @@ mod tests {
 
     #[test]
     fn local_interface_rank_prefers_real_private_lan_over_virtual_or_overlay_interfaces() {
-        let ethernet_rank = local_interface_rank(
-            "以太网 3",
-            IpAddr::V4(Ipv4Addr::new(192, 168, 101, 5)),
-            24,
-        );
+        let ethernet_rank =
+            local_interface_rank("以太网 3", IpAddr::V4(Ipv4Addr::new(192, 168, 101, 5)), 24);
         let vmware_rank = local_interface_rank(
             "VMware Network Adapter VMnet1",
             IpAddr::V4(Ipv4Addr::new(192, 168, 237, 1)),
             24,
         );
-        let tailscale_rank = local_interface_rank(
-            "Tailscale",
-            IpAddr::V4(Ipv4Addr::new(100, 81, 46, 70)),
-            32,
-        );
-        let clash_rank = local_interface_rank(
-            "FlClash",
-            IpAddr::V4(Ipv4Addr::new(198, 18, 0, 1)),
-            30,
-        );
+        let tailscale_rank =
+            local_interface_rank("Tailscale", IpAddr::V4(Ipv4Addr::new(100, 81, 46, 70)), 32);
+        let clash_rank =
+            local_interface_rank("FlClash", IpAddr::V4(Ipv4Addr::new(198, 18, 0, 1)), 30);
 
         assert!(ethernet_rank > vmware_rank);
         assert!(ethernet_rank > tailscale_rank);

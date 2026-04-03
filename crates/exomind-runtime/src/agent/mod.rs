@@ -17,9 +17,9 @@ pub mod echo;
 pub mod heartbeat;
 pub mod life;
 pub mod llm_cognition;
+pub mod runtime_event;
 pub mod session;
 pub mod tools;
-pub mod runtime_event;
 pub mod workspace;
 
 pub use runtime_event::RuntimeAgentEvent;

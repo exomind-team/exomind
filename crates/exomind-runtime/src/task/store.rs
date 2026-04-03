@@ -922,10 +922,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(TaskStoreError::TerminalFieldImmutable {
-                field: "title",
-                ..
-            })
+            Err(TaskStoreError::TerminalFieldImmutable { field: "title", .. })
         ));
     }
 

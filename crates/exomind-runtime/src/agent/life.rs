@@ -3,14 +3,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
+use super::cognition::{
+    BodyStatus, CognitionContext, CognitionEngine, CognitionOutput, KnowledgeOp,
+};
 use super::session::{
     AgentSessionRuntime, AgentTrigger, SessionError, build_tool_registry_for_runtime,
     resolve_provider_profile_with_runtime, run_agent_session_with_runtime,
 };
 use super::tools::GET_RECENT_EVENTS_TOOL;
-use super::cognition::{
-    BodyStatus, CognitionContext, CognitionEngine, CognitionOutput, KnowledgeOp,
-};
 use super::workspace::{ActionEntry, AgentWorkspace};
 use super::{Agent, ChatChunk, ChatRequest};
 use crate::energy::AgentEnergySnapshot;
@@ -414,8 +414,8 @@ impl Agent for CognitiveLifeAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::session::{AgentSessionRuntime, AgentSessionStore};
     use crate::agent::llm_cognition::LlmCognition;
+    use crate::agent::session::{AgentSessionRuntime, AgentSessionStore};
     use crate::config::PutConfigEntryInput;
     use crate::config::types::USER_CONFIG_SCOPE;
     use crate::eventlog::{EventLogStore, EventRecord};
@@ -453,7 +453,10 @@ mod tests {
     ) -> Json<Value> {
         let turn = call_count.fetch_add(1, AtomicOrdering::SeqCst);
         if turn == 0 {
-            assert_eq!(payload["tools"][0]["function"]["name"], GET_RECENT_EVENTS_TOOL);
+            assert_eq!(
+                payload["tools"][0]["function"]["name"],
+                GET_RECENT_EVENTS_TOOL
+            );
             return Json(json!({
                 "choices": [{
                     "message": {
@@ -647,25 +650,32 @@ mod tests {
 
         let (base_url, shutdown_tx) = spawn_openai_mock_server().await;
         config_store
-            .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+            .put(put_config(
+                "exomind:agentApiProvider",
+                "openai".to_string(),
+                false,
+            ))
             .unwrap();
         config_store
-            .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+            .put(put_config(
+                "exomind:agentApiModel",
+                "gpt-test".to_string(),
+                false,
+            ))
             .unwrap();
         config_store
             .put(put_config("exomind:agentApiBaseUrl", base_url, false))
             .unwrap();
         config_store
-            .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+            .put(put_config(
+                "exomind:agentApiApiKey",
+                "sk-test".to_string(),
+                true,
+            ))
             .unwrap();
 
-        let agent = CognitiveLifeAgent::new(
-            "life-alpha",
-            "认知生命体 Alpha",
-            workspace,
-            cognition,
-        )
-        .with_agent_api_tick_trigger(AgentApiTickTrigger::new(runtime));
+        let agent = CognitiveLifeAgent::new("life-alpha", "认知生命体 Alpha", workspace, cognition)
+            .with_agent_api_tick_trigger(AgentApiTickTrigger::new(runtime));
 
         let energy = AgentEnergySnapshot {
             agent_id: "life-alpha".to_string(),
