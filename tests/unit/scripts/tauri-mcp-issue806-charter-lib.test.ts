@@ -74,8 +74,10 @@ describe('tauri-mcp-issue806-charter-lib', () => {
     expect(resolveManagedInstanceBridgePort(1435)).toBe(9238);
   });
 
-  it('ignores archive buttons when parsing session card test ids（解析 session card id 时应忽略归档按钮）', () => {
+  it('ignores action buttons when parsing session card test ids（解析 session card id 时应忽略归档/停止按钮）', () => {
     expect(parseSessionCardSessionId('session-card-abc')).toBe('abc');
     expect(parseSessionCardSessionId('session-card-archive-abc')).toBeNull();
+    expect(parseSessionCardSessionId('session-card-stop-abc')).toBeNull();
+    expect(parseSessionCardSessionId('session-card-stop-session-card-stop')).toBeNull();
   });
 });

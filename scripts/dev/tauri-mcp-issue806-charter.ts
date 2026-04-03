@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { ManagedTauriInstanceRecord } from './tauri-dev-manager-lib';
 import {
   compareSessionSummaries,
+  parseSessionCardSessionId,
   resolveManagedInstanceBridgePort,
   summarizeRtSessions,
   type RtSessionRecord,
@@ -16,6 +17,19 @@ type ParsedArgs = {
   name?: string;
   outDir: string;
   timeoutMs: number;
+  webPort?: number;
+  bridgePort?: number;
+  runtimeDb?: string;
+};
+
+type CharterInstanceDescriptor = {
+  name: string;
+  webPort: number;
+  bridgePort: number;
+  runtimeDbPath?: string;
+  hmrPort?: number;
+  rootPid?: number;
+  source: 'managed' | 'direct';
 };
 
 type RawBridgeMessage = {
@@ -55,6 +69,41 @@ type ProposalPageCheck = {
   loading: boolean;
   page: boolean;
   snippet: string | null;
+};
+
+type RuntimeStatusSnapshot = {
+  running?: boolean;
+  host?: string;
+  port?: number;
+  hostId?: string | null;
+  startedAt?: string | null;
+  error?: string | null;
+};
+
+type RuntimePtyRecord = {
+  id: string;
+  session_id?: string | null;
+  name?: string | null;
+};
+
+type RuntimeStateSnapshot = {
+  runtimeStatus: RuntimeStatusSnapshot;
+  sessions: RtSessionRecord[];
+  ptys: RuntimePtyRecord[];
+};
+
+type RuntimeRestartCheck = {
+  status: 'passed' | 'failed';
+  beforeUiSummary: UiSessionSummary;
+  beforeRtSummary: ReturnType<typeof summarizeRtSessions>;
+  beforePtyCount: number;
+  beforeHostId: string | null;
+  afterUiSummary: UiSessionSummary;
+  afterRtSummary: ReturnType<typeof summarizeRtSessions>;
+  afterPtyCount: number;
+  afterHostId: string | null;
+  afterMismatches: ReturnType<typeof compareSessionSummaries>;
+  notes: string[];
 };
 
 class RawBridgeClient {
@@ -158,6 +207,9 @@ function parseArgs(argv: string[]): ParsedArgs {
   let name: string | undefined;
   let outDir = path.join(process.cwd(), '.tmp', 'reports', 'tauri-mcp-issue806-charter');
   let timeoutMs = 12_000;
+  let webPort: number | undefined;
+  let bridgePort: number | undefined;
+  let runtimeDb: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -177,9 +229,24 @@ function parseArgs(argv: string[]): ParsedArgs {
       index += 1;
       continue;
     }
+    if (token === '--web-port' && value) {
+      webPort = Number.parseInt(value, 10);
+      index += 1;
+      continue;
+    }
+    if (token === '--bridge-port' && value) {
+      bridgePort = Number.parseInt(value, 10);
+      index += 1;
+      continue;
+    }
+    if (token === '--runtime-db' && value) {
+      runtimeDb = path.resolve(process.cwd(), value);
+      index += 1;
+      continue;
+    }
   }
 
-  return { name, outDir, timeoutMs };
+  return { name, outDir, timeoutMs, webPort, bridgePort, runtimeDb };
 }
 
 async function readManagedInstanceRecords(projectRoot: string): Promise<ManagedTauriInstanceRecord[]> {
@@ -240,6 +307,37 @@ async function selectManagedInstance(
   }
 
   throw new Error(`multiple running tauri:manager instances found: ${liveRecords.map((record) => record.name).join(', ')}; pass --name`);
+}
+
+function resolveDirectInstance(
+  projectRoot: string,
+  args: ParsedArgs,
+): CharterInstanceDescriptor | null {
+  if (!args.webPort && !args.bridgePort && !args.runtimeDb) {
+    return null;
+  }
+  if (!args.webPort || !args.bridgePort) {
+    throw new Error('direct charter mode requires both --web-port and --bridge-port');
+  }
+
+  const name = args.name?.trim() || `web-${args.webPort}`;
+  const derivedRuntimeDbPath = path.join(
+    projectRoot,
+    '.tmp',
+    'tauri-dev-state',
+    name,
+    'app-data',
+    'runtime',
+    'sessions.sqlite',
+  );
+
+  return {
+    name,
+    webPort: args.webPort,
+    bridgePort: args.bridgePort,
+    runtimeDbPath: args.runtimeDb ?? derivedRuntimeDbPath,
+    source: 'direct',
+  };
 }
 
 function readRtSessionsFromSqlite(databasePath: string): RtSessionRecord[] {
@@ -388,32 +486,160 @@ async function ensureSessionsView(client: RawBridgeClient, timeoutMs: number): P
 }
 
 async function collectUiSessionSummary(client: RawBridgeClient): Promise<UiSessionSummary> {
-  return await client.executeJs<UiSessionSummary>(`(() => {
+  const raw = await client.executeJs<{
+    active: number;
+    completed: number;
+    activeTestIds: string[];
+    completedTestIds: string[];
+    visibleTestIds: string[];
+  }>(`(() => {
     const parseCount = (selector) => {
       const text = document.querySelector(selector)?.textContent?.trim() ?? '0';
       const parsed = Number.parseInt(text, 10);
       return Number.isFinite(parsed) ? parsed : 0;
     };
 
-    const getIds = (selector) => Array.from(document.querySelectorAll(selector))
+    const getTestIds = (selector) => Array.from(document.querySelectorAll(selector))
       .map((node) => node.getAttribute('data-testid') ?? '')
       .map((testId) => testId.trim())
-      .filter(Boolean)
-      .map((testId) => {
-        const match = /^session-card-(?!archive-)(.+)$/.exec(testId);
-        return match?.[1] ?? null;
-      })
-      .filter((value) => typeof value === 'string');
+      .filter(Boolean);
 
     return {
       active: parseCount('[data-testid="sessions-active-section"] span:last-child'),
       completed: parseCount('[data-testid="sessions-completed-section"] span:last-child'),
-      total: getIds('[data-testid^="session-card-"]').length,
-      activeSessionIds: getIds('[data-testid="sessions-active-section"] [data-testid^="session-card-"]'),
-      completedSessionIds: getIds('[data-testid="sessions-completed-section"] [data-testid^="session-card-"]'),
-      visibleSessionIds: getIds('[data-testid^="session-card-"]'),
+      activeTestIds: getTestIds('[data-testid="sessions-active-section"] [data-testid^="session-card-"]'),
+      completedTestIds: getTestIds('[data-testid="sessions-completed-section"] [data-testid^="session-card-"]'),
+      visibleTestIds: getTestIds('[data-testid^="session-card-"]'),
     };
   })()`);
+
+  const extractIds = (testIds: string[]) => testIds
+    .map((testId) => parseSessionCardSessionId(testId))
+    .filter((value): value is string => typeof value === 'string');
+
+  const activeSessionIds = extractIds(raw.activeTestIds);
+  const completedSessionIds = extractIds(raw.completedTestIds);
+  const visibleSessionIds = extractIds(raw.visibleTestIds);
+
+  return {
+    active: raw.active,
+    completed: raw.completed,
+    total: visibleSessionIds.length,
+    activeSessionIds,
+    completedSessionIds,
+    visibleSessionIds,
+  };
+}
+
+async function collectRuntimeState(client: RawBridgeClient): Promise<RuntimeStateSnapshot> {
+  return await client.executeJs<RuntimeStateSnapshot>(`(async () => {
+    const runtimeStatus = await window.__TAURI__.core.invoke('runtime_service_status').catch((error) => ({
+      running: false,
+      host: '127.0.0.1',
+      port: 9124,
+      hostId: null,
+      error: String(error),
+    }));
+    const host = typeof runtimeStatus?.host === 'string' && runtimeStatus.host.length > 0
+      ? runtimeStatus.host
+      : '127.0.0.1';
+    const port = typeof runtimeStatus?.port === 'number' && Number.isFinite(runtimeStatus.port)
+      ? runtimeStatus.port
+      : 9124;
+    const rtBaseUrl = 'http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + String(port);
+
+    const sessions = await fetch(rtBaseUrl + '/sessions')
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('HTTP ' + String(response.status));
+        }
+        return await response.json();
+      })
+      .catch(() => []);
+    const ptys = await fetch(rtBaseUrl + '/pty')
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('HTTP ' + String(response.status));
+        }
+        return await response.json();
+      })
+      .catch(() => []);
+
+    return {
+      runtimeStatus,
+      sessions: Array.isArray(sessions) ? sessions : [],
+      ptys: Array.isArray(ptys) ? ptys : [],
+    };
+  })()`);
+}
+
+async function restartRuntimeAndWaitForRecovery(
+  client: RawBridgeClient,
+  timeoutMs: number,
+): Promise<RuntimeRestartCheck> {
+  const beforeUiSummary = await collectUiSessionSummary(client);
+  const beforeRuntimeState = await collectRuntimeState(client);
+  const beforeRtSummary = summarizeRtSessions(beforeRuntimeState.sessions);
+  const beforeHostId = beforeRuntimeState.runtimeStatus.hostId ?? null;
+
+  await client.executeJs(`(() => window.__TAURI__.core.invoke('runtime_service_stop').then(() => true))()`);
+  await Bun.sleep(1_000);
+  await client.executeJs(`(() => window.__TAURI__.core.invoke('runtime_service_start', { host: '0.0.0.0', port: 9124 }).then(() => true))()`);
+
+  const startedAt = Date.now();
+  let recovered:
+    | {
+      uiSummary: UiSessionSummary;
+      rtSummary: ReturnType<typeof summarizeRtSessions>;
+      runtimeState: RuntimeStateSnapshot;
+      mismatches: ReturnType<typeof compareSessionSummaries>;
+    }
+    | null = null;
+  while ((Date.now() - startedAt) < timeoutMs) {
+    const uiSummary = await collectUiSessionSummary(client);
+    const runtimeState = await collectRuntimeState(client);
+    const rtSummary = summarizeRtSessions(runtimeState.sessions);
+    const mismatches = compareSessionSummaries(uiSummary, rtSummary);
+    const ready = runtimeState.runtimeStatus.running === true
+      && (runtimeState.runtimeStatus.hostId ?? null) !== beforeHostId
+      && uiSummary.active === beforeUiSummary.active
+      && rtSummary.active === beforeUiSummary.active
+      && runtimeState.ptys.length === beforeUiSummary.active
+      && mismatches.length === 0;
+
+    if (ready) {
+      recovered = { uiSummary, rtSummary, runtimeState, mismatches };
+      break;
+    }
+
+    await Bun.sleep(400);
+  }
+
+  if (!recovered) {
+    throw new Error('timed out waiting for runtime restart recovery to settle');
+  }
+
+  const notes = [
+    `before host: ${beforeHostId ?? 'none'}`,
+    `after host: ${recovered.runtimeState.runtimeStatus.hostId ?? 'none'}`,
+    `before active: ${beforeUiSummary.active}`,
+    `after active: ${recovered.uiSummary.active}`,
+    `after PTYs: ${recovered.runtimeState.ptys.length}`,
+  ];
+
+  return {
+    status: recovered.mismatches.length === 0 ? 'passed' : 'failed',
+    beforeUiSummary,
+    beforeRtSummary,
+    beforePtyCount: beforeRuntimeState.ptys.length,
+    beforeHostId,
+    afterUiSummary: recovered.uiSummary,
+    afterRtSummary: recovered.rtSummary,
+    afterPtyCount: recovered.runtimeState.ptys.length,
+    afterHostId: recovered.runtimeState.runtimeStatus.hostId ?? null,
+    afterMismatches: recovered.mismatches,
+    notes,
+  };
 }
 
 async function waitForSessionPanel(client: RawBridgeClient, timeoutMs: number): Promise<SessionPanelProbe> {
@@ -499,9 +725,9 @@ async function checkProposalInboxPage(
     `(() => ({
       status: 'failed',
       href: window.location.href,
-      loading: document.body.textContent?.includes('请求箱加载中...') ?? false,
+      loading: document.body ? ((document.body.textContent ?? '').includes('请求箱加载中...')) : false,
       page: !!document.querySelector('[data-testid="proposal-inbox-page"]'),
-      snippet: document.body.textContent?.replace(/\\s+/g, ' ').trim().slice(0, 320) ?? null,
+      snippet: document.body ? ((document.body.textContent ?? '').replace(/\\s+/g, ' ').trim().slice(0, 320) || null) : null,
     }))()`,
     (value) => value.page && !value.loading,
     timeoutMs,
@@ -516,33 +742,34 @@ async function checkProposalInboxPage(
 
 function buildMarkdownReport(input: {
   timestamp: string;
-  instance: ManagedTauriInstanceRecord;
-  bridgePort: number;
+  instance: CharterInstanceDescriptor;
   uiSummary: UiSessionSummary;
   rtSummary: ReturnType<typeof summarizeRtSessions>;
   mismatches: ReturnType<typeof compareSessionSummaries>;
   activeSessionChecks: SessionCardExerciseResult[];
   completedSessionCheck: SessionCardExerciseResult | null;
   proposalInboxCheck: ProposalPageCheck;
+  runtimeRestartCheck: RuntimeRestartCheck;
+  postRestartActiveSessionChecks: SessionCardExerciseResult[];
   overallPass: boolean;
 }): string {
   const lines = [
     '# Tauri MCP Charter Report',
     '',
     `- Generated at: \`${input.timestamp}\``,
-    `- Instance: \`${input.instance.name}\``,
+    `- Instance: \`${input.instance.name}\` (${input.instance.source})`,
     `- Web: \`http://localhost:${input.instance.webPort}\``,
-    `- Raw bridge: \`ws://127.0.0.1:${input.bridgePort}\``,
+    `- Raw bridge: \`ws://127.0.0.1:${input.instance.bridgePort}\``,
     `- Overall: ${input.overallPass ? 'PASS' : 'FAIL'}`,
     '',
-    '## Session Counts',
+    '## Pre-Restart Session Counts',
     '',
     `- UI active/completed/total: \`${input.uiSummary.active}/${input.uiSummary.completed}/${input.uiSummary.total}\``,
     `- RT active/completed/total: \`${input.rtSummary.active}/${input.rtSummary.completed}/${input.rtSummary.total}\``,
     `- UI visible ids: ${input.uiSummary.visibleSessionIds.length > 0 ? input.uiSummary.visibleSessionIds.map((value) => `\`${value}\``).join(', ') : '(none)'}`,
     `- RT visible ids: ${input.rtSummary.visibleSessionIds.length > 0 ? input.rtSummary.visibleSessionIds.map((value) => `\`${value}\``).join(', ') : '(none)'}`,
     '',
-    '## Session Card Checks',
+    '## Pre-Restart Session Card Checks',
     '',
   ];
 
@@ -566,11 +793,46 @@ function buildMarkdownReport(input: {
     lines.push(`- Snippet: ${input.proposalInboxCheck.snippet}`);
   }
 
-  lines.push('', '## Mismatches', '');
+  lines.push('', '## Pre-Restart Mismatches', '');
   if (input.mismatches.length === 0) {
     lines.push('- None');
   } else {
     for (const mismatch of input.mismatches) {
+      lines.push(`- ${mismatch.field}: UI=${JSON.stringify(mismatch.ui)} RT=${JSON.stringify(mismatch.rt)}`);
+    }
+  }
+
+  lines.push(
+    '',
+    '## Runtime Restart',
+    '',
+    `- Status: ${input.runtimeRestartCheck.status.toUpperCase()}`,
+    `- Host transition: \`${input.runtimeRestartCheck.beforeHostId ?? 'none'}\` -> \`${input.runtimeRestartCheck.afterHostId ?? 'none'}\``,
+    `- Before UI active/completed/total: \`${input.runtimeRestartCheck.beforeUiSummary.active}/${input.runtimeRestartCheck.beforeUiSummary.completed}/${input.runtimeRestartCheck.beforeUiSummary.total}\``,
+    `- After UI active/completed/total: \`${input.runtimeRestartCheck.afterUiSummary.active}/${input.runtimeRestartCheck.afterUiSummary.completed}/${input.runtimeRestartCheck.afterUiSummary.total}\``,
+    `- Before RT active/completed/total: \`${input.runtimeRestartCheck.beforeRtSummary.active}/${input.runtimeRestartCheck.beforeRtSummary.completed}/${input.runtimeRestartCheck.beforeRtSummary.total}\``,
+    `- After RT active/completed/total: \`${input.runtimeRestartCheck.afterRtSummary.active}/${input.runtimeRestartCheck.afterRtSummary.completed}/${input.runtimeRestartCheck.afterRtSummary.total}\``,
+    `- Before PTY count: \`${input.runtimeRestartCheck.beforePtyCount}\``,
+    `- After PTY count: \`${input.runtimeRestartCheck.afterPtyCount}\``,
+    `- Notes: ${input.runtimeRestartCheck.notes.join('; ') || 'none'}`,
+    '',
+    '## Post-Restart Active Card Checks',
+    '',
+  );
+
+  if (input.postRestartActiveSessionChecks.length === 0) {
+    lines.push('- No active session cards were present after restart.');
+  } else {
+    for (const check of input.postRestartActiveSessionChecks) {
+      lines.push(`- Active session \`${check.sessionId}\`: ${check.status.toUpperCase()} (${check.notes.join('; ') || 'no notes'})`);
+    }
+  }
+
+  lines.push('', '## Post-Restart Mismatches', '');
+  if (input.runtimeRestartCheck.afterMismatches.length === 0) {
+    lines.push('- None');
+  } else {
+    for (const mismatch of input.runtimeRestartCheck.afterMismatches) {
       lines.push(`- ${mismatch.field}: UI=${JSON.stringify(mismatch.ui)} RT=${JSON.stringify(mismatch.rt)}`);
     }
   }
@@ -581,15 +843,25 @@ function buildMarkdownReport(input: {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const projectRoot = process.cwd();
-  const instance = await selectManagedInstance(projectRoot, args.name);
-  const bridgePort = resolveManagedInstanceBridgePort(instance.webPort);
-  const runtimeDbPath = path.join(projectRoot, '.tmp', 'tauri-dev-state', instance.name, 'app-data', 'runtime', 'sessions.sqlite');
+  const directInstance = resolveDirectInstance(projectRoot, args);
+  const instance: CharterInstanceDescriptor = directInstance ?? await (async () => {
+    const managedInstance = await selectManagedInstance(projectRoot, args.name);
+    return {
+      name: managedInstance.name,
+      webPort: managedInstance.webPort,
+      bridgePort: resolveManagedInstanceBridgePort(managedInstance.webPort),
+      runtimeDbPath: path.join(projectRoot, '.tmp', 'tauri-dev-state', managedInstance.name, 'app-data', 'runtime', 'sessions.sqlite'),
+      hmrPort: managedInstance.hmrPort,
+      rootPid: managedInstance.rootPid,
+      source: 'managed' as const,
+    };
+  })();
   const reportTimestamp = new Date().toISOString().replaceAll(':', '-');
   const outDir = args.outDir;
   const jsonReportPath = path.join(outDir, `${reportTimestamp}-${instance.name}.json`);
   const markdownReportPath = path.join(outDir, `${reportTimestamp}-${instance.name}.md`);
 
-  const client = new RawBridgeClient(`ws://127.0.0.1:${bridgePort}`);
+  const client = new RawBridgeClient(`ws://127.0.0.1:${instance.bridgePort}`);
   await client.ready();
 
   try {
@@ -598,7 +870,8 @@ async function main(): Promise<void> {
     await ensureSessionsView(client, args.timeoutMs);
 
     const uiSummary = await collectUiSessionSummary(client);
-    const rtSummary = summarizeRtSessions(readRtSessionsFromSqlite(runtimeDbPath));
+    const rtState = await collectRuntimeState(client);
+    const rtSummary = summarizeRtSessions(rtState.sessions);
     const mismatches = compareSessionSummaries(uiSummary, rtSummary);
 
     const activeSessionChecks: SessionCardExerciseResult[] = [];
@@ -611,30 +884,43 @@ async function main(): Promise<void> {
       : null;
 
     const proposalInboxCheck = await checkProposalInboxPage(client, args.timeoutMs);
-    const activeCountWithinLimit = uiSummary.active < 5;
+    await navigateToRoute(client, '/agents', args.timeoutMs);
+    await ensureSessionsView(client, args.timeoutMs);
+
+    const runtimeRestartCheck = await restartRuntimeAndWaitForRecovery(
+      client,
+      Math.max(args.timeoutMs, 30_000),
+    );
+
+    const postRestartActiveSessionChecks: SessionCardExerciseResult[] = [];
+    for (const sessionId of runtimeRestartCheck.afterUiSummary.activeSessionIds) {
+      postRestartActiveSessionChecks.push(await exerciseSessionCard(client, sessionId, 'active', args.timeoutMs));
+    }
+
+    const activeCountWithinLimit = uiSummary.active < 5 && runtimeRestartCheck.afterUiSummary.active < 5;
     const activeChecksPassed = activeSessionChecks.every((check) => check.status === 'passed');
+    const postRestartActiveChecksPassed = postRestartActiveSessionChecks.every((check) => check.status === 'passed');
     const completedCheckPassed = completedSessionCheck ? completedSessionCheck.status === 'passed' : true;
     const overallPass = activeCountWithinLimit
       && mismatches.length === 0
       && activeChecksPassed
+      && runtimeRestartCheck.status === 'passed'
+      && postRestartActiveChecksPassed
       && completedCheckPassed
       && proposalInboxCheck.status === 'passed';
 
     const report = {
       generatedAt: new Date().toISOString(),
-      instance: {
-        name: instance.name,
-        webPort: instance.webPort,
-        hmrPort: instance.hmrPort,
-        rootPid: instance.rootPid,
-      },
+      instance,
       rawBridge: {
-        url: `ws://127.0.0.1:${bridgePort}`,
+        url: `ws://127.0.0.1:${instance.bridgePort}`,
       },
       assertions: {
         activeCountWithinLimit,
         uiRtConsistent: mismatches.length === 0,
         activeChecksPassed,
+        runtimeRestartPassed: runtimeRestartCheck.status === 'passed',
+        postRestartActiveChecksPassed,
         completedCheckPassed,
         proposalInboxLoaded: proposalInboxCheck.status === 'passed',
       },
@@ -644,6 +930,17 @@ async function main(): Promise<void> {
       activeSessionChecks,
       completedSessionCheck,
       proposalInboxCheck,
+      runtimeRestartCheck,
+      postRestartActiveSessionChecks,
+      sqliteRtSummary: instance.runtimeDbPath
+        ? (() => {
+          try {
+            return summarizeRtSessions(readRtSessionsFromSqlite(instance.runtimeDbPath!));
+          } catch {
+            return null;
+          }
+        })()
+        : null,
       overallPass,
     };
 
@@ -652,22 +949,23 @@ async function main(): Promise<void> {
     await writeFile(markdownReportPath, buildMarkdownReport({
       timestamp: report.generatedAt,
       instance,
-      bridgePort,
       uiSummary,
       rtSummary,
       mismatches,
       activeSessionChecks,
       completedSessionCheck,
       proposalInboxCheck,
+      runtimeRestartCheck,
+      postRestartActiveSessionChecks,
       overallPass,
     }), 'utf8');
 
     process.stdout.write(`${JSON.stringify({
       overallPass,
       instance: instance.name,
-      bridgePort,
-      activeCount: uiSummary.active,
-      mismatchCount: mismatches.length,
+      bridgePort: instance.bridgePort,
+      activeCount: runtimeRestartCheck.afterUiSummary.active,
+      mismatchCount: runtimeRestartCheck.afterMismatches.length,
       jsonReportPath,
       markdownReportPath,
     }, null, 2)}\n`);

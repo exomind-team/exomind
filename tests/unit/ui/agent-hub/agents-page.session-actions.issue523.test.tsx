@@ -51,6 +51,10 @@ const sessionStreamState = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 
+const useSessionStreamMocks = vi.hoisted(() => ({
+  useSessionStream: vi.fn(),
+}));
+
 vi.mock('@xyflow/react', () => ({
   ReactFlow: ({
     nodes,
@@ -108,12 +112,15 @@ vi.mock('@/lib/services/runtime-control.service', () => ({
 }));
 
 vi.mock('@/hooks/useSessionStream', () => ({
-  useSessionStream: () => ({
-    sessions: sessionStreamState.sessions,
-    loading: false,
-    error: null,
-    refresh: sessionStreamState.refresh,
-  }),
+  useSessionStream: (...args: unknown[]) => {
+    useSessionStreamMocks.useSessionStream(...args);
+    return {
+      sessions: sessionStreamState.sessions,
+      loading: false,
+      error: null,
+      refresh: sessionStreamState.refresh,
+    };
+  },
 }));
 
 vi.mock('@/components/ui/toast-hook', () => ({
@@ -239,6 +246,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     localStorage.clear();
     vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
     sessionStreamState.refresh.mockReset();
+    useSessionStreamMocks.useSessionStream.mockReset();
     toastMocks.toast.mockReset();
     toastMocks.update.mockReset();
     toastMocks.dismiss.mockReset();
@@ -466,11 +474,97 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
 
     await waitFor(() => {
       expect(runtimeClientMocks.submitQuickAction).toHaveBeenCalledWith(
-        expect.objectContaining({ host: '127.0.0.1', port: 9124 }),
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
         'session-fallback',
         { action_id: 'continue', value: undefined },
       );
     });
+  });
+
+  it('streams sessions from the local embedded runtime instead of duplicate LAN route hosts（embedded 模式下 session 流应锁定本机 RT）', async () => {
+    runtimeControlMocks.getStatus.mockResolvedValue({
+      running: true,
+      host: '0.0.0.0',
+      port: 9124,
+      hostId: 'runtime-host-523',
+    });
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-03-14T10:00:00.000Z',
+      agents: [],
+      hosts: [
+        {
+          host: {
+            id: 'host-lan-523',
+            name: '192.168.1.48:9124',
+            host: '192.168.1.48',
+            port: 9124,
+            status: 'unknown' as const,
+            createdAt: '2026-03-14T00:00:00.000Z',
+            updatedAt: '2026-03-14T00:00:00.000Z',
+          },
+          connectionState: 'online' as const,
+          agents: [],
+          topology: {
+            host_id: 'runtime-host-523',
+            hostname: 'runtime-host-523',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 90,
+            version: '0.3.6',
+            port: 9124,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+        },
+        {
+          host: {
+            id: 'host-loopback-523',
+            name: '127.0.0.1:9124',
+            host: '127.0.0.1',
+            port: 9124,
+            status: 'unknown' as const,
+            createdAt: '2026-03-14T00:00:00.000Z',
+            updatedAt: '2026-03-14T00:00:00.000Z',
+          },
+          connectionState: 'online' as const,
+          agents: [],
+          topology: {
+            host_id: 'runtime-host-523',
+            hostname: 'runtime-host-523',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 90,
+            version: '0.3.6',
+            port: 9124,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+        },
+      ],
+    });
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(useSessionStreamMocks.useSessionStream).toHaveBeenCalled();
+    });
+
+    const latestCall = useSessionStreamMocks.useSessionStream.mock.calls.at(-1)?.[0] as {
+      targets?: Array<{ id: string; rtBaseUrl: string; hostAddress?: string }>;
+    };
+    expect(latestCall.targets).toEqual([
+      {
+        id: 'runtime-host-523',
+        rtBaseUrl: 'http://127.0.0.1:9124',
+        authToken: undefined,
+        hostName: '127.0.0.1:9124',
+        hostAddress: '127.0.0.1:9124',
+      },
+    ]);
   });
 
   it('stops PTY terminal agent from the right panel（右侧终端面板可真正停止 Terminal Agent）', async () => {
@@ -1263,6 +1357,76 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     await waitFor(() => {
       expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
     });
+  });
+
+  it('treats a completed PTY session as readonly history even if /pty still lists it（已完成 PTY 即便仍出现在 live 列表也只能进入只读历史态）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-completed-current-host',
+        agent_kind: 'codex',
+        role: 'Completed Current Host',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-completed-current-host',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: [],
+        fullscreenPtyId: 'pty-completed-current-host',
+      }),
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-completed-current-host',
+              name: 'Completed Current Host',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('agent-rightpanel-archive-session')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-rightpanel-stop-pty')).not.toBeInTheDocument();
   });
 
   it('keeps disconnected Codex PTY in readonly mode when historical session validation fails（历史 session 校验失败时不串线恢复 Codex）', async () => {

@@ -363,6 +363,15 @@ function resolveRuntimeSnapshotPeerId(snapshot: RuntimeHostSnapshot): string | u
   return snapshot.topology?.host_id ?? snapshot.host.hostId;
 }
 
+function isLoopbackLikeHost(host: string): boolean {
+  const normalizedHost = resolveLocalServiceHost(host);
+  return normalizedHost === '127.0.0.1'
+    || normalizedHost === 'localhost'
+    || normalizedHost === '0.0.0.0'
+    || normalizedHost === '::1'
+    || normalizedHost === '[::1]';
+}
+
 export function resolvePtySpawnConnectionTarget(options: {
   runtimeHostSnapshots: RuntimeHostSnapshot[];
   selectedTarget: RuntimeTarget;
@@ -375,11 +384,12 @@ export function resolvePtySpawnConnectionTarget(options: {
     ? resolveLocalServiceHost(runtimeServiceStatus.host === '0.0.0.0' ? '127.0.0.1' : runtimeServiceStatus.host)
     : undefined;
 
-  const matchedSnapshot = runtimeHostSnapshots.find((snapshot) => {
-    const snapshotHost = resolveLocalServiceHost(snapshot.host.host);
-    if (snapshotHost === normalizedSelectedHost && snapshot.host.port === selectedTarget.port) {
-      return true;
-    }
+  const matchedSnapshot = runtimeHostSnapshots
+    .filter((snapshot) => {
+      const snapshotHost = resolveLocalServiceHost(snapshot.host.host);
+      if (snapshotHost === normalizedSelectedHost && snapshot.host.port === selectedTarget.port) {
+        return true;
+      }
 
     if (
       normalizedRuntimeStatusHost
@@ -393,9 +403,74 @@ export function resolvePtySpawnConnectionTarget(options: {
       return false;
     }
 
-    return resolveRuntimeSnapshotPeerId(snapshot) === embeddedHostId
+      return resolveRuntimeSnapshotPeerId(snapshot) === embeddedHostId
       || snapshot.host.id === embeddedHostId;
-  });
+    })
+    .sort((left, right) => {
+      const score = (snapshot: RuntimeHostSnapshot): number => {
+        const snapshotHost = resolveLocalServiceHost(snapshot.host.host);
+        let value = 100;
+
+        if (snapshotHost === normalizedSelectedHost && snapshot.host.port === selectedTarget.port) {
+          value -= 100;
+        }
+        if (
+          normalizedRuntimeStatusHost
+          && snapshotHost === normalizedRuntimeStatusHost
+          && snapshot.host.port === runtimeServiceStatus?.port
+        ) {
+          value -= 80;
+        }
+        if (
+          embeddedHostId
+          && (
+            resolveRuntimeSnapshotPeerId(snapshot) === embeddedHostId
+            || snapshot.host.id === embeddedHostId
+          )
+        ) {
+          value -= 40;
+        }
+        if (selectedTarget.mode === 'embedded' && isLoopbackLikeHost(snapshot.host.host)) {
+          value -= 20;
+        }
+        if (snapshot.host.isLocal) {
+          value -= 10;
+        }
+
+        return value;
+      };
+
+      return score(left) - score(right);
+    })[0];
+
+  if (
+    matchedSnapshot
+    && selectedTarget.mode === 'embedded'
+    && runtimeServiceStatus?.running
+    && embeddedHostId
+  ) {
+    const matchedSnapshotHostId = resolveRuntimeSnapshotPeerId(matchedSnapshot)
+      ?? matchedSnapshot.host.hostId
+      ?? matchedSnapshot.host.id;
+    const matchedSnapshotHost = resolveLocalServiceHost(matchedSnapshot.host.host);
+    const runtimeHostMatchesSnapshotAddress = Boolean(
+      normalizedRuntimeStatusHost
+      && matchedSnapshotHost === normalizedRuntimeStatusHost
+      && matchedSnapshot.host.port === runtimeServiceStatus.port,
+    );
+
+    if (runtimeHostMatchesSnapshotAddress && matchedSnapshotHostId !== embeddedHostId) {
+      const embeddedHost = runtimeServiceStatus.host === '0.0.0.0'
+        ? '127.0.0.1'
+        : resolveLocalServiceHost(runtimeServiceStatus.host);
+
+      return {
+        rtBaseUrl: buildRuntimeBaseUrl(embeddedHost, runtimeServiceStatus.port),
+        authToken: selectedTarget.authToken,
+        hostId: embeddedHostId,
+      };
+    }
+  }
 
   if (matchedSnapshot) {
     return {

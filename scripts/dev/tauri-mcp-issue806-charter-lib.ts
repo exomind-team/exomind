@@ -40,8 +40,10 @@ export function resolveManagedInstanceBridgePort(webPort: number): number {
   return 9223 + Math.max(0, webPort - 1420);
 }
 
+const SESSION_CARD_SESSION_ID_PATTERN = /^session-card-(?!archive-|stop-)(.+)$/;
+
 export function parseSessionCardSessionId(testId: string): string | null {
-  const match = /^session-card-(?!archive-)(.+)$/.exec(testId.trim());
+  const match = SESSION_CARD_SESSION_ID_PATTERN.exec(testId.trim());
   return match?.[1] ?? null;
 }
 

@@ -185,6 +185,81 @@ describe('resolvePtySpawnConnectionTarget', () => {
     });
   });
 
+  it('prefers the local loopback snapshot when the embedded runtime is represented by multiple addresses', () => {
+    const result = resolvePtySpawnConnectionTarget({
+      selectedTarget: buildSelectedTarget(),
+      runtimeServiceStatus: buildRuntimeStatus({
+        host: '0.0.0.0',
+        port: 9124,
+        hostId: 'local-runtime-host',
+      }),
+      runtimeHostSnapshots: [
+        buildSnapshot({
+          host: {
+            id: 'local-lan-host',
+            name: '192.168.1.48:9124',
+            host: '192.168.1.48',
+            port: 9124,
+          },
+        }),
+        buildSnapshot({
+          host: {
+            id: 'local-loopback-host',
+            name: '127.0.0.1:9124',
+            host: '127.0.0.1',
+            port: 9124,
+          },
+        }),
+      ],
+    });
+
+    expect(result).toEqual({
+      rtBaseUrl: 'http://127.0.0.1:9124',
+      authToken: 'local-selected-token',
+      hostId: 'local-runtime-host',
+    });
+  });
+
+  it('trusts the live embedded runtime hostId over a stale loopback snapshot after RT restart', () => {
+    const result = resolvePtySpawnConnectionTarget({
+      selectedTarget: buildSelectedTarget(),
+      runtimeServiceStatus: buildRuntimeStatus({
+        host: '0.0.0.0',
+        port: 9124,
+        hostId: 'embedded-runtime-current',
+      }),
+      runtimeHostSnapshots: [
+        buildSnapshot({
+          host: {
+            id: 'stale-loopback-host',
+            name: '127.0.0.1:9124',
+            host: '127.0.0.1',
+            port: 9124,
+          },
+          topology: {
+            host_id: 'embedded-runtime-stale',
+            hostname: 'embedded-runtime-stale',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 120,
+            version: '0.3.6',
+            port: 9124,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli'],
+              api_providers: ['openai'],
+            },
+          },
+        }),
+      ],
+    });
+
+    expect(result).toEqual({
+      rtBaseUrl: 'http://127.0.0.1:9124',
+      authToken: 'local-selected-token',
+      hostId: 'embedded-runtime-current',
+    });
+  });
+
   it('uses the external selected target snapshot when the user explicitly points at an external runtime', () => {
     const result = resolvePtySpawnConnectionTarget({
       selectedTarget: buildSelectedTarget({

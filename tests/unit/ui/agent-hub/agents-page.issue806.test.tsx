@@ -17,6 +17,8 @@ const runtimeManagerMocks = vi.hoisted(() => ({
 
 const runtimeControlMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
+  startRuntime: vi.fn(),
+  stopRuntime: vi.fn(),
 }));
 
 const runtimeClientMocks = vi.hoisted(() => ({
@@ -219,6 +221,40 @@ function buildRuntimeSnapshot() {
   };
 }
 
+function buildSnapshot(overrides: {
+  host?: Record<string, unknown>;
+  topology?: Record<string, unknown>;
+} = {}) {
+  return {
+    host: {
+      id: 'snapshot-host-806',
+      name: '127.0.0.1:1919',
+      host: '127.0.0.1',
+      port: 1919,
+      status: 'unknown' as const,
+      createdAt: '2026-04-02T00:00:00.000Z',
+      updatedAt: '2026-04-02T00:00:00.000Z',
+      ...(overrides.host ?? {}),
+    },
+    connectionState: 'online' as const,
+    agents: [],
+    topology: {
+      host_id: 'runtime-host-523',
+      hostname: 'runtime-host-523',
+      os: 'Windows 11',
+      arch: 'x64',
+      uptime_secs: 90,
+      version: '0.3.6',
+      port: 1919,
+      capabilities: {
+        agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+        api_providers: ['openai', 'anthropic'],
+      },
+      ...(overrides.topology ?? {}),
+    },
+  };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -251,6 +287,23 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
       running: true,
       host: '127.0.0.1',
       port: 1919,
+      hostId: 'runtime-host-523',
+    });
+    runtimeControlMocks.startRuntime.mockResolvedValue({
+      running: true,
+      host: '127.0.0.1',
+      port: 1919,
+      hostId: 'runtime-host-523',
+      pid: 1234,
+      error: null,
+    });
+    runtimeControlMocks.stopRuntime.mockResolvedValue({
+      running: false,
+      host: '127.0.0.1',
+      port: 1919,
+      hostId: 'runtime-host-523',
+      pid: null,
+      error: null,
     });
     runtimeManagerMocks.refreshSnapshot.mockResolvedValue(buildRuntimeSnapshot());
 
@@ -452,6 +505,156 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     warnSpy.mockRestore();
   });
 
+  it('switches the active PTY to disconnected history when RT stop makes /pty refresh fail（RT stop 导致 /pty 刷新失败后应立即切到断开历史态）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let runtimeReachable = true;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        if (!runtimeReachable) {
+          throw new Error('runtime down');
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-live-806',
+              name: 'Codex 806',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('mock-react-flow-node-pty-pty-live-806'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-live-806')).toBeInTheDocument();
+    });
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+    runtimeReachable = false;
+    fireEvent.click(await screen.findByTestId('runtime-local-stop-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-runtime-error-banner')).toHaveTextContent(
+        'RT 暂不可达，Terminal 已进入断开只读态；下方将展示关闭前历史，可结束后归档。',
+      );
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected-message')).toHaveTextContent(
+        'RT 暂不可达，Terminal 已进入断开只读态；下方将展示关闭前历史，可结束后归档。',
+      );
+    });
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/pty')).length).toBeGreaterThanOrEqual(2);
+    expect(warnSpy.mock.calls.some(([message, payload]) => (
+      message === '[agent-hub][pty] marking current host PTYs as disconnected because refresh failed'
+      && (payload as { ptyIds?: string[] }).ptyIds?.includes('pty-live-806')
+    ))).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  it('keeps recoverable embedded sessions active while the runtime is temporarily stopped and the source host cannot yet be resolved（embedded RT 暂停期间不应因 host 暂未解析就提前收敛可恢复会话）', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-embedded-restart-824',
+        pty_id: 'pty-embedded-restart-824',
+        inner_session_id: 'codex-thread-embedded-restart-824',
+        source_host_id: 'runtime-host-restarting-824',
+      }),
+    ];
+    runtimeControlMocks.getStatus.mockResolvedValue({
+      running: false,
+      host: '127.0.0.1',
+      port: 1919,
+      hostId: 'runtime-host-current-824',
+    });
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-04-03T10:00:00.000Z',
+      agents: [],
+      hosts: [],
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-embedded-restart-824',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-03T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/pty'))).toBe(true);
+    });
+
+    expect(runtimeClientMocks.updateSession).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'session-embedded-restart-824',
+      { status: 'completed' },
+    );
+    expect(infoSpy.mock.calls.some(([message, payload]) => (
+      message === '[agent-hub][pty] keep disconnected terminal session active while embedded runtime is restarting'
+      && (payload as { sessionId?: string }).sessionId === 'session-embedded-restart-824'
+    ))).toBe(true);
+
+    infoSpy.mockRestore();
+  });
+
   it('keeps a newly opened PTY live until a fresh PTY list confirms it is missing（新 PTY 不应在列表刷新前被立即误判断开）', async () => {
     sessionStreamState.sessions = [];
     const delayedPtyRefresh = createDeferred<Response>();
@@ -517,7 +720,14 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
             json: async () => [],
           } as Response;
         }
-        return delayedPtyRefresh.promise;
+        if (ptyListFetchCount === 2) {
+          return delayedPtyRefresh.promise;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
       }
 
       return {
@@ -528,7 +738,7 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<AgentsPage />);
+    const { rerender } = render(<AgentsPage />);
 
     fireEvent.click(await screen.findByTestId('pty-spawn-button'));
 
@@ -545,9 +755,29 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
       );
     });
 
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-new-live-806',
+        agent_kind: 'claude',
+        role: 'Claude 806 New',
+        pty_id: 'pty-new-806',
+        inner_session_id: 'claude-thread-new-806',
+        source_host_id: 'runtime-host-523',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'D:/project/exomind',
+        },
+      }),
+    ];
+    rerender(<AgentsPage />);
+
     await waitFor(() => {
       expect(screen.getByTestId('mock-pty-terminal-pty-new-806')).toBeInTheDocument();
-      expect(screen.queryByTestId('agent-rightpanel-pty-disconnected')).not.toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(ptyListFetchCount).toBeGreaterThanOrEqual(2);
     });
 
     delayedPtyRefresh.resolve({
@@ -557,8 +787,65 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     } as Response);
 
     await waitFor(() => {
-      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-pty-new-806')).toBeInTheDocument();
+      expect(screen.queryByTestId('agent-rightpanel-pty-disconnected')).not.toBeInTheDocument();
     });
+
+    expect(runtimeClientMocks.updateSession.mock.calls.some(([, sessionId]) => (
+      sessionId === 'session-new-live-806'
+    ))).toBe(false);
+  });
+
+  it('does not auto-complete a freshly created terminal session before the PTY list catches up（新建终端会话在 /pty 列表刷新前不应被误收敛为 completed）', async () => {
+    const nowIso = new Date().toISOString();
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-fresh-spawn-806',
+        agent_kind: 'claude',
+        role: 'Fresh Spawn 806',
+        pty_id: 'pty-fresh-spawn-806',
+        inner_session_id: null,
+        created_at: nowIso,
+        last_active_at: nowIso,
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/pty'))).toBe(true);
+    });
+
+    expect(runtimeClientMocks.updateSession).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'session-fresh-spawn-806',
+      { status: 'completed' },
+    );
   });
 
   it('retries codex auto-resume after the runtime becomes reachable again（RT 恢复可达后应再次自动恢复，而不是烧掉唯一尝试机会）', async () => {
@@ -720,6 +1007,135 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     );
 
     warnSpy.mockRestore();
+  });
+
+  it('auto-resumes disconnected session cards after entering the sessions view（切到会话页后应自动恢复可恢复的断开会话卡片）', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    runtimeControlMocks.getStatus.mockResolvedValue({
+      running: true,
+      host: '127.0.0.1',
+      port: 1919,
+      hostId: 'runtime-host-current-824',
+    });
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-04-03T10:00:00.000Z',
+      agents: [],
+      hosts: [],
+    });
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-sessions-view-restart-824',
+        role: 'Codex Sessions View 824',
+        pty_id: 'pty-sessions-view-stale-824',
+        inner_session_id: 'codex-thread-sessions-view-824',
+        source_host_id: 'runtime-host-stale-824',
+        last_active_at: '2026-04-03T00:00:00.000Z',
+      }),
+    ];
+
+    let resumePosted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-sessions-view-824',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-03T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => (
+            resumePosted
+              ? [
+                {
+                  id: 'pty-resumed-sessions-view-824',
+                  name: 'Codex Sessions View Resumed 824',
+                  status: 'running',
+                  workdir: 'D:/project/exomind',
+                },
+              ]
+              : []
+          ),
+        } as Response;
+      }
+      if (url.endsWith('/pty/resume')) {
+        resumePosted = true;
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-resumed-sessions-view-824',
+            name: 'Codex Sessions View Resumed 824',
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/pty'))).toBe(true);
+    });
+
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
+    ).toHaveLength(0);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
+      ).toHaveLength(1);
+    });
+
+    expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: '127.0.0.1',
+        port: 1919,
+      }),
+      'session-sessions-view-restart-824',
+      { status: 'completed' },
+    );
+    expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: '127.0.0.1',
+        port: 1919,
+      }),
+      'session-sessions-view-restart-824',
+      { status: 'archived' },
+    );
+    expect(infoSpy.mock.calls.some(([message, payload]) => (
+      message === '[agent-hub][pty] scheduling disconnected terminal auto-resume'
+      && (payload as { sessionId?: string }).sessionId === 'session-sessions-view-restart-824'
+    ))).toBe(true);
+
+    infoSpy.mockRestore();
   });
 
   it('redirects duplicate historical session cards to the canonical PTY window（重复历史会话卡片应聚焦已有 PTY，而不是再开一扇窗）', async () => {
@@ -1305,6 +1721,179 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     expect(infoSpy.mock.calls.some(([message, payload]) => (
       message === '[agent-hub][pty][open] disconnected terminal history panel opened'
       && (payload as { sessionId?: string }).sessionId === 'session-stale-open-824'
+    ))).toBe(true);
+
+    warnSpy.mockRestore();
+    infoSpy.mockRestore();
+  });
+
+  it('falls back to the current embedded runtime when a stale local source host is still discoverable（旧 local source host 仍可见时也应按当前 embedded RT 判定并恢复）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    runtimeControlMocks.getStatus.mockResolvedValue({
+      running: true,
+      host: '127.0.0.1',
+      port: 1919,
+      hostId: 'runtime-host-current-824',
+    });
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-04-03T10:00:00.000Z',
+      agents: [],
+      hosts: [
+        buildSnapshot({
+          host: {
+            id: 'stale-local-host-record',
+            name: '192.168.1.119:1919',
+            host: '192.168.1.119',
+            port: 1919,
+            isLocal: true,
+          },
+          topology: {
+            host_id: 'stale-local-runtime-host-824',
+            hostname: 'stale-local-runtime-host-824',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 90,
+            version: '0.3.6',
+            port: 1919,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+        }),
+        buildSnapshot({
+          host: {
+            id: 'current-local-host-record',
+            name: '127.0.0.1:1919',
+            host: '127.0.0.1',
+            port: 1919,
+            isLocal: true,
+          },
+          topology: {
+            host_id: 'runtime-host-current-824',
+            hostname: 'runtime-host-current-824',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 30,
+            version: '0.3.6',
+            port: 1919,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+        }),
+      ],
+    });
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-local-stale-824',
+        role: 'Local Stale 824',
+        agent_kind: 'claude',
+        pty_id: 'pty-local-stale-824',
+        inner_session_id: 'claude-thread-local-stale-824',
+        source_host_id: 'stale-local-runtime-host-824',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'D:/project/exomind',
+        },
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'claude',
+              session_id: 'claude-thread-local-stale-824',
+              project_path: 'D--project-exomind',
+              last_modified: '2026-04-03T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty/resume')) {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-resumed-fallback-824',
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+    await waitFor(() => {
+      expect(runtimeControlMocks.getStatus).toHaveBeenCalled();
+      expect(runtimeManagerMocks.refreshSnapshot).toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/pty',
+        expect.anything(),
+      );
+    });
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-local-stale-824'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/pty/resume',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            agent_type: 'claude',
+            session_id: 'claude-thread-local-stale-824',
+            name: 'Local Stale 824',
+            workdir: 'D:/project/exomind',
+          }),
+        }),
+      );
+    });
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://192.168.1.119:1919/pty/resume',
+      expect.anything(),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-resumed-fallback-824')).toBeInTheDocument();
+      expect(screen.queryByTestId('agent-rightpanel-pty-disconnected')).not.toBeInTheDocument();
+    });
+
+    expect(warnSpy.mock.calls.some(([message, payload]) => (
+      message === '[agent-hub][pty][open] session PTY is disconnected'
+      && (payload as { sessionId?: string }).sessionId === 'session-local-stale-824'
+    ))).toBe(true);
+    expect(infoSpy.mock.calls.some(([message, payload]) => (
+      message === '[agent-hub][pty][open] resumed disconnected terminal session'
+      && (payload as { sessionId?: string }).sessionId === 'session-local-stale-824'
     ))).toBe(true);
 
     warnSpy.mockRestore();

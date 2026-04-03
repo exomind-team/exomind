@@ -259,6 +259,73 @@
 - 判断“卡片没消失”时，至少同时看三层：
   - RT `/sessions` 的真实状态
 
+### 阶段补记：#806 章程在真窗实例中完整跑通（2026-04-04）
+
+#### 阶段目标
+
+- 把 `#806` 及其衍生用户故事，收敛成可重复执行的 Tauri MCP 自动交互章程。
+- 在当前唯一存活实例 `UI 1420 / RT 9124 / bridge 9223` 上，真实验证 Claude Code / Codex 两类终端 Agent 的创建、管理、页面切换、RT 重启后恢复。
+- 确认“会话页 / 请求箱页卡死、无日志、活跃卡点击无响应”的旧坏态已经消失。
+
+#### 观察结果
+
+- 官方 `mcp__tauri_mcp_server__driver_session` 仍返回：
+  - `Transport closed`
+- 但同一 Tauri 实例暴露的 raw bridge 仍可稳定连接：
+  - `ws://127.0.0.1:9223`
+- 通过 `scripts/dev/tauri-mcp-issue806-charter.ts` 在 direct mode 真窗实跑，得到：
+  - `overallPass: true`
+  - `activeCount: 2`
+  - `mismatchCount: 0`
+- 本轮实跑使用参数：
+  - `--name web-1420`
+  - `--web-port 1420`
+  - `--bridge-port 9223`
+  - `--runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+- 真窗章程报告确认：
+  - 重启前 UI/RT 会话统计一致：`2/11/13`
+  - 请求箱页可加载，不再停留在“请求箱加载中...”
+  - 两张活跃卡点击后，右侧 `Terminal` 面板都能正常显示终端
+  - 已完成卡点击后，右侧进入只读断开历史态，并显示失败/历史文案
+  - 控制台能看到 `[agent-hub][pty][open]` 相关 trace
+  - RT 重启后 hostId 完成切换：
+    - `rt-58676cb3-ad7f-41e6-af70-b0b0e9406ec1`
+    - `rt-9c8b50ba-5192-4b17-bdef-6f3c795d063c`
+  - RT 重启后 UI/RT 会话统计仍一致：`2/11/13`
+  - RT 重启后 `/pty` 数量恢复到 `2`
+  - RT 重启后两张新的活跃卡仍都能打开右侧 Terminal
+
+#### 结论
+
+- `#806` 当前阶段的终端 Agent 主叙事已在真实桌面实例中跑通：
+  - 可以在“网络”页管理 Claude Code / Codex 终端 Agent
+  - 页面在 `/agents` 与 `/proposals` 之间切换，不会把活跃会话误伤成断开或 completed
+  - embedded RT 重启后，UI 能重新收敛到新的 runtime hostId，并恢复 Claude/Codex 的活跃终端会话
+  - 对不可恢复或已结束的会话，右侧面板不再卡死，而是进入只读历史/失败态，并带控制台可追溯日志
+- 这次真正收住的关键边界有三类：
+  - fresh session grace：新建 PTY 在 `/pty` 列表尚未追平前，不会被误判死亡
+  - stale local host fallback：旧 `source_host_id` 仍残留时，允许回退到当前 embedded runtime 判定与恢复
+  - stale loopback snapshot hostId correction：RT 重启后若 runtime snapshot 仍残着旧 `127.0.0.1:9124` host 记录，前端不再盲信旧 hostId，而是优先信 live runtime hostId
+
+#### 可复用操作套路
+
+1. 先判定官方 Tauri MCP 是否可用
+   - 若 `driver_session` 返回 `Transport closed`，不要继续在官方 MCP RPC 上空转
+2. 改走同实例 raw bridge
+   - 默认检查 `ws://127.0.0.1:9223`
+   - 当前 `web-1420` 的 raw bridge 即为 `9223`
+3. 真窗验证优先用章程脚本，而不是散乱手点
+   - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name web-1420 --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+4. 章程里必须同时覆盖三段
+   - 重启前 session 统计一致
+   - `/proposals` 往返后仍一致
+   - `runtime_service_stop/start` 后 hostId 切换、`/pty` 回补、活跃卡可再打开 Terminal
+5. 遇到“RT 重启后 UI 卡死但无日志”时，最先看四个点
+   - `runtime_service_status.hostId` 是否已经变化
+   - 页面上下文 `fetch('/sessions')` 与 `fetch('/pty')` 是否一致
+   - 当前活跃卡的 `source_host_id` 是否仍指向旧 host
+   - `resolvePtySpawnConnectionTarget()` 是否被旧 loopback snapshot hostId 误导
+
 ### 阶段补记：#806 / #824 自动章程落地（2026-04-03）
 
 #### 本轮阶段目标
