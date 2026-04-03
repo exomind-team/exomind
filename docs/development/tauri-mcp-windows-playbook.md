@@ -259,6 +259,55 @@
 - 判断“卡片没消失”时，至少同时看三层：
   - RT `/sessions` 的真实状态
 
+### 阶段补记：#806 / #824 自动章程落地（2026-04-03）
+
+#### 本轮阶段目标
+
+- 把 `#806`、`#822`、`#824`、`#828` 的关键用户故事，收敛为一个可直接执行的 Tauri MCP 自动章程。
+- 让章程不只依赖 UI DOM，还能同时核对：
+  - 当前 `tauri:manager` 实例
+  - raw bridge
+  - RT SQLite 真值
+  - webview console trace
+
+#### 本轮观察结果
+
+- 当前 Windows 现场里，官方 `driver_session` 仍可能返回 `Transport closed`。
+- 但 raw bridge 在当前 `tauri:manager` 实例上稳定可用，可以持续执行：
+  - `list_windows`
+  - `execute_js`
+- 当前实例 `issue806-g` 上：
+  - 会话页 UI 汇总为 `active=0 completed=1 total=1`
+  - RT `sessions.sqlite` 真值同样为 `0/1/1`
+  - 点击已完成 session card 后：
+    - 右侧进入断开历史视图
+    - UI 明确显示失败消息
+    - console 出现 `[agent-hub][pty][open] ...` trace
+  - `/proposals` 可进入请求箱页面，不再卡在 `请求箱加载中...`
+
+#### 本轮结论
+
+- “Tauri MCP 章程”在当前阶段应分成两层：
+  - 实例与桥接层：`tauri:manager` + raw bridge
+  - 产品断言层：UI DOM + SQLite + console trace
+- 对 `#824` 而言，只看 `/sessions` HTTP 已不够，因为当前现场可能受认证与宿主态影响；SQLite 真值对账更稳。
+- 对 `#822` 而言，不能只看 UI 提示，还要直接抓到 webview console trace。
+
+#### 可复用操作套路
+
+1. 先跑：
+   - `bun run tauri:manager list`
+2. 再跑：
+   - `bun run tauri:charter:issue806 -- --name <instance>`
+3. 如果章程失败，按以下顺序拆解：
+   - raw bridge 是否连通
+   - `/agents` 会话页是否可渲染
+   - UI 与 `sessions.sqlite` 是否一致
+   - session card 点击后是否有断开/实时态反馈
+   - console 是否出现 `[agent-hub][pty][open]`
+   - `/proposals` 是否停在 loading
+4. 若官方 MCP transport 恢复，再考虑把同一套断言迁回 `driver_session` 封装层；当前先不要阻塞在 transport 问题上
+
 ### 阶段补记：#812 局域网免 Token 与本机 curl（2026-04-03）
 
 #### 本轮修复前的误区

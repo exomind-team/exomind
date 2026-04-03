@@ -77,16 +77,60 @@ export function PtyTerminal({
       return base;
     };
 
+    let lastResizeRequestKey: string | null = null;
+    let controlRequestPauseUntil = 0;
+
+    const isFatalControlStatus = (status: number) => (
+      status === 401 || status === 403 || status === 404
+    );
+
+    const isControlRequestPaused = () => Date.now() < controlRequestPauseUntil;
+
+    const pauseControlRequests = (
+      action: 'resize' | 'input',
+      status: number,
+    ) => {
+      controlRequestPauseUntil = Date.now() + 1500;
+      log.warn(
+        `[PtyTerminal] pausing PTY ${ptyId} ${action} requests for 1500ms after HTTP ${status} from ${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/${action}`,
+      );
+    };
+
     const sendResize = (rows: number, cols: number) => {
       if (!interactive) {
         return;
       }
-      fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize`, {
+      if (isControlRequestPaused()) {
+        return;
+      }
+
+      const requestKey = `${rows}x${cols}`;
+      if (lastResizeRequestKey === requestKey) {
+        return;
+      }
+      lastResizeRequestKey = requestKey;
+
+      void fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize`, {
         method: 'POST',
         headers: buildHeaders(),
         body: JSON.stringify({ rows, cols }),
-      }).catch(() => {
-        // Silently ignore resize failures
+      }).then((response) => {
+        if (response.ok) {
+          return;
+        }
+        if (!isFatalControlStatus(response.status)) {
+          lastResizeRequestKey = null;
+        } else {
+          pauseControlRequests('resize', response.status);
+        }
+        log.warn(
+          `[PtyTerminal] resize rejected for PTY ${ptyId} via ${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize with HTTP ${response.status}`,
+        );
+      }).catch((error: unknown) => {
+        lastResizeRequestKey = null;
+        log.error(
+          `[PtyTerminal] resize request failed for PTY ${ptyId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       });
     };
 
@@ -120,16 +164,31 @@ export function PtyTerminal({
     // ── Helper: send raw text to PTY backend ──────────────────
 
     const sendTextInput = (text: string) => {
+      if (isControlRequestPaused()) {
+        return;
+      }
       const encoder = new TextEncoder();
       const bytes = encoder.encode(text);
       const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
       const encoded = btoa(binary);
 
-      fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/input`, {
+      void fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/input`, {
         method: 'POST',
         headers: buildHeaders(),
         body: JSON.stringify({ data: encoded }),
-      }).catch((e: unknown) => log.error(`[PtyTerminal] pty input failed: ${e instanceof Error ? e.message : String(e)}`));
+      }).then((response) => {
+        if (response.ok) {
+          return;
+        }
+        if (isFatalControlStatus(response.status)) {
+          pauseControlRequests('input', response.status);
+        }
+        log.warn(
+          `[PtyTerminal] input rejected for PTY ${ptyId} via ${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/input with HTTP ${response.status}`,
+        );
+      }).catch((e: unknown) => {
+        log.error(`[PtyTerminal] pty input failed: ${e instanceof Error ? e.message : String(e)}`);
+      });
     };
 
     // ── Handle user input → POST to backend ──────────────────
@@ -279,6 +338,7 @@ export function PtyTerminal({
       es.onopen = () => {
         initialStreamConnected = true;
         initialStreamRetryCount = 0;
+        controlRequestPauseUntil = 0;
       };
 
       es.addEventListener('output', (event) => {

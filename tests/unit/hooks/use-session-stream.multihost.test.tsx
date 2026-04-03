@@ -214,4 +214,95 @@ describe('useSessionStream multi-host aggregation（多主机会话流聚合）'
 
     warnSpy.mockRestore();
   });
+
+  it('does not refetch endlessly when resolved targets stay the same（稳定 target 不应触发自旋重拉）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'http://127.0.0.1:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({ id: 'session-stable-target' })],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const target = {
+      id: 'host-stable',
+      rtBaseUrl: 'http://127.0.0.1:1919',
+      hostName: '127.0.0.1:1919',
+      hostAddress: '127.0.0.1:1919',
+    };
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [target],
+    }));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.urls).toEqual(['http://127.0.0.1:1919/sessions/stream']);
+  });
+
+  it('preserves backend source_host_id instead of overwriting it with fetch target metadata（保留后端 source_host_id，不被聚合 target 覆盖）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'http://127.0.0.1:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({
+            id: 'session-preserve-host-id',
+            source_host_id: 'rt-original-host',
+            source_host_name: 'Original Runtime',
+            source_host_address: '10.0.0.8:1919',
+          })],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [{
+        id: 'host-aggregator',
+        rtBaseUrl: 'http://127.0.0.1:1919',
+        hostName: '127.0.0.1:1919',
+        hostAddress: '127.0.0.1:1919',
+      }],
+    }));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    expect(result.current.sessions[0]).toMatchObject({
+      id: 'session-preserve-host-id',
+      source_host_id: 'rt-original-host',
+      source_host_name: 'Original Runtime',
+      source_host_address: '10.0.0.8:1919',
+    });
+  });
 });

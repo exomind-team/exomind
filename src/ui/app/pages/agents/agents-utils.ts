@@ -18,7 +18,12 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { resolveLocalServiceHost } from '@/config/local-service-host';
-import { DEFAULT_EMBEDDED_RUNTIME_PORT, type EmbeddedRuntimeNetworkMode } from '@/config/runtime-target';
+import {
+  DEFAULT_EMBEDDED_RUNTIME_PORT,
+  formatHostForUrl,
+  type EmbeddedRuntimeNetworkMode,
+  type RuntimeTarget,
+} from '@/config/runtime-target';
 import { readRuntimeBackedValue } from '@/config/runtime-preference-storage';
 import { VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
 import type {
@@ -91,6 +96,12 @@ export const DIRECT_RUNTIME_PORT_CANDIDATES = Array.from(
   new Set([DEFAULT_EMBEDDED_RUNTIME_PORT, 1950, 1949]),
 );
 export const DIRECT_RUNTIME_PORT_STORAGE_KEY = 'exomind:agentHubRuntimePorts';
+
+export interface PtySpawnConnectionTarget {
+  rtBaseUrl: string;
+  authToken?: string;
+  hostId?: string;
+}
 
 export const MOCK_SIGNAL_ROUTES_FALLBACK: SignalRoute[] = [
   {
@@ -342,6 +353,78 @@ export function buildDirectRuntimeCandidates(hosts: RuntimeHostSnapshot[]): Runt
     }
   }
   return candidates;
+}
+
+function buildRuntimeBaseUrl(host: string, port: number): string {
+  return `http://${formatHostForUrl(host)}:${port}`;
+}
+
+function resolveRuntimeSnapshotPeerId(snapshot: RuntimeHostSnapshot): string | undefined {
+  return snapshot.topology?.host_id ?? snapshot.host.hostId;
+}
+
+export function resolvePtySpawnConnectionTarget(options: {
+  runtimeHostSnapshots: RuntimeHostSnapshot[];
+  selectedTarget: RuntimeTarget;
+  runtimeServiceStatus?: { running: boolean; host: string; port: number; hostId?: string } | null;
+}): PtySpawnConnectionTarget {
+  const { runtimeHostSnapshots, runtimeServiceStatus, selectedTarget } = options;
+  const normalizedSelectedHost = resolveLocalServiceHost(selectedTarget.host);
+  const embeddedHostId = selectedTarget.mode === 'embedded' ? runtimeServiceStatus?.hostId : undefined;
+  const normalizedRuntimeStatusHost = runtimeServiceStatus?.running
+    ? resolveLocalServiceHost(runtimeServiceStatus.host === '0.0.0.0' ? '127.0.0.1' : runtimeServiceStatus.host)
+    : undefined;
+
+  const matchedSnapshot = runtimeHostSnapshots.find((snapshot) => {
+    const snapshotHost = resolveLocalServiceHost(snapshot.host.host);
+    if (snapshotHost === normalizedSelectedHost && snapshot.host.port === selectedTarget.port) {
+      return true;
+    }
+
+    if (
+      normalizedRuntimeStatusHost
+      && snapshotHost === normalizedRuntimeStatusHost
+      && snapshot.host.port === runtimeServiceStatus?.port
+    ) {
+      return true;
+    }
+
+    if (!embeddedHostId) {
+      return false;
+    }
+
+    return resolveRuntimeSnapshotPeerId(snapshot) === embeddedHostId
+      || snapshot.host.id === embeddedHostId;
+  });
+
+  if (matchedSnapshot) {
+    return {
+      rtBaseUrl: buildRuntimeBaseUrl(matchedSnapshot.host.host, matchedSnapshot.host.port),
+      authToken: matchedSnapshot.host.authToken ?? selectedTarget.authToken,
+      hostId: resolveRuntimeSnapshotPeerId(matchedSnapshot)
+        ?? matchedSnapshot.host.hostId
+        ?? matchedSnapshot.host.id,
+    };
+  }
+
+  if (selectedTarget.mode === 'embedded' && runtimeServiceStatus?.running) {
+    const embeddedHost = runtimeServiceStatus.host === '0.0.0.0'
+      ? '127.0.0.1'
+      : resolveLocalServiceHost(runtimeServiceStatus.host);
+
+    return {
+      rtBaseUrl: buildRuntimeBaseUrl(embeddedHost, runtimeServiceStatus.port),
+      authToken: selectedTarget.authToken,
+      hostId: runtimeServiceStatus.hostId
+        ?? createDirectRuntimeHost(embeddedHost, runtimeServiceStatus.port, selectedTarget.authToken).id,
+    };
+  }
+
+  return {
+    rtBaseUrl: buildRuntimeBaseUrl(normalizedSelectedHost, selectedTarget.port),
+    authToken: selectedTarget.authToken,
+    hostId: embeddedHostId,
+  };
 }
 
 export function mapRuntimeAgentsForHost(host: RuntimeHostRecord, agents: Array<{ id: string; name: string; description: string; status: string }>): RuntimeAggregatedAgent[] {

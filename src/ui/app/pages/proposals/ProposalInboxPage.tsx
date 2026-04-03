@@ -4,6 +4,10 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
 import {
+  formatRuntimeTargetAddress,
+  getSelectedRuntimeTarget,
+} from '@/config/runtime-target';
+import {
   ProposalRtError,
   getProposalRtAdapter,
 } from '@/lib/adapters/proposal-rt-adapter';
@@ -212,6 +216,14 @@ export function ProposalInboxPage() {
     } catch (error) {
       const message = error instanceof Error ? error.message : '请求箱加载失败';
       const missingEndpoint = error instanceof ProposalRtError && error.status === 404;
+      const target = getSelectedRuntimeTarget();
+      console.warn('[proposal-inbox] failed to load proposals', {
+        silent,
+        targetMode: target.mode,
+        targetAddress: formatRuntimeTargetAddress(target),
+        missingEndpoint,
+        message,
+      });
       setErrorMessage(message);
       setEndpointMissing(missingEndpoint);
       if (missingEndpoint) {

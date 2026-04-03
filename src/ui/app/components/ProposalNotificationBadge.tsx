@@ -1,6 +1,10 @@
 import { Link, useLocation } from '@tanstack/react-router';
 import { Inbox } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import {
+  formatRuntimeTargetAddress,
+  getSelectedRuntimeTarget,
+} from '@/config/runtime-target';
 import { getProposalRtAdapter } from '@/lib/adapters/proposal-rt-adapter';
 
 type ProposalNotificationBadgePlacement =
@@ -33,7 +37,15 @@ export function ProposalNotificationBadge({
         if (!disposed) {
           setPendingCount(pending.length);
         }
-      } catch {
+      } catch (error) {
+        const target = getSelectedRuntimeTarget();
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn('[proposal-badge] failed to refresh pending proposal count', {
+          placement,
+          targetMode: target.mode,
+          targetAddress: formatRuntimeTargetAddress(target),
+          message,
+        });
         if (!disposed) {
           setPendingCount(0);
         }

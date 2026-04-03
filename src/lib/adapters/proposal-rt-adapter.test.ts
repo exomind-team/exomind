@@ -94,6 +94,7 @@ describe('ProposalRtAdapter', () => {
   let adapter: ProposalRtAdapter;
 
   beforeEach(() => {
+    vi.useRealTimers();
     fetchImpl.mockReset();
     adapter = new ProposalRtAdapter({
       fetchImpl,
@@ -191,6 +192,41 @@ describe('ProposalRtAdapter', () => {
     });
   });
 
+  it('times out runtime proposal requests instead of hanging forever（RT 不可达时请求箱请求会超时返回）', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      fetchImpl.mockImplementationOnce((_input, init) => new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener('abort', () => {
+          reject(new Error('AbortError'));
+        });
+      }));
+
+      const errorPromise = adapter.listProposals().catch((reason) => reason);
+      await vi.advanceTimersByTimeAsync(3_500);
+      const error = await errorPromise;
+
+      expect(error).toMatchObject({
+        status: 0,
+        message: 'RT proposal request timed out（请求超时）',
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[proposal-rt][request] runtime request failed',
+        expect.objectContaining({
+          method: 'GET',
+          url: 'http://127.0.0.1:9124/api/proposals?user_id=anonymous',
+          timeoutMs: 3_500,
+          timeout: true,
+          message: 'RT proposal request timed out（请求超时）',
+        }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('sends update patch in snake_case format', async () => {
     fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify(
       toRuntimeProposal({
@@ -225,4 +261,5 @@ describe('ProposalRtAdapter', () => {
       snooze_until: null,
     });
   });
+
 });

@@ -24,6 +24,7 @@
     "gh:qmark:watch": "bun scripts/dev/gh-auto-reply-qmark.ts --watch --interval-seconds 180",
     "check:android:meta": "bun scripts/dev/android-meta-check.ts",
     "tauri:manager": "bun scripts/dev/tauri-dev-manager.ts",
+    "tauri:charter:issue806": "bun scripts/dev/tauri-mcp-issue806-charter.ts",
     "ensure:build-deps": "bun scripts/dev/ensure-build-deps.ts",
     "build:web": "node ./node_modules/typescript/bin/tsc --noEmit && node ./node_modules/vite/bin/vite.js build",
     "build": "bun scripts/dev/build.ts",

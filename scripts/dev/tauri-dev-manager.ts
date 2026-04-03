@@ -6,13 +6,16 @@ import { access, mkdir, open, readFile, readdir, rm, writeFile } from 'node:fs/p
 import path from 'node:path';
 import {
   appendManagedTauriLogSessionStart,
+  collectManagedDesktopAppPids,
   collectManagedTauriCleanupPids,
   evaluateManagedTauriInstanceHealth,
   resolveManagedTauriInstancePaths,
   type ManagedTauriInstanceHealthSnapshot,
   type ManagedTauriInstanceRecord,
+  type ManagedWindowsProcessInfo,
   type TauriDevTarget,
 } from './tauri-dev-manager-lib';
+import { resolveTauriDevTargetDir } from './tauri-dev-target-dir-lib';
 
 type CommandName = 'start' | 'list' | 'status' | 'stop' | 'logs' | 'prune';
 
@@ -23,14 +26,7 @@ type ParsedArgs = {
 
 const PROJECT_ROOT = process.cwd();
 const DEFAULT_WEB_PORT = 1420;
-const WINDOWS_TOOL_PROCESS_NAMES = new Set(['bun.exe', 'cargo.exe', 'node.exe', 'vite.exe']);
 const desktopProcessNameCache = new Map<string, Promise<string | null>>();
-
-type WindowsProcessInfo = {
-  ProcessId: number;
-  ParentProcessId: number;
-  Name: string;
-};
 
 type PortListenerInfo = {
   LocalPort: number;
@@ -222,32 +218,6 @@ function runPowerShellJson<T>(script: string): T[] {
   return normalizeJsonArray(JSON.parse(raw) as T | T[] | null);
 }
 
-function getDescendantProcesses(processes: WindowsProcessInfo[], rootPid: number): WindowsProcessInfo[] {
-  const childrenByParent = new Map<number, WindowsProcessInfo[]>();
-  for (const processInfo of processes) {
-    const siblings = childrenByParent.get(processInfo.ParentProcessId) ?? [];
-    siblings.push(processInfo);
-    childrenByParent.set(processInfo.ParentProcessId, siblings);
-  }
-
-  const descendants: WindowsProcessInfo[] = [];
-  const queue = [...(childrenByParent.get(rootPid) ?? [])];
-  const seen = new Set<number>();
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current || seen.has(current.ProcessId)) {
-      continue;
-    }
-
-    seen.add(current.ProcessId);
-    descendants.push(current);
-    queue.push(...(childrenByParent.get(current.ProcessId) ?? []));
-  }
-
-  return descendants;
-}
-
 async function resolveDesktopProcessBaseName(projectRoot: string): Promise<string | null> {
   const cached = desktopProcessNameCache.get(projectRoot);
   if (cached) {
@@ -267,16 +237,6 @@ async function resolveDesktopProcessBaseName(projectRoot: string): Promise<strin
 
   desktopProcessNameCache.set(projectRoot, pending);
   return await pending;
-}
-
-function matchesDesktopProcessName(name: string, expectedBaseName: string | null): boolean {
-  const normalized = name.trim().toLowerCase();
-  if (expectedBaseName) {
-    const expected = expectedBaseName.trim().toLowerCase();
-    return normalized === expected || normalized === `${expected}.exe`;
-  }
-
-  return !WINDOWS_TOOL_PROCESS_NAMES.has(normalized);
 }
 
 function groupListenerPidsByPort(portListeners: PortListenerInfo[], port: number): number[] {
@@ -323,13 +283,24 @@ async function collectManagedTauriHealthSnapshot(
   }
 
   const expectedDesktopProcess = await resolveDesktopProcessBaseName(record.projectRoot);
-  const processes = runPowerShellJson<WindowsProcessInfo>(
-    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name | ConvertTo-Json -Compress',
+  const expectedExecutablePath = expectedDesktopProcess
+    ? path.join(
+      resolveTauriDevTargetDir(record.projectRoot, {
+        EXOMIND_TAURI_INSTANCE_NAME: record.name,
+      }),
+      'debug',
+      `${expectedDesktopProcess}.exe`,
+    )
+    : null;
+  const processes = runPowerShellJson<ManagedWindowsProcessInfo>(
+    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json -Compress',
   );
-  const descendants = getDescendantProcesses(processes, record.rootPid);
-  const appPids = descendants
-    .filter((processInfo) => matchesDesktopProcessName(processInfo.Name, expectedDesktopProcess))
-    .map((processInfo) => processInfo.ProcessId);
+  const appPids = collectManagedDesktopAppPids({
+    processes,
+    rootPid: record.rootPid,
+    expectedBaseName: expectedDesktopProcess,
+    expectedExecutablePath,
+  });
 
   return {
     rootPidAlive,

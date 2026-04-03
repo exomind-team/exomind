@@ -52,6 +52,7 @@ interface RuntimeProposalPayload {
 }
 
 const PROPOSAL_API_BASE_PATH = '/api/proposals';
+const DEFAULT_PROPOSAL_RT_TIMEOUT_MS = 3_500;
 
 export interface ProposalQueryFilter {
   status?: ProposalStatus;
@@ -61,6 +62,7 @@ export interface ProposalQueryFilter {
 export interface ProposalRtAdapterOptions {
   fetchImpl?: RuntimeFetch;
   resolveTarget?: () => RuntimeTarget;
+  timeoutMs?: number;
 }
 
 export class ProposalRtError extends Error {
@@ -166,10 +168,12 @@ function toRuntimeUpdatePayload(
 export class ProposalRtAdapter {
   private readonly fetchImpl: RuntimeFetch;
   private readonly resolveTarget: () => RuntimeTarget;
+  private readonly timeoutMs: number;
 
   constructor(options: ProposalRtAdapterOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
     this.resolveTarget = options.resolveTarget ?? (() => getSelectedRuntimeTarget());
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_PROPOSAL_RT_TIMEOUT_MS;
   }
 
   async listProposals(filter?: ProposalQueryFilter): Promise<Proposal[]> {
@@ -181,7 +185,8 @@ export class ProposalRtAdapter {
 
   async getProposal(id: number): Promise<Proposal | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(`${PROPOSAL_API_BASE_PATH}/${id}`, target), {
+    const url = this.url(`${PROPOSAL_API_BASE_PATH}/${id}`, target);
+    const response = await this.fetchWithTimeout(url, {
       method: 'GET',
       headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
@@ -216,7 +221,8 @@ export class ProposalRtAdapter {
     input: UpdateProposalInput,
   ): Promise<Proposal | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(`${PROPOSAL_API_BASE_PATH}/${id}`, target), {
+    const url = this.url(`${PROPOSAL_API_BASE_PATH}/${id}`, target);
+    const response = await this.fetchWithTimeout(url, {
       method: 'PATCH',
       headers: buildRuntimeAuthHeaders(target, {
         'Content-Type': 'application/json',
@@ -273,7 +279,8 @@ export class ProposalRtAdapter {
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(path, target), {
+    const url = this.url(path, target);
+    const response = await this.fetchWithTimeout(url, {
       ...init,
       headers: buildRuntimeAuthHeaders(target, {
         Accept: 'application/json',
@@ -301,6 +308,36 @@ export class ProposalRtAdapter {
 
   private url(path: string, target = this.resolveTarget()): string {
     return `${toRuntimeBaseUrl(target)}${appendRuntimeProfileScope(path)}`;
+  }
+
+  private async fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
+
+    try {
+      return await this.fetchImpl(url, {
+        ...init,
+        signal: controller?.signal,
+      });
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      const timeout = messageText.includes('abort') || messageText.includes('timeout');
+      const message = timeout
+        ? 'RT proposal request timed out（请求超时）'
+        : `RT proposal request failed: ${error instanceof Error ? error.message : String(error)}`;
+      console.warn('[proposal-rt][request] runtime request failed', {
+        method: init?.method ?? 'GET',
+        url,
+        timeoutMs: this.timeoutMs,
+        timeout,
+        message,
+      });
+      throw new ProposalRtError(message, 0);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
   }
 }
 

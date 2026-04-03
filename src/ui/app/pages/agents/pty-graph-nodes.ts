@@ -10,13 +10,31 @@ export interface PtyGraphAgent {
   name: string;
   status: string;
   workdir: string;
+  sourceHostId?: string;
 }
 
 export function findSessionForPty(
   ptyId: string,
   sessions: SessionInfo[],
+  options: {
+    preferredSourceHostId?: string | null;
+  } = {},
 ): SessionInfo | undefined {
-  return sessions.find((session) => session.pty_id === ptyId);
+  const matches = sessions.filter((session) => session.pty_id === ptyId);
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  if (options.preferredSourceHostId) {
+    const preferredMatch = matches.find((session) => (
+      session.source_host_id === options.preferredSourceHostId
+    ));
+    if (preferredMatch) {
+      return preferredMatch;
+    }
+  }
+
+  return matches[0];
 }
 
 export function buildPtyGraphNodes(
@@ -24,7 +42,9 @@ export function buildPtyGraphNodes(
   sessions: SessionInfo[],
 ): SignalGraphNode[] {
   return ptyAgents.map((pty, idx) => {
-    const matchingSession = findSessionForPty(pty.id, sessions);
+    const matchingSession = findSessionForPty(pty.id, sessions, {
+      preferredSourceHostId: pty.sourceHostId ?? null,
+    });
 
     return {
       id: `pty-${pty.id}`,

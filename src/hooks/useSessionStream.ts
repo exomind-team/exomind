@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import type { SessionInfo } from '@/lib/types/session';
 
 export interface SessionStreamTarget {
@@ -56,6 +56,16 @@ function dedupeSessionsById(sessions: SessionInfo[]): SessionInfo[] {
   return deduped;
 }
 
+function buildSessionStreamTargetSignature(target: SessionStreamTarget): string {
+  return [
+    target.id,
+    target.rtBaseUrl,
+    target.authToken ?? '',
+    target.hostName ?? '',
+    target.hostAddress ?? '',
+  ].join('|');
+}
+
 /**
  * Hook that fetches sessions from the runtime and subscribes to SSE updates.
  * Uses a single multiplexed SSE connection for all session events.
@@ -71,25 +81,47 @@ export function useSessionStream({
   const [error, setError] = useState<string | null>(null);
   const eventSourcesRef = useRef<EventSource[]>([]);
   const authWarningKeysRef = useRef<Set<string>>(new Set());
+  const resolvedTargetsRef = useRef<{
+    signature: string;
+    targets: SessionStreamTarget[];
+  }>({
+    signature: '',
+    targets: [],
+  });
   const supportsEventSource = typeof EventSource !== 'undefined';
 
-  const resolvedTargets = (targets && targets.length > 0)
-    ? targets
-    : (rtBaseUrl
-      ? [{
-          id: rtBaseUrl,
-          rtBaseUrl,
-          authToken,
-          hostAddress: rtBaseUrl,
-        }]
-      : []);
+  const normalizedTargets = useMemo(() => (
+    (targets && targets.length > 0)
+      ? targets
+      : (rtBaseUrl
+        ? [{
+            id: rtBaseUrl,
+            rtBaseUrl,
+            authToken,
+            hostAddress: rtBaseUrl,
+          }]
+        : [])
+  ), [authToken, rtBaseUrl, targets]);
+  const resolvedTargetsSignature = useMemo(
+    () => normalizedTargets.map(buildSessionStreamTargetSignature).join('||'),
+    [normalizedTargets],
+  );
+
+  if (resolvedTargetsRef.current.signature !== resolvedTargetsSignature) {
+    resolvedTargetsRef.current = {
+      signature: resolvedTargetsSignature,
+      targets: normalizedTargets.map((target) => ({ ...target })),
+    };
+  }
+
+  const resolvedTargets = resolvedTargetsRef.current.targets;
 
   const decorateSession = useCallback(
     (session: SessionInfo, target: SessionStreamTarget): SessionInfo => ({
       ...session,
-      source_host_id: target.id,
-      source_host_name: target.hostName,
-      source_host_address: target.hostAddress ?? target.rtBaseUrl,
+      source_host_id: session.source_host_id ?? target.id,
+      source_host_name: session.source_host_name ?? target.hostName,
+      source_host_address: session.source_host_address ?? target.hostAddress ?? target.rtBaseUrl,
     }),
     [],
   );
