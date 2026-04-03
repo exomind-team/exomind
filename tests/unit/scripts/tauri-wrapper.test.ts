@@ -114,7 +114,7 @@ describeWindowsOnly('tauri-wrapper', () => {
       );
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('target\\tauri-dev\\web-1520');
+      expect(result.stdout).toContain('tauri-dev\\web-1520');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

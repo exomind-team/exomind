@@ -842,6 +842,9 @@ if ($requiresDynamicDevUrl) {
 if ($isTauriDev) {
   Resolve-EmbeddedRuntimePort
   Resolve-TauriDevTargetDir -ProjectRoot $projectRoot
+  if (-not $env:VITE_PTY_DEFAULT_WORKDIR) {
+    $env:VITE_PTY_DEFAULT_WORKDIR = $projectRoot
+  }
 
   $instancePaths = Resolve-TauriDevInstancePaths -ProjectRoot $projectRoot
   $env:EXOMIND_DEV_INSTANCE_NAME = "$($instancePaths.instanceName)"

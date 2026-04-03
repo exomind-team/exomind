@@ -25,14 +25,13 @@ use commands::now_workbench_overlay_commands::{
     now_workbench_overlay_set_position, now_workbench_overlay_show,
 };
 use commands::runtime_commands::{
-    ensure_runtime_started, runtime_service_peer_dial_address,
-    load_persisted_runtime_network_mode, load_persisted_runtime_target_mode,
-    runtime_external_address_get,
-    runtime_external_address_set, runtime_lan_no_auth_get, runtime_lan_no_auth_set,
-    runtime_network_mode_get, runtime_network_mode_set,
-    runtime_service_reachable_address, runtime_service_start, runtime_service_status,
-    runtime_service_stop, runtime_target_mode_get, runtime_target_mode_set, signal_publish_fast,
-    sync_android_runtime_keepalive, RuntimeProcessState, RuntimeTargetMode,
+    ensure_runtime_started, load_persisted_runtime_network_mode,
+    load_persisted_runtime_target_mode, runtime_external_address_get, runtime_external_address_set,
+    runtime_lan_no_auth_get, runtime_lan_no_auth_set, runtime_network_mode_get,
+    runtime_network_mode_set, runtime_service_peer_dial_address, runtime_service_reachable_address,
+    runtime_service_start, runtime_service_status, runtime_service_stop, runtime_target_mode_get,
+    runtime_target_mode_set, signal_publish_fast, sync_android_runtime_keepalive,
+    RuntimeProcessState, RuntimeTargetMode,
 };
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, foreground_window_get, main_window_shortcut_get,
@@ -40,7 +39,6 @@ use commands::shortcut_commands::{
     register_main_window_shortcut, register_voice_shortcut, simulate_enter, simulate_paste,
     voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, MainWindowShortcutState,
-    foreground_window_focus,
     VoiceShortcutState,
 };
 use commands::workspace_commands::{
@@ -51,10 +49,9 @@ use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, Ws
 use dev_instance_paths::{
     resolve_instance_app_data_dir, resolve_instance_runtime_dir_from_app_data_dir,
     resolve_legacy_shared_app_data_dir, resolve_legacy_shared_runtime_dir,
-    resolve_legacy_shared_webview_main_data_dir,
-    resolve_main_webview_data_dir, resolve_mcp_bridge_base_port,
-    seed_instance_app_data_dir_if_needed, seed_instance_runtime_dir_if_needed,
-    seed_instance_webview_main_data_dir_if_needed,
+    resolve_legacy_shared_webview_main_data_dir, resolve_main_webview_data_dir,
+    resolve_mcp_bridge_base_port, seed_instance_app_data_dir_if_needed,
+    seed_instance_runtime_dir_if_needed, seed_instance_webview_main_data_dir_if_needed,
 };
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
@@ -81,8 +78,7 @@ fn seed_runtime_default_signal_routes_path(runtime_dir: &std::path::Path) {
     };
 
     if should_write {
-        if let Err(error) =
-            std::fs::write(&bundled_routes_path, DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON)
+        if let Err(error) = std::fs::write(&bundled_routes_path, DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON)
         {
             log::error!("failed to seed bundled signal routes file: {error}");
             return;
@@ -433,7 +429,6 @@ pub fn run() {
             main_window_shortcut_take_pending_activation,
             voice_recording_set_active,
             foreground_window_get,
-            foreground_window_focus,
             // ASR 语音识别命令
             volcano_asr_recognize,
             volcano_asr_check_config,

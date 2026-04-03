@@ -63,13 +63,10 @@ pub async fn ws_connect<R: Runtime>(
     let parsed_url = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
 
     // 建立连接（带超时保护，防止网络不通时无限等待）
-    let (ws_stream, response) = tokio::time::timeout(
-        WS_CONNECT_TIMEOUT,
-        connect_async(parsed_url),
-    )
-    .await
-    .map_err(|_| "Connection timed out".to_string())?
-    .map_err(|e| format!("Connection failed: {}", e))?;
+    let (ws_stream, response) = tokio::time::timeout(WS_CONNECT_TIMEOUT, connect_async(parsed_url))
+        .await
+        .map_err(|_| "Connection timed out".to_string())?
+        .map_err(|e| format!("Connection failed: {}", e))?;
 
     log::info!("Connected to {}, response: {:?}", url, response.status());
 
