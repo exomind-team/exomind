@@ -161,10 +161,7 @@ vi.mock('@/config/domain-backend-mode', () => ({
 vi.mock('@/config/port-env', () => ({
   resolveAsrServerUrl: vi.fn(() => 'http://localhost:1949'),
   resolveSyncServerUrl: vi.fn(() => 'http://127.0.0.1:6984'),
-<<<<<<< HEAD
-=======
   resolveRuntimeHostname: vi.fn(() => '127.0.0.1'),
->>>>>>> origin/dev
 }));
 
 vi.mock('@/config/version-build-info', () => ({
