@@ -279,6 +279,43 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
     });
   });
 
+  it('disables occupied historical sessions and shows the opened-window hint（已占用历史会话显示已打开窗口并禁用）', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          json: async () => ([{
+            agent_type: 'claude',
+            session_id: 'claude-thread-open',
+            project_path: 'H--A137442-Develop-AGI-exomind',
+            last_modified: '2026-04-03T02:00:00.000Z',
+          }]),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <PtySpawnDialog
+        open={true}
+        onOpenChange={() => {}}
+        rtBaseUrl="http://127.0.0.1:1949"
+        onSpawned={() => {}}
+        occupiedHistoricalSessionIds={['claude-thread-open']}
+        occupiedHistoricalSessionLabels={{ 'claude-thread-open': 'Claude 806' }}
+      />,
+    );
+
+    const occupiedButton = await screen.findByTestId('pty-history-session-claude-thread-open');
+    expect(occupiedButton).toBeDisabled();
+    expect(screen.getByTestId('pty-history-session-occupied-claude-thread-open')).toHaveTextContent('已打开窗口 · Claude 806');
+
+    fireEvent.click(occupiedButton);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('supports custom command mode without history list（自定义命令模式不显示历史恢复）', async () => {
     const fetchMock = vi.fn(async (input: string) => {
       if (input.includes('/pty/sessions?agent_type=claude')) {

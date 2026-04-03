@@ -28,6 +28,8 @@ export interface PtySpawnDialogProps {
   authToken?: string;
   defaultWorkdir?: string;
   onSpawned: (info: { id: string; name: string }) => void;
+  occupiedHistoricalSessionIds?: string[];
+  occupiedHistoricalSessionLabels?: Record<string, string>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -101,6 +103,8 @@ export function PtySpawnDialog({
   authToken,
   defaultWorkdir,
   onSpawned,
+  occupiedHistoricalSessionIds = [],
+  occupiedHistoricalSessionLabels = {},
 }: PtySpawnDialogProps) {
   const [agentType, setAgentType] = useState<PtyAgentType>('claude');
   const [name, setName] = useState('');
@@ -113,6 +117,7 @@ export function PtySpawnDialog({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const occupiedHistoricalSessionIdSet = new Set(occupiedHistoricalSessionIds);
 
   // ── Build auth headers ──────────────────────────────────────
 
@@ -499,22 +504,36 @@ export function PtySpawnDialog({
               ) : sessions.length > 0 ? (
                 <div data-testid="pty-history-list" className="max-h-[200px] space-y-1.5 overflow-y-auto">
                   {sessions.map((session) => (
-                    <button
-                      key={session.session_id}
-                      data-testid={`pty-history-session-${session.session_id}`}
-                      type="button"
-                      onClick={() => handleResume(session)}
-                      disabled={loading}
-                      className="flex w-full items-center gap-2.5 rounded-xl border border-border-card bg-card px-3 py-2 text-sm text-left hover:bg-muted/50 disabled:opacity-50 transition-colors"
-                    >
-                      <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{session.project_path || session.session_id.slice(0, 12)}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {formatRelativeTime(session.last_modified)}
-                        </div>
-                      </div>
-                    </button>
+                    (() => {
+                      const occupied = occupiedHistoricalSessionIdSet.has(session.session_id);
+                      const occupiedLabel = occupiedHistoricalSessionLabels[session.session_id]?.trim();
+                      return (
+                        <button
+                          key={session.session_id}
+                          data-testid={`pty-history-session-${session.session_id}`}
+                          type="button"
+                          onClick={() => handleResume(session)}
+                          disabled={loading || occupied}
+                          className="flex w-full items-center gap-2.5 rounded-xl border border-border-card bg-card px-3 py-2 text-sm text-left hover:bg-muted/50 disabled:opacity-50 transition-colors"
+                        >
+                          <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium">{session.project_path || session.session_id.slice(0, 12)}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatRelativeTime(session.last_modified)}
+                            </div>
+                          </div>
+                          {occupied ? (
+                            <div
+                              data-testid={`pty-history-session-occupied-${session.session_id}`}
+                              className="shrink-0 text-[11px] text-amber-600"
+                            >
+                              {occupiedLabel ? `已打开窗口 · ${occupiedLabel}` : '已打开窗口'}
+                            </div>
+                          ) : null}
+                        </button>
+                      );
+                    })()
                   ))}
                 </div>
               ) : (

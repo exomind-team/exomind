@@ -544,6 +544,119 @@
   - 这是刚创建的新 PTY，还是旧 session 的回看？
   - `/pty` 是否已经完成过一次新的成功拉取？
 
+### 阶段补记：#817 唯一历史窗口占用与双恢复压制（2026-04-03 中午）
+
+#### 本轮阶段目标
+
+- 补上“窗口切换前后一致”这一口：
+  - 同一条 Claude / Codex 历史 `inner_session_id` 在当前 RT 中只能占一个打开中的 PTY 窗口
+  - 历史恢复弹窗中已被占用的会话要禁用，并明确显示“已打开窗口”
+  - 点击旧的重复 session 卡片时，要转向已有 PTY，而不是再发一次 `/pty/resume`
+- 继续用当前 Tauri dev 实例 + raw bridge 做真窗验证，而不是只停留在单测
+
+#### 本轮代码结论
+
+- `PtySpawnDialog` 现在支持传入：
+  - `occupiedHistoricalSessionIds`
+  - `occupiedHistoricalSessionLabels`
+- 历史会话条目若已被当前 RT 内的活动终端会话占用：
+  - 按钮会禁用
+  - 右侧显示：
+  - `已打开窗口 · <当前窗口名>`
+- `AgentsPage` 会按：
+  - `activePtyId`
+  - 当前 live `/pty`
+  - `tiledPaneOrder`
+  - `last_active_at`
+  来挑选某个 `inner_session_id` 的 canonical session
+- 当用户点击一个旧的重复 session 卡片，或 auto-resume 命中重复历史会话时：
+  - 不再发第二次 `/pty/resume`
+  - 直接切到 canonical PTY
+  - 被 supersede 的旧 unified session 会收敛为 `completed -> archived`
+
+#### 本轮单测结果
+
+- `bunx vitest run tests/unit/ui/agent-hub/pty-spawn-dialog.test.tsx tests/unit/ui/agent-hub/agents-page.issue806.test.tsx`
+- `bunx vitest run tests/unit/ui/agent-hub/agents-page.issue806.test.tsx tests/unit/ui/agent-hub/agents-page.session-actions.issue523.test.tsx tests/unit/ui/agent-hub/pty-spawn-dialog.test.tsx tests/unit/ui/agent-hub/pty-session-recovery.test.ts`
+- `bunx tsc --noEmit`
+
+#### 本轮真窗验证 1：历史会话占用态
+
+- 继续使用 raw bridge：
+  - `ws://127.0.0.1:9223`
+- 刷新页面后，打开 `Terminal` 弹窗并切到 `codex`
+- 页面内直接读取当前 `/sessions`，找到一个已打开中的 Codex 历史会话：
+  - `inner_session_id = 019d50e4-7668-70f2-831c-4402b903d9d7`
+- 现场结果：
+  - 历史条目存在
+  - 按钮 `disabled = true`
+  - 提示文本：
+  - `已打开窗口 · issue806-direct-codex-1775179150584`
+
+#### 本轮真窗验证 2：点击旧重复卡片不再开第二扇窗
+
+- 在 `Sessions` 视图中，定位同一个 `inner_session_id = 019d50e4-7668-70f2-831c-4402b903d9d7` 下的一张旧卡片：
+  - `clickedSessionId = abf9d818-3c00-4931-b374-f4b5c22879c7`
+- 点击该旧卡片后，现场结果：
+  - `resumeCallCount = 0`
+  - `clickedSessionStatusAfter = archived`
+  - `fullscreenPtyId = 48e1365a-dcdd-4bb8-be1b-b6807ac60132`
+- 这说明：
+  - 页面没有再发第二次 `/pty/resume`
+  - 旧卡片被自动收敛归档
+  - 右栏直接切到了已有 canonical PTY
+
+#### 本轮真窗验证 3：Codex stop/start 后按历史 session 自动恢复
+
+- 以当前激活中的 Codex session 作为目标：
+  - `targetSessionId = 48e1365a-dcdd-4bb8-be1b-b6807ac60132`
+  - `targetInnerSessionId = 019d50e4-7668-70f2-831c-4402b903d9d7`
+- 通过页面内：
+  - `window.__TAURI__.core.invoke('runtime_service_stop')`
+  - `window.__TAURI__.core.invoke('runtime_service_start')`
+  做 RT stop/start
+- 现场结果：
+  - `fullscreenPtyIdBefore = 48e1365a-dcdd-4bb8-be1b-b6807ac60132`
+  - `fullscreenPtyIdAfter = 4ebd609b-5103-42d4-b56d-b8cfdf5dfc79`
+  - `recoveredSessionId = 4ebd609b-5103-42d4-b56d-b8cfdf5dfc79`
+  - `recoveredSessionStatus = running`
+  - `oldSessionStatusAfter = completed`
+- 结论：
+  - Codex 在 RT 重启后已能基于同一历史 `inner_session_id` 自动恢复
+  - fullscreen/tiled 持久化位置会切到新的 live PTY
+
+#### 本轮真窗验证 4：Claude stop/start 后按历史 session 自动恢复
+
+- 以当前激活中的 Claude session 作为目标：
+  - `targetSessionId = fbf798c9-6b86-46b1-8ee9-971b46be3b01`
+  - `targetInnerSessionId = 93237b7d-8153-4d9b-ab27-049ecf285df9`
+- 先切到该 Claude session，再 stop/start RT
+- 现场结果：
+  - `fullscreenPtyIdBefore = fbf798c9-6b86-46b1-8ee9-971b46be3b01`
+  - `fullscreenPtyIdAfter = 2cd3799c-e0c5-4f38-a68b-a09d6afcfe23`
+  - `recoveredSessionId = 2cd3799c-e0c5-4f38-a68b-a09d6afcfe23`
+  - `recoveredSessionStatus = running`
+  - `oldSessionStatusAfter = archived`
+- 结论：
+  - Claude 这条自动恢复链路在当前桌面窗口中也已打通
+  - 不再只是 Codex 特例
+
+#### 对后续 Agent 的提醒
+
+- 如果现场已经存在“多个 running session 共享同一个 `inner_session_id`”，不要先急着手动清库。
+  - 先点击旧卡片或触发一次恢复路径
+  - 看它是否会自动把旧 session 收敛成 `archived`
+- 验证“没有再开第二扇窗”时，不要只看 DOM。
+  - 同时记录：
+  - `resumeCallCount`
+  - `fullscreenPtyId`
+  - 被点击旧 session 的最终 `status`
+- 在 raw bridge 下做 stop/start 验收时，长脚本容易触发 `execute_js` 超时。
+  - 更稳的做法是拆成三步：
+  - 先锁定目标 session 并写入 localStorage 临时键
+  - 再单独 stop/start RT
+  - 最后再单独轮询 `/sessions` 验证恢复结果
+
 ## 持续更新约定
 
 - 每完成一个 Tauri MCP 阶段目标，就在本文档追加：

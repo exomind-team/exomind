@@ -129,6 +129,7 @@ import {
   hasMatchingHistoricalSessionRecord,
   isRecoverableTerminalSession,
   isTerminalSessionPendingHistoricalBinding,
+  replacePaneOrderSessionId,
   resolveTerminalSessionWorkdir,
 } from './agents/pty-session-recovery';
 import {
@@ -193,6 +194,63 @@ function hasExplicitEmbeddedRuntimeNetworkModePreference(): boolean {
 const LINK_PROOF_TOPIC_PREFIX = 'system.link_proof.';
 const LINK_PROOF_REQUEST_TOPIC = 'system.link_proof.request';
 const MANUAL_LINK_PROOF_ADOPTION_POLL_INTERVAL_MS = 500;
+
+function parseSessionWallClockMs(session: Pick<SessionInfo, 'last_active_at' | 'created_at'>): number {
+  const lastActiveAtMs = Date.parse(session.last_active_at);
+  if (!Number.isNaN(lastActiveAtMs)) {
+    return lastActiveAtMs;
+  }
+  const createdAtMs = Date.parse(session.created_at);
+  if (!Number.isNaN(createdAtMs)) {
+    return createdAtMs;
+  }
+  return 0;
+}
+
+function isOpenRecoverableTerminalSession(session: SessionInfo): boolean {
+  return isRecoverableTerminalSession(session)
+    && session.status !== 'completed'
+    && session.status !== 'archived';
+}
+
+function getHistoricalSessionOccupancyScore(
+  session: SessionInfo,
+  options: {
+    activePtyId?: string | null;
+    knownPtyIds: Set<string>;
+    tiledPaneOrder: string[];
+  },
+): number {
+  let score = 0;
+
+  if (session.pty_id && session.pty_id === options.activePtyId) {
+    score += 16;
+  }
+  if (session.pty_id && options.knownPtyIds.has(session.pty_id)) {
+    score += 8;
+  }
+  if (options.tiledPaneOrder.includes(session.id)) {
+    score += 4;
+  }
+  if (session.status === 'running') {
+    score += 2;
+  }
+
+  return score;
+}
+
+function buildTerminalSessionRetirementSteps(status: SessionInfo['status']): UpdateSessionRequest[] {
+  if (status === 'running') {
+    return [{ status: 'completed' }, { status: 'archived' }];
+  }
+  if (status === 'waiting_input' || status === 'paused' || status === 'error') {
+    return [{ status: 'running' }, { status: 'completed' }, { status: 'archived' }];
+  }
+  if (status === 'completed') {
+    return [{ status: 'archived' }];
+  }
+  return [];
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -1656,6 +1714,79 @@ export function AgentsPage() {
     () => new Set(Object.keys(pendingPtyPresenceChecks)),
     [pendingPtyPresenceChecks],
   );
+  const occupiedHistoricalSessions = useMemo(() => {
+    const groupedSessions = new Map<string, SessionInfo[]>();
+
+    dashboardSessions.forEach((session) => {
+      const innerSessionId = session.inner_session_id?.trim();
+      if (!innerSessionId || !isOpenRecoverableTerminalSession(session)) {
+        return;
+      }
+
+      const existing = groupedSessions.get(innerSessionId);
+      if (existing) {
+        existing.push(session);
+        return;
+      }
+
+      groupedSessions.set(innerSessionId, [session]);
+    });
+
+    const next = new Map<string, SessionInfo>();
+    groupedSessions.forEach((sessions, innerSessionId) => {
+      const canonicalSession = [...sessions].sort((left, right) => {
+        const scoreDiff = getHistoricalSessionOccupancyScore(right, {
+          activePtyId,
+          knownPtyIds,
+          tiledPaneOrder,
+        }) - getHistoricalSessionOccupancyScore(left, {
+          activePtyId,
+          knownPtyIds,
+          tiledPaneOrder,
+        });
+        if (scoreDiff !== 0) {
+          return scoreDiff;
+        }
+
+        const timeDiff = parseSessionWallClockMs(right) - parseSessionWallClockMs(left);
+        if (timeDiff !== 0) {
+          return timeDiff;
+        }
+
+        return left.id.localeCompare(right.id);
+      })[0];
+
+      if (canonicalSession) {
+        next.set(innerSessionId, canonicalSession);
+      }
+    });
+
+    return next;
+  }, [activePtyId, dashboardSessions, knownPtyIds, tiledPaneOrder]);
+  const occupiedHistoricalSessionIds = useMemo(
+    () => [...occupiedHistoricalSessions.keys()],
+    [occupiedHistoricalSessions],
+  );
+  const occupiedHistoricalSessionLabels = useMemo(
+    () => Object.fromEntries(
+      [...occupiedHistoricalSessions.entries()].map(([innerSessionId, session]) => [
+        innerSessionId,
+        session.role?.trim() || session.pty_id || session.id,
+      ]),
+    ),
+    [occupiedHistoricalSessions],
+  );
+  const resolveOccupiedHistoricalSession = useCallback(
+    (historicalSessionId?: string | null) => {
+      const normalizedHistoricalSessionId = historicalSessionId?.trim();
+      if (!normalizedHistoricalSessionId) {
+        return null;
+      }
+
+      return occupiedHistoricalSessions.get(normalizedHistoricalSessionId) ?? null;
+    },
+    [occupiedHistoricalSessions],
+  );
   const isSourceHostAvailable = useCallback((sourceHostId?: string | null) => {
     if (!sourceHostId) {
       return false;
@@ -1732,6 +1863,23 @@ export function AgentsPage() {
 
     setAutoResumingSessionIds(Array.from(autoResumingSessionIdsRef.current));
   }, []);
+  const retireSupersededTerminalSession = useCallback(async (session: SessionInfo) => {
+    const retirementSteps = buildTerminalSessionRetirementSteps(session.status);
+    if (retirementSteps.length === 0) {
+      return;
+    }
+
+    const host = resolveRuntimeHostForSession(session);
+    const runtimeClient = new RuntimeClient();
+    for (const step of retirementSteps) {
+      const result = await runtimeClient.updateSession(host, session.id, step);
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+    }
+
+    refreshSessions();
+  }, [refreshSessions]);
 
   const resumeDisconnectedTerminalSession = useCallback(async (
     session: SessionInfo,
@@ -1749,6 +1897,31 @@ export function AgentsPage() {
     }
     if (!options.force && autoResumeAttemptedSessionIdsRef.current.has(session.id)) {
       return null;
+    }
+
+    const occupiedSession = resolveOccupiedHistoricalSession(session.inner_session_id);
+    if (occupiedSession && occupiedSession.id !== session.id) {
+      autoResumeAttemptedSessionIdsRef.current.add(session.id);
+      setTiledPaneOrder((prev) => replacePaneOrderSessionId(prev, session.id, occupiedSession.id));
+
+      if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
+        openPtyTerminal(occupiedSession.pty_id!, occupiedSession.source_host_id);
+      }
+
+      void retireSupersededTerminalSession(session).catch((error) => {
+        console.warn('[agent-hub][pty] failed to retire superseded terminal session', {
+          sessionId: session.id,
+          supersededBySessionId: occupiedSession.id,
+          innerSessionId: session.inner_session_id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+      if (isSessionPtyDisconnected(occupiedSession)) {
+        return resumeDisconnectedTerminalSession(occupiedSession, options);
+      }
+
+      return occupiedSession.pty_id ?? null;
     }
 
     const matchedHost = resolveRuntimeHostBySourceHostId(session.source_host_id);
@@ -1845,29 +2018,9 @@ export function AgentsPage() {
         openPtyTerminal(info.id, session.source_host_id, { expectFreshPresence: true });
       }
 
-      const runtimeClient = new RuntimeClient();
-      const recoverySteps: UpdateSessionRequest[] = [];
-      if (session.status === 'running') {
-        recoverySteps.push({ status: 'completed' }, { status: 'archived' });
-      } else if (
-        session.status === 'waiting_input'
-        || session.status === 'paused'
-        || session.status === 'error'
-      ) {
-        recoverySteps.push({ status: 'running' }, { status: 'completed' }, { status: 'archived' });
-      } else if (session.status === 'completed') {
-        recoverySteps.push({ status: 'archived' });
-      }
-
-      for (const step of recoverySteps) {
-        const result = await runtimeClient.updateSession(host, session.id, step);
-        if (!result.ok) {
-          throw new Error(result.error.message);
-        }
-      }
+      await retireSupersededTerminalSession(session);
 
       await fetchPtyAgentsRef.current();
-      refreshSessions();
       return info.id;
     } catch (error) {
       console.warn('[agent-hub][pty] terminal auto-resume failed', {
@@ -1888,11 +2041,29 @@ export function AgentsPage() {
     canFallbackToActiveRuntimeHostForSession,
     fetchPtyList,
     refreshSessions,
+    resolveOccupiedHistoricalSession,
+    retireSupersededTerminalSession,
     setSessionAutoResuming,
+    isSessionPtyDisconnected,
   ]);
 
   const handleOpenSessionTerminal = useCallback(async (session: SessionInfo) => {
     if (!session.pty_id) {
+      return;
+    }
+
+    const occupiedSession = resolveOccupiedHistoricalSession(session.inner_session_id);
+    if (occupiedSession && occupiedSession.id !== session.id) {
+      setTiledPaneOrder((prev) => replacePaneOrderSessionId(prev, session.id, occupiedSession.id));
+      openPtyTerminal(occupiedSession.pty_id!, occupiedSession.source_host_id);
+      void retireSupersededTerminalSession(session).catch((error) => {
+        console.warn('[agent-hub][pty] failed to retire duplicate terminal window binding', {
+          sessionId: session.id,
+          occupiedSessionId: occupiedSession.id,
+          innerSessionId: session.inner_session_id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
       return;
     }
 
@@ -1904,7 +2075,12 @@ export function AgentsPage() {
     }
 
     openPtyTerminal(session.pty_id, session.source_host_id);
-  }, [isSessionPtyDisconnected, resumeDisconnectedTerminalSession]);
+  }, [
+    isSessionPtyDisconnected,
+    resolveOccupiedHistoricalSession,
+    retireSupersededTerminalSession,
+    resumeDisconnectedTerminalSession,
+  ]);
 
   const canArchiveActivePtySession = activePtySession?.status === 'completed';
   const handleArchiveActivePtySession = async () => {
@@ -3909,9 +4085,11 @@ export function AgentsPage() {
       <PtySpawnDialog
         open={showPtySpawnDialog}
         onOpenChange={setShowPtySpawnDialog}
-                  rtBaseUrl={ptySpawnConnection.rtBaseUrl}
-                  authToken={ptySpawnConnection.authToken}
+        rtBaseUrl={ptySpawnConnection.rtBaseUrl}
+        authToken={ptySpawnConnection.authToken}
         defaultWorkdir={import.meta.env.VITE_PTY_DEFAULT_WORKDIR ?? ''}
+        occupiedHistoricalSessionIds={occupiedHistoricalSessionIds}
+        occupiedHistoricalSessionLabels={occupiedHistoricalSessionLabels}
         onSpawned={(info) => {
           setTiledPaneOrder((prev) => applySpawnedSessionToTiledPaneOrder({
             layout: tiledLayout,

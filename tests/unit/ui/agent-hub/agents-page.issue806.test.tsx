@@ -641,6 +641,164 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     warnSpy.mockRestore();
   });
 
+  it('redirects duplicate historical session cards to the canonical PTY window（重复历史会话卡片应聚焦已有 PTY，而不是再开一扇窗）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-duplicate-817',
+        role: 'Codex Duplicate',
+        pty_id: 'pty-stale-817',
+        source_host_id: 'stale-runtime-host-817',
+        inner_session_id: 'codex-thread-shared-817',
+        last_active_at: '2026-04-02T00:00:00.000Z',
+      }),
+      buildSession({
+        id: 'session-canonical-817',
+        role: 'Codex Canonical',
+        pty_id: 'pty-live-806',
+        source_host_id: 'runtime-host-523',
+        inner_session_id: 'codex-thread-shared-817',
+        last_active_at: '2026-04-02T00:00:10.000Z',
+      }),
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-duplicate-817'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-live-806')).toBeInTheDocument();
+    });
+
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
+    ).toHaveLength(0);
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.anything(),
+        'session-duplicate-817',
+        { status: 'completed' },
+      );
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.anything(),
+        'session-duplicate-817',
+        { status: 'archived' },
+      );
+    });
+  });
+
+  it('auto-resumes only one canonical PTY per historical inner session id after RT restart（同一历史会话在 RT 重启后只自动恢复一次）', async () => {
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '2x2',
+      paneOrder: ['session-duplicate-817'],
+    }));
+
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-duplicate-817',
+        role: 'Codex Duplicate',
+        pty_id: 'pty-stale-817',
+        source_host_id: 'stale-runtime-host-817',
+        inner_session_id: 'codex-thread-shared-817',
+        last_active_at: '2026-04-02T00:00:00.000Z',
+      }),
+      buildSession({
+        id: 'session-canonical-817',
+        role: 'Codex Canonical',
+        pty_id: 'pty-canonical-stale-817',
+        source_host_id: 'stale-runtime-host-817',
+        inner_session_id: 'codex-thread-shared-817',
+        last_active_at: '2026-04-02T00:00:10.000Z',
+      }),
+    ];
+
+    let resumePosted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-shared-817',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-02T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => (
+            resumePosted
+              ? [{
+                  id: 'pty-resumed-817',
+                  name: 'Codex Canonical Resumed',
+                  status: 'running',
+                  workdir: 'D:/project/exomind',
+                }]
+              : []
+          ),
+        } as Response;
+      }
+      if (url.endsWith('/pty/resume')) {
+        resumePosted = true;
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-resumed-817',
+            name: 'Codex Canonical Resumed',
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
+      ).toHaveLength(1);
+    });
+
+    const resumeCalls = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/pty/resume'));
+    expect(resumeCalls).toHaveLength(1);
+    expect(resumeCalls[0]).toEqual([
+      'http://127.0.0.1:1919/pty/resume',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"session_id":"codex-thread-shared-817"'),
+      }),
+    ]);
+  });
+
   it('retries claude auto-resume after the runtime becomes reachable again（Claude 断连后也应自动恢复）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     sessionStreamState.sessions = [
