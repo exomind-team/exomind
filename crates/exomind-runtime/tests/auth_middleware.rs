@@ -181,12 +181,9 @@ async fn auth_with_secret_untrusted_origin_still_returns_401() {
 
 #[tokio::test]
 async fn auth_with_secret_allow_lan_without_auth_allows_loopback_without_origin_or_token() {
-    let mut rt = start_test_runtime_with_secret_and_lan(
-        "auth-test-9",
-        Some("s3cret".to_string()),
-        true,
-    )
-    .await;
+    let mut rt =
+        start_test_runtime_with_secret_and_lan("auth-test-9", Some("s3cret".to_string()), true)
+            .await;
     let client = reqwest::Client::new();
 
     let response = client
@@ -206,12 +203,9 @@ async fn auth_with_secret_allow_lan_without_auth_allows_loopback_without_origin_
 
 #[tokio::test]
 async fn auth_with_secret_allow_lan_without_auth_ignores_untrusted_origin_on_loopback() {
-    let mut rt = start_test_runtime_with_secret_and_lan(
-        "auth-test-10",
-        Some("s3cret".to_string()),
-        true,
-    )
-    .await;
+    let mut rt =
+        start_test_runtime_with_secret_and_lan("auth-test-10", Some("s3cret".to_string()), true)
+            .await;
     let client = reqwest::Client::new();
 
     let response = client

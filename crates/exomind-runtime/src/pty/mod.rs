@@ -887,7 +887,10 @@ fn resolve_workdir_path(workdir: Option<&str>) -> Result<PathBuf, PtyError> {
     resolve_workdir_path_from(workdir, current_dir.as_path())
 }
 
-fn resolve_workdir_path_from(workdir: Option<&str>, current_dir: &Path) -> Result<PathBuf, PtyError> {
+fn resolve_workdir_path_from(
+    workdir: Option<&str>,
+    current_dir: &Path,
+) -> Result<PathBuf, PtyError> {
     let configured_agent_workdir = std::env::var("EXOMIND_RT_AGENT_WORKDIR")
         .ok()
         .map(PathBuf::from);
@@ -1065,26 +1068,36 @@ mod tests {
     fn resolve_spawn_command_keeps_custom_commands_unchanged() {
         assert_eq!(resolve_spawn_command("pwsh"), "pwsh");
         assert_eq!(resolve_spawn_command("claude.cmd"), "claude.cmd");
-        assert_eq!(resolve_spawn_command("C:/tools/claude.exe"), "C:/tools/claude.exe");
+        assert_eq!(
+            resolve_spawn_command("C:/tools/claude.exe"),
+            "C:/tools/claude.exe"
+        );
     }
 
     #[test]
     fn resolve_workdir_path_defaults_to_current_dir() {
         let resolved = resolve_workdir_path(None).expect("current dir should resolve");
         assert!(resolved.is_absolute());
-        assert_eq!(resolved, crate::resolve_project_root_from(None, std::env::current_dir().ok().as_deref()));
+        assert_eq!(
+            resolved,
+            crate::resolve_project_root_from(None, std::env::current_dir().ok().as_deref())
+        );
     }
 
     #[test]
     fn resolve_workdir_path_expands_relative_input_against_current_dir() {
         let resolved = resolve_workdir_path(Some(".")).expect("relative workdir should resolve");
         assert!(resolved.is_absolute());
-        assert_eq!(resolved, crate::resolve_project_root_from(None, std::env::current_dir().ok().as_deref()));
+        assert_eq!(
+            resolved,
+            crate::resolve_project_root_from(None, std::env::current_dir().ok().as_deref())
+        );
     }
 
     #[test]
     fn resolve_workdir_path_defaults_to_workspace_root_when_cwd_has_no_agent_entries() {
-        let workspace_root = crate::workspace_root_from_manifest().expect("workspace root should resolve");
+        let workspace_root =
+            crate::workspace_root_from_manifest().expect("workspace root should resolve");
         let fake_cwd = workspace_root.join("src-tauri");
 
         let resolved = resolve_workdir_path_from(None, fake_cwd.as_path())
@@ -1093,8 +1106,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_workdir_path_expands_relative_input_against_workspace_root_when_cwd_has_no_agent_entries() {
-        let workspace_root = crate::workspace_root_from_manifest().expect("workspace root should resolve");
+    fn resolve_workdir_path_expands_relative_input_against_workspace_root_when_cwd_has_no_agent_entries()
+     {
+        let workspace_root =
+            crate::workspace_root_from_manifest().expect("workspace root should resolve");
         let fake_cwd = workspace_root.join("src-tauri");
 
         let resolved = resolve_workdir_path_from(Some("."), fake_cwd.as_path())

@@ -327,9 +327,7 @@ async fn stream_pty_output(
         }
 
         if rx.is_none() {
-            let _ = event_tx
-                .send(Ok(build_pty_eof_event(None)))
-                .await;
+            let _ = event_tx.send(Ok(build_pty_eof_event(None))).await;
             return;
         }
 
