@@ -40,6 +40,7 @@ src-tauri/gen/android/local.properties
 src-tauri/gen/android/*.iml
 src-tauri/gen/android/.idea/
 src-tauri/gen/android/gradle-app.setting*
+crates/exomind-android-keepalive/android/.tauri/
 *.jks
 *.keystore
 
@@ -138,6 +139,7 @@ runtime-data/
 dark-mode-*.png
 *-backup.md
 .trace747_invalid*/
+issue-*-plan-review-*.md
 
 # 测试输出
 vitest-output.txt
