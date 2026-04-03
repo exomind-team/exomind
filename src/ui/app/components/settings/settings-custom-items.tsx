@@ -77,6 +77,25 @@ import {
   type DevInstanceEnvStatus,
 } from '@/config/dev-instance-diagnostics';
 import { loadTauriRuntimeInstanceDiagnostics } from '@/lib/dev-instance-runtime';
+import {
+  getVoiceOmniProfileId,
+  setVoiceOmniProfileId,
+  subscribeVoiceOmniProfileIdChanges,
+} from '@/config/voice-omni-settings';
+import {
+  getVoiceOmniPromptDocs,
+  resetVoiceOmniPromptDocs,
+  setVoiceOmniPromptDocs,
+  subscribeVoiceOmniPromptDocsChanges,
+} from '@/config/voice-omni-prompts';
+import {
+  DEFAULT_QWEN_OMNI_PROMPT_DOCS,
+  type VoiceOmniPromptDocs,
+} from '@/lib/voice/qwen-omni-prompts';
+import {
+  listProviderProfiles,
+  resolveProviderProfile,
+} from '@/lib/agent-provider/provider-profile-storage';
 
 function useSettingValue<T>(
   getValue: () => T,
@@ -154,6 +173,220 @@ function renderEnvStatusText(status: DevInstanceEnvStatus): string {
   }
 
   return status.value?.trim() || '已配置';
+}
+
+function isDefaultQwenOmniPromptDocs(docs: VoiceOmniPromptDocs): boolean {
+  return JSON.stringify(docs) === JSON.stringify(DEFAULT_QWEN_OMNI_PROMPT_DOCS);
+}
+
+function normalizePromptTextareaValue(value: string): string {
+  return value.replace(/\r\n/g, '\n');
+}
+
+export function QwenOmniProfileSetting(_props: { ctx: SettingsContext }) {
+  const [open, setOpen] = useState(false);
+  const [profileId, setProfileId] = useSettingValue(
+    () => getVoiceOmniProfileId(),
+    subscribeVoiceOmniProfileIdChanges,
+  );
+  const [profiles, setProfiles] = useState(() =>
+    listProviderProfiles().filter((profile) => profile.provider === 'openai'),
+  );
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setProfiles(listProviderProfiles().filter((profile) => profile.provider === 'openai'));
+  }, [open]);
+
+  const selectedProfile = profileId ? resolveProviderProfile(profileId) : null;
+  const summary = selectedProfile?.name ?? '未选择';
+
+  return (
+    <div>
+      <SettingRow
+        testId="new-settings-voice-omni-profile-row"
+        icon={<Key className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="Qwen Omni 供应商档案"
+        onClick={() => {
+          setError(null);
+          setNotice(null);
+          setOpen(true);
+        }}
+        right={<SecondaryValue value={summary} />}
+      />
+      <NoticeBlock message={notice} tone="success" />
+      <NoticeBlock message={error} tone="error" />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Qwen Omni 供应商档案</DialogTitle>
+            <DialogDescription>
+              选择一个已在 AI Registry 中配置好 Base URL 与 API Key 的 OpenAI-compatible 档案。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {profiles.length === 0 ? (
+              <div className="rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-4 py-3 text-sm text-[#57534E] dark:border-[#FFFFFF15] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+                还没有可用的 OpenAI-compatible 档案。请先到 AI Registry 添加 DashScope / 兼容档案。
+              </div>
+            ) : (
+              profiles.map((profile) => {
+                const selected = profile.profileId === profileId;
+                return (
+                  <button
+                    key={profile.profileId}
+                    type="button"
+                    data-testid={`new-settings-voice-omni-profile-option-${profile.profileId}`}
+                    onClick={() => {
+                      const nextValue = setVoiceOmniProfileId(profile.profileId);
+                      setProfileId(nextValue);
+                      setNotice(`Qwen Omni 供应商档案已切换为 ${profile.name}`);
+                      setError(null);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+                      selected
+                        ? 'border-[#C75B3A] bg-[#FEF0ED] text-[#1C1917] dark:border-[#E8734E] dark:bg-[#2A1510] dark:text-[#FAFAF9]'
+                        : 'border-[#F0ECE8] bg-white text-[#1C1917] dark:border-[#FFFFFF15] dark:bg-[#1C1917] dark:text-[#FAFAF9]'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium">{profile.name}</span>
+                      <span className="mt-1 block text-xs text-[#78716C] dark:text-[#A8A29E]">
+                        {profile.baseUrl || '未配置 Base URL'} · {profile.model}
+                      </span>
+                    </span>
+                    {selected ? <Check className="h-4 w-4 text-[#C75B3A]" /> : null}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+export function QwenOmniPromptDocsSetting(_props: { ctx: SettingsContext }) {
+  const [open, setOpen] = useState(false);
+  const [docs, setDocs] = useSettingValue(
+    () => getVoiceOmniPromptDocs(),
+    subscribeVoiceOmniPromptDocsChanges,
+  );
+  const [draft, setDraft] = useState<VoiceOmniPromptDocs>(docs);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setDraft(docs);
+    }
+  }, [docs, open]);
+
+  const summary = isDefaultQwenOmniPromptDocs(docs) ? '使用默认文档' : '已自定义';
+
+  const handleDraftChange = (field: keyof VoiceOmniPromptDocs) => (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = normalizePromptTextareaValue(event.target.value);
+    setDraft((current) => ({
+      ...current,
+      [field]: nextValue,
+    }));
+  };
+
+  return (
+    <div>
+      <SettingRow
+        testId="new-settings-voice-omni-prompts-row"
+        icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="Qwen Omni 提示词"
+        onClick={() => {
+          setDraft(docs);
+          setError(null);
+          setNotice(null);
+          setOpen(true);
+        }}
+        right={<SecondaryValue value={summary} />}
+      />
+      <NoticeBlock message={notice} tone="success" />
+      <NoticeBlock message={error} tone="error" />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="rounded-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Qwen Omni 提示词文档</DialogTitle>
+            <DialogDescription>
+              管理 agent / rules / vocabulary / textOptimize 四份文档。默认使用 byetype 风格文档。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {([
+              ['agent', 'Agent 文档'],
+              ['rules', 'Rules 文档'],
+              ['vocabulary', 'Vocabulary 文档'],
+              ['textOptimize', 'Text Optimize 文档'],
+            ] as Array<[keyof VoiceOmniPromptDocs, string]>).map(([field, label]) => (
+              <label key={field} className="block space-y-2">
+                <span className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{label}</span>
+                <textarea
+                  data-testid={`new-settings-voice-omni-prompts-${field}`}
+                  value={draft[field]}
+                  onChange={handleDraftChange(field)}
+                  className="min-h-[120px] w-full rounded-xl border border-[#F0ECE8] bg-white px-3 py-2 text-sm text-[#1C1917] focus:border-[#C75B3A] focus:outline-none focus:ring-1 focus:ring-[#C75B3A] dark:border-[#FFFFFF15] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+                />
+              </label>
+            ))}
+            {error ? <p className="text-xs text-red-600">{error}</p> : null}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="settings-dialog-secondary-button flex-1"
+                onClick={() => setOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                data-testid="new-settings-voice-omni-prompts-reset"
+                className="settings-dialog-secondary-button flex-1"
+                onClick={() => {
+                  const nextDocs = resetVoiceOmniPromptDocs();
+                  setDocs(nextDocs);
+                  setDraft(nextDocs);
+                  setNotice('Qwen Omni 提示词已恢复为 byetype 默认文档');
+                  setError(null);
+                }}
+              >
+                恢复默认
+              </button>
+              <button
+                type="button"
+                data-testid="new-settings-voice-omni-prompts-save"
+                className="settings-dialog-primary-button flex-1"
+                onClick={() => {
+                  try {
+                    const nextDocs = setVoiceOmniPromptDocs(draft);
+                    setDocs(nextDocs);
+                    setDraft(nextDocs);
+                    setNotice('Qwen Omni 提示词已保存');
+                    setError(null);
+                    setOpen(false);
+                  } catch (nextError) {
+                    setError(nextError instanceof Error ? nextError.message : String(nextError));
+                  }
+                }}
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 }
 
 function FocusBgmChoiceButton({

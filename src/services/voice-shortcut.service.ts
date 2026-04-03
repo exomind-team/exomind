@@ -1298,6 +1298,10 @@ export class VoiceShortcutService {
     };
   }
 
+  private isQwenOmniProvider(): boolean {
+    return String(this.asrProvider) === 'qwen-omni';
+  }
+
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
     if (this.asrProvider === 'volcano') {
       const config = this.getVolcanoRuntimeConfigOrThrow();
@@ -1322,7 +1326,7 @@ export class VoiceShortcutService {
       }
     }
 
-    if (this.asrProvider === 'qwen-omni') {
+    if (this.isQwenOmniProvider()) {
       const config = this.getVoiceOmniRuntimeConfigOrThrow();
       const adapter = new QwenOmniASRAdapter({
         profileName: config.profileName,
@@ -1703,7 +1707,7 @@ export class VoiceShortcutService {
     if (this.asrProvider === 'moss') {
       return 'MOSS · 云端识别';
     }
-    if (this.asrProvider === 'qwen-omni') {
+    if (this.isQwenOmniProvider()) {
       try {
         const config = this.getVoiceOmniRuntimeConfigOrThrow();
         return `${config.modelId} · ${config.profileName}`;

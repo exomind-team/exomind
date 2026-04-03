@@ -191,7 +191,16 @@ import {
   getVoiceShortcutAsrProviderLabel,
   setVoiceShortcutAsrProvider,
   subscribeVoiceShortcutAsrProviderChanges,
+  type VoiceShortcutAsrProvider,
 } from '@/config/voice-shortcut-asr-provider';
+import {
+  getVoiceOmniModelId,
+  getVoiceOmniOptimizeEnabled,
+  subscribeVoiceOmniModelIdChanges,
+  subscribeVoiceOmniOptimizeEnabledChanges,
+  setVoiceOmniModelId,
+  setVoiceOmniOptimizeEnabled,
+} from '@/config/voice-omni-settings';
 import {
   getMossApiKey,
   setMossApiKey,
@@ -246,6 +255,8 @@ import {
   FocusBgmSetting,
   SoundPresetSetting,
   MossVoiceTestSetting,
+  QwenOmniProfileSetting,
+  QwenOmniPromptDocsSetting,
   VolcanoEngineKeySetting,
   VolcanoUsageSummarySetting,
   VolcanoVoiceTestSetting,
@@ -408,6 +419,10 @@ function volcanoOnly(ctx: SettingsContext): boolean {
 
 function mossOnly(ctx: SettingsContext): boolean {
   return ctx.voiceShortcutAsrProvider === 'moss';
+}
+
+function qwenOmniOnly(ctx: SettingsContext): boolean {
+  return ctx.voiceShortcutAsrProvider === 'qwen-omni';
 }
 
 function desktopOperatingSystemOnly(): boolean {
@@ -950,12 +965,13 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     options: [
       { label: 'MOSS', value: 'moss' },
       { label: '火山', value: 'volcano' },
+      { label: 'Qwen Omni', value: 'qwen-omni' },
     ],
     optionTestId: (value) => `new-settings-voice-provider-${value}`,
     get: () => getVoiceShortcutAsrProvider(),
-    set: (value: string) => setVoiceShortcutAsrProvider(value as 'moss' | 'volcano'),
+    set: (value: string) => setVoiceShortcutAsrProvider(value as VoiceShortcutAsrProvider),
     subscribe: subscribeVoiceShortcutAsrProviderChanges,
-    successMessage: (value: string) => `快捷语音引擎已切换为 ${getVoiceShortcutAsrProviderLabel(value as 'moss' | 'volcano')}`,
+    successMessage: (value: string) => `快捷语音引擎已切换为 ${getVoiceShortcutAsrProviderLabel(value as VoiceShortcutAsrProvider)}`,
   },
   {
     id: 'voice-shortcut-mic-prewarm',
@@ -1041,6 +1057,55 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getNowWorkbenchOverlayEnabled(),
     set: setNowWorkbenchOverlayEnabled,
     subscribe: subscribeNowWorkbenchOverlayEnabledChanges,
+  },
+  {
+    id: 'voice-omni-profile',
+    label: 'Qwen Omni 供应商档案',
+    category: 'input',
+    type: 'custom',
+    visible: qwenOmniOnly,
+    component: QwenOmniProfileSetting,
+  },
+  {
+    id: 'voice-omni-prompts',
+    label: 'Qwen Omni 提示词',
+    category: 'input',
+    type: 'custom',
+    visible: qwenOmniOnly,
+    component: QwenOmniPromptDocsSetting,
+  },
+  {
+    id: 'voice-omni-model',
+    label: 'Qwen Omni 模型 ID',
+    icon: Bot,
+    category: 'input',
+    rowTestId: 'new-settings-voice-omni-model-row',
+    controlTestId: 'new-settings-voice-omni-model-input',
+    type: 'string',
+    visible: qwenOmniOnly,
+    stringStyle: 'dialog',
+    dialogFieldKind: 'plain',
+    placeholder: 'qwen3-omni-flash',
+    dialogTitle: 'Qwen Omni 模型 ID',
+    dialogDescription: '默认推荐 qwen3-omni-flash；也可以切换到其他已开通的 Qwen Omni 模型。',
+    get: () => getVoiceOmniModelId(),
+    set: (value: string) => setVoiceOmniModelId(value),
+    subscribe: subscribeVoiceOmniModelIdChanges,
+    successMessage: 'Qwen Omni 模型 ID 已保存',
+  },
+  {
+    id: 'voice-omni-optimize',
+    label: '启用 Qwen 二次排版',
+    icon: Bot,
+    category: 'input',
+    rowTestId: 'new-settings-voice-omni-optimize-row',
+    controlTestId: 'new-settings-voice-omni-optimize-switch',
+    type: 'boolean',
+    visible: qwenOmniOnly,
+    description: '开启后会在语音转写完成后再做一次文本排版，不改内容，只优化可读性。',
+    get: () => getVoiceOmniOptimizeEnabled(),
+    set: (value: boolean) => setVoiceOmniOptimizeEnabled(value),
+    subscribe: subscribeVoiceOmniOptimizeEnabledChanges,
   },
   {
     id: 'volcano-engine-key',
