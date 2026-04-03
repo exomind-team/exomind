@@ -44,6 +44,7 @@ import {
   TaskDagControlPanel,
   type TaskDagBackgroundMode,
   type TaskDagLayoutMode,
+  type TaskDagTagOption,
   type TaskDagTerminalFilterMode,
 } from '@/ui/app/components/TaskDagControlPanel';
 import { TaskDagKeyHints } from '@/ui/app/components/TaskDagKeyHints';
@@ -70,12 +71,16 @@ import {
 } from '@/config/task-dag-keyboard-preferences';
 import {
   getTaskDagBackgroundMode as readStoredBackgroundMode,
+  getTaskDagControlsState as readStoredControlsState,
   getTaskDagDirection as readStoredDagDirection,
+  getTaskDagFocusMode as readStoredFocusMode,
   getTaskDagImmersive as readStoredImmersive,
   getTaskDagLayoutMode as readStoredDagLayoutMode,
   getTaskDagMode as readStoredDagMode,
   TASK_DAG_BACKGROUND_STORAGE_KEY,
+  TASK_DAG_CONTROLS_STATE_STORAGE_KEY,
   TASK_DAG_DIRECTION_STORAGE_KEY,
+  TASK_DAG_FOCUS_MODE_STORAGE_KEY,
   TASK_DAG_HIDE_TERMINAL_STORAGE_KEY,
   TASK_DAG_IMMERSIVE_STORAGE_KEY,
   TASK_DAG_LAYOUT_MODE_STORAGE_KEY,
@@ -94,7 +99,9 @@ import {
   getTaskDagViewport as readStoredDagViewport,
   getTaskDagVisibility as readStoredDagVisibility,
   setTaskDagBackgroundMode as persistTaskDagBackgroundMode,
+  setTaskDagControlsState as persistTaskDagControlsState,
   setTaskDagDirection as persistTaskDagDirection,
+  setTaskDagFocusMode as persistTaskDagFocusMode,
   setTaskDagFocusedSeriesAnchorId as persistTaskDagFocusedSeriesAnchorId,
   setTaskDagImmersive as persistTaskDagImmersive,
   setTaskDagLayoutMode as persistTaskDagLayoutMode,
@@ -105,6 +112,8 @@ import {
   setTaskDagTerminalFilterMode as persistTaskDagTerminalFilterMode,
   setTaskDagViewport as writeStoredDagViewport,
   setTaskDagVisibility as persistTaskDagVisibility,
+  type TaskDagControlsState,
+  type TaskDagFocusMode,
   type TaskDagTagFilter,
   type TaskDagViewportSurface,
 } from '@/config/task-dag-preferences';
@@ -728,19 +737,19 @@ function TaskDagNode({
         'w-64 rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
         nodeData.connectPreviewType === 'hard'
           ? 'border-[#2563EB] ring-2 ring-[#2563EB]/30 bg-[#EFF6FF] shadow-[0_14px_32px_-18px_rgba(37,99,235,0.7)] dark:border-[#60A5FA] dark:bg-[#172554]'
-          : nodeData.connectPreviewType === 'soft'
-            ? 'border-dashed border-[#0F766E] ring-2 ring-[#14B8A6]/25 bg-[#F0FDFA] shadow-[0_14px_32px_-18px_rgba(20,184,166,0.7)] dark:border-[#2DD4BF] dark:bg-[#042F2E]'
-            : nodeData.executeState === 'active'
-              ? 'border-[2.5px] border-[#C75B3A] ring-[3px] ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)] animate-pulse'
-              : nodeData.isSelected
-                ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]'
-                : nodeData.executeState === 'executable'
+            : nodeData.connectPreviewType === 'soft'
+              ? 'border-dashed border-[#0F766E] ring-2 ring-[#14B8A6]/25 bg-[#F0FDFA] shadow-[0_14px_32px_-18px_rgba(20,184,166,0.7)] dark:border-[#2DD4BF] dark:bg-[#042F2E]'
+              : nodeData.executeState === 'active'
+                ? 'border-[2.5px] border-[#C75B3A] ring-[3px] ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)] animate-pulse'
+              : nodeData.isSecondaryNode
+                ? 'border-[2.5px] border-[#D6D3D1] ring-[3px] ring-[#D6D3D1]/15 opacity-35 grayscale dark:border-[#44403C] dark:ring-[#57534E]/15'
+                : nodeData.isSelected
+                  ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]'
+                  : nodeData.executeState === 'executable'
                   ? 'border-[2.5px] border-[#16A34A]/60 ring-[3px] ring-[#22C55E]/20 bg-[#F0FDF4] shadow-[0_12px_28px_-18px_rgba(34,197,94,0.7)] dark:border-[#22C55E]/60 dark:bg-[#052E16]'
                   : nodeData.executeState === 'blocked'
                     ? 'border-[2.5px] border-[#EAB308]/60 ring-[3px] ring-[#EAB308]/15 opacity-60'
-                    : nodeData.isSecondaryNode
-                      ? 'border-[2.5px] border-[#D6D3D1] ring-[3px] ring-[#D6D3D1]/15 opacity-35 grayscale dark:border-[#44403C] dark:ring-[#57534E]/15'
-                      : nodeData.isCurrentRoot
+                    : nodeData.isCurrentRoot
                         ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
                         : nodeData.isCollapsedTarget
                           ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
@@ -839,10 +848,10 @@ export function TaskDagPage() {
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const [paneContextMenu, setPaneContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [terminalFilterMode, setTerminalFilterMode] = useState<TaskDagTerminalFilterMode>(() => readStoredTerminalFilterMode());
+  const [focusMode, setFocusMode] = useState<TaskDagFocusMode>(() => readStoredFocusMode());
   const [backgroundMode, setBackgroundMode] = useState<TaskDagBackgroundMode>(() => readStoredBackgroundMode());
   const [immersive, setImmersive] = useState(() => readStoredImmersive());
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [controlsState, setControlsState] = useState<TaskDagControlsState>(() => readStoredControlsState());
   const [mobileHintsOpen, setMobileHintsOpen] = useState(false);
   const [searchDraft, setSearchDraft] = useState(() => readStoredSearchDraft());
   const [searchQuery, setSearchQuery] = useState('');
@@ -915,6 +924,10 @@ export function TaskDagPage() {
   }, [terminalFilterMode]);
 
   useEffectAfterMount(() => {
+    persistTaskDagFocusMode(focusMode);
+  }, [focusMode]);
+
+  useEffectAfterMount(() => {
     persistTaskDagBackgroundMode(backgroundMode);
   }, [backgroundMode]);
 
@@ -939,13 +952,15 @@ export function TaskDagPage() {
   }, [focusedSeriesAnchorId]);
 
   useEffectAfterMount(() => {
+    persistTaskDagControlsState(controlsState);
+  }, [controlsState]);
+
+  useEffectAfterMount(() => {
     persistTaskDagVisibility(dagVisibility);
   }, [dagVisibility]);
 
   useEffect(() => {
     if (isDesktop) {
-      setMobileSearchOpen(false);
-      setMobileToolsOpen(false);
       setMobileHintsOpen(false);
     }
   }, [isDesktop]);
@@ -1086,6 +1101,12 @@ export function TaskDagPage() {
   useEffect(() => subscribeTaskDagZoomSpeedChanges(setZoomSpeed), []);
 
   const viewportSurface: TaskDagViewportSurface = isDesktop ? 'desktop' : 'mobile';
+  const updateControlsState = useCallback((patch: Partial<TaskDagControlsState>) => {
+    setControlsState((current) => ({
+      ...current,
+      ...patch,
+    }));
+  }, []);
   const setManualLayoutSnapshot = useCallback((snapshot: TaskDagManualLayoutSnapshot | null) => {
     setTaskDagManualLayoutSnapshot(snapshot);
     setManualLayoutSnapshotState(snapshot);
@@ -1110,6 +1131,9 @@ export function TaskDagPage() {
         case TASK_DAG_HIDE_TERMINAL_STORAGE_KEY:
           setTerminalFilterMode(readStoredTerminalFilterMode());
           return;
+        case TASK_DAG_FOCUS_MODE_STORAGE_KEY:
+          setFocusMode(readStoredFocusMode());
+          return;
         case TASK_DAG_BACKGROUND_STORAGE_KEY:
           setBackgroundMode(readStoredBackgroundMode());
           return;
@@ -1127,6 +1151,9 @@ export function TaskDagPage() {
           return;
         case TASK_DAG_FOCUSED_SERIES_STORAGE_KEY:
           setFocusedSeriesAnchorId(readStoredFocusedSeriesAnchorId());
+          return;
+        case TASK_DAG_CONTROLS_STATE_STORAGE_KEY:
+          setControlsState(readStoredControlsState());
           return;
         case TASK_DAG_VISIBILITY_STORAGE_KEY:
           setDagVisibility(readStoredDagVisibility());
@@ -1211,9 +1238,24 @@ export function TaskDagPage() {
       : graph
   ), [graph, terminalFilterMode, tasks]);
   const visibleGraph = useMemo(() => projectVisibleTaskGraph(graph, dagVisibility), [graph, dagVisibility]);
-  const availableTags = useMemo(() => Array.from(new Set(
-    tasks.flatMap((task) => task.tags.map((tag) => tag.trim()).filter(Boolean)),
-  )).sort((left, right) => left.localeCompare(right, 'zh-CN')), [tasks]);
+  const availableTags = useMemo<TaskDagTagOption[]>(() => {
+    const counts = new Map<string, number>();
+    for (const task of tasks) {
+      for (const rawTag of task.tags) {
+        const tag = rawTag.trim();
+        if (!tag) {
+          continue;
+        }
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((left, right) => (
+        right.count - left.count || left.tag.localeCompare(right.tag, 'zh-CN')
+      ));
+  }, [tasks]);
   const hasActiveUnifiedSearch = searchQuery.trim().length > 0 || tagFilter.selectedTags.length > 0;
   const unifiedSearchMatchedTaskIds = useMemo(() => new Set(
     visibleGraph.nodes
@@ -1231,6 +1273,16 @@ export function TaskDagPage() {
       ? filterVisibleGraphByNodeIds(visibleGraph, unifiedSearchMatchedTaskIds)
       : visibleGraph
   ), [hasActiveUnifiedSearch, searchOptions.filterMode, unifiedSearchMatchedTaskIds, visibleGraph]);
+  const searchSecondaryNodeIds = useMemo(() => {
+    if (!hasActiveUnifiedSearch || searchOptions.filterMode) {
+      return new Set<string>();
+    }
+    return new Set(
+      visibleGraph.nodes
+        .filter((node) => !unifiedSearchMatchedTaskIds.has(node.id))
+        .map((node) => node.id),
+    );
+  }, [hasActiveUnifiedSearch, searchOptions.filterMode, unifiedSearchMatchedTaskIds, visibleGraph.nodes]);
   const smartTerminalProjection = useMemo(
     () => projectVisibleGraphForSmartTerminalMode(unifiedSearchFilteredVisibleGraph),
     [unifiedSearchFilteredVisibleGraph],
@@ -1242,50 +1294,62 @@ export function TaskDagPage() {
         ? filterStrictTerminalNodesFromVisibleGraph(unifiedSearchFilteredVisibleGraph)
         : unifiedSearchFilteredVisibleGraph
   ), [smartTerminalProjection.visibleGraph, terminalFilterMode, unifiedSearchFilteredVisibleGraph]);
-  const secondaryNodeIds = useMemo(
+  const terminalSecondaryNodeIds = useMemo(
     () => (terminalFilterMode === 'smart' ? smartTerminalProjection.secondaryNodeIds : new Set<string>()),
     [smartTerminalProjection.secondaryNodeIds, terminalFilterMode],
   );
+  const visibleFocusedSeriesNodeIds = useMemo(() => (
+    focusedSeriesAnchorId
+      ? findVisibleTaskGraphConnectedComponentNodeIds(terminalFilteredVisibleGraph, focusedSeriesAnchorId)
+      : new Set<string>()
+  ), [focusedSeriesAnchorId, terminalFilteredVisibleGraph]);
+  const hasVisibleFocusedSeries = visibleFocusedSeriesNodeIds.size > 0;
+  const renderedVisibleGraph = useMemo(() => (
+    focusMode === 'hard' && hasVisibleFocusedSeries
+      ? filterVisibleGraphByNodeIds(terminalFilteredVisibleGraph, visibleFocusedSeriesNodeIds)
+      : terminalFilteredVisibleGraph
+  ), [focusMode, hasVisibleFocusedSeries, terminalFilteredVisibleGraph, visibleFocusedSeriesNodeIds]);
+  const focusSecondaryNodeIds = useMemo(() => {
+    if (focusMode !== 'soft' || !hasVisibleFocusedSeries) {
+      return new Set<string>();
+    }
+    return new Set(
+      terminalFilteredVisibleGraph.nodes
+        .filter((node) => !visibleFocusedSeriesNodeIds.has(node.id))
+        .map((node) => node.id),
+    );
+  }, [focusMode, hasVisibleFocusedSeries, terminalFilteredVisibleGraph.nodes, visibleFocusedSeriesNodeIds]);
   const renderedVisibleNodeById = useMemo(
-    () => new Map(terminalFilteredVisibleGraph.nodes.map((node) => [node.id, node])),
-    [terminalFilteredVisibleGraph.nodes],
+    () => new Map(renderedVisibleGraph.nodes.map((node) => [node.id, node])),
+    [renderedVisibleGraph.nodes],
   );
-  const renderedVisibleGraph = terminalFilteredVisibleGraph;
   const visibleNodeIdSet = useMemo(
     () => new Set(renderedVisibleGraph.nodes.map((node) => node.id)),
     [renderedVisibleGraph.nodes],
   );
-  const visibleFocusedSeriesNodeIds = useMemo(() => (
-    focusedSeriesAnchorId
-      ? findVisibleTaskGraphConnectedComponentNodeIds(renderedVisibleGraph, focusedSeriesAnchorId)
-      : new Set<string>()
-  ), [focusedSeriesAnchorId, renderedVisibleGraph]);
-  const hasVisibleFocusedSeries = visibleFocusedSeriesNodeIds.size > 0;
+  const secondaryNodeIds = useMemo(() => new Set(
+    [...searchSecondaryNodeIds, ...terminalSecondaryNodeIds, ...focusSecondaryNodeIds]
+      .filter((nodeId) => visibleNodeIdSet.has(nodeId)),
+  ), [focusSecondaryNodeIds, searchSecondaryNodeIds, terminalSecondaryNodeIds, visibleNodeIdSet]);
   const searchMatchCount = useMemo(() => {
     if (!hasActiveUnifiedSearch) return 0;
     return terminalFilteredVisibleGraph.nodes.reduce((count, node) => (
       unifiedSearchMatchedTaskIds.has(node.id) ? count + 1 : count
     ), 0);
   }, [hasActiveUnifiedSearch, terminalFilteredVisibleGraph.nodes, unifiedSearchMatchedTaskIds]);
-  const hiddenRunningByUnifiedSearchCount = useMemo(() => {
-    if (!hasActiveUnifiedSearch || !searchOptions.filterMode) {
-      return 0;
-    }
-
-    const runningNodeIds = visibleGraph.nodes
+  const hiddenRunningNodeCount = useMemo(() => {
+    const hiddenRunningNodeIds = visibleGraph.nodes
       .filter((node) => (
-        (taskById.get(node.id)?.status === 'in_progress' || activeTaskIdSet.has(node.id))
-        && !unifiedSearchMatchedTaskIds.has(node.id)
+        !visibleNodeIdSet.has(node.id)
+        && (taskById.get(node.id)?.status === 'in_progress' || activeTaskIdSet.has(node.id))
       ))
       .map((node) => node.id);
 
-    return new Set(runningNodeIds).size;
+    return new Set(hiddenRunningNodeIds).size;
   }, [
     activeTaskIdSet,
-    hasActiveUnifiedSearch,
-    searchOptions.filterMode,
     taskById,
-    unifiedSearchMatchedTaskIds,
+    visibleNodeIdSet,
     visibleGraph.nodes,
   ]);
 
@@ -1313,6 +1377,16 @@ export function TaskDagPage() {
       setConnectState(null);
     }
   }, [connectState, visibleNodeIdSet]);
+
+  useEffect(() => {
+    if (!focusedSeriesAnchorId || controlsState.focusSectionOpen) {
+      return;
+    }
+    setControlsState((current) => ({
+      ...current,
+      focusSectionOpen: true,
+    }));
+  }, [controlsState.focusSectionOpen, focusedSeriesAnchorId]);
 
   const layoutSignature = useMemo(() => JSON.stringify({
     direction: resolvedDirection,
@@ -2058,13 +2132,16 @@ export function TaskDagPage() {
               searchOptions={searchOptions}
               availableTags={availableTags}
               tagFilter={tagFilter}
-              hiddenRunningByTagFilterCount={hiddenRunningByUnifiedSearchCount}
+              hiddenRunningNodeCount={hiddenRunningNodeCount}
               terminalFilterMode={terminalFilterMode}
+              focusMode={focusMode}
+              hasFocusedSeriesAnchor={Boolean(focusedSeriesAnchorId)}
+              hasVisibleFocusedSeries={hasVisibleFocusedSeries}
+              focusedSeriesAnchorLabel={focusedSeriesAnchorId ? (taskById.get(focusedSeriesAnchorId)?.title ?? focusedSeriesAnchorId) : null}
               backgroundMode={backgroundMode}
               hasActiveBlock={activeTaskIds.length > 0}
               immersive={immersive}
-              mobileSearchOpen={mobileSearchOpen}
-              mobileToolsOpen={mobileToolsOpen}
+              controlsState={controlsState}
               onDirectionChange={setDagDirection}
               onLayoutModeChange={setLayoutMode}
               onSearchValueChange={setSearchDraft}
@@ -2104,6 +2181,14 @@ export function TaskDagPage() {
                   return 'show';
                 });
               }}
+              onCycleFocusMode={() => {
+                setFocusMode((current) => (current === 'soft' ? 'hard' : 'soft'));
+              }}
+              onClearFocusedSeries={() => {
+                setFocusedSeriesAnchorId(null);
+                setContextMenu(null);
+                setPaneContextMenu(null);
+              }}
               onBackgroundModeChange={setBackgroundMode}
               onToggleImmersive={() => setImmersive((value) => !value)}
               onFitView={() => {
@@ -2113,8 +2198,7 @@ export function TaskDagPage() {
                 void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
               }}
               onJumpToCurrentRoot={handleJumpToCurrentRoot}
-              onMobileSearchOpenChange={setMobileSearchOpen}
-              onMobileToolsOpenChange={setMobileToolsOpen}
+              onControlsStateChange={updateControlsState}
             />
           )}
 
@@ -2205,8 +2289,11 @@ export function TaskDagPage() {
               }
               setContextMenu(null);
               setPaneContextMenu(null);
-              setMobileSearchOpen(false);
-              setMobileToolsOpen(false);
+              setControlsState((current) => ({
+                ...current,
+                mobileViewOpen: false,
+                mobileToolsOpen: false,
+              }));
             }}
             onNodeClick={handleNodeClick}
             onNodeDragStop={(_event, node) => {

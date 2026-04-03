@@ -42,7 +42,8 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
     expect(module.getTaskDagMode()).toBe('browse');
     expect(module.getTaskDagDirection()).toBe('auto');
     expect(module.getTaskDagLayoutMode()).toBe('auto');
-    expect(module.getTaskDagTerminalFilterMode()).toBe('show');
+    expect(module.getTaskDagTerminalFilterMode()).toBe('smart');
+    expect(module.getTaskDagFocusMode()).toBe('soft');
     expect(module.getTaskDagBackgroundMode()).toBe('dots');
     expect(module.getTaskDagImmersive()).toBe(false);
     expect(module.getTaskDagSearchDraft()).toBe('');
@@ -58,6 +59,14 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
     expect(module.getTaskDagVisibility()).toEqual({
       collapsedUpstreamOf: [],
       collapsedDownstreamOf: [],
+    });
+    expect(module.getTaskDagControlsState()).toEqual({
+      desktopViewOpen: true,
+      desktopToolsOpen: false,
+      mobileViewOpen: false,
+      mobileToolsOpen: false,
+      tagSectionOpen: false,
+      focusSectionOpen: false,
     });
     expect(module.getTaskDagViewport('TB')).toBeNull();
   });
@@ -75,6 +84,7 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       'exomind:dag-direction': 'LR',
       'exomind:dag-layout-mode': 'manual',
       'exomind:dag-hide-terminal': 'smart',
+      'exomind:dag-focus-mode': 'hard',
       'exomind:dag-background-mode': 'lines',
       'exomind:dag-immersive': '1',
       'exomind:dag-search-draft': 'Markdown',
@@ -91,6 +101,13 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
         collapsedUpstreamOf: ['task-a'],
         collapsedDownstreamOf: ['task-b'],
       }),
+      'exomind:dag-controls-state': JSON.stringify({
+        desktopViewOpen: false,
+        desktopToolsOpen: true,
+        mobileViewOpen: true,
+        mobileToolsOpen: 'yes',
+        tagSectionOpen: true,
+      }),
       'exomind:dag-viewport': JSON.stringify({
         surface: 'desktop',
         direction: 'LR',
@@ -106,6 +123,7 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
     expect(module.getTaskDagDirection()).toBe('LR');
     expect(module.getTaskDagLayoutMode()).toBe('manual');
     expect(module.getTaskDagTerminalFilterMode()).toBe('smart');
+    expect(module.getTaskDagFocusMode()).toBe('hard');
     expect(module.getTaskDagBackgroundMode()).toBe('lines');
     expect(module.getTaskDagImmersive()).toBe(true);
     expect(module.getTaskDagSearchDraft()).toBe('Markdown');
@@ -122,11 +140,24 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       collapsedUpstreamOf: ['task-a'],
       collapsedDownstreamOf: ['task-b'],
     });
+    expect(module.getTaskDagControlsState()).toEqual({
+      desktopViewOpen: false,
+      desktopToolsOpen: true,
+      mobileViewOpen: true,
+      mobileToolsOpen: false,
+      tagSectionOpen: true,
+      focusSectionOpen: false,
+    });
     expect(module.getTaskDagViewport('LR')).toEqual({ x: 12, y: 34, zoom: 0.8 });
   });
 
   it('writes dag preferences through runtime-preferred storage（DAG 偏好通过 Runtime 优先存储写入）', async () => {
     const module = await import('@/config/task-dag-preferences');
+
+    expect(module.TASK_DAG_FOCUS_MODE_STORAGE_KEY).toBe('exomind:dag-focus-mode');
+    expect(module.TASK_DAG_FOCUS_MODE_CHANGED_EVENT).toBe('exomind:dag-focus-mode-changed');
+    expect(module.TASK_DAG_CONTROLS_STATE_STORAGE_KEY).toBe('exomind:dag-controls-state');
+    expect(module.TASK_DAG_CONTROLS_STATE_CHANGED_EVENT).toBe('exomind:dag-controls-state-changed');
 
     expect(module.setTaskDagMode('connect')).toBe('connect');
     expect(storage[module.TASK_DAG_MODE_STORAGE_KEY]).toBe('connect');
@@ -139,6 +170,9 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
 
     expect(module.setTaskDagTerminalFilterMode('hide')).toBe('hide');
     expect(storage[module.TASK_DAG_HIDE_TERMINAL_STORAGE_KEY]).toBe('hide');
+
+    expect(module.setTaskDagFocusMode('hard')).toBe('hard');
+    expect(storage[module.TASK_DAG_FOCUS_MODE_STORAGE_KEY]).toBe('hard');
 
     expect(module.setTaskDagBackgroundMode('none')).toBe('none');
     expect(storage[module.TASK_DAG_BACKGROUND_STORAGE_KEY]).toBe('none');
@@ -186,6 +220,29 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
     expect(JSON.parse(storage[module.TASK_DAG_VISIBILITY_STORAGE_KEY] ?? '{}')).toEqual({
       collapsedUpstreamOf: ['task-x'],
       collapsedDownstreamOf: ['task-y'],
+    });
+
+    expect(module.setTaskDagControlsState({
+      desktopViewOpen: false,
+      desktopToolsOpen: true,
+      mobileViewOpen: true,
+      mobileToolsOpen: 'yes',
+      tagSectionOpen: true,
+    } as never)).toEqual({
+      desktopViewOpen: false,
+      desktopToolsOpen: true,
+      mobileViewOpen: true,
+      mobileToolsOpen: false,
+      tagSectionOpen: true,
+      focusSectionOpen: false,
+    });
+    expect(JSON.parse(storage[module.TASK_DAG_CONTROLS_STATE_STORAGE_KEY] ?? '{}')).toEqual({
+      desktopViewOpen: false,
+      desktopToolsOpen: true,
+      mobileViewOpen: true,
+      mobileToolsOpen: false,
+      tagSectionOpen: true,
+      focusSectionOpen: false,
     });
 
     module.setTaskDagViewport('TB', { x: 5, y: 7, zoom: 0.9 });

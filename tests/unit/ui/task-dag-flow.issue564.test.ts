@@ -163,6 +163,52 @@ describe('task-dag-flow issue #564（Sugiyama 布局）', () => {
     expect(flow.edges.every((edge) => edge.data?.isFocusDimmed === false)).toBe(true);
   });
 
+  it('stacks search dimming and focus dimming independently on the same visible graph', () => {
+    const graph = buildTaskGraph([
+      makeTask({ id: 'task-a', title: 'A' }),
+      makeTask({
+        id: 'task-b',
+        title: 'B',
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-c',
+        title: 'C',
+        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-x', title: 'X' }),
+    ]);
+    const visibleGraph = projectVisibleTaskGraph(graph, EMPTY_TASK_DAG_VISIBILITY_STATE);
+
+    const flow = buildVisibleTaskDagFlow(visibleGraph, {
+      direction: 'LR',
+      hasActiveSearch: true,
+      searchMatchedTaskIds: new Set(['task-c', 'task-x']),
+      focusedSeriesNodeIds: new Set(['task-a', 'task-b', 'task-c']),
+    });
+
+    expect(flow.nodes.find((node) => node.id === 'task-a')?.data).toMatchObject({
+      isSearchMatch: false,
+      isSearchDimmed: true,
+      isFocusDimmed: false,
+    });
+    expect(flow.nodes.find((node) => node.id === 'task-b')?.data).toMatchObject({
+      isSearchMatch: false,
+      isSearchDimmed: true,
+      isFocusDimmed: false,
+    });
+    expect(flow.nodes.find((node) => node.id === 'task-c')?.data).toMatchObject({
+      isSearchMatch: true,
+      isSearchDimmed: false,
+      isFocusDimmed: false,
+    });
+    expect(flow.nodes.find((node) => node.id === 'task-x')?.data).toMatchObject({
+      isSearchMatch: true,
+      isSearchDimmed: false,
+      isFocusDimmed: true,
+    });
+  });
+
   it('marks smart-terminal survivors as secondary nodes without removing them（智能隐藏保留的终态节点会标记为次要节点）', () => {
     const graph = buildTaskGraph([
       makeTask({ id: 'task-a', title: 'A' }),
