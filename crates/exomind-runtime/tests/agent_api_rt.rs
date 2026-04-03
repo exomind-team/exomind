@@ -679,9 +679,264 @@ async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present
     }
 }
 
+#[tokio::test]
+async fn broker_file_search_flow_skips_without_env_and_uses_real_upstream_when_present() {
+    let Some(profile) = real_upstream_provider_profile_from_env() else {
+        eprintln!(
+            "skipping real-upstream file-search flow: set EXOMIND_AGENT_API_RT_ENABLE=1 together with EXOMIND_AGENT_API_PROVIDER / MODEL / API_KEY env vars"
+        );
+        return;
+    };
+
+    let root = match real_upstream_fs_root_from_env() {
+        Some(path) => path,
+        None => {
+            eprintln!(
+                "skipping real-upstream file-search flow: set EXOMIND_AGENT_API_RT_FS_ROOT to the repository root for external tool simulation"
+            );
+            return;
+        }
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = AgentSessionRuntime::new(
+        Arc::new(ConfigStore::new()),
+        Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
+        Arc::new(AgentSessionStore::new()),
+    );
+    let system_prompt = Some(
+        "你是一个仓库文件搜索助手。当前工作根目录就是仓库根目录。你只能使用调用者提供的 pwd、ls、cd 三个只读工具，不允许猜测。每一轮你只能请求一个工具调用。请先用 pwd 确认位置，然后按广度优先、逐层收窄的方式搜索：先看当前层有哪些直接子项，再优先探索更像源码/工作区的目录，避免在一个深层分支里盲目走太久；如果某条分支暂时没有线索，就用 cd .. 回到上层并继续检查尚未探索的同级目录。只有当你在 ls 输出中亲眼看到目标文件名时，才能宣布找到。找到后，请用中文给出该文件相对仓库根目录的完整路径。"
+            .to_string(),
+    );
+    let prompt = "请找到文件 agent_api_rt.rs，并在找到后输出它相对当前仓库根目录的完整路径。禁止猜测，必须依赖工具搜索。"
+        .to_string();
+    let tools = vec![
+        ToolDef {
+            name: "pwd".to_string(),
+            description: "返回当前目录相对仓库根目录的路径；仓库根目录返回 . 。无参数。"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: "ls".to_string(),
+            description: "列出当前目录下的直接子文件与子目录，输出按字典序排序。无参数。"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: "cd".to_string(),
+            description: "切换当前目录。参数 dir 只能是当前目录的一个直接子目录名，或 .. 返回父目录；不能越过仓库根目录。"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "dir": { "type": "string" }
+                },
+                "required": ["dir"],
+                "additionalProperties": false
+            }),
+        },
+    ];
+
+    let expected_relative_path = "crates/exomind-runtime/tests/agent_api_rt.rs";
+    let expected_parent_dir = "crates/exomind-runtime/tests";
+    let mut current_dir = root.clone();
+    let mut history = Vec::new();
+    let mut next_user_message = Some(prompt.clone());
+    let mut turn_count = 0usize;
+    let mut total_tool_calls = 0usize;
+    let mut used_pwd = false;
+    let mut used_ls = false;
+    let mut used_cd = false;
+    let mut used_cd_parent = false;
+    let mut target_seen_in_ls = false;
+    let mut target_seen_dir = None::<String>;
+    let mut tool_names = Vec::new();
+
+    eprintln!("=== broker_file_search_flow start ===");
+    eprintln!("provider={} model={}", profile.provider, profile.model);
+    eprintln!("root={}", root.display());
+    eprintln!("prompt={prompt}");
+
+    loop {
+        turn_count += 1;
+        assert!(
+            turn_count <= 32,
+            "file-search real-upstream flow exceeded turn budget; history={history:?}"
+        );
+
+        eprintln!("\n--- turn {turn_count} request ---");
+        eprintln!(
+            "history_len={} new_user_message_present={} current_dir={}",
+            history.len(),
+            next_user_message.is_some(),
+            current_dir.display()
+        );
+
+        let record = match run_broker_agent_session_with_runtime(
+            profile.clone(),
+            system_prompt.clone(),
+            tools.clone(),
+            history.clone(),
+            next_user_message.take(),
+            AgentTrigger::Internal {
+                source: "agent-turn-broker-rt-file-search".to_string(),
+            },
+            &runtime,
+        )
+        .await
+        {
+            Ok(record) => record,
+            Err(error) => {
+                panic_if_auth_failed(&error);
+                panic!("real-upstream file-search turn failed: {error}");
+            }
+        };
+
+        eprintln!("--- turn {turn_count} response ---");
+        eprintln!("session_id={}", record.session_id);
+        eprintln!("status={}", record.status);
+        eprintln!("content={}", serde_json::to_string_pretty(&record.content).unwrap());
+        eprintln!(
+            "assistant_turn={}",
+            serde_json::to_string_pretty(&record.assistant_turn).unwrap()
+        );
+        eprintln!(
+            "tool_calls={}",
+            serde_json::to_string_pretty(&record.tool_calls).unwrap()
+        );
+
+        if turn_count == 1 {
+            history.push(TurnItem::User {
+                content: prompt.clone(),
+            });
+        }
+
+        history.push(TurnItem::Assistant {
+            content: record.assistant_turn.content.clone(),
+            tool_calls: record.assistant_turn.tool_calls.clone(),
+        });
+
+        if record.status == "completed" {
+            assert!(
+                turn_count > 2,
+                "file-search flow must not complete in the first two turns; record={record:?}"
+            );
+            assert!(
+                used_pwd && used_ls && used_cd,
+                "file-search flow must use pwd + ls + cd; tool_names={tool_names:?}"
+            );
+            assert!(
+                total_tool_calls > 1,
+                "file-search flow must involve more than one tool call; tool_names={tool_names:?}"
+            );
+            assert!(
+                target_seen_in_ls,
+                "file-search flow never observed target file in ls output; tool_names={tool_names:?}"
+            );
+            assert_eq!(
+                target_seen_dir.as_deref(),
+                Some(expected_parent_dir),
+                "target file should be seen from its containing directory"
+            );
+            assert_eq!(
+                record.assistant_turn.tool_calls,
+                Vec::<exomind_runtime::agent::broker::ToolCall>::new(),
+                "completed turns must not expose pending tool calls"
+            );
+            assert!(
+                record.content.contains(expected_relative_path),
+                "final answer must include repo-relative full path: {record:?}"
+            );
+            assert!(
+                root.join(expected_relative_path).exists(),
+                "expected file does not exist under configured root: {}",
+                root.join(expected_relative_path).display()
+            );
+            eprintln!("=== broker_file_search_flow completed ===");
+            eprintln!("tool_names={tool_names:?}");
+            eprintln!("used_cd_parent={used_cd_parent}");
+            eprintln!("target_seen_dir={target_seen_dir:?}");
+            eprintln!("final_answer={}", record.content);
+            break;
+        }
+
+        assert_eq!(
+            record.status, "needs_tool_calls",
+            "intermediate record should request tools: {record:?}"
+        );
+        assert!(
+            record.assistant_turn.tool_calls.len() == 1,
+            "stateful pwd/ls/cd search must request exactly one tool call per turn: {record:?}"
+        );
+
+        for tool_call in &record.assistant_turn.tool_calls {
+            let dir_before = relative_dir_from_root(&root, &current_dir);
+            let tool_output = execute_external_fs_tool_call(&root, &mut current_dir, tool_call);
+            total_tool_calls += 1;
+            tool_names.push(tool_call.name.clone());
+
+            match tool_call.name.as_str() {
+                "pwd" => {
+                    used_pwd = true;
+                    assert_eq!(
+                        tool_output, dir_before,
+                        "pwd should return the current relative directory"
+                    );
+                }
+                "ls" => {
+                    used_ls = true;
+                    if tool_output.lines().any(|line| line.trim() == "agent_api_rt.rs") {
+                        target_seen_in_ls = true;
+                        target_seen_dir = Some(dir_before.clone());
+                    }
+                }
+                "cd" => {
+                    used_cd = true;
+                    if tool_call.input["dir"].as_str() == Some("..") {
+                        used_cd_parent = true;
+                    }
+                }
+                other => panic!("unexpected tool requested during file search: {other}"),
+            }
+
+            eprintln!(
+                "executed_tool_call={}",
+                serde_json::to_string_pretty(tool_call).unwrap()
+            );
+            eprintln!("tool_output={tool_output}");
+
+            history.push(TurnItem::ToolResult {
+                tool_call_id: tool_call.id.clone(),
+                tool_name: tool_call.name.clone(),
+                content: tool_output,
+            });
+        }
+    }
+}
+
 fn execute_external_fs_tool_call(root: &Path, current_dir: &mut PathBuf, tool_call: &exomind_runtime::agent::broker::ToolCall) -> String {
     match tool_call.name.as_str() {
+        "pwd" => {
+            assert!(
+                is_empty_object(&tool_call.input),
+                "pwd requires an empty input object: {tool_call:?}"
+            );
+            relative_dir_from_root(root, current_dir)
+        }
         "ls" => {
+            assert!(
+                is_empty_object(&tool_call.input),
+                "ls requires an empty input object: {tool_call:?}"
+            );
             let entries = std::fs::read_dir(&*current_dir)
                 .unwrap_or_else(|error| panic!("failed to read {current_dir:?}: {error}"));
             let mut names = entries
@@ -692,24 +947,35 @@ fn execute_external_fs_tool_call(root: &Path, current_dir: &mut PathBuf, tool_ca
                         .to_string_lossy()
                         .to_string()
                 })
+                .filter(|name| !name.starts_with('.'))
                 .collect::<Vec<_>>();
             names.sort();
-            let rel = current_dir
-                .strip_prefix(root)
-                .ok()
-                .and_then(|path| path.to_str())
-                .filter(|path| !path.is_empty())
-                .unwrap_or(".");
-            format!("current_dir={rel}\n{}", names.join("\n"))
+            names.join("\n")
         }
         "cd" => {
             let dir = tool_call.input["dir"]
                 .as_str()
                 .unwrap_or_else(|| panic!("cd tool call missing dir: {tool_call:?}"));
             assert!(
-                !dir.contains('/') && !dir.contains('\\') && dir != "." && dir != "..",
-                "cd only allows a direct child directory: {tool_call:?}"
+                !dir.is_empty() && !dir.contains('/') && !dir.contains('\\') && dir != ".",
+                "cd only allows a single direct child directory name or ..: {tool_call:?}"
             );
+            if dir == ".." {
+                if current_dir == root {
+                    return "ERROR: already at root".to_string();
+                }
+                let target = current_dir
+                    .parent()
+                    .unwrap_or_else(|| panic!("current directory lost parent under root: {current_dir:?}"))
+                    .to_path_buf();
+                assert!(
+                    target.starts_with(root),
+                    "cd .. escaped the configured root: {tool_call:?}"
+                );
+                *current_dir = target;
+                return format!("OK: current_dir={}", relative_dir_from_root(root, current_dir));
+            }
+
             let target = current_dir.join(dir);
             assert!(
                 target.starts_with(root),
@@ -718,14 +984,22 @@ fn execute_external_fs_tool_call(root: &Path, current_dir: &mut PathBuf, tool_ca
             assert!(target.exists(), "cd target does not exist: {tool_call:?}");
             assert!(target.is_dir(), "cd target is not a directory: {tool_call:?}");
             *current_dir = target;
-            let rel = current_dir
-                .strip_prefix(root)
-                .ok()
-                .and_then(|path| path.to_str())
-                .filter(|path| !path.is_empty())
-                .unwrap_or(".");
-            format!("OK: current_dir={rel}")
+            format!("OK: current_dir={}", relative_dir_from_root(root, current_dir))
         }
         other => panic!("unexpected external fs tool requested: {other}"),
     }
+}
+
+fn relative_dir_from_root(root: &Path, current_dir: &Path) -> String {
+    current_dir
+        .strip_prefix(root)
+        .ok()
+        .and_then(|path| path.to_str())
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".")
+        .to_string()
+}
+
+fn is_empty_object(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| object.is_empty())
 }
