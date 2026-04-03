@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import {
   Activity,
+  Bot,
   Bug,
   Code,
   Command,
