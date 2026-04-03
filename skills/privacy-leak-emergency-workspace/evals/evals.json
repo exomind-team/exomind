@@ -1,0 +1,23 @@
+{
+  "skill_name": "privacy-leak-emergency",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "GitHub 上有条 issue 提到了我导师的名字，issue 在 exomind-team/exomind 仓库，编号是 #762，帮我彻底清除这个泄露",
+      "expected_output": "系统性地识别所有暴露面（主库issue、devlog下游、Git历史、Events API），按正确顺序执行清除（混淆→删除→历史重写），并进行验证",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "开发日报仓库 exomind-team/exomind-devlog 里有个 JSON 文件包含了「与黎老师交流NARS翻译问题」，需要从 Git 历史中彻底删除这些内容",
+      "expected_output": "使用 git filter-repo --replace-text 重写历史，覆盖所有变体，force push，本地和远程验证，并指出悬空对象的90天残留窗口",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我们最近把一个原本私有的仓库公开了，帮我排查一下 exomind-team/exomind 里有没有泄露的私人信息，比如人名、个人日程等",
+      "expected_output": "使用关键词库系统性扫描（老师、同学、师兄等），区分产品上下文和真实个人信息，覆盖issues、代码内容、devlog下游",
+      "files": []
+    }
+  ]
+}
