@@ -178,7 +178,7 @@ export function TimeBlockDetailPage() {
           <div className="mx-auto max-w-7xl">
             <TaskBreadcrumb
               segments={[backLink]}
-              current={{ label: '时间块详情' }}
+              current={{ label: '任务' }}
             />
           </div>
         </header>
@@ -192,7 +192,7 @@ export function TimeBlockDetailPage() {
             <ArrowLeft size={16} />
           </Link>
           <div className="min-w-0 flex-1 pt-0.5">
-            <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">时间块详情</h1>
+            <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
           </div>
           <div className="h-8 w-8 shrink-0" aria-hidden="true" />
         </header>

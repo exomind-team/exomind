@@ -860,7 +860,7 @@ function MobileTimeblockDetail({
           <ArrowLeft size={16} />
         </Link>
         <div className="min-w-0 flex-1 pt-0.5">
-          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务详情</h1>
+          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
         </div>
         <button
           type="button"
@@ -1180,7 +1180,7 @@ function DesktopTimeblockDetail({
       >
         <TaskBreadcrumb
           segments={buildDetailBreadcrumbSegments(backLink)}
-          current={{ label: '任务详情', icon: NotepadText }}
+          current={{ label: '任务', icon: NotepadText }}
         />
       </header>
       <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
