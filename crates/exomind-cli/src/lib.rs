@@ -1,6 +1,9 @@
 pub mod cli;
 pub mod examples;
 pub mod output;
+pub mod profile_scope;
+pub mod state;
+pub mod target;
 
 use clap::Parser;
 use cli::{Cli, RootCommand};
