@@ -9,9 +9,14 @@ use axum::routing::post;
 use axum::{Json, Router};
 use exomind_runtime::AppState;
 use exomind_runtime::agent::Agent;
+use exomind_runtime::agent::api::ApiProviderProfile;
+use exomind_runtime::agent::broker::{ToolDef, TurnItem};
 use exomind_runtime::agent::life::{AgentApiTickTrigger, CognitiveLifeAgent};
 use exomind_runtime::agent::llm_cognition::LlmCognition;
-use exomind_runtime::agent::session::{AgentSessionRuntime, AgentSessionStore};
+use exomind_runtime::agent::session::{
+    AgentSessionRuntime, AgentSessionStore, AgentTrigger, SessionError,
+    run_broker_agent_session_with_runtime,
+};
 use exomind_runtime::agent::tools::GET_RECENT_EVENTS_TOOL;
 use exomind_runtime::agent::workspace::AgentWorkspace;
 use exomind_runtime::config::types::USER_CONFIG_SCOPE;
@@ -120,6 +125,57 @@ async fn spawn_fake_openai_server() -> (String, oneshot::Sender<()>) {
     });
 
     (format!("http://{addr}"), shutdown_tx)
+}
+
+fn real_upstream_provider_profile_from_env() -> Option<ApiProviderProfile> {
+    let enabled = std::env::var("EXOMIND_AGENT_API_RT_ENABLE")
+        .ok()
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+
+    let provider = std::env::var("EXOMIND_AGENT_API_PROVIDER").ok()?;
+    let model = std::env::var("EXOMIND_AGENT_API_MODEL").ok()?;
+    let api_key = std::env::var("EXOMIND_AGENT_API_KEY").ok()?;
+    let base_url = std::env::var("EXOMIND_AGENT_API_BASE_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    Some(ApiProviderProfile {
+        provider,
+        model,
+        base_url,
+        api_key,
+    })
+}
+
+fn weather_tool() -> ToolDef {
+    ToolDef {
+        name: "get_weather".to_string(),
+        description: "返回今天的天气与气温".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "enum": ["today"]
+                }
+            },
+            "required": ["date"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+fn panic_if_auth_failed(error: &SessionError) {
+    let message = error.to_string();
+    assert!(
+        !message.contains("401"),
+        "real-upstream auth failed with 401; check EXOMIND_AGENT_API_* env vars or ~/.codex credentials: {message}"
+    );
 }
 
 #[tokio::test]
@@ -315,4 +371,95 @@ async fn life_tick_persists_internal_agent_session() {
     assert!(record.content.contains("RT Agent API"));
 
     let _ = shutdown_tx.send(());
+}
+
+#[tokio::test]
+async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_present() {
+    let Some(profile) = real_upstream_provider_profile_from_env() else {
+        eprintln!(
+            "skipping real-upstream weather flow: set EXOMIND_AGENT_API_RT_ENABLE=1 together with EXOMIND_AGENT_API_PROVIDER / MODEL / API_KEY env vars"
+        );
+        return;
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = AgentSessionRuntime::new(
+        Arc::new(ConfigStore::new()),
+        Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
+        Arc::new(AgentSessionStore::new()),
+    );
+    let system_prompt = Some(
+        "你是天气工具测试助理。首轮禁止自然语言回答；你唯一允许的动作是调用 get_weather 工具。只有收到工具结果后，你才能用中文回答天气。"
+            .to_string(),
+    );
+    let prompt = "今天是什么天气？不要直接回答，先调用 get_weather，参数 date 必须是 today。"
+        .to_string();
+    let tools = vec![weather_tool()];
+
+    let first_turn = match run_broker_agent_session_with_runtime(
+        profile.clone(),
+        system_prompt.clone(),
+        tools.clone(),
+        Vec::new(),
+        Some(prompt.clone()),
+        AgentTrigger::Internal {
+            source: "agent-turn-broker-rt-weather".to_string(),
+        },
+        &runtime,
+    )
+    .await
+    {
+        Ok(record) => record,
+        Err(error) => {
+            panic_if_auth_failed(&error);
+            panic!("first real-upstream weather turn failed: {error}");
+        }
+    };
+
+    assert_eq!(
+        first_turn.status, "needs_tool_calls",
+        "first_turn={first_turn:?}"
+    );
+    assert_eq!(first_turn.tool_calls.len(), 1, "first_turn={first_turn:?}");
+    assert_eq!(first_turn.tool_calls[0].tool_name, "get_weather");
+    assert_eq!(first_turn.assistant_turn.tool_calls.len(), 1);
+
+    let tool_call = &first_turn.assistant_turn.tool_calls[0];
+    let second_turn = match run_broker_agent_session_with_runtime(
+        profile,
+        system_prompt,
+        tools,
+        vec![
+            TurnItem::User { content: prompt },
+            TurnItem::Assistant {
+                content: first_turn.assistant_turn.content.clone(),
+                tool_calls: first_turn.assistant_turn.tool_calls.clone(),
+            },
+            TurnItem::ToolResult {
+                tool_call_id: tool_call.id.clone(),
+                tool_name: tool_call.name.clone(),
+                content: "今天是阴天，气温21.45度".to_string(),
+            },
+        ],
+        None,
+        AgentTrigger::Internal {
+            source: "agent-turn-broker-rt-weather".to_string(),
+        },
+        &runtime,
+    )
+    .await
+    {
+        Ok(record) => record,
+        Err(error) => {
+            panic_if_auth_failed(&error);
+            panic!("second real-upstream weather turn failed: {error}");
+        }
+    };
+
+    assert_eq!(second_turn.status, "completed", "second_turn={second_turn:?}");
+    assert!(
+        second_turn.content.contains("今天是阴天，气温21.45度"),
+        "second_turn={second_turn:?}"
+    );
+    assert!(second_turn.assistant_turn.tool_calls.is_empty());
 }

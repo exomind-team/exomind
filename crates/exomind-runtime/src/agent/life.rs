@@ -1,12 +1,15 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
+use super::broker::{AgentTurnBroker, AgentTurnRequest, AgentTurnResult, AssistantTurn, ToolCall, ToolDef, TurnItem};
 use super::session::{
-    AgentSessionRuntime, AgentTrigger, SessionError, build_tool_registry_for_runtime,
-    resolve_provider_profile_with_runtime, run_agent_session_with_runtime,
+    AgentSessionRecord, AgentSessionRuntime, SessionError, ToolCallRecord,
+    resolve_provider_profile_with_runtime,
 };
+use super::tools::eventlog::get_recent_events_tool;
 use super::tools::GET_RECENT_EVENTS_TOOL;
 use super::cognition::{
     BodyStatus, CognitionContext, CognitionEngine, CognitionOutput, KnowledgeOp,
@@ -219,50 +222,150 @@ impl CognitiveLifeAgent {
             }
         };
 
-        let tools = match build_tool_registry_for_runtime(
-            &trigger.runtime,
-            trigger.scope_key.clone(),
-            &trigger.requested_tools,
-        ) {
-            Ok(tools) => tools,
-            Err(error) => {
-                tracing::warn!(
-                    agent_id = %self.id,
-                    error = %error,
-                    "life agent agent-api tick tool registry build failed"
-                );
-                return None;
-            }
-        };
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let trigger_source = format!("{}-tick", self.id);
+        let broker = AgentTurnBroker;
+        let tools = build_internal_tools(&trigger);
 
-        match run_agent_session_with_runtime(
-            profile,
-            trigger.system_prompt.clone(),
-            trigger.prompt.clone(),
-            &tools,
-            AgentTrigger::Internal {
-                source: format!("{}-tick", self.id),
-            },
-            &trigger.runtime,
-        )
-        .await
-        {
-            Ok(record) => {
-                tracing::info!(
-                    agent_id = %self.id,
-                    session_id = %record.session_id,
-                    "life agent persisted internal agent-api session"
-                );
-                Some(record.session_id)
+        let first_result = broker
+            .run(AgentTurnRequest {
+                provider: profile.clone(),
+                system_prompt: trigger.system_prompt.clone(),
+                tools: tools.clone(),
+                history: Vec::new(),
+                new_user_message: Some(trigger.prompt.clone()),
+            })
+            .await;
+
+        match first_result {
+            Ok(AgentTurnResult::Final { assistant_turn }) => {
+                persist_internal_session_record(
+                    &trigger.runtime,
+                    AgentSessionRecord {
+                        session_id: session_id.clone(),
+                        trigger_source,
+                        provider: profile.provider,
+                        model: profile.model,
+                        prompt: Some(trigger.prompt),
+                        content: assistant_turn.content.clone(),
+                        assistant_turn,
+                        tool_calls: Vec::new(),
+                        status: "completed".to_string(),
+                        error_message: None,
+                        created_at,
+                        completed_at: chrono::Utc::now().to_rfc3339(),
+                    },
+                    &self.id,
+                )
             }
-            Err(SessionError::MissingRuntimeConfig(error))
-            | Err(SessionError::InvalidProviderProfile(error)) => {
-                tracing::debug!(
-                    agent_id = %self.id,
-                    error = %error,
-                    "life agent agent-api tick skipped because runtime provider config became unavailable"
-                );
-                None
+            Ok(AgentTurnResult::NeedsToolCalls {
+                assistant_turn,
+                tool_calls,
+            }) => {
+                let executed_tool_calls =
+                    execute_internal_tool_calls(&trigger.runtime, trigger.scope_key.clone(), &tool_calls)
+                        .await;
+                let tool_results = executed_tool_calls
+                    .iter()
+                    .map(|(_, turn_item)| turn_item.clone())
+                    .collect::<Vec<_>>();
+                let continued = broker
+                    .run(AgentTurnRequest {
+                        provider: profile.clone(),
+                        system_prompt: trigger.system_prompt.clone(),
+                        tools,
+                        history: build_continuation_history(
+                            trigger.prompt.clone(),
+                            assistant_turn.clone(),
+                            tool_results,
+                        ),
+                        new_user_message: None,
+                    })
+                    .await;
+
+                match continued {
+                    Ok(AgentTurnResult::Final {
+                        assistant_turn: final_turn,
+                    }) => persist_internal_session_record(
+                        &trigger.runtime,
+                        AgentSessionRecord {
+                            session_id: session_id.clone(),
+                            trigger_source,
+                            provider: profile.provider,
+                            model: profile.model,
+                            prompt: Some(trigger.prompt),
+                            content: final_turn.content.clone(),
+                            assistant_turn: final_turn,
+                            tool_calls: executed_tool_calls
+                                .iter()
+                                .map(|(record, _)| record.clone())
+                                .collect(),
+                            status: "completed".to_string(),
+                            error_message: None,
+                            created_at,
+                            completed_at: chrono::Utc::now().to_rfc3339(),
+                        },
+                        &self.id,
+                    ),
+                    Ok(AgentTurnResult::NeedsToolCalls {
+                        assistant_turn: pending_turn,
+                        tool_calls: pending_tool_calls,
+                    }) => persist_internal_session_record(
+                        &trigger.runtime,
+                        AgentSessionRecord {
+                            session_id: session_id.clone(),
+                            trigger_source,
+                            provider: profile.provider,
+                            model: profile.model,
+                            prompt: Some(trigger.prompt),
+                            content: pending_turn.content.clone(),
+                            assistant_turn: pending_turn,
+                            tool_calls: executed_tool_calls
+                                .iter()
+                                .map(|(record, _)| record.clone())
+                                .chain(pending_tool_calls.iter().map(|tool_call| ToolCallRecord {
+                                    tool_name: tool_call.name.clone(),
+                                    input: tool_call.input.clone(),
+                                    output: None,
+                                }))
+                                .collect(),
+                            status: "needs_tool_calls".to_string(),
+                            error_message: None,
+                            created_at,
+                            completed_at: chrono::Utc::now().to_rfc3339(),
+                        },
+                        &self.id,
+                    ),
+                    Err(error) => {
+                        tracing::warn!(
+                            agent_id = %self.id,
+                            error = %error,
+                            "life agent agent-api tick continuation failed"
+                        );
+                        persist_internal_session_record(
+                            &trigger.runtime,
+                            AgentSessionRecord {
+                                session_id: session_id.clone(),
+                                trigger_source,
+                                provider: profile.provider,
+                                model: profile.model,
+                                prompt: Some(trigger.prompt),
+                                content: assistant_turn.content.clone(),
+                                assistant_turn,
+                                tool_calls: executed_tool_calls
+                                    .iter()
+                                    .map(|(record, _)| record.clone())
+                                    .collect(),
+                                status: "failed".to_string(),
+                                error_message: Some(error.to_string()),
+                                created_at,
+                                completed_at: chrono::Utc::now().to_rfc3339(),
+                            },
+                            &self.id,
+                        )
+                    }
+                }
             }
             Err(error) => {
                 tracing::warn!(
@@ -270,8 +373,126 @@ impl CognitiveLifeAgent {
                     error = %error,
                     "life agent agent-api tick request failed"
                 );
-                None
+                persist_internal_session_record(
+                    &trigger.runtime,
+                    AgentSessionRecord {
+                        session_id: session_id.clone(),
+                        trigger_source,
+                        provider: profile.provider,
+                        model: profile.model,
+                        prompt: Some(trigger.prompt),
+                        content: String::new(),
+                        assistant_turn: AssistantTurn {
+                            content: String::new(),
+                            tool_calls: Vec::new(),
+                        },
+                        tool_calls: Vec::new(),
+                        status: "failed".to_string(),
+                        error_message: Some(error.to_string()),
+                        created_at,
+                        completed_at: chrono::Utc::now().to_rfc3339(),
+                    },
+                    &self.id,
+                )
             }
+        }
+    }
+}
+
+fn build_internal_tools(trigger: &AgentApiTickTrigger) -> Vec<ToolDef> {
+    trigger
+        .requested_tools
+        .iter()
+        .filter_map(|tool_name| match tool_name.as_str() {
+            GET_RECENT_EVENTS_TOOL => {
+                let (def, _) = get_recent_events_tool(
+                    Arc::clone(&trigger.runtime.eventlog_store),
+                    trigger.scope_key.clone(),
+                );
+                Some(ToolDef {
+                    name: def.name,
+                    description: def.description,
+                    input_schema: def.input_schema,
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn build_continuation_history(
+    prompt: String,
+    assistant_turn: AssistantTurn,
+    tool_results: Vec<TurnItem>,
+) -> Vec<TurnItem> {
+    let mut history = vec![
+        TurnItem::User { content: prompt },
+        TurnItem::Assistant {
+            content: assistant_turn.content,
+            tool_calls: assistant_turn.tool_calls,
+        },
+    ];
+    history.extend(tool_results);
+    history
+}
+
+async fn execute_internal_tool_calls(
+    runtime: &AgentSessionRuntime,
+    scope_key: Option<String>,
+    tool_calls: &[ToolCall],
+) -> Vec<(ToolCallRecord, TurnItem)> {
+    let mut results = Vec::with_capacity(tool_calls.len());
+    for tool_call in tool_calls {
+        let content = match tool_call.name.as_str() {
+            GET_RECENT_EVENTS_TOOL => {
+                let (_, tool_fn) =
+                    get_recent_events_tool(Arc::clone(&runtime.eventlog_store), scope_key.clone());
+                match tool_fn(tool_call.input.clone()).await {
+                    Ok(content) => content,
+                    Err(error) => format!("Tool error: {error}"),
+                }
+            }
+            _ => format!("Unsupported internal tool: {}", tool_call.name),
+        };
+
+        results.push((
+            ToolCallRecord {
+                tool_name: tool_call.name.clone(),
+                input: tool_call.input.clone(),
+                output: Some(content.clone()),
+            },
+            TurnItem::ToolResult {
+                tool_call_id: tool_call.id.clone(),
+                tool_name: tool_call.name.clone(),
+                content,
+            },
+        ));
+    }
+
+    results
+}
+
+fn persist_internal_session_record(
+    runtime: &AgentSessionRuntime,
+    record: AgentSessionRecord,
+    agent_id: &str,
+) -> Option<String> {
+    match runtime.agent_api_session_store.upsert(record.clone()) {
+        Ok(_) => {
+            tracing::info!(
+                agent_id = %agent_id,
+                session_id = %record.session_id,
+                "life agent persisted internal agent-api session"
+            );
+            Some(record.session_id)
+        }
+        Err(error) => {
+            tracing::warn!(
+                agent_id = %agent_id,
+                error = %error,
+                "life agent failed to persist internal agent-api session"
+            );
+            None
         }
     }
 }
@@ -420,6 +641,7 @@ mod tests {
     use crate::config::types::USER_CONFIG_SCOPE;
     use crate::eventlog::{EventLogStore, EventRecord};
     use axum::extract::State as AxumState;
+    use axum::http::StatusCode;
     use axum::{Json, Router, routing::post};
     use serde_json::{Value, json};
     use std::net::SocketAddr;
@@ -487,6 +709,35 @@ mod tests {
         let app = Router::new()
             .route("/chat/completions", post(fake_openai_handler))
             .with_state(Arc::new(AtomicUsize::new(0)));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        (format!("http://{addr}"), shutdown_tx)
+    }
+
+    async fn failing_openai_handler() -> (StatusCode, Json<Value>) {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": {
+                    "message": "upstream unavailable"
+                }
+            })),
+        )
+    }
+
+    async fn spawn_failing_openai_server() -> (String, oneshot::Sender<()>) {
+        let app = Router::new().route("/chat/completions", post(failing_openai_handler));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr: SocketAddr = listener.local_addr().unwrap();
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -685,7 +936,76 @@ mod tests {
         let record = agent_session_store.get(session_id).unwrap().unwrap();
         assert_eq!(record.trigger_source, "life-alpha-tick");
         assert_eq!(record.tool_calls.len(), 1);
+        assert!(
+            record.tool_calls[0]
+                .output
+                .as_deref()
+                .is_some_and(|output| output.contains("接入 runtime HTTP route"))
+        );
         assert!(record.content.contains("RT Agent API"));
+
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn on_tick_persists_failed_internal_agent_api_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = AgentWorkspace::init("life-beta", tmp.path()).unwrap();
+        let cognition = Box::new(LlmCognition::new("life-beta", DEFAULT_SOUL));
+        let config_store = Arc::new(crate::config::ConfigStore::new());
+        let eventlog_store = Arc::new(EventLogStore::new(tmp.path().join("eventlog")));
+        let agent_session_store = Arc::new(AgentSessionStore::new());
+        let runtime = AgentSessionRuntime::new(
+            Arc::clone(&config_store),
+            Arc::clone(&eventlog_store),
+            Arc::clone(&agent_session_store),
+        );
+
+        let (base_url, shutdown_tx) = spawn_failing_openai_server().await;
+        config_store
+            .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+            .unwrap();
+        config_store
+            .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+            .unwrap();
+        config_store
+            .put(put_config("exomind:agentApiBaseUrl", base_url, false))
+            .unwrap();
+        config_store
+            .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+            .unwrap();
+
+        let agent = CognitiveLifeAgent::new(
+            "life-beta",
+            "认知生命体 Beta",
+            workspace,
+            cognition,
+        )
+        .with_agent_api_tick_trigger(AgentApiTickTrigger::new(runtime));
+
+        let energy = AgentEnergySnapshot {
+            agent_id: "life-beta".to_string(),
+            current: 90,
+            max: 100,
+            ratio: 0.9,
+            tick_cost: 10,
+            phase: "normal".to_string(),
+            is_dormant: false,
+        };
+
+        let _ = agent.on_tick(&energy).await;
+
+        let state = agent.workspace().load_state().unwrap();
+        let session_id = state["agent_api_session_id"].as_str().unwrap();
+        let record = agent_session_store.get(session_id).unwrap().unwrap();
+        assert_eq!(record.trigger_source, "life-beta-tick");
+        assert_eq!(record.status, "failed");
+        assert!(
+            record
+                .error_message
+                .as_deref()
+                .is_some_and(|message| message.contains("OpenAI HTTP 500"))
+        );
 
         let _ = shutdown_tx.send(());
     }
