@@ -12,8 +12,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::AppState;
 use crate::pty::{
-    ClaudeSessionInfo, PtyAgentInfo, PtyAgentType, PtyError, PtyHistoricalSessionInfo,
-    PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
+    ClaudeSessionInfo, PtyAgentInfo, PtyAgentStatus, PtyAgentType, PtyError,
+    PtyHistoricalSessionInfo, PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
 };
 use crate::routes::sessions::{broadcast_session_created, broadcast_session_updated};
 use crate::session::{
@@ -44,6 +44,11 @@ struct HistoricalSessionsQuery {
     agent_type: PtyAgentType,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct PtyStreamEofPayload {
+    code: Option<i32>,
+}
+
 // ── Error mapping ───────────────────────────────────────────────
 
 fn map_pty_error(err: PtyError) -> (StatusCode, String) {
@@ -69,6 +74,29 @@ fn build_pty_context(info: &PtyAgentInfo) -> WorkContext {
         worktree_path: Some(info.workdir.clone()),
         work_dir: Some(info.workdir.clone()),
         ..Default::default()
+    }
+}
+
+fn serialize_pty_eof_payload(exit_code: Option<i32>) -> Option<String> {
+    exit_code.and_then(|code| serde_json::to_string(&PtyStreamEofPayload { code: Some(code) }).ok())
+}
+
+fn build_pty_eof_event(exit_code: Option<i32>) -> Event {
+    let event = Event::default().event("eof");
+    if let Some(payload) = serialize_pty_eof_payload(exit_code) {
+        event.data(payload)
+    } else {
+        event.data("")
+    }
+}
+
+async fn resolve_pty_exit_code_for_eof(state: &AppState, id: &str) -> Option<i32> {
+    match state.pty_manager.refresh_process_state(id).await {
+        Ok(Some(info)) => match info.status {
+            PtyAgentStatus::Exited { code } => Some(code),
+            _ => None,
+        },
+        Ok(None) | Err(_) => None,
     }
 }
 
@@ -280,6 +308,8 @@ async fn stream_pty_output(
 
     // Forward broadcast → mpsc in a spawned task.
     tokio::spawn(async move {
+        let stream_state = state.clone();
+        let stream_id = id.clone();
         let (buffer_snapshot, rx) = match live_subscription {
             Some((buffer_snapshot, rx)) => (buffer_snapshot, Some(rx)),
             None => (persisted_snapshot.unwrap_or_default(), None),
@@ -298,7 +328,7 @@ async fn stream_pty_output(
 
         if rx.is_none() {
             let _ = event_tx
-                .send(Ok(Event::default().event("eof").data("")))
+                .send(Ok(build_pty_eof_event(None)))
                 .await;
             return;
         }
@@ -317,8 +347,10 @@ async fn stream_pty_output(
                             Ok(Event::default().event("output").data(encoded))
                         }
                         Ok(PtyOutputMsg::Eof) => {
+                            let exit_code =
+                                resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
                             let _ = event_tx
-                                .send(Ok(Event::default().event("eof").data("")))
+                                .send(Ok(build_pty_eof_event(exit_code)))
                                 .await;
                             return;
                         }
@@ -327,8 +359,10 @@ async fn stream_pty_output(
                             Ok(Event::default().event("warning").data(msg))
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            let exit_code =
+                                resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
                             let _ = event_tx
-                                .send(Ok(Event::default().event("eof").data("")))
+                                .send(Ok(build_pty_eof_event(exit_code)))
                                 .await;
                             return;
                         }
@@ -432,4 +466,26 @@ pub fn router() -> Router<AppState> {
         .route("/pty/:id/resize", post(resize_pty))
         .route("/pty/:id/stop", post(stop_pty_agent))
         .route("/pty/:id", delete(remove_pty_agent))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::serialize_pty_eof_payload;
+
+    #[test]
+    fn serialize_pty_eof_payload_includes_known_exit_code() {
+        assert_eq!(
+            serialize_pty_eof_payload(Some(1)).as_deref(),
+            Some(r#"{"code":1}"#)
+        );
+        assert_eq!(
+            serialize_pty_eof_payload(Some(0)).as_deref(),
+            Some(r#"{"code":0}"#)
+        );
+    }
+
+    #[test]
+    fn serialize_pty_eof_payload_omits_unknown_exit_code() {
+        assert_eq!(serialize_pty_eof_payload(None), None);
+    }
 }

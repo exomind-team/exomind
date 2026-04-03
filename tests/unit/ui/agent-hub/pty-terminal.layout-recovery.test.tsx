@@ -68,7 +68,13 @@ class MockEventSource {
 
   close = vi.fn();
 
-  addEventListener = vi.fn();
+  listeners = new Map<string, Array<(event: MessageEvent) => void>>();
+
+  addEventListener = vi.fn((type: string, handler: (event: MessageEvent) => void) => {
+    const handlers = this.listeners.get(type) ?? [];
+    handlers.push(handler);
+    this.listeners.set(type, handlers);
+  });
 
   onerror: ((this: EventSource, ev: Event) => unknown) | null = null;
 
@@ -76,6 +82,12 @@ class MockEventSource {
 
   constructor(_url: string) {
     MockEventSource.instances.push(this);
+  }
+
+  emit(type: string, data = '') {
+    for (const handler of this.listeners.get(type) ?? []) {
+      handler({ data } as MessageEvent);
+    }
   }
 }
 
@@ -242,5 +254,53 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     MockEventSource.instances[1]?.onerror?.call({} as EventSource, new Event('error'));
 
     expect(onInitialConnectionFailure).not.toHaveBeenCalled();
+  });
+
+  it('shows the non-zero exit code in the EOF banner（非零退出码会显示在退出提示中）', async () => {
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-exit-code"
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await vi.runOnlyPendingTimersAsync();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    MockEventSource.instances[0]?.emit('eof', JSON.stringify({ code: 1 }));
+
+    expect(xtermState.terminal.write).toHaveBeenCalledWith(
+      '\r\n\x1b[90m[Process exited with code 1]\x1b[0m\r\n',
+    );
+  });
+
+  it('keeps the generic EOF banner for zero or unknown exit code（零或未知退出码保持通用提示）', async () => {
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-exit-code-default"
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await vi.runOnlyPendingTimersAsync();
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    MockEventSource.instances[0]?.emit('eof', JSON.stringify({ code: 0 }));
+    MockEventSource.instances[0]?.emit('eof', '');
+
+    expect(xtermState.terminal.write).toHaveBeenNthCalledWith(
+      1,
+      '\r\n\x1b[90m[Process exited]\x1b[0m\r\n',
+    );
+    expect(xtermState.terminal.write).toHaveBeenNthCalledWith(
+      2,
+      '\r\n\x1b[90m[Process exited]\x1b[0m\r\n',
+    );
   });
 });

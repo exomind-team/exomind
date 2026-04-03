@@ -18,6 +18,28 @@ export interface PtyTerminalProps {
 const INITIAL_STREAM_CONNECT_RETRY_LIMIT = 2;
 const INITIAL_STREAM_CONNECT_RETRY_DELAY_MS = 250;
 
+function parsePtyExitCode(data: string): number | null {
+  if (!data) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(data) as { code?: unknown };
+    return typeof payload.code === 'number' && Number.isInteger(payload.code)
+      ? payload.code
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatPtyProcessExitedMessage(exitCode: number | null): string {
+  if (exitCode != null && exitCode !== 0) {
+    return `[Process exited with code ${exitCode}]`;
+  }
+  return '[Process exited]';
+}
+
 // ── Component ──────────────────────────────────────────────────
 
 export function PtyTerminal({
@@ -273,9 +295,11 @@ export function PtyTerminal({
         }
       });
 
-      es.addEventListener('eof', () => {
+      es.addEventListener('eof', (event) => {
         initialStreamConnected = true;
-        terminal.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
+        const exitCode = parsePtyExitCode(event.data);
+        const message = formatPtyProcessExitedMessage(exitCode);
+        terminal.write(`\r\n\x1b[90m${message}\x1b[0m\r\n`);
       });
 
       es.onerror = () => {
