@@ -10,6 +10,7 @@ use crate::energy::AgentEnergySnapshot;
 use crate::signal::types::SignalEvent;
 
 pub mod api;
+pub mod broker;
 pub mod claude;
 pub mod codex;
 pub mod cognition;
