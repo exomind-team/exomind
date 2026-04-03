@@ -14,10 +14,14 @@ use super::broker::{
     BrokerError as AgentBrokerError, ToolCall as BrokerToolCall, ToolDef as BrokerToolDef,
     TurnItem,
 };
+use super::proposal_tools::{
+    execute_proposal_tool_call, is_proposal_tool_name, proposal_tool_defs,
+};
 use super::tools::eventlog::get_recent_events_tool;
 use super::tools::{GET_RECENT_EVENTS_TOOL, ToolDef, ToolRegistry, ToolUse};
 use crate::AppState;
 use crate::config::types::USER_CONFIG_SCOPE;
+use crate::proposal::{ProposalStore, Publisher, PublisherType};
 
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 const CONFIG_KEY_PROVIDER: &str = "exomind:agentApiProvider";
@@ -29,6 +33,7 @@ const CONFIG_KEY_API_KEY: &str = "exomind:agentApiApiKey";
 pub struct AgentSessionRuntime {
     pub config_store: Arc<crate::config::ConfigStore>,
     pub eventlog_store: Arc<crate::eventlog::EventLogStore>,
+    pub proposal_store: Arc<ProposalStore>,
     pub agent_api_session_store: Arc<AgentSessionStore>,
 }
 
@@ -36,11 +41,13 @@ impl AgentSessionRuntime {
     pub fn new(
         config_store: Arc<crate::config::ConfigStore>,
         eventlog_store: Arc<crate::eventlog::EventLogStore>,
+        proposal_store: Arc<ProposalStore>,
         agent_api_session_store: Arc<AgentSessionStore>,
     ) -> Self {
         Self {
             config_store,
             eventlog_store,
+            proposal_store,
             agent_api_session_store,
         }
     }
@@ -49,6 +56,7 @@ impl AgentSessionRuntime {
         Self::new(
             Arc::clone(&state.config_store),
             Arc::clone(&state.eventlog_store),
+            Arc::clone(&state.proposal_store),
             Arc::clone(&state.agent_api_session_store),
         )
     }
@@ -402,7 +410,11 @@ pub fn build_tool_registry(
     user_id: Option<String>,
     requested_tools: &[String],
 ) -> Result<ToolRegistry, SessionError> {
-    build_tool_registry_for_runtime(&AgentSessionRuntime::from_state(state), user_id, requested_tools)
+    build_tool_registry_for_runtime(
+        &AgentSessionRuntime::from_state(state),
+        user_id,
+        requested_tools,
+    )
 }
 
 pub fn build_tool_registry_for_runtime(
@@ -420,6 +432,48 @@ pub fn build_tool_registry_for_runtime(
                 let (def, tool_fn) =
                     get_recent_events_tool(Arc::clone(&runtime.eventlog_store), user_id.clone());
                 registry.register(def, tool_fn);
+            }
+            other if is_proposal_tool_name(other) => {
+                let proposal_store = Arc::clone(&runtime.proposal_store);
+                let scope_key = user_id.clone();
+                let publisher = Publisher {
+                    publisher_type: PublisherType::Agent,
+                    id: "api-agent".to_string(),
+                    name: "API Agent".to_string(),
+                };
+                let def = proposal_tool_defs()
+                    .into_iter()
+                    .find(|item| item.name == other)
+                    .ok_or_else(|| SessionError::UnsupportedTool(other.to_string()))?;
+                registry.register(
+                    ToolDef {
+                        name: def.name.clone(),
+                        description: def.description.clone(),
+                        input_schema: def.input_schema.clone(),
+                    },
+                    Box::new(move |input| {
+                        let proposal_store = Arc::clone(&proposal_store);
+                        let scope_key = scope_key.clone();
+                        let publisher = publisher.clone();
+                        let tool_name = def.name.clone();
+                        Box::pin(async move {
+                            execute_proposal_tool_call(
+                                proposal_store,
+                                scope_key,
+                                publisher,
+                                &super::broker::ToolCall {
+                                    id: "runtime-tool-call".to_string(),
+                                    name: tool_name,
+                                    input,
+                                },
+                            )
+                            .await
+                            .map_err(|error| {
+                                super::tools::ToolError::ExecutionFailed(error.to_string())
+                            })
+                        })
+                    }),
+                );
             }
             other => {
                 return Err(SessionError::UnsupportedTool(other.to_string()));
@@ -652,12 +706,7 @@ pub async fn run_broker_agent_session_with_runtime(
     match broker.run(request).await {
         Ok(result) => {
             let record = record_from_broker_result(
-                session_id,
-                trigger,
-                &profile,
-                prompt,
-                created_at,
-                result,
+                session_id, trigger, &profile, prompt, created_at, result,
             );
             runtime.agent_api_session_store.upsert(record.clone())?;
             Ok(record)
@@ -1121,11 +1170,13 @@ enum AnthropicContentBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::proposal_tools::ADD_TASK_PROPOSAL_TOOL;
     use crate::agent::tools::{
         GET_RECENT_EVENTS_TOOL, ToolRegistry, eventlog::get_recent_events_tool,
     };
     use crate::eventlog::{EventLogStore, EventRecord};
     use crate::mesh::MeshState;
+    use crate::proposal::{ActionType, ProposalFilter};
     use crate::signal::SignalPool;
     use axum::extract::State;
     use axum::routing::post;
@@ -1323,6 +1374,52 @@ mod tests {
             .unwrap();
         assert_eq!(persisted.tool_calls[0].tool_name, GET_RECENT_EVENTS_TOOL);
         assert_eq!(persisted.status, "completed");
+    }
+
+    #[tokio::test]
+    async fn build_tool_registry_for_runtime_registers_and_executes_proposal_tools() {
+        let dir = tempdir().unwrap();
+        let proposal_store = Arc::new(crate::proposal::ProposalStore::new());
+        let runtime = AgentSessionRuntime::new(
+            Arc::new(crate::config::ConfigStore::new()),
+            Arc::new(EventLogStore::new(dir.path().to_path_buf())),
+            Arc::clone(&proposal_store),
+            Arc::new(AgentSessionStore::new()),
+        );
+
+        let registry = build_tool_registry_for_runtime(
+            &runtime,
+            Some("profile-alpha".to_string()),
+            &[ADD_TASK_PROPOSAL_TOOL.to_string()],
+        )
+        .unwrap();
+        assert_eq!(registry.list_defs().len(), 1);
+        assert_eq!(registry.list_defs()[0].name, ADD_TASK_PROPOSAL_TOOL);
+
+        let result = registry
+            .dispatch(&ToolUse {
+                id: "call-1".to_string(),
+                name: ADD_TASK_PROPOSAL_TOOL.to_string(),
+                input: json!({
+                    "title": "任务提案：验收任务依赖图新布局",
+                    "body": "根据事件日志创建任务草案",
+                    "taskTitle": "验收任务依赖图新布局",
+                    "description": "为任务依赖图新布局安排明日验收",
+                    "priority": "high",
+                    "tags": ["task-dag", "验收"]
+                }),
+            })
+            .await;
+
+        assert_eq!(result.tool_use_id, "call-1");
+        assert!(result.content.contains("\"actionType\":\"create_task\""));
+
+        let proposals = proposal_store
+            .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
+            .unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::CreateTask);
+        assert_eq!(proposals[0].title, "任务提案：验收任务依赖图新布局");
     }
 
     #[test]

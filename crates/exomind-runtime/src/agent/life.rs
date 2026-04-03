@@ -4,19 +4,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
-use super::broker::{AgentTurnBroker, AgentTurnRequest, AgentTurnResult, AssistantTurn, ToolCall, ToolDef, TurnItem};
+use super::broker::{
+    AgentTurnBroker, AgentTurnRequest, AgentTurnResult, AssistantTurn, ToolCall, ToolDef, TurnItem,
+};
+use super::cognition::{
+    BodyStatus, CognitionContext, CognitionEngine, CognitionOutput, KnowledgeOp,
+};
+use super::proposal_tools::{
+    execute_proposal_tool_call, is_proposal_tool_name, proposal_tool_defs,
+};
 use super::session::{
     AgentSessionRecord, AgentSessionRuntime, SessionError, ToolCallRecord,
     resolve_provider_profile_with_runtime,
 };
-use super::tools::eventlog::get_recent_events_tool;
 use super::tools::GET_RECENT_EVENTS_TOOL;
-use super::cognition::{
-    BodyStatus, CognitionContext, CognitionEngine, CognitionOutput, KnowledgeOp,
-};
+use super::tools::eventlog::get_recent_events_tool;
 use super::workspace::{ActionEntry, AgentWorkspace};
 use super::{Agent, ChatChunk, ChatRequest};
 use crate::energy::AgentEnergySnapshot;
+use crate::proposal::{Publisher, PublisherType};
 use crate::signal::types::SignalEvent;
 
 // ---------------------------------------------------------------------------
@@ -239,33 +245,34 @@ impl CognitiveLifeAgent {
             .await;
 
         match first_result {
-            Ok(AgentTurnResult::Final { assistant_turn }) => {
-                persist_internal_session_record(
-                    &trigger.runtime,
-                    AgentSessionRecord {
-                        session_id: session_id.clone(),
-                        trigger_source,
-                        provider: profile.provider,
-                        model: profile.model,
-                        prompt: Some(trigger.prompt),
-                        content: assistant_turn.content.clone(),
-                        assistant_turn,
-                        tool_calls: Vec::new(),
-                        status: "completed".to_string(),
-                        error_message: None,
-                        created_at,
-                        completed_at: chrono::Utc::now().to_rfc3339(),
-                    },
-                    &self.id,
-                )
-            }
+            Ok(AgentTurnResult::Final { assistant_turn }) => persist_internal_session_record(
+                &trigger.runtime,
+                AgentSessionRecord {
+                    session_id: session_id.clone(),
+                    trigger_source,
+                    provider: profile.provider,
+                    model: profile.model,
+                    prompt: Some(trigger.prompt),
+                    content: assistant_turn.content.clone(),
+                    assistant_turn,
+                    tool_calls: Vec::new(),
+                    status: "completed".to_string(),
+                    error_message: None,
+                    created_at,
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                },
+                &self.id,
+            ),
             Ok(AgentTurnResult::NeedsToolCalls {
                 assistant_turn,
                 tool_calls,
             }) => {
-                let executed_tool_calls =
-                    execute_internal_tool_calls(&trigger.runtime, trigger.scope_key.clone(), &tool_calls)
-                        .await;
+                let executed_tool_calls = execute_internal_tool_calls(
+                    &trigger.runtime,
+                    trigger.scope_key.clone(),
+                    &tool_calls,
+                )
+                .await;
                 let tool_results = executed_tool_calls
                     .iter()
                     .map(|(_, turn_item)| turn_item.clone())
@@ -400,6 +407,8 @@ impl CognitiveLifeAgent {
 }
 
 fn build_internal_tools(trigger: &AgentApiTickTrigger) -> Vec<ToolDef> {
+    let proposal_defs = proposal_tool_defs();
+
     trigger
         .requested_tools
         .iter()
@@ -415,6 +424,13 @@ fn build_internal_tools(trigger: &AgentApiTickTrigger) -> Vec<ToolDef> {
                     input_schema: def.input_schema,
                 })
             }
+            other if is_proposal_tool_name(other) => proposal_defs.iter().find_map(|def| {
+                (def.name == other).then(|| ToolDef {
+                    name: def.name.clone(),
+                    description: def.description.clone(),
+                    input_schema: def.input_schema.clone(),
+                })
+            }),
             _ => None,
         })
         .collect()
@@ -442,12 +458,31 @@ async fn execute_internal_tool_calls(
     tool_calls: &[ToolCall],
 ) -> Vec<(ToolCallRecord, TurnItem)> {
     let mut results = Vec::with_capacity(tool_calls.len());
+    let publisher = Publisher {
+        publisher_type: PublisherType::Agent,
+        id: "api-agent".to_string(),
+        name: "API Agent".to_string(),
+    };
+
     for tool_call in tool_calls {
         let content = match tool_call.name.as_str() {
             GET_RECENT_EVENTS_TOOL => {
                 let (_, tool_fn) =
                     get_recent_events_tool(Arc::clone(&runtime.eventlog_store), scope_key.clone());
                 match tool_fn(tool_call.input.clone()).await {
+                    Ok(content) => content,
+                    Err(error) => format!("Tool error: {error}"),
+                }
+            }
+            other if is_proposal_tool_name(other) => {
+                match execute_proposal_tool_call(
+                    Arc::clone(&runtime.proposal_store),
+                    scope_key.clone(),
+                    publisher.clone(),
+                    tool_call,
+                )
+                .await
+                {
                     Ok(content) => content,
                     Err(error) => format!("Tool error: {error}"),
                 }
@@ -635,11 +670,13 @@ impl Agent for CognitiveLifeAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::session::{AgentSessionRuntime, AgentSessionStore};
     use crate::agent::llm_cognition::LlmCognition;
+    use crate::agent::proposal_tools::ADD_TASK_PROPOSAL_TOOL;
+    use crate::agent::session::{AgentSessionRuntime, AgentSessionStore};
     use crate::config::PutConfigEntryInput;
     use crate::config::types::USER_CONFIG_SCOPE;
     use crate::eventlog::{EventLogStore, EventRecord};
+    use crate::proposal::{ActionType, ProposalFilter, ProposalStore};
     use axum::extract::State as AxumState;
     use axum::http::StatusCode;
     use axum::{Json, Router, routing::post};
@@ -675,7 +712,10 @@ mod tests {
     ) -> Json<Value> {
         let turn = call_count.fetch_add(1, AtomicOrdering::SeqCst);
         if turn == 0 {
-            assert_eq!(payload["tools"][0]["function"]["name"], GET_RECENT_EVENTS_TOOL);
+            assert_eq!(
+                payload["tools"][0]["function"]["name"],
+                GET_RECENT_EVENTS_TOOL
+            );
             return Json(json!({
                 "choices": [{
                     "message": {
@@ -868,6 +908,7 @@ mod tests {
         let runtime = AgentSessionRuntime::new(
             Arc::clone(&config_store),
             Arc::clone(&eventlog_store),
+            Arc::new(crate::proposal::ProposalStore::new()),
             Arc::clone(&agent_session_store),
         );
 
@@ -898,25 +939,32 @@ mod tests {
 
         let (base_url, shutdown_tx) = spawn_openai_mock_server().await;
         config_store
-            .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+            .put(put_config(
+                "exomind:agentApiProvider",
+                "openai".to_string(),
+                false,
+            ))
             .unwrap();
         config_store
-            .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+            .put(put_config(
+                "exomind:agentApiModel",
+                "gpt-test".to_string(),
+                false,
+            ))
             .unwrap();
         config_store
             .put(put_config("exomind:agentApiBaseUrl", base_url, false))
             .unwrap();
         config_store
-            .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+            .put(put_config(
+                "exomind:agentApiApiKey",
+                "sk-test".to_string(),
+                true,
+            ))
             .unwrap();
 
-        let agent = CognitiveLifeAgent::new(
-            "life-alpha",
-            "认知生命体 Alpha",
-            workspace,
-            cognition,
-        )
-        .with_agent_api_tick_trigger(AgentApiTickTrigger::new(runtime));
+        let agent = CognitiveLifeAgent::new("life-alpha", "认知生命体 Alpha", workspace, cognition)
+            .with_agent_api_tick_trigger(AgentApiTickTrigger::new(runtime));
 
         let energy = AgentEnergySnapshot {
             agent_id: "life-alpha".to_string(),
@@ -948,6 +996,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn internal_proposal_tool_calls_use_shared_helper_and_persist_proposals() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proposal_store = Arc::new(ProposalStore::new());
+        let runtime = AgentSessionRuntime::new(
+            Arc::new(crate::config::ConfigStore::new()),
+            Arc::new(EventLogStore::new(tmp.path().join("eventlog"))),
+            Arc::clone(&proposal_store),
+            Arc::new(AgentSessionStore::new()),
+        );
+
+        let mut trigger = AgentApiTickTrigger::new(runtime.clone())
+            .with_scope_key(Some("profile-alpha".to_string()));
+        trigger.requested_tools = vec![ADD_TASK_PROPOSAL_TOOL.to_string()];
+        let tools = build_internal_tools(&trigger);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, ADD_TASK_PROPOSAL_TOOL);
+
+        let executed = execute_internal_tool_calls(
+            &runtime,
+            Some("profile-alpha".to_string()),
+            &[ToolCall {
+                id: "proposal-call-1".to_string(),
+                name: ADD_TASK_PROPOSAL_TOOL.to_string(),
+                input: json!({
+                    "title": "为依赖图验收创建任务提案",
+                    "body": "事件日志提示明天需要验收任务依赖图新布局",
+                    "taskTitle": "验收任务依赖图新布局",
+                    "description": "结合最近 task-dag 改动做验收",
+                    "tags": ["task-dag", "acceptance"],
+                    "priority": "high"
+                }),
+            }],
+        )
+        .await;
+
+        assert_eq!(executed.len(), 1);
+        assert_eq!(executed[0].0.tool_name, ADD_TASK_PROPOSAL_TOOL);
+        assert!(
+            executed[0]
+                .0
+                .output
+                .as_deref()
+                .is_some_and(|output| output.contains("\"actionType\":\"create_task\""))
+        );
+
+        let proposals = proposal_store
+            .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
+            .unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::CreateTask);
+        assert_eq!(proposals[0].title, "为依赖图验收创建任务提案");
+    }
+
+    #[tokio::test]
     async fn on_tick_persists_failed_internal_agent_api_session() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = AgentWorkspace::init("life-beta", tmp.path()).unwrap();
@@ -958,30 +1060,38 @@ mod tests {
         let runtime = AgentSessionRuntime::new(
             Arc::clone(&config_store),
             Arc::clone(&eventlog_store),
+            Arc::new(crate::proposal::ProposalStore::new()),
             Arc::clone(&agent_session_store),
         );
 
         let (base_url, shutdown_tx) = spawn_failing_openai_server().await;
         config_store
-            .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+            .put(put_config(
+                "exomind:agentApiProvider",
+                "openai".to_string(),
+                false,
+            ))
             .unwrap();
         config_store
-            .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+            .put(put_config(
+                "exomind:agentApiModel",
+                "gpt-test".to_string(),
+                false,
+            ))
             .unwrap();
         config_store
             .put(put_config("exomind:agentApiBaseUrl", base_url, false))
             .unwrap();
         config_store
-            .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+            .put(put_config(
+                "exomind:agentApiApiKey",
+                "sk-test".to_string(),
+                true,
+            ))
             .unwrap();
 
-        let agent = CognitiveLifeAgent::new(
-            "life-beta",
-            "认知生命体 Beta",
-            workspace,
-            cognition,
-        )
-        .with_agent_api_tick_trigger(AgentApiTickTrigger::new(runtime));
+        let agent = CognitiveLifeAgent::new("life-beta", "认知生命体 Beta", workspace, cognition)
+            .with_agent_api_tick_trigger(AgentApiTickTrigger::new(runtime));
 
         let energy = AgentEnergySnapshot {
             agent_id: "life-beta".to_string(),

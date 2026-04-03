@@ -13,6 +13,10 @@ use exomind_runtime::agent::api::ApiProviderProfile;
 use exomind_runtime::agent::broker::{ToolDef, TurnItem};
 use exomind_runtime::agent::life::{AgentApiTickTrigger, CognitiveLifeAgent};
 use exomind_runtime::agent::llm_cognition::LlmCognition;
+use exomind_runtime::agent::proposal_tools::{
+    ADD_EVENT_PROPOSAL_TOOL, ADD_TASK_PROPOSAL_TOOL, ADD_TIMEBLOCK_PROPOSAL_TOOL,
+    execute_proposal_tool_call, proposal_tool_defs,
+};
 use exomind_runtime::agent::session::{
     AgentSessionRuntime, AgentSessionStore, AgentTrigger, SessionError,
     run_broker_agent_session_with_runtime,
@@ -23,6 +27,9 @@ use exomind_runtime::config::types::USER_CONFIG_SCOPE;
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
 use exomind_runtime::energy::AgentEnergySnapshot;
 use exomind_runtime::eventlog::{EventLogStore, EventRecord};
+use exomind_runtime::proposal::{
+    ActionType, ProposalFilter, ProposalStore, Publisher, PublisherType,
+};
 use exomind_runtime::routes::{agent_sessions, eventlog};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -42,14 +49,8 @@ fn put_config(key: &str, value: String, sensitive: bool) -> PutConfigEntryInput 
 }
 
 fn make_test_state(data_dir: &Path) -> AppState {
-    let mut state = AppState::new_runtime(
-        0,
-        "agent-api-rt-test".to_string(),
-        None,
-        None,
-        false,
-        None,
-    );
+    let mut state =
+        AppState::new_runtime(0, "agent-api-rt-test".to_string(), None, None, false, None);
     let eventlog_store = Arc::new(EventLogStore::new(data_dir.join("eventlog")));
     let agent_api_session_store = Arc::new(AgentSessionStore::new());
     let config_store = Arc::new(ConfigStore::new());
@@ -70,7 +71,10 @@ async fn fake_openai_handler(
     let turn = call_count.fetch_add(1, Ordering::SeqCst);
     if turn == 0 {
         assert_eq!(payload["stream"], false);
-        assert_eq!(payload["tools"][0]["function"]["name"], GET_RECENT_EVENTS_TOOL);
+        assert_eq!(
+            payload["tools"][0]["function"]["name"],
+            GET_RECENT_EVENTS_TOOL
+        );
         return Json(json!({
             "choices": [{
                 "message": {
@@ -107,9 +111,121 @@ async fn fake_openai_handler(
     }))
 }
 
+async fn fake_openai_proposal_story_handler(
+    AxumState(call_count): AxumState<Arc<AtomicUsize>>,
+    Json(payload): Json<Value>,
+) -> Json<Value> {
+    let turn = call_count.fetch_add(1, Ordering::SeqCst);
+
+    if turn == 0 {
+        let tool_names = payload["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["function"]["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert!(tool_names.contains(&ADD_TASK_PROPOSAL_TOOL.to_string()));
+        assert!(tool_names.contains(&ADD_TIMEBLOCK_PROPOSAL_TOOL.to_string()));
+        assert!(tool_names.contains(&ADD_EVENT_PROPOSAL_TOOL.to_string()));
+
+        return Json(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "proposal-tool-1",
+                        "type": "function",
+                        "function": {
+                            "name": ADD_TASK_PROPOSAL_TOOL,
+                            "arguments": "{\"title\":\"为任务依赖图新布局创建验收任务提案\",\"body\":\"事件日志提到明天可能要验收任务依赖图新布局，需要提前形成可执行草案。\",\"taskTitle\":\"验收任务依赖图新布局\",\"description\":\"基于最近 task-dag 改动，检查新布局与搜索交互。\",\"tags\":[\"task-dag\",\"acceptance\"],\"priority\":\"high\"}"
+                        }
+                    }]
+                }
+            }]
+        }));
+    }
+
+    if turn == 1 {
+        assert!(payload["messages"].as_array().is_some_and(|messages| {
+            messages
+                .iter()
+                .any(|message| message["role"] == json!("tool"))
+        }));
+        return Json(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "proposal-tool-2",
+                        "type": "function",
+                        "function": {
+                            "name": ADD_TIMEBLOCK_PROPOSAL_TOOL,
+                            "arguments": "{\"title\":\"为任务依赖图验收预留时间块\",\"body\":\"日志里已经出现明天验收意图，且 task-dag 相关功能刚落地，适合补一个聚焦验收时间块。\",\"name\":\"任务依赖图新布局验收\",\"description\":\"集中检查任务依赖图的新布局与搜索体验\",\"tags\":[\"task-dag\",\"review\"],\"mode\":\"countdown\",\"targetMinutes\":45}"
+                        }
+                    }]
+                }
+            }]
+        }));
+    }
+
+    if turn == 2 {
+        return Json(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "proposal-tool-3",
+                        "type": "function",
+                        "function": {
+                            "name": ADD_EVENT_PROPOSAL_TOOL,
+                            "arguments": "{\"title\":\"补一条时间块完成总结事件提案\",\"body\":\"事件日志显示刚完成一个时间块并准备开始总结，适合补一条 Agent 总结事件草案。\",\"content\":\"Agent 总结：已完成文件搜索验证，下一步转向任务依赖图新布局验收与回填。\",\"tags\":[\"agent-summary\",\"timeblock-review\"]}"
+                        }
+                    }]
+                }
+            }]
+        }));
+    }
+
+    Json(json!({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "我已根据事件日志创建任务提案、计划时间块提案和总结事件提案，其中任务提案用于明天验收任务依赖图新布局。",
+                "tool_calls": []
+            }
+        }]
+    }))
+}
+
 async fn spawn_fake_openai_server() -> (String, oneshot::Sender<()>) {
     let app = Router::new()
         .route("/chat/completions", post(fake_openai_handler))
+        .with_state(Arc::new(AtomicUsize::new(0)));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    (format!("http://{addr}"), shutdown_tx)
+}
+
+async fn spawn_fake_openai_proposal_story_server() -> (String, oneshot::Sender<()>) {
+    let app = Router::new()
+        .route(
+            "/chat/completions",
+            post(fake_openai_proposal_story_handler),
+        )
         .with_state(Arc::new(AtomicUsize::new(0)));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -221,11 +337,19 @@ async fn route_runs_session_with_runtime_config_fallback() {
     let (base_url, shutdown_tx) = spawn_fake_openai_server().await;
     state
         .config_store
-        .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+        .put(put_config(
+            "exomind:agentApiProvider",
+            "openai".to_string(),
+            false,
+        ))
         .unwrap();
     state
         .config_store
-        .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+        .put(put_config(
+            "exomind:agentApiModel",
+            "gpt-test".to_string(),
+            false,
+        ))
         .unwrap();
     state
         .config_store
@@ -233,7 +357,11 @@ async fn route_runs_session_with_runtime_config_fallback() {
         .unwrap();
     state
         .config_store
-        .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+        .put(put_config(
+            "exomind:agentApiApiKey",
+            "sk-test".to_string(),
+            true,
+        ))
         .unwrap();
 
     let app = agent_sessions::router().with_state(state);
@@ -272,7 +400,13 @@ async fn route_runs_session_with_runtime_config_fallback() {
     let created: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(created["status"], "needs_tool_calls");
     assert_eq!(created["content"], "");
-    assert_eq!(created["assistantTurn"]["toolCalls"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        created["assistantTurn"]["toolCalls"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(created["toolCalls"].as_array().unwrap().len(), 1);
     assert_eq!(created["toolCalls"][0]["toolName"], GET_RECENT_EVENTS_TOOL);
 
@@ -311,6 +445,7 @@ async fn life_tick_persists_internal_agent_session() {
     let runtime = AgentSessionRuntime::new(
         Arc::clone(&config_store),
         Arc::clone(&eventlog_store),
+        Arc::new(ProposalStore::new()),
         Arc::clone(&agent_api_session_store),
     );
 
@@ -341,16 +476,28 @@ async fn life_tick_persists_internal_agent_session() {
 
     let (base_url, shutdown_tx) = spawn_fake_openai_server().await;
     config_store
-        .put(put_config("exomind:agentApiProvider", "openai".to_string(), false))
+        .put(put_config(
+            "exomind:agentApiProvider",
+            "openai".to_string(),
+            false,
+        ))
         .unwrap();
     config_store
-        .put(put_config("exomind:agentApiModel", "gpt-test".to_string(), false))
+        .put(put_config(
+            "exomind:agentApiModel",
+            "gpt-test".to_string(),
+            false,
+        ))
         .unwrap();
     config_store
         .put(put_config("exomind:agentApiBaseUrl", base_url, false))
         .unwrap();
     config_store
-        .put(put_config("exomind:agentApiApiKey", "sk-test".to_string(), true))
+        .put(put_config(
+            "exomind:agentApiApiKey",
+            "sk-test".to_string(),
+            true,
+        ))
         .unwrap();
 
     let workspace = AgentWorkspace::init("life-alpha", temp.path()).unwrap();
@@ -394,14 +541,15 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
     let runtime = AgentSessionRuntime::new(
         Arc::new(ConfigStore::new()),
         Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
+        Arc::new(ProposalStore::new()),
         Arc::new(AgentSessionStore::new()),
     );
     let system_prompt = Some(
         "你是天气工具测试助理。首轮禁止自然语言回答；你唯一允许的动作是调用 get_weather 工具。只有收到工具结果后，你才能用中文回答天气。"
             .to_string(),
     );
-    let prompt = "今天是什么天气？不要直接回答，先调用 get_weather，参数 date 必须是 today。"
-        .to_string();
+    let prompt =
+        "今天是什么天气？不要直接回答，先调用 get_weather，参数 date 必须是 today。".to_string();
     let tools = vec![weather_tool()];
 
     let first_turn = match run_broker_agent_session_with_runtime(
@@ -464,12 +612,328 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
         }
     };
 
-    assert_eq!(second_turn.status, "completed", "second_turn={second_turn:?}");
+    assert_eq!(
+        second_turn.status, "completed",
+        "second_turn={second_turn:?}"
+    );
     assert!(
         second_turn.content.contains("今天是阴天，气温21.45度"),
         "second_turn={second_turn:?}"
     );
     assert!(second_turn.assistant_turn.tool_calls.is_empty());
+}
+
+#[tokio::test]
+async fn broker_proposal_story_contract_creates_real_proposals() {
+    let temp = tempfile::tempdir().unwrap();
+    let proposal_store = Arc::new(ProposalStore::new());
+    let runtime = AgentSessionRuntime::new(
+        Arc::new(ConfigStore::new()),
+        Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
+        Arc::clone(&proposal_store),
+        Arc::new(AgentSessionStore::new()),
+    );
+    let system_prompt = Some(
+        "你是外心中的提案草案助手。请从事件日志中提取值得形成草案的事项，优先通过工具创建任务提案、计划时间块提案、事件提案。"
+            .to_string(),
+    );
+    let prompt = r#"下面是最近的事件记录和开发上下文：
+2026-04-04 09:10 事件：刚推送 test(rt): add broker file search validation
+2026-04-04 09:35 事件：feat(task-dag): unify dag text and tag search 已在 dev
+2026-04-04 10:20 事件：对了，明天可能要验收下任务依赖图新布局
+2026-04-04 10:45 事件：刚完成一轮 pwd/ls/cd 文件搜索验证，准备回填 issue
+2026-04-04 11:05 事件：完成一个时间块，准备开始总结
+
+请提取其中值得形成草案的事项。至少为“明天可能要验收下任务依赖图新布局”创建一个任务提案；如果上下文表明应该安排时间块或补一条总结事件，也请创建相应草案。完成后请用中文总结你创建了哪些草案以及原因。"#.to_string();
+    let publisher = Publisher {
+        publisher_type: PublisherType::Agent,
+        id: "api-agent".to_string(),
+        name: "API Agent".to_string(),
+    };
+
+    let (base_url, shutdown_tx) = spawn_fake_openai_proposal_story_server().await;
+    let profile = ApiProviderProfile {
+        provider: "openai".to_string(),
+        model: "gpt-test".to_string(),
+        base_url: Some(base_url),
+        api_key: "sk-test".to_string(),
+    };
+
+    let mut history = Vec::new();
+    let mut next_user_message = Some(prompt.clone());
+    let mut turn_count = 0usize;
+
+    loop {
+        turn_count += 1;
+        assert!(turn_count <= 6, "proposal story exceeded turn budget");
+
+        let record = run_broker_agent_session_with_runtime(
+            profile.clone(),
+            system_prompt.clone(),
+            proposal_tool_defs(),
+            history.clone(),
+            next_user_message.take(),
+            AgentTrigger::Internal {
+                source: "agent-turn-broker-proposal-story".to_string(),
+            },
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        if turn_count == 1 {
+            history.push(TurnItem::User {
+                content: prompt.clone(),
+            });
+        }
+
+        history.push(TurnItem::Assistant {
+            content: record.assistant_turn.content.clone(),
+            tool_calls: record.assistant_turn.tool_calls.clone(),
+        });
+
+        if record.status == "completed" {
+            assert!(record.content.contains("任务提案"));
+            break;
+        }
+
+        for tool_call in &record.assistant_turn.tool_calls {
+            let output = execute_proposal_tool_call(
+                Arc::clone(&proposal_store),
+                Some("profile-alpha".to_string()),
+                publisher.clone(),
+                tool_call,
+            )
+            .await
+            .unwrap();
+
+            history.push(TurnItem::ToolResult {
+                tool_call_id: tool_call.id.clone(),
+                tool_name: tool_call.name.clone(),
+                content: output,
+            });
+        }
+    }
+
+    let proposals = proposal_store
+        .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
+        .unwrap();
+    assert_eq!(proposals.len(), 3);
+    assert!(
+        proposals
+            .iter()
+            .any(|proposal| proposal.action_type == ActionType::CreateTask)
+    );
+    assert!(
+        proposals
+            .iter()
+            .any(|proposal| proposal.action_type == ActionType::StartTimeblock)
+    );
+    assert!(
+        proposals
+            .iter()
+            .any(|proposal| proposal.action_type == ActionType::AppendEvent)
+    );
+
+    let _ = shutdown_tx.send(());
+}
+
+#[tokio::test]
+async fn broker_proposal_story_skips_without_env_and_uses_real_upstream_when_present() {
+    let Some(profile) = real_upstream_provider_profile_from_env() else {
+        eprintln!(
+            "skipping real-upstream proposal story: set EXOMIND_AGENT_API_RT_ENABLE=1 together with EXOMIND_AGENT_API_PROVIDER / MODEL / API_KEY env vars"
+        );
+        return;
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let proposal_store = Arc::new(ProposalStore::new());
+    let runtime = AgentSessionRuntime::new(
+        Arc::new(ConfigStore::new()),
+        Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
+        Arc::clone(&proposal_store),
+        Arc::new(AgentSessionStore::new()),
+    );
+    let system_prompt = Some(
+        "你是外心中的提案草案助手。你会阅读最近事件与开发上下文，把值得后续处理的事项转成结构化草案。优先通过工具创建任务提案、计划时间块提案、事件提案，而不是只做口头建议。若上下文明确提到后续验收、需要安排专注工作时间、或者需要补一条总结事件，就应分别创建对应草案。完成必要的草案创建后，再用中文总结你创建了哪些草案以及原因。"
+            .to_string(),
+    );
+    let prompt = r#"下面是最近的事件记录和开发上下文：
+2026-04-04 09:10 事件：刚推送 test(rt): add broker file search validation
+2026-04-04 09:35 事件：feat(task-dag): unify dag text and tag search 已在 dev
+2026-04-04 10:20 事件：对了，明天可能要验收下任务依赖图新布局
+2026-04-04 10:45 事件：刚完成一轮 pwd/ls/cd 文件搜索验证，准备回填 issue
+2026-04-04 11:05 事件：完成一个时间块，准备开始总结
+2026-04-04 11:20 事件：下一步希望把这轮 API Agent 实验整理成 issue 回填与简明总结
+
+请先阅读这些内容，提取其中值得形成草案的事项。你可以按需要调用添加任务提案、添加计划时间块提案、添加事件提案这三种工具。至少应为“明天可能要验收下任务依赖图新布局”创建一个任务提案；如果上下文表明应该安排时间块或补一条总结事件，也请创建相应草案。完成后请用中文总结你创建了哪些草案以及原因。"#.to_string();
+    let publisher = Publisher {
+        publisher_type: PublisherType::Agent,
+        id: "api-agent".to_string(),
+        name: "API Agent".to_string(),
+    };
+
+    let mut history = Vec::new();
+    let mut next_user_message = Some(prompt.clone());
+    let mut turn_count = 0usize;
+
+    eprintln!("=== broker_proposal_story start ===");
+    eprintln!("provider={} model={}", profile.provider, profile.model);
+
+    loop {
+        turn_count += 1;
+        assert!(
+            turn_count <= 10,
+            "proposal story exceeded turn budget; history={history:?}"
+        );
+
+        eprintln!("\n--- turn {turn_count} request ---");
+        eprintln!(
+            "history_len={} new_user_message_present={}",
+            history.len(),
+            next_user_message.is_some()
+        );
+
+        let record = match run_broker_agent_session_with_runtime(
+            profile.clone(),
+            system_prompt.clone(),
+            proposal_tool_defs(),
+            history.clone(),
+            next_user_message.take(),
+            AgentTrigger::Internal {
+                source: "agent-turn-broker-proposal-story".to_string(),
+            },
+            &runtime,
+        )
+        .await
+        {
+            Ok(record) => record,
+            Err(error) => {
+                panic_if_auth_failed(&error);
+                panic!("real-upstream proposal story turn failed: {error}");
+            }
+        };
+
+        eprintln!("--- turn {turn_count} response ---");
+        eprintln!("session_id={}", record.session_id);
+        eprintln!("status={}", record.status);
+        eprintln!(
+            "content={}",
+            serde_json::to_string_pretty(&record.content).unwrap()
+        );
+        eprintln!(
+            "assistant_turn={}",
+            serde_json::to_string_pretty(&record.assistant_turn).unwrap()
+        );
+        eprintln!(
+            "tool_calls={}",
+            serde_json::to_string_pretty(&record.tool_calls).unwrap()
+        );
+
+        if turn_count == 1 {
+            history.push(TurnItem::User {
+                content: prompt.clone(),
+            });
+        }
+
+        history.push(TurnItem::Assistant {
+            content: record.assistant_turn.content.clone(),
+            tool_calls: record.assistant_turn.tool_calls.clone(),
+        });
+
+        if record.status == "completed" {
+            let proposals = proposal_store
+                .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
+                .unwrap();
+            assert!(
+                !proposals.is_empty(),
+                "proposal story should create at least one proposal"
+            );
+            assert!(
+                proposals
+                    .iter()
+                    .any(|proposal| proposal.action_type == ActionType::CreateTask),
+                "proposal story must create at least one task proposal; proposals={proposals:?}"
+            );
+            assert!(
+                proposals
+                    .iter()
+                    .any(|proposal| proposal.action_type == ActionType::StartTimeblock),
+                "proposal story should create at least one timeblock proposal; proposals={proposals:?}"
+            );
+            assert!(
+                proposals
+                    .iter()
+                    .any(|proposal| proposal.action_type == ActionType::AppendEvent),
+                "proposal story should create at least one event proposal; proposals={proposals:?}"
+            );
+            assert!(
+                proposals
+                    .iter()
+                    .all(|proposal| proposal.publisher.publisher_type == PublisherType::Agent),
+                "all created proposals should be agent-published; proposals={proposals:?}"
+            );
+            assert!(
+                proposals
+                    .iter()
+                    .filter(|proposal| proposal.action_type == ActionType::CreateTask)
+                    .any(|proposal| proposal.status
+                        == exomind_runtime::proposal::ProposalStatus::Pending),
+                "created task proposals should remain pending; proposals={proposals:?}"
+            );
+            assert!(
+                record.content.contains("任务提案") || record.content.contains("任务草案"),
+                "final summary should mention the created task proposal: {record:?}"
+            );
+            eprintln!("=== broker_proposal_story completed ===");
+            eprintln!(
+                "proposals={}",
+                serde_json::to_string_pretty(&proposals).unwrap()
+            );
+            eprintln!("final_answer={}", record.content);
+            break;
+        }
+
+        assert_eq!(
+            record.status, "needs_tool_calls",
+            "intermediate proposal story turn should request tools: {record:?}"
+        );
+        assert!(
+            !record.assistant_turn.tool_calls.is_empty(),
+            "proposal story should return at least one tool call before completion: {record:?}"
+        );
+
+        for tool_call in &record.assistant_turn.tool_calls {
+            let output = execute_proposal_tool_call(
+                Arc::clone(&proposal_store),
+                Some("profile-alpha".to_string()),
+                publisher.clone(),
+                tool_call,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("proposal tool execution failed: {error}"));
+
+            let proposals = proposal_store
+                .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
+                .unwrap();
+            eprintln!(
+                "executed_tool_call={}",
+                serde_json::to_string_pretty(tool_call).unwrap()
+            );
+            eprintln!("tool_output={output}");
+            eprintln!(
+                "proposal_snapshot={}",
+                serde_json::to_string_pretty(&proposals).unwrap()
+            );
+
+            history.push(TurnItem::ToolResult {
+                tool_call_id: tool_call.id.clone(),
+                tool_name: tool_call.name.clone(),
+                content: output,
+            });
+        }
+    }
 }
 
 #[tokio::test]
@@ -495,6 +959,7 @@ async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present
     let runtime = AgentSessionRuntime::new(
         Arc::new(ConfigStore::new()),
         Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
+        Arc::new(ProposalStore::new()),
         Arc::new(AgentSessionStore::new()),
     );
     let system_prompt = Some(
@@ -506,7 +971,8 @@ async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present
     let tools = vec![
         ToolDef {
             name: "ls".to_string(),
-            description: "列出当前所在目录下的文件和子文件夹，输出格式与普通 ls 一致。无参数。".to_string(),
+            description: "列出当前所在目录下的文件和子文件夹，输出格式与普通 ls 一致。无参数。"
+                .to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {},
@@ -515,7 +981,8 @@ async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present
         },
         ToolDef {
             name: "cd".to_string(),
-            description: "进入当前所在目录的直接子文件夹。参数 dir 只能是一个直接子目录名。".to_string(),
+            description: "进入当前所在目录的直接子文件夹。参数 dir 只能是一个直接子目录名。"
+                .to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -578,7 +1045,10 @@ async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present
         eprintln!("--- turn {turn_count} response ---");
         eprintln!("session_id={}", record.session_id);
         eprintln!("status={}", record.status);
-        eprintln!("content={}", serde_json::to_string_pretty(&record.content).unwrap());
+        eprintln!(
+            "content={}",
+            serde_json::to_string_pretty(&record.content).unwrap()
+        );
         eprintln!(
             "assistant_turn={}",
             serde_json::to_string_pretty(&record.assistant_turn).unwrap()
@@ -605,8 +1075,7 @@ async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present
                 "guided ls/cd scenario must complete only after 6 tool turns plus final answer; record={record:?}"
             );
             assert_eq!(
-                executed_tools,
-                expected_tool_sequence,
+                executed_tools, expected_tool_sequence,
                 "agent must actually perform the full multi-step tool sequence before completion"
             );
             assert!(
@@ -645,7 +1114,10 @@ async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present
         let tool_call = &record.assistant_turn.tool_calls[0];
         let tool_output = execute_external_fs_tool_call(&root, &mut current_dir, tool_call);
         executed_tools.push(tool_call.name.clone());
-        eprintln!("executed_tool_call={}", serde_json::to_string_pretty(tool_call).unwrap());
+        eprintln!(
+            "executed_tool_call={}",
+            serde_json::to_string_pretty(tool_call).unwrap()
+        );
         eprintln!("tool_output={tool_output}");
         assert_eq!(
             executed_tools.last().map(String::as_str),
@@ -662,7 +1134,10 @@ async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present
                 "unexpected cd path requested: {tool_call:?}"
             );
         } else if tool_call.name == "ls" {
-            assert_eq!(current_dir, root.join("crates/exomind-runtime/src/agent/tools"));
+            assert_eq!(
+                current_dir,
+                root.join("crates/exomind-runtime/src/agent/tools")
+            );
             assert!(
                 tool_output.contains("eventlog.rs"),
                 "final ls output should include eventlog.rs: {tool_output}"
@@ -702,6 +1177,7 @@ async fn broker_file_search_flow_skips_without_env_and_uses_real_upstream_when_p
     let runtime = AgentSessionRuntime::new(
         Arc::new(ConfigStore::new()),
         Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
+        Arc::new(ProposalStore::new()),
         Arc::new(AgentSessionStore::new()),
     );
     let system_prompt = Some(
@@ -804,7 +1280,10 @@ async fn broker_file_search_flow_skips_without_env_and_uses_real_upstream_when_p
         eprintln!("--- turn {turn_count} response ---");
         eprintln!("session_id={}", record.session_id);
         eprintln!("status={}", record.status);
-        eprintln!("content={}", serde_json::to_string_pretty(&record.content).unwrap());
+        eprintln!(
+            "content={}",
+            serde_json::to_string_pretty(&record.content).unwrap()
+        );
         eprintln!(
             "assistant_turn={}",
             serde_json::to_string_pretty(&record.assistant_turn).unwrap()
@@ -894,7 +1373,10 @@ async fn broker_file_search_flow_skips_without_env_and_uses_real_upstream_when_p
                 }
                 "ls" => {
                     used_ls = true;
-                    if tool_output.lines().any(|line| line.trim() == "agent_api_rt.rs") {
+                    if tool_output
+                        .lines()
+                        .any(|line| line.trim() == "agent_api_rt.rs")
+                    {
                         target_seen_in_ls = true;
                         target_seen_dir = Some(dir_before.clone());
                     }
@@ -923,7 +1405,11 @@ async fn broker_file_search_flow_skips_without_env_and_uses_real_upstream_when_p
     }
 }
 
-fn execute_external_fs_tool_call(root: &Path, current_dir: &mut PathBuf, tool_call: &exomind_runtime::agent::broker::ToolCall) -> String {
+fn execute_external_fs_tool_call(
+    root: &Path,
+    current_dir: &mut PathBuf,
+    tool_call: &exomind_runtime::agent::broker::ToolCall,
+) -> String {
     match tool_call.name.as_str() {
         "pwd" => {
             assert!(
@@ -966,14 +1452,19 @@ fn execute_external_fs_tool_call(root: &Path, current_dir: &mut PathBuf, tool_ca
                 }
                 let target = current_dir
                     .parent()
-                    .unwrap_or_else(|| panic!("current directory lost parent under root: {current_dir:?}"))
+                    .unwrap_or_else(|| {
+                        panic!("current directory lost parent under root: {current_dir:?}")
+                    })
                     .to_path_buf();
                 assert!(
                     target.starts_with(root),
                     "cd .. escaped the configured root: {tool_call:?}"
                 );
                 *current_dir = target;
-                return format!("OK: current_dir={}", relative_dir_from_root(root, current_dir));
+                return format!(
+                    "OK: current_dir={}",
+                    relative_dir_from_root(root, current_dir)
+                );
             }
 
             let target = current_dir.join(dir);
@@ -982,9 +1473,15 @@ fn execute_external_fs_tool_call(root: &Path, current_dir: &mut PathBuf, tool_ca
                 "cd target escaped the configured root: {tool_call:?}"
             );
             assert!(target.exists(), "cd target does not exist: {tool_call:?}");
-            assert!(target.is_dir(), "cd target is not a directory: {tool_call:?}");
+            assert!(
+                target.is_dir(),
+                "cd target is not a directory: {tool_call:?}"
+            );
             *current_dir = target;
-            format!("OK: current_dir={}", relative_dir_from_root(root, current_dir))
+            format!(
+                "OK: current_dir={}",
+                relative_dir_from_root(root, current_dir)
+            )
         }
         other => panic!("unexpected external fs tool requested: {other}"),
     }
