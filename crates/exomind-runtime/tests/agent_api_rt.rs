@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -150,6 +150,14 @@ fn real_upstream_provider_profile_from_env() -> Option<ApiProviderProfile> {
         base_url,
         api_key,
     })
+}
+
+fn real_upstream_fs_root_from_env() -> Option<PathBuf> {
+    std::env::var("EXOMIND_AGENT_API_RT_FS_ROOT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn weather_tool() -> ToolDef {
@@ -462,4 +470,262 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
         "second_turn={second_turn:?}"
     );
     assert!(second_turn.assistant_turn.tool_calls.is_empty());
+}
+
+#[tokio::test]
+async fn broker_ls_cd_flow_skips_without_env_and_uses_real_upstream_when_present() {
+    let Some(profile) = real_upstream_provider_profile_from_env() else {
+        eprintln!(
+            "skipping real-upstream ls/cd flow: set EXOMIND_AGENT_API_RT_ENABLE=1 together with EXOMIND_AGENT_API_PROVIDER / MODEL / API_KEY env vars"
+        );
+        return;
+    };
+
+    let root = match real_upstream_fs_root_from_env() {
+        Some(path) => path,
+        None => {
+            eprintln!(
+                "skipping real-upstream ls/cd flow: set EXOMIND_AGENT_API_RT_FS_ROOT to the repository root for external tool simulation"
+            );
+            return;
+        }
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = AgentSessionRuntime::new(
+        Arc::new(ConfigStore::new()),
+        Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
+        Arc::new(AgentSessionStore::new()),
+    );
+    let system_prompt = Some(
+        "你是一个仓库探索助手。起始当前目录是外心仓库根目录。你只能依赖调用者提供的 ls 与 cd 工具了解目录结构。禁止猜测文件系统内容。cd 只能进入当前目录的直接子目录，不能进入父目录，不能使用斜杠路径。用户已经给出了目标相对路径 crates/exomind-runtime/src/agent/tools。为了减少无关噪音，你应优先沿这个已知路径片段逐层调用 cd：crates -> exomind-runtime -> src -> agent -> tools。除非有必要，不要在仓库根目录调用 ls。到达每一层后如需确认可调用 ls；至少在最终目录调用一次 ls。在确认结论前不要声称某个文件存在或不存在。确认后请用中文回答是否存在 eventlog.rs，并回顾一路经过的关键目录与最终目录中的文件。"
+            .to_string(),
+    );
+    let prompt = "请通过多步调用 ls 和 cd，检查 crates/exomind-runtime/src/agent/tools/ 目录下是否存在 eventlog.rs。不要猜测，必须依赖工具结果。最终请用中文回答是否存在，并回顾一路上看到的关键目录与最终目录中的文件。"
+        .to_string();
+    let tools = vec![
+        ToolDef {
+            name: "ls".to_string(),
+            description: "列出当前所在目录下的文件和子文件夹，输出格式与普通 ls 一致。无参数。".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: "cd".to_string(),
+            description: "进入当前所在目录的直接子文件夹。参数 dir 只能是一个直接子目录名。".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "dir": { "type": "string" }
+                },
+                "required": ["dir"],
+                "additionalProperties": false
+            }),
+        },
+    ];
+
+    let expected_steps = ["crates", "exomind-runtime", "src", "agent", "tools"];
+    let expected_tool_sequence = ["cd", "cd", "cd", "cd", "cd", "ls"];
+    let mut current_dir = root.clone();
+    let mut history = Vec::new();
+    let mut next_user_message = Some(prompt.clone());
+    let mut turn_count = 0usize;
+    let mut executed_tools = Vec::new();
+
+    eprintln!("=== broker_ls_cd_flow start ===");
+    eprintln!("provider={} model={}", profile.provider, profile.model);
+    eprintln!("root={}", root.display());
+    eprintln!("prompt={prompt}");
+
+    loop {
+        turn_count += 1;
+        assert!(
+            turn_count <= 10,
+            "ls/cd real-upstream flow exceeded expected turn budget; history={history:?}"
+        );
+
+        eprintln!("\n--- turn {turn_count} request ---");
+        eprintln!(
+            "history_len={} new_user_message_present={} current_dir={}",
+            history.len(),
+            next_user_message.is_some(),
+            current_dir.display()
+        );
+
+        let record = match run_broker_agent_session_with_runtime(
+            profile.clone(),
+            system_prompt.clone(),
+            tools.clone(),
+            history.clone(),
+            next_user_message.take(),
+            AgentTrigger::Internal {
+                source: "agent-turn-broker-rt-ls-cd".to_string(),
+            },
+            &runtime,
+        )
+        .await
+        {
+            Ok(record) => record,
+            Err(error) => {
+                panic_if_auth_failed(&error);
+                panic!("real-upstream ls/cd turn failed: {error}");
+            }
+        };
+
+        eprintln!("--- turn {turn_count} response ---");
+        eprintln!("session_id={}", record.session_id);
+        eprintln!("status={}", record.status);
+        eprintln!("content={}", serde_json::to_string_pretty(&record.content).unwrap());
+        eprintln!(
+            "assistant_turn={}",
+            serde_json::to_string_pretty(&record.assistant_turn).unwrap()
+        );
+        eprintln!(
+            "tool_calls={}",
+            serde_json::to_string_pretty(&record.tool_calls).unwrap()
+        );
+
+        if turn_count == 1 {
+            history.push(TurnItem::User {
+                content: prompt.clone(),
+            });
+        }
+
+        history.push(TurnItem::Assistant {
+            content: record.assistant_turn.content.clone(),
+            tool_calls: record.assistant_turn.tool_calls.clone(),
+        });
+
+        if record.status == "completed" {
+            assert_eq!(
+                turn_count, 7,
+                "guided ls/cd scenario must complete only after 6 tool turns plus final answer; record={record:?}"
+            );
+            assert_eq!(
+                executed_tools,
+                expected_tool_sequence,
+                "agent must actually perform the full multi-step tool sequence before completion"
+            );
+            assert!(
+                record.content.contains("存在"),
+                "final record should confirm existence: {record:?}"
+            );
+            assert!(
+                record.content.contains("eventlog.rs"),
+                "final record should mention eventlog.rs: {record:?}"
+            );
+            assert!(
+                record.content.contains("mod.rs"),
+                "final record should mention final directory listing: {record:?}"
+            );
+            assert_eq!(
+                current_dir,
+                root.join("crates/exomind-runtime/src/agent/tools"),
+                "test harness should end at target directory"
+            );
+            eprintln!("=== broker_ls_cd_flow completed ===");
+            eprintln!("final_dir={}", current_dir.display());
+            eprintln!("final_answer={}", record.content);
+            break;
+        }
+
+        assert_eq!(
+            record.status, "needs_tool_calls",
+            "intermediate record should request tools: {record:?}"
+        );
+        assert_eq!(
+            record.assistant_turn.tool_calls.len(),
+            1,
+            "guided ls/cd scenario should request one tool per turn: {record:?}"
+        );
+
+        let tool_call = &record.assistant_turn.tool_calls[0];
+        let tool_output = execute_external_fs_tool_call(&root, &mut current_dir, tool_call);
+        executed_tools.push(tool_call.name.clone());
+        eprintln!("executed_tool_call={}", serde_json::to_string_pretty(tool_call).unwrap());
+        eprintln!("tool_output={tool_output}");
+        assert_eq!(
+            executed_tools.last().map(String::as_str),
+            expected_tool_sequence.get(turn_count - 1).copied(),
+            "tool sequence deviated from the expected multi-step exploration path"
+        );
+        if tool_call.name == "cd" {
+            let expected_dir = expected_steps
+                .get(turn_count - 1)
+                .expect("unexpected extra cd step requested");
+            assert_eq!(
+                tool_call.input["dir"].as_str(),
+                Some(*expected_dir),
+                "unexpected cd path requested: {tool_call:?}"
+            );
+        } else if tool_call.name == "ls" {
+            assert_eq!(current_dir, root.join("crates/exomind-runtime/src/agent/tools"));
+            assert!(
+                tool_output.contains("eventlog.rs"),
+                "final ls output should include eventlog.rs: {tool_output}"
+            );
+        } else {
+            panic!("unexpected tool requested: {tool_call:?}");
+        }
+
+        history.push(TurnItem::ToolResult {
+            tool_call_id: tool_call.id.clone(),
+            tool_name: tool_call.name.clone(),
+            content: tool_output,
+        });
+    }
+}
+
+fn execute_external_fs_tool_call(root: &Path, current_dir: &mut PathBuf, tool_call: &exomind_runtime::agent::broker::ToolCall) -> String {
+    match tool_call.name.as_str() {
+        "ls" => {
+            let entries = std::fs::read_dir(&*current_dir)
+                .unwrap_or_else(|error| panic!("failed to read {current_dir:?}: {error}"));
+            let mut names = entries
+                .map(|entry| {
+                    entry
+                        .unwrap_or_else(|error| panic!("failed to read dir entry: {error}"))
+                        .file_name()
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .collect::<Vec<_>>();
+            names.sort();
+            let rel = current_dir
+                .strip_prefix(root)
+                .ok()
+                .and_then(|path| path.to_str())
+                .filter(|path| !path.is_empty())
+                .unwrap_or(".");
+            format!("current_dir={rel}\n{}", names.join("\n"))
+        }
+        "cd" => {
+            let dir = tool_call.input["dir"]
+                .as_str()
+                .unwrap_or_else(|| panic!("cd tool call missing dir: {tool_call:?}"));
+            assert!(
+                !dir.contains('/') && !dir.contains('\\') && dir != "." && dir != "..",
+                "cd only allows a direct child directory: {tool_call:?}"
+            );
+            let target = current_dir.join(dir);
+            assert!(
+                target.starts_with(root),
+                "cd target escaped the configured root: {tool_call:?}"
+            );
+            assert!(target.exists(), "cd target does not exist: {tool_call:?}");
+            assert!(target.is_dir(), "cd target is not a directory: {tool_call:?}");
+            *current_dir = target;
+            let rel = current_dir
+                .strip_prefix(root)
+                .ok()
+                .and_then(|path| path.to_str())
+                .filter(|path| !path.is_empty())
+                .unwrap_or(".");
+            format!("OK: current_dir={rel}")
+        }
+        other => panic!("unexpected external fs tool requested: {other}"),
+    }
 }
