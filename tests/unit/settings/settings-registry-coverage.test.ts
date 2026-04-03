@@ -175,6 +175,13 @@ const CUSTOM_ITEM_IDS = [
   'device-pairing',
 ] as const;
 
+const QWEN_OMNI_ONLY_IDS = [
+  'voice-omni-profile',
+  'voice-omni-prompts',
+  'voice-omni-model',
+  'voice-omni-optimize',
+] as const;
+
 const TAURI_DEV_ONLY_IDS = [
   'eventlog-backend-mode',
   'task-backend-mode',
@@ -413,6 +420,13 @@ describe('settings registry coverage audit', () => {
   it('keeps every registry item reachable across supported settings contexts', () => {
     settingsPagePreferenceState.isTauriWindow = true;
     settingsPagePreferenceState.isDesktopOperatingSystem = true;
+    const qwenCtx: SettingsContext = {
+      ...getBaseCtx(),
+      isDesktop: true,
+      isTauriWindow: true,
+      developerMode: true,
+      voiceShortcutAsrProvider: 'qwen-omni',
+    };
     const contexts: SettingsContext[] = [
       getBaseCtx(),
       {
@@ -433,20 +447,21 @@ describe('settings registry coverage audit', () => {
         developerMode: true,
         voiceShortcutAsrProvider: 'volcano',
       },
-      {
-        ...getBaseCtx(),
-        isDesktop: true,
-        isTauriWindow: true,
-        developerMode: true,
-        voiceShortcutAsrProvider: 'qwen-omni',
-      },
     ];
 
-    const visibleIds = new Set(
-      contexts.flatMap((ctx) => getVisibleSettings(ctx).map((item) => item.id)),
-    );
+    const qwenVisibleIds = getVisibleSettings(qwenCtx).map((item) => item.id);
+    QWEN_OMNI_ONLY_IDS.forEach((id) => {
+      expect(qwenVisibleIds).toContain(id);
+    });
 
-    expect(Array.from(visibleIds).sort()).toEqual([...AUDITED_SETTINGS_IDS].sort());
+    const visibleIds = new Set([
+      ...contexts.flatMap((ctx) => getVisibleSettings(ctx).map((item) => item.id)),
+      ...qwenVisibleIds,
+    ]);
+
+    expect(Array.from(visibleIds).sort()).toEqual(
+      [...AUDITED_SETTINGS_IDS].sort(),
+    );
     settingsPagePreferenceState.isTauriWindow = false;
     settingsPagePreferenceState.isDesktopOperatingSystem = false;
   });
