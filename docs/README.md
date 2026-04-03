@@ -53,6 +53,7 @@
 - [快速上手](development/quickstart.md) -- 开发环境搭建指南
 - [前端设计规范](development/ui-spec.md) -- ExoMind 前端 UI 统一规范，含 token、页面分类、例外边界与评审清单
 - [设备配对流程](development/device-pairing-flow.md) -- node-first 配对、地址解析、Android 模拟器特殊规则
+- [ExoMind CLI](development/exomind-cli.md) -- RT client shell（RT 客户端外壳）使用说明，含 connect-first 规则与命令样例
 - [Git 规范](development/git-spec.md) -- Git 工作流规范（权威版）
 - [Runtime Agent API](development/exomind-runtime-agents-api.md) -- Runtime Agent HTTP/SSE 接口说明
 - [Issue 追踪罗盘](development/issue-tracking-compass.md) -- Issue 去重/决策/新建/追加流程

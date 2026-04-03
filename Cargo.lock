@@ -1444,6 +1444,7 @@ name = "exomind-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "axum",
  "chrono",
  "clap",
  "dirs 5.0.1",

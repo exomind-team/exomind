@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -21,8 +22,21 @@ pub struct TargetState {
 }
 
 impl CliState {
+    pub const STATE_PATH_ENV: &str = "EXOMIND_CLI_STATE_PATH";
+
     pub fn config_path() -> Option<PathBuf> {
         dirs::config_dir().map(|dir| dir.join("ExoMind").join("cli-state.json"))
+    }
+
+    pub fn resolve_path() -> PathBuf {
+        if let Ok(value) = env::var(Self::STATE_PATH_ENV) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed);
+            }
+        }
+
+        Self::config_path().unwrap_or_else(|| PathBuf::from(".exomind/cli-state.json"))
     }
 
     pub fn load(path: &Path) -> io::Result<Self> {

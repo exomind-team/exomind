@@ -26,6 +26,27 @@ pub struct Cli {
     pub command: Option<RootCommand>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalOptions {
+    pub target: Option<String>,
+    pub profile: Option<String>,
+    pub user_id: Option<String>,
+    pub json: bool,
+    pub spawn_if_missing: bool,
+}
+
+impl From<&Cli> for GlobalOptions {
+    fn from(value: &Cli) -> Self {
+        Self {
+            target: value.target.clone(),
+            profile: value.profile.clone(),
+            user_id: value.user_id.clone(),
+            json: value.json,
+            spawn_if_missing: value.spawn_if_missing,
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum RootCommand {
     #[command(subcommand)]
@@ -93,6 +114,12 @@ pub enum TaskCommand {
 pub struct TaskAddArgs {
     #[arg(long)]
     pub title: String,
+
+    #[arg(long)]
+    pub priority: Option<String>,
+
+    #[arg(long = "tag")]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Args)]

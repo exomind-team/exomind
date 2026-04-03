@@ -1,6 +1,8 @@
 use crate::state::CliState;
+use serde::Serialize;
 
 pub const DEFAULT_CANDIDATE_PORTS: [u16; 3] = [9124, 1950, 1949];
+pub const CANDIDATE_PORTS_ENV: &str = "EXOMIND_CLI_CANDIDATE_PORTS";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetResolution {
@@ -13,6 +15,12 @@ pub enum TargetResolutionSource {
     Explicit,
     SavedDefault,
     Probed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TargetProbeStatus {
+    pub target: String,
+    pub healthy: bool,
 }
 
 pub fn resolve_target<F>(
@@ -55,6 +63,33 @@ where
 
 pub fn loopback_target(port: u16) -> String {
     format!("127.0.0.1:{port}")
+}
+
+pub fn candidate_ports() -> Vec<u16> {
+    std::env::var(CANDIDATE_PORTS_ENV)
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|segment| segment.trim().parse::<u16>().ok())
+                .collect::<Vec<_>>()
+        })
+        .filter(|ports| !ports.is_empty())
+        .unwrap_or_else(|| DEFAULT_CANDIDATE_PORTS.to_vec())
+}
+
+pub fn probe_targets<F>(candidate_ports: &[u16], mut probe: F) -> Vec<TargetProbeStatus>
+where
+    F: FnMut(&str) -> bool,
+{
+    candidate_ports
+        .iter()
+        .map(|port| {
+            let target = loopback_target(*port);
+            let healthy = probe(&target);
+            TargetProbeStatus { target, healthy }
+        })
+        .collect()
 }
 
 fn normalize_target(value: Option<&str>) -> Option<String> {

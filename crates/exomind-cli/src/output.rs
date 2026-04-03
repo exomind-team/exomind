@@ -1,6 +1,12 @@
 use crate::cli::RootCommand;
 use crate::examples::{AGENT_EXAMPLES, HUMAN_EXAMPLES};
 
+pub fn print_json(value: &serde_json::Value) -> Result<(), String> {
+    let rendered = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
+    println!("{rendered}");
+    Ok(())
+}
+
 pub fn homepage_text() -> String {
     format!(
         concat!(
