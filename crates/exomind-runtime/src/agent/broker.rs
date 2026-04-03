@@ -60,6 +60,7 @@ pub enum TurnItem {
     Assistant {
         content: String,
         #[serde(default)]
+        #[serde(rename = "toolCalls")]
         tool_calls: Vec<ToolCall>,
     },
     #[serde(rename = "tool")]

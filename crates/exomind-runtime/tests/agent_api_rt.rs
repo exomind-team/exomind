@@ -183,10 +183,18 @@ async fn route_runs_session_with_runtime_config_fallback() {
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
-                        "prompt": "分析我最近在做什么",
                         "systemPrompt": "你是测试助手",
-                        "tools": ["get_recent_events"],
-                        "userId": "profile-argon"
+                        "tools": [{
+                            "name": GET_RECENT_EVENTS_TOOL,
+                            "description": "获取最近事件",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "limit": { "type": "integer" }
+                                }
+                            }
+                        }],
+                        "newUserMessage": "分析我最近在做什么"
                     })
                     .to_string(),
                 ))
@@ -198,8 +206,11 @@ async fn route_runs_session_with_runtime_config_fallback() {
     assert_eq!(response.status(), StatusCode::CREATED);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let created: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(created["status"], "needs_tool_calls");
+    assert_eq!(created["content"], "");
+    assert_eq!(created["assistantTurn"]["toolCalls"].as_array().unwrap().len(), 1);
     assert_eq!(created["toolCalls"].as_array().unwrap().len(), 1);
-    assert_eq!(created["content"], "最近主要在推进 runtime RT Agent API 落地。");
+    assert_eq!(created["toolCalls"][0]["toolName"], GET_RECENT_EVENTS_TOOL);
 
     let session_id = created["sessionId"].as_str().unwrap();
     let fetch_response = app
@@ -222,6 +233,7 @@ async fn route_runs_session_with_runtime_config_fallback() {
     let fetched: Value = serde_json::from_slice(&fetched_body).unwrap();
     assert_eq!(fetched["sessionId"], created["sessionId"]);
     assert_eq!(fetched["toolCalls"], created["toolCalls"]);
+    assert_eq!(fetched["status"], "needs_tool_calls");
 
     let _ = shutdown_tx.send(());
 }

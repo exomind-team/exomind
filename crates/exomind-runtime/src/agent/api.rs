@@ -71,6 +71,7 @@ impl ApiSessionSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiProviderProfile {
     pub provider: String,
     pub model: String,

@@ -9,6 +9,11 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use super::api::{ApiProviderProfile, build_anthropic_endpoint, build_openai_endpoint};
+use super::broker::{
+    AgentTurnBroker, AgentTurnRequest, AgentTurnResult, AssistantTurn,
+    BrokerError as AgentBrokerError, ToolCall as BrokerToolCall, ToolDef as BrokerToolDef,
+    TurnItem,
+};
 use super::tools::eventlog::get_recent_events_tool;
 use super::tools::{GET_RECENT_EVENTS_TOOL, ToolDef, ToolRegistry, ToolUse};
 use crate::AppState;
@@ -54,7 +59,8 @@ impl AgentSessionRuntime {
 pub struct ToolCallRecord {
     pub tool_name: String,
     pub input: Value,
-    pub output: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -64,8 +70,10 @@ pub struct AgentSessionRecord {
     pub trigger_source: String,
     pub provider: String,
     pub model: String,
-    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
     pub content: String,
+    pub assistant_turn: AssistantTurn,
     pub tool_calls: Vec<ToolCallRecord>,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -187,6 +195,7 @@ impl SqliteAgentSessionStore {
                 model           TEXT NOT NULL,
                 prompt          TEXT NOT NULL,
                 content         TEXT NOT NULL,
+                assistant_turn_json TEXT NOT NULL DEFAULT '{\"content\":\"\",\"toolCalls\":[]}',
                 tool_calls_json TEXT NOT NULL DEFAULT '[]',
                 status          TEXT NOT NULL DEFAULT 'completed',
                 error_message   TEXT,
@@ -197,6 +206,12 @@ impl SqliteAgentSessionStore {
             CREATE INDEX IF NOT EXISTS idx_agent_api_sessions_completed_at
                 ON agent_api_sessions(completed_at DESC);",
         )?;
+        ensure_column(
+            &conn,
+            "agent_api_sessions",
+            "assistant_turn_json",
+            "TEXT NOT NULL DEFAULT '{\"content\":\"\",\"toolCalls\":[]}'",
+        )?;
         Ok(())
     }
 
@@ -205,14 +220,15 @@ impl SqliteAgentSessionStore {
         conn.execute(
             "INSERT INTO agent_api_sessions (
                 session_id, trigger_source, provider, model, prompt, content,
-                tool_calls_json, status, error_message, created_at, completed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                assistant_turn_json, tool_calls_json, status, error_message, created_at, completed_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT(session_id) DO UPDATE SET
                 trigger_source = excluded.trigger_source,
                 provider = excluded.provider,
                 model = excluded.model,
                 prompt = excluded.prompt,
                 content = excluded.content,
+                assistant_turn_json = excluded.assistant_turn_json,
                 tool_calls_json = excluded.tool_calls_json,
                 status = excluded.status,
                 error_message = excluded.error_message,
@@ -223,8 +239,9 @@ impl SqliteAgentSessionStore {
                 record.trigger_source,
                 record.provider,
                 record.model,
-                record.prompt,
+                record.prompt.clone().unwrap_or_default(),
                 record.content,
+                serde_json::to_string(&record.assistant_turn)?,
                 serde_json::to_string(&record.tool_calls)?,
                 record.status,
                 record.error_message,
@@ -240,7 +257,7 @@ impl SqliteAgentSessionStore {
         let mut stmt = conn.prepare(
             "SELECT
                 session_id, trigger_source, provider, model, prompt, content,
-                tool_calls_json, status, error_message, created_at, completed_at
+                assistant_turn_json, tool_calls_json, status, error_message, created_at, completed_at
              FROM agent_api_sessions
              WHERE session_id = ?1",
         )?;
@@ -256,32 +273,67 @@ impl SqliteAgentSessionStore {
 }
 
 fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSessionRecord> {
-    let tool_calls_json: String = row.get(6)?;
-    let tool_calls =
-        serde_json::from_str::<Vec<ToolCallRecord>>(&tool_calls_json).map_err(|error| {
+    let assistant_turn_json: String = row.get(6)?;
+    let assistant_turn =
+        serde_json::from_str::<AssistantTurn>(&assistant_turn_json).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
                 6,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
         })?;
+    let tool_calls_json: String = row.get(7)?;
+    let tool_calls =
+        serde_json::from_str::<Vec<ToolCallRecord>>(&tool_calls_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                7,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+    let prompt: String = row.get(4)?;
+    let prompt = normalize_optional_text(&prompt);
     Ok(AgentSessionRecord {
         session_id: row.get(0)?,
         trigger_source: row.get(1)?,
         provider: row.get(2)?,
         model: row.get(3)?,
-        prompt: row.get(4)?,
+        prompt,
         content: row.get(5)?,
+        assistant_turn,
         tool_calls,
-        status: row.get(7)?,
-        error_message: row.get(8)?,
-        created_at: row.get(9)?,
-        completed_at: row.get(10)?,
+        status: row.get(8)?,
+        error_message: row.get(9)?,
+        created_at: row.get(10)?,
+        completed_at: row.get(11)?,
     })
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), AgentSessionStoreError> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let existing = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if existing.iter().any(|name| name == column) {
+        return Ok(());
+    }
+
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )?;
+    Ok(())
 }
 
 #[derive(Debug, Error)]
 pub enum SessionError {
+    #[error("invalid request: {0}")]
+    InvalidRequest(String),
     #[error("unsupported tool: {0}")]
     UnsupportedTool(String),
     #[error("invalid provider profile: {0}")]
@@ -294,6 +346,15 @@ pub enum SessionError {
     InvalidProviderResponse(String),
     #[error("persist session failed: {0}")]
     Persist(#[from] AgentSessionStoreError),
+}
+
+impl From<AgentBrokerError> for SessionError {
+    fn from(error: AgentBrokerError) -> Self {
+        match error {
+            AgentBrokerError::InvalidRequest(message) => SessionError::InvalidRequest(message),
+            AgentBrokerError::ProviderRequest(message) => SessionError::RequestFailed(message),
+        }
+    }
 }
 
 pub fn scope_key(profile_id: Option<&str>, user_id: Option<&str>) -> Option<String> {
@@ -451,6 +512,171 @@ fn normalize_optional_text(value: &str) -> Option<String> {
     }
 }
 
+fn empty_assistant_turn() -> AssistantTurn {
+    AssistantTurn {
+        content: String::new(),
+        tool_calls: Vec::new(),
+    }
+}
+
+fn map_broker_tool_call(tool_call: &BrokerToolCall) -> ToolCallRecord {
+    ToolCallRecord {
+        tool_name: tool_call.name.clone(),
+        input: tool_call.input.clone(),
+        output: None,
+    }
+}
+
+fn map_tool_call_records_to_broker(tool_calls: &[ToolCallRecord]) -> Vec<BrokerToolCall> {
+    tool_calls
+        .iter()
+        .map(|tool_call| BrokerToolCall {
+            id: String::new(),
+            name: tool_call.tool_name.clone(),
+            input: tool_call.input.clone(),
+        })
+        .collect()
+}
+
+fn record_from_broker_result(
+    session_id: String,
+    trigger: AgentTrigger,
+    profile: &ApiProviderProfile,
+    prompt: Option<String>,
+    created_at: String,
+    result: AgentTurnResult,
+) -> AgentSessionRecord {
+    match result {
+        AgentTurnResult::Final { assistant_turn } => AgentSessionRecord {
+            session_id,
+            trigger_source: trigger.as_str(),
+            provider: profile.provider.clone(),
+            model: profile.model.clone(),
+            prompt,
+            content: assistant_turn.content.clone(),
+            assistant_turn,
+            tool_calls: Vec::new(),
+            status: "completed".to_string(),
+            error_message: None,
+            created_at,
+            completed_at: chrono::Utc::now().to_rfc3339(),
+        },
+        AgentTurnResult::NeedsToolCalls {
+            assistant_turn,
+            tool_calls,
+        } => AgentSessionRecord {
+            session_id,
+            trigger_source: trigger.as_str(),
+            provider: profile.provider.clone(),
+            model: profile.model.clone(),
+            prompt,
+            content: assistant_turn.content.clone(),
+            assistant_turn,
+            tool_calls: tool_calls.iter().map(map_broker_tool_call).collect(),
+            status: "needs_tool_calls".to_string(),
+            error_message: None,
+            created_at,
+            completed_at: chrono::Utc::now().to_rfc3339(),
+        },
+    }
+}
+
+fn failed_record(
+    session_id: String,
+    trigger: AgentTrigger,
+    profile: &ApiProviderProfile,
+    prompt: Option<String>,
+    created_at: String,
+    error_message: String,
+) -> AgentSessionRecord {
+    AgentSessionRecord {
+        session_id,
+        trigger_source: trigger.as_str(),
+        provider: profile.provider.clone(),
+        model: profile.model.clone(),
+        prompt,
+        content: String::new(),
+        assistant_turn: empty_assistant_turn(),
+        tool_calls: Vec::new(),
+        status: "failed".to_string(),
+        error_message: Some(error_message),
+        created_at,
+        completed_at: chrono::Utc::now().to_rfc3339(),
+    }
+}
+
+pub async fn run_broker_agent_session(
+    profile: ApiProviderProfile,
+    system_prompt: Option<String>,
+    tools: Vec<BrokerToolDef>,
+    history: Vec<TurnItem>,
+    new_user_message: Option<String>,
+    trigger: AgentTrigger,
+    state: &AppState,
+) -> Result<AgentSessionRecord, SessionError> {
+    run_broker_agent_session_with_runtime(
+        profile,
+        system_prompt,
+        tools,
+        history,
+        new_user_message,
+        trigger,
+        &AgentSessionRuntime::from_state(state),
+    )
+    .await
+}
+
+pub async fn run_broker_agent_session_with_runtime(
+    profile: ApiProviderProfile,
+    system_prompt: Option<String>,
+    tools: Vec<BrokerToolDef>,
+    history: Vec<TurnItem>,
+    new_user_message: Option<String>,
+    trigger: AgentTrigger,
+    runtime: &AgentSessionRuntime,
+) -> Result<AgentSessionRecord, SessionError> {
+    let profile = normalize_provider_profile(profile)?;
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let broker = AgentTurnBroker;
+    let prompt = new_user_message.clone();
+
+    let request = AgentTurnRequest {
+        provider: profile.clone(),
+        system_prompt,
+        tools,
+        history,
+        new_user_message,
+    };
+
+    match broker.run(request).await {
+        Ok(result) => {
+            let record = record_from_broker_result(
+                session_id,
+                trigger,
+                &profile,
+                prompt,
+                created_at,
+                result,
+            );
+            runtime.agent_api_session_store.upsert(record.clone())?;
+            Ok(record)
+        }
+        Err(error) => {
+            let record = failed_record(
+                session_id,
+                trigger,
+                &profile,
+                prompt,
+                created_at,
+                error.to_string(),
+            );
+            let _ = runtime.agent_api_session_store.upsert(record);
+            Err(error.into())
+        }
+    }
+}
+
 pub async fn run_agent_session(
     profile: ApiProviderProfile,
     system_prompt: Option<String>,
@@ -516,8 +742,12 @@ pub async fn run_agent_session_with_runtime(
                 trigger_source: trigger.as_str(),
                 provider: profile.provider,
                 model: profile.model,
-                prompt: user_prompt,
-                content,
+                prompt: Some(user_prompt),
+                content: content.clone(),
+                assistant_turn: AssistantTurn {
+                    content,
+                    tool_calls: map_tool_call_records_to_broker(&tool_calls),
+                },
                 tool_calls,
                 status: "completed".to_string(),
                 error_message: None,
@@ -533,8 +763,9 @@ pub async fn run_agent_session_with_runtime(
                 trigger_source: trigger.as_str(),
                 provider: profile.provider,
                 model: profile.model,
-                prompt: user_prompt,
+                prompt: Some(user_prompt),
                 content: String::new(),
+                assistant_turn: empty_assistant_turn(),
                 tool_calls: Vec::new(),
                 status: "failed".to_string(),
                 error_message: Some(error.to_string()),
@@ -579,7 +810,7 @@ async fn run_openai_single_shot(
         tool_calls.push(ToolCallRecord {
             tool_name: tool_use.name.clone(),
             input: tool_use.input.clone(),
-            output: result.content.clone(),
+            output: Some(result.content.clone()),
         });
         messages.push(json!({
             "role": "tool",
@@ -624,7 +855,7 @@ async fn run_anthropic_single_shot(
         tool_calls.push(ToolCallRecord {
             tool_name: tool_use.name.clone(),
             input: tool_use.input.clone(),
-            output: result.content.clone(),
+            output: Some(result.content.clone()),
         });
         tool_results.push(json!({
             "type": "tool_result",
