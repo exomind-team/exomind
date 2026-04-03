@@ -11,6 +11,8 @@ use tauri::{AppHandle, State};
 use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutEvent, ShortcutState};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::window::Color;
 
 const DEFAULT_VOICE_SHORTCUT: &str = "Alt+Q";
 const DEFAULT_MAIN_WINDOW_SHORTCUT: &str = "Ctrl+E";
@@ -280,6 +282,11 @@ pub fn apply_main_window_shortcut(
 
 /// Pre-create overlay window hidden（预热悬浮窗）to avoid first-open white flash（首开白屏）.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn transparent_overlay_background_color() -> Color {
+    Color(0, 0, 0, 0)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     if app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL).is_some() {
         return Ok(());
@@ -297,7 +304,8 @@ pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     .shadow(false)
     .skip_taskbar(true)
     .resizable(false)
-    .visible(false);
+    .visible(false)
+    .background_color(transparent_overlay_background_color());
 
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
@@ -986,9 +994,10 @@ pub async fn foreground_window_focus(_window_handle: String) -> Result<bool, Str
 mod tests {
     use super::{
         calculate_overlay_position, choose_voice_overlay_anchor, cursor_in_monitor, paste_shortcut_steps,
-        SyntheticShortcutStep,
+        transparent_overlay_background_color, SyntheticShortcutStep,
         MonitorGeometry,
     };
+    use tauri::window::Color;
 
     #[test]
     fn calculate_overlay_position_centers_bottom_on_primary_work_area() {
@@ -1129,5 +1138,10 @@ mod tests {
                 SyntheticShortcutStep::ReleaseControl,
             ]
         );
+    }
+
+    #[test]
+    fn voice_overlay_background_color_is_fully_transparent() {
+        assert_eq!(transparent_overlay_background_color(), Color(0, 0, 0, 0));
     }
 }

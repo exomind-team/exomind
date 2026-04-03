@@ -1,6 +1,7 @@
 import { listen, emit } from '@tauri-apps/api/event';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
+import { QwenOmniASRAdapter } from '@/lib/adapters/asr/qwen-omni-asr';
 import { getClipboardService } from '../lib/services/clipboard.service';
 import { appendEventWithEcsReplication } from '@/lib/services/ecs-eventlog-replication.service';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
@@ -34,6 +35,12 @@ import {
   type VoiceShortcutAsrProvider,
 } from '@/config/voice-shortcut-asr-provider';
 import {
+  getVoiceOmniModelId,
+  getVoiceOmniOptimizeEnabled,
+  getVoiceOmniProfileId,
+} from '@/config/voice-omni-settings';
+import { getVoiceOmniPromptDocs } from '@/config/voice-omni-prompts';
+import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_RESOURCE_PRESETS,
@@ -51,9 +58,15 @@ import {
   createVolcanoStreamingCapture,
   type VolcanoStreamingCapture,
 } from '@/lib/asr/volcano-streaming-capture';
+import { resolveProviderProfile } from '@/lib/agent-provider/provider-profile-storage';
 import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 import {
+  buildQwenOmniOptimizePrompt,
+  buildQwenOmniTranscribePrompt,
+} from '@/lib/voice/qwen-omni-prompts';
+import {
   getVoiceOverlayBottomOffset,
+  getVoiceOverlayShowDiagnostics,
   subscribeVoiceOverlayBottomOffsetChanges,
 } from '@/config/voice-overlay-preferences';
 import { buildVoiceShortcutStorageEvent } from '@/services/voice-shortcut-eventlog';
@@ -85,11 +98,21 @@ type WarmVolcanoSessionSnapshot = {
   warmKey: string | null;
 };
 
+type VoiceOmniRuntimeConfig = {
+  profileId: string;
+  profileName: string;
+  apiKey: string;
+  baseUrl: string;
+  modelId: string;
+  optimizeEnabled: boolean;
+};
+
 type OverlayEventPayload = {
   state: VoiceShortcutState;
   duration?: number;
   text: string;
   shortcut: VoiceShortcutHotkey;
+  showDiagnostics: boolean;
   audioLevel?: number;
   hintText?: string;
   isLivePreview: boolean;
@@ -1275,6 +1298,10 @@ export class VoiceShortcutService {
     };
   }
 
+  private isQwenOmniProvider(): boolean {
+    return String(this.asrProvider) === 'qwen-omni';
+  }
+
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
     if (this.asrProvider === 'volcano') {
       const config = this.getVolcanoRuntimeConfigOrThrow();
@@ -1297,6 +1324,23 @@ export class VoiceShortcutService {
           config: fallback.config,
         });
       }
+    }
+
+    if (this.isQwenOmniProvider()) {
+      const config = this.getVoiceOmniRuntimeConfigOrThrow();
+      const adapter = new QwenOmniASRAdapter({
+        profileName: config.profileName,
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.modelId,
+        optimizeEnabled: config.optimizeEnabled,
+        transcribePrompt: buildQwenOmniTranscribePrompt(getVoiceOmniPromptDocs()),
+        optimizePrompt: buildQwenOmniOptimizePrompt(getVoiceOmniPromptDocs()),
+      });
+      return await adapter.transcribe({
+        lang: 'zh-CN',
+        preRecordedAudio: wavData,
+      });
     }
 
     return await this.adapter.transcribe({
@@ -1359,6 +1403,7 @@ export class VoiceShortcutService {
       ...(typeof extra.duration === 'number' ? { duration: extra.duration } : {}),
       text: extra.text ?? fallbackText,
       shortcut: extra.shortcut ?? getVoiceShortcutHotkey(),
+      showDiagnostics: extra.showDiagnostics ?? getVoiceOverlayShowDiagnostics(),
       audioLevel: extra.audioLevel ?? (state === 'recording' ? this.latestAudioLevel : 0),
       hintText: extra.hintText,
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
@@ -1632,9 +1677,43 @@ export class VoiceShortcutService {
     return config;
   }
 
+  private getVoiceOmniRuntimeConfigOrThrow(): VoiceOmniRuntimeConfig {
+    const profileId = getVoiceOmniProfileId();
+    if (!profileId) {
+      throw new Error('Qwen Omni 未配置语音供应商档案，请先到设置中选择 provider profile');
+    }
+
+    const profile = resolveProviderProfile(profileId);
+    if (!profile?.apiKey || !profile.baseUrl) {
+      throw new Error('Qwen Omni 供应商档案不完整，请先在 AI Registry 中填写 Base URL 与 API Key');
+    }
+
+    const modelId = getVoiceOmniModelId();
+    if (!modelId) {
+      throw new Error('Qwen Omni 模型 ID 为空，请先到设置中填写模型 ID');
+    }
+
+    return {
+      profileId,
+      profileName: profile.name,
+      apiKey: profile.apiKey,
+      baseUrl: profile.baseUrl,
+      modelId,
+      optimizeEnabled: getVoiceOmniOptimizeEnabled(),
+    };
+  }
+
   private getActiveProviderLabel(): string {
-    if (this.asrProvider !== 'volcano') {
+    if (this.asrProvider === 'moss') {
       return 'MOSS · 云端识别';
+    }
+    if (this.isQwenOmniProvider()) {
+      try {
+        const config = this.getVoiceOmniRuntimeConfigOrThrow();
+        return `${config.modelId} · ${config.profileName}`;
+      } catch {
+        return 'Qwen Omni · 未配置';
+      }
     }
     const config = getStoredVolcanoRuntimeConfig(import.meta.env as Record<string, string | undefined>);
     const resourceLabel = VOLCANO_RESOURCE_PRESETS.find(

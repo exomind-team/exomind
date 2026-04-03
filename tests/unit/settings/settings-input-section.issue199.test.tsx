@@ -14,6 +14,11 @@ import { setMainWindowShortcutSelection } from '@/config/main-window-shortcut';
 import { setMainWindowShortcutQuickFocusEnabled } from '@/config/main-window-shortcut-focus';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
+import {
+  setVoiceOmniModelId,
+  setVoiceOmniOptimizeEnabled,
+  setVoiceOmniProfileId,
+} from '@/config/voice-omni-settings';
 import { setVoiceAutoRecordEnabled } from '@/config/voice-auto-record';
 import {
   setVoiceOverlayOpacity,
@@ -59,6 +64,9 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     settingsPagePreferenceState.isDesktopOperatingSystem = false;
     settingsPagePreferenceState.mainWindowShortcutSelection = ['Ctrl', 'E'];
     settingsPagePreferenceState.mainWindowShortcutQuickFocusEnabled = false;
+    settingsPagePreferenceState.voiceOmniProfileId = '';
+    settingsPagePreferenceState.voiceOmniModelId = 'qwen3-omni-flash';
+    settingsPagePreferenceState.voiceOmniOptimizeEnabled = false;
     isTauriMock.mockReturnValue(false);
     invokeMock.mockResolvedValue(null);
   });
@@ -181,20 +189,66 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     const volcanoButton = screen.getByTestId('new-settings-voice-provider-volcano');
     const mossButton = screen.getByTestId('new-settings-voice-provider-moss');
+    const qwenButton = screen.getByTestId('new-settings-voice-provider-qwen-omni');
 
     fireEvent.click(volcanoButton);
     await waitFor(() => {
       expect(volcanoButton).toHaveAttribute('aria-pressed', 'true');
       expect(mossButton).toHaveAttribute('aria-pressed', 'false');
+      expect(qwenButton).toHaveAttribute('aria-pressed', 'false');
     });
     expect(setProviderMock).toHaveBeenCalledWith('volcano');
+
+    fireEvent.click(qwenButton);
+    await waitFor(() => {
+      expect(qwenButton).toHaveAttribute('aria-pressed', 'true');
+      expect(mossButton).toHaveAttribute('aria-pressed', 'false');
+      expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
+    });
+    expect(setProviderMock).toHaveBeenCalledWith('qwen-omni');
 
     fireEvent.click(mossButton);
     await waitFor(() => {
       expect(mossButton).toHaveAttribute('aria-pressed', 'true');
       expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
+      expect(qwenButton).toHaveAttribute('aria-pressed', 'false');
     });
     expect(setProviderMock).toHaveBeenCalledWith('moss');
+  });
+
+  it('shows qwen omni settings rows when provider is qwen-omni', async () => {
+    const setProfileMock = vi.mocked(setVoiceOmniProfileId);
+    const setModelMock = vi.mocked(setVoiceOmniModelId);
+    const setOptimizeMock = vi.mocked(setVoiceOmniOptimizeEnabled);
+
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-provider-qwen-omni'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Qwen Omni 供应商档案')).toBeInTheDocument();
+      expect(screen.getByText('Qwen Omni 提示词')).toBeInTheDocument();
+      expect(screen.getByText('Qwen Omni 模型 ID')).toBeInTheDocument();
+      expect(screen.getByText('启用 Qwen 二次排版')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-omni-profile-row'));
+    fireEvent.click(screen.getByTestId('new-settings-voice-omni-profile-option-registry-qwen-voice'));
+    await waitFor(() => {
+      expect(setProfileMock).toHaveBeenCalledWith('registry-qwen-voice');
+    });
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-omni-model-row'));
+    fireEvent.change(screen.getByTestId('new-settings-voice-omni-model-input'), {
+      target: { value: 'qwen-omni-turbo-latest' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => {
+      expect(setModelMock).toHaveBeenCalledWith('qwen-omni-turbo-latest');
+    });
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-omni-optimize-switch'));
+    expect(setOptimizeMock).toHaveBeenCalledWith(true);
   });
 
   it('allows selecting volcano resource model from input section', () => {

@@ -1,10 +1,12 @@
 import { createConfigModule } from './config-factory';
 
-export const VOICE_SHORTCUT_ASR_PROVIDER_VALUES = ['moss', 'volcano'] as const;
+export const VOICE_SHORTCUT_ASR_PROVIDER_VALUES = ['moss', 'volcano', 'qwen-omni'] as const;
 export type VoiceShortcutAsrProvider = (typeof VOICE_SHORTCUT_ASR_PROVIDER_VALUES)[number];
 
 function normalizeProvider(rawValue: string | null | undefined): VoiceShortcutAsrProvider {
-  return rawValue === 'volcano' ? 'volcano' : 'moss';
+  if (rawValue === 'volcano') return 'volcano';
+  if (rawValue === 'qwen-omni') return 'qwen-omni';
+  return 'moss';
 }
 
 const _module = createConfigModule<VoiceShortcutAsrProvider>({
@@ -30,5 +32,7 @@ export function subscribeVoiceShortcutAsrProviderChanges(
 }
 
 export function getVoiceShortcutAsrProviderLabel(provider: VoiceShortcutAsrProvider): string {
-  return provider === 'volcano' ? '火山' : 'MOSS';
+  if (provider === 'volcano') return '火山';
+  if (provider === 'qwen-omni') return 'Qwen Omni';
+  return 'MOSS';
 }

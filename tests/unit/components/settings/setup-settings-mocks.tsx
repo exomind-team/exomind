@@ -102,6 +102,9 @@ export const settingsPagePreferenceState = {
   isTauriWindow: false,
   isDesktopOperatingSystem: false,
   voiceShortcutAsrProvider: 'moss' as string,
+  voiceOmniProfileId: '',
+  voiceOmniModelId: 'qwen3-omni-flash',
+  voiceOmniOptimizeEnabled: false,
   voiceAutoRecordEnabled: true,
   mainWindowShortcutSelection: ['Ctrl', 'E'] as string[],
   mainWindowShortcutQuickFocusEnabled: false,
@@ -158,6 +161,10 @@ vi.mock('@/config/domain-backend-mode', () => ({
 vi.mock('@/config/port-env', () => ({
   resolveAsrServerUrl: vi.fn(() => 'http://localhost:1949'),
   resolveSyncServerUrl: vi.fn(() => 'http://127.0.0.1:6984'),
+<<<<<<< HEAD
+=======
+  resolveRuntimeHostname: vi.fn(() => '127.0.0.1'),
+>>>>>>> origin/dev
 }));
 
 vi.mock('@/config/version-build-info', () => ({
@@ -426,7 +433,7 @@ vi.mock('@/config/voice-shortcut-asr-provider', () => {
   return {
     getVoiceShortcutAsrProvider: vi.fn(() => settingsPagePreferenceState.voiceShortcutAsrProvider),
     getVoiceShortcutAsrProviderLabel: vi.fn((value: string) => {
-      const labels: Record<string, string> = { moss: 'MOSS', volcano: '火山' };
+      const labels: Record<string, string> = { moss: 'MOSS', volcano: '火山', 'qwen-omni': 'Qwen Omni' };
       return labels[value] ?? value;
     }),
     setVoiceShortcutAsrProvider: vi.fn((value: string) => {
@@ -440,6 +447,71 @@ vi.mock('@/config/voice-shortcut-asr-provider', () => {
     }),
   };
 });
+
+vi.mock('@/config/voice-omni-settings', () => ({
+  getVoiceOmniProfileId: vi.fn(() => settingsPagePreferenceState.voiceOmniProfileId),
+  setVoiceOmniProfileId: vi.fn((value: string) => {
+    settingsPagePreferenceState.voiceOmniProfileId = value;
+    return value;
+  }),
+  subscribeVoiceOmniProfileIdChanges: vi.fn(() => () => {}),
+  getVoiceOmniModelId: vi.fn(() => settingsPagePreferenceState.voiceOmniModelId),
+  setVoiceOmniModelId: vi.fn((value: string) => {
+    settingsPagePreferenceState.voiceOmniModelId = value;
+    return value;
+  }),
+  subscribeVoiceOmniModelIdChanges: vi.fn(() => () => {}),
+  getVoiceOmniOptimizeEnabled: vi.fn(() => settingsPagePreferenceState.voiceOmniOptimizeEnabled),
+  setVoiceOmniOptimizeEnabled: vi.fn((value: boolean) => {
+    settingsPagePreferenceState.voiceOmniOptimizeEnabled = value;
+    return value;
+  }),
+  subscribeVoiceOmniOptimizeEnabledChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/voice-omni-prompts', () => ({
+  getVoiceOmniPromptDocs: vi.fn(() => ({
+    agent: 'agent prompt',
+    rules: 'rules prompt',
+    vocabulary: 'vocabulary prompt',
+    textOptimize: 'text optimize prompt',
+  })),
+  setVoiceOmniPromptDocs: vi.fn((value: Record<string, string>) => value),
+  updateVoiceOmniPromptDocs: vi.fn((patch: Record<string, string>) => patch),
+  resetVoiceOmniPromptDocs: vi.fn(() => ({
+    agent: 'agent prompt',
+    rules: 'rules prompt',
+    vocabulary: 'vocabulary prompt',
+    textOptimize: 'text optimize prompt',
+  })),
+  subscribeVoiceOmniPromptDocsChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/lib/agent-provider/provider-profile-storage', () => ({
+  listProviderProfiles: vi.fn(() => [
+    {
+      profileId: 'registry-qwen-voice',
+      name: 'DashScope Voice',
+      provider: 'openai',
+      model: 'qwen3-omni-flash',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      createdAt: '2026-04-02T00:00:00.000Z',
+      updatedAt: '2026-04-02T00:00:00.000Z',
+    },
+  ]),
+  resolveProviderProfile: vi.fn((profileId: string) => profileId === 'registry-qwen-voice'
+    ? {
+      profileId: 'registry-qwen-voice',
+      name: 'DashScope Voice',
+      provider: 'openai',
+      model: 'qwen3-omni-flash',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      apiKey: 'sk-qwen',
+      createdAt: '2026-04-02T00:00:00.000Z',
+      updatedAt: '2026-04-02T00:00:00.000Z',
+    }
+    : null),
+}));
 
 vi.mock('@/config/voice-overlay-preferences', () => ({
   DEFAULT_VOICE_OVERLAY_OPACITY: 62,
