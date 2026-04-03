@@ -211,6 +211,114 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
     );
   });
 
+  it('reuses a single baseline exact match after fresh detection exhausts（未发现新 session 时允许复用唯一的 baseline 精确命中）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-existing',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-01T23:59:00.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/pty-codex-baseline') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ id: 'pty-codex-baseline', inner_session_id: 'codex-thread-existing' }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchMock);
+
+    const detected = await detectAndPersistHistoricalSessionId({
+      rtBaseUrl: 'http://127.0.0.1:1949',
+      sessionRecordId: 'pty-codex-baseline',
+      agentType: 'codex',
+      baselineSessionIds: ['codex-thread-existing'],
+      expectedWorkdir: 'D:/project/exomind',
+      startedAtMs: Date.parse('2026-04-02T00:00:00.000Z'),
+      maxAttempts: 1,
+      intervalMs: 0,
+    });
+
+    expect(detected).toBe('codex-thread-existing');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/sessions/pty-codex-baseline',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ inner_session_id: 'codex-thread-existing' }),
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[agent-hub][pty] reusing existing historical session id for terminal binding',
+      expect.objectContaining({
+        sessionRecordId: 'pty-codex-baseline',
+        matchedSessionId: 'codex-thread-existing',
+      }),
+    );
+  });
+
+  it('prefers a fresh exact match over a baseline reuse（存在新 session 时优先绑定新的精确命中）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-existing',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-01T23:59:00.000Z',
+            },
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-fresh',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-02T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/pty-codex-fresh') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ id: 'pty-codex-fresh', inner_session_id: 'codex-thread-fresh' }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const detected = await detectAndPersistHistoricalSessionId({
+      rtBaseUrl: 'http://127.0.0.1:1949',
+      sessionRecordId: 'pty-codex-fresh',
+      agentType: 'codex',
+      baselineSessionIds: ['codex-thread-existing'],
+      expectedWorkdir: 'D:/project/exomind',
+      startedAtMs: Date.parse('2026-04-02T00:00:00.000Z'),
+      maxAttempts: 1,
+      intervalMs: 0,
+    });
+
+    expect(detected).toBe('codex-thread-fresh');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/sessions/pty-codex-fresh',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ inner_session_id: 'codex-thread-fresh' }),
+      }),
+    );
+  });
+
   it('ignores exact workdir matches outside the allowed post-spawn window（超出启动后时间窗的精确目录命中不会误绑定）', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

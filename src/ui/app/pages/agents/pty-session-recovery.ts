@@ -36,7 +36,6 @@ interface PtyResumeResponse {
 }
 
 const DETECTION_CLOCK_SKEW_MS = 15_000;
-const DEFAULT_DETECTION_MAX_ATTEMPTS = 180;
 const DEFAULT_DETECTION_INTERVAL_MS = 2_000;
 const DEFAULT_DETECTION_CANDIDATE_WINDOW_MS = 15 * 60_000;
 const inFlightHistoricalSessionDetections = new Map<string, Promise<string | null>>();
@@ -112,6 +111,71 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function parseModifiedAtMs(lastModified: string): number | null {
+  const modifiedAtMs = Date.parse(lastModified);
+  return Number.isNaN(modifiedAtMs) ? null : modifiedAtMs;
+}
+
+function isHistoricalSessionWithinWindow(
+  session: HistoricalSessionInfo,
+  lowerBoundMs: number,
+  upperBoundMs: number,
+): boolean {
+  const modifiedAtMs = parseModifiedAtMs(session.last_modified);
+  if (modifiedAtMs === null) {
+    return true;
+  }
+
+  return modifiedAtMs >= lowerBoundMs && modifiedAtMs <= upperBoundMs;
+}
+
+function dedupeHistoricalSessionsById(
+  sessions: HistoricalSessionInfo[],
+): HistoricalSessionInfo[] {
+  const byId = new Map<string, HistoricalSessionInfo>();
+
+  sessions.forEach((session) => {
+    const existing = byId.get(session.session_id);
+    if (!existing) {
+      byId.set(session.session_id, session);
+      return;
+    }
+
+    const existingModifiedAtMs = parseModifiedAtMs(existing.last_modified);
+    const nextModifiedAtMs = parseModifiedAtMs(session.last_modified);
+    if (
+      existingModifiedAtMs === null
+      || (nextModifiedAtMs !== null && nextModifiedAtMs > existingModifiedAtMs)
+    ) {
+      byId.set(session.session_id, session);
+    }
+  });
+
+  return [...byId.values()];
+}
+
+async function persistHistoricalSessionId(
+  rtBaseUrl: string,
+  sessionRecordId: string,
+  matchedSessionId: string,
+  authToken?: string,
+): Promise<string> {
+  const updateResponse = await fetch(
+    `${rtBaseUrl}/sessions/${encodeURIComponent(sessionRecordId)}`,
+    {
+      method: 'PATCH',
+      headers: buildHeaders(authToken, true),
+      body: JSON.stringify({ inner_session_id: matchedSessionId }),
+    },
+  );
+  if (!updateResponse.ok) {
+    const text = await updateResponse.text();
+    throw new Error(text || `HTTP ${updateResponse.status}`);
+  }
+
+  return matchedSessionId;
 }
 
 export function resolveTerminalSessionWorkdir(session: SessionInfo): string | undefined {
@@ -240,7 +304,7 @@ export async function detectAndPersistHistoricalSessionId({
   baselineSessionIds,
   expectedWorkdir,
   startedAtMs,
-  maxAttempts = DEFAULT_DETECTION_MAX_ATTEMPTS,
+  maxAttempts,
   intervalMs = DEFAULT_DETECTION_INTERVAL_MS,
   candidateWindowMs = DEFAULT_DETECTION_CANDIDATE_WINDOW_MS,
 }: DetectAndPersistHistoricalSessionInput): Promise<string | null> {
@@ -264,51 +328,80 @@ export async function detectAndPersistHistoricalSessionId({
     const normalizedExpectedWorkdir = normalizeExpectedProjectPath(agentType, expectedWorkdir);
     const lowerBoundMs = startedAtMs - DETECTION_CLOCK_SKEW_MS;
     const upperBoundMs = startedAtMs + candidateWindowMs;
+    const normalizedIntervalMs = Math.max(1, intervalMs);
+    const resolvedMaxAttempts = maxAttempts
+      ?? Math.max(1, Math.ceil(candidateWindowMs / normalizedIntervalMs));
     let lastExactMatchIds: string[] = [];
+    let lastFreshExactMatchIds: string[] = [];
+    let lastBaselineExactMatchIds: string[] = [];
     let sawMismatchedRecentCandidate = false;
+    let sawFreshExactMatch = false;
+    let fallbackBaselineExactMatch: HistoricalSessionInfo | null = null;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const matchesExpectedWorkdir = (session: HistoricalSessionInfo): boolean => (
+      normalizeHistoricalProjectPath(agentType, session.project_path) === normalizedExpectedWorkdir
+    );
+
+    for (let attempt = 0; attempt < resolvedMaxAttempts; attempt += 1) {
       try {
-        const sessions = await fetchHistoricalSessions(rtBaseUrl, agentType, authToken);
-        const recentCandidates = sessions.filter((session) => {
-          if (baseline.has(session.session_id)) {
-            return false;
-          }
-          const modifiedAtMs = Date.parse(session.last_modified);
-          if (Number.isNaN(modifiedAtMs)) {
-            return true;
-          }
-          return modifiedAtMs >= lowerBoundMs && modifiedAtMs <= upperBoundMs;
-        });
-        const exactWorkdirMatches = recentCandidates.filter((session) => (
-          normalizeHistoricalProjectPath(agentType, session.project_path) === normalizedExpectedWorkdir
+        const sessions = dedupeHistoricalSessionsById(
+          await fetchHistoricalSessions(rtBaseUrl, agentType, authToken),
+        );
+        const recentCandidates = sessions.filter((session) => (
+          isHistoricalSessionWithinWindow(session, lowerBoundMs, upperBoundMs)
         ));
-        lastExactMatchIds = exactWorkdirMatches.map((session) => session.session_id);
-        sawMismatchedRecentCandidate ||= recentCandidates.length > exactWorkdirMatches.length;
+        const recentExactMatches = recentCandidates.filter(matchesExpectedWorkdir);
+        const freshExactMatches = recentExactMatches.filter((session) => !baseline.has(session.session_id));
+        const recentBaselineExactMatches = recentExactMatches.filter((session) => baseline.has(session.session_id));
+        const baselineExactMatches = sessions.filter((session) => (
+          baseline.has(session.session_id) && matchesExpectedWorkdir(session)
+        ));
 
-        if (exactWorkdirMatches.length === 1) {
-          const matchedSession = exactWorkdirMatches[0]!;
-          const updateResponse = await fetch(
-            `${rtBaseUrl}/sessions/${encodeURIComponent(sessionRecordId)}`,
-            {
-              method: 'PATCH',
-              headers: buildHeaders(authToken, true),
-              body: JSON.stringify({ inner_session_id: matchedSession.session_id }),
-            },
+        lastFreshExactMatchIds = [...new Set(freshExactMatches.map((session) => session.session_id))];
+        lastBaselineExactMatchIds = [...new Set(baselineExactMatches.map((session) => session.session_id))];
+        sawFreshExactMatch ||= lastFreshExactMatchIds.length > 0;
+        sawMismatchedRecentCandidate ||= recentCandidates.length > recentExactMatches.length;
+        if (lastBaselineExactMatchIds.length === 1) {
+          fallbackBaselineExactMatch = baselineExactMatches[0] ?? fallbackBaselineExactMatch;
+        }
+
+        const preferredExactMatches = freshExactMatches.length > 0
+          ? freshExactMatches
+          : recentBaselineExactMatches;
+        lastExactMatchIds = [...new Set(preferredExactMatches.map((session) => session.session_id))];
+
+        if (lastExactMatchIds.length === 1) {
+          return persistHistoricalSessionId(
+            rtBaseUrl,
+            sessionRecordId,
+            lastExactMatchIds[0]!,
+            authToken,
           );
-          if (!updateResponse.ok) {
-            const text = await updateResponse.text();
-            throw new Error(text || `HTTP ${updateResponse.status}`);
-          }
-          return matchedSession.session_id;
         }
       } catch (error) {
-        if (attempt === maxAttempts - 1) {
+        if (attempt === resolvedMaxAttempts - 1) {
           throw error;
         }
       }
 
-      await delay(intervalMs);
+      if (attempt < resolvedMaxAttempts - 1) {
+        await delay(normalizedIntervalMs);
+      }
+    }
+
+    if (!sawFreshExactMatch && fallbackBaselineExactMatch) {
+      console.warn('[agent-hub][pty] reusing existing historical session id for terminal binding', {
+        sessionRecordId,
+        agentType,
+        expectedWorkdir: expectedWorkdir ?? null,
+        matchedSessionId: fallbackBaselineExactMatch.session_id,
+      });
+      return persistHistoricalSessionId(
+        rtBaseUrl,
+        sessionRecordId,
+        fallbackBaselineExactMatch.session_id,
+        authToken,
+      );
     }
 
     console.warn('[agent-hub][pty] unable to safely detect historical session id', {
@@ -318,6 +411,10 @@ export async function detectAndPersistHistoricalSessionId({
       candidateWindowMs,
       exactMatchCount: lastExactMatchIds.length,
       exactMatchIds: lastExactMatchIds,
+      freshExactMatchCount: lastFreshExactMatchIds.length,
+      freshExactMatchIds: lastFreshExactMatchIds,
+      baselineExactMatchCount: lastBaselineExactMatchIds.length,
+      baselineExactMatchIds: lastBaselineExactMatchIds,
       sawMismatchedRecentCandidate,
     });
     return null;
