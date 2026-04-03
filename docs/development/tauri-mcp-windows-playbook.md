@@ -471,6 +471,79 @@
   - `localStorage['exomind:agentHubTiledState']`
   - `/pty/:id/stream` 的 transcript 内容
 
+### 阶段补记：#806 新 PTY 误判 disconnected 竞态修复（2026-04-03）
+
+#### 现象
+
+- 新建 Terminal 后，右栏会先闪成：
+  - `agent-rightpanel-pty-disconnected`
+- 但同一时刻 RT 里的 PTY 实际已经创建成功，属于前端误判，不是真断线。
+
+#### 根因
+
+- `AgentsPage` 之前在 `openPtyTerminal()` 后立即用：
+  - `knownPtyIds`
+  - `hasLoadedPtyAgents`
+- 来判断当前 PTY 是否存在。
+- 对“刚 spawn / 刚 resume 出来的新 PTY”来说：
+  - 右栏已经切到新 `ptyId`
+  - 但 `/pty` 列表还没刷新到包含它
+- 于是页面会把“新 PTY 还没进列表”误判成“PTY 已不存在”。
+
+#### 本轮修复策略
+
+- 只对“新 PTY”加一层待确认保护，而不是对所有 `openPtyTerminal()` 一刀切：
+  - `spawn` 成功后打开的新 PTY
+  - `resume` 成功后打开的新 PTY
+- 这些 PTY 会先进入 `pendingPtyPresenceChecks`
+- 在同 host 的第一次成功 `/pty` 拉取完成前：
+  - 不把它判为 disconnected
+- 一旦这次新的 `/pty` 拉取成功：
+  - 如果列表里有该 PTY，正常转 live
+  - 如果列表里仍没有该 PTY，再允许进入 disconnected
+- 旧的 stale session 仍保持原语义：
+  - 用户点开一个早就不在 `/pty` 列表里的会话时，应该立刻看到 disconnected
+  - 不应被这层保护误伤
+
+#### 本轮验证
+
+- 单测：
+  - `bunx vitest run tests/unit/ui/agent-hub/agents-page.issue806.test.tsx tests/unit/ui/agent-hub/agents-page.session-actions.issue523.test.tsx tests/unit/ui/agent-hub/pty-spawn-dialog.test.tsx tests/unit/ui/agent-hub/pty-session-recovery.test.ts`
+  - `bunx tsc --noEmit`
+- 新增回归点：
+  - `keeps a newly opened PTY live until a fresh PTY list confirms it is missing`
+- 同时复核旧语义未回归：
+  - stale session 打开后仍会进入 disconnected
+  - session stop / archive / recovery 相关测试全部通过
+
+#### Tauri 实窗验收
+
+- 继续使用 raw bridge：
+  - `ws://127.0.0.1:9223`
+- 先对主窗口执行一次 `window.location.reload()`
+- 再在真实窗口内：
+  - 打开 `Terminal` 弹窗
+  - 切到 `custom`
+  - 输入 `cmd`
+  - 点击“启动新会话”
+- 现场结果：
+  - `terminalVisible = true`
+  - `disconnected = false`
+  - `.xterm` 数量 = `1`
+  - `fullscreenPtyId = b4a55470-452f-466e-8a14-924fca0844fc`
+- 随后用 RT HTTP 清理：
+  - `POST /pty/b4a55470-452f-466e-8a14-924fca0844fc/stop` -> `200`
+  - `PATCH /sessions/b4a55470-452f-466e-8a14-924fca0844fc` `{ "status": "archived" }` -> `200`
+
+#### 对后续 Agent 的提醒
+
+- “新 PTY 打开后短时间不判死”是有边界的：
+  - 只适用于新 spawn / 新 resume 的 PTY
+  - 不适用于用户点开一个早就 stale 的旧 session
+- 如果后续又看到“右栏一打开就 disconnected”，先区分两类场景：
+  - 这是刚创建的新 PTY，还是旧 session 的回看？
+  - `/pty` 是否已经完成过一次新的成功拉取？
+
 ## 持续更新约定
 
 - 每完成一个 Tauri MCP 阶段目标，就在本文档追加：

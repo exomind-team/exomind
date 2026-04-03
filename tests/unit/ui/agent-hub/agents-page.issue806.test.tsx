@@ -216,6 +216,16 @@ function buildRuntimeSnapshot() {
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 class MockEventSource {
   constructor(_url: string) {}
 
@@ -355,6 +365,115 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     expect(
       vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
     ).toHaveLength(0);
+  });
+
+  it('keeps a newly opened PTY live until a fresh PTY list confirms it is missing（新 PTY 不应在列表刷新前被立即误判断开）', async () => {
+    sessionStreamState.sessions = [];
+    const delayedPtyRefresh = createDeferred<Response>();
+    let ptyListFetchCount = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/signal-routes')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'claude',
+              session_id: 'claude-thread-new-806',
+              project_path: 'D--project-exomind',
+              last_modified: '2026-04-02T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/pty-new-806') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'pty-new-806',
+            inner_session_id: 'claude-thread-new-806',
+          }),
+        } as Response;
+      }
+      if (url.endsWith('/pty/spawn')) {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-new-806',
+            name: 'Claude 806 New',
+            workdir: 'D:/project/exomind',
+          }),
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        ptyListFetchCount += 1;
+        if (ptyListFetchCount === 1) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [],
+          } as Response;
+        }
+        return delayedPtyRefresh.promise;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('pty-spawn-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('pty-spawn-submit'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/pty/spawn',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-new-806')).toBeInTheDocument();
+      expect(screen.queryByTestId('agent-rightpanel-pty-disconnected')).not.toBeInTheDocument();
+    });
+
+    delayedPtyRefresh.resolve({
+      ok: true,
+      status: 200,
+      json: async () => [],
+    } as Response);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
   });
 
   it('retries codex auto-resume after the runtime becomes reachable again（RT 恢复可达后应再次自动恢复，而不是烧掉唯一尝试机会）', async () => {

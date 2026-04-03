@@ -387,6 +387,7 @@ export function AgentsPage() {
     sourceHostId?: string;
   }>>([]);
   const [failedPtyConnectionIds, setFailedPtyConnectionIds] = useState<string[]>([]);
+  const [pendingPtyPresenceChecks, setPendingPtyPresenceChecks] = useState<Record<string, string | null>>({});
   /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
   const [activePtyId, setActivePtyId] = useState<string | null>(initialTiledState.fullscreenPtyId ?? null);
   const [activePtyHostId, setActivePtyHostId] = useState<string | null>(null);
@@ -1168,8 +1169,18 @@ export function AgentsPage() {
   const [showPtySpawnDialog, setShowPtySpawnDialog] = useState(false);
   const [peerPairingOpen, setPeerPairingOpen] = useState(false);
 
-  const openPtyTerminal = (ptyId: string, hostId?: string) => {
+  const openPtyTerminal = (
+    ptyId: string,
+    hostId?: string,
+    options: { expectFreshPresence?: boolean } = {},
+  ) => {
     setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== ptyId));
+    if (options.expectFreshPresence) {
+      setPendingPtyPresenceChecks((prev) => {
+        const nextHostId = hostId ?? null;
+        return prev[ptyId] === nextHostId ? prev : { ...prev, [ptyId]: nextHostId };
+      });
+    }
     setActivePtyId(ptyId);
     setActivePtyHostId(hostId ?? null);
     setRightPanel({ state: 'PTY_TERMINAL', ptyId });
@@ -1641,6 +1652,10 @@ export function AgentsPage() {
     () => new Set(ptyAgents.map((pty) => pty.id)),
     [ptyAgents],
   );
+  const pendingPtyPresenceIds = useMemo(
+    () => new Set(Object.keys(pendingPtyPresenceChecks)),
+    [pendingPtyPresenceChecks],
+  );
   const isSourceHostAvailable = useCallback((sourceHostId?: string | null) => {
     if (!sourceHostId) {
       return false;
@@ -1687,6 +1702,9 @@ export function AgentsPage() {
         if (knownPtyIds.has(session.pty_id)) {
           return;
         }
+        if (!disconnectedIds.has(session.pty_id) && pendingPtyPresenceIds.has(session.pty_id)) {
+          return;
+        }
         disconnectedIds.add(session.pty_id);
       }
     });
@@ -1698,6 +1716,7 @@ export function AgentsPage() {
     failedPtyConnectionIds,
     hasLoadedPtyAgents,
     knownPtyIds,
+    pendingPtyPresenceIds,
   ]);
   const isSessionPtyDisconnected = useCallback(
     (session: SessionInfo) => !!session.pty_id && disconnectedSessionPtyIds.has(session.pty_id),
@@ -1823,7 +1842,7 @@ export function AgentsPage() {
       ));
 
       if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
-        openPtyTerminal(info.id, session.source_host_id);
+        openPtyTerminal(info.id, session.source_host_id, { expectFreshPresence: true });
       }
 
       const runtimeClient = new RuntimeClient();
@@ -2113,6 +2132,16 @@ export function AgentsPage() {
       if (data) {
         if (isAgentsPageDisposedRef.current) return;
         setFailedPtyConnectionIds((prev) => prev.filter((ptyId) => !data.some((pty) => pty.id === ptyId)));
+        setPendingPtyPresenceChecks((prev) => {
+          const currentHostId = ptySpawnConnection.hostId ?? null;
+          let changed = false;
+          const nextEntries = Object.entries(prev).filter(([_, pendingHostId]) => {
+            const shouldKeep = pendingHostId != null && pendingHostId !== currentHostId;
+            changed ||= !shouldKeep;
+            return shouldKeep;
+          });
+          return changed ? Object.fromEntries(nextEntries) : prev;
+        });
         setPtyAgents(prev => {
           if (
             prev.length === data.length &&
@@ -2195,6 +2224,9 @@ export function AgentsPage() {
     if (knownPtyIds.has(activePtyId)) {
       return false;
     }
+    if (pendingPtyPresenceIds.has(activePtyId)) {
+      return false;
+    }
     if (!hasLoadedPtyAgents) {
       return false;
     }
@@ -2213,6 +2245,7 @@ export function AgentsPage() {
     failedPtyConnectionIds,
     hasLoadedPtyAgents,
     knownPtyIds,
+    pendingPtyPresenceIds,
   ]);
   const isActivePtyAutoResuming = Boolean(
     activeDisconnectedPtySession
@@ -3886,7 +3919,7 @@ export function AgentsPage() {
             sessions: dashboardSessions,
             newSessionId: info.id,
           }));
-                    openPtyTerminal(info.id, ptySpawnConnection.hostId);
+          openPtyTerminal(info.id, ptySpawnConnection.hostId, { expectFreshPresence: true });
           void refreshRuntimeSnapshot();
         }}
       />
