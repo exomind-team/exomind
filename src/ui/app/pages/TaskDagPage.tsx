@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WheelEvent as ReactWheelEvent } from 'react';
+import { LocateFixed } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
 import {
   Background,
@@ -85,6 +86,7 @@ import {
   getTaskDagImmersive as readStoredImmersive,
   getTaskDagLayoutMode as readStoredDagLayoutMode,
   getTaskDagMode as readStoredDagMode,
+  getTaskDagNodeSizing as readStoredDagNodeSizing,
   TASK_DAG_BACKGROUND_STORAGE_KEY,
   TASK_DAG_CONTROLS_STATE_STORAGE_KEY,
   TASK_DAG_DIRECTION_STORAGE_KEY,
@@ -93,6 +95,7 @@ import {
   TASK_DAG_IMMERSIVE_STORAGE_KEY,
   TASK_DAG_LAYOUT_MODE_STORAGE_KEY,
   TASK_DAG_MODE_STORAGE_KEY,
+  TASK_DAG_NODE_SIZING_STORAGE_KEY,
   TASK_DAG_FOCUSED_SERIES_STORAGE_KEY,
   TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY,
   TASK_DAG_SEARCH_DRAFT_STORAGE_KEY,
@@ -117,6 +120,7 @@ import {
   setTaskDagImmersive as persistTaskDagImmersive,
   setTaskDagLayoutMode as persistTaskDagLayoutMode,
   setTaskDagMode as persistTaskDagMode,
+  setTaskDagNodeSizing as persistTaskDagNodeSizing,
   setTaskDagSearchDraft as persistTaskDagSearchDraft,
   setTaskDagSearchOptions as persistTaskDagSearchOptions,
   setTaskDagTagFilter as persistTaskDagTagFilter,
@@ -125,6 +129,7 @@ import {
   setTaskDagVisibility as persistTaskDagVisibility,
   type TaskDagControlsState,
   type TaskDagFocusMode,
+  type TaskDagNodeSizing,
   type TaskDagTagFilter,
   type TaskDagViewportSurface,
 } from '@/config/task-dag-preferences';
@@ -750,6 +755,28 @@ function TaskDagNode({
   targetPosition = Position.Left,
 }: FlowNodeProps<TaskDagFlowNode>) {
   const nodeData = data as TaskDagFlowNodeData;
+  const isManualLayout = nodeData.layoutMode === 'manual';
+  const isExpanded = nodeData.isSelected;
+  const hasDenseTitle = nodeData.title.trim().length >= 28;
+  const lowPriorityBadgeCount = Number(nodeData.isFocusAnchor)
+    + Number(nodeData.isCollapsedUpstreamTarget)
+    + Number(nodeData.isCollapsedDownstreamTarget)
+    + Number(nodeData.hiddenUpstreamCount > 0)
+    + Number(nodeData.hiddenDownstreamCount > 0);
+  const hideLowPriorityBadges = !isExpanded && (hasDenseTitle || lowPriorityBadgeCount >= 3);
+  const widthClass = nodeData.fixedWidth
+    ? 'w-40'
+    : isManualLayout
+      ? 'w-fit max-w-[18rem]'
+      : 'max-w-40';
+  const heightClass = nodeData.fixedHeight
+    ? 'h-40'
+    : isManualLayout
+      ? ''
+      : 'max-h-40';
+  const expansionClass = isExpanded
+    ? 'z-20 max-w-[24rem] max-h-[24rem]'
+    : 'hover:z-20 hover:max-w-[24rem] hover:max-h-[24rem]';
   const handleStyle = {
     width: 10,
     height: 10,
@@ -768,7 +795,10 @@ function TaskDagNode({
         title={nodeData.blockedReason ?? undefined}
         data-testid={`task-dag-node-${id}`}
         className={[
-          'relative inline-flex max-h-40 max-w-40 flex-col justify-center overflow-hidden rounded-2xl border bg-white px-3 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
+          'group/task-dag-node relative inline-flex flex-col justify-center overflow-hidden rounded-2xl border bg-white px-3 py-3 text-left shadow-sm transition-all duration-200 ease-out dark:bg-[#1C1917]',
+          widthClass,
+          heightClass,
+          expansionClass,
           nodeData.connectPreviewType === 'hard'
             ? 'border-[#2563EB] ring-2 ring-[#2563EB]/30 bg-[#EFF6FF] shadow-[0_14px_32px_-18px_rgba(37,99,235,0.7)] dark:border-[#60A5FA] dark:bg-[#172554]'
               : nodeData.connectPreviewType === 'soft'
@@ -802,12 +832,13 @@ function TaskDagNode({
         <Handle type="target" position={targetPosition} style={handleStyle} />
         <Handle type="source" position={sourcePosition} style={handleStyle} />
 
-        {nodeData.isFocusAnchor ? (
+        {nodeData.isFocusAnchor && !hideLowPriorityBadges ? (
           <span
             data-testid={`task-dag-focus-anchor-badge-${id}`}
-            className="absolute right-3 top-3 rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[10px] font-medium text-[#7C3AED] dark:bg-[#3B1D63] dark:text-[#D8B4FE]"
+            className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[10px] font-medium text-[#7C3AED] dark:bg-[#3B1D63] dark:text-[#D8B4FE]"
           >
-            已锚定
+            <LocateFixed size={10} />
+            聚焦锚点
           </span>
         ) : null}
 
@@ -827,12 +858,12 @@ function TaskDagNode({
               专注中
             </span>
           ) : null}
-          {nodeData.isCollapsedUpstreamTarget ? (
+          {nodeData.isCollapsedUpstreamTarget && !hideLowPriorityBadges ? (
             <span className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A]">
               已折叠上游
             </span>
           ) : null}
-          {nodeData.isCollapsedDownstreamTarget ? (
+          {nodeData.isCollapsedDownstreamTarget && !hideLowPriorityBadges ? (
             <span className="rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10px] font-medium text-[#047857]">
               已折叠下游
             </span>
@@ -858,7 +889,7 @@ function TaskDagNode({
           <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
             {nodeData.statusLabel}
           </span>
-          {nodeData.hiddenUpstreamCount > 0 ? (
+          {nodeData.hiddenUpstreamCount > 0 && !hideLowPriorityBadges ? (
             <span
               data-testid={`task-dag-hidden-upstream-badge-${id}`}
               className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
@@ -866,7 +897,7 @@ function TaskDagNode({
               {`+${nodeData.hiddenUpstreamCount} 已折叠`}
             </span>
           ) : null}
-          {nodeData.hiddenDownstreamCount > 0 ? (
+          {nodeData.hiddenDownstreamCount > 0 && !hideLowPriorityBadges ? (
             <span
               data-testid={`task-dag-hidden-downstream-badge-${id}`}
               className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-medium text-[#15803D] dark:bg-[#14532D] dark:text-[#BBF7D0]"
@@ -876,7 +907,14 @@ function TaskDagNode({
           ) : null}
         </div>
 
-        <p className="mt-3 line-clamp-3 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{nodeData.title}</p>
+        <p
+          className={[
+            'mt-3 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]',
+            isExpanded ? 'line-clamp-none' : 'line-clamp-3 group-hover/task-dag-node:line-clamp-none',
+          ].join(' ')}
+        >
+          {nodeData.title}
+        </p>
         <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">{nodeData.priorityLabel}</p>
         <p className="mt-1 text-xs text-[#57534E] dark:text-[#D6D3D1]">{nodeData.executionLabel}</p>
       </div>
@@ -912,6 +950,7 @@ export function TaskDagPage() {
   const [terminalFilterMode, setTerminalFilterMode] = useState<TaskDagTerminalFilterMode>(() => readStoredTerminalFilterMode());
   const [focusMode, setFocusMode] = useState<TaskDagFocusMode>(() => readStoredFocusMode());
   const [backgroundMode, setBackgroundMode] = useState<TaskDagBackgroundMode>(() => readStoredBackgroundMode());
+  const [nodeSizing, setNodeSizing] = useState<TaskDagNodeSizing>(() => readStoredDagNodeSizing());
   const [immersive, setImmersive] = useState(() => readStoredImmersive());
   const [controlsState, setControlsState] = useState<TaskDagControlsState>(() => readStoredControlsState());
   const [mobileHintsOpen, setMobileHintsOpen] = useState(false);
@@ -996,6 +1035,10 @@ export function TaskDagPage() {
   useEffectAfterMount(() => {
     persistTaskDagBackgroundMode(backgroundMode);
   }, [backgroundMode]);
+
+  useEffectAfterMount(() => {
+    persistTaskDagNodeSizing(nodeSizing);
+  }, [nodeSizing]);
 
   useEffectAfterMount(() => {
     persistTaskDagImmersive(immersive);
@@ -1209,6 +1252,9 @@ export function TaskDagPage() {
           return;
         case TASK_DAG_IMMERSIVE_STORAGE_KEY:
           setImmersive(readStoredImmersive());
+          return;
+        case TASK_DAG_NODE_SIZING_STORAGE_KEY:
+          setNodeSizing(readStoredDagNodeSizing());
           return;
         case TASK_DAG_SEARCH_DRAFT_STORAGE_KEY:
           setSearchDraft(readStoredSearchDraft());
@@ -1542,6 +1588,9 @@ export function TaskDagPage() {
             executionLabel: task && graphNode
               ? resolveTaskDagExecutionLabel(task, graphNode.isBlocked, graphNode.isExecutable)
               : node.data.executionLabel,
+            layoutMode,
+            fixedWidth: nodeSizing.fixedWidth,
+            fixedHeight: nodeSizing.fixedHeight,
             isSelected: node.id === selectedTaskId,
             isSearchMatch: hasActiveUnifiedSearch && unifiedSearchMatchedTaskIds.has(node.id),
             isSearchDimmed: hasActiveUnifiedSearch && !unifiedSearchMatchedTaskIds.has(node.id),
@@ -1579,7 +1628,10 @@ export function TaskDagPage() {
     renderedVisibleNodeById,
     hasVisibleFocusedSeries,
     hasActiveUnifiedSearch,
+    layoutMode,
     focusedSeriesAnchorIds,
+    nodeSizing.fixedHeight,
+    nodeSizing.fixedWidth,
     secondaryNodeIds,
     selectedTaskId,
     taskById,
@@ -2364,6 +2416,7 @@ export function TaskDagPage() {
               focusedSeriesCount={focusedSeriesAnchorIds.length}
               hiddenFocusedSeriesCount={focusedSeriesAnchorIds.length - visibleFocusedSeriesAnchorIds.length}
               backgroundMode={backgroundMode}
+              nodeSizing={nodeSizing}
               hasActiveBlock={activeTaskIds.length > 0}
               immersive={immersive}
               controlsState={controlsState}
@@ -2415,6 +2468,7 @@ export function TaskDagPage() {
                 setPaneContextMenu(null);
               }}
               onBackgroundModeChange={setBackgroundMode}
+              onNodeSizingChange={setNodeSizing}
               onToggleImmersive={() => setImmersive((value) => !value)}
               onFitView={() => {
                 debugTaskDagExecute('viewport:fitView:manual', {

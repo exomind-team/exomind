@@ -97,6 +97,12 @@ bun scripts/dev/seed-task-dag-search-focus-examples.ts --base-url http://127.0.0
 
 这些样例全部通过 RT `/tasks/replication/upsert` 写入 `anonymous` scope，可重复 upsert。
 
+长标题边界样例：
+
+- `sample-q-long-title-boundary`
+  - 依赖：`sample-q-diamond-d`
+  - 用途：验证长标题优先展示、弱语义标签先退场、以及悬浮/选中时的临时展开
+
 ## 推荐手测动作
 
 1. 文本输入 `Batch Q`，再点标签 `dag`
@@ -143,6 +149,11 @@ bun scripts/dev/seed-task-dag-search-focus-examples.ts --base-url http://127.0.0
 10. 观察 `样例/Q 多入口 A`、`样例/Q 多入口 B` 到 `样例/Q 多入口 E 最终汇合`
    - 预期：能看到两个独立入口汇入同一终点，不会被误判成单链
    - 用途：验证多入口场景下的浏览、搜索和后续区间收缩边界判断
+
+11. 搜索或定位 `sample-q-long-title-boundary`
+   - 预期：基础态优先保住标题，`聚焦锚点` 等弱语义标签在空间紧张时可先退场
+   - 再操作：选中该节点
+   - 预期：卡片围绕原中心点展开，标题变完整，弱语义标签恢复显示，布局不重排
 
 ## 备注
 

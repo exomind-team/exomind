@@ -46,6 +46,10 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
     expect(module.getTaskDagFocusMode()).toBe('soft');
     expect(module.getTaskDagBackgroundMode()).toBe('dots');
     expect(module.getTaskDagImmersive()).toBe(false);
+    expect(module.getTaskDagNodeSizing()).toEqual({
+      fixedWidth: false,
+      fixedHeight: false,
+    });
     expect(module.getTaskDagSearchDraft()).toBe('');
     expect(module.getTaskDagSearchOptions()).toEqual({
       includeDescription: false,
@@ -91,6 +95,10 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       'exomind:dag-focus-mode': 'hard',
       'exomind:dag-background-mode': 'lines',
       'exomind:dag-immersive': '1',
+      'exomind:dag-node-sizing': JSON.stringify({
+        fixedWidth: true,
+        fixedHeight: false,
+      }),
       'exomind:dag-search-draft': 'Markdown',
       'exomind:dag-search-options': JSON.stringify({
         includeDescription: true,
@@ -136,6 +144,10 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
     expect(module.getTaskDagFocusMode()).toBe('hard');
     expect(module.getTaskDagBackgroundMode()).toBe('lines');
     expect(module.getTaskDagImmersive()).toBe(true);
+    expect(module.getTaskDagNodeSizing()).toEqual({
+      fixedWidth: true,
+      fixedHeight: false,
+    });
     expect(module.getTaskDagSearchDraft()).toBe('Markdown');
     expect(module.getTaskDagSearchOptions()).toEqual({
       includeDescription: true,
@@ -195,6 +207,18 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
 
     expect(module.setTaskDagImmersive(true)).toBe(true);
     expect(storage[module.TASK_DAG_IMMERSIVE_STORAGE_KEY]).toBe('1');
+
+    expect(module.setTaskDagNodeSizing({
+      fixedWidth: true,
+      fixedHeight: true,
+    })).toEqual({
+      fixedWidth: true,
+      fixedHeight: true,
+    });
+    expect(JSON.parse(storage[module.TASK_DAG_NODE_SIZING_STORAGE_KEY] ?? '{}')).toEqual({
+      fixedWidth: true,
+      fixedHeight: true,
+    });
 
     expect(module.setTaskDagSearchDraft('task keyword')).toBe('task keyword');
     expect(storage[module.TASK_DAG_SEARCH_DRAFT_STORAGE_KEY]).toBe('task keyword');

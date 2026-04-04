@@ -30,6 +30,10 @@ export type TaskDagViewport = {
   y: number;
   zoom: number;
 };
+export type TaskDagNodeSizing = {
+  fixedWidth: boolean;
+  fixedHeight: boolean;
+};
 export type TaskDagControlsState = {
   desktopViewOpen: boolean;
   desktopToolsOpen: boolean;
@@ -46,6 +50,7 @@ export const TASK_DAG_HIDE_TERMINAL_STORAGE_KEY = 'exomind:dag-hide-terminal';
 export const TASK_DAG_FOCUS_MODE_STORAGE_KEY = 'exomind:dag-focus-mode';
 export const TASK_DAG_BACKGROUND_STORAGE_KEY = 'exomind:dag-background-mode';
 export const TASK_DAG_IMMERSIVE_STORAGE_KEY = 'exomind:dag-immersive';
+export const TASK_DAG_NODE_SIZING_STORAGE_KEY = 'exomind:dag-node-sizing';
 export const TASK_DAG_VIEWPORT_STORAGE_KEY = 'exomind:dag-viewport';
 export const TASK_DAG_SEARCH_DRAFT_STORAGE_KEY = 'exomind:dag-search-draft';
 export const TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY = 'exomind:dag-search-options';
@@ -61,6 +66,7 @@ export const TASK_DAG_HIDE_TERMINAL_CHANGED_EVENT = 'exomind:dag-hide-terminal-c
 export const TASK_DAG_FOCUS_MODE_CHANGED_EVENT = 'exomind:dag-focus-mode-changed';
 export const TASK_DAG_BACKGROUND_CHANGED_EVENT = 'exomind:dag-background-mode-changed';
 export const TASK_DAG_IMMERSIVE_CHANGED_EVENT = 'exomind:dag-immersive-changed';
+export const TASK_DAG_NODE_SIZING_CHANGED_EVENT = 'exomind:dag-node-sizing-changed';
 export const TASK_DAG_VIEWPORT_CHANGED_EVENT = 'exomind:dag-viewport-changed';
 export const TASK_DAG_SEARCH_DRAFT_CHANGED_EVENT = 'exomind:dag-search-draft-changed';
 export const TASK_DAG_SEARCH_OPTIONS_CHANGED_EVENT = 'exomind:dag-search-options-changed';
@@ -86,6 +92,10 @@ const DEFAULT_TASK_DAG_CONTROLS_STATE: TaskDagControlsState = {
   mobileToolsOpen: false,
   tagSectionOpen: false,
   focusSectionOpen: false,
+};
+const DEFAULT_TASK_DAG_NODE_SIZING: TaskDagNodeSizing = {
+  fixedWidth: false,
+  fixedHeight: false,
 };
 const EMPTY_TASK_DAG_VISIBILITY_STATE: TaskDagVisibilityState = {
   collapsedUpstreamOf: [],
@@ -229,6 +239,36 @@ export function setTaskDagImmersive(immersive: boolean): boolean {
     TASK_DAG_IMMERSIVE_STORAGE_KEY,
     normalized ? '1' : '0',
     TASK_DAG_IMMERSIVE_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagNodeSizing(): TaskDagNodeSizing {
+  try {
+    const raw = readRuntimeBackedValue(TASK_DAG_NODE_SIZING_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_TASK_DAG_NODE_SIZING;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<TaskDagNodeSizing>;
+    return {
+      fixedWidth: parsed.fixedWidth === true,
+      fixedHeight: parsed.fixedHeight === true,
+    };
+  } catch {
+    return DEFAULT_TASK_DAG_NODE_SIZING;
+  }
+}
+
+export function setTaskDagNodeSizing(sizing: TaskDagNodeSizing): TaskDagNodeSizing {
+  const normalized: TaskDagNodeSizing = {
+    fixedWidth: sizing.fixedWidth === true,
+    fixedHeight: sizing.fixedHeight === true,
+  };
+  writeRuntimeBackedValue(
+    TASK_DAG_NODE_SIZING_STORAGE_KEY,
+    JSON.stringify(normalized),
+    TASK_DAG_NODE_SIZING_CHANGED_EVENT,
   );
   return normalized;
 }

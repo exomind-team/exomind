@@ -11,6 +11,7 @@ import {
 import type {
   TaskDagControlsState,
   TaskDagFocusMode,
+  TaskDagNodeSizing,
   TaskDagTagFilter,
 } from '@/config/task-dag-preferences';
 import type { DagDirection } from '@/ui/app/pages/task-dag-layout';
@@ -41,6 +42,7 @@ interface TaskDagControlPanelProps {
   focusedSeriesCount: number;
   hiddenFocusedSeriesCount: number;
   backgroundMode: TaskDagBackgroundMode;
+  nodeSizing: TaskDagNodeSizing;
   hasActiveBlock: boolean;
   immersive: boolean;
   controlsState: TaskDagControlsState;
@@ -55,6 +57,7 @@ interface TaskDagControlPanelProps {
   onCycleFocusMode: () => void;
   onClearFocusedSeries: () => void;
   onBackgroundModeChange: (mode: TaskDagBackgroundMode) => void;
+  onNodeSizingChange: (sizing: TaskDagNodeSizing) => void;
   onFitView: () => void;
   onToggleImmersive: () => void;
   onJumpToCurrentRoot: () => void;
@@ -100,6 +103,7 @@ export function TaskDagControlPanel({
   focusedSeriesCount,
   hiddenFocusedSeriesCount,
   backgroundMode,
+  nodeSizing,
   hasActiveBlock,
   immersive,
   controlsState,
@@ -114,6 +118,7 @@ export function TaskDagControlPanel({
   onCycleFocusMode,
   onClearFocusedSeries,
   onBackgroundModeChange,
+  onNodeSizingChange,
   onFitView: _onFitView,
   onToggleImmersive,
   onJumpToCurrentRoot,
@@ -150,8 +155,8 @@ export function TaskDagControlPanel({
   const focusSummaryText = focusedSeriesCount === 0
     ? '未聚焦任何系列'
     : hiddenFocusedSeriesCount > 0
-      ? `已锚定 ${focusedSeriesCount} 个锚点，${hiddenFocusedSeriesCount} 个暂不可见`
-      : `已锚定 ${focusedSeriesCount} 个锚点`;
+      ? `已聚焦 ${focusedSeriesCount} 个锚点，${hiddenFocusedSeriesCount} 个暂不可见`
+      : `已聚焦 ${focusedSeriesCount} 个锚点`;
 
   const searchPanel = (
     <div
@@ -437,6 +442,39 @@ export function TaskDagControlPanel({
             {label}
           </button>
         ))}
+      </div>
+
+      <div className="flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 px-1 py-1 dark:border-[#3C3836] dark:bg-[#120F0D]">
+        <button
+          type="button"
+          data-testid="task-dag-node-sizing-fixed-width"
+          onClick={() => onNodeSizingChange({
+            ...nodeSizing,
+            fixedWidth: !nodeSizing.fixedWidth,
+          })}
+          className={`rounded-full px-3 py-1 text-[10px] font-medium transition-colors ${
+            nodeSizing.fixedWidth
+              ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+              : 'text-[#A8A29E] hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]'
+          }`}
+        >
+          固定宽度
+        </button>
+        <button
+          type="button"
+          data-testid="task-dag-node-sizing-fixed-height"
+          onClick={() => onNodeSizingChange({
+            ...nodeSizing,
+            fixedHeight: !nodeSizing.fixedHeight,
+          })}
+          className={`rounded-full px-3 py-1 text-[10px] font-medium transition-colors ${
+            nodeSizing.fixedHeight
+              ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+              : 'text-[#A8A29E] hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]'
+          }`}
+        >
+          固定高度
+        </button>
       </div>
 
       <button

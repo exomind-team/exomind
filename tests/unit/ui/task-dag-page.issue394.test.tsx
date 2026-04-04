@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TaskDagPage, getNextTaskDagMode } from '@/ui/app/pages/TaskDagPage';
 import type { TaskNode } from '@/lib/types/task';
-import { TASK_DAG_LAYOUT_MODE_STORAGE_KEY } from '@/config/task-dag-preferences';
+import {
+  TASK_DAG_LAYOUT_MODE_STORAGE_KEY,
+  TASK_DAG_NODE_SIZING_STORAGE_KEY,
+} from '@/config/task-dag-preferences';
 import { TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY } from '@/ui/app/pages/task-dag-layout-store';
 
 const invokeMock = vi.hoisted(() => vi.fn());
@@ -1436,13 +1439,13 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       expect(screen.getByTestId('task-dag-node-task-y').className).not.toContain('opacity-35');
     });
 
-    expect(screen.getByTestId('task-dag-focus-anchor-badge-task-b')).toHaveTextContent('已锚定');
-    expect(screen.getByTestId('task-dag-focus-anchor-badge-task-x')).toHaveTextContent('已锚定');
+    expect(screen.getByTestId('task-dag-focus-anchor-badge-task-b')).toHaveTextContent('聚焦锚点');
+    expect(screen.getByTestId('task-dag-focus-anchor-badge-task-x')).toHaveTextContent('聚焦锚点');
     expect(screen.queryByText('当前锚点：B')).not.toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem('exomind:dag-focused-series') ?? '[]')).toEqual(['task-b', 'task-x']);
 
     await openFocusSection();
-    expect(screen.getByText('已锚定 2 个锚点')).toBeInTheDocument();
+    expect(screen.getByText('已聚焦 2 个锚点')).toBeInTheDocument();
   });
 
   it('switches background mode and persists the variant', async () => {
@@ -1461,6 +1464,183 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     fireEvent.click(screen.getByTestId('task-dag-background-none'));
     expect(screen.queryByTestId('mock-react-flow-background')).not.toBeInTheDocument();
     expect(window.localStorage.getItem('exomind:dag-background-mode')).toBe('none');
+  });
+
+  it('shows fixed width and fixed height toggles in layout tools and persists them', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await openDesktopToolsPanel();
+
+    expect(screen.getByTestId('task-dag-node-sizing-fixed-width')).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-node-sizing-fixed-height')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-node-sizing-fixed-width'));
+    expect(JSON.parse(window.localStorage.getItem(TASK_DAG_NODE_SIZING_STORAGE_KEY) ?? '{}')).toEqual({
+      fixedWidth: true,
+      fixedHeight: false,
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-node-sizing-fixed-height'));
+    expect(JSON.parse(window.localStorage.getItem(TASK_DAG_NODE_SIZING_STORAGE_KEY) ?? '{}')).toEqual({
+      fixedWidth: true,
+      fixedHeight: true,
+    });
+  });
+
+  it('hides low-priority badges for long titles in the base state and restores them when selected', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: 'task-long',
+        title: '这是一个用于验证任务依赖图节点在长标题情况下仍优先展示名称而弱语义标签先退场的超长标题样例节点',
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+    ]);
+    window.localStorage.setItem('exomind:dag-focused-series', JSON.stringify(['task-long']));
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-long')).toBeInTheDocument();
+    });
+
+    const cardBeforeSelection = screen.getByTestId('task-dag-node-task-long');
+    expect(cardBeforeSelection.className).toContain('hover:max-w-[24rem]');
+    expect(cardBeforeSelection.className).toContain('hover:max-h-[24rem]');
+    expect(screen.queryByTestId('task-dag-focus-anchor-badge-task-long')).not.toBeInTheDocument();
+    expect(screen.getByText(/长标题情况下仍优先展示名称/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-long'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-focus-anchor-badge-task-long')).toHaveTextContent('聚焦锚点');
+    });
+
+    const cardAfterSelection = screen.getByTestId('task-dag-node-task-long');
+    expect(cardAfterSelection.className).toContain('max-w-[24rem]');
+    expect(cardAfterSelection.className).toContain('max-h-[24rem]');
+    expect(screen.getByTestId('task-dag-node-slot-task-long').className).toContain('h-40');
+    expect(screen.getByTestId('task-dag-node-slot-task-long').className).toContain('w-40');
+  });
+
+  it('applies the four auto-layout node sizing combinations to the content card', async () => {
+    window.localStorage.setItem(TASK_DAG_NODE_SIZING_STORAGE_KEY, JSON.stringify({
+      fixedWidth: false,
+      fixedHeight: false,
+    }));
+    const firstRender = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    let cardClasses = screen.getByTestId('task-dag-node-task-a').className.split(/\s+/);
+    expect(cardClasses).toContain('max-w-40');
+    expect(cardClasses).toContain('max-h-40');
+    expect(cardClasses).not.toContain('w-40');
+    expect(cardClasses).not.toContain('h-40');
+
+    firstRender.unmount();
+    window.localStorage.setItem(TASK_DAG_NODE_SIZING_STORAGE_KEY, JSON.stringify({
+      fixedWidth: true,
+      fixedHeight: false,
+    }));
+    const secondRender = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    cardClasses = screen.getByTestId('task-dag-node-task-a').className.split(/\s+/);
+    expect(cardClasses).toContain('w-40');
+    expect(cardClasses).toContain('max-h-40');
+    expect(cardClasses).not.toContain('h-40');
+
+    secondRender.unmount();
+    window.localStorage.setItem(TASK_DAG_NODE_SIZING_STORAGE_KEY, JSON.stringify({
+      fixedWidth: false,
+      fixedHeight: true,
+    }));
+    const thirdRender = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    cardClasses = screen.getByTestId('task-dag-node-task-a').className.split(/\s+/);
+    expect(cardClasses).toContain('h-40');
+    expect(cardClasses).toContain('max-w-40');
+    expect(cardClasses).not.toContain('w-40');
+
+    thirdRender.unmount();
+    window.localStorage.setItem(TASK_DAG_NODE_SIZING_STORAGE_KEY, JSON.stringify({
+      fixedWidth: true,
+      fixedHeight: true,
+    }));
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    cardClasses = screen.getByTestId('task-dag-node-task-a').className.split(/\s+/);
+    expect(cardClasses).toContain('w-40');
+    expect(cardClasses).toContain('h-40');
+    expect(cardClasses).not.toContain('max-w-40');
+    expect(cardClasses).not.toContain('max-h-40');
+  });
+
+  it('lets manual layout cards grow naturally unless fixed width or fixed height is enabled', async () => {
+    window.localStorage.setItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY, 'manual');
+    window.localStorage.setItem(TASK_DAG_NODE_SIZING_STORAGE_KEY, JSON.stringify({
+      fixedWidth: false,
+      fixedHeight: false,
+    }));
+    const firstRender = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    let cardClasses = screen.getByTestId('task-dag-node-task-a').className.split(/\s+/);
+    expect(cardClasses).not.toContain('max-w-40');
+    expect(cardClasses).not.toContain('max-h-40');
+    expect(cardClasses).not.toContain('w-40');
+    expect(cardClasses).not.toContain('h-40');
+
+    firstRender.unmount();
+    window.localStorage.setItem(TASK_DAG_NODE_SIZING_STORAGE_KEY, JSON.stringify({
+      fixedWidth: true,
+      fixedHeight: false,
+    }));
+    const secondRender = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    cardClasses = screen.getByTestId('task-dag-node-task-a').className.split(/\s+/);
+    expect(cardClasses).toContain('w-40');
+    expect(cardClasses).not.toContain('h-40');
+
+    secondRender.unmount();
+    window.localStorage.setItem(TASK_DAG_NODE_SIZING_STORAGE_KEY, JSON.stringify({
+      fixedWidth: false,
+      fixedHeight: true,
+    }));
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    cardClasses = screen.getByTestId('task-dag-node-task-a').className.split(/\s+/);
+    expect(cardClasses).toContain('h-40');
+    expect(cardClasses).not.toContain('w-40');
   });
 
   it('clears execute selection on pane click', async () => {

@@ -45,6 +45,9 @@ export type TaskDagFlowNodeData = {
   statusLabel: string;
   priorityLabel: string;
   executionLabel: string;
+  layoutMode: 'auto' | 'manual';
+  fixedWidth: boolean;
+  fixedHeight: boolean;
   intervalCollapseSummaries?: Array<{
     startId: string;
     startTitle: string;
@@ -262,6 +265,9 @@ export function buildTaskDagFlow(
         statusLabel: STATUS_LABEL[node.status],
         priorityLabel: PRIORITY_LABEL[node.priority],
         executionLabel: resolveExecutionLabel(node),
+        layoutMode: 'auto',
+        fixedWidth: false,
+        fixedHeight: false,
         isSelected: false,
         isSearchMatch: false,
         isSearchDimmed: false,
@@ -325,6 +331,9 @@ export function buildVisibleTaskDagFlow(
         statusLabel: STATUS_LABEL[node.status],
         priorityLabel: PRIORITY_LABEL[node.priority],
         executionLabel: resolveExecutionLabel(node),
+        layoutMode: 'auto',
+        fixedWidth: false,
+        fixedHeight: false,
         isSelected: node.id === selectedTaskId,
         isSearchMatch: hasActiveSearch && searchMatchedTaskIds.has(node.id),
         isSearchDimmed: hasActiveSearch && !searchMatchedTaskIds.has(node.id),
