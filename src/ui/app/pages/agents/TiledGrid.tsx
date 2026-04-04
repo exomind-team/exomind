@@ -559,8 +559,10 @@ function SessionPane({
   const needsAttention = sessionNeedsAttention(session.status);
   const connection = resolveSessionConnection(session);
   const isCompleted = session.status === 'completed';
+  const isTerminalCompleted = session.interaction_mode === 'terminal'
+    && (session.status === 'completed' || session.status === 'archived');
   const [initialConnectionFailed, setInitialConnectionFailed] = useState(false);
-  const showDisconnected = isDisconnected || initialConnectionFailed;
+  const showDisconnected = isDisconnected || initialConnectionFailed || isTerminalCompleted;
   const showQuickActions =
     !showDisconnected
     && session.status === 'waiting_input'
@@ -690,6 +692,7 @@ function SessionPane({
               rtBaseUrl={connection.rtBaseUrl}
               ptyId={session.pty_id}
               authToken={connection.authToken}
+              autoFocus={false}
               onInitialConnectionFailure={() => {
                 setInitialConnectionFailed(true);
               }}

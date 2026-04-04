@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { PtyTerminal } from '@/ui/app/components/PtyTerminal';
 
 const xtermState = vi.hoisted(() => {
@@ -63,61 +63,78 @@ vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: class {},
 }));
 
-class MockEventSource {
-  static instances: MockEventSource[] = [];
+function createSseResponse(...frames: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const frame of frames) {
+          controller.enqueue(encoder.encode(frame));
+        }
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    },
+  );
+}
 
-  close = vi.fn();
+function createOpenSseResponse(): Response {
+  return new Response(
+    new ReadableStream({
+      start() {},
+    }),
+    {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    },
+  );
+}
 
-  listeners = new Map<string, Array<(event: MessageEvent) => void>>();
+function createStreamFrame(eventType: string, data: string): string {
+  return `event: ${eventType}\ndata: ${data}\n\n`;
+}
 
-  addEventListener = vi.fn((type: string, handler: (event: MessageEvent) => void) => {
-    const handlers = this.listeners.get(type) ?? [];
-    handlers.push(handler);
-    this.listeners.set(type, handlers);
-  });
-
-  onerror: ((this: EventSource, ev: Event) => unknown) | null = null;
-
-  onopen: ((this: EventSource, ev: Event) => unknown) | null = null;
-
-  constructor(_url: string) {
-    MockEventSource.instances.push(this);
-  }
-
-  emit(type: string, data = '') {
-    for (const handler of this.listeners.get(type) ?? []) {
-      handler({ data } as MessageEvent);
+async function flushUi(ms = 0): Promise<void> {
+  await act(async () => {
+    if (ms > 0) {
+      await vi.advanceTimersByTimeAsync(ms);
     }
-  }
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 describe('PtyTerminal layout recovery（终端布局恢复）', () => {
-  let originalEventSource: typeof EventSource | undefined;
   let originalResizeObserver: typeof ResizeObserver | undefined;
   let originalClientWidth: PropertyDescriptor | undefined;
   let originalClientHeight: PropertyDescriptor | undefined;
-  let eventSourceConstructor: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof vi.fn>;
   let resizeObservers: Array<() => void> = [];
   let sizeReady = false;
+  let streamPlans: Array<() => Promise<Response> | Response> = [];
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     sizeReady = false;
     resizeObservers = [];
-    MockEventSource.instances = [];
+    streamPlans = [];
 
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 204 })));
-
-    originalEventSource = globalThis.EventSource;
-    eventSourceConstructor = vi.fn();
-    class EventSourceSpy extends MockEventSource {
-      constructor(url: string) {
-        super(url);
-        eventSourceConstructor(url);
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/stream')) {
+        const nextPlan = streamPlans.shift();
+        if (!nextPlan) {
+          throw new Error(`missing stream plan for ${url}`);
+        }
+        return nextPlan();
       }
-    }
-    vi.stubGlobal('EventSource', EventSourceSpy as unknown as typeof EventSource);
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     originalResizeObserver = globalThis.ResizeObserver;
     vi.stubGlobal(
@@ -157,9 +174,6 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
 
-    if (originalEventSource) {
-      globalThis.EventSource = originalEventSource;
-    }
     if (originalResizeObserver) {
       globalThis.ResizeObserver = originalResizeObserver;
     }
@@ -172,22 +186,33 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
   });
 
   it('waits for measurable layout before connecting SSE（容器可测量后才连接 SSE）', async () => {
+    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))));
+
     render(<PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-1" />);
 
-    await vi.runOnlyPendingTimersAsync();
-    await vi.advanceTimersByTimeAsync(60);
+    await flushUi(60);
 
-    expect(eventSourceConstructor).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/pty/pty-layout-1/stream',
+      expect.anything(),
+    );
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await vi.runOnlyPendingTimersAsync();
-    await vi.advanceTimersByTimeAsync(60);
+    await flushUi(60);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
 
     expect(xtermState.fitAddon.fit).toHaveBeenCalled();
     expect(xtermState.terminal.refresh).toHaveBeenCalled();
-    expect(eventSourceConstructor).toHaveBeenCalledWith('http://127.0.0.1:1949/pty/pty-layout-1/stream');
-    expect(fetch).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/pty/pty-layout-1/stream',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: 'text/event-stream',
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
       'http://127.0.0.1:1949/pty/pty-layout-1/resize',
       expect.objectContaining({ method: 'POST' }),
     );
@@ -195,6 +220,11 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
   it('retries initial stream failures before reporting disconnect（首个 SSE 失败会先重试再上报断开）', async () => {
     const onInitialConnectionFailure = vi.fn();
+    streamPlans.push(
+      () => Promise.reject(new Error('stream offline 1')),
+      () => Promise.reject(new Error('stream offline 2')),
+      () => Promise.reject(new Error('stream offline 3')),
+    );
 
     render(
       <PtyTerminal
@@ -206,30 +236,27 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await vi.runOnlyPendingTimersAsync();
-    await vi.advanceTimersByTimeAsync(60);
+    await flushUi(60);
 
-    expect(MockEventSource.instances).toHaveLength(1);
-    MockEventSource.instances[0]?.onerror?.call({} as EventSource, new Event('error'));
     expect(onInitialConnectionFailure).not.toHaveBeenCalled();
-    expect(MockEventSource.instances[0]?.close).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(250);
-    expect(MockEventSource.instances).toHaveLength(2);
-    MockEventSource.instances[1]?.onerror?.call({} as EventSource, new Event('error'));
+    await flushUi(250);
     expect(onInitialConnectionFailure).not.toHaveBeenCalled();
-    expect(MockEventSource.instances[1]?.close).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(250);
-    expect(MockEventSource.instances).toHaveLength(3);
-    MockEventSource.instances[2]?.onerror?.call({} as EventSource, new Event('error'));
-
+    await flushUi(250);
     expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
-    expect(MockEventSource.instances[2]?.close).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/pty/pty-layout-2/stream',
+      expect.anything(),
+    );
   });
 
   it('does not report disconnect when a retry connects successfully（重试成功后不再上报断开）', async () => {
     const onInitialConnectionFailure = vi.fn();
+    streamPlans.push(
+      () => Promise.reject(new Error('stream offline once')),
+      () => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))),
+    );
 
     render(
       <PtyTerminal
@@ -241,22 +268,55 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await vi.runOnlyPendingTimersAsync();
-    await vi.advanceTimersByTimeAsync(60);
+    await flushUi(60);
 
-    expect(MockEventSource.instances).toHaveLength(1);
-    MockEventSource.instances[0]?.onerror?.call({} as EventSource, new Event('error'));
-
-    await vi.advanceTimersByTimeAsync(250);
-    expect(MockEventSource.instances).toHaveLength(2);
-
-    MockEventSource.instances[1]?.onopen?.call({} as EventSource, new Event('open'));
-    MockEventSource.instances[1]?.onerror?.call({} as EventSource, new Event('error'));
+    await flushUi(250);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
 
     expect(onInitialConnectionFailure).not.toHaveBeenCalled();
   });
 
+  it('does not recreate the PTY stream when only the failure callback identity changes（仅失败回调变更时不应重建 PTY 流）', async () => {
+    const firstCallback = vi.fn();
+    const secondCallback = vi.fn();
+    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))));
+
+    const { rerender } = render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-stable-callback"
+        onInitialConnectionFailure={firstCallback}
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(60);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
+
+    const initialStreamCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'));
+    expect(initialStreamCalls).toHaveLength(1);
+
+    rerender(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-stable-callback"
+        onInitialConnectionFailure={secondCallback}
+      />,
+    );
+
+    await flushUi(60);
+
+    const rerenderedStreamCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'));
+    expect(rerenderedStreamCalls).toHaveLength(1);
+
+    expect(firstCallback).not.toHaveBeenCalled();
+    expect(secondCallback).not.toHaveBeenCalled();
+  });
+
   it('shows the non-zero exit code in the EOF banner（非零退出码会显示在退出提示中）', async () => {
+    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 1 }))));
+
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:1949"
@@ -266,11 +326,8 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await vi.runOnlyPendingTimersAsync();
-    await vi.advanceTimersByTimeAsync(60);
-
-    expect(MockEventSource.instances).toHaveLength(1);
-    MockEventSource.instances[0]?.emit('eof', JSON.stringify({ code: 1 }));
+    await flushUi(60);
+    expect(xtermState.terminal.write).toHaveBeenCalled();
 
     expect(xtermState.terminal.write).toHaveBeenCalledWith(
       '\r\n\x1b[90m[Process exited with code 1]\x1b[0m\r\n',
@@ -278,6 +335,11 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
   });
 
   it('keeps the generic EOF banner for zero or unknown exit code（零或未知退出码保持通用提示）', async () => {
+    streamPlans.push(() => createSseResponse(
+      createStreamFrame('eof', JSON.stringify({ code: 0 })),
+      createStreamFrame('eof', ''),
+    ));
+
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:1949"
@@ -287,12 +349,8 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await vi.runOnlyPendingTimersAsync();
-    await vi.advanceTimersByTimeAsync(60);
-
-    expect(MockEventSource.instances).toHaveLength(1);
-    MockEventSource.instances[0]?.emit('eof', JSON.stringify({ code: 0 }));
-    MockEventSource.instances[0]?.emit('eof', '');
+    await flushUi(60);
+    expect(xtermState.terminal.write).toHaveBeenCalledTimes(2);
 
     expect(xtermState.terminal.write).toHaveBeenNthCalledWith(
       1,
@@ -302,5 +360,45 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
       2,
       '\r\n\x1b[90m[Process exited]\x1b[0m\r\n',
     );
+  });
+
+  it('hides the loading overlay after the fetch stream connects（fetch 流连通后会退出加载态）', async () => {
+    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))));
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-loading-ready"
+      />,
+    );
+
+    expect(screen.getByTestId('pty-terminal-loading')).toBeInTheDocument();
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(60);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
+  });
+
+  it('does not re-show the loading overlay while reconnecting after a successful first connect（首次连通后重连不应重新盖回加载层）', async () => {
+    streamPlans.push(
+      () => createSseResponse(),
+      () => createOpenSseResponse(),
+    );
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-reconnect-loading"
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(60);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
+
+    await flushUi(500);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
   });
 });

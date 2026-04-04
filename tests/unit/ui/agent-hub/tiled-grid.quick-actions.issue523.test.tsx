@@ -123,4 +123,29 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
     expect(screen.queryByTestId('mock-pty-terminal')).not.toBeInTheDocument();
     expect(screen.getByTitle('停止')).toBeInTheDocument();
   });
+
+  it('treats completed terminal sessions as disconnected panes instead of reopening their PTY（已完成终端会话应显示断开占位，不再重开 PTY）', () => {
+    render(
+      <TiledGrid
+        sessions={[
+          buildSession({
+            id: 'terminal-completed',
+            status: 'completed',
+            interaction_mode: 'terminal',
+            pty_id: 'pty-completed',
+          }),
+        ]}
+        layout="1x1"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('tiled-grid-pty-disconnected-terminal-completed')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-pty-terminal')).not.toBeInTheDocument();
+    expect(screen.getByTitle('归档')).toBeInTheDocument();
+  });
 });

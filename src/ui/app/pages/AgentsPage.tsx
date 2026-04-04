@@ -137,6 +137,10 @@ import {
   readAgentsTiledPersistState,
   writeAgentsTiledPersistState,
 } from './agents/agents-tiled-persistence';
+import {
+  readAgentsViewModePersistState,
+  writeAgentsViewModePersistState,
+} from './agents/agents-view-persistence';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -514,7 +518,7 @@ export function AgentsPage() {
   const supportsInlineRightPanel = useIsDesktop(1024);
   const initialRuntimeTarget = getSelectedRuntimeTarget();
   const initialTiledState = useMemo(() => readAgentsTiledPersistState(), []);
-  const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
+  const [viewMode, setViewMode] = useState<AgentHubViewMode>(() => readAgentsViewModePersistState());
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [topologyLayoutMode, setTopologyLayoutMode] = useState<TopologyLayoutMode>('manual');
   const [topologyLayoutStore, setTopologyLayoutStore] = useState<TopologyLayoutStore>(() => readTopologyLayoutStore());
@@ -1490,6 +1494,10 @@ export function AgentsPage() {
   };
 
   useEffect(() => {
+    writeAgentsViewModePersistState(viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
     if (rightPanel.state === 'AGENT_CHAT') return;
     setChatAgentId(null);
     setChatSessionId(null);
@@ -1616,6 +1624,36 @@ export function AgentsPage() {
     runtimeTargetModeValue,
   ]);
   const activeEmbeddedRuntimeHostId = embeddedRuntimeHost?.hostId ?? embeddedRuntimeHost?.id ?? null;
+  const [embeddedRuntimeHostIdentitySettlingTick, setEmbeddedRuntimeHostIdentitySettlingTick] = useState(0);
+  useEffect(() => {
+    if (runtimeTargetModeValue !== 'embedded' || !runtimeServiceStatus?.running) {
+      return;
+    }
+
+    const startedAtMs = runtimeServiceStatus.startedAt
+      ? Date.parse(runtimeServiceStatus.startedAt)
+      : Number.NaN;
+    if (!Number.isFinite(startedAtMs)) {
+      return;
+    }
+
+    const remainingMs = (startedAtMs + 20_000) - Date.now();
+    if (remainingMs <= 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setEmbeddedRuntimeHostIdentitySettlingTick((current) => current + 1);
+    }, remainingMs + 1);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [
+    runtimeServiceStatus?.running,
+    runtimeServiceStatus?.startedAt,
+    runtimeTargetModeValue,
+  ]);
   const embeddedRuntimeHostIdentitySettling = useMemo(() => {
     if (runtimeTargetModeValue !== 'embedded' || !runtimeServiceStatus?.running) {
       return false;
@@ -1628,6 +1666,7 @@ export function AgentsPage() {
     }
     return Date.now() - startedAtMs < 20_000;
   }, [
+    embeddedRuntimeHostIdentitySettlingTick,
     runtimeServiceStatus?.running,
     runtimeServiceStatus?.startedAt,
     runtimeTargetModeValue,
@@ -2176,6 +2215,37 @@ export function AgentsPage() {
     runtimeServiceStatus?.running,
     runtimeTargetModeValue,
   ]);
+  const sessionUsesActiveEmbeddedRuntimeDialAddress = useCallback((session: SessionInfo) => {
+    if (
+      runtimeTargetModeValue !== 'embedded'
+      || !runtimeServiceStatus?.running
+      || !embeddedRuntimeHost
+    ) {
+      return false;
+    }
+
+    const activeHost = resolveLocalServiceHost(embeddedRuntimeHost.host);
+    const activePort = embeddedRuntimeHost.port;
+    const candidates = [session.source_host_address, session.source_host_name];
+
+    return candidates.some((value) => {
+      if (!value) {
+        return false;
+      }
+
+      const dialAddress = resolveDialAddressFromBaseUrl(value) ?? value;
+      try {
+        const parsed = parseRuntimeAddress(dialAddress);
+        return parsed.port === activePort && resolveLocalServiceHost(parsed.host) === activeHost;
+      } catch {
+        return false;
+      }
+    });
+  }, [
+    embeddedRuntimeHost,
+    runtimeServiceStatus?.running,
+    runtimeTargetModeValue,
+  ]);
   const canFallbackToActiveRuntimeHostForSession = useCallback((session: SessionInfo) => {
     if (
       runtimeTargetModeValue !== 'embedded'
@@ -2194,17 +2264,22 @@ export function AgentsPage() {
       return false;
     }
 
-    if (matchedHost.isLocal !== true) {
+    const matchedHostId = matchedHost.hostId ?? matchedHost.id;
+    if (matchedHostId === activeEmbeddedRuntimeHostId) {
       return false;
     }
 
-    const matchedHostId = matchedHost.hostId ?? matchedHost.id;
-    return matchedHostId !== activeEmbeddedRuntimeHostId;
+    if (matchedHost.isLocal !== true) {
+      return sessionUsesActiveEmbeddedRuntimeDialAddress(session);
+    }
+
+    return true;
   }, [
     activeEmbeddedRuntimeHostId,
     loadedPtyHostId,
     resolveRuntimeHostBySourceHostId,
     runtimeServiceStatus?.running,
+    sessionUsesActiveEmbeddedRuntimeDialAddress,
     runtimeTargetModeValue,
   ]);
   const canJudgeSessionPtyPresence = useCallback((session: SessionInfo) => (
@@ -4328,9 +4403,6 @@ export function AgentsPage() {
               isSessionStopping={(session) => isPtyStopPending(session.pty_id)}
               focusedIndex={tiledFocusedIndex}
               onFocusPane={setTiledFocusedIndex}
-              onSessionClick={(session) => {
-                void handleOpenSessionTerminal(session);
-              }}
               paneOrder={tiledPaneOrder}
               onReorder={setTiledPaneOrder}
               onQuickAction={(session, response) => {
@@ -4437,8 +4509,21 @@ export function AgentsPage() {
             });
             const resolvedPtyId = matchingPty?.id ?? matchingSession?.pty_id ?? ptyId;
             const resolvedHostId = matchingSession?.source_host_id ?? matchingPty?.sourceHostId;
+            console.info('[agent-hub][pty][open] requested', {
+              origin: 'topology-node',
+              sessionId: matchingSession?.id ?? null,
+              ptyId: resolvedPtyId,
+              sourceHostId: resolvedHostId ?? null,
+              status: matchingSession?.status ?? null,
+            });
             if (supportsInlineRightPanel) {
               openPtyTerminal(resolvedPtyId, resolvedHostId);
+              console.info('[agent-hub][pty][open] terminal panel opened', {
+                origin: 'topology-node',
+                sessionId: matchingSession?.id ?? null,
+                ptyId: resolvedPtyId,
+                sourceHostId: resolvedHostId ?? null,
+              });
             } else {
               const connection = resolveRuntimeConnectionForHostId(resolvedHostId);
               const ptyParams = new URLSearchParams({ baseUrl: connection.rtBaseUrl });
@@ -4562,8 +4647,9 @@ export function AgentsPage() {
 
         {/* 右侧栏：桌面端可拖拽调整宽度。
             当 PTY 终端活跃时，关闭面板只隐藏 aside（display:none），
-            PtyTerminal 保持挂载 → SSE 连接不断 → 终端状态持久化。 */}
-        {(rightPanel.state !== 'CLOSED' || activePtyId != null) && (
+            PtyTerminal 保持挂载 → SSE 连接不断 → 终端状态持久化。
+            但平铺视图本身已经占用 PTY，因此不额外挂载右栏终端，避免重复加载。 */}
+        {viewMode !== 'tiled' && (rightPanel.state !== 'CLOSED' || activePtyId != null) && (
           <>
           {rightPanel.state !== 'CLOSED' && (
             <div

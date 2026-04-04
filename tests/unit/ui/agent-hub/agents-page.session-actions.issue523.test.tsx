@@ -4,6 +4,7 @@ import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SignalRoute } from '@/lib/types/signal-pool';
 import type { SessionInfo } from '@/lib/types/session';
 import { AGENTS_TILED_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-tiled-persistence';
+import { AGENTS_VIEW_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-view-persistence';
 
 const serviceMocks = vi.hoisted(() => ({
   getDeviceView: vi.fn(),
@@ -53,6 +54,18 @@ const sessionStreamState = vi.hoisted(() => ({
 
 const useSessionStreamMocks = vi.hoisted(() => ({
   useSessionStream: vi.fn(),
+}));
+
+vi.mock('@/ui/app/components/PtyTerminal', () => ({
+  PtyTerminal: ({
+    ptyId,
+  }: {
+    ptyId: string;
+  }) => (
+    <div data-testid={`mock-pty-terminal-${ptyId}`}>
+      PTY:{ptyId}
+    </div>
+  ),
 }));
 
 vi.mock('@xyflow/react', () => ({
@@ -419,6 +432,130 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         { action_id: 'continue', value: undefined },
       );
     });
+  });
+
+  it('persists the last selected network subpage across remounts（离开网络页再回来应恢复上次子页面）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-viewmode-persist',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    const firstRender = render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    });
+    expect(localStorage.getItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY)).toBe('sessions');
+
+    firstRender.unmount();
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    });
+  });
+
+  it('does not mount the right-side terminal while tiled view is active（平铺页不应重复挂载右侧 Terminal）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-tiled-no-right-panel',
+        role: 'Tiled No Right Panel',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: ['session-tiled-no-right-panel'],
+        fullscreenPtyId: 'pty-523',
+      }),
+    );
+    localStorage.setItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY, 'tiled');
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-rightpanel-shell')).not.toBeInTheDocument();
+  });
+
+  it('replays the same PTY when switching sessions -> tiled -> sessions（多视图切换后右栏 PTY 应稳定重放）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-replay-pty',
+        role: 'Replay PTY Session',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-card-session-replay-pty')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('session-card-session-replay-pty'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-shell')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-pty-terminal')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-view-toggle-tiled'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('agent-rightpanel-shell')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-shell')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-pty-terminal')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
+    });
+  });
+
+  it('does not open the right-side terminal when clicking a tiled pane（点击平铺会话窗格时右侧 Terminal 应保持关闭）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-tiled-click',
+        role: 'Tiled Click Session',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+      expect(screen.getByText('Tiled Click Session')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Tiled Click Session'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('agent-rightpanel-shell')).not.toBeInTheDocument();
   });
 
   it('marks running terminal sessions as waiting through RuntimeClient（点击等待决策应调用 RuntimeClient.markSessionWaiting）', async () => {

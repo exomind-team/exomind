@@ -1093,3 +1093,127 @@
 4. 如果用户说“请求箱加载中...”：
    - 先不要急着判定是 `ProposalInboxPage` 回归
    - 先排除 `9124` 被残留 `bun/node/cargo` 占住，导致 embedded RT 自启动失败
+
+### 阶段补记：MCP Bridge Ready 后仍需显式 start session（2026-04-04）
+
+#### 阶段目标
+
+- 收敛一条可重复执行的 Tauri MCP 重连前置动作，避免在真窗排查开始前把“桥已就绪但 session 未挂上”误判成桥接失败。
+
+#### 观察结果
+
+- 用户重启 `bun run tauri dev` 后，页面控制台已出现：
+  - `[MCP][BRIDGE][INFO] Tauri API available, initializing bridge`
+  - `[MCP][BRIDGE][INFO] Console capture initialized`
+  - `[MCP][BRIDGE][INFO] Ready`
+- 即便如此，`driver_session status` 起初仍可能返回：
+  - `connected: false`
+- 这时不需要先判定 bridge 坏掉；直接执行：
+  - `driver_session start --port 9223`
+- 本轮现场里，显式 `start` 后即可成功接入当前实例。
+- 接入成功后再做“当前唯一实例”交叉验证，口径应拆成两段：
+  - `9124` 与 `9223` 必须由同一个 `exomind.exe` 持有；这是 RT 与 MCP bridge 同属一台桌面实例的硬证据
+  - `1420` 不要求和 `exomind.exe` 同 PID；它通常是 Vite/Node 进程在监听。要确认它属于同一实例，应该看当前被接管的 `main` 窗口 URL 是否就是 `http://localhost:1420/...`
+- 因而本轮现场能确认的是：
+  - 当前只存在一组 `UI 1420 / RT 9124 / MCP 9223`
+  - 其中 `9124` 与 `9223` 同属一个 `exomind.exe`
+  - 该 `exomind.exe` 的主窗口实际加载的是 `http://localhost:1420`
+
+#### 结论
+
+- 控制台出现 `[MCP][BRIDGE][INFO] Ready`，只能说明 webview 内的 bridge 脚本已完成初始化；它不等同于 `driver_session` 已自动挂接成功，更不等同于后续 MCP 工具调用已经可用。
+- 因此在 Windows 下做 ExoMind 真窗调试时：
+  - `driver_session status = connected:false`
+  - 不能直接推出 “MCP bridge 不可用”
+- 更准确的三层判断应是：
+  - `Ready` = bridge 层已初始化
+  - `driver_session start --port 9223` 成功，且 `status=connected:true` = 工具接管层已连上
+  - `manage_window list` / `webview_*` 能正常返回 = 工具调用层真的可用
+- 更稳的判定方式是：
+  - 先显式 `driver_session start --port 9223`
+  - 再结合 `1420 / 9124 / 9223` 的端口归属与窗口 URL，确认当前实例是否正确对齐
+- 这一步应视为真窗排查前的固定动作，而不是异常时才尝试的补救动作。
+
+#### 可复用操作套路
+
+1. 先看页面控制台是否已出现 `[MCP][BRIDGE][INFO] Ready`。
+2. 不管 `driver_session status` 是否还是 `connected:false`，都先执行一次：
+   - `driver_session start --port 9223`
+3. `start` 之后先确认工具层真的挂上了：
+   - `driver_session status`
+   - 期待看到 `connected: true`
+4. 再核对“唯一实例”是否对齐：
+   - `Get-NetTCPConnection -State Listen -LocalPort 9124,9223 | Select-Object LocalPort,OwningProcess`
+   - 确认 `9124` 与 `9223` 的 `OwningProcess` 完全相同
+   - `Get-Process -Id <上一步 PID> | Select-Object Id,ProcessName,Path`
+   - 确认它确实是当前那一个 `exomind.exe`
+5. 最后确认 UI 端口是否绑定到这台实例：
+   - `Get-NetTCPConnection -State Listen -LocalPort 1420`
+   - 再用 `manage_window list` 或 `webview_execute_js` 看主窗口 URL
+   - 只有当主窗口 URL 指向 `http://localhost:1420/...` 时，才能判定 `UI1420/RT9124/MCP9223` 已对齐到同一实例
+6. 只有在“显式 start 后仍失败”时，才进入下一层排查：
+   - 端口占用冲突
+   - 幽灵 `exomind.exe`
+   - bridge 未绑定到当前实例
+
+### 阶段补记：#811 九条终端叙事在 `issue806-g` 真窗通过（2026-04-04）
+
+#### 阶段目标
+
+- 用当前唯一存活实例 `issue806-g / UI 1420 / RT 9124 / raw bridge 9223`，把 `#811` 收敛成一份真正可执行的九条用户叙事章程。
+- 让章程同时验证：
+  - `拓扑图 / 会话 / 平铺` 三个子页面的 PTY 恢复与切换
+  - 从 `任务 -> 网络` 的子页面持久化
+  - RT 重启前后 Claude Code / Codex 会话恢复
+- 补齐“点击拓扑 PTY 节点时无结构化 trace”的调试缺口。
+
+#### 观察结果
+
+- 官方 `driver_session` 在本轮现场仍直接报：
+  - `Transport closed`
+- 但 raw bridge `ws://127.0.0.1:9223` 持续可用，且足以驱动整套真窗章程。
+- `scripts/dev/tauri-mcp-issue806-charter.ts` 本轮补了三类稳定性修复：
+  - 切回 `网络` 页后，等待拓扑 PTY 节点真正挂上再断言，不再把子页面重挂载的瞬时空窗误判成“节点缺失”
+  - 点击前先等待 session card / topology node 选择器出现，减少多视图切换中的 DOM 抖动误报
+  - 读取 RT `/sessions` / `/pty` 时加浏览器侧超时，并在 pre-restart 阶段允许回退到 `sessions.sqlite` 作为 RT 真值
+- 前端本体也补上了：
+  - 点击拓扑 PTY 节点时输出
+    - `[agent-hub][pty][open] requested`
+    - `[agent-hub][pty][open] terminal panel opened`
+  - 这样拓扑图与会话卡的 PTY 打开链路都具备统一 trace
+- 真窗最终章程命令：
+  - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name issue806-g --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/issue806-g/app-data/runtime/sessions.sqlite`
+- 本轮最终结果：
+  - `overallPass: true`
+  - `activeCount: 2`
+  - `mismatchCount: 0`
+
+#### 结论
+
+- `#811` 当前阶段的九条终端用户叙事，已经在真实桌面实例中跑通。
+- 真窗验收里需要把 “页面 RT HTTP 抽样” 和 “RT 真值” 区分开：
+  - 优先用页面上下文直接读 `/sessions` / `/pty`
+  - 若 raw bridge 下这一层短时失真，不直接判产品失败，而是回退到 `sessions.sqlite`
+- “拓扑节点可见”和“拓扑节点可点击”现在都已具备：
+  - UI 反馈
+  - Terminal 内容
+  - `agent-hub` 结构化 trace
+
+#### 可复用操作套路
+
+1. 真窗前置先认定官方 MCP 是否可用；若仍是 `Transport closed`，直接切 raw bridge，不要空耗在 `driver_session`。
+2. 跑九条叙事章程时，先保证实例参数明确：
+   - `--name issue806-g`
+   - `--web-port 1420`
+   - `--bridge-port 9223`
+   - `--runtime-db .tmp/tauri-dev-state/issue806-g/app-data/runtime/sessions.sqlite`
+3. 若章程只在 `拓扑图` 失败，先怀疑章程是否抢跑：
+   - 是否只等到了 `agent-topology-view`
+   - 是否真的等到了 `[data-testid^="rf__node-pty-"]`
+4. 若章程只在 pre-restart UI/RT 对账失败，但重启前后 PTY 行为都正常：
+   - 先看页面上下文 `/sessions` / `/pty` 是否只是暂时超时
+   - 再用 `sessions.sqlite` 复核 RT 真值
+5. 后续任何 Agent 只要改了拓扑 PTY 打开链路，都必须同时复核三件事：
+   - 拓扑节点能打开右侧 Terminal
+   - 控制台存在 `[agent-hub][pty][open]` trace
+   - 九条章程再次 `overallPass: true`

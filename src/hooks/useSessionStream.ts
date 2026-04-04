@@ -33,6 +33,17 @@ export interface UseSessionStreamResult {
   refresh: () => void;
 }
 
+export const SESSION_FETCH_TIMEOUT_MS = 4_000;
+const SESSION_SNAPSHOT_FALLBACK_AGE_MS = 60_000;
+
+type SessionSnapshotCacheEntry = {
+  sessions: SessionInfo[];
+  updatedAtMs: number;
+};
+
+const sessionSnapshotCache = new Map<string, SessionSnapshotCacheEntry>();
+let latestSessionSnapshotCacheEntry: SessionSnapshotCacheEntry | null = null;
+
 function isLikelyLocalSessionTarget(target: Pick<SessionStreamTarget, 'rtBaseUrl' | 'hostAddress'>): boolean {
   const raw = `${target.hostAddress ?? target.rtBaseUrl}`.toLowerCase();
   return raw.includes('127.0.0.1')
@@ -56,6 +67,53 @@ function dedupeSessionsById(sessions: SessionInfo[]): SessionInfo[] {
   return deduped;
 }
 
+function cloneCachedSessionSnapshot(entry: SessionSnapshotCacheEntry | null | undefined): SessionInfo[] {
+  return entry ? [...entry.sessions] : [];
+}
+
+function readCachedSessionSnapshot(signature: string, allowLatestFallback = false): SessionInfo[] {
+  const cached = sessionSnapshotCache.get(signature);
+  if (cached) {
+    return cloneCachedSessionSnapshot(cached);
+  }
+
+  if (!allowLatestFallback || !latestSessionSnapshotCacheEntry) {
+    return [];
+  }
+
+  const ageMs = Date.now() - latestSessionSnapshotCacheEntry.updatedAtMs;
+  if (ageMs > SESSION_SNAPSHOT_FALLBACK_AGE_MS) {
+    return [];
+  }
+
+  return cloneCachedSessionSnapshot(latestSessionSnapshotCacheEntry);
+}
+
+function writeCachedSessionSnapshot(signature: string, sessions: SessionInfo[]): void {
+  if (!signature) {
+    return;
+  }
+
+  const deduped = dedupeSessionsById(sessions);
+  if (deduped.length === 0) {
+    sessionSnapshotCache.delete(signature);
+    return;
+  }
+
+  const entry = {
+    sessions: deduped,
+    updatedAtMs: Date.now(),
+  } satisfies SessionSnapshotCacheEntry;
+
+  sessionSnapshotCache.set(signature, entry);
+  latestSessionSnapshotCacheEntry = entry;
+}
+
+export function __resetSessionStreamCacheForTests(): void {
+  sessionSnapshotCache.clear();
+  latestSessionSnapshotCacheEntry = null;
+}
+
 function buildSessionStreamTargetSignature(target: SessionStreamTarget): string {
   return [
     target.id,
@@ -64,6 +122,14 @@ function buildSessionStreamTargetSignature(target: SessionStreamTarget): string 
     target.hostName ?? '',
     target.hostAddress ?? '',
   ].join('|');
+}
+
+function sortSessionStreamTargets(targets: SessionStreamTarget[]): SessionStreamTarget[] {
+  return [...targets].sort((left, right) => {
+    const leftKey = buildSessionStreamTargetSignature(left);
+    const rightKey = buildSessionStreamTargetSignature(right);
+    return leftKey.localeCompare(rightKey);
+  });
 }
 
 /**
@@ -81,6 +147,7 @@ export function useSessionStream({
   const [error, setError] = useState<string | null>(null);
   const eventSourcesRef = useRef<EventSource[]>([]);
   const authWarningKeysRef = useRef<Set<string>>(new Set());
+  const fetchRequestIdRef = useRef(0);
   const resolvedTargetsRef = useRef<{
     signature: string;
     targets: SessionStreamTarget[];
@@ -91,7 +158,7 @@ export function useSessionStream({
   const supportsEventSource = typeof EventSource !== 'undefined';
 
   const normalizedTargets = useMemo(() => (
-    (targets && targets.length > 0)
+    sortSessionStreamTargets((targets && targets.length > 0)
       ? targets
       : (rtBaseUrl
         ? [{
@@ -100,7 +167,7 @@ export function useSessionStream({
             authToken,
             hostAddress: rtBaseUrl,
           }]
-        : [])
+        : []))
   ), [authToken, rtBaseUrl, targets]);
   const resolvedTargetsSignature = useMemo(
     () => normalizedTargets.map(buildSessionStreamTargetSignature).join('||'),
@@ -116,6 +183,11 @@ export function useSessionStream({
 
   const resolvedTargets = resolvedTargetsRef.current.targets;
 
+  useEffect(() => {
+    setSessions(readCachedSessionSnapshot(resolvedTargetsSignature, true));
+    setError(null);
+  }, [resolvedTargetsSignature]);
+
   const decorateSession = useCallback(
     (session: SessionInfo, target: SessionStreamTarget): SessionInfo => ({
       ...session,
@@ -129,13 +201,38 @@ export function useSessionStream({
   const fetchSessions = useCallback(async () => {
     if (resolvedTargets.length === 0) return;
 
+    const requestId = fetchRequestIdRef.current + 1;
+    fetchRequestIdRef.current = requestId;
+    const cachedSessions = readCachedSessionSnapshot(resolvedTargetsSignature, true);
     setLoading(true);
     setError(null);
     try {
-      const results = await Promise.all(resolvedTargets.map(async (target) => {
+      const settledResults = await Promise.allSettled(resolvedTargets.map(async (target) => {
         const headers: Record<string, string> = {};
         if (target.authToken) headers['Authorization'] = `Bearer ${target.authToken}`;
-        const response = await fetch(`${target.rtBaseUrl}/sessions`, { headers });
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timeoutId = typeof window !== 'undefined'
+          ? window.setTimeout(() => controller?.abort(), SESSION_FETCH_TIMEOUT_MS)
+          : setTimeout(() => controller?.abort(), SESSION_FETCH_TIMEOUT_MS);
+        let response: Response;
+        try {
+          response = await fetch(`${target.rtBaseUrl}/sessions`, {
+            headers,
+            signal: controller?.signal,
+          });
+        } catch (fetchError) {
+          const aborted = controller?.signal.aborted
+            || (fetchError instanceof Error && fetchError.name === 'AbortError');
+          throw new Error(
+            aborted
+              ? `${target.hostName ?? target.rtBaseUrl}: timeout`
+              : fetchError instanceof Error
+                ? fetchError.message
+                : String(fetchError),
+          );
+        } finally {
+          clearTimeout(timeoutId);
+        }
         if (!response.ok) {
           if (response.status === 401) {
             const warningKey = `${target.id}|sessions|${target.authToken ? 'with-token' : 'without-token'}`;
@@ -155,13 +252,55 @@ export function useSessionStream({
         const data: SessionInfo[] = await response.json();
         return data.map((session) => decorateSession(session, target));
       }));
-      setSessions(dedupeSessionsById(results.flat()));
+
+      if (fetchRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const successfulSessions = settledResults
+        .filter((result): result is PromiseFulfilledResult<SessionInfo[]> => result.status === 'fulfilled')
+        .flatMap((result) => result.value);
+      const nextSessions = dedupeSessionsById(successfulSessions);
+      const failedMessages = settledResults
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
+
+      if (nextSessions.length > 0) {
+        setSessions(nextSessions);
+        writeCachedSessionSnapshot(resolvedTargetsSignature, nextSessions);
+        if (failedMessages.length > 0) {
+          console.warn('[session-stream] session fetch partially failed', {
+            targets: resolvedTargets.map((target) => ({
+              id: target.id,
+              rtBaseUrl: target.rtBaseUrl,
+              hostName: target.hostName,
+              hostAddress: target.hostAddress,
+            })),
+            errors: failedMessages,
+          });
+        }
+        setError(null);
+        return;
+      }
+
+      if (cachedSessions.length > 0) {
+        setSessions(cachedSessions);
+      }
+      setError(failedMessages[0] ?? 'session fetch failed（会话拉取失败）');
     } catch (e) {
+      if (fetchRequestIdRef.current !== requestId) {
+        return;
+      }
+      if (cachedSessions.length > 0) {
+        setSessions(cachedSessions);
+      }
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (fetchRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
-  }, [decorateSession, resolvedTargets]);
+  }, [decorateSession, resolvedTargets, resolvedTargetsSignature]);
 
   // Initial fetch + SSE subscription
   useEffect(() => {
@@ -171,7 +310,11 @@ export function useSessionStream({
     eventSourcesRef.current = [];
 
     if (!enabled || resolvedTargets.length === 0) {
-      setSessions([]);
+      if (!enabled) {
+        setSessions([]);
+      }
+      setLoading(false);
+      setError(null);
       return;
     }
 
@@ -210,18 +353,24 @@ export function useSessionStream({
             switch (event.type) {
               case 'session.created': {
                 const session = decorateSession(data.session as SessionInfo, target);
-                return dedupeSessionsById([session, ...prev]);
+                const next = dedupeSessionsById([session, ...prev]);
+                writeCachedSessionSnapshot(resolvedTargetsSignature, next);
+                return next;
               }
               case 'session.updated': {
                 const session = decorateSession(data.session as SessionInfo, target);
-                return dedupeSessionsById([
+                const next = dedupeSessionsById([
                   session,
                   ...prev.filter((item) => item.id !== session.id),
                 ]);
+                writeCachedSessionSnapshot(resolvedTargetsSignature, next);
+                return next;
               }
               case 'session.deleted': {
                 const sessionId = data.session_id as string;
-                return prev.filter((item) => item.id !== sessionId);
+                const next = prev.filter((item) => item.id !== sessionId);
+                writeCachedSessionSnapshot(resolvedTargetsSignature, next);
+                return next;
               }
               default:
                 return prev;
@@ -243,7 +392,7 @@ export function useSessionStream({
       }
       eventSourcesRef.current = [];
     };
-  }, [decorateSession, enabled, fetchSessions, resolvedTargets, supportsEventSource]);
+  }, [decorateSession, enabled, fetchSessions, resolvedTargets, resolvedTargetsSignature, supportsEventSource]);
 
   return {
     sessions,

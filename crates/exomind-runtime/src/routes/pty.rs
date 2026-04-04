@@ -90,6 +90,10 @@ fn build_pty_eof_event(exit_code: Option<i32>) -> Event {
     }
 }
 
+fn build_pty_ready_event() -> Event {
+    Event::default().event("ready").data("{}")
+}
+
 async fn resolve_pty_exit_code_for_eof(state: &AppState, id: &str) -> Option<i32> {
     match state.pty_manager.refresh_process_state(id).await {
         Ok(Some(info)) => match info.status {
@@ -315,6 +319,12 @@ async fn stream_pty_output(
             None => (persisted_snapshot.unwrap_or_default(), None),
         };
 
+        // 0. Emit an immediate ready event so clients can flush headers and
+        // transition out of "connecting" even when the PTY is currently idle.
+        if event_tx.send(Ok(build_pty_ready_event())).await.is_err() {
+            return;
+        }
+
         // 1. Replay scrollback buffer.
         if !buffer_snapshot.is_empty() {
             for chunk in buffer_snapshot.chunks(4096) {
@@ -468,7 +478,36 @@ pub fn router() -> Router<AppState> {
 
 #[cfg(test)]
 mod tests {
-    use super::serialize_pty_eof_payload;
+    use super::{serialize_pty_eof_payload, stream_pty_output};
+    use axum::extract::{Path, State};
+    use axum::response::IntoResponse;
+    use futures_util::StreamExt;
+    use std::time::Duration;
+
+    use crate::AppState;
+
+    #[cfg(not(target_os = "android"))]
+    fn interactive_shell_spawn_request() -> crate::pty::PtySpawnRequest {
+        if cfg!(windows) {
+            crate::pty::PtySpawnRequest {
+                name: "ready-shell".to_string(),
+                workdir: Some(".".to_string()),
+                command: "cmd".to_string(),
+                args: vec!["/Q".to_string(), "/K".to_string()],
+                rows: 24,
+                cols: 80,
+            }
+        } else {
+            crate::pty::PtySpawnRequest {
+                name: "ready-shell".to_string(),
+                workdir: Some(".".to_string()),
+                command: "sh".to_string(),
+                args: vec![],
+                rows: 24,
+                cols: 80,
+            }
+        }
+    }
 
     #[test]
     fn serialize_pty_eof_payload_includes_known_exit_code() {
@@ -485,5 +524,37 @@ mod tests {
     #[test]
     fn serialize_pty_eof_payload_omits_unknown_exit_code() {
         assert_eq!(serialize_pty_eof_payload(None), None);
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn stream_pty_output_emits_ready_event_before_terminal_output() {
+        let state = AppState::new_runtime(0, "pty-ready-host".to_string(), None, None, false, None);
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+
+        let sse = stream_pty_output(Path(pty.id.clone()), State(state.clone()))
+            .await
+            .expect("pty stream should open");
+        let response = sse.into_response();
+        let mut stream = response.into_body().into_data_stream();
+        let first_chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("ready chunk should arrive promptly")
+            .expect("body should yield first chunk")
+            .expect("first chunk should be ok");
+        let first_text =
+            String::from_utf8(first_chunk.to_vec()).expect("first chunk should be utf-8");
+
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
+
+        assert!(
+            first_text.contains("event: ready"),
+            "expected ready event first, got: {first_text}"
+        );
     }
 }

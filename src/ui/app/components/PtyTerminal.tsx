@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -12,11 +12,13 @@ export interface PtyTerminalProps {
   ptyId: string;
   authToken?: string;
   interactive?: boolean;
+  autoFocus?: boolean;
   onInitialConnectionFailure?: () => void;
 }
 
 const INITIAL_STREAM_CONNECT_RETRY_LIMIT = 2;
 const INITIAL_STREAM_CONNECT_RETRY_DELAY_MS = 250;
+const STREAM_RECONNECT_DELAY_MS = 500;
 
 function parsePtyExitCode(data: string): number | null {
   if (!data) {
@@ -40,6 +42,26 @@ function formatPtyProcessExitedMessage(exitCode: number | null): string {
   return '[Process exited]';
 }
 
+function parseSseFrame(rawFrame: string): { eventType: string; data: string | null } {
+  let eventType = 'message';
+  const dataLines: string[] = [];
+
+  for (const rawLine of rawFrame.split(/\r?\n/)) {
+    if (rawLine.startsWith('event:')) {
+      eventType = rawLine.slice(6).trim() || 'message';
+      continue;
+    }
+    if (rawLine.startsWith('data:')) {
+      dataLines.push(rawLine.slice(5).trim());
+    }
+  }
+
+  return {
+    eventType,
+    data: dataLines.length > 0 ? dataLines.join('\n') : null,
+  };
+}
+
 // ── Component ──────────────────────────────────────────────────
 
 export function PtyTerminal({
@@ -47,17 +69,42 @@ export function PtyTerminal({
   ptyId,
   authToken,
   interactive = true,
+  autoFocus = interactive,
   onInitialConnectionFailure,
 }: PtyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const onInitialConnectionFailureRef = useRef(onInitialConnectionFailure);
+  const hasConnectedOnceRef = useRef(false);
+  const [isStreamConnecting, setIsStreamConnecting] = useState(true);
+
+  useEffect(() => {
+    onInitialConnectionFailureRef.current = onInitialConnectionFailure;
+  }, [onInitialConnectionFailure]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    let disposed = false;
+    hasConnectedOnceRef.current = false;
+
+    const markStreamReady = () => {
+      if (!disposed) {
+        hasConnectedOnceRef.current = true;
+        setIsStreamConnecting(false);
+      }
+    };
+
+    const resetStreamLoading = () => {
+      if (!disposed && !hasConnectedOnceRef.current) {
+        setIsStreamConnecting(true);
+      }
+    };
+
+    resetStreamLoading();
 
     // ── Build auth helper ────────────────────────────────────
 
@@ -68,6 +115,12 @@ export function PtyTerminal({
       }
       return headers;
     };
+
+    const buildStreamHeaders = (): Record<string, string> => ({
+      ...buildHeaders(),
+      Accept: 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    });
 
     const buildStreamUrl = (): string => {
       const base = `${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/stream`;
@@ -267,16 +320,15 @@ export function PtyTerminal({
     let connectScheduled = false;
     let initialLayoutReady = false;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
-    let initialStreamConnected = false;
     let initialFailureNotified = false;
     let initialStreamRetryCount = 0;
 
-    const clearConnectedEventSource = (es: EventSource) => {
-      if (eventSourceRef.current === es) {
-        eventSourceRef.current = null;
+    const clearConnectedStreamController = (controller: AbortController) => {
+      if (streamAbortControllerRef.current === controller) {
+        streamAbortControllerRef.current = null;
       }
-      if (eventSource === es) {
-        eventSource = null;
+      if (streamAbortController === controller) {
+        streamAbortController = null;
       }
     };
 
@@ -288,7 +340,7 @@ export function PtyTerminal({
       connectTimer = setTimeout(() => {
         connectTimer = null;
         connectScheduled = false;
-        connectSSE();
+        void connectStream();
       }, delayMs);
     };
 
@@ -328,63 +380,132 @@ export function PtyTerminal({
     // If SSE connects before resize, the PTY uses default 80 cols
     // but the terminal may be narrower, causing cursor drift on backspace.
 
-    let eventSource: EventSource | null = null;
+    let streamAbortController: AbortController | null = null;
 
-    const connectSSE = () => {
-      const es = new EventSource(buildStreamUrl());
-      eventSourceRef.current = es;
-      eventSource = es;
+    const handleInitialStreamFailure = (message: string) => {
+      if (initialStreamRetryCount < INITIAL_STREAM_CONNECT_RETRY_LIMIT) {
+        initialStreamRetryCount += 1;
+        log.warn(
+          `[PtyTerminal] initial stream connection failed for PTY ${ptyId}; retry ${initialStreamRetryCount}/${INITIAL_STREAM_CONNECT_RETRY_LIMIT}: ${message}`,
+        );
+        scheduleConnect(INITIAL_STREAM_CONNECT_RETRY_DELAY_MS);
+        return;
+      }
 
-      es.onopen = () => {
-        initialStreamConnected = true;
-        initialStreamRetryCount = 0;
-        controlRequestPauseUntil = 0;
-      };
+      resetStreamLoading();
+      markStreamReady();
+      if (!initialFailureNotified && onInitialConnectionFailureRef.current) {
+        initialFailureNotified = true;
+        onInitialConnectionFailureRef.current();
+      }
+    };
 
-      es.addEventListener('output', (event) => {
-        initialStreamConnected = true;
-        try {
-          const decoded = atob(event.data);
-          const bytes = new Uint8Array(decoded.length);
-          for (let i = 0; i < decoded.length; i++) {
-            bytes[i] = decoded.charCodeAt(i);
-          }
-          terminal.write(bytes);
-        } catch {
-          terminal.write(event.data);
-        }
-      });
+    const connectStream = async () => {
+      resetStreamLoading();
+      const streamUrl = buildStreamUrl();
+      const controller = new AbortController();
+      streamAbortControllerRef.current = controller;
+      streamAbortController = controller;
+      let sawEof = false;
 
-      es.addEventListener('eof', (event) => {
-        initialStreamConnected = true;
-        const exitCode = parsePtyExitCode(event.data);
-        const message = formatPtyProcessExitedMessage(exitCode);
-        terminal.write(`\r\n\x1b[90m${message}\x1b[0m\r\n`);
-      });
+      log.info(`[PtyTerminal] opening PTY stream ${ptyId} via ${streamUrl}`);
 
-      es.onerror = () => {
-        if (!initialStreamConnected) {
-          if (initialStreamRetryCount < INITIAL_STREAM_CONNECT_RETRY_LIMIT) {
-            initialStreamRetryCount += 1;
-            log.warn(
-              `[PtyTerminal] initial stream connection failed for PTY ${ptyId}; retry ${initialStreamRetryCount}/${INITIAL_STREAM_CONNECT_RETRY_LIMIT}`,
-            );
-            es.close();
-            clearConnectedEventSource(es);
-            scheduleConnect(INITIAL_STREAM_CONNECT_RETRY_DELAY_MS);
-            return;
-          }
-
-          if (!initialFailureNotified && onInitialConnectionFailure) {
-            initialFailureNotified = true;
-            onInitialConnectionFailure();
-          }
-          es.close();
-          clearConnectedEventSource(es);
+      let response: Response;
+      try {
+        response = await fetch(streamUrl, {
+          headers: buildStreamHeaders(),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (disposed || controller.signal.aborted) {
           return;
         }
-        // EventSource will auto-reconnect by default
-      };
+        clearConnectedStreamController(controller);
+        handleInitialStreamFailure(error instanceof Error ? error.message : String(error));
+        return;
+      }
+
+      if (!response.ok || !response.body) {
+        clearConnectedStreamController(controller);
+        handleInitialStreamFailure(
+          !response.ok
+            ? `HTTP ${response.status}`
+            : 'empty stream body（终端流响应体为空）',
+        );
+        return;
+      }
+
+      initialStreamRetryCount = 0;
+      controlRequestPauseUntil = 0;
+      markStreamReady();
+      log.info(
+        `[PtyTerminal] PTY stream connected for ${ptyId} with HTTP ${response.status}`,
+      );
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (!disposed) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() ?? '';
+
+          for (const frame of frames) {
+            const { eventType, data } = parseSseFrame(frame);
+            if (data == null) {
+              continue;
+            }
+
+            if (eventType === 'output') {
+              try {
+                const decoded = atob(data);
+                const bytes = new Uint8Array(decoded.length);
+                for (let i = 0; i < decoded.length; i++) {
+                  bytes[i] = decoded.charCodeAt(i);
+                }
+                terminal.write(bytes);
+              } catch {
+                terminal.write(data);
+              }
+              continue;
+            }
+
+            if (eventType === 'eof') {
+              sawEof = true;
+              const exitCode = parsePtyExitCode(data);
+              const message = formatPtyProcessExitedMessage(exitCode);
+              terminal.write(`\r\n\x1b[90m${message}\x1b[0m\r\n`);
+            }
+          }
+        }
+      } catch (error) {
+        if (!disposed && !controller.signal.aborted) {
+          log.warn(
+            `[PtyTerminal] PTY stream reader failed for ${ptyId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      } finally {
+        try {
+          reader.releaseLock();
+        } catch {
+          // Ignore release errors during abort/dispose
+        }
+        clearConnectedStreamController(controller);
+      }
+
+      if (disposed || controller.signal.aborted || sawEof) {
+        return;
+      }
+
+      log.warn(`[PtyTerminal] PTY stream closed unexpectedly for ${ptyId}; reconnecting`);
+      scheduleConnect(STREAM_RECONNECT_DELAY_MS);
     };
 
     // Use rAF to wait for first measurable layout, then:
@@ -395,7 +516,7 @@ export function PtyTerminal({
     requestAnimationFrame(() => {
       if (syncTerminalLayout()) {
         // Auto-focus the terminal only when layout is ready
-        if (interactive) {
+        if (interactive && autoFocus) {
           terminal.focus();
         }
       }
@@ -404,6 +525,7 @@ export function PtyTerminal({
     // ── Cleanup ──────────────────────────────────────────────
 
     return () => {
+      disposed = true;
       if (interactive) {
         document.removeEventListener('paste', documentPasteHandler);
       }
@@ -415,30 +537,40 @@ export function PtyTerminal({
         resizeObserverRef.current = null;
       }
 
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
+      if (streamAbortControllerRef.current) {
+        streamAbortControllerRef.current.abort();
+        streamAbortControllerRef.current = null;
       }
       if (connectTimer) {
         clearTimeout(connectTimer);
         connectTimer = null;
       }
-      if (eventSource) {
-        eventSource.close();
-        eventSource = null;
+      if (streamAbortController) {
+        streamAbortController.abort();
+        streamAbortController = null;
       }
 
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [authToken, interactive, onInitialConnectionFailure, ptyId, rtBaseUrl]);
+  }, [authToken, autoFocus, interactive, ptyId, rtBaseUrl]);
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full min-h-[200px]"
-      style={{ backgroundColor: '#1C1917' }}
-    />
+    <div className="relative h-full w-full min-h-[200px]" style={{ backgroundColor: '#1C1917' }}>
+      {isStreamConnecting ? (
+        <div
+          data-testid="pty-terminal-loading"
+          className="absolute inset-0 z-10 flex items-center justify-center bg-[#1C1917]/90 text-xs text-[#A8A29E]"
+        >
+          会话加载中...
+        </div>
+      ) : null}
+      <div
+        ref={containerRef}
+        className="h-full w-full min-h-[200px]"
+        style={{ backgroundColor: '#1C1917' }}
+      />
+    </div>
   );
 }

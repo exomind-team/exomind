@@ -53,13 +53,48 @@ type ConsoleEntry = {
 };
 
 type SessionCardExerciseResult = {
+  target: 'session-card' | 'topology-node';
   sessionId: string;
   expectation: 'active' | 'completed';
   status: 'passed' | 'failed' | 'skipped';
+  loadingObserved: boolean;
   terminalVisible: boolean;
   disconnectedVisible: boolean;
   disconnectedMessage: string | null;
   consoleEntries: ConsoleEntry[];
+  notes: string[];
+};
+
+type CharterCheck = {
+  id: string;
+  title: string;
+  status: 'passed' | 'failed' | 'skipped';
+  notes: string[];
+};
+
+type ViewModeCheck = {
+  status: 'passed' | 'failed';
+  targetView: 'topology' | 'sessions' | 'tiled';
+  pathname: string;
+  storedViewMode: string | null;
+  notes: string[];
+};
+
+type TiledViewCheck = {
+  status: 'passed' | 'failed';
+  activeSessionIds: string[];
+  loadingObserved: boolean;
+  rightPanelVisible: boolean;
+  paneRectsStable: boolean;
+  liveTerminalCount: number;
+  disconnectedPaneCount: number;
+  notes: string[];
+};
+
+type MultiViewRoundTripCheck = {
+  status: 'passed' | 'failed';
+  sequence: string[];
+  finalViewMode: string | null;
   notes: string[];
 };
 
@@ -364,6 +399,20 @@ function readRtSessionsFromSqlite(databasePath: string): RtSessionRecord[] {
   return JSON.parse(result.stdout) as RtSessionRecord[];
 }
 
+function trySummarizeRtSessionsFromSqlite(
+  databasePath?: string,
+): ReturnType<typeof summarizeRtSessions> | null {
+  if (!databasePath) {
+    return null;
+  }
+
+  try {
+    return summarizeRtSessions(readRtSessionsFromSqlite(databasePath));
+  } catch {
+    return null;
+  }
+}
+
 async function waitForJs<T>(
   client: RawBridgeClient,
   script: string,
@@ -445,14 +494,23 @@ async function clickBySelector(
   client: RawBridgeClient,
   selector: string,
   label: string,
+  timeoutMs = 4_000,
 ): Promise<void> {
+  await waitForJs<{ present: boolean }>(
+    client,
+    `(() => ({ present: !!document.querySelector(${JSON.stringify(selector)}) }))()`,
+    (value) => value.present,
+    timeoutMs,
+    `${label} presence`,
+  );
+
   const result = await client.executeJs<{ clicked: boolean; reason: string | null }>(
     `(() => {
       const node = document.querySelector(${JSON.stringify(selector)});
       if (!(node instanceof HTMLElement)) {
         return { clicked: false, reason: 'not-found' };
       }
-      node.click();
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       return { clicked: true, reason: null };
     })()`,
   );
@@ -460,6 +518,61 @@ async function clickBySelector(
   if (!result.clicked) {
     throw new Error(`failed to click ${label}: ${result.reason}`);
   }
+}
+
+async function readAgentHubViewState(client: RawBridgeClient): Promise<{
+  pathname: string;
+  storedViewMode: string | null;
+  topologyVisible: boolean;
+  sessionsVisible: boolean;
+  tiledVisible: boolean;
+}> {
+  return await client.executeJs(`(() => ({
+    pathname: window.location.pathname,
+    storedViewMode: window.localStorage.getItem('exomind:agentHubViewMode'),
+    topologyVisible: !!document.querySelector('[data-testid="agent-topology-view"]'),
+    sessionsVisible: !!document.querySelector('[data-testid="sessions-view"]')
+      || !!document.querySelector('[data-testid="sessions-empty-state"]'),
+    tiledVisible: !!document.querySelector('[data-testid="tiled-grid"]'),
+  }))()`);
+}
+
+async function ensureTopologyView(client: RawBridgeClient, timeoutMs: number): Promise<ViewModeCheck> {
+  await waitForJs<{ ready: boolean }>(
+    client,
+    `(() => ({
+      ready: !!document.querySelector('[data-testid="agent-view-toggle-topology"]')
+    }))()`,
+    (value) => value.ready,
+    timeoutMs,
+    'topology toggle',
+  );
+  await clickBySelector(client, '[data-testid="agent-view-toggle-topology"]', 'topology toggle');
+  const state = await waitForJs<{
+    pathname: string;
+    storedViewMode: string | null;
+    topologyVisible: boolean;
+  }>(
+    client,
+    `(() => ({
+      pathname: window.location.pathname,
+      storedViewMode: window.localStorage.getItem('exomind:agentHubViewMode'),
+      topologyVisible: !!document.querySelector('[data-testid="agent-topology-view"]'),
+    }))()`,
+    (value) => value.topologyVisible,
+    timeoutMs,
+    'topology view',
+  );
+
+  return {
+    status: state.topologyVisible ? 'passed' : 'failed',
+    targetView: 'topology',
+    pathname: state.pathname,
+    storedViewMode: state.storedViewMode,
+    notes: state.topologyVisible
+      ? ['topology view became visible']
+      : ['topology view did not become visible'],
+  };
 }
 
 async function ensureSessionsView(client: RawBridgeClient, timeoutMs: number): Promise<void> {
@@ -483,6 +596,44 @@ async function ensureSessionsView(client: RawBridgeClient, timeoutMs: number): P
     timeoutMs,
     'sessions view',
   );
+}
+
+async function ensureTiledView(client: RawBridgeClient, timeoutMs: number): Promise<ViewModeCheck> {
+  await waitForJs<{ ready: boolean }>(
+    client,
+    `(() => ({
+      ready: !!document.querySelector('[data-testid="agent-view-toggle-tiled"]')
+    }))()`,
+    (value) => value.ready,
+    timeoutMs,
+    'tiled toggle',
+  );
+  await clickBySelector(client, '[data-testid="agent-view-toggle-tiled"]', 'tiled toggle');
+  const state = await waitForJs<{
+    pathname: string;
+    storedViewMode: string | null;
+    tiledVisible: boolean;
+  }>(
+    client,
+    `(() => ({
+      pathname: window.location.pathname,
+      storedViewMode: window.localStorage.getItem('exomind:agentHubViewMode'),
+      tiledVisible: !!document.querySelector('[data-testid="tiled-grid"]'),
+    }))()`,
+    (value) => value.tiledVisible,
+    timeoutMs,
+    'tiled view',
+  );
+
+  return {
+    status: state.tiledVisible ? 'passed' : 'failed',
+    targetView: 'tiled',
+    pathname: state.pathname,
+    storedViewMode: state.storedViewMode,
+    notes: state.tiledVisible
+      ? ['tiled view became visible']
+      : ['tiled view did not become visible'],
+  };
 }
 
 async function collectUiSessionSummary(client: RawBridgeClient): Promise<UiSessionSummary> {
@@ -531,6 +682,68 @@ async function collectUiSessionSummary(client: RawBridgeClient): Promise<UiSessi
   };
 }
 
+async function collectTopologyTerminalNodeTestIds(client: RawBridgeClient): Promise<string[]> {
+  return await client.executeJs(`(() => Array.from(
+    document.querySelectorAll('[data-testid^="rf__node-pty-"]'),
+  ).map((node) => node.getAttribute('data-testid') ?? '').filter(Boolean))()`);
+}
+
+async function waitForTopologyTerminalNodeTestIds(
+  client: RawBridgeClient,
+  expectedSessionIds: string[],
+  timeoutMs: number,
+): Promise<string[]> {
+  if (expectedSessionIds.length === 0) {
+    return await collectTopologyTerminalNodeTestIds(client);
+  }
+
+  const startedAt = Date.now();
+  let lastSeenTestIds: string[] = [];
+  while (Date.now() - startedAt <= timeoutMs) {
+    lastSeenTestIds = await collectTopologyTerminalNodeTestIds(client);
+    const missingSessionIds = expectedSessionIds.filter((sessionId) => (
+      !lastSeenTestIds.includes(`rf__node-pty-${sessionId}`)
+    ));
+    if (missingSessionIds.length === 0) {
+      return lastSeenTestIds;
+    }
+    await Bun.sleep(200);
+  }
+
+  return lastSeenTestIds;
+}
+
+async function collectTiledViewState(client: RawBridgeClient): Promise<{
+  visible: boolean;
+  rightPanelVisible: boolean;
+  loadingCount: number;
+  liveTerminalCount: number;
+  disconnectedPaneCount: number;
+  paneRects: Array<{ x: number; y: number; width: number; height: number }>;
+}> {
+  return await client.executeJs(`(() => {
+    const paneRects = Array.from(document.querySelectorAll('[data-testid="tiled-grid"] > div'))
+      .map((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+      });
+
+    return {
+      visible: !!document.querySelector('[data-testid="tiled-grid"]'),
+      rightPanelVisible: !!document.querySelector('[data-testid="agent-rightpanel-shell"]'),
+      loadingCount: document.querySelectorAll('[data-testid="pty-terminal-loading"]').length,
+      liveTerminalCount: document.querySelectorAll('.xterm').length,
+      disconnectedPaneCount: document.querySelectorAll('[data-testid^="tiled-grid-pty-disconnected-"]').length,
+      paneRects,
+    };
+  })()`);
+}
+
 async function collectRuntimeState(client: RawBridgeClient): Promise<RuntimeStateSnapshot> {
   return await client.executeJs<RuntimeStateSnapshot>(`(async () => {
     const runtimeStatus = await window.__TAURI__.core.invoke('runtime_service_status').catch((error) => ({
@@ -548,22 +761,26 @@ async function collectRuntimeState(client: RawBridgeClient): Promise<RuntimeStat
       : 9124;
     const rtBaseUrl = 'http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + String(port);
 
-    const sessions = await fetch(rtBaseUrl + '/sessions')
-      .then(async (response) => {
+    const fetchJsonWithTimeout = async (url) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2500);
+      try {
+        const response = await fetch(url, { signal: controller.signal });
         if (!response.ok) {
           throw new Error('HTTP ' + String(response.status));
         }
         return await response.json();
-      })
-      .catch(() => []);
-    const ptys = await fetch(rtBaseUrl + '/pty')
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error('HTTP ' + String(response.status));
-        }
-        return await response.json();
-      })
-      .catch(() => []);
+      } catch {
+        return [];
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const [sessions, ptys] = await Promise.all([
+      fetchJsonWithTimeout(rtBaseUrl + '/sessions'),
+      fetchJsonWithTimeout(rtBaseUrl + '/pty'),
+    ]);
 
     return {
       runtimeStatus,
@@ -571,6 +788,37 @@ async function collectRuntimeState(client: RawBridgeClient): Promise<RuntimeStat
       ptys: Array.isArray(ptys) ? ptys : [],
     };
   })()`);
+}
+
+async function waitForUiRtConsistency(
+  client: RawBridgeClient,
+  timeoutMs: number,
+): Promise<{
+  uiSummary: UiSessionSummary;
+  runtimeState: RuntimeStateSnapshot;
+  rtSummary: ReturnType<typeof summarizeRtSessions>;
+  mismatches: ReturnType<typeof compareSessionSummaries>;
+}> {
+  const startedAt = Date.now();
+  let latest = {
+    uiSummary: await collectUiSessionSummary(client),
+    runtimeState: await collectRuntimeState(client),
+    rtSummary: summarizeRtSessions([]),
+    mismatches: [] as ReturnType<typeof compareSessionSummaries>,
+  };
+  latest.rtSummary = summarizeRtSessions(latest.runtimeState.sessions);
+  latest.mismatches = compareSessionSummaries(latest.uiSummary, latest.rtSummary);
+
+  while (latest.mismatches.length > 0 && (Date.now() - startedAt) < timeoutMs) {
+    await Bun.sleep(250);
+    const uiSummary = await collectUiSessionSummary(client);
+    const runtimeState = await collectRuntimeState(client);
+    const rtSummary = summarizeRtSessions(runtimeState.sessions);
+    const mismatches = compareSessionSummaries(uiSummary, rtSummary);
+    latest = { uiSummary, runtimeState, rtSummary, mismatches };
+  }
+
+  return latest;
 }
 
 async function restartRuntimeAndWaitForRecovery(
@@ -664,18 +912,43 @@ async function waitForSessionPanel(client: RawBridgeClient, timeoutMs: number): 
   );
 }
 
+async function detectTerminalLoadingDuringTransition(
+  client: RawBridgeClient,
+  timeoutMs: number,
+): Promise<boolean> {
+  const startedAt = Date.now();
+  while ((Date.now() - startedAt) < timeoutMs) {
+    const loadingVisible = await client.executeJs<boolean>(
+      `(() => !!document.querySelector('[data-testid="pty-terminal-loading"]'))()`,
+    );
+    if (loadingVisible) {
+      return true;
+    }
+    await Bun.sleep(50);
+  }
+
+  return false;
+}
+
 async function exerciseSessionCard(
   client: RawBridgeClient,
   sessionId: string,
   expectation: 'active' | 'completed',
+  target: 'session-card' | 'topology-node',
+  selector: string,
   timeoutMs: number,
 ): Promise<SessionCardExerciseResult> {
   await installConsoleTap(client);
-  await clickBySelector(client, `[data-testid="session-card-${sessionId}"]`, `session-card-${sessionId}`);
+  const loadingPromise = detectTerminalLoadingDuringTransition(client, Math.min(timeoutMs, 1500));
+  await clickBySelector(client, selector, selector);
   const panel = await waitForSessionPanel(client, timeoutMs);
+  const loadingObserved = await loadingPromise;
   const consoleEntries = await readConsoleEntries(client);
   const notes: string[] = [];
 
+  if (loadingObserved) {
+    notes.push('observed terminal loading indicator');
+  }
   if (panel.terminalVisible) {
     notes.push('right panel terminal container became visible');
   }
@@ -703,9 +976,11 @@ async function exerciseSessionCard(
   }
 
   return {
+    target,
     sessionId,
     expectation,
     status: passed ? 'passed' : 'failed',
+    loadingObserved,
     terminalVisible: panel.terminalVisible,
     disconnectedVisible: panel.disconnectedVisible,
     disconnectedMessage: panel.disconnectedMessage,
@@ -740,17 +1015,195 @@ async function checkProposalInboxPage(
   };
 }
 
+async function verifyTiledViewBehavior(
+  client: RawBridgeClient,
+  activeSessionIds: string[],
+  timeoutMs: number,
+): Promise<TiledViewCheck> {
+  await ensureTiledView(client, timeoutMs);
+  const initialState = await collectTiledViewState(client);
+  let loadingObserved = initialState.loadingCount > 0;
+  const loadingStartedAt = Date.now();
+  while (!loadingObserved && (Date.now() - loadingStartedAt) < Math.min(timeoutMs, 1500)) {
+    await Bun.sleep(50);
+    loadingObserved = (await collectTiledViewState(client)).loadingCount > 0;
+  }
+  await Bun.sleep(500);
+  const settledState = await collectTiledViewState(client);
+  const clickResult = await client.executeJs<{ clicked: boolean }>(
+    `(() => {
+      const sessionIds = ${JSON.stringify(activeSessionIds)};
+      const candidates = sessionIds.flatMap((sessionId) => ([
+        document.querySelector('[data-testid="tiled-grid-stop-' + sessionId + '"]'),
+        document.querySelector('[data-testid="tiled-grid-archive-' + sessionId + '"]'),
+        document.querySelector('[data-testid="tiled-grid-pty-disconnected-' + sessionId + '"]'),
+      ])).filter(Boolean);
+
+      const anchor = candidates[0];
+      if (!(anchor instanceof HTMLElement)) {
+        return { clicked: false };
+      }
+
+      const pane = anchor.parentElement?.parentElement?.parentElement ?? anchor.closest('div');
+      if (!(pane instanceof HTMLElement)) {
+        return { clicked: false };
+      }
+
+      pane.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      return { clicked: true };
+    })()`,
+  );
+  await Bun.sleep(300);
+  const afterClickState = await collectTiledViewState(client);
+
+  const paneRectsStable = JSON.stringify(settledState.paneRects) === JSON.stringify(afterClickState.paneRects);
+  const rightPanelVisible = afterClickState.rightPanelVisible;
+  const notes = [
+    loadingObserved
+      ? `observed ${initialState.loadingCount} tiled loading overlay(s)`
+      : 'no tiled loading overlay observed during first sample',
+    `live terminals in tiled view: ${afterClickState.liveTerminalCount}`,
+    `disconnected panes in tiled view: ${afterClickState.disconnectedPaneCount}`,
+    clickResult.clicked
+      ? 'clicked a tiled pane root'
+      : 'could not locate an interactive tiled pane root to click',
+    paneRectsStable
+      ? 'tiled pane rectangles stayed stable after click'
+      : 'tiled pane rectangles changed after click',
+    rightPanelVisible
+      ? 'right panel became visible while tiled view stayed active'
+      : 'right panel stayed closed after tiled pane click',
+  ];
+
+  return {
+    status: loadingObserved && afterClickState.visible && !rightPanelVisible && paneRectsStable
+      ? 'passed'
+      : 'failed',
+    activeSessionIds,
+    loadingObserved,
+    rightPanelVisible,
+    paneRectsStable,
+    liveTerminalCount: afterClickState.liveTerminalCount,
+    disconnectedPaneCount: afterClickState.disconnectedPaneCount,
+    notes,
+  };
+}
+
+async function verifyAgentViewRestorationViaTasks(
+  client: RawBridgeClient,
+  targetView: 'topology' | 'sessions' | 'tiled',
+  timeoutMs: number,
+): Promise<CharterCheck> {
+  if (targetView === 'topology') {
+    await ensureTopologyView(client, timeoutMs);
+  } else if (targetView === 'tiled') {
+    await ensureTiledView(client, timeoutMs);
+  } else {
+    await ensureSessionsView(client, timeoutMs);
+  }
+
+  await clickBySelector(client, '[data-testid="desktop-sidebar-item-tasks"]', 'tasks sidebar item');
+  await waitForJs<{ pathname: string }>(
+    client,
+    `(() => ({ pathname: window.location.pathname }))()`,
+    (value) => value.pathname === '/tasks',
+    timeoutMs,
+    'tasks page',
+  );
+  await clickBySelector(client, '[data-testid="desktop-sidebar-item-agents"]', 'agents sidebar item');
+
+  const expectedVisibilityCheck = targetView === 'topology'
+    ? `(() => ({
+        pathname: window.location.pathname,
+        storedViewMode: window.localStorage.getItem('exomind:agentHubViewMode'),
+        visible: !!document.querySelector('[data-testid="agent-topology-view"]'),
+      }))()`
+    : targetView === 'tiled'
+      ? `(() => ({
+          pathname: window.location.pathname,
+          storedViewMode: window.localStorage.getItem('exomind:agentHubViewMode'),
+          visible: !!document.querySelector('[data-testid="tiled-grid"]'),
+        }))()`
+      : `(() => ({
+          pathname: window.location.pathname,
+          storedViewMode: window.localStorage.getItem('exomind:agentHubViewMode'),
+          visible: !!document.querySelector('[data-testid="sessions-view"]')
+            || !!document.querySelector('[data-testid="sessions-empty-state"]'),
+        }))()`;
+
+  const state = await waitForJs<{
+    pathname: string;
+    storedViewMode: string | null;
+    visible: boolean;
+  }>(
+    client,
+    expectedVisibilityCheck,
+    (value) => value.pathname === '/agents' && value.visible,
+    timeoutMs,
+    `restore ${targetView} after tasks`,
+  );
+
+  const passed = state.visible && state.storedViewMode === targetView;
+  return {
+    id: `restore-${targetView}-after-tasks`,
+    title: `从任务页返回后恢复网络/${targetView}`,
+    status: passed ? 'passed' : 'failed',
+    notes: [
+      `pathname=${state.pathname}`,
+      `storedViewMode=${state.storedViewMode ?? 'null'}`,
+      passed
+        ? `network view restored to ${targetView}`
+        : `network view did not restore to ${targetView}`,
+    ],
+  };
+}
+
+async function verifyMultiViewRoundTrip(
+  client: RawBridgeClient,
+  timeoutMs: number,
+): Promise<MultiViewRoundTripCheck> {
+  const sequence = ['sessions', 'tiled', 'sessions', 'topology', 'sessions', 'tiled'];
+  const notes: string[] = [];
+
+  for (const view of sequence) {
+    if (view === 'sessions') {
+      await ensureSessionsView(client, timeoutMs);
+    } else if (view === 'tiled') {
+      await ensureTiledView(client, timeoutMs);
+    } else {
+      await ensureTopologyView(client, timeoutMs);
+    }
+    const state = await readAgentHubViewState(client);
+    notes.push(`${view}: stored=${state.storedViewMode ?? 'null'} path=${state.pathname}`);
+  }
+
+  const finalState = await readAgentHubViewState(client);
+  return {
+    status: finalState.tiledVisible && finalState.storedViewMode === 'tiled'
+      ? 'passed'
+      : 'failed',
+    sequence,
+    finalViewMode: finalState.storedViewMode,
+    notes,
+  };
+}
+
 function buildMarkdownReport(input: {
   timestamp: string;
   instance: CharterInstanceDescriptor;
+  charterChecks: CharterCheck[];
+  topologyNodeChecks: SessionCardExerciseResult[];
   uiSummary: UiSessionSummary;
   rtSummary: ReturnType<typeof summarizeRtSessions>;
   mismatches: ReturnType<typeof compareSessionSummaries>;
   activeSessionChecks: SessionCardExerciseResult[];
   completedSessionCheck: SessionCardExerciseResult | null;
   proposalInboxCheck: ProposalPageCheck;
+  tiledViewCheck: TiledViewCheck;
+  multiViewRoundTripCheck: MultiViewRoundTripCheck;
   runtimeRestartCheck: RuntimeRestartCheck;
   postRestartActiveSessionChecks: SessionCardExerciseResult[];
+  preRestartRtSummarySource: 'runtime-http' | 'sqlite-fallback';
   overallPass: boolean;
 }): string {
   const lines = [
@@ -761,6 +1214,31 @@ function buildMarkdownReport(input: {
     `- Web: \`http://localhost:${input.instance.webPort}\``,
     `- Raw bridge: \`ws://127.0.0.1:${input.instance.bridgePort}\``,
     `- Overall: ${input.overallPass ? 'PASS' : 'FAIL'}`,
+    `- Pre-restart RT source: \`${input.preRestartRtSummarySource}\``,
+    '',
+    '## Nine-Story Charter Checks',
+    '',
+  ];
+
+  for (const check of input.charterChecks) {
+    lines.push(`- ${check.id}: ${check.status.toUpperCase()} — ${check.title} (${check.notes.join('; ') || 'no notes'})`);
+  }
+
+  lines.push(
+    '',
+    '## Topology Terminal Nodes',
+    '',
+  );
+
+  if (input.topologyNodeChecks.length === 0) {
+    lines.push('- No topology PTY nodes were detected.');
+  } else {
+    for (const check of input.topologyNodeChecks) {
+      lines.push(`- Topology session \`${check.sessionId}\`: ${check.status.toUpperCase()} (${check.notes.join('; ') || 'no notes'})`);
+    }
+  }
+
+  lines.push(
     '',
     '## Pre-Restart Session Counts',
     '',
@@ -771,7 +1249,7 @@ function buildMarkdownReport(input: {
     '',
     '## Pre-Restart Session Card Checks',
     '',
-  ];
+  );
 
   if (input.activeSessionChecks.length === 0) {
     lines.push('- No active session cards were present in the current instance.');
@@ -786,6 +1264,26 @@ function buildMarkdownReport(input: {
   } else {
     lines.push('- No completed session card was present to verify the disconnected-history fallback.');
   }
+
+  lines.push(
+    '',
+    '## Tiled View',
+    '',
+    `- Status: ${input.tiledViewCheck.status.toUpperCase()}`,
+    `- Loading observed: \`${String(input.tiledViewCheck.loadingObserved)}\``,
+    `- Right panel visible while tiled: \`${String(input.tiledViewCheck.rightPanelVisible)}\``,
+    `- Pane rects stable after click: \`${String(input.tiledViewCheck.paneRectsStable)}\``,
+    `- Live terminal count: \`${input.tiledViewCheck.liveTerminalCount}\``,
+    `- Disconnected pane count: \`${input.tiledViewCheck.disconnectedPaneCount}\``,
+    `- Notes: ${input.tiledViewCheck.notes.join('; ') || 'none'}`,
+    '',
+    '## Multi-View Round Trip',
+    '',
+    `- Status: ${input.multiViewRoundTripCheck.status.toUpperCase()}`,
+    `- Sequence: ${input.multiViewRoundTripCheck.sequence.join(' -> ')}`,
+    `- Final stored view: \`${input.multiViewRoundTripCheck.finalViewMode ?? 'null'}\``,
+    `- Notes: ${input.multiViewRoundTripCheck.notes.join('; ') || 'none'}`,
+  );
 
   lines.push('', '## Proposal Inbox', '', `- Status: ${input.proposalInboxCheck.status.toUpperCase()}`, `- Href: \`${input.proposalInboxCheck.href}\``, `- Loading visible: \`${String(input.proposalInboxCheck.loading)}\``);
 
@@ -869,20 +1367,200 @@ async function main(): Promise<void> {
     await installConsoleTap(client);
     await ensureSessionsView(client, args.timeoutMs);
 
-    const uiSummary = await collectUiSessionSummary(client);
-    const rtState = await collectRuntimeState(client);
-    const rtSummary = summarizeRtSessions(rtState.sessions);
+    const charterChecks: CharterCheck[] = [];
+    const restoreSessionsCheck = await verifyAgentViewRestorationViaTasks(client, 'sessions', args.timeoutMs);
+    charterChecks.push({
+      ...restoreSessionsCheck,
+      id: 'story-1',
+      title: '进入网络页时恢复上次使用的会话子页面',
+    });
+
+    await ensureSessionsView(client, args.timeoutMs);
+    const {
+      uiSummary,
+      runtimeState: rtState,
+      rtSummary: runtimeHttpSummary,
+      mismatches: runtimeHttpMismatches,
+    } = await waitForUiRtConsistency(client, args.timeoutMs);
+    const preRestartSqliteRtSummary = trySummarizeRtSessionsFromSqlite(instance.runtimeDbPath);
+    const sqliteFallbackMismatches = preRestartSqliteRtSummary
+      ? compareSessionSummaries(uiSummary, preRestartSqliteRtSummary)
+      : null;
+    const preRestartRtSummarySource: 'runtime-http' | 'sqlite-fallback' = runtimeHttpMismatches.length === 0
+      ? 'runtime-http'
+      : sqliteFallbackMismatches && sqliteFallbackMismatches.length === 0
+        ? 'sqlite-fallback'
+        : 'runtime-http';
+    const rtSummary = preRestartRtSummarySource === 'sqlite-fallback' && preRestartSqliteRtSummary
+      ? preRestartSqliteRtSummary
+      : runtimeHttpSummary;
     const mismatches = compareSessionSummaries(uiSummary, rtSummary);
 
+    const topologyViewCheck = await ensureTopologyView(client, args.timeoutMs);
+    const topologyNodeTestIds = await waitForTopologyTerminalNodeTestIds(
+      client,
+      uiSummary.activeSessionIds,
+      args.timeoutMs,
+    );
+    const missingTopologySessionIds = uiSummary.activeSessionIds.filter((sessionId) => (
+      !topologyNodeTestIds.includes(`rf__node-pty-${sessionId}`)
+    ));
+    charterChecks.push({
+      id: 'story-2',
+      title: '拓扑图中呈现所有活跃终端节点',
+      status: topologyViewCheck.status === 'passed' && missingTopologySessionIds.length === 0
+        ? 'passed'
+        : 'failed',
+      notes: [
+        ...topologyViewCheck.notes,
+        `detected topology PTY nodes: ${topologyNodeTestIds.length}`,
+        missingTopologySessionIds.length === 0
+          ? 'all active sessions had topology PTY nodes'
+          : `missing topology PTY nodes for: ${missingTopologySessionIds.join(', ')}`,
+      ],
+    });
+
+    const topologyNodeChecks: SessionCardExerciseResult[] = [];
+    for (const sessionId of uiSummary.activeSessionIds) {
+      const selector = `[data-testid="rf__node-pty-${sessionId}"]`;
+      if (!topologyNodeTestIds.includes(`rf__node-pty-${sessionId}`)) {
+        topologyNodeChecks.push({
+          target: 'topology-node',
+          sessionId,
+          expectation: 'active',
+          status: 'failed',
+          loadingObserved: false,
+          terminalVisible: false,
+          disconnectedVisible: false,
+          disconnectedMessage: null,
+          consoleEntries: [],
+          notes: ['missing topology PTY node'],
+        });
+        continue;
+      }
+      topologyNodeChecks.push(await exerciseSessionCard(
+        client,
+        sessionId,
+        'active',
+        'topology-node',
+        selector,
+        args.timeoutMs,
+      ));
+    }
+    charterChecks.push({
+      id: 'story-3',
+      title: '点击拓扑图终端节点可打开对应 PTY 或明确失败态',
+      status: topologyNodeChecks.every((check) => check.status === 'passed') ? 'passed' : 'failed',
+      notes: topologyNodeChecks.map((check) => `${check.sessionId}:${check.status}`),
+    });
+
+    await ensureSessionsView(client, args.timeoutMs);
     const activeSessionChecks: SessionCardExerciseResult[] = [];
     for (const sessionId of uiSummary.activeSessionIds) {
-      activeSessionChecks.push(await exerciseSessionCard(client, sessionId, 'active', args.timeoutMs));
+      activeSessionChecks.push(await exerciseSessionCard(
+        client,
+        sessionId,
+        'active',
+        'session-card',
+        `[data-testid="session-card-${sessionId}"]`,
+        args.timeoutMs,
+      ));
     }
+    charterChecks.push({
+      id: 'story-4',
+      title: '会话页中每张活跃会话卡都能加载对应 PTY',
+      status: activeSessionChecks.every((check) => check.status === 'passed') ? 'passed' : 'failed',
+      notes: activeSessionChecks.map((check) => (
+        `${check.sessionId}:${check.status}:loading=${String(check.loadingObserved)}`
+      )),
+    });
+
+    const repeatedSessionSwitchChecks: SessionCardExerciseResult[] = [];
+    if (uiSummary.activeSessionIds.length >= 2) {
+      const [firstSessionId, secondSessionId] = uiSummary.activeSessionIds;
+      repeatedSessionSwitchChecks.push(await exerciseSessionCard(
+        client,
+        firstSessionId!,
+        'active',
+        'session-card',
+        `[data-testid="session-card-${firstSessionId}"]`,
+        args.timeoutMs,
+      ));
+      repeatedSessionSwitchChecks.push(await exerciseSessionCard(
+        client,
+        secondSessionId!,
+        'active',
+        'session-card',
+        `[data-testid="session-card-${secondSessionId}"]`,
+        args.timeoutMs,
+      ));
+      repeatedSessionSwitchChecks.push(await exerciseSessionCard(
+        client,
+        firstSessionId!,
+        'active',
+        'session-card',
+        `[data-testid="session-card-${firstSessionId}"]`,
+        args.timeoutMs,
+      ));
+    }
+    charterChecks.push({
+      id: 'story-5',
+      title: '会话页来回切换活跃卡片时 PTY 可稳定重放',
+      status: repeatedSessionSwitchChecks.length === 0
+        ? 'skipped'
+        : repeatedSessionSwitchChecks.every((check) => check.status === 'passed')
+          ? 'passed'
+          : 'failed',
+      notes: repeatedSessionSwitchChecks.length === 0
+        ? ['fewer than two active sessions were present']
+        : repeatedSessionSwitchChecks.map((check) => `${check.sessionId}:${check.status}`),
+    });
 
     const completedSessionCheck = uiSummary.completedSessionIds[0]
-      ? await exerciseSessionCard(client, uiSummary.completedSessionIds[0]!, 'completed', args.timeoutMs)
+      ? await exerciseSessionCard(
+        client,
+        uiSummary.completedSessionIds[0]!,
+        'completed',
+        'session-card',
+        `[data-testid="session-card-${uiSummary.completedSessionIds[0]!}"]`,
+        args.timeoutMs,
+      )
       : null;
 
+    const tiledViewCheck = await verifyTiledViewBehavior(client, uiSummary.activeSessionIds, args.timeoutMs);
+    charterChecks.push({
+      id: 'story-6',
+      title: '平铺页并行加载活跃 PTY',
+      status: tiledViewCheck.loadingObserved && tiledViewCheck.liveTerminalCount >= uiSummary.active
+        ? 'passed'
+        : 'failed',
+      notes: tiledViewCheck.notes,
+    });
+    charterChecks.push({
+      id: 'story-7',
+      title: '点击平铺窗口时右侧 Terminal 保持关闭且布局稳定',
+      status: !tiledViewCheck.rightPanelVisible && tiledViewCheck.paneRectsStable
+        ? 'passed'
+        : 'failed',
+      notes: tiledViewCheck.notes,
+    });
+
+    const multiViewRoundTripCheck = await verifyMultiViewRoundTrip(client, args.timeoutMs);
+    charterChecks.push({
+      id: 'story-8',
+      title: '拓扑图/会话/平铺多视图往返切换保持稳定',
+      status: multiViewRoundTripCheck.status,
+      notes: multiViewRoundTripCheck.notes,
+    });
+
+    const restoreTiledCheck = await verifyAgentViewRestorationViaTasks(client, 'tiled', args.timeoutMs);
+    charterChecks.push({
+      ...restoreTiledCheck,
+      id: 'story-9',
+      title: '从任务页返回后恢复上次使用的平铺子页面与 PTY',
+    });
+
+    await ensureSessionsView(client, args.timeoutMs);
     const proposalInboxCheck = await checkProposalInboxPage(client, args.timeoutMs);
     await navigateToRoute(client, '/agents', args.timeoutMs);
     await ensureSessionsView(client, args.timeoutMs);
@@ -894,14 +1572,23 @@ async function main(): Promise<void> {
 
     const postRestartActiveSessionChecks: SessionCardExerciseResult[] = [];
     for (const sessionId of runtimeRestartCheck.afterUiSummary.activeSessionIds) {
-      postRestartActiveSessionChecks.push(await exerciseSessionCard(client, sessionId, 'active', args.timeoutMs));
+      postRestartActiveSessionChecks.push(await exerciseSessionCard(
+        client,
+        sessionId,
+        'active',
+        'session-card',
+        `[data-testid="session-card-${sessionId}"]`,
+        args.timeoutMs,
+      ));
     }
 
     const activeCountWithinLimit = uiSummary.active < 5 && runtimeRestartCheck.afterUiSummary.active < 5;
+    const nineStoryChecksPassed = charterChecks.every((check) => check.status === 'passed' || check.status === 'skipped');
     const activeChecksPassed = activeSessionChecks.every((check) => check.status === 'passed');
     const postRestartActiveChecksPassed = postRestartActiveSessionChecks.every((check) => check.status === 'passed');
     const completedCheckPassed = completedSessionCheck ? completedSessionCheck.status === 'passed' : true;
     const overallPass = activeCountWithinLimit
+      && nineStoryChecksPassed
       && mismatches.length === 0
       && activeChecksPassed
       && runtimeRestartCheck.status === 'passed'
@@ -917,6 +1604,7 @@ async function main(): Promise<void> {
       },
       assertions: {
         activeCountWithinLimit,
+        nineStoryChecksPassed,
         uiRtConsistent: mismatches.length === 0,
         activeChecksPassed,
         runtimeRestartPassed: runtimeRestartCheck.status === 'passed',
@@ -924,23 +1612,23 @@ async function main(): Promise<void> {
         completedCheckPassed,
         proposalInboxLoaded: proposalInboxCheck.status === 'passed',
       },
+      charterChecks,
+      topologyNodeChecks,
+      preRestartRtSummarySource,
       uiSummary,
       rtSummary,
       mismatches,
+      preRestartSqliteRtSummary,
+      preRestartRuntimeHttpSummary: runtimeHttpSummary,
+      preRestartRuntimeHttpMismatches: runtimeHttpMismatches,
       activeSessionChecks,
       completedSessionCheck,
       proposalInboxCheck,
+      tiledViewCheck,
+      multiViewRoundTripCheck,
       runtimeRestartCheck,
       postRestartActiveSessionChecks,
-      sqliteRtSummary: instance.runtimeDbPath
-        ? (() => {
-          try {
-            return summarizeRtSessions(readRtSessionsFromSqlite(instance.runtimeDbPath!));
-          } catch {
-            return null;
-          }
-        })()
-        : null,
+      sqliteRtSummary: trySummarizeRtSessionsFromSqlite(instance.runtimeDbPath),
       overallPass,
     };
 
@@ -949,14 +1637,19 @@ async function main(): Promise<void> {
     await writeFile(markdownReportPath, buildMarkdownReport({
       timestamp: report.generatedAt,
       instance,
+      charterChecks,
+      topologyNodeChecks,
       uiSummary,
       rtSummary,
       mismatches,
       activeSessionChecks,
       completedSessionCheck,
       proposalInboxCheck,
+      tiledViewCheck,
+      multiViewRoundTripCheck,
       runtimeRestartCheck,
       postRestartActiveSessionChecks,
+      preRestartRtSummarySource,
       overallPass,
     }), 'utf8');
 
