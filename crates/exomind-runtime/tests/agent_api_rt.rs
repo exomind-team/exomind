@@ -552,6 +552,14 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
         "今天是什么天气？不要直接回答，先调用 get_weather，参数 date 必须是 today。".to_string();
     let tools = vec![weather_tool()];
 
+    eprintln!("=== broker_weather_flow start ===");
+    eprintln!("provider={} model={}", profile.provider, profile.model);
+    eprintln!("prompt={prompt}");
+    eprintln!(
+        "tool_def={}",
+        serde_json::to_string_pretty(&tools).unwrap()
+    );
+
     let first_turn = match run_broker_agent_session_with_runtime(
         profile.clone(),
         system_prompt.clone(),
@@ -572,6 +580,22 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
         }
     };
 
+    eprintln!("--- turn 1 response ---");
+    eprintln!("session_id={}", first_turn.session_id);
+    eprintln!("status={}", first_turn.status);
+    eprintln!(
+        "content={}",
+        serde_json::to_string_pretty(&first_turn.content).unwrap()
+    );
+    eprintln!(
+        "assistant_turn={}",
+        serde_json::to_string_pretty(&first_turn.assistant_turn).unwrap()
+    );
+    eprintln!(
+        "tool_calls={}",
+        serde_json::to_string_pretty(&first_turn.tool_calls).unwrap()
+    );
+
     assert_eq!(
         first_turn.status, "needs_tool_calls",
         "first_turn={first_turn:?}"
@@ -581,6 +605,13 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
     assert_eq!(first_turn.assistant_turn.tool_calls.len(), 1);
 
     let tool_call = &first_turn.assistant_turn.tool_calls[0];
+    assert_eq!(tool_call.input["date"].as_str(), Some("today"));
+    let tool_output = "今天是阴天，气温21.45度".to_string();
+    eprintln!(
+        "executed_tool_call={}",
+        serde_json::to_string_pretty(tool_call).unwrap()
+    );
+    eprintln!("tool_output={tool_output}");
     let second_turn = match run_broker_agent_session_with_runtime(
         profile,
         system_prompt,
@@ -594,7 +625,7 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
             TurnItem::ToolResult {
                 tool_call_id: tool_call.id.clone(),
                 tool_name: tool_call.name.clone(),
-                content: "今天是阴天，气温21.45度".to_string(),
+                content: tool_output.clone(),
             },
         ],
         None,
@@ -612,6 +643,22 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
         }
     };
 
+    eprintln!("--- turn 2 response ---");
+    eprintln!("session_id={}", second_turn.session_id);
+    eprintln!("status={}", second_turn.status);
+    eprintln!(
+        "content={}",
+        serde_json::to_string_pretty(&second_turn.content).unwrap()
+    );
+    eprintln!(
+        "assistant_turn={}",
+        serde_json::to_string_pretty(&second_turn.assistant_turn).unwrap()
+    );
+    eprintln!(
+        "tool_calls={}",
+        serde_json::to_string_pretty(&second_turn.tool_calls).unwrap()
+    );
+
     assert_eq!(
         second_turn.status, "completed",
         "second_turn={second_turn:?}"
@@ -621,6 +668,8 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
         "second_turn={second_turn:?}"
     );
     assert!(second_turn.assistant_turn.tool_calls.is_empty());
+    eprintln!("=== broker_weather_flow completed ===");
+    eprintln!("final_answer={}", second_turn.content);
 }
 
 #[tokio::test]

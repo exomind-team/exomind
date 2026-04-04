@@ -5,17 +5,15 @@ use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream, StreamExt};
 
 use super::broker::{
-    AgentTurnBroker, AgentTurnRequest, AgentTurnResult, AssistantTurn, ToolCall, ToolDef, TurnItem,
+    AgentTurnBroker, AgentTurnRequest, AgentTurnResult, AssistantTurn, ToolCall, TurnItem,
 };
 use super::cognition::{
     BodyStatus, CognitionContext, CognitionEngine, CognitionOutput, KnowledgeOp,
 };
-use super::proposal_tools::{
-    execute_proposal_tool_call, is_proposal_tool_name, proposal_tool_defs,
-};
+use super::proposal_tools::{execute_proposal_tool_call, is_proposal_tool_name};
 use super::session::{
-    AgentSessionRecord, AgentSessionRuntime, SessionError, ToolCallRecord,
-    resolve_provider_profile_with_runtime,
+    AgentSessionRecord, AgentSessionRuntime, SessionError, TOOL_GROUP_RECENT_EVENTS,
+    ToolCallRecord, resolve_agent_tools_for_runtime, resolve_provider_profile_with_runtime,
 };
 use super::tools::GET_RECENT_EVENTS_TOOL;
 use super::tools::eventlog::get_recent_events_tool;
@@ -45,13 +43,15 @@ const DEFAULT_SOUL: &str = r#"# 认知生命体 Alpha
 - 谨慎行动
 "#;
 
+const DEFAULT_INTERNAL_SCOPE_KEY: &str = "anonymous";
+
 #[derive(Clone)]
 pub struct AgentApiTickTrigger {
     runtime: AgentSessionRuntime,
     scope_key: Option<String>,
     system_prompt: Option<String>,
     prompt: String,
-    requested_tools: Vec<String>,
+    tool_groups: Vec<String>,
     min_energy_ratio: f64,
 }
 
@@ -59,20 +59,27 @@ impl AgentApiTickTrigger {
     pub fn new(runtime: AgentSessionRuntime) -> Self {
         Self {
             runtime,
-            scope_key: None,
+            // Built-in life agent keeps using the historical unscoped bucket, but now does so
+            // explicitly so the source-aware resolver never relies on fallback semantics.
+            scope_key: Some(DEFAULT_INTERNAL_SCOPE_KEY.to_string()),
             system_prompt: Some(
                 "你是外心认知助理。你必须先调用 get_recent_events 工具读取最近 20 条事件，再基于事件内容输出一段简明分析。"
                     .to_string(),
             ),
             prompt: "请调用 get_recent_events(limit=20)，总结用户近期主要活动，并给出一句下一步建议。"
                 .to_string(),
-            requested_tools: vec![GET_RECENT_EVENTS_TOOL.to_string()],
+            tool_groups: vec![TOOL_GROUP_RECENT_EVENTS.to_string()],
             min_energy_ratio: 0.3,
         }
     }
 
     pub fn with_scope_key(mut self, scope_key: Option<String>) -> Self {
         self.scope_key = scope_key;
+        self
+    }
+
+    pub fn with_tool_groups(mut self, tool_groups: Vec<String>) -> Self {
+        self.tool_groups = tool_groups;
         self
     }
 
@@ -232,7 +239,42 @@ impl CognitiveLifeAgent {
         let created_at = chrono::Utc::now().to_rfc3339();
         let trigger_source = format!("{}-tick", self.id);
         let broker = AgentTurnBroker;
-        let tools = build_internal_tools(&trigger);
+        let tools = match resolve_agent_tools_for_runtime(
+            &trigger.runtime,
+            Vec::new(),
+            &trigger.tool_groups,
+            trigger.scope_key.clone(),
+        ) {
+            Ok(tools) => tools,
+            Err(error) => {
+                tracing::warn!(
+                    agent_id = %self.id,
+                    error = %error,
+                    "life agent agent-api tick failed to resolve tools"
+                );
+                return persist_internal_session_record(
+                    &trigger.runtime,
+                    AgentSessionRecord {
+                        session_id,
+                        trigger_source,
+                        provider: profile.provider,
+                        model: profile.model,
+                        prompt: Some(trigger.prompt),
+                        content: String::new(),
+                        assistant_turn: AssistantTurn {
+                            content: String::new(),
+                            tool_calls: Vec::new(),
+                        },
+                        tool_calls: Vec::new(),
+                        status: "failed".to_string(),
+                        error_message: Some(error.to_string()),
+                        created_at,
+                        completed_at: chrono::Utc::now().to_rfc3339(),
+                    },
+                    &self.id,
+                );
+            }
+        };
 
         let first_result = broker
             .run(AgentTurnRequest {
@@ -404,36 +446,6 @@ impl CognitiveLifeAgent {
             }
         }
     }
-}
-
-fn build_internal_tools(trigger: &AgentApiTickTrigger) -> Vec<ToolDef> {
-    let proposal_defs = proposal_tool_defs();
-
-    trigger
-        .requested_tools
-        .iter()
-        .filter_map(|tool_name| match tool_name.as_str() {
-            GET_RECENT_EVENTS_TOOL => {
-                let (def, _) = get_recent_events_tool(
-                    Arc::clone(&trigger.runtime.eventlog_store),
-                    trigger.scope_key.clone(),
-                );
-                Some(ToolDef {
-                    name: def.name,
-                    description: def.description,
-                    input_schema: def.input_schema,
-                })
-            }
-            other if is_proposal_tool_name(other) => proposal_defs.iter().find_map(|def| {
-                (def.name == other).then(|| ToolDef {
-                    name: def.name.clone(),
-                    description: def.description.clone(),
-                    input_schema: def.input_schema.clone(),
-                })
-            }),
-            _ => None,
-        })
-        .collect()
 }
 
 fn build_continuation_history(
@@ -1006,12 +1018,18 @@ mod tests {
             Arc::new(AgentSessionStore::new()),
         );
 
-        let mut trigger = AgentApiTickTrigger::new(runtime.clone())
-            .with_scope_key(Some("profile-alpha".to_string()));
-        trigger.requested_tools = vec![ADD_TASK_PROPOSAL_TOOL.to_string()];
-        let tools = build_internal_tools(&trigger);
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name, ADD_TASK_PROPOSAL_TOOL);
+        let trigger = AgentApiTickTrigger::new(runtime.clone())
+            .with_scope_key(Some("profile-alpha".to_string()))
+            .with_tool_groups(vec![crate::agent::session::TOOL_GROUP_PROPOSAL_TOOLS.to_string()]);
+        let tools = resolve_agent_tools_for_runtime(
+            &runtime,
+            Vec::new(),
+            &trigger.tool_groups,
+            trigger.scope_key.clone(),
+        )
+        .unwrap();
+        assert_eq!(tools.len(), 3);
+        assert!(tools.iter().any(|tool| tool.name == ADD_TASK_PROPOSAL_TOOL));
 
         let executed = execute_internal_tool_calls(
             &runtime,

@@ -1,33 +1,30 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use super::api::{ApiProviderProfile, build_anthropic_endpoint, build_openai_endpoint};
+use super::api::ApiProviderProfile;
 use super::broker::{
     AgentTurnBroker, AgentTurnRequest, AgentTurnResult, AssistantTurn,
     BrokerError as AgentBrokerError, ToolCall as BrokerToolCall, ToolDef as BrokerToolDef,
     TurnItem,
 };
-use super::proposal_tools::{
-    execute_proposal_tool_call, is_proposal_tool_name, proposal_tool_defs,
-};
+use super::proposal_tools::proposal_tool_defs;
 use super::tools::eventlog::get_recent_events_tool;
-use super::tools::{GET_RECENT_EVENTS_TOOL, ToolDef, ToolRegistry, ToolUse};
 use crate::AppState;
 use crate::config::types::USER_CONFIG_SCOPE;
-use crate::proposal::{ProposalStore, Publisher, PublisherType};
+use crate::proposal::ProposalStore;
 
-const DEFAULT_MAX_TOKENS: u32 = 4096;
 const CONFIG_KEY_PROVIDER: &str = "exomind:agentApiProvider";
 const CONFIG_KEY_MODEL: &str = "exomind:agentApiModel";
 const CONFIG_KEY_BASE_URL: &str = "exomind:agentApiBaseUrl";
 const CONFIG_KEY_API_KEY: &str = "exomind:agentApiApiKey";
+pub const TOOL_GROUP_PROPOSAL_TOOLS: &str = "proposal_tools";
+pub const TOOL_GROUP_RECENT_EVENTS: &str = "recent_events";
 
 #[derive(Clone)]
 pub struct AgentSessionRuntime {
@@ -405,83 +402,122 @@ pub fn load_agent_session_with_runtime(
         .map_err(SessionError::Persist)
 }
 
-pub fn build_tool_registry(
+pub fn resolve_agent_tools(
     state: &AppState,
-    user_id: Option<String>,
-    requested_tools: &[String],
-) -> Result<ToolRegistry, SessionError> {
-    build_tool_registry_for_runtime(
+    explicit_tools: Vec<BrokerToolDef>,
+    tool_groups: &[String],
+    scope_key: Option<String>,
+) -> Result<Vec<BrokerToolDef>, SessionError> {
+    resolve_agent_tools_for_runtime(
         &AgentSessionRuntime::from_state(state),
-        user_id,
-        requested_tools,
+        explicit_tools,
+        tool_groups,
+        scope_key,
     )
 }
 
-pub fn build_tool_registry_for_runtime(
+pub fn resolve_agent_tools_for_runtime(
     runtime: &AgentSessionRuntime,
-    user_id: Option<String>,
-    requested_tools: &[String],
-) -> Result<ToolRegistry, SessionError> {
-    let mut registry = ToolRegistry::new();
-    for tool_name in requested_tools
-        .iter()
-        .filter_map(|tool_name| normalize_optional_text(tool_name))
+    explicit_tools: Vec<BrokerToolDef>,
+    tool_groups: &[String],
+    scope_key: Option<String>,
+) -> Result<Vec<BrokerToolDef>, SessionError> {
+    if !explicit_tools.is_empty() && !tool_groups.is_empty() {
+        return Err(SessionError::InvalidRequest(
+            "tools and tool_groups cannot both be non-empty".to_string(),
+        ));
+    }
+
+    if tool_groups.is_empty() {
+        validate_unique_tool_names(&explicit_tools)?;
+        return Ok(explicit_tools);
+    }
+
+    let mut seen_groups = HashSet::new();
+    let mut resolved_tools = Vec::new();
+    for group in tool_groups {
+        let key = normalize_optional_text(group).ok_or_else(|| {
+            SessionError::InvalidRequest("tool group key must not be empty".to_string())
+        })?;
+        if !seen_groups.insert(key.clone()) {
+            return Err(SessionError::InvalidRequest(format!(
+                "duplicate tool group: {key}"
+            )));
+        }
+
+        let mut group_tools = expand_tool_group(runtime, &key, scope_key.clone())?;
+        resolved_tools.append(&mut group_tools);
+    }
+
+    validate_unique_tool_names(&resolved_tools)?;
+    Ok(resolved_tools)
+}
+
+fn expand_tool_group(
+    runtime: &AgentSessionRuntime,
+    tool_group: &str,
+    scope_key: Option<String>,
+) -> Result<Vec<BrokerToolDef>, SessionError> {
+    match tool_group {
+        TOOL_GROUP_PROPOSAL_TOOLS => {
+            let scope_key = require_scope_key(tool_group, scope_key)?;
+            let _ = scope_key;
+            Ok(proposal_tool_defs())
+        }
+        TOOL_GROUP_RECENT_EVENTS => {
+            let scope_key = require_scope_key(tool_group, scope_key)?;
+            Ok(vec![recent_events_tool_def(runtime, scope_key)])
+        }
+        other => Err(SessionError::InvalidRequest(format!(
+            "unknown tool group: {other}"
+        ))),
+    }
+}
+
+fn require_scope_key(tool_group: &str, scope_key: Option<String>) -> Result<String, SessionError> {
+    normalize_optional_text(scope_key.as_deref().unwrap_or_default()).ok_or_else(|| {
+        SessionError::InvalidRequest(format!(
+            "scope_key is required for tool group `{tool_group}`"
+        ))
+    })
+}
+
+fn recent_events_tool_def(
+    runtime: &AgentSessionRuntime,
+    scope_key: String,
+) -> BrokerToolDef {
+    let (def, _) = get_recent_events_tool(Arc::clone(&runtime.eventlog_store), Some(scope_key));
+    let mut input_schema = def.input_schema;
+    if let Some(limit) = input_schema
+        .get_mut("properties")
+        .and_then(|properties| properties.get_mut("limit"))
     {
-        match tool_name.as_str() {
-            GET_RECENT_EVENTS_TOOL => {
-                let (def, tool_fn) =
-                    get_recent_events_tool(Arc::clone(&runtime.eventlog_store), user_id.clone());
-                registry.register(def, tool_fn);
-            }
-            other if is_proposal_tool_name(other) => {
-                let proposal_store = Arc::clone(&runtime.proposal_store);
-                let scope_key = user_id.clone();
-                let publisher = Publisher {
-                    publisher_type: PublisherType::Agent,
-                    id: "api-agent".to_string(),
-                    name: "API Agent".to_string(),
-                };
-                let def = proposal_tool_defs()
-                    .into_iter()
-                    .find(|item| item.name == other)
-                    .ok_or_else(|| SessionError::UnsupportedTool(other.to_string()))?;
-                registry.register(
-                    ToolDef {
-                        name: def.name.clone(),
-                        description: def.description.clone(),
-                        input_schema: def.input_schema.clone(),
-                    },
-                    Box::new(move |input| {
-                        let proposal_store = Arc::clone(&proposal_store);
-                        let scope_key = scope_key.clone();
-                        let publisher = publisher.clone();
-                        let tool_name = def.name.clone();
-                        Box::pin(async move {
-                            execute_proposal_tool_call(
-                                proposal_store,
-                                scope_key,
-                                publisher,
-                                &super::broker::ToolCall {
-                                    id: "runtime-tool-call".to_string(),
-                                    name: tool_name,
-                                    input,
-                                },
-                            )
-                            .await
-                            .map_err(|error| {
-                                super::tools::ToolError::ExecutionFailed(error.to_string())
-                            })
-                        })
-                    }),
-                );
-            }
-            other => {
-                return Err(SessionError::UnsupportedTool(other.to_string()));
-            }
+        limit["default"] = json!(10);
+        if let Some(description) = limit.get_mut("description") {
+            *description = json!("返回条数，默认 10，最大 100");
         }
     }
 
-    Ok(registry)
+    BrokerToolDef {
+        name: def.name,
+        description: def.description,
+        input_schema,
+    }
+}
+
+fn validate_unique_tool_names(tools: &[BrokerToolDef]) -> Result<(), SessionError> {
+    let mut seen = HashSet::new();
+    for tool in tools {
+        let name = normalize_optional_text(&tool.name).ok_or_else(|| {
+            SessionError::InvalidRequest("tool name must not be empty".to_string())
+        })?;
+        if !seen.insert(name.clone()) {
+            return Err(SessionError::InvalidRequest(format!(
+                "duplicate tool name: {name}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn resolve_provider_profile_from_config(
@@ -581,17 +617,6 @@ fn map_broker_tool_call(tool_call: &BrokerToolCall) -> ToolCallRecord {
     }
 }
 
-fn map_tool_call_records_to_broker(tool_calls: &[ToolCallRecord]) -> Vec<BrokerToolCall> {
-    tool_calls
-        .iter()
-        .map(|tool_call| BrokerToolCall {
-            id: String::new(),
-            name: tool_call.tool_name.clone(),
-            input: tool_call.input.clone(),
-        })
-        .collect()
-}
-
 fn record_from_broker_result(
     session_id: String,
     trigger: AgentTrigger,
@@ -680,6 +705,55 @@ pub async fn run_broker_agent_session(
     .await
 }
 
+pub async fn run_broker_agent_session_from_sources(
+    profile: ApiProviderProfile,
+    system_prompt: Option<String>,
+    explicit_tools: Vec<BrokerToolDef>,
+    tool_groups: &[String],
+    scope_key: Option<String>,
+    history: Vec<TurnItem>,
+    new_user_message: Option<String>,
+    trigger: AgentTrigger,
+    state: &AppState,
+) -> Result<AgentSessionRecord, SessionError> {
+    run_broker_agent_session_from_sources_with_runtime(
+        profile,
+        system_prompt,
+        explicit_tools,
+        tool_groups,
+        scope_key,
+        history,
+        new_user_message,
+        trigger,
+        &AgentSessionRuntime::from_state(state),
+    )
+    .await
+}
+
+pub async fn run_broker_agent_session_from_sources_with_runtime(
+    profile: ApiProviderProfile,
+    system_prompt: Option<String>,
+    explicit_tools: Vec<BrokerToolDef>,
+    tool_groups: &[String],
+    scope_key: Option<String>,
+    history: Vec<TurnItem>,
+    new_user_message: Option<String>,
+    trigger: AgentTrigger,
+    runtime: &AgentSessionRuntime,
+) -> Result<AgentSessionRecord, SessionError> {
+    let tools = resolve_agent_tools_for_runtime(runtime, explicit_tools, tool_groups, scope_key)?;
+    run_broker_agent_session_with_runtime(
+        profile,
+        system_prompt,
+        tools,
+        history,
+        new_user_message,
+        trigger,
+        runtime,
+    )
+    .await
+}
+
 pub async fn run_broker_agent_session_with_runtime(
     profile: ApiProviderProfile,
     system_prompt: Option<String>,
@@ -726,701 +800,13 @@ pub async fn run_broker_agent_session_with_runtime(
     }
 }
 
-pub async fn run_agent_session(
-    profile: ApiProviderProfile,
-    system_prompt: Option<String>,
-    user_prompt: String,
-    tools: &ToolRegistry,
-    trigger: AgentTrigger,
-    state: &AppState,
-) -> Result<AgentSessionRecord, SessionError> {
-    run_agent_session_with_runtime(
-        profile,
-        system_prompt,
-        user_prompt,
-        tools,
-        trigger,
-        &AgentSessionRuntime::from_state(state),
-    )
-    .await
-}
-
-pub async fn run_agent_session_with_runtime(
-    profile: ApiProviderProfile,
-    system_prompt: Option<String>,
-    user_prompt: String,
-    tools: &ToolRegistry,
-    trigger: AgentTrigger,
-    runtime: &AgentSessionRuntime,
-) -> Result<AgentSessionRecord, SessionError> {
-    let profile = normalize_provider_profile(profile)?;
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let created_at = chrono::Utc::now().to_rfc3339();
-    let client = reqwest::Client::new();
-
-    let execution = match profile.provider.as_str() {
-        "openai" => {
-            run_openai_single_shot(
-                &client,
-                &profile,
-                system_prompt.as_deref(),
-                &user_prompt,
-                tools,
-            )
-            .await
-        }
-        "anthropic" => {
-            run_anthropic_single_shot(
-                &client,
-                &profile,
-                system_prompt.as_deref(),
-                &user_prompt,
-                tools,
-            )
-            .await
-        }
-        other => Err(SessionError::InvalidProviderProfile(format!(
-            "unsupported provider: {other}"
-        ))),
-    };
-
-    match execution {
-        Ok((content, tool_calls)) => {
-            let record = AgentSessionRecord {
-                session_id,
-                trigger_source: trigger.as_str(),
-                provider: profile.provider,
-                model: profile.model,
-                prompt: Some(user_prompt),
-                content: content.clone(),
-                assistant_turn: AssistantTurn {
-                    content,
-                    tool_calls: map_tool_call_records_to_broker(&tool_calls),
-                },
-                tool_calls,
-                status: "completed".to_string(),
-                error_message: None,
-                created_at,
-                completed_at: chrono::Utc::now().to_rfc3339(),
-            };
-            runtime.agent_api_session_store.upsert(record.clone())?;
-            Ok(record)
-        }
-        Err(error) => {
-            let record = AgentSessionRecord {
-                session_id,
-                trigger_source: trigger.as_str(),
-                provider: profile.provider,
-                model: profile.model,
-                prompt: Some(user_prompt),
-                content: String::new(),
-                assistant_turn: empty_assistant_turn(),
-                tool_calls: Vec::new(),
-                status: "failed".to_string(),
-                error_message: Some(error.to_string()),
-                created_at,
-                completed_at: chrono::Utc::now().to_rfc3339(),
-            };
-            let _ = runtime.agent_api_session_store.upsert(record);
-            Err(error)
-        }
-    }
-}
-
-async fn run_openai_single_shot(
-    client: &reqwest::Client,
-    profile: &ApiProviderProfile,
-    system_prompt: Option<&str>,
-    user_prompt: &str,
-    tools: &ToolRegistry,
-) -> Result<(String, Vec<ToolCallRecord>), SessionError> {
-    let mut messages = Vec::new();
-    if let Some(system_prompt) = system_prompt.filter(|value| !value.trim().is_empty()) {
-        messages.push(json!({
-            "role": "system",
-            "content": system_prompt,
-        }));
-    }
-    messages.push(json!({
-        "role": "user",
-        "content": user_prompt,
-    }));
-
-    let response = send_openai_request(client, profile, &messages, tools.list_defs()).await?;
-    let mut tool_uses = response.tool_uses()?;
-    if tool_uses.is_empty() {
-        return Ok((response.text_content(), Vec::new()));
-    }
-
-    let mut tool_calls = Vec::new();
-    messages.push(response.assistant_message_json());
-    for tool_use in tool_uses.drain(..) {
-        let result = tools.dispatch(&tool_use).await;
-        tool_calls.push(ToolCallRecord {
-            tool_name: tool_use.name.clone(),
-            input: tool_use.input.clone(),
-            output: Some(result.content.clone()),
-        });
-        messages.push(json!({
-            "role": "tool",
-            "tool_call_id": result.tool_use_id,
-            "content": result.content,
-        }));
-    }
-
-    let final_response = send_openai_request(client, profile, &messages, tools.list_defs()).await?;
-    Ok((final_response.text_content(), tool_calls))
-}
-
-async fn run_anthropic_single_shot(
-    client: &reqwest::Client,
-    profile: &ApiProviderProfile,
-    system_prompt: Option<&str>,
-    user_prompt: &str,
-    tools: &ToolRegistry,
-) -> Result<(String, Vec<ToolCallRecord>), SessionError> {
-    let mut messages = vec![json!({
-        "role": "user",
-        "content": [{ "type": "text", "text": user_prompt }],
-    })];
-
-    let response =
-        send_anthropic_request(client, profile, system_prompt, &messages, tools.list_defs())
-            .await?;
-    let mut tool_uses = response.tool_uses();
-    if tool_uses.is_empty() {
-        return Ok((response.text_content(), Vec::new()));
-    }
-
-    let mut tool_calls = Vec::new();
-    messages.push(json!({
-        "role": "assistant",
-        "content": response.content,
-    }));
-
-    let mut tool_results = Vec::new();
-    for tool_use in tool_uses.drain(..) {
-        let result = tools.dispatch(&tool_use).await;
-        tool_calls.push(ToolCallRecord {
-            tool_name: tool_use.name.clone(),
-            input: tool_use.input.clone(),
-            output: Some(result.content.clone()),
-        });
-        tool_results.push(json!({
-            "type": "tool_result",
-            "tool_use_id": result.tool_use_id,
-            "content": result.content,
-        }));
-    }
-
-    messages.push(json!({
-        "role": "user",
-        "content": tool_results,
-    }));
-
-    let final_response =
-        send_anthropic_request(client, profile, system_prompt, &messages, tools.list_defs())
-            .await?;
-    Ok((final_response.text_content(), tool_calls))
-}
-
-async fn send_openai_request(
-    client: &reqwest::Client,
-    profile: &ApiProviderProfile,
-    messages: &[Value],
-    tools: &[ToolDef],
-) -> Result<OpenAiResponseMessage, SessionError> {
-    let url = build_openai_endpoint(profile.base_url.as_deref());
-    let body = if tools.is_empty() {
-        json!({
-            "model": profile.model,
-            "messages": messages,
-            "stream": false,
-        })
-    } else {
-        json!({
-            "model": profile.model,
-            "messages": messages,
-            "tools": tools.iter().map(openai_tool_schema).collect::<Vec<_>>(),
-            "tool_choice": "auto",
-            "stream": false,
-        })
-    };
-
-    let response = client
-        .post(url)
-        .header(CONTENT_TYPE, "application/json")
-        .header(AUTHORIZATION, format!("Bearer {}", profile.api_key))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|error| SessionError::RequestFailed(format!("OpenAI request failed: {error}")))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(SessionError::RequestFailed(format!(
-            "OpenAI HTTP {status}: {body}"
-        )));
-    }
-
-    let payload: OpenAiResponse = response.json().await.map_err(|error| {
-        SessionError::InvalidProviderResponse(format!("invalid OpenAI JSON: {error}"))
-    })?;
-
-    payload
-        .choices
-        .into_iter()
-        .next()
-        .map(|choice| choice.message)
-        .ok_or_else(|| {
-            SessionError::InvalidProviderResponse("OpenAI returned no choices".to_string())
-        })
-}
-
-async fn send_anthropic_request(
-    client: &reqwest::Client,
-    profile: &ApiProviderProfile,
-    system_prompt: Option<&str>,
-    messages: &[Value],
-    tools: &[ToolDef],
-) -> Result<AnthropicResponse, SessionError> {
-    let url = build_anthropic_endpoint(profile.base_url.as_deref());
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert(
-        "x-api-key",
-        HeaderValue::from_str(&profile.api_key).map_err(|error| {
-            SessionError::InvalidProviderProfile(format!("invalid Anthropic API key: {error}"))
-        })?,
-    );
-    headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-
-    let body = if tools.is_empty() {
-        json!({
-            "model": profile.model,
-            "max_tokens": DEFAULT_MAX_TOKENS,
-            "messages": messages,
-            "system": system_prompt,
-        })
-    } else {
-        json!({
-            "model": profile.model,
-            "max_tokens": DEFAULT_MAX_TOKENS,
-            "messages": messages,
-            "system": system_prompt,
-            "tools": tools.iter().map(anthropic_tool_schema).collect::<Vec<_>>(),
-        })
-    };
-
-    let response = client
-        .post(url)
-        .headers(headers)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|error| {
-            SessionError::RequestFailed(format!("Anthropic request failed: {error}"))
-        })?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(SessionError::RequestFailed(format!(
-            "Anthropic HTTP {status}: {body}"
-        )));
-    }
-
-    response.json().await.map_err(|error| {
-        SessionError::InvalidProviderResponse(format!("invalid Anthropic JSON: {error}"))
-    })
-}
-
-fn openai_tool_schema(def: &ToolDef) -> Value {
-    json!({
-        "type": "function",
-        "function": {
-            "name": def.name,
-            "description": def.description,
-            "parameters": def.input_schema,
-        }
-    })
-}
-
-fn anthropic_tool_schema(def: &ToolDef) -> Value {
-    json!({
-        "name": def.name,
-        "description": def.description,
-        "input_schema": def.input_schema,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiResponse {
-    choices: Vec<OpenAiChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiChoice {
-    message: OpenAiResponseMessage,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct OpenAiResponseMessage {
-    role: String,
-    content: Option<String>,
-    #[serde(default)]
-    tool_calls: Vec<OpenAiToolCall>,
-}
-
-impl OpenAiResponseMessage {
-    fn text_content(&self) -> String {
-        self.content.clone().unwrap_or_default()
-    }
-
-    fn tool_uses(&self) -> Result<Vec<ToolUse>, SessionError> {
-        self.tool_calls
-            .iter()
-            .map(|call| {
-                let input =
-                    serde_json::from_str::<Value>(&call.function.arguments).map_err(|error| {
-                        SessionError::InvalidProviderResponse(format!(
-                            "invalid OpenAI tool arguments for {}: {error}",
-                            call.function.name
-                        ))
-                    })?;
-                Ok(ToolUse {
-                    id: call.id.clone(),
-                    name: call.function.name.clone(),
-                    input,
-                })
-            })
-            .collect()
-    }
-
-    fn assistant_message_json(&self) -> Value {
-        json!({
-            "role": self.role,
-            "content": self.content,
-            "tool_calls": self.tool_calls,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct OpenAiToolCall {
-    id: String,
-    #[serde(rename = "type")]
-    _kind: String,
-    function: OpenAiFunctionCall,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct OpenAiFunctionCall {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct AnthropicResponse {
-    #[serde(default)]
-    content: Vec<AnthropicContentBlock>,
-}
-
-impl AnthropicResponse {
-    fn text_content(&self) -> String {
-        self.content
-            .iter()
-            .filter_map(|block| match block {
-                AnthropicContentBlock::Text { text } => Some(text.as_str()),
-                AnthropicContentBlock::ToolUse { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("")
-    }
-
-    fn tool_uses(&self) -> Vec<ToolUse> {
-        self.content
-            .iter()
-            .filter_map(|block| match block {
-                AnthropicContentBlock::ToolUse { id, name, input } => Some(ToolUse {
-                    id: id.clone(),
-                    name: name.clone(),
-                    input: input.clone(),
-                }),
-                AnthropicContentBlock::Text { .. } => None,
-            })
-            .collect()
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum AnthropicContentBlock {
-    Text {
-        text: String,
-    },
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
-    },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::proposal_tools::ADD_TASK_PROPOSAL_TOOL;
-    use crate::agent::tools::{
-        GET_RECENT_EVENTS_TOOL, ToolRegistry, eventlog::get_recent_events_tool,
-    };
-    use crate::eventlog::{EventLogStore, EventRecord};
-    use crate::mesh::MeshState;
-    use crate::proposal::{ActionType, ProposalFilter};
-    use crate::signal::SignalPool;
-    use axum::extract::State;
-    use axum::routing::post;
-    use axum::{Json, Router};
-    use serde_json::Value;
+    use crate::agent::tools::GET_RECENT_EVENTS_TOOL;
+    use crate::eventlog::EventLogStore;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::tempdir;
-    use tokio::net::TcpListener;
-
-    #[derive(Clone)]
-    struct MockLlmState {
-        calls: Arc<AtomicUsize>,
-    }
-
-    async fn openai_mock_handler(
-        State(state): State<MockLlmState>,
-        Json(payload): Json<Value>,
-    ) -> Json<Value> {
-        let call_index = state.calls.fetch_add(1, Ordering::SeqCst);
-        if call_index == 0 {
-            assert_eq!(
-                payload["tools"][0]["function"]["name"],
-                GET_RECENT_EVENTS_TOOL
-            );
-            Json(json!({
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [{
-                            "id": "call_1",
-                            "type": "function",
-                            "function": {
-                                "name": "get_recent_events",
-                                "arguments": "{\"limit\":2}"
-                            }
-                        }]
-                    }
-                }]
-            }))
-        } else {
-            assert_eq!(payload["messages"][2]["role"], "tool");
-            Json(json!({
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": "最近两条事件显示你一直在整理 RT Agent API。",
-                        "tool_calls": []
-                    }
-                }]
-            }))
-        }
-    }
-
-    fn test_state_with_store(
-        eventlog_store: Arc<EventLogStore>,
-        agent_session_store: Arc<AgentSessionStore>,
-    ) -> AppState {
-        let signal_pool = Arc::new(SignalPool::new(None));
-        let host_id = "agent-session-test".to_string();
-        let registry = crate::agent::AgentRegistry::new();
-        let energy_registry = crate::energy::EnergyRegistry::new();
-        AppState {
-            port: 0,
-            host_id: host_id.clone(),
-            registry: registry.clone(),
-            signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(MeshState::new(
-                host_id.clone(),
-                Arc::clone(&signal_pool),
-                None,
-            )),
-            mesh_relay: None,
-            auth_secret: None,
-            allow_lan_without_auth: false,
-            mdns: None,
-            pairing: Arc::new(crate::pairing::PairingManager::new()),
-            config_store: Arc::new(crate::config::ConfigStore::new()),
-            reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
-            task_store: Arc::new(crate::task::TaskStore::new()),
-            proposal_store: Arc::new(crate::proposal::ProposalStore::new()),
-            session_store: Arc::new(crate::session::SessionStore::new()),
-            agent_api_session_store: agent_session_store,
-            session_event_tx: None,
-            eventlog_watch_tx: {
-                let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
-                eventlog_store.set_watch_tx(tx.clone());
-                tx
-            },
-            timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
-            energy_registry: energy_registry.clone(),
-            tick_manager: Arc::new(crate::tick::TickManager::new(
-                host_id.clone(),
-                registry,
-                energy_registry,
-                Arc::clone(&signal_pool),
-            )),
-            life_agents: std::collections::HashMap::new(),
-            eventlog_store,
-            #[cfg(not(target_os = "android"))]
-            pty_manager: Arc::new(crate::pty::PtyManager::new(
-                Arc::clone(&signal_pool),
-                host_id,
-            )),
-        }
-    }
-
-    async fn spawn_openai_mock_server() -> (String, Arc<AtomicUsize>) {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let app = Router::new()
-            .route("/v1/chat/completions", post(openai_mock_handler))
-            .with_state(MockLlmState {
-                calls: Arc::clone(&calls),
-            });
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        (format!("http://{addr}/v1"), calls)
-    }
-
-    fn build_registry(eventlog_store: Arc<EventLogStore>) -> ToolRegistry {
-        let mut registry = ToolRegistry::new();
-        let (def, tool_fn) =
-            get_recent_events_tool(eventlog_store, Some("profile-alpha".to_string()));
-        registry.register(def, tool_fn);
-        registry
-    }
-
-    #[tokio::test]
-    async fn run_agent_session_executes_tool_and_persists_result() {
-        let dir = tempdir().unwrap();
-        let eventlog_store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
-        eventlog_store
-            .append_event(
-                Some("profile-alpha"),
-                EventRecord {
-                    id: "evt-1".to_string(),
-                    timestamp: 1,
-                    content: "分析最近两条事件".to_string(),
-                    tags: vec!["analysis".to_string()],
-                    metadata: None,
-                },
-            )
-            .unwrap();
-        eventlog_store
-            .append_event(
-                Some("profile-alpha"),
-                EventRecord {
-                    id: "evt-2".to_string(),
-                    timestamp: 2,
-                    content: "实现 agent session 路由".to_string(),
-                    tags: vec!["code".to_string()],
-                    metadata: None,
-                },
-            )
-            .unwrap();
-
-        let sqlite_path = dir.path().join("sessions.sqlite");
-        let agent_session_store =
-            Arc::new(AgentSessionStore::with_sqlite_path(&sqlite_path).unwrap());
-        let state = test_state_with_store(
-            Arc::clone(&eventlog_store),
-            Arc::clone(&agent_session_store),
-        );
-        let registry = build_registry(Arc::clone(&eventlog_store));
-        let (base_url, calls) = spawn_openai_mock_server().await;
-
-        let result = run_agent_session(
-            ApiProviderProfile {
-                provider: "openai".to_string(),
-                model: "gpt-test".to_string(),
-                base_url: Some(base_url),
-                api_key: "sk-test".to_string(),
-            },
-            Some("你是 RT 分析助手".to_string()),
-            "请总结我最近在做什么".to_string(),
-            &registry,
-            AgentTrigger::HttpRequest,
-            &state,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(result.status, "completed");
-        assert_eq!(result.tool_calls.len(), 1);
-        assert!(result.content.contains("整理 RT Agent API"));
-
-        let persisted = agent_session_store
-            .get(&result.session_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(persisted.tool_calls[0].tool_name, GET_RECENT_EVENTS_TOOL);
-        assert_eq!(persisted.status, "completed");
-    }
-
-    #[tokio::test]
-    async fn build_tool_registry_for_runtime_registers_and_executes_proposal_tools() {
-        let dir = tempdir().unwrap();
-        let proposal_store = Arc::new(crate::proposal::ProposalStore::new());
-        let runtime = AgentSessionRuntime::new(
-            Arc::new(crate::config::ConfigStore::new()),
-            Arc::new(EventLogStore::new(dir.path().to_path_buf())),
-            Arc::clone(&proposal_store),
-            Arc::new(AgentSessionStore::new()),
-        );
-
-        let registry = build_tool_registry_for_runtime(
-            &runtime,
-            Some("profile-alpha".to_string()),
-            &[ADD_TASK_PROPOSAL_TOOL.to_string()],
-        )
-        .unwrap();
-        assert_eq!(registry.list_defs().len(), 1);
-        assert_eq!(registry.list_defs()[0].name, ADD_TASK_PROPOSAL_TOOL);
-
-        let result = registry
-            .dispatch(&ToolUse {
-                id: "call-1".to_string(),
-                name: ADD_TASK_PROPOSAL_TOOL.to_string(),
-                input: json!({
-                    "title": "任务提案：验收任务依赖图新布局",
-                    "body": "根据事件日志创建任务草案",
-                    "taskTitle": "验收任务依赖图新布局",
-                    "description": "为任务依赖图新布局安排明日验收",
-                    "priority": "high",
-                    "tags": ["task-dag", "验收"]
-                }),
-            })
-            .await;
-
-        assert_eq!(result.tool_use_id, "call-1");
-        assert!(result.content.contains("\"actionType\":\"create_task\""));
-
-        let proposals = proposal_store
-            .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
-            .unwrap();
-        assert_eq!(proposals.len(), 1);
-        assert_eq!(proposals[0].action_type, ActionType::CreateTask);
-        assert_eq!(proposals[0].title, "任务提案：验收任务依赖图新布局");
-    }
 
     #[test]
     fn normalize_provider_profile_rejects_missing_api_key() {
@@ -1433,5 +819,108 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("api_key must not be empty"));
+    }
+
+    #[test]
+    fn resolve_requested_tools_expands_recent_events_group_with_default_limit() {
+        let dir = tempdir().unwrap();
+        let runtime = AgentSessionRuntime::new(
+            Arc::new(crate::config::ConfigStore::new()),
+            Arc::new(EventLogStore::new(dir.path().to_path_buf())),
+            Arc::new(crate::proposal::ProposalStore::new()),
+            Arc::new(AgentSessionStore::new()),
+        );
+
+        let tools = resolve_agent_tools_for_runtime(
+            &runtime,
+            Vec::new(),
+            &[TOOL_GROUP_RECENT_EVENTS.to_string()],
+            Some("profile-alpha".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, GET_RECENT_EVENTS_TOOL);
+        assert_eq!(tools[0].input_schema["properties"]["limit"]["default"], 10);
+    }
+
+    #[test]
+    fn resolve_requested_tools_rejects_combining_explicit_tools_and_groups() {
+        let dir = tempdir().unwrap();
+        let runtime = AgentSessionRuntime::new(
+            Arc::new(crate::config::ConfigStore::new()),
+            Arc::new(EventLogStore::new(dir.path().to_path_buf())),
+            Arc::new(crate::proposal::ProposalStore::new()),
+            Arc::new(AgentSessionStore::new()),
+        );
+
+        let error = resolve_agent_tools_for_runtime(
+            &runtime,
+            vec![BrokerToolDef {
+                name: "get_weather".to_string(),
+                description: "获取天气".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }],
+            &[TOOL_GROUP_RECENT_EVENTS.to_string()],
+            Some("profile-alpha".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("tools and tool_groups cannot both be non-empty"));
+    }
+
+    #[test]
+    fn resolve_requested_tools_rejects_missing_scope_key_for_runtime_group() {
+        let dir = tempdir().unwrap();
+        let runtime = AgentSessionRuntime::new(
+            Arc::new(crate::config::ConfigStore::new()),
+            Arc::new(EventLogStore::new(dir.path().to_path_buf())),
+            Arc::new(crate::proposal::ProposalStore::new()),
+            Arc::new(AgentSessionStore::new()),
+        );
+
+        let error = resolve_agent_tools_for_runtime(
+            &runtime,
+            Vec::new(),
+            &[TOOL_GROUP_RECENT_EVENTS.to_string()],
+            None,
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("scope_key is required for tool group"));
+    }
+
+    #[test]
+    fn resolve_requested_tools_rejects_duplicate_tool_group_keys() {
+        let dir = tempdir().unwrap();
+        let runtime = AgentSessionRuntime::new(
+            Arc::new(crate::config::ConfigStore::new()),
+            Arc::new(EventLogStore::new(dir.path().to_path_buf())),
+            Arc::new(crate::proposal::ProposalStore::new()),
+            Arc::new(AgentSessionStore::new()),
+        );
+
+        let error = resolve_agent_tools_for_runtime(
+            &runtime,
+            Vec::new(),
+            &[
+                TOOL_GROUP_RECENT_EVENTS.to_string(),
+                TOOL_GROUP_RECENT_EVENTS.to_string(),
+            ],
+            Some("profile-alpha".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("duplicate tool group"));
     }
 }
