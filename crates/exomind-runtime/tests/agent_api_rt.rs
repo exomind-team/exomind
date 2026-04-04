@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::State as AxumState;
@@ -15,14 +16,15 @@ use exomind_runtime::agent::life::{AgentApiTickTrigger, CognitiveLifeAgent};
 use exomind_runtime::agent::llm_cognition::LlmCognition;
 use exomind_runtime::agent::proposal_tools::{
     ADD_EVENT_PROPOSAL_TOOL, ADD_TASK_PROPOSAL_TOOL, ADD_TIMEBLOCK_PROPOSAL_TOOL,
-    execute_proposal_tool_call, proposal_tool_defs,
+    execute_proposal_tool_call, is_proposal_tool_name, proposal_tool_defs,
 };
 use exomind_runtime::agent::session::{
     AgentSessionRuntime, AgentSessionStore, AgentTrigger, SessionError,
-    TOOL_PRESET_RECENT_EVENTS,
-    run_broker_agent_session_with_runtime,
+    TOOL_PRESET_PROPOSAL_TOOLS, TOOL_PRESET_RECENT_EVENTS,
+    run_broker_agent_session_from_sources_with_runtime, run_broker_agent_session_with_runtime,
 };
 use exomind_runtime::agent::tools::GET_RECENT_EVENTS_TOOL;
+use exomind_runtime::agent::tools::eventlog::get_recent_events_tool;
 use exomind_runtime::agent::workspace::AgentWorkspace;
 use exomind_runtime::config::types::USER_CONFIG_SCOPE;
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
@@ -235,6 +237,124 @@ async fn fake_openai_proposal_story_handler(
     }))
 }
 
+async fn fake_openai_combined_story_handler(
+    AxumState(call_count): AxumState<Arc<AtomicUsize>>,
+    Json(payload): Json<Value>,
+) -> Json<Value> {
+    let turn = call_count.fetch_add(1, Ordering::SeqCst);
+    let tool_names = payload["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["function"]["name"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+
+    let tool_contents = payload["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|message| message["role"] == json!("tool"))
+        .filter_map(|message| message["content"].as_str())
+        .collect::<Vec<_>>();
+
+    match turn {
+        0 => {
+            assert!(tool_names.contains(&GET_RECENT_EVENTS_TOOL.to_string()));
+            assert!(tool_names.contains(&"get_weather".to_string()));
+            assert!(tool_names.contains(&ADD_TASK_PROPOSAL_TOOL.to_string()));
+
+            Json(json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "combined-tool-1",
+                            "type": "function",
+                            "function": {
+                                "name": GET_RECENT_EVENTS_TOOL,
+                                "arguments": "{\"limit\":5}"
+                            }
+                        }]
+                    }
+                }]
+            }))
+        }
+        1 => {
+            assert!(tool_contents
+                .iter()
+                .any(|content| content.contains("明天要出门去银行存钱，不知天气如何")));
+            assert!(tool_contents
+                .iter()
+                .any(|content| content.contains("家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了")));
+
+            Json(json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "combined-tool-2",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": "{\"date\":\"tomorrow\"}"
+                            }
+                        }]
+                    }
+                }]
+            }))
+        }
+        2 => {
+            assert!(tool_contents
+                .iter()
+                .any(|content| content.contains("明天温度24.5度，暴雨")));
+
+            Json(json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "combined-tool-3",
+                                "type": "function",
+                                "function": {
+                                    "name": ADD_TASK_PROPOSAL_TOOL,
+                                    "arguments": "{\"title\":\"任务提案：出门准备雨伞\",\"body\":\"近期事件显示明天要出门去银行，天气工具显示明天暴雨，而且用户已经找到了伞，因此需要提前准备并带上雨伞。\",\"taskTitle\":\"出门准备雨伞\",\"description\":\"出门前从衣柜取出雨伞并随身携带。\",\"tags\":[\"天气\",\"暴雨\",\"出门准备\"],\"priority\":\"high\"}"
+                                }
+                            },
+                            {
+                                "id": "combined-tool-4",
+                                "type": "function",
+                                "function": {
+                                    "name": ADD_TASK_PROPOSAL_TOOL,
+                                    "arguments": "{\"title\":\"任务提案：银行存钱\",\"body\":\"近期事件明确提到明天要出门去银行存钱，应单独形成明日外出事务任务。\",\"taskTitle\":\"银行存钱\",\"description\":\"明天出门去银行办理存钱事项。\",\"tags\":[\"银行\",\"外出\"],\"priority\":\"high\"}"
+                                }
+                            }
+                        ]
+                    }
+                }]
+            }))
+        }
+        3 => {
+            assert!(tool_contents.iter().any(|content| content.contains("出门准备雨伞")));
+            assert!(tool_contents.iter().any(|content| content.contains("银行存钱")));
+
+            Json(json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "我先读取了近期事件，再查询了明天的天气。由于明天要去银行且天气是暴雨，同时事件里提到雨伞已经找回，所以我创建了两条任务提案：出门准备雨伞、银行存钱。",
+                        "tool_calls": []
+                    }
+                }]
+            }))
+        }
+        other => panic!("unexpected combined story turn: {other}"),
+    }
+}
+
 async fn spawn_fake_openai_server() -> (String, oneshot::Sender<()>) {
     let app = Router::new()
         .route("/chat/completions", post(fake_openai_handler))
@@ -281,6 +401,26 @@ async fn spawn_fake_openai_proposal_story_server() -> (String, oneshot::Sender<(
             "/chat/completions",
             post(fake_openai_proposal_story_handler),
         )
+        .with_state(Arc::new(AtomicUsize::new(0)));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    (format!("http://{addr}"), shutdown_tx)
+}
+
+async fn spawn_fake_openai_combined_story_server() -> (String, oneshot::Sender<()>) {
+    let app = Router::new()
+        .route("/chat/completions", post(fake_openai_combined_story_handler))
         .with_state(Arc::new(AtomicUsize::new(0)));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -349,12 +489,127 @@ fn weather_tool() -> ToolDef {
     }
 }
 
+fn tomorrow_weather_tool() -> ToolDef {
+    ToolDef {
+        name: "get_weather".to_string(),
+        description: "返回明天的天气与气温".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "enum": ["tomorrow"]
+                }
+            },
+            "required": ["date"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+async fn execute_combined_story_tool_call(
+    eventlog_store: Arc<EventLogStore>,
+    proposal_store: Arc<ProposalStore>,
+    publisher: &Publisher,
+    scope_key: &str,
+    tool_call: &exomind_runtime::agent::broker::ToolCall,
+) -> String {
+    match tool_call.name.as_str() {
+        GET_RECENT_EVENTS_TOOL => {
+            let (_, tool_fn) =
+                get_recent_events_tool(eventlog_store, Some(scope_key.to_string()));
+            tool_fn(tool_call.input.clone())
+                .await
+                .unwrap_or_else(|error| panic!("recent events tool execution failed: {error}"))
+        }
+        "get_weather" => {
+            assert_eq!(
+                tool_call.input["date"].as_str(),
+                Some("tomorrow"),
+                "combined weather story should request tomorrow weather"
+            );
+            "明天温度24.5度，暴雨".to_string()
+        }
+        name if is_proposal_tool_name(name) => execute_proposal_tool_call(
+            proposal_store,
+            Some(scope_key.to_string()),
+            publisher.clone(),
+            tool_call,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("proposal tool execution failed: {error}")),
+        other => panic!("unexpected combined story tool requested: {other}"),
+    }
+}
+
 fn panic_if_auth_failed(error: &SessionError) {
     let message = error.to_string();
     assert!(
         !message.contains("401"),
         "real-upstream auth failed with 401; check EXOMIND_AGENT_API_* env vars or ~/.codex credentials: {message}"
     );
+}
+
+fn is_retryable_upstream_error_message(message: &str) -> bool {
+    message.contains("429")
+        || message.contains("502")
+        || message.contains("503")
+        || message.contains("bad_response_status_code")
+        || message.contains("OpenAI SSE 响应未提供可解析的 choices")
+        || message.contains("system cpu overloaded")
+        || message.contains("Service temporarily unavailable")
+}
+
+async fn run_real_upstream_turn_with_retries<F, Fut>(
+    label: &str,
+    mut operation: F,
+) -> Result<exomind_runtime::agent::session::AgentSessionRecord, SessionError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<
+        Output = Result<exomind_runtime::agent::session::AgentSessionRecord, SessionError>,
+    >,
+{
+    const MAX_ATTEMPTS: usize = 3;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match operation().await {
+            Ok(record) => return Ok(record),
+            Err(error) => {
+                panic_if_auth_failed(&error);
+                let message = error.to_string();
+                if attempt == MAX_ATTEMPTS || !is_retryable_upstream_error_message(&message) {
+                    return Err(error);
+                }
+
+                eprintln!(
+                    "retrying {label} after transient upstream failure (attempt {attempt}/{MAX_ATTEMPTS}): {message}"
+                );
+                tokio::time::sleep(Duration::from_secs(attempt as u64)).await;
+            }
+        }
+    }
+
+    unreachable!("real upstream retry loop should always return");
+}
+
+#[test]
+fn retryable_upstream_error_detection_keeps_401_non_retryable() {
+    assert!(is_retryable_upstream_error_message(
+        "OpenAI HTTP 503 Service Unavailable: system cpu overloaded"
+    ));
+    assert!(is_retryable_upstream_error_message(
+        "OpenAI HTTP 429 Too Many Requests"
+    ));
+    assert!(is_retryable_upstream_error_message(
+        "OpenAI HTTP 502 Bad Gateway: bad_response_status_code"
+    ));
+    assert!(is_retryable_upstream_error_message(
+        "OpenAI 响应解析失败: sse_error=OpenAI SSE 响应未提供可解析的 choices"
+    ));
+    assert!(!is_retryable_upstream_error_message(
+        "OpenAI HTTP 401 Unauthorized"
+    ));
 }
 
 #[tokio::test]
@@ -670,25 +925,21 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
         serde_json::to_string_pretty(&tools).unwrap()
     );
 
-    let first_turn = match run_broker_agent_session_with_runtime(
-        profile.clone(),
-        system_prompt.clone(),
-        tools.clone(),
-        Vec::new(),
-        Some(prompt.clone()),
-        AgentTrigger::Internal {
-            source: "agent-turn-broker-rt-weather".to_string(),
-        },
-        &runtime,
-    )
+    let first_turn = run_real_upstream_turn_with_retries("weather turn 1", || {
+        run_broker_agent_session_with_runtime(
+            profile.clone(),
+            system_prompt.clone(),
+            tools.clone(),
+            Vec::new(),
+            Some(prompt.clone()),
+            AgentTrigger::Internal {
+                source: "agent-turn-broker-rt-weather".to_string(),
+            },
+            &runtime,
+        )
+    })
     .await
-    {
-        Ok(record) => record,
-        Err(error) => {
-            panic_if_auth_failed(&error);
-            panic!("first real-upstream weather turn failed: {error}");
-        }
-    };
+    .unwrap_or_else(|error| panic!("first real-upstream weather turn failed: {error}"));
 
     eprintln!("--- turn 1 response ---");
     eprintln!("session_id={}", first_turn.session_id);
@@ -722,36 +973,34 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
         serde_json::to_string_pretty(tool_call).unwrap()
     );
     eprintln!("tool_output={tool_output}");
-    let second_turn = match run_broker_agent_session_with_runtime(
-        profile,
-        system_prompt,
-        tools,
-        vec![
-            TurnItem::User { content: prompt },
-            TurnItem::Assistant {
-                content: first_turn.assistant_turn.content.clone(),
-                tool_calls: first_turn.assistant_turn.tool_calls.clone(),
+    let second_turn = run_real_upstream_turn_with_retries("weather turn 2", || {
+        run_broker_agent_session_with_runtime(
+            profile.clone(),
+            system_prompt.clone(),
+            tools.clone(),
+            vec![
+                TurnItem::User {
+                    content: prompt.clone(),
+                },
+                TurnItem::Assistant {
+                    content: first_turn.assistant_turn.content.clone(),
+                    tool_calls: first_turn.assistant_turn.tool_calls.clone(),
+                },
+                TurnItem::ToolResult {
+                    tool_call_id: tool_call.id.clone(),
+                    tool_name: tool_call.name.clone(),
+                    content: tool_output.clone(),
+                },
+            ],
+            None,
+            AgentTrigger::Internal {
+                source: "agent-turn-broker-rt-weather".to_string(),
             },
-            TurnItem::ToolResult {
-                tool_call_id: tool_call.id.clone(),
-                tool_name: tool_call.name.clone(),
-                content: tool_output.clone(),
-            },
-        ],
-        None,
-        AgentTrigger::Internal {
-            source: "agent-turn-broker-rt-weather".to_string(),
-        },
-        &runtime,
-    )
+            &runtime,
+        )
+    })
     .await
-    {
-        Ok(record) => record,
-        Err(error) => {
-            panic_if_auth_failed(&error);
-            panic!("second real-upstream weather turn failed: {error}");
-        }
-    };
+    .unwrap_or_else(|error| panic!("second real-upstream weather turn failed: {error}"));
 
     eprintln!("--- turn 2 response ---");
     eprintln!("session_id={}", second_turn.session_id);
@@ -893,6 +1142,151 @@ async fn broker_proposal_story_contract_creates_real_proposals() {
             .iter()
             .any(|proposal| proposal.action_type == ActionType::AppendEvent)
     );
+
+    let _ = shutdown_tx.send(());
+}
+
+#[tokio::test]
+async fn broker_combined_story_contract_reads_events_weather_and_creates_two_task_proposals() {
+    let temp = tempfile::tempdir().unwrap();
+    let eventlog_store = Arc::new(EventLogStore::new(temp.path().join("eventlog")));
+    let proposal_store = Arc::new(ProposalStore::new());
+    let runtime = AgentSessionRuntime::new(
+        Arc::new(ConfigStore::new()),
+        Arc::clone(&eventlog_store),
+        Arc::clone(&proposal_store),
+        Arc::new(AgentSessionStore::new()),
+    );
+    let scope_key = "profile-alpha";
+
+    eventlog_store
+        .append_event(
+            Some(scope_key),
+            EventRecord {
+                id: "evt-bank".to_string(),
+                timestamp: 2,
+                content: "明天要出门去银行存钱，不知天气如何".to_string(),
+                tags: vec!["life".to_string(), "bank".to_string()],
+                metadata: None,
+            },
+        )
+        .unwrap();
+    eventlog_store
+        .append_event(
+            Some(scope_key),
+            EventRecord {
+                id: "evt-umbrella".to_string(),
+                timestamp: 1,
+                content: "家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了".to_string(),
+                tags: vec!["home".to_string(), "umbrella".to_string()],
+                metadata: None,
+            },
+        )
+        .unwrap();
+
+    let system_prompt = Some(
+        "你是外心中的明日准备助理。你必须先调用 get_recent_events 读取近期事件，再判断是否需要调用 get_weather(date=tomorrow) 获取明天天气。随后根据事件与天气，为用户创建明天要做的任务提案。不要只给口头建议；如果既有外出办事事项，又因暴雨需要准备雨具，就应拆成两个独立任务提案。".to_string(),
+    );
+    let prompt = "请根据最近事件和明天天气，为用户补全明天需要做的任务提案。先读事件，再按需要查天气，再创建任务提案。".to_string();
+    let publisher = Publisher {
+        publisher_type: PublisherType::Agent,
+        id: "api-agent".to_string(),
+        name: "API Agent".to_string(),
+    };
+
+    let (base_url, shutdown_tx) = spawn_fake_openai_combined_story_server().await;
+    let profile = ApiProviderProfile {
+        provider: "openai".to_string(),
+        model: "gpt-test".to_string(),
+        base_url: Some(base_url),
+        api_key: "sk-test".to_string(),
+    };
+
+    let presets = vec![
+        TOOL_PRESET_RECENT_EVENTS.to_string(),
+        TOOL_PRESET_PROPOSAL_TOOLS.to_string(),
+    ];
+    let mut history = Vec::new();
+    let mut next_user_message = Some(prompt.clone());
+    let mut turn_count = 0usize;
+    let mut executed_tools = Vec::new();
+
+    loop {
+        turn_count += 1;
+        assert!(turn_count <= 6, "combined story exceeded turn budget");
+
+        let record = run_broker_agent_session_from_sources_with_runtime(
+            profile.clone(),
+            system_prompt.clone(),
+            vec![tomorrow_weather_tool()],
+            &presets,
+            Some(scope_key.to_string()),
+            history.clone(),
+            next_user_message.take(),
+            AgentTrigger::Internal {
+                source: "agent-turn-broker-combined-story-contract".to_string(),
+            },
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        if turn_count == 1 {
+            history.push(TurnItem::User {
+                content: prompt.clone(),
+            });
+        }
+
+        history.push(TurnItem::Assistant {
+            content: record.assistant_turn.content.clone(),
+            tool_calls: record.assistant_turn.tool_calls.clone(),
+        });
+
+        if record.status == "completed" {
+            assert!(record.content.contains("雨伞"));
+            assert!(record.content.contains("银行"));
+            break;
+        }
+
+        for tool_call in &record.assistant_turn.tool_calls {
+            executed_tools.push(tool_call.name.clone());
+            let output = execute_combined_story_tool_call(
+                Arc::clone(&eventlog_store),
+                Arc::clone(&proposal_store),
+                &publisher,
+                scope_key,
+                tool_call,
+            )
+            .await;
+            history.push(TurnItem::ToolResult {
+                tool_call_id: tool_call.id.clone(),
+                tool_name: tool_call.name.clone(),
+                content: output,
+            });
+        }
+    }
+
+    assert_eq!(
+        executed_tools,
+        vec![
+            GET_RECENT_EVENTS_TOOL.to_string(),
+            "get_weather".to_string(),
+            ADD_TASK_PROPOSAL_TOOL.to_string(),
+            ADD_TASK_PROPOSAL_TOOL.to_string()
+        ]
+    );
+
+    let proposals = proposal_store
+        .list_scoped(Some(scope_key), &ProposalFilter::default())
+        .unwrap();
+    let task_titles = proposals
+        .iter()
+        .filter(|proposal| proposal.action_type == ActionType::CreateTask)
+        .map(|proposal| proposal.title.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(task_titles.len(), 2, "proposals={proposals:?}");
+    assert!(task_titles.iter().any(|title| title.contains("雨伞")));
+    assert!(task_titles.iter().any(|title| title.contains("银行存钱")));
 
     let _ = shutdown_tx.send(());
 }
@@ -1086,6 +1480,219 @@ async fn broker_proposal_story_skips_without_env_and_uses_real_upstream_when_pre
                 serde_json::to_string_pretty(&proposals).unwrap()
             );
 
+            history.push(TurnItem::ToolResult {
+                tool_call_id: tool_call.id.clone(),
+                tool_name: tool_call.name.clone(),
+                content: output,
+            });
+        }
+    }
+}
+
+#[tokio::test]
+async fn broker_combined_story_skips_without_env_and_uses_real_upstream_when_present() {
+    let Some(profile) = real_upstream_provider_profile_from_env() else {
+        eprintln!(
+            "skipping real-upstream combined story: set EXOMIND_AGENT_API_RT_ENABLE=1 together with EXOMIND_AGENT_API_PROVIDER / MODEL / API_KEY env vars"
+        );
+        return;
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let eventlog_store = Arc::new(EventLogStore::new(temp.path().join("eventlog")));
+    let proposal_store = Arc::new(ProposalStore::new());
+    let runtime = AgentSessionRuntime::new(
+        Arc::new(ConfigStore::new()),
+        Arc::clone(&eventlog_store),
+        Arc::clone(&proposal_store),
+        Arc::new(AgentSessionStore::new()),
+    );
+    let scope_key = "profile-alpha";
+
+    eventlog_store
+        .append_event(
+            Some(scope_key),
+            EventRecord {
+                id: "evt-bank".to_string(),
+                timestamp: 2,
+                content: "明天要出门去银行存钱，不知天气如何".to_string(),
+                tags: vec!["life".to_string(), "bank".to_string()],
+                metadata: None,
+            },
+        )
+        .unwrap();
+    eventlog_store
+        .append_event(
+            Some(scope_key),
+            EventRecord {
+                id: "evt-umbrella".to_string(),
+                timestamp: 1,
+                content: "家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了".to_string(),
+                tags: vec!["home".to_string(), "umbrella".to_string()],
+                metadata: None,
+            },
+        )
+        .unwrap();
+
+    let system_prompt = Some(
+        "你是外心中的明日准备助理。你必须先调用 get_recent_events 读取近期事件，再决定是否调用 get_weather(date=tomorrow) 获取明天天气。然后根据事件与天气创建明天的任务提案。不要只给口头建议；如果存在外出办事事项，且天气显示暴雨，就把外出事务和雨具准备拆成两个独立任务提案。".to_string(),
+    );
+    let prompt = "请根据最近事件和明天天气，为用户添加明天的任务提案。先读事件，再查天气，再创建任务提案。不要把带伞和去银行合并成同一个任务。".to_string();
+    let publisher = Publisher {
+        publisher_type: PublisherType::Agent,
+        id: "api-agent".to_string(),
+        name: "API Agent".to_string(),
+    };
+    let presets = vec![
+        TOOL_PRESET_RECENT_EVENTS.to_string(),
+        TOOL_PRESET_PROPOSAL_TOOLS.to_string(),
+    ];
+    let mut history = Vec::new();
+    let mut next_user_message = Some(prompt.clone());
+    let mut turn_count = 0usize;
+    let mut executed_tools = Vec::new();
+
+    eprintln!("=== broker_combined_story start ===");
+    eprintln!("provider={} model={}", profile.provider, profile.model);
+
+    loop {
+        turn_count += 1;
+        assert!(
+            turn_count <= 10,
+            "combined story exceeded turn budget; history={history:?}"
+        );
+
+        eprintln!("\n--- turn {turn_count} request ---");
+        eprintln!(
+            "history_len={} new_user_message_present={}",
+            history.len(),
+            next_user_message.is_some()
+        );
+
+        let user_message_for_turn = next_user_message.take();
+        let record = run_real_upstream_turn_with_retries(
+            &format!("combined story turn {turn_count}"),
+            || {
+                run_broker_agent_session_from_sources_with_runtime(
+                    profile.clone(),
+                    system_prompt.clone(),
+                    vec![tomorrow_weather_tool()],
+                    &presets,
+                    Some(scope_key.to_string()),
+                    history.clone(),
+                    user_message_for_turn.clone(),
+                    AgentTrigger::Internal {
+                        source: "agent-turn-broker-combined-story".to_string(),
+                    },
+                    &runtime,
+                )
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("real-upstream combined story turn failed: {error}"));
+
+        eprintln!("--- turn {turn_count} response ---");
+        eprintln!("session_id={}", record.session_id);
+        eprintln!("status={}", record.status);
+        eprintln!(
+            "content={}",
+            serde_json::to_string_pretty(&record.content).unwrap()
+        );
+        eprintln!(
+            "assistant_turn={}",
+            serde_json::to_string_pretty(&record.assistant_turn).unwrap()
+        );
+        eprintln!(
+            "tool_calls={}",
+            serde_json::to_string_pretty(&record.tool_calls).unwrap()
+        );
+
+        if turn_count == 1 {
+            history.push(TurnItem::User {
+                content: prompt.clone(),
+            });
+        }
+
+        history.push(TurnItem::Assistant {
+            content: record.assistant_turn.content.clone(),
+            tool_calls: record.assistant_turn.tool_calls.clone(),
+        });
+
+        if record.status == "completed" {
+            let proposals = proposal_store
+                .list_scoped(Some(scope_key), &ProposalFilter::default())
+                .unwrap();
+            let task_proposals = proposals
+                .iter()
+                .filter(|proposal| proposal.action_type == ActionType::CreateTask)
+                .collect::<Vec<_>>();
+
+            assert!(
+                executed_tools.iter().any(|name| name == GET_RECENT_EVENTS_TOOL),
+                "combined story must read recent events first; executed_tools={executed_tools:?}"
+            );
+            assert!(
+                executed_tools.iter().any(|name| name == "get_weather"),
+                "combined story must query weather; executed_tools={executed_tools:?}"
+            );
+            assert!(
+                task_proposals.len() >= 2,
+                "combined story should create at least two task proposals; proposals={proposals:?}"
+            );
+            assert!(
+                task_proposals.iter().any(|proposal| {
+                    proposal.title.contains("雨伞")
+                        || proposal.body.contains("雨伞")
+                        || proposal.body.contains("雨具")
+                }),
+                "combined story should create an umbrella-preparation proposal; proposals={proposals:?}"
+            );
+            assert!(
+                task_proposals.iter().any(|proposal| {
+                    proposal.title.contains("银行")
+                        || proposal.body.contains("银行")
+                        || proposal.body.contains("存钱")
+                }),
+                "combined story should create a bank/deposit proposal; proposals={proposals:?}"
+            );
+            assert!(
+                record.content.contains("雨伞") || record.content.contains("银行"),
+                "final answer should summarize the created proposals: {record:?}"
+            );
+            eprintln!("=== broker_combined_story completed ===");
+            eprintln!(
+                "proposals={}",
+                serde_json::to_string_pretty(&proposals).unwrap()
+            );
+            eprintln!("executed_tools={executed_tools:?}");
+            eprintln!("final_answer={}", record.content);
+            break;
+        }
+
+        assert_eq!(
+            record.status, "needs_tool_calls",
+            "intermediate combined story turn should request tools: {record:?}"
+        );
+        assert!(
+            !record.assistant_turn.tool_calls.is_empty(),
+            "combined story should keep using tools before completion: {record:?}"
+        );
+
+        for tool_call in &record.assistant_turn.tool_calls {
+            executed_tools.push(tool_call.name.clone());
+            let output = execute_combined_story_tool_call(
+                Arc::clone(&eventlog_store),
+                Arc::clone(&proposal_store),
+                &publisher,
+                scope_key,
+                tool_call,
+            )
+            .await;
+            eprintln!(
+                "executed_tool_call={}",
+                serde_json::to_string_pretty(tool_call).unwrap()
+            );
+            eprintln!("tool_output={output}");
             history.push(TurnItem::ToolResult {
                 tool_call_id: tool_call.id.clone(),
                 tool_name: tool_call.name.clone(),
