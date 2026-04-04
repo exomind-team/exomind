@@ -32,6 +32,11 @@ export function ProposalNotificationBadge({
   useEffect(() => subscribeProposalInboxEnabledChanges(setProposalInboxEnabled), []);
 
   useEffect(() => {
+    if (!proposalInboxEnabled) {
+      setPendingCount(0);
+      return;
+    }
+
     let disposed = false;
     const adapter = getProposalRtAdapter();
 
@@ -65,7 +70,7 @@ export function ProposalNotificationBadge({
       disposed = true;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [placement, proposalInboxEnabled]);
 
   if (!proposalInboxEnabled || pendingCount <= 0) {
     return null;

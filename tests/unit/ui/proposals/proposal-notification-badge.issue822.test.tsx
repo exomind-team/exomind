@@ -6,9 +6,24 @@ const adapterMocks = vi.hoisted(() => ({
   listProposals: vi.fn(),
 }));
 
+const proposalInboxFlagState = vi.hoisted(() => ({
+  enabled: true,
+  listeners: new Set<(enabled: boolean) => void>(),
+}));
+
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: unknown }) => <a {...props}>{children}</a>,
   useLocation: () => ({ pathname: '/agents' }),
+}));
+
+vi.mock('@/config/proposal-inbox-enabled', () => ({
+  getProposalInboxEnabled: () => proposalInboxFlagState.enabled,
+  subscribeProposalInboxEnabledChanges: (listener: (enabled: boolean) => void) => {
+    proposalInboxFlagState.listeners.add(listener);
+    return () => {
+      proposalInboxFlagState.listeners.delete(listener);
+    };
+  },
 }));
 
 vi.mock('@/config/runtime-target', () => ({
@@ -27,6 +42,8 @@ vi.mock('@/lib/adapters/proposal-rt-adapter', () => ({
 describe('ProposalNotificationBadge observability（请求箱角标失败日志）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    proposalInboxFlagState.enabled = true;
+    proposalInboxFlagState.listeners.clear();
   });
 
   it('logs a traceable warning when pending proposal refresh fails（轮询失败时输出可追溯告警）', async () => {
@@ -50,5 +67,13 @@ describe('ProposalNotificationBadge observability（请求箱角标失败日志�
     );
 
     warnSpy.mockRestore();
+  });
+
+  it('does not poll the RT when proposal inbox entry is disabled（请求箱入口关闭时不再轮询 RT）', () => {
+    proposalInboxFlagState.enabled = false;
+
+    render(<ProposalNotificationBadge placement="desktop" />);
+
+    expect(adapterMocks.listProposals).not.toHaveBeenCalled();
   });
 });
