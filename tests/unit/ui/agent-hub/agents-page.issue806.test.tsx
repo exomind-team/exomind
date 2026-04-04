@@ -999,6 +999,107 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     });
   });
 
+  it('maps a spawned PTY back to its session id once the session stream catches up（spawn 后 session 流补齐时应把 pane order 回填为 session id）', async () => {
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '2x2',
+      paneOrder: ['session-issue-806'],
+    }));
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty/spawn')) {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-new-806',
+            name: 'Claude 806 New',
+            workdir: 'D:/project/exomind',
+          }),
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-live-806',
+              name: 'Codex 806',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+            {
+              id: 'pty-new-806',
+              name: 'Claude 806 New',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('pty-spawn-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('pty-spawn-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-new-806')).toBeInTheDocument();
+    });
+
+    sessionStreamState.sessions = [
+      buildSession({}),
+      buildSession({
+        id: 'session-new-live-806',
+        agent_kind: 'claude',
+        role: 'Claude 806 New',
+        pty_id: 'pty-new-806',
+        inner_session_id: 'claude-thread-new-806',
+        source_host_id: 'runtime-host-523',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'D:/project/exomind',
+        },
+      }),
+    ];
+    rerender(<AgentsPage />);
+
+    await waitFor(() => {
+      const persisted = JSON.parse(localStorage.getItem('exomind:agentHubTiledState') ?? '{}') as {
+        paneOrder?: string[];
+      };
+      expect(persisted.paneOrder).toEqual(['session-issue-806', 'session-new-live-806']);
+      expect(persisted.paneOrder).not.toContain('pty-new-806');
+    });
+  });
+
   it('keeps a disconnected pending-binding terminal session active instead of auto-completing it（待补绑 inner_session_id 的失联终端应保留活跃断开态）', async () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const pendingBindingIso = new Date(Date.now() - 20_000).toISOString();
