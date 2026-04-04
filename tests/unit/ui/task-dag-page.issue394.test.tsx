@@ -1744,10 +1744,12 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
         nodes: Array<{ id: string; position: { x: number; y: number } }>;
       }).nodes.find((node) => node.id === taskId)?.position)
     );
+    const getNodeCardClassList = (taskId: string) => screen.getByTestId(`task-dag-node-${taskId}`).className.split(/\s+/);
 
     expect(screen.getByTestId('task-dag-layout-mode-manual')).toHaveClass('bg-[#FFF7ED]');
     expect((flowApiMocks.lastProps as { nodesDraggable?: boolean }).nodesDraggable).toBe(true);
     expect(getNodePosition('task-a')).toEqual({ x: 640, y: 320 });
+    expect(getNodeCardClassList('task-a')).toContain('nopan');
 
     act(() => {
       (
@@ -1766,11 +1768,13 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     fireEvent.click(screen.getByTestId('task-dag-layout-mode-auto'));
     expect(window.localStorage.getItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY)).toBe('auto');
     expect((flowApiMocks.lastProps as { nodesDraggable?: boolean }).nodesDraggable).toBe(false);
+    expect(getNodeCardClassList('task-a')).not.toContain('nopan');
 
     fireEvent.click(screen.getByTestId('task-dag-layout-mode-manual'));
     await waitFor(() => {
       expect(getNodePosition('task-a')).toEqual({ x: 888, y: 444 });
     });
+    expect(getNodeCardClassList('task-a')).toContain('nopan');
 
     firstRender.unmount();
 

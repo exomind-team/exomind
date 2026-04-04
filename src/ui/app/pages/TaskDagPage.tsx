@@ -796,6 +796,7 @@ function TaskDagNode({
         data-testid={`task-dag-node-${id}`}
         className={[
           'group/task-dag-node relative inline-flex flex-col justify-center overflow-hidden rounded-2xl border bg-white px-3 py-3 text-left shadow-sm transition-all duration-200 ease-out dark:bg-[#1C1917]',
+          isManualLayout ? 'nopan' : '',
           widthClass,
           heightClass,
           expansionClass,
