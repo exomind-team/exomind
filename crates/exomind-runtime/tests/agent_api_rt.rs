@@ -507,6 +507,14 @@ fn tomorrow_weather_tool() -> ToolDef {
     }
 }
 
+fn combined_story_system_prompt() -> String {
+    "你是一个外心软件的个人成长 Agent 助手。你会尽量利用当前可用的一切工具，结合用户事件日志、任务、时间块或其他可获得的上下文信息，主动推理并提出能帮助用户成长或更好行动的举措。若合适，你应通过提案系统添加用户可见的提案，并在最终说明你的决策依据。不要跳过信息收集步骤；先使用可用工具理解情况，再决定是否需要进一步行动。若你识别到多个彼此独立、分别值得执行的行动，应拆分成多个提案表达，不要把不同动作合并成一个笼统事项。若某个行动已经足够具体并可直接执行，应优先将它表达为单独的任务提案，而不是只用其他类型提案笼统替代。即使多个动作服务于同一个较大目标，只要它们在性质上不同，例如一个偏向准备、一个偏向确认或安排，也应视为不同的独立任务。".to_string()
+}
+
+fn combined_story_user_prompt() -> String {
+    "现在开始你的个人成长辅助工作。请结合你当前可以读取到的信息和工具，主动发现值得帮助用户处理的事项；如果你判断应创建提案，就优先把可执行行动落成明确任务提案。若存在多个相互独立的行动，请分别创建，不要合并，也不要仅用时间块或事件提案替代本应单独存在的任务提案。即使几个动作围绕同一个总体事项，只要动作性质不同，也请拆成不同任务，并在最后说明你为什么这样决策。".to_string()
+}
+
 async fn execute_combined_story_tool_call(
     eventlog_store: Arc<EventLogStore>,
     proposal_store: Arc<ProposalStore>,
@@ -555,6 +563,7 @@ fn is_retryable_upstream_error_message(message: &str) -> bool {
         || message.contains("502")
         || message.contains("503")
         || message.contains("bad_response_status_code")
+        || message.contains("Insufficient account balance")
         || message.contains("OpenAI SSE 响应未提供可解析的 choices")
         || message.contains("system cpu overloaded")
         || message.contains("Service temporarily unavailable")
@@ -605,11 +614,48 @@ fn retryable_upstream_error_detection_keeps_401_non_retryable() {
         "OpenAI HTTP 502 Bad Gateway: bad_response_status_code"
     ));
     assert!(is_retryable_upstream_error_message(
+        "OpenAI HTTP 403 Forbidden: Insufficient account balance"
+    ));
+    assert!(is_retryable_upstream_error_message(
         "OpenAI 响应解析失败: sse_error=OpenAI SSE 响应未提供可解析的 choices"
     ));
     assert!(!is_retryable_upstream_error_message(
         "OpenAI HTTP 401 Unauthorized"
     ));
+}
+
+#[test]
+fn combined_story_prompts_stay_generic_and_avoid_target_hints() {
+    let system_prompt = combined_story_system_prompt();
+    let user_prompt = combined_story_user_prompt();
+
+    for forbidden in ["伞", "银行", "存钱", "雨", "天气"] {
+        assert!(
+            !system_prompt.contains(forbidden),
+            "system prompt should stay generic: {system_prompt}"
+        );
+        assert!(
+            !user_prompt.contains(forbidden),
+            "user prompt should stay generic: {user_prompt}"
+        );
+    }
+
+    assert!(system_prompt.contains("个人成长"));
+    assert!(system_prompt.contains("工具"));
+    assert!(system_prompt.contains("事件日志"));
+    assert!(system_prompt.contains("提案"));
+    assert!(system_prompt.contains("多个彼此独立"));
+    assert!(system_prompt.contains("不要把不同动作合并成一个笼统事项"));
+    assert!(system_prompt.contains("单独的任务提案"));
+    assert!(system_prompt.contains("一个偏向准备、一个偏向确认或安排"));
+    assert!(user_prompt.contains("个人成长辅助工作"));
+    assert!(user_prompt.contains("创建提案"));
+    assert!(user_prompt.contains("决策"));
+    assert!(user_prompt.contains("多个相互独立的行动"));
+    assert!(user_prompt.contains("不要合并"));
+    assert!(user_prompt.contains("明确任务提案"));
+    assert!(user_prompt.contains("不要仅用时间块或事件提案替代"));
+    assert!(user_prompt.contains("动作性质不同"));
 }
 
 #[tokio::test]
@@ -1184,10 +1230,8 @@ async fn broker_combined_story_contract_reads_events_weather_and_creates_two_tas
         )
         .unwrap();
 
-    let system_prompt = Some(
-        "你是外心中的明日准备助理。你必须先调用 get_recent_events 读取近期事件，再判断是否需要调用 get_weather(date=tomorrow) 获取明天天气。随后根据事件与天气，为用户创建明天要做的任务提案。不要只给口头建议；如果既有外出办事事项，又因暴雨需要准备雨具，就应拆成两个独立任务提案。".to_string(),
-    );
-    let prompt = "请根据最近事件和明天天气，为用户补全明天需要做的任务提案。先读事件，再按需要查天气，再创建任务提案。".to_string();
+    let system_prompt = Some(combined_story_system_prompt());
+    let prompt = combined_story_user_prompt();
     let publisher = Publisher {
         publisher_type: PublisherType::Agent,
         id: "api-agent".to_string(),
@@ -1534,10 +1578,8 @@ async fn broker_combined_story_skips_without_env_and_uses_real_upstream_when_pre
         )
         .unwrap();
 
-    let system_prompt = Some(
-        "你是外心中的明日准备助理。你必须先调用 get_recent_events 读取近期事件，再决定是否调用 get_weather(date=tomorrow) 获取明天天气。然后根据事件与天气创建明天的任务提案。不要只给口头建议；如果存在外出办事事项，且天气显示暴雨，就把外出事务和雨具准备拆成两个独立任务提案。".to_string(),
-    );
-    let prompt = "请根据最近事件和明天天气，为用户添加明天的任务提案。先读事件，再查天气，再创建任务提案。不要把带伞和去银行合并成同一个任务。".to_string();
+    let system_prompt = Some(combined_story_system_prompt());
+    let prompt = combined_story_user_prompt();
     let publisher = Publisher {
         publisher_type: PublisherType::Agent,
         id: "api-agent".to_string(),
@@ -1642,7 +1684,9 @@ async fn broker_combined_story_skips_without_env_and_uses_real_upstream_when_pre
             assert!(
                 task_proposals.iter().any(|proposal| {
                     proposal.title.contains("雨伞")
+                        || proposal.title.contains("伞")
                         || proposal.body.contains("雨伞")
+                        || proposal.body.contains("伞")
                         || proposal.body.contains("雨具")
                 }),
                 "combined story should create an umbrella-preparation proposal; proposals={proposals:?}"

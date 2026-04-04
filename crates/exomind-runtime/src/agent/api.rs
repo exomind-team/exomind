@@ -976,9 +976,12 @@ fn parse_openai_tool_calls(message: &Value) -> Result<Vec<ToolUse>, String> {
     let Some(tool_calls) = message.get("tool_calls") else {
         return Ok(Vec::new());
     };
+    if tool_calls.is_null() {
+        return Ok(Vec::new());
+    }
     let array = tool_calls
         .as_array()
-        .ok_or_else(|| "OpenAI tool_calls 必须是数组".to_string())?;
+        .ok_or_else(|| format!("OpenAI tool_calls 必须是数组或 null: {tool_calls}"))?;
     let mut parsed = Vec::with_capacity(array.len());
     for tool_call in array {
         let id = tool_call
@@ -1046,6 +1049,24 @@ mod tests {
         assert_eq!(completion.tool_uses.len(), 1);
         assert_eq!(completion.tool_uses[0].name, "get_recent_events");
         assert_eq!(completion.tool_uses[0].input["limit"], 2);
+    }
+
+    #[test]
+    fn parse_openai_completion_treats_null_tool_calls_as_empty() {
+        let parsed = json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "content": "已经完成处理。",
+                    "tool_calls": null
+                }
+            }]
+        });
+
+        let completion = parse_openai_completion(&parsed).unwrap();
+        assert_eq!(completion.text, "已经完成处理。");
+        assert!(completion.tool_uses.is_empty());
+        assert_eq!(completion.stop_reason.as_deref(), Some("stop"));
     }
 
     async fn sse_completion_handler(Json(payload): Json<Value>) -> Response {
