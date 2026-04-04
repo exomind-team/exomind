@@ -39,6 +39,10 @@ const sessionStreamState = vi.hoisted(() => ({
   sessions: [] as SessionInfo[],
 }));
 
+const ptyTerminalMockState = vi.hoisted(() => ({
+  nextMountSerial: 0,
+}));
+
 vi.mock('@/ui/app/components/PtyTerminal', () => ({
   PtyTerminal: ({
     ptyId,
@@ -46,20 +50,28 @@ vi.mock('@/ui/app/components/PtyTerminal', () => ({
   }: {
     ptyId: string;
     onInitialConnectionFailure?: () => void;
-  }) => (
-    <div data-testid={`mock-pty-terminal-${ptyId}`}>
-      PTY:{ptyId}
-      {onInitialConnectionFailure ? (
-        <button
-          type="button"
-          data-testid={`mock-pty-terminal-fail-${ptyId}`}
-          onClick={() => onInitialConnectionFailure()}
-        >
-          fail
-        </button>
-      ) : null}
-    </div>
-  ),
+  }) => {
+    const React = require('react') as typeof import('react');
+    const [mountSerial] = React.useState(() => {
+      ptyTerminalMockState.nextMountSerial += 1;
+      return ptyTerminalMockState.nextMountSerial;
+    });
+    return (
+      <div data-testid={`mock-pty-terminal-${ptyId}`} data-mount-serial={mountSerial}>
+        PTY:{ptyId}
+        <span data-testid={`mock-pty-terminal-mount-${ptyId}`}>{mountSerial}</span>
+        {onInitialConnectionFailure ? (
+          <button
+            type="button"
+            data-testid={`mock-pty-terminal-fail-${ptyId}`}
+            onClick={() => onInitialConnectionFailure()}
+          >
+            fail
+          </button>
+        ) : null}
+      </div>
+    );
+  },
 }));
 
 vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
@@ -280,6 +292,7 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     vi.clearAllMocks();
     localStorage.clear();
     vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
+    ptyTerminalMockState.nextMountSerial = 0;
 
     sessionStreamState.sessions = [buildSession({})];
 
@@ -425,6 +438,23 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     expect(
       vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
     ).toHaveLength(0);
+  });
+
+  it('remounts the active PTY terminal when the same session card is reopened（重复点击当前会话卡片时应重新挂载终端）', async () => {
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-issue-806'));
+
+    const initialMount = await screen.findByTestId('mock-pty-terminal-mount-pty-live-806');
+    const firstMountSerial = initialMount.textContent;
+    expect(firstMountSerial).not.toBeNull();
+
+    fireEvent.click(await screen.findByTestId('session-card-session-issue-806'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-mount-pty-live-806').textContent).not.toBe(firstMountSerial);
+    });
   });
 
   it('emits agent-hub PTY open traces when opening a topology PTY node（点击拓扑 PTY 节点时应输出可追溯日志）', async () => {
@@ -876,6 +906,97 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
       'session-fresh-spawn-806',
       { status: 'completed' },
     );
+  });
+
+  it('does not persist raw spawned PTY ids into tiled pane order and clears stale fullscreen recovery（spawn raw PTY 时不应污染 pane order，且应清空旧恢复快照）', async () => {
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '2x2',
+      paneOrder: ['session-issue-806'],
+      fullscreenPtyId: 'pty-stale-recovery-818',
+      fullscreenTerminalRecovery: {
+        sessionId: 'session-stale-recovery-818',
+        sourceHostId: 'runtime-host-523',
+        agentType: 'codex',
+        innerSessionId: 'codex-thread-stale-recovery-818',
+        role: 'Stale Recovery 818',
+        workdir: 'D:/project/exomind',
+        projectPathKey: 'd:/project/exomind',
+      },
+    }));
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty/spawn')) {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-new-806',
+            name: 'Claude 806 New',
+            workdir: 'D:/project/exomind',
+          }),
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-live-806',
+              name: 'Codex 806',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('pty-spawn-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('pty-spawn-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-new-806')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const persisted = JSON.parse(localStorage.getItem('exomind:agentHubTiledState') ?? '{}') as {
+        paneOrder?: string[];
+        fullscreenPtyId?: string;
+        fullscreenTerminalRecovery?: unknown;
+      };
+      expect(persisted.fullscreenPtyId).toBe('pty-new-806');
+      expect(persisted.paneOrder).toEqual(['session-issue-806']);
+      expect(persisted.paneOrder).not.toContain('pty-new-806');
+      expect(persisted.fullscreenTerminalRecovery).toBeUndefined();
+    });
   });
 
   it('keeps a disconnected pending-binding terminal session active instead of auto-completing it（待补绑 inner_session_id 的失联终端应保留活跃断开态）', async () => {
@@ -1930,6 +2051,422 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
       'session-resumed-live-824',
       expect.anything(),
     );
+  });
+
+  it('rebinds a persisted fullscreen terminal to the current live PTY by logical session identity after RT restart（RT 重启后旧 PTY 已失效时应按持久逻辑会话重新绑定 live PTY）', async () => {
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '2x2',
+      paneOrder: ['session-stale-focused-818'],
+      fullscreenPtyId: 'pty-stale-focused-818',
+      fullscreenTerminalRecovery: {
+        sessionId: 'session-stale-focused-818',
+        sourceHostId: 'stale-runtime-host-818',
+        agentType: 'codex',
+        innerSessionId: 'codex-thread-focused-818',
+        role: 'Focused Persisted 818',
+        workdir: 'D:/project/exomind',
+        projectPathKey: 'd:/project/exomind',
+      },
+    }));
+
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-rebound-live-818',
+        role: 'Rebound Live 818',
+        agent_kind: 'codex',
+        pty_id: 'pty-rebound-live-818',
+        inner_session_id: 'codex-thread-focused-818',
+        source_host_id: 'runtime-host-523',
+        last_active_at: '2026-04-04T00:00:20.000Z',
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-rebound-live-818',
+              name: 'Rebound Live 818',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-rebound-live-818')).toBeInTheDocument();
+      expect(screen.queryByTestId('agent-rightpanel-pty-disconnected')).not.toBeInTheDocument();
+    });
+
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
+    ).toHaveLength(0);
+    await waitFor(() => {
+      expect(localStorage.getItem('exomind:agentHubTiledState')).toContain('pty-rebound-live-818');
+      expect(localStorage.getItem('exomind:agentHubTiledState')).toContain('codex-thread-focused-818');
+    });
+  });
+
+  it('auto-resumes a persisted fullscreen terminal from saved recovery info even when the old session record is gone（旧 session 记录缺失时也应按持久恢复信息自动 /pty/resume）', async () => {
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '2x2',
+      paneOrder: [],
+      fullscreenPtyId: 'pty-persisted-stale-818',
+      fullscreenTerminalRecovery: {
+        sessionId: 'session-persisted-stale-818',
+        sourceHostId: 'stale-runtime-host-818',
+        agentType: 'codex',
+        innerSessionId: 'codex-thread-persisted-818',
+        role: 'Persisted Fullscreen 818',
+        workdir: 'D:/project/exomind',
+        projectPathKey: 'd:/project/exomind',
+      },
+    }));
+
+    sessionStreamState.sessions = [];
+
+    let resumePosted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-persisted-818',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-04T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => (
+            resumePosted
+              ? [{
+                  id: 'pty-resumed-from-persisted-818',
+                  name: 'Persisted Fullscreen 818',
+                  status: 'running',
+                  workdir: 'D:/project/exomind',
+                }]
+              : []
+          ),
+        } as Response;
+      }
+      if (url.endsWith('/pty/resume')) {
+        resumePosted = true;
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-resumed-from-persisted-818',
+            name: 'Persisted Fullscreen 818',
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      const resumeCall = fetchMock.mock.calls.find(([input]) => String(input) === 'http://127.0.0.1:1919/pty/resume');
+      expect(resumeCall).toBeDefined();
+      expect(resumeCall?.[1]).toEqual(expect.objectContaining({
+        method: 'POST',
+      }));
+      expect(JSON.parse(String((resumeCall?.[1] as RequestInit | undefined)?.body ?? '{}'))).toEqual(expect.objectContaining({
+        agent_type: 'codex',
+        session_id: 'codex-thread-persisted-818',
+        name: 'Persisted Fullscreen 818',
+        workdir: 'D:/project/exomind',
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-resumed-from-persisted-818')).toBeInTheDocument();
+      expect(screen.queryByTestId('agent-rightpanel-pty-disconnected')).not.toBeInTheDocument();
+    });
+
+    expect(localStorage.getItem('exomind:agentHubTiledState')).toContain('pty-resumed-from-persisted-818');
+    expect(localStorage.getItem('exomind:agentHubTiledState')).toContain('codex-thread-persisted-818');
+  });
+
+  it('does not rebind a persisted fullscreen terminal to another live PTY from the same workdir（同目录不同 inner_session_id 的 live PTY 不能劫持持久恢复）', async () => {
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '2x2',
+      paneOrder: [],
+      fullscreenPtyId: 'pty-persisted-stale-818',
+      fullscreenTerminalRecovery: {
+        sessionId: 'session-persisted-stale-818',
+        sourceHostId: 'stale-runtime-host-818',
+        agentType: 'codex',
+        innerSessionId: 'codex-thread-persisted-818',
+        role: 'Persisted Fullscreen 818',
+        workdir: 'D:/project/exomind',
+        projectPathKey: 'd:/project/exomind',
+      },
+    }));
+
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-live-same-workdir-818',
+        role: 'Live Same Workdir 818',
+        agent_kind: 'codex',
+        pty_id: 'pty-live-same-workdir-818',
+        inner_session_id: 'codex-thread-other-818',
+        source_host_id: 'runtime-host-523',
+        last_active_at: '2026-04-04T00:00:20.000Z',
+      }),
+    ];
+
+    let resumePosted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-persisted-818',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-04T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => (
+            resumePosted
+              ? [{
+                  id: 'pty-resumed-from-persisted-818',
+                  name: 'Persisted Fullscreen 818',
+                  status: 'running',
+                  workdir: 'D:/project/exomind',
+                }, {
+                  id: 'pty-live-same-workdir-818',
+                  name: 'Live Same Workdir 818',
+                  status: 'running',
+                  workdir: 'D:/project/exomind',
+                }]
+              : [{
+                  id: 'pty-live-same-workdir-818',
+                  name: 'Live Same Workdir 818',
+                  status: 'running',
+                  workdir: 'D:/project/exomind',
+                }]
+          ),
+        } as Response;
+      }
+      if (url.endsWith('/pty/resume')) {
+        resumePosted = true;
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-resumed-from-persisted-818',
+            name: 'Persisted Fullscreen 818',
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      const resumeCall = fetchMock.mock.calls.find(([input]) => String(input) === 'http://127.0.0.1:1919/pty/resume');
+      expect(resumeCall).toBeDefined();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-resumed-from-persisted-818')).toBeInTheDocument();
+      expect(screen.queryByTestId('mock-pty-terminal-pty-live-same-workdir-818')).not.toBeInTheDocument();
+    });
+
+    expect(localStorage.getItem('exomind:agentHubTiledState')).toContain('pty-resumed-from-persisted-818');
+    expect(localStorage.getItem('exomind:agentHubTiledState')).not.toContain('pty-live-same-workdir-818');
+  });
+
+  it('clears a stale fullscreen recovery snapshot after opening a raw topology PTY with no recoverable session（打开无 session 绑定的拓扑 PTY 时要清除旧恢复快照）', async () => {
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '2x2',
+      paneOrder: [],
+      fullscreenTerminalRecovery: {
+        sessionId: 'session-stale-focused-818',
+        sourceHostId: 'stale-runtime-host-818',
+        agentType: 'codex',
+        innerSessionId: 'codex-thread-focused-818',
+        role: 'Focused Persisted 818',
+        workdir: 'D:/project/exomind',
+        projectPathKey: 'd:/project/exomind',
+      },
+    }));
+
+    sessionStreamState.sessions = [];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-raw-topology-818',
+              name: 'Raw Topology 818',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('mock-react-flow-node-pty-pty-raw-topology-818'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-raw-topology-818')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const persisted = JSON.parse(localStorage.getItem('exomind:agentHubTiledState') ?? '{}') as {
+        fullscreenPtyId?: string;
+        fullscreenTerminalRecovery?: unknown;
+      };
+      expect(persisted.fullscreenPtyId).toBe('pty-raw-topology-818');
+      expect(persisted.fullscreenTerminalRecovery).toBeUndefined();
+    });
+  });
+
+  it('shows a failure message instead of staying stuck in persisted fullscreen recovery loading when the historical lookup times out（持久恢复历史查询超时时不能一直卡在加载中）', async () => {
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '2x2',
+      paneOrder: [],
+      fullscreenPtyId: 'pty-persisted-timeout-818',
+      fullscreenTerminalRecovery: {
+        sessionId: 'session-persisted-timeout-818',
+        sourceHostId: 'stale-runtime-host-818',
+        agentType: 'codex',
+        innerSessionId: 'codex-thread-timeout-818',
+        role: 'Persisted Timeout 818',
+        workdir: 'D:/project/exomind',
+        projectPathKey: 'd:/project/exomind',
+      },
+    }));
+
+    sessionStreamState.sessions = [];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        throw new Error('request timeout（请求超时）');
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected-message')).toHaveTextContent(
+        'Terminal 已断开，自动恢复失败',
+      );
+      expect(screen.getByTestId('mock-pty-terminal-pty-persisted-timeout-818')).toBeInTheDocument();
+    });
   });
 
   it('auto-resumes only one canonical PTY per historical inner session id after RT restart（同一历史会话在 RT 重启后只自动恢复一次）', async () => {

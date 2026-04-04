@@ -1285,3 +1285,75 @@
 5. 如果本轮活跃会话数少于 `2`：
    - `story-5` 可以接受 `skipped`
    - 但必须在报告里写明跳过原因是“现场活跃会话不足”，不是脚本或产品失败
+
+### 阶段补记：#818 需要先造出 fullscreen 恢复前置态，再做 RT 重启验收（2026-04-04）
+
+#### 阶段目标
+
+- 把 `#818` 的核心验收从“RT 重启后活跃会话总数恢复”收紧到“RT 重启后，基于已持久化的 fullscreen PTY 恢复信息自动恢复 Claude / Codex 终端上下文”。
+- 避免章程在“当前实例根本没有活跃 fullscreen 终端快照”时误跑，导致把空前置态误判成产品失败。
+
+#### 观察结果
+
+- 当前 `issue806-g / UI 1420 / RT 9124 / raw bridge 9223` 现场里，若直接跑：
+  - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name issue806-g --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/issue806-g/app-data/runtime/sessions.sqlite`
+  但当前窗口没有任何活跃终端、`localStorage.exomind:agentHubTiledState` 也没有 `fullscreenTerminalRecovery`，章程会在 RT 重启恢复阶段超时。
+- 这不一定说明产品回归，更常见的真实原因是：
+  - 当前实例没有 `#818` 所需的前置态
+  - 也就是没有 “Claude/Codex 活跃终端 + 已打开右侧 PTY + fullscreen 恢复快照已落盘”
+- 本轮把章程脚本补成了先自动准备前置态：
+  - 确保至少存在 `claude` 与 `codex` 两类活跃 terminal agent
+  - 确保 `exomind:agentHubTiledState` 中存在 `fullscreenTerminalRecovery`
+  - 再执行 `runtime_service_stop/start`
+- 同时把 RT 重启等待改成两段：
+  - 先等 `runtime_service_status.running === false`
+  - 再等 `runtime_service_status.running === true`
+  - 不再用单纯 `sleep(1000)` 赌 RT 状态
+- 本轮更新后，章程 stdout 会先输出：
+  - `issue818Preparation`
+  - 其中包含：
+    - `status`
+    - `spawnedAgents`
+    - `activeTerminalCount`
+    - `activeTerminalAgentKinds`
+    - `fullscreenRecoveryPresent`
+- 在同一现场复跑后结果：
+  - `overallPass: true`
+  - `activeCount: 2`
+  - `mismatchCount: 0`
+  - 报告：
+    - `.tmp/reports/tauri-mcp-issue806-charter/2026-04-04T15-48-20.764Z-issue806-g.json`
+    - `.tmp/reports/tauri-mcp-issue806-charter/2026-04-04T15-48-20.764Z-issue806-g.md`
+
+#### 结论
+
+- `#818` 的桌面验收不是“只要 RT 重启后还有活跃会话就算过”。
+- 真正的 `#818` 前置条件必须先成立：
+  - 当前窗口有活跃终端
+  - 右侧 terminal 已打开
+  - fullscreen 恢复快照已持久化
+- 如果这三者缺任何一个，章程失败优先解释为“前置态缺失”，不是直接解释为“恢复逻辑失效”。
+- 另一个经验是：
+  - raw bridge 下长时间的大块 `execute_js` 更容易触发脚本执行超时
+  - stop/start/recovery 相关验证要拆成短调用与轮询，不要把所有 fetch、DOM 读取、状态机等待堆进一次长脚本
+
+#### 可复用操作套路
+
+1. 跑 `#818` 章程前，先确认当前实例里是否已有前置态：
+   - 活跃 Claude/Codex terminal agent
+   - `agent-rightpanel-pty-terminal`
+   - `localStorage.exomind:agentHubTiledState.fullscreenTerminalRecovery`
+2. 如果没有，不要先怪恢复逻辑；先让章程或人工步骤补齐前置态。
+3. 通过 raw bridge 做 RT 重启时，固定拆成两段等待：
+   - `runtime_service_stop` 后等 `running=false`
+   - `runtime_service_start` 后等 `running=true`
+4. 桌面桥接里需要读取大量状态时：
+   - 把 `runtime_service_status`
+   - DOM 状态
+   - `/sessions`
+   - `/pty`
+   拆成短脚本或短轮询；不要塞进一个超长 `execute_js`
+5. 当章程 stdout 出现：
+   - `issue818Preparation.status = ready/prepared`
+   - `fullscreenRecoveryPresent = true`
+   再开始解读后面的 RT 重启恢复结果，才是有效的 `#818` 验收

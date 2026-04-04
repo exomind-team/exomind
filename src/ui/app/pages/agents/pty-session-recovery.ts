@@ -1,9 +1,19 @@
 import type { SessionInfo } from '@/lib/types/session';
 
-type RecoverableAgentType = 'claude' | 'codex';
+export type RecoverableTerminalAgentType = 'claude' | 'codex';
+
+export interface RecoverableTerminalSessionSnapshot {
+  sessionId?: string;
+  sourceHostId?: string;
+  agentType: RecoverableTerminalAgentType;
+  innerSessionId: string;
+  role?: string;
+  workdir: string;
+  projectPathKey: string;
+}
 
 interface HistoricalSessionInfo {
-  agent_type: RecoverableAgentType;
+  agent_type: RecoverableTerminalAgentType;
   session_id: string;
   project_path: string;
   last_modified: string;
@@ -21,7 +31,7 @@ interface DetectAndPersistHistoricalSessionInput {
   rtBaseUrl: string;
   authToken?: string;
   sessionRecordId: string;
-  agentType: RecoverableAgentType;
+  agentType: RecoverableTerminalAgentType;
   baselineSessionIds: string[];
   preferredBaselineSessionIds?: string[];
   allowImmediatePreferredBaselineMatch?: boolean;
@@ -40,6 +50,7 @@ interface PtyResumeResponse {
 const DETECTION_CLOCK_SKEW_MS = 15_000;
 const DEFAULT_DETECTION_INTERVAL_MS = 2_000;
 const DEFAULT_DETECTION_CANDIDATE_WINDOW_MS = 15 * 60_000;
+const PTY_RECOVERY_REQUEST_TIMEOUT_MS = 3_500;
 const inFlightHistoricalSessionDetections = new Map<string, Promise<string | null>>();
 
 function buildHeaders(authToken?: string, includeJsonContentType = false): Record<string, string> {
@@ -53,7 +64,7 @@ function buildHeaders(authToken?: string, includeJsonContentType = false): Recor
   return headers;
 }
 
-function resolveRecoverableTerminalAgentType(session: Pick<SessionInfo, 'agent_kind' | 'interaction_mode'>): RecoverableAgentType | null {
+function resolveRecoverableTerminalAgentType(session: Pick<SessionInfo, 'agent_kind' | 'interaction_mode'>): RecoverableTerminalAgentType | null {
   if (session.interaction_mode !== 'terminal') {
     return null;
   }
@@ -81,7 +92,7 @@ function encodeClaudeProjectPath(value?: string | null): string {
 }
 
 function normalizeHistoricalProjectPath(
-  agentType: RecoverableAgentType,
+  agentType: RecoverableTerminalAgentType,
   projectPath?: string | null,
 ): string {
   if (agentType === 'claude') {
@@ -92,7 +103,7 @@ function normalizeHistoricalProjectPath(
 }
 
 function normalizeExpectedProjectPath(
-  agentType: RecoverableAgentType,
+  agentType: RecoverableTerminalAgentType,
   workdir?: string | null,
 ): string {
   if (agentType === 'claude') {
@@ -113,6 +124,42 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function isPtyRecoveryTimeoutError(error: unknown): boolean {
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError') {
+    return true;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes('abort') || message.includes('timeout') || message.includes('超时');
+}
+
+async function fetchPtyRecoveryWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs: number = PTY_RECOVERY_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller?.signal,
+    });
+  } catch (error) {
+    if (isPtyRecoveryTimeoutError(error)) {
+      throw new Error('request timeout（请求超时）');
+    }
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function parseModifiedAtMs(lastModified: string): number | null {
@@ -184,6 +231,70 @@ export function resolveTerminalSessionWorkdir(session: Pick<SessionInfo, 'contex
   return session.context.work_dir ?? session.context.worktree_path;
 }
 
+export function buildRecoverableTerminalSessionSnapshot(
+  session: Pick<
+    SessionInfo,
+    'id' | 'agent_kind' | 'interaction_mode' | 'inner_session_id' | 'role' | 'context' | 'source_host_id'
+  >,
+): RecoverableTerminalSessionSnapshot | null {
+  const agentType = resolveRecoverableTerminalAgentType(session);
+  if (!agentType) {
+    return null;
+  }
+
+  const innerSessionId = session.inner_session_id?.trim();
+  if (!innerSessionId) {
+    return null;
+  }
+
+  const workdir = resolveTerminalSessionWorkdir(session)?.trim();
+  if (!isAbsolutePathLike(workdir)) {
+    return null;
+  }
+
+  const projectPathKey = normalizeExpectedProjectPath(agentType, workdir);
+  if (!projectPathKey) {
+    return null;
+  }
+
+  return {
+    sessionId: session.id,
+    ...(session.source_host_id?.trim() ? { sourceHostId: session.source_host_id.trim() } : {}),
+    agentType,
+    innerSessionId,
+    ...(session.role?.trim() ? { role: session.role.trim() } : {}),
+    workdir: workdir!,
+    projectPathKey,
+  };
+}
+
+export function getRecoverableTerminalSessionSnapshotKey(
+  snapshot: Pick<RecoverableTerminalSessionSnapshot, 'agentType' | 'innerSessionId' | 'projectPathKey'>,
+): string {
+  const innerSessionId = snapshot.innerSessionId.trim();
+  if (innerSessionId.length > 0) {
+    return `${snapshot.agentType}:${innerSessionId}`;
+  }
+  return `${snapshot.agentType}:${snapshot.projectPathKey}`;
+}
+
+export function matchesRecoverableTerminalSessionSnapshot(
+  session: Pick<
+    SessionInfo,
+    'id' | 'agent_kind' | 'interaction_mode' | 'inner_session_id' | 'role' | 'context' | 'source_host_id'
+  >,
+  snapshot: RecoverableTerminalSessionSnapshot,
+): boolean {
+  const candidate = buildRecoverableTerminalSessionSnapshot(session);
+  if (!candidate) {
+    return false;
+  }
+  if (candidate.agentType !== snapshot.agentType) {
+    return false;
+  }
+  return candidate.innerSessionId === snapshot.innerSessionId;
+}
+
 export function resolveRecoverableTerminalProjectPathKey(
   session: Pick<SessionInfo, 'agent_kind' | 'interaction_mode' | 'context'>,
 ): string | null {
@@ -231,10 +342,10 @@ export function replacePaneOrderSessionId(
 
 async function fetchHistoricalSessions(
   rtBaseUrl: string,
-  agentType: RecoverableAgentType,
+  agentType: RecoverableTerminalAgentType,
   authToken?: string,
 ): Promise<HistoricalSessionInfo[]> {
-  const response = await fetch(
+  const response = await fetchPtyRecoveryWithTimeout(
     `${rtBaseUrl}/pty/sessions?agent_type=${encodeURIComponent(agentType)}`,
     { headers: buildHeaders(authToken) },
   );
@@ -244,36 +355,43 @@ async function fetchHistoricalSessions(
   return response.json() as Promise<HistoricalSessionInfo[]>;
 }
 
-export async function resumeHistoricalPtySession({
-  rtBaseUrl,
-  authToken,
-  session,
-  rows = 24,
-  cols = 80,
-}: ResumeHistoricalSessionInput): Promise<PtyResumeResponse> {
-  const agentType = resolveRecoverableTerminalAgentType(session);
-  if (!agentType || !session.inner_session_id) {
-    throw new Error('session is not recoverable');
-  }
-
+function buildResumeRequestBody(
+  snapshot: RecoverableTerminalSessionSnapshot,
+  rows: number,
+  cols: number,
+): Record<string, string | number> {
   const body: Record<string, string | number> = {
-    agent_type: agentType,
-    session_id: session.inner_session_id,
+    agent_type: snapshot.agentType,
+    session_id: snapshot.innerSessionId,
     rows,
     cols,
   };
-  const workdir = resolveTerminalSessionWorkdir(session);
-  if (session.role.trim()) {
-    body.name = session.role.trim();
+  if (snapshot.role?.trim()) {
+    body.name = snapshot.role.trim();
   }
-  if (workdir?.trim()) {
-    body.workdir = workdir.trim();
+  if (snapshot.workdir.trim()) {
+    body.workdir = snapshot.workdir.trim();
   }
+  return body;
+}
 
-  const response = await fetch(`${rtBaseUrl}/pty/resume`, {
+export async function resumeHistoricalPtySnapshot({
+  rtBaseUrl,
+  authToken,
+  snapshot,
+  rows = 24,
+  cols = 80,
+}: {
+  rtBaseUrl: string;
+  authToken?: string;
+  snapshot: RecoverableTerminalSessionSnapshot;
+  rows?: number;
+  cols?: number;
+}): Promise<PtyResumeResponse> {
+  const response = await fetchPtyRecoveryWithTimeout(`${rtBaseUrl}/pty/resume`, {
     method: 'POST',
     headers: buildHeaders(authToken, true),
-    body: JSON.stringify(body),
+    body: JSON.stringify(buildResumeRequestBody(snapshot, rows, cols)),
   });
 
   if (!response.ok) {
@@ -284,35 +402,51 @@ export async function resumeHistoricalPtySession({
   return response.json() as Promise<PtyResumeResponse>;
 }
 
-export async function hasMatchingHistoricalSessionRecord(
+export async function resumeHistoricalPtySession({
+  rtBaseUrl,
+  authToken,
+  session,
+  rows = 24,
+  cols = 80,
+}: ResumeHistoricalSessionInput): Promise<PtyResumeResponse> {
+  const snapshot = buildRecoverableTerminalSessionSnapshot(session);
+  if (!snapshot) {
+    throw new Error('session is not recoverable');
+  }
+  return resumeHistoricalPtySnapshot({ rtBaseUrl, authToken, snapshot, rows, cols });
+}
+
+export async function hasMatchingHistoricalSessionSnapshotRecord(
   rtBaseUrl: string,
-  session: SessionInfo,
+  snapshot: RecoverableTerminalSessionSnapshot,
   authToken?: string,
 ): Promise<boolean> {
-  const agentType = resolveRecoverableTerminalAgentType(session);
-  if (!agentType || !session.inner_session_id) {
-    return false;
-  }
-
-  const workdir = resolveTerminalSessionWorkdir(session);
-  if (!isAbsolutePathLike(workdir)) {
-    return false;
-  }
-
   const historicalSessions = await fetchHistoricalSessions(
     rtBaseUrl,
-    agentType,
+    snapshot.agentType,
     authToken,
   );
   const matchedSession = historicalSessions.find(
-    (item) => item.session_id === session.inner_session_id,
+    (item) => item.session_id === snapshot.innerSessionId,
   );
   if (!matchedSession) {
     return false;
   }
 
-  return normalizeHistoricalProjectPath(agentType, matchedSession.project_path)
-    === normalizeExpectedProjectPath(agentType, workdir);
+  return normalizeHistoricalProjectPath(snapshot.agentType, matchedSession.project_path)
+    === snapshot.projectPathKey;
+}
+
+export async function hasMatchingHistoricalSessionRecord(
+  rtBaseUrl: string,
+  session: SessionInfo,
+  authToken?: string,
+): Promise<boolean> {
+  const snapshot = buildRecoverableTerminalSessionSnapshot(session);
+  if (!snapshot) {
+    return false;
+  }
+  return hasMatchingHistoricalSessionSnapshotRecord(rtBaseUrl, snapshot, authToken);
 }
 
 export async function detectAndPersistHistoricalSessionId({

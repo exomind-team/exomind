@@ -42,6 +42,15 @@ describe('agents tiled persistence（终端平铺持久化）', () => {
       layout: '2x4',
       paneOrder: ['session-a', 'session-b'],
       fullscreenPtyId: 'pty-recover-1',
+      fullscreenTerminalRecovery: {
+        sessionId: 'session-a',
+        sourceHostId: 'runtime-host-523',
+        agentType: 'codex',
+        innerSessionId: 'codex-thread-818',
+        role: 'Codex Recovery',
+        workdir: 'D:/project/exomind',
+        projectPathKey: 'd:/project/exomind',
+      },
     });
 
     expect(localStorage.getItem(AGENTS_TILED_PERSISTENCE_STORAGE_KEY)).toContain('pty-recover-1');
@@ -49,6 +58,15 @@ describe('agents tiled persistence（终端平铺持久化）', () => {
       layout: '2x4',
       paneOrder: ['session-a', 'session-b'],
       fullscreenPtyId: 'pty-recover-1',
+      fullscreenTerminalRecovery: {
+        sessionId: 'session-a',
+        sourceHostId: 'runtime-host-523',
+        agentType: 'codex',
+        innerSessionId: 'codex-thread-818',
+        role: 'Codex Recovery',
+        workdir: 'D:/project/exomind',
+        projectPathKey: 'd:/project/exomind',
+      },
     });
   });
 

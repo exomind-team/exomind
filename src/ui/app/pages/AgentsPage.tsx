@@ -126,13 +126,19 @@ import { useSessionStream } from '@/hooks/useSessionStream';
 import { buildPtyGraphNodes, findSessionForPty } from './agents/pty-graph-nodes';
 import { applySpawnedSessionToTiledPaneOrder } from './agents/tiled-pane-order';
 import {
+  buildRecoverableTerminalSessionSnapshot,
   detectAndPersistHistoricalSessionId,
   hasMatchingHistoricalSessionRecord,
+  hasMatchingHistoricalSessionSnapshotRecord,
+  matchesRecoverableTerminalSessionSnapshot,
+  resumeHistoricalPtySnapshot,
+  getRecoverableTerminalSessionSnapshotKey,
   isRecoverableTerminalSession,
   isTerminalSessionPendingHistoricalBinding,
   replacePaneOrderSessionId,
   resolveRecoverableTerminalProjectPathKey,
   resolveTerminalSessionWorkdir,
+  type RecoverableTerminalSessionSnapshot,
 } from './agents/pty-session-recovery';
 import {
   readAgentsTiledPersistState,
@@ -241,6 +247,123 @@ function parseSessionWallClockMs(session: Pick<SessionInfo, 'last_active_at' | '
     return createdAtMs;
   }
   return 0;
+}
+
+function preserveSpecificDisconnectedRuntimeMessage(previous: string, next: string): string {
+  return previous.startsWith('RT 暂不可达') ? previous : next;
+}
+
+function resolveRecoverableTerminalAgentLabel(agentType?: string | null): string {
+  if (agentType === 'claude') {
+    return 'Claude Code';
+  }
+  if (agentType === 'codex') {
+    return 'Codex';
+  }
+  return '终端';
+}
+
+function areRecoverableTerminalSessionSnapshotsEqual(
+  left: RecoverableTerminalSessionSnapshot | null | undefined,
+  right: RecoverableTerminalSessionSnapshot | null | undefined,
+): boolean {
+  if (!left && !right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return left.sessionId === right.sessionId
+    && left.sourceHostId === right.sourceHostId
+    && left.agentType === right.agentType
+    && left.innerSessionId === right.innerSessionId
+    && left.role === right.role
+    && left.workdir === right.workdir
+    && left.projectPathKey === right.projectPathKey;
+}
+
+function buildHistoricalTerminalSessionIdentityKey(
+  session: Pick<SessionInfo, 'agent_kind' | 'interaction_mode' | 'inner_session_id'>,
+): string | null {
+  if (
+    session.interaction_mode !== 'terminal'
+    || (session.agent_kind !== 'claude' && session.agent_kind !== 'codex')
+  ) {
+    return null;
+  }
+  const innerSessionId = session.inner_session_id?.trim();
+  if (!innerSessionId) {
+    return null;
+  }
+  return `${session.agent_kind}:${innerSessionId}`;
+}
+
+function compareHistoricalSessionPriority(
+  left: SessionInfo,
+  right: SessionInfo,
+  options: {
+    activePtyId?: string | null;
+    knownPtyIds: Set<string>;
+    tiledPaneOrder: string[];
+  },
+): number {
+  const scoreDiff = getHistoricalSessionOccupancyScore(right, options)
+    - getHistoricalSessionOccupancyScore(left, options);
+  if (scoreDiff !== 0) {
+    return scoreDiff;
+  }
+
+  const timeDiff = parseSessionWallClockMs(right) - parseSessionWallClockMs(left);
+  if (timeDiff !== 0) {
+    return timeDiff;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
+type TerminalResumeSuccessMode = 'live' | 'rebound' | 'resumed';
+
+type TerminalResumeDeferredReason =
+  | 'session-in-flight'
+  | 'session-auto-resuming'
+  | 'historical-session-in-flight'
+  | 'already-attempted'
+  | 'source-host-settling';
+
+type TerminalResumeFailureReason =
+  | 'source-host-unavailable'
+  | 'historical-record-mismatch'
+  | 'runtime-request-failed';
+
+type TerminalResumeOutcome =
+  | {
+      status: 'success';
+      mode: TerminalResumeSuccessMode;
+      ptyId: string;
+      sessionId: string;
+    }
+  | {
+      status: 'deferred';
+      reason: TerminalResumeDeferredReason;
+      sessionId: string;
+      historicalSessionKey?: string | null;
+    }
+  | {
+      status: 'failed';
+      reason: TerminalResumeFailureReason;
+      sessionId: string;
+      historicalSessionKey?: string | null;
+      message?: string;
+    };
+
+function shouldKeepPendingTerminalResumeState(outcome: TerminalResumeOutcome): boolean {
+  return outcome.status === 'deferred'
+    && (
+      outcome.reason === 'session-in-flight'
+      || outcome.reason === 'session-auto-resuming'
+      || outcome.reason === 'historical-session-in-flight'
+      || outcome.reason === 'source-host-settling'
+    );
 }
 
 function isFreshRunningTerminalSession(
@@ -685,18 +808,26 @@ export function AgentsPage() {
   }>>([]);
   const [failedPtyConnectionIds, setFailedPtyConnectionIds] = useState<string[]>([]);
   const [pendingPtyPresenceChecks, setPendingPtyPresenceChecks] = useState<Record<string, PendingPtyPresenceCheck>>({});
+  const [pendingSpawnedPtyIds, setPendingSpawnedPtyIds] = useState<string[]>([]);
   /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
   const [activePtyId, setActivePtyId] = useState<string | null>(initialTiledState.fullscreenPtyId ?? null);
   const [activePtyHostId, setActivePtyHostId] = useState<string | null>(null);
+  const [activePtyTerminalNonce, setActivePtyTerminalNonce] = useState(0);
+  const [fullscreenTerminalRecovery, setFullscreenTerminalRecovery] = useState<RecoverableTerminalSessionSnapshot | null>(
+    initialTiledState.fullscreenTerminalRecovery ?? null,
+  );
   const [autoResumingSessionIds, setAutoResumingSessionIds] = useState<string[]>([]);
   const autoResumingSessionIdsRef = useRef<Set<string>>(new Set());
   const autoResumeInFlightSessionIdsRef = useRef<Set<string>>(new Set());
+  const autoResumeInFlightHistoricalSessionKeysRef = useRef<Set<string>>(new Set());
   const autoResumeAttemptedSessionIdsRef = useRef<Set<string>>(new Set());
+  const persistedFullscreenRecoveryAttemptedKeysRef = useRef<Set<string>>(new Set());
   const deferredAutoResumeDecisionSignaturesRef = useRef<Map<string, string>>(new Map());
   const autoCompletingDisconnectedSessionIdsRef = useRef<Set<string>>(new Set());
   const disconnectedSessionDecisionSignaturesRef = useRef<Map<string, string>>(new Map());
   const retiringSupersededSessionIdsRef = useRef<Set<string>>(new Set());
   const supersededSessionDecisionSignaturesRef = useRef<Map<string, string>>(new Map());
+  const [persistedFullscreenAutoResumeKey, setPersistedFullscreenAutoResumeKey] = useState<string | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [agentCreateKind, setAgentCreateKind] = useState<RuntimeCreateAgentRequest['kind']>('claude_cli');
@@ -1594,10 +1725,10 @@ export function AgentsPage() {
   const [showPtySpawnDialog, setShowPtySpawnDialog] = useState(false);
   const [peerPairingOpen, setPeerPairingOpen] = useState(false);
 
-  const openPtyTerminal = (
+  const openPtyTerminal = useCallback((
     ptyId: string,
     hostId?: string,
-    options: { expectFreshPresence?: boolean } = {},
+    options: { expectFreshPresence?: boolean; reconnectIfSame?: boolean } = {},
   ) => {
     setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== ptyId));
     if (options.expectFreshPresence) {
@@ -1620,10 +1751,13 @@ export function AgentsPage() {
         return { ...prev, [ptyId]: nextEntry };
       });
     }
+    if (options.reconnectIfSame && activePtyId === ptyId) {
+      setActivePtyTerminalNonce((prev) => prev + 1);
+    }
     setActivePtyId(ptyId);
     setActivePtyHostId(hostId ?? null);
     setRightPanel({ state: 'PTY_TERMINAL', ptyId });
-  };
+  }, [activePtyId]);
 
   const fetchPtyList = useCallback(async (
     rtBaseUrl: string,
@@ -2098,8 +2232,9 @@ export function AgentsPage() {
       layout: tiledLayout,
       paneOrder: tiledPaneOrder,
       ...(activePtyId ? { fullscreenPtyId: activePtyId } : {}),
+      ...(activePtyId && fullscreenTerminalRecovery ? { fullscreenTerminalRecovery } : {}),
     });
-  }, [activePtyId, tiledLayout, tiledPaneOrder]);
+  }, [activePtyId, fullscreenTerminalRecovery, tiledLayout, tiledPaneOrder]);
 
   useEffect(() => {
     if (sessionLoading) {
@@ -2120,6 +2255,45 @@ export function AgentsPage() {
       return next.length === prev.length ? prev : next;
     });
   }, [dashboardSessions, sessionLoading]);
+
+  useEffect(() => {
+    if (pendingSpawnedPtyIds.length === 0) {
+      return;
+    }
+
+    const matchedPtyIds = new Set<string>();
+
+    setTiledPaneOrder((prev) => {
+      let next = prev;
+
+      pendingSpawnedPtyIds.forEach((ptyId) => {
+        const matchingSession = dashboardSessions.find((session) => (
+          session.pty_id === ptyId
+          && session.status !== 'completed'
+          && session.status !== 'archived'
+        ));
+        if (!matchingSession) {
+          return;
+        }
+
+        matchedPtyIds.add(ptyId);
+        next = applySpawnedSessionToTiledPaneOrder({
+          layout: tiledLayout,
+          paneOrder: next,
+          sessions: dashboardSessions,
+          newSessionId: matchingSession.id,
+        });
+      });
+
+      return next;
+    });
+
+    if (matchedPtyIds.size === 0) {
+      return;
+    }
+
+    setPendingSpawnedPtyIds((prev) => prev.filter((ptyId) => !matchedPtyIds.has(ptyId)));
+  }, [dashboardSessions, pendingSpawnedPtyIds, tiledLayout]);
 
   const matchingActivePty = useMemo(
     () => ptyAgents.find((pty) => pty.id === activePtyId) ?? null,
@@ -2209,6 +2383,14 @@ export function AgentsPage() {
     ),
     [activePtyHostId, activePtyId, dashboardSessions, matchingActivePty],
   );
+  const activePtyTerminalKey = useMemo(
+    () => (
+      activePtyId
+        ? `${activePtyId}:${resolvedActivePtyHostId ?? 'no-host'}:${activePtyTerminalNonce}`
+        : null
+    ),
+    [activePtyId, activePtyTerminalNonce, resolvedActivePtyHostId],
+  );
   const knownPtyIds = useMemo(
     () => new Set(
       ptyAgents
@@ -2217,6 +2399,60 @@ export function AgentsPage() {
     ),
     [ptyAgents],
   );
+  const activePtyRecoverySnapshot = useMemo(
+    () => (
+      activePtySession
+        ? buildRecoverableTerminalSessionSnapshot(activePtySession)
+        : null
+    ),
+    [activePtySession],
+  );
+  useEffect(() => {
+    if (!activePtyId) {
+      setFullscreenTerminalRecovery((prev) => (prev ? null : prev));
+      setPersistedFullscreenAutoResumeKey(null);
+      return;
+    }
+
+    if (!activePtySession) {
+      return;
+    }
+
+    if (!activePtyRecoverySnapshot) {
+      setFullscreenTerminalRecovery((prev) => (prev ? null : prev));
+      return;
+    }
+
+    setFullscreenTerminalRecovery((prev) => (
+      areRecoverableTerminalSessionSnapshotsEqual(prev, activePtyRecoverySnapshot)
+        ? prev ?? null
+        : activePtyRecoverySnapshot
+    ));
+  }, [activePtyId, activePtyRecoverySnapshot, activePtySession]);
+  const fullscreenTerminalRecoveryKey = useMemo(
+    () => (
+      fullscreenTerminalRecovery
+        ? getRecoverableTerminalSessionSnapshotKey(fullscreenTerminalRecovery)
+        : null
+    ),
+    [fullscreenTerminalRecovery],
+  );
+  const matchedFullscreenRecoverySession = useMemo(() => {
+    if (!fullscreenTerminalRecovery) {
+      return null;
+    }
+
+    return dashboardSessions
+      .filter((session) => (
+        isOpenRecoverableTerminalSession(session)
+        && matchesRecoverableTerminalSessionSnapshot(session, fullscreenTerminalRecovery)
+      ))
+      .sort((left, right) => compareHistoricalSessionPriority(left, right, {
+          activePtyId,
+          knownPtyIds,
+          tiledPaneOrder,
+        }))[0] ?? null;
+  }, [activePtyId, dashboardSessions, fullscreenTerminalRecovery, knownPtyIds, tiledPaneOrder]);
   const pendingPtyPresenceIds = useMemo(
     () => {
       const now = Date.now();
@@ -2248,27 +2484,11 @@ export function AgentsPage() {
 
     const next = new Map<string, SessionInfo>();
     groupedSessions.forEach((sessions, innerSessionId) => {
-      const canonicalSession = [...sessions].sort((left, right) => {
-        const scoreDiff = getHistoricalSessionOccupancyScore(right, {
+      const canonicalSession = [...sessions].sort((left, right) => compareHistoricalSessionPriority(left, right, {
           activePtyId,
           knownPtyIds,
           tiledPaneOrder,
-        }) - getHistoricalSessionOccupancyScore(left, {
-          activePtyId,
-          knownPtyIds,
-          tiledPaneOrder,
-        });
-        if (scoreDiff !== 0) {
-          return scoreDiff;
-        }
-
-        const timeDiff = parseSessionWallClockMs(right) - parseSessionWallClockMs(left);
-        if (timeDiff !== 0) {
-          return timeDiff;
-        }
-
-        return left.id.localeCompare(right.id);
-      })[0];
+        }))[0];
 
       if (canonicalSession) {
         next.set(innerSessionId, canonicalSession);
@@ -2573,36 +2793,66 @@ export function AgentsPage() {
     });
   }, [knownPtyIds, retireSupersededTerminalSession]);
 
-  const resumeDisconnectedTerminalSession = useCallback(async (
+  const attemptDisconnectedTerminalSessionResume = useCallback(async function attemptDisconnectedTerminalSessionResumeInternal(
     session: SessionInfo,
     options: { force?: boolean; activateTerminal?: boolean } = {},
-  ) => {
+  ): Promise<TerminalResumeOutcome> {
     if (!isRecoverableTerminalSession(session) || !session.pty_id || !session.inner_session_id) {
-      return null;
+      return {
+        status: 'failed',
+        reason: 'historical-record-mismatch',
+        sessionId: session.id,
+      };
     }
 
+    const historicalSessionKey = buildHistoricalTerminalSessionIdentityKey(session);
     if (autoResumeInFlightSessionIdsRef.current.has(session.id)) {
-      return null;
+      return {
+        status: 'deferred',
+        reason: 'session-in-flight',
+        sessionId: session.id,
+        historicalSessionKey,
+      };
     }
     if (autoResumingSessionIdsRef.current.has(session.id)) {
-      return null;
+      return {
+        status: 'deferred',
+        reason: 'session-auto-resuming',
+        sessionId: session.id,
+        historicalSessionKey,
+      };
+    }
+    if (historicalSessionKey && autoResumeInFlightHistoricalSessionKeysRef.current.has(historicalSessionKey)) {
+      return {
+        status: 'deferred',
+        reason: 'historical-session-in-flight',
+        sessionId: session.id,
+        historicalSessionKey,
+      };
     }
     if (!options.force && autoResumeAttemptedSessionIdsRef.current.has(session.id)) {
-      return null;
+      return {
+        status: 'deferred',
+        reason: 'already-attempted',
+        sessionId: session.id,
+        historicalSessionKey,
+      };
     }
 
     const occupiedSession = resolveOccupiedHistoricalSession(session.inner_session_id);
     if (occupiedSession && occupiedSession.id !== session.id) {
       if (isSessionPtyDisconnected(occupiedSession)) {
-        return resumeDisconnectedTerminalSession(occupiedSession, options);
+        return attemptDisconnectedTerminalSessionResumeInternal(occupiedSession, options);
       }
 
       autoResumeAttemptedSessionIdsRef.current.add(session.id);
       setTiledPaneOrder((prev) => replacePaneOrderSessionId(prev, session.id, occupiedSession.id));
 
-      if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
-        openPtyTerminal(occupiedSession.pty_id!, occupiedSession.source_host_id);
-      }
+        if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
+          openPtyTerminal(occupiedSession.pty_id!, occupiedSession.source_host_id, {
+            reconnectIfSame: true,
+          });
+        }
 
       void reconcileSupersededTerminalSession(session, occupiedSession).catch((error) => {
         console.warn('[agent-hub][pty] failed to retire superseded terminal session', {
@@ -2613,7 +2863,12 @@ export function AgentsPage() {
         });
       });
 
-      return occupiedSession.pty_id ?? null;
+      return {
+        status: 'success',
+        mode: 'rebound',
+        ptyId: occupiedSession.pty_id ?? session.pty_id,
+        sessionId: occupiedSession.id,
+      };
     }
 
     const matchedHost = resolveRuntimeHostBySourceHostId(session.source_host_id);
@@ -2632,7 +2887,12 @@ export function AgentsPage() {
         runtimeRunning: runtimeServiceStatus?.running ?? null,
         runtimeStartedAt: runtimeServiceStatus?.startedAt ?? null,
       });
-      return null;
+      return {
+        status: 'deferred',
+        reason: 'source-host-settling',
+        sessionId: session.id,
+        historicalSessionKey,
+      };
     }
     if (session.source_host_id && !matchedHost && !shouldFallbackToActiveRuntimeHost) {
       console.warn('[agent-hub][pty] skip terminal auto-resume because source host is no longer available', {
@@ -2642,7 +2902,12 @@ export function AgentsPage() {
         innerSessionId: session.inner_session_id,
         sourceHostId: session.source_host_id,
       });
-      return null;
+      return {
+        status: 'failed',
+        reason: 'source-host-unavailable',
+        sessionId: session.id,
+        historicalSessionKey,
+      };
     }
 
     const host = matchedHost && !shouldFallbackToActiveRuntimeHost
@@ -2667,6 +2932,9 @@ export function AgentsPage() {
       activateTerminal: options.activateTerminal ?? false,
       force: options.force ?? false,
     });
+    if (historicalSessionKey) {
+      autoResumeInFlightHistoricalSessionKeysRef.current.add(historicalSessionKey);
+    }
     autoResumeInFlightSessionIdsRef.current.add(session.id);
 
     try {
@@ -2675,9 +2943,6 @@ export function AgentsPage() {
         host.authToken,
         sessionHostId ?? undefined,
       );
-      if (!livePtys) {
-        return null;
-      }
       if (livePtys?.some((pty) => pty.id === session.pty_id)) {
         console.warn('[agent-hub][pty] skip terminal auto-resume because PTY is still live', {
           sessionId: session.id,
@@ -2688,9 +2953,16 @@ export function AgentsPage() {
         });
         setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== session.pty_id));
         if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
-          openPtyTerminal(session.pty_id, sessionHostId ?? undefined);
+          openPtyTerminal(session.pty_id, sessionHostId ?? undefined, {
+            reconnectIfSame: true,
+          });
         }
-        return session.pty_id;
+        return {
+          status: 'success',
+          mode: 'live',
+          ptyId: session.pty_id,
+          sessionId: session.id,
+        };
       }
 
       deferredAutoResumeDecisionSignaturesRef.current.delete(session.id);
@@ -2719,7 +2991,12 @@ export function AgentsPage() {
           innerSessionId: session.inner_session_id,
           workdir: workdir ?? null,
         });
-        return null;
+        return {
+          status: 'failed',
+          reason: 'historical-record-mismatch',
+          sessionId: session.id,
+          historicalSessionKey,
+        };
       }
 
       console.info('[agent-hub][pty] posting disconnected terminal resume request', {
@@ -2750,21 +3027,23 @@ export function AgentsPage() {
         throw new Error('missing resumed PTY id');
       }
 
-      setTiledPaneOrder((prev) => (
-        prev.includes(session.id)
-          ? prev.map((paneId) => (paneId === session.id ? info.id : paneId))
-          : prev
-      ));
-
       if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
-        openPtyTerminal(info.id, sessionHostId ?? undefined, { expectFreshPresence: true });
+        openPtyTerminal(info.id, sessionHostId ?? undefined, {
+          expectFreshPresence: true,
+          reconnectIfSame: true,
+        });
       }
 
       await retireSupersededTerminalSession(session);
 
       await fetchPtyAgentsRef.current();
       await Promise.resolve(refreshSessions());
-      return info.id;
+      return {
+        status: 'success',
+        mode: 'resumed',
+        ptyId: info.id,
+        sessionId: session.id,
+      };
     } catch (error) {
       if (!autoResumeAttemptedSessionIdsRef.current.has(session.id)) {
         deferredAutoResumeDecisionSignaturesRef.current.set(
@@ -2780,9 +3059,18 @@ export function AgentsPage() {
         hostAddress: `${host.host}:${host.port}`,
         message: error instanceof Error ? error.message : String(error),
       });
-      return null;
+      return {
+        status: 'failed',
+        reason: 'runtime-request-failed',
+        sessionId: session.id,
+        historicalSessionKey,
+        message: error instanceof Error ? error.message : String(error),
+      };
     } finally {
       autoResumeInFlightSessionIdsRef.current.delete(session.id);
+      if (historicalSessionKey) {
+        autoResumeInFlightHistoricalSessionKeysRef.current.delete(historicalSessionKey);
+      }
       setSessionAutoResuming(session.id, false);
     }
   }, [
@@ -2798,6 +3086,13 @@ export function AgentsPage() {
     isSessionPtyDisconnected,
     shouldDeferUnavailableSourceHostHandling,
   ]);
+  const resumeDisconnectedTerminalSession = useCallback(async (
+    session: SessionInfo,
+    options: { force?: boolean; activateTerminal?: boolean } = {},
+  ) => {
+    const outcome = await attemptDisconnectedTerminalSessionResume(session, options);
+    return outcome.status === 'success' ? outcome.ptyId : null;
+  }, [attemptDisconnectedTerminalSessionResume]);
 
   const handleOpenSessionTerminal = useCallback(async (session: SessionInfo) => {
     if (!session.pty_id) {
@@ -2848,7 +3143,9 @@ export function AgentsPage() {
         innerSessionId: session.inner_session_id ?? null,
       });
       setTiledPaneOrder((prev) => replacePaneOrderSessionId(prev, session.id, occupiedSession.id));
-      openPtyTerminal(occupiedSession.pty_id!, occupiedSession.source_host_id);
+      openPtyTerminal(occupiedSession.pty_id!, occupiedSession.source_host_id, {
+        reconnectIfSame: true,
+      });
       void reconcileSupersededTerminalSession(session, occupiedSession).catch((error) => {
         console.warn('[agent-hub][pty] failed to retire duplicate terminal window binding', {
           sessionId: session.id,
@@ -2877,7 +3174,9 @@ export function AgentsPage() {
         freshPresenceProtected: sessionFreshPresenceProtected,
         sourceHostAvailable: isSourceHostAvailable(session.source_host_id),
       });
-      openPtyTerminal(session.pty_id, sessionTerminalHostId ?? undefined);
+      openPtyTerminal(session.pty_id, sessionTerminalHostId ?? undefined, {
+        reconnectIfSame: true,
+      });
       console.info('[agent-hub][pty][open] disconnected terminal history panel opened', {
         sessionId: session.id,
         ptyId: session.pty_id,
@@ -2887,18 +3186,22 @@ export function AgentsPage() {
     }
 
     if (sessionDisconnected && isRecoverableTerminalSession(session)) {
-      const resumedPtyId = await resumeDisconnectedTerminalSession(session, {
+      const resumeOutcome = await attemptDisconnectedTerminalSessionResume(session, {
         activateTerminal: true,
         force: true,
       });
-      if (resumedPtyId) {
+      if (resumeOutcome.status === 'success') {
         setRuntimeHostError('');
         console.info('[agent-hub][pty][open] resumed disconnected terminal session', {
           sessionId: session.id,
           previousPtyId: session.pty_id,
-          resumedPtyId,
+          resumedPtyId: resumeOutcome.ptyId,
           sourceHostId: session.source_host_id ?? null,
+          mode: resumeOutcome.mode,
         });
+        return;
+      }
+      if (shouldKeepPendingTerminalResumeState(resumeOutcome)) {
         return;
       }
 
@@ -2926,7 +3229,9 @@ export function AgentsPage() {
       return;
     }
 
-    openPtyTerminal(session.pty_id, sessionTerminalHostId ?? undefined);
+    openPtyTerminal(session.pty_id, sessionTerminalHostId ?? undefined, {
+      reconnectIfSame: true,
+    });
     console.info('[agent-hub][pty][open] terminal panel opened', {
       sessionId: session.id,
       ptyId: session.pty_id,
@@ -2945,7 +3250,7 @@ export function AgentsPage() {
     resolveOccupiedHistoricalSession,
     resolveTerminalSessionHostId,
     reconcileSupersededTerminalSession,
-    resumeDisconnectedTerminalSession,
+    attemptDisconnectedTerminalSessionResume,
   ]);
 
   const canArchiveActivePtySession = activePtySession?.status === 'completed';
@@ -3411,9 +3716,204 @@ export function AgentsPage() {
     pendingPtyPresenceIds,
   ]);
   const isActivePtyAutoResuming = Boolean(
-    activeDisconnectedPtySession
-      && autoResumingSessionIds.includes(activeDisconnectedPtySession.id),
+    (activeDisconnectedPtySession
+      && autoResumingSessionIds.includes(activeDisconnectedPtySession.id))
+    || (fullscreenTerminalRecoveryKey
+      && persistedFullscreenAutoResumeKey === fullscreenTerminalRecoveryKey),
   );
+  const activeRecoverableTerminalLabel = useMemo(
+    () => resolveRecoverableTerminalAgentLabel(
+      activeDisconnectedPtySession?.agent_kind ?? fullscreenTerminalRecovery?.agentType ?? null,
+    ),
+    [activeDisconnectedPtySession?.agent_kind, fullscreenTerminalRecovery?.agentType],
+  );
+
+  useEffect(() => {
+    if (
+      !activePtyId
+      || !fullscreenTerminalRecovery
+      || !fullscreenTerminalRecoveryKey
+      || !hasLoadedPtyAgents
+      || !isActivePtyDisconnected
+      || (runtimeTargetModeValue === 'embedded' && embeddedRuntimeHostIdentitySettling)
+      || autoResumeInFlightHistoricalSessionKeysRef.current.has(fullscreenTerminalRecoveryKey)
+    ) {
+      return;
+    }
+
+    const failureMessage = 'Terminal 已断开，自动恢复失败；下方将展示关闭前历史，可结束后归档。';
+
+    if (
+      matchedFullscreenRecoverySession?.pty_id
+      && knownPtyIds.has(matchedFullscreenRecoverySession.pty_id)
+      && matchedFullscreenRecoverySession.pty_id !== activePtyId
+    ) {
+      if (fullscreenTerminalRecovery.sessionId) {
+        setTiledPaneOrder((prev) => (
+          prev.includes(fullscreenTerminalRecovery.sessionId!)
+            ? replacePaneOrderSessionId(prev, fullscreenTerminalRecovery.sessionId!, matchedFullscreenRecoverySession.id)
+            : prev
+        ));
+      }
+      setRuntimeHostError('');
+      openPtyTerminal(
+        matchedFullscreenRecoverySession.pty_id,
+        matchedFullscreenRecoverySession.source_host_id,
+      );
+      console.info('[agent-hub][pty] rebound fullscreen terminal from persisted recovery snapshot', {
+        previousPtyId: activePtyId,
+        nextPtyId: matchedFullscreenRecoverySession.pty_id,
+        sessionId: matchedFullscreenRecoverySession.id,
+        recoveryKey: fullscreenTerminalRecoveryKey,
+      });
+      return;
+    }
+
+    const runtimeEpochKey = `${fullscreenTerminalRecoveryKey}|${runtimeServiceStatus?.startedAt ?? 'no-started-at'}`;
+    if (persistedFullscreenRecoveryAttemptedKeysRef.current.has(runtimeEpochKey)) {
+      return;
+    }
+
+    if (matchedFullscreenRecoverySession && isSessionPtyDisconnected(matchedFullscreenRecoverySession)) {
+      setPersistedFullscreenAutoResumeKey(fullscreenTerminalRecoveryKey);
+      setRuntimeHostError((prev) => preserveSpecificDisconnectedRuntimeMessage(
+        prev,
+        'Terminal 已断开，正在尝试恢复；若恢复失败，将展示关闭前历史。',
+      ));
+      console.info('[agent-hub][pty] attempting persisted fullscreen recovery via matched session', {
+        previousPtyId: activePtyId,
+        sessionId: matchedFullscreenRecoverySession.id,
+        recoveryKey: fullscreenTerminalRecoveryKey,
+      });
+      void attemptDisconnectedTerminalSessionResume(matchedFullscreenRecoverySession, {
+        activateTerminal: true,
+        force: true,
+      }).then((outcome) => {
+        if (outcome.status === 'success') {
+          persistedFullscreenRecoveryAttemptedKeysRef.current.add(runtimeEpochKey);
+          setRuntimeHostError('');
+          console.info('[agent-hub][pty] persisted fullscreen recovery succeeded via matched session', {
+            previousPtyId: activePtyId,
+            resumedPtyId: outcome.ptyId,
+            sessionId: outcome.sessionId,
+            recoveryKey: fullscreenTerminalRecoveryKey,
+            mode: outcome.mode,
+          });
+          return;
+        }
+        if (shouldKeepPendingTerminalResumeState(outcome)) {
+          return;
+        }
+        persistedFullscreenRecoveryAttemptedKeysRef.current.add(runtimeEpochKey);
+        setRuntimeHostError((prev) => preserveSpecificDisconnectedRuntimeMessage(prev, failureMessage));
+        console.warn('[agent-hub][pty] persisted fullscreen recovery failed via matched session', {
+          previousPtyId: activePtyId,
+          sessionId: outcome.sessionId,
+          recoveryKey: fullscreenTerminalRecoveryKey,
+          reason: outcome.reason,
+          ...(outcome.status === 'failed' && outcome.message ? { message: outcome.message } : {}),
+        });
+      }).finally(() => {
+        setPersistedFullscreenAutoResumeKey((prev) => (
+          prev === fullscreenTerminalRecoveryKey ? null : prev
+        ));
+      });
+      return;
+    }
+
+    let host: RuntimeHostRecord;
+    try {
+      host = resolveActiveRuntimeHost();
+    } catch {
+      return;
+    }
+
+    persistedFullscreenRecoveryAttemptedKeysRef.current.add(runtimeEpochKey);
+    setPersistedFullscreenAutoResumeKey(fullscreenTerminalRecoveryKey);
+    autoResumeInFlightHistoricalSessionKeysRef.current.add(fullscreenTerminalRecoveryKey);
+    setRuntimeHostError((prev) => preserveSpecificDisconnectedRuntimeMessage(
+      prev,
+      'Terminal 已断开，正在尝试恢复；若恢复失败，将展示关闭前历史。',
+    ));
+    console.info('[agent-hub][pty] attempting persisted fullscreen recovery from saved snapshot', {
+      previousPtyId: activePtyId,
+      recoveryKey: fullscreenTerminalRecoveryKey,
+      innerSessionId: fullscreenTerminalRecovery.innerSessionId,
+      agentType: fullscreenTerminalRecovery.agentType,
+      workdir: fullscreenTerminalRecovery.workdir,
+      hostAddress: `${host.host}:${host.port}`,
+    });
+    void (async () => {
+      try {
+        const runtimeBaseUrl = resolveRuntimeHostBaseUrl(host);
+        const hasMatchingHistoricalRecord = await hasMatchingHistoricalSessionSnapshotRecord(
+          runtimeBaseUrl,
+          fullscreenTerminalRecovery,
+          host.authToken,
+        );
+        if (!hasMatchingHistoricalRecord) {
+          setRuntimeHostError((prev) => preserveSpecificDisconnectedRuntimeMessage(prev, failureMessage));
+          console.warn('[agent-hub][pty] persisted fullscreen recovery skipped because historical session record does not match', {
+            previousPtyId: activePtyId,
+            recoveryKey: fullscreenTerminalRecoveryKey,
+            innerSessionId: fullscreenTerminalRecovery.innerSessionId,
+            workdir: fullscreenTerminalRecovery.workdir,
+          });
+          return;
+        }
+
+        const resumed = await resumeHistoricalPtySnapshot({
+          rtBaseUrl: runtimeBaseUrl,
+          authToken: host.authToken,
+          snapshot: fullscreenTerminalRecovery,
+        });
+        openPtyTerminal(
+          resumed.id,
+          host.hostId ?? activeEmbeddedRuntimeHostId ?? fullscreenTerminalRecovery.sourceHostId,
+          { expectFreshPresence: true },
+        );
+        setRuntimeHostError('');
+        await fetchPtyAgentsRef.current();
+        await Promise.resolve(refreshSessions());
+        console.info('[agent-hub][pty] persisted fullscreen recovery resumed saved terminal snapshot', {
+          previousPtyId: activePtyId,
+          resumedPtyId: resumed.id,
+          recoveryKey: fullscreenTerminalRecoveryKey,
+        });
+      } catch (error) {
+        setRuntimeHostError((prev) => preserveSpecificDisconnectedRuntimeMessage(prev, failureMessage));
+        console.warn('[agent-hub][pty] persisted fullscreen recovery failed from saved snapshot', {
+          previousPtyId: activePtyId,
+          recoveryKey: fullscreenTerminalRecoveryKey,
+          innerSessionId: fullscreenTerminalRecovery.innerSessionId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        autoResumeInFlightHistoricalSessionKeysRef.current.delete(fullscreenTerminalRecoveryKey);
+        setPersistedFullscreenAutoResumeKey((prev) => (
+          prev === fullscreenTerminalRecoveryKey ? null : prev
+        ));
+      }
+    })();
+  }, [
+    activeEmbeddedRuntimeHostId,
+    activePtyId,
+    fetchPtyAgentsRef,
+    fullscreenTerminalRecovery,
+    fullscreenTerminalRecoveryKey,
+    hasLoadedPtyAgents,
+    embeddedRuntimeHostIdentitySettling,
+    isActivePtyDisconnected,
+    isSessionPtyDisconnected,
+    knownPtyIds,
+    matchedFullscreenRecoverySession,
+    openPtyTerminal,
+    persistedFullscreenAutoResumeKey,
+    refreshSessions,
+    attemptDisconnectedTerminalSessionResume,
+    runtimeTargetModeValue,
+    runtimeServiceStatus?.startedAt,
+  ]);
 
   useEffect(() => {
     if (!hasLoadedPtyAgents) {
@@ -4686,7 +5186,12 @@ export function AgentsPage() {
               status: matchingSession?.status ?? null,
             });
             if (supportsInlineRightPanel) {
-              openPtyTerminal(resolvedPtyId, resolvedHostId);
+              if (!matchingSession) {
+                setFullscreenTerminalRecovery((prev) => (prev ? null : prev));
+              }
+              openPtyTerminal(resolvedPtyId, resolvedHostId, {
+                reconnectIfSame: true,
+              });
               console.info('[agent-hub][pty][open] terminal panel opened', {
                 origin: 'topology-node',
                 sessionId: matchingSession?.id ?? null,
@@ -5377,7 +5882,7 @@ export function AgentsPage() {
                           <div className="space-y-1 border-b border-[#292524] px-4 py-3 text-xs text-[#A8A29E]">
                             <p>
                               {isActivePtyAutoResuming
-                                ? 'Codex 会话恢复中，成功后会自动切回实时终端。'
+                                ? `${activeRecoverableTerminalLabel} 会话恢复中，成功后会自动切回实时终端。`
                                 : '当前 PTY 已不存在，RT 可能已经重启。下方保留关闭前历史；如需结束，可点击上方“结束”收敛后归档。'}
                             </p>
                             {runtimeHostError && (
@@ -5391,11 +5896,12 @@ export function AgentsPage() {
                           </div>
                           {isActivePtyAutoResuming ? (
                             <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-[#E7E5E4]">
-                              正在恢复 Codex 历史会话...
+                              正在恢复 {activeRecoverableTerminalLabel} 历史会话...
                             </div>
                           ) : (
                             <div className="flex-1 overflow-hidden">
                               <PtyTerminal
+                                key={activePtyTerminalKey ?? activePtyId}
                                 rtBaseUrl={connection.rtBaseUrl}
                                 ptyId={activePtyId}
                                 authToken={connection.authToken}
@@ -5424,6 +5930,7 @@ export function AgentsPage() {
                     const connection = resolveRuntimeConnectionForHostId(resolvedActivePtyHostId);
                     return (
                       <PtyTerminal
+                        key={activePtyTerminalKey ?? activePtyId}
                         rtBaseUrl={connection.rtBaseUrl}
                         ptyId={activePtyId}
                         authToken={connection.authToken}
@@ -5451,13 +5958,24 @@ export function AgentsPage() {
         occupiedHistoricalSessionIds={occupiedHistoricalSessionIds}
         occupiedHistoricalSessionLabels={occupiedHistoricalSessionLabels}
         onSpawned={(info) => {
-          setTiledPaneOrder((prev) => applySpawnedSessionToTiledPaneOrder({
-            layout: tiledLayout,
-            paneOrder: prev,
-            sessions: dashboardSessions,
-            newSessionId: info.id,
-          }));
-          openPtyTerminal(info.id, ptySpawnConnection.hostId, { expectFreshPresence: true });
+          const matchingSession = dashboardSessions.find((session) => session.pty_id === info.id);
+          if (matchingSession) {
+            setTiledPaneOrder((prev) => applySpawnedSessionToTiledPaneOrder({
+              layout: tiledLayout,
+              paneOrder: prev,
+              sessions: dashboardSessions,
+              newSessionId: matchingSession.id,
+            }));
+          }
+          if (!matchingSession) {
+            setPendingSpawnedPtyIds((prev) => (prev.includes(info.id) ? prev : [...prev, info.id]));
+            setFullscreenTerminalRecovery((prev) => (prev ? null : prev));
+            setPersistedFullscreenAutoResumeKey(null);
+          }
+          openPtyTerminal(info.id, ptySpawnConnection.hostId, {
+            expectFreshPresence: true,
+            reconnectIfSame: true,
+          });
           void refreshRuntimeSnapshot();
         }}
       />

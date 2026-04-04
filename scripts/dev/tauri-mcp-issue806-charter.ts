@@ -176,6 +176,15 @@ type RuntimeRestartCheck = {
   notes: string[];
 };
 
+type Issue818PreparationResult = {
+  status: 'prepared' | 'ready';
+  spawnedAgents: Array<'claude' | 'codex'>;
+  activeTerminalCount: number;
+  activeTerminalAgentKinds: string[];
+  fullscreenRecoveryPresent: boolean;
+  notes: string[];
+};
+
 class RawBridgeClient {
   private readonly ws: WebSocket;
   private readonly pending = new Map<
@@ -555,6 +564,40 @@ async function clickBySelector(
   }
 }
 
+async function setFieldValue(
+  client: RawBridgeClient,
+  selector: string,
+  value: string,
+  label: string,
+  timeoutMs = 4_000,
+): Promise<void> {
+  await waitForJs<{ present: boolean }>(
+    client,
+    `(() => ({ present: !!document.querySelector(${JSON.stringify(selector)}) }))()`,
+    (result) => result.present,
+    timeoutMs,
+    `${label} presence`,
+  );
+
+  const updated = await client.executeJs<{ ok: boolean; reason: string | null }>(
+    `(() => {
+      const node = document.querySelector(${JSON.stringify(selector)});
+      if (!(node instanceof HTMLInputElement || node instanceof HTMLSelectElement || node instanceof HTMLTextAreaElement)) {
+        return { ok: false, reason: 'field-not-found' };
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node), 'value');
+      descriptor?.set?.call(node, ${JSON.stringify(value)});
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+      node.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, reason: null };
+    })()`,
+  );
+
+  if (!updated.ok) {
+    throw new Error(`failed to set ${label}: ${updated.reason}`);
+  }
+}
+
 async function readAgentHubViewState(client: RawBridgeClient): Promise<{
   pathname: string;
   storedViewMode: string | null;
@@ -715,6 +758,42 @@ async function collectUiSessionSummary(client: RawBridgeClient): Promise<UiSessi
     completedSessionIds,
     visibleSessionIds,
   };
+}
+
+async function readIssue818PreparationState(client: RawBridgeClient): Promise<{
+  activeTestIds: string[];
+  fullscreenPtyId: string | null;
+  fullscreenRecoveryPresent: boolean;
+  fullscreenRecoveryAgentType: string | null;
+  rightPanelTerminalVisible: boolean;
+  xtermReady: boolean;
+  terminalLoadingVisible: boolean;
+  terminalErrorMessage: string | null;
+}> {
+  return await client.executeJs(`(() => {
+    const tiledStateRaw = window.localStorage.getItem('exomind:agentHubTiledState');
+    let tiledState = null;
+    try {
+      tiledState = tiledStateRaw ? JSON.parse(tiledStateRaw) : null;
+    } catch {
+      tiledState = null;
+    }
+
+    return {
+      activeTestIds: Array.from(document.querySelectorAll('[data-testid="sessions-active-section"] [data-testid^="session-card-"]'))
+        .map((node) => node.getAttribute('data-testid') ?? '')
+        .filter(Boolean),
+      fullscreenPtyId: typeof tiledState?.fullscreenPtyId === 'string' ? tiledState.fullscreenPtyId : null,
+      fullscreenRecoveryPresent: !!tiledState?.fullscreenTerminalRecovery,
+      fullscreenRecoveryAgentType: typeof tiledState?.fullscreenTerminalRecovery?.agentType === 'string'
+        ? tiledState.fullscreenTerminalRecovery.agentType
+        : null,
+      rightPanelTerminalVisible: !!document.querySelector('[data-testid="agent-rightpanel-pty-terminal"]'),
+      xtermReady: !!document.querySelector('[data-testid="agent-rightpanel-pty-terminal"] .xterm'),
+      terminalLoadingVisible: !!document.querySelector('[data-testid="pty-terminal-loading"]'),
+      terminalErrorMessage: document.querySelector('[data-testid="pty-terminal-error"]')?.textContent?.trim() ?? null,
+    };
+  })()`);
 }
 
 async function collectTopologyTerminalNodeTestIds(client: RawBridgeClient): Promise<string[]> {
@@ -880,6 +959,20 @@ function getActiveTerminalSessionRecordIds(records: RtSessionRecord[]): string[]
     .sort((left, right) => left.localeCompare(right));
 }
 
+function getActiveTerminalAgentKinds(records: RtSessionRecord[]): string[] {
+  return Array.from(new Set(
+    records
+      .filter((record) => (
+        record.interaction_mode === 'terminal'
+        && record.status !== 'completed'
+        && record.status !== 'archived'
+      ))
+      .map((record) => String(record.agent_kind ?? '').trim())
+      .filter((value) => value.length > 0),
+  ))
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function resolveTerminalRecoveryKey(
   record: Pick<RtSessionRecord, 'id' | 'inner_session_id'>,
 ): string {
@@ -914,6 +1007,140 @@ function getLivePtyRecoveryKeys(ptys: RuntimePtyRecord[]): string[] {
     }),
   ))
     .sort((left, right) => left.localeCompare(right));
+}
+
+async function spawnTerminalAgentViaDialog(
+  client: RawBridgeClient,
+  input: {
+    agentType: 'claude' | 'codex';
+    name: string;
+    workdir: string;
+  },
+  timeoutMs: number,
+): Promise<void> {
+  await ensureSessionsView(client, timeoutMs);
+  await clickBySelector(client, '[data-testid="pty-spawn-button"]', 'pty spawn button', timeoutMs);
+  await waitForJs<{ open: boolean }>(
+    client,
+    `(() => ({ open: !!document.querySelector('[data-testid="pty-agent-type"]') }))()`,
+    (value) => value.open,
+    timeoutMs,
+    `spawn dialog ${input.agentType}`,
+  );
+  await setFieldValue(client, '[data-testid="pty-agent-type"]', input.agentType, 'pty agent type', timeoutMs);
+  await setFieldValue(client, '[data-testid="pty-session-name"]', input.name, 'pty session name', timeoutMs);
+  await setFieldValue(client, '[data-testid="pty-session-workdir"]', input.workdir, 'pty session workdir', timeoutMs);
+  await clickBySelector(client, '[data-testid="pty-spawn-submit"]', `spawn submit ${input.agentType}`, timeoutMs);
+  await waitForJs<{ closed: boolean }>(
+    client,
+    `(() => ({ closed: !document.querySelector('[data-testid="pty-agent-type"]') }))()`,
+    (value) => value.closed,
+    Math.max(timeoutMs, 60_000),
+    `spawn dialog close ${input.agentType}`,
+  );
+  await waitForJs<Awaited<ReturnType<typeof readIssue818PreparationState>>>(
+    client,
+    `(() => {
+      const tiledStateRaw = window.localStorage.getItem('exomind:agentHubTiledState');
+      let tiledState = null;
+      try {
+        tiledState = tiledStateRaw ? JSON.parse(tiledStateRaw) : null;
+      } catch {
+        tiledState = null;
+      }
+
+      return {
+        activeTestIds: Array.from(document.querySelectorAll('[data-testid="sessions-active-section"] [data-testid^="session-card-"]'))
+          .map((node) => node.getAttribute('data-testid') ?? '')
+          .filter(Boolean),
+        fullscreenPtyId: typeof tiledState?.fullscreenPtyId === 'string' ? tiledState.fullscreenPtyId : null,
+        fullscreenRecoveryPresent: !!tiledState?.fullscreenTerminalRecovery,
+        fullscreenRecoveryAgentType: typeof tiledState?.fullscreenTerminalRecovery?.agentType === 'string'
+          ? tiledState.fullscreenTerminalRecovery.agentType
+          : null,
+        rightPanelTerminalVisible: !!document.querySelector('[data-testid="agent-rightpanel-pty-terminal"]'),
+        xtermReady: !!document.querySelector('[data-testid="agent-rightpanel-pty-terminal"] .xterm'),
+        terminalLoadingVisible: !!document.querySelector('[data-testid="pty-terminal-loading"]'),
+        terminalErrorMessage: document.querySelector('[data-testid="pty-terminal-error"]')?.textContent?.trim() ?? null,
+      };
+    })()`,
+    (value) => value.fullscreenRecoveryPresent
+      && value.fullscreenRecoveryAgentType === input.agentType
+      && value.rightPanelTerminalVisible
+      && !value.terminalErrorMessage,
+    Math.max(timeoutMs, 60_000),
+    `issue818 post-spawn ${input.agentType}`,
+  );
+}
+
+async function ensureIssue818RecoveryPreparation(
+  client: RawBridgeClient,
+  timeoutMs: number,
+  projectRoot: string,
+): Promise<Issue818PreparationResult> {
+  await ensureSessionsView(client, timeoutMs);
+  const runtimeState = await collectRuntimeState(client);
+  const activeTerminalAgentKinds = getActiveTerminalAgentKinds(runtimeState.sessions);
+  const uiState = await readIssue818PreparationState(client);
+
+  const needsClaude = !activeTerminalAgentKinds.includes('claude');
+  const needsCodex = !activeTerminalAgentKinds.includes('codex');
+  const needsFullscreenRecovery = !uiState.fullscreenRecoveryPresent || !uiState.rightPanelTerminalVisible;
+  const spawnedAgents: Array<'claude' | 'codex'> = [];
+  const notes: string[] = [
+    `initial active terminal agent kinds: ${activeTerminalAgentKinds.join(', ') || 'none'}`,
+    `initial fullscreen recovery present: ${String(uiState.fullscreenRecoveryPresent)}`,
+  ];
+
+  if (!needsClaude && !needsCodex && !needsFullscreenRecovery) {
+    return {
+      status: 'ready',
+      spawnedAgents,
+      activeTerminalCount: getActiveTerminalSessionRecordIds(runtimeState.sessions).length,
+      activeTerminalAgentKinds,
+      fullscreenRecoveryPresent: uiState.fullscreenRecoveryPresent,
+      notes,
+    };
+  }
+
+  const normalizedWorkdir = projectRoot.replaceAll('\\', '/');
+  const runToken = Date.now();
+  if (needsCodex) {
+    await spawnTerminalAgentViaDialog(client, {
+      agentType: 'codex',
+      name: `issue818-codex-${runToken}`,
+      workdir: normalizedWorkdir,
+    }, timeoutMs);
+    spawnedAgents.push('codex');
+  }
+  if (needsClaude || needsFullscreenRecovery || (!needsCodex && !needsClaude)) {
+    await spawnTerminalAgentViaDialog(client, {
+      agentType: 'claude',
+      name: `issue818-claude-${runToken}`,
+      workdir: normalizedWorkdir,
+    }, timeoutMs);
+    if (!spawnedAgents.includes('claude')) {
+      spawnedAgents.push('claude');
+    }
+  }
+
+  const preparedRuntimeState = await collectRuntimeState(client);
+  const preparedUiState = await readIssue818PreparationState(client);
+  const preparedAgentKinds = getActiveTerminalAgentKinds(preparedRuntimeState.sessions);
+  notes.push(
+    `spawned agents: ${spawnedAgents.join(', ') || 'none'}`,
+    `prepared active terminal agent kinds: ${preparedAgentKinds.join(', ') || 'none'}`,
+    `prepared fullscreen recovery present: ${String(preparedUiState.fullscreenRecoveryPresent)}`,
+  );
+
+  return {
+    status: 'prepared',
+    spawnedAgents,
+    activeTerminalCount: getActiveTerminalSessionRecordIds(preparedRuntimeState.sessions).length,
+    activeTerminalAgentKinds: preparedAgentKinds,
+    fullscreenRecoveryPresent: preparedUiState.fullscreenRecoveryPresent,
+    notes,
+  };
 }
 
 function encodeRuntimeInputData(text: string): string {
@@ -1221,8 +1448,21 @@ async function restartRuntimeAndWaitForRecovery(
   const beforeHostId = beforeRuntimeState.runtimeStatus.hostId ?? null;
 
   await client.executeJs(`(() => window.__TAURI__.core.invoke('runtime_service_stop').then(() => true))()`);
-  await Bun.sleep(1_000);
+  await waitForJs<RuntimeStatusSnapshot>(
+    client,
+    `(async () => await window.__TAURI__.core.invoke('runtime_service_status').catch((error) => ({ running: false, error: String(error) })))()`,
+    (value) => value.running !== true,
+    Math.min(timeoutMs, 20_000),
+    'runtime stop',
+  );
   await client.executeJs(`(() => window.__TAURI__.core.invoke('runtime_service_start', { host: '0.0.0.0', port: 9124 }).then(() => true))()`);
+  await waitForJs<RuntimeStatusSnapshot>(
+    client,
+    `(async () => await window.__TAURI__.core.invoke('runtime_service_status').catch((error) => ({ running: false, error: String(error) })))()`,
+    (value) => value.running === true,
+    Math.min(timeoutMs, 20_000),
+    'runtime start',
+  );
 
   const startedAt = Date.now();
   let recovered:
@@ -2005,6 +2245,10 @@ async function main(): Promise<void> {
     await navigateToRoute(client, '/agents', args.timeoutMs);
     await installConsoleTap(client);
     await ensureSessionsView(client, args.timeoutMs);
+    const issue818Preparation = await ensureIssue818RecoveryPreparation(client, args.timeoutMs, projectRoot);
+    process.stdout.write(`${JSON.stringify({
+      issue818Preparation,
+    }, null, 2)}\n`);
 
     const charterChecks: CharterCheck[] = [];
     const restoreSessionsCheck = await verifyAgentViewRestorationViaTasks(client, 'sessions', args.timeoutMs);

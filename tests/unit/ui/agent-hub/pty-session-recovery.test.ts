@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionInfo } from '@/lib/types/session';
 import {
+  buildRecoverableTerminalSessionSnapshot,
   detectAndPersistHistoricalSessionId,
   hasMatchingHistoricalSessionRecord,
+  resumeHistoricalPtySnapshot,
+  matchesRecoverableTerminalSessionSnapshot,
 } from '@/ui/app/pages/agents/pty-session-recovery';
 
 function buildSession(overrides: Partial<SessionInfo>): SessionInfo {
@@ -523,5 +526,65 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
     await expect(
       hasMatchingHistoricalSessionRecord('http://127.0.0.1:1949', mismatchedSession),
     ).resolves.toBe(false);
+  });
+
+  it('matches persisted recovery snapshots by logical inner_session_id instead of workdir alone（持久恢复快照不能只按 workdir 误绑别的 live 会话）', () => {
+    const snapshot = buildRecoverableTerminalSessionSnapshot(buildSession({
+      id: 'session-persisted-818',
+      inner_session_id: 'codex-thread-persisted-818',
+      role: 'Persisted Recovery 818',
+    }));
+
+    expect(snapshot).not.toBeNull();
+    expect(matchesRecoverableTerminalSessionSnapshot(
+      buildSession({
+        id: 'session-live-same-thread-818',
+        pty_id: 'pty-live-same-thread-818',
+        inner_session_id: 'codex-thread-persisted-818',
+        role: 'Live Same Thread 818',
+      }),
+      snapshot!,
+    )).toBe(true);
+    expect(matchesRecoverableTerminalSessionSnapshot(
+      buildSession({
+        id: 'session-live-same-workdir-818',
+        pty_id: 'pty-live-same-workdir-818',
+        inner_session_id: 'codex-thread-other-818',
+        role: 'Live Same Workdir 818',
+      }),
+      snapshot!,
+    )).toBe(false);
+  });
+
+  it('times out hanging historical PTY resume requests instead of waiting forever（历史 PTY 恢复请求超时后应抛出超时错误）', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!url.endsWith('/pty/resume')) {
+          throw new Error(`unexpected fetch: ${url}`);
+        }
+        const signal = init?.signal as AbortSignal | undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+        });
+      }));
+
+      const promise = resumeHistoricalPtySnapshot({
+        rtBaseUrl: 'http://127.0.0.1:1949',
+        snapshot: buildRecoverableTerminalSessionSnapshot(buildSession({
+          inner_session_id: 'codex-thread-timeout-818',
+        }))!,
+      });
+      const assertion = expect(promise).rejects.toThrow('request timeout（请求超时）');
+
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

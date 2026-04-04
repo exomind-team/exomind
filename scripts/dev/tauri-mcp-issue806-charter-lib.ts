@@ -1,4 +1,5 @@
 export interface RtSessionRecord {
+  agent_kind?: string | null;
   id: string;
   status: string;
   interaction_mode?: string | null;
