@@ -1,3 +1,4 @@
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { MarkerType, Position, type Edge, type Node } from '@xyflow/react';
 import type { TaskGraph } from '@/lib/task/task-dag-graph';
 import type { VisibleTaskGraph } from '@/lib/task/task-dag-visibility';
@@ -72,6 +73,7 @@ export type TaskDagFlowNodeData = {
   executeState?: 'active' | 'executable' | 'blocked' | 'terminal';
   hiddenUpstreamCount: number;
   hiddenDownstreamCount: number;
+  onManualTouchPointerDown?: (nodeId: string, event: ReactPointerEvent<HTMLDivElement>) => void;
 };
 
 export type TaskDagFlowNode = Node<TaskDagFlowNodeData, 'taskDag'>;

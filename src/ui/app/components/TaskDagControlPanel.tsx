@@ -62,6 +62,7 @@ interface TaskDagControlPanelProps {
   onToggleImmersive: () => void;
   onJumpToCurrentRoot: () => void;
   onControlsStateChange: (patch: Partial<TaskDagControlsState>) => void;
+  onDebugInteraction?: (payload: Record<string, unknown>) => void;
 }
 
 function legendChip(label: string, title: string, className: string, testId: string) {
@@ -123,8 +124,26 @@ export function TaskDagControlPanel({
   onToggleImmersive,
   onJumpToCurrentRoot,
   onControlsStateChange,
+  onDebugInteraction,
 }: TaskDagControlPanelProps) {
+  const reportDebugInteraction = (source: string, phase: 'pointerdown' | 'click', pointerType?: string) => {
+    onDebugInteraction?.({
+      source,
+      phase,
+      pointerType: pointerType ?? null,
+      isDesktop,
+      layoutMode,
+      desktopViewOpen: controlsState.desktopViewOpen,
+      desktopToolsOpen: controlsState.desktopToolsOpen,
+      mobileViewOpen: controlsState.mobileViewOpen,
+      mobileToolsOpen: controlsState.mobileToolsOpen,
+    });
+  };
+  const supportsHoverDesktop = typeof window === 'undefined' || typeof window.matchMedia !== 'function'
+    ? true
+    : window.matchMedia('(hover: hover) and (pointer: fine)').matches;
   const immersiveFadeClass = immersive && isDesktop
+    && supportsHoverDesktop
     ? 'opacity-0 hover:opacity-100 focus-within:opacity-100'
     : '';
   const searchOptionLabels: Array<{ key: keyof TaskDagSearchOptions; label: string; testId: string }> = [
@@ -432,7 +451,11 @@ export function TaskDagControlPanel({
             key={key}
             type="button"
             data-testid={testId}
-            onClick={() => onLayoutModeChange(key)}
+            onPointerDownCapture={(event) => reportDebugInteraction(`layout-mode-${key}`, 'pointerdown', event.pointerType)}
+            onClick={() => {
+              reportDebugInteraction(`layout-mode-${key}`, 'click');
+              onLayoutModeChange(key);
+            }}
             className={`rounded-full px-3 py-1 text-[10px] font-medium transition-colors ${
               layoutMode === key
                 ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
@@ -509,7 +532,11 @@ export function TaskDagControlPanel({
           <button
             type="button"
             data-testid="task-dag-mobile-search-toggle"
-            onClick={() => onControlsStateChange({ mobileViewOpen: !controlsState.mobileViewOpen })}
+            onPointerDownCapture={(event) => reportDebugInteraction('mobile-search-toggle', 'pointerdown', event.pointerType)}
+            onClick={() => {
+              reportDebugInteraction('mobile-search-toggle', 'click');
+              onControlsStateChange({ mobileViewOpen: !controlsState.mobileViewOpen });
+            }}
             className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#E7E3E0] bg-white/90 text-[#57534E] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]"
             aria-expanded={controlsState.mobileViewOpen}
             aria-label="切换搜索面板"
@@ -519,7 +546,11 @@ export function TaskDagControlPanel({
           <button
             type="button"
             data-testid="task-dag-mobile-tools-toggle"
-            onClick={() => onControlsStateChange({ mobileToolsOpen: !controlsState.mobileToolsOpen })}
+            onPointerDownCapture={(event) => reportDebugInteraction('mobile-tools-toggle', 'pointerdown', event.pointerType)}
+            onClick={() => {
+              reportDebugInteraction('mobile-tools-toggle', 'click');
+              onControlsStateChange({ mobileToolsOpen: !controlsState.mobileToolsOpen });
+            }}
             className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#E7E3E0] bg-white/90 text-[#57534E] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]"
             aria-expanded={controlsState.mobileToolsOpen}
             aria-label="切换工具面板"
@@ -550,7 +581,11 @@ export function TaskDagControlPanel({
         <button
           type="button"
           data-testid="task-dag-desktop-view-toggle"
-          onClick={() => onControlsStateChange({ desktopViewOpen: !controlsState.desktopViewOpen })}
+          onPointerDownCapture={(event) => reportDebugInteraction('desktop-view-toggle', 'pointerdown', event.pointerType)}
+          onClick={() => {
+            reportDebugInteraction('desktop-view-toggle', 'click');
+            onControlsStateChange({ desktopViewOpen: !controlsState.desktopViewOpen });
+          }}
           className="inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-2 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]"
           aria-expanded={controlsState.desktopViewOpen}
         >
@@ -560,7 +595,11 @@ export function TaskDagControlPanel({
         <button
           type="button"
           data-testid="task-dag-desktop-tools-toggle"
-          onClick={() => onControlsStateChange({ desktopToolsOpen: !controlsState.desktopToolsOpen })}
+          onPointerDownCapture={(event) => reportDebugInteraction('desktop-tools-toggle', 'pointerdown', event.pointerType)}
+          onClick={() => {
+            reportDebugInteraction('desktop-tools-toggle', 'click');
+            onControlsStateChange({ desktopToolsOpen: !controlsState.desktopToolsOpen });
+          }}
           className="inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-2 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]"
           aria-expanded={controlsState.desktopToolsOpen}
         >

@@ -1643,6 +1643,35 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(cardClasses).not.toContain('w-40');
   });
 
+  it('uses auto-layout positions as the initial manual positions when no manual snapshot exists', async () => {
+    const autoRender = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    const getNodePosition = (taskId: string) => (
+      ((flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; position: { x: number; y: number } }>;
+      }).nodes.find((node) => node.id === taskId)?.position)
+    );
+
+    const autoPosition = getNodePosition('task-a');
+    expect(autoPosition).toBeDefined();
+
+    autoRender.unmount();
+    window.localStorage.clear();
+    window.localStorage.setItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY, 'manual');
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    expect(getNodePosition('task-a')).toEqual(autoPosition);
+  });
+
   it('clears execute selection on pane click', async () => {
     render(<TaskDagPage />);
 
@@ -1741,15 +1770,50 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     const getNodePosition = (taskId: string) => (
       ((flowApiMocks.lastProps as {
-        nodes: Array<{ id: string; position: { x: number; y: number } }>;
+        nodes: Array<{ id: string; position: { x: number; y: number }; draggable?: boolean }>;
       }).nodes.find((node) => node.id === taskId)?.position)
+    );
+    const getNodeDraggable = (taskId: string) => (
+      ((flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; position: { x: number; y: number }; draggable?: boolean }>;
+      }).nodes.find((node) => node.id === taskId)?.draggable)
     );
     const getNodeCardClassList = (taskId: string) => screen.getByTestId(`task-dag-node-${taskId}`).className.split(/\s+/);
 
     expect(screen.getByTestId('task-dag-layout-mode-manual')).toHaveClass('bg-[#FFF7ED]');
     expect((flowApiMocks.lastProps as { nodesDraggable?: boolean }).nodesDraggable).toBe(true);
+    expect(getNodeDraggable('task-a')).toBe(true);
     expect(getNodePosition('task-a')).toEqual({ x: 640, y: 320 });
     expect(getNodeCardClassList('task-a')).toContain('nopan');
+
+    act(() => {
+      (
+        flowApiMocks.lastProps as {
+          onNodesChange?: (
+            changes: Array<{
+              id: string;
+              type: string;
+              position?: { x: number; y: number };
+              dragging?: boolean;
+            }>,
+          ) => void;
+        }
+      ).onNodesChange?.([
+        {
+          id: 'task-a',
+          type: 'position',
+          position: { x: 700, y: 350 },
+          dragging: true,
+        },
+      ]);
+    });
+
+    expect(getNodePosition('task-a')).toEqual({ x: 700, y: 350 });
+    expect(JSON.parse(window.localStorage.getItem(TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY) ?? '{}')).toMatchObject({
+      manualPositions: {
+        'task-a': { x: 640, y: 320 },
+      },
+    });
 
     act(() => {
       (
@@ -1768,12 +1832,14 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     fireEvent.click(screen.getByTestId('task-dag-layout-mode-auto'));
     expect(window.localStorage.getItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY)).toBe('auto');
     expect((flowApiMocks.lastProps as { nodesDraggable?: boolean }).nodesDraggable).toBe(false);
+    expect(getNodeDraggable('task-a')).toBe(false);
     expect(getNodeCardClassList('task-a')).not.toContain('nopan');
 
     fireEvent.click(screen.getByTestId('task-dag-layout-mode-manual'));
     await waitFor(() => {
       expect(getNodePosition('task-a')).toEqual({ x: 888, y: 444 });
     });
+    expect(getNodeDraggable('task-a')).toBe(true);
     expect(getNodeCardClassList('task-a')).toContain('nopan');
 
     firstRender.unmount();
@@ -1787,6 +1853,72 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(window.localStorage.getItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY)).toBe('manual');
     expect((flowApiMocks.lastProps as { nodesDraggable?: boolean }).nodesDraggable).toBe(true);
     expect(getNodePosition('task-a')).toEqual({ x: 888, y: 444 });
+  });
+
+  it('updates manual layout positions from touch drags that start on node cards', async () => {
+    flowApiMocks.getViewport.mockReturnValue({ x: 0, y: 0, zoom: 1 });
+    window.localStorage.setItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY, 'manual');
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await openDesktopToolsPanel();
+
+    const getNodePosition = (taskId: string) => (
+      ((flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; position: { x: number; y: number } }>;
+      }).nodes.find((node) => node.id === taskId)?.position)
+    );
+
+    const initialPosition = getNodePosition('task-a');
+    expect(initialPosition).toBeDefined();
+
+    fireEvent.pointerDown(screen.getByTestId('task-dag-node-task-a'), {
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 120,
+      isPrimary: true,
+      button: 0,
+    });
+
+    fireEvent.pointerMove(window, {
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 148,
+      clientY: 176,
+      isPrimary: true,
+      buttons: 1,
+    });
+
+    await waitFor(() => {
+      expect(getNodePosition('task-a')).toEqual({
+        x: (initialPosition?.x ?? 0) + 48,
+        y: (initialPosition?.y ?? 0) + 56,
+      });
+    });
+
+    fireEvent.pointerUp(window, {
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 148,
+      clientY: 176,
+      isPrimary: true,
+    });
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY) ?? '{}')).toMatchObject({
+        manualPositions: {
+          'task-a': {
+            x: (initialPosition?.x ?? 0) + 48,
+            y: (initialPosition?.y ?? 0) + 56,
+          },
+        },
+      });
+    });
   });
 
   it('cycles modes from canvas Ctrl+Alt+wheel without changing mode on plain wheel', async () => {
@@ -1976,6 +2108,49 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     fireEvent.click(screen.getByTestId('task-dag-mobile-tools-toggle'));
     expect(screen.getByTestId('task-dag-tools-panel').className).not.toContain('opacity-0');
     expect(screen.getByTestId('task-dag-legend-panel').className).not.toContain('opacity-0');
+  });
+
+  it('keeps desktop immersive panels visible on touch-first landscape devices after opening them', async () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query === '(hover: hover) and (pointer: fine)' ? false : true,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    try {
+      window.localStorage.setItem('exomind:dag-immersive', '1');
+
+      render(<TaskDagPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('task-dag-desktop-tools-toggle'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('task-dag-tools-panel')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('task-dag-tools-panel').className).not.toContain('opacity-0');
+      expect(screen.getByTestId('task-dag-legend-panel').className).not.toContain('opacity-0');
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: originalMatchMedia,
+      });
+    }
   });
 
   it('supports connect mode dependency toggle rules and surfaces cycle rejection', async () => {

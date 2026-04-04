@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { WheelEvent as ReactWheelEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { LocateFixed } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
 import {
@@ -10,6 +10,7 @@ import {
   Handle,
   Position,
   ReactFlow,
+  type NodeChange,
   type HandleType,
   type NodeProps as FlowNodeProps,
   type EdgeTypes,
@@ -172,6 +173,16 @@ type TaskDagIntervalSummary = {
   memberCount: number;
   collapsed: boolean;
 };
+type TaskDagManualTouchDragState = {
+  pointerId: number;
+  nodeId: string;
+  startClientX: number;
+  startClientY: number;
+  startPosition: { x: number; y: number };
+  lastPosition: { x: number; y: number };
+  sourceElement: HTMLDivElement | null;
+  moved: boolean;
+};
 
 const TASK_DAG_EXECUTE_DEBUG_TAG = '[TaskDag][ExecuteDebug]';
 const TASK_DAG_MODE_ORDER: TaskDagMode[] = ['browse', 'connect', 'execute'];
@@ -179,6 +190,7 @@ const TASK_DAG_BACKGROUND_DOT_COLOR_LIGHT = 'rgba(168,162,158,0.42)';
 const TASK_DAG_BACKGROUND_LINE_COLOR_LIGHT = 'rgba(168,162,158,0.24)';
 const TASK_DAG_BACKGROUND_DOT_COLOR_DARK = 'rgba(68,64,60,0.8)';
 const TASK_DAG_BACKGROUND_LINE_COLOR_DARK = 'rgba(68,64,60,0.45)';
+const TASK_DAG_MANUAL_TOUCH_CLICK_SUPPRESS_MS = 250;
 
 export function getNextTaskDagMode(current: TaskDagMode, delta: 1 | -1): TaskDagMode {
   const currentIndex = TASK_DAG_MODE_ORDER.indexOf(current);
@@ -225,6 +237,33 @@ function debugTaskDagExecute(message: string, payload?: Record<string, unknown>)
   }
 
   console.log(TASK_DAG_EXECUTE_DEBUG_TAG, message);
+}
+
+function warnTaskDagInteraction(message: string, payload?: Record<string, unknown>): void {
+  if (!import.meta.env.DEV || typeof console === 'undefined') {
+    return;
+  }
+
+  if (payload) {
+    console.warn('[TaskDag][InteractionDebug]', message, payload);
+    return;
+  }
+
+  console.warn('[TaskDag][InteractionDebug]', message);
+}
+
+function resolveDebugTargetTestId(target: EventTarget | null): string | null {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+
+  return target.closest<HTMLElement>('[data-testid]')?.dataset.testid ?? null;
+}
+
+function isTaskDagPositionChange(
+  change: NodeChange<TaskDagFlowNode>,
+): change is Extract<NodeChange<TaskDagFlowNode>, { type: 'position' }> {
+  return change.type === 'position';
 }
 
 function snapshotViewport(
@@ -794,6 +833,7 @@ function TaskDagNode({
       <div
         title={nodeData.blockedReason ?? undefined}
         data-testid={`task-dag-node-${id}`}
+        onPointerDownCapture={(event) => nodeData.onManualTouchPointerDown?.(id, event)}
         className={[
           'group/task-dag-node relative inline-flex flex-col justify-center overflow-hidden rounded-2xl border bg-white px-3 py-3 text-left shadow-sm transition-all duration-200 ease-out dark:bg-[#1C1917]',
           isManualLayout ? 'nopan' : '',
@@ -972,6 +1012,7 @@ export function TaskDagPage() {
   const [manualLayoutSnapshot, setManualLayoutSnapshotState] = useState<TaskDagManualLayoutSnapshot | null>(
     () => getTaskDagManualLayoutSnapshot(),
   );
+  const manualLayoutSnapshotRef = useRef<TaskDagManualLayoutSnapshot | null>(manualLayoutSnapshot);
   const [connectState, setConnectState] = useState<DagConnectState>(null);
   const [endingDialogOpen, setEndingDialogOpen] = useState(false);
   const [endingTaskIds, setEndingTaskIds] = useState<string[]>([]);
@@ -987,11 +1028,15 @@ export function TaskDagPage() {
   const [disassociateDescription, setDisassociateDescription] = useState('');
   const [panSpeed, setPanSpeed] = useState(() => getTaskDagPanSpeed());
   const [zoomSpeed, setZoomSpeed] = useState(() => getTaskDagZoomSpeed());
+  const [manualTouchNodeDragActive, setManualTouchNodeDragActive] = useState(false);
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
   const wheelListenerRef = useRef<HTMLDivElement | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
   const connectDragQuickCreateRef = useRef<QuickCreateDependencyContext>(null);
   const quickCreateDropPositionRef = useRef<TaskDagDropPosition>(null);
+  const flowNodePositionByIdRef = useRef(new Map<string, { x: number; y: number }>());
+  const manualTouchDragRef = useRef<TaskDagManualTouchDragState | null>(null);
+  const suppressNodeClickRef = useRef<{ nodeId: string; until: number } | null>(null);
   const pendingManualLayoutNodeIdsRef = useRef(new Set<string>());
   const hasMountedDirectionRef = useRef(false);
   const hasAppliedInitialViewportRef = useRef(false);
@@ -1221,10 +1266,35 @@ export function TaskDagPage() {
       ...patch,
     }));
   }, []);
-  const setManualLayoutSnapshot = useCallback((snapshot: TaskDagManualLayoutSnapshot | null) => {
-    setTaskDagManualLayoutSnapshot(snapshot);
+  const handleDebugControlInteraction = useCallback((payload: Record<string, unknown>) => {
+    warnTaskDagInteraction('control-panel:event', payload);
+  }, []);
+  const setTransientManualLayoutSnapshot = useCallback((snapshot: TaskDagManualLayoutSnapshot | null) => {
+    manualLayoutSnapshotRef.current = snapshot;
     setManualLayoutSnapshotState(snapshot);
   }, []);
+  const setManualLayoutSnapshot = useCallback((snapshot: TaskDagManualLayoutSnapshot | null) => {
+    const persistedSnapshot = setTaskDagManualLayoutSnapshot(snapshot);
+    manualLayoutSnapshotRef.current = persistedSnapshot;
+    setManualLayoutSnapshotState(persistedSnapshot);
+  }, []);
+
+  useEffect(() => {
+    manualLayoutSnapshotRef.current = manualLayoutSnapshot;
+  }, [manualLayoutSnapshot]);
+
+  useEffect(() => {
+    warnTaskDagInteraction('surface:update', {
+      isDesktop,
+      layoutMode,
+      mode,
+      viewportSurface,
+      width: typeof window !== 'undefined' ? window.innerWidth : null,
+      height: typeof window !== 'undefined' ? window.innerHeight : null,
+      maxTouchPoints: typeof navigator !== 'undefined' ? navigator.maxTouchPoints : null,
+      controlsState,
+    });
+  }, [controlsState, isDesktop, layoutMode, mode, viewportSurface]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1288,7 +1358,7 @@ export function TaskDagPage() {
           return;
         }
         case TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY:
-          setManualLayoutSnapshotState(getTaskDagManualLayoutSnapshot());
+          setTransientManualLayoutSnapshot(getTaskDagManualLayoutSnapshot());
           return;
         default:
           return;
@@ -1563,6 +1633,221 @@ export function TaskDagPage() {
     visibleFocusedSeriesNodeIds,
   ]);
 
+  const handleManualLayoutNodesChange = useCallback((changes: NodeChange<TaskDagFlowNode>[]) => {
+    if (layoutMode !== 'manual') {
+      return;
+    }
+
+    let nextSnapshot = manualLayoutSnapshotRef.current;
+    let hasPositionChange = false;
+
+    for (const change of changes) {
+      if (change.type !== 'position' || !change.position) {
+        continue;
+      }
+
+      nextSnapshot = updateTaskDagManualLayoutPosition(nextSnapshot, change.id, change.position);
+      hasPositionChange = true;
+    }
+
+    if (!hasPositionChange) {
+      return;
+    }
+
+    warnTaskDagInteraction('manual-layout:nodes-change', {
+      changeCount: changes.length,
+      positions: changes
+        .flatMap((change) => {
+          if (!isTaskDagPositionChange(change) || !change.position) {
+            return [];
+          }
+
+          return [{
+            id: change.id,
+            position: change.position,
+            dragging: change.dragging ?? null,
+          }];
+        }),
+    });
+    setTransientManualLayoutSnapshot(nextSnapshot);
+  }, [layoutMode, setTransientManualLayoutSnapshot]);
+
+  const handleManualTouchNodePointerDown = useCallback((
+    nodeId: string,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (layoutMode !== 'manual' || event.pointerType !== 'touch') {
+      return;
+    }
+
+    const startPosition = flowNodePositionByIdRef.current.get(nodeId)
+      ?? manualLayoutSnapshotRef.current?.manualPositions[nodeId];
+
+    if (!startPosition) {
+      warnTaskDagInteraction('manual-layout:touch-pointerdown-miss', { nodeId });
+      return;
+    }
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Ignore browsers that cannot capture this pointer on the node element.
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    manualTouchDragRef.current = {
+      pointerId: event.pointerId,
+      nodeId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPosition,
+      lastPosition: startPosition,
+      sourceElement: event.currentTarget,
+      moved: false,
+    };
+    suppressNodeClickRef.current = null;
+    setManualTouchNodeDragActive(true);
+    warnTaskDagInteraction('manual-layout:touch-pointerdown', {
+      nodeId,
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      startPosition,
+    });
+  }, [layoutMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return () => {};
+    }
+
+    const releasePointerCapture = (dragState: TaskDagManualTouchDragState | null) => {
+      if (!dragState?.sourceElement) {
+        return;
+      }
+
+      try {
+        if (dragState.sourceElement.hasPointerCapture(dragState.pointerId)) {
+          dragState.sourceElement.releasePointerCapture(dragState.pointerId);
+        }
+      } catch {
+        // Ignore browsers that do not support pointer capture inspection on this element.
+      }
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const dragState = manualTouchDragRef.current;
+      if (!dragState || event.pointerId !== dragState.pointerId) {
+        return;
+      }
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+
+      const zoom = Math.max(flowInstanceRef.current?.getViewport().zoom ?? 1, TASK_DAG_MIN_ZOOM);
+      const nextPosition = {
+        x: dragState.startPosition.x + ((event.clientX - dragState.startClientX) / zoom),
+        y: dragState.startPosition.y + ((event.clientY - dragState.startClientY) / zoom),
+      };
+      const moved = dragState.moved
+        || nextPosition.x !== dragState.startPosition.x
+        || nextPosition.y !== dragState.startPosition.y;
+
+      manualTouchDragRef.current = {
+        ...dragState,
+        moved,
+        lastPosition: nextPosition,
+      };
+
+      if (moved && !dragState.moved) {
+        warnTaskDagInteraction('manual-layout:touch-drag-start', {
+          nodeId: dragState.nodeId,
+          pointerId: dragState.pointerId,
+          nextPosition,
+        });
+      }
+
+      setTransientManualLayoutSnapshot(updateTaskDagManualLayoutPosition(
+        manualLayoutSnapshotRef.current,
+        dragState.nodeId,
+        nextPosition,
+      ));
+    };
+
+    const finishPointerDrag = (event: PointerEvent, reason: 'pointerup' | 'pointercancel') => {
+      const dragState = manualTouchDragRef.current;
+      if (!dragState || event.pointerId !== dragState.pointerId) {
+        return;
+      }
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+
+      manualTouchDragRef.current = null;
+      setManualTouchNodeDragActive(false);
+      releasePointerCapture(dragState);
+
+      if (!dragState.moved) {
+        warnTaskDagInteraction('manual-layout:touch-drag-end', {
+          nodeId: dragState.nodeId,
+          reason,
+          moved: false,
+        });
+        return;
+      }
+
+      suppressNodeClickRef.current = {
+        nodeId: dragState.nodeId,
+        until: Date.now() + TASK_DAG_MANUAL_TOUCH_CLICK_SUPPRESS_MS,
+      };
+      warnTaskDagInteraction('manual-layout:touch-drag-end', {
+        nodeId: dragState.nodeId,
+        reason,
+        moved: true,
+        finalPosition: dragState.lastPosition,
+      });
+      setManualLayoutSnapshot(updateTaskDagManualLayoutPosition(
+        manualLayoutSnapshotRef.current,
+        dragState.nodeId,
+        dragState.lastPosition,
+      ));
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      finishPointerDrag(event, 'pointerup');
+    };
+    const handlePointerCancel = (event: PointerEvent) => {
+      finishPointerDrag(event, 'pointercancel');
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp, { passive: false });
+    window.addEventListener('pointercancel', handlePointerCancel, { passive: false });
+
+    return () => {
+      const activeDrag = manualTouchDragRef.current;
+      if (activeDrag) {
+        releasePointerCapture(activeDrag);
+        manualTouchDragRef.current = null;
+      }
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+    };
+  }, [setManualLayoutSnapshot, setTransientManualLayoutSnapshot]);
+
+  useEffect(() => {
+    if (layoutMode === 'manual') {
+      return;
+    }
+
+    manualTouchDragRef.current = null;
+    setManualTouchNodeDragActive(false);
+  }, [layoutMode]);
+
   const flowGraph = useMemo(() => {
     return {
       nodes: layoutFlowGraph.nodes.map((node) => {
@@ -1581,6 +1866,7 @@ export function TaskDagPage() {
 
         return {
           ...node,
+          draggable: layoutMode === 'manual' && !manualTouchNodeDragActive,
           data: {
             ...node.data,
             title: task?.title ?? visibleNode?.title ?? node.data.title,
@@ -1610,6 +1896,7 @@ export function TaskDagPage() {
             blockedReason,
             showConnectHandles: mode === 'connect',
             connectPreviewType: connectState?.sourceId === node.id ? connectState.type : null,
+            onManualTouchPointerDown: handleManualTouchNodePointerDown,
             executeState: task && graphNode
               ? resolveExecuteState(task, graphNode.isBlocked, graphNode.isExecutable, activeTaskIdSet)
               : undefined,
@@ -1630,6 +1917,7 @@ export function TaskDagPage() {
     hasVisibleFocusedSeries,
     hasActiveUnifiedSearch,
     layoutMode,
+    manualTouchNodeDragActive,
     focusedSeriesAnchorIds,
     nodeSizing.fixedHeight,
     nodeSizing.fixedWidth,
@@ -1638,8 +1926,15 @@ export function TaskDagPage() {
     taskById,
     unifiedSearchMatchedTaskIds,
     visibleFocusedSeriesNodeIds,
+    handleManualTouchNodePointerDown,
     mode,
   ]);
+
+  useEffect(() => {
+    flowNodePositionByIdRef.current = new Map(
+      flowGraph.nodes.map((node) => [node.id, node.position]),
+    );
+  }, [flowGraph.nodes]);
 
   useEffect(() => {
     const layoutSummary = summarizeFlowViewport(flowInstanceRef.current, flowGraph.nodes);
@@ -2053,7 +2348,7 @@ export function TaskDagPage() {
       ) {
         pendingManualLayoutNodeIdsRef.current.add(createdTaskId);
         setManualLayoutSnapshot(updateTaskDagManualLayoutPosition(
-          manualLayoutSnapshot,
+          manualLayoutSnapshotRef.current,
           createdTaskId,
           persistedDropPosition,
         ));
@@ -2248,6 +2543,17 @@ export function TaskDagPage() {
   };
 
   const handleNodeClick = (_event: unknown, node: { id: string }) => {
+    const suppressed = suppressNodeClickRef.current;
+    if (suppressed) {
+      if (suppressed.until <= Date.now()) {
+        suppressNodeClickRef.current = null;
+      } else if (suppressed.nodeId === node.id) {
+        warnTaskDagInteraction('manual-layout:click-suppressed', { nodeId: node.id });
+        suppressNodeClickRef.current = null;
+        return;
+      }
+    }
+
     if (mode === 'browse') {
       setSelectedTaskId(node.id);
       setContextMenu(null);
@@ -2479,6 +2785,7 @@ export function TaskDagPage() {
               }}
               onJumpToCurrentRoot={handleJumpToCurrentRoot}
               onControlsStateChange={updateControlsState}
+              onDebugInteraction={handleDebugControlInteraction}
             />
           )}
 
@@ -2486,6 +2793,15 @@ export function TaskDagPage() {
           data-testid="task-dag-wheel-listener"
           ref={wheelListenerRef}
           className="h-full w-full"
+          onPointerDownCapture={(event: ReactPointerEvent<HTMLDivElement>) => {
+            if (event.pointerType === 'mouse') {
+              return;
+            }
+            warnTaskDagInteraction('canvas:pointerdown-capture', {
+              pointerType: event.pointerType,
+              targetTestId: resolveDebugTargetTestId(event.target),
+            });
+          }}
           onWheelCapture={handleCanvasModeWheel}
           onDoubleClick={(event) => {
             if (mode !== 'connect' || !isPaneInteractionTarget(event.target)) {
@@ -2515,10 +2831,12 @@ export function TaskDagPage() {
             proOptions={{ hideAttribution: true }}
             minZoom={TASK_DAG_MIN_ZOOM}
             fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}
-            nodesDraggable={layoutMode === 'manual'}
+            nodesDraggable={layoutMode === 'manual' && !manualTouchNodeDragActive}
             nodesConnectable={mode === 'connect'}
             elementsSelectable
             zoomOnDoubleClick={false}
+            panOnDrag={manualTouchNodeDragActive ? false : true}
+            onNodesChange={handleManualLayoutNodesChange}
             onInit={(instance) => {
               flowInstanceRef.current = instance;
               debugTaskDagExecute('viewport:onInit', {
@@ -2576,12 +2894,24 @@ export function TaskDagPage() {
               }));
             }}
             onNodeClick={handleNodeClick}
+            onNodeDragStart={(event, node) => {
+              warnTaskDagInteraction('manual-layout:drag-start', {
+                layoutMode,
+                nodeId: node.id,
+                eventType: event.type,
+                pointerType: 'pointerType' in event ? event.pointerType : null,
+              });
+            }}
             onNodeDragStop={(_event, node) => {
               if (layoutMode !== 'manual') {
                 return;
               }
+              warnTaskDagInteraction('manual-layout:drag-stop', {
+                nodeId: node.id,
+                position: node.position,
+              });
               setManualLayoutSnapshot(updateTaskDagManualLayoutPosition(
-                manualLayoutSnapshot,
+                manualLayoutSnapshotRef.current,
                 node.id,
                 node.position,
               ));
