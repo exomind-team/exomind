@@ -2818,6 +2818,176 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(JSON.parse(window.localStorage.getItem('exomind:dag-focused-series') ?? '[]')).toEqual(['task-b']);
   });
 
+  it('creates an interval collapse from two browse-mode context-menu endpoint selections and persists it', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: 'B',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-c',
+        title: 'C',
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-d',
+        title: 'D',
+        createdAt: 40,
+        updatedAt: 40,
+        dependsOn: [{ taskId: 'task-c', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-e',
+        title: 'E',
+        createdAt: 50,
+        updatedAt: 50,
+        dependsOn: [{ taskId: 'task-d', type: 'hard' }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-d')).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-b'));
+    fireEvent.click(await screen.findByText('设为区间起点'));
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-d'));
+    fireEvent.click(await screen.findByText('收缩到此终点'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-b')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-d')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-interval-start-badge-task-d')).toHaveTextContent('起点 B');
+      expect(screen.getByTestId('task-dag-interval-count-badge-task-d')).toHaveTextContent('3 个节点');
+    });
+
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-interval-collapse') ?? '{}')).toEqual({
+      intervals: [
+        { startId: 'task-b', endId: 'task-d', collapsed: true },
+      ],
+    });
+  });
+
+  it('shows interval members in the detail panel and can expand the interval without deleting its definition', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: 'B',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-c',
+        title: 'C',
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-d',
+        title: 'D',
+        createdAt: 40,
+        updatedAt: 40,
+        dependsOn: [{ taskId: 'task-c', type: 'hard' }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-d')).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-b'));
+    fireEvent.click(await screen.findByText('设为区间起点'));
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-d'));
+    fireEvent.click(await screen.findByText('收缩到此终点'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-b')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-d'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-detail-interval-section')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-detail-interval-member-list')).toHaveTextContent('B');
+      expect(screen.getByTestId('task-dag-detail-interval-member-list')).toHaveTextContent('C');
+      expect(screen.getByTestId('task-dag-detail-interval-member-list')).toHaveTextContent('D');
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-detail-interval-toggle-0'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+    });
+
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-interval-collapse') ?? '{}')).toEqual({
+      intervals: [
+        { startId: 'task-b', endId: 'task-d', collapsed: false },
+      ],
+    });
+  });
+
+  it('explains why an invalid interval cannot be collapsed instead of creating it', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
+      makeTask({ id: 'task-x', title: 'X', createdAt: 15, updatedAt: 15 }),
+      makeTask({
+        id: 'task-b',
+        title: 'B',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [
+          { taskId: 'task-a', type: 'hard' },
+          { taskId: 'task-x', type: 'hard' },
+        ],
+      }),
+      makeTask({
+        id: 'task-c',
+        title: 'C',
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(await screen.findByText('设为区间起点'));
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-c'));
+    fireEvent.click(await screen.findByText('收缩到此终点'));
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '区间收缩不可用',
+        description: '区间内部存在边界外上游依赖，当前不能收缩。',
+        variant: 'destructive',
+      }));
+    });
+
+    expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    expect(window.localStorage.getItem('exomind:dag-interval-collapse')).toBeNull();
+  });
+
   it('computes focus-series from the unified-search visible graph without bringing hidden branches back', async () => {
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-a', title: 'Batch Q DAG 主线 A', tags: ['batch-q', 'dag', 'focus'], createdAt: 10, updatedAt: 10 }),

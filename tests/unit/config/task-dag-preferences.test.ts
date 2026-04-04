@@ -57,6 +57,9 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       matchMode: 'and',
     });
     expect(module.getTaskDagFocusedSeriesAnchorIds()).toEqual([]);
+    expect(module.getTaskDagIntervalCollapseState()).toEqual({
+      intervals: [],
+    });
     expect(module.getTaskDagVisibility()).toEqual({
       collapsedUpstreamOf: [],
       collapsedDownstreamOf: [],
@@ -99,6 +102,11 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
         matchMode: 'or',
       }),
       'exomind:dag-focused-series': JSON.stringify(['task-b', 'task-x']),
+      'exomind:dag-interval-collapse': JSON.stringify({
+        intervals: [
+          { startId: 'task-a', endId: 'task-c', collapsed: true },
+        ],
+      }),
       'exomind:dag-visibility': JSON.stringify({
         collapsedUpstreamOf: ['task-a'],
         collapsedDownstreamOf: ['task-b'],
@@ -139,6 +147,11 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       matchMode: 'or',
     });
     expect(module.getTaskDagFocusedSeriesAnchorIds()).toEqual(['task-b', 'task-x']);
+    expect(module.getTaskDagIntervalCollapseState()).toEqual({
+      intervals: [
+        { startId: 'task-a', endId: 'task-c', collapsed: true },
+      ],
+    });
     expect(module.getTaskDagVisibility()).toEqual({
       collapsedUpstreamOf: ['task-a'],
       collapsedDownstreamOf: ['task-b'],
@@ -221,6 +234,25 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       'task-b',
       'task-x',
     ]);
+
+    expect(module.setTaskDagIntervalCollapseState({
+      intervals: [
+        { startId: 'task-a', endId: 'task-c', collapsed: true },
+        { startId: 'task-a', endId: 'task-c', collapsed: false },
+        { startId: 'task-b', endId: 'task-d', collapsed: true },
+      ],
+    })).toEqual({
+      intervals: [
+        { startId: 'task-a', endId: 'task-c', collapsed: true },
+        { startId: 'task-b', endId: 'task-d', collapsed: true },
+      ],
+    });
+    expect(JSON.parse(storage[module.TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY] ?? '{}')).toEqual({
+      intervals: [
+        { startId: 'task-a', endId: 'task-c', collapsed: true },
+        { startId: 'task-b', endId: 'task-d', collapsed: true },
+      ],
+    });
 
     expect(module.setTaskDagVisibility({
       collapsedUpstreamOf: ['task-x'],

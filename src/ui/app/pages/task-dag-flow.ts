@@ -10,11 +10,11 @@ import {
 } from './task-dag-layout';
 import type { TaskDagManualLayoutSnapshot } from './task-dag-layout-store';
 
-export const TASK_DAG_NODE_WIDTH = 256;
-export const TASK_DAG_NODE_HEIGHT = 140;
+export const TASK_DAG_NODE_WIDTH = 160;
+export const TASK_DAG_NODE_HEIGHT = 160;
 
-const COLUMN_GAP = 320;
-const ROW_GAP = 180;
+const COLUMN_GAP = 220;
+const ROW_GAP = 220;
 
 const STATUS_LABEL: Record<TaskNode['status'], string> = {
   pending: '待办',
@@ -45,6 +45,12 @@ export type TaskDagFlowNodeData = {
   statusLabel: string;
   priorityLabel: string;
   executionLabel: string;
+  intervalCollapseSummaries?: Array<{
+    startId: string;
+    startTitle: string;
+    memberCount: number;
+    collapsed: boolean;
+  }>;
   isSelected: boolean;
   isSearchMatch: boolean;
   isSearchDimmed: boolean;

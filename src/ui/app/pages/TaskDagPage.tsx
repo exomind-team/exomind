@@ -37,6 +37,13 @@ import {
   projectVisibleTaskGraph,
   type VisibleTaskGraph,
 } from '@/lib/task/task-dag-visibility';
+import {
+  projectVisibleTaskGraphWithIntervalCollapses,
+  resolveTaskDagIntervalDefinition,
+  validateTaskDagIntervalAgainstExisting,
+  type ResolvedTaskDagInterval,
+  type TaskDagIntervalCollapseState,
+} from '@/lib/task/task-dag-interval-collapse';
 import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimerConfig } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { MultiTaskEndDialog } from '@/ui/app/components/MultiTaskEndDialog';
@@ -52,6 +59,7 @@ import { TaskQuickCreateDialog } from '@/ui/app/components/TaskQuickCreateDialog
 import {
   TaskDagDetailPanel,
   type TaskDagDependencyItem,
+  type TaskDagIntervalDetailItem,
 } from '@/ui/app/components/TaskDagDetailPanel';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { ensureNodeVisible, useTaskDagKeyboard } from '@/ui/app/hooks/useTaskDagKeyboard';
@@ -86,12 +94,14 @@ import {
   TASK_DAG_LAYOUT_MODE_STORAGE_KEY,
   TASK_DAG_MODE_STORAGE_KEY,
   TASK_DAG_FOCUSED_SERIES_STORAGE_KEY,
+  TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY,
   TASK_DAG_SEARCH_DRAFT_STORAGE_KEY,
   TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY,
   TASK_DAG_TAG_FILTER_STORAGE_KEY,
   TASK_DAG_VIEWPORT_STORAGE_KEY,
   TASK_DAG_VISIBILITY_STORAGE_KEY,
   getTaskDagFocusedSeriesAnchorIds as readStoredFocusedSeriesAnchorIds,
+  getTaskDagIntervalCollapseState as readStoredTaskDagIntervalCollapseState,
   getTaskDagTagFilter as readStoredTagFilter,
   getTaskDagSearchDraft as readStoredSearchDraft,
   getTaskDagSearchOptions as readStoredSearchOptions,
@@ -103,6 +113,7 @@ import {
   setTaskDagDirection as persistTaskDagDirection,
   setTaskDagFocusMode as persistTaskDagFocusMode,
   setTaskDagFocusedSeriesAnchorIds as persistTaskDagFocusedSeriesAnchorIds,
+  setTaskDagIntervalCollapseState as persistTaskDagIntervalCollapseState,
   setTaskDagImmersive as persistTaskDagImmersive,
   setTaskDagLayoutMode as persistTaskDagLayoutMode,
   setTaskDagMode as persistTaskDagMode,
@@ -150,6 +161,12 @@ type QuickCreateDependencyContext = {
   direction: 'upstream' | 'downstream';
 } | null;
 type TaskDagDropPosition = { x: number; y: number } | null;
+type TaskDagIntervalSummary = {
+  startId: string;
+  startTitle: string;
+  memberCount: number;
+  collapsed: boolean;
+};
 
 const TASK_DAG_EXECUTE_DEBUG_TAG = '[TaskDag][ExecuteDebug]';
 const TASK_DAG_MODE_ORDER: TaskDagMode[] = ['browse', 'connect', 'execute'];
@@ -747,7 +764,7 @@ function TaskDagNode({
       title={nodeData.blockedReason ?? undefined}
       data-testid={`task-dag-node-${id}`}
       className={[
-        'relative w-64 rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
+        'relative flex h-40 w-40 flex-col justify-center overflow-hidden rounded-2xl border bg-white px-3 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
         nodeData.connectPreviewType === 'hard'
           ? 'border-[#2563EB] ring-2 ring-[#2563EB]/30 bg-[#EFF6FF] shadow-[0_14px_32px_-18px_rgba(37,99,235,0.7)] dark:border-[#60A5FA] dark:bg-[#172554]'
             : nodeData.connectPreviewType === 'soft'
@@ -816,6 +833,24 @@ function TaskDagNode({
             已折叠下游
           </span>
         ) : null}
+        {nodeData.intervalCollapseSummaries?.map((summary, index) => (
+          <span
+            key={`interval-start-${summary.startId}-${index}`}
+            data-testid={index === 0 ? `task-dag-interval-start-badge-${id}` : undefined}
+            className="rounded-full bg-[#EDE9FE] px-2 py-0.5 text-[10px] font-medium text-[#6D28D9] dark:bg-[#2E1065] dark:text-[#DDD6FE]"
+          >
+            {`起点 ${summary.startTitle}`}
+          </span>
+        ))}
+        {nodeData.intervalCollapseSummaries?.map((summary, index) => (
+          <span
+            key={`interval-count-${summary.startId}-${summary.memberCount}-${index}`}
+            data-testid={index === 0 ? `task-dag-interval-count-badge-${id}` : undefined}
+            className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-medium text-[#4B5563] dark:bg-[#292524] dark:text-[#D6D3D1]"
+          >
+            {`${summary.memberCount} 个节点`}
+          </span>
+        ))}
         <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
           {nodeData.statusLabel}
         </span>
@@ -837,7 +872,7 @@ function TaskDagNode({
         ) : null}
       </div>
 
-      <p className="mt-3 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{nodeData.title}</p>
+      <p className="mt-3 line-clamp-3 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{nodeData.title}</p>
       <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">{nodeData.priorityLabel}</p>
       <p className="mt-1 text-xs text-[#57534E] dark:text-[#D6D3D1]">{nodeData.executionLabel}</p>
     </div>
@@ -882,6 +917,10 @@ export function TaskDagPage() {
   const [focusedSeriesAnchorIds, setFocusedSeriesAnchorIds] = useState<string[]>(
     () => readStoredFocusedSeriesAnchorIds(),
   );
+  const [intervalCollapseState, setIntervalCollapseState] = useState<TaskDagIntervalCollapseState>(
+    () => readStoredTaskDagIntervalCollapseState(),
+  );
+  const [pendingIntervalStartId, setPendingIntervalStartId] = useState<string | null>(null);
   const [dagDirection, setDagDirection] = useState<DagDirection>(() => readStoredDagDirection());
   const [layoutMode, setLayoutMode] = useState<TaskDagLayoutMode>(() => readStoredDagLayoutMode());
   const [mode, setMode] = useState<TaskDagMode>(() => readStoredDagMode());
@@ -972,6 +1011,10 @@ export function TaskDagPage() {
   useEffectAfterMount(() => {
     persistTaskDagFocusedSeriesAnchorIds(focusedSeriesAnchorIds);
   }, [focusedSeriesAnchorIds]);
+
+  useEffectAfterMount(() => {
+    persistTaskDagIntervalCollapseState(intervalCollapseState);
+  }, [intervalCollapseState]);
 
   useEffectAfterMount(() => {
     persistTaskDagControlsState(controlsState);
@@ -1174,6 +1217,9 @@ export function TaskDagPage() {
         case TASK_DAG_FOCUSED_SERIES_STORAGE_KEY:
           setFocusedSeriesAnchorIds(readStoredFocusedSeriesAnchorIds());
           return;
+        case TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY:
+          setIntervalCollapseState(readStoredTaskDagIntervalCollapseState());
+          return;
         case TASK_DAG_CONTROLS_STATE_STORAGE_KEY:
           setControlsState(readStoredControlsState());
           return;
@@ -1260,6 +1306,18 @@ export function TaskDagPage() {
       : graph
   ), [graph, terminalFilterMode, tasks]);
   const visibleGraph = useMemo(() => projectVisibleTaskGraph(graph, dagVisibility), [graph, dagVisibility]);
+  const resolvedExistingIntervals = useMemo<ResolvedTaskDagInterval[]>(() => (
+    intervalCollapseState.intervals.flatMap((interval) => {
+      const resolved = resolveTaskDagIntervalDefinition(graph, interval.startId, interval.endId);
+      return resolved.ok ? [resolved] : [];
+    })
+  ), [graph, intervalCollapseState.intervals]);
+  const intervalCollapseProjection = useMemo(() => (
+    projectVisibleTaskGraphWithIntervalCollapses(graph, visibleGraph, intervalCollapseState)
+  ), [graph, intervalCollapseState, visibleGraph]);
+  const intervalVisibleGraph = intervalCollapseProjection.visibleGraph;
+  const intervalStateSignature = JSON.stringify(intervalCollapseState);
+  const normalizedIntervalStateSignature = JSON.stringify(intervalCollapseProjection.normalizedState);
   const availableTags = useMemo<TaskDagTagOption[]>(() => {
     const counts = new Map<string, number>();
     for (const task of tasks) {
@@ -1280,7 +1338,7 @@ export function TaskDagPage() {
   }, [tasks]);
   const hasActiveUnifiedSearch = searchQuery.trim().length > 0 || tagFilter.selectedTags.length > 0;
   const unifiedSearchMatchedTaskIds = useMemo(() => new Set(
-    visibleGraph.nodes
+    intervalVisibleGraph.nodes
       .filter((node) => {
         const task = taskById.get(node.id);
         return task
@@ -1289,22 +1347,22 @@ export function TaskDagPage() {
           : false;
       })
       .map((node) => node.id),
-  ), [searchOptions, searchQuery, tagFilter, taskById, visibleGraph.nodes]);
+  ), [intervalVisibleGraph.nodes, searchOptions, searchQuery, tagFilter, taskById]);
   const unifiedSearchFilteredVisibleGraph = useMemo(() => (
     hasActiveUnifiedSearch && searchOptions.filterMode
-      ? filterVisibleGraphByNodeIds(visibleGraph, unifiedSearchMatchedTaskIds)
-      : visibleGraph
-  ), [hasActiveUnifiedSearch, searchOptions.filterMode, unifiedSearchMatchedTaskIds, visibleGraph]);
+      ? filterVisibleGraphByNodeIds(intervalVisibleGraph, unifiedSearchMatchedTaskIds)
+      : intervalVisibleGraph
+  ), [hasActiveUnifiedSearch, intervalVisibleGraph, searchOptions.filterMode, unifiedSearchMatchedTaskIds]);
   const searchSecondaryNodeIds = useMemo(() => {
     if (!hasActiveUnifiedSearch || searchOptions.filterMode) {
       return new Set<string>();
     }
     return new Set(
-      visibleGraph.nodes
+      intervalVisibleGraph.nodes
         .filter((node) => !unifiedSearchMatchedTaskIds.has(node.id))
         .map((node) => node.id),
     );
-  }, [hasActiveUnifiedSearch, searchOptions.filterMode, unifiedSearchMatchedTaskIds, visibleGraph.nodes]);
+  }, [hasActiveUnifiedSearch, intervalVisibleGraph.nodes, searchOptions.filterMode, unifiedSearchMatchedTaskIds]);
   const smartTerminalProjection = useMemo(
     () => projectVisibleGraphForSmartTerminalMode(unifiedSearchFilteredVisibleGraph),
     [unifiedSearchFilteredVisibleGraph],
@@ -1361,7 +1419,7 @@ export function TaskDagPage() {
     ), 0);
   }, [hasActiveUnifiedSearch, terminalFilteredVisibleGraph.nodes, unifiedSearchMatchedTaskIds]);
   const hiddenRunningNodeCount = useMemo(() => {
-    const hiddenRunningNodeIds = visibleGraph.nodes
+    const hiddenRunningNodeIds = intervalVisibleGraph.nodes
       .filter((node) => (
         !visibleNodeIdSet.has(node.id)
         && (taskById.get(node.id)?.status === 'in_progress' || activeTaskIdSet.has(node.id))
@@ -1371,9 +1429,20 @@ export function TaskDagPage() {
     return new Set(hiddenRunningNodeIds).size;
   }, [
     activeTaskIdSet,
+    intervalVisibleGraph.nodes,
     taskById,
     visibleNodeIdSet,
-    visibleGraph.nodes,
+  ]);
+
+  useEffect(() => {
+    if (normalizedIntervalStateSignature === intervalStateSignature) {
+      return;
+    }
+    setIntervalCollapseState(intervalCollapseProjection.normalizedState);
+  }, [
+    intervalCollapseProjection.normalizedState,
+    intervalStateSignature,
+    normalizedIntervalStateSignature,
   ]);
 
   useEffect(() => {
@@ -1385,9 +1454,10 @@ export function TaskDagPage() {
       hiddenNodeIds: renderedVisibleGraph.hiddenNodeIds,
       collapsedUpstreamOf: dagVisibility.collapsedUpstreamOf,
       collapsedDownstreamOf: dagVisibility.collapsedDownstreamOf,
+      intervalCollapseState,
       viewport: snapshotViewport(flowInstanceRef.current),
     });
-  }, [activeTaskIds, dagVisibility, mode, renderedVisibleGraph.hiddenNodeIds, renderedVisibleGraph.nodes, tasks]);
+  }, [activeTaskIds, dagVisibility, intervalCollapseState, mode, renderedVisibleGraph.hiddenNodeIds, renderedVisibleGraph.nodes, tasks]);
 
   useEffect(() => {
     if (selectedTaskId && !visibleNodeIdSet.has(selectedTaskId)) {
@@ -1400,6 +1470,12 @@ export function TaskDagPage() {
       setConnectState(null);
     }
   }, [connectState, visibleNodeIdSet]);
+
+  useEffect(() => {
+    if (pendingIntervalStartId && !visibleNodeIdSet.has(pendingIntervalStartId)) {
+      setPendingIntervalStartId(null);
+    }
+  }, [pendingIntervalStartId, visibleNodeIdSet]);
 
   useEffect(() => {
     if (focusedSeriesAnchorIds.length === 0 || controlsState.focusSectionOpen) {
@@ -1442,6 +1518,14 @@ export function TaskDagPage() {
         const graphNode = graphNodeById.get(node.id);
         const visibleNode = renderedVisibleNodeById.get(node.id);
         const blockedReason = task ? buildBlockedReason(task, taskById) : null;
+        const intervalCollapseSummaries: TaskDagIntervalSummary[] = (
+          intervalCollapseProjection.collapsedIntervalsByTerminalId.get(node.id) ?? []
+        ).map((interval) => ({
+          startId: interval.startId,
+          startTitle: taskById.get(interval.startId)?.title ?? interval.startId,
+          memberCount: interval.memberCount,
+          collapsed: interval.collapsed,
+        }));
 
         return {
           ...node,
@@ -1467,6 +1551,7 @@ export function TaskDagPage() {
             isExecutable: graphNode?.isExecutable ?? visibleNode?.isExecutable ?? node.data.isExecutable,
             hiddenUpstreamCount: visibleNode?.hiddenUpstreamCount ?? node.data.hiddenUpstreamCount,
             hiddenDownstreamCount: visibleNode?.hiddenDownstreamCount ?? node.data.hiddenDownstreamCount,
+            intervalCollapseSummaries,
             blockedReason,
             showConnectHandles: mode === 'connect',
             connectPreviewType: connectState?.sourceId === node.id ? connectState.type : null,
@@ -1482,6 +1567,7 @@ export function TaskDagPage() {
     activeTaskIdSet,
     connectState,
     graphNodeById,
+    intervalCollapseProjection.collapsedIntervalsByTerminalId,
     layoutFlowGraph.edges,
     layoutFlowGraph.nodes,
     renderedVisibleGraph,
@@ -1645,11 +1731,90 @@ export function TaskDagPage() {
     };
   }, [dagVisibility, interactionGraph]);
 
+  const handleSetIntervalCollapsed = useCallback((
+    startId: string,
+    endId: string,
+    nextCollapsed: boolean,
+  ) => {
+    setIntervalCollapseState((current) => {
+      const existingIndex = current.intervals.findIndex((interval) => (
+        interval.startId === startId && interval.endId === endId
+      ));
+      if (existingIndex === -1) {
+        return {
+          intervals: [
+            ...current.intervals,
+            { startId, endId, collapsed: nextCollapsed },
+          ],
+        };
+      }
+
+      return {
+        intervals: current.intervals.map((interval, index) => (
+          index === existingIndex
+            ? { ...interval, collapsed: nextCollapsed }
+            : interval
+        )),
+      };
+    });
+  }, []);
+
+  const handleToggleIntervalsForTerminal = useCallback((terminalId: string, nextCollapsed: boolean) => {
+    const intervals = intervalCollapseProjection.intervalsByTerminalId.get(terminalId) ?? [];
+    if (intervals.length === 0) {
+      return;
+    }
+
+    setIntervalCollapseState((current) => ({
+      intervals: current.intervals.map((interval) => (
+        interval.endId === terminalId
+          ? { ...interval, collapsed: nextCollapsed }
+          : interval
+      )),
+    }));
+  }, [intervalCollapseProjection.intervalsByTerminalId]);
+
+  const handleCreateIntervalCollapse = useCallback((leftId: string, rightId: string) => {
+    const resolved = resolveTaskDagIntervalDefinition(graph, leftId, rightId);
+    if (!resolved.ok) {
+      toast({
+        title: '区间收缩不可用',
+        description: resolved.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const overlapValidation = validateTaskDagIntervalAgainstExisting(resolved, resolvedExistingIntervals);
+    if (!overlapValidation.ok) {
+      toast({
+        title: '区间收缩不可用',
+        description: overlapValidation.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    handleSetIntervalCollapsed(resolved.startId, resolved.endId, true);
+    setPendingIntervalStartId(null);
+    setSelectedTaskId(resolved.endId);
+  }, [graph, handleSetIntervalCollapsed, resolvedExistingIntervals]);
+
   const resolveContextMenuState = useCallback((nodeId: string) => {
     const upstream = resolveCollapseActionState('upstream', nodeId);
     const downstream = resolveCollapseActionState('downstream', nodeId);
+    const intervalDefinitions = intervalCollapseProjection.intervalsByTerminalId.get(nodeId) ?? [];
+    const hasCollapsedIntervals = intervalDefinitions.some((interval) => interval.collapsed);
+    const hasExpandedIntervals = intervalDefinitions.some((interval) => !interval.collapsed);
     return {
       showEndBlock: mode === 'execute' && activeTaskIds.length > 0,
+      interval: {
+        canSetStart: mode === 'browse' && pendingIntervalStartId !== nodeId,
+        canClearStart: mode === 'browse' && pendingIntervalStartId === nodeId,
+        canCollapseToEnd: mode === 'browse' && pendingIntervalStartId !== null && pendingIntervalStartId !== nodeId,
+        hasCollapsedIntervals,
+        hasExpandedIntervals,
+      },
       focusSeries: {
         visible: mode === 'browse',
         active: hasVisibleFocusedSeries && visibleFocusedSeriesNodeIds.has(nodeId),
@@ -1660,7 +1825,9 @@ export function TaskDagPage() {
   }, [
     activeTaskIds.length,
     hasVisibleFocusedSeries,
+    intervalCollapseProjection.intervalsByTerminalId,
     mode,
+    pendingIntervalStartId,
     resolveCollapseActionState,
     visibleFocusedSeriesNodeIds,
   ]);
@@ -1725,6 +1892,21 @@ export function TaskDagPage() {
   const selectedTaskDownstreamDependencies = selectedTask
     ? buildDownstreamDependencies(selectedTask.id, tasks)
     : [];
+  const selectedTaskIntervalDetails = useMemo<TaskDagIntervalDetailItem[]>(() => {
+    if (!selectedTaskId) {
+      return [];
+    }
+
+    return (intervalCollapseProjection.intervalsByTerminalId.get(selectedTaskId) ?? []).map((interval) => ({
+      startId: interval.startId,
+      startTitle: taskById.get(interval.startId)?.title ?? interval.startId,
+      endId: interval.endId,
+      endTitle: taskById.get(interval.endId)?.title ?? interval.endId,
+      memberCount: interval.memberCount,
+      collapsed: interval.collapsed,
+      memberTitles: interval.nodeIds.map((nodeId) => taskById.get(nodeId)?.title ?? nodeId),
+    }));
+  }, [intervalCollapseProjection.intervalsByTerminalId, selectedTaskId, taskById]);
   const disassociateTargetTask = disassociateTargetTaskId
     ? taskById.get(disassociateTargetTaskId) ?? null
     : null;
@@ -2446,6 +2628,75 @@ export function TaskDagPage() {
             className="fixed z-50 rounded-lg border border-[#E7E5E4] bg-white py-1 shadow-lg dark:border-[#292524] dark:bg-[#1C1917]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
+            {contextMenuState?.interval.canSetStart ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-interval-start"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  setPendingIntervalStartId(contextMenu.nodeId);
+                  setContextMenu(null);
+                }}
+              >
+                设为区间起点
+              </button>
+            ) : null}
+            {contextMenuState?.interval.canClearStart ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-interval-clear-start"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  setPendingIntervalStartId(null);
+                  setContextMenu(null);
+                }}
+              >
+                取消区间起点
+              </button>
+            ) : null}
+            {contextMenuState?.interval.canCollapseToEnd ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-interval-collapse"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  const startId = pendingIntervalStartId;
+                  setContextMenu(null);
+                  if (!startId) {
+                    return;
+                  }
+                  handleCreateIntervalCollapse(startId, contextMenu.nodeId);
+                }}
+              >
+                收缩到此终点
+              </button>
+            ) : null}
+            {contextMenuState?.interval.hasCollapsedIntervals ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-interval-expand"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  handleToggleIntervalsForTerminal(contextMenu.nodeId, false);
+                  setContextMenu(null);
+                }}
+              >
+                展开区间
+              </button>
+            ) : null}
+            {contextMenuState?.interval.hasExpandedIntervals ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-interval-collapse-existing"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  handleToggleIntervalsForTerminal(contextMenu.nodeId, true);
+                  setContextMenu(null);
+                }}
+              >
+                收起区间
+              </button>
+            ) : null}
             {contextMenuState?.showEndBlock ? (
               <button
                 type="button"
@@ -2536,6 +2787,8 @@ export function TaskDagPage() {
             executionHint={selectedTaskExecutionHint}
             upstreamDependencies={selectedTaskUpstreamDependencies}
             downstreamDependencies={selectedTaskDownstreamDependencies}
+            intervalDetails={selectedTaskIntervalDetails}
+            onToggleIntervalCollapse={handleSetIntervalCollapsed}
             onClose={() => setSelectedTaskId(null)}
             onOpenDetail={() => handleNavigateToTaskDetail(selectedTask.id)}
           />

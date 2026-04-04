@@ -1,4 +1,8 @@
 import type { TaskDagVisibilityState } from '@/lib/task/task-dag-visibility';
+import {
+  EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE,
+  type TaskDagIntervalCollapseState,
+} from '@/lib/task/task-dag-interval-collapse';
 import type { DagDirection } from '@/ui/app/pages/task-dag-layout';
 import {
   readRuntimeBackedValue,
@@ -47,6 +51,7 @@ export const TASK_DAG_SEARCH_DRAFT_STORAGE_KEY = 'exomind:dag-search-draft';
 export const TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY = 'exomind:dag-search-options';
 export const TASK_DAG_TAG_FILTER_STORAGE_KEY = 'exomind:dag-tag-filter';
 export const TASK_DAG_FOCUSED_SERIES_STORAGE_KEY = 'exomind:dag-focused-series';
+export const TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY = 'exomind:dag-interval-collapse';
 export const TASK_DAG_VISIBILITY_STORAGE_KEY = 'exomind:dag-visibility';
 export const TASK_DAG_CONTROLS_STATE_STORAGE_KEY = 'exomind:dag-controls-state';
 export const TASK_DAG_MODE_CHANGED_EVENT = 'exomind:dag-mode-changed';
@@ -61,6 +66,7 @@ export const TASK_DAG_SEARCH_DRAFT_CHANGED_EVENT = 'exomind:dag-search-draft-cha
 export const TASK_DAG_SEARCH_OPTIONS_CHANGED_EVENT = 'exomind:dag-search-options-changed';
 export const TASK_DAG_TAG_FILTER_CHANGED_EVENT = 'exomind:dag-tag-filter-changed';
 export const TASK_DAG_FOCUSED_SERIES_CHANGED_EVENT = 'exomind:dag-focused-series-changed';
+export const TASK_DAG_INTERVAL_COLLAPSE_CHANGED_EVENT = 'exomind:dag-interval-collapse-changed';
 export const TASK_DAG_VISIBILITY_CHANGED_EVENT = 'exomind:dag-visibility-changed';
 export const TASK_DAG_CONTROLS_STATE_CHANGED_EVENT = 'exomind:dag-controls-state-changed';
 
@@ -81,11 +87,36 @@ const DEFAULT_TASK_DAG_CONTROLS_STATE: TaskDagControlsState = {
   tagSectionOpen: false,
   focusSectionOpen: false,
 };
-
 const EMPTY_TASK_DAG_VISIBILITY_STATE: TaskDagVisibilityState = {
   collapsedUpstreamOf: [],
   collapsedDownstreamOf: [],
 };
+
+function normalizeTaskDagIntervalCollapseState(
+  state: Partial<TaskDagIntervalCollapseState> | TaskDagIntervalCollapseState | undefined,
+): TaskDagIntervalCollapseState {
+  const seenKeys = new Set<string>();
+  const intervals = Array.isArray(state?.intervals) ? state.intervals : [];
+  return {
+    intervals: intervals.flatMap((interval) => {
+      const startId = typeof interval?.startId === 'string' ? interval.startId.trim() : '';
+      const endId = typeof interval?.endId === 'string' ? interval.endId.trim() : '';
+      if (!startId || !endId) {
+        return [];
+      }
+      const key = `${startId}\0${endId}`;
+      if (seenKeys.has(key)) {
+        return [];
+      }
+      seenKeys.add(key);
+      return [{
+        startId,
+        endId,
+        collapsed: interval.collapsed !== false,
+      }];
+    }),
+  };
+}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -385,6 +416,33 @@ export function setTaskDagControlsState(controlsState: TaskDagControlsState): Ta
     TASK_DAG_CONTROLS_STATE_STORAGE_KEY,
     JSON.stringify(normalized),
     TASK_DAG_CONTROLS_STATE_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagIntervalCollapseState(): TaskDagIntervalCollapseState {
+  try {
+    const raw = readRuntimeBackedValue(TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY);
+    if (!raw) {
+      return EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE;
+    }
+
+    return normalizeTaskDagIntervalCollapseState(
+      JSON.parse(raw) as Partial<TaskDagIntervalCollapseState>,
+    );
+  } catch {
+    return EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE;
+  }
+}
+
+export function setTaskDagIntervalCollapseState(
+  state: TaskDagIntervalCollapseState,
+): TaskDagIntervalCollapseState {
+  const normalized = normalizeTaskDagIntervalCollapseState(state);
+  writeRuntimeBackedValue(
+    TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY,
+    JSON.stringify(normalized),
+    TASK_DAG_INTERVAL_COLLAPSE_CHANGED_EVENT,
   );
   return normalized;
 }

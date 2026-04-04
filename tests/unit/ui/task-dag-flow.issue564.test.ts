@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { EMPTY_TASK_DAG_VISIBILITY_STATE, projectVisibleTaskGraph } from '@/lib/task/task-dag-visibility';
 import type { TaskNode } from '@/lib/types/task';
-import { buildTaskDagFlow, buildVisibleTaskDagFlow } from '@/ui/app/pages/task-dag-flow';
+import {
+  TASK_DAG_NODE_HEIGHT,
+  TASK_DAG_NODE_WIDTH,
+  buildTaskDagFlow,
+  buildVisibleTaskDagFlow,
+} from '@/ui/app/pages/task-dag-flow';
 
 function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }): TaskNode {
   return {
@@ -20,6 +25,11 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
 }
 
 describe('task-dag-flow issue #564（Sugiyama 布局）', () => {
+  it('uses the 160x160 slot box as the shared DAG layout baseline（使用统一 160×160 占位盒）', () => {
+    expect(TASK_DAG_NODE_WIDTH).toBe(160);
+    expect(TASK_DAG_NODE_HEIGHT).toBe(160);
+  });
+
   it('uses left-right layout handles and dagre-routed edges in LR mode', () => {
     const graph = buildTaskGraph([
       makeTask({ id: 'task-a', title: 'A' }),
