@@ -234,7 +234,7 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
       expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '节点' }));
+    fireEvent.click(screen.getByRole('tab', { name: '节点' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
@@ -297,7 +297,7 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
       expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '节点' }));
+    fireEvent.click(screen.getByRole('tab', { name: '节点' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();

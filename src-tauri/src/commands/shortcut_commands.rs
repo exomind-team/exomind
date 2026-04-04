@@ -11,6 +11,8 @@ use tauri::{AppHandle, State};
 use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutEvent, ShortcutState};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::window::Color;
 
 const DEFAULT_VOICE_SHORTCUT: &str = "Alt+Q";
 const DEFAULT_MAIN_WINDOW_SHORTCUT: &str = "Ctrl+E";
@@ -35,7 +37,8 @@ static VOICE_CANCEL_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 static MAIN_WINDOW_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-static VOICE_OVERLAY_BOTTOM_MARGIN: AtomicI32 = AtomicI32::new(DEFAULT_VOICE_OVERLAY_BOTTOM_MARGIN);
+static VOICE_OVERLAY_BOTTOM_MARGIN: AtomicI32 =
+    AtomicI32::new(DEFAULT_VOICE_OVERLAY_BOTTOM_MARGIN);
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,9 +143,7 @@ pub fn register_main_window_shortcut(
     };
 
     if shortcut.eq_ignore_ascii_case(&voice_state.get()) {
-        log::warn!(
-            "skip main window shortcut registration because it conflicts with voice shortcut"
-        );
+        log::warn!("skip main window shortcut registration because it conflicts with voice shortcut");
         return;
     }
 
@@ -156,8 +157,7 @@ pub fn register_main_window_shortcut(
     _app: &AppHandle,
     _state: &MainWindowShortcutState,
     _voice_state: &VoiceShortcutState,
-) {
-}
+) {}
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn register_voice_shortcut(_app: &AppHandle, _state: &VoiceShortcutState) {}
@@ -224,7 +224,9 @@ pub fn apply_main_window_shortcut(
     voice_state: &VoiceShortcutState,
     raw_shortcut: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let next_shortcut = raw_shortcut.map(normalize_shortcut).transpose()?;
+    let next_shortcut = raw_shortcut
+        .map(normalize_shortcut)
+        .transpose()?;
     let current_shortcut = state.get();
 
     if current_shortcut == next_shortcut {
@@ -271,12 +273,19 @@ pub fn apply_main_window_shortcut(
     _voice_state: &VoiceShortcutState,
     raw_shortcut: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let next_shortcut = raw_shortcut.map(normalize_shortcut).transpose()?;
+    let next_shortcut = raw_shortcut
+        .map(normalize_shortcut)
+        .transpose()?;
     state.set(next_shortcut.clone());
     Ok(next_shortcut)
 }
 
 /// Pre-create overlay window hidden（预热悬浮窗）to avoid first-open white flash（首开白屏）.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn transparent_overlay_background_color() -> Color {
+    Color(0, 0, 0, 0)
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     if app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL).is_some() {
@@ -295,7 +304,8 @@ pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     .shadow(false)
     .skip_taskbar(true)
     .resizable(false)
-    .visible(false);
+    .visible(false)
+    .background_color(transparent_overlay_background_color());
 
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
@@ -408,8 +418,7 @@ fn toggle_main_window_from_shortcut(app: &AppHandle) -> Result<(), String> {
         let _ = window.unminimize();
     }
     window.set_focus().map_err(|error| error.to_string())?;
-    app.state::<MainWindowShortcutState>()
-        .mark_activation_pending();
+    app.state::<MainWindowShortcutState>().mark_activation_pending();
     app.emit("main-window-shortcut", "activate").ok();
     Ok(())
 }
@@ -505,8 +514,7 @@ fn foreground_window_context() -> ForegroundWindowContext {
 
     #[link(name = "kernel32")]
     extern "system" {
-        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32)
-            -> Handle;
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> Handle;
         fn QueryFullProcessImageNameW(
             h_process: Handle,
             dw_flags: u32,
@@ -547,8 +555,9 @@ fn foreground_window_context() -> ForegroundWindowContext {
 
         let mut buffer = vec![0u16; 32768];
         let mut size = buffer.len() as u32;
-        let success =
-            unsafe { QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size) };
+        let success = unsafe {
+            QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size)
+        };
         unsafe {
             CloseHandle(handle);
         }
@@ -585,10 +594,7 @@ fn foreground_window_context() -> ForegroundWindowContext {
     }
 }
 
-#[cfg(all(
-    not(target_os = "windows"),
-    not(any(target_os = "android", target_os = "ios"))
-))]
+#[cfg(all(not(target_os = "windows"), not(any(target_os = "android", target_os = "ios"))))]
 fn foreground_window_context() -> ForegroundWindowContext {
     ForegroundWindowContext::default()
 }
@@ -633,9 +639,7 @@ fn resolve_overlay_monitor(app: &AppHandle) -> Result<Option<tauri::Monitor>, St
         None
     };
 
-    let available_monitors = app
-        .available_monitors()
-        .map_err(|error| error.to_string())?;
+    let available_monitors = app.available_monitors().map_err(|error| error.to_string())?;
     let cursor_monitor = if let Some((cx, cy)) = cursor_position() {
         let matched_monitor = available_monitors.into_iter().find(|monitor| {
             let geometry = monitor_geometry(monitor);
@@ -692,8 +696,9 @@ fn calculate_overlay_position(
     let width = VOICE_OVERLAY_WIDTH.round() as i32;
     let height = VOICE_OVERLAY_HEIGHT.round() as i32;
     let horizontal_center_offset = ((work_area_width as i32 - width) / 2).max(0);
-    let bottom_margin =
-        clamp_overlay_bottom_margin(VOICE_OVERLAY_BOTTOM_MARGIN.load(Ordering::SeqCst));
+    let bottom_margin = clamp_overlay_bottom_margin(
+        VOICE_OVERLAY_BOTTOM_MARGIN.load(Ordering::SeqCst),
+    );
     let vertical_offset = (work_area_height as i32 - height - bottom_margin).max(0);
 
     (
@@ -721,23 +726,50 @@ fn position_voice_overlay(app: &AppHandle, window: &WebviewWindow) -> Result<(),
         .map_err(|error| error.to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyntheticShortcutStep {
+    PressControl,
+    ClickV,
+    ReleaseControl,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn paste_shortcut_steps() -> [SyntheticShortcutStep; 3] {
+    [
+        SyntheticShortcutStep::PressControl,
+        SyntheticShortcutStep::ClickV,
+        SyntheticShortcutStep::ReleaseControl,
+    ]
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// Simulate Ctrl+V paste via enigo.
 #[tauri::command]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn simulate_paste() -> Result<(), String> {
     // Run in blocking thread since enigo is not Send on all platforms
     tokio::task::spawn_blocking(|| {
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
         let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-        enigo
-            .key(Key::Control, Direction::Press)
-            .map_err(|e| e.to_string())?;
-        enigo
-            .key(Key::Unicode('v'), Direction::Click)
-            .map_err(|e| e.to_string())?;
-        enigo
-            .key(Key::Control, Direction::Release)
-            .map_err(|e| e.to_string())?;
+        for step in paste_shortcut_steps() {
+            match step {
+                SyntheticShortcutStep::PressControl => {
+                    enigo
+                        .key(Key::Control, Direction::Press)
+                        .map_err(|e| e.to_string())?;
+                }
+                SyntheticShortcutStep::ClickV => {
+                    enigo
+                        .key(Key::V, Direction::Click)
+                        .map_err(|e| e.to_string())?;
+                }
+                SyntheticShortcutStep::ReleaseControl => {
+                    enigo
+                        .key(Key::Control, Direction::Release)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+        }
         Ok(())
     })
     .await
@@ -827,7 +859,10 @@ pub async fn voice_overlay_hide(_app: AppHandle) -> Result<(), String> {
 /// Update voice overlay bottom offset（更新语音悬浮窗底部间距）.
 #[tauri::command]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub async fn voice_overlay_set_bottom_offset(app: AppHandle, offset: i32) -> Result<i32, String> {
+pub async fn voice_overlay_set_bottom_offset(
+    app: AppHandle,
+    offset: i32,
+) -> Result<i32, String> {
     let normalized = clamp_overlay_bottom_margin(offset);
     VOICE_OVERLAY_BOTTOM_MARGIN.store(normalized, Ordering::SeqCst);
     if let Some(window) = app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL) {
@@ -838,7 +873,10 @@ pub async fn voice_overlay_set_bottom_offset(app: AppHandle, offset: i32) -> Res
 
 #[tauri::command]
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn voice_overlay_set_bottom_offset(_app: AppHandle, offset: i32) -> Result<i32, String> {
+pub async fn voice_overlay_set_bottom_offset(
+    _app: AppHandle,
+    offset: i32,
+) -> Result<i32, String> {
     Ok(offset)
 }
 
@@ -955,8 +993,11 @@ pub async fn foreground_window_focus(_window_handle: String) -> Result<bool, Str
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_overlay_position, choose_voice_overlay_anchor, cursor_in_monitor, MonitorGeometry,
+        calculate_overlay_position, choose_voice_overlay_anchor, cursor_in_monitor, paste_shortcut_steps,
+        transparent_overlay_background_color, SyntheticShortcutStep,
+        MonitorGeometry,
     };
+    use tauri::window::Color;
 
     #[test]
     fn calculate_overlay_position_centers_bottom_on_primary_work_area() {
@@ -993,11 +1034,8 @@ mod tests {
             height: 2088,
         };
 
-        let anchor = choose_voice_overlay_anchor(
-            Some(main_monitor),
-            Some(cursor_monitor),
-            Some(primary_monitor),
-        );
+        let anchor =
+            choose_voice_overlay_anchor(Some(main_monitor), Some(cursor_monitor), Some(primary_monitor));
 
         assert_eq!(anchor, Some(main_monitor));
     }
@@ -1088,5 +1126,22 @@ mod tests {
         // Monitor with taskbar offset: work area starts at y=40
         assert!(cursor_in_monitor(960, 100, 0, 40, 1920, 1000));
         assert!(!cursor_in_monitor(960, 39, 0, 40, 1920, 1000));
+    }
+
+    #[test]
+    fn paste_shortcut_uses_physical_v_key_instead_of_unicode_character() {
+        assert_eq!(
+            paste_shortcut_steps(),
+            [
+                SyntheticShortcutStep::PressControl,
+                SyntheticShortcutStep::ClickV,
+                SyntheticShortcutStep::ReleaseControl,
+            ]
+        );
+    }
+
+    #[test]
+    fn voice_overlay_background_color_is_fully_transparent() {
+        assert_eq!(transparent_overlay_background_color(), Color(0, 0, 0, 0));
     }
 }

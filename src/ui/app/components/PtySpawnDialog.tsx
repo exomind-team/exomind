@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Terminal } from 'lucide-react';
 import { detectAndPersistHistoricalSessionId } from '@/ui/app/pages/agents/pty-session-recovery';
 
@@ -370,17 +371,20 @@ export function PtySpawnDialog({
           {/* ── Agent type ── */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Agent 类型（agent type）</label>
-            <select
-              data-testid="pty-agent-type"
+            <Select
               value={agentType}
-              onChange={(e) => setAgentType(e.target.value as PtyAgentType)}
-              className="h-9 w-full rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
+              onValueChange={(value) => setAgentType(value as PtyAgentType)}
               disabled={loading}
             >
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-              <option value="custom">Custom（自定义）</option>
-            </select>
+              <SelectTrigger data-testid="pty-agent-type" className="h-9 rounded-lg text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="claude">Claude</SelectItem>
+                <SelectItem value="codex">Codex</SelectItem>
+                <SelectItem value="custom">Custom（自定义）</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* ── Name input ── */}
@@ -429,18 +433,21 @@ export function PtySpawnDialog({
           {agentType === 'codex' && (
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">推理强度（reasoning effort）</label>
-              <select
-                data-testid="pty-reasoning-effort"
+              <Select
                 value={reasoningEffort}
-                onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
-                className="h-9 w-full rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
+                onValueChange={(value) => setReasoningEffort(value as ReasoningEffort)}
                 disabled={loading}
               >
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
-              </select>
+                <SelectTrigger data-testid="pty-reasoning-effort" className="h-9 rounded-lg text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">low</SelectItem>
+                  <SelectItem value="medium">medium</SelectItem>
+                  <SelectItem value="high">high</SelectItem>
+                  <SelectItem value="xhigh">xhigh</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           )}
 

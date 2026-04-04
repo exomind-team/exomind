@@ -142,4 +142,43 @@ mod tests {
         assert!(result.content.contains("整理 runtime 路由"));
         assert!(result.content.contains("复盘 Agent API 设计"));
     }
+
+    #[tokio::test]
+    async fn get_recent_events_tool_uses_default_limit_of_ten() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        for index in 0..12 {
+            store
+                .append_event(
+                    Some("profile-alpha"),
+                    EventRecord {
+                        id: format!("evt-{index}"),
+                        timestamp: index as i64,
+                        content: format!("event-{index}"),
+                        tags: Vec::new(),
+                        metadata: None,
+                    },
+                )
+                .unwrap();
+        }
+
+        let mut registry = ToolRegistry::new();
+        let (def, tool_fn) =
+            eventlog::get_recent_events_tool(Arc::clone(&store), Some("profile-alpha".to_string()));
+        registry.register(def, tool_fn);
+
+        let result = registry
+            .dispatch(&ToolUse {
+                id: "call-default".to_string(),
+                name: GET_RECENT_EVENTS_TOOL.to_string(),
+                input: serde_json::json!({}),
+            })
+            .await;
+
+        let lines = result.content.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 10);
+        assert!(lines.iter().any(|line| line.contains("event-11")));
+        assert!(!lines.iter().any(|line| line.contains("event-0")));
+        assert!(!lines.iter().any(|line| line.contains("event-1 (")));
+    }
 }

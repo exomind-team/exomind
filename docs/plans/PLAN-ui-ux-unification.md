@@ -1,497 +1,155 @@
-# 前端 UI/UX 统一重构计划
+# 前端 UI/UX 统一重构计划（Issue #807 总览入口）
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-> **Issue**: #807
-> **标准参照**: 信号网络页 (AgentsPage) Tab 规范
-
-**Tech Stack:** React 18 + TypeScript, shadcn/ui (Radix), Tailwind CSS, Tauri v2
+> **Issue**: [#807](https://github.com/exomind-team/exomind/issues/807)
+> **状态**: Reviewed and reframed（已评审并重构）
+> **最后更新**: 2026-04-02
 
 ---
 
-## 0. 现状诊断
+## 1. 这份文件现在负责什么
 
-| 问题 | 数量 | 严重度 |
-|------|------|--------|
-| 硬编码颜色 | 1,560 处 / 436 文件 | 🔴 |
-| 原生 HTML `<select>` | 18 处 / 13 文件 | 🔴 |
-| 手搓 Tab（非 Radix） | 3+ 页面 | 🟡 |
-| 页面壳层无统一 | 15 个页面各自实现 | 🟡 |
-| 缺少 shadcn Select | 组件库缺失 | 🔴 |
+这不是最终实施细节文档，而是 **Issue #807 的总览入口**。
 
-**已有但被忽略的基础**:
-- `src/index.css` 已定义 28+ CSS 变量（`--brand-accent`, `--text-muted`, `--bg-card` 等）
-- `tailwind.config.js` 已扩展了 `brand`, `success`, `warning` 等 color alias
-- 13 个 shadcn/ui 组件已安装
+它负责回答三件事：
 
----
+1. 为什么要做前端统一化
+2. 旧计划里哪些方向有问题
+3. 现在应该看哪两份正式文档
 
-## 1. Scope
+正式文档如下：
 
-### In Scope
-
-- 设计 Token 补全 + 硬编码颜色批量迁移
-- shadcn Select 组件引入 + 替换 18 处原生 select
-- PageShell + PageTabs 统一组件提取
-- 所有页面 Tab 收敛到 shadcn Tabs
-- 页面壳层（header/content/footer）统一
-- UI 规范文档
-
-### Out of Scope
-
-- 功能性改动（不改业务逻辑）
-- 图标重设计（#795 单独处理）
-- 品牌配色大改（保持现有配色，只做变量化）
-- 新页面设计（如目标系统 v2）
+- **前端设计规范 / Frontend UI Spec（前端 UI 规范）**
+  `docs/development/ui-spec.md`
+- **Issue #807 实施计划 / Implementation Plan（实施计划）**
+  `docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md`
 
 ---
 
-## Task 1: 补全设计 Token + Tailwind 映射
+## 2. 现状诊断（保留结论）
 
-**Files:**
-- Modify: `src/index.css`
-- Modify: `tailwind.config.js`
-- Create: `docs/development/ui-spec.md`
+当前前端 UI 存在系统性不一致问题，关键现象包括：
 
-**Step 1: 审计现有 CSS 变量，补缺失的**
+- 硬编码颜色大量存在
+- 原生 `<select>` 仍在多个页面使用
+- tab 语义和模式切换语义混用
+- 页面壳层没有统一边界
+- 设置页局部已形成统一系统，但尚未升格为全项目标准
 
-当前已有的变量：
-```css
---background, --foreground, --primary, --secondary
---brand, --brand-accent, --success, --warning, --destructive
---text-primary, --text-strong, --text-secondary, --text-muted
---bg-card, --bg-surface, --border-card, --border-subtle
---sidebar, --sidebar-foreground, --sidebar-border
-```
+一句话版：
 
-需要补充的变量（从硬编码中提取）：
-
-```css
-:root {
-  /* 页面级 */
-  --page-bg: 30 33% 98%;            /* #FAF7F5 */
-  --page-bg-dark: 20 14% 4%;        /* #0C0A09 */
-
-  /* 交互态 */
-  --active-bg: 14 56% 50%;          /* #C75B3A */
-  --active-bg-hover: 14 59% 44%;    /* #B24D2F */
-  --inactive-bg: 30 26% 94%;        /* #F5F0ED */
-  --inactive-bg-dark: 24 10% 10%;   /* #1C1917 */
-
-  /* 边框补充 */
-  --border-page: 30 20% 92%;        /* #F0ECE8 */
-  --border-input: 30 7% 89%;        /* #E7E5E4 */
-
-  /* 输入域 */
-  --input-text: 24 9% 24%;          /* #44403C */
-  --input-text-dark: 30 7% 89%;     /* #E7E5E4 */
-}
-```
-
-**Step 2: Tailwind 映射**
-
-在 `tailwind.config.js` 的 `extend.colors` 中添加：
-
-```js
-page: {
-  DEFAULT: 'hsl(var(--page-bg))',
-  dark: 'hsl(var(--page-bg-dark))',
-},
-active: {
-  DEFAULT: 'hsl(var(--active-bg))',
-  hover: 'hsl(var(--active-bg-hover))',
-},
-inactive: {
-  DEFAULT: 'hsl(var(--inactive-bg))',
-  dark: 'hsl(var(--inactive-bg-dark))',
-},
-```
-
-这样 `bg-[#FAF7F5]` → `bg-page`，`bg-[#C75B3A]` → `bg-active`。
-
-**Step 3: 写 UI 规范文档**
-
-Create `docs/development/ui-spec.md`:
-
-内容包含：
-1. 颜色 Token 表（变量名 → HSL → 用途）
-2. Tab 实现标准（必须用 shadcn Tabs）
-3. Select 实现标准（必须用 shadcn Select）
-4. 页面壳层标准（必须用 PageShell）
-5. 禁止事项清单：
-   - ❌ 禁止 `bg-[#xxx]` 硬编码颜色
-   - ❌ 禁止手搓 Tab / Select / Dialog
-   - ❌ 禁止 native HTML `<select>`
-   - ✅ 必须用 CSS 变量 / Tailwind token
-   - ✅ 必须用 shadcn/ui 组件
-
-**验证:**
-```bash
-npx tsc --noEmit
-```
+> 现在不是“没有规范”，而是“规范只在局部生效，还没有变成全项目默认规则”。
 
 ---
 
-## Task 2: 引入 shadcn Select 组件
+## 3. 旧计划评审结论
 
-**Files:**
-- Create: `src/components/ui/select.tsx`
-- Modify: 13 个文件中的 18 处 `<select>`
+### P0 问题（方向性错误）
 
-**Step 1: 添加 shadcn Select**
+1. **“所有 tab-like UI 都收敛到 Tabs”是错误目标。**
+   某些 UI 是模式切换或锚点导航，不是真 tab。
 
-```bash
-npx shadcn@latest add select
-```
+2. **“所有页面都必须使用 PageShell”是错误目标。**
+   graph、topology、overlay、全屏浮层不属于普通内容页。
 
-如果 CLI 不可用，手动从 shadcn/ui 文档复制 Select 组件代码到 `src/components/ui/select.tsx`。
+3. **“硬编码颜色归零”不应该作为单 issue 的绝对验收条件。**
+   需要文档化例外，而不是误伤特殊表面。
 
-基于 Radix Select primitive:
-```tsx
-import * as SelectPrimitive from '@radix-ui/react-select';
-// Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel
-```
+### P1 问题（计划可执行性不足）
 
-**Step 2: 逐文件替换原生 select**
-
-按优先级排序（用户最常见的页面优先）：
-
-| 优先 | 文件 | select 数量 | 说明 |
-|------|------|------------|------|
-| 1 | `TaskDetailPage.tsx` | 3 | 任务依赖选择 |
-| 2 | `BlockTaskAssociationList.tsx` | 1 | 时间块关联任务 |
-| 3 | `prestart-task-selection.tsx` | 1 | 预选任务 |
-| 4 | `NowTodayPlannerTimeline.tsx` | 1 | 今日计划 |
-| 5 | `ai-registry-settings-card.tsx` | 多个 | AI 设置 |
-| 6 | `settings-renderers.tsx` | 多个 | 通用设置渲染 |
-| 7 | `agents-sheets.tsx` | 1 | Agent 配置 |
-| 8 | `GoalsPage.tsx` | 1 | 目标系统 |
-| 9 | `SplitEdgeDialog.tsx` | 1 | 目标拆分 |
-| 10 | `PtySpawnDialog.tsx` | 1 | PTY 终端 |
-| 11 | `UpdateSettingsCard.tsx` | 1 | 更新设置 |
-| 12 | `RouteEditPanel.tsx` | 1 | 信号路由编辑 |
-| 13 | `TimeBlockWidget.tsx` | 1 | 时间块 |
-
-替换模式：
-
-```tsx
-// Before (原生)
-<select className="w-full rounded-xl border border-[#E7E5E4] ..."
-  value={value} onChange={e => setValue(e.target.value)}>
-  <option value="a">选项 A</option>
-</select>
-
-// After (shadcn)
-<Select value={value} onValueChange={setValue}>
-  <SelectTrigger className="w-full">
-    <SelectValue placeholder="选择..." />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value="a">选项 A</SelectItem>
-  </SelectContent>
-</Select>
-```
-
-**验证:**
-```bash
-npx tsc --noEmit
-npx vitest run
-```
+1. 没有先落正式 spec
+2. 没有接入 `CLAUDE.md / AGENTS.md`
+3. 缺少页面分类法
+4. 缺少 Windows PowerShell 友好的验证命令
+5. 缺少特殊页面例外策略
 
 ---
 
-## Task 3: 提取 PageShell + PageTabs 统一组件
+## 4. 修订后的核心策略
 
-**Files:**
-- Create: `src/ui/app/components/PageShell.tsx`
-- Create: `src/ui/app/components/PageTabs.tsx`
+Issue #807 的正确推进方式不是“一口气统一全部页面”，而是三步：
 
-**Step 1: PageShell 组件**
-
-```tsx
-interface PageShellProps {
-  title: string;
-  subtitle?: string;
-  headerAction?: ReactNode;
-  children: ReactNode;
-  /** 隐藏 header（如设置页由外层提供 header） */
-  hideHeader?: boolean;
-}
-```
-
-标准布局：
-```
-<div className="flex h-full min-h-full flex-col bg-page dark:bg-page-dark">
-  {!hideHeader && (
-    <header className="flex items-center justify-between border-b border-border-page px-5 py-3 md:px-6 lg:px-8">
-      <h1 className="text-lg font-semibold text-foreground">{title}</h1>
-      {headerAction}
-    </header>
-  )}
-  <div className="min-h-0 flex-1 overflow-y-auto">
-    {children}
-  </div>
-</div>
-```
-
-**Step 2: PageTabs 组件**
-
-基于 shadcn Tabs，提供两种 variant:
-
-```tsx
-interface PageTabsProps {
-  tabs: Array<{ id: string; label: string; icon?: ReactNode }>;
-  activeTab: string;
-  onTabChange: (tab: string) => void;
-  /** grid: 等分网格（≤4 tab）; scroll: 横向滚动（>4 tab / 移动端） */
-  variant?: 'grid' | 'scroll';
-  children: ReactNode; // TabsContent
-}
-```
-
-Grid variant（信号网络页标准）:
-```tsx
-<TabsList className="grid h-auto w-full grid-cols-{N} rounded-xl border border-border-card bg-card p-1 shadow-sm">
-  {tabs.map(tab => (
-    <TabsTrigger key={tab.id} value={tab.id} className="h-9 flex-1 gap-1.5 rounded-lg">
-      {tab.icon} {tab.label}
-    </TabsTrigger>
-  ))}
-</TabsList>
-```
-
-Scroll variant（移动端 / 多 tab）:
-```tsx
-<TabsList className="scrollbar-none flex gap-2 overflow-x-auto rounded-xl p-1">
-  {tabs.map(tab => (
-    <TabsTrigger key={tab.id} value={tab.id} className="shrink-0 rounded-full px-3 py-1.5">
-      {tab.icon} {tab.label}
-    </TabsTrigger>
-  ))}
-</TabsList>
-```
-
-**验证:**
-```bash
-npx tsc --noEmit
-```
+1. **先固化规范**
+   把 Settings 的成功经验整理成项目级 spec
+2. **再收口共享层**
+   明确 `PageShell / PageTabs / Select / Dialog / Drawer` 的边界
+3. **最后分层迁移页面**
+   普通页面优先，复杂页面慎改，特殊页面只治理基础设施
 
 ---
 
-## Task 4: 各页面收敛到 PageShell + PageTabs
+## 5. 本次最终交付物
 
-**Files:** 修改以下所有页面
+本轮文档工作完成后，Issue #807 的文档基础应包括：
 
-### 4.1 当下页 (NowPage.tsx)
-
-当前：已用 shadcn Tabs，结构接近标准。
-改动：套 PageShell，Tab 样式对齐信号网络页标准（加 border + shadow）。
-
-### 4.2 Me 页 (MePage.tsx)
-
-当前：手搓 button + useState。
-改动：
-- 移除手动 active state 管理
-- 替换为 PageTabs（grid variant, 3 cols）
-- 套 PageShell
-
-### 4.3 提醒页 (RemindersPage.tsx)
-
-当前：手搓 button。
-改动：同 Me 页，替换为 PageTabs。
-
-### 4.4 任务详情页 (TaskDetailPage.tsx)
-
-当前：手搓 sticky pill tabs。
-改动：替换为 PageTabs（scroll variant for mobile, grid for desktop）。
-
-### 4.5 任务页 (TasksPage.tsx)
-
-当前：无内部 tab，用 Link 跳转到子页面。
-改动：评估是否需要 tab 化。如果保持 Link 模式，至少套 PageShell 统一 header。
-
-### 4.6 信号网络页 (AgentsPage.tsx)
-
-当前：已是标准。
-改动：套 PageShell（可能 hideHeader，因为页面结构特殊），确保 WorkspaceTabs 的子 tab 使用 PageTabs。
-
-### 4.7 设置页 (SettingsPage.tsx)
-
-当前：Registry 驱动，无 tab。
-改动：保持现有模式，但套 PageShell（hideHeader）。确保内部组件使用统一 token。
-
-### 4.8 其他页面
-
-TaskTimelinePage, TaskDagPage, TimeBlockDetailPage, FocusPage 等：
-- 套 PageShell
-- 确保 header 格式统一
-
-**每个页面改完后验证:**
-```bash
-npx tsc --noEmit
-```
+- `docs/development/ui-spec.md`
+- `docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md`
+- `CLAUDE.md` 中的规范入口
+- `AGENTS.md` 中的规范入口
+- `docs/README.md` 中的导航入口
 
 ---
 
-## Task 5: 硬编码颜色批量迁移
+## 6. 下一步怎么看
 
-**Files:** 436 个文件，1,560 处
+如果你是：
 
-**策略: 分批替换，高频先行**
+### 人类评审者
 
-### 5.1 建立替换映射表
+先看：
 
-| 硬编码 | 替换为 | 出现次数 |
-|--------|--------|---------|
-| `bg-[#FAF7F5]` | `bg-page` | 41 |
-| `dark:bg-[#0C0A09]` | `dark:bg-page-dark` | 26 |
-| `bg-[#C75B3A]` | `bg-active` | 61 |
-| `text-[#78716C]` | `text-muted-foreground` | 77 |
-| `text-[#A8A29E]` | `text-muted` | 121 |
-| `border-[#E7E5E4]` | `border-border` | 75 |
-| `dark:border-[#292524]` | `dark:border-border` | 119 |
-| `bg-[#1C1917]` | `dark:bg-card` | 119 |
-| `bg-[#F5F0ED]` | `bg-inactive` | 32 |
-| `text-[#57534E]` | `text-foreground` | 32 |
-| `text-[#FAFAF9]` | `dark:text-foreground` | 66 |
-| `text-[#D6D3D1]` | `dark:text-muted-foreground` | 41 |
-| `bg-[#F0ECE8]` | `border-page` | 16 |
-| `text-[#44403C]` | `text-input` | 14 |
+1. `docs/development/ui-spec.md`
+2. `docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md`
 
-### 5.2 执行策略
+### Agent / 实施者
 
-**用 IDE 全局替换或脚本批量处理**，按颜色分批：
+先看：
 
-Round 1: 背景色（`bg-[#FAF7F5]` → `bg-page` 等）
-Round 2: 文字色（`text-[#78716C]` → `text-muted-foreground` 等）
-Round 3: 边框色（`border-[#E7E5E4]` → `border-border` 等）
-Round 4: 交互色（`bg-[#C75B3A]` → `bg-active` 等）
-Round 5: 剩余零散色值
-
-**每轮替换后验证:**
-```bash
-npx tsc --noEmit
-npx vitest run
-bun dev  # 视觉检查
-```
-
-### 5.3 添加 lint 规则（可选）
-
-在 `.eslintrc` 或自定义脚本中添加规则，**禁止新的硬编码颜色**：
-
-```bash
-# 检查是否还有硬编码颜色
-grep -r 'bg-\[#\|text-\[#\|border-\[#' src/ --include='*.tsx' --include='*.ts' | wc -l
-# 目标: 0
-```
+1. `CLAUDE.md` 或 `AGENTS.md`
+2. `docs/development/ui-spec.md`
+3. `docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md`
 
 ---
 
-## Task 6: UI 规范文档
+## 7. 一句话总结
 
-**File:** Create `docs/development/ui-spec.md`
+Issue #807 的目标已经从“粗暴统一页面样子”修正为：
 
-内容大纲:
-
-```markdown
-# ExoMind UI 规范
-
-## 强制规则
-
-### 1. 颜色
-- ✅ 必须使用 CSS 变量 / Tailwind token
-- ❌ 禁止 bg-[#xxx] / text-[#xxx] / border-[#xxx]
-- 颜色 Token 速查表...
-
-### 2. 组件
-- ✅ Tab → shadcn Tabs (Radix)
-- ✅ Select → shadcn Select (Radix)
-- ✅ Dialog → shadcn Dialog (Radix)
-- ✅ 页面壳 → PageShell
-- ❌ 禁止手搓 Tab / Select / Dialog
-- ❌ 禁止原生 HTML <select>
-
-### 3. 页面结构
-- 所有页面必须使用 PageShell
-- Tab 使用 PageTabs（grid 或 scroll variant）
-- Header 标准: title + action area, border-b
-
-### 4. 响应式
-- 标准断点: md (768px) / lg (1024px)
-- 标准间距: px-5 md:px-6 lg:px-8
-
-### 5. 深色模式
-- 所有组件必须有 dark: 变体
-- 使用 CSS 变量自动切换
-```
+> 建立一个人和 Agent 都能持续执行的前端设计规范，再按页面类型有边界地推进统一化。
 
 ---
 
-## Task 7: 最终验证
+## 8. 当前阶段判断（2026-04-02）
 
-**Step 1: 全量检查**
-```bash
-npx tsc --noEmit
-npx vitest run
-bun build
-```
+### Phase 0
 
-**Step 2: 硬编码颜色清零检查**
-```bash
-grep -r 'bg-\[#\|text-\[#\|border-\[#' src/ --include='*.tsx' --include='*.ts' | wc -l
-# 目标: 0
-```
+已完成。
 
-**Step 3: 原生 select 清零检查**
-```bash
-grep -r '<select' src/ --include='*.tsx' | wc -l
-# 目标: 0
-```
+已经完成：
 
-**Step 4: 视觉验证**
-```bash
-bun dev
-```
-逐页面检查：当下、任务、Me、信号网络、提醒、设置、任务详情。
+- 规范入口固化
+- `CLAUDE.md / AGENTS.md / docs/README.md` 接入
+- `#807` 升级为总 epic
 
----
+### Phase 1
 
-## 验收标准 (DoD)
+接近完成，可视为 **收尾中**。
 
-- [ ] `npx tsc --noEmit` 通过
-- [ ] `npx vitest run` 全部通过
-- [ ] `bun build` 成功
-- [ ] 硬编码颜色 grep 结果 = 0
-- [ ] 原生 `<select>` grep 结果 = 0
-- [ ] 所有 Tab 使用 shadcn Tabs
-- [ ] 所有页面使用 PageShell
-- [ ] `docs/development/ui-spec.md` 已创建
-- [ ] 深色模式全页面一致
-- [ ] 视觉回归无异常
+已经完成：
 
-## 分支
+- `PageShell / PageTabs / Select` 共享层落地
+- `Now / Tasks / Proposal Inbox` 头部骨架开始统一
+- 任务域顶部导航开始统一到同一套 header tabs
+- 高价值普通页面中的高频原生 `<select>` 已大幅收口
 
-```
-feature/issue-807-ui-unification
-```
+剩余尾巴：
 
-目标合并到 `dev`。
+- `Workbench` 仅纳入头部一致性规划，仍属于特殊 surface，不在本轮深改骨架
+- 零散页面与特殊表面的局部一致性仍需在下一阶段继续收边
 
-## 执行建议
+### Phase 2
 
-7 个 Task 有依赖关系：
+已开始，但不继续扩大战线；待 Phase 1 正式关账后再系统推进。
 
-```
-Task 1 (Token 补全) ← 其他 Task 都依赖这个
-Task 2 (Select 组件) ← Task 4 替换页面时用
-Task 3 (PageShell/Tabs) ← Task 4 替换页面时用
-Task 4 (页面收敛) ← 依赖 1+2+3
-Task 5 (颜色迁移) ← 依赖 1，可与 4 并行
-Task 6 (规范文档) ← 可随时写
-Task 7 (验证) ← 最后
-```
+### Phase 2.5
 
-**建议拆成 2-3 个 Agent 并行**:
-- Agent A: Task 1 → Task 5（Token + 颜色迁移）
-- Agent B: Task 2 → Task 3（组件库）
-- Agent C: Task 4（页面收敛，等 A+B 完成后开始）
-- 最后: Task 6 + 7
+文档已起草，工程还未正式进入执行。

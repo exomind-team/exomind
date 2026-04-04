@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { PtySpawnDialog } from '@/ui/app/components/PtySpawnDialog';
+
+async function chooseDialogSelect(triggerTestId: string, optionName: string): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByTestId(triggerTestId));
+  await user.click(await screen.findByRole('option', { name: optionName }));
+}
 
 describe('PtySpawnDialog（终端会话启动弹窗）', () => {
   beforeEach(() => {
@@ -38,11 +45,11 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId('pty-agent-type'), { target: { value: 'codex' } });
+    await chooseDialogSelect('pty-agent-type', 'Codex');
     fireEvent.change(screen.getByTestId('pty-session-name'), { target: { value: 'codex-main' } });
     fireEvent.change(screen.getByTestId('pty-session-workdir'), { target: { value: 'D:/project/exomind' } });
     fireEvent.change(screen.getByTestId('pty-model'), { target: { value: 'gpt-5.4' } });
-    fireEvent.change(screen.getByTestId('pty-reasoning-effort'), { target: { value: 'xhigh' } });
+    await chooseDialogSelect('pty-reasoning-effort', 'xhigh');
     fireEvent.change(screen.getByTestId('pty-extra-args'), { target: { value: '--search --full-auto' } });
     fireEvent.click(screen.getByTestId('pty-spawn-submit'));
 
@@ -124,7 +131,7 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId('pty-agent-type'), { target: { value: 'codex' } });
+    await chooseDialogSelect('pty-agent-type', 'Codex');
     fireEvent.change(screen.getByTestId('pty-session-name'), { target: { value: 'codex-main' } });
     fireEvent.click(screen.getByTestId('pty-spawn-submit'));
 
@@ -246,7 +253,7 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId('pty-agent-type'), { target: { value: 'codex' } });
+    await chooseDialogSelect('pty-agent-type', 'Codex');
 
     await waitFor(() => {
       expect(screen.getByTestId('pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab')).toBeInTheDocument();
@@ -255,7 +262,7 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
     fireEvent.change(screen.getByTestId('pty-session-name'), { target: { value: 'resume-codex' } });
     fireEvent.change(screen.getByTestId('pty-session-workdir'), { target: { value: 'D:/project/exomind' } });
     fireEvent.change(screen.getByTestId('pty-model'), { target: { value: 'gpt-5.4' } });
-    fireEvent.change(screen.getByTestId('pty-reasoning-effort'), { target: { value: 'xhigh' } });
+    await chooseDialogSelect('pty-reasoning-effort', 'xhigh');
     fireEvent.change(screen.getByTestId('pty-extra-args'), { target: { value: '--search --full-auto' } });
     fireEvent.click(screen.getByTestId('pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab'));
 
@@ -342,7 +349,7 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId('pty-agent-type'), { target: { value: 'custom' } });
+    await chooseDialogSelect('pty-agent-type', 'Custom（自定义）');
 
     expect(screen.getByTestId('pty-custom-command')).toBeInTheDocument();
     expect(screen.queryByTestId('pty-history-list')).not.toBeInTheDocument();

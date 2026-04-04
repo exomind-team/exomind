@@ -1,6 +1,7 @@
 ﻿import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { TaskDetailPage } from '@/ui/app/pages/TaskDetailPage';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
@@ -165,6 +166,12 @@ function renderPage(isDesktop = true) {
   render(<TaskDetailPage />);
 }
 
+async function chooseSharedSelectOption(triggerTestId: string, optionName: string): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(await screen.findByTestId(triggerTestId));
+  await user.click(await screen.findByRole('option', { name: optionName }));
+}
+
 describe('TaskDetailPage dependencies issue #398 P0', () => {
   beforeEach(() => {
     navigateMock.mockReset();
@@ -220,7 +227,7 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
     const currentItem = await screen.findByTestId('dependency-item-task-2');
     expect(within(currentItem).getByText('补 task.service 单测')).toBeInTheDocument();
     expect(within(currentItem).getByText('进行中')).toBeInTheDocument();
-    expect(within(currentItem).getByDisplayValue('soft')).toBeInTheDocument();
+    expect(within(currentItem).getByTestId('dependency-type-task-2')).toHaveTextContent('soft');
 
     const reverseItem = screen.getByTestId('reverse-dependency-item-task-3');
     expect(within(reverseItem).getByText('联调任务详情页')).toBeInTheDocument();
@@ -235,8 +242,8 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
     await screen.findByTestId('dependency-add-task-select');
     expect(screen.getByTestId('dependency-current-empty')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByTestId('dependency-add-task-select'), { target: { value: 'task-2' } });
-    fireEvent.change(screen.getByTestId('dependency-add-type-select'), { target: { value: 'hard' } });
+    await chooseSharedSelectOption('dependency-add-task-select', '补 task.service 单测 · 进行中');
+    await chooseSharedSelectOption('dependency-add-type-select', 'hard');
     fireEvent.click(screen.getByTestId('dependency-add-button'));
 
     await waitFor(() => {
@@ -244,7 +251,7 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
     });
 
     const currentItem = await screen.findByTestId('dependency-item-task-2');
-    expect(within(currentItem).getByDisplayValue('hard')).toBeInTheDocument();
+    expect(within(currentItem).getByTestId('dependency-type-task-2')).toHaveTextContent('hard');
     expect(screen.queryByTestId('dependency-current-empty')).not.toBeInTheDocument();
   });
 
@@ -258,14 +265,16 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
     }));
     renderPage();
 
+    const user = userEvent.setup();
     const taskSelect = await screen.findByTestId('dependency-add-task-select');
+    await user.click(taskSelect);
 
-    expect(within(taskSelect).queryByRole('option', { name: '实现依赖关系卡片 · 待办' })).not.toBeInTheDocument();
-    expect(within(taskSelect).getByRole('option', { name: '补 task.service 单测 · 进行中' })).not.toBeDisabled();
-    expect(within(taskSelect).getByRole('option', { name: '联调任务详情页 · 已完成 · 会形成循环依赖' })).toBeDisabled();
-    expect(within(taskSelect).getByRole('option', { name: '归档旧方案 · 已取消 · 任务已取消' })).toBeDisabled();
+    expect(screen.queryByRole('option', { name: '实现依赖关系卡片 · 待办' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '补 task.service 单测 · 进行中' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '联调任务详情页 · 已完成 · 会形成循环依赖' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '归档旧方案 · 已取消 · 任务已取消' })).toBeInTheDocument();
 
-    fireEvent.change(taskSelect, { target: { value: 'task-3' } });
+    await user.click(screen.getByRole('option', { name: '联调任务详情页 · 已完成 · 会形成循环依赖' }));
 
     expect(screen.getByTestId('dependency-add-button')).toBeDisabled();
     expect(screen.getByTestId('dependency-add-task-disabled-reason')).toHaveTextContent('会形成循环依赖');
@@ -275,15 +284,14 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
   it('switches dependency type from soft to hard（切换依赖类型）', async () => {
     renderPage();
 
-    const typeSelect = await screen.findByTestId('dependency-type-task-2');
-    fireEvent.change(typeSelect, { target: { value: 'hard' } });
+    await chooseSharedSelectOption('dependency-type-task-2', 'hard');
 
     await waitFor(() => {
       expect(addDependencyMock).toHaveBeenCalledWith('task-1', 'task-2', 'hard');
     });
 
     const currentItem = await screen.findByTestId('dependency-item-task-2');
-    expect(within(currentItem).getByDisplayValue('hard')).toBeInTheDocument();
+    expect(within(currentItem).getByTestId('dependency-type-task-2')).toHaveTextContent('hard');
   });
 
   it('removes dependency（删除依赖）', async () => {
@@ -305,7 +313,7 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
     renderPage();
 
     await screen.findByTestId('dependency-add-task-select');
-    fireEvent.change(screen.getByTestId('dependency-add-task-select'), { target: { value: 'task-2' } });
+    await chooseSharedSelectOption('dependency-add-task-select', '补 task.service 单测 · 进行中');
     fireEvent.click(screen.getByTestId('dependency-add-button'));
 
     const alert = await screen.findByRole('alert');

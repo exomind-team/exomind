@@ -317,9 +317,9 @@ describe('agents page topology layout issue-382（拓扑布局持久化）', () 
       expect(readClassifierPosition()).toEqual({ x: 822, y: 234 });
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '节点' }));
+    fireEvent.click(screen.getByRole('tab', { name: '节点' }));
     fireEvent.click(screen.getByTestId('agent-list-filter-agent'));
-    fireEvent.click(screen.getByRole('button', { name: '拓扑图' }));
+    fireEvent.click(screen.getByRole('tab', { name: '拓扑图' }));
 
     await waitFor(() => {
       expect(readClassifierPosition()).toEqual({ x: 822, y: 234 });

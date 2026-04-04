@@ -67,7 +67,7 @@ export function TaskQuickCreateDialog({
       >
         <DialogHeader>
           <DialogTitle>快速创建任务</DialogTitle>
-          <DialogDescription>在连接模式下直接补建一个新任务节点。</DialogDescription>
+          <DialogDescription>在编辑模式下直接补建一个新任务节点。</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">

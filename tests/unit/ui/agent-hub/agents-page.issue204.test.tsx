@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
 import type { SignalRoute } from '@/lib/types/signal-pool';
+import { AGENTS_VIEW_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-view-persistence';
 
 const serviceMocks = vi.hoisted(() => ({
   getTopology: vi.fn(),
@@ -145,6 +146,7 @@ vi.mock('@/lib/services/runtime-control.service', () => ({
 
 describe('agents page issue-204（主页面三视图与添加节点）', () => {
   beforeEach(() => {
+    window.localStorage.removeItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY);
     serviceMocks.getTopology.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.topology);
     serviceMocks.getDeviceView.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.deviceGroups);
     runtimeControlMocks.getStatus.mockResolvedValue({
@@ -208,11 +210,11 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
       expect(screen.getByText('session.end → reviewer')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '节点' }));
+    fireEvent.click(screen.getByRole('tab', { name: '节点' }));
     expect(screen.getByText('全部')).toBeInTheDocument();
     expect(screen.getByText('Echo Agent')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '设备' }));
+    fireEvent.click(screen.getByRole('tab', { name: '设备' }));
     expect(screen.getByTestId('agent-device-view')).toBeInTheDocument();
     expect(screen.getByTestId('agent-device-overview-card')).toBeInTheDocument();
   });

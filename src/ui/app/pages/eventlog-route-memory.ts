@@ -1,5 +1,10 @@
 export const EVENTLOG_LAST_TAB_KEY = 'exomind:last-eventlog-tab';
 export const EVENTLOG_TAB_VALUES = ['focus', 'record', 'today'] as const;
+export const EVENTLOG_TAB_PATHS = {
+  focus: '/eventlog',
+  record: '/eventlog/record',
+  today: '/eventlog/today',
+} as const;
 
 export type EventlogTabValue = (typeof EVENTLOG_TAB_VALUES)[number];
 
@@ -42,4 +47,27 @@ export function resolveEventlogRestoreTab(search: string): EventlogTabValue | nu
 
   const saved = getEventlogLastTab();
   return saved === 'focus' ? null : saved;
+}
+
+export function resolveLegacyEventlogTabSearch(search: string): EventlogTabValue | null {
+  const normalizedSearch = search.startsWith('?') ? search.slice(1) : search;
+  const params = new URLSearchParams(normalizedSearch);
+  const explicitTab = params.get('tab');
+  return EVENTLOG_TAB_VALUES.includes(explicitTab as EventlogTabValue)
+    ? explicitTab as EventlogTabValue
+    : null;
+}
+
+export function getEventlogPathForTab(tab: string): string {
+  return EVENTLOG_TAB_PATHS[normalizeEventlogTab(tab)];
+}
+
+export function resolveEventlogTabFromLocation(pathname: string, search = ''): EventlogTabValue {
+  if (pathname === '/eventlog/record') {
+    return 'record';
+  }
+  if (pathname === '/eventlog/today') {
+    return 'today';
+  }
+  return resolveLegacyEventlogTabSearch(search) ?? 'focus';
 }

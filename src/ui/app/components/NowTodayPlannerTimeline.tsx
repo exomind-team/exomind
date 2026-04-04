@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getTodayPlannerService } from '@/lib/services';
 import type { RhythmPresetKey, TodayPlannerSegment, TodayPlannerSnapshot, TodayPlannerWindow } from '@/lib/types/event';
 import { PrestartTaskSelectionList, usePrestartSelectableTasks } from './prestart-task-selection';
@@ -355,14 +356,25 @@ export function NowTodayPlannerTimeline({
               </label>
               <label className="space-y-1 text-xs text-[#57534E] dark:text-[#D6D3D1]">
                 <span>节奏预设</span>
-                <select
+                <Select
                   aria-label="节奏预设"
                   value={draft.rhythmPresetKey}
-                  onChange={(event) => setDraft((current) => current ? { ...current, rhythmPresetKey: event.target.value as RhythmPresetKey } : current)}
-                  className="w-full rounded-2xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm outline-none focus:border-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917]"
+                  onValueChange={(value) => setDraft((current) => current ? { ...current, rhythmPresetKey: value as RhythmPresetKey } : current)}
                 >
-                  {RHYTHM_OPTIONS.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
-                </select>
+                  <SelectTrigger
+                    aria-label="节奏预设"
+                    className="w-full rounded-2xl border-[#E7E5E4] bg-white px-3 py-2 text-sm dark:border-[#292524] dark:bg-[#1C1917]"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RHYTHM_OPTIONS.map((option) => (
+                      <SelectItem key={option.key} value={option.key}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <div className="flex flex-wrap gap-2">
                 <button type="button" disabled={submitting} onClick={() => void createWindow()} className="rounded-full bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white hover:bg-[#B14D2F] disabled:cursor-not-allowed disabled:opacity-60">

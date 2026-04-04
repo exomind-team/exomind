@@ -2,6 +2,7 @@ import { ArrowLeft, Ellipsis, NotepadText, Target, Play } from 'lucide-react';
 import { Link, useNavigate, useParams, useLocation } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { TASKS_LAST_PATH_KEY, buildTasksMainSearch } from './task-route-memory';
+import { buildTaskDomainBackLink } from './task-domain-routing';
 import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/TaskBreadcrumb';
 import { getEventLogService, getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { isTerminalTaskStatus } from '@/lib/types/task';
@@ -13,6 +14,7 @@ import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
 import { EstimatedTimeEditor } from '@/ui/app/components/EstimatedTimeEditor';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   buildTaskTimeblockDetailViewModel,
   type TimeblockEventLog,
@@ -42,13 +44,9 @@ import { Textarea } from '@/components/ui/textarea';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import { getEventlogPathForTab } from './eventlog-route-memory';
 
 type DependencyType = 'soft' | 'hard';
-const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
-  dag: { label: '依赖图', to: '/tasks/dag' },
-  timeblocks: { label: '时间线', to: '/tasks/timeline' },
-  timeline: { label: '时间线', to: '/tasks/timeline' },
-};
 interface TimeblockSourceBackLink {
   to: string;
   search?: Record<string, string>;
@@ -70,10 +68,6 @@ function resolveAutoTimerConfig(
   }
 
   return { mode: 'countup' };
-}
-
-function buildNowFocusSearch(): Record<string, string> {
-  return { tab: 'focus' };
 }
 
 const MOBILE_ANCHOR_TARGETS = {
@@ -251,13 +245,7 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
     };
   }
   const from = searchParams.get('from')?.trim();
-  const sourceConfig = from ? SOURCE_CONFIG[from] : undefined;
-
-  return {
-    to: sourceConfig?.to ?? '/tasks',
-    label: `← 返回${sourceConfig?.label ?? '任务'}`,
-    sourceLabel: sourceConfig?.label ?? '任务',
-  };
+  return buildTaskDomainBackLink(from, 'list');
 }
 
 function buildDetailBreadcrumbSegments(backLink: TimeblockSourceBackLink): TaskBreadcrumbSegment[] {
@@ -601,16 +589,22 @@ function DependencyCard({
                   </div>
 
                   <div className="flex flex-col gap-2 sm:w-[176px]">
-                    <select
-                      data-testid={`dependency-type-${dependency.taskId}`}
+                    <Select
                       value={dependency.type}
                       disabled={isSaving}
-                      onChange={(event) => onChangeDependencyType(dependency.taskId, event.target.value as DependencyType)}
-                      className="w-full rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 text-sm text-[#44403C] focus:outline-none focus:ring-2 focus:ring-[#C75B3A]/40 dark:border-[#292524] dark:bg-[#292524] dark:text-[#E7E5E4]"
+                      onValueChange={(value) => onChangeDependencyType(dependency.taskId, value as DependencyType)}
                     >
-                      <option value="soft">soft</option>
-                      <option value="hard">hard</option>
-                    </select>
+                      <SelectTrigger
+                        data-testid={`dependency-type-${dependency.taskId}`}
+                        className="w-full rounded-xl border-[#E7E5E4] bg-[#FAF7F5] text-sm text-[#44403C] dark:border-[#292524] dark:bg-[#292524] dark:text-[#E7E5E4]"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="soft">soft</SelectItem>
+                        <SelectItem value="hard">hard</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <button
                       type="button"
                       data-testid={`dependency-remove-${dependency.taskId}`}
@@ -640,20 +634,29 @@ function DependencyCard({
           <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
             <label className="space-y-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
               <span>依赖任务</span>
-              <select
-                data-testid="dependency-add-task-select"
+              <Select
                 value={selectedTaskId}
                 disabled={isSaving}
-                onChange={(event) => onSelectedTaskChange(event.target.value)}
-                className="w-full rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] focus:outline-none focus:ring-2 focus:ring-[#C75B3A]/40 dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+                onValueChange={onSelectedTaskChange}
               >
-                <option value="">请选择任务</option>
-                {dependencyView.candidates.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id} disabled={candidate.disabled}>
-                    {candidate.title} · {candidate.statusLabel}{candidate.disabledReason ? ` · ${candidate.disabledReason}` : ''}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  data-testid="dependency-add-task-select"
+                  className="w-full rounded-xl border-[#E7E5E4] bg-white text-sm text-[#44403C] dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+                >
+                  <SelectValue placeholder="请选择任务" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dependencyView.candidates.map((candidate) => (
+                    <SelectItem
+                      key={candidate.id}
+                      value={candidate.id}
+                      className={candidate.disabled ? 'opacity-50' : undefined}
+                    >
+                      {candidate.title} · {candidate.statusLabel}{candidate.disabledReason ? ` · ${candidate.disabledReason}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {selectedCandidate?.disabledReason ? (
                 <p
                   data-testid="dependency-add-task-disabled-reason"
@@ -666,16 +669,22 @@ function DependencyCard({
 
             <label className="space-y-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
               <span>类型</span>
-              <select
-                data-testid="dependency-add-type-select"
+              <Select
                 value={selectedType}
                 disabled={isSaving}
-                onChange={(event) => onSelectedTypeChange(event.target.value as DependencyType)}
-                className="w-full rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] focus:outline-none focus:ring-2 focus:ring-[#C75B3A]/40 dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+                onValueChange={(value) => onSelectedTypeChange(value as DependencyType)}
               >
-                <option value="soft">soft</option>
-                <option value="hard">hard</option>
-              </select>
+                <SelectTrigger
+                  data-testid="dependency-add-type-select"
+                  className="w-full rounded-xl border-[#E7E5E4] bg-white text-sm text-[#44403C] dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="soft">soft</SelectItem>
+                  <SelectItem value="hard">hard</SelectItem>
+                </SelectContent>
+              </Select>
             </label>
 
             <div className="flex items-end">
@@ -851,7 +860,7 @@ function MobileTimeblockDetail({
           <ArrowLeft size={16} />
         </Link>
         <div className="min-w-0 flex-1 pt-0.5">
-          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务详情</h1>
+          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
         </div>
         <button
           type="button"
@@ -1171,7 +1180,7 @@ function DesktopTimeblockDetail({
       >
         <TaskBreadcrumb
           segments={buildDetailBreadcrumbSegments(backLink)}
-          current={{ label: '任务详情', icon: NotepadText }}
+          current={{ label: '任务', icon: NotepadText }}
         />
       </header>
       <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
@@ -1804,7 +1813,7 @@ export function TaskDetailPage() {
     console.log('[TaskDetail] handleStartTimer', { taskId, timerConfig, timerMode, countdownMinutes });
     void getTaskTimerService().startBlockForTask(taskId, timerConfig).then((block) => {
       console.log('[TaskDetail] startBlockForTask OK', block ? { startId: block.startId, mode: block.mode, phase: block.phase, taskIds: resolveActiveBlockTaskIds(block), paused: block.paused, elapsed: block.elapsed } : 'NULL');
-      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
+      void navigate({ to: getEventlogPathForTab('focus') });
     }).catch((err) => {
       console.error('[TaskDetail] startBlockForTask FAILED', err);
     });
@@ -1813,7 +1822,7 @@ export function TaskDetailPage() {
   const handleAppendTaskToActiveBlock = () => {
     if (!taskId || blockingReason) return;
     void getTaskTimerService().addTaskToBlock(taskId).then(() => {
-      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
+      void navigate({ to: getEventlogPathForTab('focus') });
     }).catch((err) => {
       console.error('[TaskDetail] addTaskToBlock FAILED', err);
     });
@@ -1821,11 +1830,11 @@ export function TaskDetailPage() {
 
   const handlePauseAndGoEventlog = () => {
     if (!activeBlock) {
-      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
+      void navigate({ to: getEventlogPathForTab('focus') });
       return;
     }
     void getTimeBlockService().pauseBlock().finally(() => {
-      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
+      void navigate({ to: getEventlogPathForTab('focus') });
     });
   };
 

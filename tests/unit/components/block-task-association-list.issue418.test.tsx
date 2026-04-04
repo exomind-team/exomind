@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
 
 type MockTask = {
@@ -76,6 +77,11 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
+async function chooseTask(user: ReturnType<typeof userEvent.setup>, label: string): Promise<void> {
+  await user.click(screen.getByRole('combobox', { name: '选择任务' }));
+  await user.click(await screen.findByRole('option', { name: label }));
+}
+
 describe('BlockTaskAssociationList issue-418', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -85,6 +91,7 @@ describe('BlockTaskAssociationList issue-418', () => {
   });
 
   it('renders running association controls and calls add/remove actions', async () => {
+    const user = userEvent.setup();
     loadActiveBlockMock.mockResolvedValue({
       startId: 'block-1',
       name: '进行中时间块',
@@ -112,7 +119,8 @@ describe('BlockTaskAssociationList issue-418', () => {
     expect(screen.queryByText('in_progress')).toBeNull();
     expect(screen.getByRole('link', { name: '打开任务详情：任务一' })).toHaveAttribute('href', '/tasks/task-1');
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
+    expect(screen.getByRole('combobox', { name: '选择任务' }).tagName).not.toBe('SELECT');
+    await chooseTask(user, '任务二');
     fireEvent.click(screen.getByRole('button', { name: '关联任务' }));
     await waitFor(() => {
       expect(addTaskToBlockMock).toHaveBeenCalledWith('task-2');
@@ -125,6 +133,7 @@ describe('BlockTaskAssociationList issue-418', () => {
   });
 
   it('keeps newly associated tasks when active block falls back to association log', async () => {
+    const user = userEvent.setup();
     const initialBlock = {
       startId: 'block-1',
       name: '进行中时间块',
@@ -166,6 +175,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     await screen.findByText('1 个任务');
     await screen.findByText('任务一');
 
+    await chooseTask(user, '任务二');
     fireEvent.click(screen.getByRole('button', { name: '关联任务' }));
 
     await waitFor(() => {
@@ -183,6 +193,7 @@ describe('BlockTaskAssociationList issue-418', () => {
   });
 
   it('filters out already linked and hard-blocked tasks from candidate options', async () => {
+    const user = userEvent.setup();
     loadActiveBlockMock.mockResolvedValue({
       startId: 'block-1',
       name: '进行中时间块',
@@ -209,18 +220,16 @@ describe('BlockTaskAssociationList issue-418', () => {
 
     render(<BlockTaskAssociationList />);
 
-    await waitFor(() => {
-      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(
-        expect.arrayContaining(['选择任务', '可追加任务']),
-      );
-    });
+    await screen.findByRole('combobox', { name: '选择任务' });
+    await user.click(screen.getByRole('combobox', { name: '选择任务' }));
 
     const options = screen.getAllByRole('option').map((option) => option.textContent);
-    expect(options).toEqual(expect.arrayContaining(['选择任务', '可追加任务']));
+    expect(options).toEqual(expect.arrayContaining(['可追加任务']));
     expect(options).not.toEqual(expect.arrayContaining(['已关联任务', '被硬依赖阻塞的任务']));
   });
 
   it('shows an inline error when addTaskToBlock rejects', async () => {
+    const user = userEvent.setup();
     loadActiveBlockMock.mockResolvedValue({
       startId: 'block-1',
       name: '进行中时间块',
@@ -241,7 +250,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     render(<BlockTaskAssociationList />);
 
     await screen.findByText('关联任务');
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
+    await chooseTask(user, '任务二');
     fireEvent.click(screen.getByRole('button', { name: '关联任务' }));
 
     expect(await screen.findByText('所选任务存在未完成的硬依赖，当前不能关联。')).toBeInTheDocument();

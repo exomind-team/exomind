@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { NowPage } from '@/ui/app/pages/NowPage';
@@ -14,59 +13,6 @@ let locationState = {
 vi.mock('@tanstack/react-router', () => ({
   useLocation: () => locationState,
   useNavigate: () => navigateMock,
-}));
-
-const TabsContext = createContext<{
-  value: string;
-  onValueChange?: (value: string) => void;
-} | null>(null);
-
-vi.mock('@/components/ui/tabs', () => ({
-  Tabs: ({
-    value,
-    onValueChange,
-    children,
-  }: {
-    value: string;
-    onValueChange?: (value: string) => void;
-    children: ReactNode;
-  }) => (
-    <TabsContext.Provider value={{ value, onValueChange }}>
-      <div data-testid="mock-tabs-root">{children}</div>
-    </TabsContext.Provider>
-  ),
-  TabsList: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  TabsTrigger: ({
-    value,
-    children,
-  }: {
-    value: string;
-    children: ReactNode;
-  }) => {
-    const context = useContext(TabsContext);
-    return (
-      <button
-        type="button"
-        role="tab"
-        aria-selected={context?.value === value}
-        onClick={() => context?.onValueChange?.(value)}
-      >
-        {children}
-      </button>
-    );
-  },
-  TabsContent: ({
-    value,
-    children,
-    className,
-  }: {
-    value: string;
-    children: ReactNode;
-    className?: string;
-  }) => {
-    const context = useContext(TabsContext);
-    return context?.value === value ? <div data-testid={`tab-content-${value}`} className={className}>{children}</div> : null;
-  },
 }));
 
 vi.mock('@/components/Chat/ChatPage', () => ({
@@ -98,24 +44,54 @@ describe('NowPage tab routing', () => {
   it('defaults to focus tab when search is empty（默认进入专注页）', () => {
     render(<NowPage />);
 
+    expect(screen.getByRole('heading', { name: '当下' })).toBeInTheDocument();
+    expect(screen.getByTestId('now-page-view-toggle-focus')).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('now-page-focus-widget')).toBeInTheDocument();
     expect(screen.getByTestId('now-page-association-list')).toBeInTheDocument();
     expect(screen.queryByTestId('now-page-record')).toBeNull();
     expect(screen.queryByTestId('now-page-today')).toBeNull();
   });
 
+  it('uses a signal-network style header and left-aligned fixed-width toggles（头部样式对齐网络页且切换条左对齐）', () => {
+    render(<NowPage />);
+
+    const heading = screen.getByRole('heading', { name: '当下' });
+    const toggleBar = screen.getByTestId('now-page-view-bar');
+    const focusToggle = screen.getByTestId('now-page-view-toggle-focus');
+
+    expect(heading.className).toContain('text-lg');
+    expect(heading.className).toContain('font-semibold');
+    expect(toggleBar.className).toContain('self-start');
+    expect(focusToggle.className).not.toContain('flex-1');
+    expect(focusToggle.className).toContain('px-3');
+  });
+
   it('lets the focus tab own page scrolling instead of clipping children（专注页由页面容器滚动而非截断子组件）', () => {
     render(<NowPage />);
 
-    const focusContent = screen.getByTestId('tab-content-focus');
+    const focusContent = screen.getByTestId('now-page-focus-panel');
     expect(focusContent.className).toContain('overflow-y-auto');
     expect(focusContent.className).not.toContain('overflow-hidden');
   });
 
+  it('keeps the record tab panel clipped so ChatPage owns the inner scroll（记录页由 ChatPage 接管内部滚动）', () => {
+    locationState = {
+      pathname: '/eventlog/record',
+      searchStr: '',
+    };
+
+    render(<NowPage />);
+
+    const recordPanel = screen.getByTestId('now-page-record-panel');
+    expect(recordPanel.className).toContain('overflow-hidden');
+    expect(recordPanel.className).toContain('min-h-0');
+    expect(recordPanel.className).toContain('flex-1');
+  });
+
   it('reads tab from search and routes tab switch through navigate（读取 search 并通过路由切换页签）', () => {
     locationState = {
-      pathname: '/eventlog',
-      searchStr: '?tab=today',
+      pathname: '/eventlog/today',
+      searchStr: '',
     };
 
     render(<NowPage />);
@@ -127,7 +103,6 @@ describe('NowPage tab routing', () => {
 
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/eventlog',
-      search: {},
       replace: true,
     });
   });

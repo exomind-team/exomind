@@ -11,11 +11,23 @@ export interface TaskDagDependencyItem {
   type: DependencyType;
 }
 
+export interface TaskDagIntervalDetailItem {
+  startId: string;
+  startTitle: string;
+  endId: string;
+  endTitle: string;
+  memberCount: number;
+  collapsed: boolean;
+  memberTitles: string[];
+}
+
 interface TaskDagDetailPanelProps {
   task: TaskNode | null;
   executionHint: string;
   upstreamDependencies: TaskDagDependencyItem[];
   downstreamDependencies: TaskDagDependencyItem[];
+  intervalDetails?: TaskDagIntervalDetailItem[];
+  onToggleIntervalCollapse?: (startId: string, endId: string, nextCollapsed: boolean) => void;
   onClose: () => void;
   onOpenDetail: () => void;
 }
@@ -66,6 +78,8 @@ export function TaskDagDetailPanel({
   executionHint,
   upstreamDependencies,
   downstreamDependencies,
+  intervalDetails = [],
+  onToggleIntervalCollapse,
   onClose,
   onOpenDetail,
 }: TaskDagDetailPanelProps) {
@@ -134,6 +148,62 @@ export function TaskDagDetailPanel({
                 </div>
               ) : (
                 <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">当前任务还没有描述。</p>
+              )}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">区间收缩</h3>
+              <span className="text-[11px] text-[#A8A29E]">{intervalDetails.length}</span>
+            </div>
+            <div className="mt-2" data-testid="task-dag-detail-interval-section">
+              {intervalDetails.length === 0 ? (
+                <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">当前节点没有区间收缩摘要。</p>
+              ) : (
+                <div className="space-y-3">
+                  {intervalDetails.map((interval, index) => (
+                    <div
+                      key={`${interval.startId}-${interval.endId}`}
+                      className="rounded-2xl border border-[#E7E5E4] bg-[#FAF7F5] px-4 py-3 dark:border-[#3F3F46] dark:bg-[#120F0D]"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                            {`起点 ${interval.startTitle} → 终点 ${interval.endTitle}`}
+                          </p>
+                          <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                            {`${interval.memberCount} 个节点`}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          data-testid={`task-dag-detail-interval-toggle-${index}`}
+                          onClick={() => onToggleIntervalCollapse?.(
+                            interval.startId,
+                            interval.endId,
+                            !interval.collapsed,
+                          )}
+                          className="inline-flex shrink-0 items-center gap-2 rounded-full border border-[#E7E5E4] px-3 py-1.5 text-xs font-semibold text-[#57534E] hover:bg-white dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#1C1917]"
+                        >
+                          {interval.collapsed ? '展开区间' : '收起区间'}
+                        </button>
+                      </div>
+                      <div className="mt-3" data-testid={index === 0 ? 'task-dag-detail-interval-member-list' : undefined}>
+                        <div className="space-y-2">
+                          {interval.memberTitles.map((title) => (
+                            <div
+                              key={`${interval.startId}-${interval.endId}-${title}`}
+                              className="rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#1C1917] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+                            >
+                              {title}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </section>

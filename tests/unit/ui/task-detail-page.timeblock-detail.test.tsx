@@ -205,7 +205,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
       expect(getTaskMock).toHaveBeenCalledWith('task-1');
     });
 
-    expect(await screen.findByText('任务详情')).toBeInTheDocument();
+    expect((await screen.findAllByText('深度工作：EventLog 模块实现')).length).toBeGreaterThan(0);
     expect(screen.getByText('概览')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '信息面板' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '计时控制' })).toBeInTheDocument();
@@ -223,7 +223,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     const infoTitle = screen.getByRole('heading', { name: '信息面板' });
     const timerTitle = screen.getByRole('heading', { name: '计时控制' });
@@ -245,7 +245,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     expect(screen.getByTestId('task-mobile-section-tabs')).toBeInTheDocument();
     expect(screen.getAllByRole('tab')).toHaveLength(10);
@@ -260,7 +260,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     expect(screen.getByTestId('new-task-detail-page')).toHaveClass('scrollbar-none');
     expect(screen.getByTestId('task-mobile-section-tabs').firstElementChild).toHaveClass('scrollbar-none');
@@ -275,8 +275,8 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
       expect(loadTimeBlocksMock).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText('任务')).toBeInTheDocument();
-    expect(screen.getByText('任务详情')).toBeInTheDocument();
+    expect((await screen.findAllByText('任务')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { level: 1, name: '深度工作：EventLog 模块实现' })).toBeInTheDocument();
     expect(screen.getByTestId('task-detail-desktop-breadcrumb')).toHaveClass('sticky', 'top-0');
     expect(screen.getAllByText('深度工作：EventLog 模块实现').length).toBeGreaterThan(0);
     expect(screen.getByText('事件时间线')).toBeInTheDocument();
@@ -308,7 +308,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
     expect(screen.getByText('暂无关联时间块，开始一个时间块后即可在此查看事件。')).toBeInTheDocument();
   });
 
@@ -368,7 +368,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     await waitFor(() => {
       expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('120m');
@@ -378,7 +378,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 120 });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -386,7 +386,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     fireEvent.click(screen.getByTestId('estimated-time-preset-60'));
 
@@ -400,7 +400,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 60 });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -408,7 +408,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     const view = render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     expect(screen.getByTestId('task-countdown-auto-fill-status')).toHaveTextContent('剩余 30min');
     fireEvent.click(screen.getByTestId('task-countdown-auto-fill-switch'));
@@ -424,7 +424,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     view.unmount();
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
     expect(screen.getByTestId('task-countdown-auto-fill-switch')).toHaveAttribute('aria-checked', 'true');
 
     await waitFor(() => {
@@ -436,7 +436,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     fireEvent.click(screen.getByTestId('task-countdown-auto-fill-switch'));
     await waitFor(() => {
@@ -457,7 +457,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countup' });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -465,7 +465,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     const { rerender } = render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     fireEvent.click(screen.getByTestId('task-mode-countup'));
     expect(screen.getByTestId('task-mode-countup')).toHaveAttribute('aria-pressed', 'true');
@@ -487,7 +487,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -511,7 +511,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     const { rerender } = render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
     fireEvent.click(screen.getByTestId('task-mode-countup'));
 
     currentTaskId = 'task-2';
@@ -528,7 +528,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -548,7 +548,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     expect(await screen.findByTestId('task-pause-button')).toHaveTextContent('回到当下');
   });
@@ -569,7 +569,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     expect(screen.queryByText('计时时长')).toBeNull();
     expect(screen.queryByTestId('task-countdown-auto-fill-switch')).toBeNull();
@@ -581,7 +581,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(addTaskToBlockMock).toHaveBeenCalledWith('task-1');
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -622,7 +622,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     const appendButton = screen.getByTestId('task-append-association-button');
     expect(appendButton).toBeDisabled();
@@ -651,13 +651,13 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     fireEvent.click(await screen.findByTestId('task-pause-button'));
 
     await waitFor(() => {
       expect(pauseBlockMock).toHaveBeenCalled();
-      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog' });
     });
   });
 
@@ -670,7 +670,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     expect(screen.getByLabelText('返回时间块详情')).toHaveAttribute('to', '/tasks/block/block-1');
   });
@@ -690,7 +690,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     expect(screen.getByRole('heading', { level: 1, name: '深度工作：EventLog 模块实现' })).toBeInTheDocument();
     expect(screen.getByText('关联时间块：2026-03-22 洗澡')).toBeInTheDocument();
@@ -700,7 +700,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     const { container } = render(<TaskDetailPage />);
 
-    await screen.findByText('任务详情');
+    await screen.findAllByText('深度工作：EventLog 模块实现');
 
     const editButton = container.querySelector('button[class*="p-1.5"]');
     expect(editButton).not.toBeNull();

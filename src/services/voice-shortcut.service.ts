@@ -1,6 +1,7 @@
 import { listen, emit } from '@tauri-apps/api/event';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
+import { QwenOmniASRAdapter } from '@/lib/adapters/asr/qwen-omni-asr';
 import { getClipboardService } from '../lib/services/clipboard.service';
 import { appendEventWithEcsReplication } from '@/lib/services/ecs-eventlog-replication.service';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
@@ -34,6 +35,12 @@ import {
   type VoiceShortcutAsrProvider,
 } from '@/config/voice-shortcut-asr-provider';
 import {
+  getVoiceOmniModelId,
+  getVoiceOmniOptimizeEnabled,
+  getVoiceOmniProfileId,
+} from '@/config/voice-omni-settings';
+import { getVoiceOmniPromptDocs } from '@/config/voice-omni-prompts';
+import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_RESOURCE_PRESETS,
@@ -51,9 +58,15 @@ import {
   createVolcanoStreamingCapture,
   type VolcanoStreamingCapture,
 } from '@/lib/asr/volcano-streaming-capture';
+import { resolveProviderProfile } from '@/lib/agent-provider/provider-profile-storage';
 import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 import {
+  buildQwenOmniOptimizePrompt,
+  buildQwenOmniTranscribePrompt,
+} from '@/lib/voice/qwen-omni-prompts';
+import {
   getVoiceOverlayBottomOffset,
+  getVoiceOverlayShowDiagnostics,
   subscribeVoiceOverlayBottomOffsetChanges,
 } from '@/config/voice-overlay-preferences';
 import { buildVoiceShortcutStorageEvent } from '@/services/voice-shortcut-eventlog';
@@ -85,10 +98,21 @@ type WarmVolcanoSessionSnapshot = {
   warmKey: string | null;
 };
 
+type VoiceOmniRuntimeConfig = {
+  profileId: string;
+  profileName: string;
+  apiKey: string;
+  baseUrl: string;
+  modelId: string;
+  optimizeEnabled: boolean;
+};
+
 type OverlayEventPayload = {
   state: VoiceShortcutState;
   duration?: number;
   text: string;
+  shortcut: VoiceShortcutHotkey;
+  showDiagnostics: boolean;
   audioLevel?: number;
   hintText?: string;
   isLivePreview: boolean;
@@ -105,6 +129,28 @@ type OverlayEventPayload = {
   recognitionMs?: number;
   errorMessage: string;
 };
+
+type VoiceShortcutGlobalRuntime = {
+  instance: VoiceShortcutService | null;
+  startEventClaimed: boolean;
+};
+
+const VOICE_SHORTCUT_GLOBAL_RUNTIME_KEY = '__EXOMIND_VOICE_SHORTCUT_RUNTIME__';
+
+function getVoiceShortcutGlobalRuntime(): VoiceShortcutGlobalRuntime {
+  const globalScope = globalThis as typeof globalThis & {
+    [VOICE_SHORTCUT_GLOBAL_RUNTIME_KEY]?: VoiceShortcutGlobalRuntime;
+  };
+
+  if (!globalScope[VOICE_SHORTCUT_GLOBAL_RUNTIME_KEY]) {
+    globalScope[VOICE_SHORTCUT_GLOBAL_RUNTIME_KEY] = {
+      instance: null,
+      startEventClaimed: false,
+    };
+  }
+
+  return globalScope[VOICE_SHORTCUT_GLOBAL_RUNTIME_KEY]!;
+}
 
 type VolcanoAsrStreamEventPayload = {
   sessionId: string;
@@ -139,7 +185,8 @@ export class VoiceShortcutService {
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private warmMaintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private warmRotateTimer: ReturnType<typeof setTimeout> | null = null;
-  private initializing = false;
+  private initPromise: Promise<void> | null = null;
+  private initEpoch = 0;
   private startPending = false;
   private activationStartedAt: number | null = null;
   private traceStartedAtMs: number | null = null;
@@ -205,67 +252,145 @@ export class VoiceShortcutService {
   }
 
   async init(): Promise<void> {
-    if (this.unlisten || this.initializing) return;
+    if (this.unlisten && !this.destroyed) return;
+    if (this.initPromise) {
+      await this.initPromise;
+      if (this.unlisten && !this.destroyed) {
+        return;
+      }
+    }
     if (!isTauri()) {
       this.debugWarn(LOG_TAG, 'not in Tauri environment, service disabled');
       return;
     }
+
+    const initEpoch = ++this.initEpoch;
     this.destroyed = false;
-    this.initializing = true;
-    this.syncDeveloperConsoleLevel();
+    const localHandles: {
+      unlisten: (() => void) | null;
+      unlistenVolcanoStream: (() => void) | null;
+      unlistenHotkey: (() => void) | null;
+      unlistenProvider: (() => void) | null;
+      unlistenMicPrewarm: (() => void) | null;
+      unlistenDeveloperMode: (() => void) | null;
+      unlistenOverlayBottomOffset: (() => void) | null;
+      windowFocusBound: boolean;
+      documentVisibilityBound: boolean;
+    } = {
+      unlisten: null,
+      unlistenVolcanoStream: null,
+      unlistenHotkey: null,
+      unlistenProvider: null,
+      unlistenMicPrewarm: null,
+      unlistenDeveloperMode: null,
+      unlistenOverlayBottomOffset: null,
+      windowFocusBound: false,
+      documentVisibilityBound: false,
+    };
 
-    try {
+    const cleanupLocalHandles = (): void => {
+      localHandles.unlisten?.();
+      localHandles.unlistenVolcanoStream?.();
+      localHandles.unlistenHotkey?.();
+      localHandles.unlistenProvider?.();
+      localHandles.unlistenMicPrewarm?.();
+      localHandles.unlistenDeveloperMode?.();
+      localHandles.unlistenOverlayBottomOffset?.();
+      if (localHandles.windowFocusBound && typeof window !== 'undefined') {
+        window.removeEventListener('focus', this.handleAppForeground);
+      }
+      if (localHandles.documentVisibilityBound && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+      }
+    };
+
+    const initTask = (async () => {
+      this.syncDeveloperConsoleLevel();
       await this.applyShortcut(getVoiceShortcutHotkey());
+      if (this.destroyed || this.initEpoch !== initEpoch) {
+        return;
+      }
 
-      this.unlistenHotkey = subscribeVoiceShortcutHotkeyChanges((hotkey) => {
+      localHandles.unlistenHotkey = subscribeVoiceShortcutHotkeyChanges((hotkey) => {
         this.applyShortcut(hotkey).catch((error) => {
           this.debugError(LOG_TAG, 'failed to apply updated voice shortcut:', error);
         });
       });
 
-      this.unlistenProvider = subscribeVoiceShortcutAsrProviderChanges((provider) => {
+      localHandles.unlistenProvider = subscribeVoiceShortcutAsrProviderChanges((provider) => {
         this.asrProvider = provider;
         this.syncWarmMaintenanceLoop();
         void this.prewarmResourcesForProvider();
       });
 
-      this.unlistenMicPrewarm = subscribeVoiceShortcutMicPrewarmChanges((enabled) => {
+      localHandles.unlistenMicPrewarm = subscribeVoiceShortcutMicPrewarmChanges((enabled) => {
         this.micPrewarmEnabled = enabled;
         this.syncWarmMaintenanceLoop();
         void this.prewarmResourcesForProvider();
       });
 
-      this.unlistenDeveloperMode = subscribeDeveloperModeChanges((enabled) => {
+      localHandles.unlistenDeveloperMode = subscribeDeveloperModeChanges((enabled) => {
         this.developerModeEnabled = enabled;
         this.syncDeveloperConsoleLevel();
       });
 
-      this.unlistenOverlayBottomOffset = subscribeVoiceOverlayBottomOffsetChanges((offset) => {
+      localHandles.unlistenOverlayBottomOffset = subscribeVoiceOverlayBottomOffsetChanges((offset) => {
         void this.syncVoiceOverlayBottomOffset(offset);
       });
 
-      this.unlisten = await listen<string>('voice-shortcut', (event) => {
+      localHandles.unlisten = await listen<string>('voice-shortcut', (event) => {
         if (event.payload === 'start') this.handleStart();
         if (event.payload === 'stop') this.handleStop();
         if (event.payload === 'cancel') this.handleCancel();
       });
+      if (this.destroyed || this.initEpoch !== initEpoch) {
+        return;
+      }
 
-      this.unlistenVolcanoStream = await listen<VolcanoAsrStreamEventPayload>('volcano-asr-stream-event', (event) => {
+      localHandles.unlistenVolcanoStream = await listen<VolcanoAsrStreamEventPayload>('volcano-asr-stream-event', (event) => {
         this.handleVolcanoStreamEvent(event.payload);
       });
+      if (this.destroyed || this.initEpoch !== initEpoch) {
+        return;
+      }
 
       if (typeof window !== 'undefined') {
         window.addEventListener('focus', this.handleAppForeground);
+        localHandles.windowFocusBound = true;
       }
       if (typeof document !== 'undefined') {
         document.addEventListener('visibilitychange', this.handleVisibilityChange);
+        localHandles.documentVisibilityBound = true;
       }
 
       await this.syncVoiceOverlayBottomOffset(getVoiceOverlayBottomOffset());
+      if (this.destroyed || this.initEpoch !== initEpoch) {
+        return;
+      }
+
+      this.unlisten = localHandles.unlisten;
+      this.unlistenVolcanoStream = localHandles.unlistenVolcanoStream;
+      this.unlistenHotkey = localHandles.unlistenHotkey;
+      this.unlistenProvider = localHandles.unlistenProvider;
+      this.unlistenMicPrewarm = localHandles.unlistenMicPrewarm;
+      this.unlistenDeveloperMode = localHandles.unlistenDeveloperMode;
+      this.unlistenOverlayBottomOffset = localHandles.unlistenOverlayBottomOffset;
       this.syncWarmMaintenanceLoop();
       void this.prewarmResourcesForProvider();
+    })();
+
+    this.initPromise = initTask;
+
+    try {
+      await initTask;
     } finally {
-      this.initializing = false;
+      if (this.initPromise === initTask) {
+        this.initPromise = null;
+      }
+      const committed = this.unlisten === localHandles.unlisten && !this.destroyed && this.initEpoch === initEpoch;
+      if (!committed) {
+        cleanupLocalHandles();
+      }
     }
   }
 
@@ -274,6 +399,7 @@ export class VoiceShortcutService {
       return;
     }
     this.destroyed = true;
+    this.initEpoch += 1;
     this.unlisten?.();
     this.unlisten = null;
     this.unlistenVolcanoStream?.();
@@ -821,6 +947,10 @@ export class VoiceShortcutService {
       this.state = 'idle';
     }
 
+    if (!this.tryClaimStartEvent()) {
+      return;
+    }
+
     this.clearAutoHide();
     this.livePreviewText = '';
     this.startPending = true;
@@ -1084,6 +1214,21 @@ export class VoiceShortcutService {
     emit('voice-overlay-state', this.buildOverlayPayload(state, extra)).catch(() => {});
   }
 
+  private tryClaimStartEvent(): boolean {
+    const runtime = getVoiceShortcutGlobalRuntime();
+    if (runtime.startEventClaimed) {
+      this.debugInfo(LOG_TAG, '[dedupe] ignored duplicated start event in the same dispatch turn');
+      return false;
+    }
+
+    runtime.startEventClaimed = true;
+    queueMicrotask(() => {
+      const latestRuntime = getVoiceShortcutGlobalRuntime();
+      latestRuntime.startEventClaimed = false;
+    });
+    return true;
+  }
+
   private normalizeText(text: string | null | undefined): string {
     return normalizeRecognitionText(text?.trim() ?? '');
   }
@@ -1153,6 +1298,10 @@ export class VoiceShortcutService {
     };
   }
 
+  private isQwenOmniProvider(): boolean {
+    return String(this.asrProvider) === 'qwen-omni';
+  }
+
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
     if (this.asrProvider === 'volcano') {
       const config = this.getVolcanoRuntimeConfigOrThrow();
@@ -1175,6 +1324,23 @@ export class VoiceShortcutService {
           config: fallback.config,
         });
       }
+    }
+
+    if (this.isQwenOmniProvider()) {
+      const config = this.getVoiceOmniRuntimeConfigOrThrow();
+      const adapter = new QwenOmniASRAdapter({
+        profileName: config.profileName,
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.modelId,
+        optimizeEnabled: config.optimizeEnabled,
+        transcribePrompt: buildQwenOmniTranscribePrompt(getVoiceOmniPromptDocs()),
+        optimizePrompt: buildQwenOmniOptimizePrompt(getVoiceOmniPromptDocs()),
+      });
+      return await adapter.transcribe({
+        lang: 'zh-CN',
+        preRecordedAudio: wavData,
+      });
     }
 
     return await this.adapter.transcribe({
@@ -1236,6 +1402,8 @@ export class VoiceShortcutService {
       state,
       ...(typeof extra.duration === 'number' ? { duration: extra.duration } : {}),
       text: extra.text ?? fallbackText,
+      shortcut: extra.shortcut ?? getVoiceShortcutHotkey(),
+      showDiagnostics: extra.showDiagnostics ?? getVoiceOverlayShowDiagnostics(),
       audioLevel: extra.audioLevel ?? (state === 'recording' ? this.latestAudioLevel : 0),
       hintText: extra.hintText,
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
@@ -1478,7 +1646,7 @@ export class VoiceShortcutService {
       this.handleError(fallback?.message ?? payload.errorMessage);
       return;
     }
-    const nextText = (payload.text || '').trim();
+    const nextText = this.normalizeText(payload.text);
     if (!nextText) {
       return;
     }
@@ -1509,9 +1677,43 @@ export class VoiceShortcutService {
     return config;
   }
 
+  private getVoiceOmniRuntimeConfigOrThrow(): VoiceOmniRuntimeConfig {
+    const profileId = getVoiceOmniProfileId();
+    if (!profileId) {
+      throw new Error('Qwen Omni 未配置语音供应商档案，请先到设置中选择 provider profile');
+    }
+
+    const profile = resolveProviderProfile(profileId);
+    if (!profile?.apiKey || !profile.baseUrl) {
+      throw new Error('Qwen Omni 供应商档案不完整，请先在 AI Registry 中填写 Base URL 与 API Key');
+    }
+
+    const modelId = getVoiceOmniModelId();
+    if (!modelId) {
+      throw new Error('Qwen Omni 模型 ID 为空，请先到设置中填写模型 ID');
+    }
+
+    return {
+      profileId,
+      profileName: profile.name,
+      apiKey: profile.apiKey,
+      baseUrl: profile.baseUrl,
+      modelId,
+      optimizeEnabled: getVoiceOmniOptimizeEnabled(),
+    };
+  }
+
   private getActiveProviderLabel(): string {
-    if (this.asrProvider !== 'volcano') {
+    if (this.asrProvider === 'moss') {
       return 'MOSS · 云端识别';
+    }
+    if (this.isQwenOmniProvider()) {
+      try {
+        const config = this.getVoiceOmniRuntimeConfigOrThrow();
+        return `${config.modelId} · ${config.profileName}`;
+      } catch {
+        return 'Qwen Omni · 未配置';
+      }
     }
     const config = getStoredVolcanoRuntimeConfig(import.meta.env as Record<string, string | undefined>);
     const resourceLabel = VOLCANO_RESOURCE_PRESETS.find(
@@ -1524,13 +1726,12 @@ export class VoiceShortcutService {
   }
 }
 
-let instance: VoiceShortcutService | null = null;
-
 export function getVoiceShortcutService(): VoiceShortcutService {
-  if (!instance) {
-    instance = new VoiceShortcutService();
+  const runtime = getVoiceShortcutGlobalRuntime();
+  if (!runtime.instance) {
+    runtime.instance = new VoiceShortcutService();
   }
-  return instance;
+  return runtime.instance;
 }
 
 export async function initVoiceShortcutService(): Promise<void> {

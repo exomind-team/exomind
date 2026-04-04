@@ -219,9 +219,9 @@ describe('TasksPage issue-546 fuzzy search', () => {
     });
 
     expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-4',
       'tasks-page-task-link-task-2',
       'tasks-page-task-link-task-1',
-      'tasks-page-task-link-task-4',
     ]);
     expect(screen.queryByTestId('tasks-page-task-link-task-3')).not.toBeInTheDocument();
     expect(screen.getByTestId('task-current-root-card')).toHaveAttribute('data-search-query', 'ab');
@@ -242,9 +242,9 @@ describe('TasksPage issue-546 fuzzy search', () => {
     });
 
     expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-4',
       'tasks-page-task-link-task-2',
       'tasks-page-task-link-task-1',
-      'tasks-page-task-link-task-4',
     ]);
 
     await act(async () => {
@@ -301,6 +301,38 @@ describe('TasksPage issue-546 fuzzy search', () => {
     expect(visibleTaskOrder()).toEqual([
       'tasks-page-task-link-task-4',
       'tasks-page-task-link-task-1',
+    ]);
+  });
+
+  it('orders search results by status priority and createdAt desc while still showing terminal matches', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-completed', title: 'baaab archived', updatedAt: 120, status: 'completed' }),
+      makeTask({ id: 'task-pending-old', title: 'baaab backlog', updatedAt: 20, status: 'pending' }),
+      makeTask({ id: 'task-in-progress', title: 'ab doing', updatedAt: 10, status: 'in_progress' }),
+      makeTask({ id: 'task-cancelled', title: 'ababa cancelled', updatedAt: 200, status: 'cancelled' }),
+      makeTask({ id: 'task-suspended', title: 'abacus paused', updatedAt: 30, status: 'suspended' }),
+      makeTask({ id: 'task-pending-new', title: 'ab inbox', updatedAt: 90, status: 'pending' }),
+    ]);
+
+    render(<TasksPage />);
+
+    await flushLoad();
+
+    fireEvent.change(screen.getByTestId('task-search-input'), {
+      target: { value: 'ab' },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(180);
+    });
+
+    expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-in-progress',
+      'tasks-page-task-link-task-suspended',
+      'tasks-page-task-link-task-pending-new',
+      'tasks-page-task-link-task-pending-old',
+      'tasks-page-task-link-task-completed',
+      'tasks-page-task-link-task-cancelled',
     ]);
   });
 });

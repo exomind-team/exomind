@@ -5,6 +5,7 @@ interface TaskDagKeyHintsProps {
   isDesktop: boolean;
   mode: TaskDagMode;
   hasSelectedNode: boolean;
+  hasFocusedSeries: boolean;
   hasConnectSource: boolean;
   immersive: boolean;
   mobileOpen: boolean;
@@ -15,6 +16,7 @@ export function TaskDagKeyHints({
   isDesktop,
   mode,
   hasSelectedNode,
+  hasFocusedSeries,
   hasConnectSource,
   immersive,
   mobileOpen,
@@ -36,9 +38,13 @@ export function TaskDagKeyHints({
     hints.push({ keys: 'E', label: '聚焦屏幕中心最近节点' });
   }
 
+  if (hasSelectedNode || hasFocusedSeries) {
+    hints.push({ keys: 'Esc / J', label: hasSelectedNode ? '清当前节点' : '清当前系列' });
+  }
+
   if (mode === 'connect') {
     if (!hasConnectSource && hasSelectedNode) {
-      hints.push({ keys: 'Enter / Space', label: '设为连接起点' });
+      hints.push({ keys: 'Enter / Space', label: '设为依赖起点' });
     }
     if (hasConnectSource) {
       hints.push({ keys: 'Enter', label: '建立依赖' });
@@ -60,7 +66,7 @@ export function TaskDagKeyHints({
     mouseHints.push({ label: '双击节点 打开详情' });
     mouseHints.push({ label: '空白单击 取消选中' });
   } else if (mode === 'connect') {
-    mouseHints.push({ label: '单击节点 选择或建依赖' });
+    mouseHints.push({ label: '单击节点 选择或编辑依赖' });
     mouseHints.push({ label: '双击空白处 快速创建任务' });
   } else {
     mouseHints.push({ label: '单击节点 开始/追加/移除关联' });

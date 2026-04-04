@@ -57,7 +57,7 @@ export function layoutDagNodes(
   graph.setGraph({
     rankdir: direction,
     nodesep: 60,
-    ranksep: 120,
+    ranksep: 60,
     marginx: 40,
     marginy: 40,
   });

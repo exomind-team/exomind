@@ -12,6 +12,7 @@ import {
 } from '@/config/runtime-target';
 import { getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
+import { PageShell } from '@/ui/app/components/PageShell';
 import { UserCard } from '@/ui/app/components/UserCard';
 import { DesktopSettingsLayout } from '@/ui/app/layouts/DesktopSettingsLayout';
 import { MobileSettingsLayout } from '@/ui/app/layouts/MobileSettingsLayout';
@@ -111,14 +112,16 @@ export function SettingsPage() {
   if (isDesktopVcLayout) {
     return (
       <>
-        <div className="h-full min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
-          <div className="mx-auto max-w-3xl px-8 py-8">
-            <UserCard />
-            <div className="mt-6">
-              <DesktopSettingsLayout items={items} ctx={ctx} />
+        <PageShell title="设置" hideHeader contentClassName="h-full min-h-full">
+          <div className="h-full min-h-full bg-page dark:bg-page-dark">
+            <div className="mx-auto max-w-3xl px-8 py-8">
+              <UserCard />
+              <div className="mt-6">
+                <DesktopSettingsLayout items={items} ctx={ctx} />
+              </div>
             </div>
           </div>
-        </div>
+        </PageShell>
         <LogPanelDialog />
       </>
     );
@@ -126,15 +129,12 @@ export function SettingsPage() {
 
   return (
     <>
-      <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
-        <header className="flex items-center justify-center px-6 py-3">
-          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">设置</h1>
-        </header>
-        <div className="space-y-5 px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2">
+      <PageShell title="设置" contentClassName="space-y-5 px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2">
+        <div className="space-y-5 bg-page dark:bg-page-dark">
           <UserCard />
           <MobileSettingsLayout items={items} ctx={ctx} />
         </div>
-      </div>
+      </PageShell>
       <LogPanelDialog />
     </>
   );

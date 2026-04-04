@@ -1,12 +1,19 @@
 import type { TaskDagVisibilityState } from '@/lib/task/task-dag-visibility';
+import {
+  EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE,
+  type TaskDagIntervalCollapseState,
+} from '@/lib/task/task-dag-interval-collapse';
 import type { DagDirection } from '@/ui/app/pages/task-dag-layout';
 import {
   readRuntimeBackedValue,
+  removeRuntimeBackedValue,
   writeRuntimeBackedValue,
 } from './runtime-preference-storage';
 
 export type TaskDagMode = 'browse' | 'connect' | 'execute';
+export type TaskDagLayoutMode = 'auto' | 'manual';
 export type TaskDagTerminalFilterMode = 'show' | 'smart' | 'hide';
+export type TaskDagFocusMode = 'soft' | 'hard';
 export type TaskDagBackgroundMode = 'none' | 'dots' | 'lines';
 export type TaskDagViewportSurface = 'desktop' | 'mobile';
 export type TaskDagSearchOptions = {
@@ -14,41 +21,112 @@ export type TaskDagSearchOptions = {
   fuzzy: boolean;
   filterMode: boolean;
 };
+export type TaskDagTagFilter = {
+  selectedTags: string[];
+  matchMode: 'and' | 'or';
+};
 export type TaskDagViewport = {
   x: number;
   y: number;
   zoom: number;
 };
+export type TaskDagNodeSizing = {
+  fixedWidth: boolean;
+  fixedHeight: boolean;
+};
+export type TaskDagControlsState = {
+  desktopViewOpen: boolean;
+  desktopToolsOpen: boolean;
+  mobileViewOpen: boolean;
+  mobileToolsOpen: boolean;
+  tagSectionOpen: boolean;
+  focusSectionOpen: boolean;
+};
 
 export const TASK_DAG_MODE_STORAGE_KEY = 'exomind:dag-mode';
 export const TASK_DAG_DIRECTION_STORAGE_KEY = 'exomind:dag-direction';
+export const TASK_DAG_LAYOUT_MODE_STORAGE_KEY = 'exomind:dag-layout-mode';
 export const TASK_DAG_HIDE_TERMINAL_STORAGE_KEY = 'exomind:dag-hide-terminal';
+export const TASK_DAG_FOCUS_MODE_STORAGE_KEY = 'exomind:dag-focus-mode';
 export const TASK_DAG_BACKGROUND_STORAGE_KEY = 'exomind:dag-background-mode';
 export const TASK_DAG_IMMERSIVE_STORAGE_KEY = 'exomind:dag-immersive';
+export const TASK_DAG_NODE_SIZING_STORAGE_KEY = 'exomind:dag-node-sizing';
 export const TASK_DAG_VIEWPORT_STORAGE_KEY = 'exomind:dag-viewport';
 export const TASK_DAG_SEARCH_DRAFT_STORAGE_KEY = 'exomind:dag-search-draft';
 export const TASK_DAG_SEARCH_OPTIONS_STORAGE_KEY = 'exomind:dag-search-options';
+export const TASK_DAG_TAG_FILTER_STORAGE_KEY = 'exomind:dag-tag-filter';
+export const TASK_DAG_FOCUSED_SERIES_STORAGE_KEY = 'exomind:dag-focused-series';
+export const TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY = 'exomind:dag-interval-collapse';
 export const TASK_DAG_VISIBILITY_STORAGE_KEY = 'exomind:dag-visibility';
+export const TASK_DAG_CONTROLS_STATE_STORAGE_KEY = 'exomind:dag-controls-state';
 export const TASK_DAG_MODE_CHANGED_EVENT = 'exomind:dag-mode-changed';
 export const TASK_DAG_DIRECTION_CHANGED_EVENT = 'exomind:dag-direction-changed';
+export const TASK_DAG_LAYOUT_MODE_CHANGED_EVENT = 'exomind:dag-layout-mode-changed';
 export const TASK_DAG_HIDE_TERMINAL_CHANGED_EVENT = 'exomind:dag-hide-terminal-changed';
+export const TASK_DAG_FOCUS_MODE_CHANGED_EVENT = 'exomind:dag-focus-mode-changed';
 export const TASK_DAG_BACKGROUND_CHANGED_EVENT = 'exomind:dag-background-mode-changed';
 export const TASK_DAG_IMMERSIVE_CHANGED_EVENT = 'exomind:dag-immersive-changed';
+export const TASK_DAG_NODE_SIZING_CHANGED_EVENT = 'exomind:dag-node-sizing-changed';
 export const TASK_DAG_VIEWPORT_CHANGED_EVENT = 'exomind:dag-viewport-changed';
 export const TASK_DAG_SEARCH_DRAFT_CHANGED_EVENT = 'exomind:dag-search-draft-changed';
 export const TASK_DAG_SEARCH_OPTIONS_CHANGED_EVENT = 'exomind:dag-search-options-changed';
+export const TASK_DAG_TAG_FILTER_CHANGED_EVENT = 'exomind:dag-tag-filter-changed';
+export const TASK_DAG_FOCUSED_SERIES_CHANGED_EVENT = 'exomind:dag-focused-series-changed';
+export const TASK_DAG_INTERVAL_COLLAPSE_CHANGED_EVENT = 'exomind:dag-interval-collapse-changed';
 export const TASK_DAG_VISIBILITY_CHANGED_EVENT = 'exomind:dag-visibility-changed';
+export const TASK_DAG_CONTROLS_STATE_CHANGED_EVENT = 'exomind:dag-controls-state-changed';
 
 const DEFAULT_TASK_DAG_SEARCH_OPTIONS: TaskDagSearchOptions = {
   includeDescription: false,
   fuzzy: true,
   filterMode: false,
 };
-
+const DEFAULT_TASK_DAG_TAG_FILTER: TaskDagTagFilter = {
+  selectedTags: [],
+  matchMode: 'and',
+};
+const DEFAULT_TASK_DAG_CONTROLS_STATE: TaskDagControlsState = {
+  desktopViewOpen: true,
+  desktopToolsOpen: false,
+  mobileViewOpen: false,
+  mobileToolsOpen: false,
+  tagSectionOpen: false,
+  focusSectionOpen: false,
+};
+const DEFAULT_TASK_DAG_NODE_SIZING: TaskDagNodeSizing = {
+  fixedWidth: false,
+  fixedHeight: false,
+};
 const EMPTY_TASK_DAG_VISIBILITY_STATE: TaskDagVisibilityState = {
   collapsedUpstreamOf: [],
   collapsedDownstreamOf: [],
 };
+
+function normalizeTaskDagIntervalCollapseState(
+  state: Partial<TaskDagIntervalCollapseState> | TaskDagIntervalCollapseState | undefined,
+): TaskDagIntervalCollapseState {
+  const seenKeys = new Set<string>();
+  const intervals = Array.isArray(state?.intervals) ? state.intervals : [];
+  return {
+    intervals: intervals.flatMap((interval) => {
+      const startId = typeof interval?.startId === 'string' ? interval.startId.trim() : '';
+      const endId = typeof interval?.endId === 'string' ? interval.endId.trim() : '';
+      if (!startId || !endId) {
+        return [];
+      }
+      const key = `${startId}\0${endId}`;
+      if (seenKeys.has(key)) {
+        return [];
+      }
+      seenKeys.add(key);
+      return [{
+        startId,
+        endId,
+        collapsed: interval.collapsed !== false,
+      }];
+    }),
+  };
+}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -74,6 +152,20 @@ export function getTaskDagDirection(): DagDirection {
   return saved === 'TB' || saved === 'LR' || saved === 'auto' ? saved : 'auto';
 }
 
+export function getTaskDagLayoutMode(): TaskDagLayoutMode {
+  return readRuntimeBackedValue(TASK_DAG_LAYOUT_MODE_STORAGE_KEY) === 'manual' ? 'manual' : 'auto';
+}
+
+export function setTaskDagLayoutMode(mode: TaskDagLayoutMode): TaskDagLayoutMode {
+  const normalized = mode === 'manual' ? 'manual' : 'auto';
+  writeRuntimeBackedValue(
+    TASK_DAG_LAYOUT_MODE_STORAGE_KEY,
+    normalized,
+    TASK_DAG_LAYOUT_MODE_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
 export function setTaskDagDirection(direction: DagDirection): DagDirection {
   const normalized = direction === 'TB' || direction === 'LR' ? direction : 'auto';
   writeRuntimeBackedValue(
@@ -95,7 +187,7 @@ export function getTaskDagTerminalFilterMode(): TaskDagTerminalFilterMode {
   if (saved === '0' || saved === 'false') {
     return 'show';
   }
-  return 'show';
+  return 'smart';
 }
 
 export function setTaskDagTerminalFilterMode(mode: TaskDagTerminalFilterMode): TaskDagTerminalFilterMode {
@@ -104,6 +196,20 @@ export function setTaskDagTerminalFilterMode(mode: TaskDagTerminalFilterMode): T
     TASK_DAG_HIDE_TERMINAL_STORAGE_KEY,
     normalized,
     TASK_DAG_HIDE_TERMINAL_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagFocusMode(): TaskDagFocusMode {
+  return readRuntimeBackedValue(TASK_DAG_FOCUS_MODE_STORAGE_KEY) === 'hard' ? 'hard' : 'soft';
+}
+
+export function setTaskDagFocusMode(mode: TaskDagFocusMode): TaskDagFocusMode {
+  const normalized = mode === 'hard' ? 'hard' : 'soft';
+  writeRuntimeBackedValue(
+    TASK_DAG_FOCUS_MODE_STORAGE_KEY,
+    normalized,
+    TASK_DAG_FOCUS_MODE_CHANGED_EVENT,
   );
   return normalized;
 }
@@ -133,6 +239,36 @@ export function setTaskDagImmersive(immersive: boolean): boolean {
     TASK_DAG_IMMERSIVE_STORAGE_KEY,
     normalized ? '1' : '0',
     TASK_DAG_IMMERSIVE_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagNodeSizing(): TaskDagNodeSizing {
+  try {
+    const raw = readRuntimeBackedValue(TASK_DAG_NODE_SIZING_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_TASK_DAG_NODE_SIZING;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<TaskDagNodeSizing>;
+    return {
+      fixedWidth: parsed.fixedWidth === true,
+      fixedHeight: parsed.fixedHeight === true,
+    };
+  } catch {
+    return DEFAULT_TASK_DAG_NODE_SIZING;
+  }
+}
+
+export function setTaskDagNodeSizing(sizing: TaskDagNodeSizing): TaskDagNodeSizing {
+  const normalized: TaskDagNodeSizing = {
+    fixedWidth: sizing.fixedWidth === true,
+    fixedHeight: sizing.fixedHeight === true,
+  };
+  writeRuntimeBackedValue(
+    TASK_DAG_NODE_SIZING_STORAGE_KEY,
+    JSON.stringify(normalized),
+    TASK_DAG_NODE_SIZING_CHANGED_EVENT,
   );
   return normalized;
 }
@@ -177,6 +313,176 @@ export function setTaskDagSearchDraft(draft: string): string {
     TASK_DAG_SEARCH_DRAFT_STORAGE_KEY,
     normalized,
     TASK_DAG_SEARCH_DRAFT_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagTagFilter(): TaskDagTagFilter {
+  try {
+    const raw = readRuntimeBackedValue(TASK_DAG_TAG_FILTER_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_TASK_DAG_TAG_FILTER;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<TaskDagTagFilter>;
+    return {
+      selectedTags: Array.isArray(parsed.selectedTags)
+        ? parsed.selectedTags
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter(Boolean)
+        : [],
+      matchMode: parsed.matchMode === 'or' ? 'or' : 'and',
+    };
+  } catch {
+    return DEFAULT_TASK_DAG_TAG_FILTER;
+  }
+}
+
+export function setTaskDagTagFilter(tagFilter: TaskDagTagFilter): TaskDagTagFilter {
+  const normalized: TaskDagTagFilter = {
+    selectedTags: Array.isArray(tagFilter.selectedTags)
+      ? Array.from(new Set(
+        tagFilter.selectedTags
+          .filter((value): value is string => typeof value === 'string')
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ))
+      : [],
+    matchMode: tagFilter.matchMode === 'or' ? 'or' : 'and',
+  };
+  writeRuntimeBackedValue(
+    TASK_DAG_TAG_FILTER_STORAGE_KEY,
+    JSON.stringify(normalized),
+    TASK_DAG_TAG_FILTER_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+function normalizeFocusedSeriesAnchorIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(new Set(
+    value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  ));
+}
+
+export function getTaskDagFocusedSeriesAnchorIds(): string[] {
+  const saved = readRuntimeBackedValue(TASK_DAG_FOCUSED_SERIES_STORAGE_KEY);
+  if (!saved) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(saved) as unknown;
+    if (typeof parsed === 'string') {
+      return parsed.trim() ? [parsed.trim()] : [];
+    }
+    return normalizeFocusedSeriesAnchorIds(parsed);
+  } catch {
+    const normalized = saved.trim();
+    return normalized ? [normalized] : [];
+  }
+}
+
+export function setTaskDagFocusedSeriesAnchorIds(anchorIds: string[]): string[] {
+  const normalized = normalizeFocusedSeriesAnchorIds(anchorIds);
+  if (normalized.length === 0) {
+    removeRuntimeBackedValue(TASK_DAG_FOCUSED_SERIES_STORAGE_KEY);
+    return [];
+  }
+
+  writeRuntimeBackedValue(
+    TASK_DAG_FOCUSED_SERIES_STORAGE_KEY,
+    JSON.stringify(normalized),
+    TASK_DAG_FOCUSED_SERIES_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagFocusedSeriesAnchorId(): string | null {
+  return getTaskDagFocusedSeriesAnchorIds()[0] ?? null;
+}
+
+export function setTaskDagFocusedSeriesAnchorId(anchorId: string | null): string | null {
+  return setTaskDagFocusedSeriesAnchorIds(anchorId ? [anchorId] : [])[0] ?? null;
+}
+
+function normalizeControlsState(
+  controlsState: Partial<TaskDagControlsState> | null | undefined,
+): TaskDagControlsState {
+  return {
+    desktopViewOpen: typeof controlsState?.desktopViewOpen === 'boolean'
+      ? controlsState.desktopViewOpen
+      : DEFAULT_TASK_DAG_CONTROLS_STATE.desktopViewOpen,
+    desktopToolsOpen: typeof controlsState?.desktopToolsOpen === 'boolean'
+      ? controlsState.desktopToolsOpen
+      : DEFAULT_TASK_DAG_CONTROLS_STATE.desktopToolsOpen,
+    mobileViewOpen: typeof controlsState?.mobileViewOpen === 'boolean'
+      ? controlsState.mobileViewOpen
+      : DEFAULT_TASK_DAG_CONTROLS_STATE.mobileViewOpen,
+    mobileToolsOpen: typeof controlsState?.mobileToolsOpen === 'boolean'
+      ? controlsState.mobileToolsOpen
+      : DEFAULT_TASK_DAG_CONTROLS_STATE.mobileToolsOpen,
+    tagSectionOpen: typeof controlsState?.tagSectionOpen === 'boolean'
+      ? controlsState.tagSectionOpen
+      : DEFAULT_TASK_DAG_CONTROLS_STATE.tagSectionOpen,
+    focusSectionOpen: typeof controlsState?.focusSectionOpen === 'boolean'
+      ? controlsState.focusSectionOpen
+      : DEFAULT_TASK_DAG_CONTROLS_STATE.focusSectionOpen,
+  };
+}
+
+export function getTaskDagControlsState(): TaskDagControlsState {
+  try {
+    const raw = readRuntimeBackedValue(TASK_DAG_CONTROLS_STATE_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_TASK_DAG_CONTROLS_STATE;
+    }
+    return normalizeControlsState(JSON.parse(raw) as Partial<TaskDagControlsState>);
+  } catch {
+    return DEFAULT_TASK_DAG_CONTROLS_STATE;
+  }
+}
+
+export function setTaskDagControlsState(controlsState: TaskDagControlsState): TaskDagControlsState {
+  const normalized = normalizeControlsState(controlsState);
+  writeRuntimeBackedValue(
+    TASK_DAG_CONTROLS_STATE_STORAGE_KEY,
+    JSON.stringify(normalized),
+    TASK_DAG_CONTROLS_STATE_CHANGED_EVENT,
+  );
+  return normalized;
+}
+
+export function getTaskDagIntervalCollapseState(): TaskDagIntervalCollapseState {
+  try {
+    const raw = readRuntimeBackedValue(TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY);
+    if (!raw) {
+      return EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE;
+    }
+
+    return normalizeTaskDagIntervalCollapseState(
+      JSON.parse(raw) as Partial<TaskDagIntervalCollapseState>,
+    );
+  } catch {
+    return EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE;
+  }
+}
+
+export function setTaskDagIntervalCollapseState(
+  state: TaskDagIntervalCollapseState,
+): TaskDagIntervalCollapseState {
+  const normalized = normalizeTaskDagIntervalCollapseState(state);
+  writeRuntimeBackedValue(
+    TASK_DAG_INTERVAL_COLLAPSE_STORAGE_KEY,
+    JSON.stringify(normalized),
+    TASK_DAG_INTERVAL_COLLAPSE_CHANGED_EVENT,
   );
   return normalized;
 }

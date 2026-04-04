@@ -5,7 +5,7 @@ use futures_util::stream::{self, BoxStream, StreamExt};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard};
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -71,6 +71,7 @@ impl ApiSessionSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ApiProviderProfile {
     pub provider: String,
     pub model: String,
@@ -473,9 +474,7 @@ async fn complete_openai_turn(
         return Err(format!("OpenAI HTTP {}: {}", status, body));
     }
 
-    let parsed: Value = serde_json::from_str(&body)
-        .map_err(|error| format!("OpenAI 响应解析失败: {error}; body={body}"))?;
-    parse_openai_completion(&parsed)
+    parse_openai_completion_body(&body)
 }
 
 async fn complete_anthropic_turn(
@@ -716,6 +715,140 @@ fn parse_openai_completion(parsed: &Value) -> Result<ProviderCompletion, String>
     })
 }
 
+fn parse_openai_completion_body(body: &str) -> Result<ProviderCompletion, String> {
+    match serde_json::from_str::<Value>(body) {
+        Ok(parsed) => parse_openai_completion(&parsed),
+        Err(json_error) => parse_openai_sse_completion(body)
+            .map_err(|sse_error| {
+                format!(
+                    "OpenAI 响应解析失败: {json_error}; sse_error={sse_error}; body={body}"
+                )
+            }),
+    }
+}
+
+fn parse_openai_sse_completion(body: &str) -> Result<ProviderCompletion, String> {
+    #[derive(Default)]
+    struct PartialToolCall {
+        id: Option<String>,
+        name: Option<String>,
+        arguments: String,
+    }
+
+    let mut buffer = body.to_string();
+    let mut text = String::new();
+    let mut stop_reason = None;
+    let mut tool_calls = BTreeMap::<usize, PartialToolCall>::new();
+    let mut saw_choice_payload = false;
+
+    for event in split_sse_events(&mut buffer) {
+        let Some(data) = extract_sse_data(&event) else {
+            continue;
+        };
+        if data == "[DONE]" {
+            break;
+        }
+
+        let parsed: Value = serde_json::from_str(&data)
+            .map_err(|error| format!("OpenAI SSE 事件解析失败: {error}; data={data}"))?;
+        let Some(choices) = parsed.get("choices").and_then(Value::as_array) else {
+            continue;
+        };
+        if choices.is_empty() {
+            continue;
+        }
+        saw_choice_payload = true;
+
+        for choice in choices {
+            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+                stop_reason = Some(reason.to_string());
+            }
+
+            let Some(delta) = choice.get("delta") else {
+                continue;
+            };
+            if let Some(content) = delta.get("content").and_then(Value::as_str) {
+                text.push_str(content);
+            }
+            if let Some(delta_tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
+                for delta_tool_call in delta_tool_calls {
+                    let index = delta_tool_call
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
+                    let entry = tool_calls.entry(index).or_default();
+                    if let Some(id) = delta_tool_call.get("id").and_then(Value::as_str) {
+                        entry.id = Some(id.to_string());
+                    }
+                    if let Some(function) = delta_tool_call.get("function") {
+                        if let Some(name) = function.get("name").and_then(Value::as_str) {
+                            entry.name = Some(name.to_string());
+                        }
+                        if let Some(arguments) =
+                            function.get("arguments").and_then(Value::as_str)
+                        {
+                            entry.arguments.push_str(arguments);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !buffer.trim().is_empty() {
+        let data = extract_sse_data(&buffer)
+            .ok_or_else(|| format!("OpenAI SSE 尾块缺少 data 字段: {buffer}"))?;
+        if data != "[DONE]" {
+            let parsed: Value = serde_json::from_str(&data)
+                .map_err(|error| format!("OpenAI SSE 尾块解析失败: {error}; data={data}"))?;
+            let Some(choices) = parsed.get("choices").and_then(Value::as_array) else {
+                return Err(format!("OpenAI SSE 尾块缺少 choices: {data}"));
+            };
+            if !choices.is_empty() {
+                saw_choice_payload = true;
+                for choice in choices {
+                    if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+                        stop_reason = Some(reason.to_string());
+                    }
+                    if let Some(delta) = choice.get("delta") {
+                        if let Some(content) = delta.get("content").and_then(Value::as_str) {
+                            text.push_str(content);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !saw_choice_payload {
+        return Err("OpenAI SSE 响应未提供可解析的 choices".to_string());
+    }
+
+    let mut parsed_tool_uses = Vec::with_capacity(tool_calls.len());
+    for (_, partial) in tool_calls {
+        let id = partial
+            .id
+            .ok_or_else(|| "OpenAI SSE tool_call 缺少 id".to_string())?;
+        let name = partial
+            .name
+            .ok_or_else(|| "OpenAI SSE tool_call 缺少 function.name".to_string())?;
+        let input = if partial.arguments.trim().is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(&partial.arguments).map_err(|error| {
+                format!("OpenAI SSE tool arguments 解析失败: {error}")
+            })?
+        };
+        parsed_tool_uses.push(ToolUse { id, name, input });
+    }
+
+    Ok(ProviderCompletion {
+        text,
+        tool_uses: parsed_tool_uses,
+        stop_reason,
+    })
+}
+
 fn parse_anthropic_completion(parsed: &Value) -> Result<ProviderCompletion, String> {
     let content = parsed
         .get("content")
@@ -843,9 +976,12 @@ fn parse_openai_tool_calls(message: &Value) -> Result<Vec<ToolUse>, String> {
     let Some(tool_calls) = message.get("tool_calls") else {
         return Ok(Vec::new());
     };
+    if tool_calls.is_null() {
+        return Ok(Vec::new());
+    }
     let array = tool_calls
         .as_array()
-        .ok_or_else(|| "OpenAI tool_calls 必须是数组".to_string())?;
+        .ok_or_else(|| format!("OpenAI tool_calls 必须是数组或 null: {tool_calls}"))?;
     let mut parsed = Vec::with_capacity(array.len());
     for tool_call in array {
         let id = tool_call
@@ -881,6 +1017,13 @@ fn parse_openai_tool_calls(message: &Value) -> Result<Vec<ToolUse>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::http::StatusCode;
+    use axum::response::Response;
+    use axum::routing::post;
+    use axum::{Json, Router};
+    use serde_json::Value;
+    use tokio::net::TcpListener;
 
     #[test]
     fn parse_openai_completion_collects_text_and_tool_calls() {
@@ -906,6 +1049,124 @@ mod tests {
         assert_eq!(completion.tool_uses.len(), 1);
         assert_eq!(completion.tool_uses[0].name, "get_recent_events");
         assert_eq!(completion.tool_uses[0].input["limit"], 2);
+    }
+
+    #[test]
+    fn parse_openai_completion_treats_null_tool_calls_as_empty() {
+        let parsed = json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "content": "已经完成处理。",
+                    "tool_calls": null
+                }
+            }]
+        });
+
+        let completion = parse_openai_completion(&parsed).unwrap();
+        assert_eq!(completion.text, "已经完成处理。");
+        assert!(completion.tool_uses.is_empty());
+        assert_eq!(completion.stop_reason.as_deref(), Some("stop"));
+    }
+
+    async fn sse_completion_handler(Json(payload): Json<Value>) -> Response {
+        assert_eq!(payload["stream"], false);
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"今天\"}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"是阴天，气温21.45度\"}}]}\n\n\
+data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n\
+data: [DONE]\n\n";
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    async fn sse_tool_call_completion_handler(Json(payload): Json<Value>) -> Response {
+        assert_eq!(payload["stream"], false);
+        let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-weather\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"date\\\":\\\"today\\\"}\"}}]}}]}\n\n\
+data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n\
+data: [DONE]\n\n";
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    async fn spawn_completion_test_server(path: &'static str) -> String {
+        let app = Router::new()
+            .route("/chat/completions", post(sse_completion_handler))
+            .route("/tool/chat/completions", post(sse_tool_call_completion_handler));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}{path}")
+    }
+
+    #[tokio::test]
+    async fn complete_openai_turn_accepts_sse_text_body_when_stream_is_false() {
+        let client = reqwest::Client::new();
+        let completion = complete_openai_turn(
+            &client,
+            &ApiProviderProfile {
+                provider: "openai".to_string(),
+                model: "gpt-test".to_string(),
+                base_url: Some(spawn_completion_test_server("").await),
+                api_key: "sk-test".to_string(),
+            },
+            None,
+            &[ProviderConversationTurn::User {
+                text: "今天是什么天气".to_string(),
+            }],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(completion.text, "今天是阴天，气温21.45度");
+        assert!(completion.tool_uses.is_empty());
+        assert_eq!(completion.stop_reason.as_deref(), Some("stop"));
+    }
+
+    #[tokio::test]
+    async fn complete_openai_turn_accepts_sse_tool_call_body_when_stream_is_false() {
+        let client = reqwest::Client::new();
+        let completion = complete_openai_turn(
+            &client,
+            &ApiProviderProfile {
+                provider: "openai".to_string(),
+                model: "gpt-test".to_string(),
+                base_url: Some(spawn_completion_test_server("/tool").await),
+                api_key: "sk-test".to_string(),
+            },
+            None,
+            &[ProviderConversationTurn::User {
+                text: "今天是什么天气".to_string(),
+            }],
+            &[ToolDef {
+                name: "get_weather".to_string(),
+                description: "返回天气".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "date": { "type": "string" }
+                    }
+                }),
+            }],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(completion.text, "");
+        assert_eq!(completion.tool_uses.len(), 1);
+        assert_eq!(completion.tool_uses[0].id, "call-weather");
+        assert_eq!(completion.tool_uses[0].name, "get_weather");
+        assert_eq!(completion.tool_uses[0].input["date"], "today");
+        assert_eq!(completion.stop_reason.as_deref(), Some("tool_calls"));
     }
 
     #[test]

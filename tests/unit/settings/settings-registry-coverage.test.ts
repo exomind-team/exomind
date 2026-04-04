@@ -39,6 +39,10 @@ const AUDITED_SETTINGS_IDS = [
   'voice-overlay-transcript-lines',
   'voice-overlay-bottom-offset',
   'now-workbench-overlay-enabled',
+  'voice-omni-profile',
+  'voice-omni-prompts',
+  'voice-omni-model',
+  'voice-omni-optimize',
   'volcano-engine-key',
   'volcano-usage-summary',
   'volcano-endpoint',
@@ -71,7 +75,12 @@ const AUDITED_SETTINGS_IDS = [
   'developer-mode',
   'use-mock-data',
   'devtools',
-  'feature-toggles',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'proposal-inbox-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
   'instance-diagnostics',
   'device-pairing',
   'embedded-runtime-lan-no-auth',
@@ -115,6 +124,12 @@ const BOOLEAN_IDS = [
   'developer-mode',
   'use-mock-data',
   'devtools',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'proposal-inbox-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
 ] as const;
 
 const NUMBER_IDS = [
@@ -148,6 +163,8 @@ const BUTTON_ACTION_IDS = [
 const CUSTOM_ITEM_IDS = [
   'sound-preset',
   'focus-bgm',
+  'voice-omni-profile',
+  'voice-omni-prompts',
   'volcano-engine-key',
   'volcano-usage-summary',
   'moss-voice-test',
@@ -156,6 +173,13 @@ const CUSTOM_ITEM_IDS = [
   'data-transfer',
   'instance-diagnostics',
   'device-pairing',
+] as const;
+
+const QWEN_OMNI_ONLY_IDS = [
+  'voice-omni-profile',
+  'voice-omni-prompts',
+  'voice-omni-model',
+  'voice-omni-optimize',
 ] as const;
 
 const TAURI_DEV_ONLY_IDS = [
@@ -167,7 +191,12 @@ const TAURI_DEV_ONLY_IDS = [
 const DEV_ONLY_IDS = [
   'use-mock-data',
   'devtools',
-  'feature-toggles',
+  'me-page-enabled',
+  'agent-page-enabled',
+  'goals-page-enabled',
+  'proposal-inbox-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
   'instance-diagnostics',
   'device-pairing',
 ] as const;
@@ -304,15 +333,12 @@ describe('settings registry coverage audit', () => {
       isTauriWindow: true,
     })).toBe(true);
 
-    const featureToggles = getItem('feature-toggles', 'group');
-    expect(featureToggles.groupStyle).toBe('adaptive-overlay');
-    expect(featureToggles.children.map((child) => child.id)).toEqual([
-      'me-page-enabled',
-      'agent-page-enabled',
-      'goals-page-enabled',
-      'desktop-adaptive',
-      'command-palette-enabled',
-    ]);
+    expect(getItem('me-page-enabled', 'boolean').category).toBe('developer');
+    expect(getItem('agent-page-enabled', 'boolean').category).toBe('developer');
+    expect(getItem('goals-page-enabled', 'boolean').category).toBe('developer');
+    expect(getItem('proposal-inbox-enabled', 'boolean').category).toBe('developer');
+    expect(getItem('desktop-adaptive', 'boolean').category).toBe('developer');
+    expect(getItem('command-palette-enabled', 'boolean').category).toBe('developer');
 
     const clearLocalCache = getItem('clear-local-cache', 'action');
     expect(clearLocalCache.confirmMessage).toContain('确认清空本地缓存');
@@ -394,6 +420,13 @@ describe('settings registry coverage audit', () => {
   it('keeps every registry item reachable across supported settings contexts', () => {
     settingsPagePreferenceState.isTauriWindow = true;
     settingsPagePreferenceState.isDesktopOperatingSystem = true;
+    const qwenCtx: SettingsContext = {
+      ...getBaseCtx(),
+      isDesktop: true,
+      isTauriWindow: true,
+      developerMode: true,
+      voiceShortcutAsrProvider: 'qwen-omni',
+    };
     const contexts: SettingsContext[] = [
       getBaseCtx(),
       {
@@ -414,22 +447,38 @@ describe('settings registry coverage audit', () => {
         developerMode: true,
         voiceShortcutAsrProvider: 'volcano',
       },
+      {
+        ...getBaseCtx(),
+        isDesktop: true,
+        isTauriWindow: true,
+        developerMode: true,
+        voiceShortcutAsrProvider: 'qwen-omni',
+      },
     ];
 
-    const visibleIds = new Set(
-      contexts.flatMap((ctx) => getVisibleSettings(ctx).map((item) => item.id)),
-    );
+    const qwenVisibleIds = getVisibleSettings(qwenCtx).map((item) => item.id);
+    QWEN_OMNI_ONLY_IDS.forEach((id) => {
+      expect(qwenVisibleIds).toContain(id);
+    });
 
-    expect(Array.from(visibleIds).sort()).toEqual([...AUDITED_SETTINGS_IDS].sort());
+    const visibleIds = new Set([
+      ...contexts.flatMap((ctx) => getVisibleSettings(ctx).map((item) => item.id)),
+      ...qwenVisibleIds,
+    ]);
+
+    expect(Array.from(visibleIds).sort()).toEqual(
+      [...AUDITED_SETTINGS_IDS].sort(),
+    );
     settingsPagePreferenceState.isTauriWindow = false;
     settingsPagePreferenceState.isDesktopOperatingSystem = false;
   });
 
-  it('keeps the feature toggles drawer checklist in sync with its audited child settings', () => {
+  it('keeps the inline developer toggle checklist in sync with its audited child settings（开发者分组内联开关清单与审计项保持一致）', () => {
     expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
       'me-page-enabled',
       'agent-page-enabled',
       'goals-page-enabled',
+      'proposal-inbox-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
     ]);

@@ -3,6 +3,7 @@ import { BaseEdge, getBezierPath, Position, type Edge, type EdgeProps } from '@x
 export type DagreRoutedEdgeData = {
   points?: Array<{ x: number; y: number }> | null;
   hardEdge?: boolean;
+  isFocusDimmed?: boolean;
 };
 
 type Point = { x: number; y: number };

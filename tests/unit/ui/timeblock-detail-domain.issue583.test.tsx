@@ -127,7 +127,7 @@ describe('TimeBlockDetailPage issue #583 domain routing', () => {
     })
 
     expect(screen.getByText('当下').closest('a')).toHaveAttribute('href', '/eventlog')
-    expect(screen.getByText('时间块详情')).toBeInTheDocument()
+    expect(screen.getByText('任务')).toBeInTheDocument()
   })
 
   it('keeps 任务 breadcrumb when entered from tasks domain', async () => {
@@ -141,8 +141,8 @@ describe('TimeBlockDetailPage issue #583 domain routing', () => {
       expect(loadTimeBlocksMock).toHaveBeenCalled()
     })
 
-    expect(screen.getByText('任务').closest('a')).toHaveAttribute('href', '/tasks?main=1')
-    expect(screen.getByText('时间块详情')).toBeInTheDocument()
+    expect(screen.getAllByText('任务')[0]?.closest('a')).toHaveAttribute('href', '/tasks?main=1')
+    expect(screen.getAllByText('任务').length).toBeGreaterThan(0)
   })
 
   it('builds related-task detail and dag links with timeblock return context', async () => {

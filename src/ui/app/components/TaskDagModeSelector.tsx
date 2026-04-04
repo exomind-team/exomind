@@ -5,7 +5,7 @@ const MODE_OPTIONS: ReadonlyArray<{
   label: string;
 }> = [
   { key: 'browse', label: '浏览' },
-  { key: 'connect', label: '连接' },
+  { key: 'connect', label: '编辑' },
   { key: 'execute', label: '执行' },
 ];
 

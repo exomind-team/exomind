@@ -16,6 +16,7 @@ import {
   takePendingMainWindowShortcutActivation,
 } from '@/services/main-window-shortcut-runtime';
 import { buildTasksMainSearch } from '@/ui/app/pages/task-route-memory';
+import { getEventlogPathForTab } from '@/ui/app/pages/eventlog-route-memory';
 
 export const MAIN_WINDOW_SHORTCUT_EVENT_NAME = 'main-window-shortcut';
 export const MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT = 'eventlog-record-input';
@@ -36,8 +37,7 @@ function getRouterLocationSnapshot(): RouterLocationSnapshot {
 
 async function navigateToEventlogRecord(): Promise<void> {
   await appRouter.navigate({
-    to: '/eventlog',
-    search: { tab: 'record' },
+    to: getEventlogPathForTab('record'),
   });
 }
 
@@ -120,7 +120,7 @@ export class MainWindowShortcutService {
     }
 
     const location = getRouterLocationSnapshot();
-    if (location.pathname === '/' || location.pathname === '/eventlog') {
+    if (location.pathname === '/' || location.pathname.startsWith('/eventlog')) {
       await navigateToEventlogRecord();
       requestMainWindowFocusTarget(MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT);
       return;

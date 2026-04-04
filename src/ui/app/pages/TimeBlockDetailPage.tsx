@@ -11,6 +11,7 @@ import type { TaskNode } from '@/lib/types/task';
 import { buildTimeBlockDetailView } from './timeblock-detail-view';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { buildTaskDomainBackLink } from './task-domain-routing';
 
 function resolveActiveTaskIds(block: ActiveBlockData): string[] {
   return resolveActiveBlockTaskIds(block);
@@ -77,9 +78,10 @@ export function TimeBlockDetailPage() {
   const [eventLogs, setEventLogs] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const isNowDomain = location.pathname.startsWith('/eventlog/');
+  const taskDomainBackLink = buildTaskDomainBackLink(null, 'list');
   const backLink = isNowDomain
     ? { label: '当下', to: '/eventlog' }
-    : { label: '任务', to: '/tasks' };
+    : { label: taskDomainBackLink.sourceLabel, to: taskDomainBackLink.to, search: { main: '1' } };
   const returnTo = block
     ? (isNowDomain ? `/eventlog/timeblocks/${block.startId}` : `/tasks/block/${block.startId}`)
     : undefined;
@@ -176,7 +178,7 @@ export function TimeBlockDetailPage() {
           <div className="mx-auto max-w-7xl">
             <TaskBreadcrumb
               segments={[backLink]}
-              current={{ label: '时间块详情' }}
+              current={{ label: '任务' }}
             />
           </div>
         </header>
@@ -190,7 +192,7 @@ export function TimeBlockDetailPage() {
             <ArrowLeft size={16} />
           </Link>
           <div className="min-w-0 flex-1 pt-0.5">
-            <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">时间块详情</h1>
+            <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
           </div>
           <div className="h-8 w-8 shrink-0" aria-hidden="true" />
         </header>

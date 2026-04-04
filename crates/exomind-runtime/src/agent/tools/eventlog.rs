@@ -15,7 +15,7 @@ pub fn get_recent_events_tool(
             "properties": {
                 "limit": {
                     "type": "integer",
-                    "description": "返回条数，默认 20，最大 100",
+                    "description": "返回条数，默认 10，最大 100",
                     "minimum": 1,
                     "maximum": 100
                 }
@@ -30,7 +30,7 @@ pub fn get_recent_events_tool(
             let limit = input
                 .get("limit")
                 .and_then(Value::as_u64)
-                .unwrap_or(20)
+                .unwrap_or(10)
                 .clamp(1, 100) as usize;
 
             let events = store

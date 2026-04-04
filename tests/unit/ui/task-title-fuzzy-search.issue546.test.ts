@@ -69,4 +69,24 @@ describe('task title fuzzy search issue-546（任务页标题模糊搜索）', (
       'task-1',
     ]);
   });
+
+  it('sorts search results by status priority, then createdAt desc, before fuzzy tie-breakers', () => {
+    const tasks = [
+      { ...makeTask('task-completed', 'baaab'), status: 'completed' as const, createdAt: 120, updatedAt: 120 },
+      { ...makeTask('task-pending-old', 'baaab'), status: 'pending' as const, createdAt: 20, updatedAt: 20 },
+      { ...makeTask('task-in-progress', 'ab'), status: 'in_progress' as const, createdAt: 10, updatedAt: 10 },
+      { ...makeTask('task-cancelled', 'ababa'), status: 'cancelled' as const, createdAt: 200, updatedAt: 200 },
+      { ...makeTask('task-suspended', 'abacus'), status: 'suspended' as const, createdAt: 30, updatedAt: 30 },
+      { ...makeTask('task-pending-new', 'ab'), status: 'pending' as const, createdAt: 90, updatedAt: 90 },
+    ];
+
+    expect(filterTasksByTitleFuzzySearch(tasks, 'ab').map((task) => task.id)).toEqual([
+      'task-in-progress',
+      'task-suspended',
+      'task-pending-new',
+      'task-pending-old',
+      'task-completed',
+      'task-cancelled',
+    ]);
+  });
 });
