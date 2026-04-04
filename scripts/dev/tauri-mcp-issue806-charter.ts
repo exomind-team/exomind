@@ -790,6 +790,19 @@ async function collectRuntimeState(client: RawBridgeClient): Promise<RuntimeStat
   })()`);
 }
 
+function buildUiRtConsistencySignature(input: {
+  uiSummary: UiSessionSummary;
+  rtSummary: ReturnType<typeof summarizeRtSessions>;
+  runtimeState: RuntimeStateSnapshot;
+}): string {
+  return JSON.stringify({
+    ui: input.uiSummary,
+    rt: input.rtSummary,
+    hostId: input.runtimeState.runtimeStatus.hostId ?? null,
+    ptyIds: [...input.runtimeState.ptys.map((pty) => pty.id)].sort(),
+  });
+}
+
 async function waitForUiRtConsistency(
   client: RawBridgeClient,
   timeoutMs: number,
@@ -808,14 +821,35 @@ async function waitForUiRtConsistency(
   };
   latest.rtSummary = summarizeRtSessions(latest.runtimeState.sessions);
   latest.mismatches = compareSessionSummaries(latest.uiSummary, latest.rtSummary);
+  let stableConsistencySignature = latest.mismatches.length === 0
+    ? buildUiRtConsistencySignature(latest)
+    : null;
+  let stableConsistencySamples = stableConsistencySignature ? 1 : 0;
 
-  while (latest.mismatches.length > 0 && (Date.now() - startedAt) < timeoutMs) {
+  while ((Date.now() - startedAt) < timeoutMs) {
+    if (latest.mismatches.length === 0 && stableConsistencySamples >= 3) {
+      return latest;
+    }
+
     await Bun.sleep(250);
     const uiSummary = await collectUiSessionSummary(client);
     const runtimeState = await collectRuntimeState(client);
     const rtSummary = summarizeRtSessions(runtimeState.sessions);
     const mismatches = compareSessionSummaries(uiSummary, rtSummary);
     latest = { uiSummary, runtimeState, rtSummary, mismatches };
+
+    if (mismatches.length === 0) {
+      const nextSignature = buildUiRtConsistencySignature(latest);
+      if (nextSignature === stableConsistencySignature) {
+        stableConsistencySamples += 1;
+      } else {
+        stableConsistencySignature = nextSignature;
+        stableConsistencySamples = 1;
+      }
+    } else {
+      stableConsistencySignature = null;
+      stableConsistencySamples = 0;
+    }
   }
 
   return latest;
@@ -852,7 +886,6 @@ async function restartRuntimeAndWaitForRecovery(
       && (runtimeState.runtimeStatus.hostId ?? null) !== beforeHostId
       && uiSummary.active === beforeUiSummary.active
       && rtSummary.active === beforeUiSummary.active
-      && runtimeState.ptys.length === beforeUiSummary.active
       && mismatches.length === 0;
 
     if (ready) {
@@ -940,7 +973,25 @@ async function exerciseSessionCard(
 ): Promise<SessionCardExerciseResult> {
   await installConsoleTap(client);
   const loadingPromise = detectTerminalLoadingDuringTransition(client, Math.min(timeoutMs, 1500));
-  await clickBySelector(client, selector, selector);
+  try {
+    await clickBySelector(client, selector, selector);
+  } catch (error) {
+    return {
+      target,
+      sessionId,
+      expectation,
+      status: 'failed',
+      loadingObserved: await loadingPromise,
+      terminalVisible: false,
+      disconnectedVisible: false,
+      disconnectedMessage: null,
+      consoleEntries: await readConsoleEntries(client),
+      notes: [
+        'target session card/node disappeared before the charter could click it',
+        error instanceof Error ? error.message : String(error),
+      ],
+    };
+  }
   const panel = await waitForSessionPanel(client, timeoutMs);
   const loadingObserved = await loadingPromise;
   const consoleEntries = await readConsoleEntries(client);

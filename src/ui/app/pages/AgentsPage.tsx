@@ -203,6 +203,7 @@ const LINK_PROOF_TOPIC_PREFIX = 'system.link_proof.';
 const LINK_PROOF_REQUEST_TOPIC = 'system.link_proof.request';
 const MANUAL_LINK_PROOF_ADOPTION_POLL_INTERVAL_MS = 500;
 const FRESH_PTY_PRESENCE_GRACE_MS = 15_000;
+const PENDING_HISTORICAL_BINDING_GRACE_MS = 10 * 60_000;
 
 type PendingPtyPresenceCheck = {
   hostId: string | null;
@@ -259,6 +260,28 @@ function isFreshRunningTerminalSession(
   }
 
   return now - wallClockMs < FRESH_PTY_PRESENCE_GRACE_MS;
+}
+
+function isFreshPendingHistoricalBindingSession(
+  session: Pick<SessionInfo, 'status' | 'interaction_mode' | 'agent_kind' | 'inner_session_id' | 'last_active_at' | 'created_at'>,
+  now: number = Date.now(),
+): boolean {
+  if (
+    session.interaction_mode !== 'terminal'
+    || (session.agent_kind !== 'claude' && session.agent_kind !== 'codex')
+    || (session.inner_session_id?.trim().length ?? 0) > 0
+    || session.status === 'completed'
+    || session.status === 'archived'
+  ) {
+    return false;
+  }
+
+  const wallClockMs = parseSessionWallClockMs(session);
+  if (!Number.isFinite(wallClockMs) || wallClockMs <= 0) {
+    return false;
+  }
+
+  return now - wallClockMs < PENDING_HISTORICAL_BINDING_GRACE_MS;
 }
 
 function resolveDialAddressFromBaseUrl(rtBaseUrl: string): string | undefined {
@@ -3507,6 +3530,17 @@ export function AgentsPage() {
         const decisionSignature = buildDisconnectedTerminalSessionDecisionSignature(session);
         autoCompletingDisconnectedSessionIdsRef.current.add(session.id);
         try {
+          if (isFreshPendingHistoricalBindingSession(session)) {
+            console.info('[agent-hub][pty] keep disconnected terminal session active because historical binding is still pending', {
+              sessionId: session.id,
+              ptyId: session.pty_id ?? null,
+              sourceHostId: session.source_host_id ?? null,
+              agentType: session.agent_kind,
+            });
+            disconnectedSessionDecisionSignaturesRef.current.set(session.id, decisionSignature);
+            continue;
+          }
+
           if (isRecoverableTerminalSession(session)) {
             const matchedHost = resolveRuntimeHostBySourceHostId(session.source_host_id);
             const shouldFallbackToActiveRuntimeHost = canFallbackToActiveRuntimeHostForSession(session);

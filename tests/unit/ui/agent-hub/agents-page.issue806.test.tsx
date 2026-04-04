@@ -878,6 +878,77 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     );
   });
 
+  it('keeps a disconnected pending-binding terminal session active instead of auto-completing it（待补绑 inner_session_id 的失联终端应保留活跃断开态）', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const pendingBindingIso = new Date(Date.now() - 20_000).toISOString();
+    localStorage.setItem('exomind:agentHubViewMode', 'sessions');
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-pending-binding-824',
+        agent_kind: 'claude',
+        role: 'Pending Binding 824',
+        pty_id: 'pty-pending-binding-824',
+        inner_session_id: null,
+        source_host_id: 'runtime-host-523',
+        created_at: pendingBindingIso,
+        last_active_at: pendingBindingIso,
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-card-session-pending-binding-824')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(infoSpy.mock.calls.some(([message, payload]) => (
+        message === '[agent-hub][pty] keep disconnected terminal session active because historical binding is still pending'
+        && (payload as { sessionId?: string }).sessionId === 'session-pending-binding-824'
+      ))).toBe(true);
+    });
+
+    expect(runtimeClientMocks.updateSession).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'session-pending-binding-824',
+      { status: 'completed' },
+    );
+
+    infoSpy.mockRestore();
+  });
+
   it('retries codex auto-resume after the runtime becomes reachable again（RT 恢复可达后应再次自动恢复，而不是烧掉唯一尝试机会）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     sessionStreamState.sessions = [

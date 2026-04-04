@@ -114,7 +114,7 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let resizeObservers: Array<() => void> = [];
   let sizeReady = false;
-  let streamPlans: Array<() => Promise<Response> | Response> = [];
+  let streamPlans: Array<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response> | Response> = [];
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -123,14 +123,14 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     resizeObservers = [];
     streamPlans = [];
 
-    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/stream')) {
         const nextPlan = streamPlans.shift();
         if (!nextPlan) {
           throw new Error(`missing stream plan for ${url}`);
         }
-        return nextPlan();
+        return nextPlan(input, init);
       }
       return new Response(null, { status: 204 });
     });
@@ -274,6 +274,41 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
 
     expect(onInitialConnectionFailure).not.toHaveBeenCalled();
+  });
+
+  it('fails fast when the initial stream request times out（初始流请求超时时应退出加载态并上报失败）', async () => {
+    const onInitialConnectionFailure = vi.fn();
+    streamPlans.push((_input, init) => (
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      })
+    ));
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-timeout"
+        onInitialConnectionFailure={onInitialConnectionFailure}
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(60);
+
+    expect(screen.getByTestId('pty-terminal-loading')).toBeInTheDocument();
+
+    await flushUi(4_100);
+
+    expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pty-terminal-error')).toHaveTextContent(
+      '会话加载失败：RT 响应超时',
+    );
   });
 
   it('does not recreate the PTY stream when only the failure callback identity changes（仅失败回调变更时不应重建 PTY 流）', async () => {

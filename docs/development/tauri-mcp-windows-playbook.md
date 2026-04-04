@@ -1217,3 +1217,71 @@
    - 拓扑节点能打开右侧 Terminal
    - 控制台存在 `[agent-hub][pty][open]` trace
    - 九条章程再次 `overallPass: true`
+
+### 阶段补记：`web-1420` 现场继续通过九条章程，PTY 失败态已显式出屏（2026-04-04）
+
+#### 阶段目标
+
+- 在用户重启并清空外心相关进程后，重新确认当前唯一实例 `UI 1420 / RT 9124 / raw bridge 9223` 仍可完成九条终端叙事验收。
+- 收敛“PTY 加载失败时 UI 不应一直卡在会话加载中”的现场证据，并把这轮判断写成可复用经验。
+
+#### 观察结果
+
+- 当前端口归属重新确认后：
+  - `1420` 正在监听
+  - `9124` 正在监听
+  - `9223` 正在监听
+  - `9124` 与 `9223` 仍由同一个 `exomind.exe` 持有
+- 官方 `driver_session status` 这轮依旧直接返回：
+  - `Transport closed`
+- 但 raw bridge 章程仍可直接跑通：
+  - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name web-1420 --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+- 本轮生成报告：
+  - `.tmp/reports/tauri-mcp-issue806-charter/2026-04-04T09-37-14.437Z-web-1420.json`
+  - `.tmp/reports/tauri-mcp-issue806-charter/2026-04-04T09-37-14.437Z-web-1420.md`
+- 章程结果：
+  - `overallPass = true`
+  - `activeCount = 1`
+  - `mismatchCount = 0`
+- 九条叙事结果：
+  - `story-1/2/3/4/6/7/8/9 = passed`
+  - `story-5 = skipped`
+  - 跳过原因不是功能失败，而是现场只有 `1` 个活跃会话，不足以验证“多张活跃卡片来回切换”
+- 这轮 completed session 卡片的真实 UI 结果已经变成：
+  - 先出现终端加载态
+  - 再落到断开历史 / 失败态
+  - UI 文案明确显示：`Terminal 会话已结束；下方将展示关闭前历史，可继续归档。`
+  - 控制台仍保留 `[agent-hub][pty][open]` trace
+
+#### 结论
+
+- 当前 `web-1420` 现场再次证明：
+  - 即使官方 `driver_session` 仍是 `Transport closed`
+  - 只要 raw bridge 还活着，就能继续对真实桌面窗口执行产品级验收
+- 对“PTY 加载失败/会话不可恢复”的体验要求，这轮可以确认已经满足最小闭环：
+  - UI 不再无限停留在 `会话加载中...`
+  - 会明确落成简短失败/断开提示
+  - 控制台存在可追溯 trace
+- 因而后续遇到用户反馈“卡在加载中”时，判断顺序应该变成：
+  1. 先确认是不是旧实例/残留进程导致 RT 根本没起来
+  2. 再确认当前代码是否已经把初始 PTY 流失败收敛为显式错误 UI
+  3. 最后才继续排查具体会话恢复逻辑
+
+#### 可复用操作套路
+
+1. 先用三条快速真值确认当前实例还活着：
+   - `Get-NetTCPConnection -State Listen -LocalPort 1420,9124,9223`
+   - `Invoke-WebRequest http://127.0.0.1:9124/health`
+   - `driver_session status`
+2. 如果 `driver_session` 仍是 `Transport closed`，不要阻塞，直接改跑：
+   - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name web-1420 --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+3. 看章程结果时，优先盯三项：
+   - `overallPass`
+   - `mismatchCount`
+   - `Nine-Story Charter Checks`
+4. 对“失败 UI 是否真的出屏”的证据，不要只看 active session：
+   - 还要点至少一张 completed session card
+   - 确认它不是无响应，而是进入断开历史/失败态并有明确文案
+5. 如果本轮活跃会话数少于 `2`：
+   - `story-5` 可以接受 `skipped`
+   - 但必须在报告里写明跳过原因是“现场活跃会话不足”，不是脚本或产品失败

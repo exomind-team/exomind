@@ -18,7 +18,22 @@ export interface PtyTerminalProps {
 
 const INITIAL_STREAM_CONNECT_RETRY_LIMIT = 2;
 const INITIAL_STREAM_CONNECT_RETRY_DELAY_MS = 250;
+const INITIAL_STREAM_CONNECT_TIMEOUT_MS = 4_000;
 const STREAM_RECONNECT_DELAY_MS = 500;
+
+function formatInitialStreamFailureSummary(message: string): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes('401') || normalized.includes('403')) {
+    return '会话加载失败：RT 鉴权失败';
+  }
+  if (normalized.includes('404')) {
+    return '会话加载失败：当前 PTY 不存在';
+  }
+  if (normalized.includes('timeout') || normalized.includes('超时')) {
+    return '会话加载失败：RT 响应超时';
+  }
+  return '会话加载失败：请检查 RT 或稍后重试';
+}
 
 function parsePtyExitCode(data: string): number | null {
   if (!data) {
@@ -80,6 +95,7 @@ export function PtyTerminal({
   const onInitialConnectionFailureRef = useRef(onInitialConnectionFailure);
   const hasConnectedOnceRef = useRef(false);
   const [isStreamConnecting, setIsStreamConnecting] = useState(true);
+  const [streamErrorMessage, setStreamErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     onInitialConnectionFailureRef.current = onInitialConnectionFailure;
@@ -94,12 +110,14 @@ export function PtyTerminal({
     const markStreamReady = () => {
       if (!disposed) {
         hasConnectedOnceRef.current = true;
+        setStreamErrorMessage(null);
         setIsStreamConnecting(false);
       }
     };
 
     const resetStreamLoading = () => {
       if (!disposed && !hasConnectedOnceRef.current) {
+        setStreamErrorMessage(null);
         setIsStreamConnecting(true);
       }
     };
@@ -382,8 +400,23 @@ export function PtyTerminal({
 
     let streamAbortController: AbortController | null = null;
 
-    const handleInitialStreamFailure = (message: string) => {
-      if (initialStreamRetryCount < INITIAL_STREAM_CONNECT_RETRY_LIMIT) {
+    const finalizeInitialStreamFailure = (message: string) => {
+      if (!disposed) {
+        hasConnectedOnceRef.current = true;
+        setIsStreamConnecting(false);
+        setStreamErrorMessage(formatInitialStreamFailureSummary(message));
+      }
+      if (!initialFailureNotified && onInitialConnectionFailureRef.current) {
+        initialFailureNotified = true;
+        onInitialConnectionFailureRef.current();
+      }
+    };
+
+    const handleInitialStreamFailure = (
+      message: string,
+      options?: { skipRetry?: boolean },
+    ) => {
+      if (!options?.skipRetry && initialStreamRetryCount < INITIAL_STREAM_CONNECT_RETRY_LIMIT) {
         initialStreamRetryCount += 1;
         log.warn(
           `[PtyTerminal] initial stream connection failed for PTY ${ptyId}; retry ${initialStreamRetryCount}/${INITIAL_STREAM_CONNECT_RETRY_LIMIT}: ${message}`,
@@ -392,12 +425,8 @@ export function PtyTerminal({
         return;
       }
 
-      resetStreamLoading();
-      markStreamReady();
-      if (!initialFailureNotified && onInitialConnectionFailureRef.current) {
-        initialFailureNotified = true;
-        onInitialConnectionFailureRef.current();
-      }
+      log.warn(`[PtyTerminal] initial stream connection failed for PTY ${ptyId}; giving up: ${message}`);
+      finalizeInitialStreamFailure(message);
     };
 
     const connectStream = async () => {
@@ -407,6 +436,11 @@ export function PtyTerminal({
       streamAbortControllerRef.current = controller;
       streamAbortController = controller;
       let sawEof = false;
+      let connectTimedOut = false;
+      const connectTimeoutId = setTimeout(() => {
+        connectTimedOut = true;
+        controller.abort();
+      }, INITIAL_STREAM_CONNECT_TIMEOUT_MS);
 
       log.info(`[PtyTerminal] opening PTY stream ${ptyId} via ${streamUrl}`);
 
@@ -417,13 +451,24 @@ export function PtyTerminal({
           signal: controller.signal,
         });
       } catch (error) {
+        clearTimeout(connectTimeoutId);
         if (disposed || controller.signal.aborted) {
-          return;
+          if (!connectTimedOut) {
+            return;
+          }
         }
         clearConnectedStreamController(controller);
+        if (connectTimedOut) {
+          handleInitialStreamFailure(
+            `timeout after ${INITIAL_STREAM_CONNECT_TIMEOUT_MS}ms（终端流连接超时）`,
+            { skipRetry: true },
+          );
+          return;
+        }
         handleInitialStreamFailure(error instanceof Error ? error.message : String(error));
         return;
       }
+      clearTimeout(connectTimeoutId);
 
       if (!response.ok || !response.body) {
         clearConnectedStreamController(controller);
@@ -564,6 +609,16 @@ export function PtyTerminal({
           className="absolute inset-0 z-10 flex items-center justify-center bg-[#1C1917]/90 text-xs text-[#A8A29E]"
         >
           会话加载中...
+        </div>
+      ) : null}
+      {!isStreamConnecting && streamErrorMessage ? (
+        <div
+          data-testid="pty-terminal-error"
+          className="absolute inset-0 z-10 flex items-center justify-center bg-[#1C1917]/92 px-6 text-center"
+        >
+          <p className="text-sm text-[#FCA5A5]">
+            {streamErrorMessage}
+          </p>
         </div>
       ) : null}
       <div
