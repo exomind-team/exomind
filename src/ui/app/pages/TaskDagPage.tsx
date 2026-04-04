@@ -136,7 +136,9 @@ import {
 } from '@/config/task-dag-preferences';
 import {
   getTaskDagManualLayoutSnapshot,
+  mergeTaskDagManualLayoutPositions,
   pruneTaskDagManualLayoutSnapshot,
+  setTaskDagManualLayoutBaselinePositions,
   setTaskDagManualLayoutSnapshot,
   TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY,
   updateTaskDagManualLayoutPosition,
@@ -258,6 +260,12 @@ function resolveDebugTargetTestId(target: EventTarget | null): string | null {
   }
 
   return target.closest<HTMLElement>('[data-testid]')?.dataset.testid ?? null;
+}
+
+function buildPositionMapFromFlowNodes(
+  nodes: Array<{ id: string; position: { x: number; y: number } }>,
+): Record<string, { x: number; y: number }> {
+  return Object.fromEntries(nodes.map((node) => [node.id, node.position]));
 }
 
 function isTaskDagPositionChange(
@@ -1599,34 +1607,49 @@ export function TaskDagPage() {
     }
   }, [pendingIntervalStartId, visibleNodeIdSet]);
 
-  useEffect(() => {
-    if (focusedSeriesAnchorIds.length === 0 || controlsState.focusSectionOpen) {
-      return;
-    }
-    setControlsState((current) => ({
-      ...current,
-      focusSectionOpen: true,
-    }));
-  }, [controlsState.focusSectionOpen, focusedSeriesAnchorIds.length]);
-
   const layoutSignature = useMemo(() => JSON.stringify({
     direction: resolvedDirection,
     nodeIds: renderedVisibleGraph.nodes.map((node) => node.id),
     edges: renderedVisibleGraph.edges.map((edge) => [edge.id, edge.source, edge.target, edge.type]),
   }), [renderedVisibleGraph.edges, renderedVisibleGraph.nodes, resolvedDirection]);
 
-  const manualPositions = layoutMode === 'manual'
-    ? (manualLayoutSnapshot?.manualPositions ?? undefined)
+  const manualPositionSource = layoutMode === 'manual'
+    ? {
+      ...(manualLayoutSnapshot?.manualBaselinePositions ?? {}),
+      ...(manualLayoutSnapshot?.manualPositions ?? {}),
+    }
     : undefined;
+  const renderedAutoLayoutFlowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
+    direction: resolvedDirection,
+  }), [
+    layoutSignature,
+    renderedVisibleGraph,
+    resolvedDirection,
+  ]);
+  const renderedAutoLayoutPositionMap = useMemo(
+    () => buildPositionMapFromFlowNodes(renderedAutoLayoutFlowGraph.nodes),
+    [renderedAutoLayoutFlowGraph.nodes],
+  );
+  const manualBaselineFlowGraph = useMemo(() => buildVisibleTaskDagFlow(intervalVisibleGraph, {
+    direction: resolvedDirection,
+  }), [
+    intervalVisibleGraph.edges,
+    intervalVisibleGraph.nodes,
+    resolvedDirection,
+  ]);
+  const manualBaselinePositionMap = useMemo(
+    () => buildPositionMapFromFlowNodes(manualBaselineFlowGraph.nodes),
+    [manualBaselineFlowGraph.nodes],
+  );
 
   const layoutFlowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
     direction: resolvedDirection,
     focusedSeriesNodeIds: visibleFocusedSeriesNodeIds,
-    manualPositions,
+    manualPositions: manualPositionSource,
     secondaryNodeIds,
   }), [
     layoutSignature,
-    manualPositions,
+    manualPositionSource,
     renderedVisibleGraph,
     resolvedDirection,
     secondaryNodeIds,
@@ -1935,6 +1958,38 @@ export function TaskDagPage() {
       flowGraph.nodes.map((node) => [node.id, node.position]),
     );
   }, [flowGraph.nodes]);
+
+  const handleLayoutModeChange = useCallback((nextMode: TaskDagLayoutMode) => {
+    if (nextMode === layoutMode) {
+      return;
+    }
+
+    if (nextMode === 'manual') {
+      const visiblePositions = buildPositionMapFromFlowNodes(flowGraph.nodes);
+      let nextSnapshot = mergeTaskDagManualLayoutPositions(
+        manualLayoutSnapshotRef.current,
+        visiblePositions,
+      );
+      nextSnapshot = setTaskDagManualLayoutBaselinePositions(
+        nextSnapshot,
+        manualBaselinePositionMap,
+      );
+      setManualLayoutSnapshot(nextSnapshot);
+    }
+
+    setLayoutMode(nextMode);
+  }, [flowGraph.nodes, layoutMode, manualBaselinePositionMap, setManualLayoutSnapshot]);
+
+  const handleSyncManualLayoutToAuto = useCallback(() => {
+    if (layoutMode !== 'manual') {
+      return;
+    }
+
+    setManualLayoutSnapshot(mergeTaskDagManualLayoutPositions(
+      manualLayoutSnapshotRef.current,
+      renderedAutoLayoutPositionMap,
+    ));
+  }, [layoutMode, renderedAutoLayoutPositionMap, setManualLayoutSnapshot]);
 
   useEffect(() => {
     const layoutSummary = summarizeFlowViewport(flowInstanceRef.current, flowGraph.nodes);
@@ -2728,7 +2783,8 @@ export function TaskDagPage() {
               immersive={immersive}
               controlsState={controlsState}
               onDirectionChange={setDagDirection}
-              onLayoutModeChange={setLayoutMode}
+              onLayoutModeChange={handleLayoutModeChange}
+              onSyncManualLayout={handleSyncManualLayoutToAuto}
               onSearchValueChange={setSearchDraft}
               onSearchOptionToggle={(key) => {
                 setSearchOptions((current) => ({

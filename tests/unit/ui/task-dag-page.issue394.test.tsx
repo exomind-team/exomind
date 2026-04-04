@@ -1378,6 +1378,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       expect(screen.getByTestId('task-dag-node-task-x').className).toContain('opacity-35');
     });
 
+    await openFocusSection();
     fireEvent.click(screen.getByTestId('task-dag-focus-mode-toggle'));
 
     await waitFor(() => {
@@ -1446,6 +1447,78 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     await openFocusSection();
     expect(screen.getByText('已聚焦 2 个锚点')).toBeInTheDocument();
+  });
+
+  it('allows collapsing the focus section even when focused anchors already exist', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: 'B',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-x', title: 'X', createdAt: 30, updatedAt: 30 }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-b'));
+    fireEvent.click(await screen.findByText('聚焦此系列'));
+
+    await openFocusSection();
+    expect(screen.getByText('已聚焦 1 个锚点')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-focus-section-toggle'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-focus-mode-toggle')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('已聚焦 1 个锚点')).toBeInTheDocument();
+  });
+
+  it('fully collapses the tag section and keeps only the and/or selection summary', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', tags: ['frontend', 'dag'], createdAt: 10, updatedAt: 10 }),
+      makeTask({ id: 'task-b', title: 'B', tags: ['frontend'], createdAt: 20, updatedAt: 20 }),
+      makeTask({ id: 'task-c', title: 'C', tags: ['dag'], createdAt: 30, updatedAt: 30 }),
+      makeTask({ id: 'task-d', title: 'D', tags: ['backend'], createdAt: 40, updatedAt: 40 }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await openTagSection();
+    fireEvent.click(screen.getByTestId('task-dag-tag-filter-frontend'));
+    fireEvent.click(screen.getByTestId('task-dag-tag-filter-dag'));
+    fireEvent.click(screen.getByTestId('task-dag-tag-section-toggle'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-tag-filter-mode-and')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('已同时选中 2 个标签')).toBeInTheDocument();
+    expect(screen.queryByText('frontend (2)')).not.toBeInTheDocument();
+    expect(screen.queryByText('dag (2)')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-tag-section-toggle'));
+    await openTagSection();
+    fireEvent.click(screen.getByTestId('task-dag-tag-filter-mode-or'));
+    fireEvent.click(screen.getByTestId('task-dag-tag-section-toggle'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-tag-filter-mode-and')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('已并列选中 2 个标签')).toBeInTheDocument();
+    expect(screen.queryByText('frontend (2)')).not.toBeInTheDocument();
+    expect(screen.queryByText('dag (2)')).not.toBeInTheDocument();
   });
 
   it('switches background mode and persists the variant', async () => {
@@ -1835,9 +1908,11 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(getNodeDraggable('task-a')).toBe(false);
     expect(getNodeCardClassList('task-a')).not.toContain('nopan');
 
+    const autoPositionBeforeReturningToManual = getNodePosition('task-a');
+
     fireEvent.click(screen.getByTestId('task-dag-layout-mode-manual'));
     await waitFor(() => {
-      expect(getNodePosition('task-a')).toEqual({ x: 888, y: 444 });
+      expect(getNodePosition('task-a')).toEqual(autoPositionBeforeReturningToManual);
     });
     expect(getNodeDraggable('task-a')).toBe(true);
     expect(getNodeCardClassList('task-a')).toContain('nopan');
@@ -1852,7 +1927,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     expect(window.localStorage.getItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY)).toBe('manual');
     expect((flowApiMocks.lastProps as { nodesDraggable?: boolean }).nodesDraggable).toBe(true);
-    expect(getNodePosition('task-a')).toEqual({ x: 888, y: 444 });
+    expect(getNodePosition('task-a')).toEqual(autoPositionBeforeReturningToManual);
   });
 
   it('updates manual layout positions from touch drags that start on node cards', async () => {
@@ -1919,6 +1994,216 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
         },
       });
     });
+  });
+
+  it('persists touch-driven manual positions across sync actions and remounts', async () => {
+    flowApiMocks.getViewport.mockReturnValue({ x: 0, y: 0, zoom: 1 });
+    window.localStorage.setItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY, 'manual');
+
+    const view = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await openDesktopToolsPanel();
+
+    const getNodePosition = (taskId: string) => (
+      ((flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; position: { x: number; y: number } }>;
+      }).nodes.find((node) => node.id === taskId)?.position)
+    );
+
+    const initialPosition = getNodePosition('task-a');
+    expect(initialPosition).toBeDefined();
+
+    fireEvent.pointerDown(screen.getByTestId('task-dag-node-task-a'), {
+      pointerId: 9,
+      pointerType: 'touch',
+      clientX: 120,
+      clientY: 160,
+      isPrimary: true,
+      button: 0,
+    });
+
+    fireEvent.pointerMove(window, {
+      pointerId: 9,
+      pointerType: 'touch',
+      clientX: 180,
+      clientY: 212,
+      isPrimary: true,
+      buttons: 1,
+    });
+
+    fireEvent.pointerUp(window, {
+      pointerId: 9,
+      pointerType: 'touch',
+      clientX: 180,
+      clientY: 212,
+      isPrimary: true,
+    });
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY) ?? '{}')).toMatchObject({
+        manualPositions: {
+          'task-a': {
+            x: (initialPosition?.x ?? 0) + 60,
+            y: (initialPosition?.y ?? 0) + 52,
+          },
+        },
+      });
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-direction-tb'));
+    fireEvent.click(screen.getByTestId('task-dag-layout-sync'));
+
+    const syncedPosition = getNodePosition('task-a');
+    expect(syncedPosition).toBeDefined();
+
+    view.unmount();
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    expect(window.localStorage.getItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY)).toBe('manual');
+    expect(getNodePosition('task-a')).toEqual(syncedPosition);
+  });
+
+  it('captures visible positions and baseline positions when entering manual layout', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await openDesktopToolsPanel();
+
+    const getNodePosition = (taskId: string) => (
+      ((flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; position: { x: number; y: number } }>;
+      }).nodes.find((node) => node.id === taskId)?.position)
+    );
+
+    const autoTaskAPosition = getNodePosition('task-a');
+    const autoTaskBPosition = getNodePosition('task-b');
+    const autoTaskCPosition = getNodePosition('task-c');
+
+    fireEvent.click(screen.getByTestId('task-dag-layout-mode-manual'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-layout-mode-manual')).toHaveClass('bg-[#FFF7ED]');
+    });
+
+    expect(JSON.parse(window.localStorage.getItem(TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY) ?? '{}')).toMatchObject({
+      manualPositions: {
+        'task-a': autoTaskAPosition,
+        'task-b': autoTaskBPosition,
+        'task-c': autoTaskCPosition,
+      },
+      manualBaselinePositions: {
+        'task-a': autoTaskAPosition,
+        'task-b': autoTaskBPosition,
+        'task-c': autoTaskCPosition,
+      },
+    });
+  });
+
+  it('keeps manual node positions stable across direction changes and restores filtered nodes from the captured baseline', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await openDesktopToolsPanel();
+
+    const getNodePosition = (taskId: string) => (
+      ((flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; position: { x: number; y: number } }>;
+      }).nodes.find((node) => node.id === taskId)?.position)
+    );
+
+    const autoLrTaskA = getNodePosition('task-a');
+    const autoLrTaskB = getNodePosition('task-b');
+
+    fireEvent.change(screen.getByTestId('task-dag-search-input'), { target: { value: '梳理' } });
+    fireEvent.click(screen.getByTestId('task-dag-search-option-filter'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-b')).not.toBeInTheDocument();
+    });
+    const filteredTaskAPosition = getNodePosition('task-a');
+
+    fireEvent.click(screen.getByTestId('task-dag-layout-mode-manual'));
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-layout-mode-manual')).toHaveClass('bg-[#FFF7ED]');
+    });
+    const manualSnapshotAfterEnter = JSON.parse(window.localStorage.getItem(TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY) ?? '{}');
+
+    fireEvent.click(screen.getByTestId('task-dag-direction-tb'));
+    expect(getNodePosition('task-a')).toEqual(filteredTaskAPosition ?? autoLrTaskA);
+    fireEvent.change(screen.getByTestId('task-dag-search-input'), { target: { value: '' } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    expect(getNodePosition('task-b')).toEqual(manualSnapshotAfterEnter.manualBaselinePositions?.['task-b'] ?? autoLrTaskB);
+  });
+
+  it('shows sync only in manual layout and syncs only visible nodes to current auto-layout positions', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await openDesktopToolsPanel();
+
+    const getNodePosition = (taskId: string) => (
+      ((flowApiMocks.lastProps as {
+        nodes: Array<{ id: string; position: { x: number; y: number } }>;
+      }).nodes.find((node) => node.id === taskId)?.position)
+    );
+
+    expect(screen.queryByTestId('task-dag-layout-sync')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-layout-mode-manual'));
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-layout-sync')).toBeInTheDocument();
+    });
+
+    act(() => {
+      (
+        flowApiMocks.lastProps as {
+          onNodeDragStop?: (_event: unknown, node: { id: string; position: { x: number; y: number } }) => void;
+        }
+      ).onNodeDragStop?.({}, { id: 'task-c', position: { x: 777, y: 555 } });
+    });
+
+    fireEvent.change(screen.getByTestId('task-dag-search-input'), { target: { value: '梳理' } });
+    fireEvent.click(screen.getByTestId('task-dag-search-option-filter'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-direction-tb'));
+    fireEvent.click(screen.getByTestId('task-dag-layout-sync'));
+
+    const syncedSnapshot = JSON.parse(window.localStorage.getItem(TASK_DAG_MANUAL_LAYOUT_STORAGE_KEY) ?? '{}');
+
+    expect(syncedSnapshot.manualPositions?.['task-c']).toEqual({ x: 777, y: 555 });
+
+    fireEvent.change(screen.getByTestId('task-dag-search-input'), { target: { value: '' } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+    });
+
+    expect(getNodePosition('task-c')).toEqual({ x: 777, y: 555 });
   });
 
   it('cycles modes from canvas Ctrl+Alt+wheel without changing mode on plain wheel', async () => {

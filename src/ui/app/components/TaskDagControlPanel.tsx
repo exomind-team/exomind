@@ -48,6 +48,7 @@ interface TaskDagControlPanelProps {
   controlsState: TaskDagControlsState;
   onDirectionChange: (direction: DagDirection) => void;
   onLayoutModeChange: (mode: TaskDagLayoutMode) => void;
+  onSyncManualLayout?: () => void;
   onSearchValueChange: (value: string) => void;
   onSearchOptionToggle: (key: keyof TaskDagSearchOptions) => void;
   onTagToggle: (tag: string) => void;
@@ -110,6 +111,7 @@ export function TaskDagControlPanel({
   controlsState,
   onDirectionChange,
   onLayoutModeChange,
+  onSyncManualLayout,
   onSearchValueChange,
   onSearchOptionToggle,
   onTagToggle,
@@ -152,6 +154,9 @@ export function TaskDagControlPanel({
     { key: 'filterMode', label: '过滤', testId: 'task-dag-search-option-filter' },
   ];
   const hasTagFilter = tagFilter.selectedTags.length > 0;
+  const tagSummaryText = hasTagFilter
+    ? `已${tagFilter.matchMode === 'and' ? '同时' : '并列'}选中 ${tagFilter.selectedTags.length} 个标签`
+    : '未选任何标签';
   const terminalFilterLabels: Record<TaskDagTerminalFilterMode, string> = {
     show: '展示已结束',
     smart: '弱化已结束',
@@ -170,7 +175,6 @@ export function TaskDagControlPanel({
     { key: 'auto', label: '自动布局', testId: 'task-dag-layout-mode-auto' },
     { key: 'manual', label: '手动布局', testId: 'task-dag-layout-mode-manual' },
   ];
-  const tagSummaryOptions = availableTags.slice(0, 5);
   const focusSummaryText = focusedSeriesCount === 0
     ? '未聚焦任何系列'
     : hiddenFocusedSeriesCount > 0
@@ -263,14 +267,16 @@ export function TaskDagControlPanel({
               {controlsState.tagSectionOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               标签搜索
             </button>
-            {hasTagFilter ? (
-              <span
-                data-testid="task-dag-tag-filter-summary"
-                className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
-              >
-                已选 {tagFilter.selectedTags.length} 个标签
-              </span>
-            ) : null}
+            <span
+              data-testid="task-dag-tag-filter-summary"
+              className={`text-[10px] ${
+                hasTagFilter
+                  ? 'text-[#C75B3A] dark:text-[#FDBA74]'
+                  : 'text-[#78716C] dark:text-[#A8A29E]'
+              }`}
+            >
+              {tagSummaryText}
+            </span>
             {hasTagFilter ? (
               <button
                 type="button"
@@ -334,18 +340,7 @@ export function TaskDagControlPanel({
                 </div>
               </div>
             </>
-          ) : (
-            <div className="flex flex-wrap items-center gap-1">
-              {tagSummaryOptions.map(({ tag, count }) => (
-                <span
-                  key={tag}
-                  className="rounded-full border border-[#E7E3E0] bg-white/80 px-2 py-1 text-[10px] font-medium text-[#78716C] dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E]"
-                >
-                  {tag} ({count})
-                </span>
-              ))}
-            </div>
-          )}
+          ) : null}
         </div>
       ) : null}
 
@@ -465,6 +460,16 @@ export function TaskDagControlPanel({
             {label}
           </button>
         ))}
+        {layoutMode === 'manual' ? (
+          <button
+            type="button"
+            data-testid="task-dag-layout-sync"
+            onClick={onSyncManualLayout}
+            className="rounded-full px-3 py-1 text-[10px] font-medium text-[#A8A29E] transition-colors hover:text-[#57534E] dark:text-[#78716C] dark:hover:text-[#D6D3D1]"
+          >
+            同步
+          </button>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 px-1 py-1 dark:border-[#3C3836] dark:bg-[#120F0D]">
