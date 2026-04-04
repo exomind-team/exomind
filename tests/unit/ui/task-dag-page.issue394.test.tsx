@@ -231,6 +231,16 @@ async function openTagSection(): Promise<void> {
   });
 }
 
+async function openFocusSection(): Promise<void> {
+  if (!screen.queryByTestId('task-dag-focus-mode-toggle')) {
+    fireEvent.click(screen.getByTestId('task-dag-focus-section-toggle'));
+  }
+
+  await waitFor(() => {
+    expect(screen.getByTestId('task-dag-focus-mode-toggle')).toBeInTheDocument();
+  });
+}
+
 function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }): TaskNode {
   return {
     id: overrides.id,
@@ -1346,6 +1356,65 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
       expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
     });
+  });
+
+  it('unions multiple focused series and shows anchor badges instead of a single anchor label', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: 'B',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-c',
+        title: 'C',
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-x', title: 'X', createdAt: 40, updatedAt: 40 }),
+      makeTask({
+        id: 'task-y',
+        title: 'Y',
+        createdAt: 50,
+        updatedAt: 50,
+        dependsOn: [{ taskId: 'task-x', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-z', title: 'Z', createdAt: 60, updatedAt: 60 }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-x')).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-b'));
+    fireEvent.click(await screen.findByText('聚焦此系列'));
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-x'));
+    fireEvent.click(await screen.findByText('聚焦此系列'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-node-task-z').className).toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-a').className).not.toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-b').className).not.toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-c').className).not.toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-x').className).not.toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-y').className).not.toContain('opacity-35');
+    });
+
+    expect(screen.getByTestId('task-dag-focus-anchor-badge-task-b')).toHaveTextContent('已锚定');
+    expect(screen.getByTestId('task-dag-focus-anchor-badge-task-x')).toHaveTextContent('已锚定');
+    expect(screen.queryByText('当前锚点：B')).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-focused-series') ?? '[]')).toEqual(['task-b', 'task-x']);
+
+    await openFocusSection();
+    expect(screen.getByText('已锚定 2 个锚点')).toBeInTheDocument();
   });
 
   it('switches background mode and persists the variant', async () => {
@@ -2745,6 +2814,8 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     await waitFor(() => {
       expect(screen.getByText('取消聚焦此系列')).toBeInTheDocument();
     });
+
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-focused-series') ?? '[]')).toEqual(['task-b']);
   });
 
   it('computes focus-series from the unified-search visible graph without bringing hidden branches back', async () => {
@@ -2815,6 +2886,127 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
       expect(screen.queryByTestId('mock-react-flow-node-task-z')).not.toBeInTheDocument();
     });
+  });
+
+  it('allows multiple anchors after filtering splits one underlying chain into separate visible series', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', tags: ['keep'], createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: 'Bridge',
+        tags: ['bridge'],
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-c',
+        title: 'C',
+        tags: ['keep'],
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-x', title: 'X', tags: ['keep'], createdAt: 40, updatedAt: 40 }),
+    ]);
+
+    const view = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    await openTagSection();
+    fireEvent.click(screen.getByTestId('task-dag-tag-filter-keep'));
+    fireEvent.click(screen.getByTestId('task-dag-search-option-filter'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-x')).toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-b')).not.toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(await screen.findByText('聚焦此系列'));
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-c'));
+    fireEvent.click(await screen.findByText('聚焦此系列'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-focus-anchor-badge-task-a')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-focus-anchor-badge-task-c')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-node-task-x').className).toContain('opacity-35');
+    });
+
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-focused-series') ?? '[]')).toEqual(['task-a', 'task-c']);
+
+    view.unmount();
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-focus-anchor-badge-task-a')).toBeInTheDocument();
+      expect(screen.getByTestId('task-dag-focus-anchor-badge-task-c')).toBeInTheDocument();
+    });
+  });
+
+  it('removes anchors from the current focused series without affecting other focused series', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: 'B',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-c',
+        title: 'C',
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-x', title: 'X', createdAt: 40, updatedAt: 40 }),
+      makeTask({
+        id: 'task-y',
+        title: 'Y',
+        createdAt: 50,
+        updatedAt: 50,
+        dependsOn: [{ taskId: 'task-x', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-z', title: 'Z', createdAt: 60, updatedAt: 60 }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-x')).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-b'));
+    fireEvent.click(await screen.findByText('聚焦此系列'));
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-x'));
+    fireEvent.click(await screen.findByText('聚焦此系列'));
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-c'));
+    fireEvent.click(await screen.findByText('取消聚焦此系列'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-node-task-a').className).toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-b').className).toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-c').className).toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-x').className).not.toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-y').className).not.toContain('opacity-35');
+      expect(screen.getByTestId('task-dag-node-task-z').className).toContain('opacity-35');
+    });
+
+    expect(screen.queryByTestId('task-dag-focus-anchor-badge-task-b')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-focus-anchor-badge-task-c')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-focus-anchor-badge-task-x')).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem('exomind:dag-focused-series') ?? '[]')).toEqual(['task-x']);
   });
 
   it('clears selected node before clearing the focused series with Escape on the page', async () => {

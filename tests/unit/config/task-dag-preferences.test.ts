@@ -56,6 +56,7 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       selectedTags: [],
       matchMode: 'and',
     });
+    expect(module.getTaskDagFocusedSeriesAnchorIds()).toEqual([]);
     expect(module.getTaskDagVisibility()).toEqual({
       collapsedUpstreamOf: [],
       collapsedDownstreamOf: [],
@@ -97,6 +98,7 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
         selectedTags: ['backend', 'dag'],
         matchMode: 'or',
       }),
+      'exomind:dag-focused-series': JSON.stringify(['task-b', 'task-x']),
       'exomind:dag-visibility': JSON.stringify({
         collapsedUpstreamOf: ['task-a'],
         collapsedDownstreamOf: ['task-b'],
@@ -136,6 +138,7 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       selectedTags: ['backend', 'dag'],
       matchMode: 'or',
     });
+    expect(module.getTaskDagFocusedSeriesAnchorIds()).toEqual(['task-b', 'task-x']);
     expect(module.getTaskDagVisibility()).toEqual({
       collapsedUpstreamOf: ['task-a'],
       collapsedDownstreamOf: ['task-b'],
@@ -210,6 +213,15 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
       matchMode: 'or',
     });
 
+    expect(module.setTaskDagFocusedSeriesAnchorIds(['task-b', 'task-x', 'task-b', ''])).toEqual([
+      'task-b',
+      'task-x',
+    ]);
+    expect(JSON.parse(storage[module.TASK_DAG_FOCUSED_SERIES_STORAGE_KEY] ?? '[]')).toEqual([
+      'task-b',
+      'task-x',
+    ]);
+
     expect(module.setTaskDagVisibility({
       collapsedUpstreamOf: ['task-x'],
       collapsedDownstreamOf: ['task-y'],
@@ -269,5 +281,15 @@ describe('task dag preferences（任务 DAG 偏好）', () => {
     module.setTaskDagViewport('TB', { x: 10, y: 20, zoom: 0.5 }, 'mobile');
     expect(module.getTaskDagViewport('TB', 'desktop')).toBeNull();
     expect(module.getTaskDagViewport('TB', 'mobile')).toEqual({ x: 10, y: 20, zoom: 0.5 });
+  });
+
+  it('accepts legacy single-anchor payloads and clears focused-series storage when empty（兼容旧单锚点 payload，并在清空时移除存储）', async () => {
+    const module = await import('@/config/task-dag-preferences');
+
+    storage[module.TASK_DAG_FOCUSED_SERIES_STORAGE_KEY] = 'task-b';
+    expect(module.getTaskDagFocusedSeriesAnchorIds()).toEqual(['task-b']);
+
+    expect(module.setTaskDagFocusedSeriesAnchorIds([])).toEqual([]);
+    expect(storage[module.TASK_DAG_FOCUSED_SERIES_STORAGE_KEY]).toBeUndefined();
   });
 });

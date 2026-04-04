@@ -288,25 +288,58 @@ export function setTaskDagTagFilter(tagFilter: TaskDagTagFilter): TaskDagTagFilt
   return normalized;
 }
 
-export function getTaskDagFocusedSeriesAnchorId(): string | null {
-  const saved = readRuntimeBackedValue(TASK_DAG_FOCUSED_SERIES_STORAGE_KEY);
-  const normalized = saved?.trim();
-  return normalized ? normalized : null;
+function normalizeFocusedSeriesAnchorIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(new Set(
+    value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  ));
 }
 
-export function setTaskDagFocusedSeriesAnchorId(anchorId: string | null): string | null {
-  const normalized = anchorId?.trim() ?? null;
-  if (!normalized) {
+export function getTaskDagFocusedSeriesAnchorIds(): string[] {
+  const saved = readRuntimeBackedValue(TASK_DAG_FOCUSED_SERIES_STORAGE_KEY);
+  if (!saved) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(saved) as unknown;
+    if (typeof parsed === 'string') {
+      return parsed.trim() ? [parsed.trim()] : [];
+    }
+    return normalizeFocusedSeriesAnchorIds(parsed);
+  } catch {
+    const normalized = saved.trim();
+    return normalized ? [normalized] : [];
+  }
+}
+
+export function setTaskDagFocusedSeriesAnchorIds(anchorIds: string[]): string[] {
+  const normalized = normalizeFocusedSeriesAnchorIds(anchorIds);
+  if (normalized.length === 0) {
     removeRuntimeBackedValue(TASK_DAG_FOCUSED_SERIES_STORAGE_KEY);
-    return null;
+    return [];
   }
 
   writeRuntimeBackedValue(
     TASK_DAG_FOCUSED_SERIES_STORAGE_KEY,
-    normalized,
+    JSON.stringify(normalized),
     TASK_DAG_FOCUSED_SERIES_CHANGED_EVENT,
   );
   return normalized;
+}
+
+export function getTaskDagFocusedSeriesAnchorId(): string | null {
+  return getTaskDagFocusedSeriesAnchorIds()[0] ?? null;
+}
+
+export function setTaskDagFocusedSeriesAnchorId(anchorId: string | null): string | null {
+  return setTaskDagFocusedSeriesAnchorIds(anchorId ? [anchorId] : [])[0] ?? null;
 }
 
 function normalizeControlsState(

@@ -91,9 +91,9 @@ import {
   TASK_DAG_TAG_FILTER_STORAGE_KEY,
   TASK_DAG_VIEWPORT_STORAGE_KEY,
   TASK_DAG_VISIBILITY_STORAGE_KEY,
+  getTaskDagFocusedSeriesAnchorIds as readStoredFocusedSeriesAnchorIds,
   getTaskDagTagFilter as readStoredTagFilter,
   getTaskDagSearchDraft as readStoredSearchDraft,
-  getTaskDagFocusedSeriesAnchorId as readStoredFocusedSeriesAnchorId,
   getTaskDagSearchOptions as readStoredSearchOptions,
   getTaskDagTerminalFilterMode as readStoredTerminalFilterMode,
   getTaskDagViewport as readStoredDagViewport,
@@ -102,7 +102,7 @@ import {
   setTaskDagControlsState as persistTaskDagControlsState,
   setTaskDagDirection as persistTaskDagDirection,
   setTaskDagFocusMode as persistTaskDagFocusMode,
-  setTaskDagFocusedSeriesAnchorId as persistTaskDagFocusedSeriesAnchorId,
+  setTaskDagFocusedSeriesAnchorIds as persistTaskDagFocusedSeriesAnchorIds,
   setTaskDagImmersive as persistTaskDagImmersive,
   setTaskDagLayoutMode as persistTaskDagLayoutMode,
   setTaskDagMode as persistTaskDagMode,
@@ -713,6 +713,19 @@ function filterStrictTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGrap
   );
 }
 
+function collectVisibleTaskGraphConnectedComponentNodeIds(
+  visibleGraph: VisibleTaskGraph,
+  anchorIds: readonly string[],
+): Set<string> {
+  const union = new Set<string>();
+  for (const anchorId of anchorIds) {
+    for (const nodeId of findVisibleTaskGraphConnectedComponentNodeIds(visibleGraph, anchorId)) {
+      union.add(nodeId);
+    }
+  }
+  return union;
+}
+
 function TaskDagNode({
   id,
   data,
@@ -734,7 +747,7 @@ function TaskDagNode({
       title={nodeData.blockedReason ?? undefined}
       data-testid={`task-dag-node-${id}`}
       className={[
-        'w-64 rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
+        'relative w-64 rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
         nodeData.connectPreviewType === 'hard'
           ? 'border-[#2563EB] ring-2 ring-[#2563EB]/30 bg-[#EFF6FF] shadow-[0_14px_32px_-18px_rgba(37,99,235,0.7)] dark:border-[#60A5FA] dark:bg-[#172554]'
             : nodeData.connectPreviewType === 'soft'
@@ -767,6 +780,15 @@ function TaskDagNode({
     >
       <Handle type="target" position={targetPosition} style={handleStyle} />
       <Handle type="source" position={sourcePosition} style={handleStyle} />
+
+      {nodeData.isFocusAnchor ? (
+        <span
+          data-testid={`task-dag-focus-anchor-badge-${id}`}
+          className="absolute right-3 top-3 rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[10px] font-medium text-[#7C3AED] dark:bg-[#3B1D63] dark:text-[#D8B4FE]"
+        >
+          已锚定
+        </span>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         {nodeData.connectPreviewType === 'hard' ? (
@@ -857,8 +879,8 @@ export function TaskDagPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOptions, setSearchOptions] = useState<TaskDagSearchOptions>(() => readStoredSearchOptions());
   const [tagFilter, setTagFilter] = useState<TaskDagTagFilter>(() => readStoredTagFilter());
-  const [focusedSeriesAnchorId, setFocusedSeriesAnchorId] = useState<string | null>(
-    () => readStoredFocusedSeriesAnchorId(),
+  const [focusedSeriesAnchorIds, setFocusedSeriesAnchorIds] = useState<string[]>(
+    () => readStoredFocusedSeriesAnchorIds(),
   );
   const [dagDirection, setDagDirection] = useState<DagDirection>(() => readStoredDagDirection());
   const [layoutMode, setLayoutMode] = useState<TaskDagLayoutMode>(() => readStoredDagLayoutMode());
@@ -948,8 +970,8 @@ export function TaskDagPage() {
   }, [tagFilter]);
 
   useEffectAfterMount(() => {
-    persistTaskDagFocusedSeriesAnchorId(focusedSeriesAnchorId);
-  }, [focusedSeriesAnchorId]);
+    persistTaskDagFocusedSeriesAnchorIds(focusedSeriesAnchorIds);
+  }, [focusedSeriesAnchorIds]);
 
   useEffectAfterMount(() => {
     persistTaskDagControlsState(controlsState);
@@ -1150,7 +1172,7 @@ export function TaskDagPage() {
           setTagFilter(readStoredTagFilter());
           return;
         case TASK_DAG_FOCUSED_SERIES_STORAGE_KEY:
-          setFocusedSeriesAnchorId(readStoredFocusedSeriesAnchorId());
+          setFocusedSeriesAnchorIds(readStoredFocusedSeriesAnchorIds());
           return;
         case TASK_DAG_CONTROLS_STATE_STORAGE_KEY:
           setControlsState(readStoredControlsState());
@@ -1299,10 +1321,11 @@ export function TaskDagPage() {
     [smartTerminalProjection.secondaryNodeIds, terminalFilterMode],
   );
   const visibleFocusedSeriesNodeIds = useMemo(() => (
-    focusedSeriesAnchorId
-      ? findVisibleTaskGraphConnectedComponentNodeIds(terminalFilteredVisibleGraph, focusedSeriesAnchorId)
-      : new Set<string>()
-  ), [focusedSeriesAnchorId, terminalFilteredVisibleGraph]);
+    collectVisibleTaskGraphConnectedComponentNodeIds(terminalFilteredVisibleGraph, focusedSeriesAnchorIds)
+  ), [focusedSeriesAnchorIds, terminalFilteredVisibleGraph]);
+  const visibleFocusedSeriesAnchorIds = useMemo(() => (
+    focusedSeriesAnchorIds.filter((anchorId) => visibleFocusedSeriesNodeIds.has(anchorId))
+  ), [focusedSeriesAnchorIds, visibleFocusedSeriesNodeIds]);
   const hasVisibleFocusedSeries = visibleFocusedSeriesNodeIds.size > 0;
   const renderedVisibleGraph = useMemo(() => (
     focusMode === 'hard' && hasVisibleFocusedSeries
@@ -1379,14 +1402,14 @@ export function TaskDagPage() {
   }, [connectState, visibleNodeIdSet]);
 
   useEffect(() => {
-    if (!focusedSeriesAnchorId || controlsState.focusSectionOpen) {
+    if (focusedSeriesAnchorIds.length === 0 || controlsState.focusSectionOpen) {
       return;
     }
     setControlsState((current) => ({
       ...current,
       focusSectionOpen: true,
     }));
-  }, [controlsState.focusSectionOpen, focusedSeriesAnchorId]);
+  }, [controlsState.focusSectionOpen, focusedSeriesAnchorIds.length]);
 
   const layoutSignature = useMemo(() => JSON.stringify({
     direction: resolvedDirection,
@@ -1434,6 +1457,7 @@ export function TaskDagPage() {
             isSearchMatch: hasActiveUnifiedSearch && unifiedSearchMatchedTaskIds.has(node.id),
             isSearchDimmed: hasActiveUnifiedSearch && !unifiedSearchMatchedTaskIds.has(node.id),
             isFocusDimmed: hasVisibleFocusedSeries && !visibleFocusedSeriesNodeIds.has(node.id),
+            isFocusAnchor: focusedSeriesAnchorIds.includes(node.id),
             isSecondaryNode: secondaryNodeIds.has(node.id),
             isCurrentRoot: node.id === renderedVisibleGraph.visibleCurrentRootNodeId,
             isCollapsedTarget: visibleNode?.isCollapsedTarget ?? node.data.isCollapsedTarget,
@@ -1464,6 +1488,7 @@ export function TaskDagPage() {
     renderedVisibleNodeById,
     hasVisibleFocusedSeries,
     hasActiveUnifiedSearch,
+    focusedSeriesAnchorIds,
     secondaryNodeIds,
     selectedTaskId,
     taskById,
@@ -1639,6 +1664,20 @@ export function TaskDagPage() {
     resolveCollapseActionState,
     visibleFocusedSeriesNodeIds,
   ]);
+
+  const addFocusedSeriesAnchor = useCallback((nodeId: string) => {
+    const seriesNodeIds = findVisibleTaskGraphConnectedComponentNodeIds(terminalFilteredVisibleGraph, nodeId);
+    setFocusedSeriesAnchorIds((current) => {
+      const next = current.filter((anchorId) => !seriesNodeIds.has(anchorId));
+      next.push(nodeId);
+      return next;
+    });
+  }, [terminalFilteredVisibleGraph]);
+
+  const removeFocusedSeriesAnchorsForNode = useCallback((nodeId: string) => {
+    const seriesNodeIds = findVisibleTaskGraphConnectedComponentNodeIds(terminalFilteredVisibleGraph, nodeId);
+    setFocusedSeriesAnchorIds((current) => current.filter((anchorId) => !seriesNodeIds.has(anchorId)));
+  }, [terminalFilteredVisibleGraph]);
 
   const contextMenuState = useMemo(() => (
     contextMenu ? resolveContextMenuState(contextMenu.nodeId) : null
@@ -1987,7 +2026,7 @@ export function TaskDagPage() {
     mode,
     immersive,
     selectedTaskId,
-    focusedSeriesAnchorTaskId: focusedSeriesAnchorId,
+    focusedSeriesAnchorTaskId: focusedSeriesAnchorIds[0] ?? null,
     connectState,
     flowNodes: flowGraph.nodes,
     flowInstance: flowInstanceRef.current,
@@ -1997,7 +2036,7 @@ export function TaskDagPage() {
     onImmersiveChange: setImmersive,
     onSelectedTaskIdChange: setSelectedTaskId,
     onClearFocusedSeries: () => {
-      setFocusedSeriesAnchorId(null);
+      setFocusedSeriesAnchorIds([]);
       setContextMenu(null);
       setPaneContextMenu(null);
     },
@@ -2135,9 +2174,8 @@ export function TaskDagPage() {
               hiddenRunningNodeCount={hiddenRunningNodeCount}
               terminalFilterMode={terminalFilterMode}
               focusMode={focusMode}
-              hasFocusedSeriesAnchor={Boolean(focusedSeriesAnchorId)}
-              hasVisibleFocusedSeries={hasVisibleFocusedSeries}
-              focusedSeriesAnchorLabel={focusedSeriesAnchorId ? (taskById.get(focusedSeriesAnchorId)?.title ?? focusedSeriesAnchorId) : null}
+              focusedSeriesCount={focusedSeriesAnchorIds.length}
+              hiddenFocusedSeriesCount={focusedSeriesAnchorIds.length - visibleFocusedSeriesAnchorIds.length}
               backgroundMode={backgroundMode}
               hasActiveBlock={activeTaskIds.length > 0}
               immersive={immersive}
@@ -2185,7 +2223,7 @@ export function TaskDagPage() {
                 setFocusMode((current) => (current === 'soft' ? 'hard' : 'soft'));
               }}
               onClearFocusedSeries={() => {
-                setFocusedSeriesAnchorId(null);
+                setFocusedSeriesAnchorIds([]);
                 setContextMenu(null);
                 setPaneContextMenu(null);
               }}
@@ -2395,7 +2433,7 @@ export function TaskDagPage() {
           isDesktop={isDesktop}
           mode={mode}
           hasSelectedNode={Boolean(selectedTaskId)}
-          hasFocusedSeries={Boolean(focusedSeriesAnchorId)}
+          hasFocusedSeries={focusedSeriesAnchorIds.length > 0}
           hasConnectSource={Boolean(connectState)}
           immersive={immersive}
           mobileOpen={mobileHintsOpen}
@@ -2427,7 +2465,11 @@ export function TaskDagPage() {
                 data-testid="task-dag-context-toggle-focus-series"
                 className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
                 onClick={() => {
-                  setFocusedSeriesAnchorId(contextMenuState.focusSeries.active ? null : contextMenu.nodeId);
+                  if (contextMenuState.focusSeries.active) {
+                    removeFocusedSeriesAnchorsForNode(contextMenu.nodeId);
+                  } else {
+                    addFocusedSeriesAnchor(contextMenu.nodeId);
+                  }
                   setContextMenu(null);
                 }}
               >

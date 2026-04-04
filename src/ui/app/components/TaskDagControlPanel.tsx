@@ -38,9 +38,8 @@ interface TaskDagControlPanelProps {
   hiddenRunningNodeCount: number;
   terminalFilterMode: TaskDagTerminalFilterMode;
   focusMode: TaskDagFocusMode;
-  hasFocusedSeriesAnchor: boolean;
-  hasVisibleFocusedSeries: boolean;
-  focusedSeriesAnchorLabel: string | null;
+  focusedSeriesCount: number;
+  hiddenFocusedSeriesCount: number;
   backgroundMode: TaskDagBackgroundMode;
   hasActiveBlock: boolean;
   immersive: boolean;
@@ -98,9 +97,8 @@ export function TaskDagControlPanel({
   hiddenRunningNodeCount,
   terminalFilterMode,
   focusMode,
-  hasFocusedSeriesAnchor,
-  hasVisibleFocusedSeries,
-  focusedSeriesAnchorLabel,
+  focusedSeriesCount,
+  hiddenFocusedSeriesCount,
   backgroundMode,
   hasActiveBlock,
   immersive,
@@ -149,11 +147,11 @@ export function TaskDagControlPanel({
     { key: 'manual', label: '手动布局', testId: 'task-dag-layout-mode-manual' },
   ];
   const tagSummaryOptions = availableTags.slice(0, 5);
-  const focusSummaryText = !hasFocusedSeriesAnchor
+  const focusSummaryText = focusedSeriesCount === 0
     ? '未聚焦任何系列'
-    : hasVisibleFocusedSeries
-      ? `当前锚点：${focusedSeriesAnchorLabel ?? '当前系列'}`
-      : `锚点暂不可见：${focusedSeriesAnchorLabel ?? '当前系列'}`;
+    : hiddenFocusedSeriesCount > 0
+      ? `已锚定 ${focusedSeriesCount} 个锚点，${hiddenFocusedSeriesCount} 个暂不可见`
+      : `已锚定 ${focusedSeriesCount} 个锚点`;
 
   const searchPanel = (
     <div
@@ -357,7 +355,7 @@ export function TaskDagControlPanel({
             >
               {focusModeLabels[focusMode]}
             </button>
-            {hasFocusedSeriesAnchor ? (
+            {focusedSeriesCount > 0 ? (
               <button
                 type="button"
                 data-testid="task-dag-focus-clear"

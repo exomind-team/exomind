@@ -49,6 +49,7 @@ export type TaskDagFlowNodeData = {
   isSearchMatch: boolean;
   isSearchDimmed: boolean;
   isFocusDimmed: boolean;
+  isFocusAnchor: boolean;
   isSecondaryNode: boolean;
   isCurrentRoot: boolean;
   isCollapsedTarget: boolean;
@@ -259,6 +260,7 @@ export function buildTaskDagFlow(
         isSearchMatch: false,
         isSearchDimmed: false,
         isFocusDimmed: false,
+        isFocusAnchor: false,
         isSecondaryNode: false,
         isCurrentRoot: node.id === graph.currentRootNodeId,
         isCollapsedTarget: false,
@@ -321,6 +323,7 @@ export function buildVisibleTaskDagFlow(
         isSearchMatch: hasActiveSearch && searchMatchedTaskIds.has(node.id),
         isSearchDimmed: hasActiveSearch && !searchMatchedTaskIds.has(node.id),
         isFocusDimmed: hasFocusedSeries && !focusedSeriesNodeIds?.has(node.id),
+        isFocusAnchor: false,
         isSecondaryNode: Boolean(secondaryNodeIds?.has(node.id)),
         isCurrentRoot: node.id === visibleGraph.visibleCurrentRootNodeId,
         isCollapsedTarget: node.isCollapsedTarget,
