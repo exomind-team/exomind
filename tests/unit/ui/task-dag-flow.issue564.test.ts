@@ -25,7 +25,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
 }
 
 describe('task-dag-flow issue #564（Sugiyama 布局）', () => {
-  it('uses the 160x160 slot box as the shared DAG layout baseline（使用统一 160×160 占位盒）', () => {
+  it('uses the 160x160 slot box as the shared DAG layout baseline, not a fixed visual card（160×160 是占位盒而非固定卡片）', () => {
     expect(TASK_DAG_NODE_WIDTH).toBe(160);
     expect(TASK_DAG_NODE_HEIGHT).toBe(160);
   });

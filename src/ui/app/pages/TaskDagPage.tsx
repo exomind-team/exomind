@@ -761,120 +761,125 @@ function TaskDagNode({
 
   return (
     <div
-      title={nodeData.blockedReason ?? undefined}
-      data-testid={`task-dag-node-${id}`}
-      className={[
-        'relative flex h-40 w-40 flex-col justify-center overflow-hidden rounded-2xl border bg-white px-3 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
-        nodeData.connectPreviewType === 'hard'
-          ? 'border-[#2563EB] ring-2 ring-[#2563EB]/30 bg-[#EFF6FF] shadow-[0_14px_32px_-18px_rgba(37,99,235,0.7)] dark:border-[#60A5FA] dark:bg-[#172554]'
-            : nodeData.connectPreviewType === 'soft'
-              ? 'border-dashed border-[#0F766E] ring-2 ring-[#14B8A6]/25 bg-[#F0FDFA] shadow-[0_14px_32px_-18px_rgba(20,184,166,0.7)] dark:border-[#2DD4BF] dark:bg-[#042F2E]'
-              : nodeData.executeState === 'active'
-                ? 'border-[2.5px] border-[#C75B3A] ring-[3px] ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)] animate-pulse'
-              : nodeData.isSecondaryNode
-                ? 'border-[2.5px] border-[#D6D3D1] ring-[3px] ring-[#D6D3D1]/15 opacity-35 grayscale dark:border-[#44403C] dark:ring-[#57534E]/15'
-                : nodeData.isSelected
-                  ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]'
-                  : nodeData.executeState === 'executable'
-                  ? 'border-[2.5px] border-[#16A34A]/60 ring-[3px] ring-[#22C55E]/20 bg-[#F0FDF4] shadow-[0_12px_28px_-18px_rgba(34,197,94,0.7)] dark:border-[#22C55E]/60 dark:bg-[#052E16]'
-                  : nodeData.executeState === 'blocked'
-                    ? 'border-[2.5px] border-[#EAB308]/60 ring-[3px] ring-[#EAB308]/15 opacity-60'
-                    : nodeData.isCurrentRoot
-                        ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
-                        : nodeData.isCollapsedTarget
-                          ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
-                          : nodeData.isSearchMatch
-                            ? 'border-[#2563EB] bg-[#EFF6FF] shadow-[0_10px_25px_-15px_rgba(37,99,235,0.65)] dark:border-[#60A5FA] dark:bg-[#172554]'
-                            : nodeData.isBlocked
-                              ? 'border-[#EAB308]/60'
-                              : 'border-[#E7E5E4] dark:border-[#292524]',
-        (
-          (nodeData.isSearchDimmed || nodeData.isFocusDimmed)
-          && !nodeData.isSelected
-          && nodeData.executeState !== 'active'
-        ) ? 'opacity-35 saturate-[0.7]' : '',
-      ].join(' ')}
+      data-testid={`task-dag-node-slot-${id}`}
+      className="relative flex h-40 w-40 items-center justify-center"
     >
-      <Handle type="target" position={targetPosition} style={handleStyle} />
-      <Handle type="source" position={sourcePosition} style={handleStyle} />
+      <div
+        title={nodeData.blockedReason ?? undefined}
+        data-testid={`task-dag-node-${id}`}
+        className={[
+          'relative inline-flex max-h-40 max-w-40 flex-col justify-center overflow-hidden rounded-2xl border bg-white px-3 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
+          nodeData.connectPreviewType === 'hard'
+            ? 'border-[#2563EB] ring-2 ring-[#2563EB]/30 bg-[#EFF6FF] shadow-[0_14px_32px_-18px_rgba(37,99,235,0.7)] dark:border-[#60A5FA] dark:bg-[#172554]'
+              : nodeData.connectPreviewType === 'soft'
+                ? 'border-dashed border-[#0F766E] ring-2 ring-[#14B8A6]/25 bg-[#F0FDFA] shadow-[0_14px_32px_-18px_rgba(20,184,166,0.7)] dark:border-[#2DD4BF] dark:bg-[#042F2E]'
+                : nodeData.executeState === 'active'
+                  ? 'border-[2.5px] border-[#C75B3A] ring-[3px] ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)] animate-pulse'
+                : nodeData.isSecondaryNode
+                  ? 'border-[2.5px] border-[#D6D3D1] ring-[3px] ring-[#D6D3D1]/15 opacity-35 grayscale dark:border-[#44403C] dark:ring-[#57534E]/15'
+                  : nodeData.isSelected
+                    ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]'
+                    : nodeData.executeState === 'executable'
+                    ? 'border-[2.5px] border-[#16A34A]/60 ring-[3px] ring-[#22C55E]/20 bg-[#F0FDF4] shadow-[0_12px_28px_-18px_rgba(34,197,94,0.7)] dark:border-[#22C55E]/60 dark:bg-[#052E16]'
+                    : nodeData.executeState === 'blocked'
+                      ? 'border-[2.5px] border-[#EAB308]/60 ring-[3px] ring-[#EAB308]/15 opacity-60'
+                      : nodeData.isCurrentRoot
+                          ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
+                          : nodeData.isCollapsedTarget
+                            ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
+                            : nodeData.isSearchMatch
+                              ? 'border-[#2563EB] bg-[#EFF6FF] shadow-[0_10px_25px_-15px_rgba(37,99,235,0.65)] dark:border-[#60A5FA] dark:bg-[#172554]'
+                              : nodeData.isBlocked
+                                ? 'border-[#EAB308]/60'
+                                : 'border-[#E7E5E4] dark:border-[#292524]',
+          (
+            (nodeData.isSearchDimmed || nodeData.isFocusDimmed)
+            && !nodeData.isSelected
+            && nodeData.executeState !== 'active'
+          ) ? 'opacity-35 saturate-[0.7]' : '',
+        ].join(' ')}
+      >
+        <Handle type="target" position={targetPosition} style={handleStyle} />
+        <Handle type="source" position={sourcePosition} style={handleStyle} />
 
-      {nodeData.isFocusAnchor ? (
-        <span
-          data-testid={`task-dag-focus-anchor-badge-${id}`}
-          className="absolute right-3 top-3 rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[10px] font-medium text-[#7C3AED] dark:bg-[#3B1D63] dark:text-[#D8B4FE]"
-        >
-          已锚定
-        </span>
-      ) : null}
+        {nodeData.isFocusAnchor ? (
+          <span
+            data-testid={`task-dag-focus-anchor-badge-${id}`}
+            className="absolute right-3 top-3 rounded-full bg-[#F3E8FF] px-2 py-0.5 text-[10px] font-medium text-[#7C3AED] dark:bg-[#3B1D63] dark:text-[#D8B4FE]"
+          >
+            已锚定
+          </span>
+        ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
-        {nodeData.connectPreviewType === 'hard' ? (
-          <span className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]">
-            准备硬依赖
+        <div className="flex flex-wrap items-center gap-2">
+          {nodeData.connectPreviewType === 'hard' ? (
+            <span className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]">
+              准备硬依赖
+            </span>
+          ) : null}
+          {nodeData.connectPreviewType === 'soft' ? (
+            <span className="rounded-full bg-[#CCFBF1] px-2 py-0.5 text-[10px] font-medium text-[#0F766E] dark:bg-[#134E4A] dark:text-[#99F6E4]">
+              准备软依赖
+            </span>
+          ) : null}
+          {nodeData.executeState === 'active' ? (
+            <span className="rounded-full bg-[#FDE7DC] px-2 py-0.5 text-[10px] font-semibold text-[#C75B3A]">
+              专注中
+            </span>
+          ) : null}
+          {nodeData.isCollapsedUpstreamTarget ? (
+            <span className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A]">
+              已折叠上游
+            </span>
+          ) : null}
+          {nodeData.isCollapsedDownstreamTarget ? (
+            <span className="rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10px] font-medium text-[#047857]">
+              已折叠下游
+            </span>
+          ) : null}
+          {nodeData.intervalCollapseSummaries?.map((summary, index) => (
+            <span
+              key={`interval-start-${summary.startId}-${index}`}
+              data-testid={index === 0 ? `task-dag-interval-start-badge-${id}` : undefined}
+              className="rounded-full bg-[#EDE9FE] px-2 py-0.5 text-[10px] font-medium text-[#6D28D9] dark:bg-[#2E1065] dark:text-[#DDD6FE]"
+            >
+              {`起点 ${summary.startTitle}`}
+            </span>
+          ))}
+          {nodeData.intervalCollapseSummaries?.map((summary, index) => (
+            <span
+              key={`interval-count-${summary.startId}-${summary.memberCount}-${index}`}
+              data-testid={index === 0 ? `task-dag-interval-count-badge-${id}` : undefined}
+              className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-medium text-[#4B5563] dark:bg-[#292524] dark:text-[#D6D3D1]"
+            >
+              {`${summary.memberCount} 个节点`}
+            </span>
+          ))}
+          <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+            {nodeData.statusLabel}
           </span>
-        ) : null}
-        {nodeData.connectPreviewType === 'soft' ? (
-          <span className="rounded-full bg-[#CCFBF1] px-2 py-0.5 text-[10px] font-medium text-[#0F766E] dark:bg-[#134E4A] dark:text-[#99F6E4]">
-            准备软依赖
-          </span>
-        ) : null}
-        {nodeData.executeState === 'active' ? (
-          <span className="rounded-full bg-[#FDE7DC] px-2 py-0.5 text-[10px] font-semibold text-[#C75B3A]">
-            专注中
-          </span>
-        ) : null}
-        {nodeData.isCollapsedUpstreamTarget ? (
-          <span className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A]">
-            已折叠上游
-          </span>
-        ) : null}
-        {nodeData.isCollapsedDownstreamTarget ? (
-          <span className="rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10px] font-medium text-[#047857]">
-            已折叠下游
-          </span>
-        ) : null}
-        {nodeData.intervalCollapseSummaries?.map((summary, index) => (
-          <span
-            key={`interval-start-${summary.startId}-${index}`}
-            data-testid={index === 0 ? `task-dag-interval-start-badge-${id}` : undefined}
-            className="rounded-full bg-[#EDE9FE] px-2 py-0.5 text-[10px] font-medium text-[#6D28D9] dark:bg-[#2E1065] dark:text-[#DDD6FE]"
-          >
-            {`起点 ${summary.startTitle}`}
-          </span>
-        ))}
-        {nodeData.intervalCollapseSummaries?.map((summary, index) => (
-          <span
-            key={`interval-count-${summary.startId}-${summary.memberCount}-${index}`}
-            data-testid={index === 0 ? `task-dag-interval-count-badge-${id}` : undefined}
-            className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-medium text-[#4B5563] dark:bg-[#292524] dark:text-[#D6D3D1]"
-          >
-            {`${summary.memberCount} 个节点`}
-          </span>
-        ))}
-        <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-          {nodeData.statusLabel}
-        </span>
-        {nodeData.hiddenUpstreamCount > 0 ? (
-          <span
-            data-testid={`task-dag-hidden-upstream-badge-${id}`}
-            className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
-          >
-            {`+${nodeData.hiddenUpstreamCount} 已折叠`}
-          </span>
-        ) : null}
-        {nodeData.hiddenDownstreamCount > 0 ? (
-          <span
-            data-testid={`task-dag-hidden-downstream-badge-${id}`}
-            className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-medium text-[#15803D] dark:bg-[#14532D] dark:text-[#BBF7D0]"
-          >
-            {`+${nodeData.hiddenDownstreamCount} 下游已折叠`}
-          </span>
-        ) : null}
+          {nodeData.hiddenUpstreamCount > 0 ? (
+            <span
+              data-testid={`task-dag-hidden-upstream-badge-${id}`}
+              className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
+            >
+              {`+${nodeData.hiddenUpstreamCount} 已折叠`}
+            </span>
+          ) : null}
+          {nodeData.hiddenDownstreamCount > 0 ? (
+            <span
+              data-testid={`task-dag-hidden-downstream-badge-${id}`}
+              className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-medium text-[#15803D] dark:bg-[#14532D] dark:text-[#BBF7D0]"
+            >
+              {`+${nodeData.hiddenDownstreamCount} 下游已折叠`}
+            </span>
+          ) : null}
+        </div>
+
+        <p className="mt-3 line-clamp-3 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{nodeData.title}</p>
+        <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">{nodeData.priorityLabel}</p>
+        <p className="mt-1 text-xs text-[#57534E] dark:text-[#D6D3D1]">{nodeData.executionLabel}</p>
       </div>
-
-      <p className="mt-3 line-clamp-3 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{nodeData.title}</p>
-      <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">{nodeData.priorityLabel}</p>
-      <p className="mt-1 text-xs text-[#57534E] dark:text-[#D6D3D1]">{nodeData.executionLabel}</p>
     </div>
   );
 }

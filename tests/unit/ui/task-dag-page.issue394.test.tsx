@@ -371,6 +371,12 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(screen.queryByTestId('task-dag-current-root-badge-task-a')).not.toBeInTheDocument();
     expect(screen.queryByTestId('task-dag-selected-panel')).not.toBeInTheDocument();
     expect(screen.getByTestId('task-dag-node-task-a').className).toContain('border-[#16A34A]/60');
+    expect(screen.getByTestId('task-dag-node-slot-task-a').className).toContain('h-40');
+    expect(screen.getByTestId('task-dag-node-slot-task-a').className).toContain('w-40');
+    expect(screen.getByTestId('task-dag-node-slot-task-a').className).toContain('items-center');
+    expect(screen.getByTestId('task-dag-node-slot-task-a').className).toContain('justify-center');
+    expect(screen.getByTestId('task-dag-node-task-a').className.split(/\s+/)).not.toContain('h-40');
+    expect(screen.getByTestId('task-dag-node-task-a').className.split(/\s+/)).not.toContain('w-40');
 
     await openDesktopToolsPanel();
 
@@ -382,6 +388,28 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       duration: 300,
       padding: 0.3,
     });
+  });
+
+  it('renders a fixed 160x160 slot with a content-sized card centered inside it（节点使用固定占位盒承载内容自适应卡片）', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledWith(true);
+    });
+
+    const slot = screen.getByTestId('task-dag-node-slot-task-a');
+    const card = screen.getByTestId('task-dag-node-task-a');
+    const slotClasses = slot.className.split(/\s+/);
+    const cardClasses = card.className.split(/\s+/);
+
+    expect(slotClasses).toContain('h-40');
+    expect(slotClasses).toContain('w-40');
+    expect(slotClasses).toContain('items-center');
+    expect(slotClasses).toContain('justify-center');
+    expect(cardClasses).toContain('max-h-40');
+    expect(cardClasses).toContain('max-w-40');
+    expect(cardClasses).not.toContain('h-40');
+    expect(cardClasses).not.toContain('w-40');
   });
 
   it('keeps fit-view zoom options available without auto-fitting on first load', async () => {
