@@ -203,6 +203,64 @@
    - 关键 transcript marker
    一起保存到文档里，避免下轮重复排查
 
+### 阶段补记：#818 终端 Agent 九条叙事全量通过（2026-04-04）
+
+#### 本轮阶段目标
+
+- 用真实桌面实例而不是 curl-only 验证 `#818`：
+  - Claude Code / Codex 终端 Agent 可在「网络」页面创建、管理
+  - UI 在拓扑图 / 会话 / 平铺 / 任务页之间来回切换时，PTY 加载稳定可重放
+  - RT 重启后，Claude Code / Codex 会基于持久会话信息自动恢复
+- 把这轮实测沉淀为可复用的 raw bridge 验收套路。
+
+#### 本轮观察结果
+
+- 当前稳定可用的桌面验收链路仍然是：
+  - Tauri dev Web：`http://localhost:1420`
+  - embedded RT：`127.0.0.1:9124`
+  - raw bridge：`ws://127.0.0.1:9223`
+- 直接跑：
+  - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name issue806-g --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/issue806-g/app-data/runtime/sessions.sqlite`
+- 本轮最新报告：
+  - `.tmp/reports/tauri-mcp-issue806-charter/2026-04-04T16-28-55.048Z-issue806-g.md`
+  - `.tmp/reports/tauri-mcp-issue806-charter/2026-04-04T16-28-55.048Z-issue806-g.json`
+- 结果：
+  - 九条终端用户叙事全部 `PASS`
+  - RT 重启前后 UI/RT 活跃会话数一致
+  - RT 重启后的两个活跃终端卡片都能重新加载并完成输入回显验证
+
+#### 本轮收敛出的关键结论
+
+- 右栏 PTY 终端“保持挂载”本身不是问题，真正危险的是：
+  - 用户重复点击“当前已经打开的那张会话卡片”时，如果没有显式触发 reconnect/remount，控制台可能只有 `[agent-hub][pty][open]`，却没有新的 `[PtyTerminal] opening/connected`。
+- 因此，终端卡片/拓扑节点的用户主动 reopen 路径必须支持：
+  - 同 PTY 条件下强制重连
+  - 让「再次点击同一活跃会话」也成为一次可重放的 PTY 加载动作
+- `spawn` 路径不能把原始 `ptyId` 直接写进 `paneOrder`：
+  - `paneOrder` 的语义是 session id，不是 PTY id
+  - 对新 spawn 的 PTY，应该先等待 session 流补齐，再把它映射回真正的 session id
+- 对没有 session 绑定的 raw PTY：
+  - 打开时要清空旧的 fullscreen recovery snapshot
+  - 否则 RT 重启后可能被陈旧恢复信息误导
+
+#### 本轮可复用操作套路
+
+1. 先用 charter 脚本跑完整九条叙事，不要只手点 1-2 条路径。
+2. 如果报告里出现：
+   - `loadingObserved: false`
+   - 只有 `[agent-hub][pty][open]`
+   - 没有 `[PtyTerminal] opening/connected`
+   优先怀疑“点到了当前 active PTY，但没有触发真正的 reconnect/remount”。
+3. 如果 spawn 后平铺顺序异常，先检查 localStorage：
+   - `exomind:agentHubTiledState.paneOrder` 是否混入了 `ptyId`
+4. 如果 RT 重启后恢复错位，先检查 localStorage：
+   - `fullscreenTerminalRecovery` 是否还是陈旧 snapshot
+5. 每次跑完桌面验收，都把：
+   - charter 命令
+   - report 路径
+   - 通过/失败结论
+   一并写回 PR / issue / playbook，避免下轮重复试错
+
 ### 阶段补记：RT 重启后的重复 session / 归档残留（2026-04-02 深夜）
 
 #### 现象
