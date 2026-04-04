@@ -12,7 +12,7 @@ use super::cognition::{
 };
 use super::proposal_tools::{execute_proposal_tool_call, is_proposal_tool_name};
 use super::session::{
-    AgentSessionRecord, AgentSessionRuntime, SessionError, TOOL_GROUP_RECENT_EVENTS,
+    AgentSessionRecord, AgentSessionRuntime, SessionError, TOOL_PRESET_RECENT_EVENTS,
     ToolCallRecord, resolve_agent_tools_for_runtime, resolve_provider_profile_with_runtime,
 };
 use super::tools::GET_RECENT_EVENTS_TOOL;
@@ -51,7 +51,7 @@ pub struct AgentApiTickTrigger {
     scope_key: Option<String>,
     system_prompt: Option<String>,
     prompt: String,
-    tool_groups: Vec<String>,
+    presets: Vec<String>,
     min_energy_ratio: f64,
 }
 
@@ -68,7 +68,7 @@ impl AgentApiTickTrigger {
             ),
             prompt: "请调用 get_recent_events(limit=20)，总结用户近期主要活动，并给出一句下一步建议。"
                 .to_string(),
-            tool_groups: vec![TOOL_GROUP_RECENT_EVENTS.to_string()],
+            presets: vec![TOOL_PRESET_RECENT_EVENTS.to_string()],
             min_energy_ratio: 0.3,
         }
     }
@@ -78,8 +78,8 @@ impl AgentApiTickTrigger {
         self
     }
 
-    pub fn with_tool_groups(mut self, tool_groups: Vec<String>) -> Self {
-        self.tool_groups = tool_groups;
+    pub fn with_presets(mut self, presets: Vec<String>) -> Self {
+        self.presets = presets;
         self
     }
 
@@ -242,7 +242,7 @@ impl CognitiveLifeAgent {
         let tools = match resolve_agent_tools_for_runtime(
             &trigger.runtime,
             Vec::new(),
-            &trigger.tool_groups,
+            &trigger.presets,
             trigger.scope_key.clone(),
         ) {
             Ok(tools) => tools,
@@ -1020,11 +1020,11 @@ mod tests {
 
         let trigger = AgentApiTickTrigger::new(runtime.clone())
             .with_scope_key(Some("profile-alpha".to_string()))
-            .with_tool_groups(vec![crate::agent::session::TOOL_GROUP_PROPOSAL_TOOLS.to_string()]);
+            .with_presets(vec![crate::agent::session::TOOL_PRESET_PROPOSAL_TOOLS.to_string()]);
         let tools = resolve_agent_tools_for_runtime(
             &runtime,
             Vec::new(),
-            &trigger.tool_groups,
+            &trigger.presets,
             trigger.scope_key.clone(),
         )
         .unwrap();

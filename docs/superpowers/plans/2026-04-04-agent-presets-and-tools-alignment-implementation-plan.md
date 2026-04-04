@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the current `toolGroups`-centric API Agent source model with a clearer `presets + tools` model, while allowing Rust/HTTP callers to combine Rust-internal presets and caller-defined custom tools in the same session.
+**Goal:** Replace the current `toolGroups`-centric API Agent source model with a clearer `presets + tools` model, while allowing Rust/HTTP callers to treat both `tools` and `presets` as optional inputs that may coexist in the same session.
 
-**Architecture:** Keep the existing three-layer split: broker only accepts final `Vec<ToolDef>`, final-tools runner persists and maps broker results, and source-aware runner accepts source-level inputs and normalizes them. The source-aware layer must rename `toolGroups` to `presets`, expand presets inside Rust, merge them with explicit `tools`, reject duplicate tool names, and keep HTTP as a pure transport adapter.
+**Architecture:** Keep the existing three-layer split: broker only accepts final `Vec<ToolDef>`, final-tools runner persists and maps broker results, and source-aware runner accepts source-level inputs and normalizes them. The source-aware layer must rename `toolGroups` to `presets`, expand presets inside Rust, merge them with explicit `tools`, detect internal conflicts (`duplicate preset key` and merged `duplicate tool name`), and keep HTTP as a pure transport adapter.
 
 **Tech Stack:** Rust, Axum, serde, cargo test, GitHub issue tracking
 
@@ -49,6 +49,7 @@ Required language to capture:
 - callers may provide `tools`, `presets`, or both
 - HTTP only transports source-level fields
 - Rust source-aware normalization expands presets and merges them with explicit tools
+- `toolGroups` is retained only as an HTTP compatibility alias, not as the primary contract term
 
 - [ ] **Step 2: Replace the old mutual-exclusion rule with merge semantics**
 
@@ -63,6 +64,7 @@ Also document conflict handling:
 - duplicate tool names after merge => error
 - no silent override
 - no route-side merging
+- no “explicit tools override preset tools” rule
 
 - [ ] **Step 3: Commit the spec/doc update**
 
@@ -90,6 +92,7 @@ Add failing tests covering:
 - duplicate preset names are rejected
 - duplicate final tool names across explicit tools and preset-expanded tools are rejected
 - missing `scopeKey` for a scope-bound preset is rejected
+- legacy HTTP `toolGroups` alias still maps into the same preset path where compatibility is intended
 
 Test cases should assert exact error messages where practical.
 
@@ -151,6 +154,7 @@ Implementation requirements:
 - expand each preset into concrete `ToolDef`s
 - append explicit `tools`
 - validate uniqueness across the final merged list
+- keep source-aware conflict detection in Rust rather than in the route
 
 Pseudo-shape:
 
@@ -288,6 +292,7 @@ Create `docs/testing/agent-turn-broker-presets-and-tools.md` with:
 - exact commands
 - expected results
 - note that HTTP still does not execute tools
+- note that duplicate preset keys and duplicate merged tool names are rejected inside Rust normalization
 
 - [ ] **Step 4: Commit verification/docs updates**
 
@@ -335,4 +340,3 @@ git log --oneline -5
 Expected:
 - working tree clean
 - commits present locally and remotely
-

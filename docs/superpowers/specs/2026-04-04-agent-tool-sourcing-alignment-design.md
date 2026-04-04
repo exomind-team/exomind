@@ -2,8 +2,8 @@
 
 > 日期：2026-04-04
 > 关联 Issue：#823、#830
-> 当前分支基线：`dev@7e9da9c9`
-> 状态：已收口，待实现
+> 当前分支基线：`dev@c8ffd54c`
+> 状态：已收口，实施中
 
 ## 1. 背景
 
@@ -11,10 +11,10 @@
 
 - `AgentTurnBroker` 已可作为统一 turn 模型向上游 LLM 发起请求
 - HTTP `/agent-sessions` 已可把调用方显式传入的 `tools` 转发给 broker
-- 内部 Rust 调用方 `life.rs` 已部分迁移到 broker 模型
+- 内部 Rust 调用方 `life.rs` 已迁移到 broker 模型
 - 提案工具链已能在测试中通过外部 API Agent 创建真实 `ProposalStore` 草案
 
-但当前仍保留一条关键的旧路径：
+此前仍存在的关键歧义是：
 
 - 新路径：`broker + 显式 tools + 调用方处理 toolCalls`
 - 旧路径：`ToolRegistry + RT 内执行工具 + run_agent_session`
@@ -33,7 +33,7 @@
 
 1. API Agent 默认无工具。
 2. “无工具调用”严格等价于请求中没有任何工具定义。
-3. 工具只能来自调用方显式提供的 `tools` 或显式选择的 `toolGroups`。
+3. 工具只能来自调用方显式提供的 `tools` 或显式选择的 `presets`。
 4. HTTP 外部调用与内部 Rust 调用统一走 broker 模型。
 5. Rust 侧允许提供预设工具组作为复用装配层，但它们只能在调用方显式选择时出现。
 6. `proposal_tools` 可以保留为一个预设工具组，但绝不能在每次 API Agent 调用中默认出现。
@@ -70,7 +70,7 @@ API Agent 的所有正式调用入口，在未显式指定工具时，都必须�
 Agent 可见工具只能来自以下两类显式来源：
 
 1. 调用方直接提供的 `tools`
-2. 调用方明确请求展开的 `toolGroups`
+2. 调用方明确请求展开的 `presets`
 
 除此之外，不允许第三种隐式来源。
 
@@ -80,11 +80,13 @@ Agent 可见工具只能来自以下两类显式来源：
 - 按调用入口偷偷补工具
 - 依据 system prompt 或 trigger 类型隐式挂工具
 
-### 4.3 预设工具组只是装配层
+### 4.3 `presets` 只是装配层
 
-预设工具组的定位是：
+`presets` 的定位是：
 
 > Rust 侧为了复用一组稳定工具定义与可选执行 helper，而提供的显式装配能力。
+
+每个 preset 在 Rust 内部通常对应一组工具定义，因此它也可以理解为“Rust 内部预设工具（组）”。
 
 它不是：
 
@@ -98,8 +100,8 @@ HTTP 端口仍遵守“只中转参数，不执行功能”的原则。
 
 因此：
 
-- HTTP 可以接受 `toolGroups`
-- 但 `toolGroups` 的解析、校验、展开、与 `tools` 的互斥/冲突判断，都必须下沉到 Rust 功能函数层
+- HTTP 可以接受 `presets`
+- 但 `presets` 的解析、校验、展开、与 `tools` 的合并/冲突判断，都必须下沉到 Rust 功能函数层
 - 路由层只负责解析 JSON、调用 Rust 函数、映射状态码、整理响应
 
 ### 4.5 HTTP 与 Rust 统一 broker 语义
@@ -131,7 +133,7 @@ HTTP 与 Rust 侧不能继续维持两套工具语义：
 
 它不负责：
 
-- `toolGroups` 解析
+- `presets` 解析
 - 作用域解析
 - 工具执行
 - 自动续跑
@@ -148,7 +150,7 @@ pub struct AgentTurnRequest {
 }
 ```
 
-## 5.2 Final-tools runner 层
+### 5.2 Final-tools runner 层
 
 在 broker 之上保留一个底层统一函数，只接受最终展开后的 `Vec<ToolDef>`。
 
@@ -162,8 +164,8 @@ pub struct AgentTurnRequest {
 
 它不负责：
 
-- 解析 `toolGroups`
-- 处理工具组与作用域规则
+- 解析 `presets`
+- 处理 preset 与作用域规则
 
 ### 5.3 Source-aware runner 层
 
@@ -172,23 +174,23 @@ pub struct AgentTurnRequest {
 这一层接受：
 
 - `tools`
-- `toolGroups`
+- `presets`
 - `scopeKey`
 
 并负责：
 
-- 校验 `tools` 与 `toolGroups` 的组合是否合法
-- 校验未知 `toolGroup`
-- 校验重复 `toolGroup`
+- 校验未知 `preset`
+- 校验重复 `preset`
 - 校验重复 `tool.name`
-- 校验依赖本地数据的工具组是否具备 `scopeKey`
-- 将 `toolGroups` 展开为最终 `Vec<ToolDef>`
+- 校验依赖本地数据的 preset 是否具备 `scopeKey`
+- 将 `presets` 展开为最终 `Vec<ToolDef>`
+- 将展开后的 preset 工具与显式 `tools` 合并
 - 再调用 `final-tools runner`
 
 这层是：
 
 - HTTP `/agent-sessions` 路由的 Rust 承接函数
-- 内部 Rust 调用方在需要 `toolGroups` / `scopeKey` 时的默认高层入口
+- 内部 Rust 调用方在需要 `presets` / `scopeKey` 时的默认高层入口
 
 ### 5.4 Session / HTTP wrapper 层
 
@@ -201,7 +203,7 @@ pub struct AgentTurnRequest {
 
 它不负责：
 
-- 工具组解析与合并
+- preset 解析与合并
 - 工具执行
 - 自动继续下一轮
 
@@ -209,10 +211,10 @@ pub struct AgentTurnRequest {
 
 ### 6.1 HTTP 请求模型
 
-`/agent-sessions` 对外新增并固定以下字段：
+`/agent-sessions` 对外支持以下字段：
 
 - `tools?: ToolDef[]`
-- `toolGroups?: string[]`
+- `presets?: string[]`
 - `scopeKey?: string`
 
 同时保留既有：
@@ -227,30 +229,37 @@ pub struct AgentTurnRequest {
 固定规则如下：
 
 1. 省略 `tools` 等价于空数组
-2. 省略 `toolGroups` 等价于空数组
-3. `tools` 与 `toolGroups` 若同时非空，直接返回 `invalid request`
-4. `toolGroups` 在 HTTP 上保持 `string[]`
+2. 省略 `presets` 等价于空数组
+3. `tools` 与 `presets` 允许同时非空
+4. `presets` 在 HTTP 上保持 `string[]`
 5. HTTP 路由不回显 `resolvedTools`
+6. 若调用方仍传历史字段 `toolGroups`，仅作为兼容别名映射到 `presets`
 
 ### 6.3 Rust 高层工具来源模型
 
-内部 Rust 高层 helper 不再暴露“任意组合”的无约束接口，而是使用 one-of 语义：
+内部 Rust 高层 helper 的正式语义是：
 
-- `None`
-- `ExplicitTools`
-- `ToolGroups`
-
-不支持 `Mixed`。
+- `tools=[] + presets=[]` => 无工具
+- `tools` only => 显式自定义工具
+- `presets` only => Rust 内部预设工具
+- `tools + presets` => 允许，Rust 侧展开并合并
 
 内部调用方如果已经有最终 `Vec<ToolDef>`，则直接调用底层 `final-tools runner`。
 
-内部调用方如果需要 `toolGroups` / `scopeKey`，则调用 `source-aware runner`。
+内部调用方如果需要 `presets` / `scopeKey`，则调用 `source-aware runner`。
+
+合并规则固定为：
+
+- duplicate preset key => 报错
+- merge 后 duplicate tool name => 报错
+- 不做静默覆盖
+- 不引入“显式 tools 覆盖 preset tools”的特殊优先级
 
 ## 7. 预设工具组约束
 
-### 7.1 首批正式支持的工具组
+### 7.1 首批正式支持的 presets
 
-本批首批正式纳入 `toolGroups` 体系的只有两组：
+本批首批正式纳入 `presets` 体系的只有两组：
 
 - `proposal_tools`
 - `recent_events`
@@ -260,9 +269,9 @@ pub struct AgentTurnRequest {
 - HTTP 与 Rust 使用相同的稳定字符串 key
 - key 由 Rust 常量统一管理
 
-### 7.2 工具组 bundle 形态
+### 7.2 preset bundle 形态
 
-每个预设工具组在 Rust 侧应暴露为：
+每个 preset 在 Rust 侧应暴露为：
 
 - 一组 `ToolDef`
 - 一组可选本地执行 helper
@@ -271,7 +280,7 @@ pub struct AgentTurnRequest {
 
 - broker 只消费工具定义
 - Rust 本地场景在需要时可复用执行逻辑
-- 若没有本地执行 helper，也不会阻塞该工具组作为纯 broker 工具定义被使用
+- 若没有本地执行 helper，也不会阻塞该 preset 作为纯 broker 工具定义被使用
 
 ### 7.3 `proposal_tools`
 
@@ -290,7 +299,7 @@ pub struct AgentTurnRequest {
 
 ### 7.4 `recent_events`
 
-`recent_events` 组负责暴露 `get_recent_events`。
+`recent_events` preset 负责暴露 `get_recent_events`。
 
 其合同固定为：
 
@@ -299,7 +308,7 @@ pub struct AgentTurnRequest {
 
 ### 7.5 作用域规则
 
-对依赖本地数据的预设工具组：
+对依赖本地数据的 preset：
 
 - 缺少必需 `scopeKey` 时直接报错
 - 若本次不会使用本地作用域工具组，但调用方额外传了 `scopeKey`，则忽略
@@ -342,7 +351,7 @@ pub struct AgentTurnRequest {
 需要把 HTTP 请求契约更新为支持：
 
 - `tools`
-- `toolGroups`
+- `presets`
 - `scopeKey`
 
 同时严格保持 route 只做 transport adapter。
@@ -351,7 +360,7 @@ pub struct AgentTurnRequest {
 
 需要将内部调用方统一接到新分层：
 
-- 需要工具组时走 `source-aware runner`
+- 需要 preset 时走 `source-aware runner`
 - 已有最终工具列表时走 `final-tools runner`
 
 不再保留独立于 HTTP 语义之外的旧工具注入逻辑。
@@ -362,7 +371,7 @@ pub struct AgentTurnRequest {
 
 但其角色明确为：
 
-- `proposal_tools` 组的定义与执行 helper 来源
+- `proposal_tools` preset 的定义与执行 helper 来源
 
 ### 9.5 `crates/exomind-runtime/src/agent/tools/mod.rs`
 
@@ -374,14 +383,14 @@ pub struct AgentTurnRequest {
 
 ### 10.1 工具来源校验
 
-- 无 `tools` / 无 `toolGroups` 时是真无工具
-- `tools` 与 `toolGroups` 同时非空时报错
-- 未知 `toolGroup` 报错
-- 重复 `toolGroup` 报错
+- 无 `tools` / 无 `presets` 时是真无工具
+- `tools + presets` 可同时存在
+- 未知 `preset` 报错
+- 重复 `preset` 报错
 - 重复 `tool.name` 报错
 - 缺少必需 `scopeKey` 报错
 
-### 10.2 工具组展开
+### 10.2 preset 展开
 
 - `proposal_tools` 正确展开为 proposal 相关 `ToolDef`
 - `recent_events` 正确展开为 `get_recent_events`
@@ -409,7 +418,7 @@ pub struct AgentTurnRequest {
 - Agent 默认无工具
 - 工具永远显式接入
 - HTTP 只做中转
-- 工具组解析下沉到 Rust 函数层
+- preset 解析与合并下沉到 Rust 函数层
 - Rust 内外调用统一落到底层 broker 主线
 
 在这套约束下，后续 proposal、eventlog、文件搜索、提案系统等能力的接入方式都能保持一致。

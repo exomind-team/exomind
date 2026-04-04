@@ -23,8 +23,8 @@ const CONFIG_KEY_PROVIDER: &str = "exomind:agentApiProvider";
 const CONFIG_KEY_MODEL: &str = "exomind:agentApiModel";
 const CONFIG_KEY_BASE_URL: &str = "exomind:agentApiBaseUrl";
 const CONFIG_KEY_API_KEY: &str = "exomind:agentApiApiKey";
-pub const TOOL_GROUP_PROPOSAL_TOOLS: &str = "proposal_tools";
-pub const TOOL_GROUP_RECENT_EVENTS: &str = "recent_events";
+pub const TOOL_PRESET_PROPOSAL_TOOLS: &str = "proposal_tools";
+pub const TOOL_PRESET_RECENT_EVENTS: &str = "recent_events";
 
 #[derive(Clone)]
 pub struct AgentSessionRuntime {
@@ -405,13 +405,13 @@ pub fn load_agent_session_with_runtime(
 pub fn resolve_agent_tools(
     state: &AppState,
     explicit_tools: Vec<BrokerToolDef>,
-    tool_groups: &[String],
+    presets: &[String],
     scope_key: Option<String>,
 ) -> Result<Vec<BrokerToolDef>, SessionError> {
     resolve_agent_tools_for_runtime(
         &AgentSessionRuntime::from_state(state),
         explicit_tools,
-        tool_groups,
+        presets,
         scope_key,
     )
 }
@@ -419,65 +419,54 @@ pub fn resolve_agent_tools(
 pub fn resolve_agent_tools_for_runtime(
     runtime: &AgentSessionRuntime,
     explicit_tools: Vec<BrokerToolDef>,
-    tool_groups: &[String],
+    presets: &[String],
     scope_key: Option<String>,
 ) -> Result<Vec<BrokerToolDef>, SessionError> {
-    if !explicit_tools.is_empty() && !tool_groups.is_empty() {
-        return Err(SessionError::InvalidRequest(
-            "tools and tool_groups cannot both be non-empty".to_string(),
-        ));
-    }
-
-    if tool_groups.is_empty() {
-        validate_unique_tool_names(&explicit_tools)?;
-        return Ok(explicit_tools);
-    }
-
-    let mut seen_groups = HashSet::new();
-    let mut resolved_tools = Vec::new();
-    for group in tool_groups {
-        let key = normalize_optional_text(group).ok_or_else(|| {
-            SessionError::InvalidRequest("tool group key must not be empty".to_string())
+    let mut seen_presets = HashSet::new();
+    let mut resolved_tools = explicit_tools;
+    for preset in presets {
+        let key = normalize_optional_text(preset).ok_or_else(|| {
+            SessionError::InvalidRequest("preset key must not be empty".to_string())
         })?;
-        if !seen_groups.insert(key.clone()) {
+        if !seen_presets.insert(key.clone()) {
             return Err(SessionError::InvalidRequest(format!(
-                "duplicate tool group: {key}"
+                "duplicate preset: {key}"
             )));
         }
 
-        let mut group_tools = expand_tool_group(runtime, &key, scope_key.clone())?;
-        resolved_tools.append(&mut group_tools);
+        let mut preset_tools = expand_tool_preset(runtime, &key, scope_key.clone())?;
+        resolved_tools.append(&mut preset_tools);
     }
 
     validate_unique_tool_names(&resolved_tools)?;
     Ok(resolved_tools)
 }
 
-fn expand_tool_group(
+fn expand_tool_preset(
     runtime: &AgentSessionRuntime,
-    tool_group: &str,
+    preset: &str,
     scope_key: Option<String>,
 ) -> Result<Vec<BrokerToolDef>, SessionError> {
-    match tool_group {
-        TOOL_GROUP_PROPOSAL_TOOLS => {
-            let scope_key = require_scope_key(tool_group, scope_key)?;
+    match preset {
+        TOOL_PRESET_PROPOSAL_TOOLS => {
+            let scope_key = require_scope_key(preset, scope_key)?;
             let _ = scope_key;
             Ok(proposal_tool_defs())
         }
-        TOOL_GROUP_RECENT_EVENTS => {
-            let scope_key = require_scope_key(tool_group, scope_key)?;
+        TOOL_PRESET_RECENT_EVENTS => {
+            let scope_key = require_scope_key(preset, scope_key)?;
             Ok(vec![recent_events_tool_def(runtime, scope_key)])
         }
         other => Err(SessionError::InvalidRequest(format!(
-            "unknown tool group: {other}"
+            "unknown preset: {other}"
         ))),
     }
 }
 
-fn require_scope_key(tool_group: &str, scope_key: Option<String>) -> Result<String, SessionError> {
+fn require_scope_key(preset: &str, scope_key: Option<String>) -> Result<String, SessionError> {
     normalize_optional_text(scope_key.as_deref().unwrap_or_default()).ok_or_else(|| {
         SessionError::InvalidRequest(format!(
-            "scope_key is required for tool group `{tool_group}`"
+            "scope_key is required for preset `{preset}`"
         ))
     })
 }
@@ -709,7 +698,7 @@ pub async fn run_broker_agent_session_from_sources(
     profile: ApiProviderProfile,
     system_prompt: Option<String>,
     explicit_tools: Vec<BrokerToolDef>,
-    tool_groups: &[String],
+    presets: &[String],
     scope_key: Option<String>,
     history: Vec<TurnItem>,
     new_user_message: Option<String>,
@@ -720,7 +709,7 @@ pub async fn run_broker_agent_session_from_sources(
         profile,
         system_prompt,
         explicit_tools,
-        tool_groups,
+        presets,
         scope_key,
         history,
         new_user_message,
@@ -734,14 +723,14 @@ pub async fn run_broker_agent_session_from_sources_with_runtime(
     profile: ApiProviderProfile,
     system_prompt: Option<String>,
     explicit_tools: Vec<BrokerToolDef>,
-    tool_groups: &[String],
+    presets: &[String],
     scope_key: Option<String>,
     history: Vec<TurnItem>,
     new_user_message: Option<String>,
     trigger: AgentTrigger,
     runtime: &AgentSessionRuntime,
 ) -> Result<AgentSessionRecord, SessionError> {
-    let tools = resolve_agent_tools_for_runtime(runtime, explicit_tools, tool_groups, scope_key)?;
+    let tools = resolve_agent_tools_for_runtime(runtime, explicit_tools, presets, scope_key)?;
     run_broker_agent_session_with_runtime(
         profile,
         system_prompt,
@@ -808,6 +797,18 @@ mod tests {
     use std::sync::Arc;
     use tempfile::tempdir;
 
+    fn weather_tool_def() -> BrokerToolDef {
+        BrokerToolDef {
+            name: "get_weather".to_string(),
+            description: "获取天气".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        }
+    }
+
     #[test]
     fn normalize_provider_profile_rejects_missing_api_key() {
         let error = normalize_provider_profile(ApiProviderProfile {
@@ -822,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_requested_tools_expands_recent_events_group_with_default_limit() {
+    fn resolve_requested_tools_expands_recent_events_preset_with_default_limit() {
         let dir = tempdir().unwrap();
         let runtime = AgentSessionRuntime::new(
             Arc::new(crate::config::ConfigStore::new()),
@@ -834,7 +835,7 @@ mod tests {
         let tools = resolve_agent_tools_for_runtime(
             &runtime,
             Vec::new(),
-            &[TOOL_GROUP_RECENT_EVENTS.to_string()],
+            &[TOOL_PRESET_RECENT_EVENTS.to_string()],
             Some("profile-alpha".to_string()),
         )
         .unwrap();
@@ -845,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_requested_tools_rejects_combining_explicit_tools_and_groups() {
+    fn resolve_requested_tools_merges_explicit_tools_with_presets() {
         let dir = tempdir().unwrap();
         let runtime = AgentSessionRuntime::new(
             Arc::new(crate::config::ConfigStore::new()),
@@ -854,29 +855,21 @@ mod tests {
             Arc::new(AgentSessionStore::new()),
         );
 
-        let error = resolve_agent_tools_for_runtime(
+        let tools = resolve_agent_tools_for_runtime(
             &runtime,
-            vec![BrokerToolDef {
-                name: "get_weather".to_string(),
-                description: "获取天气".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": false
-                }),
-            }],
-            &[TOOL_GROUP_RECENT_EVENTS.to_string()],
+            vec![weather_tool_def()],
+            &[TOOL_PRESET_RECENT_EVENTS.to_string()],
             Some("profile-alpha".to_string()),
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(error
-            .to_string()
-            .contains("tools and tool_groups cannot both be non-empty"));
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].name, "get_weather");
+        assert_eq!(tools[1].name, GET_RECENT_EVENTS_TOOL);
     }
 
     #[test]
-    fn resolve_requested_tools_rejects_missing_scope_key_for_runtime_group() {
+    fn resolve_requested_tools_rejects_missing_scope_key_for_runtime_preset() {
         let dir = tempdir().unwrap();
         let runtime = AgentSessionRuntime::new(
             Arc::new(crate::config::ConfigStore::new()),
@@ -888,18 +881,18 @@ mod tests {
         let error = resolve_agent_tools_for_runtime(
             &runtime,
             Vec::new(),
-            &[TOOL_GROUP_RECENT_EVENTS.to_string()],
+            &[TOOL_PRESET_RECENT_EVENTS.to_string()],
             None,
         )
         .unwrap_err();
 
         assert!(error
             .to_string()
-            .contains("scope_key is required for tool group"));
+            .contains("scope_key is required for preset"));
     }
 
     #[test]
-    fn resolve_requested_tools_rejects_duplicate_tool_group_keys() {
+    fn resolve_requested_tools_rejects_duplicate_preset_keys() {
         let dir = tempdir().unwrap();
         let runtime = AgentSessionRuntime::new(
             Arc::new(crate::config::ConfigStore::new()),
@@ -912,15 +905,42 @@ mod tests {
             &runtime,
             Vec::new(),
             &[
-                TOOL_GROUP_RECENT_EVENTS.to_string(),
-                TOOL_GROUP_RECENT_EVENTS.to_string(),
+                TOOL_PRESET_RECENT_EVENTS.to_string(),
+                TOOL_PRESET_RECENT_EVENTS.to_string(),
             ],
             Some("profile-alpha".to_string()),
         )
         .unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("duplicate tool group"));
+        assert!(error.to_string().contains("duplicate preset"));
+    }
+
+    #[test]
+    fn resolve_requested_tools_rejects_duplicate_final_tool_names_across_tools_and_presets() {
+        let dir = tempdir().unwrap();
+        let runtime = AgentSessionRuntime::new(
+            Arc::new(crate::config::ConfigStore::new()),
+            Arc::new(EventLogStore::new(dir.path().to_path_buf())),
+            Arc::new(crate::proposal::ProposalStore::new()),
+            Arc::new(AgentSessionStore::new()),
+        );
+
+        let error = resolve_agent_tools_for_runtime(
+            &runtime,
+            vec![BrokerToolDef {
+                name: GET_RECENT_EVENTS_TOOL.to_string(),
+                description: "duplicate".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }],
+            &[TOOL_PRESET_RECENT_EVENTS.to_string()],
+            Some("profile-alpha".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("duplicate tool name"));
     }
 }

@@ -19,6 +19,7 @@ use exomind_runtime::agent::proposal_tools::{
 };
 use exomind_runtime::agent::session::{
     AgentSessionRuntime, AgentSessionStore, AgentTrigger, SessionError,
+    TOOL_PRESET_RECENT_EVENTS,
     run_broker_agent_session_with_runtime,
 };
 use exomind_runtime::agent::tools::GET_RECENT_EVENTS_TOOL;
@@ -106,6 +107,40 @@ async fn fake_openai_handler(
                 "role": "assistant",
                 "content": "最近主要在推进 runtime RT Agent API 落地。",
                 "tool_calls": []
+            }
+        }]
+    }))
+}
+
+async fn fake_openai_combined_sources_handler(
+    AxumState(call_count): AxumState<Arc<AtomicUsize>>,
+    Json(payload): Json<Value>,
+) -> Json<Value> {
+    let turn = call_count.fetch_add(1, Ordering::SeqCst);
+    assert_eq!(turn, 0);
+
+    let tool_names = payload["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["function"]["name"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert!(tool_names.contains(&GET_RECENT_EVENTS_TOOL.to_string()));
+    assert!(tool_names.contains(&"get_weather".to_string()));
+
+    Json(json!({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "tool-weather-1",
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": "{\"date\":\"today\"}"
+                    }
+                }]
             }
         }]
     }))
@@ -203,6 +238,26 @@ async fn fake_openai_proposal_story_handler(
 async fn spawn_fake_openai_server() -> (String, oneshot::Sender<()>) {
     let app = Router::new()
         .route("/chat/completions", post(fake_openai_handler))
+        .with_state(Arc::new(AtomicUsize::new(0)));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    (format!("http://{addr}"), shutdown_tx)
+}
+
+async fn spawn_fake_openai_combined_sources_server() -> (String, oneshot::Sender<()>) {
+    let app = Router::new()
+        .route("/chat/completions", post(fake_openai_combined_sources_handler))
         .with_state(Arc::new(AtomicUsize::new(0)));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -432,6 +487,61 @@ async fn route_runs_session_with_runtime_config_fallback() {
     assert_eq!(fetched["sessionId"], created["sessionId"]);
     assert_eq!(fetched["toolCalls"], created["toolCalls"]);
     assert_eq!(fetched["status"], "needs_tool_calls");
+
+    let _ = shutdown_tx.send(());
+}
+
+#[tokio::test]
+async fn route_allows_combined_presets_and_explicit_tools() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = make_test_state(temp.path());
+
+    let (base_url, shutdown_tx) = spawn_fake_openai_combined_sources_server().await;
+    let app = agent_sessions::router().with_state(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/agent-sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "systemPrompt": "你是测试助手",
+                        "presets": [TOOL_PRESET_RECENT_EVENTS],
+                        "scopeKey": "profile-argon",
+                        "tools": [{
+                            "name": "get_weather",
+                            "description": "获取天气",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "date": { "type": "string" }
+                                },
+                                "required": ["date"],
+                                "additionalProperties": false
+                            }
+                        }],
+                        "providerProfile": {
+                            "provider": "openai",
+                            "model": "gpt-test",
+                            "baseUrl": base_url,
+                            "apiKey": "sk-test"
+                        },
+                        "newUserMessage": "先看最近事件，再查今天的天气。"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let created: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(created["status"], "needs_tool_calls");
+    assert_eq!(created["toolCalls"][0]["toolName"], "get_weather");
 
     let _ = shutdown_tx.send(());
 }
