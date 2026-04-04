@@ -349,6 +349,54 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     expect(secondCallback).not.toHaveBeenCalled();
   });
 
+  it('ignores a stale timeout from an unmounted stream attempt（旧实例晚到超时不应误报断开）', async () => {
+    const onInitialConnectionFailure = vi.fn();
+    let rejectStaleAttempt: ((reason?: unknown) => void) | null = null;
+    streamPlans.push(
+      () => new Promise<Response>((_, reject) => {
+        rejectStaleAttempt = reject;
+      }),
+      () => createOpenSseResponse(),
+    );
+
+    const { rerender } = render(
+      <PtyTerminal
+        key="pty-layout-stale-attempt-a"
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-stale-attempt"
+        onInitialConnectionFailure={onInitialConnectionFailure}
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers[resizeObservers.length - 1]?.();
+    await flushUi(60);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'))).toHaveLength(1);
+
+    rerender(
+      <PtyTerminal
+        key="pty-layout-stale-attempt-b"
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-stale-attempt"
+        onInitialConnectionFailure={onInitialConnectionFailure}
+      />,
+    );
+
+    resizeObservers[resizeObservers.length - 1]?.();
+    await flushUi(60);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'))).toHaveLength(2);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
+
+    await flushUi(4_100);
+    await act(async () => {
+      rejectStaleAttempt?.(new Error('stale timeout after remount'));
+      await Promise.resolve();
+    });
+
+    expect(onInitialConnectionFailure).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('pty-terminal-error')).not.toBeInTheDocument();
+  });
+
   it('shows the non-zero exit code in the EOF banner（非零退出码会显示在退出提示中）', async () => {
     streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 1 }))));
 

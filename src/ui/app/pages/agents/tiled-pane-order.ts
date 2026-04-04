@@ -8,6 +8,10 @@ const TILED_LAYOUT_MAX_PANES: Record<TiledLayout, number> = {
   '2x4': 8,
 };
 
+function isTiledActiveSession(session: SessionInfo): boolean {
+  return session.status !== 'completed' && session.status !== 'archived';
+}
+
 function uniqueIds(ids: string[]): string[] {
   return [...new Set(ids)];
 }
@@ -17,7 +21,7 @@ function getVisibleDisplayedPaneIds(
   paneOrder: string[],
   maxPanes: number,
 ): string[] {
-  const visibleSessions = sessions.filter((session) => session.status !== 'archived');
+  const visibleSessions = sessions.filter(isTiledActiveSession);
 
   if (paneOrder.length === 0) {
     return visibleSessions.slice(0, maxPanes).map((session) => session.id);
@@ -50,7 +54,7 @@ export function applySpawnedSessionToTiledPaneOrder({
   const displayedPaneIds = getVisibleDisplayedPaneIds(sessions, paneOrder, maxPanes);
   const visibleSessionsById = new Map(
     sessions
-      .filter((session) => session.status !== 'archived')
+      .filter(isTiledActiveSession)
       .map((session) => [session.id, session]),
   );
 

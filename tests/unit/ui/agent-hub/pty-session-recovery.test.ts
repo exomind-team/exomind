@@ -266,6 +266,70 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
     );
   });
 
+  it('prefers the first ordered baseline match when multiple exact baseline candidates exist（存在多个 baseline 精确命中时按偏好顺序选择）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              agent_type: 'claude',
+              session_id: 'claude-thread-older',
+              project_path: 'H--A137442-Develop-AGI-exomind',
+              last_modified: '2026-04-02T00:00:01.000Z',
+            },
+            {
+              agent_type: 'claude',
+              session_id: 'claude-thread-preferred',
+              project_path: 'H--A137442-Develop-AGI-exomind',
+              last_modified: '2026-04-01T23:59:59.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/pty-claude-ordered') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({ id: 'pty-claude-ordered', inner_session_id: 'claude-thread-preferred' }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchMock);
+
+    const detected = await detectAndPersistHistoricalSessionId({
+      rtBaseUrl: 'http://127.0.0.1:1949',
+      sessionRecordId: 'pty-claude-ordered',
+      agentType: 'claude',
+      baselineSessionIds: ['claude-thread-older', 'claude-thread-preferred'],
+      preferredBaselineSessionIds: ['claude-thread-preferred', 'claude-thread-older'],
+      allowImmediatePreferredBaselineMatch: true,
+      expectedWorkdir: 'H:/A137442/Develop/AGI/exomind',
+      startedAtMs: Date.parse('2026-04-02T00:00:00.000Z'),
+      maxAttempts: 1,
+      intervalMs: 0,
+    });
+
+    expect(detected).toBe('claude-thread-preferred');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/sessions/pty-claude-ordered',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ inner_session_id: 'claude-thread-preferred' }),
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[agent-hub][pty] preferring ordered baseline historical session id for ambiguous terminal binding',
+      expect.objectContaining({
+        sessionRecordId: 'pty-claude-ordered',
+        matchedSessionId: 'claude-thread-preferred',
+        immediate: true,
+      }),
+    );
+  });
+
   it('prefers a fresh exact match over a baseline reuse（存在新 session 时优先绑定新的精确命中）', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

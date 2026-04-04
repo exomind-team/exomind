@@ -23,7 +23,7 @@ function buildSession(overrides: Partial<SessionInfo>): SessionInfo {
 }
 
 describe('tiled pane auto replace on spawn（新建会话时自动替换平铺 pane）', () => {
-  it('replaces the earliest completed pane in pane order（替换 paneOrder 中最靠前的 completed pane）', () => {
+  it('drops completed panes from pane order before placing the new session（completed pane 不应继续占用平铺位）', () => {
     const nextPaneOrder = applySpawnedSessionToTiledPaneOrder({
       layout: '2x2',
       paneOrder: ['session-completed', 'session-active'],
@@ -40,7 +40,7 @@ describe('tiled pane auto replace on spawn（新建会话时自动替换平铺 p
       newSessionId: 'session-new',
     });
 
-    expect(nextPaneOrder).toEqual(['session-new', 'session-active']);
+    expect(nextPaneOrder).toEqual(['session-active', 'session-new']);
   });
 
   it('does not insert the new session when all visible panes are active and full（所有可见 pane 都活跃且已满时不自动插入新会话）', () => {
@@ -68,5 +68,20 @@ describe('tiled pane auto replace on spawn（新建会话时自动替换平铺 p
     });
 
     expect(nextPaneOrder).toEqual(['session-a', 'session-new']);
+  });
+
+  it('ignores archived and completed sessions when reconstructing displayed panes（重建平铺 pane 时忽略 completed / archived）', () => {
+    const nextPaneOrder = applySpawnedSessionToTiledPaneOrder({
+      layout: '2x2',
+      paneOrder: ['session-archived', 'session-completed', 'session-active'],
+      sessions: [
+        buildSession({ id: 'session-archived', status: 'archived' }),
+        buildSession({ id: 'session-completed', status: 'completed' }),
+        buildSession({ id: 'session-active', status: 'running' }),
+      ],
+      newSessionId: 'session-new',
+    });
+
+    expect(nextPaneOrder).toEqual(['session-active', 'session-new']);
   });
 });

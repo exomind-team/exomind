@@ -2,6 +2,7 @@ export interface RtSessionRecord {
   id: string;
   status: string;
   interaction_mode?: string | null;
+  inner_session_id?: string | null;
   pty_id?: string | null;
   source_host_id?: string | null;
   created_at?: string | null;

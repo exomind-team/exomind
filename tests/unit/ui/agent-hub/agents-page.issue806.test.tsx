@@ -949,6 +949,454 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     infoSpy.mockRestore();
   });
 
+  it('does not keep a disconnected pending-binding session active when its workdir context is unusable（待补绑会话若无可恢复工作目录，不应继续假活跃）', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const pendingBindingIso = new Date(Date.now() - 20_000).toISOString();
+    localStorage.setItem('exomind:agentHubViewMode', 'sessions');
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-pending-binding-invalid-workdir-824',
+        agent_kind: 'claude',
+        role: 'Pending Binding Invalid Workdir 824',
+        pty_id: 'pty-pending-binding-invalid-workdir-824',
+        inner_session_id: null,
+        source_host_id: 'runtime-host-523',
+        created_at: pendingBindingIso,
+        last_active_at: pendingBindingIso,
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind/${workdir}',
+        },
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    runtimeClientMocks.updateSession.mockImplementation(async (
+      _host: unknown,
+      sessionId: string,
+      request: { status?: SessionInfo['status'] },
+    ) => ({
+      ok: true,
+      data: buildSession({
+        id: sessionId,
+        agent_kind: 'claude',
+        role: 'Pending Binding Invalid Workdir 824',
+        pty_id: 'pty-pending-binding-invalid-workdir-824',
+        inner_session_id: null,
+        source_host_id: 'runtime-host-523',
+        created_at: pendingBindingIso,
+        last_active_at: pendingBindingIso,
+        status: request.status ?? 'running',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind/${workdir}',
+        },
+      }),
+    }));
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.anything(),
+        'session-pending-binding-invalid-workdir-824',
+        { status: 'completed' },
+      );
+    });
+
+    expect(infoSpy.mock.calls.some(([message, payload]) => (
+      message === '[agent-hub][pty] keep disconnected terminal session active because historical binding is still pending'
+      && (payload as { sessionId?: string }).sessionId === 'session-pending-binding-invalid-workdir-824'
+    ))).toBe(false);
+
+    infoSpy.mockRestore();
+  });
+
+  it('does not keep a pending-binding session active when its stale source host cannot fall back to the current runtime（待补绑会话若 source host 已失效且不能回退当前 RT，不应继续假活跃）', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const pendingBindingIso = new Date(Date.now() - 20_000).toISOString();
+    localStorage.setItem('exomind:agentHubViewMode', 'sessions');
+    localStorage.setItem('exomind:runtimeTargetMode', 'external');
+    localStorage.setItem('exomind:runtimeExternalAddress', '192.168.1.119:1919');
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-pending-binding-stale-host-824',
+        agent_kind: 'claude',
+        role: 'Pending Binding Stale Host 824',
+        pty_id: 'pty-pending-binding-stale-host-824',
+        inner_session_id: null,
+        source_host_id: 'stale-runtime-host-824',
+        created_at: pendingBindingIso,
+        last_active_at: pendingBindingIso,
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    runtimeClientMocks.updateSession.mockImplementation(async (
+      _host: unknown,
+      sessionId: string,
+      request: { status?: SessionInfo['status'] },
+    ) => ({
+      ok: true,
+      data: buildSession({
+        id: sessionId,
+        agent_kind: 'claude',
+        role: 'Pending Binding Stale Host 824',
+        pty_id: 'pty-pending-binding-stale-host-824',
+        inner_session_id: null,
+        source_host_id: 'stale-runtime-host-824',
+        created_at: pendingBindingIso,
+        last_active_at: pendingBindingIso,
+        status: request.status ?? 'running',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      }),
+    }));
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.anything(),
+        'session-pending-binding-stale-host-824',
+        { status: 'completed' },
+      );
+    });
+
+    expect(infoSpy.mock.calls.some(([message, payload]) => (
+      message === '[agent-hub][pty] keep disconnected terminal session active because historical binding is still pending'
+      && (payload as { sessionId?: string }).sessionId === 'session-pending-binding-stale-host-824'
+    ))).toBe(false);
+
+    infoSpy.mockRestore();
+  });
+
+  it('prefers the most recent bound historical session id when pending Claude binding is ambiguous（待补绑 Claude 存在多个历史候选时应优先最近一次已绑定链路）', async () => {
+    const pendingBindingIso = new Date(Date.now() - 20_000).toISOString();
+    const recentBoundIso = new Date(Date.now() - 5 * 60_000).toISOString();
+    const olderBoundIso = new Date(Date.now() - 26 * 60 * 60_000).toISOString();
+    localStorage.setItem('exomind:agentHubViewMode', 'sessions');
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-pending-binding-ambiguous-824',
+        agent_kind: 'claude',
+        role: 'Pending Binding Ambiguous 824',
+        pty_id: 'pty-pending-binding-ambiguous-824',
+        inner_session_id: null,
+        source_host_id: 'runtime-host-523',
+        created_at: pendingBindingIso,
+        last_active_at: pendingBindingIso,
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      }),
+      buildSession({
+        id: 'session-bound-recent-824',
+        agent_kind: 'claude',
+        role: 'Claude Recent 824',
+        pty_id: 'pty-bound-recent-824',
+        inner_session_id: 'claude-thread-recent-824',
+        source_host_id: 'runtime-host-523',
+        status: 'archived',
+        created_at: recentBoundIso,
+        last_active_at: recentBoundIso,
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      }),
+      buildSession({
+        id: 'session-bound-older-824',
+        agent_kind: 'claude',
+        role: 'Claude Older 824',
+        pty_id: 'pty-bound-older-824',
+        inner_session_id: 'claude-thread-older-824',
+        source_host_id: 'runtime-host-523',
+        status: 'archived',
+        created_at: olderBoundIso,
+        last_active_at: olderBoundIso,
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'claude',
+              session_id: 'claude-thread-older-824',
+              project_path: 'H--A137442-Develop-AGI-exomind',
+              last_modified: olderBoundIso,
+            },
+            {
+              agent_type: 'claude',
+              session_id: 'claude-thread-recent-824',
+              project_path: 'H--A137442-Develop-AGI-exomind',
+              last_modified: recentBoundIso,
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/session-pending-binding-ambiguous-824') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'session-pending-binding-ambiguous-824',
+            inner_session_id: 'claude-thread-recent-824',
+          }),
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/sessions/session-pending-binding-ambiguous-824',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ inner_session_id: 'claude-thread-recent-824' }),
+        }),
+      );
+    });
+
+    expect(runtimeClientMocks.updateSession).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'session-pending-binding-ambiguous-824',
+      { status: 'completed' },
+    );
+  });
+
+  it('does not auto-complete an older pending Claude binding session when a preferred historical recovery candidate already exists（较旧的待补绑 Claude 会话若已有首选历史链路，不应被抢先收敛为 completed）', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const pendingBindingIso = new Date(Date.now() - 20 * 60_000).toISOString();
+    const recentBoundIso = new Date(Date.now() - 5 * 60_000).toISOString();
+    const olderBoundIso = new Date(Date.now() - 26 * 60 * 60_000).toISOString();
+    localStorage.setItem('exomind:agentHubViewMode', 'sessions');
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-pending-binding-older-824',
+        agent_kind: 'claude',
+        role: 'Pending Binding Older 824',
+        pty_id: 'pty-pending-binding-older-824',
+        inner_session_id: null,
+        source_host_id: 'runtime-host-523',
+        created_at: pendingBindingIso,
+        last_active_at: pendingBindingIso,
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      }),
+      buildSession({
+        id: 'session-bound-recent-older-824',
+        agent_kind: 'claude',
+        role: 'Claude Recent Older 824',
+        pty_id: 'pty-bound-recent-older-824',
+        inner_session_id: 'claude-thread-recent-older-824',
+        source_host_id: 'runtime-host-523',
+        status: 'archived',
+        created_at: recentBoundIso,
+        last_active_at: recentBoundIso,
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      }),
+      buildSession({
+        id: 'session-bound-older-older-824',
+        agent_kind: 'claude',
+        role: 'Claude Older Older 824',
+        pty_id: 'pty-bound-older-older-824',
+        inner_session_id: 'claude-thread-older-older-824',
+        source_host_id: 'runtime-host-523',
+        status: 'archived',
+        created_at: olderBoundIso,
+        last_active_at: olderBoundIso,
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'claude',
+              session_id: 'claude-thread-older-older-824',
+              project_path: 'h--a137442-develop-agi-exomind',
+              last_modified: olderBoundIso,
+            },
+            {
+              agent_type: 'claude',
+              session_id: 'claude-thread-recent-older-824',
+              project_path: 'h--a137442-develop-agi-exomind',
+              last_modified: recentBoundIso,
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/session-pending-binding-older-824') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'session-pending-binding-older-824',
+            inner_session_id: 'claude-thread-recent-older-824',
+          }),
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/sessions/session-pending-binding-older-824',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ inner_session_id: 'claude-thread-recent-older-824' }),
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(infoSpy.mock.calls.some(([message, payload]) => (
+        message === '[agent-hub][pty] keep disconnected terminal session active because historical binding already has a preferred recovery candidate'
+        && (payload as { sessionId?: string }).sessionId === 'session-pending-binding-older-824'
+      ))).toBe(true);
+    });
+
+    expect(runtimeClientMocks.updateSession).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'session-pending-binding-older-824',
+      { status: 'completed' },
+    );
+
+    infoSpy.mockRestore();
+  });
+
   it('retries codex auto-resume after the runtime becomes reachable again（RT 恢复可达后应再次自动恢复，而不是烧掉唯一尝试机会）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     sessionStreamState.sessions = [

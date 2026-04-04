@@ -131,6 +131,7 @@ import {
   isRecoverableTerminalSession,
   isTerminalSessionPendingHistoricalBinding,
   replacePaneOrderSessionId,
+  resolveRecoverableTerminalProjectPathKey,
   resolveTerminalSessionWorkdir,
 } from './agents/pty-session-recovery';
 import {
@@ -262,8 +263,30 @@ function isFreshRunningTerminalSession(
   return now - wallClockMs < FRESH_PTY_PRESENCE_GRACE_MS;
 }
 
+function hasRecoverablePendingHistoricalBindingContext(
+  session: Pick<SessionInfo, 'context'>,
+): boolean {
+  const workdir = resolveTerminalSessionWorkdir(session as SessionInfo);
+  if (!workdir) {
+    return false;
+  }
+
+  const trimmed = workdir.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  if (/\$\{[^}]+\}/.test(trimmed)) {
+    return false;
+  }
+
+  return /^[a-z]:[\\/]/i.test(trimmed)
+    || trimmed.startsWith('\\\\')
+    || trimmed.startsWith('/');
+}
+
 function isFreshPendingHistoricalBindingSession(
-  session: Pick<SessionInfo, 'status' | 'interaction_mode' | 'agent_kind' | 'inner_session_id' | 'last_active_at' | 'created_at'>,
+  session: Pick<SessionInfo, 'status' | 'interaction_mode' | 'agent_kind' | 'inner_session_id' | 'last_active_at' | 'created_at' | 'context'>,
   now: number = Date.now(),
 ): boolean {
   if (
@@ -275,6 +298,9 @@ function isFreshPendingHistoricalBindingSession(
   ) {
     return false;
   }
+  if (!hasRecoverablePendingHistoricalBindingContext(session)) {
+    return false;
+  }
 
   const wallClockMs = parseSessionWallClockMs(session);
   if (!Number.isFinite(wallClockMs) || wallClockMs <= 0) {
@@ -282,6 +308,40 @@ function isFreshPendingHistoricalBindingSession(
   }
 
   return now - wallClockMs < PENDING_HISTORICAL_BINDING_GRACE_MS;
+}
+
+function shouldKeepFreshPendingHistoricalBindingSessionActive(
+  session: Pick<SessionInfo, 'status' | 'interaction_mode' | 'agent_kind' | 'inner_session_id' | 'last_active_at' | 'created_at' | 'context' | 'pty_id' | 'source_host_id'>,
+  options: {
+    now?: number;
+    loadedPtyHostId?: string | null;
+    activeEmbeddedRuntimeHostId?: string | null;
+    pendingPtyPresenceIds?: ReadonlySet<string>;
+    allowRuntimeHostFallback?: boolean;
+  } = {},
+): boolean {
+  if (!isFreshPendingHistoricalBindingSession(session, options.now)) {
+    return false;
+  }
+
+  if (session.pty_id && options.pendingPtyPresenceIds?.has(session.pty_id)) {
+    return true;
+  }
+
+  const sourceHostId = session.source_host_id ?? null;
+  if (!sourceHostId) {
+    return true;
+  }
+
+  if (sourceHostId === (options.loadedPtyHostId ?? null)) {
+    return true;
+  }
+
+  if (sourceHostId === (options.activeEmbeddedRuntimeHostId ?? null)) {
+    return true;
+  }
+
+  return options.allowRuntimeHostFallback === true;
 }
 
 function resolveDialAddressFromBaseUrl(rtBaseUrl: string): string | undefined {
@@ -2004,6 +2064,34 @@ export function AgentsPage() {
     }),
     [dashboardSessions],
   );
+  const getPreferredHistoricalBindingSessionIds = useCallback((session: SessionInfo): string[] => {
+    const sessionProjectPathKey = resolveRecoverableTerminalProjectPathKey(session);
+    if (!sessionProjectPathKey) {
+      return [];
+    }
+
+    return Array.from(new Set(
+      dashboardSessions
+        .filter((candidate) => (
+          candidate.id !== session.id
+          && candidate.interaction_mode === 'terminal'
+          && candidate.agent_kind === session.agent_kind
+          && resolveRecoverableTerminalProjectPathKey(candidate) === sessionProjectPathKey
+        ))
+        .sort((left, right) => {
+          const wallClockDiff = parseSessionWallClockMs(right) - parseSessionWallClockMs(left);
+          if (wallClockDiff !== 0) {
+            return wallClockDiff;
+          }
+
+          return right.id.localeCompare(left.id);
+        })
+        .flatMap((candidate) => {
+          const historicalSessionId = candidate.inner_session_id?.trim();
+          return historicalSessionId ? [historicalSessionId] : [];
+        }),
+    ));
+  }, [dashboardSessions]);
 
   useEffect(() => {
     writeAgentsTiledPersistState({
@@ -2014,18 +2102,24 @@ export function AgentsPage() {
   }, [activePtyId, tiledLayout, tiledPaneOrder]);
 
   useEffect(() => {
-    const archivedSessionIds = new Set(
+    if (sessionLoading) {
+      return;
+    }
+
+    const visibleTiledSessionIds = new Set(
       dashboardSessions
-        .filter((session) => session.status === 'archived')
+        .filter((session) => session.status !== 'completed' && session.status !== 'archived')
         .map((session) => session.id),
     );
-    if (archivedSessionIds.size === 0) return;
 
     setTiledPaneOrder((prev) => {
-      const next = prev.filter((id) => !archivedSessionIds.has(id));
+      if (prev.length === 0) {
+        return prev;
+      }
+      const next = prev.filter((id) => visibleTiledSessionIds.has(id));
       return next.length === prev.length ? prev : next;
     });
-  }, [dashboardSessions]);
+  }, [dashboardSessions, sessionLoading]);
 
   const matchingActivePty = useMemo(
     () => ptyAgents.find((pty) => pty.id === activePtyId) ?? null,
@@ -2062,6 +2156,7 @@ export function AgentsPage() {
       if (!workdir) {
         return;
       }
+      const preferredBaselineSessionIds = getPreferredHistoricalBindingSessionIds(session);
 
       const host = resolveRuntimeHostForSession(session);
       void detectAndPersistHistoricalSessionId({
@@ -2070,6 +2165,8 @@ export function AgentsPage() {
         sessionRecordId: session.id,
         agentType: session.agent_kind === 'claude' ? 'claude' : 'codex',
         baselineSessionIds: boundHistoricalSessionIds,
+        preferredBaselineSessionIds,
+        allowImmediatePreferredBaselineMatch: true,
         expectedWorkdir: workdir,
         startedAtMs: Date.parse(session.created_at),
       }).then((detectedSessionId) => {
@@ -2091,7 +2188,7 @@ export function AgentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [boundHistoricalSessionIds, dashboardSessions, refreshSessions, useMockData]);
+  }, [boundHistoricalSessionIds, dashboardSessions, getPreferredHistoricalBindingSessionIds, refreshSessions, useMockData]);
 
   const resolvedActivePtyHostId = useMemo(
     () => (
@@ -2666,6 +2763,7 @@ export function AgentsPage() {
       await retireSupersededTerminalSession(session);
 
       await fetchPtyAgentsRef.current();
+      await Promise.resolve(refreshSessions());
       return info.id;
     } catch (error) {
       if (!autoResumeAttemptedSessionIdsRef.current.has(session.id)) {
@@ -3530,23 +3628,53 @@ export function AgentsPage() {
         const decisionSignature = buildDisconnectedTerminalSessionDecisionSignature(session);
         autoCompletingDisconnectedSessionIdsRef.current.add(session.id);
         try {
-          if (isFreshPendingHistoricalBindingSession(session)) {
+          const shouldFallbackToActiveRuntimeHost = canFallbackToActiveRuntimeHostForSession(session);
+          const matchedSourceHost = resolveRuntimeHostBySourceHostId(session.source_host_id);
+          const preferredHistoricalBindingSessionIds = isTerminalSessionPendingHistoricalBinding(session)
+            ? getPreferredHistoricalBindingSessionIds(session)
+            : [];
+          if (shouldKeepFreshPendingHistoricalBindingSessionActive(session, {
+            loadedPtyHostId,
+            activeEmbeddedRuntimeHostId,
+            pendingPtyPresenceIds,
+            allowRuntimeHostFallback: shouldFallbackToActiveRuntimeHost,
+          })) {
             console.info('[agent-hub][pty] keep disconnected terminal session active because historical binding is still pending', {
               sessionId: session.id,
               ptyId: session.pty_id ?? null,
               sourceHostId: session.source_host_id ?? null,
               agentType: session.agent_kind,
+              loadedPtyHostId,
+              activeEmbeddedRuntimeHostId,
+              pendingPtyPresenceKnown: Boolean(session.pty_id && pendingPtyPresenceIds.has(session.pty_id)),
+              allowRuntimeHostFallback: shouldFallbackToActiveRuntimeHost,
+            });
+            disconnectedSessionDecisionSignaturesRef.current.set(session.id, decisionSignature);
+            continue;
+          }
+
+          if (
+            isTerminalSessionPendingHistoricalBinding(session)
+            && hasRecoverablePendingHistoricalBindingContext(session)
+            && preferredHistoricalBindingSessionIds.length > 0
+            && (!session.source_host_id || matchedSourceHost || shouldFallbackToActiveRuntimeHost)
+          ) {
+            console.info('[agent-hub][pty] keep disconnected terminal session active because historical binding already has a preferred recovery candidate', {
+              sessionId: session.id,
+              ptyId: session.pty_id ?? null,
+              sourceHostId: session.source_host_id ?? null,
+              agentType: session.agent_kind,
+              preferredHistoricalBindingSessionIds,
+              allowRuntimeHostFallback: shouldFallbackToActiveRuntimeHost,
             });
             disconnectedSessionDecisionSignaturesRef.current.set(session.id, decisionSignature);
             continue;
           }
 
           if (isRecoverableTerminalSession(session)) {
-            const matchedHost = resolveRuntimeHostBySourceHostId(session.source_host_id);
-            const shouldFallbackToActiveRuntimeHost = canFallbackToActiveRuntimeHostForSession(session);
             const shouldDeferUnavailableSourceHostCompletion = shouldDeferUnavailableSourceHostHandling(
               session,
-              matchedHost,
+              matchedSourceHost,
             );
             if (shouldDeferUnavailableSourceHostCompletion) {
               console.info('[agent-hub][pty] keep disconnected terminal session active while embedded runtime is restarting', {
@@ -3558,13 +3686,13 @@ export function AgentsPage() {
               });
               continue;
             }
-            if (session.source_host_id && !matchedHost && !shouldFallbackToActiveRuntimeHost) {
+            if (session.source_host_id && !matchedSourceHost && !shouldFallbackToActiveRuntimeHost) {
               await completeDisconnectedTerminalSession(session, 'source-host-unavailable');
               disconnectedSessionDecisionSignaturesRef.current.set(session.id, decisionSignature);
               continue;
             }
 
-            const host = matchedHost ?? resolveActiveRuntimeHost();
+            const host = matchedSourceHost ?? resolveActiveRuntimeHost();
             const runtimeBaseUrl = resolveRuntimeHostBaseUrl(host);
             let hasMatchingHistoricalRecord = false;
             try {
@@ -3623,12 +3751,17 @@ export function AgentsPage() {
       cancelled = true;
     };
   }, [
+    activeEmbeddedRuntimeHostId,
     canFallbackToActiveRuntimeHostForSession,
     canJudgePtyPresenceForHost,
     completeDisconnectedTerminalSession,
     dashboardSessions,
+    getPreferredHistoricalBindingSessionIds,
     hasLoadedPtyAgents,
     isSessionPtyDisconnected,
+    loadedPtyHostId,
+    pendingPtyPresenceIds,
+    resolveRuntimeHostBySourceHostId,
     shouldDeferUnavailableSourceHostHandling,
     runtimeServiceStatus?.running,
     runtimeServiceStatus?.startedAt,
@@ -4416,7 +4549,9 @@ export function AgentsPage() {
       );
     }
     if (viewMode === 'tiled') {
-      const visibleSessions = dashboardSessions.filter((s) => s.status !== 'archived');
+      const visibleSessions = dashboardSessions.filter(
+        (session) => session.status !== 'completed' && session.status !== 'archived',
+      );
       return (
         <div className="flex h-full flex-col gap-2">
           <div className="flex items-center justify-between">

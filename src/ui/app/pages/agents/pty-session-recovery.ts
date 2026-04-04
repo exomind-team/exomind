@@ -23,6 +23,8 @@ interface DetectAndPersistHistoricalSessionInput {
   sessionRecordId: string;
   agentType: RecoverableAgentType;
   baselineSessionIds: string[];
+  preferredBaselineSessionIds?: string[];
+  allowImmediatePreferredBaselineMatch?: boolean;
   expectedWorkdir?: string;
   startedAtMs: number;
   maxAttempts?: number;
@@ -178,8 +180,25 @@ async function persistHistoricalSessionId(
   return matchedSessionId;
 }
 
-export function resolveTerminalSessionWorkdir(session: SessionInfo): string | undefined {
+export function resolveTerminalSessionWorkdir(session: Pick<SessionInfo, 'context'>): string | undefined {
   return session.context.work_dir ?? session.context.worktree_path;
+}
+
+export function resolveRecoverableTerminalProjectPathKey(
+  session: Pick<SessionInfo, 'agent_kind' | 'interaction_mode' | 'context'>,
+): string | null {
+  const agentType = resolveRecoverableTerminalAgentType(session);
+  if (!agentType) {
+    return null;
+  }
+
+  const workdir = resolveTerminalSessionWorkdir(session);
+  if (!workdir) {
+    return null;
+  }
+
+  const normalized = normalizeExpectedProjectPath(agentType, workdir);
+  return normalized || null;
 }
 
 export function isRecoverableTerminalSession(session: SessionInfo): boolean {
@@ -302,6 +321,8 @@ export async function detectAndPersistHistoricalSessionId({
   sessionRecordId,
   agentType,
   baselineSessionIds,
+  preferredBaselineSessionIds,
+  allowImmediatePreferredBaselineMatch = false,
   expectedWorkdir,
   startedAtMs,
   maxAttempts,
@@ -325,6 +346,11 @@ export async function detectAndPersistHistoricalSessionId({
     }
 
     const baseline = new Set(baselineSessionIds);
+    const normalizedPreferredBaselineSessionIds = [...new Set(
+      (preferredBaselineSessionIds ?? [])
+        .map((sessionId) => sessionId.trim())
+        .filter((sessionId) => sessionId.length > 0),
+    )];
     const normalizedExpectedWorkdir = normalizeExpectedProjectPath(agentType, expectedWorkdir);
     const lowerBoundMs = startedAtMs - DETECTION_CLOCK_SKEW_MS;
     const upperBoundMs = startedAtMs + candidateWindowMs;
@@ -334,6 +360,7 @@ export async function detectAndPersistHistoricalSessionId({
     let lastExactMatchIds: string[] = [];
     let lastFreshExactMatchIds: string[] = [];
     let lastBaselineExactMatchIds: string[] = [];
+    let lastBaselineExactMatches: HistoricalSessionInfo[] = [];
     let sawMismatchedRecentCandidate = false;
     let sawFreshExactMatch = false;
     let fallbackBaselineExactMatch: HistoricalSessionInfo | null = null;
@@ -341,6 +368,11 @@ export async function detectAndPersistHistoricalSessionId({
     const matchesExpectedWorkdir = (session: HistoricalSessionInfo): boolean => (
       normalizeHistoricalProjectPath(agentType, session.project_path) === normalizedExpectedWorkdir
     );
+    const resolvePreferredBaselineExactMatch = () => normalizedPreferredBaselineSessionIds
+      .map((preferredSessionId) => (
+        lastBaselineExactMatches.find((session) => session.session_id === preferredSessionId) ?? null
+      ))
+      .find((session): session is HistoricalSessionInfo => session !== null);
 
     for (let attempt = 0; attempt < resolvedMaxAttempts; attempt += 1) {
       try {
@@ -359,6 +391,7 @@ export async function detectAndPersistHistoricalSessionId({
 
         lastFreshExactMatchIds = [...new Set(freshExactMatches.map((session) => session.session_id))];
         lastBaselineExactMatchIds = [...new Set(baselineExactMatches.map((session) => session.session_id))];
+        lastBaselineExactMatches = baselineExactMatches;
         sawFreshExactMatch ||= lastFreshExactMatchIds.length > 0;
         sawMismatchedRecentCandidate ||= recentCandidates.length > recentExactMatches.length;
         if (lastBaselineExactMatchIds.length === 1) {
@@ -377,6 +410,27 @@ export async function detectAndPersistHistoricalSessionId({
             lastExactMatchIds[0]!,
             authToken,
           );
+        }
+
+        if (!sawFreshExactMatch && allowImmediatePreferredBaselineMatch) {
+          const preferredBaselineExactMatch = resolvePreferredBaselineExactMatch();
+          if (preferredBaselineExactMatch) {
+            console.warn('[agent-hub][pty] preferring ordered baseline historical session id for ambiguous terminal binding', {
+              sessionRecordId,
+              agentType,
+              expectedWorkdir: expectedWorkdir ?? null,
+              matchedSessionId: preferredBaselineExactMatch.session_id,
+              preferredBaselineSessionIds: normalizedPreferredBaselineSessionIds,
+              baselineExactMatchIds: lastBaselineExactMatchIds,
+              immediate: true,
+            });
+            return persistHistoricalSessionId(
+              rtBaseUrl,
+              sessionRecordId,
+              preferredBaselineExactMatch.session_id,
+              authToken,
+            );
+          }
         }
       } catch (error) {
         if (attempt === resolvedMaxAttempts - 1) {
@@ -402,6 +456,27 @@ export async function detectAndPersistHistoricalSessionId({
         fallbackBaselineExactMatch.session_id,
         authToken,
       );
+    }
+
+    if (!sawFreshExactMatch && normalizedPreferredBaselineSessionIds.length > 0) {
+      const preferredBaselineExactMatch = resolvePreferredBaselineExactMatch();
+      if (preferredBaselineExactMatch) {
+        console.warn('[agent-hub][pty] preferring ordered baseline historical session id for ambiguous terminal binding', {
+          sessionRecordId,
+          agentType,
+          expectedWorkdir: expectedWorkdir ?? null,
+          matchedSessionId: preferredBaselineExactMatch.session_id,
+          preferredBaselineSessionIds: normalizedPreferredBaselineSessionIds,
+          baselineExactMatchIds: lastBaselineExactMatchIds,
+          immediate: false,
+        });
+        return persistHistoricalSessionId(
+          rtBaseUrl,
+          sessionRecordId,
+          preferredBaselineExactMatch.session_id,
+          authToken,
+        );
+      }
     }
 
     console.warn('[agent-hub][pty] unable to safely detect historical session id', {

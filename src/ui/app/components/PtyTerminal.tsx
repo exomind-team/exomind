@@ -340,6 +340,18 @@ export function PtyTerminal({
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
     let initialFailureNotified = false;
     let initialStreamRetryCount = 0;
+    let connectAttemptSerial = 0;
+    let latestConnectAttemptId = 0;
+
+    const isLatestConnectAttempt = (attemptId: number) => (
+      !disposed && attemptId === latestConnectAttemptId
+    );
+
+    const invalidateConnectAttempt = (attemptId?: number) => {
+      if (attemptId == null || latestConnectAttemptId === attemptId) {
+        latestConnectAttemptId = 0;
+      }
+    };
 
     const clearConnectedStreamController = (controller: AbortController) => {
       if (streamAbortControllerRef.current === controller) {
@@ -400,7 +412,13 @@ export function PtyTerminal({
 
     let streamAbortController: AbortController | null = null;
 
-    const finalizeInitialStreamFailure = (message: string) => {
+    const finalizeInitialStreamFailure = (
+      attemptId: number,
+      message: string,
+    ) => {
+      if (!isLatestConnectAttempt(attemptId)) {
+        return;
+      }
       if (!disposed) {
         hasConnectedOnceRef.current = true;
         setIsStreamConnecting(false);
@@ -410,27 +428,38 @@ export function PtyTerminal({
         initialFailureNotified = true;
         onInitialConnectionFailureRef.current();
       }
+      invalidateConnectAttempt(attemptId);
     };
 
     const handleInitialStreamFailure = (
+      attemptId: number,
       message: string,
       options?: { skipRetry?: boolean },
     ) => {
+      if (!isLatestConnectAttempt(attemptId)) {
+        return;
+      }
       if (!options?.skipRetry && initialStreamRetryCount < INITIAL_STREAM_CONNECT_RETRY_LIMIT) {
         initialStreamRetryCount += 1;
         log.warn(
           `[PtyTerminal] initial stream connection failed for PTY ${ptyId}; retry ${initialStreamRetryCount}/${INITIAL_STREAM_CONNECT_RETRY_LIMIT}: ${message}`,
         );
+        invalidateConnectAttempt(attemptId);
         scheduleConnect(INITIAL_STREAM_CONNECT_RETRY_DELAY_MS);
         return;
       }
 
       log.warn(`[PtyTerminal] initial stream connection failed for PTY ${ptyId}; giving up: ${message}`);
-      finalizeInitialStreamFailure(message);
+      finalizeInitialStreamFailure(attemptId, message);
     };
 
     const connectStream = async () => {
+      if (disposed) {
+        return;
+      }
       resetStreamLoading();
+      const attemptId = ++connectAttemptSerial;
+      latestConnectAttemptId = attemptId;
       const streamUrl = buildStreamUrl();
       const controller = new AbortController();
       streamAbortControllerRef.current = controller;
@@ -438,6 +467,9 @@ export function PtyTerminal({
       let sawEof = false;
       let connectTimedOut = false;
       const connectTimeoutId = setTimeout(() => {
+        if (disposed || latestConnectAttemptId !== attemptId) {
+          return;
+        }
         connectTimedOut = true;
         controller.abort();
       }, INITIAL_STREAM_CONNECT_TIMEOUT_MS);
@@ -452,27 +484,40 @@ export function PtyTerminal({
         });
       } catch (error) {
         clearTimeout(connectTimeoutId);
-        if (disposed || controller.signal.aborted) {
-          if (!connectTimedOut) {
-            return;
-          }
+        if (!isLatestConnectAttempt(attemptId)) {
+          return;
+        }
+        if (controller.signal.aborted && !connectTimedOut) {
+          invalidateConnectAttempt(attemptId);
+          return;
         }
         clearConnectedStreamController(controller);
         if (connectTimedOut) {
           handleInitialStreamFailure(
+            attemptId,
             `timeout after ${INITIAL_STREAM_CONNECT_TIMEOUT_MS}ms（终端流连接超时）`,
             { skipRetry: true },
           );
           return;
         }
-        handleInitialStreamFailure(error instanceof Error ? error.message : String(error));
+        handleInitialStreamFailure(attemptId, error instanceof Error ? error.message : String(error));
         return;
       }
       clearTimeout(connectTimeoutId);
 
+      if (!isLatestConnectAttempt(attemptId)) {
+        try {
+          response.body?.cancel();
+        } catch {
+          // Ignore cancellation failures for superseded attempts
+        }
+        return;
+      }
+
       if (!response.ok || !response.body) {
         clearConnectedStreamController(controller);
         handleInitialStreamFailure(
+          attemptId,
           !response.ok
             ? `HTTP ${response.status}`
             : 'empty stream body（终端流响应体为空）',
@@ -537,19 +582,26 @@ export function PtyTerminal({
           );
         }
       } finally {
+        const shouldReconnect = (
+          !disposed
+          && latestConnectAttemptId === attemptId
+          && !controller.signal.aborted
+          && !sawEof
+        );
         try {
           reader.releaseLock();
         } catch {
           // Ignore release errors during abort/dispose
         }
         clearConnectedStreamController(controller);
-      }
-
-      if (disposed || controller.signal.aborted || sawEof) {
-        return;
+        if (!shouldReconnect) {
+          invalidateConnectAttempt(attemptId);
+          return;
+        }
       }
 
       log.warn(`[PtyTerminal] PTY stream closed unexpectedly for ${ptyId}; reconnecting`);
+      invalidateConnectAttempt(attemptId);
       scheduleConnect(STREAM_RECONNECT_DELAY_MS);
     };
 
@@ -571,6 +623,7 @@ export function PtyTerminal({
 
     return () => {
       disposed = true;
+      invalidateConnectAttempt();
       if (interactive) {
         document.removeEventListener('paste', documentPasteHandler);
       }
