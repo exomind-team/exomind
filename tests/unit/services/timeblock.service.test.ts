@@ -499,9 +499,7 @@ describe('TimeBlockServiceImpl', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
-    // In non-Tauri environments resolveEmbeddedPort() uses window.location.port when set
-    // (Vite proxy path, #775), so the expected URL uses the jsdom default port.
-    const embeddedPort = window.location.port || DEFAULT_EMBEDDED_RUNTIME_PORT;
+    const embeddedPort = DEFAULT_EMBEDDED_RUNTIME_PORT;
     expect(networkMocks.fetch).toHaveBeenCalledWith(
       `http://${window.location.hostname || 'localhost'}:${embeddedPort}/signals/publish`,
       expect.objectContaining({ method: 'POST' }),
@@ -535,7 +533,7 @@ describe('TimeBlockServiceImpl', () => {
     }
 
     expect(networkMocks.fetch).toHaveBeenCalled();
-    const embeddedPort = window.location.port || DEFAULT_EMBEDDED_RUNTIME_PORT;
+    const embeddedPort = DEFAULT_EMBEDDED_RUNTIME_PORT;
     expect(networkMocks.fetch).toHaveBeenCalledWith(
       `http://${window.location.hostname || 'localhost'}:${embeddedPort}/signals/publish`,
       expect.objectContaining({ method: 'POST' }),

@@ -170,12 +170,6 @@ function resolveEmbeddedPort(): number {
   const cachedStatus = readEmbeddedRuntimeStatus();
   if (cachedStatus?.port) return cachedStatus.port;
 
-  // Web 开发模式：无 Tauri、无 localStorage 缓存时，使用当前页面端口
-  // 让请求走 Vite proxy 到 RT，避免跨端口 fetch 失败（#775）
-  if (!isTauriWindow() && typeof window !== 'undefined' && window.location?.port) {
-    return Number(window.location.port);
-  }
-
   return DEFAULT_EMBEDDED_RUNTIME_PORT;
 }
 

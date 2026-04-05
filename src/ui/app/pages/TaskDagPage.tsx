@@ -185,6 +185,21 @@ type TaskDagManualTouchDragState = {
   sourceElement: HTMLDivElement | null;
   moved: boolean;
 };
+type TaskDagFocusHardDragContext = {
+  focusMode: TaskDagFocusMode;
+  focusedSeriesAnchorIds: string[];
+  visibleFocusedSeriesNodeIds: string[];
+  currentFlowNodeIds: string[];
+  renderedNodeIds: string[];
+  edgeCount: number;
+};
+type TaskDagFocusHardDragSession = {
+  pointerId: number;
+  nodeId: string;
+  startViewport: { x: number; y: number; zoom: number } | null;
+  startFlowNodeIds: string[];
+  anomalyKinds: Set<string>;
+};
 
 const TASK_DAG_EXECUTE_DEBUG_TAG = '[TaskDag][ExecuteDebug]';
 const TASK_DAG_MODE_ORDER: TaskDagMode[] = ['browse', 'connect', 'execute'];
@@ -362,7 +377,28 @@ function summarizeRenderedFlowNodes(): {
   visibleRenderedCount: number;
   visibleRenderedNodeIds: string[];
   zeroRectNodeIds: string[];
+  edgesDomCount: number;
+  edgePathCount: number;
+  viewportTransform: string | null;
+  viewportRect: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null;
+  wrapperRect: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null;
 } {
+  const summarizeRect = (element: Element | null) => {
+    if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
+      return null;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    };
+  };
+
   if (typeof document === 'undefined') {
     return {
       renderedCount: 0,
@@ -370,6 +406,11 @@ function summarizeRenderedFlowNodes(): {
       visibleRenderedCount: 0,
       visibleRenderedNodeIds: [],
       zeroRectNodeIds: [],
+      edgesDomCount: 0,
+      edgePathCount: 0,
+      viewportTransform: null,
+      viewportRect: null,
+      wrapperRect: null,
     };
   }
 
@@ -382,6 +423,13 @@ function summarizeRenderedFlowNodes(): {
   const renderedNodeIds: string[] = [];
   const visibleRenderedNodeIds: string[] = [];
   const zeroRectNodeIds: string[] = [];
+  const edgeElements = Array.from(
+    document.querySelectorAll<SVGGElement>('.react-flow__edge'),
+  );
+  const edgePathElements = Array.from(
+    document.querySelectorAll<SVGPathElement>('.react-flow__edge path, .react-flow__edge-path'),
+  );
+  const viewportElement = document.querySelector<HTMLElement>('.react-flow__viewport');
 
   for (const element of elements) {
     const nodeId = element.dataset.id ?? '';
@@ -415,7 +463,35 @@ function summarizeRenderedFlowNodes(): {
     visibleRenderedCount: visibleRenderedNodeIds.length,
     visibleRenderedNodeIds,
     zeroRectNodeIds,
+    edgesDomCount: edgeElements.length,
+    edgePathCount: edgePathElements.length,
+    viewportTransform: viewportElement?.style.transform || null,
+    viewportRect: summarizeRect(viewportElement),
+    wrapperRect: summarizeRect(container),
   };
+}
+
+function resolveFocusHardDragAnomalyKind(
+  context: TaskDagFocusHardDragContext,
+  domSummary: ReturnType<typeof summarizeRenderedFlowNodes>,
+): 'edge-path-zero' | 'node-dom-zero' | 'visible-node-zero' | null {
+  if (context.currentFlowNodeIds.length === 0) {
+    return null;
+  }
+
+  if (context.edgeCount > 0 && domSummary.edgePathCount === 0) {
+    return 'edge-path-zero';
+  }
+
+  if (domSummary.renderedCount === 0) {
+    return 'node-dom-zero';
+  }
+
+  if (domSummary.visibleRenderedCount === 0) {
+    return 'visible-node-zero';
+  }
+
+  return null;
 }
 
 function focusNodeInViewport(
@@ -1044,6 +1120,15 @@ export function TaskDagPage() {
   const quickCreateDropPositionRef = useRef<TaskDagDropPosition>(null);
   const flowNodePositionByIdRef = useRef(new Map<string, { x: number; y: number }>());
   const manualTouchDragRef = useRef<TaskDagManualTouchDragState | null>(null);
+  const focusHardDragDebugRef = useRef<TaskDagFocusHardDragSession | null>(null);
+  const focusHardDragContextRef = useRef<TaskDagFocusHardDragContext>({
+    focusMode,
+    focusedSeriesAnchorIds: [],
+    visibleFocusedSeriesNodeIds: [],
+    currentFlowNodeIds: [],
+    renderedNodeIds: [],
+    edgeCount: 0,
+  });
   const suppressNodeClickRef = useRef<{ nodeId: string; until: number } | null>(null);
   const pendingManualLayoutNodeIdsRef = useRef(new Set<string>());
   const hasMountedDirectionRef = useRef(false);
@@ -1729,6 +1814,17 @@ export function TaskDagPage() {
       sourceElement: event.currentTarget,
       moved: false,
     };
+    const focusHardContext = focusHardDragContextRef.current;
+    focusHardDragDebugRef.current = focusHardContext.focusMode === 'hard'
+      && focusHardContext.visibleFocusedSeriesNodeIds.length > 0
+      ? {
+          pointerId: event.pointerId,
+          nodeId,
+          startViewport: snapshotViewport(flowInstanceRef.current),
+          startFlowNodeIds: [...focusHardContext.currentFlowNodeIds],
+          anomalyKinds: new Set<string>(),
+        }
+      : null;
     suppressNodeClickRef.current = null;
     setManualTouchNodeDragActive(true);
     warnTaskDagInteraction('manual-layout:touch-pointerdown', {
@@ -1738,6 +1834,17 @@ export function TaskDagPage() {
       clientY: event.clientY,
       startPosition,
     });
+    if (focusHardDragDebugRef.current) {
+      warnTaskDagInteraction('focus-hard:drag-session-start', {
+        nodeId,
+        pointerId: event.pointerId,
+        focusedSeriesAnchorIds: focusHardContext.focusedSeriesAnchorIds,
+        visibleFocusedSeriesNodeIds: focusHardContext.visibleFocusedSeriesNodeIds,
+        renderedNodeIds: focusHardContext.renderedNodeIds,
+        currentFlowNodeIds: focusHardContext.currentFlowNodeIds,
+        startViewport: focusHardDragDebugRef.current.startViewport,
+      });
+    }
   }, [layoutMode]);
 
   useEffect(() => {
@@ -1797,6 +1904,36 @@ export function TaskDagPage() {
         dragState.nodeId,
         nextPosition,
       ));
+
+      const focusHardSession = focusHardDragDebugRef.current;
+      if (focusHardSession && focusHardSession.pointerId === event.pointerId) {
+        const focusHardContext = focusHardDragContextRef.current;
+        const domSummary = summarizeRenderedFlowNodes();
+        const anomalyKind = resolveFocusHardDragAnomalyKind(focusHardContext, domSummary);
+        if (anomalyKind && !focusHardSession.anomalyKinds.has(anomalyKind)) {
+          focusHardSession.anomalyKinds.add(anomalyKind);
+          warnTaskDagInteraction('focus-hard:drag-session-anomaly', {
+            nodeId: dragState.nodeId,
+            pointerId: dragState.pointerId,
+            anomalyKind,
+            focusedSeriesAnchorIds: focusHardContext.focusedSeriesAnchorIds,
+            visibleFocusedSeriesNodeIds: focusHardContext.visibleFocusedSeriesNodeIds,
+            startViewport: focusHardSession.startViewport,
+            currentViewport: snapshotViewport(flowInstanceRef.current),
+            startFlowNodeIds: focusHardSession.startFlowNodeIds,
+            currentFlowNodeIds: focusHardContext.currentFlowNodeIds,
+            renderedNodeIds: focusHardContext.renderedNodeIds,
+            visibleRenderedNodeIds: domSummary.visibleRenderedNodeIds,
+            nodesDomCount: domSummary.renderedCount,
+            edgesDomCount: domSummary.edgesDomCount,
+            edgePathCount: domSummary.edgePathCount,
+            viewportTransform: domSummary.viewportTransform,
+            viewportRect: domSummary.viewportRect,
+            wrapperRect: domSummary.wrapperRect,
+            zeroRectNodeIds: domSummary.zeroRectNodeIds,
+          });
+        }
+      }
     };
 
     const finishPointerDrag = (event: PointerEvent, reason: 'pointerup' | 'pointercancel') => {
@@ -1812,6 +1949,8 @@ export function TaskDagPage() {
       manualTouchDragRef.current = null;
       setManualTouchNodeDragActive(false);
       releasePointerCapture(dragState);
+      const focusHardSession = focusHardDragDebugRef.current;
+      focusHardDragDebugRef.current = null;
 
       if (!dragState.moved) {
         warnTaskDagInteraction('manual-layout:touch-drag-end', {
@@ -1819,6 +1958,16 @@ export function TaskDagPage() {
           reason,
           moved: false,
         });
+        if (focusHardSession && focusHardSession.pointerId === event.pointerId) {
+          warnTaskDagInteraction('focus-hard:drag-session-end', {
+            nodeId: dragState.nodeId,
+            pointerId: dragState.pointerId,
+            reason,
+            moved: false,
+            anomalyKinds: [...focusHardSession.anomalyKinds],
+            endViewport: snapshotViewport(flowInstanceRef.current),
+          });
+        }
         return;
       }
 
@@ -1832,6 +1981,31 @@ export function TaskDagPage() {
         moved: true,
         finalPosition: dragState.lastPosition,
       });
+      if (focusHardSession && focusHardSession.pointerId === event.pointerId) {
+        const focusHardContext = focusHardDragContextRef.current;
+        const domSummary = summarizeRenderedFlowNodes();
+        warnTaskDagInteraction('focus-hard:drag-session-end', {
+          nodeId: dragState.nodeId,
+          pointerId: dragState.pointerId,
+          reason,
+          moved: true,
+          finalPosition: dragState.lastPosition,
+          anomalyKinds: [...focusHardSession.anomalyKinds],
+          focusedSeriesAnchorIds: focusHardContext.focusedSeriesAnchorIds,
+          visibleFocusedSeriesNodeIds: focusHardContext.visibleFocusedSeriesNodeIds,
+          endViewport: snapshotViewport(flowInstanceRef.current),
+          currentFlowNodeIds: focusHardContext.currentFlowNodeIds,
+          renderedNodeIds: focusHardContext.renderedNodeIds,
+          visibleRenderedNodeIds: domSummary.visibleRenderedNodeIds,
+          nodesDomCount: domSummary.renderedCount,
+          edgesDomCount: domSummary.edgesDomCount,
+          edgePathCount: domSummary.edgePathCount,
+          viewportTransform: domSummary.viewportTransform,
+          viewportRect: domSummary.viewportRect,
+          wrapperRect: domSummary.wrapperRect,
+          zeroRectNodeIds: domSummary.zeroRectNodeIds,
+        });
+      }
       setManualLayoutSnapshot(updateTaskDagManualLayoutPosition(
         manualLayoutSnapshotRef.current,
         dragState.nodeId,
@@ -1856,6 +2030,7 @@ export function TaskDagPage() {
         releasePointerCapture(activeDrag);
         manualTouchDragRef.current = null;
       }
+      focusHardDragDebugRef.current = null;
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerCancel);
@@ -1868,6 +2043,7 @@ export function TaskDagPage() {
     }
 
     manualTouchDragRef.current = null;
+    focusHardDragDebugRef.current = null;
     setManualTouchNodeDragActive(false);
   }, [layoutMode]);
 
@@ -1958,6 +2134,24 @@ export function TaskDagPage() {
       flowGraph.nodes.map((node) => [node.id, node.position]),
     );
   }, [flowGraph.nodes]);
+
+  useEffect(() => {
+    focusHardDragContextRef.current = {
+      focusMode,
+      focusedSeriesAnchorIds: [...focusedSeriesAnchorIds],
+      visibleFocusedSeriesNodeIds: [...visibleFocusedSeriesNodeIds],
+      currentFlowNodeIds: flowGraph.nodes.map((node) => node.id),
+      renderedNodeIds: renderedVisibleGraph.nodes.map((node) => node.id),
+      edgeCount: renderedVisibleGraph.edges.length,
+    };
+  }, [
+    focusMode,
+    focusedSeriesAnchorIds,
+    flowGraph.nodes,
+    renderedVisibleGraph.edges.length,
+    renderedVisibleGraph.nodes,
+    visibleFocusedSeriesNodeIds,
+  ]);
 
   const handleLayoutModeChange = useCallback((nextMode: TaskDagLayoutMode) => {
     if (nextMode === layoutMode) {
