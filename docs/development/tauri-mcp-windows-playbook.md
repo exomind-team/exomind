@@ -1415,3 +1415,163 @@
    - `issue818Preparation.status = ready/prepared`
    - `fullscreenRecoveryPresent = true`
    再开始解读后面的 RT 重启恢复结果，才是有效的 `#818` 验收
+
+### 阶段补记：冲突收敛后再次回归验证 #806 / #818（2026-04-05）
+
+#### 阶段目标
+
+- 在 `feature/issue-806-terminal-lifecycle` 与 `dev` 完成合并冲突收敛后，再次确认：
+  - `#806` 相关终端生命周期单测没有被合并回归破坏
+  - `#818` 的九条桌面终端用户叙事仍可在真实 Tauri dev 实例里完整跑通
+- 同时确认官方 Tauri MCP 工具链在当前现场可直接连接并读取窗口/DOM，而不必退回“仅 raw bridge 可用”的保守模式。
+
+#### 观察结果
+
+- 本轮现场可直接连上官方 Tauri MCP：
+  - `driver_session start --host 127.0.0.1 --port 9223`
+  - `manage_window list` 正常返回主窗口、Now overlay、Voice overlay
+  - `ipc_get_backend_state` 正常返回：
+    - `identifier = com.exomind.app`
+    - `tauri.version = 2.10.3`
+    - `window_count = 3`
+- 主窗口标题和 URL 显示当前真实实例为：
+  - `ExoMind [feature/issue-806-terminal-lifecycle] [Web:1420 RT:9124]`
+  - `http://localhost:1420/agents`
+- 本轮代码侧针对性验证通过：
+  - `bunx tsc --noEmit`
+  - `bunx vitest run tests/unit/ui/agent-hub/agents-page.issue806.test.tsx tests/unit/ui/agent-hub/pty-session-recovery.test.ts tests/unit/ui/agent-hub/agents-tiled-persistence.test.tsx tests/unit/ui/agent-hub/pty-spawn-dialog.test.tsx`
+- 本轮桌面章程实测通过：
+  - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name web-1420 --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+  - stdout 结果：
+    - `issue818Preparation.status = ready`
+    - `overallPass = true`
+    - `activeCount = 2`
+    - `mismatchCount = 0`
+  - 报告路径：
+    - `.tmp/reports/tauri-mcp-issue806-charter/2026-04-04T19-48-51.282Z-web-1420.json`
+    - `.tmp/reports/tauri-mcp-issue806-charter/2026-04-04T19-48-51.282Z-web-1420.md`
+- 章程报告确认九条叙事全部 `PASSED`：
+  - `story-1` 到 `story-9` 全部通过
+  - RT 重启前后：
+    - UI active/completed/total = `2/14/16 -> 2/14/16`
+    - RT active/completed/total = `2/14/16 -> 2/14/16`
+    - `mismatchCount = 0`
+- 本轮还用官方 Tauri MCP 工具补做了代表性手动抽查：
+  - 当前窗口可读到：
+    - `/agents`
+    - `localStorage.exomind:agentHubViewMode = sessions/tiled`
+  - 从 `任务` 返回 `网络` 后，`storedViewMode = sessions` 的恢复被再次确认
+  - 点击 `平铺` 后，`storedViewMode = tiled`、`tiledVisible = true`
+  - 点击平铺窗格后，未观察到右侧 terminal 重新占用
+
+#### 结论
+
+- 这轮可以确认：`dev` 合并冲突收敛后，`#806` / `#818` 的关键终端叙事没有被语义回归破坏。
+- 当前环境已经不需要再把“官方 Tauri MCP 会断”当作默认前提：
+  - 至少在这轮 `web-1420 / RT 9124 / bridge 9223` 现场里，官方 MCP 的窗口、DOM、JS、IPC 读取都可用
+  - raw bridge 仍然有价值，但更多是章程脚本的自动化执行层，不再是唯一验收入口
+- 章程与官方 Tauri MCP 抽查组合起来后，本轮可以把验收结论定性为：
+  - 代码层回归测试通过
+  - 桌面真实窗口叙事通过
+  - RT 重启后的终端会话自动恢复通过
+
+#### 可复用操作套路
+
+1. 冲突收敛后的终端回归，不要只跑单测：
+   - 先跑 `bunx tsc --noEmit`
+   - 再跑 `agents-page.issue806 + pty-session-recovery + agents-tiled-persistence + pty-spawn-dialog`
+   - 最后一定补跑一次桌面章程
+2. 若当前实例就是 `web-1420 / bridge 9223 / RT 9124`，可以直接复用：
+   - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name web-1420 --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+3. 看章程结果时，固定先看四项：
+   - `issue818Preparation.status`
+   - `overallPass`
+   - `activeCount`
+   - `mismatchCount`
+4. 当官方 Tauri MCP 可用时，补两条代表性现场抽查即可：
+   - 读 `window.location.pathname` + `localStorage.exomind:agentHubViewMode`
+   - 读当前 `tiledVisible / sessionsVisible / topologyVisible`
+   这样能快速确认“导航持久化”和“当前页面真相”
+5. 如果章程通过、官方 MCP 抽查也通过，就不要继续怀疑“还有隐藏冲突”：
+   - 这时应把问题切换到新的功能需求或新的现场故障
+
+### Troubleshooting：Tauri MCP 断线重连、保活与 RT 重启小步验证（2026-04-05）
+
+#### 阶段目标
+
+- 让后续 Agent 在 Windows 下遇到 Tauri MCP 间歇失灵、脚本超时、实例名选错时，可以更快回到可操作状态。
+- 把本轮 `#806 / #818` 最后一轮门禁测试里沉淀出的“保连接”和“防误判”经验固定下来。
+
+#### 观察结果
+
+- 本轮官方 Tauri MCP 可连：
+  - `driver_session status => connected=true`
+  - `manage_window list` 能看到主窗口：
+    - `ExoMind [feature/issue-806-terminal-lifecycle] [Web:1420 RT:9124]`
+    - `url = http://localhost:1420/agents`
+- 但 `driver_session` 已连，不等于所有操作都同样稳定：
+  - `execute_js`、`dom_snapshot`、`read_logs` 大体可用
+  - 某些长轮询 `execute_js` 会因脚本过长直接超时
+  - `webview_keyboard type`、`navigator.clipboard.writeText(...)` 在当前桌面不处于前台焦点时可能失败
+- 本轮现场明确观察到：
+  - `document.hasFocus() = false`
+  - 即使 `.xterm-helper-textarea` 已聚焦，剪贴板写入仍可能报：
+    - `NotAllowedError: Document is not focused`
+  - 这类失败首先应解释为 MCP 驱动/窗口焦点限制，不要直接解释为产品 PTY 输入失效
+- 本轮还确认了实例名误用会直接导致错误结论：
+  - 章程若用 `--name issue806-g`，会读错 managed instance 上下文
+  - 当前真实验收实例其实是：
+    - `web-1420`
+    - `.tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+
+#### 结论
+
+- 现场排障要分三层判断：
+  - 第一层：`driver_session` / bridge WebSocket 是否已连
+  - 第二层：主窗口 URL 与实例目录是否命中当前真实实例
+  - 第三层：`execute_js`、`runtime_service_status`、`/sessions`、`/pty` 是否真能稳定返回
+- 对 RT 重启恢复的桌面验收，不要把 stop/start/poll 塞进一个大脚本：
+  - 这容易把“产品没问题”误判成“脚本执行超时”
+- 对输入交互验证，也要区分：
+  - “MCP 没拿到前台焦点，键盘/剪贴板受限”
+  - 和
+  - “页面实际的 `PtyTerminal.sendTextInput()` 路径失效”
+- 当前最稳的验收路径是：
+  - 官方 Tauri MCP 做窗口、导航、DOM、日志、实时页面验证
+  - 章程脚本做十条叙事的自动化兜底
+
+#### 可复用操作套路
+
+1. 先确认自己连的是不是对的实例：
+   - 看 `manage_window list`
+   - 看主窗口标题里的 `Web:1420 RT:9124`
+   - 看主窗口 URL 是否真是 `http://localhost:1420/agents`
+   - 再核对章程参数里的 `--name` 与 `runtime-db`
+2. 先确认官方 MCP 是“真可用”而不是“只显示 connected”：
+   - 先跑一个最短 `execute_js`
+   - 再跑一个 `runtime_service_status`
+   - 再读一次 `/sessions` 或 `/pty`
+   - 这三步都过，才进入后续深水区验收
+3. RT 重启恢复固定拆成小步骤：
+   - `runtime_service_stop`
+   - 单独查一次 `runtime_service_status`
+   - `runtime_service_start`
+   - 再分别查：
+     - `runtime_service_status`
+     - `/sessions`
+     - `/pty`
+   - 不要写成长轮询大脚本
+4. 如果长脚本超时，不要立刻怀疑产品：
+   - 先把一个大脚本拆成多个 1-2 秒内可返回的短调用
+   - 用多次短读替代一次大轮询
+5. 如果需要验证 PTY 输入交互，而 MCP 键盘/剪贴板因为焦点限制不稳定：
+   - 先确认右侧或平铺页 `.xterm` 文本确实在渲染
+   - 再用与 `PtyTerminal.sendTextInput()` 相同的页面内 `fetch('/pty/:id/input', { body: JSON.stringify({ data }) })` 路径验证
+   - 验证重点是：
+     - 请求 `204`
+     - 页面 `.xterm` 文本出现 marker
+   - 同时在文档里注明这是“与 UI 同路径的页面内注入”，不是 RT 外部旁路
+6. 如果 `issue806-g` 与 `web-1420` 混用，先停下来重核实例：
+   - 选错实例最容易把“章程前置态缺失”误判成“恢复逻辑失败”
+7. 新一轮十条叙事门禁前，优先复用本轮稳定命令：
+   - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name web-1420 --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
