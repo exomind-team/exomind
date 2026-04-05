@@ -9,6 +9,13 @@ export type ManagedTauriInstancePaths = {
   logPath: string;
 };
 
+export type ManagedWindowsProcessInfo = {
+  ProcessId: number;
+  ParentProcessId: number;
+  Name: string;
+  CommandLine?: string | null;
+};
+
 export type TauriDevTarget = 'desktop' | 'android';
 
 export type ManagedTauriInstanceRecord = {
@@ -112,6 +119,73 @@ function collectListeningPortLabels(
 
 function uniquePositivePids(values: Array<number | undefined>): number[] {
   return [...new Set(values.filter((value): value is number => Number.isInteger(value) && value > 0))];
+}
+
+const WINDOWS_TOOL_PROCESS_NAMES = new Set(['bun.exe', 'cargo.exe', 'node.exe', 'vite.exe']);
+
+function getDescendantProcesses(processes: ManagedWindowsProcessInfo[], rootPid: number): ManagedWindowsProcessInfo[] {
+  const childrenByParent = new Map<number, ManagedWindowsProcessInfo[]>();
+  for (const processInfo of processes) {
+    const siblings = childrenByParent.get(processInfo.ParentProcessId) ?? [];
+    siblings.push(processInfo);
+    childrenByParent.set(processInfo.ParentProcessId, siblings);
+  }
+
+  const descendants: ManagedWindowsProcessInfo[] = [];
+  const queue = [...(childrenByParent.get(rootPid) ?? [])];
+  const seen = new Set<number>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || seen.has(current.ProcessId)) {
+      continue;
+    }
+
+    seen.add(current.ProcessId);
+    descendants.push(current);
+    queue.push(...(childrenByParent.get(current.ProcessId) ?? []));
+  }
+
+  return descendants;
+}
+
+function matchesDesktopProcessName(name: string, expectedBaseName: string | null): boolean {
+  const normalized = name.trim().toLowerCase();
+  if (expectedBaseName) {
+    const expected = expectedBaseName.trim().toLowerCase();
+    return normalized === expected || normalized === `${expected}.exe`;
+  }
+
+  return !WINDOWS_TOOL_PROCESS_NAMES.has(normalized);
+}
+
+function matchesExpectedExecutablePath(
+  commandLine: string | null | undefined,
+  expectedExecutablePath: string | null | undefined,
+): boolean {
+  if (!commandLine || !expectedExecutablePath) {
+    return false;
+  }
+
+  return commandLine.toLowerCase().includes(expectedExecutablePath.trim().toLowerCase());
+}
+
+export function collectManagedDesktopAppPids(input: {
+  processes: ManagedWindowsProcessInfo[];
+  rootPid: number;
+  expectedBaseName: string | null;
+  expectedExecutablePath?: string | null;
+}): number[] {
+  const descendants = getDescendantProcesses(input.processes, input.rootPid);
+  const descendantPids = descendants
+    .filter((processInfo) => matchesDesktopProcessName(processInfo.Name, input.expectedBaseName))
+    .map((processInfo) => processInfo.ProcessId);
+
+  const pathMatchedPids = input.processes
+    .filter((processInfo) => matchesExpectedExecutablePath(processInfo.CommandLine, input.expectedExecutablePath))
+    .map((processInfo) => processInfo.ProcessId);
+
+  return uniquePositivePids([...descendantPids, ...pathMatchedPids]);
 }
 
 const DESKTOP_APP_STARTUP_GRACE_MS = 90_000;

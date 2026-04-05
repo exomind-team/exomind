@@ -71,7 +71,8 @@ impl SqliteTimeBlockStore {
                     .map_err(to_sqlite_conversion_error)?,
                 source_planned_block_id: row.get(11)?,
                 block_type: row.get(12)?,
-                transitions: row.get::<_, Option<String>>(13)?
+                transitions: row
+                    .get::<_, Option<String>>(13)?
                     .map(|v| serde_json::from_str(&v).unwrap_or_default())
                     .unwrap_or_default(),
             })
@@ -453,12 +454,36 @@ impl SqliteTimeBlockStore {
                 let has_block_type = columns.iter().any(|c| c == "block_type");
                 let has_transitions = columns.iter().any(|c| c == "transitions_json");
 
-                let select_task_ids = if has_task_ids { "task_ids_json" } else { "'[]'" };
-                let select_outcomes = if has_outcomes { "task_status_outcomes_json" } else { "NULL" };
-                let select_assoc = if has_assoc_log { "task_association_log_json" } else { "'[]'" };
-                let select_source = if has_source { "source_planned_block_id" } else { "NULL" };
-                let select_block_type = if has_block_type { "block_type" } else { "'active'" };
-                let select_transitions = if has_transitions { "transitions_json" } else { "'[]'" };
+                let select_task_ids = if has_task_ids {
+                    "task_ids_json"
+                } else {
+                    "'[]'"
+                };
+                let select_outcomes = if has_outcomes {
+                    "task_status_outcomes_json"
+                } else {
+                    "NULL"
+                };
+                let select_assoc = if has_assoc_log {
+                    "task_association_log_json"
+                } else {
+                    "'[]'"
+                };
+                let select_source = if has_source {
+                    "source_planned_block_id"
+                } else {
+                    "NULL"
+                };
+                let select_block_type = if has_block_type {
+                    "block_type"
+                } else {
+                    "'active'"
+                };
+                let select_transitions = if has_transitions {
+                    "transitions_json"
+                } else {
+                    "'[]'"
+                };
 
                 let sql = format!(
                     "INSERT OR IGNORE INTO timeblocks (
@@ -501,11 +526,15 @@ impl SqliteTimeBlockStore {
             let mut stmt = if has_scope {
                 connection.prepare("SELECT scope_key, payload_json FROM active_timeblock")?
             } else {
-                connection.prepare("SELECT 'anonymous' AS scope_key, payload_json FROM active_timeblock")?
+                connection.prepare(
+                    "SELECT 'anonymous' AS scope_key, payload_json FROM active_timeblock",
+                )?
             };
 
             let rows: Vec<(String, String)> = stmt
-                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
                 .collect::<Result<Vec<_>, _>>()?;
 
             for (scope_key, payload_json) in &rows {

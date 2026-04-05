@@ -114,7 +114,7 @@ describeWindowsOnly('tauri-wrapper', () => {
       );
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('target\\tauri-dev\\web-1520');
+      expect(result.stdout).toContain('tauri-dev\\web-1520');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
@@ -214,6 +214,50 @@ describeWindowsOnly('tauri-wrapper', () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain('ARGS=dev --no-watch');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it('keeps watch-enabled dev args separated when appending config（开启 watch 后追加 config 参数时不应拼接成单个子命令）', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-watch-config-'));
+    const fakeBinDir = join(tempDir, 'bin');
+    const fakeTauriCmd = join(fakeBinDir, 'tauri.cmd');
+    const wrapperPath = join(process.cwd(), 'Scripts', 'dev', 'tauri-wrapper.ps1');
+
+    try {
+      spawnSync('cmd.exe', ['/c', 'mkdir', fakeBinDir], { stdio: 'ignore' });
+
+      writeFileSync(
+        fakeTauriCmd,
+        [
+          '@echo off',
+          'echo ARGS=%*',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      const result = spawnSync(
+        POWERSHELL_PATH,
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath, 'dev'],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${fakeBinDir};${process.env.PATH ?? ''}`,
+            EXOMIND_WEB_PORT: '1520',
+            EXOMIND_HMR_PORT: '1521',
+            EXOMIND_RT_PORT: '1949',
+            EXOMIND_TAURI_ENABLE_WATCH: '1',
+          },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('ARGS=dev --config');
+      expect(result.stdout).not.toContain('ARGS=dev--config');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

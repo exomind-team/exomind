@@ -1,5 +1,5 @@
-use exomind_runtime::start_with_options;
 use exomind_runtime::RuntimeStartOptions;
+use exomind_runtime::start_with_options;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -22,7 +22,9 @@ async fn reminder_routes_persist_in_sqlite_runtime() {
     let client = reqwest::Client::new();
 
     let created = client
-        .post(format!("{base_url}/reminders?user_id=profile-reminder-test"))
+        .post(format!(
+            "{base_url}/reminders?user_id=profile-reminder-test"
+        ))
         .json(&json!({
             "title": "RT Reminder",
             "content": "persist me",
@@ -37,10 +39,15 @@ async fn reminder_routes_persist_in_sqlite_runtime() {
         .await
         .expect("create response should decode");
 
-    let reminder_id = created["id"].as_str().expect("created reminder id").to_string();
+    let reminder_id = created["id"]
+        .as_str()
+        .expect("created reminder id")
+        .to_string();
 
     let listed = client
-        .get(format!("{base_url}/reminders?user_id=profile-reminder-test"))
+        .get(format!(
+            "{base_url}/reminders?user_id=profile-reminder-test"
+        ))
         .send()
         .await
         .expect("list request should send")

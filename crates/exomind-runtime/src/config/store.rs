@@ -78,9 +78,10 @@ impl ConfigStore {
     pub fn get(&self, scope: &str, key: &str) -> Result<Option<ConfigEntry>, ConfigStoreError> {
         match &self.backend {
             ConfigStoreBackend::Sqlite(store) => store.get(scope, key),
-            ConfigStoreBackend::Memory(_) => {
-                Ok(self.memory_entries().get(&(scope.to_string(), key.to_string())).cloned())
-            }
+            ConfigStoreBackend::Memory(_) => Ok(self
+                .memory_entries()
+                .get(&(scope.to_string(), key.to_string()))
+                .cloned()),
         }
     }
 
@@ -115,9 +116,8 @@ impl ConfigStore {
     pub fn delete(&self, scope: &str, key: &str) -> Result<Option<ConfigEntry>, ConfigStoreError> {
         match &self.backend {
             ConfigStoreBackend::Sqlite(store) => store.delete(scope, key),
-            ConfigStoreBackend::Memory(_) => Ok(
-                self.with_memory_mut(|entries| entries.remove(&(scope.to_string(), key.to_string())))
-            ),
+            ConfigStoreBackend::Memory(_) => Ok(self
+                .with_memory_mut(|entries| entries.remove(&(scope.to_string(), key.to_string())))),
         }
     }
 
@@ -131,7 +131,9 @@ impl ConfigStore {
     fn memory_entries(&self) -> HashMap<(String, String), ConfigEntry> {
         match &self.backend {
             ConfigStoreBackend::Memory(entries) => entries.read().unwrap().clone(),
-            ConfigStoreBackend::Sqlite(_) => unreachable!("memory_entries called on sqlite backend"),
+            ConfigStoreBackend::Sqlite(_) => {
+                unreachable!("memory_entries called on sqlite backend")
+            }
         }
     }
 
@@ -204,16 +206,32 @@ mod tests {
     fn upserts_and_filters_entries_in_memory() {
         let store = ConfigStore::new();
         store
-            .put(put_input(USER_CONFIG_SCOPE, "exomind:themePreference", "dark"))
+            .put(put_input(
+                USER_CONFIG_SCOPE,
+                "exomind:themePreference",
+                "dark",
+            ))
             .unwrap();
         store
-            .put(put_input(USER_CONFIG_SCOPE, "exomind:voiceShortcutHotkey", "Alt+Q"))
+            .put(put_input(
+                USER_CONFIG_SCOPE,
+                "exomind:voiceShortcutHotkey",
+                "Alt+Q",
+            ))
             .unwrap();
         store
-            .put(put_input(DEVICE_CONFIG_SCOPE, "exomind:themePreference", "light"))
+            .put(put_input(
+                DEVICE_CONFIG_SCOPE,
+                "exomind:themePreference",
+                "light",
+            ))
             .unwrap();
         store
-            .put(put_input(USER_CONFIG_SCOPE, "exomind:themePreference", "light"))
+            .put(put_input(
+                USER_CONFIG_SCOPE,
+                "exomind:themePreference",
+                "light",
+            ))
             .unwrap();
 
         let entries = store
@@ -224,7 +242,14 @@ mod tests {
         assert_eq!(entries[0].key, "exomind:themePreference");
         assert_eq!(entries[0].value, "light");
         assert_eq!(entries[1].key, "exomind:voiceShortcutHotkey");
-        assert_eq!(store.get(USER_CONFIG_SCOPE, "exomind:themePreference").unwrap().unwrap().value, "light");
+        assert_eq!(
+            store
+                .get(USER_CONFIG_SCOPE, "exomind:themePreference")
+                .unwrap()
+                .unwrap()
+                .value,
+            "light"
+        );
     }
 
     #[test]
@@ -254,7 +279,11 @@ mod tests {
     fn delete_removes_existing_entry() {
         let store = ConfigStore::new();
         store
-            .put(put_input(USER_CONFIG_SCOPE, "exomind:inputSendMode", "enter-send"))
+            .put(put_input(
+                USER_CONFIG_SCOPE,
+                "exomind:inputSendMode",
+                "enter-send",
+            ))
             .unwrap();
 
         let deleted = store
@@ -262,20 +291,36 @@ mod tests {
             .unwrap();
 
         assert!(deleted.is_some());
-        assert!(store.get(USER_CONFIG_SCOPE, "exomind:inputSendMode").unwrap().is_none());
+        assert!(
+            store
+                .get(USER_CONFIG_SCOPE, "exomind:inputSendMode")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn put_if_absent_does_not_overwrite_existing_entry() {
         let store = ConfigStore::new();
         store
-            .put(put_input(USER_CONFIG_SCOPE, "exomind:themePreference", "dark"))
+            .put(put_input(
+                USER_CONFIG_SCOPE,
+                "exomind:themePreference",
+                "dark",
+            ))
             .unwrap();
 
         let inserted = store
-            .put_if_absent(put_input(USER_CONFIG_SCOPE, "exomind:themePreference", "light"))
+            .put_if_absent(put_input(
+                USER_CONFIG_SCOPE,
+                "exomind:themePreference",
+                "light",
+            ))
             .unwrap();
-        let entry = store.get(USER_CONFIG_SCOPE, "exomind:themePreference").unwrap().unwrap();
+        let entry = store
+            .get(USER_CONFIG_SCOPE, "exomind:themePreference")
+            .unwrap()
+            .unwrap();
 
         assert!(!inserted);
         assert_eq!(entry.value, "dark");
@@ -308,7 +353,10 @@ mod tests {
             .into_iter()
             .map(|handle| handle.join().unwrap().unwrap())
             .collect();
-        let entry = store.get(USER_CONFIG_SCOPE, "exomind:themePreference").unwrap().unwrap();
+        let entry = store
+            .get(USER_CONFIG_SCOPE, "exomind:themePreference")
+            .unwrap()
+            .unwrap();
 
         assert_eq!(results.into_iter().filter(|inserted| *inserted).count(), 1);
         assert!(matches!(entry.value.as_str(), "dark" | "light"));

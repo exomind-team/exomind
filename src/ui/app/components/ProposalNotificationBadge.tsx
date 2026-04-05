@@ -1,6 +1,10 @@
 import { Link, useLocation } from '@tanstack/react-router';
 import { Inbox } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import {
+  formatRuntimeTargetAddress,
+  getSelectedRuntimeTarget,
+} from '@/config/runtime-target';
 import { getProposalInboxEnabled, subscribeProposalInboxEnabledChanges } from '@/config/proposal-inbox-enabled';
 import { getProposalRtAdapter } from '@/lib/adapters/proposal-rt-adapter';
 
@@ -28,6 +32,11 @@ export function ProposalNotificationBadge({
   useEffect(() => subscribeProposalInboxEnabledChanges(setProposalInboxEnabled), []);
 
   useEffect(() => {
+    if (!proposalInboxEnabled) {
+      setPendingCount(0);
+      return;
+    }
+
     let disposed = false;
     const adapter = getProposalRtAdapter();
 
@@ -37,7 +46,15 @@ export function ProposalNotificationBadge({
         if (!disposed) {
           setPendingCount(pending.length);
         }
-      } catch {
+      } catch (error) {
+        const target = getSelectedRuntimeTarget();
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn('[proposal-badge] failed to refresh pending proposal count', {
+          placement,
+          targetMode: target.mode,
+          targetAddress: formatRuntimeTargetAddress(target),
+          message,
+        });
         if (!disposed) {
           setPendingCount(0);
         }
@@ -53,7 +70,7 @@ export function ProposalNotificationBadge({
       disposed = true;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [placement, proposalInboxEnabled]);
 
   if (!proposalInboxEnabled || pendingCount <= 0) {
     return null;

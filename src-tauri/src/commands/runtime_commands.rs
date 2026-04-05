@@ -302,14 +302,18 @@ fn normalize_runtime_external_address(raw: &str) -> Result<String, String> {
 fn load_runtime_external_address_from_path(path: &Path) -> Result<String, String> {
     match std::fs::read_to_string(path) {
         Ok(raw) => {
-            let parsed = serde_json::from_str::<RuntimeExternalAddressPersisted>(&raw)
-                .map_err(|error| format!("failed to parse runtime external address file: {error}"))?;
+            let parsed =
+                serde_json::from_str::<RuntimeExternalAddressPersisted>(&raw).map_err(|error| {
+                    format!("failed to parse runtime external address file: {error}")
+                })?;
             normalize_runtime_external_address(&parsed.address)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(format!("127.0.0.1:{}", DEFAULT_RT_PORT))
         }
-        Err(error) => Err(format!("failed to read runtime external address file: {error}")),
+        Err(error) => Err(format!(
+            "failed to read runtime external address file: {error}"
+        )),
     }
 }
 
@@ -406,10 +410,7 @@ fn save_persisted_runtime_external_address(
     save_runtime_external_address_to_path(&runtime_external_address_path(&app_data_dir), address)
 }
 
-fn save_persisted_runtime_lan_no_auth(
-    app: &AppHandle,
-    enabled: bool,
-) -> Result<bool, String> {
+fn save_persisted_runtime_lan_no_auth(app: &AppHandle, enabled: bool) -> Result<bool, String> {
     let app_data_dir = resolve_instance_app_data_dir(app)?;
     save_runtime_lan_no_auth_to_path(&runtime_lan_no_auth_path(&app_data_dir), enabled)
 }
@@ -512,11 +513,9 @@ fn adb_command_candidates() -> Vec<PathBuf> {
 
     for env_key in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
         if let Some(raw) = std::env::var_os(env_key) {
-            let sdk_adb = PathBuf::from(raw).join("platform-tools").join(if cfg!(windows) {
-                "adb.exe"
-            } else {
-                "adb"
-            });
+            let sdk_adb = PathBuf::from(raw)
+                .join("platform-tools")
+                .join(if cfg!(windows) { "adb.exe" } else { "adb" });
             candidates.push(sdk_adb);
         }
     }
@@ -602,7 +601,9 @@ fn find_adb_forward_host_port(remote_port: u16) -> Result<Option<u16>, String> {
     let mut last_error: Option<String> = None;
 
     for candidate in adb_command_candidates() {
-        let output = Command::new(&candidate).args(["forward", "--list"]).output();
+        let output = Command::new(&candidate)
+            .args(["forward", "--list"])
+            .output();
         match output {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -629,19 +630,13 @@ fn find_adb_forward_host_port(remote_port: u16) -> Result<Option<u16>, String> {
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 last_error = Some(if stderr.is_empty() {
-                    format!(
-                        "adb forward --list failed with status {}",
-                        output.status
-                    )
+                    format!("adb forward --list failed with status {}", output.status)
                 } else {
                     stderr
                 });
             }
             Err(error) => {
-                last_error = Some(format!(
-                    "failed to run {}: {error}",
-                    candidate.display()
-                ));
+                last_error = Some(format!("failed to run {}: {error}", candidate.display()));
             }
         }
     }
@@ -770,12 +765,13 @@ pub async fn ensure_runtime_started(
     if let Some(runtime_port) = port {
         options.port = runtime_port;
     }
-    options.allow_lan_without_auth = load_persisted_runtime_lan_no_auth(app).unwrap_or_else(|error| {
-        log::warn!(
+    options.allow_lan_without_auth =
+        load_persisted_runtime_lan_no_auth(app).unwrap_or_else(|error| {
+            log::warn!(
             "failed to load persisted runtime LAN no-auth setting, fallback to disabled: {error}"
         );
-        false
-    });
+            false
+        });
     let requested_host = options.bind_host.clone();
     let requested_port = options.port;
     let requested_auth_secret = options.auth_secret.clone();
@@ -1242,8 +1238,10 @@ mod tests {
 
     #[test]
     fn runtime_external_address_file_roundtrip() {
-        let temp_dir = std::env::temp_dir()
-            .join(format!("exomind-rt-external-address-{}", uuid::Uuid::new_v4()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "exomind-rt-external-address-{}",
+            uuid::Uuid::new_v4()
+        ));
         let path = temp_dir.join("runtime-external-address.json");
 
         let saved = super::save_runtime_external_address_to_path(&path, "192.168.1.48:9124")
@@ -1352,27 +1350,27 @@ mod tests {
             "embedded runtime status must not expose authSecret"
         );
     }
-#[test]
-fn only_android_emulator_guests_may_reuse_existing_adb_forwards() {
-    // Issue 773: LAN phone nodes should not reuse existing ADB forwards
-    // that might belong to a different device. Only Android emulator guest
-    // addresses can safely reuse ADB forwards since they are on a special
-    // virtual network that cannot be reached directly from the host.
-    
-    // Emulator guests CAN reuse ADB forwards
-    assert!(super::should_reuse_existing_adb_forward("10.0.2.15"));
-    assert!(super::should_reuse_existing_adb_forward("10.0.3.15"));
-    
-    // LAN IP addresses should NEVER reuse existing ADB forwards
-    assert!(!super::should_reuse_existing_adb_forward("192.168.1.88"));
-    assert!(!super::should_reuse_existing_adb_forward("192.168.101.5"));
-    // Note: 10.0.2.2 is a special emulator-host alias that IS allowed
-    
-    // Loopback should not use ADB forwarding
-    assert!(!super::should_reuse_existing_adb_forward("127.0.0.1"));
-    assert!(!super::should_reuse_existing_adb_forward("localhost"));
-    
-    // Public IPs should not use ADB forwarding
-    assert!(!super::should_reuse_existing_adb_forward("8.8.8.8"));
-}
+    #[test]
+    fn only_android_emulator_guests_may_reuse_existing_adb_forwards() {
+        // Issue 773: LAN phone nodes should not reuse existing ADB forwards
+        // that might belong to a different device. Only Android emulator guest
+        // addresses can safely reuse ADB forwards since they are on a special
+        // virtual network that cannot be reached directly from the host.
+
+        // Emulator guests CAN reuse ADB forwards
+        assert!(super::should_reuse_existing_adb_forward("10.0.2.15"));
+        assert!(super::should_reuse_existing_adb_forward("10.0.3.15"));
+
+        // LAN IP addresses should NEVER reuse existing ADB forwards
+        assert!(!super::should_reuse_existing_adb_forward("192.168.1.88"));
+        assert!(!super::should_reuse_existing_adb_forward("192.168.101.5"));
+        // Note: 10.0.2.2 is a special emulator-host alias that IS allowed
+
+        // Loopback should not use ADB forwarding
+        assert!(!super::should_reuse_existing_adb_forward("127.0.0.1"));
+        assert!(!super::should_reuse_existing_adb_forward("localhost"));
+
+        // Public IPs should not use ADB forwarding
+        assert!(!super::should_reuse_existing_adb_forward("8.8.8.8"));
+    }
 }

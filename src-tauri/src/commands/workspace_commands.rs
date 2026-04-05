@@ -142,10 +142,7 @@ pub async fn get_agent_workspace_actions(
     limit: Option<u32>,
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<ActionsResponse, String> {
-    let mut url = format!(
-        "{}/agents/{agent_id}/workspace/actions",
-        base_url(&state)?
-    );
+    let mut url = format!("{}/agents/{agent_id}/workspace/actions", base_url(&state)?);
     if let Some(n) = limit {
         url.push_str(&format!("?limit={n}"));
     }
@@ -158,9 +155,6 @@ pub async fn get_agent_workspace_status(
     agent_id: String,
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<BodyStatus, String> {
-    let url = format!(
-        "{}/agents/{agent_id}/workspace/status",
-        base_url(&state)?
-    );
+    let url = format!("{}/agents/{agent_id}/workspace/status", base_url(&state)?);
     get_json(&url).await
 }

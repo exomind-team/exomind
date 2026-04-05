@@ -19,6 +19,7 @@
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { loadValidatedDevlogHtmlFile } from './devlog-html-gate';
 import { readLatestDevlog, renderSourceBlock } from './extract-devlog';
 
 type Options = {
@@ -453,7 +454,7 @@ async function main() {
     throw new Error(`devlog 仓库不存在: ${options.devlogDir}\n请先克隆: gh repo clone exomind-team/exomind-devlog ${options.devlogDir}`);
   }
 
-  const html = readFileSync(reportPath, 'utf-8');
+  const { html } = loadValidatedDevlogHtmlFile('report', reportPath);
   const reportBlock = extractObjectBlock(html, 'REPORT');
   const reportObject = parseObjectBlock(reportBlock, 'REPORT');
   validateReportData(reportObject);

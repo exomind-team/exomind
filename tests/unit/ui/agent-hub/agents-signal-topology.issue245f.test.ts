@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { SignalRoute } from '@/lib/types/signal-pool';
+import type { SessionInfo } from '@/lib/types/session';
 import type { RuntimeAggregatedAgent } from '@/services/runtime-manager';
 import {
   buildSignalGraph,
   buildSignalRouteRows,
 } from '@/ui/app/pages/agents-signal-topology';
+import { buildPtyGraphNodes } from '@/ui/app/pages/agents/pty-graph-nodes';
 
 const SAMPLE_ROUTES: SignalRoute[] = [
   {
@@ -111,6 +113,26 @@ const SAMPLE_AGENTS: RuntimeAggregatedAgent[] = [
   },
 ];
 
+const SAMPLE_SESSIONS: SessionInfo[] = [
+  {
+    id: 'session-pty-245f',
+    agent_kind: 'claude',
+    role: 'Issue 806 Terminal',
+    summary: '',
+    status: 'waiting_input',
+    interaction_mode: 'terminal',
+    pty_id: 'pty-245f',
+    context: {
+      issue_refs: ['#806'],
+      labels: [],
+    },
+    created_at: '2026-04-02T00:00:00.000Z',
+    last_active_at: '2026-04-02T00:05:00.000Z',
+    turn_count: 3,
+    source_host_id: 'runtime-host-245f',
+  },
+];
+
 describe('agents signal topology builder issue-245f（信号拓扑构建）', () => {
   it('builds route rows with active/inactive status（构建路由列表行并区分状态）', () => {
     const rows = buildSignalRouteRows(SAMPLE_ROUTES, '127.0.0.1:1919');
@@ -182,6 +204,35 @@ describe('agents signal topology builder issue-245f（信号拓扑构建）', ()
     expect(graph.nodes.find((node) => node.id === 'agent:reviewer')).toMatchObject({
       energyPhase: 'dormant',
       isDormant: true,
+    });
+  });
+
+  it('projects matching session context onto existing pty nodes（把匹配 session 上下文投影到现有 pty 节点）', () => {
+    const nodes = buildPtyGraphNodes(
+      [
+        {
+          id: 'pty-245f',
+          name: 'Terminal Agent',
+          status: 'running',
+          workdir: 'H:/A137442/Develop/AGI/exomind',
+        },
+        {
+          id: 'pty-fallback',
+          name: 'Detached PTY',
+          status: 'stopped',
+          workdir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      ],
+      SAMPLE_SESSIONS,
+    );
+
+    expect(nodes.find((node) => node.id === 'pty-pty-245f')).toMatchObject({
+      label: 'Issue 806 Terminal',
+      status: 'Claude · 等待输入',
+    });
+    expect(nodes.find((node) => node.id === 'pty-pty-fallback')).toMatchObject({
+      label: 'Detached PTY',
+      status: 'Terminal · offline',
     });
   });
 });

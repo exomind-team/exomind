@@ -127,9 +127,7 @@ impl MeshState {
         signal_pool: Arc<SignalPool>,
         persist_path: Option<PathBuf>,
     ) -> Self {
-        let persisted = persist_path
-            .as_ref()
-            .and_then(load_persisted_state);
+        let persisted = persist_path.as_ref().and_then(load_persisted_state);
 
         let mut peers = HashMap::new();
         let mut interests = HashMap::new();

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
@@ -14,6 +14,7 @@ import {
   setRuntimeExternalAddress,
   setRuntimeTargetMode,
   subscribeRuntimeTargetChanges,
+  toRuntimeBaseUrl,
 } from '@/config/runtime-target';
 import {
   __primeRuntimeConfigForTests,
@@ -26,6 +27,10 @@ describe('runtime target config（Runtime 目标配置）', () => {
     __resetRuntimeConfigCacheForTests();
   });
 
+  afterEach(() => {
+    delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
   it('defaults to embedded runtime port in web mode（Web 模式默认走内嵌 RT 端口）', () => {
     expect(getRuntimeTargetMode()).toBe('embedded');
     expect(getEmbeddedRuntimeNetworkMode()).toBe('local');
@@ -36,7 +41,7 @@ describe('runtime target config（Runtime 目标配置）', () => {
     });
   });
 
-  it('uses loopback for tauri localhost embedded target（Tauri embedded 目标应回落到回环地址）', () => {
+  it('uses 127.0.0.1 loopback for tauri embedded target（Tauri embedded 目标应回落到 127.0.0.1）', () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
@@ -71,6 +76,16 @@ describe('runtime target config（Runtime 目标配置）', () => {
     });
     expect(getSelectedRuntimeTarget().authToken).toBeUndefined();
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).not.toContain('"authSecret"');
+  });
+
+  it('normalizes tauri loopback runtime base URLs to 127.0.0.1（Tauri loopback Runtime URL 统一为 127.0.0.1）', () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+
+    expect(toRuntimeBaseUrl({ host: '127.0.0.1', port: 9124 })).toBe('http://127.0.0.1:9124');
+    expect(toRuntimeBaseUrl({ host: '0.0.0.0', port: 9124 })).toBe('http://127.0.0.1:9124');
   });
 
   it('persists embedded runtime LAN bind mode（保存内嵌 Runtime 局域网监听模式）', () => {

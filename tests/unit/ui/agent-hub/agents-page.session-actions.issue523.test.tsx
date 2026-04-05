@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SignalRoute } from '@/lib/types/signal-pool';
 import type { SessionInfo } from '@/lib/types/session';
+import { AGENTS_TILED_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-tiled-persistence';
+import { AGENTS_VIEW_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-view-persistence';
 
 const serviceMocks = vi.hoisted(() => ({
   getDeviceView: vi.fn(),
@@ -34,13 +37,43 @@ const runtimeClientMocks = vi.hoisted(() => ({
   createAgent: vi.fn(),
   deleteAgent: vi.fn(),
   stopPtyAgent: vi.fn(),
+  updateSession: vi.fn(),
   submitQuickAction: vi.fn(),
   markSessionWaiting: vi.fn(),
 }));
 
+const toastMocks = vi.hoisted(() => ({
+  toast: vi.fn(),
+  update: vi.fn(),
+  dismiss: vi.fn(),
+}));
+
 const sessionStreamState = vi.hoisted(() => ({
   sessions: [] as SessionInfo[],
+  refresh: vi.fn(),
 }));
+
+const useSessionStreamMocks = vi.hoisted(() => ({
+  useSessionStream: vi.fn(),
+}));
+
+vi.mock('@/ui/app/components/PtyTerminal', () => ({
+  PtyTerminal: ({
+    ptyId,
+  }: {
+    ptyId: string;
+  }) => (
+    <div data-testid={`mock-pty-terminal-${ptyId}`}>
+      PTY:{ptyId}
+    </div>
+  ),
+}));
+
+async function chooseDialogSelect(triggerTestId: string, optionName: string): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByTestId(triggerTestId));
+  await user.click(await screen.findByRole('option', { name: optionName }));
+}
 
 vi.mock('@xyflow/react', () => ({
   ReactFlow: ({
@@ -91,6 +124,7 @@ vi.mock('@/lib/services', async (importOriginal) => {
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
   findPreferredRuntimeHostForAgent: vi.fn(() => null),
+  shouldAutoPollRuntimeHost: vi.fn(() => true),
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
@@ -98,12 +132,26 @@ vi.mock('@/lib/services/runtime-control.service', () => ({
 }));
 
 vi.mock('@/hooks/useSessionStream', () => ({
-  useSessionStream: () => ({
-    sessions: sessionStreamState.sessions,
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-  }),
+  useSessionStream: (...args: unknown[]) => {
+    useSessionStreamMocks.useSessionStream(...args);
+    return {
+      sessions: sessionStreamState.sessions,
+      loading: false,
+      error: null,
+      refresh: sessionStreamState.refresh,
+    };
+  },
+}));
+
+vi.mock('@/components/ui/toast-hook', () => ({
+  toast: (...args: unknown[]) => {
+    toastMocks.toast(...args);
+    return {
+      id: 'toast-523',
+      update: toastMocks.update,
+      dismiss: toastMocks.dismiss,
+    };
+  },
 }));
 
 vi.mock('@/services/runtime-client', async (importOriginal) => {
@@ -122,6 +170,8 @@ vi.mock('@/services/runtime-client', async (importOriginal) => {
     deleteAgent = runtimeClientMocks.deleteAgent;
 
     stopPtyAgent = runtimeClientMocks.stopPtyAgent;
+
+    updateSession = runtimeClientMocks.updateSession;
 
     submitQuickAction = runtimeClientMocks.submitQuickAction;
 
@@ -215,6 +265,11 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     vi.clearAllMocks();
     localStorage.clear();
     vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
+    sessionStreamState.refresh.mockReset();
+    useSessionStreamMocks.useSessionStream.mockReset();
+    toastMocks.toast.mockReset();
+    toastMocks.update.mockReset();
+    toastMocks.dismiss.mockReset();
 
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: true,
@@ -254,6 +309,17 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         created_at: '2026-03-14T00:00:00.000Z',
       },
     });
+    runtimeClientMocks.updateSession.mockImplementation(async (
+      _host: unknown,
+      sessionId: string,
+      request: { status?: SessionInfo['status'] },
+    ) => ({
+      ok: true,
+      data: buildSession({
+        id: sessionId,
+        status: request.status ?? 'running',
+      }),
+    }));
     runtimeClientMocks.submitQuickAction.mockResolvedValue({
       ok: true,
       data: buildSession({
@@ -358,7 +424,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     ];
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '平铺' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument();
@@ -375,6 +441,130 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
   });
 
+  it('persists the last selected network subpage across remounts（离开网络页再回来应恢复上次子页面）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-viewmode-persist',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    const firstRender = render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    });
+    expect(localStorage.getItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY)).toBe('sessions');
+
+    firstRender.unmount();
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    });
+  });
+
+  it('does not mount the right-side terminal while tiled view is active（平铺页不应重复挂载右侧 Terminal）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-tiled-no-right-panel',
+        role: 'Tiled No Right Panel',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: ['session-tiled-no-right-panel'],
+        fullscreenPtyId: 'pty-523',
+      }),
+    );
+    localStorage.setItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY, 'tiled');
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-rightpanel-shell')).not.toBeInTheDocument();
+  });
+
+  it('replays the same PTY when switching sessions -> tiled -> sessions（多视图切换后右栏 PTY 应稳定重放）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-replay-pty',
+        role: 'Replay PTY Session',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-card-session-replay-pty')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('session-card-session-replay-pty'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-shell')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-pty-terminal')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-view-toggle-tiled'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('agent-rightpanel-shell')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-shell')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-pty-terminal')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
+    });
+  });
+
+  it('does not open the right-side terminal when clicking a tiled pane（点击平铺会话窗格时右侧 Terminal 应保持关闭）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-tiled-click',
+        role: 'Tiled Click Session',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+      expect(screen.getByText('Tiled Click Session')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Tiled Click Session'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('agent-rightpanel-shell')).not.toBeInTheDocument();
+  });
+
   it('marks running terminal sessions as waiting through RuntimeClient（点击等待决策应调用 RuntimeClient.markSessionWaiting）', async () => {
     sessionStreamState.sessions = [
       buildSession({
@@ -385,7 +575,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     ];
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '平铺' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '等待决策' })).toBeInTheDocument();
@@ -423,16 +613,102 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '平铺' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
     fireEvent.click(await screen.findByRole('button', { name: '继续' }));
 
     await waitFor(() => {
       expect(runtimeClientMocks.submitQuickAction).toHaveBeenCalledWith(
-        expect.objectContaining({ host: '127.0.0.1', port: 9124 }),
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
         'session-fallback',
         { action_id: 'continue', value: undefined },
       );
     });
+  });
+
+  it('streams sessions from the local embedded runtime instead of duplicate LAN route hosts（embedded 模式下 session 流应锁定本机 RT）', async () => {
+    runtimeControlMocks.getStatus.mockResolvedValue({
+      running: true,
+      host: '0.0.0.0',
+      port: 9124,
+      hostId: 'runtime-host-523',
+    });
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-03-14T10:00:00.000Z',
+      agents: [],
+      hosts: [
+        {
+          host: {
+            id: 'host-lan-523',
+            name: '192.168.1.48:9124',
+            host: '192.168.1.48',
+            port: 9124,
+            status: 'unknown' as const,
+            createdAt: '2026-03-14T00:00:00.000Z',
+            updatedAt: '2026-03-14T00:00:00.000Z',
+          },
+          connectionState: 'online' as const,
+          agents: [],
+          topology: {
+            host_id: 'runtime-host-523',
+            hostname: 'runtime-host-523',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 90,
+            version: '0.3.6',
+            port: 9124,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+        },
+        {
+          host: {
+            id: 'host-loopback-523',
+            name: '127.0.0.1:9124',
+            host: '127.0.0.1',
+            port: 9124,
+            status: 'unknown' as const,
+            createdAt: '2026-03-14T00:00:00.000Z',
+            updatedAt: '2026-03-14T00:00:00.000Z',
+          },
+          connectionState: 'online' as const,
+          agents: [],
+          topology: {
+            host_id: 'runtime-host-523',
+            hostname: 'runtime-host-523',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 90,
+            version: '0.3.6',
+            port: 9124,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+        },
+      ],
+    });
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(useSessionStreamMocks.useSessionStream).toHaveBeenCalled();
+    });
+
+    const latestCall = useSessionStreamMocks.useSessionStream.mock.calls.at(-1)?.[0] as {
+      targets?: Array<{ id: string; rtBaseUrl: string; hostAddress?: string }>;
+    };
+    expect(latestCall.targets).toEqual([
+      {
+        id: 'runtime-host-523',
+        rtBaseUrl: 'http://127.0.0.1:9124',
+        authToken: undefined,
+        hostName: '127.0.0.1:9124',
+        hostAddress: '127.0.0.1:9124',
+      },
+    ]);
   });
 
   it('stops PTY terminal agent from the right panel（右侧终端面板可真正停止 Terminal Agent）', async () => {
@@ -459,6 +735,71 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
     await waitFor(() => {
       expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
+    });
+  });
+
+  it('uses matching session host context when opening a pty topology node（点击 pty 拓扑节点时优先使用匹配 session 的 host 上下文）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-topology-pty',
+        role: 'Issue 806 Terminal',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+        source_host_id: 'runtime-host-remote',
+      }),
+    ];
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-03-14T10:00:00.000Z',
+      agents: [],
+      hosts: [
+        ...buildRuntimeSnapshot().hosts,
+        {
+          host: {
+            id: 'host-remote',
+            name: '127.0.0.1:9124',
+            host: '127.0.0.1',
+            port: 9124,
+            status: 'unknown' as const,
+            createdAt: '2026-03-14T00:00:00.000Z',
+            updatedAt: '2026-03-14T00:00:00.000Z',
+          },
+          connectionState: 'online' as const,
+          agents: [],
+          topology: {
+            host_id: 'runtime-host-remote',
+            hostname: 'runtime-host-remote',
+            os: 'Windows 11',
+            arch: 'x64',
+            uptime_secs: 90,
+            version: '0.3.6',
+            port: 9124,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+        },
+      ],
+    });
+
+    render(<AgentsPage />);
+
+    const topologyNode = await screen.findByTestId('mock-react-flow-node-pty-pty-523');
+    expect(topologyNode).toHaveTextContent('Issue 806 Terminal');
+
+    fireEvent.click(topologyNode);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-stop-pty')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 9124 }),
+        'pty-523',
+      );
     });
   });
 
@@ -489,6 +830,409 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
   });
 
+  it('reconciles stale terminal sessions from the right panel when PTY stop returns 404（右侧面板可将丢失 PTY 的会话收敛为已完成）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-stale-stop',
+        role: 'Stale Terminal',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-stale',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    runtimeClientMocks.stopPtyAgent.mockResolvedValue({
+      ok: false,
+      error: {
+        status: 404,
+        message: 'PTY instance not found: pty-stale',
+      },
+    });
+    runtimeClientMocks.updateSession.mockResolvedValue({
+      ok: true,
+      data: buildSession({
+        id: 'session-stale-stop',
+        role: 'Stale Terminal',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-stale',
+        source_host_id: 'runtime-host-523',
+      }),
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => SAMPLE_SIGNAL_ROUTES,
+        } as Response;
+      }
+      if (url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-523',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-02T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    fireEvent.click(await screen.findByTestId('session-card-session-stale-stop'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-stop-pty')).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'pty-stale',
+      );
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'session-stale-stop',
+        { status: 'completed' },
+      );
+      expect(toastMocks.toast).toHaveBeenCalledWith(expect.objectContaining({
+        title: '正在结束 Terminal Agent',
+      }));
+      expect(toastMocks.update).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'toast-523',
+        title: '已收敛失联 Terminal 会话',
+      }));
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
+    });
+  });
+
+  it('reconciles a disconnected session when stop times out but the PTY is already gone（stop 超时但 PTY 已缺失时仍会收敛会话）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-timeout-reconcile',
+        role: 'Timeout Reconcile',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-timeout-reconcile',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    runtimeClientMocks.stopPtyAgent.mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'timeout',
+        message: 'request timeout（请求超时）',
+      },
+    });
+    runtimeClientMocks.updateSession.mockResolvedValue({
+      ok: true,
+      data: buildSession({
+        id: 'session-timeout-reconcile',
+        role: 'Timeout Reconcile',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-timeout-reconcile',
+        source_host_id: 'runtime-host-523',
+      }),
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-timeout-reconcile'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-stop-pty')).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'session-timeout-reconcile',
+        { status: 'completed' },
+      );
+      expect(toastMocks.update).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'toast-523',
+        title: '已收敛失联 Terminal 会话',
+      }));
+    });
+  });
+
+  it('reconciles a disconnected persisted PTY via fresh /sessions lookup when in-memory sessions are missing（内存会话缺失时仍可回源 /sessions 收敛断开 PTY）', async () => {
+    sessionStreamState.sessions = [];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: [],
+        fullscreenPtyId: 'pty-stale-fresh-fetch',
+      }),
+    );
+
+    runtimeClientMocks.stopPtyAgent.mockResolvedValue({
+      ok: false,
+      error: {
+        status: 404,
+        message: 'PTY instance not found: pty-stale-fresh-fetch',
+      },
+    });
+    runtimeClientMocks.updateSession.mockResolvedValue({
+      ok: true,
+      data: buildSession({
+        id: 'session-stale-fresh-fetch',
+        role: 'Fresh Session Lookup',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-stale-fresh-fetch',
+        source_host_id: 'runtime-host-523',
+      }),
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/sessions')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'session-stale-fresh-fetch',
+              agent_kind: 'claude',
+              role: 'Fresh Session Lookup',
+              summary: '',
+              status: 'running',
+              interaction_mode: 'terminal',
+              pty_id: 'pty-stale-fresh-fetch',
+              source_host_id: 'runtime-host-523',
+              context: {
+                issue_refs: [],
+                labels: [],
+              },
+              created_at: '2026-03-14T00:00:00.000Z',
+              last_active_at: '2026-03-14T00:00:00.000Z',
+              turn_count: 0,
+            },
+          ],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-rightpanel-stop-pty')).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/sessions',
+        expect.objectContaining({ headers: expect.any(Object) }),
+      );
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'session-stale-fresh-fetch',
+        { status: 'completed' },
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows an error when terminal stop throws a network error（右侧面板停止终端遇到网络异常时不再静默）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-stop-network-error',
+        role: 'Stale Terminal',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-network-error',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    runtimeClientMocks.stopPtyAgent.mockRejectedValue(new Error('Failed to fetch'));
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => SAMPLE_SIGNAL_ROUTES,
+        } as Response;
+      }
+      if (url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-523',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-02T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-stop-network-error'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'pty-network-error',
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        '[agent-hub][pty][stop] action threw',
+        expect.objectContaining({
+          ptyId: 'pty-network-error',
+          sourceHostId: 'runtime-host-523',
+          hostAddress: '127.0.0.1:1919',
+          message: 'Failed to fetch',
+        }),
+      );
+      expect(toastMocks.update).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'toast-523',
+        title: '结束 Terminal Agent 失败',
+        variant: 'destructive',
+      }));
+      expect(screen.getByTestId('agent-runtime-error-banner')).toHaveTextContent(
+        '停止 Terminal Agent 失败: Failed to fetch',
+      );
+    });
+
+    consoleWarnSpy.mockRestore();
+  });
+
   it('opens PTY spawn dialog and resumes codex history（Agents 页可恢复 Codex 历史会话）', async () => {
     render(<AgentsPage />);
 
@@ -498,7 +1242,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
       expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByTestId('pty-agent-type'), { target: { value: 'codex' } });
+    await chooseDialogSelect('pty-agent-type', 'Codex');
 
     await waitFor(() => {
       expect(screen.getByTestId('pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab')).toBeInTheDocument();
@@ -519,5 +1263,402 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         }),
       );
     });
+  });
+
+  it('backfills missing Codex inner_session_id for running PTY sessions（运行中的 Codex PTY 会补写 inner_session_id）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-codex-bind',
+        agent_kind: 'codex',
+        role: 'Codex Bind',
+        status: 'running',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-codex-bind',
+        source_host_id: 'runtime-host-523',
+        created_at: '2026-04-02T00:00:00.000Z',
+        last_active_at: '2026-04-02T00:00:00.000Z',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'D:/project/exomind',
+        },
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/signal-routes')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => SAMPLE_SIGNAL_ROUTES,
+        } as Response;
+      }
+      if (url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-bind',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-04-02T00:05:00.000Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/session-codex-bind') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'session-codex-bind',
+            inner_session_id: 'codex-thread-bind',
+          }),
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-codex-bind',
+              name: 'Codex Bind',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input, init]) => {
+        if (!String(input).endsWith('/sessions/session-codex-bind')) {
+          return false;
+        }
+        if (init?.method !== 'PATCH') {
+          return false;
+        }
+        const headers = new Headers(init.headers);
+        return headers.get('Content-Type') === 'application/json'
+          && init.body === JSON.stringify({ inner_session_id: 'codex-thread-bind' });
+      })).toBe(true);
+    });
+  });
+
+  it('keeps persisted fullscreen PTY visible as disconnected after RT state loss（持久化全屏 PTY 丢失后保留断开态）', async () => {
+    sessionStreamState.sessions = [];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: [],
+        fullscreenPtyId: 'pty-missing',
+      }),
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
+
+    expect(localStorage.getItem(AGENTS_TILED_PERSISTENCE_STORAGE_KEY)).toContain('pty-missing');
+  });
+
+  it('treats a completed PTY session from a disappeared host as disconnected and lets the user archive it（旧 host 的已完成 PTY 会话应进入断开态并可归档）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-completed-stale-host',
+        agent_kind: 'codex',
+        role: 'Completed Stale Host',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-completed-stale-host',
+        source_host_id: 'runtime-host-old',
+      }),
+    ];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: [],
+        fullscreenPtyId: 'pty-completed-stale-host',
+      }),
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('agent-rightpanel-archive-session')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-rightpanel-stop-pty')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-archive-session'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'session-completed-stale-host',
+        { status: 'archived' },
+      );
+    });
+    await waitFor(() => {
+      expect(sessionStreamState.refresh).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
+    });
+  });
+
+  it('treats a completed PTY session as readonly history even if /pty still lists it（已完成 PTY 即便仍出现在 live 列表也只能进入只读历史态）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-completed-current-host',
+        agent_kind: 'codex',
+        role: 'Completed Current Host',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-completed-current-host',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: [],
+        fullscreenPtyId: 'pty-completed-current-host',
+      }),
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-completed-current-host',
+              name: 'Completed Current Host',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('agent-rightpanel-archive-session')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-rightpanel-stop-pty')).not.toBeInTheDocument();
+  });
+
+  it('keeps disconnected Codex PTY in readonly mode when historical session validation fails（历史 session 校验失败时不串线恢复 Codex）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-codex-stale',
+        agent_kind: 'codex',
+        role: 'Codex Resume',
+        status: 'running',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-codex-stale',
+        inner_session_id: 'codex-thread-523',
+        source_host_id: 'runtime-host-523',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'D:/project/exomind',
+        },
+      }),
+    ];
+    localStorage.setItem(
+      AGENTS_TILED_PERSISTENCE_STORAGE_KEY,
+      JSON.stringify({
+        layout: '2x2',
+        paneOrder: [],
+        fullscreenPtyId: 'pty-codex-stale',
+      }),
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/sessions/pty-codex-stale') && init?.method === 'PATCH') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ...sessionStreamState.sessions[0],
+            status: init.body === JSON.stringify({ status: 'completed' }) ? 'completed' : 'archived',
+          }),
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: 'codex-thread-523',
+              project_path: 'D:/project/other',
+              last_modified: '2026-04-02T00:00:05.000Z',
+            },
+          ],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-disconnected')).toBeInTheDocument();
+    });
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://127.0.0.1:1919/pty/resume',
+      expect.anything(),
+    );
+    expect(localStorage.getItem(AGENTS_TILED_PERSISTENCE_STORAGE_KEY)).toContain('pty-codex-stale');
   });
 });

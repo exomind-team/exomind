@@ -1,4 +1,4 @@
-import { Clock, ExternalLink, Square } from 'lucide-react';
+import { Clock, ExternalLink, Loader2, Square, X } from 'lucide-react';
 import type { SessionInfo } from '@/lib/types/session';
 import {
   AGENT_KIND_LABELS,
@@ -14,16 +14,27 @@ export interface SessionCardProps {
   session: SessionInfo;
   onClick?: (session: SessionInfo) => void;
   onStop?: (session: SessionInfo) => void;
+  onArchive?: (session: SessionInfo) => void;
+  stopDisabled?: boolean;
 }
 
 // ── Component ──────────────────────────────────────────────────
 
-export function SessionCard({ session, onClick, onStop }: SessionCardProps) {
+export function SessionCard({
+  session,
+  onClick,
+  onStop,
+  onArchive,
+  stopDisabled = false,
+}: SessionCardProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const agentColor = AGENT_KIND_COLORS[session.agent_kind];
   const agentLabel = AGENT_KIND_LABELS[session.agent_kind];
   const needsAttention = sessionNeedsAttention(session.status);
-  const canStopPty = session.interaction_mode === 'terminal' && !!session.pty_id;
+  const isCompleted = session.status === 'completed';
+  const canStopPty = !isCompleted && session.interaction_mode === 'terminal' && !!session.pty_id;
+  const canArchive = isCompleted;
+  const hasActionButton = canStopPty || canArchive;
 
   return (
     <div className="relative">
@@ -34,7 +45,8 @@ export function SessionCard({ session, onClick, onStop }: SessionCardProps) {
         className={`
         group relative flex w-full flex-col gap-2 rounded-xl border p-4 text-left
         transition-all duration-200 hover:shadow-md
-        ${canStopPty ? 'pr-14' : ''}
+        ${hasActionButton ? 'pr-14' : ''}
+        ${isCompleted ? 'opacity-50' : ''}
         ${needsAttention
           ? 'border-yellow-400/60 bg-yellow-50/50 shadow-sm dark:border-yellow-500/40 dark:bg-yellow-950/20'
           : 'border-[#E7E5E4] bg-white hover:border-[#D6D3D1] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:border-[#44403C]'
@@ -124,24 +136,43 @@ export function SessionCard({ session, onClick, onStop }: SessionCardProps) {
         {/* Hover arrow indicator */}
         <ExternalLink
           size={14}
-          className={`absolute top-4 text-[#D6D3D1] opacity-0 transition-opacity group-hover:opacity-100 dark:text-[#44403C] ${canStopPty ? 'right-11' : 'right-3'}`}
+          className={`absolute top-4 text-[#D6D3D1] opacity-0 transition-opacity group-hover:opacity-100 dark:text-[#44403C] ${hasActionButton ? 'right-11' : 'right-3'}`}
         />
       </button>
+
+      {canArchive && onArchive && (
+        <button
+          type="button"
+          data-testid={`session-card-archive-${session.id}`}
+          aria-label="归档"
+          title="归档"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onArchive(session);
+          }}
+          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#E7E5E4] hover:text-[#1C1917] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#44403C] dark:hover:text-[#FAFAF9]"
+        >
+          <X size={12} />
+        </button>
+      )}
 
       {canStopPty && onStop && (
         <button
           type="button"
           data-testid={`session-card-stop-${session.id}`}
-          aria-label="停止"
-          title="停止"
+          aria-label={stopDisabled ? '停止中' : '停止'}
+          title={stopDisabled ? '停止中' : '停止'}
+          disabled={stopDisabled}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
+            if (stopDisabled) return;
             onStop(session);
           }}
-          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#E7E5E4] hover:text-[#1C1917] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#44403C] dark:hover:text-[#FAFAF9]"
+          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#E7E5E4] hover:text-[#1C1917] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-[#F5F0ED] disabled:hover:text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#44403C] dark:hover:text-[#FAFAF9] dark:disabled:hover:bg-[#292524] dark:disabled:hover:text-[#A8A29E]"
         >
-          <Square size={12} />
+          {stopDisabled ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}
         </button>
       )}
     </div>

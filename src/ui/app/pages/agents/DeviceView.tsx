@@ -161,6 +161,9 @@ export function DeviceView({
   const localNodeId = runtimeServiceStatus?.hostId ?? 'pending（待登记）';
   const canOpenPeerPairing = Boolean(runtimeServiceStatus?.running);
   const canVerifyConfirmedPeer = Boolean(runtimeServiceStatus?.running);
+  const overviewGridClassName = hostCard
+    ? 'grid gap-3 lg:grid-cols-2'
+    : 'grid gap-3';
 
   const renderRuntimePeerCard = (
     item: RuntimeHostSnapshot,
@@ -374,7 +377,7 @@ export function DeviceView({
           </button>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_minmax(260px,1fr)]">
+        <div data-testid="runtime-device-overview-grid" className={overviewGridClassName}>
           <div className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-3 dark:border-[#292524] dark:bg-[#292524]">
             <div className="flex items-start justify-between gap-3">
               <div>

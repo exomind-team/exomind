@@ -195,10 +195,10 @@ async fn transition_task(
             .task_store
             .transition_with_shortcut_scoped(scope_key, &id, input.status)
             .map_err(map_task_store_error)?;
-        let (_, final_task) = steps
-            .last()
-            .cloned()
-            .ok_or((StatusCode::CONFLICT, "task already at target status".to_string()))?;
+        let (_, final_task) = steps.last().cloned().ok_or((
+            StatusCode::CONFLICT,
+            "task already at target status".to_string(),
+        ))?;
 
         for (old_status, task) in &steps {
             publish_task_transition_signal(&state, *old_status, task);
@@ -250,10 +250,14 @@ async fn batch_transition_tasks(
                 .task_store
                 .transition_with_shortcut_scoped(scope_key, &item.id, item.status)
                 .and_then(|steps| {
-                    steps.last().cloned().ok_or(TaskStoreError::InvalidTransition {
-                        from: item.status,
-                        to: item.status,
-                    }).map(|last| (steps, last))
+                    steps
+                        .last()
+                        .cloned()
+                        .ok_or(TaskStoreError::InvalidTransition {
+                            from: item.status,
+                            to: item.status,
+                        })
+                        .map(|last| (steps, last))
                 }) {
                 Ok((steps, (old_status, task))) => {
                     for (step_old_status, step_task) in &steps {
@@ -292,7 +296,8 @@ async fn batch_transition_tasks(
 
         match state
             .task_store
-            .transition_scoped(scope_key, &item.id, item.status) {
+            .transition_scoped(scope_key, &item.id, item.status)
+        {
             Ok((old_status, task)) => {
                 publish_task_transition_signal(&state, old_status, &task);
                 publish_task_replication_signal(&state, scope_key, &task).await;
@@ -482,11 +487,7 @@ fn build_task_replication_payload(
     })
 }
 
-async fn publish_task_replication_signal(
-    state: &AppState,
-    scope_key: Option<&str>,
-    task: &Task,
-) {
+async fn publish_task_replication_signal(state: &AppState, scope_key: Option<&str>, task: &Task) {
     let event = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
@@ -566,12 +567,14 @@ async fn replication_upsert_task(
                 .map_err(map_task_store_error)?;
             "inserted"
         }
-        Some(current) if should_accept_replicated_task(
-            &current,
-            &payload.task,
-            payload.source_host_id.as_deref(),
-            &state.host_id,
-        ) => {
+        Some(current)
+            if should_accept_replicated_task(
+                &current,
+                &payload.task,
+                payload.source_host_id.as_deref(),
+                &state.host_id,
+            ) =>
+        {
             state
                 .task_store
                 .upsert_scoped(scope_key, payload.task)
@@ -847,10 +850,10 @@ mod tests {
                 Arc::clone(&signal_pool),
                 None,
             )),
-        mesh_relay: None,
-        auth_secret: None,
-        allow_lan_without_auth: false,
-        mdns: None,
+            mesh_relay: None,
+            auth_secret: None,
+            allow_lan_without_auth: false,
+            mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             config_store: Arc::new(crate::config::ConfigStore::new()),
             reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
@@ -952,11 +955,21 @@ mod tests {
         assert_eq!(create_response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
         let list_response = app
-            .oneshot(Request::builder().uri("/tasks").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(list_response.status(), StatusCode::OK);
-        let body = list_response.into_body().collect().await.unwrap().to_bytes();
+        let body = list_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
         let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert!(tasks.is_empty());
     }
@@ -1457,8 +1470,14 @@ mod tests {
         assert_eq!(events[0].tags, vec!["task_started".to_string()]);
         assert_eq!(events[0].content, "任务启动：Task with eventlog");
         assert_eq!(events[0].metadata.as_ref().unwrap()["task_id"], task.id);
-        assert_eq!(events[0].metadata.as_ref().unwrap()["old_status"], "pending");
-        assert_eq!(events[0].metadata.as_ref().unwrap()["new_status"], "in_progress");
+        assert_eq!(
+            events[0].metadata.as_ref().unwrap()["old_status"],
+            "pending"
+        );
+        assert_eq!(
+            events[0].metadata.as_ref().unwrap()["new_status"],
+            "in_progress"
+        );
     }
 
     #[tokio::test]
@@ -1509,7 +1528,10 @@ mod tests {
         assert_eq!(events[0].tags, vec!["task_cancelled".to_string()]);
         assert_eq!(events[0].content, "任务取消：Task cancel eventlog");
         assert_eq!(events[0].metadata.as_ref().unwrap()["task_id"], task.id);
-        assert_eq!(events[0].metadata.as_ref().unwrap()["new_status"], "cancelled");
+        assert_eq!(
+            events[0].metadata.as_ref().unwrap()["new_status"],
+            "cancelled"
+        );
     }
 
     #[tokio::test]
@@ -1910,7 +1932,10 @@ mod tests {
         let payload: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload["succeeded"], 3);
         assert_eq!(payload["failed"], 0);
-        assert_eq!(payload["results"].as_array().map(|items| items.len()), Some(3));
+        assert_eq!(
+            payload["results"].as_array().map(|items| items.len()),
+            Some(3)
+        );
     }
 
     #[tokio::test]
@@ -2382,7 +2407,8 @@ mod tests {
                     .method("POST")
                     .uri("/tasks/replication/upsert?user_id=user-a")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{
+                    .body(Body::from(
+                        r#"{
                         "task": {
                             "id": "task-rep-1",
                             "title": "Replicated task",
@@ -2402,7 +2428,8 @@ mod tests {
                             "completed_at": null
                         },
                         "source_host_id": "desktop-host"
-                    }"#))
+                    }"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -2415,7 +2442,8 @@ mod tests {
                     .method("POST")
                     .uri("/tasks/replication/upsert?user_id=user-a")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{
+                    .body(Body::from(
+                        r#"{
                         "task": {
                             "id": "task-rep-1",
                             "title": "Replicated task older",
@@ -2435,7 +2463,8 @@ mod tests {
                             "completed_at": null
                         },
                         "source_host_id": "mobile-host"
-                    }"#))
+                    }"#,
+                    ))
                     .unwrap(),
             )
             .await

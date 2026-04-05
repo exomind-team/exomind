@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from 'react';
-import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical } from 'lucide-react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical, Loader2, X } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -51,7 +51,24 @@ export interface TiledGridProps {
   onMarkWaiting?: (session: SessionInfo) => void;
   /** Callback when user stops a terminal session */
   onStopSession?: (session: SessionInfo) => void;
+  /** Callback when user archives a completed session */
+  onArchiveSession?: (session: SessionInfo) => void;
+  /** Whether a terminal session currently points to a missing PTY */
+  isSessionDisconnected?: (session: SessionInfo) => boolean;
+  isSessionAutoResuming?: (session: SessionInfo) => boolean;
+  isSessionStopping?: (session: SessionInfo) => boolean;
 }
+
+type TiledPaneEntry =
+  | {
+    id: string;
+    kind: 'session';
+    session: SessionInfo;
+  }
+  | {
+    id: string;
+    kind: 'disconnected';
+  };
 
 // ── Layout config ──────────────────────────────────────────────
 
@@ -76,29 +93,61 @@ export function TiledGrid({
   onQuickAction,
   onMarkWaiting,
   onStopSession,
+  onArchiveSession,
+  isSessionDisconnected,
+  isSessionAutoResuming,
+  isSessionStopping,
 }: TiledGridProps) {
   const config = LAYOUT_CONFIG[layout];
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   // Build ordered panes: respect paneOrder if provided, then fill remaining
-  const orderedPanes = useMemo(() => {
+  const orderedPanes = useMemo<TiledPaneEntry[]>(() => {
     if (!paneOrder || paneOrder.length === 0) {
-      return sessions.slice(0, config.maxPanes);
+      return sessions.slice(0, config.maxPanes).map((session) => ({
+        id: session.id,
+        kind: 'session' as const,
+        session,
+      }));
     }
+
     const sessionMap = new Map(sessions.map((s) => [s.id, s]));
-    const ordered: SessionInfo[] = [];
+    const ordered: TiledPaneEntry[] = [];
+    const seenIds = new Set<string>();
+
     for (const id of paneOrder) {
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
       const s = sessionMap.get(id);
-      if (s) ordered.push(s);
+      if (s) {
+        ordered.push({
+          id,
+          kind: 'session',
+          session: s,
+        });
+      } else {
+        ordered.push({
+          id,
+          kind: 'disconnected',
+        });
+      }
     }
+
     // Append any sessions not in paneOrder
     for (const s of sessions) {
-      if (!paneOrder.includes(s.id)) ordered.push(s);
+      if (seenIds.has(s.id)) continue;
+      seenIds.add(s.id);
+      ordered.push({
+        id: s.id,
+        kind: 'session',
+        session: s,
+      });
     }
+
     return ordered.slice(0, config.maxPanes);
   }, [sessions, paneOrder, config.maxPanes]);
 
-  const paneIds = useMemo(() => orderedPanes.map((s) => s.id), [orderedPanes]);
+  const paneIds = useMemo(() => orderedPanes.map((pane) => pane.id), [orderedPanes]);
 
   // DnD sensors: require 8px drag distance to avoid conflicting with clicks
   const sensors = useSensors(
@@ -139,24 +188,59 @@ export function TiledGrid({
     [],
   );
 
+  const handleCloseDisconnectedPane = useCallback(
+    (sessionId: string) => {
+      if (!onReorder) return;
+
+      const paneIndex = paneIds.indexOf(sessionId);
+      if (paneIndex === -1) return;
+
+      onReorder(paneIds.filter((id) => id !== sessionId));
+
+      if (focusedIndex === null) return;
+      if (focusedIndex === paneIndex) {
+        onFocusPane(null);
+      } else if (focusedIndex > paneIndex) {
+        onFocusPane(focusedIndex - 1);
+      }
+    },
+    [focusedIndex, onFocusPane, onReorder, paneIds],
+  );
+
   // If a pane is expanded (double-click fullscreen), show only that pane
   if (expandedIndex !== null && orderedPanes[expandedIndex]) {
-    const session = orderedPanes[expandedIndex];
+    const pane = orderedPanes[expandedIndex];
     return (
       <div data-testid="tiled-grid" className="flex h-full flex-col">
-        <SessionPane
-          session={session}
-          resolveSessionConnection={resolveSessionConnection}
-          isFocused={true}
-          isExpanded={true}
-          isDragging={false}
-          onDoubleClick={() => handleDoubleClick(expandedIndex)}
-          onFocus={() => onFocusPane(expandedIndex)}
-          onClick={() => onSessionClick?.(session)}
-          onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
-          onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
-          onStop={() => onStopSession?.(session)}
-        />
+        {pane.kind === 'session' ? (
+          <SessionPane
+            session={pane.session}
+            resolveSessionConnection={resolveSessionConnection}
+            isDisconnected={isSessionDisconnected?.(pane.session) ?? false}
+            isAutoResuming={isSessionAutoResuming?.(pane.session) ?? false}
+            isFocused={true}
+            isExpanded={true}
+            isDragging={false}
+            onDoubleClick={() => handleDoubleClick(expandedIndex)}
+            onFocus={() => onFocusPane(expandedIndex)}
+            onClick={() => onSessionClick?.(pane.session)}
+            onQuickAction={onQuickAction ? (r) => onQuickAction(pane.session, r) : undefined}
+            onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(pane.session) : undefined}
+            onStop={() => onStopSession?.(pane.session)}
+            stopDisabled={isSessionStopping?.(pane.session) ?? false}
+            onArchive={() => onArchiveSession?.(pane.session)}
+          />
+        ) : (
+          <DisconnectedPane
+            sessionId={pane.id}
+            isFocused={true}
+            isExpanded={true}
+            isDragging={false}
+            onDoubleClick={() => handleDoubleClick(expandedIndex)}
+            onFocus={() => onFocusPane(expandedIndex)}
+            onClose={() => handleCloseDisconnectedPane(pane.id)}
+          />
+        )}
       </div>
     );
   }
@@ -172,19 +256,36 @@ export function TiledGrid({
             gridTemplateRows: `repeat(${config.rows}, 1fr)`,
           }}
         >
-          {orderedPanes.map((session, index) => (
+          {orderedPanes.map((pane, index) => (
             <SortablePane
-              key={session.id}
-              session={session}
+              key={pane.id}
+              pane={pane}
               resolveSessionConnection={resolveSessionConnection}
+              isSessionDisconnected={isSessionDisconnected}
+              isSessionAutoResuming={isSessionAutoResuming}
               isFocused={focusedIndex === index}
               isExpanded={false}
               onDoubleClick={() => handleDoubleClick(index)}
               onFocus={() => onFocusPane(index)}
-              onClick={() => onSessionClick?.(session)}
-              onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
-              onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
-              onStop={() => onStopSession?.(session)}
+              onClick={pane.kind === 'session' ? () => onSessionClick?.(pane.session) : undefined}
+              onQuickAction={
+                pane.kind === 'session' && onQuickAction
+                  ? (r) => onQuickAction(pane.session, r)
+                  : undefined
+              }
+              onMarkWaiting={
+                pane.kind === 'session' && onMarkWaiting
+                  ? () => onMarkWaiting(pane.session)
+                  : undefined
+              }
+              onStop={pane.kind === 'session' ? () => onStopSession?.(pane.session) : undefined}
+              stopDisabled={pane.kind === 'session' ? (isSessionStopping?.(pane.session) ?? false) : false}
+              onArchive={pane.kind === 'session' ? () => onArchiveSession?.(pane.session) : undefined}
+              onCloseDisconnectedPane={
+                pane.kind === 'disconnected'
+                  ? () => handleCloseDisconnectedPane(pane.id)
+                  : undefined
+              }
             />
           ))}
           {/* Empty pane placeholders */}
@@ -246,11 +347,13 @@ export function GlobalStatusIndicator({ sessions }: GlobalStatusProps) {
 // ── SortablePane (dnd-kit wrapper) ──────────────────────────────
 
 interface SortablePaneProps {
-  session: SessionInfo;
+  pane: TiledPaneEntry;
   resolveSessionConnection: (session: SessionInfo) => {
     rtBaseUrl: string;
     authToken?: string;
   };
+  isSessionDisconnected?: (session: SessionInfo) => boolean;
+  isSessionAutoResuming?: (session: SessionInfo) => boolean;
   isFocused: boolean;
   isExpanded: boolean;
   onDoubleClick: () => void;
@@ -259,6 +362,9 @@ interface SortablePaneProps {
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
   onStop?: () => void;
+  stopDisabled?: boolean;
+  onArchive?: () => void;
+  onCloseDisconnectedPane?: () => void;
 }
 
 function SortablePane(props: SortablePaneProps) {
@@ -269,7 +375,7 @@ function SortablePane(props: SortablePaneProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: props.session.id });
+  } = useSortable({ id: props.pane.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -279,11 +385,138 @@ function SortablePane(props: SortablePaneProps) {
 
   return (
     <div ref={setNodeRef} style={style} {...attributes}>
-      <SessionPane
-        {...props}
-        isDragging={isDragging}
-        dragListeners={listeners}
-      />
+      {props.pane.kind === 'session' ? (
+        <SessionPane
+          session={props.pane.session}
+          resolveSessionConnection={props.resolveSessionConnection}
+          isDisconnected={props.isSessionDisconnected?.(props.pane.session) ?? false}
+          isAutoResuming={props.isSessionAutoResuming?.(props.pane.session) ?? false}
+          isFocused={props.isFocused}
+          isExpanded={props.isExpanded}
+          isDragging={isDragging}
+          onDoubleClick={props.onDoubleClick}
+          onFocus={props.onFocus}
+          onClick={props.onClick}
+          dragListeners={listeners}
+          onQuickAction={props.onQuickAction}
+          onMarkWaiting={props.onMarkWaiting}
+          onStop={props.onStop}
+          stopDisabled={props.stopDisabled}
+          onArchive={props.onArchive}
+        />
+      ) : (
+        <DisconnectedPane
+          sessionId={props.pane.id}
+          isFocused={props.isFocused}
+          isExpanded={props.isExpanded}
+          isDragging={isDragging}
+          onDoubleClick={props.onDoubleClick}
+          onFocus={props.onFocus}
+          onClose={props.onCloseDisconnectedPane}
+          dragListeners={listeners}
+        />
+      )}
+    </div>
+  );
+}
+
+interface DisconnectedPaneProps {
+  sessionId: string;
+  isFocused: boolean;
+  isExpanded: boolean;
+  isDragging: boolean;
+  onDoubleClick: () => void;
+  onFocus: () => void;
+  onClose?: () => void;
+  dragListeners?: Record<string, Function>;
+}
+
+function DisconnectedPane({
+  sessionId,
+  isFocused,
+  isExpanded,
+  isDragging,
+  onDoubleClick,
+  onFocus,
+  onClose,
+  dragListeners,
+}: DisconnectedPaneProps) {
+  return (
+    <div
+      data-testid={`tiled-grid-disconnected-${sessionId}`}
+      className={`
+        flex h-full flex-col overflow-hidden rounded-lg border transition-all
+        ${isDragging ? 'opacity-50 shadow-2xl ring-2 ring-[#A8A29E]/40' : ''}
+        ${isFocused
+          ? 'border-[#78716C]/60 shadow-[0_0_0_1px_rgba(120,113,108,0.2)]'
+          : 'border-[#D6D3D1] bg-[#F5F5F4] dark:border-[#44403C] dark:bg-[#1C1917]'
+        }
+      `}
+      onClick={onFocus}
+    >
+      <div
+        className="flex items-center justify-between gap-2 border-b border-[#D6D3D1] bg-[#F5F5F4] px-2 py-1 dark:border-[#44403C] dark:bg-[#1C1917]"
+        onDoubleClick={onDoubleClick}
+      >
+        <div className="flex min-w-0 items-center gap-1.5">
+          {dragListeners && (
+            <button
+              type="button"
+              className="flex-shrink-0 cursor-grab text-[#A8A29E] hover:text-[#78716C] active:cursor-grabbing dark:hover:text-[#D6D3D1]"
+              {...dragListeners}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <GripVertical size={10} />
+            </button>
+          )}
+          <span className="text-xs text-[#78716C]">✕</span>
+          <span className="truncate text-xs font-semibold text-[#57534E] dark:text-[#D6D3D1]">
+            已断开
+          </span>
+          {!isExpanded && (
+            <span className="truncate text-[9px] text-[#A8A29E]">
+              {sessionId}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDoubleClick();
+            }}
+            className="flex h-5 w-5 items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+            title={isExpanded ? '还原' : '全屏'}
+          >
+            {isExpanded ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
+          </button>
+          <button
+            type="button"
+            data-testid={`tiled-grid-disconnected-close-${sessionId}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose?.();
+            }}
+            className="flex h-5 w-5 items-center justify-center rounded text-[#78716C] hover:text-[#57534E] disabled:opacity-50 dark:hover:text-[#D6D3D1]"
+            title="关闭"
+            aria-label="关闭断开的会话窗格"
+            disabled={!onClose}
+          >
+            <X size={10} />
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-1 items-center justify-center bg-[#F5F5F4] px-4 text-center dark:bg-[#1C1917]">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-[#57534E] dark:text-[#D6D3D1]">
+            会话已断开
+          </p>
+          <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+            RT 可能已重启，此窗格保留原位置，关闭后会从布局中移除。
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -296,6 +529,8 @@ interface SessionPaneProps {
     rtBaseUrl: string;
     authToken?: string;
   };
+  isDisconnected: boolean;
+  isAutoResuming: boolean;
   isFocused: boolean;
   isExpanded: boolean;
   isDragging: boolean;
@@ -306,11 +541,15 @@ interface SessionPaneProps {
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
   onStop?: () => void;
+  stopDisabled?: boolean;
+  onArchive?: () => void;
 }
 
 function SessionPane({
   session,
   resolveSessionConnection,
+  isDisconnected,
+  isAutoResuming,
   isFocused,
   isExpanded,
   isDragging,
@@ -321,18 +560,65 @@ function SessionPane({
   onQuickAction,
   onMarkWaiting,
   onStop,
+  stopDisabled = false,
+  onArchive,
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const needsAttention = sessionNeedsAttention(session.status);
   const connection = resolveSessionConnection(session);
+  const isCompleted = session.status === 'completed';
+  const isTerminalCompleted = session.interaction_mode === 'terminal'
+    && (session.status === 'completed' || session.status === 'archived');
+  const shouldRenderLiveTerminal = session.interaction_mode === 'terminal'
+    && !!session.pty_id
+    && !isTerminalCompleted;
+  const [initialConnectionFailed, setInitialConnectionFailed] = useState(false);
+  const [terminalNonce, setTerminalNonce] = useState(0);
+  const previousRecoveryStateRef = useRef({
+    isDisconnected,
+    isAutoResuming,
+  });
+  const showDisconnected = isDisconnected || initialConnectionFailed || isTerminalCompleted;
   const showQuickActions =
-    session.status === 'waiting_input' && (session.quick_actions?.length ?? 0) > 0;
+    !showDisconnected
+    && session.status === 'waiting_input'
+    && (session.quick_actions?.length ?? 0) > 0;
   const showManualMarkWaiting =
+    !showDisconnected
+    &&
     session.interaction_mode === 'terminal'
     && session.status === 'running'
     && (session.quick_actions?.length ?? 0) === 0;
-  // Stop PTY session（停止 PTY 会话）
-  const canStopPty = session.interaction_mode === 'terminal' && !!session.pty_id;
+  const canStopPty = !isCompleted && session.interaction_mode === 'terminal' && !!session.pty_id;
+  const canArchive = isCompleted;
+
+  useEffect(() => {
+    setInitialConnectionFailed(false);
+    setTerminalNonce(0);
+    previousRecoveryStateRef.current = {
+      isDisconnected,
+      isAutoResuming,
+    };
+  }, [isAutoResuming, isDisconnected, session.id, session.pty_id]);
+
+  useEffect(() => {
+    const previousRecoveryState = previousRecoveryStateRef.current;
+    const hasRecoveredFromDisconnectedState = (
+      (previousRecoveryState.isDisconnected || previousRecoveryState.isAutoResuming)
+      && !isDisconnected
+      && !isAutoResuming
+    );
+
+    if (hasRecoveredFromDisconnectedState) {
+      setInitialConnectionFailed(false);
+      setTerminalNonce((prev) => prev + 1);
+    }
+
+    previousRecoveryStateRef.current = {
+      isDisconnected,
+      isAutoResuming,
+    };
+  }, [isAutoResuming, isDisconnected]);
 
   return (
     <div
@@ -427,13 +713,61 @@ function SessionPane({
       </div>
 
       {/* Pane content: Terminal or summary */}
-      <div className="flex-1 min-h-0 overflow-hidden bg-[#1C1917]">
-        {session.interaction_mode === 'terminal' && session.pty_id ? (
-          <PtyTerminal
-            rtBaseUrl={connection.rtBaseUrl}
-            ptyId={session.pty_id}
-            authToken={connection.authToken}
-          />
+      <div className="relative flex-1 min-h-0 overflow-hidden bg-[#1C1917]">
+        {shouldRenderLiveTerminal ? (
+          <>
+            <PtyTerminal
+              key={`${session.id}:${session.pty_id}:${terminalNonce}`}
+              rtBaseUrl={connection.rtBaseUrl}
+              ptyId={session.pty_id!}
+              authToken={connection.authToken}
+              autoFocus={false}
+              onInitialConnectionFailure={() => {
+                setInitialConnectionFailed(true);
+              }}
+            />
+            {showDisconnected ? (
+              <div
+                data-testid={`tiled-grid-pty-disconnected-${session.id}`}
+                className="absolute inset-0 flex flex-col"
+              >
+                <div className="space-y-2 border-b border-[#292524] bg-[#1C1917]/92 px-4 py-3 text-left backdrop-blur-sm">
+                  <p className="text-sm font-medium text-[#FAFAF9]">
+                    {isAutoResuming ? '终端恢复中' : '终端已断开'}
+                  </p>
+                  <p className="text-xs text-[#A8A29E]">
+                    {isTerminalCompleted
+                      ? '当前会话已结束；保留已加载的 Terminal 内容，后续可直接归档。'
+                      : isAutoResuming
+                        ? '正在尝试自动恢复当前终端会话；恢复成功后会自动切回实时 Terminal。'
+                        : '当前 PTY 已不存在，RT 可能已经重启。保留已加载的 Terminal 内容，必要时可点击停止收敛后归档。'}
+                  </p>
+                </div>
+                {isAutoResuming ? (
+                  <div className="flex flex-1 items-center justify-center px-4 text-center">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-[#1C1917]/88 px-3 py-1.5 text-xs text-[#E7E5E4] backdrop-blur-sm">
+                      <Loader2 size={12} className="animate-spin" />
+                      正在恢复会话…
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : isTerminalCompleted ? (
+          <div
+            data-testid={`tiled-grid-pty-disconnected-${session.id}`}
+            className="flex h-full items-center justify-center px-4 text-center"
+          >
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-[#FAFAF9]">
+                终端会话已结束
+              </p>
+              <p className="text-xs text-[#A8A29E]">
+                当前 PTY 已关闭；保留会话卡片以便直接归档。
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="h-full overflow-auto p-2">
             <p className="whitespace-pre-wrap text-xs text-[#A8A29E] font-mono">
@@ -472,21 +806,38 @@ function SessionPane({
           >
             <Pause size={10} />
           </button>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!canStopPty) return;
-              onStop?.();
-            }}
-            data-testid={`tiled-grid-stop-${session.id}`}
-            aria-label="停止"
-            disabled={!canStopPty || !onStop}
-            className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:opacity-50 disabled:hover:text-[#57534E]"
-            title="停止"
-          >
-            <Square size={10} />
-          </button>
+          {canArchive ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onArchive?.();
+              }}
+              data-testid={`tiled-grid-archive-${session.id}`}
+              aria-label="归档"
+              disabled={!onArchive}
+              className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:opacity-50 disabled:hover:text-[#57534E]"
+              title="归档"
+            >
+              <X size={10} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!canStopPty || stopDisabled) return;
+                onStop?.();
+              }}
+              data-testid={`tiled-grid-stop-${session.id}`}
+              aria-label={stopDisabled ? '停止中' : '停止'}
+              disabled={!canStopPty || !onStop || stopDisabled}
+              className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-[#57534E]"
+              title={stopDisabled ? '停止中' : '停止'}
+            >
+              {stopDisabled ? <Loader2 size={10} className="animate-spin" /> : <Square size={10} />}
+            </button>
+          )}
         </div>
       </div>
     </div>

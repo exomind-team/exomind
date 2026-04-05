@@ -233,7 +233,7 @@ pub fn seed_instance_webview_main_data_dir_if_needed(
 
     let marker_path = webview_main_data_dir.join(WEBVIEW_MAIN_LEGACY_SEED_MARKER_NAME);
     if marker_path.exists() {
-      return Ok(());
+        return Ok(());
     }
 
     if legacy_webview_main_data_dir.exists() {
@@ -560,7 +560,10 @@ mod tests {
         fs::create_dir_all(webview_dir.join("EBWebView").join("Default"))
             .expect("isolated webview dir should be created");
         fs::write(
-            webview_dir.join("EBWebView").join("Default").join("Preferences"),
+            webview_dir
+                .join("EBWebView")
+                .join("Default")
+                .join("Preferences"),
             "fresh-empty-profile",
         )
         .expect("isolated webview placeholder should be written");

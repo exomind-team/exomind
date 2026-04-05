@@ -74,10 +74,11 @@ function formatHostForAddress(host: string): string {
 }
 
 export function formatHostForUrl(host: string): string {
-  if (host.includes(':') && !host.startsWith('[')) {
-    return `[${host}]`;
+  const normalizedHost = resolveLocalServiceHost(host);
+  if (normalizedHost.includes(':') && !normalizedHost.startsWith('[')) {
+    return `[${normalizedHost}]`;
   }
-  return host;
+  return normalizedHost;
 }
 
 export function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
@@ -157,7 +158,7 @@ function resolveEmbeddedHost(): string {
   }
 
   if (isTauriWindow()) {
-    return '127.0.0.1';
+    return resolveLocalServiceHost('127.0.0.1');
   }
 
   if (typeof window !== 'undefined' && window.location?.hostname) {

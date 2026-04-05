@@ -110,6 +110,37 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
     expect(result.error.status).toBe(503);
   });
 
+  it('warns when protected runtime request returns 401（受保护 runtime 请求 401 时输出告警）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'unauthorized' }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology({
+      ...SAMPLE_HOST,
+      host: '192.168.1.48',
+      port: 9124,
+      authToken: 'shared-secret',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[runtime-client][auth] unauthorized runtime request',
+      expect.objectContaining({
+        method: 'GET',
+        url: 'http://192.168.1.48:9124/topology',
+        authTokenPresent: true,
+      }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
   it('parses topology capabilities from /topology（解析 /topology 的运行时能力）', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,

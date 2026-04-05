@@ -149,3 +149,6 @@ vitest-output.txt
 artifacts/
 docs/pr/
 .wrangler/*
+
+# Cygwin/MSYS2 crash dumps
+*.stackdump

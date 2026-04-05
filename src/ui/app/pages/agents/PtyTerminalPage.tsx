@@ -1,11 +1,14 @@
 import { ChevronLeft, Square } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PtyTerminal } from '../../components/PtyTerminal';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
+import type { SessionInfo, UpdateSessionRequest } from '@/lib/types/session';
 
 export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
   const [isStopping, setIsStopping] = useState(false);
   const [stopError, setStopError] = useState('');
+  const [isCheckingPty, setIsCheckingPty] = useState(false);
+  const [isDisconnected, setIsDisconnected] = useState(false);
   // Read baseUrl and token from URL search params — set by AgentsPage when navigating.
   // This avoids re-guessing the host inside the page and ensures the correct auth token
   // is used regardless of whether it is an embedded RT or a remote peer RT.
@@ -20,6 +23,57 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
     (typeof window !== 'undefined'
       ? (window.history.state as Record<string, unknown> | null)?.ptyToken
       : undefined) as string | undefined;
+  const buildHeaders = (includeJsonContentType = false): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    if (includeJsonContentType) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+    return headers;
+  };
+
+  useEffect(() => {
+    if (!ptyId) {
+      setIsCheckingPty(false);
+      setIsDisconnected(false);
+      return;
+    }
+
+    let disposed = false;
+
+    const verifyPty = async () => {
+      setIsCheckingPty(true);
+      setIsDisconnected(false);
+
+      try {
+        const response = await fetch(`${rtBaseUrl}/pty`, { headers: buildHeaders() });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const ptyAgents = await response.json() as Array<{ id: string }>;
+        if (!disposed) {
+          setIsDisconnected(!ptyAgents.some((agent) => agent.id === ptyId));
+        }
+      } catch {
+        if (!disposed) {
+          setIsDisconnected(true);
+        }
+      } finally {
+        if (!disposed) {
+          setIsCheckingPty(false);
+        }
+      }
+    };
+
+    void verifyPty();
+
+    return () => {
+      disposed = true;
+    };
+  }, [authToken, ptyId, rtBaseUrl]);
 
   const navigateBack = () => {
     if (typeof window !== 'undefined') {
@@ -28,23 +82,75 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
     }
   };
 
+  const recoverDisconnectedSession = async (): Promise<boolean> => {
+    if (!ptyId) return false;
+
+    const sessionsResponse = await fetch(`${rtBaseUrl}/sessions`, {
+      headers: buildHeaders(),
+    });
+    if (!sessionsResponse.ok) {
+      throw new Error(`HTTP ${sessionsResponse.status}`);
+    }
+
+    const sessions = await sessionsResponse.json() as SessionInfo[];
+    let matchingSession = sessions.find((session) => (
+      session.interaction_mode === 'terminal'
+      && session.pty_id === ptyId
+    ));
+
+    if (!matchingSession) {
+      return false;
+    }
+
+    const recoverySteps: UpdateSessionRequest[] = [];
+    if (matchingSession.status === 'running') {
+      recoverySteps.push({ status: 'completed' });
+    } else if (
+      matchingSession.status === 'waiting_input'
+      || matchingSession.status === 'paused'
+      || matchingSession.status === 'error'
+    ) {
+      recoverySteps.push({ status: 'running' }, { status: 'completed' });
+    } else if (matchingSession.status === 'completed') {
+      return true;
+    } else {
+      return false;
+    }
+
+    for (const step of recoverySteps) {
+      const response = await fetch(`${rtBaseUrl}/sessions/${encodeURIComponent(matchingSession.id)}`, {
+        method: 'PATCH',
+        headers: buildHeaders(true),
+        body: JSON.stringify(step),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      matchingSession = await response.json() as SessionInfo;
+    }
+
+    return true;
+  };
+
   const handleStop = async () => {
-    if (!ptyId || isStopping) return;
+    if (!ptyId || isStopping || isCheckingPty) return;
     setIsStopping(true);
     setStopError('');
 
     try {
-      const headers: Record<string, string> = {};
-      if (authToken) {
-        headers.Authorization = `Bearer ${authToken}`;
-      }
-
       const response = await fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/stop`, {
         method: 'POST',
-        headers,
+        headers: buildHeaders(),
       });
 
       if (!response.ok) {
+        if (response.status === 404) {
+          const recovered = await recoverDisconnectedSession();
+          if (recovered) {
+            navigateBack();
+            return;
+          }
+        }
         throw new Error(`HTTP ${response.status}`);
       }
 
@@ -82,7 +188,7 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
           onClick={() => {
             void handleStop();
           }}
-          disabled={isStopping}
+          disabled={isStopping || isCheckingPty}
           className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[#FCA5A5] hover:text-[#FECACA] disabled:opacity-60"
           aria-label="结束 Terminal Agent"
         >
@@ -96,7 +202,45 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
         </div>
       )}
       <div className="flex-1 overflow-hidden">
-        <PtyTerminal rtBaseUrl={rtBaseUrl} ptyId={ptyId} authToken={authToken} />
+        {isDisconnected ? (
+          <div
+            data-testid="pty-terminal-page-disconnected"
+            className="flex h-full flex-col bg-[#1C1917]"
+          >
+            <div className="border-b border-[#292524] px-6 py-4 text-center">
+              <p className="text-sm font-semibold text-[#FAFAF9]">终端已断开</p>
+              <p className="mt-1 text-xs text-[#A8A29E]">
+                对应 PTY 已不存在，RT 可能已经重启。下方保留关闭前历史；如需结束，可点击上方“结束”将会话收敛为已完成。
+              </p>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <PtyTerminal
+                rtBaseUrl={rtBaseUrl}
+                ptyId={ptyId}
+                authToken={authToken}
+                interactive={false}
+              />
+            </div>
+            <div className="border-t border-[#292524] px-4 py-3">
+              <button
+                type="button"
+                onClick={navigateBack}
+                className="rounded border border-[#44403C] px-3 py-1.5 text-xs text-[#E7E5E4] hover:border-[#57534E]"
+              >
+                返回 Agents
+              </button>
+            </div>
+          </div>
+        ) : (
+          <PtyTerminal
+            rtBaseUrl={rtBaseUrl}
+            ptyId={ptyId}
+            authToken={authToken}
+            onInitialConnectionFailure={() => {
+              setIsDisconnected(true);
+            }}
+          />
+        )}
       </div>
     </div>
   );

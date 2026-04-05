@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appendManagedTauriLogSessionStart,
   buildManagedTauriCommand,
+  collectManagedDesktopAppPids,
   collectManagedTauriCleanupPids,
   evaluateManagedTauriInstanceHealth,
   resolveManagedTauriInstancePaths,
@@ -184,5 +185,29 @@ describe('tauri-dev-manager-lib', () => {
     );
 
     expect(cleanupPids).toEqual([333436]);
+  });
+
+  it('recognizes the desktop app by its resolved executable path even when it is no longer a bun descendant（桌面进程脱离 bun 子进程链后仍应被 manager 识别）', () => {
+    const appPids = collectManagedDesktopAppPids({
+      rootPid: 1234,
+      expectedBaseName: 'exomind',
+      expectedExecutablePath: 'G:\\exomind-cargo-target\\tauri-dev\\issue806-g\\debug\\exomind.exe',
+      processes: [
+        {
+          ProcessId: 1234,
+          ParentProcessId: 10,
+          Name: 'bun.exe',
+          CommandLine: 'bun run tauri dev',
+        },
+        {
+          ProcessId: 7777,
+          ParentProcessId: 88,
+          Name: 'exomind.exe',
+          CommandLine: '"G:\\exomind-cargo-target\\tauri-dev\\issue806-g\\debug\\exomind.exe"',
+        },
+      ],
+    });
+
+    expect(appPids).toEqual([7777]);
   });
 });

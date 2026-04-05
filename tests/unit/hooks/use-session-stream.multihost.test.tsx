@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
-import { useSessionStream } from '@/hooks/useSessionStream';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import {
+  SESSION_FETCH_TIMEOUT_MS,
+  __resetSessionStreamCacheForTests,
+  useSessionStream,
+} from '@/hooks/useSessionStream';
 import type { SessionInfo } from '@/lib/types/session';
 
 class MockEventSource {
@@ -45,7 +49,9 @@ function buildSession(overrides: Partial<SessionInfo>): SessionInfo {
 describe('useSessionStream multi-host aggregation（多主机会话流聚合）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
     MockEventSource.urls = [];
+    __resetSessionStreamCacheForTests();
     vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
   });
 
@@ -115,5 +121,394 @@ describe('useSessionStream multi-host aggregation（多主机会话流聚合）'
       'http://127.0.0.1:1919/sessions/stream',
       'http://192.168.1.22:2919/sessions/stream',
     ]));
+  });
+
+  it('deduplicates duplicate session ids across targets（同一 session id 跨 target 只保留一条）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === 'http://127.0.0.1:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({ id: 'session-shared', role: '本机会话' })],
+        } as Response;
+      }
+
+      if (url === 'http://localhost:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({ id: 'session-shared', role: '同一会话的重复来源' })],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [
+        {
+          id: 'host-127',
+          rtBaseUrl: 'http://127.0.0.1:1919',
+          hostName: '127.0.0.1:1919',
+          hostAddress: '127.0.0.1:1919',
+        },
+        {
+          id: 'host-localhost',
+          rtBaseUrl: 'http://localhost:1919',
+          hostName: 'localhost:1919',
+          hostAddress: 'localhost:1919',
+        },
+      ],
+    }));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    expect(result.current.sessions[0]).toMatchObject({
+      id: 'session-shared',
+      role: '本机会话',
+      source_host_id: 'host-127',
+    });
+  });
+
+  it('warns when protected runtime session fetch returns 401（受保护 runtime 会话拉取 401 时输出告警）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'unauthorized' }),
+    } as Response));
+
+    vi.stubGlobal('fetch', fetchMock);
+    const targets = [{
+      id: 'protected-host',
+      rtBaseUrl: 'http://192.168.1.48:9124',
+      hostName: 'Protected Runtime',
+      hostAddress: '192.168.1.48:9124',
+      authToken: 'bad-token',
+    }];
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.error).toBe('Protected Runtime: HTTP 401');
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[session-stream][auth] unauthorized session fetch',
+      expect.objectContaining({
+        targetId: 'protected-host',
+        rtBaseUrl: 'http://192.168.1.48:9124',
+        authTokenPresent: true,
+      }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('does not refetch endlessly when resolved targets stay the same（稳定 target 不应触发自旋重拉）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'http://127.0.0.1:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({ id: 'session-stable-target' })],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const target = {
+      id: 'host-stable',
+      rtBaseUrl: 'http://127.0.0.1:1919',
+      hostName: '127.0.0.1:1919',
+      hostAddress: '127.0.0.1:1919',
+    };
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [target],
+    }));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.urls).toEqual(['http://127.0.0.1:1919/sessions/stream']);
+  });
+
+  it('preserves backend source_host_id instead of overwriting it with fetch target metadata（保留后端 source_host_id，不被聚合 target 覆盖）', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'http://127.0.0.1:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({
+            id: 'session-preserve-host-id',
+            source_host_id: 'rt-original-host',
+            source_host_name: 'Original Runtime',
+            source_host_address: '10.0.0.8:1919',
+          })],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [{
+        id: 'host-aggregator',
+        rtBaseUrl: 'http://127.0.0.1:1919',
+        hostName: '127.0.0.1:1919',
+        hostAddress: '127.0.0.1:1919',
+      }],
+    }));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    expect(result.current.sessions[0]).toMatchObject({
+      id: 'session-preserve-host-id',
+      source_host_id: 'rt-original-host',
+      source_host_name: 'Original Runtime',
+      source_host_address: '10.0.0.8:1919',
+    });
+  });
+
+  it('keeps usable sessions when one runtime host fetch stalls（单个坏主机不应拖死整个会话列表）', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === 'http://127.0.0.1:1919/sessions') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({ id: 'session-local-ok', role: '本地会话' })],
+        } as Response);
+      }
+
+      if (url === 'http://192.168.1.99:2919/sessions') {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        });
+      }
+
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [
+        {
+          id: 'host-local',
+          rtBaseUrl: 'http://127.0.0.1:1919',
+          hostName: '127.0.0.1:1919',
+          hostAddress: '127.0.0.1:1919',
+        },
+        {
+          id: 'host-stalled',
+          rtBaseUrl: 'http://192.168.1.99:2919',
+          hostName: '192.168.1.99:2919',
+          hostAddress: '192.168.1.99:2919',
+        },
+      ],
+    }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SESSION_FETCH_TIMEOUT_MS + 1);
+    });
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.sessions).toHaveLength(1);
+    expect(result.current.sessions[0]).toMatchObject({
+      id: 'session-local-ok',
+      source_host_id: 'host-local',
+    });
+    expect(result.current.error).toBeNull();
+  });
+
+  it('rehydrates the last successful session snapshot on remount（切页 remount 后应先回填最近一次成功快照）', async () => {
+    const stableTarget = {
+      id: 'host-cache',
+      rtBaseUrl: 'http://127.0.0.1:1919',
+      hostName: '127.0.0.1:1919',
+      hostAddress: '127.0.0.1:1919',
+    };
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [buildSession({ id: 'session-cached-remount', role: '缓存会话' })],
+    } as Response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const firstRender = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [stableTarget],
+    }));
+
+    await waitFor(() => {
+      expect(firstRender.result.current.sessions).toHaveLength(1);
+    });
+    firstRender.unmount();
+
+    vi.useFakeTimers();
+
+    fetchMock.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => (
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      })
+    ));
+
+    const secondRender = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [stableTarget],
+    }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(secondRender.result.current.sessions).toHaveLength(1);
+    expect(secondRender.result.current.sessions[0]).toMatchObject({
+      id: 'session-cached-remount',
+      role: '缓存会话',
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SESSION_FETCH_TIMEOUT_MS + 1);
+    });
+
+    expect(secondRender.result.current.loading).toBe(false);
+    expect(secondRender.result.current.sessions[0]).toMatchObject({
+      id: 'session-cached-remount',
+      role: '缓存会话',
+    });
+  });
+
+  it('reuses the latest successful snapshot when target order changes on remount（target 顺序抖动时仍应回填最近成功快照）', async () => {
+    const targetA = {
+      id: 'host-a',
+      rtBaseUrl: 'http://127.0.0.1:1919',
+      hostName: '127.0.0.1:1919',
+      hostAddress: '127.0.0.1:1919',
+    };
+    const targetB = {
+      id: 'host-b',
+      rtBaseUrl: 'http://192.168.1.22:2919',
+      hostName: '192.168.1.22:2919',
+      hostAddress: '192.168.1.22:2919',
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'http://127.0.0.1:1919/sessions') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [buildSession({ id: 'session-order-stable', role: '顺序稳定会话' })],
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => [],
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const firstRender = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [targetB, targetA],
+    }));
+
+    await waitFor(() => {
+      expect(firstRender.result.current.sessions).toHaveLength(1);
+    });
+    firstRender.unmount();
+
+    vi.useFakeTimers();
+    fetchMock.mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => (
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      })
+    ));
+
+    const secondRender = renderHook(() => useSessionStream({
+      rtBaseUrl: null,
+      enabled: true,
+      targets: [targetA, targetB],
+    }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(secondRender.result.current.sessions).toHaveLength(1);
+    expect(secondRender.result.current.sessions[0]).toMatchObject({
+      id: 'session-order-stable',
+      role: '顺序稳定会话',
+    });
   });
 });

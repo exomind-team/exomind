@@ -580,10 +580,7 @@ fn format_stream_finish_log_line(
     }
 }
 
-fn format_recognize_finish_log_line(
-    endpoint: &str,
-    outcome: &Result<AsrResult, String>,
-) -> String {
+fn format_recognize_finish_log_line(endpoint: &str, outcome: &Result<AsrResult, String>) -> String {
     match outcome {
         Ok(_) => format!("[ASR-Rust] 识别结束: endpoint={} status=ok", endpoint),
         Err(error) => format!(
@@ -806,11 +803,20 @@ async fn run_volcano_stream_session(
     let _ = write.close().await;
     stream_state.remove_session(&session_id).await;
     match &outcome {
-        Ok(_) => log::info!("{}", format_stream_finish_log_line(&session_id, &endpoint, &outcome)),
+        Ok(_) => log::info!(
+            "{}",
+            format_stream_finish_log_line(&session_id, &endpoint, &outcome)
+        ),
         Err(error) if error == VOLCANO_STREAM_CANCELLED_MESSAGE => {
-            log::debug!("{}", format_stream_finish_log_line(&session_id, &endpoint, &outcome))
+            log::debug!(
+                "{}",
+                format_stream_finish_log_line(&session_id, &endpoint, &outcome)
+            )
         }
-        Err(_) => log::warn!("{}", format_stream_finish_log_line(&session_id, &endpoint, &outcome)),
+        Err(_) => log::warn!(
+            "{}",
+            format_stream_finish_log_line(&session_id, &endpoint, &outcome)
+        ),
     }
 
     if let Err(error) = &outcome {
@@ -838,7 +844,10 @@ pub async fn volcano_asr_recognize(
     let (ws_stream, endpoint) = open_configured_ws(&config).await?;
     let (mut write, mut read): (VolcanoWriteHalf, VolcanoReadHalf) = ws_stream.split();
 
-    log::debug!("[ASR] 开始识别: endpoint={endpoint}, audio={} bytes", audio_data.len());
+    log::debug!(
+        "[ASR] 开始识别: endpoint={endpoint}, audio={} bytes",
+        audio_data.len()
+    );
 
     let chunk_size = 6400usize;
     let total_chunks = audio_data.chunks(chunk_size).len();
@@ -1188,7 +1197,10 @@ mod tests {
 
     #[test]
     fn volcano_default_resource_id_points_to_bigmodel_2() {
-        assert_eq!(default_resource_id(), "volc.seedasr.sauc.duration".to_string());
+        assert_eq!(
+            default_resource_id(),
+            "volc.seedasr.sauc.duration".to_string()
+        );
     }
 
     #[test]

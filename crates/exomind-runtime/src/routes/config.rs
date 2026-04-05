@@ -196,10 +196,10 @@ mod tests {
                 Arc::clone(&signal_pool),
                 None,
             )),
-        mesh_relay: None,
-        auth_secret: None,
-        allow_lan_without_auth: false,
-        mdns: None,
+            mesh_relay: None,
+            auth_secret: None,
+            allow_lan_without_auth: false,
+            mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             config_store: Arc::new(crate::config::ConfigStore::new()),
             reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
@@ -274,7 +274,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(list_response.status(), StatusCode::OK);
-        let body = list_response.into_body().collect().await.unwrap().to_bytes();
+        let body = list_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
         let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.len(), 1);
         assert_eq!(payload[0]["key"], "exomind:themePreference");
@@ -321,7 +326,12 @@ mod tests {
             .await
             .unwrap();
 
-        let body = list_response.into_body().collect().await.unwrap().to_bytes();
+        let body = list_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
         let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert!(payload.is_empty());
     }
@@ -381,11 +391,22 @@ mod tests {
             .await
             .unwrap();
 
-        let body = list_response.into_body().collect().await.unwrap().to_bytes();
+        let body = list_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
         let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload.len(), 2);
-        let theme = payload.iter().find(|entry| entry["key"] == "exomind:themePreference").unwrap();
-        let moss = payload.iter().find(|entry| entry["key"] == "moss_api_key").unwrap();
+        let theme = payload
+            .iter()
+            .find(|entry| entry["key"] == "exomind:themePreference")
+            .unwrap();
+        let moss = payload
+            .iter()
+            .find(|entry| entry["key"] == "moss_api_key")
+            .unwrap();
         assert_eq!(theme["value"], "dark");
         assert_eq!(moss["value"], "sk-imported");
         assert_eq!(moss["sensitive"], true);

@@ -12,8 +12,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::AppState;
 use crate::pty::{
-    ClaudeSessionInfo, PtyAgentInfo, PtyAgentType, PtyError, PtyHistoricalSessionInfo,
-    PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
+    ClaudeSessionInfo, PtyAgentInfo, PtyAgentStatus, PtyAgentType, PtyError,
+    PtyHistoricalSessionInfo, PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
 };
 use crate::routes::sessions::{broadcast_session_created, broadcast_session_updated};
 use crate::session::{
@@ -44,6 +44,11 @@ struct HistoricalSessionsQuery {
     agent_type: PtyAgentType,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct PtyStreamEofPayload {
+    code: Option<i32>,
+}
+
 // ── Error mapping ───────────────────────────────────────────────
 
 fn map_pty_error(err: PtyError) -> (StatusCode, String) {
@@ -69,6 +74,33 @@ fn build_pty_context(info: &PtyAgentInfo) -> WorkContext {
         worktree_path: Some(info.workdir.clone()),
         work_dir: Some(info.workdir.clone()),
         ..Default::default()
+    }
+}
+
+fn serialize_pty_eof_payload(exit_code: Option<i32>) -> Option<String> {
+    exit_code.and_then(|code| serde_json::to_string(&PtyStreamEofPayload { code: Some(code) }).ok())
+}
+
+fn build_pty_eof_event(exit_code: Option<i32>) -> Event {
+    let event = Event::default().event("eof");
+    if let Some(payload) = serialize_pty_eof_payload(exit_code) {
+        event.data(payload)
+    } else {
+        event.data("")
+    }
+}
+
+fn build_pty_ready_event() -> Event {
+    Event::default().event("ready").data("{}")
+}
+
+async fn resolve_pty_exit_code_for_eof(state: &AppState, id: &str) -> Option<i32> {
+    match state.pty_manager.refresh_process_state(id).await {
+        Ok(Some(info)) => match info.status {
+            PtyAgentStatus::Exited { code } => Some(code),
+            _ => None,
+        },
+        Ok(None) | Err(_) => None,
     }
 }
 
@@ -144,7 +176,16 @@ fn watch_pty_lifecycle(state: AppState, id: String) {
         loop {
             match state.pty_manager.refresh_process_state(&id).await {
                 Ok(Some(info)) => match info.status {
-                    crate::pty::PtyAgentStatus::Exited { .. } => {
+                    crate::pty::PtyAgentStatus::Exited { code } => {
+                        if code != 0 {
+                            tracing::warn!(
+                                pty_id = %id,
+                                session_id = ?info.session_id,
+                                command = %info.command,
+                                exit_code = code,
+                                "PTY process exited with non-zero status"
+                            );
+                        }
                         match complete_pty_session(&state, &id) {
                             Ok(Some(updated)) => {
                                 broadcast_session_updated(
@@ -205,7 +246,20 @@ async fn resume_pty_agent(
     State(state): State<AppState>,
     Json(req): Json<PtyResumeRequest>,
 ) -> Result<(StatusCode, Json<PtyAgentInfo>), (StatusCode, String)> {
-    let info = state.pty_manager.resume(req).await.map_err(map_pty_error)?;
+    let session_id = req.session_id.clone();
+    let agent_type = req.agent_type;
+    let info = match state.pty_manager.resume(req).await {
+        Ok(info) => info,
+        Err(error) => {
+            tracing::warn!(
+                ?agent_type,
+                session_id = %session_id,
+                error = %error,
+                "failed to resume PTY agent"
+            );
+            return Err(map_pty_error(error));
+        }
+    };
     if let Err(error) = register_pty_session(&state, &info) {
         let _ = state.pty_manager.remove(&info.id).await;
         return Err(error);
@@ -239,14 +293,38 @@ async fn stream_pty_output(
 ) -> Result<Sse<ReceiverStream<Result<Event, Infallible>>>, (StatusCode, String)> {
     let (event_tx, event_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(1024);
 
-    let (buffer_snapshot, mut rx) = state
-        .pty_manager
-        .subscribe_output(&id)
-        .await
-        .map_err(map_pty_error)?;
+    let live_subscription = match state.pty_manager.subscribe_output(&id).await {
+        Ok((buffer_snapshot, rx)) => Some((buffer_snapshot, rx)),
+        Err(PtyError::NotFound { .. }) => None,
+        Err(error) => return Err(map_pty_error(error)),
+    };
+    let persisted_snapshot = if live_subscription.is_none() {
+        match state.pty_manager.load_persisted_output(&id).await {
+            Ok(Some(buffer_snapshot)) => Some(buffer_snapshot),
+            Ok(None) => {
+                return Err(map_pty_error(PtyError::NotFound { id }));
+            }
+            Err(error) => return Err(map_pty_error(error)),
+        }
+    } else {
+        None
+    };
 
     // Forward broadcast → mpsc in a spawned task.
     tokio::spawn(async move {
+        let stream_state = state.clone();
+        let stream_id = id.clone();
+        let (buffer_snapshot, rx) = match live_subscription {
+            Some((buffer_snapshot, rx)) => (buffer_snapshot, Some(rx)),
+            None => (persisted_snapshot.unwrap_or_default(), None),
+        };
+
+        // 0. Emit an immediate ready event so clients can flush headers and
+        // transition out of "connecting" even when the PTY is currently idle.
+        if event_tx.send(Ok(build_pty_ready_event())).await.is_err() {
+            return;
+        }
+
         // 1. Replay scrollback buffer.
         if !buffer_snapshot.is_empty() {
             for chunk in buffer_snapshot.chunks(4096) {
@@ -258,9 +336,15 @@ async fn stream_pty_output(
             }
         }
 
+        if rx.is_none() {
+            let _ = event_tx.send(Ok(build_pty_eof_event(None))).await;
+            return;
+        }
+
         // 2. Stream live output from the broadcast channel.
         let mut keep_alive_interval = tokio::time::interval(std::time::Duration::from_secs(15));
         keep_alive_interval.tick().await;
+        let mut rx = rx.expect("live subscription should include broadcast receiver");
 
         loop {
             tokio::select! {
@@ -271,8 +355,10 @@ async fn stream_pty_output(
                             Ok(Event::default().event("output").data(encoded))
                         }
                         Ok(PtyOutputMsg::Eof) => {
+                            let exit_code =
+                                resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
                             let _ = event_tx
-                                .send(Ok(Event::default().event("eof").data("")))
+                                .send(Ok(build_pty_eof_event(exit_code)))
                                 .await;
                             return;
                         }
@@ -281,8 +367,10 @@ async fn stream_pty_output(
                             Ok(Event::default().event("warning").data(msg))
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            let exit_code =
+                                resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
                             let _ = event_tx
-                                .send(Ok(Event::default().event("eof").data("")))
+                                .send(Ok(build_pty_eof_event(exit_code)))
                                 .await;
                             return;
                         }
@@ -386,4 +474,87 @@ pub fn router() -> Router<AppState> {
         .route("/pty/:id/resize", post(resize_pty))
         .route("/pty/:id/stop", post(stop_pty_agent))
         .route("/pty/:id", delete(remove_pty_agent))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{serialize_pty_eof_payload, stream_pty_output};
+    use axum::extract::{Path, State};
+    use axum::response::IntoResponse;
+    use futures_util::StreamExt;
+    use std::time::Duration;
+
+    use crate::AppState;
+
+    #[cfg(not(target_os = "android"))]
+    fn interactive_shell_spawn_request() -> crate::pty::PtySpawnRequest {
+        if cfg!(windows) {
+            crate::pty::PtySpawnRequest {
+                name: "ready-shell".to_string(),
+                workdir: Some(".".to_string()),
+                command: "cmd".to_string(),
+                args: vec!["/Q".to_string(), "/K".to_string()],
+                rows: 24,
+                cols: 80,
+            }
+        } else {
+            crate::pty::PtySpawnRequest {
+                name: "ready-shell".to_string(),
+                workdir: Some(".".to_string()),
+                command: "sh".to_string(),
+                args: vec![],
+                rows: 24,
+                cols: 80,
+            }
+        }
+    }
+
+    #[test]
+    fn serialize_pty_eof_payload_includes_known_exit_code() {
+        assert_eq!(
+            serialize_pty_eof_payload(Some(1)).as_deref(),
+            Some(r#"{"code":1}"#)
+        );
+        assert_eq!(
+            serialize_pty_eof_payload(Some(0)).as_deref(),
+            Some(r#"{"code":0}"#)
+        );
+    }
+
+    #[test]
+    fn serialize_pty_eof_payload_omits_unknown_exit_code() {
+        assert_eq!(serialize_pty_eof_payload(None), None);
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn stream_pty_output_emits_ready_event_before_terminal_output() {
+        let state = AppState::new_runtime(0, "pty-ready-host".to_string(), None, None, false, None);
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+
+        let sse = stream_pty_output(Path(pty.id.clone()), State(state.clone()))
+            .await
+            .expect("pty stream should open");
+        let response = sse.into_response();
+        let mut stream = response.into_body().into_data_stream();
+        let first_chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("ready chunk should arrive promptly")
+            .expect("body should yield first chunk")
+            .expect("first chunk should be ok");
+        let first_text =
+            String::from_utf8(first_chunk.to_vec()).expect("first chunk should be utf-8");
+
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
+
+        assert!(
+            first_text.contains("event: ready"),
+            "expected ready event first, got: {first_text}"
+        );
+    }
 }

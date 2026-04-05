@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::timeblock::{
-    ActiveBlockData, BlockTaskAssociationEvent, BreakWindowKind, PlannedSegmentData,
-    PlannedSegmentKind, RhythmPresetData, SchedulingWindowData,
+    ActiveBlockData, BreakWindowKind, PlannedSegmentData, PlannedSegmentKind, RhythmPresetData,
+    SchedulingWindowData,
 };
 
 #[derive(Debug, Deserialize)]
@@ -372,7 +372,8 @@ async fn get_today_planner(
     State(state): State<AppState>,
     Query(query): Query<TodayPlannerQuery>,
 ) -> Result<Json<TodayPlannerSnapshotResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let snapshot = build_snapshot_response(&state, scope_key_from_today_query(&query), &query.date)?;
+    let snapshot =
+        build_snapshot_response(&state, scope_key_from_today_query(&query), &query.date)?;
     Ok(Json(snapshot))
 }
 
@@ -385,7 +386,9 @@ async fn create_window(
         return Err(bad_request("date is required"));
     }
     if payload.planned_end_at <= payload.planned_start_at {
-        return Err(bad_request("plannedEndAt must be greater than plannedStartAt"));
+        return Err(bad_request(
+            "plannedEndAt must be greater than plannedStartAt",
+        ));
     }
     let preset = resolve_rhythm_preset(&payload.rhythm_preset_key)
         .ok_or_else(|| bad_request("unknown rhythmPresetKey"))?;
@@ -535,7 +538,9 @@ async fn start_segment(
         },
     )
     .map_err(|(status, _)| {
-        let err: ErrorResponse = ErrorResponse { error: "failed to create timeblock via newBlock".into() };
+        let err: ErrorResponse = ErrorResponse {
+            error: "failed to create timeblock via newBlock".into(),
+        };
         (status, Json(err))
     })?;
 
@@ -571,7 +576,9 @@ async fn reflow_window(
         .ok_or_else(|| not_found("anchor segment not found"))?;
     let anchor = window.segments[anchor_index].clone();
     if payload.actual_end_at <= anchor.planned_start_at {
-        return Err(bad_request("actualEndAt must be after anchor segment start"));
+        return Err(bad_request(
+            "actualEndAt must be after anchor segment start",
+        ));
     }
 
     let delta = payload.actual_end_at as i128 - anchor.planned_end_at as i128;

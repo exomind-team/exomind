@@ -82,6 +82,16 @@
 4. 禁止把所有页面都强行套进 `PageShell`；`GoalsPage`、`AgentsPage` 主拓扑、overlay（悬浮窗 / 浮层）属于特殊表面，优先治理基础设施，不先重做骨架。
 5. 默认优先复用 Settings 已验证过的统一层：token、row、section、dialog/drawer 规则，再考虑页面级特化。
 
+## Tauri MCP 经验库
+
+1. Windows 下凡是使用 Tauri MCP 调试外心桌面应用，优先查阅并持续更新 [docs/development/tauri-mcp-windows-playbook.md](docs/development/tauri-mcp-windows-playbook.md)。
+2. 这份文档是持续追加的经验库，不新建零散排查总结；每达成一个阶段性目标都要补充：
+   - 阶段目标
+   - 观察结果
+   - 结论
+   - 可复用的操作套路
+3. `bun run tauri dev` 默认使用 worktree 级实例目录，先确认 `.tmp/tauri-dev-state/<instance>/`，不要直接把 `%APPDATA%/com.exomind.app` 视为当前实例真相。
+
 ## Multi-Agent 协作最佳实践（多代理协作）
 
 1. 仅在任务可拆成 **2 个及以上相互独立子问题** 时启用 multi-agent（多代理）；共享同一文件或强顺序依赖的问题优先单线程处理。

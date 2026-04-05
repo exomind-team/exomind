@@ -2,10 +2,10 @@ use chrono::{DateTime, Utc};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -172,6 +172,11 @@ struct PtyInstance {
     output_tx: broadcast::Sender<PtyOutputMsg>,
 }
 
+struct TranscriptWriter {
+    path: PathBuf,
+    file: File,
+}
+
 impl Drop for PtyInstance {
     fn drop(&mut self) {
         // Kill the child process when the instance is dropped to prevent orphans.
@@ -187,20 +192,43 @@ pub struct PtyManager {
     instances: Arc<Mutex<HashMap<String, PtyInstance>>>,
     signal_pool: Arc<SignalPool>,
     host_id: String,
+    transcript_dir: Option<PathBuf>,
 }
 
 impl PtyManager {
     pub fn new(signal_pool: Arc<SignalPool>, host_id: String) -> Self {
+        Self::new_with_transcript_dir(signal_pool, host_id, None)
+    }
+
+    pub fn new_with_transcript_dir(
+        signal_pool: Arc<SignalPool>,
+        host_id: String,
+        transcript_dir: Option<PathBuf>,
+    ) -> Self {
+        let transcript_dir = transcript_dir.and_then(|path| match std::fs::create_dir_all(&path) {
+            Ok(()) => Some(path),
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "failed to create PTY transcript directory"
+                );
+                None
+            }
+        });
+
         Self {
             instances: Arc::new(Mutex::new(HashMap::new())),
             signal_pool,
             host_id,
+            transcript_dir,
         }
     }
 
     /// Spawn a new PTY process.
     pub async fn spawn(&self, request: PtySpawnRequest) -> Result<PtyAgentInfo, PtyError> {
         let pty_system = native_pty_system();
+        let resolved_workdir = resolve_workdir_path(request.workdir.as_deref())?;
 
         let size = PtySize {
             rows: request.rows,
@@ -229,9 +257,7 @@ impl PtyManager {
         {
             cmd.arg("--dangerously-skip-permissions");
         }
-        if let Some(ref workdir) = request.workdir {
-            cmd.cwd(workdir);
-        }
+        cmd.cwd(&resolved_workdir);
 
         let child = pair
             .slave
@@ -268,7 +294,7 @@ impl PtyManager {
             id: id.clone(),
             name,
             session_id: None,
-            workdir: request.workdir.unwrap_or_else(|| ".".to_string()),
+            workdir: resolved_workdir.to_string_lossy().to_string(),
             command: request.command,
             status: PtyAgentStatus::Running,
             created_at: now.to_rfc3339(),
@@ -277,14 +303,18 @@ impl PtyManager {
         // Create output buffering infrastructure
         let output_buffer = Arc::new(Mutex::new(Vec::new()));
         let (output_tx, _) = broadcast::channel::<PtyOutputMsg>(1024);
+        let transcript_writer = self
+            .transcript_path(&id)
+            .and_then(|path| create_transcript_writer(&id, path));
 
         // Spawn background reader task that reads from PTY and:
         // 1. Appends to the scrollback buffer (capped at MAX_OUTPUT_BUFFER)
         // 2. Broadcasts to all SSE consumers
+        let pty_id = id.clone();
         let buffer_clone = Arc::clone(&output_buffer);
         let tx_clone = output_tx.clone();
         tokio::task::spawn_blocking(move || {
-            Self::reader_loop(reader, buffer_clone, tx_clone);
+            Self::reader_loop(pty_id, reader, buffer_clone, tx_clone, transcript_writer);
         });
 
         let instance = PtyInstance {
@@ -305,9 +335,11 @@ impl PtyManager {
 
     /// Background reader loop — runs on a blocking thread.
     fn reader_loop(
+        pty_id: String,
         mut reader: Box<dyn Read + Send>,
         buffer: Arc<Mutex<Vec<u8>>>,
         tx: broadcast::Sender<PtyOutputMsg>,
+        mut transcript_writer: Option<TranscriptWriter>,
     ) {
         let mut buf = [0u8; 4096];
         loop {
@@ -319,6 +351,20 @@ impl PtyManager {
                 }
                 Ok(n) => {
                     let data = buf[..n].to_vec();
+                    if let Some(writer) = transcript_writer.as_mut()
+                        && let Err(error) = writer
+                            .file
+                            .write_all(&data)
+                            .and_then(|_| writer.file.flush())
+                    {
+                        tracing::warn!(
+                            pty_id = %pty_id,
+                            path = %writer.path.display(),
+                            error = %error,
+                            "failed to persist PTY transcript chunk"
+                        );
+                        transcript_writer = None;
+                    }
                     // Append to scrollback buffer
                     {
                         let mut b = buffer.blocking_lock();
@@ -439,6 +485,18 @@ impl PtyManager {
         Ok((buffer_snapshot, rx))
     }
 
+    pub async fn load_persisted_output(&self, id: &str) -> Result<Option<Vec<u8>>, PtyError> {
+        let Some(path) = self.transcript_path(id) else {
+            return Ok(None);
+        };
+
+        tokio::task::spawn_blocking(move || read_transcript_tail(&path))
+            .await
+            .map_err(|error| PtyError::SpawnFailed {
+                reason: format!("load_persisted_output task failed: {error}"),
+            })?
+    }
+
     /// Resize the PTY terminal.
     pub async fn resize(&self, id: &str, rows: u16, cols: u16) -> Result<(), PtyError> {
         let instances = self.instances.lock().await;
@@ -547,6 +605,12 @@ impl PtyManager {
         // Publish — ignore delivery records for lifecycle signals.
         let _rx = self.signal_pool.subscribe();
         self.signal_pool.publish(event);
+    }
+
+    fn transcript_path(&self, id: &str) -> Option<PathBuf> {
+        self.transcript_dir
+            .as_ref()
+            .map(|dir| dir.join(format!("{id}.log")))
     }
 }
 
@@ -706,6 +770,41 @@ fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
     None
 }
 
+fn create_transcript_writer(pty_id: &str, path: PathBuf) -> Option<TranscriptWriter> {
+    match OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+    {
+        Ok(file) => Some(TranscriptWriter { path, file }),
+        Err(error) => {
+            tracing::warn!(
+                pty_id = %pty_id,
+                path = %path.display(),
+                error = %error,
+                "failed to create PTY transcript file"
+            );
+            None
+        }
+    }
+}
+
+fn read_transcript_tail(path: &Path) -> Result<Option<Vec<u8>>, PtyError> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+
+    let mut file = File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let start = file_len.saturating_sub(MAX_OUTPUT_BUFFER as u64);
+    file.seek(SeekFrom::Start(start))?;
+
+    let mut data = Vec::with_capacity((file_len - start) as usize);
+    file.read_to_end(&mut data)?;
+    Ok(Some(data))
+}
+
 fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
     let name = if request.name.is_empty() {
         let len = 8.min(request.session_id.len());
@@ -732,9 +831,9 @@ fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
             }
             args.push("--resume".to_string());
             args.push(request.session_id.clone());
+            args.extend(request.extra_args.clone());
         }
         PtyAgentType::Codex => {
-            args.push("exec".to_string());
             args.push("resume".to_string());
             if let Some(model) = request
                 .model
@@ -754,10 +853,10 @@ fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
                 args.push("-c".to_string());
                 args.push(format!("model_reasoning_effort=\"{reasoning_effort}\""));
             }
+            args.extend(request.extra_args.clone());
             args.push(request.session_id.clone());
         }
     }
-    args.extend(request.extra_args.clone());
 
     PtySpawnRequest {
         name,
@@ -772,12 +871,44 @@ fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
 fn resolve_spawn_command(command: &str) -> String {
     #[cfg(target_os = "windows")]
     {
+        if command.eq_ignore_ascii_case("claude") {
+            return "claude.cmd".to_string();
+        }
         if command.eq_ignore_ascii_case("codex") {
             return "codex.cmd".to_string();
         }
     }
 
     command.to_string()
+}
+
+fn resolve_workdir_path(workdir: Option<&str>) -> Result<PathBuf, PtyError> {
+    let current_dir = std::env::current_dir()?;
+    resolve_workdir_path_from(workdir, current_dir.as_path())
+}
+
+fn resolve_workdir_path_from(
+    workdir: Option<&str>,
+    current_dir: &Path,
+) -> Result<PathBuf, PtyError> {
+    let configured_agent_workdir = std::env::var("EXOMIND_RT_AGENT_WORKDIR")
+        .ok()
+        .map(PathBuf::from);
+    let default_base_dir =
+        crate::resolve_project_root_from(configured_agent_workdir.as_deref(), Some(current_dir));
+    let trimmed = workdir.map(str::trim).filter(|value| !value.is_empty());
+
+    Ok(match trimmed {
+        Some(value) => {
+            let candidate = PathBuf::from(value);
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                default_base_dir.join(candidate)
+            }
+        }
+        None => default_base_dir,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -865,7 +996,7 @@ mod tests {
     }
 
     #[test]
-    fn build_resume_spawn_request_supports_codex_exec_resume() {
+    fn build_resume_spawn_request_supports_codex_interactive_resume() {
         let req = PtyResumeRequest {
             name: "".to_string(),
             workdir: Some("D:/project/exomind".to_string()),
@@ -883,7 +1014,6 @@ mod tests {
         assert_eq!(
             spawn_request.args,
             vec![
-                "exec".to_string(),
                 "resume".to_string(),
                 "019d0011-aaaa-bbbb-cccc-1234567890ab".to_string(),
             ]
@@ -910,17 +1040,81 @@ mod tests {
         assert_eq!(
             spawn_request.args,
             vec![
-                "exec".to_string(),
                 "resume".to_string(),
                 "-m".to_string(),
                 "gpt-5.4".to_string(),
                 "-c".to_string(),
                 "model_reasoning_effort=\"xhigh\"".to_string(),
-                "019d0011-aaaa-bbbb-cccc-1234567890ab".to_string(),
                 "--search".to_string(),
                 "--full-auto".to_string(),
+                "019d0011-aaaa-bbbb-cccc-1234567890ab".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn resolve_spawn_command_uses_windows_cli_shims_for_builtin_agents() {
+        if cfg!(windows) {
+            assert_eq!(resolve_spawn_command("claude"), "claude.cmd");
+            assert_eq!(resolve_spawn_command("codex"), "codex.cmd");
+            assert_eq!(resolve_spawn_command("CLAUDE"), "claude.cmd");
+        } else {
+            assert_eq!(resolve_spawn_command("claude"), "claude");
+            assert_eq!(resolve_spawn_command("codex"), "codex");
+        }
+    }
+
+    #[test]
+    fn resolve_spawn_command_keeps_custom_commands_unchanged() {
+        assert_eq!(resolve_spawn_command("pwsh"), "pwsh");
+        assert_eq!(resolve_spawn_command("claude.cmd"), "claude.cmd");
+        assert_eq!(
+            resolve_spawn_command("C:/tools/claude.exe"),
+            "C:/tools/claude.exe"
+        );
+    }
+
+    #[test]
+    fn resolve_workdir_path_defaults_to_current_dir() {
+        let resolved = resolve_workdir_path(None).expect("current dir should resolve");
+        assert!(resolved.is_absolute());
+        assert_eq!(
+            resolved,
+            crate::resolve_project_root_from(None, std::env::current_dir().ok().as_deref())
+        );
+    }
+
+    #[test]
+    fn resolve_workdir_path_expands_relative_input_against_current_dir() {
+        let resolved = resolve_workdir_path(Some(".")).expect("relative workdir should resolve");
+        assert!(resolved.is_absolute());
+        assert_eq!(
+            resolved,
+            crate::resolve_project_root_from(None, std::env::current_dir().ok().as_deref())
+        );
+    }
+
+    #[test]
+    fn resolve_workdir_path_defaults_to_workspace_root_when_cwd_has_no_agent_entries() {
+        let workspace_root =
+            crate::workspace_root_from_manifest().expect("workspace root should resolve");
+        let fake_cwd = workspace_root.join("src-tauri");
+
+        let resolved = resolve_workdir_path_from(None, fake_cwd.as_path())
+            .expect("default workdir should resolve from workspace root");
+        assert_eq!(resolved, workspace_root);
+    }
+
+    #[test]
+    fn resolve_workdir_path_expands_relative_input_against_workspace_root_when_cwd_has_no_agent_entries()
+     {
+        let workspace_root =
+            crate::workspace_root_from_manifest().expect("workspace root should resolve");
+        let fake_cwd = workspace_root.join("src-tauri");
+
+        let resolved = resolve_workdir_path_from(Some("."), fake_cwd.as_path())
+            .expect("relative workdir should resolve against workspace root");
+        assert_eq!(resolved, workspace_root);
     }
 
     #[test]

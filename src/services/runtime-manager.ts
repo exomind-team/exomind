@@ -44,6 +44,10 @@ export interface RuntimeManagerOptions {
   now?: () => Date;
 }
 
+export function shouldAutoPollRuntimeHost(host: RuntimeHostRecord): boolean {
+  return !(host.trustState === 'discovered_candidate' && !host.authToken);
+}
+
 export function findPreferredRuntimeHostForAgent(
   snapshots: RuntimeHostSnapshot[],
   agentId: string,
@@ -169,6 +173,16 @@ export class RuntimeManager {
   }
 
   private async buildHostSnapshot(host: RuntimeHostRecord): Promise<RuntimeHostSnapshot> {
+    if (!shouldAutoPollRuntimeHost(host)) {
+      return {
+        host,
+        connectionState: 'error',
+        agents: [],
+        topology: null,
+        error: 'Awaiting verification before protected polling',
+      };
+    }
+
     const topologyStartedAtMs = Date.now();
     const energyRequest = this.runtimeClient.getAllEnergy
       ? this.runtimeClient.getAllEnergy(host).catch(() => ({

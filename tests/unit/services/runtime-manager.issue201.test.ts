@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
-import { RuntimeManager } from '@/services/runtime-manager';
+import { RuntimeManager, shouldAutoPollRuntimeHost } from '@/services/runtime-manager';
 
 const HOST_A: RuntimeHostRecord = {
   id: 'host-a',
@@ -90,6 +90,48 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
     expect(snapshot.agents).toHaveLength(0);
     expect(snapshot.hosts).toHaveLength(1);
     expect(snapshot.hosts[0]?.connectionState).toBe('offline');
+  });
+
+  it('does not auto-poll discovered candidates without auth token（未验证 discovered candidate 不自动轮询受保护接口）', async () => {
+    const discoveredHost: RuntimeHostRecord = {
+      ...HOST_B,
+      trustState: 'discovered_candidate',
+    };
+    const hostService = {
+      listHosts: vi.fn(async () => [discoveredHost]),
+      addHost: vi.fn(),
+      removeHost: vi.fn(),
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(),
+      getTopology: vi.fn(),
+      getAllEnergy: vi.fn(),
+    };
+
+    const manager = new RuntimeManager({ hostService, runtimeClient });
+    const snapshot = await manager.refreshSnapshot();
+
+    expect(runtimeClient.getAgents).not.toHaveBeenCalled();
+    expect(runtimeClient.getTopology).not.toHaveBeenCalled();
+    expect(runtimeClient.getAllEnergy).not.toHaveBeenCalled();
+    expect(snapshot.hosts[0]).toMatchObject({
+      connectionState: 'error',
+      error: 'Awaiting verification before protected polling',
+      agents: [],
+      topology: null,
+    });
+  });
+
+  it('still auto-polls discovered candidates when auth token exists（带 token 的 discovered candidate 仍允许自动轮询）', () => {
+    expect(shouldAutoPollRuntimeHost({
+      ...HOST_B,
+      trustState: 'discovered_candidate',
+      authToken: 'paired-token',
+    })).toBe(true);
+    expect(shouldAutoPollRuntimeHost({
+      ...HOST_B,
+      trustState: 'discovered_candidate',
+    })).toBe(false);
   });
 
   it('parses host:port and forwards to host service（解析 host:port 并调用 hostService）', async () => {

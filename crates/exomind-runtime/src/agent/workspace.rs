@@ -191,12 +191,10 @@ impl AgentWorkspace {
         };
         let new_total = current_usage - existing_size + content.len();
         if new_total > self.max_knowledge_bytes {
-            return Err(io::Error::other(
-                format!(
-                    "knowledge quota exceeded: {new_total} > {} bytes",
-                    self.max_knowledge_bytes
-                ),
-            ));
+            return Err(io::Error::other(format!(
+                "knowledge quota exceeded: {new_total} > {} bytes",
+                self.max_knowledge_bytes
+            )));
         }
 
         fs::write(self.knowledge_dir.join(filename), content)

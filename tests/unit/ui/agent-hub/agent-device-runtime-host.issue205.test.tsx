@@ -77,6 +77,7 @@ vi.mock('@/lib/services', () => ({
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
   findPreferredRuntimeHostForAgent: vi.fn(() => null),
+  shouldAutoPollRuntimeHost: vi.fn(() => true),
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
@@ -371,9 +372,39 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     fireEvent.click(screen.getByTestId('runtime-host-add-button'));
 
     await waitFor(() => {
-      expect(runtimeManagerMocks.addHostFromAddress).toHaveBeenCalledWith('192.168.1.33', 'LAN Runner');
+      expect(runtimeManagerMocks.addHostFromAddress).toHaveBeenCalledWith('192.168.1.33', 'LAN Runner', undefined);
       expect(screen.getAllByText('LAN Runner').length).toBeGreaterThan(0);
       expect(screen.getAllByText(`192.168.1.33:${DEFAULT_EXTERNAL_RUNTIME_PORT}`).length).toBeGreaterThan(0);
+    });
+  });
+
+  it('reuses external runtime auth token when adding matching runtime host（新增同地址主机时复用 external token）', async () => {
+    window.localStorage.setItem('exomind:runtimeTargetMode', 'external');
+    window.localStorage.setItem('exomind:runtimeExternalAddress', '192.168.1.48:9124');
+    window.localStorage.setItem('exomind:runtimeExternalAuthToken', 'external-admin-token');
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-host-panel')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('runtime-host-manage-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-host-manager-sheet')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('runtime-host-name-input'), { target: { value: 'Protected Runtime' } });
+    fireEvent.change(screen.getByTestId('runtime-host-address-input'), { target: { value: '192.168.1.48:9124' } });
+    fireEvent.click(screen.getByTestId('runtime-host-add-button'));
+
+    await waitFor(() => {
+      expect(runtimeManagerMocks.addHostFromAddress).toHaveBeenCalledWith(
+        '192.168.1.48:9124',
+        'Protected Runtime',
+        'external-admin-token',
+      );
     });
   });
 
@@ -390,6 +421,27 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
     fireEvent.click(pairingButton);
     expect(screen.queryByRole('heading', { name: '设备配对' })).not.toBeInTheDocument();
+  });
+
+  it('uses equal-width overview cards when companion card exists（顶部概览多卡片时平分宽度）', async () => {
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+
+    const overviewGrid = await screen.findByTestId('runtime-device-overview-grid');
+    expect(screen.getByTestId('agent-device-overview-card')).toBeInTheDocument();
+    expect(overviewGrid).toHaveClass('lg:grid-cols-2');
+  });
+
+  it('keeps local runtime card full width when no companion card exists（顶部概览单卡片时保持全宽）', async () => {
+    agentHubMocks.getDeviceView.mockResolvedValue([]);
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+
+    const overviewGrid = await screen.findByTestId('runtime-device-overview-grid');
+    expect(screen.queryByTestId('agent-device-overview-card')).not.toBeInTheDocument();
+    expect(screen.getByTestId('runtime-local-status')).toBeInTheDocument();
+    expect(overviewGrid).not.toHaveClass('lg:grid-cols-2');
   });
 
   it('promotes node-first sections and pairing entry in device view（设备页主路径切到节点视角并上浮配对入口）', async () => {
@@ -1287,6 +1339,19 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
   });
 
   it('switches runtime target to external and saves host address（可切换外部 Runtime 并保存地址）', async () => {
+    hosts = [
+      ...hosts,
+      {
+        id: 'runtime-host-remote-protected',
+        name: 'Protected Runtime',
+        host: '10.9.0.8',
+        port: 2999,
+        status: 'unknown',
+        createdAt: '2026-02-27T10:05:00.000Z',
+        updatedAt: '2026-02-27T10:05:00.000Z',
+      },
+    ];
+
     render(<AgentsPage />);
     fireEvent.click(await screen.findByRole('button', { name: '设备' }));
 
@@ -1315,6 +1380,9 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       expect(window.localStorage.getItem('exomind:runtimeExternalAddress')).toBe('10.9.0.8:2999');
       expect(window.localStorage.getItem('exomind:runtimeExternalAuthToken')).toBe('external-admin-token');
       expect(window.localStorage.getItem('exomind:runtimeTargetMode')).toBe('external');
+      expect(runtimeHostServiceMocks.mergeHostMetadata).toHaveBeenCalledWith('runtime-host-remote-protected', {
+        authToken: 'external-admin-token',
+      });
     });
   });
 });

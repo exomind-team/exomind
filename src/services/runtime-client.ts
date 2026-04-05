@@ -12,6 +12,8 @@ import {
   resolveRuntimeHostBaseUrl,
 } from '@/lib/utils/runtime-host-address';
 
+const unauthorizedRuntimeRequestWarnings = new Set<string>();
+
 export type RuntimeClientErrorCode = 'timeout' | 'network' | 'http' | 'invalid_payload';
 
 export interface RuntimeClientError {
@@ -98,6 +100,7 @@ export interface RuntimeAgentConversationChunk {
 }
 
 const DEFAULT_TIMEOUT_MS = 3500;
+const PTY_STOP_TIMEOUT_MS = 10000;
 
 function buildBaseUrl(host: RuntimeHostRecord): string {
   return resolveRuntimeHostBaseUrl(host);
@@ -573,6 +576,7 @@ export class RuntimeClient {
       'POST',
       undefined,
       host.authToken,
+      PTY_STOP_TIMEOUT_MS,
     );
     if (!response.ok) {
       return response;
@@ -885,9 +889,10 @@ export class RuntimeClient {
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     payload?: unknown,
     authToken?: string,
+    timeoutMs: number = this.timeoutMs,
   ): Promise<RuntimeClientResult<unknown>> {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
     try {
       const response = await this.fetchImpl(url, {
@@ -903,6 +908,17 @@ export class RuntimeClient {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          const warningKey = `${method}|${url}|${authToken ? 'with-token' : 'without-token'}`;
+          if (!unauthorizedRuntimeRequestWarnings.has(warningKey)) {
+            unauthorizedRuntimeRequestWarnings.add(warningKey);
+            console.warn('[runtime-client][auth] unauthorized runtime request', {
+              method,
+              url,
+              authTokenPresent: Boolean(authToken),
+            });
+          }
+        }
         return {
           ok: false,
           error: {

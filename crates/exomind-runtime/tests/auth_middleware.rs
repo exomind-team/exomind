@@ -1,6 +1,9 @@
 mod support;
 
-use support::{runtime_base_url, start_test_runtime_with_secret, stop_runtime};
+use support::{
+    runtime_base_url, start_test_runtime_with_secret, start_test_runtime_with_secret_and_lan,
+    stop_runtime,
+};
 
 #[tokio::test]
 async fn auth_with_secret_no_token_returns_401() {
@@ -174,4 +177,49 @@ async fn auth_with_secret_untrusted_origin_still_returns_401() {
     );
 
     stop_runtime(&mut rt, "auth-test-8").await;
+}
+
+#[tokio::test]
+async fn auth_with_secret_allow_lan_without_auth_allows_loopback_without_origin_or_token() {
+    let mut rt =
+        start_test_runtime_with_secret_and_lan("auth-test-9", Some("s3cret".to_string()), true)
+            .await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("{}/topology", runtime_base_url(&rt)))
+        .send()
+        .await
+        .expect("request should send");
+
+    assert_eq!(
+        response.status(),
+        200,
+        "allow_lan_without_auth should trust loopback requests even without Origin"
+    );
+
+    stop_runtime(&mut rt, "auth-test-9").await;
+}
+
+#[tokio::test]
+async fn auth_with_secret_allow_lan_without_auth_ignores_untrusted_origin_on_loopback() {
+    let mut rt =
+        start_test_runtime_with_secret_and_lan("auth-test-10", Some("s3cret".to_string()), true)
+            .await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("{}/topology", runtime_base_url(&rt)))
+        .header("Origin", "https://evil.example")
+        .send()
+        .await
+        .expect("request should send");
+
+    assert_eq!(
+        response.status(),
+        200,
+        "allow_lan_without_auth should trust loopback requests regardless of Origin"
+    );
+
+    stop_runtime(&mut rt, "auth-test-10").await;
 }

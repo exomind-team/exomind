@@ -31,10 +31,7 @@ pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String
         WebviewUrl::App("now-workbench-overlay.html".into()),
     )
     .title("ExoMind Now")
-    .inner_size(
-        NOW_WORKBENCH_OVERLAY_WIDTH,
-        NOW_WORKBENCH_OVERLAY_HEIGHT,
-    )
+    .inner_size(NOW_WORKBENCH_OVERLAY_WIDTH, NOW_WORKBENCH_OVERLAY_HEIGHT)
     .always_on_top(true)
     .decorations(false)
     .shadow(false)
@@ -132,7 +129,9 @@ fn overlay_position_is_visible_on_any_monitor(
         return Ok(false);
     }
 
-    let monitors = app.available_monitors().map_err(|error| error.to_string())?;
+    let monitors = app
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
     if monitors.is_empty() {
         return Ok(true);
     }
@@ -187,7 +186,8 @@ fn now_workbench_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
     ensure_now_workbench_overlay_window(app)?;
     if let Some(window) = app.get_webview_window(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL) {
         let current_position = window.outer_position().map_err(|error| error.to_string())?;
-        if !overlay_position_is_visible_on_any_monitor(app, current_position.x, current_position.y)? {
+        if !overlay_position_is_visible_on_any_monitor(app, current_position.x, current_position.y)?
+        {
             position_now_workbench_overlay_default(app, &window)?;
         }
         window.show().map_err(|error| error.to_string())?;
@@ -343,13 +343,21 @@ mod tests {
 
     #[test]
     fn overlay_rect_intersects_visible_monitor_area_on_multi_screen_layout() {
-        assert!(overlay_rect_intersects_monitor(2500, 120, 392, 470, 1920, 0, 1920, 1080));
-        assert!(overlay_rect_intersects_monitor(-1600, 120, 392, 470, -1920, 0, 1920, 1080));
+        assert!(overlay_rect_intersects_monitor(
+            2500, 120, 392, 470, 1920, 0, 1920, 1080
+        ));
+        assert!(overlay_rect_intersects_monitor(
+            -1600, 120, 392, 470, -1920, 0, 1920, 1080
+        ));
     }
 
     #[test]
     fn overlay_rect_detects_positions_fully_outside_all_monitors() {
-        assert!(!overlay_rect_intersects_monitor(4000, 1200, 392, 470, 0, 0, 1920, 1080));
-        assert!(!overlay_rect_intersects_monitor(-5000, -2000, 392, 470, -1920, 0, 1920, 1080));
+        assert!(!overlay_rect_intersects_monitor(
+            4000, 1200, 392, 470, 0, 0, 1920, 1080
+        ));
+        assert!(!overlay_rect_intersects_monitor(
+            -5000, -2000, 392, 470, -1920, 0, 1920, 1080
+        ));
     }
 }
