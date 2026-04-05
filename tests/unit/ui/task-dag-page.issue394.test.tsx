@@ -4,6 +4,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { TaskDagPage, getNextTaskDagMode } from '@/ui/app/pages/TaskDagPage';
 import type { TaskNode } from '@/lib/types/task';
 import {
+  TASK_DAG_FOCUS_MODE_STORAGE_KEY,
+  TASK_DAG_FOCUSED_SERIES_STORAGE_KEY,
   TASK_DAG_LAYOUT_MODE_STORAGE_KEY,
   TASK_DAG_NODE_SIZING_STORAGE_KEY,
 } from '@/config/task-dag-preferences';
@@ -1994,6 +1996,83 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
         },
       });
     });
+  });
+
+  it('emits focus-hard drag session logs during touch drags in manual layout', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    flowApiMocks.getViewport.mockReturnValue({ x: 0, y: 0, zoom: 1 });
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: 'B',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-c',
+        title: 'C',
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
+      }),
+      makeTask({ id: 'task-x', title: 'X', createdAt: 40, updatedAt: 40 }),
+    ]);
+    window.localStorage.setItem(TASK_DAG_LAYOUT_MODE_STORAGE_KEY, 'manual');
+    window.localStorage.setItem(TASK_DAG_FOCUS_MODE_STORAGE_KEY, 'hard');
+    window.localStorage.setItem(TASK_DAG_FOCUSED_SERIES_STORAGE_KEY, JSON.stringify(['task-b']));
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.pointerDown(screen.getByTestId('task-dag-node-task-b'), {
+      pointerId: 11,
+      pointerType: 'touch',
+      clientX: 120,
+      clientY: 180,
+      isPrimary: true,
+      button: 0,
+    });
+
+    fireEvent.pointerMove(window, {
+      pointerId: 11,
+      pointerType: 'touch',
+      clientX: 156,
+      clientY: 222,
+      isPrimary: true,
+      buttons: 1,
+    });
+
+    fireEvent.pointerUp(window, {
+      pointerId: 11,
+      pointerType: 'touch',
+      clientX: 156,
+      clientY: 222,
+      isPrimary: true,
+    });
+
+    const interactionCalls = warnSpy.mock.calls
+      .filter((call) => call[0] === '[TaskDag][InteractionDebug]')
+      .map((call) => ({ message: call[1], payload: call[2] as Record<string, unknown> | undefined }));
+
+    expect(interactionCalls.some((call) => call.message === 'focus-hard:drag-session-start')).toBe(true);
+    expect(interactionCalls.some((call) => call.message === 'focus-hard:drag-session-end')).toBe(true);
+
+    const startCall = interactionCalls.find((call) => call.message === 'focus-hard:drag-session-start');
+    expect(startCall?.payload).toMatchObject({
+      nodeId: 'task-b',
+      pointerId: 11,
+      focusedSeriesAnchorIds: ['task-b'],
+    });
+    expect(startCall?.payload?.visibleFocusedSeriesNodeIds).toEqual(
+      expect.arrayContaining(['task-a', 'task-b', 'task-c']),
+    );
+
+    warnSpy.mockRestore();
   });
 
   it('persists touch-driven manual positions across sync actions and remounts', async () => {

@@ -22,10 +22,6 @@ import {
 } from '@/config/runtime-config-cache';
 
 describe('runtime target config（Runtime 目标配置）', () => {
-  const expectedWebEmbeddedPort = window.location.port
-    ? Number(window.location.port)
-    : DEFAULT_EMBEDDED_RUNTIME_PORT;
-
   beforeEach(() => {
     window.localStorage.clear();
     __resetRuntimeConfigCacheForTests();
@@ -35,13 +31,13 @@ describe('runtime target config（Runtime 目标配置）', () => {
     delete (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
-  it('defaults to current page port in web mode（Web 模式默认走当前页面端口）', () => {
+  it('defaults to embedded runtime port in web mode（Web 模式默认走内嵌 RT 端口）', () => {
     expect(getRuntimeTargetMode()).toBe('embedded');
     expect(getEmbeddedRuntimeNetworkMode()).toBe('local');
     expect(resolveEmbeddedRuntimeBindHost()).toBe('127.0.0.1');
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
-      port: expectedWebEmbeddedPort,
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
   });
 
