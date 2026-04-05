@@ -1,7 +1,12 @@
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { TaskDagPage, getNextTaskDagMode } from '@/ui/app/pages/TaskDagPage';
+import {
+  TaskDagPage,
+  detectTaskDagFocusHardStateAnomalies,
+  getNextTaskDagMode,
+  summarizeTaskDagFlowNodeDimensions,
+} from '@/ui/app/pages/TaskDagPage';
 import type { TaskNode } from '@/lib/types/task';
 import {
   TASK_DAG_FOCUS_MODE_STORAGE_KEY,
@@ -37,6 +42,7 @@ const flowApiMocks = vi.hoisted(() => ({
   setViewport: vi.fn(),
   getViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 0.12 })),
   getNode: vi.fn(),
+  getNodes: vi.fn(() => []),
   screenToFlowPosition: vi.fn(({ x, y }: { x: number; y: number }) => ({ x, y })),
   lastProps: null as null | Record<string, unknown>,
 }));
@@ -119,6 +125,7 @@ vi.mock('@xyflow/react', () => ({
       setViewport: typeof flowApiMocks.setViewport;
       getViewport: typeof flowApiMocks.getViewport;
       getNode: typeof flowApiMocks.getNode;
+      getNodes: typeof flowApiMocks.getNodes;
       screenToFlowPosition: typeof flowApiMocks.screenToFlowPosition;
     }) => void;
     [key: string]: unknown;
@@ -2073,6 +2080,126 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     );
 
     warnSpy.mockRestore();
+  });
+
+  it('detects focus-series hidden DOM anomaly from state snapshot inputs', () => {
+    const anomalies = detectTaskDagFocusHardStateAnomalies(
+      {
+        focusMode: 'hard',
+        focusedSeriesAnchorIds: ['task-b'],
+        visibleFocusedSeriesNodeIds: ['task-a', 'task-b', 'task-c'],
+        currentFlowNodeIds: ['task-a', 'task-b', 'task-c'],
+        renderedNodeIds: ['task-a', 'task-b', 'task-c'],
+        edgeCount: 2,
+      },
+      {
+        renderedCount: 3,
+        renderedNodeIds: ['task-a', 'task-b', 'task-c'],
+        visibleRenderedCount: 3,
+        visibleRenderedNodeIds: ['task-a', 'task-b', 'task-c'],
+        visibleStyleRenderedCount: 0,
+        visibleStyleRenderedNodeIds: [],
+        hiddenRenderedCount: 3,
+        hiddenRenderedNodeIds: ['task-a', 'task-b', 'task-c'],
+        zeroRectNodeIds: [],
+        edgesDomCount: 0,
+        edgePathCount: 0,
+        viewportTransform: 'translate(0px, 0px) scale(1)',
+        viewportRect: null,
+        wrapperRect: null,
+      },
+    );
+
+    expect(anomalies).toEqual(expect.arrayContaining([
+      'focus-anchor-hidden',
+      'all-rendered-hidden',
+      'edge-dom-zero',
+      'edge-path-zero',
+    ]));
+  });
+
+  it('does not flag healthy hard-focus DOM state as anomalous', () => {
+    const anomalies = detectTaskDagFocusHardStateAnomalies(
+      {
+        focusMode: 'hard',
+        focusedSeriesAnchorIds: ['task-b'],
+        visibleFocusedSeriesNodeIds: ['task-a', 'task-b', 'task-c'],
+        currentFlowNodeIds: ['task-a', 'task-b', 'task-c'],
+        renderedNodeIds: ['task-a', 'task-b', 'task-c'],
+        edgeCount: 2,
+      },
+      {
+        renderedCount: 3,
+        renderedNodeIds: ['task-a', 'task-b', 'task-c'],
+        visibleRenderedCount: 3,
+        visibleRenderedNodeIds: ['task-a', 'task-b', 'task-c'],
+        visibleStyleRenderedCount: 3,
+        visibleStyleRenderedNodeIds: ['task-a', 'task-b', 'task-c'],
+        hiddenRenderedCount: 0,
+        hiddenRenderedNodeIds: [],
+        zeroRectNodeIds: [],
+        edgesDomCount: 2,
+        edgePathCount: 4,
+        viewportTransform: 'translate(0px, 0px) scale(1)',
+        viewportRect: null,
+        wrapperRect: null,
+      },
+    );
+
+    expect(anomalies).toEqual([]);
+  });
+
+  it('summarizes controlled vs instance flow node dimensions for hidden-node debugging', () => {
+    const summary = summarizeTaskDagFlowNodeDimensions(
+      [
+        { id: 'task-a' },
+        { id: 'task-b', width: 160, height: 160 },
+      ],
+      [
+        {
+          id: 'task-a',
+          measured: { width: 160, height: 160 },
+          internals: { handleBounds: { source: [], target: [] } },
+          dragging: true,
+        },
+        {
+          id: 'task-b',
+          width: 160,
+          height: 160,
+          hidden: true,
+          internals: {},
+        },
+      ],
+    );
+
+    expect(summary).toMatchObject({
+      controlledMeasuredCount: 0,
+      controlledSizedCount: 1,
+      instancePresentCount: 2,
+      instanceMeasuredCount: 1,
+      instanceHandleBoundsCount: 1,
+    });
+    expect(summary.nodes).toEqual([
+      expect.objectContaining({
+        id: 'task-a',
+        controlledHasMeasured: false,
+        instancePresent: true,
+        instanceHasMeasured: true,
+        instanceHasHandleBounds: true,
+        instanceDragging: true,
+        instanceHidden: false,
+      }),
+      expect.objectContaining({
+        id: 'task-b',
+        controlledHasMeasured: false,
+        controlledWidth: 160,
+        controlledHeight: 160,
+        instancePresent: true,
+        instanceHasMeasured: false,
+        instanceHasHandleBounds: false,
+        instanceHidden: true,
+      }),
+    ]);
   });
 
   it('persists touch-driven manual positions across sync actions and remounts', async () => {

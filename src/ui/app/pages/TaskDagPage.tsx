@@ -193,12 +193,110 @@ type TaskDagFocusHardDragContext = {
   renderedNodeIds: string[];
   edgeCount: number;
 };
+type TaskDagFocusHardStateAnomalyKind =
+  | 'flow-node-zero'
+  | 'rendered-graph-zero'
+  | 'focus-anchor-render-missing'
+  | 'focus-anchor-dom-missing'
+  | 'focus-anchor-hidden'
+  | 'node-dom-zero'
+  | 'edge-dom-zero'
+  | 'edge-path-zero'
+  | 'all-rendered-hidden';
 type TaskDagFocusHardDragSession = {
   pointerId: number;
   nodeId: string;
   startViewport: { x: number; y: number; zoom: number } | null;
   startFlowNodeIds: string[];
   anomalyKinds: Set<string>;
+};
+type TaskDagRenderedDomSummary = {
+  renderedCount: number;
+  renderedNodeIds: string[];
+  visibleRenderedCount: number;
+  visibleRenderedNodeIds: string[];
+  visibleStyleRenderedCount: number;
+  visibleStyleRenderedNodeIds: string[];
+  hiddenRenderedCount: number;
+  hiddenRenderedNodeIds: string[];
+  zeroRectNodeIds: string[];
+  edgesDomCount: number;
+  edgePathCount: number;
+  viewportTransform: string | null;
+  viewportRect: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null;
+  wrapperRect: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null;
+};
+type TaskDagFlowNodeDimensionDiagnostic = {
+  id: string;
+  controlledHasMeasured: boolean;
+  controlledMeasuredWidth: number | null;
+  controlledMeasuredHeight: number | null;
+  controlledWidth: number | null;
+  controlledHeight: number | null;
+  controlledInitialWidth: number | null;
+  controlledInitialHeight: number | null;
+  instancePresent: boolean;
+  instanceHasMeasured: boolean;
+  instanceMeasuredWidth: number | null;
+  instanceMeasuredHeight: number | null;
+  instanceWidth: number | null;
+  instanceHeight: number | null;
+  instanceInitialWidth: number | null;
+  instanceInitialHeight: number | null;
+  instanceHasHandleBounds: boolean;
+  instanceDragging: boolean;
+  instanceHidden: boolean;
+};
+type TaskDagFlowNodeDimensionSummary = {
+  controlledMeasuredCount: number;
+  controlledSizedCount: number;
+  instancePresentCount: number;
+  instanceMeasuredCount: number;
+  instanceHandleBoundsCount: number;
+  nodes: TaskDagFlowNodeDimensionDiagnostic[];
+};
+type TaskDagCachedFlowNodeDimensions = {
+  measured: { width: number; height: number };
+  width: number | null;
+  height: number | null;
+  initialWidth: number | null;
+  initialHeight: number | null;
+};
+type TaskDagDebugSnapshot = {
+  route: string | null;
+  focusMode: TaskDagFocusMode;
+  focusedSeriesAnchorIds: string[];
+  visibleFocusedSeriesNodeIds: string[];
+  currentFlowNodeIds: string[];
+  renderedGraphNodeIds: string[];
+  renderedGraphEdgeCount: number;
+  flowNodeDimensionSummary: TaskDagFlowNodeDimensionSummary;
+  domSummary: TaskDagRenderedDomSummary;
+  anomalyKinds: TaskDagFocusHardStateAnomalyKind[];
+};
+type TaskDagDebugHistoryEntry = {
+  timestamp: number;
+  snapshot: TaskDagDebugSnapshot;
+};
+type TaskDagDebugWindow = Window & typeof globalThis & {
+  __EXOMIND_TASK_DAG_DEBUG__?: {
+    getSnapshot: () => TaskDagDebugSnapshot;
+    getHistory: () => TaskDagDebugHistoryEntry[];
+    clearHistory: () => void;
+  };
+};
+type TaskDagDebugFlowInstance = ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> & {
+  getInternalNode?: (id: string) => {
+    id: string;
+    measured?: { width?: number; height?: number };
+    width?: number;
+    height?: number;
+    initialWidth?: number;
+    initialHeight?: number;
+    hidden?: boolean;
+    dragging?: boolean;
+    internals?: { handleBounds?: unknown };
+  } | undefined;
 };
 
 const TASK_DAG_EXECUTE_DEBUG_TAG = '[TaskDag][ExecuteDebug]';
@@ -371,18 +469,20 @@ function summarizeFlowViewport(
   };
 }
 
-function summarizeRenderedFlowNodes(): {
-  renderedCount: number;
-  renderedNodeIds: string[];
-  visibleRenderedCount: number;
-  visibleRenderedNodeIds: string[];
-  zeroRectNodeIds: string[];
-  edgesDomCount: number;
-  edgePathCount: number;
-  viewportTransform: string | null;
-  viewportRect: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null;
-  wrapperRect: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null;
-} {
+function isRenderedFlowNodeHiddenByStyle(element: HTMLElement): boolean {
+  if (typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  return (
+    style.display === 'none'
+    || style.visibility === 'hidden'
+    || Number(style.opacity || '1') <= 0.01
+  );
+}
+
+function summarizeRenderedFlowNodes(): TaskDagRenderedDomSummary {
   const summarizeRect = (element: Element | null) => {
     if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
       return null;
@@ -405,6 +505,10 @@ function summarizeRenderedFlowNodes(): {
       renderedNodeIds: [],
       visibleRenderedCount: 0,
       visibleRenderedNodeIds: [],
+      visibleStyleRenderedCount: 0,
+      visibleStyleRenderedNodeIds: [],
+      hiddenRenderedCount: 0,
+      hiddenRenderedNodeIds: [],
       zeroRectNodeIds: [],
       edgesDomCount: 0,
       edgePathCount: 0,
@@ -422,6 +526,8 @@ function summarizeRenderedFlowNodes(): {
 
   const renderedNodeIds: string[] = [];
   const visibleRenderedNodeIds: string[] = [];
+  const visibleStyleRenderedNodeIds: string[] = [];
+  const hiddenRenderedNodeIds: string[] = [];
   const zeroRectNodeIds: string[] = [];
   const edgeElements = Array.from(
     document.querySelectorAll<SVGGElement>('.react-flow__edge'),
@@ -438,6 +544,11 @@ function summarizeRenderedFlowNodes(): {
     }
 
     renderedNodeIds.push(nodeId);
+    if (isRenderedFlowNodeHiddenByStyle(element)) {
+      hiddenRenderedNodeIds.push(nodeId);
+    } else {
+      visibleStyleRenderedNodeIds.push(nodeId);
+    }
     const rect = element.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       zeroRectNodeIds.push(nodeId);
@@ -462,6 +573,10 @@ function summarizeRenderedFlowNodes(): {
     renderedNodeIds,
     visibleRenderedCount: visibleRenderedNodeIds.length,
     visibleRenderedNodeIds,
+    visibleStyleRenderedCount: visibleStyleRenderedNodeIds.length,
+    visibleStyleRenderedNodeIds,
+    hiddenRenderedCount: hiddenRenderedNodeIds.length,
+    hiddenRenderedNodeIds,
     zeroRectNodeIds,
     edgesDomCount: edgeElements.length,
     edgePathCount: edgePathElements.length,
@@ -469,6 +584,157 @@ function summarizeRenderedFlowNodes(): {
     viewportRect: summarizeRect(viewportElement),
     wrapperRect: summarizeRect(container),
   };
+}
+
+function toNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function summarizeTaskDagFlowNodeDimensions(
+  controlledNodes: Array<{
+    id: string;
+    measured?: { width?: number; height?: number };
+    width?: number;
+    height?: number;
+    initialWidth?: number;
+    initialHeight?: number;
+  }>,
+  instanceNodes: Array<{
+    id: string;
+    measured?: { width?: number; height?: number };
+    width?: number;
+    height?: number;
+    initialWidth?: number;
+    initialHeight?: number;
+    hidden?: boolean;
+    dragging?: boolean;
+    internals?: { handleBounds?: unknown };
+  }> | null | undefined,
+): TaskDagFlowNodeDimensionSummary {
+  const instanceNodeById = new Map((instanceNodes ?? []).map((node) => [node.id, node]));
+  const diagnostics = controlledNodes.map((node) => {
+    const instanceNode = instanceNodeById.get(node.id);
+    const controlledMeasuredWidth = toNullableNumber(node.measured?.width);
+    const controlledMeasuredHeight = toNullableNumber(node.measured?.height);
+    const controlledWidth = toNullableNumber(node.width);
+    const controlledHeight = toNullableNumber(node.height);
+    const controlledInitialWidth = toNullableNumber(node.initialWidth);
+    const controlledInitialHeight = toNullableNumber(node.initialHeight);
+    const instanceMeasuredWidth = toNullableNumber(instanceNode?.measured?.width);
+    const instanceMeasuredHeight = toNullableNumber(instanceNode?.measured?.height);
+    const instanceWidth = toNullableNumber(instanceNode?.width);
+    const instanceHeight = toNullableNumber(instanceNode?.height);
+    const instanceInitialWidth = toNullableNumber(instanceNode?.initialWidth);
+    const instanceInitialHeight = toNullableNumber(instanceNode?.initialHeight);
+
+    return {
+      id: node.id,
+      controlledHasMeasured: controlledMeasuredWidth != null && controlledMeasuredHeight != null,
+      controlledMeasuredWidth,
+      controlledMeasuredHeight,
+      controlledWidth,
+      controlledHeight,
+      controlledInitialWidth,
+      controlledInitialHeight,
+      instancePresent: Boolean(instanceNode),
+      instanceHasMeasured: instanceMeasuredWidth != null && instanceMeasuredHeight != null,
+      instanceMeasuredWidth,
+      instanceMeasuredHeight,
+      instanceWidth,
+      instanceHeight,
+      instanceInitialWidth,
+      instanceInitialHeight,
+      instanceHasHandleBounds: instanceNode?.internals?.handleBounds != null,
+      instanceDragging: Boolean(instanceNode?.dragging),
+      instanceHidden: Boolean(instanceNode?.hidden),
+    } satisfies TaskDagFlowNodeDimensionDiagnostic;
+  });
+
+  return {
+    controlledMeasuredCount: diagnostics.filter((node) => node.controlledHasMeasured).length,
+    controlledSizedCount: diagnostics.filter((node) => (
+      node.controlledWidth != null
+      || node.controlledHeight != null
+      || node.controlledInitialWidth != null
+      || node.controlledInitialHeight != null
+    )).length,
+    instancePresentCount: diagnostics.filter((node) => node.instancePresent).length,
+    instanceMeasuredCount: diagnostics.filter((node) => node.instanceHasMeasured).length,
+    instanceHandleBoundsCount: diagnostics.filter((node) => node.instanceHasHandleBounds).length,
+    nodes: diagnostics,
+  };
+}
+
+function resolveTaskDagFlowNodeDimensions(
+  nodeId: string,
+  cachedDimensions: Map<string, TaskDagCachedFlowNodeDimensions>,
+): Pick<TaskDagFlowNode, 'measured' | 'width' | 'height' | 'initialWidth' | 'initialHeight'> {
+  const cached = cachedDimensions.get(nodeId);
+  if (cached) {
+    return {
+      measured: cached.measured,
+      width: cached.width ?? undefined,
+      height: cached.height ?? undefined,
+      initialWidth: cached.initialWidth ?? undefined,
+      initialHeight: cached.initialHeight ?? undefined,
+    };
+  }
+
+  return {
+    measured: {
+      width: TASK_DAG_NODE_WIDTH,
+      height: TASK_DAG_NODE_HEIGHT,
+    },
+    initialWidth: TASK_DAG_NODE_WIDTH,
+    initialHeight: TASK_DAG_NODE_HEIGHT,
+  };
+}
+
+export function detectTaskDagFocusHardStateAnomalies(
+  context: TaskDagFocusHardDragContext,
+  domSummary: TaskDagRenderedDomSummary,
+): TaskDagFocusHardStateAnomalyKind[] {
+  if (context.focusMode !== 'hard') {
+    return [];
+  }
+  if (context.focusedSeriesAnchorIds.length === 0) {
+    return [];
+  }
+  if (context.visibleFocusedSeriesNodeIds.length === 0) {
+    return [];
+  }
+
+  const anomalies: TaskDagFocusHardStateAnomalyKind[] = [];
+
+  if (context.currentFlowNodeIds.length === 0) {
+    anomalies.push('flow-node-zero');
+  }
+  if (context.renderedNodeIds.length === 0) {
+    anomalies.push('rendered-graph-zero');
+  }
+  if (!context.focusedSeriesAnchorIds.some((nodeId) => context.renderedNodeIds.includes(nodeId))) {
+    anomalies.push('focus-anchor-render-missing');
+  }
+  if (domSummary.renderedCount === 0) {
+    anomalies.push('node-dom-zero');
+  }
+  if (!context.focusedSeriesAnchorIds.some((nodeId) => domSummary.renderedNodeIds.includes(nodeId))) {
+    anomalies.push('focus-anchor-dom-missing');
+  }
+  if (context.focusedSeriesAnchorIds.some((nodeId) => domSummary.hiddenRenderedNodeIds.includes(nodeId))) {
+    anomalies.push('focus-anchor-hidden');
+  }
+  if (domSummary.renderedCount > 0 && domSummary.hiddenRenderedCount === domSummary.renderedCount) {
+    anomalies.push('all-rendered-hidden');
+  }
+  if (context.edgeCount > 0 && domSummary.edgesDomCount === 0) {
+    anomalies.push('edge-dom-zero');
+  }
+  if (context.edgeCount > 0 && domSummary.edgePathCount === 0) {
+    anomalies.push('edge-path-zero');
+  }
+
+  return anomalies;
 }
 
 function resolveFocusHardDragAnomalyKind(
@@ -1119,8 +1385,12 @@ export function TaskDagPage() {
   const connectDragQuickCreateRef = useRef<QuickCreateDependencyContext>(null);
   const quickCreateDropPositionRef = useRef<TaskDagDropPosition>(null);
   const flowNodePositionByIdRef = useRef(new Map<string, { x: number; y: number }>());
+  const flowNodeDimensionCacheRef = useRef(new Map<string, TaskDagCachedFlowNodeDimensions>());
   const manualTouchDragRef = useRef<TaskDagManualTouchDragState | null>(null);
   const focusHardDragDebugRef = useRef<TaskDagFocusHardDragSession | null>(null);
+  const focusHardStateAnomalySignatureRef = useRef<string | null>(null);
+  const taskDagDebugHistoryRef = useRef<TaskDagDebugHistoryEntry[]>([]);
+  const taskDagDebugHistorySignatureRef = useRef<string | null>(null);
   const focusHardDragContextRef = useRef<TaskDagFocusHardDragContext>({
     focusMode,
     focusedSeriesAnchorIds: [],
@@ -2048,6 +2318,7 @@ export function TaskDagPage() {
   }, [layoutMode]);
 
   const flowGraph = useMemo(() => {
+    const cachedNodeDimensions = flowNodeDimensionCacheRef.current;
     return {
       nodes: layoutFlowGraph.nodes.map((node) => {
         const task = taskById.get(node.id);
@@ -2065,6 +2336,7 @@ export function TaskDagPage() {
 
         return {
           ...node,
+          ...resolveTaskDagFlowNodeDimensions(node.id, cachedNodeDimensions),
           draggable: layoutMode === 'manual' && !manualTouchNodeDragActive,
           data: {
             ...node.data,
@@ -2130,6 +2402,50 @@ export function TaskDagPage() {
   ]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return () => {};
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      const debugFlowInstance = flowInstanceRef.current as TaskDagDebugFlowInstance | null;
+      if (!debugFlowInstance?.getInternalNode) {
+        return;
+      }
+
+      const nextCache = new Map<string, TaskDagCachedFlowNodeDimensions>();
+      for (const node of flowGraph.nodes) {
+        const internalNode = debugFlowInstance.getInternalNode(node.id);
+        const measuredWidth = toNullableNumber(internalNode?.measured?.width);
+        const measuredHeight = toNullableNumber(internalNode?.measured?.height);
+        if (measuredWidth == null || measuredHeight == null) {
+          const cached = flowNodeDimensionCacheRef.current.get(node.id);
+          if (cached) {
+            nextCache.set(node.id, cached);
+          }
+          continue;
+        }
+
+        nextCache.set(node.id, {
+          measured: {
+            width: measuredWidth,
+            height: measuredHeight,
+          },
+          width: toNullableNumber(internalNode?.width),
+          height: toNullableNumber(internalNode?.height),
+          initialWidth: toNullableNumber(internalNode?.initialWidth),
+          initialHeight: toNullableNumber(internalNode?.initialHeight),
+        });
+      }
+
+      flowNodeDimensionCacheRef.current = nextCache;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [flowGraph.nodes]);
+
+  useEffect(() => {
     flowNodePositionByIdRef.current = new Map(
       flowGraph.nodes.map((node) => [node.id, node.position]),
     );
@@ -2150,8 +2466,121 @@ export function TaskDagPage() {
     flowGraph.nodes,
     renderedVisibleGraph.edges.length,
     renderedVisibleGraph.nodes,
+      visibleFocusedSeriesNodeIds,
+  ]);
+
+  const getTaskDagDebugSnapshot = useCallback((): TaskDagDebugSnapshot => {
+    const context: TaskDagFocusHardDragContext = {
+      focusMode,
+      focusedSeriesAnchorIds: [...focusedSeriesAnchorIds],
+      visibleFocusedSeriesNodeIds: [...visibleFocusedSeriesNodeIds],
+      currentFlowNodeIds: flowGraph.nodes.map((node) => node.id),
+      renderedNodeIds: renderedVisibleGraph.nodes.map((node) => node.id),
+      edgeCount: renderedVisibleGraph.edges.length,
+    };
+    const debugFlowInstance = flowInstanceRef.current as TaskDagDebugFlowInstance | null;
+    const internalNodes = flowGraph.nodes.flatMap((node) => {
+      const internalNode = debugFlowInstance?.getInternalNode?.(node.id);
+      return internalNode ? [internalNode] : [];
+    });
+    const flowNodeDimensionSummary = summarizeTaskDagFlowNodeDimensions(flowGraph.nodes, internalNodes);
+    const domSummary = summarizeRenderedFlowNodes();
+    return {
+      route: typeof window !== 'undefined' ? window.location?.pathname ?? null : null,
+      focusMode,
+      focusedSeriesAnchorIds: context.focusedSeriesAnchorIds,
+      visibleFocusedSeriesNodeIds: context.visibleFocusedSeriesNodeIds,
+      currentFlowNodeIds: context.currentFlowNodeIds,
+      renderedGraphNodeIds: context.renderedNodeIds,
+      renderedGraphEdgeCount: context.edgeCount,
+      flowNodeDimensionSummary,
+      domSummary,
+      anomalyKinds: detectTaskDagFocusHardStateAnomalies(context, domSummary),
+    };
+  }, [
+    focusMode,
+    focusedSeriesAnchorIds,
+    flowGraph.nodes,
+    renderedVisibleGraph.edges.length,
+    renderedVisibleGraph.nodes,
     visibleFocusedSeriesNodeIds,
   ]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const targetWindow = window as TaskDagDebugWindow;
+    targetWindow.__EXOMIND_TASK_DAG_DEBUG__ = {
+      getSnapshot: getTaskDagDebugSnapshot,
+      getHistory: () => [...taskDagDebugHistoryRef.current],
+      clearHistory: () => {
+        taskDagDebugHistoryRef.current = [];
+        taskDagDebugHistorySignatureRef.current = null;
+      },
+    };
+
+    return () => {
+      if (targetWindow.__EXOMIND_TASK_DAG_DEBUG__?.getSnapshot === getTaskDagDebugSnapshot) {
+        delete targetWindow.__EXOMIND_TASK_DAG_DEBUG__;
+      }
+    };
+  }, [getTaskDagDebugSnapshot]);
+
+  useEffect(() => {
+    const snapshot = getTaskDagDebugSnapshot();
+    const historySignature = JSON.stringify({
+      anomalyKinds: snapshot.anomalyKinds,
+      hiddenRenderedNodeIds: snapshot.domSummary.hiddenRenderedNodeIds,
+      edgesDomCount: snapshot.domSummary.edgesDomCount,
+      edgePathCount: snapshot.domSummary.edgePathCount,
+      viewportTransform: snapshot.domSummary.viewportTransform,
+      controlledMeasuredCount: snapshot.flowNodeDimensionSummary.controlledMeasuredCount,
+      controlledSizedCount: snapshot.flowNodeDimensionSummary.controlledSizedCount,
+      instancePresentCount: snapshot.flowNodeDimensionSummary.instancePresentCount,
+      instanceMeasuredCount: snapshot.flowNodeDimensionSummary.instanceMeasuredCount,
+      instanceHandleBoundsCount: snapshot.flowNodeDimensionSummary.instanceHandleBoundsCount,
+      instanceHiddenNodeIds: snapshot.flowNodeDimensionSummary.nodes
+        .filter((node) => node.instanceHidden)
+        .map((node) => node.id),
+      instanceMissingMeasuredNodeIds: snapshot.flowNodeDimensionSummary.nodes
+        .filter((node) => node.instancePresent && !node.instanceHasMeasured)
+        .map((node) => node.id),
+      instanceMissingHandleBoundsNodeIds: snapshot.flowNodeDimensionSummary.nodes
+        .filter((node) => node.instancePresent && !node.instanceHasHandleBounds)
+        .map((node) => node.id),
+    });
+    if (taskDagDebugHistorySignatureRef.current !== historySignature) {
+      taskDagDebugHistorySignatureRef.current = historySignature;
+      taskDagDebugHistoryRef.current = [
+        ...taskDagDebugHistoryRef.current.slice(-39),
+        {
+          timestamp: Date.now(),
+          snapshot,
+        },
+      ];
+    }
+
+    if (snapshot.anomalyKinds.length === 0) {
+      focusHardStateAnomalySignatureRef.current = null;
+      return;
+    }
+
+    const signature = JSON.stringify({
+      anomalyKinds: snapshot.anomalyKinds,
+      focusedSeriesAnchorIds: snapshot.focusedSeriesAnchorIds,
+      renderedGraphNodeIds: snapshot.renderedGraphNodeIds,
+      hiddenRenderedNodeIds: snapshot.domSummary.hiddenRenderedNodeIds,
+      edgesDomCount: snapshot.domSummary.edgesDomCount,
+      edgePathCount: snapshot.domSummary.edgePathCount,
+    });
+    if (focusHardStateAnomalySignatureRef.current === signature) {
+      return;
+    }
+    focusHardStateAnomalySignatureRef.current = signature;
+    warnTaskDagInteraction('focus-hard:state-anomaly', snapshot);
+  }, [getTaskDagDebugSnapshot]);
 
   const handleLayoutModeChange = useCallback((nextMode: TaskDagLayoutMode) => {
     if (nextMode === layoutMode) {

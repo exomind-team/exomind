@@ -30,6 +30,7 @@ type VerifySummary = {
 };
 
 type CliOptions = {
+  mode: "verify-drag" | "detect-current" | "watch-current" | "history-current" | "clear-history";
   host: string;
   port: number;
   route: string;
@@ -41,9 +42,72 @@ type CliOptions = {
   stepDy: number;
   stepDelayMs: number;
   settleDelayMs: number;
+  holdBeforeMoveMs: number;
+  pointerType: "touch" | "mouse";
+  watchDurationMs: number;
+  watchIntervalMs: number;
+};
+
+type CurrentDebugSnapshot = {
+  route: string | null;
+  focusMode: string;
+  focusedSeriesAnchorIds: string[];
+  visibleFocusedSeriesNodeIds: string[];
+  currentFlowNodeIds: string[];
+  renderedGraphNodeIds: string[];
+  renderedGraphEdgeCount: number;
+  anomalyKinds: string[];
+  flowNodeDimensionSummary: {
+    controlledMeasuredCount: number;
+    controlledSizedCount: number;
+    instancePresentCount: number;
+    instanceMeasuredCount: number;
+    instanceHandleBoundsCount: number;
+    nodes: Array<{
+      id: string;
+      controlledHasMeasured: boolean;
+      controlledMeasuredWidth: number | null;
+      controlledMeasuredHeight: number | null;
+      controlledWidth: number | null;
+      controlledHeight: number | null;
+      controlledInitialWidth: number | null;
+      controlledInitialHeight: number | null;
+      instancePresent: boolean;
+      instanceHasMeasured: boolean;
+      instanceMeasuredWidth: number | null;
+      instanceMeasuredHeight: number | null;
+      instanceWidth: number | null;
+      instanceHeight: number | null;
+      instanceInitialWidth: number | null;
+      instanceInitialHeight: number | null;
+      instanceHasHandleBounds: boolean;
+      instanceDragging: boolean;
+      instanceHidden: boolean;
+    }>;
+  };
+  domSummary: {
+    renderedCount: number;
+    renderedNodeIds: string[];
+    visibleRenderedCount: number;
+    visibleRenderedNodeIds: string[];
+    visibleStyleRenderedCount: number;
+    visibleStyleRenderedNodeIds: string[];
+    hiddenRenderedCount: number;
+    hiddenRenderedNodeIds: string[];
+    edgesDomCount: number;
+    edgePathCount: number;
+    zeroRectNodeIds: string[];
+    viewportTransform: string | null;
+  };
+};
+
+type DebugHistoryEntry = {
+  timestamp: number;
+  snapshot: CurrentDebugSnapshot;
 };
 
 const DEFAULT_OPTIONS: CliOptions = {
+  mode: "verify-drag",
   host: "127.0.0.1",
   port: 9223,
   route: "/tasks/dag",
@@ -55,6 +119,10 @@ const DEFAULT_OPTIONS: CliOptions = {
   stepDy: 4,
   stepDelayMs: 140,
   settleDelayMs: 180,
+  holdBeforeMoveMs: 120,
+  pointerType: "touch",
+  watchDurationMs: 15000,
+  watchIntervalMs: 120,
 };
 
 function parseArgs(argv: string[]): CliOptions {
@@ -68,6 +136,18 @@ function parseArgs(argv: string[]): CliOptions {
     }
 
     switch (current) {
+      case "--mode":
+        if (
+          next === "detect-current"
+          || next === "verify-drag"
+          || next === "watch-current"
+          || next === "history-current"
+          || next === "clear-history"
+        ) {
+          options.mode = next;
+          index += 1;
+        }
+        break;
       case "--host":
         if (next) {
           options.host = next;
@@ -131,6 +211,30 @@ function parseArgs(argv: string[]): CliOptions {
       case "--settle-delay-ms":
         if (next) {
           options.settleDelayMs = Number(next);
+          index += 1;
+        }
+        break;
+      case "--hold-before-move-ms":
+        if (next) {
+          options.holdBeforeMoveMs = Number(next);
+          index += 1;
+        }
+        break;
+      case "--pointer-type":
+        if (next === "touch" || next === "mouse") {
+          options.pointerType = next;
+          index += 1;
+        }
+        break;
+      case "--watch-duration-ms":
+        if (next) {
+          options.watchDurationMs = Number(next);
+          index += 1;
+        }
+        break;
+      case "--watch-interval-ms":
+        if (next) {
+          options.watchIntervalMs = Number(next);
           index += 1;
         }
         break;
@@ -224,8 +328,11 @@ function assertVerification(summary: VerifySummary): void {
     throw new Error("Touch-capable environment was not detected");
   }
 
-  if (!summary.logs.some((line) => line.includes("manual-layout:touch-pointerdown"))) {
-    throw new Error("Touch pointerdown path was not triggered");
+  if (
+    !summary.logs.some((line) => line.includes("manual-layout:touch-pointerdown"))
+    && !summary.logs.some((line) => line.includes("manual-layout:drag-start"))
+  ) {
+    throw new Error("Neither touch nor mouse drag path was triggered");
   }
 
   if (!summary.logs.some((line) => line.includes("focus-hard:drag-session-start"))) {
@@ -259,12 +366,198 @@ function assertVerification(summary: VerifySummary): void {
   }
 }
 
+async function readCurrentDebugSnapshot(
+  client: BridgeClient,
+  options: CliOptions,
+): Promise<CurrentDebugSnapshot | null> {
+  const response = await client.request<CurrentDebugSnapshot | null>("execute_js", {
+    windowLabel: options.windowLabel,
+    script: `(() => (
+      window.__EXOMIND_TASK_DAG_DEBUG__?.getSnapshot?.() ?? null
+    ))()`,
+  });
+
+  return response.data ?? null;
+}
+
+async function readCurrentDebugHistory(
+  client: BridgeClient,
+  options: CliOptions,
+): Promise<DebugHistoryEntry[]> {
+  const response = await client.request<DebugHistoryEntry[] | null>("execute_js", {
+    windowLabel: options.windowLabel,
+    script: `(() => (
+      window.__EXOMIND_TASK_DAG_DEBUG__?.getHistory?.() ?? []
+    ))()`,
+  });
+
+  return response.data ?? [];
+}
+
+async function clearCurrentDebugHistory(
+  client: BridgeClient,
+  options: CliOptions,
+): Promise<void> {
+  await client.request("execute_js", {
+    windowLabel: options.windowLabel,
+    script: `(() => {
+      window.__EXOMIND_TASK_DAG_DEBUG__?.clearHistory?.();
+      return { ok: true };
+    })()`,
+  });
+}
+
+function assertCurrentSnapshot(snapshot: CurrentDebugSnapshot | null): asserts snapshot is CurrentDebugSnapshot {
+  if (!snapshot) {
+    throw new Error("Task DAG debug snapshot is unavailable in the current desktop page");
+  }
+
+  if (snapshot.route !== "/tasks/dag") {
+    throw new Error(`Current page is not /tasks/dag: ${snapshot.route ?? "unknown"}`);
+  }
+}
+
+type WatchSample = {
+  elapsedMs: number;
+  anomalyKinds: string[];
+  hiddenRenderedCount: number;
+  hiddenRenderedNodeIds: string[];
+  edgesDomCount: number;
+  edgePathCount: number;
+  controlledMeasuredCount: number;
+  controlledSizedCount: number;
+  instancePresentCount: number;
+  instanceMeasuredCount: number;
+  instanceHandleBoundsCount: number;
+  instanceHiddenNodeIds: string[];
+  instanceMissingMeasuredNodeIds: string[];
+  instanceMissingHandleBoundsNodeIds: string[];
+};
+
+function buildWatchSample(snapshot: CurrentDebugSnapshot, elapsedMs: number): WatchSample {
+  return {
+    elapsedMs,
+    anomalyKinds: snapshot.anomalyKinds,
+    hiddenRenderedCount: snapshot.domSummary.hiddenRenderedCount,
+    hiddenRenderedNodeIds: snapshot.domSummary.hiddenRenderedNodeIds,
+    edgesDomCount: snapshot.domSummary.edgesDomCount,
+    edgePathCount: snapshot.domSummary.edgePathCount,
+    controlledMeasuredCount: snapshot.flowNodeDimensionSummary.controlledMeasuredCount,
+    controlledSizedCount: snapshot.flowNodeDimensionSummary.controlledSizedCount,
+    instancePresentCount: snapshot.flowNodeDimensionSummary.instancePresentCount,
+    instanceMeasuredCount: snapshot.flowNodeDimensionSummary.instanceMeasuredCount,
+    instanceHandleBoundsCount: snapshot.flowNodeDimensionSummary.instanceHandleBoundsCount,
+    instanceHiddenNodeIds: snapshot.flowNodeDimensionSummary.nodes
+      .filter((node) => node.instanceHidden)
+      .map((node) => node.id),
+    instanceMissingMeasuredNodeIds: snapshot.flowNodeDimensionSummary.nodes
+      .filter((node) => node.instancePresent && !node.instanceHasMeasured)
+      .map((node) => node.id),
+    instanceMissingHandleBoundsNodeIds: snapshot.flowNodeDimensionSummary.nodes
+      .filter((node) => node.instancePresent && !node.instanceHasHandleBounds)
+      .map((node) => node.id),
+  };
+}
+
+function getWatchSignature(sample: WatchSample): string {
+  return JSON.stringify({
+    anomalyKinds: sample.anomalyKinds,
+    hiddenRenderedNodeIds: sample.hiddenRenderedNodeIds,
+    edgesDomCount: sample.edgesDomCount,
+    edgePathCount: sample.edgePathCount,
+    instanceHiddenNodeIds: sample.instanceHiddenNodeIds,
+    instanceMissingMeasuredNodeIds: sample.instanceMissingMeasuredNodeIds,
+    instanceMissingHandleBoundsNodeIds: sample.instanceMissingHandleBoundsNodeIds,
+  });
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const client = new BridgeClient(`ws://${options.host}:${options.port}`);
 
   try {
     await client.ready();
+
+    if (options.mode === "detect-current") {
+      const snapshot = await readCurrentDebugSnapshot(client, options);
+      assertCurrentSnapshot(snapshot);
+      const detected = snapshot.anomalyKinds.length > 0;
+      console.log(JSON.stringify({
+        ok: !detected,
+        detected,
+        bridgeUrl: `ws://${options.host}:${options.port}`,
+        snapshot,
+      }, null, 2));
+      if (detected) {
+        process.exitCode = 2;
+      }
+      return;
+    }
+
+    if (options.mode === "watch-current") {
+      const startedAt = Date.now();
+      const samples: WatchSample[] = [];
+      let lastSignature: string | null = null;
+      let detected = false;
+
+      while (Date.now() - startedAt <= options.watchDurationMs) {
+        const snapshot = await readCurrentDebugSnapshot(client, options);
+        assertCurrentSnapshot(snapshot);
+        const sample = buildWatchSample(snapshot, Date.now() - startedAt);
+        const signature = getWatchSignature(sample);
+
+        if (signature !== lastSignature) {
+          samples.push(sample);
+          lastSignature = signature;
+        }
+        if (sample.anomalyKinds.length > 0) {
+          detected = true;
+        }
+
+        await Bun.sleep(options.watchIntervalMs);
+      }
+
+      const firstAnomalousIndex = samples.findIndex((sample) => sample.anomalyKinds.length > 0);
+      const lastHealthySample = firstAnomalousIndex > 0 ? samples[firstAnomalousIndex - 1] : null;
+      const firstAnomalousSample = firstAnomalousIndex >= 0 ? samples[firstAnomalousIndex] : null;
+
+      console.log(JSON.stringify({
+        ok: !detected,
+        detected,
+        bridgeUrl: `ws://${options.host}:${options.port}`,
+        watchDurationMs: options.watchDurationMs,
+        watchIntervalMs: options.watchIntervalMs,
+        sampleCount: samples.length,
+        lastHealthySample,
+        firstAnomalousSample,
+        samples,
+      }, null, 2));
+      if (detected) {
+        process.exitCode = 2;
+      }
+      return;
+    }
+
+    if (options.mode === "history-current") {
+      const entries = await readCurrentDebugHistory(client, options);
+      console.log(JSON.stringify({
+        ok: true,
+        bridgeUrl: `ws://${options.host}:${options.port}`,
+        entryCount: entries.length,
+        entries,
+      }, null, 2));
+      return;
+    }
+
+    if (options.mode === "clear-history") {
+      await clearCurrentDebugHistory(client, options);
+      console.log(JSON.stringify({
+        ok: true,
+        bridgeUrl: `ws://${options.host}:${options.port}`,
+        cleared: true,
+      }, null, 2));
+      return;
+    }
 
     await client.request("execute_js", {
       windowLabel: options.windowLabel,
@@ -329,10 +622,17 @@ async function main(): Promise<void> {
 
     await Bun.sleep(1500);
 
-    const verification = await client.request<VerifySummary>("execute_js", {
+    const sessionKey = "__EXOMIND_TASK_DAG_VERIFY_DRAG__";
+    const pointerTypeLiteral = JSON.stringify(options.pointerType);
+    const dragStart = await client.request<{
+      anchorId: string;
+      anchorText: string | null;
+      startX: number;
+      startY: number;
+      maxTouchPoints: number;
+    }>("execute_js", {
       windowLabel: options.windowLabel,
       script: `(() => {
-        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const anchorId = ${JSON.stringify(resolvedAnchorId)};
         const logs = [];
         const snapshots = [];
@@ -368,80 +668,258 @@ async function main(): Promise<void> {
           return { wrapper, rect };
         };
 
-        const makeEvent = (type, x, y) => new PointerEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          pointerId: 77,
-          pointerType: 'touch',
-          isPrimary: true,
-          clientX: x,
-          clientY: y,
-          pageX: x,
-          pageY: y,
-          screenX: x,
-          screenY: y,
-          button: 0,
-          buttons: type === 'pointerup' ? 0 : 1,
-          pressure: type === 'pointerup' ? 0 : 0.5,
-          width: 24,
-          height: 24,
-        });
-
-        return (async () => {
-          const before = takeSnapshot('before');
-          if (!before.wrapper || !before.rect) {
-            throw new Error('Focused anchor node not found before drag');
+        const dispatchDragEvent = (phase, dispatchTarget, x, y) => {
+          if (${pointerTypeLiteral} === 'mouse') {
+            const mouseType = phase === 'down' ? 'mousedown' : phase === 'move' ? 'mousemove' : 'mouseup';
+            dispatchTarget.dispatchEvent(new MouseEvent(mouseType, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              clientX: x,
+              clientY: y,
+              pageX: x,
+              pageY: y,
+              screenX: x,
+              screenY: y,
+              button: 0,
+              buttons: phase === 'up' ? 0 : 1,
+            }));
+            return;
           }
 
-          const target = document.querySelector('[data-testid="task-dag-node-' + anchorId + '"]') || before.wrapper;
-          const startX = before.rect.x + before.rect.width / 2;
-          const startY = before.rect.y + before.rect.height / 2;
+          const pointerTypeName = phase === 'down' ? 'pointerdown' : phase === 'move' ? 'pointermove' : 'pointerup';
+          dispatchTarget.dispatchEvent(new PointerEvent(pointerTypeName, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            pointerId: 77,
+            pointerType: ${pointerTypeLiteral},
+            isPrimary: true,
+            clientX: x,
+            clientY: y,
+            pageX: x,
+            pageY: y,
+            screenX: x,
+            screenY: y,
+            button: 0,
+            buttons: phase === 'up' ? 0 : 1,
+            pressure: phase === 'up' ? 0 : 0.5,
+            width: 24,
+            height: 24,
+          }));
+        };
 
-          target.dispatchEvent(makeEvent('pointerdown', startX, startY));
-          takeSnapshot('after-pointerdown');
-          await wait(120);
-
-          for (let step = 1; step <= ${options.moveSteps}; step += 1) {
-            const moveX = startX + step * ${options.stepDx};
-            const moveY = startY + step * ${options.stepDy};
-            window.dispatchEvent(makeEvent('pointermove', moveX, moveY));
-            takeSnapshot('move-' + step);
-            await wait(${options.stepDelayMs});
-          }
-
-          window.dispatchEvent(
-            makeEvent(
-              'pointerup',
-              startX + ${options.moveSteps} * ${options.stepDx},
-              startY + ${options.moveSteps} * ${options.stepDy},
-            ),
-          );
-          await wait(${options.settleDelayMs});
-          takeSnapshot('after-pointerup');
-
-          const manualLayoutRaw = localStorage.getItem('exomind:dag-manual-layout');
-          let manualLayout = null;
-          try {
-            manualLayout = manualLayoutRaw ? JSON.parse(manualLayoutRaw) : null;
-          } catch {
-            manualLayout = manualLayoutRaw;
-          }
-
+        const before = takeSnapshot('before');
+        if (!before.wrapper || !before.rect) {
           console.warn = originalWarn;
-          return {
-            route: location.pathname,
-            anchorId,
-            anchorText: target.textContent?.trim() || null,
-            maxTouchPoints: navigator.maxTouchPoints,
-            logs: logs.filter((line) => line.includes('[TaskDag][InteractionDebug]')).slice(-50),
-            snapshots,
-            manualLayout,
+          throw new Error('Focused anchor node not found before drag');
+        }
+
+        const target = ${pointerTypeLiteral} === 'mouse'
+          ? before.wrapper
+          : (document.querySelector('[data-testid="task-dag-node-' + anchorId + '"]') || before.wrapper);
+        const startX = before.rect.x + before.rect.width / 2;
+        const startY = before.rect.y + before.rect.height / 2;
+        dispatchDragEvent('down', target, startX, startY);
+        takeSnapshot('after-pointerdown');
+
+        window.${sessionKey} = {
+          anchorId,
+          anchorText: target.textContent?.trim() || null,
+          startX,
+          startY,
+          logs,
+          snapshots,
+          originalWarn,
+        };
+
+        return {
+          anchorId,
+          anchorText: target.textContent?.trim() || null,
+          startX,
+          startY,
+          maxTouchPoints: navigator.maxTouchPoints,
+        };
+      })()`,
+    }, 30_000);
+
+    const dragStartData = dragStart.data;
+    if (!dragStartData) {
+      throw new Error("Drag start returned no data");
+    }
+
+    await Bun.sleep(options.holdBeforeMoveMs);
+
+    for (let step = 1; step <= options.moveSteps; step += 1) {
+      await client.request("execute_js", {
+        windowLabel: options.windowLabel,
+        script: `(() => {
+          const state = window.${sessionKey};
+          if (!state) {
+            throw new Error('Drag session state is unavailable during move');
+          }
+
+          const dispatchDragEvent = (phase, dispatchTarget, x, y) => {
+            if (${pointerTypeLiteral} === 'mouse') {
+              const mouseType = phase === 'down' ? 'mousedown' : phase === 'move' ? 'mousemove' : 'mouseup';
+              dispatchTarget.dispatchEvent(new MouseEvent(mouseType, {
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+                clientX: x,
+                clientY: y,
+                pageX: x,
+                pageY: y,
+                screenX: x,
+                screenY: y,
+                button: 0,
+                buttons: phase === 'up' ? 0 : 1,
+              }));
+              return;
+            }
+
+            const pointerTypeName = phase === 'down' ? 'pointerdown' : phase === 'move' ? 'pointermove' : 'pointerup';
+            dispatchTarget.dispatchEvent(new PointerEvent(pointerTypeName, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              pointerId: 77,
+              pointerType: ${pointerTypeLiteral},
+              isPrimary: true,
+              clientX: x,
+              clientY: y,
+              pageX: x,
+              pageY: y,
+              screenX: x,
+              screenY: y,
+              button: 0,
+              buttons: phase === 'up' ? 0 : 1,
+              pressure: phase === 'up' ? 0 : 0.5,
+              width: 24,
+              height: 24,
+            }));
           };
-        })().catch((error) => {
-          console.warn = originalWarn;
-          throw error;
+
+          const wrapper = document.querySelector('.react-flow__node[data-id="' + state.anchorId + '"]');
+          const rect = wrapper?.getBoundingClientRect?.();
+          const moveX = state.startX + ${step} * ${options.stepDx};
+          const moveY = state.startY + ${step} * ${options.stepDy};
+
+          dispatchDragEvent('move', window, moveX, moveY);
+          state.snapshots.push({
+            label: 'move-' + ${step},
+            nodeCount: document.querySelectorAll('.react-flow__node').length,
+            edgeCount: document.querySelectorAll('.react-flow__edge').length,
+            edgePathCount: document.querySelectorAll('.react-flow__edge path').length,
+            focusedAnchorBadge: Boolean(document.querySelector('[data-testid="task-dag-focus-anchor-badge-' + state.anchorId + '"]')),
+            anchorRect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
+          });
+          return { ok: true };
+        })()`,
+      }, 30_000);
+      await Bun.sleep(options.stepDelayMs);
+    }
+
+    await client.request("execute_js", {
+      windowLabel: options.windowLabel,
+      script: `(() => {
+        const state = window.${sessionKey};
+        if (!state) {
+          throw new Error('Drag session state is unavailable during pointerup');
+        }
+
+        const dispatchDragEvent = (phase, dispatchTarget, x, y) => {
+          if (${pointerTypeLiteral} === 'mouse') {
+            const mouseType = phase === 'down' ? 'mousedown' : phase === 'move' ? 'mousemove' : 'mouseup';
+            dispatchTarget.dispatchEvent(new MouseEvent(mouseType, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              clientX: x,
+              clientY: y,
+              pageX: x,
+              pageY: y,
+              screenX: x,
+              screenY: y,
+              button: 0,
+              buttons: phase === 'up' ? 0 : 1,
+            }));
+            return;
+          }
+
+          const pointerTypeName = phase === 'down' ? 'pointerdown' : phase === 'move' ? 'pointermove' : 'pointerup';
+          dispatchTarget.dispatchEvent(new PointerEvent(pointerTypeName, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            pointerId: 77,
+            pointerType: ${pointerTypeLiteral},
+            isPrimary: true,
+            clientX: x,
+            clientY: y,
+            pageX: x,
+            pageY: y,
+            screenX: x,
+            screenY: y,
+            button: 0,
+            buttons: phase === 'up' ? 0 : 1,
+            pressure: phase === 'up' ? 0 : 0.5,
+            width: 24,
+            height: 24,
+          }));
+        };
+
+        dispatchDragEvent(
+          'up',
+          window,
+          state.startX + ${options.moveSteps} * ${options.stepDx},
+          state.startY + ${options.moveSteps} * ${options.stepDy},
+        );
+        return { ok: true };
+      })()`,
+    }, 30_000);
+
+    await Bun.sleep(options.settleDelayMs);
+
+    const verification = await client.request<VerifySummary>("execute_js", {
+      windowLabel: options.windowLabel,
+      script: `(() => {
+        const state = window.${sessionKey};
+        if (!state) {
+          throw new Error('Drag session state is unavailable during collection');
+        }
+
+        const wrapper = document.querySelector('.react-flow__node[data-id="' + state.anchorId + '"]');
+        const rect = wrapper?.getBoundingClientRect?.();
+        state.snapshots.push({
+          label: 'after-pointerup',
+          nodeCount: document.querySelectorAll('.react-flow__node').length,
+          edgeCount: document.querySelectorAll('.react-flow__edge').length,
+          edgePathCount: document.querySelectorAll('.react-flow__edge path').length,
+          focusedAnchorBadge: Boolean(document.querySelector('[data-testid="task-dag-focus-anchor-badge-' + state.anchorId + '"]')),
+          anchorRect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
         });
+
+        const manualLayoutRaw = localStorage.getItem('exomind:dag-manual-layout');
+        let manualLayout = null;
+        try {
+          manualLayout = manualLayoutRaw ? JSON.parse(manualLayoutRaw) : null;
+        } catch {
+          manualLayout = manualLayoutRaw;
+        }
+
+        console.warn = state.originalWarn;
+        delete window.${sessionKey};
+
+        return {
+          route: location.pathname,
+          anchorId: state.anchorId,
+          anchorText: state.anchorText,
+          maxTouchPoints: navigator.maxTouchPoints,
+          logs: state.logs.filter((line) => line.includes('[TaskDag][InteractionDebug]')).slice(-50),
+          snapshots: state.snapshots,
+          manualLayout,
+        };
       })()`,
     }, 30_000);
 
