@@ -2,6 +2,8 @@
 
 > 持续更新。用于沉淀在 Windows 环境下，使用 Tauri MCP 调试 ExoMind 外心桌面应用的实践经验、坑点与验证套路。
 
+> 本文中的实例名、端口、窗口标题、route、SQLite 路径、报告路径、session/anchor id 等，除非明确写成“通用规则”，否则都只表示对应阶段的现场样例，复用时必须替换为当前实例真值。
+
 ## 目的
 
 - 为后续 Agent 提供可复用的 Tauri MCP 调试路径，而不是每次从零摸索。
@@ -1495,83 +1497,191 @@
 5. 如果章程通过、官方 MCP 抽查也通过，就不要继续怀疑“还有隐藏冲突”：
    - 这时应把问题切换到新的功能需求或新的现场故障
 
-### Troubleshooting：Tauri MCP 断线重连、保活与 RT 重启小步验证（2026-04-05）
+### 跨阶段总则：Windows 下 Tauri MCP 桌面调试（2026-04-05 收敛）
+
+#### 适用范围
+
+- 这一节只收敛跨阶段反复成立的方法论。
+- 后续阶段补记默认不再重复这些共性，只补各阶段新增观察、新增结论和新增坑点。
+
+#### 已稳定成立的共通知识
+
+- `driver_session connected=true` 只说明桥接层已连，不说明窗口、DOM、JS、IPC、日志读取都稳定可用。
+- 实例识别必须同时看“当前窗口真相”和“当前 dev 实例目录”：
+  - 先看主窗口标题和 URL
+  - 再看 `.tmp/tauri-dev-state/<instance>/...`
+  - `%APPDATA%/com.exomind.app` 只当 legacy/shared 参考，不默认视为当前 `tauri dev` 实例
+- 官方 Tauri MCP 与 raw bridge 应按角色分工，不要在文档里把它们写成绝对二选一：
+  - 官方 Tauri MCP 更适合窗口、导航、DOM、日志、短 JS 读取
+  - raw bridge 更适合作为 fallback，或承载现有章程/定制 bridge 脚本
+- 桌面验收里的长脚本要拆小：
+  - `execute_js`、stop/start/poll、状态读取不要塞进一个大调用
+  - 优先拆成多个 1-2 秒内可返回的短调用
+- 焦点相关交互要先区分“驱动限制”和“产品失效”：
+  - `document.hasFocus() = false`
+  - `navigator.clipboard.writeText(...)` / 键盘输入失败
+  - 这类现象优先解释为前台焦点限制，不直接判产品坏
+- 对 RT 或 PTY 交互，优先走页面内同路径验证，而不是外部旁路猜测：
+  - 页面内 `fetch('/sessions')`、`fetch('/pty')`
+  - 页面内 `fetch('/pty/:id/input', ...)`
+  - 页面内 `EventSource('/pty/:id/stream')`
+
+#### 固定排障顺序
+
+1. 先确认连的是不是正确实例：
+   - `manage_window list`
+   - 主窗口标题中的 `Web:<port> RT:<port>`
+   - 主窗口 URL
+   - 对应 `runtime-db` / `.tmp/tauri-dev-state/<instance>/...`
+2. 再确认当前 MCP/bridge 是“真可用”而不是“只显示 connected”：
+   - 最短 `execute_js`
+   - `runtime_service_status`
+   - 一次 `/sessions` 或 `/pty`
+3. 再进入具体业务断言：
+   - 终端恢复
+   - PTY 输入
+   - 图编辑器交互
+   - 浮层/面板状态
+4. 如果验证链路里出现超时、空日志、键盘失败，先回到前两步，不直接把责任压到产品逻辑。
+
+#### 当前固定套路
+
+1. RT 重启恢复一律拆成小步骤：
+   - `runtime_service_stop`
+   - 单独读一次 `runtime_service_status`
+   - `runtime_service_start`
+   - 再分别读 `runtime_service_status`、`/sessions`、`/pty`
+2. PTY 输入若受焦点限制，不直接依赖 MCP 键盘/剪贴板：
+   - 先确认 `.xterm` 已渲染
+   - 再走与 `PtyTerminal.sendTextInput()` 同路径的页面内 `fetch`
+   - 以 `204` 与页面回显 marker 作为断言
+3. 如果实例名混用，先停下来重核实例：
+   - 选错实例最容易把“前置态缺失”误判成“恢复逻辑失败”
+4. 若文中出现 `web-1420`、`issue806-g`、`9223`、`9124` 这类值，默认都只是当时现场样例：
+   - 复用前必须替换成当前窗口标题、当前 bridge 端口和当前实例路径
+
+### 阶段补记：#834 任务 DAG 交互 bug 与沉浸面板验收（2026-04-05 ~ 2026-04-06）
 
 #### 阶段目标
 
-- 让后续 Agent 在 Windows 下遇到 Tauri MCP 间歇失灵、脚本超时、实例名选错时，可以更快回到可操作状态。
-- 把本轮 `#806 / #818` 最后一轮门禁测试里沉淀出的“保连接”和“防误判”经验固定下来。
+- 用真实桌面窗口而不是纯 Web / 纯 curl 方式，定位并验证任务 DAG 在强聚焦 + 手动拖拽下的交互回归。
+- 在上面的跨阶段总则之外，补齐“图编辑器交互 bug + 沉浸面板状态验证”的专用套路。
 
-#### 观察结果
+#### 本轮观察结果
 
-- 本轮官方 Tauri MCP 可连：
-  - `driver_session status => connected=true`
-  - `manage_window list` 能看到主窗口：
-    - `ExoMind [feature/issue-806-terminal-lifecycle] [Web:1420 RT:9124]`
-    - `url = http://localhost:1420/agents`
-- 但 `driver_session` 已连，不等于所有操作都同样稳定：
-  - `execute_js`、`dom_snapshot`、`read_logs` 大体可用
-  - 某些长轮询 `execute_js` 会因脚本过长直接超时
-  - `webview_keyboard type`、`navigator.clipboard.writeText(...)` 在当前桌面不处于前台焦点时可能失败
-- 本轮现场明确观察到：
-  - `document.hasFocus() = false`
-  - 即使 `.xterm-helper-textarea` 已聚焦，剪贴板写入仍可能报：
-    - `NotAllowedError: Document is not focused`
-  - 这类失败首先应解释为 MCP 驱动/窗口焦点限制，不要直接解释为产品 PTY 输入失效
-- 本轮还确认了实例名误用会直接导致错误结论：
-  - 章程若用 `--name issue806-g`，会读错 managed instance 上下文
-  - 当前真实验收实例其实是：
-    - `web-1420`
-    - `.tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+- 本轮现场样例是：
+  - 主窗口：`ExoMind [dev] [Web:1420 RT:9124]`
+  - route：`/tasks/dag`
+  - embedded RT：`0.0.0.0:9124`
+  - target mode：`embedded`
+- 当前 DAG 现场的关键不是“桥能不能连”，而是“页面里有没有稳定 detector”：
+  - 这轮最稳定的证据来自页面内 debug hook
+  - bridge 主要负责导航、触发少量交互、回读结果
+- 仅靠 bridge 直接模拟复杂鼠标拖拽并不可靠：
+  - `verify-drag --pointer-type mouse` 在当前环境下无法稳定打进 React Flow / d3-drag 的真实 mouse drag 路径
+  - 但 `touch` 持续拖拽路径可稳定触发页面逻辑
+- 后台监控脚本如果依赖 `Start-Process` + 输出重定向到文件，结果不稳定：
+  - 日志文件可能为空
+  - 页面其实仍在跑，但脚本以为“没有样本”
+- 页面内 history 反而稳定：
+  - `clear-history`
+  - 用户操作
+  - `history-current`
+  这条链路比“后台 watch 写文件”更可信
 
-#### 结论
+#### 本轮收敛出的调试方法论
 
-- 现场排障要分三层判断：
-  - 第一层：`driver_session` / bridge WebSocket 是否已连
-  - 第二层：主窗口 URL 与实例目录是否命中当前真实实例
-  - 第三层：`execute_js`、`runtime_service_status`、`/sessions`、`/pty` 是否真能稳定返回
-- 对 RT 重启恢复的桌面验收，不要把 stop/start/poll 塞进一个大脚本：
-  - 这容易把“产品没问题”误判成“脚本执行超时”
-- 对输入交互验证，也要区分：
-  - “MCP 没拿到前台焦点，键盘/剪贴板受限”
-  - 和
-  - “页面实际的 `PtyTerminal.sendTextInput()` 路径失效”
-- 当前最稳的验收路径是：
-  - 官方 Tauri MCP 做窗口、导航、DOM、日志、实时页面验证
-  - 章程脚本做十条叙事的自动化兜底
+- 遇到桌面前端交互异常时，不要先猜“数据算空了”还是“渲染层丢了”。
+- 先把页面内状态拆成三层并同时暴露出来：
+  - 状态层：当前 graph / focused series / rendered graph ids
+  - DOM 层：节点数、hidden 节点数、edge DOM/path 数、viewport transform
+  - React Flow internal 层：`measured`、`handleBounds`、internal node hidden/dragging
+- 真正的异常判定应在页面里完成，而不是让 bridge 脚本自己猜：
+  - 页面应直接暴露：
+    - `window.__EXOMIND_TASK_DAG_DEBUG__.getSnapshot()`
+    - `getHistory()`
+    - `clearHistory()`
+- 一旦判定标准稳定，就把它变成可机读的 anomaly kinds，而不是只看 console 文本：
+  - 例如：
+    - `focus-anchor-hidden`
+    - `all-rendered-hidden`
+    - `edge-dom-zero`
+    - `edge-path-zero`
 
-#### 可复用操作套路
+#### 本轮关键结论
 
-1. 先确认自己连的是不是对的实例：
-   - 看 `manage_window list`
-   - 看主窗口标题里的 `Web:1420 RT:9124`
-   - 看主窗口 URL 是否真是 `http://localhost:1420/agents`
-   - 再核对章程参数里的 `--name` 与 `runtime-db`
-2. 先确认官方 MCP 是“真可用”而不是“只显示 connected”：
-   - 先跑一个最短 `execute_js`
-   - 再跑一个 `runtime_service_status`
-   - 再读一次 `/sessions` 或 `/pty`
-   - 这三步都过，才进入后续深水区验收
-3. RT 重启恢复固定拆成小步骤：
-   - `runtime_service_stop`
-   - 单独查一次 `runtime_service_status`
-   - `runtime_service_start`
-   - 再分别查：
-     - `runtime_service_status`
-     - `/sessions`
-     - `/pty`
-   - 不要写成长轮询大脚本
-4. 如果长脚本超时，不要立刻怀疑产品：
-   - 先把一个大脚本拆成多个 1-2 秒内可返回的短调用
-   - 用多次短读替代一次大轮询
-5. 如果需要验证 PTY 输入交互，而 MCP 键盘/剪贴板因为焦点限制不稳定：
-   - 先确认右侧或平铺页 `.xterm` 文本确实在渲染
-   - 再用与 `PtyTerminal.sendTextInput()` 相同的页面内 `fetch('/pty/:id/input', { body: JSON.stringify({ data }) })` 路径验证
-   - 验证重点是：
-     - 请求 `204`
-     - 页面 `.xterm` 文本出现 marker
-   - 同时在文档里注明这是“与 UI 同路径的页面内注入”，不是 RT 外部旁路
-6. 如果 `issue806-g` 与 `web-1420` 混用，先停下来重核实例：
-   - 选错实例最容易把“章程前置态缺失”误判成“恢复逻辑失败”
-7. 新一轮十条叙事门禁前，优先复用本轮稳定命令：
-   - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name web-1420 --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+- 这类交互 bug 的根因不一定在上游 graph projection。
+- 本轮真实坏态里，状态层仍然有 3 nodes / 2 edges，但：
+  - DOM 节点被设为 `visibility:hidden`
+  - edge DOM / edge path 清空
+  - React Flow internal node 的 `measured` / `handleBounds` 掉到 0
+- 因此，对图编辑器类桌面 bug，必须把：
+  - “数据没了”
+  - “DOM 没了”
+  - “内部测量退化了”
+  分开看。
+- 另一个单独收敛出的经验是：
+  - 对沉浸模式 / 浮层 / 控制面板一类交互，不要只测 DOM 存在
+  - 要直接验证：
+    - 默认隐藏态
+    - 点击后常驻态
+    - 再次点击隐藏态
+    - 以及按钮 class / `aria-expanded`
+
+#### 当前最值得复用的操作套路
+
+1. 先确认当前桌面实例与目标页面无误：
+   - 主窗口标题
+   - `Web:<port> RT:<port>`
+   - `location.pathname`
+2. 对交互 bug，优先给页面加 debug hook，而不是先写复杂 bridge 自动化：
+   - snapshot
+   - history
+   - detector
+3. 追踪用户手工复现时，优先用：
+   - `clear-history`
+   - 用户真实操作
+   - `history-current`
+   - 不优先依赖后台日志文件
+4. 需要自动验证时，先选“页面里本来就稳定的交互路径”：
+   - 当前 DAG 现场优先 `touch` 持续拖拽
+   - 不要强行把 `mouse` automation 失败直接解释成产品仍有 bug
+5. 判断是否修复成功，至少同时看：
+   - anomaly kinds 是否为空
+   - DOM 节点/边是否仍在
+   - internal `measured` / `handleBounds` 是否恢复
+6. 对浮层 / 沉浸模式 UI，bridge 验证优先读取：
+   - `aria-expanded`
+   - className 里是否仍有 `opacity-0`
+   - 面板 DOM 是否真正存在
+
+#### 本轮明确踩过的坑
+
+- 坑 1：把 bridge 自动化失败误判成页面仍失败
+  - 当前现场里，`mouse` 持续拖拽自动化进不去真实 mouse drag 路径
+  - 这只能说明模拟受限，不能直接说明页面逻辑没修好
+- 坑 2：把后台日志文件为空误判成“没有异常/没有样本”
+  - `Start-Process` 重定向输出在当前 Windows 现场不稳定
+  - 空文件不等于页面没有变化
+- 坑 3：只看 console 文本，不把判定逻辑产品化
+  - 纯日志很难稳定比较“修复前后”
+  - 可机读的 snapshot / history / anomaly kinds 更适合持续验收
+- 坑 4：只看 DOM，不看 React Flow internal state
+  - 图编辑器类问题里，internal measurement 退化经常才是上游原因
+- 坑 5：只验证“点了会出现”，不验证“为什么消失/何时常驻”
+  - 沉浸模式入口类 UI 必须把 hover reveal 和 click pin 两种状态明确区分
+
+#### 可复用命令与脚本
+
+- 当前 DAG bridge 调试脚本：
+  - `bun scripts/dev/verify-task-dag-834-tauri-bridge.ts --mode detect-current`
+  - `bun scripts/dev/verify-task-dag-834-tauri-bridge.ts --mode history-current`
+  - `bun scripts/dev/verify-task-dag-834-tauri-bridge.ts --mode clear-history`
+- 持续 touch 拖拽验证：
+  - `bun scripts/dev/verify-task-dag-834-tauri-bridge.ts --anchor-id <current-anchor-id> --move-steps 30 --step-dx 8 --step-dy 0 --step-delay-ms 120 --settle-delay-ms 250`
+  - 其中 `<current-anchor-id>` 只应取当前页面真实 anchor id，不复用历史样例值
+- 验证思路：
+  - 先 `detect-current`
+  - 再 `clear-history`
+  - 用户或脚本操作
+  - 最后 `history-current` / 再读一次 `detect-current`
