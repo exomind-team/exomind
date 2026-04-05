@@ -233,6 +233,16 @@ async function openDesktopToolsPanel(): Promise<void> {
   });
 }
 
+async function openDesktopImmersivePanel(): Promise<void> {
+  if (!screen.queryByTestId('task-dag-search-panel')) {
+    fireEvent.click(screen.getByTestId('task-dag-desktop-immersive-panel-toggle'));
+  }
+
+  await waitFor(() => {
+    expect(screen.getByTestId('task-dag-search-panel')).toBeInTheDocument();
+  });
+}
+
 async function openTagSection(): Promise<void> {
   if (!screen.queryByTestId('task-dag-tag-filter-mode-and')) {
     fireEvent.click(screen.getByTestId('task-dag-tag-section-toggle'));
@@ -2601,47 +2611,43 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(screen.getByTestId('task-dag-legend-panel').className).not.toContain('opacity-0');
   });
 
-  it('keeps desktop immersive panels visible on touch-first landscape devices after opening them', async () => {
-    const originalMatchMedia = window.matchMedia;
-    Object.defineProperty(window, 'matchMedia', {
-      configurable: true,
-      writable: true,
-      value: vi.fn().mockImplementation((query: string) => ({
-        matches: query === '(hover: hover) and (pointer: fine)' ? false : true,
-        media: query,
-        onchange: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })),
+  it('uses a pinned desktop immersive panel that stays visible until explicitly hidden', async () => {
+    window.localStorage.setItem('exomind:dag-immersive', '1');
+
+    const view = render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
     });
 
-    try {
-      window.localStorage.setItem('exomind:dag-immersive', '1');
+    expect(screen.getByTestId('task-dag-desktop-immersive-panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('task-dag-desktop-immersive-panel-toggle').className).toContain('opacity-0');
+    expect(screen.queryByTestId('task-dag-search-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-tools-panel')).not.toBeInTheDocument();
 
-      render(<TaskDagPage />);
+    await openDesktopImmersivePanel();
 
-      await waitFor(() => {
-        expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
-      });
+    expect(screen.getByTestId('task-dag-tools-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-legend-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-desktop-immersive-panel-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('task-dag-desktop-immersive-panel-toggle').className).not.toContain('opacity-0');
 
-      fireEvent.click(screen.getByTestId('task-dag-desktop-tools-toggle'));
+    view.unmount();
+    render(<TaskDagPage />);
 
-      await waitFor(() => {
-        expect(screen.getByTestId('task-dag-tools-panel')).toBeInTheDocument();
-      });
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-panel')).toBeInTheDocument();
+    });
 
-      expect(screen.getByTestId('task-dag-tools-panel').className).not.toContain('opacity-0');
-      expect(screen.getByTestId('task-dag-legend-panel').className).not.toContain('opacity-0');
-    } finally {
-      Object.defineProperty(window, 'matchMedia', {
-        configurable: true,
-        writable: true,
-        value: originalMatchMedia,
-      });
-    }
+    fireEvent.click(screen.getByTestId('task-dag-desktop-immersive-panel-toggle'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-search-panel')).not.toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('task-dag-tools-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-desktop-immersive-panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('task-dag-desktop-immersive-panel-toggle').className).toContain('opacity-0');
   });
 
   it('supports connect mode dependency toggle rules and surfaces cycle rejection', async () => {

@@ -137,6 +137,7 @@ export function TaskDagControlPanel({
       layoutMode,
       desktopViewOpen: controlsState.desktopViewOpen,
       desktopToolsOpen: controlsState.desktopToolsOpen,
+      desktopImmersivePanelOpen: controlsState.desktopImmersivePanelOpen,
       mobileViewOpen: controlsState.mobileViewOpen,
       mobileToolsOpen: controlsState.mobileToolsOpen,
     });
@@ -144,10 +145,7 @@ export function TaskDagControlPanel({
   const supportsHoverDesktop = typeof window === 'undefined' || typeof window.matchMedia !== 'function'
     ? true
     : window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-  const immersiveFadeClass = immersive && isDesktop
-    && supportsHoverDesktop
-    ? 'opacity-0 hover:opacity-100 focus-within:opacity-100'
-    : '';
+  const isDesktopImmersive = isDesktop && immersive;
   const searchOptionLabels: Array<{ key: keyof TaskDagSearchOptions; label: string; testId: string }> = [
     { key: 'includeDescription', label: '描述', testId: 'task-dag-search-option-description' },
     { key: 'fuzzy', label: '模糊', testId: 'task-dag-search-option-fuzzy' },
@@ -185,8 +183,7 @@ export function TaskDagControlPanel({
     <div
       data-testid="task-dag-search-panel"
       className={[
-        'pointer-events-auto flex w-full flex-col gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 text-[11px] text-[#57534E] shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]',
-        immersiveFadeClass,
+        'pointer-events-auto flex w-full flex-col gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 text-[11px] text-[#57534E] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]',
       ].join(' ')}
     >
       <div className="flex w-full items-center gap-2">
@@ -394,8 +391,9 @@ export function TaskDagControlPanel({
     <div
       data-testid="task-dag-tools-panel"
       className={[
-        'pointer-events-auto flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90',
-        immersiveFadeClass,
+        `pointer-events-auto flex flex-wrap items-center gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 ${
+          isDesktopImmersive ? 'w-full justify-start' : 'justify-end'
+        }`,
       ].join(' ')}
     >
       <button
@@ -521,8 +519,9 @@ export function TaskDagControlPanel({
     <div
       data-testid="task-dag-legend-panel"
       className={[
-        'pointer-events-auto flex items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/90 px-2 py-1 text-[11px] text-[#57534E] shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]',
-        immersiveFadeClass,
+        `pointer-events-auto flex items-center gap-2 border border-[#E7E3E0] bg-white/90 px-2 py-1 text-[11px] text-[#57534E] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1] ${
+          isDesktopImmersive ? 'w-full rounded-2xl' : 'rounded-full'
+        }`,
       ].join(' ')}
     >
       {legendChip('H', '硬依赖：前置必须完成后才能开始', 'bg-[#FDE7DC] text-[#C75B3A]', 'task-dag-legend-hard-chip')}
@@ -577,6 +576,62 @@ export function TaskDagControlPanel({
           </div>
         ) : null}
       </>
+    );
+  }
+
+  if (isDesktopImmersive) {
+    const immersivePanelOpen = controlsState.desktopImmersivePanelOpen;
+    const revealOnHoverOnly = !immersivePanelOpen && supportsHoverDesktop;
+
+    return (
+      <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[min(30rem,calc(100%-1.5rem))] flex-col items-start gap-2">
+        <div
+          data-testid="task-dag-desktop-immersive-panel-hotspot"
+          className="pointer-events-auto group flex h-11 min-w-[176px] items-start justify-start"
+        >
+          <button
+            type="button"
+            data-testid="task-dag-desktop-immersive-panel-toggle"
+            onPointerDownCapture={(event) => reportDebugInteraction('desktop-immersive-panel-toggle', 'pointerdown', event.pointerType)}
+            onClick={() => {
+              reportDebugInteraction('desktop-immersive-panel-toggle', 'click');
+              onControlsStateChange({ desktopImmersivePanelOpen: !immersivePanelOpen });
+            }}
+            className={`inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-[11px] font-medium shadow-lg backdrop-blur-md transition-all ${
+              immersivePanelOpen
+                ? 'pointer-events-auto border-[#C75B3A] bg-white/96 text-[#9A3412] hover:bg-white dark:border-[#FDBA74] dark:bg-[#1C1917]/96 dark:text-[#FDBA74] dark:hover:bg-[#1C1917]'
+                : revealOnHoverOnly
+                  ? 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 border-white/70 bg-white/82 text-[#57534E] group-hover:-translate-y-0.5 group-hover:bg-white/96 dark:border-[#3C3836] dark:bg-[#1C1917]/82 dark:text-[#D6D3D1] dark:group-hover:bg-[#1C1917]/96'
+                  : 'pointer-events-auto border-white/70 bg-white/82 text-[#57534E] hover:-translate-y-0.5 hover:bg-white/96 dark:border-[#3C3836] dark:bg-[#1C1917]/82 dark:text-[#D6D3D1] dark:hover:bg-[#1C1917]/96'
+            }`}
+            aria-expanded={immersivePanelOpen}
+            aria-label={immersivePanelOpen ? '隐藏沉浸模式控制面板' : '展开沉浸模式控制面板'}
+          >
+            <Settings2 size={14} />
+            <span>{immersivePanelOpen ? '隐藏面板' : '展开面板'}</span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] ${
+                immersivePanelOpen
+                  ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                  : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]'
+              }`}
+            >
+              {immersivePanelOpen ? '常驻' : '查看 / 工具'}
+            </span>
+          </button>
+        </div>
+
+        {immersivePanelOpen ? (
+          <div
+            data-testid="task-dag-desktop-immersive-panel"
+            className="pointer-events-none flex w-[min(30rem,calc(100%-1.5rem))] max-w-[min(30rem,calc(100vw-1.5rem))] flex-col items-start gap-2"
+          >
+            {searchPanel}
+            {toolsPanel}
+            {legendPanel}
+          </div>
+        ) : null}
+      </div>
     );
   }
 

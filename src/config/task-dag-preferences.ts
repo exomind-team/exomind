@@ -37,6 +37,7 @@ export type TaskDagNodeSizing = {
 export type TaskDagControlsState = {
   desktopViewOpen: boolean;
   desktopToolsOpen: boolean;
+  desktopImmersivePanelOpen: boolean;
   mobileViewOpen: boolean;
   mobileToolsOpen: boolean;
   tagSectionOpen: boolean;
@@ -88,6 +89,7 @@ const DEFAULT_TASK_DAG_TAG_FILTER: TaskDagTagFilter = {
 const DEFAULT_TASK_DAG_CONTROLS_STATE: TaskDagControlsState = {
   desktopViewOpen: true,
   desktopToolsOpen: false,
+  desktopImmersivePanelOpen: false,
   mobileViewOpen: false,
   mobileToolsOpen: false,
   tagSectionOpen: false,
@@ -423,6 +425,9 @@ function normalizeControlsState(
     desktopToolsOpen: typeof controlsState?.desktopToolsOpen === 'boolean'
       ? controlsState.desktopToolsOpen
       : DEFAULT_TASK_DAG_CONTROLS_STATE.desktopToolsOpen,
+    desktopImmersivePanelOpen: typeof controlsState?.desktopImmersivePanelOpen === 'boolean'
+      ? controlsState.desktopImmersivePanelOpen
+      : DEFAULT_TASK_DAG_CONTROLS_STATE.desktopImmersivePanelOpen,
     mobileViewOpen: typeof controlsState?.mobileViewOpen === 'boolean'
       ? controlsState.mobileViewOpen
       : DEFAULT_TASK_DAG_CONTROLS_STATE.mobileViewOpen,
