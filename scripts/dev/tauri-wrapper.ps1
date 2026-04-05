@@ -91,6 +91,43 @@ function Ensure-BunWindowsShim {
   Write-Host "[tauri-wrapper] Created bun.bat shim: $bunBatPath"
 }
 
+$script:TauriCliInvocation = $null
+
+function Resolve-TauriCliInvocation {
+  if ($script:TauriCliInvocation) {
+    return $script:TauriCliInvocation
+  }
+
+  $tauriCommand = Get-Command tauri -ErrorAction SilentlyContinue
+  if ($tauriCommand) {
+    $script:TauriCliInvocation = @{
+      Command = $tauriCommand.Source
+      BaseArgs = @()
+    }
+    return $script:TauriCliInvocation
+  }
+
+  $bunxCommand = Get-Command bunx -ErrorAction SilentlyContinue
+  if ($bunxCommand) {
+    $script:TauriCliInvocation = @{
+      Command = $bunxCommand.Source
+      BaseArgs = @('tauri')
+    }
+    return $script:TauriCliInvocation
+  }
+
+  $bunCommand = Get-Command bun -ErrorAction SilentlyContinue
+  if ($bunCommand) {
+    $script:TauriCliInvocation = @{
+      Command = $bunCommand.Source
+      BaseArgs = @('x', 'tauri')
+    }
+    return $script:TauriCliInvocation
+  }
+
+  throw "[tauri-wrapper] tauri CLI not found. Install @tauri-apps/cli or ensure bun/bunx is available."
+}
+
 function Ensure-AndroidManifestPermissions {
   param(
     [Parameter(Mandatory = $true)]
@@ -784,6 +821,10 @@ function Invoke-TauriCommandWithCapture {
   $previousErrorActionPreference = $ErrorActionPreference
 
   try {
+    $tauriCliInvocation = Resolve-TauriCliInvocation
+    $resolvedCommand = $tauriCliInvocation.Command
+    $baseArgs = @($tauriCliInvocation.BaseArgs)
+
     # Native stderr becomes ErrorRecord after 2>&1 in PowerShell.
     #（原生命令 stderr 经 2>&1 后会变成 ErrorRecord）
     # Tauri prints status lines like "Running BeforeDevCommand" to stderr,
@@ -792,12 +833,12 @@ function Invoke-TauriCommandWithCapture {
     $ErrorActionPreference = "Continue"
 
     if ($CommandArgs -and $CommandArgs.Count -gt 0) {
-      & tauri @CommandArgs 2>&1 | ForEach-Object {
+      & $resolvedCommand @baseArgs @CommandArgs 2>&1 | ForEach-Object {
         $capturedOutput += $_
         Write-Host "$_"
       }
     } else {
-      & tauri 2>&1 | ForEach-Object {
+      & $resolvedCommand @baseArgs 2>&1 | ForEach-Object {
         $capturedOutput += $_
         Write-Host "$_"
       }

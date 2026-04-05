@@ -7,6 +7,23 @@ const path = require('node:path');
 const dispatchScript = path.resolve(__dirname, 'runtime-dispatch.cjs');
 const env = { ...process.env };
 
+function hasBinary(binary) {
+  const { spawnSync } = require('node:child_process');
+  const probe = spawnSync(binary, ['--version'], { stdio: 'ignore' });
+  return !probe.error && probe.status === 0;
+}
+
+function resolveHostRuntime() {
+  const configured = (env.EXOMIND_JS_RUNTIME || 'auto').toLowerCase();
+  if (configured === 'bun') {
+    return 'bun';
+  }
+  if (configured === 'node') {
+    return 'node';
+  }
+  return hasBinary('bun') ? 'bun' : 'node';
+}
+
 function parseArgs(rawArgs) {
   const forwarded = [];
   for (let index = 0; index < rawArgs.length; index += 1) {
@@ -46,7 +63,8 @@ if (isTermuxRuntime) {
     (existsSync(defaultChromiumPath) ? defaultChromiumPath : fallbackChromiumPath);
 }
 
-const child = spawn('node', [dispatchScript, ...args], {
+const hostRuntime = resolveHostRuntime();
+const child = spawn(hostRuntime, [dispatchScript, ...args], {
   env,
   stdio: 'inherit',
 });

@@ -11,13 +11,13 @@ This project uses a unified E2E runtime dispatcher:
 ## Quick Start (PC, fresh clone)
 
 1. Install dependencies:
-   - `npm install`
+   - `bun install`
 2. Install Playwright browsers:
-   - `npx playwright install`
+   - `bun x playwright install`
 3. Run a target E2E case:
-   - `npm run test:e2e:issue77`
-   - `npm run test:e2e:issue82`
-   - `npm run test:e2e:issue27`
+   - `bun run test:e2e:issue77`
+   - `bun run test:e2e:issue82`
+   - `bun run test:e2e:issue27`
 
 ## Runtime Behavior
 
@@ -37,14 +37,14 @@ This project uses a unified E2E runtime dispatcher:
 
 Recommended baseline:
 
-1. Install Node.js + npm.
-2. Install Bun (optional but preferred).
-3. Install project deps (`npm install` or `bun install`).
+1. Install Node.js.
+2. Install Bun.
+3. Install project deps (`bun install`).
 4. Install Playwright browsers/deps as supported by your Termux environment.
 
 Run with explicit Node fallback if needed:
 
-- `EXOMIND_JS_RUNTIME=node npm run test:e2e:issue82`
+- `EXOMIND_JS_RUNTIME=node bun run test:e2e:issue82`
 
 If GUI/browser runtime is constrained on device, run smoke checks in Termux and run full browser validation on desktop.
 
@@ -53,6 +53,6 @@ If GUI/browser runtime is constrained on device, run smoke checks in Termux and 
 - Bun not found:
   - Expected behavior in `auto`: dispatcher falls back to Node.
 - Browser not found:
-  - Run `npx playwright install`.
+- Run `bun x playwright install`.
 - Port conflict:
   - Use issue-specific Playwright configs under `tests/e2e/playwright.issue*.config.ts` which already isolate ports.

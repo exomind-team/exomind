@@ -20,7 +20,7 @@ export default defineConfig({
   use: getBaseUse(BASE_URL),
   projects: [getChromiumProject()],
   webServer: {
-    command: 'node scripts/test/runtime-dispatch.cjs vite-dev',
+    command: 'bun scripts/test/runtime-dispatch.cjs vite-dev',
     cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: true,
