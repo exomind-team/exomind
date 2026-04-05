@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical, Loader2, X } from 'lucide-react';
 import {
   DndContext,
@@ -55,6 +55,7 @@ export interface TiledGridProps {
   onArchiveSession?: (session: SessionInfo) => void;
   /** Whether a terminal session currently points to a missing PTY */
   isSessionDisconnected?: (session: SessionInfo) => boolean;
+  isSessionAutoResuming?: (session: SessionInfo) => boolean;
   isSessionStopping?: (session: SessionInfo) => boolean;
 }
 
@@ -94,6 +95,7 @@ export function TiledGrid({
   onStopSession,
   onArchiveSession,
   isSessionDisconnected,
+  isSessionAutoResuming,
   isSessionStopping,
 }: TiledGridProps) {
   const config = LAYOUT_CONFIG[layout];
@@ -215,6 +217,7 @@ export function TiledGrid({
             session={pane.session}
             resolveSessionConnection={resolveSessionConnection}
             isDisconnected={isSessionDisconnected?.(pane.session) ?? false}
+            isAutoResuming={isSessionAutoResuming?.(pane.session) ?? false}
             isFocused={true}
             isExpanded={true}
             isDragging={false}
@@ -259,6 +262,7 @@ export function TiledGrid({
               pane={pane}
               resolveSessionConnection={resolveSessionConnection}
               isSessionDisconnected={isSessionDisconnected}
+              isSessionAutoResuming={isSessionAutoResuming}
               isFocused={focusedIndex === index}
               isExpanded={false}
               onDoubleClick={() => handleDoubleClick(index)}
@@ -349,6 +353,7 @@ interface SortablePaneProps {
     authToken?: string;
   };
   isSessionDisconnected?: (session: SessionInfo) => boolean;
+  isSessionAutoResuming?: (session: SessionInfo) => boolean;
   isFocused: boolean;
   isExpanded: boolean;
   onDoubleClick: () => void;
@@ -385,6 +390,7 @@ function SortablePane(props: SortablePaneProps) {
           session={props.pane.session}
           resolveSessionConnection={props.resolveSessionConnection}
           isDisconnected={props.isSessionDisconnected?.(props.pane.session) ?? false}
+          isAutoResuming={props.isSessionAutoResuming?.(props.pane.session) ?? false}
           isFocused={props.isFocused}
           isExpanded={props.isExpanded}
           isDragging={isDragging}
@@ -524,6 +530,7 @@ interface SessionPaneProps {
     authToken?: string;
   };
   isDisconnected: boolean;
+  isAutoResuming: boolean;
   isFocused: boolean;
   isExpanded: boolean;
   isDragging: boolean;
@@ -542,6 +549,7 @@ function SessionPane({
   session,
   resolveSessionConnection,
   isDisconnected,
+  isAutoResuming,
   isFocused,
   isExpanded,
   isDragging,
@@ -561,7 +569,15 @@ function SessionPane({
   const isCompleted = session.status === 'completed';
   const isTerminalCompleted = session.interaction_mode === 'terminal'
     && (session.status === 'completed' || session.status === 'archived');
+  const shouldRenderLiveTerminal = session.interaction_mode === 'terminal'
+    && !!session.pty_id
+    && !isTerminalCompleted;
   const [initialConnectionFailed, setInitialConnectionFailed] = useState(false);
+  const [terminalNonce, setTerminalNonce] = useState(0);
+  const previousRecoveryStateRef = useRef({
+    isDisconnected,
+    isAutoResuming,
+  });
   const showDisconnected = isDisconnected || initialConnectionFailed || isTerminalCompleted;
   const showQuickActions =
     !showDisconnected
@@ -578,7 +594,31 @@ function SessionPane({
 
   useEffect(() => {
     setInitialConnectionFailed(false);
-  }, [session.id, session.pty_id]);
+    setTerminalNonce(0);
+    previousRecoveryStateRef.current = {
+      isDisconnected,
+      isAutoResuming,
+    };
+  }, [isAutoResuming, isDisconnected, session.id, session.pty_id]);
+
+  useEffect(() => {
+    const previousRecoveryState = previousRecoveryStateRef.current;
+    const hasRecoveredFromDisconnectedState = (
+      (previousRecoveryState.isDisconnected || previousRecoveryState.isAutoResuming)
+      && !isDisconnected
+      && !isAutoResuming
+    );
+
+    if (hasRecoveredFromDisconnectedState) {
+      setInitialConnectionFailed(false);
+      setTerminalNonce((prev) => prev + 1);
+    }
+
+    previousRecoveryStateRef.current = {
+      isDisconnected,
+      isAutoResuming,
+    };
+  }, [isAutoResuming, isDisconnected]);
 
   return (
     <div
@@ -673,31 +713,61 @@ function SessionPane({
       </div>
 
       {/* Pane content: Terminal or summary */}
-      <div className="flex-1 min-h-0 overflow-hidden bg-[#1C1917]">
-        {session.interaction_mode === 'terminal' && session.pty_id ? (
-          showDisconnected ? (
-            <div
-              data-testid={`tiled-grid-pty-disconnected-${session.id}`}
-              className="flex h-full items-center justify-center px-4 text-center"
-            >
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-[#FAFAF9]">终端已断开</p>
-                <p className="text-xs text-[#A8A29E]">
-                  当前 PTY 已不存在，RT 可能已经重启。可点击停止，将会话收敛为已完成后再归档。
-                </p>
-              </div>
-            </div>
-          ) : (
+      <div className="relative flex-1 min-h-0 overflow-hidden bg-[#1C1917]">
+        {shouldRenderLiveTerminal ? (
+          <>
             <PtyTerminal
+              key={`${session.id}:${session.pty_id}:${terminalNonce}`}
               rtBaseUrl={connection.rtBaseUrl}
-              ptyId={session.pty_id}
+              ptyId={session.pty_id!}
               authToken={connection.authToken}
               autoFocus={false}
               onInitialConnectionFailure={() => {
                 setInitialConnectionFailed(true);
               }}
             />
-          )
+            {showDisconnected ? (
+              <div
+                data-testid={`tiled-grid-pty-disconnected-${session.id}`}
+                className="absolute inset-0 flex flex-col"
+              >
+                <div className="space-y-2 border-b border-[#292524] bg-[#1C1917]/92 px-4 py-3 text-left backdrop-blur-sm">
+                  <p className="text-sm font-medium text-[#FAFAF9]">
+                    {isAutoResuming ? '终端恢复中' : '终端已断开'}
+                  </p>
+                  <p className="text-xs text-[#A8A29E]">
+                    {isTerminalCompleted
+                      ? '当前会话已结束；保留已加载的 Terminal 内容，后续可直接归档。'
+                      : isAutoResuming
+                        ? '正在尝试自动恢复当前终端会话；恢复成功后会自动切回实时 Terminal。'
+                        : '当前 PTY 已不存在，RT 可能已经重启。保留已加载的 Terminal 内容，必要时可点击停止收敛后归档。'}
+                  </p>
+                </div>
+                {isAutoResuming ? (
+                  <div className="flex flex-1 items-center justify-center px-4 text-center">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-[#1C1917]/88 px-3 py-1.5 text-xs text-[#E7E5E4] backdrop-blur-sm">
+                      <Loader2 size={12} className="animate-spin" />
+                      正在恢复会话…
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : isTerminalCompleted ? (
+          <div
+            data-testid={`tiled-grid-pty-disconnected-${session.id}`}
+            className="flex h-full items-center justify-center px-4 text-center"
+          >
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-[#FAFAF9]">
+                终端会话已结束
+              </p>
+              <p className="text-xs text-[#A8A29E]">
+                当前 PTY 已关闭；保留会话卡片以便直接归档。
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="h-full overflow-auto p-2">
             <p className="whitespace-pre-wrap text-xs text-[#A8A29E] font-mono">

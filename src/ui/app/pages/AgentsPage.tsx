@@ -212,6 +212,8 @@ const LINK_PROOF_REQUEST_TOPIC = 'system.link_proof.request';
 const MANUAL_LINK_PROOF_ADOPTION_POLL_INTERVAL_MS = 500;
 const FRESH_PTY_PRESENCE_GRACE_MS = 15_000;
 const PENDING_HISTORICAL_BINDING_GRACE_MS = 10 * 60_000;
+const ACTIVE_PTY_INITIAL_STREAM_RECONNECT_RETRY_LIMIT = 1;
+const ACTIVE_PTY_INITIAL_STREAM_RECONNECT_WINDOW_MS = 10_000;
 
 type PendingPtyPresenceCheck = {
   hostId: string | null;
@@ -802,6 +804,9 @@ export function AgentsPage() {
   const [activePtyId, setActivePtyId] = useState<string | null>(initialTiledState.fullscreenPtyId ?? null);
   const [activePtyHostId, setActivePtyHostId] = useState<string | null>(null);
   const [activePtyTerminalNonce, setActivePtyTerminalNonce] = useState(0);
+  const activePtyInitialStreamReconnectStateRef = useRef<Map<string, { retryCount: number; firstFailureAtMs: number }>>(
+    new Map(),
+  );
   const [fullscreenTerminalRecovery, setFullscreenTerminalRecovery] = useState<RecoverableTerminalSessionSnapshot | null>(
     initialTiledState.fullscreenTerminalRecovery ?? null,
   );
@@ -3264,6 +3269,7 @@ export function AgentsPage() {
     ptyId: string,
     hostId?: string | null,
   ) => {
+    const now = Date.now();
     const connection = resolveRuntimeConnectionForHostId(hostId);
     const hostAddress = resolveDialAddressFromBaseUrl(connection.rtBaseUrl) ?? connection.rtBaseUrl;
     console.warn('[agent-hub][pty][connect] initial terminal stream failed; rechecking PTY liveness', {
@@ -3275,15 +3281,42 @@ export function AgentsPage() {
     try {
       const livePtys = await fetchPtyList(connection.rtBaseUrl, connection.authToken, hostId ?? undefined);
       if (livePtys?.some((pty) => pty.id === ptyId)) {
+        const previousRetryState = activePtyInitialStreamReconnectStateRef.current.get(ptyId);
+        const retryWindowActive = previousRetryState != null
+          && now - previousRetryState.firstFailureAtMs <= ACTIVE_PTY_INITIAL_STREAM_RECONNECT_WINDOW_MS;
+        const retryCount = retryWindowActive ? previousRetryState.retryCount : 0;
+
+        setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== ptyId));
+        if (retryCount >= ACTIVE_PTY_INITIAL_STREAM_RECONNECT_RETRY_LIMIT) {
+          activePtyInitialStreamReconnectStateRef.current.delete(ptyId);
+          console.warn('[agent-hub][pty][connect] stopping automatic same-PTY reconnect after repeated initial stream failures', {
+            ptyId,
+            sourceHostId: hostId ?? null,
+            hostAddress,
+            retryCount,
+            retryWindowMs: ACTIVE_PTY_INITIAL_STREAM_RECONNECT_WINDOW_MS,
+          });
+          return;
+        }
+
+        activePtyInitialStreamReconnectStateRef.current.set(ptyId, {
+          retryCount: retryCount + 1,
+          firstFailureAtMs: retryWindowActive
+            ? previousRetryState!.firstFailureAtMs
+            : now,
+        });
         console.info('[agent-hub][pty][connect] PTY still live after initial stream failure; keeping terminal active', {
           ptyId,
           sourceHostId: hostId ?? null,
           hostAddress,
         });
+        setRuntimeHostError('');
         setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== ptyId));
+        openPtyTerminal(ptyId, hostId ?? undefined, { reconnectIfSame: true });
         return;
       }
 
+      activePtyInitialStreamReconnectStateRef.current.delete(ptyId);
       const failureMessage = 'Terminal 首次连接失败，当前 PTY 已不存在；下方将展示关闭前历史，可结束后归档。';
       console.warn('[agent-hub][pty][connect] PTY missing after initial stream failure; switching terminal to disconnected history view', {
         ptyId,
@@ -3292,6 +3325,7 @@ export function AgentsPage() {
       });
       setRuntimeHostError(failureMessage);
     } catch (error) {
+      activePtyInitialStreamReconnectStateRef.current.delete(ptyId);
       const message = error instanceof Error ? error.message : String(error);
       const timeout = isRuntimeFetchTimeoutError(error);
       console.warn('[agent-hub][pty][connect] PTY liveness recheck failed after initial stream failure', {
@@ -3315,7 +3349,7 @@ export function AgentsPage() {
       prev.includes(ptyId) ? prev : [...prev, ptyId]
     ));
     void fetchPtyAgentsRef.current();
-  }, [fetchPtyList, resolveRuntimeConnectionForHostId]);
+  }, [fetchPtyList, openPtyTerminal, resolveRuntimeConnectionForHostId]);
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
@@ -3971,6 +4005,63 @@ export function AgentsPage() {
     resumeDisconnectedTerminalSession,
     tiledPaneOrder,
     viewMode,
+  ]);
+
+  useEffect(() => {
+    if (useMockData || !hasLoadedPtyAgents || tiledPaneOrder.length === 0) {
+      return;
+    }
+
+    const sessionById = new Map(dashboardSessions.map((session) => [session.id, session]));
+    let nextPaneOrder = tiledPaneOrder;
+    let didRebind = false;
+
+    tiledPaneOrder.forEach((sessionId) => {
+      const session = sessionById.get(sessionId);
+      const innerSessionId = session?.inner_session_id?.trim();
+      if (
+        !session
+        || !innerSessionId
+        || !isOpenRecoverableTerminalSession(session)
+        || !isSessionPtyDisconnected(session)
+      ) {
+        return;
+      }
+
+      const canonicalSession = resolveOccupiedHistoricalSession(innerSessionId);
+      if (
+        !canonicalSession
+        || canonicalSession.id === session.id
+        || isSessionPtyDisconnected(canonicalSession)
+      ) {
+        return;
+      }
+
+      nextPaneOrder = replacePaneOrderSessionId(nextPaneOrder, session.id, canonicalSession.id);
+      didRebind = true;
+      console.info('[agent-hub][pty] rebound tiled pane from disconnected historical session to canonical live session', {
+        previousSessionId: session.id,
+        canonicalSessionId: canonicalSession.id,
+        innerSessionId,
+        previousPtyId: session.pty_id ?? null,
+        canonicalPtyId: canonicalSession.pty_id ?? null,
+      });
+    });
+
+    if (didRebind) {
+      setTiledPaneOrder((prev) => (
+        prev.join('\u0000') === tiledPaneOrder.join('\u0000')
+          ? nextPaneOrder
+          : prev
+      ));
+    }
+  }, [
+    dashboardSessions,
+    hasLoadedPtyAgents,
+    isSessionPtyDisconnected,
+    resolveOccupiedHistoricalSession,
+    tiledPaneOrder,
+    useMockData,
   ]);
 
   useEffect(() => {
@@ -5058,6 +5149,7 @@ export function AgentsPage() {
               layout={tiledLayout}
               resolveSessionConnection={resolveRuntimeConnectionForSession}
               isSessionDisconnected={isSessionPtyDisconnected}
+              isSessionAutoResuming={(session) => autoResumingSessionIds.includes(session.id)}
               isSessionStopping={(session) => isPtyStopPending(session.pty_id)}
               focusedIndex={tiledFocusedIndex}
               onFocusPane={setTiledFocusedIndex}
@@ -5855,81 +5947,71 @@ export function AgentsPage() {
               )}
               {/* PTY terminal — stays mounted when activePtyId is set, hidden when panel shows other content */}
               {activePtyId && (
-                <div
-                  data-testid="agent-rightpanel-pty-terminal"
-                  className="flex h-full flex-col overflow-hidden"
-                  style={rightPanel.state !== 'PTY_TERMINAL' ? { display: 'none' } : undefined}
-                >
-                  {isActivePtyDisconnected ? (
-                    (() => {
-                      const connection = resolveRuntimeConnectionForHostId(resolvedActivePtyHostId);
-                      return (
-                        <div
-                          data-testid="agent-rightpanel-pty-disconnected"
-                          className="flex h-full flex-col bg-[#1C1917]"
-                        >
-                          <div className="space-y-1 border-b border-[#292524] px-4 py-3 text-xs text-[#A8A29E]">
-                            <p>
-                              {isActivePtyAutoResuming
-                                ? `${activeRecoverableTerminalLabel} 会话恢复中，成功后会自动切回实时终端。`
-                                : '当前 PTY 已不存在，RT 可能已经重启。下方保留关闭前历史；如需结束，可点击上方“结束”收敛后归档。'}
-                            </p>
-                            {runtimeHostError && (
-                              <p
-                                data-testid="agent-rightpanel-pty-disconnected-message"
-                                className="text-[#FCA5A5]"
-                              >
-                                {runtimeHostError}
+                (() => {
+                  const connection = resolveRuntimeConnectionForHostId(resolvedActivePtyHostId);
+                  return (
+                    <div
+                      data-testid="agent-rightpanel-pty-terminal"
+                      className="flex h-full flex-col overflow-hidden"
+                      style={rightPanel.state !== 'PTY_TERMINAL' ? { display: 'none' } : undefined}
+                    >
+                      <div className="relative flex-1 overflow-hidden bg-[#1C1917]">
+                        <PtyTerminal
+                          key={activePtyTerminalKey ?? activePtyId}
+                          rtBaseUrl={connection.rtBaseUrl}
+                          ptyId={activePtyId}
+                          authToken={connection.authToken}
+                          onInitialConnectionFailure={() => {
+                            void handleActivePtyInitialConnectionFailure(activePtyId, resolvedActivePtyHostId);
+                          }}
+                        />
+                        {isActivePtyDisconnected ? (
+                          <div
+                            data-testid="agent-rightpanel-pty-disconnected"
+                            className="absolute inset-0 flex flex-col"
+                          >
+                            <div className="space-y-1 border-b border-[#292524] bg-[#1C1917]/92 px-4 py-3 text-xs text-[#A8A29E] backdrop-blur-sm">
+                              <p>
+                                {isActivePtyAutoResuming
+                                  ? `${activeRecoverableTerminalLabel} 会话恢复中，成功后会自动切回实时终端。`
+                                  : '当前 PTY 已不存在，RT 可能已经重启。下方保留关闭前历史；如需结束，可点击上方“结束”收敛后归档。'}
                               </p>
+                              {runtimeHostError && (
+                                <p
+                                  data-testid="agent-rightpanel-pty-disconnected-message"
+                                  className="text-[#FCA5A5]"
+                                >
+                                  {runtimeHostError}
+                                </p>
+                              )}
+                            </div>
+                            {isActivePtyAutoResuming ? (
+                              <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-[#E7E5E4]">
+                                正在恢复 {activeRecoverableTerminalLabel} 历史会话...
+                              </div>
+                            ) : (
+                              <div className="flex-1" />
                             )}
-                          </div>
-                          {isActivePtyAutoResuming ? (
-                            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-[#E7E5E4]">
-                              正在恢复 {activeRecoverableTerminalLabel} 历史会话...
+                            <div className="border-t border-[#292524] bg-[#1C1917]/92 px-4 py-2 backdrop-blur-sm">
+                              <button
+                                type="button"
+                                data-testid="agent-rightpanel-pty-disconnected-close"
+                                onClick={() => {
+                                  setActivePtyId(null);
+                                  setActivePtyHostId(null);
+                                  closeRightPanel();
+                                }}
+                                className="rounded border border-[#44403C] px-3 py-1.5 text-xs text-[#E7E5E4] hover:border-[#57534E]"
+                              >
+                                关闭终端
+                              </button>
                             </div>
-                          ) : (
-                            <div className="flex-1 overflow-hidden">
-                              <PtyTerminal
-                                key={activePtyTerminalKey ?? activePtyId}
-                                rtBaseUrl={connection.rtBaseUrl}
-                                ptyId={activePtyId}
-                                authToken={connection.authToken}
-                                interactive={false}
-                              />
-                            </div>
-                          )}
-                          <div className="border-t border-[#292524] px-4 py-2">
-                            <button
-                              type="button"
-                              data-testid="agent-rightpanel-pty-disconnected-close"
-                              onClick={() => {
-                                setActivePtyId(null);
-                                setActivePtyHostId(null);
-                                closeRightPanel();
-                              }}
-                              className="rounded border border-[#44403C] px-3 py-1.5 text-xs text-[#E7E5E4] hover:border-[#57534E]"
-                            >
-                              关闭终端
-                            </button>
                           </div>
-                        </div>
-                      );
-                    })()
-                  ) : (() => {
-                    const connection = resolveRuntimeConnectionForHostId(resolvedActivePtyHostId);
-                    return (
-                      <PtyTerminal
-                        key={activePtyTerminalKey ?? activePtyId}
-                        rtBaseUrl={connection.rtBaseUrl}
-                        ptyId={activePtyId}
-                        authToken={connection.authToken}
-                        onInitialConnectionFailure={() => {
-                          void handleActivePtyInitialConnectionFailure(activePtyId, resolvedActivePtyHostId);
-                        }}
-                      />
-                    );
-                  })()}
-                </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })()
               )}
             </div>
           </aside>

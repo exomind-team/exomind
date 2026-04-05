@@ -311,6 +311,43 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     );
   });
 
+  it('falls back to connecting without a measurable layout so loading cannot hang forever（布局长期不可测时也不能无限卡在加载中）', async () => {
+    const onInitialConnectionFailure = vi.fn();
+    streamPlans.push((_input, init) => (
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      })
+    ));
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-no-measure-timeout"
+        onInitialConnectionFailure={onInitialConnectionFailure}
+      />,
+    );
+
+    await flushUi(60);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'))).toHaveLength(0);
+    expect(screen.getByTestId('pty-terminal-loading')).toBeInTheDocument();
+
+    await flushUi(1_300);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'))).toHaveLength(1);
+    expect(screen.getByTestId('pty-terminal-loading')).toBeInTheDocument();
+
+    await flushUi(4_100);
+
+    expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pty-terminal-error')).toHaveTextContent(
+      '会话加载失败：RT 响应超时',
+    );
+  });
+
   it('does not recreate the PTY stream when only the failure callback identity changes（仅失败回调变更时不应重建 PTY 流）', async () => {
     const firstCallback = vi.fn();
     const secondCallback = vi.fn();

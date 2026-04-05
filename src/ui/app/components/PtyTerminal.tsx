@@ -19,6 +19,7 @@ export interface PtyTerminalProps {
 const INITIAL_STREAM_CONNECT_RETRY_LIMIT = 2;
 const INITIAL_STREAM_CONNECT_RETRY_DELAY_MS = 250;
 const INITIAL_STREAM_CONNECT_TIMEOUT_MS = 4_000;
+const INITIAL_LAYOUT_READY_FALLBACK_CONNECT_MS = 1_200;
 const STREAM_RECONNECT_DELAY_MS = 500;
 
 function formatInitialStreamFailureSummary(message: string): string {
@@ -338,6 +339,7 @@ export function PtyTerminal({
     let connectScheduled = false;
     let initialLayoutReady = false;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
+    let layoutFallbackTimer: ReturnType<typeof setTimeout> | null = null;
     let initialFailureNotified = false;
     let initialStreamRetryCount = 0;
     let connectAttemptSerial = 0;
@@ -378,6 +380,11 @@ export function PtyTerminal({
       // Wait for a measurable container before attaching stream output.
       if (container.clientWidth <= 0 || container.clientHeight <= 0) {
         return false;
+      }
+
+      if (layoutFallbackTimer) {
+        clearTimeout(layoutFallbackTimer);
+        layoutFallbackTimer = null;
       }
 
       try {
@@ -430,6 +437,23 @@ export function PtyTerminal({
       }
       invalidateConnectAttempt(attemptId);
     };
+
+    const ensureInitialConnectWithoutLayout = () => {
+      if (disposed || initialLayoutReady || connectScheduled || hasConnectedOnceRef.current) {
+        return;
+      }
+
+      initialLayoutReady = true;
+      log.warn(
+        `[PtyTerminal] PTY ${ptyId} container stayed unmeasurable for ${INITIAL_LAYOUT_READY_FALLBACK_CONNECT_MS}ms; connecting stream before first fit/resize`,
+      );
+      scheduleConnect(0);
+    };
+
+    layoutFallbackTimer = setTimeout(
+      ensureInitialConnectWithoutLayout,
+      INITIAL_LAYOUT_READY_FALLBACK_CONNECT_MS,
+    );
 
     const handleInitialStreamFailure = (
       attemptId: number,
@@ -642,6 +666,10 @@ export function PtyTerminal({
       if (connectTimer) {
         clearTimeout(connectTimer);
         connectTimer = null;
+      }
+      if (layoutFallbackTimer) {
+        clearTimeout(layoutFallbackTimer);
+        layoutFallbackTimer = null;
       }
       if (streamAbortController) {
         streamAbortController.abort();

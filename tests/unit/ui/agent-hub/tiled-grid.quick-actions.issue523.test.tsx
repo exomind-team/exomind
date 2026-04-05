@@ -98,7 +98,7 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
     expect(onStopSession).toHaveBeenCalledWith(session);
   });
 
-  it('shows a disconnected placeholder instead of mounting a missing PTY terminal（失效 PTY 应渲染断开占位而非继续挂载终端）', () => {
+  it('keeps the terminal mounted under a disconnected overlay so prior PTY content can remain visible（失效 PTY 应保留原 terminal 挂载并叠加断开提示）', () => {
     render(
       <TiledGrid
         sessions={[
@@ -120,7 +120,7 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
     );
 
     expect(screen.getByTestId('tiled-grid-pty-disconnected-terminal-stale')).toBeInTheDocument();
-    expect(screen.queryByTestId('mock-pty-terminal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mock-pty-terminal')).toBeInTheDocument();
     expect(screen.getByTitle('停止')).toBeInTheDocument();
   });
 

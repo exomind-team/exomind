@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SignalRoute } from '@/lib/types/signal-pool';
 import type { SessionInfo } from '@/lib/types/session';
@@ -67,6 +68,12 @@ vi.mock('@/ui/app/components/PtyTerminal', () => ({
     </div>
   ),
 }));
+
+async function chooseDialogSelect(triggerTestId: string, optionName: string): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByTestId(triggerTestId));
+  await user.click(await screen.findByRole('option', { name: optionName }));
+}
 
 vi.mock('@xyflow/react', () => ({
   ReactFlow: ({
@@ -417,7 +424,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     ];
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '平铺' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument();
@@ -568,7 +575,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     ];
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '平铺' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '等待决策' })).toBeInTheDocument();
@@ -606,7 +613,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '平铺' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
     fireEvent.click(await screen.findByRole('button', { name: '继续' }));
 
     await waitFor(() => {
@@ -1235,7 +1242,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
       expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByTestId('pty-agent-type'), { target: { value: 'codex' } });
+    await chooseDialogSelect('pty-agent-type', 'Codex');
 
     await waitFor(() => {
       expect(screen.getByTestId('pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab')).toBeInTheDocument();

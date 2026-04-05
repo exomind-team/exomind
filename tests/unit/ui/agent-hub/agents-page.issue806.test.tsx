@@ -424,17 +424,57 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     const topologyNode = await screen.findByTestId('mock-react-flow-node-pty-pty-live-806');
     fireEvent.click(topologyNode);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-pty-terminal-pty-live-806')).toBeInTheDocument();
-    });
+    const firstMount = await screen.findByTestId('mock-pty-terminal-mount-pty-live-806');
+    const firstMountSerial = firstMount.textContent;
+    expect(firstMountSerial).not.toBeNull();
 
     fireEvent.click(screen.getByTestId('mock-pty-terminal-fail-pty-live-806'));
 
     await waitFor(() => {
       expect(screen.getByTestId('mock-pty-terminal-pty-live-806')).toBeInTheDocument();
       expect(screen.queryByTestId('agent-rightpanel-pty-disconnected')).not.toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-mount-pty-live-806').textContent).not.toBe(firstMountSerial);
     });
 
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
+    ).toHaveLength(0);
+  });
+
+  it('stops auto-remounting the same live PTY after repeated initial stream failures（同一 live PTY 首连连续失败时应停止自动重挂）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    render(<AgentsPage />);
+
+    const topologyNode = await screen.findByTestId('mock-react-flow-node-pty-pty-live-806');
+    fireEvent.click(topologyNode);
+
+    const firstMount = await screen.findByTestId('mock-pty-terminal-mount-pty-live-806');
+    const firstMountSerial = firstMount.textContent;
+    expect(firstMountSerial).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId('mock-pty-terminal-fail-pty-live-806'));
+
+    let secondMountSerial: string | null = null;
+    await waitFor(() => {
+      secondMountSerial = screen.getByTestId('mock-pty-terminal-mount-pty-live-806').textContent;
+      expect(secondMountSerial).not.toBe(firstMountSerial);
+    });
+
+    fireEvent.click(screen.getByTestId('mock-pty-terminal-fail-pty-live-806'));
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[agent-hub][pty][connect] stopping automatic same-PTY reconnect after repeated initial stream failures',
+        expect.objectContaining({
+          ptyId: 'pty-live-806',
+          retryCount: 1,
+        }),
+      );
+    });
+
+    expect(screen.getByTestId('mock-pty-terminal-mount-pty-live-806').textContent).toBe(secondMountSerial);
+    expect(screen.queryByTestId('agent-rightpanel-pty-disconnected')).not.toBeInTheDocument();
     expect(
       vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/pty/resume')),
     ).toHaveLength(0);
@@ -608,9 +648,9 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
 
     fireEvent.click(await screen.findByTestId('mock-react-flow-node-pty-pty-live-806'));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-pty-terminal-pty-live-806')).toBeInTheDocument();
-    });
+    const mountBeforeStop = await screen.findByTestId('mock-pty-terminal-mount-pty-live-806');
+    const mountSerialBeforeStop = mountBeforeStop.textContent;
+    expect(mountSerialBeforeStop).not.toBeNull();
 
     fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
     runtimeReachable = false;
@@ -624,6 +664,7 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
       expect(screen.getByTestId('agent-rightpanel-pty-disconnected-message')).toHaveTextContent(
         'RT 暂不可达，Terminal 已进入断开只读态；下方将展示关闭前历史，可结束后归档。',
       );
+      expect(screen.getByTestId('mock-pty-terminal-mount-pty-live-806').textContent).toBe(mountSerialBeforeStop);
     });
 
     expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/pty')).length).toBeGreaterThanOrEqual(2);
@@ -1097,6 +1138,84 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
       };
       expect(persisted.paneOrder).toEqual(['session-issue-806', 'session-new-live-806']);
       expect(persisted.paneOrder).not.toContain('pty-new-806');
+    });
+  });
+
+  it('rebinds a tiled pane from a disconnected historical session to the canonical live session after recovery（平铺 pane 应在恢复后自动切回 canonical live session）', async () => {
+    localStorage.setItem('exomind:agentHubViewMode', 'tiled');
+    localStorage.setItem('exomind:agentHubTiledState', JSON.stringify({
+      layout: '1x1',
+      paneOrder: ['session-stale-pane-818'],
+    }));
+
+    const staleSession = buildSession({
+      id: 'session-stale-pane-818',
+      role: 'Recovered Pane 818',
+      pty_id: 'pty-stale-pane-818',
+      inner_session_id: 'codex-thread-pane-818',
+      source_host_id: 'stale-runtime-host-pane-818',
+    });
+    const liveSession = buildSession({
+      id: 'session-live-pane-818',
+      role: 'Recovered Pane 818',
+      pty_id: 'pty-live-pane-818',
+      inner_session_id: 'codex-thread-pane-818',
+      source_host_id: 'runtime-host-523',
+    });
+    sessionStreamState.sessions = [staleSession];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes') || url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-live-pane-818',
+              name: 'Recovered Pane 818',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const view = render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+      expect(screen.getByTestId('tiled-grid-pty-disconnected-session-stale-pane-818')).toBeInTheDocument();
+    });
+
+    sessionStreamState.sessions = [staleSession, liveSession];
+    view.rerender(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-live-pane-818')).toBeInTheDocument();
+      expect(screen.queryByTestId('tiled-grid-pty-disconnected-session-stale-pane-818')).not.toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const persisted = JSON.parse(localStorage.getItem('exomind:agentHubTiledState') ?? '{}') as {
+        paneOrder?: string[];
+      };
+      expect(persisted.paneOrder).toEqual(['session-live-pane-818']);
     });
   });
 
