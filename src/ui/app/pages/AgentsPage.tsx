@@ -4053,7 +4053,7 @@ export function AgentsPage() {
       };
 
       if (!recoverableSnapshot) {
-        const failureMessage = '该会话没有关联 PTY，可点击结束将其完成。';
+        const failureMessage = '该会话没有关联 PTY，可点击强制完成将其收敛。';
         console.warn('[agent-hub][pty][open] session is missing pty_id and cannot resume', missingPtyLogPayload);
         setRuntimeHostError(failureMessage);
         return;
@@ -4076,7 +4076,7 @@ export function AgentsPage() {
         return;
       }
       if (session.source_host_id && !matchedHost && !shouldFallbackToActiveRuntimeHost) {
-        const failureMessage = 'Terminal 会话缺少 PTY，且原始 RT 已不可用；可点击结束将其完成。';
+        const failureMessage = 'Terminal 会话缺少 PTY，且原始 RT 已不可用；可点击强制完成将其收敛。';
         setRuntimeHostError(failureMessage);
         console.warn('[agent-hub][pty][open] missing-PTY resume skipped because source host is unavailable', {
           ...missingPtyLogPayload,
@@ -4086,7 +4086,7 @@ export function AgentsPage() {
       }
 
       setRuntimeHostError(
-        'Terminal 会话缺少 PTY，正在尝试恢复历史终端；若恢复失败，可点击结束将其完成。',
+        'Terminal 会话缺少 PTY，正在尝试恢复历史终端；若恢复失败，可点击强制完成将其收敛。',
       );
       console.info('[agent-hub][pty][open] session is missing pty_id; attempting historical resume', {
         ...missingPtyLogPayload,
@@ -4120,7 +4120,7 @@ export function AgentsPage() {
         });
         return;
       } catch (error) {
-        const failureMessage = 'Terminal 会话缺少 PTY，自动恢复失败；可点击结束将其完成。';
+        const failureMessage = 'Terminal 会话缺少 PTY，自动恢复失败；可点击强制完成将其收敛。';
         setRuntimeHostError(failureMessage);
         console.warn('[agent-hub][pty][open] failed to resume terminal session without PTY', {
           ...missingPtyLogPayload,
@@ -6641,9 +6641,19 @@ export function AgentsPage() {
           {runtimeHostError && (
             <div
               data-testid="agent-runtime-error-banner"
-              className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400"
+              className="mb-3 flex items-start justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400"
             >
-              {runtimeHostError}
+              <p className="min-w-0 flex-1">{runtimeHostError}</p>
+              <button
+                type="button"
+                data-testid="agent-runtime-error-banner-dismiss"
+                onClick={() => setRuntimeHostError('')}
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-red-500 transition-colors hover:bg-red-100 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-900/40 dark:hover:text-red-100"
+                aria-label="关闭提示"
+                title="关闭提示"
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
           {content}
@@ -7226,12 +7236,23 @@ export function AgentsPage() {
                                   : '当前 PTY 已不存在，RT 可能已经重启。下方保留关闭前历史；如需结束，可点击上方“结束”收敛后归档。'}
                               </p>
                               {runtimeHostError && (
-                                <p
-                                  data-testid="agent-rightpanel-pty-disconnected-message"
-                                  className="text-[#FCA5A5]"
-                                >
-                                  {runtimeHostError}
-                                </p>
+                                <div className="flex items-start justify-between gap-2">
+                                  <p
+                                    data-testid="agent-rightpanel-pty-disconnected-message"
+                                    className="min-w-0 flex-1 text-[#FCA5A5]"
+                                  >
+                                    {runtimeHostError}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRuntimeHostError('')}
+                                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[#FCA5A5] transition-colors hover:bg-[#7F1D1D]/30 hover:text-[#FECACA]"
+                                    aria-label="关闭提示"
+                                    title="关闭提示"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </div>
                               )}
                             </div>
                             {isActivePtyAutoResuming ? (

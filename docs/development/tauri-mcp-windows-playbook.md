@@ -1753,6 +1753,63 @@
 - 坑 5：只验证“点了会出现”，不验证“为什么消失/何时常驻”
   - 沉浸模式入口类 UI 必须把 hover reveal 和 click pin 两种状态明确区分
 
+### 阶段补记：#84x no-PTY 会话强制完成与提示关闭（2026-04-07）
+
+#### 阶段目标
+
+- 在真实 Tauri 桌面实例里验证：
+  - 活跃终端会话缺少 `pty_id` 时，卡片上直接出现 `强制完成`
+  - 点击会话卡片后出现的红色提示可手动关闭
+  - 点击 `强制完成` 后，会话能从 `running` 收敛为 `completed`
+
+#### 本轮观察结果
+
+- 当前实例样例：
+  - 主窗口：`ExoMind [dev] [Web:1424 RT:9124]`
+  - raw bridge：`ws://127.0.0.1:9227`
+- 官方 `driver_session` 在本轮现场仍直接报：
+  - `Transport closed`
+- 但 raw bridge 正常可用，已实测通过：
+  - `list_windows`
+  - `execute_js`
+- 本轮必须先处理两个环境问题：
+  - `H:` 盘空间耗尽，导致 Vite 与 Rust 都可能 `ENOSPC`
+  - 端口 `9124` 已被其他实例占用，当前 app 自动拉起 embedded RT 会失败
+- 本轮稳定做法是：
+  - 把 Tauri / Cargo 构建产物显式放到 `G:\exomind-tauri-targets\issue84x-submit`
+  - 桌面启动后，再在页面上下文里调用：
+  - `window.__TAURI__.core.invoke('runtime_service_start', { host: '127.0.0.1', port: 1950 })`
+
+#### 本轮结论
+
+- `no-PTY` 会话的用户路径已经在真实桌面窗口中跑通：
+  - seed 一条 `running + terminal + pty_id = null` 会话
+  - 会话卡片上可见 `强制完成`
+  - 点卡片后出现红色提示：`该会话没有关联 PTY，可点击强制完成将其收敛。`
+  - 点提示右侧关闭按钮后，提示消失
+  - 点 `强制完成` 后，目标会话变成：
+  - `status = completed`
+  - `pty_id = null`
+  - 当前 runtime 中 `activeNoPty = []`
+- 这轮同时再次确认一个重要边界：
+  - 自动收敛逻辑只处理“有 `pty_id` 但已断开”的终端
+  - 对已经没有 `pty_id` 的会话，系统会保留给用户手动处理
+
+#### 可复用操作套路
+
+1. 如果 `driver_session` 仍报 `Transport closed`，不要卡住：
+   - 直接退回 raw bridge
+   - 用 `list_windows + execute_js` 继续桌面验收
+2. 如果当前 `tauri dev` 启动时 `9124` 被占用：
+   - 先不要抢端口
+   - 在页面里手动 `runtime_service_start` 到空闲端口，例如 `1950`
+3. 若要稳定复现 `no-PTY` 手动收敛：
+   - 准备一条 `interaction_mode = terminal`
+   - `status = running`
+   - `pty_id = null`
+   的会话记录
+   - 再走真实卡片点击与按钮点击，不只看静态 DOM
+
 #### 可复用命令与脚本
 
 - 当前 DAG bridge 调试脚本：

@@ -1259,10 +1259,11 @@ function SessionPane({
     && session.status === 'running'
     && (session.quick_actions?.length ?? 0) === 0;
   const canResolveTerminal = !isTerminalCompleted && session.interaction_mode === 'terminal';
+  const canForceCompleteWithoutPty = canResolveTerminal && !session.pty_id;
   const canArchive = isCompleted;
   const stopLabel = stopDisabled
     ? (session.pty_id ? '停止中' : '处理中')
-    : (session.pty_id ? '停止' : '结束');
+    : (session.pty_id ? '停止' : '强制完成');
 
   useEffect(() => {
     setInitialConnectionFailed(false);
@@ -1422,11 +1423,36 @@ function SessionPane({
                     {isTerminalCompleted
                       ? '当前会话已结束；保留已加载的 Terminal 内容，后续可直接归档。'
                       : isTerminalMissingPty
-                        ? '当前会话记录仍然活跃，但没有关联 PTY。可点击结束将其完成，或点开会话尝试恢复历史终端。'
-                      : isAutoResuming
-                        ? '正在尝试自动恢复当前终端会话；恢复成功后会自动切回实时 Terminal。'
-                        : '当前 PTY 已不存在，RT 可能已经重启。保留已加载的 Terminal 内容，必要时可点击停止收敛后归档。'}
+                        ? '当前会话记录仍然活跃，但没有关联 PTY。可点击强制完成将其收敛，或点开会话尝试恢复历史终端。'
+                        : isAutoResuming
+                          ? '正在尝试自动恢复当前终端会话；恢复成功后会自动切回实时 Terminal。'
+                          : '当前 PTY 已不存在，RT 可能已经重启。保留已加载的 Terminal 内容，必要时可点击停止收敛后归档。'}
                   </p>
+                  {isTerminalMissingPty && onStop ? (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (stopDisabled) return;
+                          onStop();
+                        }}
+                        className="inline-flex h-7 items-center rounded-md border border-red-200 bg-red-50 px-2.5 text-[11px] font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-red-200 disabled:hover:bg-red-50 disabled:hover:text-red-600 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:border-red-800 dark:hover:bg-red-950/50 dark:hover:text-red-200 dark:disabled:hover:border-red-900/60 dark:disabled:hover:bg-red-950/30 dark:disabled:hover:text-red-300"
+                        disabled={stopDisabled}
+                        aria-label={stopLabel}
+                        title={stopLabel}
+                      >
+                        {stopDisabled ? (
+                          <>
+                            <Loader2 size={12} className="mr-1 animate-spin" />
+                            处理中
+                          </>
+                        ) : (
+                          '强制完成'
+                        )}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 {isAutoResuming ? (
                   <div className="flex flex-1 items-center justify-center px-4 text-center">
@@ -1450,9 +1476,34 @@ function SessionPane({
               </p>
               <p className="text-xs text-[#A8A29E]">
                 {isTerminalMissingPty
-                  ? '该会话仍处于活跃状态，但没有关联 PTY。可点击结束将其完成，或点开会话尝试恢复。'
+                  ? '该会话仍处于活跃状态，但没有关联 PTY。可点击强制完成将其收敛，或点开会话尝试恢复。'
                   : '当前 PTY 已关闭；保留会话卡片以便直接归档。'}
               </p>
+              {isTerminalMissingPty && onStop ? (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (stopDisabled) return;
+                      onStop();
+                    }}
+                    className="inline-flex h-7 items-center rounded-md border border-red-200 bg-red-50 px-2.5 text-[11px] font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-red-200 disabled:hover:bg-red-50 disabled:hover:text-red-600 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:border-red-800 dark:hover:bg-red-950/50 dark:hover:text-red-200 dark:disabled:hover:border-red-900/60 dark:disabled:hover:bg-red-950/30 dark:disabled:hover:text-red-300"
+                    disabled={stopDisabled}
+                    aria-label={stopLabel}
+                    title={stopLabel}
+                  >
+                    {stopDisabled ? (
+                      <>
+                        <Loader2 size={12} className="mr-1 animate-spin" />
+                        处理中
+                      </>
+                    ) : (
+                      '强制完成'
+                    )}
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -1513,12 +1564,12 @@ function SessionPane({
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
-                if (!canResolveTerminal || stopDisabled) return;
+                if ((!canResolveTerminal && !canForceCompleteWithoutPty) || stopDisabled) return;
                 onStop?.();
               }}
               data-testid={`tiled-grid-stop-${session.id}`}
               aria-label={stopLabel}
-              disabled={!canResolveTerminal || !onStop || stopDisabled}
+              disabled={(!canResolveTerminal && !canForceCompleteWithoutPty) || !onStop || stopDisabled}
               className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-[#57534E]"
               title={stopLabel}
             >
