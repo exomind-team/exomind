@@ -4,8 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SignalRoute } from '@/lib/types/signal-pool';
 import type { SessionInfo } from '@/lib/types/session';
-import { AGENTS_TILED_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-tiled-persistence';
+import { AGENTS_TILED_PERSISTENCE_STORAGE_KEY, writeAgentsTiledPersistState } from '@/ui/app/pages/agents/agents-tiled-persistence';
 import { AGENTS_VIEW_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-view-persistence';
+import {
+  createTemplatePaneSlotBindings,
+  createTemplatePaneTree,
+} from '@/ui/app/pages/agents/tiled-pane-tree';
 
 const serviceMocks = vi.hoisted(() => ({
   getDeviceView: vi.fn(),
@@ -250,6 +254,20 @@ function buildRuntimeSnapshot() {
   };
 }
 
+function seedBoundTiledLayout(sessionId: string): void {
+  writeAgentsTiledPersistState({
+    version: 2,
+    layout: '1x1',
+    paneOrder: [sessionId],
+    tree: createTemplatePaneTree('1x1'),
+    slots: createTemplatePaneSlotBindings('1x1', [sessionId]),
+    focusedSlotId: 'slot-1',
+    unassignedSessionIds: [],
+    unassignedPoolCollapsed: false,
+    immersive: false,
+  });
+}
+
 class MockEventSource {
   constructor(_url: string) {}
 
@@ -422,6 +440,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         ],
       }),
     ];
+    seedBoundTiledLayout('session-quick');
 
     render(<AgentsPage />);
     fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
@@ -571,8 +590,41 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         id: 'session-terminal',
         status: 'running',
         interaction_mode: 'terminal',
+        pty_id: 'pty-523-running',
       }),
     ];
+    runtimeClientMocks.markSessionWaiting.mockResolvedValue({
+      ok: true,
+      data: buildSession({
+        id: 'session-terminal',
+        status: 'waiting_input',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523-running',
+      }),
+    });
+    const defaultFetch = global.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-523-running',
+              name: 'Terminal Agent',
+              session_id: 'session-terminal',
+              workdir: 'D:/project/exomind',
+              command: 'claude',
+              status: 'running',
+              created_at: '2026-03-14T00:00:00.000Z',
+            },
+          ],
+        } as Response;
+      }
+      return defaultFetch(input, init);
+    }));
+    seedBoundTiledLayout('session-terminal');
 
     render(<AgentsPage />);
     fireEvent.click(await screen.findByTestId('agent-view-toggle-tiled'));
@@ -605,6 +657,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         ],
       }),
     ];
+    seedBoundTiledLayout('session-fallback');
 
     runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
       updatedAt: '2026-03-14T10:00:00.000Z',
@@ -828,6 +881,86 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         'pty-523',
       );
     });
+  });
+
+  it('completes an active terminal session without PTY from the session list（无 PTY 的活跃终端会话可从会话列表直接结束）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-card-stop-no-pty',
+        role: 'No PTY Session',
+        interaction_mode: 'terminal',
+        pty_id: undefined,
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    runtimeClientMocks.updateSession.mockResolvedValueOnce({
+      ok: true,
+      data: buildSession({
+        id: 'session-card-stop-no-pty',
+        role: 'No PTY Session',
+        status: 'completed',
+        interaction_mode: 'terminal',
+        pty_id: undefined,
+        source_host_id: 'runtime-host-523',
+      }),
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    fireEvent.click(await screen.findByTestId('session-card-stop-session-card-stop-no-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).not.toHaveBeenCalled();
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1' }),
+        'session-card-stop-no-pty',
+        { status: 'completed' },
+      );
+      expect(toastMocks.toast).toHaveBeenCalledWith(expect.objectContaining({
+        title: '正在结束 Terminal 会话',
+      }));
+      expect(toastMocks.update).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'toast-523',
+        title: '已结束 Terminal 会话',
+      }));
+    });
+  });
+
+  it('tries to resume a recoverable terminal session without PTY when opened from the session list（点开无 PTY 且可恢复的终端会话时应尝试恢复）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-open-no-pty',
+        role: 'Recoverable No PTY',
+        agent_kind: 'codex',
+        interaction_mode: 'terminal',
+        pty_id: undefined,
+        inner_session_id: '019d0011-aaaa-bbbb-cccc-1234567890ab',
+        source_host_id: 'runtime-host-523',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'D:/project/exomind',
+        },
+      }),
+    ];
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-open-no-pty'));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/pty/resume',
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"session_id":"019d0011-aaaa-bbbb-cccc-1234567890ab"'),
+        }),
+      );
+      expect(sessionStreamState.refresh).toHaveBeenCalled();
+    });
+
+    expect(await screen.findByTestId('mock-pty-terminal-pty-resume-523')).toBeInTheDocument();
   });
 
   it('reconciles stale terminal sessions from the right panel when PTY stop returns 404（右侧面板可将丢失 PTY 的会话收敛为已完成）', async () => {

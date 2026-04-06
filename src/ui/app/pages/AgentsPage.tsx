@@ -125,8 +125,10 @@ import { TiledGrid, LayoutSelector, GlobalStatusIndicator, type TiledLayout } fr
 import { useSessionStream } from '@/hooks/useSessionStream';
 import { buildPtyGraphNodes, findSessionForPty } from './agents/pty-graph-nodes';
 import { applySpawnedSessionToTiledPaneOrder } from './agents/tiled-pane-order';
+import { useTiledWorkbenchKeyboard } from './agents/useTiledWorkbenchKeyboard';
 import {
   buildRecoverableTerminalSessionSnapshot,
+  canResumeHistoricalTerminalSession,
   detectAndPersistHistoricalSessionId,
   hasMatchingHistoricalSessionRecord,
   hasMatchingHistoricalSessionSnapshotRecord,
@@ -141,9 +143,29 @@ import {
   type RecoverableTerminalSessionSnapshot,
 } from './agents/pty-session-recovery';
 import {
+  buildNextTiledWorkbenchLayoutName,
+  cloneTiledLayoutPersistSnapshot,
+  createEmptyTiledLayoutPersistSnapshot,
+  createTiledWorkbenchLayoutRecord,
+  extractTiledLayoutPersistSnapshot,
+  readAgentsTiledWorkbenchPersistState,
   readAgentsTiledPersistState,
-  writeAgentsTiledPersistState,
+  writeAgentsTiledWorkbenchPersistState,
+  type TiledLayoutPersistSnapshot,
 } from './agents/agents-tiled-persistence';
+import {
+  applyLegacyPaneOrderToBindings,
+  bindSessionToTiledPaneSlot,
+  clearTiledPaneSlotBinding,
+  createTemplatePaneSlotBindings,
+  createTemplatePaneTree,
+  flattenTiledPaneTreeSlotIds,
+  removeTiledPaneTreeSlot,
+  resolveLegacyPaneOrderFromTree,
+  splitTiledPaneTreeSlot,
+  updateTiledPaneTreeSplitRatio,
+  type TiledPaneSplitAxis,
+} from './agents/tiled-pane-tree';
 import {
   readAgentsViewModePersistState,
   writeAgentsViewModePersistState,
@@ -220,6 +242,112 @@ type PendingPtyPresenceCheck = {
   startedAtMs: number;
   expiresAtMs: number;
 };
+
+type PendingSpawnedPtyBinding = {
+  ptyId: string;
+  slotId?: string | null;
+  layoutId?: string | null;
+};
+
+function isActiveTiledWorkbenchSession(session: SessionInfo): boolean {
+  return session.status !== 'completed' && session.status !== 'archived';
+}
+
+function appendUniqueSessionIds(currentIds: string[], sessionIds: string[]): string[] {
+  if (sessionIds.length === 0) {
+    return currentIds;
+  }
+
+  const nextIds = [...currentIds];
+  sessionIds.forEach((sessionId) => {
+    if (!sessionId || nextIds.includes(sessionId)) {
+      return;
+    }
+    nextIds.push(sessionId);
+  });
+  return nextIds;
+}
+
+function applySessionToTiledLayoutSnapshot({
+  snapshot,
+  sessions,
+  sessionId,
+  slotId,
+}: {
+  snapshot: TiledLayoutPersistSnapshot;
+  sessions: SessionInfo[];
+  sessionId: string;
+  slotId?: string | null;
+}): TiledLayoutPersistSnapshot {
+  const nextSnapshot = cloneTiledLayoutPersistSnapshot(snapshot);
+  const slotIds = flattenTiledPaneTreeSlotIds(nextSnapshot.tree);
+  const activeSessionIds = new Set(
+    sessions.filter(isActiveTiledWorkbenchSession).map((session) => session.id),
+  );
+  const matchingSession = sessions.find((session) => session.id === sessionId);
+  const recoverySnapshot = matchingSession
+    ? buildRecoverableTerminalSessionSnapshot(matchingSession) ?? undefined
+    : undefined;
+
+  if (slotId) {
+    if (!slotIds.includes(slotId)) {
+      return {
+        ...nextSnapshot,
+        unassignedSessionIds: appendUniqueSessionIds(
+          nextSnapshot.unassignedSessionIds.filter((id) => id !== sessionId),
+          [sessionId],
+        ),
+      };
+    }
+
+    const displacedSessionId = nextSnapshot.slots.find((slot) => slot.slotId === slotId)?.sessionId ?? null;
+    const nextSlots = bindSessionToTiledPaneSlot(
+      nextSnapshot.tree,
+      nextSnapshot.slots,
+      slotId,
+      sessionId,
+      recoverySnapshot,
+    );
+    const nextUnassignedSessionIds = nextSnapshot.unassignedSessionIds.filter((id) => id !== sessionId);
+
+    return {
+      ...nextSnapshot,
+      paneOrder: resolveLegacyPaneOrderFromTree(nextSnapshot.tree, nextSlots),
+      slots: nextSlots,
+      focusedSlotId: slotId,
+      unassignedSessionIds: displacedSessionId
+        && displacedSessionId !== sessionId
+        && activeSessionIds.has(displacedSessionId)
+        ? appendUniqueSessionIds(nextUnassignedSessionIds, [displacedSessionId])
+        : nextUnassignedSessionIds,
+    };
+  }
+
+  const nextPaneOrder = applySpawnedSessionToTiledPaneOrder({
+    layout: nextSnapshot.layout,
+    paneOrder: nextSnapshot.paneOrder,
+    sessions,
+    newSessionId: sessionId,
+  });
+  const nextSlots = applyLegacyPaneOrderToBindings(nextSnapshot.tree, nextSnapshot.slots, nextPaneOrder).map((slot) => (
+    slot.sessionId === sessionId && recoverySnapshot
+      ? {
+          ...slot,
+          terminalRecovery: recoverySnapshot,
+        }
+      : slot
+  ));
+  const isAssigned = nextSlots.some((slot) => slot.sessionId === sessionId);
+
+  return {
+    ...nextSnapshot,
+    paneOrder: resolveLegacyPaneOrderFromTree(nextSnapshot.tree, nextSlots),
+    slots: nextSlots,
+    unassignedSessionIds: isAssigned
+      ? nextSnapshot.unassignedSessionIds.filter((id) => id !== sessionId)
+      : appendUniqueSessionIds(nextSnapshot.unassignedSessionIds, [sessionId]),
+  };
+}
 
 function isPendingPtyPresenceCheckActive(
   entry: PendingPtyPresenceCheck | undefined,
@@ -524,6 +652,31 @@ function isOpenRecoverableTerminalSession(session: SessionInfo): boolean {
     && session.status !== 'archived';
 }
 
+function hasRecoverableTerminalSessionSnapshot(session: SessionInfo): boolean {
+  return buildRecoverableTerminalSessionSnapshot(session) !== null
+    && session.status !== 'completed'
+    && session.status !== 'archived';
+}
+
+function shouldAutoCompleteDisconnectedTerminalSession(session: SessionInfo): boolean {
+  if (session.interaction_mode !== 'terminal') {
+    return false;
+  }
+
+  if (buildTerminalSessionCompletionSteps(session.status).length === 0) {
+    return false;
+  }
+
+  // Sessions that have already lost their PTY need explicit user handling:
+  // open attempts can still try historical recovery, and the UI exposes an
+  // end action for manually completing the session when recovery is impossible.
+  if (!session.pty_id) {
+    return false;
+  }
+
+  return true;
+}
+
 function getHistoricalSessionOccupancyScore(
   session: SessionInfo,
   options: {
@@ -714,6 +867,9 @@ function TabBar({
 export function AgentsPage() {
   const supportsInlineRightPanel = useIsDesktop(1024);
   const initialRuntimeTarget = getSelectedRuntimeTarget();
+  const initialTiledWorkbenchState = useMemo(() => readAgentsTiledWorkbenchPersistState(), []);
+  const initialTiledLayoutRecord = initialTiledWorkbenchState.layouts[initialTiledWorkbenchState.activeLayoutId]
+    ?? Object.values(initialTiledWorkbenchState.layouts)[0];
   const initialTiledState = useMemo(() => readAgentsTiledPersistState(), []);
   const [viewMode, setViewMode] = useState<AgentHubViewMode>(() => readAgentsViewModePersistState());
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
@@ -738,8 +894,132 @@ export function AgentsPage() {
   );
   // ── Tiled view state ──
   const [tiledLayout, setTiledLayout] = useState<TiledLayout>(initialTiledState.layout);
-  const [tiledFocusedIndex, setTiledFocusedIndex] = useState<number | null>(null);
-  const [tiledPaneOrder, setTiledPaneOrder] = useState<string[]>(initialTiledState.paneOrder);
+  const [tiledPaneTree, setTiledPaneTree] = useState(initialTiledState.tree);
+  const [tiledPaneSlots, setTiledPaneSlots] = useState(initialTiledState.slots);
+  const [tiledWorkbenchLayouts, setTiledWorkbenchLayouts] = useState(initialTiledWorkbenchState.layouts);
+  const [tiledWorkbenchLayoutOrder, setTiledWorkbenchLayoutOrder] = useState(initialTiledWorkbenchState.layoutOrder);
+  const [tiledActiveLayoutId, setTiledActiveLayoutId] = useState(initialTiledWorkbenchState.activeLayoutId);
+  const [tiledActiveLayoutNameDraft, setTiledActiveLayoutNameDraft] = useState(
+    initialTiledLayoutRecord?.name ?? '默认布局',
+  );
+  const [tiledFocusedSlotId, setTiledFocusedSlotId] = useState<string | null>(
+    initialTiledState.focusedSlotId ?? null,
+  );
+  const [tiledUnassignedSessionIds, setTiledUnassignedSessionIds] = useState<string[]>(
+    initialTiledState.unassignedSessionIds,
+  );
+  const [tiledUnassignedPoolCollapsed, setTiledUnassignedPoolCollapsed] = useState(
+    initialTiledState.unassignedPoolCollapsed,
+  );
+  const [tiledImmersive, setTiledImmersive] = useState(initialTiledState.immersive);
+  const [tiledPassthroughArmed, setTiledPassthroughArmed] = useState(false);
+  const tiledSlotIds = useMemo(
+    () => flattenTiledPaneTreeSlotIds(tiledPaneTree),
+    [tiledPaneTree],
+  );
+  const tiledPaneOrder = useMemo(
+    () => resolveLegacyPaneOrderFromTree(tiledPaneTree, tiledPaneSlots),
+    [tiledPaneTree, tiledPaneSlots],
+  );
+  const tiledActiveLayoutRecord = useMemo(
+    () => tiledWorkbenchLayouts[tiledActiveLayoutId]
+      ?? tiledWorkbenchLayouts[tiledWorkbenchLayoutOrder[0] ?? '']
+      ?? null,
+    [tiledActiveLayoutId, tiledWorkbenchLayoutOrder, tiledWorkbenchLayouts],
+  );
+  const tiledFocusedIndex = useMemo(() => {
+    if (!tiledFocusedSlotId) {
+      return null;
+    }
+    const index = tiledSlotIds.indexOf(tiledFocusedSlotId);
+    return index === -1 ? null : index;
+  }, [tiledFocusedSlotId, tiledSlotIds]);
+  const setTiledPaneOrder = useCallback((next: string[] | ((prev: string[]) => string[])) => {
+    setTiledPaneSlots((prev) => {
+      const prevOrder = resolveLegacyPaneOrderFromTree(tiledPaneTree, prev);
+      const nextOrder = typeof next === 'function' ? next(prevOrder) : next;
+      return applyLegacyPaneOrderToBindings(tiledPaneTree, prev, nextOrder);
+    });
+  }, [tiledPaneTree]);
+  const handleTiledFocusPane = useCallback((index: number | null) => {
+    if (index == null) {
+      setTiledFocusedSlotId(null);
+      return;
+    }
+    setTiledFocusedSlotId(tiledSlotIds[index] ?? null);
+  }, [tiledSlotIds]);
+  const handleTiledLayoutChange = useCallback((nextLayout: TiledLayout) => {
+    setTiledLayout(nextLayout);
+    const nextTree = createTemplatePaneTree(nextLayout);
+    setTiledPaneTree(nextTree);
+    setTiledPaneSlots((prev) => {
+      const prevOrder = resolveLegacyPaneOrderFromTree(tiledPaneTree, prev);
+      return applyLegacyPaneOrderToBindings(
+        nextTree,
+        createTemplatePaneSlotBindings(nextLayout),
+        prevOrder,
+      );
+    });
+    setTiledFocusedSlotId((prev) => {
+      const nextSlotIds = flattenTiledPaneTreeSlotIds(nextTree);
+      return prev && nextSlotIds.includes(prev) ? prev : nextSlotIds[0] ?? null;
+    });
+  }, [tiledPaneTree]);
+  useEffect(() => {
+    if (!tiledFocusedSlotId) {
+      if (tiledSlotIds[0]) {
+        setTiledFocusedSlotId(tiledSlotIds[0]);
+      }
+      return;
+    }
+    if (!tiledSlotIds.includes(tiledFocusedSlotId)) {
+      setTiledFocusedSlotId(tiledSlotIds[0] ?? null);
+    }
+  }, [tiledFocusedSlotId, tiledSlotIds]);
+  const toggleTiledImmersive = useCallback(() => {
+    setTiledImmersive((prev) => {
+      const next = !prev;
+      if (next) {
+        setTiledUnassignedPoolCollapsed(true);
+      }
+      return next;
+    });
+  }, []);
+  const toggleTiledUnassignedPool = useCallback(() => {
+    setTiledUnassignedPoolCollapsed((prev) => !prev);
+  }, []);
+  const buildCurrentTiledLayoutSnapshot = useCallback((): TiledLayoutPersistSnapshot => ({
+    version: 2,
+    layout: tiledLayout,
+    paneOrder: tiledPaneOrder,
+    tree: tiledPaneTree,
+    slots: tiledPaneSlots,
+    ...(tiledFocusedSlotId ? { focusedSlotId: tiledFocusedSlotId } : {}),
+    unassignedSessionIds: tiledUnassignedSessionIds,
+    unassignedPoolCollapsed: tiledUnassignedPoolCollapsed,
+    immersive: tiledImmersive,
+  }), [
+    tiledFocusedSlotId,
+    tiledImmersive,
+    tiledLayout,
+    tiledPaneOrder,
+    tiledPaneSlots,
+    tiledPaneTree,
+    tiledUnassignedPoolCollapsed,
+    tiledUnassignedSessionIds,
+  ]);
+  const applyTiledLayoutSnapshot = useCallback((snapshot: TiledLayoutPersistSnapshot) => {
+    const nextSnapshot = extractTiledLayoutPersistSnapshot(snapshot);
+
+    setTiledLayout(nextSnapshot.layout);
+    setTiledPaneTree(nextSnapshot.tree);
+    setTiledPaneSlots(nextSnapshot.slots);
+    setTiledFocusedSlotId(nextSnapshot.focusedSlotId ?? null);
+    setTiledUnassignedSessionIds(nextSnapshot.unassignedSessionIds);
+    setTiledUnassignedPoolCollapsed(nextSnapshot.unassignedPoolCollapsed);
+    setTiledImmersive(nextSnapshot.immersive);
+    setTiledPassthroughArmed(false);
+  }, []);
   const [useMockData, setUseMockData] = useState(getUseMockDataEnabled);
 
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
@@ -788,6 +1068,7 @@ export function AgentsPage() {
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
   const [stoppingPtyIds, setStoppingPtyIds] = useState<string[]>([]);
+  const [resolvingTerminalSessionIds, setResolvingTerminalSessionIds] = useState<string[]>([]);
   const [hasLoadedPtyAgents, setHasLoadedPtyAgents] = useState(false);
   const [loadedPtyHostId, setLoadedPtyHostId] = useState<string | null>(null);
   const [ptyAgents, setPtyAgents] = useState<Array<{
@@ -799,7 +1080,7 @@ export function AgentsPage() {
   }>>([]);
   const [failedPtyConnectionIds, setFailedPtyConnectionIds] = useState<string[]>([]);
   const [pendingPtyPresenceChecks, setPendingPtyPresenceChecks] = useState<Record<string, PendingPtyPresenceCheck>>({});
-  const [pendingSpawnedPtyIds, setPendingSpawnedPtyIds] = useState<string[]>([]);
+  const [pendingSpawnedPtyBindings, setPendingSpawnedPtyBindings] = useState<PendingSpawnedPtyBinding[]>([]);
   /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
   const [activePtyId, setActivePtyId] = useState<string | null>(initialTiledState.fullscreenPtyId ?? null);
   const [activePtyHostId, setActivePtyHostId] = useState<string | null>(null);
@@ -1308,6 +1589,21 @@ export function AgentsPage() {
     (ptyId?: string | null) => Boolean(ptyId && stoppingPtyIds.includes(ptyId)),
     [stoppingPtyIds],
   );
+  const setTerminalSessionResolutionPending = useCallback((sessionId: string, isPending: boolean) => {
+    setResolvingTerminalSessionIds((prev) => {
+      if (isPending) {
+        return prev.includes(sessionId) ? prev : [...prev, sessionId];
+      }
+      return prev.filter((id) => id !== sessionId);
+    });
+  }, []);
+  const isTerminalSessionResolutionPending = useCallback(
+    (session: Pick<SessionInfo, 'id' | 'pty_id'>) => (
+      isPtyStopPending(session.pty_id)
+      || resolvingTerminalSessionIds.includes(session.id)
+    ),
+    [isPtyStopPending, resolvingTerminalSessionIds],
+  );
 
   const handleStopPtyAgent = async (ptyId: string, sourceHostId?: string | null) => {
     if (isPtyStopPending(ptyId)) {
@@ -1717,6 +2013,8 @@ export function AgentsPage() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
   const [showPtySpawnDialog, setShowPtySpawnDialog] = useState(false);
+  const [ptySpawnTargetSlotId, setPtySpawnTargetSlotId] = useState<string | null>(null);
+  const [ptySpawnTargetLayoutId, setPtySpawnTargetLayoutId] = useState<string | null>(null);
   const [peerPairingOpen, setPeerPairingOpen] = useState(false);
 
   const openPtyTerminal = useCallback((
@@ -2017,7 +2315,6 @@ export function AgentsPage() {
       authToken: resolveRtAuthToken(),
     };
   };
-
   const ptySpawnConnection = useMemo(() => {
     return resolvePtySpawnConnectionTarget({
       runtimeHostSnapshots,
@@ -2185,6 +2482,74 @@ export function AgentsPage() {
     () => (useMockData ? MOCK_SESSIONS : liveSessions),
     [liveSessions, useMockData],
   );
+  const tiledSessionById = useMemo(
+    () => new Map(dashboardSessions.map((session) => [session.id, session])),
+    [dashboardSessions],
+  );
+  const activeTiledSessions = useMemo(
+    () => dashboardSessions.filter(
+      (session) => session.status !== 'completed' && session.status !== 'archived',
+    ),
+    [dashboardSessions],
+  );
+  const tiledAssignedSessionIds = useMemo(
+    () => new Set(
+      tiledPaneSlots.flatMap((slot) => (slot.sessionId ? [slot.sessionId] : [])),
+    ),
+    [tiledPaneSlots],
+  );
+  const tiledUnassignedSessions = useMemo(() => {
+    const orderedSessionIds = [...tiledUnassignedSessionIds, ...activeTiledSessions.map((session) => session.id)];
+    const seen = new Set<string>();
+
+    return orderedSessionIds.flatMap((sessionId) => {
+      if (seen.has(sessionId) || tiledAssignedSessionIds.has(sessionId)) {
+        return [];
+      }
+      seen.add(sessionId);
+      const session = tiledSessionById.get(sessionId);
+      return session ? [session] : [];
+    });
+  }, [
+    activeTiledSessions,
+    tiledAssignedSessionIds,
+    tiledSessionById,
+    tiledUnassignedSessionIds,
+  ]);
+  const focusedTiledPtyTarget = useMemo(() => {
+    if (!tiledFocusedSlotId) {
+      return null;
+    }
+
+    const sessionId = tiledPaneSlots.find((slot) => slot.slotId === tiledFocusedSlotId)?.sessionId;
+    if (!sessionId) {
+      return null;
+    }
+
+    const session = tiledSessionById.get(sessionId);
+    if (
+      !session?.pty_id
+      || session.interaction_mode !== 'terminal'
+      || session.status === 'completed'
+      || session.status === 'archived'
+    ) {
+      return null;
+    }
+
+    const connection = resolveRuntimeConnectionForSession(session);
+    return {
+      ...connection,
+      ptyId: session.pty_id,
+    };
+  }, [
+    tiledFocusedSlotId,
+    tiledPaneSlots,
+    tiledSessionById,
+    resolveRuntimeConnectionForSession,
+  ]);
+  useEffect(() => {
+    setTiledActiveLayoutNameDraft(tiledActiveLayoutRecord?.name ?? '默认布局');
+  }, [tiledActiveLayoutRecord?.name]);
   const boundHistoricalSessionIds = useMemo(
     () => dashboardSessions.flatMap((session) => {
       const sessionId = session.inner_session_id?.trim();
@@ -2220,74 +2585,519 @@ export function AgentsPage() {
         }),
     ));
   }, [dashboardSessions]);
+  const appendTiledUnassignedSessionIds = useCallback((sessionIds: string[]) => {
+    if (sessionIds.length === 0) {
+      return;
+    }
+    setTiledUnassignedSessionIds((prev) => {
+      const next = [...prev];
+      sessionIds.forEach((sessionId) => {
+        if (!sessionId || next.includes(sessionId)) {
+          return;
+        }
+        next.push(sessionId);
+      });
+      return next.join('\u0000') === prev.join('\u0000') ? prev : next;
+    });
+  }, []);
+  const bindSessionToTiledSlot = useCallback((slotId: string, sessionId: string) => {
+    const displacedSessionId = tiledPaneSlots.find((slot) => slot.slotId === slotId)?.sessionId ?? null;
+    const session = tiledSessionById.get(sessionId);
+    const recoverySnapshot = session ? buildRecoverableTerminalSessionSnapshot(session) : null;
+
+    setTiledPaneSlots((prev) => bindSessionToTiledPaneSlot(
+      tiledPaneTree,
+      prev,
+      slotId,
+      sessionId,
+      recoverySnapshot ?? undefined,
+    ));
+    setTiledFocusedSlotId(slotId);
+    setTiledUnassignedSessionIds((prev) => prev.filter((id) => id !== sessionId));
+    if (
+      displacedSessionId
+      && displacedSessionId !== sessionId
+      && activeTiledSessions.some((candidate) => candidate.id === displacedSessionId)
+    ) {
+      appendTiledUnassignedSessionIds([displacedSessionId]);
+    }
+  }, [
+    activeTiledSessions,
+    appendTiledUnassignedSessionIds,
+    tiledPaneSlots,
+    tiledPaneTree,
+    tiledSessionById,
+  ]);
+  const applySessionToNamedTiledWorkbenchLayout = useCallback(({
+    sessionId,
+    slotId,
+    layoutId,
+  }: {
+    sessionId: string;
+    slotId?: string | null;
+    layoutId?: string | null;
+  }) => {
+    const targetLayoutId = layoutId ?? tiledActiveLayoutId;
+    if (targetLayoutId === tiledActiveLayoutId) {
+      if (slotId && !tiledSlotIds.includes(slotId)) {
+        appendTiledUnassignedSessionIds([sessionId]);
+        return;
+      }
+
+      const nextSnapshot = applySessionToTiledLayoutSnapshot({
+        snapshot: buildCurrentTiledLayoutSnapshot(),
+        sessions: dashboardSessions,
+        sessionId,
+        ...(slotId ? { slotId } : {}),
+      });
+      applyTiledLayoutSnapshot(nextSnapshot);
+      return;
+    }
+
+    const targetLayout = tiledWorkbenchLayouts[targetLayoutId];
+    if (!targetLayout) {
+      appendTiledUnassignedSessionIds([sessionId]);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    setTiledWorkbenchLayouts((prev) => {
+      const currentLayout = prev[targetLayoutId];
+      if (!currentLayout) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [targetLayoutId]: {
+          ...currentLayout,
+          snapshot: applySessionToTiledLayoutSnapshot({
+            snapshot: currentLayout.snapshot,
+            sessions: dashboardSessions,
+            sessionId,
+            ...(slotId ? { slotId } : {}),
+          }),
+          updatedAt: now,
+        },
+      };
+    });
+  }, [
+    appendTiledUnassignedSessionIds,
+    applyTiledLayoutSnapshot,
+    buildCurrentTiledLayoutSnapshot,
+    dashboardSessions,
+    tiledActiveLayoutId,
+    tiledSlotIds,
+    tiledWorkbenchLayouts,
+  ]);
+  const clearTiledSlot = useCallback((slotId: string) => {
+    const currentSlot = tiledPaneSlots.find((slot) => slot.slotId === slotId);
+    if (!currentSlot) {
+      return;
+    }
+
+    setTiledPaneSlots((prev) => clearTiledPaneSlotBinding(tiledPaneTree, prev, slotId));
+
+    if (
+      currentSlot.sessionId
+      && activeTiledSessions.some((session) => session.id === currentSlot.sessionId)
+    ) {
+      appendTiledUnassignedSessionIds([currentSlot.sessionId]);
+    }
+  }, [
+    activeTiledSessions,
+    appendTiledUnassignedSessionIds,
+    tiledPaneSlots,
+    tiledPaneTree,
+  ]);
+  const closeTiledSlot = useCallback((slotId: string) => {
+    if (tiledSlotIds.length <= 1) {
+      clearTiledSlot(slotId);
+      return;
+    }
+
+    const currentSlot = tiledPaneSlots.find((slot) => slot.slotId === slotId);
+    const nextTree = removeTiledPaneTreeSlot(tiledPaneTree, slotId);
+    const nextSlotIds = flattenTiledPaneTreeSlotIds(nextTree);
+
+    setTiledPaneTree(nextTree);
+    setTiledPaneSlots((prev) => prev.filter(
+      (slot) => slot.slotId !== slotId && nextSlotIds.includes(slot.slotId),
+    ));
+    setTiledFocusedSlotId((prev) => (
+      prev && nextSlotIds.includes(prev) ? prev : nextSlotIds[0] ?? null
+    ));
+
+    if (
+      currentSlot?.sessionId
+      && activeTiledSessions.some((session) => session.id === currentSlot.sessionId)
+    ) {
+      appendTiledUnassignedSessionIds([currentSlot.sessionId]);
+    }
+  }, [
+    activeTiledSessions,
+    appendTiledUnassignedSessionIds,
+    clearTiledSlot,
+    tiledPaneSlots,
+    tiledPaneTree,
+    tiledSlotIds.length,
+  ]);
+  const splitTiledSlot = useCallback((slotId: string, axis: TiledPaneSplitAxis) => {
+    const result = splitTiledPaneTreeSlot(tiledPaneTree, slotId, axis);
+    if (!result) {
+      return;
+    }
+
+    setTiledPaneTree(result.tree);
+    setTiledPaneSlots((prev) => {
+      const next = prev.filter((slot) => slot.slotId !== result.newSlotId);
+      next.push({ slotId: result.newSlotId });
+      return next;
+    });
+    setTiledFocusedSlotId(result.newSlotId);
+  }, [tiledPaneTree]);
+  const resizeTiledSplit = useCallback((path: number[], ratio: number) => {
+    setTiledPaneTree((prev) => updateTiledPaneTreeSplitRatio(prev, path, ratio));
+  }, []);
+  const openPtySpawnDialogForSlot = useCallback((slotId: string | null) => {
+    setPtySpawnTargetSlotId(slotId);
+    setPtySpawnTargetLayoutId(viewMode === 'tiled' ? tiledActiveLayoutId : null);
+    setShowPtySpawnDialog(true);
+    if (slotId) {
+      setTiledFocusedSlotId(slotId);
+    }
+  }, [tiledActiveLayoutId, viewMode]);
+  const commitActiveTiledLayoutName = useCallback((rawName: string) => {
+    const normalizedName = rawName.trim() || tiledActiveLayoutRecord?.name || '默认布局';
+    setTiledActiveLayoutNameDraft(normalizedName);
+
+    if (!tiledActiveLayoutRecord || tiledActiveLayoutRecord.name === normalizedName) {
+      return normalizedName;
+    }
+
+    const now = new Date().toISOString();
+    setTiledWorkbenchLayouts((prev) => ({
+      ...prev,
+      [tiledActiveLayoutRecord.id]: {
+        ...tiledActiveLayoutRecord,
+        name: normalizedName,
+        updatedAt: now,
+      },
+    }));
+    return normalizedName;
+  }, [tiledActiveLayoutRecord]);
+  const switchTiledWorkbenchLayout = useCallback((nextLayoutId: string) => {
+    if (!nextLayoutId || nextLayoutId === tiledActiveLayoutId) {
+      return;
+    }
+
+    const nextLayout = tiledWorkbenchLayouts[nextLayoutId];
+    if (!nextLayout) {
+      return;
+    }
+
+    const currentSnapshot = buildCurrentTiledLayoutSnapshot();
+    const currentLayoutName = commitActiveTiledLayoutName(tiledActiveLayoutNameDraft);
+    const nextSnapshot = cloneTiledLayoutPersistSnapshot(nextLayout.snapshot);
+    const now = new Date().toISOString();
+
+    setTiledWorkbenchLayouts((prev) => {
+      const currentLayout = prev[tiledActiveLayoutId];
+      return {
+        ...prev,
+        ...(currentLayout ? {
+          [tiledActiveLayoutId]: {
+            ...currentLayout,
+            name: currentLayoutName,
+            snapshot: currentSnapshot,
+            updatedAt: now,
+          },
+        } : {}),
+        [nextLayoutId]: {
+          ...nextLayout,
+          lastUsedAt: now,
+        },
+      };
+    });
+    setTiledActiveLayoutId(nextLayoutId);
+    applyTiledLayoutSnapshot(nextSnapshot);
+  }, [
+    applyTiledLayoutSnapshot,
+    buildCurrentTiledLayoutSnapshot,
+    commitActiveTiledLayoutName,
+    tiledActiveLayoutId,
+    tiledActiveLayoutNameDraft,
+    tiledWorkbenchLayouts,
+  ]);
+  const createEmptyTiledWorkbenchLayout = useCallback(() => {
+    const currentSnapshot = buildCurrentTiledLayoutSnapshot();
+    const currentLayoutName = commitActiveTiledLayoutName(tiledActiveLayoutNameDraft);
+    const nextSnapshot = createEmptyTiledLayoutPersistSnapshot(
+      tiledLayout,
+      activeTiledSessions.map((session) => session.id),
+    );
+    const nextLayout = createTiledWorkbenchLayoutRecord(nextSnapshot, {
+      name: buildNextTiledWorkbenchLayoutName(tiledWorkbenchLayouts),
+    });
+    const now = nextLayout.createdAt;
+
+    setTiledWorkbenchLayouts((prev) => ({
+      ...prev,
+      ...(tiledActiveLayoutRecord ? {
+        [tiledActiveLayoutRecord.id]: {
+          ...tiledActiveLayoutRecord,
+          name: currentLayoutName,
+          snapshot: currentSnapshot,
+          updatedAt: now,
+        },
+      } : {}),
+      [nextLayout.id]: nextLayout,
+    }));
+    setTiledWorkbenchLayoutOrder((prev) => [...prev, nextLayout.id]);
+    setTiledActiveLayoutId(nextLayout.id);
+    applyTiledLayoutSnapshot(nextLayout.snapshot);
+    setTiledActiveLayoutNameDraft(nextLayout.name);
+  }, [
+    activeTiledSessions,
+    applyTiledLayoutSnapshot,
+    buildCurrentTiledLayoutSnapshot,
+    commitActiveTiledLayoutName,
+    tiledActiveLayoutNameDraft,
+    tiledActiveLayoutRecord,
+    tiledLayout,
+    tiledWorkbenchLayouts,
+  ]);
+  const duplicateActiveTiledWorkbenchLayout = useCallback(() => {
+    const currentSnapshot = cloneTiledLayoutPersistSnapshot(buildCurrentTiledLayoutSnapshot());
+    const currentLayoutName = commitActiveTiledLayoutName(tiledActiveLayoutNameDraft);
+    const nextLayout = createTiledWorkbenchLayoutRecord(currentSnapshot, {
+      name: buildNextTiledWorkbenchLayoutName(
+        tiledWorkbenchLayouts,
+        `${currentLayoutName} 副本`,
+      ),
+    });
+    const now = nextLayout.createdAt;
+
+    setTiledWorkbenchLayouts((prev) => ({
+      ...prev,
+      ...(tiledActiveLayoutRecord ? {
+        [tiledActiveLayoutRecord.id]: {
+          ...tiledActiveLayoutRecord,
+          name: currentLayoutName,
+          snapshot: currentSnapshot,
+          updatedAt: now,
+        },
+      } : {}),
+      [nextLayout.id]: nextLayout,
+    }));
+    setTiledWorkbenchLayoutOrder((prev) => [...prev, nextLayout.id]);
+    setTiledActiveLayoutId(nextLayout.id);
+    applyTiledLayoutSnapshot(nextLayout.snapshot);
+    setTiledActiveLayoutNameDraft(nextLayout.name);
+  }, [
+    applyTiledLayoutSnapshot,
+    buildCurrentTiledLayoutSnapshot,
+    commitActiveTiledLayoutName,
+    tiledActiveLayoutNameDraft,
+    tiledActiveLayoutRecord,
+    tiledWorkbenchLayouts,
+  ]);
+  const deleteActiveTiledWorkbenchLayout = useCallback(() => {
+    if (tiledWorkbenchLayoutOrder.length <= 1) {
+      return;
+    }
+
+    const currentIndex = tiledWorkbenchLayoutOrder.indexOf(tiledActiveLayoutId);
+    const fallbackLayoutId = tiledWorkbenchLayoutOrder[currentIndex - 1]
+      ?? tiledWorkbenchLayoutOrder[currentIndex + 1]
+      ?? null;
+    if (!fallbackLayoutId) {
+      return;
+    }
+
+    const fallbackLayout = tiledWorkbenchLayouts[fallbackLayoutId];
+    if (!fallbackLayout) {
+      return;
+    }
+
+    const nextSnapshot = cloneTiledLayoutPersistSnapshot(fallbackLayout.snapshot);
+    const now = new Date().toISOString();
+
+    setTiledWorkbenchLayouts((prev) => {
+      const nextLayouts = { ...prev };
+      delete nextLayouts[tiledActiveLayoutId];
+      if (nextLayouts[fallbackLayoutId]) {
+        nextLayouts[fallbackLayoutId] = {
+          ...nextLayouts[fallbackLayoutId]!,
+          lastUsedAt: now,
+        };
+      }
+      return nextLayouts;
+    });
+    setTiledWorkbenchLayoutOrder((prev) => prev.filter((layoutId) => layoutId !== tiledActiveLayoutId));
+    setTiledActiveLayoutId(fallbackLayoutId);
+    applyTiledLayoutSnapshot(nextSnapshot);
+    setTiledActiveLayoutNameDraft(fallbackLayout.name);
+  }, [
+    applyTiledLayoutSnapshot,
+    tiledActiveLayoutId,
+    tiledWorkbenchLayoutOrder,
+    tiledWorkbenchLayouts,
+  ]);
+  const tiledWorkbenchKeyboardSuspended = showPtySpawnDialog
+    || sheetOpen
+    || hostManagerOpen
+    || agentCreateOpen
+    || peerPairingOpen;
 
   useEffect(() => {
-    writeAgentsTiledPersistState({
-      layout: tiledLayout,
-      paneOrder: tiledPaneOrder,
+    if (
+      tiledPassthroughArmed
+      && (
+        viewMode !== 'tiled'
+        || !focusedTiledPtyTarget
+        || tiledWorkbenchKeyboardSuspended
+      )
+    ) {
+      setTiledPassthroughArmed(false);
+    }
+  }, [
+    focusedTiledPtyTarget,
+    tiledPassthroughArmed,
+    tiledWorkbenchKeyboardSuspended,
+    viewMode,
+  ]);
+
+  useTiledWorkbenchKeyboard({
+    enabled: viewMode === 'tiled',
+    suspended: tiledWorkbenchKeyboardSuspended,
+    tree: tiledPaneTree,
+    focusedSlotId: tiledFocusedSlotId,
+    focusedPtyTarget: focusedTiledPtyTarget,
+    passthroughArmed: tiledPassthroughArmed,
+    onPassthroughArmedChange: setTiledPassthroughArmed,
+    onFocusSlot: setTiledFocusedSlotId,
+    onSplitSlot: splitTiledSlot,
+    onClearSlot: clearTiledSlot,
+    onCloseSlot: closeTiledSlot,
+    onOpenSlotEntry: openPtySpawnDialogForSlot,
+  });
+
+  useEffect(() => {
+    const currentSnapshot = buildCurrentTiledLayoutSnapshot();
+    const now = new Date().toISOString();
+    const persistedLayouts = tiledActiveLayoutRecord
+      ? {
+          ...tiledWorkbenchLayouts,
+          [tiledActiveLayoutRecord.id]: {
+            ...tiledActiveLayoutRecord,
+            snapshot: currentSnapshot,
+            updatedAt: now,
+          },
+        }
+      : tiledWorkbenchLayouts;
+
+    writeAgentsTiledWorkbenchPersistState({
+      version: 3,
+      activeLayoutId: tiledActiveLayoutId,
+      layoutOrder: tiledWorkbenchLayoutOrder,
+      layouts: persistedLayouts,
       ...(activePtyId ? { fullscreenPtyId: activePtyId } : {}),
       ...(activePtyId && fullscreenTerminalRecovery ? { fullscreenTerminalRecovery } : {}),
     });
-  }, [activePtyId, fullscreenTerminalRecovery, tiledLayout, tiledPaneOrder]);
+  }, [
+    activePtyId,
+    buildCurrentTiledLayoutSnapshot,
+    fullscreenTerminalRecovery,
+    tiledActiveLayoutId,
+    tiledActiveLayoutRecord,
+    tiledWorkbenchLayoutOrder,
+    tiledWorkbenchLayouts,
+  ]);
 
   useEffect(() => {
     if (sessionLoading) {
       return;
     }
 
-    const visibleTiledSessionIds = new Set(
-      dashboardSessions
-        .filter((session) => session.status !== 'completed' && session.status !== 'archived')
-        .map((session) => session.id),
-    );
+    const visibleTiledSessionIds = new Set(activeTiledSessions.map((session) => session.id));
 
-    setTiledPaneOrder((prev) => {
-      if (prev.length === 0) {
-        return prev;
-      }
-      const next = prev.filter((id) => visibleTiledSessionIds.has(id));
-      return next.length === prev.length ? prev : next;
+    setTiledPaneSlots((prev) => {
+      const next = prev
+        .filter((slot) => tiledSlotIds.includes(slot.slotId))
+        .map((slot) => {
+          const session = slot.sessionId ? tiledSessionById.get(slot.sessionId) ?? null : null;
+          const recoverySnapshot = session
+            ? buildRecoverableTerminalSessionSnapshot(session) ?? slot.terminalRecovery
+            : slot.terminalRecovery;
+
+          if (slot.sessionId && !visibleTiledSessionIds.has(slot.sessionId)) {
+            return {
+              slotId: slot.slotId,
+              ...(recoverySnapshot ? { terminalRecovery: recoverySnapshot } : {}),
+            };
+          }
+
+          return {
+            slotId: slot.slotId,
+            ...(slot.sessionId ? { sessionId: slot.sessionId } : {}),
+            ...(recoverySnapshot ? { terminalRecovery: recoverySnapshot } : {}),
+          };
+        });
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
     });
-  }, [dashboardSessions, sessionLoading]);
+    setTiledUnassignedSessionIds((prev) => {
+      const next = prev.filter((id) => visibleTiledSessionIds.has(id));
+      activeTiledSessions.forEach((session) => {
+        if (!tiledAssignedSessionIds.has(session.id) && !next.includes(session.id)) {
+          next.push(session.id);
+        }
+      });
+      return next.join('\u0000') === prev.join('\u0000') ? prev : next;
+    });
+  }, [
+    activeTiledSessions,
+    sessionLoading,
+    tiledAssignedSessionIds,
+    tiledSessionById,
+    tiledSlotIds,
+  ]);
 
   useEffect(() => {
-    if (pendingSpawnedPtyIds.length === 0) {
+    if (pendingSpawnedPtyBindings.length === 0) {
       return;
     }
 
     const matchedPtyIds = new Set<string>();
 
-    setTiledPaneOrder((prev) => {
-      let next = prev;
-
-      pendingSpawnedPtyIds.forEach((ptyId) => {
-        const matchingSession = dashboardSessions.find((session) => (
+    pendingSpawnedPtyBindings.forEach(({ ptyId, slotId, layoutId }) => {
+      const matchingSession = dashboardSessions.find((session) => (
           session.pty_id === ptyId
           && session.status !== 'completed'
           && session.status !== 'archived'
         ));
-        if (!matchingSession) {
-          return;
-        }
+      if (!matchingSession) {
+        return;
+      }
 
-        matchedPtyIds.add(ptyId);
-        next = applySpawnedSessionToTiledPaneOrder({
-          layout: tiledLayout,
-          paneOrder: next,
-          sessions: dashboardSessions,
-          newSessionId: matchingSession.id,
-        });
+      matchedPtyIds.add(ptyId);
+      applySessionToNamedTiledWorkbenchLayout({
+        sessionId: matchingSession.id,
+        ...(slotId ? { slotId } : {}),
+        ...(layoutId ? { layoutId } : {}),
       });
-
-      return next;
     });
 
     if (matchedPtyIds.size === 0) {
       return;
     }
 
-    setPendingSpawnedPtyIds((prev) => prev.filter((ptyId) => !matchedPtyIds.has(ptyId)));
-  }, [dashboardSessions, pendingSpawnedPtyIds, tiledLayout]);
+    setPendingSpawnedPtyBindings((prev) => prev.filter(({ ptyId }) => !matchedPtyIds.has(ptyId)));
+  }, [
+    applySessionToNamedTiledWorkbenchLayout,
+    dashboardSessions,
+    pendingSpawnedPtyBindings,
+  ]);
 
   const matchingActivePty = useMemo(
     () => ptyAgents.find((pty) => pty.id === activePtyId) ?? null,
@@ -2515,6 +3325,70 @@ export function AgentsPage() {
     },
     [occupiedHistoricalSessions],
   );
+  useEffect(() => {
+    if (sessionLoading) {
+      return;
+    }
+
+    const nextAutoBindings: Array<{
+      slotId: string;
+      sessionId: string;
+      terminalRecovery: RecoverableTerminalSessionSnapshot;
+    }> = [];
+    const assignedSessionIds = new Set(
+      tiledPaneSlots.flatMap((slot) => (slot.sessionId ? [slot.sessionId] : [])),
+    );
+
+    tiledPaneSlots.forEach((slot) => {
+      const snapshot = slot.terminalRecovery;
+      if (slot.sessionId || !snapshot) {
+        return;
+      }
+
+      const matchedSession = resolveOccupiedHistoricalSession(snapshot.innerSessionId);
+      if (
+        !matchedSession
+        || !matchesRecoverableTerminalSessionSnapshot(matchedSession, snapshot)
+        || assignedSessionIds.has(matchedSession.id)
+      ) {
+        return;
+      }
+
+      const recoverySnapshot = buildRecoverableTerminalSessionSnapshot(matchedSession) ?? snapshot;
+      assignedSessionIds.add(matchedSession.id);
+      nextAutoBindings.push({
+        slotId: slot.slotId,
+        sessionId: matchedSession.id,
+        terminalRecovery: recoverySnapshot,
+      });
+    });
+
+    if (nextAutoBindings.length === 0) {
+      return;
+    }
+
+    setTiledPaneSlots((prev) => {
+      let next = prev;
+      nextAutoBindings.forEach(({ slotId, sessionId, terminalRecovery }) => {
+        next = bindSessionToTiledPaneSlot(
+          tiledPaneTree,
+          next,
+          slotId,
+          sessionId,
+          terminalRecovery,
+        );
+      });
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+    });
+    setTiledUnassignedSessionIds((prev) => prev.filter(
+      (id) => !nextAutoBindings.some((binding) => binding.sessionId === id),
+    ));
+  }, [
+    resolveOccupiedHistoricalSession,
+    sessionLoading,
+    tiledPaneSlots,
+    tiledPaneTree,
+  ]);
   const isSourceHostAvailable = useCallback((sourceHostId?: string | null) => {
     if (!sourceHostId) {
       return false;
@@ -2716,6 +3590,80 @@ export function AgentsPage() {
     refreshSessions();
     return currentSession;
   }, [refreshSessions]);
+  const handleResolveTerminalSession = useCallback(async (session: SessionInfo) => {
+    if (isTerminalSessionResolutionPending(session)) {
+      return;
+    }
+
+    if (session.pty_id) {
+      setTerminalSessionResolutionPending(session.id, true);
+      try {
+        await handleStopPtyAgent(session.pty_id, session.source_host_id);
+      } finally {
+        setTerminalSessionResolutionPending(session.id, false);
+      }
+      return;
+    }
+
+    const targetLabel = session.role || session.inner_session_id || session.id;
+    const resolveToast = toast({
+      title: '正在结束 Terminal 会话',
+      description: `会话：${targetLabel}`,
+      duration: 5000,
+    });
+    setRuntimeHostError('');
+    setTerminalSessionResolutionPending(session.id, true);
+    console.info('[agent-hub][pty][resolve] completing active terminal session without PTY', {
+      sessionId: session.id,
+      sourceHostId: session.source_host_id ?? null,
+      innerSessionId: session.inner_session_id ?? null,
+      status: session.status,
+    });
+
+    try {
+      const completedSession = await completeDisconnectedTerminalSession(
+        session,
+        'manual-missing-pty-resolution',
+      );
+      resolveToast.update({
+        id: resolveToast.id,
+        title: '已结束 Terminal 会话',
+        description: `会话：${targetLabel}`,
+        duration: 4000,
+      });
+      console.info('[agent-hub][pty][resolve] completed active terminal session without PTY', {
+        sessionId: session.id,
+        sourceHostId: session.source_host_id ?? null,
+        innerSessionId: session.inner_session_id ?? null,
+        nextStatus: completedSession.status,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failureMessage = `结束 Terminal 会话失败: ${message}`;
+      setRuntimeHostError(failureMessage);
+      console.warn('[agent-hub][pty][resolve] failed to complete active terminal session without PTY', {
+        sessionId: session.id,
+        sourceHostId: session.source_host_id ?? null,
+        innerSessionId: session.inner_session_id ?? null,
+        status: session.status,
+        message,
+      });
+      resolveToast.update({
+        id: resolveToast.id,
+        title: '结束 Terminal 会话失败',
+        description: failureMessage,
+        variant: 'destructive',
+        duration: 6000,
+      });
+    } finally {
+      setTerminalSessionResolutionPending(session.id, false);
+    }
+  }, [
+    completeDisconnectedTerminalSession,
+    handleStopPtyAgent,
+    isTerminalSessionResolutionPending,
+    setTerminalSessionResolutionPending,
+  ]);
   const retireSupersededTerminalSession = useCallback(async (session: SessionInfo) => {
     const retirementSteps = buildTerminalSessionRetirementSteps(session.status);
     if (retirementSteps.length === 0) {
@@ -2791,7 +3739,7 @@ export function AgentsPage() {
     session: SessionInfo,
     options: { force?: boolean; activateTerminal?: boolean } = {},
   ): Promise<TerminalResumeOutcome> {
-    if (!isRecoverableTerminalSession(session) || !session.pty_id || !session.inner_session_id) {
+    if (!canResumeHistoricalTerminalSession(session) || !session.inner_session_id) {
       return {
         status: 'failed',
         reason: 'historical-record-mismatch',
@@ -2799,6 +3747,7 @@ export function AgentsPage() {
       };
     }
 
+    const currentPtyId = session.pty_id?.trim() || null;
     const historicalSessionKey = buildHistoricalTerminalSessionIdentityKey(session);
     if (autoResumeInFlightSessionIdsRef.current.has(session.id)) {
       return {
@@ -2835,18 +3784,21 @@ export function AgentsPage() {
 
     const occupiedSession = resolveOccupiedHistoricalSession(session.inner_session_id);
     if (occupiedSession && occupiedSession.id !== session.id) {
-      if (isSessionPtyDisconnected(occupiedSession)) {
+      if (
+        isSessionPtyDisconnected(occupiedSession)
+        || !occupiedSession.pty_id
+      ) {
         return attemptDisconnectedTerminalSessionResumeInternal(occupiedSession, options);
       }
 
       autoResumeAttemptedSessionIdsRef.current.add(session.id);
       setTiledPaneOrder((prev) => replacePaneOrderSessionId(prev, session.id, occupiedSession.id));
 
-        if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
-          openPtyTerminal(occupiedSession.pty_id!, occupiedSession.source_host_id, {
-            reconnectIfSame: true,
-          });
-        }
+      if (options.activateTerminal || options.force || activePtyId === currentPtyId) {
+        openPtyTerminal(occupiedSession.pty_id!, occupiedSession.source_host_id, {
+          reconnectIfSame: true,
+        });
+      }
 
       void reconcileSupersededTerminalSession(session, occupiedSession).catch((error) => {
         console.warn('[agent-hub][pty] failed to retire superseded terminal session', {
@@ -2860,7 +3812,7 @@ export function AgentsPage() {
       return {
         status: 'success',
         mode: 'rebound',
-        ptyId: occupiedSession.pty_id ?? session.pty_id,
+        ptyId: occupiedSession.pty_id!,
         sessionId: occupiedSession.id,
       };
     }
@@ -2919,7 +3871,7 @@ export function AgentsPage() {
     console.info('[agent-hub][pty] attempting disconnected terminal auto-resume', {
       sessionId: session.id,
       agentType: session.agent_kind,
-      ptyId: session.pty_id,
+      ptyId: currentPtyId,
       innerSessionId: session.inner_session_id,
       sourceHostId: session.source_host_id ?? null,
       hostAddress: `${host.host}:${host.port}`,
@@ -2932,29 +3884,31 @@ export function AgentsPage() {
     autoResumeInFlightSessionIdsRef.current.add(session.id);
 
     try {
-      const livePtys = await fetchPtyList(
-        runtimeBaseUrl,
-        host.authToken,
-        sessionHostId ?? undefined,
-      );
-      if (livePtys?.some((pty) => pty.id === session.pty_id)) {
+      const livePtys = currentPtyId
+        ? await fetchPtyList(
+            runtimeBaseUrl,
+            host.authToken,
+            sessionHostId ?? undefined,
+          )
+        : null;
+      if (currentPtyId && livePtys?.some((pty) => pty.id === currentPtyId)) {
         console.warn('[agent-hub][pty] skip terminal auto-resume because PTY is still live', {
           sessionId: session.id,
           agentType: session.agent_kind,
-          ptyId: session.pty_id,
+          ptyId: currentPtyId,
           innerSessionId: session.inner_session_id,
           hostAddress: `${host.host}:${host.port}`,
         });
-        setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== session.pty_id));
-        if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
-          openPtyTerminal(session.pty_id, sessionHostId ?? undefined, {
+        setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== currentPtyId));
+        if (options.activateTerminal || options.force || activePtyId === currentPtyId) {
+          openPtyTerminal(currentPtyId, sessionHostId ?? undefined, {
             reconnectIfSame: true,
           });
         }
         return {
           status: 'success',
           mode: 'live',
-          ptyId: session.pty_id,
+          ptyId: currentPtyId,
           sessionId: session.id,
         };
       }
@@ -2971,7 +3925,7 @@ export function AgentsPage() {
       console.info('[agent-hub][pty] disconnected terminal historical record lookup completed', {
         sessionId: session.id,
         agentType: session.agent_kind,
-        ptyId: session.pty_id,
+        ptyId: currentPtyId,
         innerSessionId: session.inner_session_id,
         sourceHostId: session.source_host_id ?? null,
         workdir: workdir ?? null,
@@ -2981,7 +3935,7 @@ export function AgentsPage() {
         console.warn('[agent-hub][pty] skip terminal auto-resume because historical session record does not match workdir', {
           sessionId: session.id,
           agentType: session.agent_kind,
-          ptyId: session.pty_id,
+          ptyId: currentPtyId,
           innerSessionId: session.inner_session_id,
           workdir: workdir ?? null,
         });
@@ -2996,7 +3950,7 @@ export function AgentsPage() {
       console.info('[agent-hub][pty] posting disconnected terminal resume request', {
         sessionId: session.id,
         agentType: session.agent_kind,
-        ptyId: session.pty_id,
+        ptyId: currentPtyId,
         innerSessionId: session.inner_session_id,
         sourceHostId: session.source_host_id ?? null,
         hostAddress: `${host.host}:${host.port}`,
@@ -3021,7 +3975,7 @@ export function AgentsPage() {
         throw new Error('missing resumed PTY id');
       }
 
-      if (options.activateTerminal || options.force || activePtyId === session.pty_id) {
+      if (options.activateTerminal || options.force || activePtyId === currentPtyId) {
         openPtyTerminal(info.id, sessionHostId ?? undefined, {
           expectFreshPresence: true,
           reconnectIfSame: true,
@@ -3048,7 +4002,7 @@ export function AgentsPage() {
       console.warn('[agent-hub][pty] terminal auto-resume failed', {
         sessionId: session.id,
         agentType: session.agent_kind,
-        ptyId: session.pty_id,
+        ptyId: currentPtyId,
         innerSessionId: session.inner_session_id,
         hostAddress: `${host.host}:${host.port}`,
         message: error instanceof Error ? error.message : String(error),
@@ -3090,14 +4044,91 @@ export function AgentsPage() {
 
   const handleOpenSessionTerminal = useCallback(async (session: SessionInfo) => {
     if (!session.pty_id) {
-      const failureMessage = '该会话没有可打开的 PTY。';
-      console.warn('[agent-hub][pty][open] session is missing pty_id', {
+      const recoverableSnapshot = buildRecoverableTerminalSessionSnapshot(session);
+      const missingPtyLogPayload = {
         sessionId: session.id,
         sourceHostId: session.source_host_id ?? null,
         status: session.status,
+        innerSessionId: session.inner_session_id ?? null,
+      };
+
+      if (!recoverableSnapshot) {
+        const failureMessage = '该会话没有关联 PTY，可点击结束将其完成。';
+        console.warn('[agent-hub][pty][open] session is missing pty_id and cannot resume', missingPtyLogPayload);
+        setRuntimeHostError(failureMessage);
+        return;
+      }
+
+      const matchedHost = resolveRuntimeHostBySourceHostId(session.source_host_id);
+      const shouldFallbackToActiveRuntimeHost = canFallbackToActiveRuntimeHostForSession(session);
+      const shouldDeferUnavailableSourceHostResume = shouldDeferUnavailableSourceHostHandling(
+        session,
+        matchedHost,
+      );
+      if (shouldDeferUnavailableSourceHostResume) {
+        const deferredMessage = 'Terminal 会话缺少 PTY；嵌入式 RT 仍在恢复中，请稍后重试。';
+        setRuntimeHostError(deferredMessage);
+        console.info('[agent-hub][pty][open] deferred missing-PTY resume while source host is settling', {
+          ...missingPtyLogPayload,
+          runtimeRunning: runtimeServiceStatus?.running ?? null,
+          runtimeStartedAt: runtimeServiceStatus?.startedAt ?? null,
+        });
+        return;
+      }
+      if (session.source_host_id && !matchedHost && !shouldFallbackToActiveRuntimeHost) {
+        const failureMessage = 'Terminal 会话缺少 PTY，且原始 RT 已不可用；可点击结束将其完成。';
+        setRuntimeHostError(failureMessage);
+        console.warn('[agent-hub][pty][open] missing-PTY resume skipped because source host is unavailable', {
+          ...missingPtyLogPayload,
+          sourceHostId: session.source_host_id,
+        });
+        return;
+      }
+
+      setRuntimeHostError(
+        'Terminal 会话缺少 PTY，正在尝试恢复历史终端；若恢复失败，可点击结束将其完成。',
+      );
+      console.info('[agent-hub][pty][open] session is missing pty_id; attempting historical resume', {
+        ...missingPtyLogPayload,
+        recoverableAgentType: recoverableSnapshot.agentType,
+        recoverableWorkdir: recoverableSnapshot.workdir,
       });
-      setRuntimeHostError(failureMessage);
-      return;
+      try {
+        const host = matchedHost && !shouldFallbackToActiveRuntimeHost
+          ? matchedHost
+          : resolveActiveRuntimeHost();
+        const sessionHostId = shouldFallbackToActiveRuntimeHost
+          ? activeEmbeddedRuntimeHostId
+          : session.source_host_id ?? null;
+        const resumed = await resumeHistoricalPtySnapshot({
+          rtBaseUrl: resolveRuntimeHostBaseUrl(host),
+          authToken: resolveRuntimeHostAuthToken(host),
+          snapshot: recoverableSnapshot,
+        });
+        openPtyTerminal(resumed.id, sessionHostId ?? undefined, {
+          expectFreshPresence: true,
+          reconnectIfSame: true,
+        });
+        await fetchPtyAgentsRef.current();
+        await Promise.resolve(refreshSessions());
+        setRuntimeHostError('');
+        console.info('[agent-hub][pty][open] resumed terminal session without PTY', {
+          sessionId: session.id,
+          resumedPtyId: resumed.id,
+          sourceHostId: sessionHostId,
+          innerSessionId: recoverableSnapshot.innerSessionId,
+        });
+        return;
+      } catch (error) {
+        const failureMessage = 'Terminal 会话缺少 PTY，自动恢复失败；可点击结束将其完成。';
+        setRuntimeHostError(failureMessage);
+        console.warn('[agent-hub][pty][open] failed to resume terminal session without PTY', {
+          ...missingPtyLogPayload,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+
     }
 
     setRuntimeHostError('');
@@ -3235,16 +4266,22 @@ export function AgentsPage() {
     });
   }, [
     activeEmbeddedRuntimeHostId,
+    canFallbackToActiveRuntimeHostForSession,
     canJudgePtyPresenceForHost,
     canJudgeSessionPtyPresence,
     isSessionPtyDisconnected,
     isFreshTerminalSessionPresenceProtected,
     isSourceHostAvailable,
     knownPtyIds,
+    refreshSessions,
     resolveOccupiedHistoricalSession,
+    resolveRuntimeHostBySourceHostId,
     resolveTerminalSessionHostId,
     reconcileSupersededTerminalSession,
     attemptDisconnectedTerminalSessionResume,
+    runtimeServiceStatus?.running,
+    runtimeServiceStatus?.startedAt,
+    shouldDeferUnavailableSourceHostHandling,
   ]);
 
   const canArchiveActivePtySession = activePtySession?.status === 'completed';
@@ -4163,7 +5200,11 @@ export function AgentsPage() {
     }
 
     dashboardSessions.forEach((session) => {
-      if (!session.pty_id || !isSessionPtyDisconnected(session)) {
+      const shouldPreserveDecisionSignature = session.interaction_mode === 'terminal' && (
+        (!!session.pty_id && isSessionPtyDisconnected(session))
+        || (!session.pty_id && hasRecoverableTerminalSessionSnapshot(session))
+      );
+      if (!shouldPreserveDecisionSignature) {
         disconnectedSessionDecisionSignaturesRef.current.delete(session.id);
       }
     });
@@ -4182,7 +5223,10 @@ export function AgentsPage() {
       if (autoResumingSessionIdsRef.current.has(session.id)) {
         return false;
       }
-      if (session.interaction_mode !== 'terminal' || !session.pty_id) {
+      if (session.interaction_mode !== 'terminal') {
+        return false;
+      }
+      if (!shouldAutoCompleteDisconnectedTerminalSession(session)) {
         return false;
       }
       if (!isSessionPtyDisconnected(session)) {
@@ -4191,7 +5235,7 @@ export function AgentsPage() {
       if (!canJudgePtyPresenceForHost(session.source_host_id)) {
         return false;
       }
-      return buildTerminalSessionCompletionSteps(session.status).length > 0;
+      return true;
     });
 
     if (staleSessions.length === 0) {
@@ -4251,7 +5295,8 @@ export function AgentsPage() {
             continue;
           }
 
-          if (isRecoverableTerminalSession(session)) {
+          const recoverableSnapshot = buildRecoverableTerminalSessionSnapshot(session);
+          if (recoverableSnapshot) {
             const shouldDeferUnavailableSourceHostCompletion = shouldDeferUnavailableSourceHostHandling(
               session,
               matchedSourceHost,
@@ -4276,9 +5321,9 @@ export function AgentsPage() {
             const runtimeBaseUrl = resolveRuntimeHostBaseUrl(host);
             let hasMatchingHistoricalRecord = false;
             try {
-              hasMatchingHistoricalRecord = await hasMatchingHistoricalSessionRecord(
+              hasMatchingHistoricalRecord = await hasMatchingHistoricalSessionSnapshotRecord(
                 runtimeBaseUrl,
-                session,
+                recoverableSnapshot,
                 host.authToken,
               );
             } catch (error) {
@@ -4364,6 +5409,62 @@ export function AgentsPage() {
     await refreshSignalRoutesFromSnapshot(snapshot);
     await fetchPtyAgents(nextPtyConnection);
   };
+  const resumeRecoverableTiledSlot = useCallback(async (slotId: string) => {
+    const slot = tiledPaneSlots.find((candidate) => candidate.slotId === slotId);
+    const snapshot = slot?.terminalRecovery;
+    const targetLayoutId = tiledActiveLayoutId;
+    if (!snapshot) {
+      return;
+    }
+
+    const matchedSession = resolveOccupiedHistoricalSession(snapshot.innerSessionId);
+    if (matchedSession && matchesRecoverableTerminalSessionSnapshot(matchedSession, snapshot)) {
+      applySessionToNamedTiledWorkbenchLayout({
+        sessionId: matchedSession.id,
+        slotId,
+        layoutId: targetLayoutId,
+      });
+      return;
+    }
+
+    const host = resolveRuntimeHostBySourceHostId(snapshot.sourceHostId) ?? resolveActiveRuntimeHost();
+    const connection = resolveRuntimeConnectionForHostId(host.hostId ?? snapshot.sourceHostId ?? null);
+
+    try {
+      const resumed = await resumeHistoricalPtySnapshot({
+        rtBaseUrl: connection.rtBaseUrl,
+        authToken: connection.authToken,
+        snapshot,
+      });
+      setPendingSpawnedPtyBindings((prev) => (
+        prev.some((entry) => entry.ptyId === resumed.id)
+          ? prev
+          : [...prev, {
+              ptyId: resumed.id,
+              slotId,
+              layoutId: targetLayoutId,
+            }]
+      ));
+      openPtyTerminal(resumed.id, host.hostId ?? snapshot.sourceHostId, {
+        expectFreshPresence: true,
+        reconnectIfSame: true,
+      });
+      setRuntimeHostError('');
+      await refreshRuntimeSnapshot();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeHostError(`Terminal 恢复失败：${message}`);
+    }
+  }, [
+    applySessionToNamedTiledWorkbenchLayout,
+    resolveOccupiedHistoricalSession,
+    openPtyTerminal,
+    refreshRuntimeSnapshot,
+    resolveRuntimeHostBySourceHostId,
+    resolveRuntimeConnectionForHostId,
+    tiledActiveLayoutId,
+    tiledPaneSlots,
+  ]);
 
   useEffect(() => {
     let disposed = false;
@@ -5113,14 +6214,13 @@ export function AgentsPage() {
           loading={sessionLoading}
           error={sessionError}
           useMockData={useMockData}
-          isSessionStopping={(session) => isPtyStopPending(session.pty_id)}
+          isSessionStopping={(session) => isTerminalSessionResolutionPending(session)}
           onRefresh={refreshSessions}
           onSessionClick={(session) => {
             void handleOpenSessionTerminal(session);
           }}
           onStopSession={(session) => {
-            if (!session.pty_id) return;
-            void handleStopPtyAgent(session.pty_id, session.source_host_id);
+            void handleResolveTerminalSession(session);
           }}
           onArchiveSession={(session) => {
             void handleArchiveSession(session);
@@ -5129,30 +6229,134 @@ export function AgentsPage() {
       );
     }
     if (viewMode === 'tiled') {
-      const visibleSessions = dashboardSessions.filter(
-        (session) => session.status !== 'completed' && session.status !== 'archived',
-      );
       return (
-        <div className="flex h-full flex-col gap-2">
-          <div className="flex items-center justify-between">
+        <div className={`relative flex h-full min-h-0 flex-col ${tiledImmersive ? 'gap-3' : 'gap-2'}`}>
+          <div className={`flex items-center justify-between gap-3 ${
+            tiledImmersive
+              ? 'rounded-lg border border-[#E7E5E4] bg-white/90 px-3 py-2 shadow-sm backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/90'
+              : ''
+          }`}
+          >
             <div className="flex items-center gap-3">
               <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">
-                {visibleSessions.length} 个会话
+                {activeTiledSessions.length} 个会话
               </span>
-              <GlobalStatusIndicator sessions={visibleSessions} />
+              <GlobalStatusIndicator sessions={activeTiledSessions} />
+              {tiledPassthroughArmed ? (
+                <span
+                  data-testid="agents-tiled-passthrough-armed"
+                  className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                    tiledImmersive
+                      ? 'border border-[#C75B3A]/30 bg-white/90 text-[#9A3412] shadow-sm dark:border-[#7C2D12] dark:bg-[#1C1917]/90 dark:text-[#FDBA74]'
+                      : 'border border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412] dark:border-[#7C2D12] dark:bg-[#1C1917] dark:text-[#FDBA74]'
+                  }`}
+                >
+                  透传下一键
+                </span>
+              ) : null}
             </div>
-            <LayoutSelector value={tiledLayout} onChange={setTiledLayout} />
+            {tiledImmersive ? (
+              <button
+                type="button"
+                onClick={toggleTiledImmersive}
+                className="rounded-full border border-[#D6D3D1] bg-white/90 px-3 py-1 text-xs text-[#57534E] shadow-sm backdrop-blur dark:border-[#44403C] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]"
+              >
+                退出沉浸
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleTiledUnassignedPool}
+                  className="rounded-md border border-[#D6D3D1] px-2 py-1 text-[10px] font-medium text-[#57534E] hover:border-[#C75B3A]/40 hover:text-[#1C1917] dark:border-[#44403C] dark:text-[#D6D3D1]"
+                >
+                  未分配 {tiledUnassignedSessions.length}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleTiledImmersive}
+                  className="rounded-md border border-[#D6D3D1] px-2 py-1 text-[10px] font-medium text-[#57534E] hover:border-[#C75B3A]/40 hover:text-[#1C1917] dark:border-[#44403C] dark:text-[#D6D3D1]"
+                >
+                  沉浸
+                </button>
+                <div className="flex items-center gap-1 rounded-md border border-[#E7E5E4] bg-[#FAFAF9] px-1.5 py-1 dark:border-[#292524] dark:bg-[#1C1917]">
+                  <select
+                    data-testid="agents-tiled-layout-select"
+                    value={tiledActiveLayoutId}
+                    onChange={(event) => switchTiledWorkbenchLayout(event.target.value)}
+                    className="h-6 rounded border border-[#E7E5E4] bg-white px-2 text-[10px] text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#0C0A09] dark:text-[#FAFAF9]"
+                  >
+                    {tiledWorkbenchLayoutOrder.map((layoutId) => (
+                      <option key={layoutId} value={layoutId}>
+                        {tiledWorkbenchLayouts[layoutId]?.name ?? layoutId}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    data-testid="agents-tiled-layout-name-input"
+                    value={tiledActiveLayoutNameDraft}
+                    onChange={(event) => {
+                      setTiledActiveLayoutNameDraft(event.target.value);
+                    }}
+                    onBlur={() => {
+                      commitActiveTiledLayoutName(tiledActiveLayoutNameDraft);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        commitActiveTiledLayoutName(tiledActiveLayoutNameDraft);
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setTiledActiveLayoutNameDraft(tiledActiveLayoutRecord?.name ?? '默认布局');
+                      }
+                    }}
+                    placeholder="布局名称"
+                    className="h-6 w-24 rounded border border-[#E7E5E4] bg-white px-2 text-[10px] text-[#1C1917] outline-none placeholder:text-[#A8A29E] dark:border-[#44403C] dark:bg-[#0C0A09] dark:text-[#FAFAF9]"
+                  />
+                  <button
+                    type="button"
+                    data-testid="agents-tiled-layout-new"
+                    onClick={createEmptyTiledWorkbenchLayout}
+                    className="rounded-md border border-[#D6D3D1] px-2 py-1 text-[10px] font-medium text-[#57534E] hover:border-[#C75B3A]/40 hover:text-[#1C1917] dark:border-[#44403C] dark:text-[#D6D3D1]"
+                  >
+                    新建
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="agents-tiled-layout-duplicate"
+                    onClick={duplicateActiveTiledWorkbenchLayout}
+                    className="rounded-md border border-[#D6D3D1] px-2 py-1 text-[10px] font-medium text-[#57534E] hover:border-[#C75B3A]/40 hover:text-[#1C1917] dark:border-[#44403C] dark:text-[#D6D3D1]"
+                  >
+                    复制
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="agents-tiled-layout-delete"
+                    onClick={deleteActiveTiledWorkbenchLayout}
+                    disabled={tiledWorkbenchLayoutOrder.length <= 1}
+                    className="rounded-md border border-[#D6D3D1] px-2 py-1 text-[10px] font-medium text-[#57534E] hover:border-[#C75B3A]/40 hover:text-[#1C1917] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#44403C] dark:text-[#D6D3D1]"
+                  >
+                    删除
+                  </button>
+                </div>
+                <LayoutSelector value={tiledLayout} onChange={handleTiledLayoutChange} />
+              </div>
+            )}
           </div>
           <div className="flex-1 min-h-0">
             <TiledGrid
-              sessions={visibleSessions}
+              sessions={activeTiledSessions}
               layout={tiledLayout}
+              tree={tiledPaneTree}
+              slots={tiledPaneSlots}
               resolveSessionConnection={resolveRuntimeConnectionForSession}
               isSessionDisconnected={isSessionPtyDisconnected}
               isSessionAutoResuming={(session) => autoResumingSessionIds.includes(session.id)}
-              isSessionStopping={(session) => isPtyStopPending(session.pty_id)}
+              isSessionStopping={(session) => isTerminalSessionResolutionPending(session)}
               focusedIndex={tiledFocusedIndex}
-              onFocusPane={setTiledFocusedIndex}
+              onFocusPane={handleTiledFocusPane}
+              focusedSlotId={tiledFocusedSlotId}
+              onFocusSlot={setTiledFocusedSlotId}
               paneOrder={tiledPaneOrder}
               onReorder={setTiledPaneOrder}
               onQuickAction={(session, response) => {
@@ -5162,12 +6366,23 @@ export function AgentsPage() {
                 void handleSessionMarkWaiting(session);
               }}
               onStopSession={(session) => {
-                if (!session.pty_id) return;
-                void handleStopPtyAgent(session.pty_id, session.source_host_id);
+                void handleResolveTerminalSession(session);
               }}
               onArchiveSession={(session) => {
                 void handleArchiveSession(session);
               }}
+              onSplitSlot={splitTiledSlot}
+              onResizeSplit={resizeTiledSplit}
+              onClearSlot={clearTiledSlot}
+              onCloseSlot={closeTiledSlot}
+              onOpenEmptySlot={openPtySpawnDialogForSlot}
+              onResumeRecoverableSlot={(slotId) => {
+                void resumeRecoverableTiledSlot(slotId);
+              }}
+              unassignedSessions={tiledUnassignedSessions}
+              unassignedPoolCollapsed={tiledUnassignedPoolCollapsed}
+              onToggleUnassignedPool={toggleTiledUnassignedPool}
+              onAssignSessionToSlot={bindSessionToTiledSlot}
             />
           </div>
         </div>
@@ -5333,57 +6548,91 @@ export function AgentsPage() {
     useMockData,
     viewMode,
     tiledLayout,
+    tiledActiveLayoutId,
+    tiledActiveLayoutNameDraft,
+    tiledActiveLayoutRecord,
     tiledFocusedIndex,
     tiledPaneOrder,
+    tiledWorkbenchLayoutOrder,
+    tiledWorkbenchLayouts,
+    activeTiledSessions,
+    commitActiveTiledLayoutName,
+    createEmptyTiledWorkbenchLayout,
+    deleteActiveTiledWorkbenchLayout,
+    duplicateActiveTiledWorkbenchLayout,
+    handleTiledLayoutChange,
+    handleTiledFocusPane,
+    bindSessionToTiledSlot,
+    clearTiledSlot,
+    closeTiledSlot,
+    splitTiledSlot,
+    resizeTiledSplit,
+    openPtySpawnDialogForSlot,
+    toggleTiledImmersive,
+    toggleTiledUnassignedPool,
+    tiledFocusedSlotId,
+    tiledImmersive,
+    tiledPassthroughArmed,
+    tiledPaneSlots,
+    tiledPaneTree,
+    tiledUnassignedPoolCollapsed,
+    tiledUnassignedSessions,
+    switchTiledWorkbenchLayout,
     resolveRuntimeConnectionForSession,
     resolveRuntimeConnectionForHostId,
     isPtyStopPending,
     supportsInlineRightPanel,
   ]);
 
+  const isTiledWorkbenchImmersive = viewMode === 'tiled' && tiledImmersive;
+
   return (
     <div
       data-testid="agent-hub-page"
       className="relative flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]"
     >
-      {/* Header */}
-      <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">信号网络</h1>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-              aria-label="设置"
-            >
-              <Settings size={18} />
-            </button>
-            <button
-              type="button"
-              data-testid="pty-spawn-button"
-              onClick={() => setShowPtySpawnDialog(true)}
-              className="flex h-9 items-center gap-1.5 rounded-full bg-[#0D9488] px-3 text-sm text-white"
-              aria-label="新建 Terminal"
-            >
-              <TerminalSquare size={16} />
-              <span className="hidden sm:inline">Terminal</span>
-            </button>
-            <button
-              type="button"
-              data-testid="agent-add-node-button"
-              onClick={() => setSheetOpen(true)}
-              disabled={isAgentCreating}
-              className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
-              aria-label="添加节点"
-            >
-              <Plus size={16} />
-              {isAgentCreating ? '创建中...' : '添加'}
-            </button>
-          </div>
-        </div>
-        {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
-        <TabBar value={viewMode} onChange={handleTabChange} />
-      </header>
+      {!isTiledWorkbenchImmersive ? (
+        <>
+          {/* Header */}
+          <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
+            <div className="flex items-center justify-between">
+              <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">信号网络</h1>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+                  aria-label="设置"
+                >
+                  <Settings size={18} />
+                </button>
+                <button
+                  type="button"
+                  data-testid="pty-spawn-button"
+                  onClick={() => openPtySpawnDialogForSlot(viewMode === 'tiled' ? tiledFocusedSlotId : null)}
+                  className="flex h-9 items-center gap-1.5 rounded-full bg-[#0D9488] px-3 text-sm text-white"
+                  aria-label="新建 Terminal"
+                >
+                  <TerminalSquare size={16} />
+                  <span className="hidden sm:inline">Terminal</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="agent-add-node-button"
+                  onClick={() => setSheetOpen(true)}
+                  disabled={isAgentCreating}
+                  className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
+                  aria-label="添加节点"
+                >
+                  <Plus size={16} />
+                  {isAgentCreating ? '创建中...' : '添加'}
+                </button>
+              </div>
+            </div>
+            {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
+            <TabBar value={viewMode} onChange={handleTabChange} />
+          </header>
+        </>
+      ) : null}
 
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
@@ -6022,7 +7271,13 @@ export function AgentsPage() {
       {/* PTY Spawn Dialog */}
       <PtySpawnDialog
         open={showPtySpawnDialog}
-        onOpenChange={setShowPtySpawnDialog}
+        onOpenChange={(open) => {
+          setShowPtySpawnDialog(open);
+          if (!open) {
+            setPtySpawnTargetSlotId(null);
+            setPtySpawnTargetLayoutId(null);
+          }
+        }}
         rtBaseUrl={ptySpawnConnection.rtBaseUrl}
         authToken={ptySpawnConnection.authToken}
         defaultWorkdir={import.meta.env.VITE_PTY_DEFAULT_WORKDIR ?? ''}
@@ -6031,18 +7286,27 @@ export function AgentsPage() {
         onSpawned={(info) => {
           const matchingSession = dashboardSessions.find((session) => session.pty_id === info.id);
           if (matchingSession) {
-            setTiledPaneOrder((prev) => applySpawnedSessionToTiledPaneOrder({
-              layout: tiledLayout,
-              paneOrder: prev,
-              sessions: dashboardSessions,
-              newSessionId: matchingSession.id,
-            }));
+            applySessionToNamedTiledWorkbenchLayout({
+              sessionId: matchingSession.id,
+              ...(ptySpawnTargetSlotId ? { slotId: ptySpawnTargetSlotId } : {}),
+              ...(ptySpawnTargetLayoutId ? { layoutId: ptySpawnTargetLayoutId } : {}),
+            });
           }
           if (!matchingSession) {
-            setPendingSpawnedPtyIds((prev) => (prev.includes(info.id) ? prev : [...prev, info.id]));
+            setPendingSpawnedPtyBindings((prev) => (
+              prev.some((entry) => entry.ptyId === info.id)
+                ? prev
+                : [...prev, {
+                    ptyId: info.id,
+                    slotId: ptySpawnTargetSlotId,
+                    layoutId: ptySpawnTargetLayoutId,
+                  }]
+            ));
             setFullscreenTerminalRecovery((prev) => (prev ? null : prev));
             setPersistedFullscreenAutoResumeKey(null);
           }
+          setPtySpawnTargetSlotId(null);
+          setPtySpawnTargetLayoutId(null);
           openPtyTerminal(info.id, ptySpawnConnection.hostId, {
             expectFreshPresence: true,
             reconnectIfSame: true,

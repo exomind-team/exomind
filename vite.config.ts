@@ -23,6 +23,36 @@ function hasEnvValue(env: Record<string, string | undefined>, key: string): bool
   return Boolean(readEnvValue(env, key));
 }
 
+function createDevModuleCacheBypassPlugin() {
+  return {
+    name: "exomind-dev-module-cache-bypass",
+    apply: "serve" as const,
+    configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? "";
+        if ((req.method !== "GET" && req.method !== "HEAD") || url.startsWith("/api/")) {
+          next();
+          return;
+        }
+
+        // Chromium-based Tauri webviews can occasionally return
+        // ERR_CACHE_READ_FAILURE for Vite module reloads after a 304 response.
+        // Strip conditional cache validators in dev so the webview always gets
+        // a fresh 200 body for HTML/module assets during reloads/deep links.
+        req.headers["if-none-match"] = undefined;
+        req.headers["if-modified-since"] = undefined;
+        res.setHeader(
+          "Cache-Control",
+          "no-store, no-cache, must-revalidate, proxy-revalidate",
+        );
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        next();
+      });
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -84,7 +114,10 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      ...(mode === "development" ? [createDevModuleCacheBypassPlugin()] : []),
+    ],
     ...(mode === 'development'
       ? {
           define: {
