@@ -17,6 +17,8 @@ interface HistoricalSessionInfo {
   session_id: string;
   project_path: string;
   last_modified: string;
+  display_title?: string;
+  display_path?: string;
 }
 
 interface ResumeHistoricalSessionInput {
@@ -310,6 +312,17 @@ export function resolveRecoverableTerminalProjectPathKey(
 
   const normalized = normalizeExpectedProjectPath(agentType, workdir);
   return normalized || null;
+}
+
+export function canResumeHistoricalTerminalSession(
+  session: Pick<
+    SessionInfo,
+    'id' | 'agent_kind' | 'interaction_mode' | 'inner_session_id' | 'role' | 'context' | 'source_host_id' | 'status'
+  >,
+): boolean {
+  return buildRecoverableTerminalSessionSnapshot(session) !== null
+    && session.status !== 'completed'
+    && session.status !== 'archived';
 }
 
 export function isRecoverableTerminalSession(session: SessionInfo): boolean {
