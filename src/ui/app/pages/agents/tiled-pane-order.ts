@@ -1,12 +1,7 @@
 import type { SessionInfo } from '@/lib/types/session';
-import type { TiledLayout } from './TiledGrid';
+import type { TiledLayout } from './tiled-layout';
 
-const TILED_LAYOUT_MAX_PANES: Record<TiledLayout, number> = {
-  '1x1': 1,
-  '1x2': 2,
-  '2x2': 4,
-  '2x4': 8,
-};
+import { TILED_LAYOUT_MAX_PANES } from './tiled-layout';
 
 function isTiledActiveSession(session: SessionInfo): boolean {
   return session.status !== 'completed' && session.status !== 'archived';
