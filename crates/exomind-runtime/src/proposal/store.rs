@@ -302,6 +302,33 @@ impl ProposalStore {
         Ok(proposal)
     }
 
+    pub fn save_replica_scoped(
+        &self,
+        scope_key: Option<&str>,
+        proposal: Proposal,
+    ) -> Result<Proposal, ProposalStoreError> {
+        let normalized_scope = normalize_scope_key(scope_key);
+        match &self.backend {
+            ProposalStoreBackend::Memory(state) => {
+                let mut state = match state.write() {
+                    Ok(lock) => lock,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                state.next_id = state.next_id.max(proposal.id);
+                state
+                    .scopes
+                    .entry(normalized_scope.to_string())
+                    .or_default()
+                    .insert(proposal.id, proposal.clone());
+                Ok(proposal)
+            }
+            ProposalStoreBackend::Sqlite(store) => {
+                store.save_scoped(normalized_scope, &proposal)?;
+                Ok(proposal)
+            }
+        }
+    }
+
     fn save_scoped(&self, scope_key: &str, proposal: &Proposal) -> Result<(), ProposalStoreError> {
         match &self.backend {
             ProposalStoreBackend::Memory(state) => {

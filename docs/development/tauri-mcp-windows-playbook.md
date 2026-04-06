@@ -319,6 +319,88 @@
 - 判断“卡片没消失”时，至少同时看三层：
   - RT `/sessions` 的真实状态
 
+### 阶段补记：#532 双 embedded RT 跨档案同步章程（2026-04-06）
+
+#### 本轮阶段目标
+
+- 用两个真实 Tauri 桌面实例，而不是单 RT / 单窗口 / curl-only 假验收，验证同一档案 scope 下四个域都能跨 embedded RT 增量同步：
+  - EventLog
+  - Task
+  - TimeBlock
+  - Proposal
+- 把“档案对齐 -> pairing -> peer online -> 四域真实写入 -> 对端真实可见 -> 基线回收”为一条可复跑章程。
+- 明确区分：
+  - mesh / peer 看起来在线
+  - 真实业务对象已经落到对端 store
+
+#### 本轮观察结果
+
+- 当前更稳的拓扑不是只靠一个窗口，而是：
+  - `tauri:manager` 管双实例
+  - raw bridge 负责拿窗口真值、执行 pairing、读取 `runtime_service_status`
+  - 已知 `rtBaseUrl` 后，基线/终态快照直接打 RT HTTP 路由
+- 双实例如果并行启动，第二个实例可能错误继承第一个实例的 RT 端口；本轮现场就出现过两个 wrapper 都解析到同一 RT 端口的情况。
+- `tauri:manager list` 把实例标成 `stale`，不等于实例真的死了；但如果同时满足：
+  - 没有对应 `exomind.exe`
+  - raw bridge 不可连
+  - 目标 RT 端口不通
+  就不能继续把它当成可用实例。
+- 只看 pairing / peer online 会误判问题已经解决；这轮首次新版章程跑出的失败就是：
+  - 四域主对象部分可同步
+  - 但 Task / TimeBlock 内部动作写出来的 EventLog 副产物没有跨 RT replication
+  - 导致最终 scope snapshot 的 `eventlogCount` 两端不一致
+- 页面里 `execute_js(fetch(...))` 适合拿窗口真值，但不适合承载所有长链路读数；终态 snapshot 阶段偶发脚本超时时，直接打 RT HTTP 更稳。
+
+#### 本轮结论
+
+- 对跨 RT 同步，当前稳定判定标准应是：
+  1. manager 能定位到两个真实实例
+  2. 两边 raw bridge 可连
+  3. 两边 `runtime_service_status` 明确返回 `externalRuntime=false`
+  4. 双边 peer 都进入 `status=online`
+  5. 四域动作都能在对端对应路由看到真实对象
+  6. 清理后 final snapshot 两端重新对齐
+- 本轮补齐后，真实缺口已经从“peer online 但业务对象没落库”推进到“Task / TimeBlock 副产物 EventLog 也能跨 RT 对齐”。
+- Proposal 域现在也已经进入“可作为跨 RT 共享对象验收”的阶段，不再只是单端 MVP。
+
+#### 本轮可复用操作套路
+
+1. 启动双实例时优先顺序启动；第二实例显式指定 RT 端口，避免端口误抢。
+2. 先从 raw bridge 拿每个窗口的：
+   - `runtime_service_status`
+   - 当前 `rtBaseUrl`
+   - 页面标题 / route / 实例名
+3. 配对时不要只做发现；要显式完成：
+   - pairing
+   - 双边 peer upsert
+   - interests 写入
+   - 等待两边 `mesh/peers.status === online`
+4. 做验收时不要只看 signal；每个域都必须执行真实业务动作，再轮询对端真实路由直到对象可见或超时。
+5. 基线与终态统一直接打 RT HTTP：
+   - `/eventlog`
+   - `/tasks`
+   - `/timeblocks`
+   - `/api/proposals`
+6. 若报告失败，优先比对 baseline / final snapshot，而不是先看控制台噪音；它更容易暴露“主对象同步了，但副产物没对齐”的真实缺口。
+7. 每轮结束都保存 JSON + Markdown 报告，并把：
+   - 实例拓扑
+   - 端口真值
+   - pairing 结果
+   - 分域延迟
+   - final snapshot
+   一起回写 issue / playbook，避免下轮重复取证。
+
+#### 本轮踩坑记录
+
+- `tauri:manager` 的元数据不能替代运行真值；manager、bridge、RT 端口三者必须交叉验证。
+- 并行启动双实例时，端口继承错误比“实例没起来”更隐蔽，因为窗口表面上仍可打开。
+- 当前长尾延迟主要出现在：
+  - task create
+  - timeblock start
+  - proposal transition
+  结论不是“同步错误”，而是“当前仍有明显延迟尾部，后续应继续压缩”。
+- 文档里出现的实例名、端口、报告路径都只是现场样例；下一轮复跑必须先取当前真值，不要机械复用。
+
 ### 阶段补记：#806 章程在真窗实例中完整跑通（2026-04-04）
 
 #### 阶段目标

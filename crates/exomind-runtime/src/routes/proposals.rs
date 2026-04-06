@@ -10,6 +10,7 @@ use crate::proposal::{
     ActionType, Comment, CreateProposalInput, Proposal, ProposalExecutor, ProposalFilter,
     ProposalRef, ProposalStatus, ProposalStoreError, Publisher, PublisherType,
 };
+use crate::signal::types::SignalEvent;
 
 #[derive(Debug, Deserialize)]
 struct ProposalQuery {
@@ -115,6 +116,7 @@ async fn create_proposal(
             },
         )
         .map_err(map_store_error)?;
+    publish_proposal_replication_signal(&state, scope_key, &proposal).await;
     Ok((StatusCode::CREATED, Json(proposal)))
 }
 
@@ -195,6 +197,7 @@ async fn update_proposal(
         }
     }
 
+    publish_proposal_replication_signal(&state, scope_key, &proposal).await;
     Ok(Json(proposal))
 }
 
@@ -217,6 +220,7 @@ async fn add_comment(
             },
         )
         .map_err(map_store_error)?;
+    publish_proposal_replication_signal(&state, scope_key, &proposal).await;
     Ok((StatusCode::CREATED, Json(proposal)))
 }
 
@@ -225,6 +229,39 @@ fn scope_key_from_query<'a>(
     user_id: Option<&'a str>,
 ) -> Option<&'a str> {
     profile_id.or(user_id)
+}
+
+async fn publish_proposal_replication_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+) {
+    let signal = SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "proposal.replication.upserted".to_string(),
+        ts: Utc::now().timestamp_millis() as u64,
+        source: "http:proposals".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 0,
+        trace_id: Some(format!("proposal:{}", proposal.id)),
+        payload: serde_json::json!({
+            "schemaVersion": 1,
+            "scopeKey": scope_key.unwrap_or("anonymous"),
+            "cursor": {
+                "kind": "proposal_snapshot",
+                "proposalId": proposal.id,
+                "updatedAt": proposal.updated_at,
+                "originHostId": state.host_id.clone(),
+            },
+            "proposal": proposal,
+        }),
+    };
+
+    state.signal_pool.publish(signal.clone());
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.forward_event_to_peers(signal).await;
+    }
 }
 
 fn map_store_error(error: ProposalStoreError) -> (StatusCode, Json<ErrorResponse>) {

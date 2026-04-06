@@ -146,6 +146,42 @@ async fn publish_completed_timeblock_replication_signal(
     }
 }
 
+async fn publish_active_timeblock_replication_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    active: &ActiveBlockData,
+) {
+    let signal = SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "timeblock.replication.active_upserted".to_string(),
+        ts: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock error")
+            .as_millis() as u64,
+        source: "http:timeblocks".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 0,
+        trace_id: Some(format!("timeblock-active:{}", active.start_id)),
+        payload: serde_json::json!({
+            "schemaVersion": 1,
+            "scopeKey": normalize_scope_key(scope_key),
+            "cursor": {
+                "kind": "timeblock_active",
+                "startId": active.start_id,
+                "updatedAt": active.updated_at.unwrap_or(active.start_time),
+                "originHostId": state.host_id.clone(),
+            },
+            "active": active,
+        }),
+    };
+
+    state.signal_pool.publish(signal.clone());
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.forward_event_to_peers(signal).await;
+    }
+}
+
 // ── #759 newBlock primitive ─────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -396,7 +432,9 @@ async fn start_block(
         &result.active.name,
         &result.active.start_id,
         &result.active.task_ids,
-    );
+    )
+    .await;
+    publish_active_timeblock_replication_signal(&state, scope_key, &result.active).await;
 
     Ok(Json(result))
 }
@@ -452,9 +490,11 @@ async fn end_block(
             &completed.name,
             &completed.start_id,
             &completed.task_ids,
-        );
+        )
+        .await;
         publish_completed_timeblock_replication_signal(&state, scope_key, completed).await;
     }
+    publish_active_timeblock_replication_signal(&state, scope_key, &result.active).await;
 
     Ok(Json(result))
 }
@@ -535,7 +575,14 @@ async fn stop_block(
         .put_active_scoped(scope_key, updated)
         .map_err(|e| internal_error(e.to_string()))?;
 
-    write_timeblock_eventlog(&state, scope_key, "block_end", &name, &start_id, &task_ids);
+    write_timeblock_eventlog(&state, scope_key, "block_end", &name, &start_id, &task_ids).await;
+    if let Some(active) = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+    {
+        publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
+    }
 
     Ok(Json(
         serde_json::json!({ "status": "stopped", "phase": "feedback_in_progress" }),
@@ -604,7 +651,15 @@ async fn pause_block(
         &name,
         &start_id,
         &task_ids,
-    );
+    )
+    .await;
+    if let Some(active) = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+    {
+        publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
+    }
 
     Ok(Json(serde_json::json!({ "status": "paused" })))
 }
@@ -669,7 +724,15 @@ async fn resume_block(
         &name,
         &start_id,
         &task_ids,
-    );
+    )
+    .await;
+    if let Some(active) = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+    {
+        publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
+    }
 
     Ok(Json(serde_json::json!({ "status": "resumed" })))
 }
@@ -706,6 +769,13 @@ async fn describe_current_block(
         .timeblock_store
         .put_active_scoped(scope_key, active)
         .map_err(|e| internal_error(e.to_string()))?;
+    if let Some(active) = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+    {
+        publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
+    }
 
     Ok(Json(
         serde_json::json!({ "updated": "current", "blockId": block_id }),
@@ -756,6 +826,7 @@ async fn describe_block(
                 .timeblock_store
                 .put_active_scoped(scope_key, active.clone())
                 .map_err(|e| internal_error(e.to_string()))?;
+            publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
             return Ok(Json(
                 serde_json::json!({ "updated": "active", "blockId": block_id }),
             ));
@@ -885,6 +956,7 @@ async fn put_active_timeblock(
         .timeblock_store
         .put_active_scoped(scope_key, normalized.clone())
         .map_err(|error| internal_error(error.to_string()))?;
+    publish_active_timeblock_replication_signal(&state, scope_key, &normalized).await;
 
     if is_new_block {
         write_timeblock_eventlog(
@@ -894,7 +966,8 @@ async fn put_active_timeblock(
             &normalized.name,
             &normalized.start_id,
             &normalized.task_ids,
-        );
+        )
+        .await;
     } else if let Some(existing) = existing_active.as_ref() {
         if !is_timeblock_ended(existing) && is_timeblock_ended(&normalized) {
             write_timeblock_eventlog(
@@ -904,7 +977,8 @@ async fn put_active_timeblock(
                 &normalized.name,
                 &normalized.start_id,
                 &normalized.task_ids,
-            );
+            )
+            .await;
         } else if !existing.paused && normalized.paused {
             write_timeblock_eventlog(
                 &state,
@@ -913,7 +987,8 @@ async fn put_active_timeblock(
                 &normalized.name,
                 &normalized.start_id,
                 &normalized.task_ids,
-            );
+            )
+            .await;
         } else if existing.paused && !normalized.paused {
             write_timeblock_eventlog(
                 &state,
@@ -922,7 +997,8 @@ async fn put_active_timeblock(
                 &normalized.name,
                 &normalized.start_id,
                 &normalized.task_ids,
-            );
+            )
+            .await;
         }
     }
 
@@ -1134,7 +1210,7 @@ fn apply_timeblock_import(
     })
 }
 
-fn write_timeblock_eventlog(
+async fn write_timeblock_eventlog(
     state: &AppState,
     scope_key: Option<&str>,
     event_type: &str,
@@ -1165,9 +1241,12 @@ fn write_timeblock_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event) {
+    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
         tracing::warn!(error = %error, "failed to write timeblock eventlog");
+        return;
     }
+
+    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 fn build_timeblocks_sqlite_snapshot_bytes(
@@ -1683,7 +1762,7 @@ mod tests {
             Arc::new(crate::timeblock::TimeBlockStore::new()),
             eventlog_store.clone(),
         );
-        let app = test_router(state);
+        let app = test_router(state.clone());
 
         let response = app
             .oneshot(
@@ -1734,6 +1813,15 @@ mod tests {
             events[0].metadata.as_ref().unwrap()["block_name"],
             "Morning focus"
         );
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| event.topic == "eventlog.replication.appended")
+            .expect("timeblock start should publish eventlog.replication.appended");
+        assert_eq!(replication.payload["scopeKey"], serde_json::json!("anonymous"));
+        assert_eq!(replication.payload["record"]["tags"], serde_json::json!(["block_start"]));
     }
 
     #[tokio::test]

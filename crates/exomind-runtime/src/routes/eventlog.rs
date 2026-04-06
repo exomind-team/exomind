@@ -240,11 +240,12 @@ fn build_eventlog_replication_payload(
             "type": event_type,
             "metadata": event.metadata,
             "replicationSeq": replication_seq,
-        }
+        },
+        "record": event,
     })
 }
 
-async fn publish_eventlog_replication_append(
+pub(crate) async fn publish_eventlog_replication_append(
     state: &AppState,
     user_id: Option<&str>,
     event: &EventRecord,

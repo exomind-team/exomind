@@ -209,7 +209,8 @@ async fn transition_task(
                 task,
                 *old_status,
                 "http:tasks/transition",
-            );
+            )
+            .await;
         }
 
         return Ok(Json(final_task));
@@ -228,7 +229,8 @@ async fn transition_task(
         &task,
         old_status,
         "http:tasks/transition",
-    );
+    )
+    .await;
 
     Ok(Json(task))
 }
@@ -269,7 +271,8 @@ async fn batch_transition_tasks(
                             step_task,
                             *step_old_status,
                             "http:tasks/batch-transition",
-                        );
+                        )
+                        .await;
                     }
                     succeeded += 1;
                     results.push(BatchTransitionResult {
@@ -307,7 +310,8 @@ async fn batch_transition_tasks(
                     &task,
                     old_status,
                     "http:tasks/batch-transition",
-                );
+                )
+                .await;
                 succeeded += 1;
                 results.push(BatchTransitionResult {
                     id: item.id,
@@ -366,7 +370,8 @@ async fn cancel_task(
 
     publish_task_signal(&state, "task.cancelled", &task);
     publish_task_replication_signal(&state, scope_key, &task).await;
-    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/cancel");
+    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/cancel")
+        .await;
 
     Ok(Json(task))
 }
@@ -382,7 +387,8 @@ async fn delete_task(
 
     publish_task_signal(&state, "task.cancelled", &task);
     publish_task_replication_signal(&state, scope_key, &task).await;
-    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete");
+    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete")
+        .await;
 
     Ok(Json(task))
 }
@@ -606,7 +612,7 @@ fn publish_task_transition_signal(state: &AppState, old_status: TaskStatus, task
     state.signal_pool.publish(event);
 }
 
-fn write_task_transition_eventlog(
+async fn write_task_transition_eventlog(
     state: &AppState,
     scope_key: Option<&str>,
     task: &Task,
@@ -631,9 +637,12 @@ fn write_task_transition_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event) {
+    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
         tracing::warn!(error = %error, "failed to write task transition eventlog");
+        return;
     }
+
+    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 fn task_transition_event_content(tag: &str) -> &'static str {
@@ -893,7 +902,7 @@ mod tests {
     async fn create_and_list_tasks() {
         let state = test_state();
         let _rx = state.signal_pool.subscribe();
-        let app = test_router(state);
+        let app = test_router(state.clone());
 
         // Create
         let response = app
@@ -936,7 +945,7 @@ mod tests {
     #[tokio::test]
     async fn create_task_rejects_client_supplied_status() {
         let state = test_state();
-        let app = test_router(state);
+        let app = test_router(state.clone());
 
         let create_response = app
             .clone()
@@ -990,7 +999,7 @@ mod tests {
             estimated_minutes: None,
             time_block_ids: vec![],
         });
-        let app = test_router(state);
+        let app = test_router(state.clone());
 
         let response = app
             .oneshot(
@@ -1450,7 +1459,7 @@ mod tests {
             estimated_minutes: None,
             time_block_ids: vec![],
         });
-        let app = test_router(state);
+        let app = test_router(state.clone());
 
         let response = app
             .oneshot(
@@ -1474,6 +1483,15 @@ mod tests {
             events[0].metadata.as_ref().unwrap()["old_status"],
             "pending"
         );
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| event.topic == "eventlog.replication.appended")
+            .expect("task transition should publish eventlog.replication.appended");
+        assert_eq!(replication.payload["scopeKey"], serde_json::json!("anonymous"));
+        assert_eq!(replication.payload["record"]["tags"], serde_json::json!(["task_started"]));
         assert_eq!(
             events[0].metadata.as_ref().unwrap()["new_status"],
             "in_progress"

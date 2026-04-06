@@ -534,6 +534,14 @@ pub async fn start_with_options(
             Arc::clone(&state.signal_pool),
             options.host_id.clone(),
         ));
+        actor_tasks.push(signal::actors::replication_actor::spawn_replication_actor(
+            Arc::clone(&state.signal_pool),
+            options.host_id.clone(),
+            Arc::clone(&state.eventlog_store),
+            Arc::clone(&state.task_store),
+            Arc::clone(&state.timeblock_store),
+            Arc::clone(&state.proposal_store),
+        ));
         actor_tasks.push(task::actor::spawn_task_store_actor(
             Arc::clone(&state.signal_pool),
             Arc::clone(&state.task_store),
