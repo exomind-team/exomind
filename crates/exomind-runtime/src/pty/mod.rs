@@ -7,15 +7,32 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::{Mutex, broadcast};
 
 use crate::signal::SignalPool;
 use crate::signal::types::SignalEvent;
 
-/// Max scrollback buffer size in bytes (256 KB).
-const MAX_OUTPUT_BUFFER: usize = 256 * 1024;
+/// Default scrollback buffer size in bytes (256 KB).
+const DEFAULT_OUTPUT_BUFFER_LIMIT_BYTES: usize = 256 * 1024;
+const MIN_OUTPUT_BUFFER_LIMIT_BYTES: usize = 128 * 1024;
+const MAX_OUTPUT_BUFFER_LIMIT_BYTES: usize = 2048 * 1024;
+const CODEX_SESSION_SCAN_LINE_LIMIT: usize = 128;
+const HISTORICAL_SESSION_PREVIEW_CHAR_LIMIT: usize = 200;
+
+fn clamp_output_buffer_limit_bytes(value: usize) -> usize {
+    value.clamp(MIN_OUTPUT_BUFFER_LIMIT_BYTES, MAX_OUTPUT_BUFFER_LIMIT_BYTES)
+}
+
+fn trim_output_buffer_to_limit(buffer: &mut Vec<u8>, limit_bytes: usize) {
+    if buffer.len() > limit_bytes {
+        let drain = buffer.len() - limit_bytes;
+        buffer.drain(..drain);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -152,9 +169,52 @@ pub struct PtyHistoricalSessionInfo {
     pub session_id: String,
     pub project_path: String,
     pub last_modified: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_user_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_user_message: Option<String>,
 }
 
-pub type ClaudeSessionInfo = PtyHistoricalSessionInfo;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyHistoricalSessionPreview {
+    pub agent_type: PtyAgentType,
+    pub session_id: String,
+    pub project_path: String,
+    pub last_modified: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_user_message_preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_user_message_preview: Option<String>,
+}
+
+impl PtyHistoricalSessionInfo {
+    pub fn into_preview(self) -> PtyHistoricalSessionPreview {
+        PtyHistoricalSessionPreview {
+            agent_type: self.agent_type,
+            session_id: self.session_id,
+            project_path: self.project_path,
+            last_modified: self.last_modified,
+            display_title: self.display_title,
+            display_path: self.display_path,
+            first_user_message_preview: truncate_unicode_preview_text(
+                self.first_user_message.as_deref(),
+            ),
+            last_user_message_preview: truncate_unicode_preview_text(
+                self.last_user_message.as_deref(),
+            ),
+        }
+    }
+}
+
+pub type ClaudeSessionInfo = PtyHistoricalSessionPreview;
 
 // ---------------------------------------------------------------------------
 // Internal PTY instance (not serializable — holds OS resources)
@@ -166,6 +226,8 @@ struct PtyInstance {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Monotonic PTY activity clock used for idle -> waiting_input detection.
+    last_activity_at: Arc<StdMutex<Instant>>,
     /// Scrollback buffer — stores recent output for replay on SSE reconnect.
     output_buffer: Arc<Mutex<Vec<u8>>>,
     /// Broadcast sender — every SSE consumer subscribes here for live data.
@@ -193,6 +255,7 @@ pub struct PtyManager {
     signal_pool: Arc<SignalPool>,
     host_id: String,
     transcript_dir: Option<PathBuf>,
+    scrollback_limit_bytes: Arc<AtomicUsize>,
 }
 
 impl PtyManager {
@@ -222,7 +285,19 @@ impl PtyManager {
             signal_pool,
             host_id,
             transcript_dir,
+            scrollback_limit_bytes: Arc::new(AtomicUsize::new(DEFAULT_OUTPUT_BUFFER_LIMIT_BYTES)),
         }
+    }
+
+    pub fn set_scrollback_limit_bytes(&self, limit_bytes: usize) {
+        self.scrollback_limit_bytes.store(
+            clamp_output_buffer_limit_bytes(limit_bytes),
+            Ordering::Relaxed,
+        );
+    }
+
+    pub fn scrollback_limit_bytes(&self) -> usize {
+        clamp_output_buffer_limit_bytes(self.scrollback_limit_bytes.load(Ordering::Relaxed))
     }
 
     /// Spawn a new PTY process.
@@ -302,19 +377,30 @@ impl PtyManager {
 
         // Create output buffering infrastructure
         let output_buffer = Arc::new(Mutex::new(Vec::new()));
+        let last_activity_at = Arc::new(StdMutex::new(Instant::now()));
         let (output_tx, _) = broadcast::channel::<PtyOutputMsg>(1024);
         let transcript_writer = self
             .transcript_path(&id)
             .and_then(|path| create_transcript_writer(&id, path));
 
         // Spawn background reader task that reads from PTY and:
-        // 1. Appends to the scrollback buffer (capped at MAX_OUTPUT_BUFFER)
+        // 1. Appends to the scrollback buffer (capped at the current replay limit)
         // 2. Broadcasts to all SSE consumers
         let pty_id = id.clone();
         let buffer_clone = Arc::clone(&output_buffer);
+        let activity_clone = Arc::clone(&last_activity_at);
+        let scrollback_limit_bytes = Arc::clone(&self.scrollback_limit_bytes);
         let tx_clone = output_tx.clone();
         tokio::task::spawn_blocking(move || {
-            Self::reader_loop(pty_id, reader, buffer_clone, tx_clone, transcript_writer);
+            Self::reader_loop(
+                pty_id,
+                reader,
+                activity_clone,
+                buffer_clone,
+                scrollback_limit_bytes,
+                tx_clone,
+                transcript_writer,
+            );
         });
 
         let instance = PtyInstance {
@@ -322,6 +408,7 @@ impl PtyManager {
             master: pair.master,
             child,
             writer: Arc::new(Mutex::new(writer)),
+            last_activity_at,
             output_buffer,
             output_tx,
         };
@@ -337,7 +424,9 @@ impl PtyManager {
     fn reader_loop(
         pty_id: String,
         mut reader: Box<dyn Read + Send>,
+        activity: Arc<StdMutex<Instant>>,
         buffer: Arc<Mutex<Vec<u8>>>,
+        scrollback_limit_bytes: Arc<AtomicUsize>,
         tx: broadcast::Sender<PtyOutputMsg>,
         mut transcript_writer: Option<TranscriptWriter>,
     ) {
@@ -369,11 +458,14 @@ impl PtyManager {
                     {
                         let mut b = buffer.blocking_lock();
                         b.extend_from_slice(&data);
-                        if b.len() > MAX_OUTPUT_BUFFER {
-                            let drain = b.len() - MAX_OUTPUT_BUFFER;
-                            b.drain(..drain);
-                        }
+                        trim_output_buffer_to_limit(
+                            &mut b,
+                            clamp_output_buffer_limit_bytes(
+                                scrollback_limit_bytes.load(Ordering::Relaxed),
+                            ),
+                        );
                     }
+                    Self::record_activity(&activity);
                     // Broadcast to SSE consumers (ignore if no receivers)
                     let _ = tx.send(PtyOutputMsg::Data(data));
                 }
@@ -405,12 +497,15 @@ impl PtyManager {
     ///
     /// Uses `spawn_blocking` to avoid blocking the tokio runtime with synchronous I/O.
     pub async fn write_input(&self, id: &str, data: &[u8]) -> Result<(), PtyError> {
-        let writer = {
+        let (writer, activity) = {
             let instances = self.instances.lock().await;
             let instance = instances
                 .get(id)
                 .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
-            Arc::clone(&instance.writer)
+            (
+                Arc::clone(&instance.writer),
+                Arc::clone(&instance.last_activity_at),
+            )
         };
         // Release instances lock before spawning blocking task
         let data = data.to_vec();
@@ -424,7 +519,22 @@ impl PtyManager {
         .map_err(|e| PtyError::SpawnFailed {
             reason: format!("write_input task failed: {e}"),
         })??;
+        Self::record_activity(&activity);
         Ok(())
+    }
+
+    pub async fn activity_idle_for(&self, id: &str) -> Result<Duration, PtyError> {
+        let activity = {
+            let instances = self.instances.lock().await;
+            let instance = instances
+                .get(id)
+                .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+            Arc::clone(&instance.last_activity_at)
+        };
+        let last_activity = *activity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Ok(Instant::now().saturating_duration_since(last_activity))
     }
 
     /// Refresh the PTY process state from the underlying child handle.
@@ -481,7 +591,8 @@ impl PtyManager {
             )
         };
 
-        let buffer_snapshot = output_buffer.lock().await.clone();
+        let mut buffer_snapshot = output_buffer.lock().await.clone();
+        trim_output_buffer_to_limit(&mut buffer_snapshot, self.scrollback_limit_bytes());
         Ok((buffer_snapshot, rx))
     }
 
@@ -489,8 +600,9 @@ impl PtyManager {
         let Some(path) = self.transcript_path(id) else {
             return Ok(None);
         };
+        let limit_bytes = self.scrollback_limit_bytes();
 
-        tokio::task::spawn_blocking(move || read_transcript_tail(&path))
+        tokio::task::spawn_blocking(move || read_transcript_tail(&path, limit_bytes))
             .await
             .map_err(|error| PtyError::SpawnFailed {
                 reason: format!("load_persisted_output task failed: {error}"),
@@ -576,9 +688,27 @@ impl PtyManager {
         }
     }
 
+    pub fn list_historical_session_previews(
+        agent_type: PtyAgentType,
+    ) -> Vec<PtyHistoricalSessionPreview> {
+        Self::list_historical_sessions(agent_type)
+            .into_iter()
+            .map(PtyHistoricalSessionInfo::into_preview)
+            .collect()
+    }
+
+    pub fn get_historical_session(
+        agent_type: PtyAgentType,
+        session_id: &str,
+    ) -> Option<PtyHistoricalSessionInfo> {
+        Self::list_historical_sessions(agent_type)
+            .into_iter()
+            .find(|session| session.session_id == session_id)
+    }
+
     /// Discover existing Claude CLI sessions from ~/.claude/projects/.
     pub fn list_claude_sessions() -> Vec<ClaudeSessionInfo> {
-        Self::list_historical_sessions(PtyAgentType::Claude)
+        Self::list_historical_session_previews(PtyAgentType::Claude)
     }
 
     /// Kill all running PTY child processes and clear instances (graceful shutdown).
@@ -612,6 +742,13 @@ impl PtyManager {
             .as_ref()
             .map(|dir| dir.join(format!("{id}.log")))
     }
+
+    fn record_activity(activity: &Arc<StdMutex<Instant>>) {
+        let mut guard = activity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = Instant::now();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -640,6 +777,16 @@ fn dirs_codex_sessions() -> Option<PathBuf> {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct HistoricalSessionDisplayMeta {
+    display_title: Option<String>,
+    fallback_title: Option<String>,
+    display_path: Option<String>,
+    last_modified: Option<String>,
+    first_user_message: Option<String>,
+    last_user_message: Option<String>,
+}
+
 /// Scan the Claude projects directory for session JSONL files.
 ///
 /// Directory structure: `~/.claude/projects/<encoded-project-path>/<session-id>.jsonl`
@@ -659,6 +806,7 @@ fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<PtyHistoricalSessionI
 
         // The directory name is the encoded project path.
         let project_name = project_entry.file_name().to_string_lossy().to_string();
+        let project_index = read_claude_project_index(&project_path);
 
         let session_entries = match std::fs::read_dir(&project_path) {
             Ok(entries) => entries,
@@ -674,22 +822,45 @@ fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<PtyHistoricalSessionI
             }
 
             let session_id = file_name.trim_end_matches(".jsonl").to_string();
+            let index_meta = project_index.get(&session_id).cloned().unwrap_or_default();
+            let direct_meta = read_claude_session_display_meta(&session_path);
+            let display_meta = HistoricalSessionDisplayMeta {
+                display_title: direct_meta
+                    .display_title
+                    .or(index_meta.display_title)
+                    .or(direct_meta.fallback_title),
+                fallback_title: None,
+                display_path: index_meta.display_path,
+                last_modified: index_meta.last_modified,
+                first_user_message: direct_meta
+                    .first_user_message
+                    .or(index_meta.first_user_message),
+                last_user_message: direct_meta
+                    .last_user_message
+                    .or(index_meta.last_user_message),
+            };
 
-            let last_modified = session_path
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .map(|t| {
-                    let dt: DateTime<Utc> = t.into();
-                    dt.to_rfc3339()
-                })
-                .unwrap_or_default();
+            let last_modified = display_meta.last_modified.clone().unwrap_or_else(|| {
+                session_path
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(|t| {
+                        let dt: DateTime<Utc> = t.into();
+                        dt.to_rfc3339()
+                    })
+                    .unwrap_or_default()
+            });
 
             sessions.push(PtyHistoricalSessionInfo {
                 agent_type: PtyAgentType::Claude,
                 session_id,
                 project_path: project_name.clone(),
                 last_modified,
+                display_title: display_meta.display_title,
+                display_path: display_meta.display_path,
+                first_user_message: display_meta.first_user_message,
+                last_user_message: display_meta.last_user_message,
             });
         }
     }
@@ -702,6 +873,7 @@ fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<PtyHistoricalSessionI
 fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo> {
     let mut sessions = Vec::new();
     let mut stack = vec![sessions_dir.to_path_buf()];
+    let history_meta = read_codex_history_meta(sessions_dir);
 
     while let Some(dir) = stack.pop() {
         let entries = match std::fs::read_dir(&dir) {
@@ -720,8 +892,26 @@ fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo>
                 continue;
             }
 
-            let Some((session_id, project_path)) = read_codex_session_meta(&path) else {
+            let Some(session_meta) = read_codex_session_meta(&path) else {
                 continue;
+            };
+            let history_display_meta = history_meta
+                .get(&session_meta.session_id)
+                .cloned()
+                .unwrap_or_default();
+            let display_meta = HistoricalSessionDisplayMeta {
+                display_title: session_meta
+                    .display_title
+                    .or(history_display_meta.display_title),
+                fallback_title: history_display_meta.fallback_title,
+                display_path: history_display_meta.display_path,
+                last_modified: history_display_meta.last_modified,
+                first_user_message: history_display_meta
+                    .first_user_message
+                    .or(session_meta.first_user_message),
+                last_user_message: history_display_meta
+                    .last_user_message
+                    .or(session_meta.last_user_message),
             };
 
             let last_modified = path
@@ -736,9 +926,15 @@ fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo>
 
             sessions.push(PtyHistoricalSessionInfo {
                 agent_type: PtyAgentType::Codex,
-                session_id,
-                project_path,
+                session_id: session_meta.session_id,
+                project_path: session_meta.project_path.clone(),
                 last_modified,
+                display_title: display_meta.display_title,
+                display_path: display_meta
+                    .display_path
+                    .or_else(|| normalize_trimmed_text(Some(session_meta.project_path.as_str()))),
+                first_user_message: display_meta.first_user_message,
+                last_user_message: display_meta.last_user_message,
             });
         }
     }
@@ -747,27 +943,418 @@ fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo>
     sessions
 }
 
-fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
+struct CodexSessionScanResult {
+    session_id: String,
+    project_path: String,
+    display_title: Option<String>,
+    first_user_message: Option<String>,
+    last_user_message: Option<String>,
+}
+
+fn read_codex_session_meta(path: &Path) -> Option<CodexSessionScanResult> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
+    let mut session_id = None;
+    let mut project_path = None;
+    let mut display_title = None;
+    let mut first_user_message = None;
+    let mut last_user_message = None;
 
-    for line in reader.lines().take(20).flatten() {
-        let value: serde_json::Value = serde_json::from_str(&line).ok()?;
-        if value.get("type").and_then(|kind| kind.as_str()) != Some("session_meta") {
+    for line in reader.lines().take(CODEX_SESSION_SCAN_LINE_LIMIT).flatten() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+
+        if value.get("type").and_then(|kind| kind.as_str()) == Some("session_meta") {
+            let payload = value.get("payload")?;
+            if session_id.is_none() {
+                session_id = payload
+                    .get("id")
+                    .and_then(|id| id.as_str())
+                    .map(ToString::to_string);
+            }
+            if project_path.is_none() {
+                project_path = payload
+                    .get("cwd")
+                    .and_then(|cwd| cwd.as_str())
+                    .map(ToString::to_string);
+            }
+        }
+
+        if let Some(thread_name) = find_string_field_recursive(&value, "thread_name") {
+            display_title = Some(thread_name);
+        }
+
+        update_message_preview(
+            &mut first_user_message,
+            &mut last_user_message,
+            extract_codex_user_message(&value),
+        );
+    }
+
+    Some(CodexSessionScanResult {
+        session_id: session_id?,
+        project_path: project_path.unwrap_or_default(),
+        display_title,
+        first_user_message,
+        last_user_message,
+    })
+}
+
+fn read_claude_project_index(project_path: &Path) -> HashMap<String, HistoricalSessionDisplayMeta> {
+    let index_path = project_path.join("sessions-index.json");
+    let index = std::fs::read_to_string(index_path).ok();
+    let Some(index) = index else {
+        return HashMap::new();
+    };
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&index) else {
+        return HashMap::new();
+    };
+    let Some(entries) = value.get("entries").and_then(|entries| entries.as_array()) else {
+        return HashMap::new();
+    };
+
+    let mut by_session_id = HashMap::new();
+    for entry in entries {
+        let Some(session_id) = entry.get("sessionId").and_then(|value| value.as_str()) else {
+            continue;
+        };
+
+        let display_title = normalize_title_text(
+            entry
+                .get("summary")
+                .and_then(|value| value.as_str())
+                .or_else(|| entry.get("firstPrompt").and_then(|value| value.as_str())),
+        );
+        let display_path =
+            normalize_trimmed_text(entry.get("projectPath").and_then(|value| value.as_str()));
+        let last_modified =
+            normalize_trimmed_text(entry.get("modified").and_then(|value| value.as_str()));
+        let first_user_message = normalize_message_preview_text(
+            entry.get("firstPrompt").and_then(|value| value.as_str()),
+        );
+
+        by_session_id.insert(
+            session_id.to_string(),
+            HistoricalSessionDisplayMeta {
+                display_title,
+                fallback_title: None,
+                display_path,
+                last_modified,
+                first_user_message,
+                last_user_message: None,
+            },
+        );
+    }
+
+    by_session_id
+}
+
+fn read_claude_session_display_meta(path: &Path) -> HistoricalSessionDisplayMeta {
+    let file = File::open(path).ok();
+    let Some(file) = file else {
+        return HistoricalSessionDisplayMeta::default();
+    };
+
+    let reader = BufReader::new(file);
+    let mut display_title = None;
+    let mut fallback_title = None;
+    let mut first_user_message = None;
+    let mut last_user_message = None;
+
+    for line in reader.lines().flatten() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+
+        if let Some(custom_title) = find_string_field_recursive(&value, "customTitle") {
+            display_title = Some(custom_title);
             continue;
         }
 
-        let payload = value.get("payload")?;
-        let session_id = payload.get("id").and_then(|id| id.as_str())?;
-        let cwd = payload
-            .get("cwd")
-            .and_then(|cwd| cwd.as_str())
-            .unwrap_or_default();
+        if let Some(rename_title) = find_claude_rename_command(&value) {
+            display_title = Some(rename_title);
+            continue;
+        }
 
-        return Some((session_id.to_string(), cwd.to_string()));
+        if display_title.is_none() {
+            if let Some(agent_name) = find_string_field_recursive(&value, "agentName") {
+                fallback_title = Some(agent_name);
+            }
+        }
+
+        update_message_preview(
+            &mut first_user_message,
+            &mut last_user_message,
+            extract_claude_user_message(&value),
+        );
     }
 
-    None
+    HistoricalSessionDisplayMeta {
+        display_title,
+        fallback_title,
+        first_user_message,
+        last_user_message,
+        ..Default::default()
+    }
+}
+
+fn read_codex_history_meta(sessions_dir: &Path) -> HashMap<String, HistoricalSessionDisplayMeta> {
+    let Some(history_path) = sessions_dir
+        .parent()
+        .map(|parent| parent.join("history.jsonl"))
+    else {
+        return HashMap::new();
+    };
+    let file = File::open(history_path).ok();
+    let Some(file) = file else {
+        return HashMap::new();
+    };
+
+    let reader = BufReader::new(file);
+    let mut by_session_id = HashMap::new();
+
+    for line in reader.lines().flatten() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let Some(session_id) = value.get("session_id").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(text) = value.get("text").and_then(|value| value.as_str()) else {
+            continue;
+        };
+
+        let entry = by_session_id
+            .entry(session_id.to_string())
+            .or_insert_with(HistoricalSessionDisplayMeta::default);
+
+        if let Some(rename_title) = parse_codex_rename_command(text) {
+            entry.display_title = Some(rename_title);
+            continue;
+        }
+
+        if let Some(message_preview) = normalize_message_preview_text(Some(text)) {
+            if entry.first_user_message.is_none() {
+                entry.first_user_message = Some(message_preview.clone());
+            }
+            entry.last_user_message = Some(message_preview.clone());
+
+            if entry.display_title.is_none() {
+                entry.display_title = Some(message_preview);
+            }
+        }
+    }
+
+    by_session_id
+}
+
+fn extract_claude_user_message(value: &serde_json::Value) -> Option<String> {
+    let message = value.get("message")?;
+    if message.get("role").and_then(|role| role.as_str()) != Some("user") {
+        return None;
+    }
+
+    extract_message_text_from_content(message.get("content")?)
+}
+
+fn extract_codex_user_message(value: &serde_json::Value) -> Option<String> {
+    let payload = value.get("payload")?;
+    if payload.get("role").and_then(|role| role.as_str()) != Some("user") {
+        return None;
+    }
+
+    extract_message_text_from_content(payload.get("content")?)
+}
+
+fn extract_message_text_from_content(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => normalize_message_preview_text(Some(text)),
+        serde_json::Value::Array(items) => {
+            let text = items
+                .iter()
+                .filter_map(extract_message_text_item)
+                .collect::<Vec<_>>()
+                .join(" ");
+            normalize_message_preview_text(Some(text.as_str()))
+        }
+        serde_json::Value::Object(_) => extract_message_text_item(value),
+        _ => None,
+    }
+}
+
+fn extract_message_text_item(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => normalize_message_preview_text(Some(text)),
+        serde_json::Value::Object(map) => {
+            let item_type = map
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            if matches!(item_type, "tool_result" | "tool_use") {
+                return None;
+            }
+
+            normalize_message_preview_text(
+                map.get("text")
+                    .and_then(|value| value.as_str())
+                    .or_else(|| map.get("value").and_then(|value| value.as_str())),
+            )
+            .or_else(|| {
+                map.get("content")
+                    .and_then(extract_message_text_from_content)
+            })
+        }
+        _ => None,
+    }
+}
+
+fn update_message_preview(
+    first: &mut Option<String>,
+    last: &mut Option<String>,
+    next: Option<String>,
+) {
+    let Some(next) = next else {
+        return;
+    };
+
+    if first.is_none() {
+        *first = Some(next.clone());
+    }
+    *last = Some(next);
+}
+
+fn find_string_field_recursive(value: &serde_json::Value, target_key: &str) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(direct) = map
+                .get(target_key)
+                .and_then(|value| value.as_str())
+                .and_then(|value| normalize_title_text(Some(value)))
+            {
+                return Some(direct);
+            }
+
+            map.values()
+                .filter_map(|value| find_string_field_recursive(value, target_key))
+                .last()
+        }
+        serde_json::Value::Array(values) => values
+            .iter()
+            .filter_map(|value| find_string_field_recursive(value, target_key))
+            .last(),
+        _ => None,
+    }
+}
+
+fn find_string_value_recursive(
+    value: &serde_json::Value,
+    predicate: &impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => predicate(text),
+        serde_json::Value::Object(map) => map
+            .values()
+            .filter_map(|value| find_string_value_recursive(value, predicate))
+            .last(),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .filter_map(|value| find_string_value_recursive(value, predicate))
+            .last(),
+        _ => None,
+    }
+}
+
+fn normalize_trimmed_text(value: Option<&str>) -> Option<String> {
+    let trimmed = value.unwrap_or_default().trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_title_text(value: Option<&str>) -> Option<String> {
+    let normalized = value
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn normalize_message_preview_text(value: Option<&str>) -> Option<String> {
+    let normalized = normalize_title_text(value)?;
+    if is_codex_title_candidate(&normalized) {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
+fn parse_codex_rename_command(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if !trimmed.to_ascii_lowercase().starts_with("/rename") {
+        return None;
+    }
+
+    let renamed = trimmed.get("/rename".len()..).unwrap_or_default().trim();
+    normalize_title_text(Some(renamed))
+}
+
+fn parse_claude_rename_command(text: &str) -> Option<String> {
+    if !text.contains("<command-name>/rename</command-name>") {
+        return None;
+    }
+
+    let args_tag = "<command-args>";
+    let args_start = text.find(args_tag)?;
+    let args_value_start = args_start + args_tag.len();
+    let args_end = text[args_value_start..].find("</command-args>")?;
+    let args = &text[args_value_start..args_value_start + args_end];
+    normalize_title_text(Some(args))
+}
+
+fn find_claude_rename_command(value: &serde_json::Value) -> Option<String> {
+    find_string_value_recursive(value, &parse_claude_rename_command)
+}
+
+fn is_codex_title_candidate(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if trimmed.starts_with('/') {
+        return false;
+    }
+
+    !matches!(trimmed.to_ascii_lowercase().as_str(), "exit" | "resume")
+}
+
+fn truncate_unicode_preview_text(value: Option<&str>) -> Option<String> {
+    let value = value?;
+    let mut chars = value.chars();
+    let mut result = String::new();
+
+    for _ in 0..HISTORICAL_SESSION_PREVIEW_CHAR_LIMIT {
+        match chars.next() {
+            Some(ch) => result.push(ch),
+            None => return Some(result),
+        }
+    }
+
+    if chars.next().is_some() && HISTORICAL_SESSION_PREVIEW_CHAR_LIMIT > 0 {
+        result.pop();
+        result.push('…');
+    }
+
+    Some(result)
 }
 
 fn create_transcript_writer(pty_id: &str, path: PathBuf) -> Option<TranscriptWriter> {
@@ -790,14 +1377,14 @@ fn create_transcript_writer(pty_id: &str, path: PathBuf) -> Option<TranscriptWri
     }
 }
 
-fn read_transcript_tail(path: &Path) -> Result<Option<Vec<u8>>, PtyError> {
+fn read_transcript_tail(path: &Path, limit_bytes: usize) -> Result<Option<Vec<u8>>, PtyError> {
     if !path.is_file() {
         return Ok(None);
     }
 
     let mut file = File::open(path)?;
     let file_len = file.metadata()?.len();
-    let start = file_len.saturating_sub(MAX_OUTPUT_BUFFER as u64);
+    let start = file_len.saturating_sub(clamp_output_buffer_limit_bytes(limit_bytes) as u64);
     file.seek(SeekFrom::Start(start))?;
 
     let mut data = Vec::with_capacity((file_len - start) as usize);
@@ -971,7 +1558,9 @@ mod tests {
     #[test]
     fn discover_codex_sessions_reads_rollout_metadata() {
         let dir = tempdir().unwrap();
-        let day_dir = dir.path().join("2026").join("03").join("18");
+        let codex_root = dir.path().join(".codex");
+        let sessions_dir = codex_root.join("sessions");
+        let day_dir = sessions_dir.join("2026").join("03").join("18");
         fs::create_dir_all(&day_dir).unwrap();
         let session_path =
             day_dir.join("rollout-2026-03-18T10-20-30-019d0011-aaaa-bbbb-cccc-1234567890ab.jsonl");
@@ -980,12 +1569,20 @@ mod tests {
             concat!(
                 "{\"timestamp\":\"2026-03-18T02:20:32.696Z\",\"type\":\"session_meta\",",
                 "\"payload\":{\"id\":\"019d0011-aaaa-bbbb-cccc-1234567890ab\",",
-                "\"cwd\":\"D:\\\\project\\\\exomind\",\"originator\":\"codex_cli_rs\"}}\n"
+                "\"cwd\":\"D:\\\\project\\\\exomind\",\"originator\":\"codex_cli_rs\"}}\n",
+                "{\"timestamp\":\"2026-03-18T02:20:33.000Z\",\"type\":\"event\",",
+                "\"payload\":{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",",
+                "\"text\":\"Investigate pane tree regression\"}]}}\n",
+                "{\"timestamp\":\"2026-03-18T02:20:35.000Z\",\"type\":\"event\",",
+                "\"payload\":{\"thread_name\":\"Codex renamed title\"}}\n",
+                "{\"timestamp\":\"2026-03-18T02:25:35.000Z\",\"type\":\"event\",",
+                "\"payload\":{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",",
+                "\"text\":\"Verify fullscreen empty pane layout\"}]}}\n"
             ),
         )
         .unwrap();
 
-        let sessions = discover_codex_sessions(&day_dir);
+        let sessions = discover_codex_sessions(&sessions_dir);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].agent_type, PtyAgentType::Codex);
         assert_eq!(
@@ -993,6 +1590,68 @@ mod tests {
             "019d0011-aaaa-bbbb-cccc-1234567890ab"
         );
         assert_eq!(sessions[0].project_path, "D:\\project\\exomind");
+        assert_eq!(
+            sessions[0].display_title.as_deref(),
+            Some("Codex renamed title")
+        );
+        assert_eq!(
+            sessions[0].display_path.as_deref(),
+            Some("D:\\project\\exomind")
+        );
+        assert_eq!(
+            sessions[0].first_user_message.as_deref(),
+            Some("Investigate pane tree regression")
+        );
+        assert_eq!(
+            sessions[0].last_user_message.as_deref(),
+            Some("Verify fullscreen empty pane layout")
+        );
+    }
+
+    #[test]
+    fn discover_codex_sessions_prefers_history_user_previews_over_head_scan() {
+        let dir = tempdir().unwrap();
+        let codex_root = dir.path().join(".codex");
+        let sessions_dir = codex_root.join("sessions");
+        let day_dir = sessions_dir.join("2026").join("04").join("06");
+        fs::create_dir_all(&day_dir).unwrap();
+        let session_path = day_dir.join("rollout-2026-04-06T10-20-30-codex-session-1.jsonl");
+        fs::write(
+            &session_path,
+            concat!(
+                "{\"timestamp\":\"2026-04-06T10:20:32.696Z\",\"type\":\"session_meta\",",
+                "\"payload\":{\"id\":\"codex-session-1\",\"cwd\":\"D:\\\\project\\\\exomind\"}}\n",
+                "{\"timestamp\":\"2026-04-06T10:20:33.000Z\",\"type\":\"event\",",
+                "\"payload\":{\"thread_name\":\"Codex renamed title\"}}\n",
+                "{\"timestamp\":\"2026-04-06T10:20:34.000Z\",\"type\":\"event\",",
+                "\"payload\":{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",",
+                "\"text\":\"Head scan prompt\"}]}}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            codex_root.join("history.jsonl"),
+            concat!(
+                "{\"session_id\":\"codex-session-1\",\"ts\":1,\"text\":\"Investigate pane tree regression\"}\n",
+                "{\"session_id\":\"codex-session-1\",\"ts\":2,\"text\":\"Verify fullscreen empty pane layout\"}\n"
+            ),
+        )
+        .unwrap();
+
+        let sessions = discover_codex_sessions(&sessions_dir);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].display_title.as_deref(),
+            Some("Codex renamed title")
+        );
+        assert_eq!(
+            sessions[0].first_user_message.as_deref(),
+            Some("Investigate pane tree regression")
+        );
+        assert_eq!(
+            sessions[0].last_user_message.as_deref(),
+            Some("Verify fullscreen empty pane layout")
+        );
     }
 
     #[test]
@@ -1148,6 +1807,215 @@ mod tests {
         assert!(sessions.iter().all(|s| s.project_path == "project-a"));
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn discover_claude_sessions_reads_display_metadata_from_sessions_index() {
+        let dir = tempdir().unwrap();
+        let project_dir = dir.path().join("project-a");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(
+            project_dir.join("sess-1.jsonl"),
+            concat!(
+                "{\"message\":{\"role\":\"user\",\"content\":\"Plan pane tree recovery\"},\"sessionId\":\"sess-1\"}\n",
+                "{\"type\":\"custom-title\",\"customTitle\":\"Claude renamed title\",\"sessionId\":\"sess-1\"}\n",
+                "{\"type\":\"agent-name\",\"agentName\":\"Fallback agent name\",\"sessionId\":\"sess-1\"}\n",
+                "{\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Validate fullscreen empty pane layout\"}]},\"sessionId\":\"sess-1\"}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("sessions-index.json"),
+            r#"{
+                "version": 1,
+                "entries": [
+                    {
+                        "sessionId": "sess-1",
+                        "summary": "Index summary fallback",
+                        "firstPrompt": "fallback prompt",
+                        "projectPath": "D:\\project\\exomind",
+                        "modified": "2026-04-05T02:20:32.696Z"
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let sessions = discover_claude_sessions(&dir.path().to_path_buf());
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "sess-1");
+        assert_eq!(
+            sessions[0].display_title.as_deref(),
+            Some("Claude renamed title")
+        );
+        assert_eq!(
+            sessions[0].display_path.as_deref(),
+            Some("D:\\project\\exomind")
+        );
+        assert_eq!(sessions[0].last_modified, "2026-04-05T02:20:32.696Z");
+        assert_eq!(
+            sessions[0].first_user_message.as_deref(),
+            Some("Plan pane tree recovery")
+        );
+        assert_eq!(
+            sessions[0].last_user_message.as_deref(),
+            Some("Validate fullscreen empty pane layout")
+        );
+    }
+
+    #[test]
+    fn discover_claude_sessions_falls_back_to_index_first_prompt_for_first_message() {
+        let dir = tempdir().unwrap();
+        let project_dir = dir.path().join("project-a");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(project_dir.join("sess-1.jsonl"), "{}").unwrap();
+        fs::write(
+            project_dir.join("sessions-index.json"),
+            r#"{
+                "version": 1,
+                "entries": [
+                    {
+                        "sessionId": "sess-1",
+                        "summary": "Index summary fallback",
+                        "firstPrompt": "Fallback first user prompt",
+                        "projectPath": "D:\\project\\exomind",
+                        "modified": "2026-04-05T02:20:32.696Z"
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let sessions = discover_claude_sessions(&dir.path().to_path_buf());
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].first_user_message.as_deref(),
+            Some("Fallback first user prompt")
+        );
+        assert_eq!(sessions[0].last_user_message, None);
+    }
+
+    #[test]
+    fn discover_claude_sessions_prefers_index_summary_over_agent_name_fallback() {
+        let dir = tempdir().unwrap();
+        let project_dir = dir.path().join("project-a");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(
+            project_dir.join("sess-1.jsonl"),
+            concat!(
+                "{\"type\":\"agent-name\",\"agentName\":\"Fallback agent name\",\"sessionId\":\"sess-1\"}\n",
+                "{\"message\":{\"role\":\"user\",\"content\":\"Plan pane tree recovery\"},\"sessionId\":\"sess-1\"}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("sessions-index.json"),
+            r#"{
+                "version": 1,
+                "entries": [
+                    {
+                        "sessionId": "sess-1",
+                        "summary": "Index summary fallback",
+                        "firstPrompt": "Fallback first user prompt",
+                        "projectPath": "D:\\project\\exomind",
+                        "modified": "2026-04-05T02:20:32.696Z"
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let sessions = discover_claude_sessions(&dir.path().to_path_buf());
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].display_title.as_deref(),
+            Some("Index summary fallback")
+        );
+    }
+
+    #[test]
+    fn read_codex_history_meta_falls_back_to_first_user_prompt() {
+        let dir = tempdir().unwrap();
+        let codex_root = dir.path().join(".codex");
+        let sessions_dir = codex_root.join("sessions");
+        fs::create_dir_all(&sessions_dir).unwrap();
+        fs::write(
+            codex_root.join("history.jsonl"),
+            concat!(
+                "{\"session_id\":\"codex-session-1\",\"ts\":1,\"text\":\"/model codex 5.2\"}\n",
+                "{\"session_id\":\"codex-session-1\",\"ts\":2,\"text\":\"Investigate pane tree regression\"}\n"
+            ),
+        )
+        .unwrap();
+
+        let history_meta = read_codex_history_meta(&sessions_dir);
+        assert_eq!(
+            history_meta
+                .get("codex-session-1")
+                .and_then(|meta| meta.display_title.as_deref()),
+            Some("Investigate pane tree regression")
+        );
+        assert_eq!(
+            history_meta
+                .get("codex-session-1")
+                .and_then(|meta| meta.first_user_message.as_deref()),
+            Some("Investigate pane tree regression")
+        );
+        assert_eq!(
+            history_meta
+                .get("codex-session-1")
+                .and_then(|meta| meta.last_user_message.as_deref()),
+            Some("Investigate pane tree regression")
+        );
+    }
+
+    #[test]
+    fn historical_session_preview_truncates_user_messages_to_200_unicode_chars() {
+        let long_preview = "界".repeat(205);
+        let preview = PtyHistoricalSessionInfo {
+            agent_type: PtyAgentType::Codex,
+            session_id: "codex-preview-session".to_string(),
+            project_path: "D:/project/exomind".to_string(),
+            last_modified: "2026-04-06T10:20:32.696Z".to_string(),
+            display_title: Some("Codex preview".to_string()),
+            display_path: Some("D:/project/exomind".to_string()),
+            first_user_message: Some(long_preview.clone()),
+            last_user_message: Some(long_preview),
+        }
+        .into_preview();
+
+        let first_preview = preview
+            .first_user_message_preview
+            .as_deref()
+            .expect("first preview should exist");
+        let last_preview = preview
+            .last_user_message_preview
+            .as_deref()
+            .expect("last preview should exist");
+
+        assert_eq!(first_preview.chars().count(), 200);
+        assert_eq!(last_preview.chars().count(), 200);
+        assert!(first_preview.ends_with('…'));
+        assert!(last_preview.ends_with('…'));
+    }
+
+    #[test]
+    fn read_transcript_tail_respects_runtime_scrollback_limit() {
+        let dir = tempdir().unwrap();
+        let transcript_path = dir.path().join("tail.log");
+        let expected_limit = MIN_OUTPUT_BUFFER_LIMIT_BYTES;
+        let requested_limit = 64 * 1024;
+        let data = (0..(expected_limit + 64 * 1024))
+            .map(|value| (value % 251) as u8)
+            .collect::<Vec<_>>();
+        fs::write(&transcript_path, &data).unwrap();
+
+        let replay = read_transcript_tail(&transcript_path, requested_limit)
+            .unwrap()
+            .expect("tail should exist");
+
+        assert_eq!(replay.len(), expected_limit);
+        assert_eq!(replay, data[data.len() - expected_limit..].to_vec());
     }
 
     #[test]

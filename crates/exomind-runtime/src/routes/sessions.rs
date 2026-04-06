@@ -12,8 +12,8 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::AppState;
 use crate::session::{
-    AgentSession, CreateSessionInput, Participant, QuickActionResponse, SendMessageInput,
-    SessionMessage, SessionStatus, UpdateSessionInput,
+    AgentSession, CreateSessionInput, InteractionMode, Participant, QuickActionResponse,
+    SendMessageInput, SessionMessage, SessionStatus, SessionStoreError, UpdateSessionInput,
 };
 
 // ── Query types ─────────────────────────────────────────────────
@@ -106,6 +106,55 @@ fn map_pty_delivery_error(pty_id: &str, error: crate::pty::PtyError) -> (StatusC
 }
 
 #[cfg(not(target_os = "android"))]
+pub(crate) fn restore_terminal_session_to_running_on_input(
+    state: &AppState,
+    session_id: &str,
+) -> Result<Option<AgentSession>, (StatusCode, String)> {
+    let session = match state
+        .session_store
+        .get(session_id)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+    {
+        Some(session) => session,
+        None => return Ok(None),
+    };
+
+    if session.interaction_mode != InteractionMode::Terminal {
+        return Ok(None);
+    }
+
+    if !matches!(
+        session.status,
+        SessionStatus::WaitingInput | SessionStatus::Paused | SessionStatus::Error
+    ) {
+        return Ok(None);
+    }
+
+    let updated = match state.session_store.update(
+        session_id,
+        UpdateSessionInput {
+            status: Some(SessionStatus::Running),
+            ..Default::default()
+        },
+    ) {
+        Ok(updated) => updated,
+        Err(SessionStoreError::InvalidTransition { .. }) => return Ok(None),
+        Err(error) => return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
+    };
+    let updated = fill_source_host_id(updated, &state.host_id);
+    broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+    Ok(Some(updated))
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn restore_terminal_session_to_running_on_input(
+    _state: &AppState,
+    _session_id: &str,
+) -> Result<Option<AgentSession>, (StatusCode, String)> {
+    Ok(None)
+}
+
+#[cfg(not(target_os = "android"))]
 async fn deliver_message_to_pty(
     state: &AppState,
     session: &AgentSession,
@@ -118,6 +167,7 @@ async fn deliver_message_to_pty(
             .write_input(pty_id, input.as_bytes())
             .await
             .map_err(|error| map_pty_delivery_error(pty_id, error))?;
+        let _ = restore_terminal_session_to_running_on_input(state, &session.id)?;
     }
     Ok(())
 }
@@ -336,8 +386,8 @@ async fn submit_quick_action(
 
 /// POST /sessions/:id/mark-waiting — Manually mark a PTY session as waiting for input
 ///
-/// For terminal mode sessions where we can't auto-detect WaitingInput.
-/// The user clicks a "等待决策" button to manually mark the session.
+/// Serves as a manual fallback for terminal mode sessions when the user wants
+/// to force WaitingInput before the runtime idle detector would do it.
 async fn mark_waiting(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -454,8 +504,17 @@ mod tests {
     use std::time::Duration;
     use tower::ServiceExt;
 
-    fn test_state(host_id: &str) -> AppState {
-        AppState::new_runtime(0, host_id.to_string(), None, None, false, None)
+    struct TestRuntime {
+        _tempdir: tempfile::TempDir,
+        state: AppState,
+    }
+
+    fn test_state(host_id: &str) -> TestRuntime {
+        let (tempdir, state) = AppState::new_isolated_test_runtime(0, host_id.to_string());
+        TestRuntime {
+            _tempdir: tempdir,
+            state,
+        }
     }
 
     #[cfg(not(target_os = "android"))]
@@ -483,7 +542,8 @@ mod tests {
 
     #[tokio::test]
     async fn create_session_defaults_source_host_id() {
-        let state = test_state("session-host-1");
+        let runtime = test_state("session-host-1");
+        let state = runtime.state.clone();
         let app = router().with_state(state);
         let payload = serde_json::json!({
             "agent_kind": "claude",
@@ -509,7 +569,8 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_fills_missing_source_host_id() {
-        let state = test_state("session-host-2");
+        let runtime = test_state("session-host-2");
+        let state = runtime.state.clone();
         state
             .session_store
             .create(CreateSessionInput {
@@ -549,7 +610,8 @@ mod tests {
 
     #[tokio::test]
     async fn send_message_returns_created_for_non_pty_session() {
-        let state = test_state("session-host-3");
+        let runtime = test_state("session-host-3");
+        let state = runtime.state.clone();
         state
             .session_store
             .create(CreateSessionInput {
@@ -586,7 +648,8 @@ mod tests {
     #[tokio::test]
     #[cfg(not(target_os = "android"))]
     async fn send_message_bridges_content_to_pty_stdin() {
-        let state = test_state("session-host-4");
+        let runtime = test_state("session-host-4");
+        let state = runtime.state.clone();
         let pty = state
             .pty_manager
             .spawn(interactive_shell_spawn_request())
@@ -661,7 +724,8 @@ mod tests {
 
     #[tokio::test]
     async fn send_message_returns_conflict_when_pty_delivery_fails() {
-        let state = test_state("session-host-5");
+        let runtime = test_state("session-host-5");
+        let state = runtime.state.clone();
         state
             .session_store
             .create(CreateSessionInput {
@@ -696,7 +760,8 @@ mod tests {
 
     #[tokio::test]
     async fn update_session_route_accepts_colon_path() {
-        let state = test_state("session-host-6");
+        let runtime = test_state("session-host-6");
+        let state = runtime.state.clone();
         state
             .session_store
             .create(CreateSessionInput {
@@ -738,7 +803,8 @@ mod tests {
 
     #[tokio::test]
     async fn mark_waiting_route_accepts_colon_path() {
-        let state = test_state("session-host-7");
+        let runtime = test_state("session-host-7");
+        let state = runtime.state.clone();
         state
             .session_store
             .create(CreateSessionInput {
@@ -771,5 +837,69 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let session: AgentSession = serde_json::from_slice(&body).unwrap();
         assert_eq!(session.status, SessionStatus::WaitingInput);
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn send_message_wakes_waiting_terminal_session_after_pty_delivery() {
+        let runtime = test_state("session-host-8");
+        let state = runtime.state.clone();
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+        state
+            .session_store
+            .create(CreateSessionInput {
+                id: Some(pty.id.clone()),
+                agent_kind: "shell".to_string(),
+                agent_id: None,
+                source_host_id: Some("session-host-8".to_string()),
+                role: Some("route-message".to_string()),
+                context: None,
+                interaction: Some(crate::session::InteractionMode::Terminal),
+                pty_id: Some(pty.id.clone()),
+                inner_session_id: None,
+                parent_session_id: None,
+            })
+            .unwrap();
+        state
+            .session_store
+            .update(
+                &pty.id,
+                UpdateSessionInput {
+                    status: Some(SessionStatus::WaitingInput),
+                    ..Default::default()
+                },
+            )
+            .expect("session should enter waiting_input for test setup");
+
+        let app = router().with_state(state.clone());
+        let payload = serde_json::json!({
+            "content": "echo resumed",
+        });
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/sessions/{}/messages", pty.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let session = state
+            .session_store
+            .get(&pty.id)
+            .expect("session lookup should succeed")
+            .expect("session should exist");
+        assert_eq!(session.status, SessionStatus::Running);
+
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
     }
 }
