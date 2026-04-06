@@ -1,0 +1,113 @@
+docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md
+  e9514e28c4b408ab 124-125,150,153,162-163,174-175,200-204,214-215,232-233,280-281,292-293,295-310,315-316,326-330,383-384,392-394,398-406,412
+  ee7de93db49a320c 13,75-78
+  287935f874405b37 8-10,12,52,56-57,59,61
+  77cdb21b8965def1 583-584,610-611,613,657-659,670-671,683-685
+  a132cd55b7ca52fa 1-7,14-51,53-55,58,60,62-72,74,81-123,126-148,154,156,164-173,176-186,188-192,205-213,216-231,245-249,252-268,275-279,282-291,294,311-314,317-325,331-382,385-391,395-397,413-582,585-590,592-596,599-609,614-623,628-656,660-669,672-682,686-725
+  fe4079f8eff1ba82 11,250-251,269-270,274,624-625,627
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "81fa316f425e37496ea084f8a4df6045fc4f1ce9",
+  "prompts": {
+    "287935f874405b37": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d5c1a-315f-77c0-800c-7886e5af4268",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 9,
+      "accepted_lines": 9,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f0690f79e7aff9e5d0d484ff30aff7e0a21565a9451e31315339cf81b2eab728"
+    },
+    "6ab6a4de41e7bf9f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "68bc8b2b-642f-4c75-b2e2-fe3796445232",
+        "model": "claude-opus-4-6-thinking"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 4630,
+      "total_deletions": 112,
+      "accepted_lines": 4518,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ca573171c928b7f542279f37bcb58337432159d8fba0917b666ce68f0125dfa5"
+    },
+    "77cdb21b8965def1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d5c1a-3110-7c02-a123-4cf896df6884",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 11,
+      "accepted_lines": 13,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d0923df40dff8a53b3e31b73d595e84c25a666f841fcc5100e71e999a65d3889"
+    },
+    "a132cd55b7ca52fa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d5e74-1749-7dd2-9853-e414e0e10eae",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 664,
+      "total_deletions": 27,
+      "accepted_lines": 586,
+      "overriden_lines": 8,
+      "messages_url": "https://usegitai.com/cas/0fad9179f8b6f39f0e68647954e78cd82975dd0cf4258a6d0f165d79edaa4d9e"
+    },
+    "e9514e28c4b408ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d5c1a-3135-7110-a7d4-23f35b1729a6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 64,
+      "total_deletions": 21,
+      "accepted_lines": 59,
+      "overriden_lines": 6,
+      "messages_url": "https://usegitai.com/cas/6acac2e688b26b3ca37594ad228c2dea24469142a986c73412956da7a2fa34b5"
+    },
+    "ee7de93db49a320c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d5fb3-f9cf-7292-a225-2845546d8bc4",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 1,
+      "accepted_lines": 5,
+      "overriden_lines": 2,
+      "messages_url": "https://usegitai.com/cas/a6c3729a9f9e6811871313b1a42b5642952186466dbb66554ee10433d81bbd5e"
+    },
+    "fe4079f8eff1ba82": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d5fa8-1119-7b30-ad51-6b3cc6538a07",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 12,
+      "total_deletions": 7,
+      "accepted_lines": 9,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/c8bf3cc24321e338c8cd1bf852901c946db0c81397e60b39f9cdae777be85f93"
+    }
+  }
+}
