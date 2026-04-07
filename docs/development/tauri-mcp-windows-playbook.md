@@ -1753,63 +1753,6 @@
 - 坑 5：只验证“点了会出现”，不验证“为什么消失/何时常驻”
   - 沉浸模式入口类 UI 必须把 hover reveal 和 click pin 两种状态明确区分
 
-### 阶段补记：#84x no-PTY 会话强制完成与提示关闭（2026-04-07）
-
-#### 阶段目标
-
-- 在真实 Tauri 桌面实例里验证：
-  - 活跃终端会话缺少 `pty_id` 时，卡片上直接出现 `强制完成`
-  - 点击会话卡片后出现的红色提示可手动关闭
-  - 点击 `强制完成` 后，会话能从 `running` 收敛为 `completed`
-
-#### 本轮观察结果
-
-- 当前实例样例：
-  - 主窗口：`ExoMind [dev] [Web:1424 RT:9124]`
-  - raw bridge：`ws://127.0.0.1:9227`
-- 官方 `driver_session` 在本轮现场仍直接报：
-  - `Transport closed`
-- 但 raw bridge 正常可用，已实测通过：
-  - `list_windows`
-  - `execute_js`
-- 本轮必须先处理两个环境问题：
-  - `H:` 盘空间耗尽，导致 Vite 与 Rust 都可能 `ENOSPC`
-  - 端口 `9124` 已被其他实例占用，当前 app 自动拉起 embedded RT 会失败
-- 本轮稳定做法是：
-  - 把 Tauri / Cargo 构建产物显式放到 `G:\exomind-tauri-targets\issue84x-submit`
-  - 桌面启动后，再在页面上下文里调用：
-  - `window.__TAURI__.core.invoke('runtime_service_start', { host: '127.0.0.1', port: 1950 })`
-
-#### 本轮结论
-
-- `no-PTY` 会话的用户路径已经在真实桌面窗口中跑通：
-  - seed 一条 `running + terminal + pty_id = null` 会话
-  - 会话卡片上可见 `强制完成`
-  - 点卡片后出现红色提示：`该会话没有关联 PTY，可点击强制完成将其收敛。`
-  - 点提示右侧关闭按钮后，提示消失
-  - 点 `强制完成` 后，目标会话变成：
-  - `status = completed`
-  - `pty_id = null`
-  - 当前 runtime 中 `activeNoPty = []`
-- 这轮同时再次确认一个重要边界：
-  - 自动收敛逻辑只处理“有 `pty_id` 但已断开”的终端
-  - 对已经没有 `pty_id` 的会话，系统会保留给用户手动处理
-
-#### 可复用操作套路
-
-1. 如果 `driver_session` 仍报 `Transport closed`，不要卡住：
-   - 直接退回 raw bridge
-   - 用 `list_windows + execute_js` 继续桌面验收
-2. 如果当前 `tauri dev` 启动时 `9124` 被占用：
-   - 先不要抢端口
-   - 在页面里手动 `runtime_service_start` 到空闲端口，例如 `1950`
-3. 若要稳定复现 `no-PTY` 手动收敛：
-   - 准备一条 `interaction_mode = terminal`
-   - `status = running`
-   - `pty_id = null`
-   的会话记录
-   - 再走真实卡片点击与按钮点击，不只看静态 DOM
-
 #### 可复用命令与脚本
 
 - 当前 DAG bridge 调试脚本：
@@ -1824,3 +1767,216 @@
   - 再 `clear-history`
   - 用户或脚本操作
   - 最后 `history-current` / 再读一次 `detect-current`
+
+### 补充：官方 MCP 稳定验收套路（保留并入）
+
+1. 先确认自己连的是不是对的实例：
+   - 看 `manage_window list`
+   - 看主窗口标题里的 `Web:1420 RT:9124`
+   - 看主窗口 URL 是否真是 `http://localhost:1420/agents`
+   - 再核对章程参数里的 `--name` 与 `runtime-db`
+2. 先确认官方 MCP 是“真可用”而不是“只显示 connected”：
+   - 先跑一个最短 `execute_js`
+   - 再跑一个 `runtime_service_status`
+   - 再读一次 `/sessions` 或 `/pty`
+   - 这三步都过，才进入后续深水区验收
+3. RT 重启恢复固定拆成小步骤：
+   - `runtime_service_stop`
+   - 单独查一次 `runtime_service_status`
+   - `runtime_service_start`
+   - 再分别查：
+     - `runtime_service_status`
+     - `/sessions`
+     - `/pty`
+   - 不要写成长轮询大脚本
+4. 如果长脚本超时，不要立刻怀疑产品：
+   - 先把一个大脚本拆成多个 1-2 秒内可返回的短调用
+   - 用多次短读替代一次大轮询
+5. 如果需要验证 PTY 输入交互，而 MCP 键盘/剪贴板因为焦点限制不稳定：
+   - 先确认右侧或平铺页 `.xterm` 文本确实在渲染
+   - 再用与 `PtyTerminal.sendTextInput()` 相同的页面内 `fetch('/pty/:id/input', { body: JSON.stringify({ data }) })` 路径验证
+   - 验证重点是：
+     - 请求 `204`
+     - 页面 `.xterm` 文本出现 marker
+   - 同时在文档里注明这是“与 UI 同路径的页面内注入”，不是 RT 外部旁路
+6. 如果 `issue806-g` 与 `web-1420` 混用，先停下来重核实例：
+   - 选错实例最容易把“章程前置态缺失”误判成“恢复逻辑失败”
+7. 新一轮十条叙事门禁前，优先复用本轮稳定命令：
+   - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name web-1420 --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/web-1420/app-data/runtime/sessions.sqlite`
+
+### 阶段补记：#836 #838 #839 #841 #842 系列桌面复核（2026-04-06）
+
+#### 阶段目标
+
+- 在不新起实例的前提下，直接复用隔离中的 Tauri dev 实例，完成本轮终端 Agent / 平铺工作台的真实桌面验收。
+- 重点覆盖：
+  - `#836` 独立 PTY 路由不再 404
+  - `#838` 历史会话卡片标题优先展示 rename 后标题
+  - `#839` PTY 空闲自动进入 `waiting_input`，真实 PTY 输入后回到 `running`
+  - `#841/#855` 命名布局下的异步 spawn/resume 仍能回填到原始布局
+  - `#856/#857` 平铺沉浸模式与窗格高度填充
+
+#### 观察结果
+
+- 当前稳定可复用实例：
+  - managed instance：`issue842-verify2`
+  - web：`1422`
+  - HMR：`1423`
+  - embedded RT：`1950`
+  - MCP / bridge：`9225`
+- 本轮官方 MCP 基础链路稳定：
+  - `driver_session status => connected=true`
+  - `manage_window list` 能看到主窗口：
+    - `ExoMind [dev] [Web:1422 RT:1950]`
+    - `url = http://localhost:1422/agents`
+- 但本轮也明确观察到一个新限制：
+  - `webview_interact` / `webview_find_element` 在当前 bridge 下会报：
+    - `window.__MCP__.resolveRef is not a function`
+  - 结论：
+    - DOM 读写不要卡死在 `interact/find_element`
+    - 直接退回 `webview_execute_js`，用真实 DOM 查询与 `.click()` / `dispatchEvent(...)` 执行
+- `#856/#857` 在桌面里已拿到几何和截图证据：
+  - 沉浸模式下，`信号网络 / 拓扑图|会话|平铺... / Terminal / 添加` 整条工作台顶部栏消失
+  - 仅保留 `X 个会话` 状态栏与 `退出沉浸`
+  - `PtyTerminal` 与空窗格在 1x1 / 1x2 下都能充满窗格高度，不再需要先点 maximize
+- `#836` 已在桌面中复核通过：
+  - 从会话页点击 PTY 的 `全屏`
+  - 主窗口进入 `/agents/pty/<ptyId>?baseUrl=...`
+  - 刷新后仍保持 PTY 页面，不再落入全局 404
+- `#838` 已在桌面中复核通过：
+  - `启动终端会话` 弹层里的历史卡片首项显示 `Claude计划`
+  - `session_id` 只出现在次级信息行
+  - 占用中的历史会话显示 `已打开窗口 · Claude-93237b7d`
+- `#841/#855` 的 hardest case 已通过“页面内延迟 `/pty/resume`”稳定复现：
+  - 先在布局 A 打开空窗格恢复弹层
+  - 用页面内 fetch patch 把 `/pty/resume` 人为延迟
+  - 点击恢复后，立刻程序化切到布局 B
+  - 结果：
+    - 新 PTY 只写回布局 A 的 slot snapshot
+    - 当前激活的布局 B 没被污染
+- `#839` 已在同一实例上完成闭环：
+  - 用 `POST /pty/spawn` 新建隔离 PTY：`tmcp-wait-test`
+    - 命令：`powershell -NoLogo -NoProfile -NoExit -Command "Write-Output 'TMCP_WAIT_TEST'"`
+  - 运行一段时间后，`GET /sessions` 观察到：
+    - `status = waiting_input`
+  - 再调用与前端同路径的：
+    - `POST /pty/<id>/input`
+  - 2 秒后 `GET /sessions` 观察到：
+    - `status = running`
+  - 设置页也确认可见：
+    - `终端等待输入超时`
+    - `终端历史回放上限`
+- 本轮还顺手确认一个新 UI bug 并修复：
+  - `启动终端会话` 模态内部输入控件曾横向撑穿对话框
+  - 修复后桌面几何为：
+    - dialog：`520px`
+    - body：`518px`
+    - `Agent 类型` / `工作目录` / `启动新会话`：`470px`
+
+#### 结论
+
+- 对当前这批终端 / 平铺 issue，官方 Tauri MCP 已足以做真实桌面验收，但要接受一个现实：
+  - “导航/截图/JS 执行稳定”
+  - 不等于
+  - “所有高级元素交互工具都稳定”
+- 当前最稳的组合是：
+  - `manage_window` / `driver_session status` 负责确认实例与窗口
+  - `webview_execute_js` 负责 DOM 查询、导航、程序化点击、localStorage 读写
+  - `webview_screenshot` 负责视觉证据
+  - RT HTTP 负责 PTY / session 真值校验
+- 对异步布局回填这类强 timing 问题，不要赌人工点得够快：
+  - 应该在页面上下文里人为延迟 `/pty/spawn` 或 `/pty/resume`
+  - 让 race condition 变成稳定可复现的桌面验收脚本
+
+#### 可复用操作套路
+
+1. 先确认实例，不要误连或误杀别的端口：
+   - 当前用户明确保留的端口可能不属于本轮实例
+   - 本轮就要求不要动 `9124`
+2. 先做三步最小探活：
+   - `driver_session status`
+   - `manage_window list`
+   - `webview_execute_js(() => location.href)`
+3. 如果 `webview_interact` 报 `resolveRef is not a function`：
+   - 直接改用 `webview_execute_js`
+   - 通过 `document.querySelector(...)`、`Array.from(...).find(...)`、`.click()`、`dispatchEvent(...)` 继续验收
+4. 做平铺异步回填验收时：
+   - 在页面上下文暂时 patch `window.fetch`
+   - 只延迟 `/pty/spawn` 或 `/pty/resume`
+   - 在请求返回前程序化切布局
+   - 最后读 localStorage 的 `exomind:agentHubTiledState` 做真值判断
+5. 做 PTY `waiting_input` 验收时：
+   - 用隔离 PTY，不要碰用户自己的 Claude / Codex 会话
+   - 先用 RT `spawn` 起一个会保持交互态但会空闲的 shell
+   - 再用 `GET /sessions` 看状态转移
+   - 唤醒时优先走和前端一致的 `/pty/:id/input`
+6. 模态 / 对话框类布局 bug，不要只看截图：
+   - 同时用 `getBoundingClientRect()` 记录 dialog 与关键控件宽度
+   - 本轮这类几何证据比肉眼截图更容易判断“是否真的没越界”
+
+### 阶段补记：#822 无 PTY 会话动作矩阵复核（2026-04-07）
+
+#### 阶段目标
+
+- 复核“没有关联 PTY 的会话”在真实桌面中的收敛入口是否已经补齐。
+- 不再只盯着旧卡片 DOM，而是区分：
+  - 会话当前是否还处于 `running`
+  - 会话是 `structured` 还是 `terminal`
+  - 会话是否已经 `completed / archived`
+- 验证红色提示横幅是否已经改为“整条可点击关闭”。
+
+#### 观察结果
+
+- 当前桌面实例：
+  - 主窗口标题：`ExoMind [dev] [Web:1420 RT:1949]`
+  - Tauri MCP bridge：`9223`
+- 旧问题卡片 `010659f3-24a6-4f31-be87-94868e3d7588` 的运行时真值是：
+  - `interaction_mode = structured`
+  - `pty_id = null`
+  - `status = completed`
+- 这解释了为什么它只显示：
+  - `归档`
+  - 而不是 `关闭`
+- 为避免继续被历史卡片误导，本轮直接在页面上下文创建两个新的活动态 no-PTY 会话：
+  - `structured`
+  - `terminal`
+- 真机 DOM 观察到：
+  - `structured + running + no PTY` 显示 `session-card-close-*`
+  - `terminal + running + no PTY` 显示 `session-card-force-complete-*`
+- 点开 terminal no-PTY 会话后，红色提示横幅现在是：
+  - 一个整条 `<button data-testid="agent-runtime-error-banner">`
+  - 没有单独的 `agent-runtime-error-banner-dismiss`
+
+#### 结论
+
+- 当前无 PTY 会话动作矩阵已经在真实桌面闭环验证通过：
+  - `running + structured + no PTY` → `关闭`
+  - `running + terminal + no PTY` → `强制完成`
+  - `completed + no PTY` → `归档`
+- 红色提示横幅的交互也已符合预期：
+  - 整条可点击
+  - 点击后立即消失
+  - 不再依赖右上角 `×`
+- 本轮还再次验证了动作结果：
+  - 点击 `关闭` / `强制完成` 后，会话状态从 `running` 进入 `completed`
+  - 随后卡片动作切换为 `归档`
+  - 归档后不再残留活动态 no-PTY 会话
+
+#### 可复用操作套路
+
+1. 先查运行时真值，不要只根据卡片肉眼判断：
+   - `GET /sessions`
+   - 核对 `status / interaction_mode / pty_id`
+2. 若历史卡片都已完成，直接新建临时会话做验收：
+   - `POST /sessions` 创建一个 `structured` no-PTY
+   - `POST /sessions` 创建一个 `terminal` no-PTY
+3. 在桌面里分别检查：
+   - `session-card-close-*`
+   - `session-card-force-complete-*`
+4. 点开 terminal no-PTY 会话后，再核对横幅：
+   - 是否为整条 button
+   - 是否已经移除单独 dismiss 按钮
+5. 验收完成后要把临时会话收敛并归档：
+   - 先触发 `关闭 / 强制完成`
+   - 再点 `归档`
+   - 最后确认 `remainingActiveNoPty = []`
