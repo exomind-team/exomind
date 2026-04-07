@@ -200,6 +200,26 @@ function validatePoolHealth(report: Record<string, any>, errors: string[]) {
   }
 }
 
+function validateInsight(report: Record<string, any>, errors: string[]) {
+  const insight = report.insight;
+
+  if (typeof insight === 'string') {
+    errors.push(
+      'insight 为纯字符串，缺少结构。' +
+      '必须为对象格式: { text: string, author: string }。' +
+      'render 引擎按 R.insight.text / R.insight.author 读取，plain string 会导致页面崩溃。'
+    );
+    return;
+  }
+
+  if (typeof insight?.text !== 'string' || insight.text.trim().length < 20) {
+    errors.push('insight.text 为空或过短（至少 20 字符）');
+  }
+  if (typeof insight?.author !== 'string' || insight.author.trim().length < 1) {
+    errors.push('insight.author 缺失或为空');
+  }
+}
+
 function validateReportData(report: Record<string, any>) {
   const errors: string[] = [];
   const meta = report.meta ?? {};
@@ -214,11 +234,6 @@ function validateReportData(report: Record<string, any>) {
       ? weather.actions
       : [];
   const truthStillOpen = Array.isArray(report.truth?.stillOpen) ? report.truth.stillOpen : null;
-  const insight = typeof report.insight === 'string'
-    ? report.insight
-    : typeof report.insight?.text === 'string'
-      ? report.insight.text
-      : '';
 
   ensureString(meta.date, 'meta.date', errors, 10);
   ensureString(meta.baseline, 'meta.baseline', errors, 7);
@@ -252,14 +267,11 @@ function validateReportData(report: Record<string, any>) {
     .map(item => typeof item === 'string' ? item : item?.text)
     .filter((item): item is string => typeof item === 'string')
     .filter(item => /持续关注|继续观察|保持/i.test(item));
-  if (vagueActions.length) {
+  if (vagueActions.length > 0) {
     errors.push('actions 包含模糊表述（"持续关注"），必须是具体操作');
   }
 
-  if (!insight || insight.length < 20) {
-    errors.push('insight 为空或过短');
-  }
-
+  validateInsight(report, errors);
   validatePoolHealth(report, errors);
 
   const placeholders: string[] = [];
