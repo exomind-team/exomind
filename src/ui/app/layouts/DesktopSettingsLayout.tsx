@@ -12,6 +12,7 @@ const SECTION_TEST_IDS: Record<string, string> = {
   focus: 'new-settings-desktop-vc-section-focus',
   input: 'new-settings-desktop-vc-section-input',
   services: 'new-settings-desktop-vc-section-services',
+  'terminal-agent': 'new-settings-desktop-vc-section-terminal-agent',
   data: 'new-settings-desktop-vc-section-data',
   developer: 'new-settings-desktop-vc-section-developer',
   danger: 'new-settings-desktop-vc-section-danger',

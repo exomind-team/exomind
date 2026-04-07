@@ -25,6 +25,7 @@ export type Category =
   | 'feedback'
   | 'ai'
   | 'connection'
+  | 'terminal-agent'
   | 'sync'
   | 'data'
   | 'developer'

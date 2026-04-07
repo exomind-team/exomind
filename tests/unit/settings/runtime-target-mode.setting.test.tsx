@@ -54,12 +54,15 @@ describe('SettingsPage runtime target mode setting', () => {
     });
   });
 
-  it('shows runtime settings in the new connection group and toggles visible fields', async () => {
+  it('shows terminal agent as its own settings section and toggles visible fields', async () => {
     render(<SettingsPage />);
 
     expect(screen.getByRole('button', { name: '连接' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '终端 Agent' })).toBeInTheDocument();
     expect(screen.getByText('RT 配置')).toBeInTheDocument();
     expect(screen.getByText('RT 开放模式')).toBeInTheDocument();
+    expect(screen.getByText('超时待决策时间')).toBeInTheDocument();
+    expect(screen.getByText('终端历史回放上限')).toBeInTheDocument();
     expect(screen.queryByText('RT 地址')).toBeNull();
 
     fireEvent.click(screen.getByText('RT 配置'));
@@ -78,6 +81,9 @@ describe('SettingsPage runtime target mode setting', () => {
     await waitFor(() => {
       expect(screen.getByText('RT 地址')).toBeInTheDocument();
       expect(screen.queryByText('RT 开放模式')).toBeNull();
+      expect(screen.queryByRole('button', { name: '终端 Agent' })).toBeNull();
+      expect(screen.queryByText('超时待决策时间')).toBeNull();
+      expect(screen.queryByText('终端历史回放上限')).toBeNull();
     });
 
     fireEvent.click(screen.getByText('RT 配置'));
@@ -97,6 +103,9 @@ describe('SettingsPage runtime target mode setting', () => {
     await waitFor(() => {
       expect(screen.getByText('RT 开放模式')).toBeInTheDocument();
       expect(screen.queryByText('RT 地址')).toBeNull();
+      expect(screen.getByRole('button', { name: '终端 Agent' })).toBeInTheDocument();
+      expect(screen.getByText('超时待决策时间')).toBeInTheDocument();
+      expect(screen.getByText('终端历史回放上限')).toBeInTheDocument();
     });
   });
 

@@ -32,6 +32,9 @@ const AUDITED_SETTINGS_IDS = [
   'voice-shortcut-hotkey',
   'main-window-shortcut',
   'main-window-shortcut-quick-focus',
+  'tiled-workbench-navigation-shortcut-scheme',
+  'tiled-workbench-command-shortcut-scheme',
+  'tiled-workbench-passthrough-shortcut',
   'voice-shortcut-asr-provider',
   'voice-shortcut-mic-prewarm',
   'voice-overlay-opacity',
@@ -56,6 +59,8 @@ const AUDITED_SETTINGS_IDS = [
   'runtime-target-mode',
   'embedded-runtime-open-mode',
   'sync-server-url',
+  'pty-waiting-input-idle-timeout',
+  'pty-terminal-replay-limit-kb',
   'eventlog-backend-mode',
   'task-backend-mode',
   'timeblock-backend-mode',
@@ -103,6 +108,9 @@ const DIALOG_ENUM_IDS = [
   'countdown-end-mode',
   'runtime-target-mode',
   'embedded-runtime-open-mode',
+  'tiled-workbench-navigation-shortcut-scheme',
+  'tiled-workbench-command-shortcut-scheme',
+  'tiled-workbench-passthrough-shortcut',
   'volcano-endpoint',
   'volcano-language',
 ] as const;
@@ -138,6 +146,8 @@ const NUMBER_IDS = [
   'voice-overlay-opacity',
   'voice-overlay-transcript-lines',
   'voice-overlay-bottom-offset',
+  'pty-waiting-input-idle-timeout',
+  'pty-terminal-replay-limit-kb',
 ] as const;
 
 const ROW_ACTION_IDS = [
@@ -332,6 +342,48 @@ describe('settings registry coverage audit', () => {
       ...getBaseCtx(),
       isTauriWindow: true,
     })).toBe(true);
+
+    const ptyWaitingTimeout = getItem('pty-waiting-input-idle-timeout', 'number');
+    expect(ptyWaitingTimeout.category).toBe('terminal-agent');
+    expect(ptyWaitingTimeout.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: false,
+    })).toBe(true);
+    expect(ptyWaitingTimeout.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+      runtimeTargetMode: 'embedded',
+    })).toBe(true);
+    expect(ptyWaitingTimeout.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+      runtimeTargetMode: 'external',
+    })).toBe(false);
+    expect(ptyWaitingTimeout.label).toBe('超时待决策时间');
+    expect(ptyWaitingTimeout.min).toBe(1);
+    expect(ptyWaitingTimeout.max).toBe(600);
+    expect(ptyWaitingTimeout.step).toBe(1);
+
+    const ptyReplayLimit = getItem('pty-terminal-replay-limit-kb', 'number');
+    expect(ptyReplayLimit.category).toBe('terminal-agent');
+    expect(ptyReplayLimit.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: false,
+    })).toBe(true);
+    expect(ptyReplayLimit.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+      runtimeTargetMode: 'embedded',
+    })).toBe(true);
+    expect(ptyReplayLimit.visible?.({
+      ...getBaseCtx(),
+      isTauriWindow: true,
+      runtimeTargetMode: 'external',
+    })).toBe(false);
+    expect(ptyReplayLimit.label).toBe('终端历史回放上限');
+    expect(ptyReplayLimit.min).toBe(128);
+    expect(ptyReplayLimit.max).toBe(2048);
+    expect(ptyReplayLimit.step).toBe(64);
 
     expect(getItem('me-page-enabled', 'boolean').category).toBe('developer');
     expect(getItem('agent-page-enabled', 'boolean').category).toBe('developer');

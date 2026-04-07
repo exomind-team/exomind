@@ -23,6 +23,7 @@ import {
   RefreshCw,
   ScrollText,
   Shield,
+  History,
   Sun,
   SunMoon,
   Tag,
@@ -138,6 +139,20 @@ import {
   MAX_TASK_DAG_ZOOM_SPEED,
 } from '@/config/task-dag-keyboard-preferences';
 import {
+  DEFAULT_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS,
+  DEFAULT_PTY_TERMINAL_REPLAY_LIMIT_KB,
+  MAX_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS,
+  MAX_PTY_TERMINAL_REPLAY_LIMIT_KB,
+  MIN_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS,
+  MIN_PTY_TERMINAL_REPLAY_LIMIT_KB,
+  getPtyTerminalReplayLimitKb,
+  getPtyWaitingInputIdleTimeoutSeconds,
+  setPtyTerminalReplayLimitKb,
+  setPtyWaitingInputIdleTimeoutSeconds,
+  subscribePtyTerminalReplayLimitKbChanges,
+  subscribePtyWaitingInputIdleTimeoutSecondsChanges,
+} from '@/config/pty-terminal-preferences';
+import {
   getVoiceShortcutHotkey,
   setVoiceShortcutHotkey,
   subscribeVoiceShortcutHotkeyChanges,
@@ -156,6 +171,20 @@ import {
   setMainWindowShortcutQuickFocusEnabled,
   subscribeMainWindowShortcutQuickFocusChanges,
 } from '@/config/main-window-shortcut-focus';
+import {
+  getTiledWorkbenchCommandShortcutScheme,
+  getTiledWorkbenchNavigationShortcutScheme,
+  getTiledWorkbenchPassthroughShortcut,
+  setTiledWorkbenchCommandShortcutScheme,
+  setTiledWorkbenchNavigationShortcutScheme,
+  setTiledWorkbenchPassthroughShortcut,
+  subscribeTiledWorkbenchCommandShortcutSchemeChanges,
+  subscribeTiledWorkbenchNavigationShortcutSchemeChanges,
+  subscribeTiledWorkbenchPassthroughShortcutChanges,
+  type TiledWorkbenchCommandShortcutScheme,
+  type TiledWorkbenchNavigationShortcutScheme,
+  type TiledWorkbenchPassthroughShortcut,
+} from '@/config/tiled-workbench-shortcuts';
 import {
   getVoiceShortcutSendMode,
   setVoiceShortcutSendMode,
@@ -454,6 +483,10 @@ function externalRuntimeOnly(ctx: SettingsContext): boolean {
   return (ctx.runtimeTargetMode ?? 'embedded') === 'external';
 }
 
+function embeddedRuntimeOrWeb(ctx: SettingsContext): boolean {
+  return !ctx.isTauriWindow || embeddedRuntimeOnly(ctx);
+}
+
 function setDeveloperModeWithSideEffects(enabled: boolean): void {
   setDeveloperModeEnabled(enabled);
   if (!enabled) {
@@ -520,6 +553,8 @@ const LOCAL_CACHE_RUNTIME_CONFIG_KEYS = [
   'exomind:dag-visibility',
   'exomind:agentHubTopologyLayouts',
   'exomind:agentHubRuntimePorts',
+  'exomind:ptyWaitingInputIdleTimeoutSeconds',
+  'exomind:ptyTerminalReplayLimitKb',
   'exomind:voiceOverlayOpacity',
   'exomind:voiceOverlayShowDiagnostics',
   'exomind:voiceOverlayTranscriptLines',
@@ -973,6 +1008,105 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     subscribe: subscribeMainWindowShortcutQuickFocusChanges,
   },
   {
+    id: 'tiled-workbench-navigation-shortcut-scheme',
+    label: '平铺工作台方向快捷键',
+    icon: Waypoints,
+    category: 'input',
+    description: '仅作用于 Agent Hub 平铺工作台；控制焦点在窗格之间切换的宿主快捷键。',
+    rowTestId: 'new-settings-tiled-workbench-navigation-shortcut-scheme-row',
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '平铺工作台方向快捷键',
+    dialogDescription: '默认会在 PTY 聚焦时也优先拦截为宿主快捷键；如与终端内程序冲突，可切到 Alt-only 或直接关闭。',
+    options: [
+      {
+        label: 'Alt+Shift+方向键',
+        value: 'alt-shift-arrows',
+        description: '默认方案，更不容易与 tmux / vim / Claude / Codex 内部快捷键冲突。',
+      },
+      {
+        label: 'Alt+方向键',
+        value: 'alt-arrows',
+        description: '少按一个 Shift，但更容易与终端程序自身快捷键重叠。',
+      },
+      {
+        label: '关闭',
+        value: 'disabled',
+        description: '不再拦截方向快捷键；只保留鼠标或其他 UI 焦点切换方式。',
+      },
+    ],
+    optionTestId: (value) => `new-settings-tiled-workbench-navigation-shortcut-scheme-${value}`,
+    get: () => getTiledWorkbenchNavigationShortcutScheme(),
+    set: (value: string) => setTiledWorkbenchNavigationShortcutScheme(value as TiledWorkbenchNavigationShortcutScheme),
+    subscribe: subscribeTiledWorkbenchNavigationShortcutSchemeChanges,
+  },
+  {
+    id: 'tiled-workbench-command-shortcut-scheme',
+    label: '平铺工作台命令快捷键',
+    icon: Command,
+    category: 'input',
+    description: '仅作用于 Agent Hub 平铺工作台；控制分割、清空、关闭、打开入口等宿主动作。',
+    rowTestId: 'new-settings-tiled-workbench-command-shortcut-scheme-row',
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '平铺工作台命令快捷键',
+    dialogDescription: '会覆盖 PTY 内同组合键的默认处理；若经常在终端内使用 Alt 字母组合，可切到更保守的默认方案或关闭。',
+    options: [
+      {
+        label: 'Alt+Shift+字母',
+        value: 'alt-shift-letters',
+        description: '默认方案：H/V/X/Backspace/Enter 分别对应横分/纵分/关闭/清空/打开入口。',
+      },
+      {
+        label: 'Alt+字母',
+        value: 'alt-letters',
+        description: '更省按键，但更容易与终端内的 Alt 字母快捷键冲突。',
+      },
+      {
+        label: '关闭',
+        value: 'disabled',
+        description: '不再拦截这些宿主命令，只保留鼠标点击操作。',
+      },
+    ],
+    optionTestId: (value) => `new-settings-tiled-workbench-command-shortcut-scheme-${value}`,
+    get: () => getTiledWorkbenchCommandShortcutScheme(),
+    set: (value: string) => setTiledWorkbenchCommandShortcutScheme(value as TiledWorkbenchCommandShortcutScheme),
+    subscribe: subscribeTiledWorkbenchCommandShortcutSchemeChanges,
+  },
+  {
+    id: 'tiled-workbench-passthrough-shortcut',
+    label: '平铺工作台单次透传快捷键',
+    icon: Monitor,
+    category: 'input',
+    description: '用于把下一次宿主快捷键透传到当前聚焦 PTY，而不是执行工作台动作。',
+    rowTestId: 'new-settings-tiled-workbench-passthrough-shortcut-row',
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '平铺工作台单次透传快捷键',
+    dialogDescription: '先按一次透传键，再按下一次宿主快捷键，就会把该快捷键文本发给当前 PTY。',
+    options: [
+      {
+        label: 'Alt+Shift+P',
+        value: 'Alt+Shift+P',
+        description: '默认方案，更不容易和终端内快捷键冲突。',
+      },
+      {
+        label: 'Alt+P',
+        value: 'Alt+P',
+        description: '少按一个 Shift，但更容易和终端内 Alt+P 语义重叠。',
+      },
+      {
+        label: '关闭',
+        value: 'Disabled',
+        description: '禁用单次透传入口。',
+      },
+    ],
+    optionTestId: (value) => `new-settings-tiled-workbench-passthrough-shortcut-${String(value).toLowerCase().split('+').join('-')}`,
+    get: () => getTiledWorkbenchPassthroughShortcut(),
+    set: (value: string) => setTiledWorkbenchPassthroughShortcut(value as TiledWorkbenchPassthroughShortcut),
+    subscribe: subscribeTiledWorkbenchPassthroughShortcutChanges,
+  },
+  {
     id: 'voice-shortcut-asr-provider',
     label: '快捷语音引擎',
     icon: Mic,
@@ -1362,6 +1496,42 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     },
     validate: validateRuntimeExternalAddress,
     successMessage: (value: string) => `已切换到 RT 地址：${value}`,
+  },
+  {
+    id: 'pty-waiting-input-idle-timeout',
+    label: '超时待决策时间',
+    icon: Bot,
+    category: 'terminal-agent',
+    description: `连续 ${DEFAULT_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS} 秒没有任何 PTY 输出字节时，自动标记为等待决策。`,
+    visible: embeddedRuntimeOrWeb,
+    rowTestId: 'new-settings-pty-waiting-input-idle-timeout-row',
+    controlTestId: 'new-settings-pty-waiting-input-idle-timeout-slider',
+    type: 'number',
+    min: MIN_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS,
+    max: MAX_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS,
+    step: 1,
+    unit: 's',
+    get: () => getPtyWaitingInputIdleTimeoutSeconds(),
+    set: setPtyWaitingInputIdleTimeoutSeconds,
+    subscribe: subscribePtyWaitingInputIdleTimeoutSecondsChanges,
+  },
+  {
+    id: 'pty-terminal-replay-limit-kb',
+    label: '终端历史回放上限',
+    icon: History,
+    category: 'terminal-agent',
+    description: `控制 PTY 近期历史回放窗口大小；默认 ${DEFAULT_PTY_TERMINAL_REPLAY_LIMIT_KB} KB，运行时 scrollback 与 transcript tail 会按此上限截尾回放。`,
+    visible: embeddedRuntimeOrWeb,
+    rowTestId: 'new-settings-pty-terminal-replay-limit-kb-row',
+    controlTestId: 'new-settings-pty-terminal-replay-limit-kb-slider',
+    type: 'number',
+    min: MIN_PTY_TERMINAL_REPLAY_LIMIT_KB,
+    max: MAX_PTY_TERMINAL_REPLAY_LIMIT_KB,
+    step: 64,
+    unit: 'KB',
+    get: () => getPtyTerminalReplayLimitKb(),
+    set: setPtyTerminalReplayLimitKb,
+    subscribe: subscribePtyTerminalReplayLimitKbChanges,
   },
   {
     id: 'eventlog-backend-mode',
