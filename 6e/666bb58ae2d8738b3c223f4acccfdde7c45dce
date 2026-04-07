@@ -1,0 +1,56 @@
+crates/exomind-cli/src/commands/proposal.rs
+  5f0f218c9e114e69 7-9,20-31,35-37,68-70,81-83,88-90,95-97,185-186
+crates/exomind-runtime/tests/agent_api_rt.rs
+  5f0f218c9e114e69 22-24,284-291,311-315,345-354,392-395,438-441,545,596-597,986,1687-1689
+crates/exomind-cli/tests/task_smoke.rs
+  5f0f218c9e114e69 55-58,191-194,200-202,242
+crates/exomind-cli/tests/eventlog_smoke.rs
+  5f0f218c9e114e69 7-8,52-55,150-152
+crates/exomind-cli/src/commands/eventlog.rs
+  5f0f218c9e114e69 68-71,117-118
+crates/exomind-runtime/src/agent/broker.rs
+  5f0f218c9e114e69 393-396
+crates/exomind-runtime/src/agent/life.rs
+  5f0f218c9e114e69 1023-1025
+crates/exomind-runtime/src/routes/agent_sessions.rs
+  5f0f218c9e114e69 94,198-201,221,314-317,335-336,406-412,505-508
+crates/exomind-cli/tests/proposal_smoke.rs
+  5f0f218c9e114e69 9-10,13-14,61-64,84-86,93-96,180-182
+crates/exomind-cli/tests/cli_parse.rs
+  5f0f218c9e114e69 58
+crates/exomind-cli/src/commands/task.rs
+  5f0f218c9e114e69 4-5,15-24,46-48,160-161
+crates/exomind-runtime/src/agent/api.rs
+  5f0f218c9e114e69 721-723,784,833-834,1095-1098
+crates/exomind-runtime/src/agent/session.rs
+  5f0f218c9e114e69 468,472,884-888
+crates/exomind-cli/src/runtime_client.rs
+  5f0f218c9e114e69 49-50
+crates/exomind-cli/src/commands/rt.rs
+  5f0f218c9e114e69 8-9,27-30,41-42,47-51
+src-tauri/src/commands/shortcut_commands.rs
+  5f0f218c9e114e69 11,40,145-147,161,229,276,419-420,516-517,558-559,596-598,644-646,703-704,865,876,993-995,1034-1038
+crates/exomind-cli/tests/target_resolution.rs
+  5f0f218c9e114e69 10-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "6e666bb58ae2d8738b3c223f4acccfdde7c45dce",
+  "prompts": {
+    "5f0f218c9e114e69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d67f2-738b-7bf1-aa6e-33030c75edd5",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 251,
+      "total_deletions": 150,
+      "accepted_lines": 238,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/74d80c5872454eb7d42b45a982dd76f92d0cd2d6d59173ecfc013699f6c5ea9a"
+    }
+  }
+}
