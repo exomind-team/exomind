@@ -1,0 +1,54 @@
+tests/unit/settings/settings-registry-coverage.test.ts
+  bacd18fd7a184ad9 363
+tests/unit/settings/runtime-target-mode.setting.test.tsx
+  bacd18fd7a184ad9 65
+crates/exomind-runtime/src/routes/pty.rs
+  bacd18fd7a184ad9 64,638-639,751-759
+src/config/pty-terminal-preferences.ts
+  bacd18fd7a184ad9 1-98
+src/ui/app/config/settings/settings-registry.ts
+  bacd18fd7a184ad9 1504
+src/ui/app/components/PtyTerminal.tsx
+  bacd18fd7a184ad9 6-10,12,87-110,128-130,138-146,264-265,268,288-292,727,748
+crates/exomind-runtime/src/lib.rs
+  bacd18fd7a184ad9 934-958
+tests/unit/ui/agent-hub/pty-terminal.layout-recovery.test.tsx
+  bacd18fd7a184ad9 1-2,8,12,29,34-41,134-135,538-592
+tests/unit/config/pty-terminal-preferences.test.ts
+  bacd18fd7a184ad9 1-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "16a591d6ac180f72b6ccfbea2c1a6ad344a02184",
+  "prompts": {
+    "900529e46987bfd9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "26cc412f-a818-47d9-9868-af97680173d6",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 182,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/1c9f48c38432f50c08ce20d255138f105d10382cc46c2f2400ebc6e2f5780823"
+    },
+    "bacd18fd7a184ad9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d66e6-cc3d-76d1-9e32-1a7d38f8e9d1",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 12029,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f3219d149f617a806aa6fc4d6288e915fb80952886d27ef72a6ebeeb82b2abcd"
+    }
+  }
+}
