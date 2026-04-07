@@ -30,7 +30,7 @@ export interface UseSessionStreamResult {
   /** Error message if any */
   error: string | null;
   /** Manually refresh session list */
-  refresh: () => void;
+  refresh: () => Promise<void>;
 }
 
 export const SESSION_FETCH_TIMEOUT_MS = 4_000;

@@ -1,4 +1,5 @@
-import { Inbox, RefreshCw } from 'lucide-react';
+import { RefreshCw, Inbox } from 'lucide-react';
+import { useState } from 'react';
 import type { SessionInfo } from '@/lib/types/session';
 import { SessionCard } from './SessionCard';
 
@@ -9,7 +10,7 @@ export interface SessionsViewProps {
   loading: boolean;
   error: string | null;
   useMockData: boolean;
-  onRefresh?: () => void;
+  onRefresh?: () => void | Promise<void>;
   /** Callback when user clicks a session card */
   onSessionClick?: (session: SessionInfo) => void;
   /** Callback when user stops a PTY session（停止 PTY 会话） */
@@ -33,6 +34,7 @@ export function SessionsView({
   onArchiveSession,
   isSessionStopping,
 }: SessionsViewProps) {
+  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
   // Sort: attention-needing first, then by last_active_at desc
   const sortedSessions = [...sessions].sort((a, b) => {
     const aNeeds = a.status === 'waiting_input' || a.status === 'error';
@@ -44,6 +46,32 @@ export function SessionsView({
   const visibleSessions = sortedSessions.filter((s) => s.status !== 'archived');
   const activeSessions = visibleSessions.filter((s) => s.status !== 'completed');
   const completedSessions = visibleSessions.filter((s) => s.status === 'completed');
+  const isRefreshPending = loading || isManualRefreshPending;
+
+  const handleRefresh = async () => {
+    if (!onRefresh || isRefreshPending) {
+      return;
+    }
+
+    console.info('[agent-hub][sessions][refresh] requested', {
+      visibleSessionCount: visibleSessions.length,
+      activeSessionCount: activeSessions.length,
+      completedSessionCount: completedSessions.length,
+    });
+    setIsManualRefreshPending(true);
+    try {
+      await Promise.resolve(onRefresh());
+      console.info('[agent-hub][sessions][refresh] completed', {
+        visibleSessionCount: visibleSessions.length,
+      });
+    } catch (error) {
+      console.warn('[agent-hub][sessions][refresh] failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsManualRefreshPending(false);
+    }
+  };
 
   if (loading && sessions.length === 0) {
     return (
@@ -89,11 +117,20 @@ export function SessionsView({
         {!useMockData && (
           <button
             type="button"
-            onClick={onRefresh}
-            className="flex h-7 w-7 items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
-            title="刷新"
+            data-testid="sessions-refresh-button"
+            onClick={() => {
+              void handleRefresh();
+            }}
+            disabled={isRefreshPending}
+            className="flex h-7 w-7 items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] disabled:cursor-not-allowed disabled:opacity-60 dark:hover:text-[#FAFAF9]"
+            title={isRefreshPending ? '刷新中' : '刷新'}
+            aria-label={isRefreshPending ? '刷新中' : '刷新会话'}
           >
-            <RefreshCw size={14} />
+            <RefreshCw
+              data-testid="sessions-refresh-icon"
+              size={14}
+              className={isRefreshPending ? 'animate-spin' : undefined}
+            />
           </button>
         )}
       </div>
@@ -118,7 +155,7 @@ export function SessionsView({
               <SessionCard
                 key={session.id}
                 session={session}
-                onClick={session.interaction_mode === 'terminal' ? onSessionClick : undefined}
+                onClick={onSessionClick}
                 onStop={onStopSession}
                 onArchive={onArchiveSession}
                 stopDisabled={isSessionStopping?.(session) ?? false}
@@ -143,7 +180,7 @@ export function SessionsView({
               <SessionCard
                 key={session.id}
                 session={session}
-                onClick={session.interaction_mode === 'terminal' ? onSessionClick : undefined}
+                onClick={onSessionClick}
                 onStop={onStopSession}
                 onArchive={onArchiveSession}
                 stopDisabled={isSessionStopping?.(session) ?? false}
