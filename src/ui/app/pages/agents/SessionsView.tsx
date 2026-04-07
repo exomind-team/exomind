@@ -118,7 +118,7 @@ export function SessionsView({
               <SessionCard
                 key={session.id}
                 session={session}
-                onClick={onSessionClick}
+                onClick={session.interaction_mode === 'terminal' ? onSessionClick : undefined}
                 onStop={onStopSession}
                 onArchive={onArchiveSession}
                 stopDisabled={isSessionStopping?.(session) ?? false}
@@ -143,7 +143,7 @@ export function SessionsView({
               <SessionCard
                 key={session.id}
                 session={session}
-                onClick={onSessionClick}
+                onClick={session.interaction_mode === 'terminal' ? onSessionClick : undefined}
                 onStop={onStopSession}
                 onArchive={onArchiveSession}
                 stopDisabled={isSessionStopping?.(session) ?? false}

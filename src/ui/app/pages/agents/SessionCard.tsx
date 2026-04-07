@@ -39,6 +39,7 @@ export function SessionCard({
   const hasActionButton = canStopPty || canForceCompleteWithoutPty || canArchive;
   const actionPaddingClass = canForceCompleteWithoutPty ? 'pr-24' : hasActionButton ? 'pr-14' : '';
   const externalLinkRightClass = canForceCompleteWithoutPty ? 'right-20' : hasActionButton ? 'right-11' : 'right-3';
+  const isClickable = typeof onClick === 'function';
   const stopButtonLabel = stopDisabled
     ? (session.pty_id ? '停止中' : '处理中')
     : (session.pty_id ? '停止' : '强制完成');
@@ -48,15 +49,19 @@ export function SessionCard({
       <button
         type="button"
         data-testid={`session-card-${session.id}`}
+        disabled={!isClickable}
         onClick={() => onClick?.(session)}
         className={`
         group relative flex w-full flex-col gap-2 rounded-xl border p-4 text-left
-        transition-all duration-200 hover:shadow-md
+        transition-all duration-200 disabled:cursor-default disabled:hover:shadow-none
+        ${isClickable ? 'hover:shadow-md' : ''}
         ${actionPaddingClass}
         ${isCompleted ? 'opacity-50' : ''}
         ${needsAttention
           ? 'border-yellow-400/60 bg-yellow-50/50 shadow-sm dark:border-yellow-500/40 dark:bg-yellow-950/20'
-          : 'border-[#E7E5E4] bg-white hover:border-[#D6D3D1] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:border-[#44403C]'
+          : isClickable
+            ? 'border-[#E7E5E4] bg-white hover:border-[#D6D3D1] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:border-[#44403C]'
+            : 'border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]'
         }
       `}
       >
@@ -141,10 +146,12 @@ export function SessionCard({
         )}
 
         {/* Hover arrow indicator */}
-        <ExternalLink
-          size={14}
-          className={`absolute top-4 text-[#D6D3D1] opacity-0 transition-opacity group-hover:opacity-100 dark:text-[#44403C] ${externalLinkRightClass}`}
-        />
+        {isClickable ? (
+          <ExternalLink
+            size={14}
+            className={`absolute top-4 text-[#D6D3D1] opacity-0 transition-opacity group-hover:opacity-100 dark:text-[#44403C] ${externalLinkRightClass}`}
+          />
+        ) : null}
       </button>
 
       {canArchive && onArchive && (

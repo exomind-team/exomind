@@ -4043,6 +4043,17 @@ export function AgentsPage() {
   }, [attemptDisconnectedTerminalSessionResume]);
 
   const handleOpenSessionTerminal = useCallback(async (session: SessionInfo) => {
+    if (session.interaction_mode !== 'terminal') {
+      setRuntimeHostError('');
+      console.info('[agent-hub][pty][open] ignored non-terminal session card click', {
+        sessionId: session.id,
+        interactionMode: session.interaction_mode,
+        status: session.status,
+        sourceHostId: session.source_host_id ?? null,
+      });
+      return;
+    }
+
     if (!session.pty_id) {
       const recoverableSnapshot = buildRecoverableTerminalSessionSnapshot(session);
       const missingPtyLogPayload = {
@@ -6639,22 +6650,16 @@ export function AgentsPage() {
         {/* 内容区 */}
         <div className={`flex-1 min-h-0 ${viewMode === 'topology' || viewMode === 'tiled' ? 'overflow-hidden' : 'overflow-auto'} ${viewMode === 'topology' ? '' : viewMode === 'tiled' ? 'px-2 py-2' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
           {runtimeHostError && (
-            <div
+            <button
+              type="button"
               data-testid="agent-runtime-error-banner"
-              className="mb-3 flex items-start justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400"
+              onClick={() => setRuntimeHostError('')}
+              className="mb-3 block w-full rounded-lg bg-red-50 px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/45"
+              aria-label="关闭提示"
+              title="点击关闭提示"
             >
-              <p className="min-w-0 flex-1">{runtimeHostError}</p>
-              <button
-                type="button"
-                data-testid="agent-runtime-error-banner-dismiss"
-                onClick={() => setRuntimeHostError('')}
-                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-red-500 transition-colors hover:bg-red-100 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-900/40 dark:hover:text-red-100"
-                aria-label="关闭提示"
-                title="关闭提示"
-              >
-                <X size={14} />
-              </button>
-            </div>
+              <span className="block min-w-0">{runtimeHostError}</span>
+            </button>
           )}
           {content}
         </div>

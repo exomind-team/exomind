@@ -36,4 +36,16 @@ describe('SessionCard', () => {
     fireEvent.click(button);
     expect(onStop).toHaveBeenCalledWith(session);
   });
+
+  it('does not expose force-complete for non-terminal sessions without a PTY', () => {
+    const session = buildSession({
+      interaction_mode: 'structured',
+      pty_id: undefined,
+    });
+
+    render(<SessionCard session={session} />);
+
+    expect(screen.queryByRole('button', { name: '强制完成' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('session-card-session-1')).toBeDisabled();
+  });
 });
