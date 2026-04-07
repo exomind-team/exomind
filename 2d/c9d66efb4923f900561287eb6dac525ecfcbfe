@@ -1,0 +1,36 @@
+docs/plans/2026-04-06-multi-archive-and-collective-collaboration-outline.md
+  b4ef3981fb4f61aa 12-14,56-57,59-60,62,64,66-71,127,130,132-134,145,147-153,155,157-163,165,169,174,297-299,328-338,343-349,352-355,385-388,390,393-394,396-398,452,468-469,471-473,485-488,506,511,513-518
+docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md
+  b4ef3981fb4f61aa 10-15,42-43,47,49-54,60-61,67-77,149-150,172-181,183-184,206,267,272,277-282
+docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md
+  b4ef3981fb4f61aa 14-16,53,75-82,217-225,360,383-386,667,669-670,738-740
+docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md
+  b4ef3981fb4f61aa 1-432
+docs/plans/2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md
+  b4ef3981fb4f61aa 1-178
+docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md
+  b4ef3981fb4f61aa 1-175
+docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md
+  b4ef3981fb4f61aa 1-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "2dc9d66efb4923f900561287eb6dac525ecfcbfe",
+  "prompts": {
+    "b4ef3981fb4f61aa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6847-84e6-7fc0-9d76-d9f58ff0f4d7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 11018,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/050a9e21dd33308cbcd38219aa16044d24044d691af231b48b4a52fd857ee8c6"
+    }
+  }
+}
