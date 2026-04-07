@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SessionInfo } from '@/lib/types/session';
+import { readAgentsTiledPersistState } from '@/ui/app/pages/agents/agents-tiled-persistence';
 
 const serviceMocks = vi.hoisted(() => ({
   getDeviceView: vi.fn(),
@@ -844,9 +845,13 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     fireEvent.click(await screen.findByTestId('pty-spawn-button'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+      expect(screen.getByTestId('pty-mode-create')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByTestId('pty-mode-create'));
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-spawn-submit')).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByTestId('pty-spawn-submit'));
 
     await waitFor(() => {
@@ -1018,9 +1023,13 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
 
     fireEvent.click(await screen.findByTestId('pty-spawn-button'));
     await waitFor(() => {
-      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+      expect(screen.getByTestId('pty-mode-create')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByTestId('pty-mode-create'));
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-spawn-submit')).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByTestId('pty-spawn-submit'));
 
     await waitFor(() => {
@@ -1028,11 +1037,7 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     });
 
     await waitFor(() => {
-      const persisted = JSON.parse(localStorage.getItem('exomind:agentHubTiledState') ?? '{}') as {
-        paneOrder?: string[];
-        fullscreenPtyId?: string;
-        fullscreenTerminalRecovery?: unknown;
-      };
+      const persisted = readAgentsTiledPersistState();
       expect(persisted.fullscreenPtyId).toBe('pty-new-806');
       expect(persisted.paneOrder).toEqual(['session-issue-806']);
       expect(persisted.paneOrder).not.toContain('pty-new-806');
@@ -1105,9 +1110,13 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
 
     fireEvent.click(await screen.findByTestId('pty-spawn-button'));
     await waitFor(() => {
-      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+      expect(screen.getByTestId('pty-mode-create')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByTestId('pty-mode-create'));
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-spawn-submit')).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByTestId('pty-spawn-submit'));
 
     await waitFor(() => {
@@ -1133,9 +1142,7 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     rerender(<AgentsPage />);
 
     await waitFor(() => {
-      const persisted = JSON.parse(localStorage.getItem('exomind:agentHubTiledState') ?? '{}') as {
-        paneOrder?: string[];
-      };
+      const persisted = readAgentsTiledPersistState();
       expect(persisted.paneOrder).toEqual(['session-issue-806', 'session-new-live-806']);
       expect(persisted.paneOrder).not.toContain('pty-new-806');
     });
@@ -1212,9 +1219,7 @@ describe('agents page issue-806（终端恢复误判防风暴）', () => {
     });
 
     await waitFor(() => {
-      const persisted = JSON.parse(localStorage.getItem('exomind:agentHubTiledState') ?? '{}') as {
-        paneOrder?: string[];
-      };
+      const persisted = readAgentsTiledPersistState();
       expect(persisted.paneOrder).toEqual(['session-live-pane-818']);
     });
   });

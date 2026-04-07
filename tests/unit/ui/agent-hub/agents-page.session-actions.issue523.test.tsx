@@ -1601,9 +1601,13 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     fireEvent.click(await screen.findByTestId('pty-spawn-button'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+      expect(screen.getByTestId('pty-mode-resume')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByTestId('pty-mode-resume'));
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+    });
     await chooseDialogSelect('pty-agent-type', 'Codex');
 
     await waitFor(() => {

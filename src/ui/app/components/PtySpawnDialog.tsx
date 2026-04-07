@@ -13,13 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Terminal } from "lucide-react";
+import { ArrowLeft, Loader2, Terminal } from "lucide-react";
 import { detectAndPersistHistoricalSessionId } from "@/ui/app/pages/agents/pty-session-recovery";
 
 // ── Types ──────────────────────────────────────────────────────
 
 type PtyAgentType = "claude" | "codex" | "custom";
 type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+type PtyDialogMode = "route" | "create" | "resume";
 
 interface HistoricalSessionInfo {
   agent_type: Exclude<PtyAgentType, "custom">;
@@ -231,10 +232,10 @@ export function PtySpawnDialog({
   occupiedHistoricalSessionIds = [],
   occupiedHistoricalSessionLabels = {},
 }: PtySpawnDialogProps) {
+  const [dialogMode, setDialogMode] = useState<PtyDialogMode>("route");
   const [agentType, setAgentType] = useState<PtyAgentType>("claude");
   const [name, setName] = useState("");
   const [workdir, setWorkdir] = useState(defaultWorkdir || "");
-  const [workdirDirty, setWorkdirDirty] = useState(false);
   const [model, setModel] = useState("");
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort>("xhigh");
@@ -262,10 +263,10 @@ export function PtySpawnDialog({
 
   useEffect(() => {
     if (!open) {
+      setDialogMode("route");
       setAgentType("claude");
       setName("");
       setWorkdir(defaultWorkdir || "");
-      setWorkdirDirty(false);
       setModel("");
       setReasoningEffort("xhigh");
       setCustomCommand("");
@@ -280,7 +281,7 @@ export function PtySpawnDialog({
   // ── Fetch historical sessions on open / type switch ─────────
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || dialogMode === "route") return;
     if (agentType === "custom") {
       setSessions([]);
       setHistoryLoading(false);
@@ -328,7 +329,18 @@ export function PtySpawnDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, agentType, rtBaseUrl, authToken]);
+  }, [open, dialogMode, agentType, rtBaseUrl, authToken]);
+
+  const changeDialogMode = useCallback(
+    (nextMode: PtyDialogMode) => {
+      setDialogMode(nextMode);
+      setError("");
+      if (nextMode === "resume" && agentType === "custom") {
+        setAgentType("claude");
+      }
+    },
+    [agentType],
+  );
 
   const buildSpawnPayload = useCallback(() => {
     const args: string[] = [];
@@ -472,13 +484,7 @@ export function PtySpawnDialog({
           agent_type: session.agent_type,
           session_id: session.session_id,
         };
-        const trimmedWorkdir = workdir.trim();
-        const defaultWorkdirValue = defaultWorkdir?.trim() ?? "";
-        const includeResumeWorkdir =
-          trimmedWorkdir.length > 0 &&
-          (workdirDirty || trimmedWorkdir !== defaultWorkdirValue);
         if (name.trim()) body.name = name.trim();
-        if (includeResumeWorkdir) body.workdir = trimmedWorkdir;
         if (model.trim()) body.model = model.trim();
         if (session.agent_type === "codex" && reasoningEffort.trim()) {
           body.reasoning_effort = reasoningEffort.trim();
@@ -516,8 +522,6 @@ export function PtySpawnDialog({
       reasoningEffort,
       rtBaseUrl,
       workdir,
-      workdirDirty,
-      defaultWorkdir,
       buildHeaders,
     ],
   );
@@ -528,9 +532,31 @@ export function PtySpawnDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-32px)] max-w-[520px] min-w-0 max-h-[calc(100vh-32px)] overflow-hidden rounded-2xl p-0 sm:max-w-[520px]">
         <DialogHeader className="min-w-0 px-6 pt-6">
-          <DialogTitle>启动终端会话</DialogTitle>
+          {dialogMode !== "route" ? (
+            <button
+              type="button"
+              data-testid="pty-mode-back"
+              onClick={() => changeDialogMode("route")}
+              disabled={loading}
+              className="mb-2 flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              返回模式选择
+            </button>
+          ) : null}
+          <DialogTitle>
+            {dialogMode === "create"
+              ? "创建新终端"
+              : dialogMode === "resume"
+                ? "恢复已有终端"
+                : "启动终端会话"}
+          </DialogTitle>
           <DialogDescription>
-            启动新的 PTY 会话，或按 Agent 类型恢复 Claude / Codex 历史会话
+            {dialogMode === "create"
+              ? "启动新的 PTY 会话，并按创建模式填写连接参数"
+              : dialogMode === "resume"
+                ? "恢复 Claude / Codex 历史会话，并沿用历史会话自身路径"
+                : "先选择创建新终端，或恢复已有终端"}
           </DialogDescription>
         </DialogHeader>
 
@@ -538,274 +564,321 @@ export function PtySpawnDialog({
           data-testid="pty-spawn-dialog-body"
           className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-6 pb-6 pt-1"
         >
-          <div className="space-y-4 min-w-0">
-            {/* ── Agent type ── */}
-            <div className="space-y-1.5 min-w-0">
-              <label className="text-xs font-medium text-muted-foreground">
-                Agent 类型（agent type）
-              </label>
-              <Select
-                value={agentType}
-                onValueChange={(value) => setAgentType(value as PtyAgentType)}
-                disabled={loading}
+          {dialogMode === "route" ? (
+            <div
+              data-testid="pty-mode-route"
+              className="grid min-w-0 gap-3 sm:grid-cols-2"
+            >
+              <button
+                type="button"
+                data-testid="pty-mode-create"
+                onClick={() => changeDialogMode("create")}
+                className="flex min-h-[132px] flex-col items-start justify-between rounded-2xl border border-border-card bg-card px-4 py-4 text-left transition-colors hover:bg-muted/40"
               >
-                <SelectTrigger
-                  data-testid="pty-agent-type"
-                  className="h-9 max-w-full min-w-0 rounded-lg text-sm"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="claude">Claude</SelectItem>
-                  <SelectItem value="codex">Codex</SelectItem>
-                  <SelectItem value="custom">Custom（自定义）</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                <div className="rounded-xl bg-[#F5F0ED] p-2 text-[#C75B3A]">
+                  <Terminal className="h-4 w-4" />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-foreground">
+                    创建新终端
+                  </div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    新建一个 Claude、Codex 或自定义命令的 PTY 会话。
+                  </p>
+                </div>
+              </button>
 
-            {/* ── Name input ── */}
-            <div className="space-y-1.5 min-w-0">
-              <label className="text-xs font-medium text-muted-foreground">
-                名称（可选）
-              </label>
-              <input
-                data-testid="pty-session-name"
-                type="text"
-                placeholder="my-terminal"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
-                disabled={loading}
-              />
+              <button
+                type="button"
+                data-testid="pty-mode-resume"
+                onClick={() => changeDialogMode("resume")}
+                className="flex min-h-[132px] flex-col items-start justify-between rounded-2xl border border-border-card bg-card px-4 py-4 text-left transition-colors hover:bg-muted/40"
+              >
+                <div className="rounded-xl bg-[#EEF6F5] p-2 text-[#0D9488]">
+                  <Terminal className="h-4 w-4" />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-foreground">
+                    恢复已有终端
+                  </div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    从 Claude / Codex 历史会话恢复，沿用历史会话自身路径。
+                  </p>
+                </div>
+              </button>
             </div>
-
-            {/* ── Workdir input ── */}
-            <div className="space-y-1.5 min-w-0">
-              <label className="text-xs font-medium text-muted-foreground">
-                工作目录（可选）
-              </label>
-              <input
-                data-testid="pty-session-workdir"
-                type="text"
-                placeholder="D:\project\exomind"
-                value={workdir}
-                onChange={(e) => {
-                  setWorkdir(e.target.value);
-                  setWorkdirDirty(true);
-                }}
-                className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
-                disabled={loading}
-              />
-            </div>
-
-            {(agentType === "claude" || agentType === "codex") && (
+          ) : (
+            <div className="space-y-4 min-w-0">
               <div className="space-y-1.5 min-w-0">
                 <label className="text-xs font-medium text-muted-foreground">
-                  模型（model）
-                </label>
-                <input
-                  data-testid="pty-model"
-                  type="text"
-                  placeholder={
-                    agentType === "claude" ? "claude-sonnet-4-5" : "gpt-5.4"
-                  }
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
-                  disabled={loading}
-                />
-              </div>
-            )}
-
-            {agentType === "codex" && (
-              <div className="space-y-1.5 min-w-0">
-                <label className="text-xs font-medium text-muted-foreground">
-                  推理强度（reasoning effort）
+                  Agent 类型（agent type）
                 </label>
                 <Select
-                  value={reasoningEffort}
-                  onValueChange={(value) =>
-                    setReasoningEffort(value as ReasoningEffort)
-                  }
+                  value={agentType}
+                  onValueChange={(value) => setAgentType(value as PtyAgentType)}
                   disabled={loading}
                 >
                   <SelectTrigger
-                    data-testid="pty-reasoning-effort"
+                    data-testid="pty-agent-type"
                     className="h-9 max-w-full min-w-0 rounded-lg text-sm"
                   >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="low">low</SelectItem>
-                    <SelectItem value="medium">medium</SelectItem>
-                    <SelectItem value="high">high</SelectItem>
-                    <SelectItem value="xhigh">xhigh</SelectItem>
+                    <SelectItem value="claude">Claude</SelectItem>
+                    <SelectItem value="codex">Codex</SelectItem>
+                    {dialogMode === "create" ? (
+                      <SelectItem value="custom">Custom（自定义）</SelectItem>
+                    ) : null}
                   </SelectContent>
                 </Select>
               </div>
-            )}
 
-            {agentType === "custom" && (
               <div className="space-y-1.5 min-w-0">
                 <label className="text-xs font-medium text-muted-foreground">
-                  命令（command）
+                  名称（可选）
                 </label>
                 <input
-                  data-testid="pty-custom-command"
+                  data-testid="pty-session-name"
                   type="text"
-                  placeholder="node"
-                  value={customCommand}
-                  onChange={(e) => setCustomCommand(e.target.value)}
+                  placeholder="my-terminal"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
                   disabled={loading}
                 />
               </div>
-            )}
 
-            <div className="space-y-1.5 min-w-0">
-              <label className="text-xs font-medium text-muted-foreground">
-                额外参数（extra args）
-              </label>
-              <input
-                data-testid="pty-extra-args"
-                type="text"
-                placeholder="--search --full-auto"
-                value={extraArgs}
-                onChange={(e) => setExtraArgs(e.target.value)}
-                className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
-                disabled={loading}
-              />
-            </div>
-
-            {/* ── Error ── */}
-            {error && <p className="text-sm text-red-500">{error}</p>}
-
-            {/* ── Spawn button ── */}
-            <button
-              type="button"
-              data-testid="pty-spawn-submit"
-              onClick={handleSpawn}
-              disabled={
-                loading || (agentType === "custom" && !customCommand.trim())
-              }
-              className="w-full max-w-full min-w-0 rounded-[14px] bg-[#C75B3A] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#B5502F] transition-colors"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  启动中...
-                </span>
-              ) : (
-                "启动新会话"
-              )}
-            </button>
-
-            {/* ── Session list ── */}
-            {agentType !== "custom" && (
-              <div className="space-y-2 min-w-0">
-                <div className="text-xs font-medium text-muted-foreground">
-                  恢复历史会话（resume history）
+              {dialogMode === "create" ? (
+                <div className="space-y-1.5 min-w-0">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    工作目录（可选）
+                  </label>
+                  <input
+                    data-testid="pty-session-workdir"
+                    type="text"
+                    placeholder="D:\project\exomind"
+                    value={workdir}
+                    onChange={(e) => setWorkdir(e.target.value)}
+                    className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
+                    disabled={loading}
+                  />
                 </div>
-                {historyLoading ? (
-                  <div className="text-xs text-muted-foreground">
-                    加载历史会话中...
-                  </div>
-                ) : sessions.length > 0 ? (
-                  <div
-                    data-testid="pty-history-list"
-                    className="max-h-[200px] min-w-0 space-y-1.5 overflow-x-hidden overflow-y-auto"
+              ) : (
+                <div
+                  data-testid="pty-resume-workdir-note"
+                  className="rounded-xl border border-dashed border-border-card bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground"
+                >
+                  恢复已有终端时将沿用历史会话自身路径，无需重新填写工作目录。
+                </div>
+              )}
+
+              {(agentType === "claude" || agentType === "codex") && (
+                <div className="space-y-1.5 min-w-0">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    模型（model）
+                  </label>
+                  <input
+                    data-testid="pty-model"
+                    type="text"
+                    placeholder={
+                      agentType === "claude" ? "claude-sonnet-4-5" : "gpt-5.4"
+                    }
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
+                    disabled={loading}
+                  />
+                </div>
+              )}
+
+              {agentType === "codex" && (
+                <div className="space-y-1.5 min-w-0">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    推理强度（reasoning effort）
+                  </label>
+                  <Select
+                    value={reasoningEffort}
+                    onValueChange={(value) =>
+                      setReasoningEffort(value as ReasoningEffort)
+                    }
+                    disabled={loading}
                   >
-                    {sessions.map((session) =>
-                      (() => {
-                        const occupied = occupiedHistoricalSessionIdSet.has(
-                          session.session_id,
-                        );
-                        const occupiedLabel =
-                          occupiedHistoricalSessionLabels[
-                            session.session_id
-                          ]?.trim();
-                        const sessionPrimaryLabel =
-                          resolveHistoricalSessionPrimaryLabel(session);
-                        const sessionPathLabel =
-                          resolveHistoricalSessionPathLabel(session);
-                        const sessionSecondaryTitle =
-                          resolveHistoricalSessionSecondaryTitle(session);
-                        const firstUserMessage =
-                          resolveHistoricalSessionPreview(
-                            session.first_user_message_preview ??
-                              session.first_user_message,
-                          );
-                        const lastUserMessage = resolveHistoricalSessionPreview(
-                          session.last_user_message_preview ??
-                            session.last_user_message,
-                        );
-                        return (
-                          <button
-                            key={session.session_id}
-                            data-testid={`pty-history-session-${session.session_id}`}
-                            type="button"
-                            onClick={() => handleResume(session)}
-                            disabled={loading || occupied}
-                            className="flex w-full max-w-full min-w-0 items-center gap-2.5 rounded-xl border border-border-card bg-card px-3 py-2 text-sm text-left hover:bg-muted/50 disabled:opacity-50 transition-colors"
-                          >
-                            <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
-                            <div className="min-w-0 flex-1">
-                              <div className="break-all font-medium">
-                                {sessionPrimaryLabel}
-                              </div>
-                              {sessionSecondaryTitle ? (
-                                <div className="break-words text-xs text-muted-foreground">
-                                  会话名 · {sessionSecondaryTitle}
-                                </div>
-                              ) : null}
-                              {sessionPathLabel ? (
-                                <div className="break-all text-[11px] text-muted-foreground">
-                                  目录 · {sessionPathLabel}
-                                </div>
-                              ) : null}
-                              {firstUserMessage ? (
-                                <div className="break-words text-[11px] text-muted-foreground">
-                                  首句 · {firstUserMessage}
-                                </div>
-                              ) : null}
-                              {lastUserMessage ? (
-                                <div className="break-words text-[11px] text-muted-foreground">
-                                  末句 · {lastUserMessage}
-                                </div>
-                              ) : null}
-                              <div className="text-xs text-muted-foreground">
-                                {formatRelativeTime(session.last_modified)}
-                              </div>
-                              {session.session_id ? (
-                                <div className="break-all text-[11px] text-muted-foreground">
-                                  会话 ID · {session.session_id}
-                                </div>
-                              ) : null}
-                            </div>
-                            {occupied ? (
-                              <div
-                                data-testid={`pty-history-session-occupied-${session.session_id}`}
-                                className="min-w-0 max-w-[45%] break-words text-right text-[11px] text-amber-600"
-                              >
-                                {occupiedLabel
-                                  ? `已打开窗口 · ${occupiedLabel}`
-                                  : "已打开窗口"}
-                              </div>
-                            ) : null}
-                          </button>
-                        );
-                      })(),
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground">
-                    当前没有可恢复的{" "}
-                    {agentType === "claude" ? "Claude" : "Codex"} 会话
-                  </div>
-                )}
+                    <SelectTrigger
+                      data-testid="pty-reasoning-effort"
+                      className="h-9 max-w-full min-w-0 rounded-lg text-sm"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">low</SelectItem>
+                      <SelectItem value="medium">medium</SelectItem>
+                      <SelectItem value="high">high</SelectItem>
+                      <SelectItem value="xhigh">xhigh</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {dialogMode === "create" && agentType === "custom" && (
+                <div className="space-y-1.5 min-w-0">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    命令（command）
+                  </label>
+                  <input
+                    data-testid="pty-custom-command"
+                    type="text"
+                    placeholder="node"
+                    value={customCommand}
+                    onChange={(e) => setCustomCommand(e.target.value)}
+                    className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
+                    disabled={loading}
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1.5 min-w-0">
+                <label className="text-xs font-medium text-muted-foreground">
+                  额外参数（extra args）
+                </label>
+                <input
+                  data-testid="pty-extra-args"
+                  type="text"
+                  placeholder="--search --full-auto"
+                  value={extraArgs}
+                  onChange={(e) => setExtraArgs(e.target.value)}
+                  className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
+                  disabled={loading}
+                />
               </div>
-            )}
-          </div>
+
+              {error && <p className="text-sm text-red-500">{error}</p>}
+
+              {dialogMode === "create" ? (
+                <button
+                  type="button"
+                  data-testid="pty-spawn-submit"
+                  onClick={handleSpawn}
+                  disabled={
+                    loading || (agentType === "custom" && !customCommand.trim())
+                  }
+                  className="w-full max-w-full min-w-0 rounded-[14px] bg-[#C75B3A] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 hover:bg-[#B5502F] transition-colors"
+                >
+                  {loading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      启动中...
+                    </span>
+                  ) : (
+                    "启动新会话"
+                  )}
+                </button>
+              ) : (
+                <div className="space-y-2 min-w-0">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    恢复历史会话（resume history）
+                  </div>
+                  {historyLoading ? (
+                    <div className="text-xs text-muted-foreground">
+                      加载历史会话中...
+                    </div>
+                  ) : sessions.length > 0 ? (
+                    <div
+                      data-testid="pty-history-list"
+                      className="max-h-[200px] min-w-0 space-y-1.5 overflow-x-hidden overflow-y-auto"
+                    >
+                      {sessions.map((session) =>
+                        (() => {
+                          const occupied = occupiedHistoricalSessionIdSet.has(
+                            session.session_id,
+                          );
+                          const occupiedLabel =
+                            occupiedHistoricalSessionLabels[
+                              session.session_id
+                            ]?.trim();
+                          const sessionPrimaryLabel =
+                            resolveHistoricalSessionPrimaryLabel(session);
+                          const sessionPathLabel =
+                            resolveHistoricalSessionPathLabel(session);
+                          const sessionSecondaryTitle =
+                            resolveHistoricalSessionSecondaryTitle(session);
+                          const firstUserMessage =
+                            resolveHistoricalSessionPreview(
+                              session.first_user_message_preview ??
+                                session.first_user_message,
+                            );
+                          const lastUserMessage = resolveHistoricalSessionPreview(
+                            session.last_user_message_preview ??
+                              session.last_user_message,
+                          );
+                          return (
+                            <button
+                              key={session.session_id}
+                              data-testid={`pty-history-session-${session.session_id}`}
+                              type="button"
+                              onClick={() => handleResume(session)}
+                              disabled={loading || occupied}
+                              className="flex w-full max-w-full min-w-0 items-center gap-2.5 rounded-xl border border-border-card bg-card px-3 py-2 text-sm text-left hover:bg-muted/50 disabled:opacity-50 transition-colors"
+                            >
+                              <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <div className="min-w-0 flex-1">
+                                <div className="break-all font-medium">
+                                  {sessionPrimaryLabel}
+                                </div>
+                                {sessionSecondaryTitle ? (
+                                  <div className="break-words text-xs text-muted-foreground">
+                                    会话名 · {sessionSecondaryTitle}
+                                  </div>
+                                ) : null}
+                                {sessionPathLabel ? (
+                                  <div className="break-all text-[11px] text-muted-foreground">
+                                    目录 · {sessionPathLabel}
+                                  </div>
+                                ) : null}
+                                {firstUserMessage ? (
+                                  <div className="break-words text-[11px] text-muted-foreground">
+                                    首句 · {firstUserMessage}
+                                  </div>
+                                ) : null}
+                                {lastUserMessage ? (
+                                  <div className="break-words text-[11px] text-muted-foreground">
+                                    末句 · {lastUserMessage}
+                                  </div>
+                                ) : null}
+                                <div className="text-xs text-muted-foreground">
+                                  {formatRelativeTime(session.last_modified)}
+                                </div>
+                                {session.session_id ? (
+                                  <div className="break-all text-[11px] text-muted-foreground">
+                                    会话 ID · {session.session_id}
+                                  </div>
+                                ) : null}
+                              </div>
+                              {occupied ? (
+                                <div
+                                  data-testid={`pty-history-session-occupied-${session.session_id}`}
+                                  className="min-w-0 max-w-[45%] break-words text-right text-[11px] text-amber-600"
+                                >
+                                  {occupiedLabel
+                                    ? `已打开窗口 · ${occupiedLabel}`
+                                    : "已打开窗口"}
+                                </div>
+                              ) : null}
+                            </button>
+                          );
+                        })(),
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      当前没有可恢复的{" "}
+                      {agentType === "claude" ? "Claude" : "Codex"} 会话
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

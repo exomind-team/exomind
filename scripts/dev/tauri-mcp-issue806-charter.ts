@@ -598,6 +598,72 @@ async function setFieldValue(
   }
 }
 
+async function selectComboboxValue(
+  client: RawBridgeClient,
+  triggerSelector: string,
+  optionLabel: string,
+  label: string,
+  timeoutMs = 4_000,
+): Promise<void> {
+  await waitForJs<{ present: boolean }>(
+    client,
+    `(() => ({ present: !!document.querySelector(${JSON.stringify(triggerSelector)}) }))()`,
+    (result) => result.present,
+    timeoutMs,
+    `${label} trigger presence`,
+  );
+
+  const opened = await client.executeJs<{ ok: boolean; reason: string | null }>(
+    `(() => {
+      const trigger = document.querySelector(${JSON.stringify(triggerSelector)});
+      if (!(trigger instanceof HTMLElement)) {
+        return { ok: false, reason: 'trigger-not-found' };
+      }
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      return { ok: true, reason: null };
+    })()`,
+  );
+  if (!opened.ok) {
+    throw new Error(`failed to open ${label}: ${opened.reason}`);
+  }
+
+  await waitForJs<{ present: boolean }>(
+    client,
+    `(() => {
+      const expected = ${JSON.stringify(optionLabel)}.trim().toLowerCase();
+      const options = Array.from(document.querySelectorAll('[role="option"], [data-radix-collection-item]'));
+      return {
+        present: options.some((node) => node.textContent?.trim().toLowerCase() === expected),
+      };
+    })()`,
+    (result) => result.present,
+    timeoutMs,
+    `${label} option presence`,
+  );
+
+  const selected = await client.executeJs<{ ok: boolean; reason: string | null }>(
+    `(() => {
+      const expected = ${JSON.stringify(optionLabel)}.trim().toLowerCase();
+      const option = Array.from(document.querySelectorAll('[role="option"], [data-radix-collection-item]'))
+        .find((node) => node.textContent?.trim().toLowerCase() === expected);
+      if (!(option instanceof HTMLElement)) {
+        return { ok: false, reason: 'option-not-found' };
+      }
+      option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      option.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+      option.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      return { ok: true, reason: null };
+    })()`,
+  );
+  if (!selected.ok) {
+    throw new Error(`failed to select ${label}: ${selected.reason}`);
+  }
+}
+
 async function readAgentHubViewState(client: RawBridgeClient): Promise<{
   pathname: string;
   storedViewMode: string | null;
@@ -1027,7 +1093,13 @@ async function spawnTerminalAgentViaDialog(
     timeoutMs,
     `spawn dialog ${input.agentType}`,
   );
-  await setFieldValue(client, '[data-testid="pty-agent-type"]', input.agentType, 'pty agent type', timeoutMs);
+  await selectComboboxValue(
+    client,
+    '[data-testid="pty-agent-type"]',
+    input.agentType === 'claude' ? 'Claude' : 'Codex',
+    'pty agent type',
+    timeoutMs,
+  );
   await setFieldValue(client, '[data-testid="pty-session-name"]', input.name, 'pty session name', timeoutMs);
   await setFieldValue(client, '[data-testid="pty-session-workdir"]', input.workdir, 'pty session workdir', timeoutMs);
   await clickBySelector(client, '[data-testid="pty-spawn-submit"]', `spawn submit ${input.agentType}`, timeoutMs);
@@ -1446,6 +1518,11 @@ async function restartRuntimeAndWaitForRecovery(
   const beforeRuntimeState = await collectRuntimeState(client);
   const beforeRtSummary = summarizeRtSessions(beforeRuntimeState.sessions);
   const beforeHostId = beforeRuntimeState.runtimeStatus.hostId ?? null;
+  const restartHost = beforeRuntimeState.runtimeStatus.host ?? '127.0.0.1';
+  const restartPort = typeof beforeRuntimeState.runtimeStatus.port === 'number'
+    && Number.isFinite(beforeRuntimeState.runtimeStatus.port)
+    ? beforeRuntimeState.runtimeStatus.port
+    : 9124;
 
   await client.executeJs(`(() => window.__TAURI__.core.invoke('runtime_service_stop').then(() => true))()`);
   await waitForJs<RuntimeStatusSnapshot>(
@@ -1455,7 +1532,10 @@ async function restartRuntimeAndWaitForRecovery(
     Math.min(timeoutMs, 20_000),
     'runtime stop',
   );
-  await client.executeJs(`(() => window.__TAURI__.core.invoke('runtime_service_start', { host: '0.0.0.0', port: 9124 }).then(() => true))()`);
+  await client.executeJs(`(() => window.__TAURI__.core.invoke('runtime_service_start', ${JSON.stringify({
+    host: restartHost,
+    port: restartPort,
+  })}).then(() => true))()`);
   await waitForJs<RuntimeStatusSnapshot>(
     client,
     `(async () => await window.__TAURI__.core.invoke('runtime_service_status').catch((error) => ({ running: false, error: String(error) })))()`,
@@ -1519,6 +1599,7 @@ async function restartRuntimeAndWaitForRecovery(
 
   const notes = [
     `before host: ${beforeHostId ?? 'none'}`,
+    `restart target: ${restartHost}:${restartPort}`,
     `after host: ${recovered.runtimeState.runtimeStatus.hostId ?? 'none'}`,
     `before active: ${beforeUiSummary.active}`,
     `after active: ${recovered.uiSummary.active}`,

@@ -12,18 +12,25 @@ async function chooseDialogSelect(
   await user.click(await screen.findByRole("option", { name: optionName }));
 }
 
+async function openCreateMode(): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByTestId("pty-mode-create"));
+  await screen.findByTestId("pty-agent-type");
+}
+
+async function openResumeMode(): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByTestId("pty-mode-resume"));
+  await screen.findByTestId("pty-agent-type");
+}
+
 describe("PtySpawnDialog（终端会话启动弹窗）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("keeps the form surface constrained inside the dialog viewport（模态内部表单不会横向撑穿对话框）", async () => {
-    const fetchMock = vi.fn(async (input: string) => {
-      if (input.includes("/pty/sessions?agent_type=claude")) {
-        return { ok: true, json: async () => [] } as Response;
-      }
-      throw new Error(`unexpected fetch: ${input}`);
-    });
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     render(
@@ -37,6 +44,9 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
 
     const dialog = await screen.findByRole("dialog");
     const body = screen.getByTestId("pty-spawn-dialog-body");
+    expect(screen.getByTestId("pty-mode-route")).toBeInTheDocument();
+
+    await openCreateMode();
     const agentType = screen.getByTestId("pty-agent-type");
     const workdir = screen.getByTestId("pty-session-workdir");
     const submit = screen.getByTestId("pty-spawn-submit");
@@ -85,6 +95,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openCreateMode();
     await chooseDialogSelect("pty-agent-type", "Codex");
     fireEvent.change(screen.getByTestId("pty-session-name"), {
       target: { value: "codex-main" },
@@ -191,6 +202,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openCreateMode();
     await chooseDialogSelect("pty-agent-type", "Codex");
     fireEvent.change(screen.getByTestId("pty-session-name"), {
       target: { value: "codex-main" },
@@ -268,6 +280,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openCreateMode();
     fireEvent.change(screen.getByTestId("pty-session-name"), {
       target: { value: "claude-main" },
     });
@@ -328,6 +341,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openResumeMode();
     await chooseDialogSelect("pty-agent-type", "Codex");
 
     await waitFor(() => {
@@ -341,9 +355,8 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
     fireEvent.change(screen.getByTestId("pty-session-name"), {
       target: { value: "resume-codex" },
     });
-    fireEvent.change(screen.getByTestId("pty-session-workdir"), {
-      target: { value: "D:/project/exomind/custom-worktree" },
-    });
+    expect(screen.queryByTestId("pty-session-workdir")).not.toBeInTheDocument();
+    expect(screen.getByTestId("pty-resume-workdir-note")).toBeInTheDocument();
     fireEvent.change(screen.getByTestId("pty-model"), {
       target: { value: "gpt-5.4" },
     });
@@ -366,7 +379,6 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
             agent_type: "codex",
             session_id: "019d0011-aaaa-bbbb-cccc-1234567890ab",
             name: "resume-codex",
-            workdir: "D:/project/exomind/custom-worktree",
             model: "gpt-5.4",
             reasoning_effort: "xhigh",
             extra_args: ["--search", "--full-auto"],
@@ -380,7 +392,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
     });
   });
 
-  it("does not send untouched defaultWorkdir when resuming a historical session from another project（恢复历史会话时不应误带全局默认目录）", async () => {
+  it("does not render or send workdir when resuming a historical session（恢复历史会话时不应再暴露或发送 workdir）", async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input.includes("/pty/sessions?agent_type=claude")) {
         return { ok: true, json: async () => [] } as Response;
@@ -419,7 +431,11 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openResumeMode();
     await chooseDialogSelect("pty-agent-type", "Codex");
+
+    expect(screen.queryByTestId("pty-session-workdir")).not.toBeInTheDocument();
+    expect(screen.getByTestId("pty-resume-workdir-note")).toBeInTheDocument();
 
     const historyButton = await screen.findByTestId(
       "pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab",
@@ -477,6 +493,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openResumeMode();
     const historyButton = await screen.findByTestId(
       "pty-history-session-claude-thread-display-title-1234567890",
     );
@@ -532,6 +549,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openResumeMode();
     const historyButton = await screen.findByTestId(
       "pty-history-session-claude-thread-long-preview",
     );
@@ -571,6 +589,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openResumeMode();
     const historyButton = await screen.findByTestId(
       "pty-history-session-claude-thread-encoded-only-1234567890",
     );
@@ -617,6 +636,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openResumeMode();
     const historyButton = await screen.findByTestId(
       "pty-history-session-claude-thread-preview-fallback-1234567890",
     );
@@ -678,6 +698,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openResumeMode();
     const claudeButton = await screen.findByTestId(
       "pty-history-session-claude-history-1",
     );
@@ -746,6 +767,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openResumeMode();
     const occupiedButton = await screen.findByTestId(
       "pty-history-session-claude-thread-open",
     );
@@ -789,6 +811,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       />,
     );
 
+    await openCreateMode();
     await chooseDialogSelect("pty-agent-type", "Custom（自定义）");
 
     expect(screen.getByTestId("pty-custom-command")).toBeInTheDocument();
