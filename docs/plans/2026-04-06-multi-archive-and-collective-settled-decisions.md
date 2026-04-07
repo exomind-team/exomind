@@ -7,6 +7,12 @@
 > 对应主线计划：[2026-04-06-multi-archive-and-collective-collaboration-outline.md](./2026-04-06-multi-archive-and-collective-collaboration-outline.md)
 >
 > 对应子计划：[2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md](./2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md)
+>
+> 对应补充计划：[2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md](./2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md)
+>
+> 对应会话澄清：[2026-04-07-archive-session-and-ui-session-clarifications.md](./2026-04-07-archive-session-and-ui-session-clarifications.md)
+>
+> 对应 OS 层补充：[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](./2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md)
 
 ---
 
@@ -33,29 +39,42 @@
 - `ArchiveSession` 是一等运行时对象
 - 其作用域完全本地于 `RT`
 - 不跨 `RT` 同步
+- 真相落在 `RT` 本地会话元数据
+- 未被明确关闭的会话，`RT` 重启后默认自动恢复
 
 ### 2.3 会话状态
 
-- 至少包含：
+- 第一阶段状态收口为：
   - `running`
-  - `suspended`
-  - `stopped`
-- 同一档案可在多个 `RT` 上各自前台
+  - `closed`
+- 同一档案可在多个 `RT` 上各自 `running`
+- 外部 UI 连接单独建模为 `UiSession / ClientSession`
+- `RT` 第一阶段只跟踪 UI 连接的：
+  - `connected`
+  - `disconnected`
 
 ---
 
 ## 3. 前台切换与资源占用
 
-- 普通“切换档案”默认只切前台接入，不默认停旧档案
+- “前台 / 后台”是 UI 视角概念，不是 `RT` 状态机字段
+- 普通“切换档案”默认只切当前 UI 连接，不默认停旧档案
 - 单例资源默认前台独占：
   - 主窗口焦点
   - 全局快捷键
   - 麦克风入口
   - 托盘主入口
-- 后台档案默认可继续运行，但默认静默
-- “切出时是否自动挂起”是切出档案自己的设置
-- 此前说的“硬切换”重定义为前台接入与前台资源的原子切换事务
-- “挂起 / 停止旧档案”作为显式附加动作，不混入普通切换定义
+- UI 未连接但仍 `running` 的档案，对该 UI 而言属于后台档案
+- 连接未运行档案时，默认自动拉起其 `ArchiveSession`
+- 必须区分“断开 UI 连接”与“关闭 ArchiveSession”
+- 最后一个 UI 断开后，默认会话继续运行
+- “自动关闭切出的档案”是 UI 侧快捷策略，第一阶段默认开启
+- 切档案固定流程是：
+  1. 先启动 / 连接新档案
+  2. 若失败则回退到旧档案
+  3. 若成功再请求关闭旧档案
+  4. 若关闭旧档案失败，仍停留在新档案并显式报错
+- 此前说的“硬切换”重定义为 UI 当前连接与前台资源的原子切换事务
 
 ---
 
@@ -127,7 +146,8 @@
 - 任务结构变更走提案，执行反馈直写并审计
 - 提案默认对所有 `active_member` 可见
 - 成员可见性不自动等于 Agent 可见性
-- `blackboard` 默认可直接写，但必须强审计
+- `blackboard` 默认可直接写
+- 但 Phase 1 不再按“长期保留 + 强审计总池”实现
 - route / edge 编辑默认走提案
 - 治理设置本身也走提案
 
@@ -149,9 +169,19 @@
 - 不承载任务、时间块等业务真相
 - 也不作为公共长期记忆总池
 - 在集体档案中默认对 `active_member` 可读
-- 默认长期保留，清理 / 归档先采用手动动作
+- Phase 1 只先测试记录、存储与读写
+- Phase 1 采用时间序条目 + 追加修正
+- Phase 1 语义上是临时草稿区、容量受限缓冲区
+- 默认允许成员与授权 Agent 写入
+- 每条记录至少归因到作者与座席 / 设备
+- 每黑板有总上限
+- 所有保留条目都计入占用
+- 达到阈值时先预警，再阻写
+- 显式提供“弹出最早条目”释放空间
+- Phase 1 不做 pin / protect
 - 访问方式应靠近 node / workbench，而不是先做厚重独立页面
-- 直写时必须记录成员身份、来源与审计
+- 交互型请求可建立正式 route，并把弹出内容作为信号回送给发起者
+- 这类 route 进入档案级持久路由，并在 route editor 可见
 
 ### 7.2 Network v1
 
@@ -173,6 +203,7 @@
 - tools 层显式区分读 / 写权限
 - 写权限按角色输出受限，不默认等同成员的广泛写权限
 - 审计需同时记录 Agent 身份与来源成员
+- 集体 Agent 第一阶段最小现实形态，默认先挂在活跃成员的座席主机
 
 ---
 
@@ -233,13 +264,19 @@
 
 这些主题已经明确不属于“已落实主题”范围，后续继续讨论：
 
+- 集体档案的Agent
 - 防伪、签名与公开标识轮换
 - 多公开标识 / 多名片体系
 - 局域网发现、目录中继等辅助找人机制
 - 集体档案公开发现
-- 集体 Agent 的运行落点与调度机制
-- 全局审计总控台
+- 审计界面 / 全局审计总控台
 - 单 Agent 总结 → 提案闭环
 - 能量双计量
 - 对外文档生成
 - 集体记账 / Labor Ledger
+
+其中以下三项当前明确只记录问题簇，后续 GitHub 追踪需提及 `@HailayLin`：
+
+- 集体档案的Agent
+- 防伪、签名与公开标识轮换
+- 审计界面 / 全局审计总控台

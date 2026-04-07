@@ -11,6 +11,9 @@
 > - Agent 能量双计量第一阶段已拆到：[2026-04-06-agent-energy-and-dual-metering-phase1-plan.md](./2026-04-06-agent-energy-and-dual-metering-phase1-plan.md)
 > - 独立集体记账系统第一阶段已拆到：[2026-04-06-independent-collective-bookkeeping-system-plan.md](./2026-04-06-independent-collective-bookkeeping-system-plan.md)
 > - 未充分讨论主题的第二轮收口计划已拆到：[2026-04-06-remaining-themes-second-round-settled-plan.md](./2026-04-06-remaining-themes-second-round-settled-plan.md)
+> - `blackboard` Phase 1 与当前扩大讨论问题簇已拆到：[2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md](./2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md)
+> - `ArchiveSession / UiSession` 第一阶段澄清已拆到：[2026-04-07-archive-session-and-ui-session-clarifications.md](./2026-04-07-archive-session-and-ui-session-clarifications.md)
+> - `archive` 术语、默认档案、档案切换器与 OS 层入口补充已拆到：[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](./2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md)
 > - 主线 epic [#837](https://github.com/exomind-team/exomind/issues/837) 已同步修订，吸收了上述子计划与最新已定决策
 > - 本文继续作为原始灵感、未决项和任务池的总索引，不再承担“已定决策主文档”职责
 
@@ -47,6 +50,7 @@
   - 主线计划已落盘
   - 已定决策快照已拆出
   - “找被邀请者”已拆出独立子计划
+  - `ArchiveSession / UiSession` 会话语义补充澄清已拆出
   - 主线 epic `#837` 已完成修订同步
 
 ### 已收口并已拆出子计划
@@ -67,6 +71,14 @@
 ### 明确后置
 
 - **I. 复杂跨层组织协作**
+
+### 当前明确按“扩大讨论问题簇”处理
+
+以下主题当前不继续硬收口，而是只记录问题，后续 GitHub 追踪需提及 `@HailayLin`：
+
+- `集体档案的Agent`
+- `档案防伪 / 公开标识轮换`
+- `审计界面`
 
 ### 当前建议的下一轮优先级
 
@@ -202,6 +214,15 @@
 - 默认产出是：**总结 + 建议 + pending proposal**
 - `blackboard` 在这条闭环中默认只收**摘要痕迹**
 - 第一阶段默认在**个人档案**中启用
+- `blackboard` 的独立 Phase 1 合同已补充收口到：
+  - [2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md](./2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md)
+- 其 Phase 1 新增稳定判断包括：
+  - 时间序条目
+  - 追加修正
+  - 每黑板总上限
+  - 预警后阻写
+  - 显式“弹出最早条目”
+  - 交互型请求建立正式 route 并信号回送
 
 仍待继续探讨：
 
@@ -336,6 +357,7 @@
 - **主线已收口，找被邀请者子题已拆出并收口**
 - 已拆到：[2026-04-06-multi-archive-and-collective-collaboration-outline.md](./2026-04-06-multi-archive-and-collective-collaboration-outline.md)
 - 已定决策快照见：[2026-04-06-multi-archive-and-collective-settled-decisions.md](./2026-04-06-multi-archive-and-collective-settled-decisions.md)
+- 会话补充澄清见：[2026-04-07-archive-session-and-ui-session-clarifications.md](./2026-04-07-archive-session-and-ui-session-clarifications.md)
 - 子计划见：[2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md](./2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md)
 
 包含原始点：
@@ -358,7 +380,10 @@
 
 - 档案是统一基础对象，个人档案与集体档案在身份层**同型**
 - 多档案并活与 `ArchiveSession` 是必要基础设施
-- 集体档案有自己的 `ArchiveSession`，但 UI 前台接入的是**成员座席**
+- `ArchiveSession` 是 `RT` 本地运行会话，第一阶段状态收口为 `running / closed`
+- 外部 UI 连接单独建模为 `UiSession / ClientSession`
+- “前台 / 后台”改为 UI 侧派生概念，而不是 `RT` 全局状态
+- 集体档案有自己的 `ArchiveSession`，但 UI 接入的是**成员座席**
 - settings 分层为：个人档案级、集体本体级、成员×集体视角级
 - 集体治理不引入固定管理员 / 创建者角色
 - 邀请、加入、退出与治理门禁已有最小合同
@@ -639,7 +664,10 @@
 - **主线已收口**
 - 当前主线计划已替代“新开 epic”的需求
 - “找被邀请者”子题已拆为独立子计划
+- `ArchiveSession / UiSession` 语义澄清已拆为独立补充文档
 - 后续应基于主线计划继续拆 ArchiveSession、成员生命周期、治理门禁、公开标识、防伪与公开发现等子题
+- `blackboard` Phase 1 补充合同与扩大讨论问题簇已拆到：
+  - [2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md](./2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md)
 
 ### Task Group 7：集体记账 / Labor Ledger 产品化
 
@@ -707,6 +735,9 @@
 2. 集体档案的正式认证 / OAuth / 外部身份接入细节
 3. 把所有网络对象都做成 signal node 的极端一致化方案
 4. 把 token、额度、功耗、算力压成一个统一标量的过早收敛
+5. `集体档案的Agent`
+6. `档案防伪 / 公开标识轮换`
+7. `审计界面`
 
 ---
 

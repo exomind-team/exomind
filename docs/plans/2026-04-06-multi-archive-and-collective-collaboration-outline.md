@@ -9,6 +9,9 @@
 > 已拆子计划：
 >
 > - [2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md](./2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md)
+> - [2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md](./2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md)
+> - [2026-04-07-archive-session-and-ui-session-clarifications.md](./2026-04-07-archive-session-and-ui-session-clarifications.md)
+> - [2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](./2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md)
 >
 > 相关路线顺序：
 >
@@ -50,18 +53,22 @@
 
 - 作用域完全本地于 `RT`
 - 不跨 `RT` 同步
-- 状态至少为：
+- 真相落在 `RT` 本地会话元数据
+- 第一阶段状态收口为：
   - `running`
-  - `suspended`
-  - `stopped`
+  - `closed`
+- 只要未被明确关闭，`RT` 重启后默认自动恢复
 
-### 2.3 ForegroundAttachment
+### 2.3 UiSession / ClientSession
 
-表示当前 UI 与前台独占资源接入到哪个 `ArchiveSession`。
+表示外部 UI 与某个 `ArchiveSession` 的连接对象。
 
-- 普通“切换档案”默认只切前台接入
-- 不默认停掉切出的档案
-- 前台切换事务必须保证单例资源原子无双占
+- 是 `RT` 本地一等对象
+- 第一阶段一个 UI 客户端同一时刻只连接一个档案
+- 同一档案在同一 `RT` 上，第一阶段只允许一个 UI 连接
+- `RT` 侧第一阶段只跟踪：
+  - `connected`
+  - `disconnected`
 
 ### 2.4 MemberSeat
 
@@ -117,10 +124,14 @@
 ### 3.1 多档案并活
 
 - 同一 `RT` 上允许多个 `ArchiveSession` 并活
-- 同一档案可在不同 `RT` 上各自前台，各 `RT` 自治
+- 同一档案可在不同 `RT` 上各自 `running`，各 `RT` 自治
 - `ArchiveSession` 持久化落在各 `RT` 本地会话存储，不挂进档案共享数据
 
-### 3.2 前台独占资源
+### 3.2 UI 视角的前台 / 后台与独占资源
+
+- “前台 / 后台”是 UI 视角概念，不是 `RT` 状态机字段
+- 某个 UI 当前连接着的档案，就是这个 UI 的前台档案
+- 某个 UI 当前未连接、但在同一 `RT` 中仍 `running` 的档案，就是这个 UI 的后台档案
 
 以下资源默认前台独占：
 
@@ -131,26 +142,36 @@
 
 后台档案默认可继续运行，但默认静默，不主动抢前台。
 
-### 3.3 挂起与停止
+### 3.3 断开连接与关闭会话
 
-`suspended` 的本质是：
+- 当 UI 去连接一个当前未运行的档案时，默认自动拉起该档案的 `ArchiveSession`
+- 必须区分：
+  - 断开 `UiSession / ClientSession`
+  - 关闭 `ArchiveSession`
+- 最后一个 UI 断开后，默认会话继续运行
+- 后续可给档案增加设置：
+  - 最后一个 UI 断开时自动关闭会话
 
-- 失去前台接入权
-- 失去前台独占资源占用权
-- 核心服务仍可继续运行
+### 3.4 切档案事务
 
-“切出时是否自动挂起”作为切出档案自己的设置。
+- “自动关闭切出的档案”是 UI 侧快捷策略，不是 `RT` 全局前台语义
+- 第一阶段默认开启该快捷策略
+- 固定流程为：
+  1. 先启动 / 连接新档案
+  2. 若失败，则回退到旧档案
+  3. 若成功，再请求关闭旧档案
+  4. 若关闭旧档案失败，仍停留在新档案，并显式提示旧档案关闭失败
 
-### 3.4 “硬切换”的新含义
+### 3.5 “硬切换”的新含义
 
 此前讨论中的“硬切换”不再理解为“停旧启新”的唯一主路径，而重定义为：
 
-- 前台接入
+- UI 当前连接
 - 前台独占资源
 
 在档案之间的原子切换事务。
 
-如果用户明确想把切出的档案停掉或挂起，则作为显式附加动作处理，而不是普通切换默认语义。
+如果用户明确想把切出的档案停掉，则作为显式附加动作处理；第一阶段不再保留 `suspended` 作为 `ArchiveSession` 核心状态。
 
 ---
 
@@ -273,7 +294,9 @@
 ### 6.5 `blackboard`
 
 - 默认可直接写入
-- 但必须强审计
+- 但 Phase 1 不再按“长期保留 + 强审计总池”实现
+- Phase 1 具体合同见：
+  - [2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md](./2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md)
 
 ### 6.6 route / edge 编辑
 
@@ -302,15 +325,34 @@
 - 不作为：
   - 任务、时间块等业务真相数据库
   - 公共长期记忆总池
+- Phase 1 先只测试：
+  - 记录
+  - 存储
+  - 读写
+- Phase 1 的内容单位先收口为：
+  - 时间序条目
+- Phase 1 的写入模型先收口为：
+  - 追加修正
+- Phase 1 语义上是：
+  - 临时草稿区
+  - 容量受限缓冲区
 
 在集体档案中：
 
 - 默认对所有 `active_member` 可读
-- 默认长期保留
-- 清理 / 归档先采用手动方式
+- 默认允许成员与授权 Agent 直写
+- 归因至少记录作者与座席 / 设备
+- 每黑板有总上限
+- 所有保留条目都计入占用
+- 达到阈值时先预警，再阻写
+- 默认提供显式“弹出最早条目”动作释放空间
+- Phase 1 先不做 pin / protect
 - 应作为靠近 node / workbench 的特殊访问方式出现
 - 不先做厚重独立页面
-- 直写时必须记录成员身份、来源与审计信息
+- 交互型请求可建立正式连边，并将弹出内容作为信号回送给发起者
+- 这类连边直接进入档案级持久路由，并在 route editor 可见
+- 更细合同见：
+  - [2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md](./2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md)
 
 ### 7.2 Network v1
 
@@ -340,10 +382,20 @@
   - Agent 身份
   - delegating / source member
 
-当前仍未定的内容：
+当前最小现实形态额外补一条：
 
-- 集体 Agent 具体跑在哪个 RT
+- 集体 Agent 第一阶段默认先挂在：
+  - 活跃成员的座席主机
+
+当前仍未定、并改为后续扩大讨论问题簇的内容：
+
 - 调度 / 派工 / 驻留机制如何实现
+- 多成员同时在线时的唯一执行语义
+- 双执行 / 双提交的收敛语义
+
+对应问题簇见：
+
+- [2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md](./2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md)
 
 这些不进入 `v1` 关闭条件。
 
@@ -397,7 +449,7 @@
 建议按以下顺序继续拆题：
 
 1. `ArchiveSession` 本地状态机与持久化
-2. 前台接入事务与前台独占资源切换器
+2. `UiSession` 连接合同与切档案事务
 3. settings 三层分域与继承 / 覆写规则
 4. 集体成员生命周期与邀请材料合同
 5. 集体治理开关与提案门禁预设
@@ -413,10 +465,12 @@
 
 至少覆盖以下场景：
 
-- 单 `RT` 同时运行多个 `ArchiveSession`，切前台不杀后台
-- 同一档案在两个 `RT` 上同时前台，各自独立
+- 单 `RT` 同时运行多个 `ArchiveSession`，UI 切档案时不默认杀掉其他仍在运行的会话
+- 同一档案在两个 `RT` 上同时 `running`，各自独立恢复
 - 前台切换时，主窗口 / 快捷键 / 麦克风不出现双占
-- 切出档案配置为自动挂起时，只失去前台接入权，不丢运行态
+- UI 连接一个未运行档案时，会自动拉起对应 `ArchiveSession`
+- 最后一个 UI 断开后，会话默认继续运行；显式关闭时才转为 `closed`
+- 切档案时若新档案启动失败，UI 回退到旧档案；若旧档案关闭失败，UI 仍停留在新档案并暴露错误
 - 个人档案 UI 偏好随档案恢复
 - 集体视角默认继承个人偏好，局部覆写后仅在该成员自己的 `RT` 间同步
 - 集体治理设置跨 `RT` 保持一致
@@ -428,8 +482,10 @@
 - 任务结构变更走提案，执行反馈直写并审计
 - 时间块计划走提案，执行记录直写并审计
 - 提案默认对所有 `active_member` 可见
-- `blackboard` 默认对 `active_member` 可读，并保留成员身份、来源、审计
-- `blackboard` 清理 / 归档采用手动动作
+- `blackboard` 默认对 `active_member` 可读，并记录作者与座席 / 设备
+- `blackboard` 按每黑板总上限计量，达到阈值会预警并阻写
+- `blackboard` 可显式执行“弹出最早条目”释放空间
+- 交互型黑板请求可建立正式 route，并把弹出内容以信号回送给发起者
 - route table 按档案恢复；集体改边默认走提案
 - 无连边节点发信失败，并能提示先建边
 - 禁用 route 记录 `skipped`；目标缺失 / 不可用记录 `failed`
@@ -447,10 +503,16 @@
 - 能量双计量
 - 对外文档生成工作流
 - 集体记账 / Labor Ledger
+- 集体档案的Agent
 - 防伪与公开标识轮换
 - 多公开标识体系
 - 局域网发现 / 目录中继等辅助找人机制
 - 集体档案公开发现
-- 集体 Agent 的运行落点与调度机制
-- 全局审计总控台
+- 审计界面 / 全局审计总控台
 - 跨层组织协商
+
+其中以下三项当前明确按“扩大讨论问题簇”处理，后续 GitHub 追踪需提及 `@HailayLin`：
+
+- 集体档案的Agent
+- 防伪与公开标识轮换
+- 审计界面 / 全局审计总控台
