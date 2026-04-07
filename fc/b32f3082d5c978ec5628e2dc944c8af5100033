@@ -1,0 +1,26 @@
+tests/unit/ui/agent-hub/agent-routing.issue204.test.ts
+  b4ef3981fb4f61aa 26-29
+tests/unit/ui/agent-hub/agents-page.tiled-workbench.issue842.test.tsx
+  b4ef3981fb4f61aa 1-612
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "fcb32f3082d5c978ec5628e2dc944c8af5100033",
+  "prompts": {
+    "b4ef3981fb4f61aa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6847-84e6-7fc0-9d76-d9f58ff0f4d7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 11648,
+      "total_deletions": 218,
+      "accepted_lines": 11634,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/050a9e21dd33308cbcd38219aa16044d24044d691af231b48b4a52fd857ee8c6"
+    }
+  }
+}
