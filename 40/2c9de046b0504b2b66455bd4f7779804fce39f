@@ -1,0 +1,37 @@
+docs/architecture/ECS-mesh-cross-analysis.md
+  7c20d607dba3e7a4 1-430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "402c9de046b0504b2b66455bd4f7779804fce39f",
+  "prompts": {
+    "5f0f218c9e114e69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d67f2-738b-7bf1-aa6e-33030c75edd5",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    },
+    "7c20d607dba3e7a4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74da4e38-ee8d-4058-a28e-3be26a742775",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 430,
+      "total_deletions": 0,
+      "accepted_lines": 430,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/c63fb1bcfc25c09333fbfa63232476f04c705a68ebd231d7a24d03c57952dfc3"
+    }
+  }
+}
