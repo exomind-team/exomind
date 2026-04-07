@@ -44,7 +44,7 @@ describe('session card stop action（列表卡片停止动作）', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('does not show stop button for non-PTY sessions（非 PTY 会话不显示停止按钮）', () => {
+  it('shows a close button for structured sessions without PTY（无 PTY 的结构化会话显示关闭按钮）', () => {
     render(
       <SessionCard
         session={buildSession({
@@ -52,10 +52,33 @@ describe('session card stop action（列表卡片停止动作）', () => {
           interaction_mode: 'structured',
           pty_id: undefined,
         })}
+        onStop={vi.fn()}
       />,
     );
 
     expect(screen.queryByTestId('session-card-stop-session-no-stop')).not.toBeInTheDocument();
+    expect(screen.getByTestId('session-card-close-session-no-stop')).toHaveTextContent('关闭');
+  });
+
+  it('shows visible force-complete action for terminal sessions without PTY（无 PTY 的终端会话显示显式强制完成按钮）', () => {
+    const session = buildSession({
+      id: 'session-no-pty-terminal',
+      pty_id: undefined,
+    });
+    const onStop = vi.fn();
+
+    render(<SessionCard session={session} onStop={onStop} />);
+
+    expect(screen.queryByTestId('session-card-stop-session-no-pty-terminal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('session-card-missing-pty-note-session-no-pty-terminal')).toHaveTextContent('该会话没有关联 PTY');
+    expect(screen.getByTestId('session-card-missing-pty-note-session-no-pty-terminal')).toHaveTextContent('若存在可恢复的历史终端');
+
+    const stopButton = screen.getByTestId('session-card-force-complete-session-no-pty-terminal');
+    expect(stopButton).toHaveTextContent('强制完成');
+
+    fireEvent.click(stopButton);
+
+    expect(onStop).toHaveBeenCalledWith(session);
   });
 
   it('passes stop callback through SessionsView（SessionsView 应透传停止回调）', () => {
@@ -77,6 +100,45 @@ describe('session card stop action（列表卡片停止动作）', () => {
     expect(onStopSession).toHaveBeenCalledWith(session);
   });
 
+  it('passes resolve callback through SessionsView for terminal sessions without PTY（SessionsView 对无 PTY 终端会话也应透传结束回调）', () => {
+    const session = buildSession({
+      id: 'session-pass-through-no-pty',
+      pty_id: undefined,
+    });
+    const onStopSession = vi.fn();
+
+    render(
+      <SessionsView
+        sessions={[session]}
+        loading={false}
+        error={null}
+        useMockData={false}
+        onStopSession={onStopSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('session-card-force-complete-session-pass-through-no-pty'));
+
+    expect(onStopSession).toHaveBeenCalledWith(session);
+  });
+
+  it('uses force-complete semantics for terminal sessions without PTY（无 PTY 的终端会话应显示强制完成动作）', () => {
+    const session = buildSession({
+      id: 'session-no-pty',
+      pty_id: undefined,
+    });
+    const onStop = vi.fn();
+
+    render(<SessionCard session={session} onStop={onStop} />);
+
+    const stopButton = screen.getByTestId('session-card-force-complete-session-no-pty');
+    expect(stopButton).toHaveTextContent('强制完成');
+
+    fireEvent.click(stopButton);
+
+    expect(onStop).toHaveBeenCalledWith(session);
+  });
+
   it('disables the stop button while a stop action is pending（停止进行中时禁用列表卡片按钮）', () => {
     const session = buildSession({ id: 'session-stop-pending' });
 
@@ -91,6 +153,26 @@ describe('session card stop action（列表卡片停止动作）', () => {
     const stopButton = screen.getByTestId('session-card-stop-session-stop-pending');
     expect(stopButton).toBeDisabled();
     expect(stopButton).toHaveAttribute('title', '停止中');
+  });
+
+  it('uses processing label while resolving a no-PTY terminal session（无 PTY 会话处理中时显示处理中）', () => {
+    const session = buildSession({
+      id: 'session-no-pty-pending',
+      pty_id: undefined,
+    });
+
+    render(
+      <SessionCard
+        session={session}
+        onStop={vi.fn()}
+        stopDisabled
+      />,
+    );
+
+    expect(screen.queryByTestId('session-card-stop-session-no-pty-pending')).not.toBeInTheDocument();
+    const stopButton = screen.getByTestId('session-card-force-complete-session-no-pty-pending');
+    expect(stopButton).toBeDisabled();
+    expect(stopButton).toHaveTextContent('处理中');
   });
 
   it('shows archive button for completed PTY sessions and does not trigger stop/main click（已完成 PTY 会话显示归档按钮且不触发停止或主点击）', () => {
@@ -173,6 +255,32 @@ describe('tiled grid terminal lifecycle actions（平铺视图终端生命周期
     expect(onStopSession).toHaveBeenCalledWith(session);
   });
 
+  it('calls resolve handler for running terminal sessions without PTY in tiled view（平铺视图中的无 PTY 终端会话点击结束应触发回调）', () => {
+    const onStopSession = vi.fn();
+    const session = buildSession({
+      id: 'terminal-no-pty',
+      interaction_mode: 'terminal',
+      pty_id: undefined,
+    });
+
+    render(
+      <TiledGrid
+        sessions={[session]}
+        layout="1x1"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+        onStopSession={onStopSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('tiled-grid-stop-terminal-no-pty'));
+
+    expect(onStopSession).toHaveBeenCalledWith(session);
+  });
+
   it('disables tiled stop button while stop is pending（停止进行中时禁用平铺窗格按钮）', () => {
     const session = buildSession({
       id: 'terminal-pty-pending',
@@ -197,6 +305,35 @@ describe('tiled grid terminal lifecycle actions（平铺视图终端生命周期
     const stopButton = screen.getByTestId('tiled-grid-stop-terminal-pty-pending');
     expect(stopButton).toBeDisabled();
     expect(stopButton).toHaveAttribute('title', '停止中');
+  });
+
+  it('uses end semantics in tiled view for terminal sessions without PTY（平铺视图中的无 PTY 终端会话仍应显示结束动作）', () => {
+    const onStopSession = vi.fn();
+    const session = buildSession({
+      id: 'terminal-no-pty',
+      interaction_mode: 'terminal',
+      pty_id: undefined,
+    });
+
+    render(
+      <TiledGrid
+        sessions={[session]}
+        layout="1x1"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+        onStopSession={onStopSession}
+      />,
+    );
+
+    const stopButton = screen.getByTestId('tiled-grid-stop-terminal-no-pty');
+    expect(stopButton).toHaveAttribute('title', '结束');
+
+    fireEvent.click(stopButton);
+
+    expect(onStopSession).toHaveBeenCalledWith(session);
   });
 
   it('shows archive button instead of stop for completed panes（已完成窗格显示归档按钮而非停止按钮）', () => {

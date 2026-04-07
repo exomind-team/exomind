@@ -908,7 +908,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     render(<AgentsPage />);
     fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
 
-    fireEvent.click(await screen.findByTestId('session-card-stop-session-card-stop-no-pty'));
+    fireEvent.click(await screen.findByTestId('session-card-force-complete-session-card-stop-no-pty'));
 
     await waitFor(() => {
       expect(runtimeClientMocks.stopPtyAgent).not.toHaveBeenCalled();
@@ -925,6 +925,165 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         title: '已结束 Terminal 会话',
       }));
     });
+  });
+
+  it('closes an active structured session without PTY from the session list（无 PTY 的结构化会话可从会话列表直接关闭）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-card-close-no-pty',
+        role: 'Structured No PTY',
+        interaction_mode: 'structured',
+        pty_id: undefined,
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+    runtimeClientMocks.updateSession.mockResolvedValue({
+      ok: true,
+      data: buildSession({
+        id: 'session-card-close-no-pty',
+        role: 'Structured No PTY',
+        status: 'completed',
+        interaction_mode: 'structured',
+        pty_id: undefined,
+        source_host_id: 'runtime-host-523',
+      }),
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    fireEvent.click(await screen.findByTestId('session-card-close-session-card-close-no-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).not.toHaveBeenCalled();
+      expect(runtimeClientMocks.updateSession).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1' }),
+        'session-card-close-no-pty',
+        { status: 'completed' },
+      );
+      expect(toastMocks.toast).toHaveBeenCalledWith(expect.objectContaining({
+        title: '正在关闭会话',
+      }));
+      expect(toastMocks.update).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'toast-523',
+        title: '已关闭会话',
+      }));
+    });
+  });
+
+  it('dismisses the runtime error banner when the missing-PTY hint is clicked（缺少 PTY 的提示横幅整条可点击关闭）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-banner-no-pty',
+        role: 'Banner No PTY',
+        interaction_mode: 'terminal',
+        pty_id: undefined,
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-banner-no-pty'));
+
+    const banner = await screen.findByTestId('agent-runtime-error-banner');
+    expect(banner).toHaveTextContent('该会话没有关联 PTY');
+    expect(banner).toHaveTextContent('网络 / 会话');
+    expect(banner).not.toHaveAttribute('aria-label');
+
+    fireEvent.click(banner);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-runtime-error-banner')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows the updated force-complete copy when historical resume fails（历史恢复失败时也应引导去网络会话页强制完成）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-banner-resume-fail',
+        role: 'Resume Fail No PTY',
+        agent_kind: 'codex',
+        interaction_mode: 'terminal',
+        pty_id: undefined,
+        inner_session_id: '019d0011-aaaa-bbbb-cccc-1234567890ab',
+        source_host_id: 'runtime-host-523',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'D:/project/exomind',
+        },
+      }),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/signal-routes')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => SAMPLE_SIGNAL_ROUTES,
+        } as Response;
+      }
+      if (url.includes('/signals/history')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: '019d0011-aaaa-bbbb-cccc-1234567890ab',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-03-18T02:20:32.696Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty/resume')) {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: 'resume failed' }),
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+    fireEvent.click(await screen.findByTestId('session-card-session-banner-resume-fail'));
+
+    const banner = await screen.findByTestId('agent-runtime-error-banner');
+    expect(banner).toHaveTextContent('自动恢复失败');
+    expect(banner).toHaveTextContent('网络 / 会话');
+    expect(banner).toHaveTextContent('强制完成');
   });
 
   it('tries to resume a recoverable terminal session without PTY when opened from the session list（点开无 PTY 且可恢复的终端会话时应尝试恢复）', async () => {

@@ -3590,6 +3590,37 @@ export function AgentsPage() {
     refreshSessions();
     return currentSession;
   }, [refreshSessions]);
+  const completeSessionWithoutRuntimeControl = useCallback(async (
+    session: SessionInfo,
+    reason: string,
+  ) => {
+    const completionSteps = buildTerminalSessionCompletionSteps(session.status);
+    if (completionSteps.length === 0) {
+      return session;
+    }
+
+    const host = resolveRuntimeHostForSession(session);
+    const runtimeClient = new RuntimeClient();
+    let currentSession = session;
+    for (const step of completionSteps) {
+      const result = await runtimeClient.updateSession(host, currentSession.id, step);
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+      currentSession = result.data;
+    }
+
+    console.info('[agent-hub][session][resolve] completed session without runtime control', {
+      sessionId: currentSession.id,
+      interactionMode: currentSession.interaction_mode,
+      ptyId: currentSession.pty_id ?? null,
+      sourceHostId: currentSession.source_host_id ?? null,
+      status: session.status,
+      reason,
+    });
+    refreshSessions();
+    return currentSession;
+  }, [refreshSessions]);
   const handleResolveTerminalSession = useCallback(async (session: SessionInfo) => {
     if (isTerminalSessionResolutionPending(session)) {
       return;
@@ -3621,7 +3652,7 @@ export function AgentsPage() {
     });
 
     try {
-      const completedSession = await completeDisconnectedTerminalSession(
+      const completedSession = await completeSessionWithoutRuntimeControl(
         session,
         'manual-missing-pty-resolution',
       );
@@ -3659,8 +3690,71 @@ export function AgentsPage() {
       setTerminalSessionResolutionPending(session.id, false);
     }
   }, [
-    completeDisconnectedTerminalSession,
+    completeSessionWithoutRuntimeControl,
     handleStopPtyAgent,
+    isTerminalSessionResolutionPending,
+    setTerminalSessionResolutionPending,
+  ]);
+  const handleCloseSessionWithoutPty = useCallback(async (session: SessionInfo) => {
+    if (isTerminalSessionResolutionPending(session)) {
+      return;
+    }
+
+    const targetLabel = session.role || session.id;
+    const closeToast = toast({
+      title: '正在关闭会话',
+      description: `会话：${targetLabel}`,
+      duration: 5000,
+    });
+    setRuntimeHostError('');
+    setTerminalSessionResolutionPending(session.id, true);
+    console.info('[agent-hub][session][close] closing active session without PTY', {
+      sessionId: session.id,
+      interactionMode: session.interaction_mode,
+      sourceHostId: session.source_host_id ?? null,
+      status: session.status,
+    });
+
+    try {
+      const completedSession = await completeSessionWithoutRuntimeControl(
+        session,
+        'manual-non-terminal-without-pty-close',
+      );
+      closeToast.update({
+        id: closeToast.id,
+        title: '已关闭会话',
+        description: `会话：${targetLabel}`,
+        duration: 4000,
+      });
+      console.info('[agent-hub][session][close] closed active session without PTY', {
+        sessionId: session.id,
+        interactionMode: session.interaction_mode,
+        sourceHostId: session.source_host_id ?? null,
+        nextStatus: completedSession.status,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failureMessage = `关闭会话失败: ${message}`;
+      setRuntimeHostError(failureMessage);
+      console.warn('[agent-hub][session][close] failed to close active session without PTY', {
+        sessionId: session.id,
+        interactionMode: session.interaction_mode,
+        sourceHostId: session.source_host_id ?? null,
+        status: session.status,
+        message,
+      });
+      closeToast.update({
+        id: closeToast.id,
+        title: '关闭会话失败',
+        description: failureMessage,
+        variant: 'destructive',
+        duration: 6000,
+      });
+    } finally {
+      setTerminalSessionResolutionPending(session.id, false);
+    }
+  }, [
+    completeSessionWithoutRuntimeControl,
     isTerminalSessionResolutionPending,
     setTerminalSessionResolutionPending,
   ]);
@@ -4043,17 +4137,6 @@ export function AgentsPage() {
   }, [attemptDisconnectedTerminalSessionResume]);
 
   const handleOpenSessionTerminal = useCallback(async (session: SessionInfo) => {
-    if (session.interaction_mode !== 'terminal') {
-      setRuntimeHostError('');
-      console.info('[agent-hub][pty][open] ignored non-terminal session card click', {
-        sessionId: session.id,
-        interactionMode: session.interaction_mode,
-        status: session.status,
-        sourceHostId: session.source_host_id ?? null,
-      });
-      return;
-    }
-
     if (!session.pty_id) {
       const recoverableSnapshot = buildRecoverableTerminalSessionSnapshot(session);
       const missingPtyLogPayload = {
@@ -4064,7 +4147,7 @@ export function AgentsPage() {
       };
 
       if (!recoverableSnapshot) {
-        const failureMessage = '该会话没有关联 PTY，可点击强制完成将其收敛。';
+        const failureMessage = '该会话没有关联 PTY；可在“网络 / 会话”中点击右上角“强制完成”将其收敛。';
         console.warn('[agent-hub][pty][open] session is missing pty_id and cannot resume', missingPtyLogPayload);
         setRuntimeHostError(failureMessage);
         return;
@@ -4087,7 +4170,7 @@ export function AgentsPage() {
         return;
       }
       if (session.source_host_id && !matchedHost && !shouldFallbackToActiveRuntimeHost) {
-        const failureMessage = 'Terminal 会话缺少 PTY，且原始 RT 已不可用；可点击强制完成将其收敛。';
+        const failureMessage = 'Terminal 会话缺少 PTY，且原始 RT 已不可用；可在“网络 / 会话”中点击右上角“强制完成”将其收敛。';
         setRuntimeHostError(failureMessage);
         console.warn('[agent-hub][pty][open] missing-PTY resume skipped because source host is unavailable', {
           ...missingPtyLogPayload,
@@ -4097,7 +4180,7 @@ export function AgentsPage() {
       }
 
       setRuntimeHostError(
-        'Terminal 会话缺少 PTY，正在尝试恢复历史终端；若恢复失败，可点击强制完成将其收敛。',
+        'Terminal 会话缺少 PTY，正在尝试恢复历史终端；若恢复失败，可在“网络 / 会话”中点击右上角“强制完成”将其收敛。',
       );
       console.info('[agent-hub][pty][open] session is missing pty_id; attempting historical resume', {
         ...missingPtyLogPayload,
@@ -4131,7 +4214,7 @@ export function AgentsPage() {
         });
         return;
       } catch (error) {
-        const failureMessage = 'Terminal 会话缺少 PTY，自动恢复失败；可点击强制完成将其收敛。';
+        const failureMessage = 'Terminal 会话缺少 PTY，自动恢复失败；可在“网络 / 会话”中点击右上角“强制完成”将其收敛。';
         setRuntimeHostError(failureMessage);
         console.warn('[agent-hub][pty][open] failed to resume terminal session without PTY', {
           ...missingPtyLogPayload,
@@ -6231,7 +6314,11 @@ export function AgentsPage() {
             void handleOpenSessionTerminal(session);
           }}
           onStopSession={(session) => {
-            void handleResolveTerminalSession(session);
+            if (session.interaction_mode === 'terminal') {
+              void handleResolveTerminalSession(session);
+              return;
+            }
+            void handleCloseSessionWithoutPty(session);
           }}
           onArchiveSession={(session) => {
             void handleArchiveSession(session);
@@ -6377,7 +6464,11 @@ export function AgentsPage() {
                 void handleSessionMarkWaiting(session);
               }}
               onStopSession={(session) => {
-                void handleResolveTerminalSession(session);
+                if (session.interaction_mode === 'terminal') {
+                  void handleResolveTerminalSession(session);
+                  return;
+                }
+                void handleCloseSessionWithoutPty(session);
               }}
               onArchiveSession={(session) => {
                 void handleArchiveSession(session);
@@ -6653,12 +6744,12 @@ export function AgentsPage() {
             <button
               type="button"
               data-testid="agent-runtime-error-banner"
-              onClick={() => setRuntimeHostError('')}
-              className="mb-3 block w-full rounded-lg bg-red-50 px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/45"
-              aria-label="关闭提示"
-              title="点击关闭提示"
+              onClick={() => {
+                setRuntimeHostError('');
+              }}
+              className="mb-3 block w-full rounded-lg bg-red-50 px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/40"
             >
-              <span className="block min-w-0">{runtimeHostError}</span>
+              {runtimeHostError}
             </button>
           )}
           {content}
@@ -7241,23 +7332,12 @@ export function AgentsPage() {
                                   : '当前 PTY 已不存在，RT 可能已经重启。下方保留关闭前历史；如需结束，可点击上方“结束”收敛后归档。'}
                               </p>
                               {runtimeHostError && (
-                                <div className="flex items-start justify-between gap-2">
-                                  <p
-                                    data-testid="agent-rightpanel-pty-disconnected-message"
-                                    className="min-w-0 flex-1 text-[#FCA5A5]"
-                                  >
-                                    {runtimeHostError}
-                                  </p>
-                                  <button
-                                    type="button"
-                                    onClick={() => setRuntimeHostError('')}
-                                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[#FCA5A5] transition-colors hover:bg-[#7F1D1D]/30 hover:text-[#FECACA]"
-                                    aria-label="关闭提示"
-                                    title="关闭提示"
-                                  >
-                                    <X size={12} />
-                                  </button>
-                                </div>
+                                <p
+                                  data-testid="agent-rightpanel-pty-disconnected-message"
+                                  className="text-[#FCA5A5]"
+                                >
+                                  {runtimeHostError}
+                                </p>
                               )}
                             </div>
                             {isActivePtyAutoResuming ? (
