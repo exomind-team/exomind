@@ -1,0 +1,57 @@
+src/ui/app/pages/AgentsPage.tsx
+  bacd18fd7a184ad9 6747-6750,6752
+  49e15e29c711ca7a 6317-6321,6467-6471
+src/ui/app/pages/agents/SessionCard.tsx
+  12fdd299f1f618dc 135
+  49e15e29c711ca7a 36-39,41-46,197,200-201,212
+  bacd18fd7a184ad9 35,56-57,61,130-134,136-138,155-158,178,182-183,191,193,195-196,198-199,202-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "1a7c2cc21b4d5931b606feec9324ff187d2904b9",
+  "prompts": {
+    "12fdd299f1f618dc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d674e-b174-7982-bc39-4fdfe052718a",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 4,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/8371aaba460a9006e1e01b500cb4faa79b9efab8282fca2896eaa29d4b689c9b"
+    },
+    "49e15e29c711ca7a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6769-7120-7ed2-8e44-1ea80bb69d73",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 124,
+      "total_deletions": 19,
+      "accepted_lines": 46,
+      "overriden_lines": 60,
+      "messages_url": "https://usegitai.com/cas/37cf657c5e447f57750551574a933ca64df31c3babb6a9b96f53d005d03652e1"
+    },
+    "bacd18fd7a184ad9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d66e6-cc3d-76d1-9e32-1a7d38f8e9d1",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 7889,
+      "total_deletions": 7661,
+      "accepted_lines": 1802,
+      "overriden_lines": 189,
+      "messages_url": "https://usegitai.com/cas/51d9bf9f4261c40311f94fa579a56bd193106ae4ea5beb01ad52662f3d13d5dc"
+    }
+  }
+}
