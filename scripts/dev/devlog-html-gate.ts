@@ -11,6 +11,11 @@ type TextIssue = {
   value: string;
 };
 
+type SchemaIssue = {
+  path: string;
+  reason: string;
+};
+
 const REPLACEMENT_CHAR = '\uFFFD';
 
 const STRICT_QUESTION_PATHS: Record<DevlogHtmlKind, RegExp[]> = {
@@ -156,6 +161,158 @@ function formatGateError(kind: DevlogHtmlKind, issues: TextIssue[]) {
   ].join('\n');
 }
 
+function formatSchemaError(kind: DevlogHtmlKind, issues: SchemaIssue[]) {
+  const label = kind === 'report' ? '日报' : '航线';
+  return [
+    `❌ HTML 生成前门禁失败：检测到${label}输入数据存在结构性错误（类型不匹配）。`,
+    ...issues.map(issue => `   · ${issue.path}: ${issue.reason}`),
+    '   · 请让 Agent 重读分析原因并重试；不要直接发布当前 HTML。',
+  ].join('\n');
+}
+
+function collectArrayFields(value: unknown, hits: string[], path: string) {
+  if (Array.isArray(value)) {
+    hits.push(path);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      collectArrayFields(nested, hits, `${path}.${key}`);
+    }
+  }
+}
+
+function collectObjectFields(value: unknown, hits: string[], path: string) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    hits.push(path);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      collectObjectFields(nested, hits, `${path}.${key}`);
+    }
+  }
+}
+
+function assertValidDevlogSchema(kind: DevlogHtmlKind, data: Record<string, unknown>) {
+  const issues: SchemaIssue[] = [];
+
+  if (kind === 'report') {
+    // 必须为数组（.map/.forEach 在 undefined 上调用即崩溃）
+    const arrayPaths = [
+      'metrics', 'headlines', 'mainlines', 'actions', 'scorecard',
+      'prs.open', 'prs.merged',
+      'weather.ups', 'weather.downs',
+      'truth.closed', 'truth.stillOpen',
+    ];
+    for (const p of arrayPaths) {
+      const parts = p.split('.');
+      let v: unknown = data;
+      for (const part of parts) v = (v as Record<string, unknown>)?.[part];
+      if (!Array.isArray(v)) {
+        issues.push({ path: p, reason: `期望数组，实际为 ${Array.isArray(v) ? 'array' : typeof v}` });
+      }
+    }
+
+    // insight 必须为对象 { text: string, author: string }
+    const insight = data.insight as Record<string, unknown> | undefined;
+    if (typeof insight === 'string') {
+      issues.push({ path: 'insight', reason: '期望对象 { text: string, author: string }，实际为纯字符串（会导致渲染页面白屏）' });
+    } else if (typeof insight?.text !== 'string' || insight.text.trim().length < 20) {
+      issues.push({ path: 'insight.text', reason: `期望非空字符串（≥20字符），实际为 ${typeof insight?.text === 'string' ? `"${insight.text.slice(0, 20)}..."` : typeof insight?.text}` });
+    } else if (typeof insight?.author !== 'string' || !insight.author.trim()) {
+      issues.push({ path: 'insight.author', reason: '期望非空字符串，实际为空或缺失' });
+    }
+
+    // weather 必须为对象
+    const weather = data.weather as Record<string, unknown> | undefined;
+    if (!weather || typeof weather !== 'object' || Array.isArray(weather)) {
+      issues.push({ path: 'weather', reason: '期望对象 { emoji, label, level, ups[], downs[] }' });
+    } else {
+      for (const f of ['emoji', 'label', 'level'] as const) {
+        if (typeof weather[f] !== 'string' || !weather[f].trim()) {
+          issues.push({ path: `weather.${f}`, reason: `期望非空字符串，实际为 ${typeof weather[f] === 'string' ? `"${weather[f]}"` : typeof weather[f]}` });
+        }
+      }
+      for (const f of ['ups', 'downs'] as const) {
+        if (!Array.isArray(weather[f])) {
+          issues.push({ path: `weather.${f}`, reason: `期望数组，实际为 ${typeof weather[f]}` });
+        }
+      }
+    }
+
+    // meta 必须为对象
+    const meta = data.meta as Record<string, unknown> | undefined;
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+      issues.push({ path: 'meta', reason: '期望对象 { date, title }' });
+    }
+
+    // publisher 必须为对象（或 undefined 兜底）
+    const publisher = data.publisher as Record<string, unknown> | undefined;
+    if (publisher !== undefined && (typeof publisher !== 'object' || Array.isArray(publisher))) {
+      issues.push({ path: 'publisher', reason: '期望对象 { identity, os, model, version } 或 undefined' });
+    }
+
+    // poolHealth（可选但如果存在必须为对象）
+    const poolHealth = data.poolHealth as Record<string, unknown> | undefined;
+    if (poolHealth !== undefined && (typeof poolHealth !== 'object' || Array.isArray(poolHealth))) {
+      issues.push({ path: 'poolHealth', reason: '期望对象或 undefined' });
+    }
+
+    // truth 必须为对象
+    const truth = data.truth as Record<string, unknown> | undefined;
+    if (!truth || typeof truth !== 'object' || Array.isArray(truth)) {
+      issues.push({ path: 'truth', reason: '期望对象 { closed[], stillOpen[] }' });
+    }
+
+    // scorecard 数组元素必须为对象
+    const scorecard = data.scorecard as unknown[];
+    if (Array.isArray(scorecard)) {
+      scorecard.forEach((item, i) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          issues.push({ path: `scorecard[${i}]`, reason: '期望对象 { text, result, note }' });
+        }
+      });
+    }
+
+    // prs 必须为对象
+    const prs = data.prs as Record<string, unknown> | undefined;
+    if (!prs || typeof prs !== 'object' || Array.isArray(prs)) {
+      issues.push({ path: 'prs', reason: '期望对象 { open[], merged[] }' });
+    }
+
+  } else if (kind === 'route') {
+    // route 的结构校验（参照 renderRouteText 和渲染引擎）
+    const status = data.status as Record<string, unknown> | undefined;
+    if (!status || typeof status !== 'object' || Array.isArray(status)) {
+      issues.push({ path: 'status', reason: '期望对象 { emoji, label, summary }' });
+    }
+
+    const batches = data.batches as unknown[];
+    if (!Array.isArray(batches)) {
+      issues.push({ path: 'batches', reason: `期望数组，实际为 ${typeof batches}` });
+    }
+
+    const actions = data.actions as unknown[];
+    if (!Array.isArray(actions)) {
+      issues.push({ path: 'actions', reason: `期望数组，实际为 ${typeof actions}` });
+    }
+
+    const batchesItems = data.batches as unknown[];
+    if (Array.isArray(batchesItems)) {
+      batchesItems.forEach((item: unknown, i: number) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          issues.push({ path: `batches[${i}]`, reason: '期望对象 { name, issues[], pct }' });
+        }
+      });
+    }
+  }
+
+  if (issues.length) {
+    throw new Error(formatSchemaError(kind, issues));
+  }
+}
+
 export function assertNoEncodingIssuesInDevlogObject(kind: DevlogHtmlKind, data: Record<string, any>) {
   const issues: TextIssue[] = [];
   collectEncodingIssues(kind, data, issues);
@@ -204,6 +361,7 @@ export function loadValidatedDevlogHtmlFile(kind: DevlogHtmlKind, filePath: stri
   const objectBlock = extractObjectBlock(html, variableName);
   const data = parseObjectBlock(objectBlock, variableName);
   assertNoEncodingIssuesInDevlogObject(kind, data);
+  assertValidDevlogSchema(kind, data as Record<string, unknown>);
 
   return { html, data };
 }
