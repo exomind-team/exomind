@@ -931,6 +931,31 @@ impl AppState {
         )
     }
 
+    #[cfg(test)]
+    pub fn new_isolated_test_runtime(port: u16, host_id: String) -> (tempfile::TempDir, Self) {
+        let tempdir = tempfile::tempdir().expect("create isolated runtime tempdir");
+        let storage_paths = RuntimeStoragePaths {
+            data_dir: tempdir.path().join("runtime-data"),
+            eventlog_sqlite_path: Some(tempdir.path().join("eventlog.sqlite")),
+            config_sqlite_path: Some(tempdir.path().join("config.sqlite")),
+            reminder_sqlite_path: Some(tempdir.path().join("reminders.sqlite")),
+            task_sqlite_path: Some(tempdir.path().join("tasks.sqlite")),
+            proposal_sqlite_path: Some(tempdir.path().join("proposals.sqlite")),
+            timeblock_sqlite_path: Some(tempdir.path().join("timeblocks.sqlite")),
+            session_sqlite_path: Some(tempdir.path().join("sessions.sqlite")),
+        };
+        let state = Self::new_runtime_with_storage_paths(
+            port,
+            host_id,
+            None,
+            None,
+            false,
+            None,
+            storage_paths,
+        );
+        (tempdir, state)
+    }
+
     fn new_runtime_with_storage_paths(
         port: u16,
         host_id: String,

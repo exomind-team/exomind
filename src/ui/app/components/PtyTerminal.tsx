@@ -3,7 +3,13 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import {
+  getPtyTerminalReplayLimitKb,
+  resolvePtyTerminalScrollbackLines,
+  subscribePtyTerminalReplayLimitKbChanges,
+} from '@/config/pty-terminal-preferences';
 import { log } from '@/lib/logger';
+import { sendPtyTextInput } from './pty-input';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -78,6 +84,30 @@ function parseSseFrame(rawFrame: string): { eventType: string; data: string | nu
   };
 }
 
+function includesWindowsPlatform(value: string | undefined): boolean {
+  return typeof value === 'string' && value.toLowerCase().includes('win');
+}
+
+function resolveWindowsPtyOptions() {
+  if (typeof navigator === 'undefined') {
+    return undefined;
+  }
+
+  const userAgentData = navigator as Navigator & {
+    userAgentData?: { platform?: string };
+  };
+
+  if (
+    includesWindowsPlatform(userAgentData.userAgentData?.platform)
+    || includesWindowsPlatform(navigator.platform)
+    || includesWindowsPlatform(navigator.userAgent)
+  ) {
+    return { backend: 'conpty' as const };
+  }
+
+  return undefined;
+}
+
 // ── Component ──────────────────────────────────────────────────
 
 export function PtyTerminal({
@@ -95,12 +125,25 @@ export function PtyTerminal({
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const onInitialConnectionFailureRef = useRef(onInitialConnectionFailure);
   const hasConnectedOnceRef = useRef(false);
+  const scrollbackLinesRef = useRef(
+    resolvePtyTerminalScrollbackLines(getPtyTerminalReplayLimitKb())
+  );
   const [isStreamConnecting, setIsStreamConnecting] = useState(true);
   const [streamErrorMessage, setStreamErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     onInitialConnectionFailureRef.current = onInitialConnectionFailure;
   }, [onInitialConnectionFailure]);
+
+  useEffect(() => (
+    subscribePtyTerminalReplayLimitKbChanges((replayLimitKb) => {
+      const nextScrollbackLines = resolvePtyTerminalScrollbackLines(replayLimitKb);
+      scrollbackLinesRef.current = nextScrollbackLines;
+      if (terminalRef.current) {
+        terminalRef.current.options.scrollback = nextScrollbackLines;
+      }
+    })
+  ), []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -218,8 +261,11 @@ export function PtyTerminal({
       fontSize: 13,
       fontFamily: "'Cascadia Code', 'Fira Code', Consolas, monospace",
       cursorBlink: interactive,
+      scrollback: scrollbackLinesRef.current,
+      scrollOnEraseInDisplay: true,
       allowProposedApi: true,
       disableStdin: !interactive,
+      windowsPty: resolveWindowsPtyOptions(),
     });
 
     const fitAddon = new FitAddon();
@@ -239,16 +285,11 @@ export function PtyTerminal({
       if (isControlRequestPaused()) {
         return;
       }
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(text);
-      const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
-      const encoded = btoa(binary);
-
-      void fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/input`, {
-        method: 'POST',
-        headers: buildHeaders(),
-        body: JSON.stringify({ data: encoded }),
-      }).then((response) => {
+      void sendPtyTextInput({
+        rtBaseUrl,
+        ptyId,
+        authToken,
+      }, text).then((response) => {
         if (response.ok) {
           return;
         }
@@ -683,7 +724,7 @@ export function PtyTerminal({
   }, [authToken, autoFocus, interactive, ptyId, rtBaseUrl]);
 
   return (
-    <div className="relative h-full w-full min-h-[200px]" style={{ backgroundColor: '#1C1917' }}>
+    <div className="relative h-full w-full min-h-0" style={{ backgroundColor: '#1C1917' }}>
       {isStreamConnecting ? (
         <div
           data-testid="pty-terminal-loading"
@@ -704,7 +745,7 @@ export function PtyTerminal({
       ) : null}
       <div
         ref={containerRef}
-        className="h-full w-full min-h-[200px]"
+        className="h-full w-full min-h-0"
         style={{ backgroundColor: '#1C1917' }}
       />
     </div>

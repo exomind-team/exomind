@@ -62,6 +62,7 @@ describe('SettingsPage runtime target mode setting', () => {
     expect(screen.getByText('RT 配置')).toBeInTheDocument();
     expect(screen.getByText('RT 开放模式')).toBeInTheDocument();
     expect(screen.getByText('超时待决策时间')).toBeInTheDocument();
+    expect(screen.getByText('控制 PTY 连续无输出多久后自动标记为等待决策。')).toBeInTheDocument();
     expect(screen.getByText('终端历史回放上限')).toBeInTheDocument();
     expect(screen.queryByText('RT 地址')).toBeNull();
 

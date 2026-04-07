@@ -1,11 +1,15 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { PtyTerminal } from '@/ui/app/components/PtyTerminal';
 
 const xtermState = vi.hoisted(() => {
+  const constructedOptions: Array<Record<string, unknown>> = [];
   const terminal = {
     rows: 24,
     cols: 80,
+    options: {} as Record<string, unknown>,
     loadAddon: vi.fn(),
     open: vi.fn(),
     write: vi.fn(),
@@ -22,11 +26,19 @@ const xtermState = vi.hoisted(() => {
     fit: vi.fn(),
   };
 
-  return { terminal, fitAddon };
+  return { constructedOptions, terminal, fitAddon };
 });
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
+    options: Record<string, unknown>;
+
+    constructor(options: Record<string, unknown> = {}) {
+      this.options = { ...options };
+      xtermState.constructedOptions.push(this.options);
+      xtermState.terminal.options = this.options;
+    }
+
     rows = xtermState.terminal.rows;
 
     cols = xtermState.terminal.cols;
@@ -119,6 +131,8 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    xtermState.constructedOptions.length = 0;
+    xtermState.terminal.options = {};
     sizeReady = false;
     resizeObservers = [];
     streamPlans = [];
@@ -520,5 +534,61 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     await flushUi(500);
     expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
+  });
+
+  it('updates scrollback in place without recreating the terminal（历史回放上限变更时原位更新而不重建终端）', async () => {
+    streamPlans.push(() => createOpenSseResponse());
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-scrollback-update"
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(60);
+
+    expect(xtermState.constructedOptions).toHaveLength(1);
+    expect(xtermState.constructedOptions[0]?.scrollOnEraseInDisplay).toBe(true);
+
+    const streamCallsBefore = fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'));
+    expect(streamCallsBefore).toHaveLength(1);
+
+    const preferences = await import('@/config/pty-terminal-preferences');
+    const previousReplayLimitKb = preferences.getPtyTerminalReplayLimitKb();
+
+    try {
+      const nextReplayLimitKb = 384;
+      act(() => {
+        preferences.setPtyTerminalReplayLimitKb(nextReplayLimitKb);
+      });
+      await flushUi(0);
+
+      expect(xtermState.constructedOptions).toHaveLength(1);
+      expect(xtermState.terminal.dispose).not.toHaveBeenCalled();
+      expect(xtermState.terminal.options.scrollback).toBe(
+        preferences.resolvePtyTerminalScrollbackLines(nextReplayLimitKb),
+      );
+
+      const streamCallsAfter = fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'));
+      expect(streamCallsAfter).toHaveLength(1);
+    } finally {
+      act(() => {
+        preferences.setPtyTerminalReplayLimitKb(previousReplayLimitKb);
+      });
+      await flushUi(0);
+    }
+  });
+
+  it('does not enforce a fixed 200px minimum height on the terminal surface（终端表面不再强制固定最小高度）', () => {
+    const source = readFileSync(
+      path.resolve(process.cwd(), 'src/ui/app/components/PtyTerminal.tsx'),
+      'utf8',
+    );
+
+    expect(source).not.toContain('min-h-[200px]');
+    expect(source).toContain('min-h-0');
   });
 });

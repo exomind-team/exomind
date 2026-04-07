@@ -139,7 +139,6 @@ import {
   MAX_TASK_DAG_ZOOM_SPEED,
 } from '@/config/task-dag-keyboard-preferences';
 import {
-  DEFAULT_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS,
   DEFAULT_PTY_TERMINAL_REPLAY_LIMIT_KB,
   MAX_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS,
   MAX_PTY_TERMINAL_REPLAY_LIMIT_KB,
@@ -1502,7 +1501,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: '超时待决策时间',
     icon: Bot,
     category: 'terminal-agent',
-    description: `连续 ${DEFAULT_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS} 秒没有任何 PTY 输出字节时，自动标记为等待决策。`,
+    description: '控制 PTY 连续无输出多久后自动标记为等待决策。',
     visible: embeddedRuntimeOrWeb,
     rowTestId: 'new-settings-pty-waiting-input-idle-timeout-row',
     controlTestId: 'new-settings-pty-waiting-input-idle-timeout-slider',

@@ -61,7 +61,7 @@ struct PtyStreamEofPayload {
 }
 
 const PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY: &str = "exomind:ptyWaitingInputIdleTimeoutSeconds";
-const DEFAULT_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS: u64 = 30;
+const DEFAULT_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS: u64 = 60;
 const MIN_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS: u64 = 1;
 const MAX_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS: u64 = 600;
 const PTY_REPLAY_LIMIT_KB_CONFIG_KEY: &str = "exomind:ptyTerminalReplayLimitKb";
@@ -635,7 +635,8 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY, register_pty_session, router,
+        PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY, register_pty_session,
+        resolve_pty_waiting_input_idle_timeout, router,
         serialize_pty_eof_payload, stream_pty_output, watch_pty_lifecycle,
     };
     use axum::body::Body;
@@ -745,6 +746,17 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    #[test]
+    fn default_pty_waiting_input_idle_timeout_is_60_seconds() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-default-timeout-host".to_string());
+
+        assert_eq!(
+            resolve_pty_waiting_input_idle_timeout(&state),
+            Duration::from_secs(60)
+        );
     }
 
     #[tokio::test]

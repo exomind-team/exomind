@@ -360,6 +360,7 @@ describe('settings registry coverage audit', () => {
       runtimeTargetMode: 'external',
     })).toBe(false);
     expect(ptyWaitingTimeout.label).toBe('超时待决策时间');
+    expect(ptyWaitingTimeout.description).toBe('控制 PTY 连续无输出多久后自动标记为等待决策。');
     expect(ptyWaitingTimeout.min).toBe(1);
     expect(ptyWaitingTimeout.max).toBe(600);
     expect(ptyWaitingTimeout.step).toBe(1);
