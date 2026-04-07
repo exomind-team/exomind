@@ -6,10 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use exomind_cli::cli::{GlobalOptions, ProposalAddArgs, ProposalCommentArgs, ProposalIdArgs, ProposalListArgs};
+use exomind_cli::cli::{
+    GlobalOptions, ProposalAddArgs, ProposalCommentArgs, ProposalIdArgs, ProposalListArgs,
+};
 use exomind_cli::commands::proposal::{
-    add_proposal, approve_proposal, comment_proposal, get_proposal, list_proposals, reject_proposal,
-    snooze_proposal,
+    add_proposal, approve_proposal, comment_proposal, get_proposal, list_proposals,
+    reject_proposal, snooze_proposal,
 };
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -56,7 +58,10 @@ async fn proposal_add_posts_pending_proposal() {
     let latest = captured.last().expect("captured add request");
     assert_eq!(latest.method, "POST");
     assert_eq!(latest.path, "/api/proposals");
-    assert_eq!(latest.query.get("profile_id"), Some(&"profile-argon".to_string()));
+    assert_eq!(
+        latest.query.get("profile_id"),
+        Some(&"profile-argon".to_string())
+    );
     let body = latest.body.as_ref().expect("proposal add body");
     assert_eq!(body["action_type"], "create_task");
     assert_eq!(body["action_params"]["title"], "整理浏览器标签");
@@ -76,19 +81,19 @@ async fn proposal_approve_patches_status_to_approved() {
         spawn_if_missing: false,
     };
 
-    let approved = approve_proposal(
-        &global,
-        &ProposalIdArgs { proposal_id: 12 },
-    )
-    .await
-    .expect("proposal approve");
+    let approved = approve_proposal(&global, &ProposalIdArgs { proposal_id: 12 })
+        .await
+        .expect("proposal approve");
 
     assert_eq!(approved["status"], "approved");
     let captured = state.captured.lock().expect("captured requests");
     let latest = captured.last().expect("captured approve request");
     assert_eq!(latest.method, "PATCH");
     assert_eq!(latest.path, "/api/proposals/12");
-    assert_eq!(latest.body.as_ref().expect("approve body")["status"], "approved");
+    assert_eq!(
+        latest.body.as_ref().expect("approve body")["status"],
+        "approved"
+    );
 }
 
 #[tokio::test]
@@ -172,7 +177,9 @@ async fn spawn_proposal_server(state: ProposalTestState) -> String {
         .with_state(state);
 
     tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve proposal test app");
+        axum::serve(listener, app)
+            .await
+            .expect("serve proposal test app");
     });
 
     address.to_string()

@@ -55,8 +55,7 @@ fn root_help_mentions_eventlog_task_proposal_rt_and_examples() {
 
 #[test]
 fn eventlog_get_parses_event_id() {
-    let cli =
-        Cli::try_parse_from(["exomind", "eventlog", "get", "evt-123"]).expect("eventlog get");
+    let cli = Cli::try_parse_from(["exomind", "eventlog", "get", "evt-123"]).expect("eventlog get");
 
     match cli.command.expect("eventlog command") {
         RootCommand::Eventlog(EventlogCommand::Get(args)) => {

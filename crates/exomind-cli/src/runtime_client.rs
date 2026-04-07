@@ -46,7 +46,8 @@ impl RuntimeClient {
     where
         T: DeserializeOwned,
     {
-        self.send_json(self.request(reqwest::Method::GET, path)?).await
+        self.send_json(self.request(reqwest::Method::GET, path)?)
+            .await
     }
 
     pub async fn post_json<T, B>(&self, path: &str, body: &B) -> Result<T, CliError>

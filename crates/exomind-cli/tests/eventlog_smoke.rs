@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
-use exomind_cli::cli::{EventlogAddArgs, EventlogGetArgs, EventlogListArgs, EventlogWatchArgs, GlobalOptions};
+use exomind_cli::cli::{
+    EventlogAddArgs, EventlogGetArgs, EventlogListArgs, EventlogWatchArgs, GlobalOptions,
+};
 use exomind_cli::commands::eventlog::{add_event, get_event, list_events, watch_events};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -47,7 +49,10 @@ async fn eventlog_add_posts_to_scoped_rt_endpoint() {
     let captured = state.captured.lock().expect("captured requests");
     let latest = captured.last().expect("captured add request");
     assert_eq!(latest.path, "/eventlog");
-    assert_eq!(latest.query.get("user_id"), Some(&"profile-argon".to_string()));
+    assert_eq!(
+        latest.query.get("user_id"),
+        Some(&"profile-argon".to_string())
+    );
     assert_eq!(latest.body["content"], "补记今天的口述");
     assert_eq!(latest.body["tags"], json!(["note", "voice"]));
 }
@@ -142,7 +147,9 @@ async fn spawn_eventlog_server(state: EventlogTestState) -> String {
         .with_state(state);
 
     tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve eventlog test app");
+        axum::serve(listener, app)
+            .await
+            .expect("serve eventlog test app");
     });
 
     address.to_string()

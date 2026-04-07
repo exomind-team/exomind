@@ -718,12 +718,9 @@ fn parse_openai_completion(parsed: &Value) -> Result<ProviderCompletion, String>
 fn parse_openai_completion_body(body: &str) -> Result<ProviderCompletion, String> {
     match serde_json::from_str::<Value>(body) {
         Ok(parsed) => parse_openai_completion(&parsed),
-        Err(json_error) => parse_openai_sse_completion(body)
-            .map_err(|sse_error| {
-                format!(
-                    "OpenAI 响应解析失败: {json_error}; sse_error={sse_error}; body={body}"
-                )
-            }),
+        Err(json_error) => parse_openai_sse_completion(body).map_err(|sse_error| {
+            format!("OpenAI 响应解析失败: {json_error}; sse_error={sse_error}; body={body}")
+        }),
     }
 }
 
@@ -784,9 +781,7 @@ fn parse_openai_sse_completion(body: &str) -> Result<ProviderCompletion, String>
                         if let Some(name) = function.get("name").and_then(Value::as_str) {
                             entry.name = Some(name.to_string());
                         }
-                        if let Some(arguments) =
-                            function.get("arguments").and_then(Value::as_str)
-                        {
+                        if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
                             entry.arguments.push_str(arguments);
                         }
                     }
@@ -835,9 +830,8 @@ fn parse_openai_sse_completion(body: &str) -> Result<ProviderCompletion, String>
         let input = if partial.arguments.trim().is_empty() {
             json!({})
         } else {
-            serde_json::from_str(&partial.arguments).map_err(|error| {
-                format!("OpenAI SSE tool arguments 解析失败: {error}")
-            })?
+            serde_json::from_str(&partial.arguments)
+                .map_err(|error| format!("OpenAI SSE tool arguments 解析失败: {error}"))?
         };
         parsed_tool_uses.push(ToolUse { id, name, input });
     }
@@ -1098,7 +1092,10 @@ data: [DONE]\n\n";
     async fn spawn_completion_test_server(path: &'static str) -> String {
         let app = Router::new()
             .route("/chat/completions", post(sse_completion_handler))
-            .route("/tool/chat/completions", post(sse_tool_call_completion_handler));
+            .route(
+                "/tool/chat/completions",
+                post(sse_tool_call_completion_handler),
+            );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {

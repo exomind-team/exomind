@@ -91,6 +91,7 @@ fn map_session_error(error: SessionError) -> (StatusCode, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::session::TOOL_PRESET_RECENT_EVENTS;
     use crate::eventlog::EventLogStore;
     use crate::mesh::MeshState;
     use crate::proposal;
@@ -106,7 +107,6 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
     use tower::util::ServiceExt;
-    use crate::agent::session::TOOL_PRESET_RECENT_EVENTS;
 
     fn test_state(data_dir: &std::path::Path) -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
@@ -195,7 +195,10 @@ mod tests {
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[2]["role"], "assistant");
-        assert_eq!(messages[2]["tool_calls"][0]["function"]["name"], "get_weather");
+        assert_eq!(
+            messages[2]["tool_calls"][0]["function"]["name"],
+            "get_weather"
+        );
         assert_eq!(messages[3]["role"], "tool");
         assert_eq!(messages[3]["content"], "今天是阴天，气温21.45度");
 
@@ -215,10 +218,7 @@ mod tests {
     ) -> Json<Value> {
         let turn = call_count.fetch_add(1, Ordering::SeqCst);
         assert_eq!(turn, 0);
-        assert_eq!(
-            payload["tools"][0]["function"]["name"],
-            "get_recent_events"
-        );
+        assert_eq!(payload["tools"][0]["function"]["name"], "get_recent_events");
 
         Json(json!({
             "choices": [{
@@ -311,7 +311,10 @@ mod tests {
 
     async fn spawn_fake_openai_recent_events_preset_server() -> (String, oneshot::Sender<()>) {
         let app = Router::new()
-            .route("/chat/completions", post(fake_openai_recent_events_preset_handler))
+            .route(
+                "/chat/completions",
+                post(fake_openai_recent_events_preset_handler),
+            )
             .with_state(Arc::new(AtomicUsize::new(0)));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr: SocketAddr = listener.local_addr().unwrap();
@@ -329,7 +332,8 @@ mod tests {
         (format!("http://{}", addr), shutdown_tx)
     }
 
-    async fn spawn_fake_openai_combined_presets_and_tools_server() -> (String, oneshot::Sender<()>) {
+    async fn spawn_fake_openai_combined_presets_and_tools_server() -> (String, oneshot::Sender<()>)
+    {
         let app = Router::new()
             .route(
                 "/chat/completions",
@@ -399,7 +403,13 @@ mod tests {
         let created: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(created["status"], "needs_tool_calls");
         assert_eq!(created["content"], "");
-        assert_eq!(created["assistantTurn"]["toolCalls"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            created["assistantTurn"]["toolCalls"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(created["toolCalls"].as_array().unwrap().len(), 1);
         assert_eq!(created["toolCalls"][0]["toolName"], "get_weather");
 
@@ -492,7 +502,10 @@ mod tests {
         let created: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(created["status"], "completed");
         assert_eq!(created["content"], "今天是阴天，气温21.45度。");
-        assert_eq!(created["assistantTurn"]["content"], "今天是阴天，气温21.45度。");
+        assert_eq!(
+            created["assistantTurn"]["content"],
+            "今天是阴天，气温21.45度。"
+        );
         assert_eq!(created["toolCalls"], json!([]));
 
         let _ = shutdown_tx.send(());

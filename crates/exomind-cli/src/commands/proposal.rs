@@ -4,7 +4,10 @@ use std::io::Read;
 use serde_json::Value;
 use serde_json::json;
 
-use crate::cli::{GlobalOptions, ProposalAddArgs, ProposalCommentArgs, ProposalCommand, ProposalIdArgs, ProposalListArgs};
+use crate::cli::{
+    GlobalOptions, ProposalAddArgs, ProposalCommand, ProposalCommentArgs, ProposalIdArgs,
+    ProposalListArgs,
+};
 use crate::commands::resolve_command_context;
 use crate::error::CliError;
 use crate::output;
@@ -14,14 +17,25 @@ pub async fn handle(command: ProposalCommand, global: &GlobalOptions) -> Result<
         ProposalCommand::Add(args) => print_value(global, &add_proposal(global, &args).await?),
         ProposalCommand::List(args) => print_list(global, &list_proposals(global, &args).await?),
         ProposalCommand::Get(args) => print_value(global, &get_proposal(global, &args).await?),
-        ProposalCommand::Approve(args) => print_value(global, &approve_proposal(global, &args).await?),
-        ProposalCommand::Reject(args) => print_value(global, &reject_proposal(global, &args).await?),
-        ProposalCommand::Snooze(args) => print_value(global, &snooze_proposal(global, &args).await?),
-        ProposalCommand::Comment(args) => print_value(global, &comment_proposal(global, &args).await?),
+        ProposalCommand::Approve(args) => {
+            print_value(global, &approve_proposal(global, &args).await?)
+        }
+        ProposalCommand::Reject(args) => {
+            print_value(global, &reject_proposal(global, &args).await?)
+        }
+        ProposalCommand::Snooze(args) => {
+            print_value(global, &snooze_proposal(global, &args).await?)
+        }
+        ProposalCommand::Comment(args) => {
+            print_value(global, &comment_proposal(global, &args).await?)
+        }
     }
 }
 
-pub async fn add_proposal(global: &GlobalOptions, args: &ProposalAddArgs) -> Result<Value, CliError> {
+pub async fn add_proposal(
+    global: &GlobalOptions,
+    args: &ProposalAddArgs,
+) -> Result<Value, CliError> {
     let context = resolve_command_context(global)?;
     let path = scoped_proposal_path("/api/proposals", context.scope.as_ref());
     let action_params = read_params_json(args.params_file.as_deref())?;
@@ -51,7 +65,10 @@ pub async fn list_proposals(
     context.client.get_json(&path).await
 }
 
-pub async fn get_proposal(global: &GlobalOptions, args: &ProposalIdArgs) -> Result<Value, CliError> {
+pub async fn get_proposal(
+    global: &GlobalOptions,
+    args: &ProposalIdArgs,
+) -> Result<Value, CliError> {
     let context = resolve_command_context(global)?;
     let path = scoped_proposal_path(
         &format!("/api/proposals/{}", args.proposal_id),
@@ -61,15 +78,24 @@ pub async fn get_proposal(global: &GlobalOptions, args: &ProposalIdArgs) -> Resu
     context.client.get_json(&path).await
 }
 
-pub async fn approve_proposal(global: &GlobalOptions, args: &ProposalIdArgs) -> Result<Value, CliError> {
+pub async fn approve_proposal(
+    global: &GlobalOptions,
+    args: &ProposalIdArgs,
+) -> Result<Value, CliError> {
     update_status(global, args, "approved").await
 }
 
-pub async fn reject_proposal(global: &GlobalOptions, args: &ProposalIdArgs) -> Result<Value, CliError> {
+pub async fn reject_proposal(
+    global: &GlobalOptions,
+    args: &ProposalIdArgs,
+) -> Result<Value, CliError> {
     update_status(global, args, "rejected").await
 }
 
-pub async fn snooze_proposal(global: &GlobalOptions, args: &ProposalIdArgs) -> Result<Value, CliError> {
+pub async fn snooze_proposal(
+    global: &GlobalOptions,
+    args: &ProposalIdArgs,
+) -> Result<Value, CliError> {
     update_status(global, args, "snoozed").await
 }
 
@@ -156,7 +182,8 @@ fn print_value(global: &GlobalOptions, value: &Value) -> Result<(), CliError> {
 
 fn print_list(global: &GlobalOptions, values: &[Value]) -> Result<(), CliError> {
     if global.json {
-        let payload = serde_json::to_value(values).map_err(|error| CliError::Message(error.to_string()))?;
+        let payload =
+            serde_json::to_value(values).map_err(|error| CliError::Message(error.to_string()))?;
         output::print_json(&payload).map_err(CliError::Message)?;
     } else {
         for value in values {

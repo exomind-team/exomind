@@ -465,16 +465,11 @@ fn expand_tool_preset(
 
 fn require_scope_key(preset: &str, scope_key: Option<String>) -> Result<String, SessionError> {
     normalize_optional_text(scope_key.as_deref().unwrap_or_default()).ok_or_else(|| {
-        SessionError::InvalidRequest(format!(
-            "scope_key is required for preset `{preset}`"
-        ))
+        SessionError::InvalidRequest(format!("scope_key is required for preset `{preset}`"))
     })
 }
 
-fn recent_events_tool_def(
-    runtime: &AgentSessionRuntime,
-    scope_key: String,
-) -> BrokerToolDef {
+fn recent_events_tool_def(runtime: &AgentSessionRuntime, scope_key: String) -> BrokerToolDef {
     let (def, _) = get_recent_events_tool(Arc::clone(&runtime.eventlog_store), Some(scope_key));
     let mut input_schema = def.input_schema;
     if let Some(limit) = input_schema
@@ -886,9 +881,11 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("scope_key is required for preset"));
+        assert!(
+            error
+                .to_string()
+                .contains("scope_key is required for preset")
+        );
     }
 
     #[test]

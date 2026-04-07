@@ -19,9 +19,9 @@ use exomind_runtime::agent::proposal_tools::{
     execute_proposal_tool_call, is_proposal_tool_name, proposal_tool_defs,
 };
 use exomind_runtime::agent::session::{
-    AgentSessionRuntime, AgentSessionStore, AgentTrigger, SessionError,
-    TOOL_PRESET_PROPOSAL_TOOLS, TOOL_PRESET_RECENT_EVENTS,
-    run_broker_agent_session_from_sources_with_runtime, run_broker_agent_session_with_runtime,
+    AgentSessionRuntime, AgentSessionStore, AgentTrigger, SessionError, TOOL_PRESET_PROPOSAL_TOOLS,
+    TOOL_PRESET_RECENT_EVENTS, run_broker_agent_session_from_sources_with_runtime,
+    run_broker_agent_session_with_runtime,
 };
 use exomind_runtime::agent::tools::GET_RECENT_EVENTS_TOOL;
 use exomind_runtime::agent::tools::eventlog::get_recent_events_tool;
@@ -281,12 +281,14 @@ async fn fake_openai_combined_story_handler(
             }))
         }
         1 => {
-            assert!(tool_contents
-                .iter()
-                .any(|content| content.contains("明天要出门去银行存钱，不知天气如何")));
-            assert!(tool_contents
-                .iter()
-                .any(|content| content.contains("家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了")));
+            assert!(
+                tool_contents
+                    .iter()
+                    .any(|content| content.contains("明天要出门去银行存钱，不知天气如何"))
+            );
+            assert!(tool_contents.iter().any(|content| {
+                content.contains("家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了")
+            }));
 
             Json(json!({
                 "choices": [{
@@ -306,9 +308,11 @@ async fn fake_openai_combined_story_handler(
             }))
         }
         2 => {
-            assert!(tool_contents
-                .iter()
-                .any(|content| content.contains("明天温度24.5度，暴雨")));
+            assert!(
+                tool_contents
+                    .iter()
+                    .any(|content| content.contains("明天温度24.5度，暴雨"))
+            );
 
             Json(json!({
                 "choices": [{
@@ -338,8 +342,16 @@ async fn fake_openai_combined_story_handler(
             }))
         }
         3 => {
-            assert!(tool_contents.iter().any(|content| content.contains("出门准备雨伞")));
-            assert!(tool_contents.iter().any(|content| content.contains("银行存钱")));
+            assert!(
+                tool_contents
+                    .iter()
+                    .any(|content| content.contains("出门准备雨伞"))
+            );
+            assert!(
+                tool_contents
+                    .iter()
+                    .any(|content| content.contains("银行存钱"))
+            );
 
             Json(json!({
                 "choices": [{
@@ -377,7 +389,10 @@ async fn spawn_fake_openai_server() -> (String, oneshot::Sender<()>) {
 
 async fn spawn_fake_openai_combined_sources_server() -> (String, oneshot::Sender<()>) {
     let app = Router::new()
-        .route("/chat/completions", post(fake_openai_combined_sources_handler))
+        .route(
+            "/chat/completions",
+            post(fake_openai_combined_sources_handler),
+        )
         .with_state(Arc::new(AtomicUsize::new(0)));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -420,7 +435,10 @@ async fn spawn_fake_openai_proposal_story_server() -> (String, oneshot::Sender<(
 
 async fn spawn_fake_openai_combined_story_server() -> (String, oneshot::Sender<()>) {
     let app = Router::new()
-        .route("/chat/completions", post(fake_openai_combined_story_handler))
+        .route(
+            "/chat/completions",
+            post(fake_openai_combined_story_handler),
+        )
         .with_state(Arc::new(AtomicUsize::new(0)));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -524,8 +542,7 @@ async fn execute_combined_story_tool_call(
 ) -> String {
     match tool_call.name.as_str() {
         GET_RECENT_EVENTS_TOOL => {
-            let (_, tool_fn) =
-                get_recent_events_tool(eventlog_store, Some(scope_key.to_string()));
+            let (_, tool_fn) = get_recent_events_tool(eventlog_store, Some(scope_key.to_string()));
             tool_fn(tool_call.input.clone())
                 .await
                 .unwrap_or_else(|error| panic!("recent events tool execution failed: {error}"))
@@ -576,8 +593,8 @@ async fn run_real_upstream_turn_with_retries<F, Fut>(
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<
-        Output = Result<exomind_runtime::agent::session::AgentSessionRecord, SessionError>,
-    >,
+            Output = Result<exomind_runtime::agent::session::AgentSessionRecord, SessionError>,
+        >,
 {
     const MAX_ATTEMPTS: usize = 3;
 
@@ -966,10 +983,7 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
     eprintln!("=== broker_weather_flow start ===");
     eprintln!("provider={} model={}", profile.provider, profile.model);
     eprintln!("prompt={prompt}");
-    eprintln!(
-        "tool_def={}",
-        serde_json::to_string_pretty(&tools).unwrap()
-    );
+    eprintln!("tool_def={}", serde_json::to_string_pretty(&tools).unwrap());
 
     let first_turn = run_real_upstream_turn_with_retries("weather turn 1", || {
         run_broker_agent_session_with_runtime(
@@ -1670,7 +1684,9 @@ async fn broker_combined_story_skips_without_env_and_uses_real_upstream_when_pre
                 .collect::<Vec<_>>();
 
             assert!(
-                executed_tools.iter().any(|name| name == GET_RECENT_EVENTS_TOOL),
+                executed_tools
+                    .iter()
+                    .any(|name| name == GET_RECENT_EVENTS_TOOL),
                 "combined story must read recent events first; executed_tools={executed_tools:?}"
             );
             assert!(

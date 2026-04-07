@@ -5,7 +5,9 @@ use crate::error::CliError;
 use crate::output;
 use crate::runtime_client::RuntimeClient;
 use crate::state::CliState;
-use crate::target::{TargetProbeStatus, TargetResolutionSource, candidate_ports, probe_targets, resolve_target};
+use crate::target::{
+    TargetProbeStatus, TargetResolutionSource, candidate_ports, probe_targets, resolve_target,
+};
 
 pub async fn handle(command: RtCommand, global: &GlobalOptions) -> Result<(), CliError> {
     match command {
@@ -22,7 +24,10 @@ async fn rt_status(global: &GlobalOptions) -> Result<(), CliError> {
     if global.json {
         output::print_json(&payload).map_err(CliError::Message)?;
     } else {
-        println!("Selected target: {}", payload["target"].as_str().unwrap_or_default());
+        println!(
+            "Selected target: {}",
+            payload["target"].as_str().unwrap_or_default()
+        );
         println!("Source: {}", payload["source"].as_str().unwrap_or_default());
         println!("Health: ok");
     }
@@ -33,12 +38,17 @@ async fn rt_status(global: &GlobalOptions) -> Result<(), CliError> {
 async fn rt_probe(global: &GlobalOptions) -> Result<(), CliError> {
     let statuses = probe_payload().await?;
 
-    let payload = serde_json::to_value(&statuses).map_err(|error| CliError::Message(error.to_string()))?;
+    let payload =
+        serde_json::to_value(&statuses).map_err(|error| CliError::Message(error.to_string()))?;
     if global.json {
         output::print_json(&payload).map_err(CliError::Message)?;
     } else {
         for status in &statuses {
-            let label = if status.healthy { "healthy" } else { "unreachable" };
+            let label = if status.healthy {
+                "healthy"
+            } else {
+                "unreachable"
+            };
             println!("{} [{label}]", status.target);
         }
     }

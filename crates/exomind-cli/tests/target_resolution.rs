@@ -7,12 +7,9 @@ fn explicit_target_wins_over_saved_target() {
     let mut state = CliState::default();
     state.default_target = Some("127.0.0.1:1950".to_string());
 
-    let resolved = resolve_target(
-        Some("127.0.0.1:9124"),
-        &state,
-        &[9124, 1950, 1949],
-        |_| true,
-    )
+    let resolved = resolve_target(Some("127.0.0.1:9124"), &state, &[9124, 1950, 1949], |_| {
+        true
+    })
     .expect("target should resolve");
 
     assert_eq!(resolved.target, "127.0.0.1:9124");

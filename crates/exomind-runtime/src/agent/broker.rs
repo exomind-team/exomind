@@ -390,7 +390,10 @@ mod tests {
     async fn spawn_openai_tool_call_server() -> (String, Arc<AtomicUsize>, oneshot::Sender<()>) {
         let call_count = Arc::new(AtomicUsize::new(0));
         let app = Router::new()
-            .route("/chat/completions", post(fake_openai_tool_call_once_handler))
+            .route(
+                "/chat/completions",
+                post(fake_openai_tool_call_once_handler),
+            )
             .with_state(Arc::clone(&call_count));
         let (url, shutdown) = spawn_server(app).await;
         (url, call_count, shutdown)

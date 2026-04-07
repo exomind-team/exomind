@@ -65,7 +65,10 @@ pub async fn list_events(
 
 pub async fn get_event(global: &GlobalOptions, args: &EventlogGetArgs) -> Result<Value, CliError> {
     let context = resolve_command_context(global)?;
-    let path = scoped_eventlog_path(&format!("/eventlog/{}", args.event_id), context.scope.as_ref());
+    let path = scoped_eventlog_path(
+        &format!("/eventlog/{}", args.event_id),
+        context.scope.as_ref(),
+    );
 
     context.client.get_json(&path).await
 }
@@ -111,7 +114,8 @@ fn print_value(global: &GlobalOptions, value: &Value) -> Result<(), CliError> {
 
 fn print_list(global: &GlobalOptions, values: &[Value]) -> Result<(), CliError> {
     if global.json {
-        let payload = serde_json::to_value(values).map_err(|error| CliError::Message(error.to_string()))?;
+        let payload =
+            serde_json::to_value(values).map_err(|error| CliError::Message(error.to_string()))?;
         output::print_json(&payload).map_err(CliError::Message)?;
     } else {
         for value in values {

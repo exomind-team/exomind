@@ -1,7 +1,9 @@
 use serde_json::Value;
 use serde_json::json;
 
-use crate::cli::{GlobalOptions, TaskAddArgs, TaskCommand, TaskIdArgs, TaskListArgs, TaskUpdateArgs};
+use crate::cli::{
+    GlobalOptions, TaskAddArgs, TaskCommand, TaskIdArgs, TaskListArgs, TaskUpdateArgs,
+};
 use crate::commands::resolve_command_context;
 use crate::error::CliError;
 use crate::output;
@@ -10,7 +12,16 @@ pub async fn handle(command: TaskCommand, global: &GlobalOptions) -> Result<(), 
     match command {
         TaskCommand::Add(args) => print_value(global, &add_task(global, &args).await?),
         TaskCommand::List(args) => print_list(global, &list_tasks(global, &args).await?),
-        TaskCommand::Get(args) => print_value(global, &get_task(global, &TaskIdArgs { task_id: args.task_id }).await?),
+        TaskCommand::Get(args) => print_value(
+            global,
+            &get_task(
+                global,
+                &TaskIdArgs {
+                    task_id: args.task_id,
+                },
+            )
+            .await?,
+        ),
         TaskCommand::Update(args) => print_value(global, &update_task(global, &args).await?),
         TaskCommand::Start(args) => print_value(global, &start_task(global, &args).await?),
         TaskCommand::Complete(args) => print_value(global, &complete_task(global, &args).await?),
@@ -32,7 +43,10 @@ pub async fn add_task(global: &GlobalOptions, args: &TaskAddArgs) -> Result<Valu
     context.client.post_json(&path, &payload).await
 }
 
-pub async fn list_tasks(global: &GlobalOptions, args: &TaskListArgs) -> Result<Vec<Value>, CliError> {
+pub async fn list_tasks(
+    global: &GlobalOptions,
+    args: &TaskListArgs,
+) -> Result<Vec<Value>, CliError> {
     let context = resolve_command_context(global)?;
     let mut path = scoped_task_path("/tasks", context.scope.as_ref());
     let mut extra_pairs = Vec::new();
@@ -143,7 +157,8 @@ fn print_value(global: &GlobalOptions, value: &Value) -> Result<(), CliError> {
 
 fn print_list(global: &GlobalOptions, values: &[Value]) -> Result<(), CliError> {
     if global.json {
-        let payload = serde_json::to_value(values).map_err(|error| CliError::Message(error.to_string()))?;
+        let payload =
+            serde_json::to_value(values).map_err(|error| CliError::Message(error.to_string()))?;
         output::print_json(&payload).map_err(CliError::Message)?;
     } else {
         for value in values {

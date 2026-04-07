@@ -1020,7 +1020,9 @@ mod tests {
 
         let trigger = AgentApiTickTrigger::new(runtime.clone())
             .with_scope_key(Some("profile-alpha".to_string()))
-            .with_presets(vec![crate::agent::session::TOOL_PRESET_PROPOSAL_TOOLS.to_string()]);
+            .with_presets(vec![
+                crate::agent::session::TOOL_PRESET_PROPOSAL_TOOLS.to_string(),
+            ]);
         let tools = resolve_agent_tools_for_runtime(
             &runtime,
             Vec::new(),

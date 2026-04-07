@@ -52,7 +52,10 @@ async fn task_add_posts_create_task_payload() {
     let latest = captured.last().expect("captured add request");
     assert_eq!(latest.method, "POST");
     assert_eq!(latest.path, "/tasks");
-    assert_eq!(latest.query.get("profile_id"), Some(&"profile-argon".to_string()));
+    assert_eq!(
+        latest.query.get("profile_id"),
+        Some(&"profile-argon".to_string())
+    );
     let body = latest.body.as_ref().expect("task add body");
     assert_eq!(body["title"], "整理浏览器标签");
     assert_eq!(body["priority"], "high");
@@ -185,13 +188,18 @@ async fn spawn_task_server(state: TaskTestState) -> String {
     let app = Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
         .route("/tasks", get(list_handler).post(add_handler))
-        .route("/tasks/:id", get(get_handler).put(update_handler).patch(update_handler))
+        .route(
+            "/tasks/:id",
+            get(get_handler).put(update_handler).patch(update_handler),
+        )
         .route("/tasks/:id/transition", post(transition_handler))
         .route("/tasks/:id/cancel", post(cancel_handler))
         .with_state(state);
 
     tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve task test app");
+        axum::serve(listener, app)
+            .await
+            .expect("serve task test app");
     });
 
     address.to_string()
@@ -231,13 +239,7 @@ async fn get_handler(
     Path(task_id): Path<String>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Json<Value> {
-    capture_request(
-        &state,
-        "GET",
-        &format!("/tasks/{task_id}"),
-        query,
-        None,
-    );
+    capture_request(&state, "GET", &format!("/tasks/{task_id}"), query, None);
     Json(json!({
         "id": task_id,
         "title": "整理浏览器标签",
