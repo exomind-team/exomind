@@ -1,0 +1,90 @@
+crates/exomind-cli/tests/eventlog_smoke.rs
+  bacd18fd7a184ad9 7-8,52-55,150-152
+crates/exomind-runtime/src/agent/life.rs
+  bacd18fd7a184ad9 1023-1025
+crates/exomind-cli/tests/proposal_smoke.rs
+  bacd18fd7a184ad9 9-10,13-14,61-64,84-86,93-96,180-182
+crates/exomind-cli/src/commands/proposal.rs
+  bacd18fd7a184ad9 7-9,20-31,35-37,68-70,81-83,88-90,95-97,185-186
+tests/unit/ui/agent-hub/agent-routing.issue204.test.ts
+  bacd18fd7a184ad9 26-29
+tests/unit/ui/agent-hub/pty-terminal.layout-recovery.test.tsx
+  bacd18fd7a184ad9 1-2,8,12,29,34-41,134-135,538-593
+crates/exomind-cli/tests/cli_parse.rs
+  bacd18fd7a184ad9 58
+crates/exomind-cli/src/runtime_client.rs
+  bacd18fd7a184ad9 49-50
+crates/exomind-cli/src/commands/rt.rs
+  bacd18fd7a184ad9 8-9,27-30,41-42,47-51
+scripts/dev/tauri-mcp-issue806-charter.ts
+  bacd18fd7a184ad9 601-666,1096-1101,1521-1525,1535-1538,1602
+crates/exomind-runtime/src/agent/session.rs
+  bacd18fd7a184ad9 468,472,884-888
+src-tauri/src/commands/shortcut_commands.rs
+  bacd18fd7a184ad9 11,40,145-147,161,229,276,419-420,516-517,558-559,596-598,644-646,703-704,865,876,993-995,1034-1038
+crates/exomind-runtime/src/lib.rs
+  bacd18fd7a184ad9 934-958
+crates/exomind-runtime/src/agent/broker.rs
+  bacd18fd7a184ad9 393-396
+src/ui/app/pages/agents/SessionsView.tsx
+  bacd18fd7a184ad9 121,146
+tests/unit/settings/settings-input-section.issue199.test.tsx
+  bacd18fd7a184ad9 87-89,102
+src/ui/app/components/PtyTerminal.tsx
+  bacd18fd7a184ad9 6-10,12,87-110,128-130,138-146,264-265,268,288-292,727,748
+crates/exomind-cli/tests/task_smoke.rs
+  bacd18fd7a184ad9 55-58,191-194,200-202,242
+crates/exomind-cli/src/commands/eventlog.rs
+  bacd18fd7a184ad9 68-71,117-118
+src/ui/app/config/settings/settings-registry.ts
+  bacd18fd7a184ad9 1503
+crates/exomind-runtime/src/routes/agent_sessions.rs
+  bacd18fd7a184ad9 94,198-201,221,314-317,335-336,406-412,505-508
+crates/exomind-runtime/tests/agent_api_rt.rs
+  bacd18fd7a184ad9 22-24,284-291,311-315,345-354,392-395,438-441,545,596-597,986,1687-1689
+crates/exomind-runtime/src/agent/api.rs
+  bacd18fd7a184ad9 721-723,784,833-834,1095-1098
+src/ui/app/pages/agents/TiledGrid.tsx
+  bacd18fd7a184ad9 1413
+crates/exomind-cli/src/commands/task.rs
+  bacd18fd7a184ad9 4-5,15-24,46-48,160-161
+tests/unit/ui/agent-hub/agents-page.issue806.test.tsx
+  bacd18fd7a184ad9 5,1032,1133,1210
+crates/exomind-cli/tests/target_resolution.rs
+  bacd18fd7a184ad9 10-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "2099728db7b5a9b2e7f6e4508e0fa8524ca440b2",
+  "prompts": {
+    "bacd18fd7a184ad9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d66e6-cc3d-76d1-9e32-1a7d38f8e9d1",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 58,
+      "accepted_lines": 848,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d704684a77362da0fa1ae5e34b28e9cbb962cddae9a818364ed4bccd9e05796d"
+    },
+    "ca81220fb1a587b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d67c7-b5f2-7802-835c-4289140d2762",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 2,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/961b461833840034ef7dd579d960f0f6f7ec97f24eb84e0e92921244379db963"
+    }
+  }
+}
