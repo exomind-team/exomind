@@ -7,10 +7,6 @@ main = "./website/dist/_worker.js/index.js"
 [assets]
 directory = "./website/dist"
 
-[build]
-command = "bun install --frozen-lockfile && bun run build"
-cwd = "website"
-
 # R2 bucket for build artifacts (release & preview channels)
 [[r2_buckets]]
 binding = "RELEASES"
