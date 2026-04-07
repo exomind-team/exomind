@@ -185,18 +185,24 @@ function collectPlaceholderTexts(value: unknown, hits: string[], path = 'root') 
 function validatePoolHealth(report: Record<string, any>, errors: string[]) {
   const poolHealth = report.poolHealth ?? {};
   const aging = poolHealth.aging ?? {};
-  const stalePriority = Array.isArray(poolHealth.stalePriority) ? poolHealth.stalePriority : [];
+  const staleHighPriority = Array.isArray(poolHealth.staleHighPriority) ? poolHealth.staleHighPriority : [];
 
   if (!Number.isFinite(aging.total) || aging.total <= 0) {
     errors.push('poolHealth.aging.total 必须是大于 0 的实际 open issue 总数');
   }
 
-  if (!Array.isArray(aging.samples) || aging.samples.length < 1) {
-    errors.push('poolHealth.aging.samples 为空（必须列出最老的 5-8 个 open issue）');
+  if (!Number.isFinite(aging.oldCount) || aging.oldCount < 0) {
+    errors.push('poolHealth.aging.oldCount 必须是大于等于 0 的陈年 issue 总数');
   }
 
-  if (stalePriority.some((item: any) => !Number.isFinite(item?.num))) {
-    errors.push('poolHealth.stalePriority 含非法 issue 编号');
+  if (!Array.isArray(aging.samples) || aging.samples.length < 1) {
+    errors.push('poolHealth.aging.samples 为空（必须列出最老的 5-8 个 open issue）');
+  } else if (aging.samples.some((item: any) => !Number.isFinite(item?.num) || !Number.isFinite(item?.ageDays))) {
+    errors.push('poolHealth.aging.samples 含非法 issue 编号或 ageDays');
+  }
+
+  if (staleHighPriority.some((item: any) => !Number.isFinite(item?.num) || !Number.isFinite(item?.staleDays))) {
+    errors.push('poolHealth.staleHighPriority 含非法 issue 编号或 staleDays');
   }
 }
 
@@ -217,6 +223,28 @@ function validateInsight(report: Record<string, any>, errors: string[]) {
   }
   if (typeof insight?.author !== 'string' || insight.author.trim().length < 1) {
     errors.push('insight.author 缺失或为空');
+  }
+}
+
+function validateTruth(report: Record<string, any>, errors: string[]) {
+  const truth = report.truth ?? {};
+
+  for (const group of ['closed', 'stillOpen'] as const) {
+    const items = Array.isArray(truth[group]) ? truth[group] : [];
+    items.forEach((item: any, index: number) => {
+      if (!Number.isFinite(item?.num)) {
+        errors.push(`truth.${group}[${index}].num 不是合法 issue 编号`);
+      }
+      if (typeof item?.title !== 'string' || item.title.trim().length < 1) {
+        errors.push(`truth.${group}[${index}].title 缺失或为空`);
+      }
+      if (typeof item?.gh !== 'string' || item.gh.trim().length < 1) {
+        errors.push(`truth.${group}[${index}].gh 缺失或为空`);
+      }
+      if (typeof item?.code !== 'string' || item.code.trim().length < 1) {
+        errors.push(`truth.${group}[${index}].code 缺失或为空`);
+      }
+    });
   }
 }
 
@@ -272,6 +300,7 @@ function validateReportData(report: Record<string, any>) {
   }
 
   validateInsight(report, errors);
+  validateTruth(report, errors);
   validatePoolHealth(report, errors);
 
   const placeholders: string[] = [];
