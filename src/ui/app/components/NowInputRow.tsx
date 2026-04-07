@@ -294,6 +294,23 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     });
   }, [onSend, voiceTranscriptSendMode]);
 
+  const appendDraftText = useCallback((text: string) => {
+    const normalized = normalizeRecognitionText(text);
+    if (!normalized) return;
+
+    setValue((prev) => mergeTranscriptText(prev, normalized));
+    requestAnimationFrame(() => {
+      resizeTextarea();
+      focusTextarea(textareaRef.current);
+      const nextValue = textareaRef.current?.value ?? '';
+      const end = nextValue.length;
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = end;
+        textareaRef.current.selectionEnd = end;
+      }
+    });
+  }, [resizeTextarea]);
+
   const handleVoiceError = useCallback((error: string) => {
     log.error(`[new-now-input][voice] ${error}`);
   }, []);
@@ -347,7 +364,10 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     startVoiceRecording: () => {
       voiceButtonRef.current?.start();
     },
-  }), []);
+    appendText: (text: string) => {
+      appendDraftText(text);
+    },
+  }), [appendDraftText]);
 
   return (
     <div className="shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]" data-testid="new-now-input-row">

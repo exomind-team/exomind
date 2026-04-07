@@ -1,8 +1,14 @@
 import { ChevronLeft, Square } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PtyTerminal } from '../../components/PtyTerminal';
+import { AgentGlobalComposer, type AgentGlobalComposerTarget } from '../../components/AgentGlobalComposer';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
 import type { SessionInfo, UpdateSessionRequest } from '@/lib/types/session';
+import { sendPtyTextInput } from '@/ui/app/components/pty-input';
+
+function appendTerminalCarriageReturn(text: string): string {
+  return text.endsWith('\r') ? text : `${text}\r`;
+}
 
 export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
   const [isStopping, setIsStopping] = useState(false);
@@ -163,6 +169,29 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
     }
   };
 
+  const activeComposerTarget = useMemo<AgentGlobalComposerTarget | null>(() => {
+    if (!ptyId || isDisconnected) {
+      return null;
+    }
+
+    return {
+      kind: 'pty',
+      label: ptyId,
+      placeholder: '输入命令或提示，Enter 发送到当前终端',
+      description: 'Ctrl+Space 转写会写入这里，并发送到当前终端',
+      send: async (content: string) => {
+        const response = await sendPtyTextInput({
+          rtBaseUrl,
+          ptyId,
+          authToken,
+        }, appendTerminalCarriageReturn(content));
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+      },
+    };
+  }, [authToken, isDisconnected, ptyId, rtBaseUrl]);
+
   if (!ptyId) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -232,14 +261,19 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
             </div>
           </div>
         ) : (
-          <PtyTerminal
-            rtBaseUrl={rtBaseUrl}
-            ptyId={ptyId}
-            authToken={authToken}
-            onInitialConnectionFailure={() => {
-              setIsDisconnected(true);
-            }}
-          />
+          <div className="flex h-full flex-col overflow-hidden">
+            <div className="flex-1 overflow-hidden">
+              <PtyTerminal
+                rtBaseUrl={rtBaseUrl}
+                ptyId={ptyId}
+                authToken={authToken}
+                onInitialConnectionFailure={() => {
+                  setIsDisconnected(true);
+                }}
+              />
+            </div>
+            <AgentGlobalComposer target={activeComposerTarget} variant="terminal" />
+          </div>
         )}
       </div>
     </div>

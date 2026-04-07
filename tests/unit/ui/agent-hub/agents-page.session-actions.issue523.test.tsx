@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SignalRoute } from '@/lib/types/signal-pool';
@@ -555,6 +555,76 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
       expect(screen.getByTestId('agent-rightpanel-pty-terminal')).toBeInTheDocument();
       expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
     });
+  });
+
+  it('shows the page-level global composer for the right-side terminal panel（右侧终端面板应改为页面级全局草稿输入器）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-rightpanel-composer',
+        role: 'Right Panel Composer Session',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-card-session-rightpanel-composer')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('session-card-session-rightpanel-composer'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-pty-terminal')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-global-composer')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('pty-prompt-composer')).not.toBeInTheDocument();
+  });
+
+  it('injects global-shortcut transcript into the page-level draft box（Ctrl+Space 转写应写入页面级草稿箱）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-shortcut-transcript',
+        role: 'Shortcut Transcript Session',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    const hasFocusSpy = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-card-session-shortcut-transcript')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('session-card-session-shortcut-transcript'));
+
+    const composer = await screen.findByTestId('agent-global-composer');
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('exomind:voice-transcript-local', {
+        detail: {
+          text: '快捷语音草稿',
+          rawText: '快捷语音草稿',
+          captureSource: 'global-shortcut',
+          source: 'tauri:voice-shortcut',
+          targetScope: 'unknown',
+        },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(within(composer).getByTestId('event-input-textarea')).toHaveValue('快捷语音草稿');
+    });
+
+    hasFocusSpy.mockRestore();
   });
 
   it('does not open the right-side terminal when clicking a tiled pane（点击平铺会话窗格时右侧 Terminal 应保持关闭）', async () => {

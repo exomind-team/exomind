@@ -54,11 +54,14 @@ export interface VoiceMessageInputProps {
   maxRows?: number;
   /** UI 变体（UI Variant） */
   variant?: 'default' | 'new-mobile';
+  /** 覆盖发送快捷模式（override send mode，覆盖发送模式） */
+  inputSendModeOverride?: InputSendMode;
 }
 
 export interface VoiceMessageInputHandle {
   focusText: () => void;
   startVoiceRecording: () => void;
+  appendText: (text: string) => void;
 }
 
 export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessageInputProps>(function VoiceMessageInput({
@@ -75,6 +78,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
   minRows = 2,
   maxRows = 6,
   variant = 'default',
+  inputSendModeOverride,
 }: VoiceMessageInputProps, ref) {
   const [value, setValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -109,6 +113,23 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
 
   useEffect(() => subscribeInputSendModeChanges(setInputSendMode), []);
 
+  const appendDraftText = useCallback((text: string) => {
+    const normalized = normalizeRecognitionText(text);
+    if (!normalized) return;
+
+    setValue((prev) => (prev.trim() ? `${prev} ${normalized}` : normalized));
+    requestAnimationFrame(() => {
+      resizeTextarea();
+      textareaRef.current?.focus();
+      const nextValue = textareaRef.current?.value ?? '';
+      const end = nextValue.length;
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = end;
+        textareaRef.current.selectionEnd = end;
+      }
+    });
+  }, [resizeTextarea]);
+
   // 发送消息
   const handleSend = useCallback(async () => {
     if (submittingRef.current) return;
@@ -142,7 +163,8 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     if (e.key !== 'Enter') return;
     if (e.altKey) return;
 
-    const shouldSend = inputSendMode === 'enter-send'
+    const effectiveInputSendMode = inputSendModeOverride ?? inputSendMode;
+    const shouldSend = effectiveInputSendMode === 'enter-send'
       ? !e.shiftKey && !e.ctrlKey && !e.metaKey
       : !e.shiftKey && (e.ctrlKey || e.metaKey);
     if (!shouldSend) {
@@ -152,7 +174,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     e.preventDefault();
     if (value.trim()) {
       handleSend();
-    } else if (inputSendMode === 'ctrl-enter-send') {
+    } else if (effectiveInputSendMode === 'ctrl-enter-send') {
       textareaRef.current?.blur();
       voiceButtonRef.current?.start();
     }
@@ -163,8 +185,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     const normalized = normalizeRecognitionText(text);
     if (!normalized) return;
 
-    // 追加到输入框
-    setValue(prev => (prev.trim() ? `${prev} ${normalized}` : normalized));
+    appendDraftText(normalized);
     // 触发回调（如果有）
     onVoiceResult?.(normalized);
     void publishVoiceTranscriptSignal({ text: normalized }, {
@@ -172,7 +193,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     }).catch((publishError) => {
       log.warn(`[VoiceMessageInput] 发布语音信号失败（voice signal publish failed）: ${publishError instanceof Error ? publishError.message : String(publishError)}`);
     });
-  }, [onVoiceResult]);
+  }, [appendDraftText, onVoiceResult]);
 
   // 语音状态变化
   const handleStateChange = useCallback(() => {
@@ -186,7 +207,10 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     startVoiceRecording: () => {
       voiceButtonRef.current?.start();
     },
-  }), []);
+    appendText: (text: string) => {
+      appendDraftText(text);
+    },
+  }), [appendDraftText]);
 
   const isNewMobile = variant === 'new-mobile';
   const wrapperClassName = isNewMobile ? 'safe-area-pb bg-transparent shrink-0' : 'safe-area-pb bg-card shrink-0';

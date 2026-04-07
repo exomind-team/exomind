@@ -35,6 +35,7 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
             id: 'terminal-running',
             status: 'running',
             interaction_mode: 'terminal',
+            pty_id: 'pty-terminal-running',
           }),
         ]}
         layout="1x1"
@@ -46,7 +47,7 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
       />,
     );
 
-    expect(screen.getByRole('button', { name: '等待决策' })).toBeInTheDocument();
+    expect(screen.getByTitle('手动标记此会话为等待决策状态')).toBeInTheDocument();
   });
 
   it('does not show mark-waiting button for already waiting terminal sessions（已等待中的终端会话不应重复显示等待决策按钮）', () => {
@@ -122,6 +123,31 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
     expect(screen.getByTestId('tiled-grid-pty-disconnected-terminal-stale')).toBeInTheDocument();
     expect(screen.getByTestId('mock-pty-terminal')).toBeInTheDocument();
     expect(screen.getByTitle('停止')).toBeInTheDocument();
+  });
+
+  it('does not render a local PTY prompt composer for live terminal sessions（实时终端窗格不再显示局部草稿输入器）', () => {
+    render(
+      <TiledGrid
+        sessions={[
+          buildSession({
+            id: 'terminal-live-composer',
+            status: 'running',
+            interaction_mode: 'terminal',
+            pty_id: 'pty-live-composer',
+          }),
+        ]}
+        layout="1x1"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('mock-pty-terminal')).toBeInTheDocument();
+    expect(screen.queryByTestId('pty-prompt-composer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pty-prompt-input')).not.toBeInTheDocument();
   });
 
   it('treats completed terminal sessions as disconnected panes instead of reopening their PTY（已完成终端会话应显示断开占位，不再重开 PTY）', () => {

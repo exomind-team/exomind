@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SignalRoute, SignalEvent } from '@/lib/types/signal-pool';
 
@@ -164,6 +164,7 @@ describe('agents page signal history + right chat issue-354（历史标签与右
 
   beforeEach(() => {
     window.history.pushState({}, '', '/agents');
+    window.localStorage.clear();
     mockMatchMedia(true);
 
     runtimeControlMocks.getStatus.mockResolvedValue({
@@ -294,20 +295,22 @@ describe('agents page signal history + right chat issue-354（历史标签与右
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-rightpanel-chat-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-global-composer')).toBeInTheDocument();
     });
 
     const chatPanel = screen.getByTestId('agent-rightpanel-chat-panel');
-    const chatInput = screen.getByTestId('agent-rightpanel-chat-input');
     expect(chatPanel.className).toContain('bg-surface');
     expect(chatPanel.className).toContain('text-foreground');
+    const composer = screen.getByTestId('agent-global-composer');
+    const chatInput = within(composer).getByTestId('event-input-textarea');
     expect(chatInput.className).toContain('bg-card');
     expect(chatInput.className).toContain('text-foreground');
     expect(chatInput.className).toContain('border-border-card');
 
-    fireEvent.change(screen.getByTestId('agent-rightpanel-chat-input'), {
+    fireEvent.change(chatInput, {
       target: { value: '测试消息' },
     });
-    fireEvent.click(screen.getByTestId('agent-rightpanel-chat-send'));
+    fireEvent.click(within(composer).getByTestId('event-send-button'));
 
     await waitFor(() => {
       expect(screen.getByText('已收到：测试消息')).toBeInTheDocument();

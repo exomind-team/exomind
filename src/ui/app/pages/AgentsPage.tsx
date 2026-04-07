@@ -40,6 +40,10 @@ import {
 } from '@/config/runtime-target-mode';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
 import { PtyTerminal } from '../components/PtyTerminal';
+import {
+  AgentGlobalComposer,
+  type AgentGlobalComposerTarget,
+} from '../components/AgentGlobalComposer';
 import { PtySpawnDialog } from '../components/PtySpawnDialog';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
@@ -176,6 +180,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { toast } from '@/components/ui/toast-hook';
 import { log } from '@/lib/logger';
 import { PageHeaderNav } from '@/ui/app/components/PageHeaderNav';
+import { sendPtyTextInput } from '@/ui/app/components/pty-input';
 import {
   buildRuntimeAuthHeaders,
   resolveRuntimeHostBaseUrl,
@@ -605,6 +610,10 @@ function resolveDialAddressFromBaseUrl(rtBaseUrl: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function appendTerminalCarriageReturn(text: string): string {
+  return text.endsWith('\r') ? text : `${text}\r`;
 }
 
 const RAW_RUNTIME_FETCH_TIMEOUT_MS = 3_500;
@@ -1062,7 +1071,6 @@ export function AgentsPage() {
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<AgentConversationMessage[]>([]);
   const [chatSessionId, setChatSessionId] = useState<string | null>(null);
-  const [chatInput, setChatInput] = useState('');
   const [chatError, setChatError] = useState('');
   const [isChatSending, setIsChatSending] = useState(false);
   const [isAgentCreating, setIsAgentCreating] = useState(false);
@@ -1374,7 +1382,6 @@ export function AgentsPage() {
   const handleOpenAgentChat = async (nodeId: string) => {
     const agentId = resolveRuntimeEntityId(nodeId);
     setChatAgentId(agentId);
-    setChatInput('');
     setChatError('');
     setRightPanel({ state: 'AGENT_CHAT', nodeId });
 
@@ -1428,13 +1435,12 @@ export function AgentsPage() {
     };
   }, [rightPanel.state, chatAgentId, chatSessionId]);
 
-  const handleChatSend = async () => {
-    const prompt = chatInput.trim();
+  const sendChatPrompt = useCallback(async (rawPrompt: string) => {
+    const prompt = rawPrompt.trim();
     if (!chatAgentId || !prompt || isChatSending) return;
 
     const userMessage = createConversationMessage(`user-${Date.now()}`, 'user', prompt);
     setChatMessages((prev) => [...prev, userMessage]);
-    setChatInput('');
     setChatError('');
     setIsChatSending(true);
 
@@ -1563,7 +1569,13 @@ export function AgentsPage() {
     } finally {
       setIsChatSending(false);
     }
-  };
+  }, [
+    chatAgentId,
+    chatSessionId,
+    isChatSending,
+    rightPanel,
+    runtimeHostSnapshots,
+  ]);
 
   const handleSessionQuickAction = async (session: SessionInfo, response: QuickActionResponse) => {
     const host = resolveRuntimeHostForSession(session);
@@ -2005,7 +2017,6 @@ export function AgentsPage() {
     if (rightPanel.state === 'AGENT_CHAT') return;
     setChatAgentId(null);
     setChatSessionId(null);
-    setChatInput('');
     setChatError('');
     setIsChatSending(false);
   }, [rightPanel.state]);
@@ -2515,6 +2526,22 @@ export function AgentsPage() {
     tiledAssignedSessionIds,
     tiledSessionById,
     tiledUnassignedSessionIds,
+  ]);
+  const focusedTiledSession = useMemo(() => {
+    if (!tiledFocusedSlotId) {
+      return null;
+    }
+
+    const sessionId = tiledPaneSlots.find((slot) => slot.slotId === tiledFocusedSlotId)?.sessionId;
+    if (!sessionId) {
+      return null;
+    }
+
+    return tiledSessionById.get(sessionId) ?? null;
+  }, [
+    tiledFocusedSlotId,
+    tiledPaneSlots,
+    tiledSessionById,
   ]);
   const focusedTiledPtyTarget = useMemo(() => {
     if (!tiledFocusedSlotId) {
@@ -6300,6 +6327,93 @@ export function AgentsPage() {
     }));
   };
 
+  const sendPtyPromptContent = useCallback(async (
+    target: {
+      rtBaseUrl: string;
+      ptyId: string;
+      authToken?: string;
+    },
+    content: string,
+  ) => {
+    const response = await sendPtyTextInput(target, appendTerminalCarriageReturn(content));
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  }, []);
+
+  const chatTargetLabel = useMemo(() => {
+    if (!chatAgentId) {
+      return 'Agent 对话';
+    }
+
+    const matchedNode = signalGraph.nodes.find((node) => (
+      node.type === 'agent' && resolveRuntimeEntityId(node.id) === chatAgentId
+    ));
+    return matchedNode?.label ?? chatAgentId;
+  }, [chatAgentId, signalGraph.nodes]);
+
+  const activeComposerTarget = useMemo<AgentGlobalComposerTarget | null>(() => {
+    if (viewMode === 'tiled') {
+      if (
+        !focusedTiledPtyTarget
+        || !focusedTiledSession
+        || isSessionPtyDisconnected(focusedTiledSession)
+      ) {
+        return null;
+      }
+
+      return {
+        kind: 'pty',
+        label: focusedTiledSession.role || focusedTiledSession.id,
+        placeholder: '输入命令或提示，Enter 发送到当前聚焦终端',
+        description: 'Ctrl+Space 转写会写入这里，并发送到当前聚焦终端',
+        send: (content: string) => sendPtyPromptContent(focusedTiledPtyTarget, content),
+      };
+    }
+
+    if (rightPanel.state === 'AGENT_CHAT' && chatAgentId) {
+      return {
+        kind: 'agent-chat',
+        label: chatTargetLabel,
+        placeholder: '输入消息，Enter 发送到当前 Agent 会话',
+        description: 'Ctrl+Space 转写会写入这里，并发送到当前对话',
+        send: sendChatPrompt,
+      };
+    }
+
+    if (rightPanel.state === 'PTY_TERMINAL' && activePtyId && !isActivePtyDisconnected) {
+      const connection = resolveRuntimeConnectionForHostId(resolvedActivePtyHostId);
+      return {
+        kind: 'pty',
+        label: activePtySession?.role || activePtyId,
+        placeholder: '输入命令或提示，Enter 发送到当前终端',
+        description: 'Ctrl+Space 转写会写入这里，并发送到当前终端',
+        send: (content: string) => sendPtyPromptContent({
+          rtBaseUrl: connection.rtBaseUrl,
+          ptyId: activePtyId,
+          authToken: connection.authToken,
+        }, content),
+      };
+    }
+
+    return null;
+  }, [
+    activePtyId,
+    activePtySession,
+    chatAgentId,
+    chatTargetLabel,
+    focusedTiledPtyTarget,
+    focusedTiledSession,
+    isActivePtyDisconnected,
+    isSessionPtyDisconnected,
+    resolvedActivePtyHostId,
+    resolveRuntimeConnectionForHostId,
+    rightPanel.state,
+    sendChatPrompt,
+    sendPtyPromptContent,
+    viewMode,
+  ]);
+
   const content = useMemo(() => {
     if (viewMode === 'sessions') {
       return (
@@ -6739,7 +6853,7 @@ export function AgentsPage() {
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
-        <div className={`flex-1 min-h-0 ${viewMode === 'topology' || viewMode === 'tiled' ? 'overflow-hidden' : 'overflow-auto'} ${viewMode === 'topology' ? '' : viewMode === 'tiled' ? 'px-2 py-2' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
+        <div className={`flex-1 min-h-0 ${viewMode === 'topology' || viewMode === 'tiled' ? 'overflow-hidden' : 'overflow-auto'} ${viewMode === 'topology' ? '' : viewMode === 'tiled' ? 'px-2 py-2' : 'px-5 pb-4 pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
           {runtimeHostError && (
             <button
               type="button"
@@ -7272,32 +7386,9 @@ export function AgentsPage() {
                     })}
                   </div>
                   {chatError && <p className="text-xs text-destructive">{chatError}</p>}
-                  <div className="flex items-center gap-2">
-                    <input
-                      data-testid="agent-rightpanel-chat-input"
-                      value={chatInput}
-                      onChange={(event) => setChatInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          event.preventDefault();
-                          void handleChatSend();
-                        }
-                      }}
-                      placeholder="输入消息..."
-                      className="h-9 flex-1 rounded-lg border border-border-card bg-card px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-[#0D9488]"
-                    />
-                    <button
-                      type="button"
-                      data-testid="agent-rightpanel-chat-send"
-                      onClick={() => {
-                        void handleChatSend();
-                      }}
-                      disabled={!chatInput.trim() || isChatSending}
-                      className="h-9 rounded-lg bg-[#0D9488] px-3 text-xs font-medium text-white disabled:opacity-50"
-                    >
-                      {isChatSending ? '发送中...' : '发送'}
-                    </button>
-                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    使用页面底部的统一草稿输入框发送消息；Ctrl+Space 转写也会进入底部草稿箱。
+                  </p>
                 </div>
               )}
               {/* PTY terminal — stays mounted when activePtyId is set, hidden when panel shows other content */}
@@ -7373,6 +7464,8 @@ export function AgentsPage() {
           </>
         )}
       </div>
+
+      <AgentGlobalComposer target={activeComposerTarget} />
 
       {/* PTY Spawn Dialog */}
       <PtySpawnDialog

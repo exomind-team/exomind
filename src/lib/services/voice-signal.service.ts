@@ -21,6 +21,14 @@ export interface PublishVoiceTranscriptOptions {
   agentContext?: AgentInteractionContext;
 }
 
+export const LOCAL_VOICE_TRANSCRIPT_EVENT = 'exomind:voice-transcript-local';
+
+export interface LocalVoiceTranscriptDetail extends NormalizedInputEnvelope {
+  source: string;
+  transcript: string;
+  duration?: number;
+}
+
 function buildRuntimeHostRecord(): RuntimeHostRecord {
   const runtimeTarget = getSelectedRuntimeTarget();
   return {
@@ -78,6 +86,37 @@ function buildNormalizedEnvelope(
   };
 }
 
+function emitLocalVoiceTranscript(detail: LocalVoiceTranscriptDetail): void {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent<LocalVoiceTranscriptDetail>(LOCAL_VOICE_TRANSCRIPT_EVENT, {
+    detail,
+  }));
+}
+
+export function subscribeLocalVoiceTranscript(
+  listener: (detail: LocalVoiceTranscriptDetail) => void,
+): () => void {
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+    return () => {};
+  }
+
+  const handleEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<LocalVoiceTranscriptDetail>;
+    if (!customEvent.detail) {
+      return;
+    }
+    listener(customEvent.detail);
+  };
+
+  window.addEventListener(LOCAL_VOICE_TRANSCRIPT_EVENT, handleEvent as EventListener);
+  return () => {
+    window.removeEventListener(LOCAL_VOICE_TRANSCRIPT_EVENT, handleEvent as EventListener);
+  };
+}
+
 export async function publishVoiceTranscriptSignal(
   result: Pick<ASRResult, 'text'> & Partial<Pick<ASRResult, 'lang' | 'confidence' | 'duration'>>,
   options: PublishVoiceTranscriptOptions = {},
@@ -98,6 +137,11 @@ export async function publishVoiceTranscriptSignal(
     transcript: text,
     duration: result.duration,
   };
+
+  emitLocalVoiceTranscript({
+    ...transcriptPayload,
+    source,
+  });
 
   await publisher.publish({
     topic: VOICE_INPUT_TRANSCRIPT_TOPIC,

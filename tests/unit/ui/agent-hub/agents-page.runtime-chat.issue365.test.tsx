@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import type { SignalRoute } from '@/lib/types/signal-pool';
 
@@ -250,12 +250,14 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-rightpanel-chat-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-global-composer')).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByTestId('agent-rightpanel-chat-input'), {
+    const composer = screen.getByTestId('agent-global-composer');
+    fireEvent.change(within(composer).getByTestId('event-input-textarea'), {
       target: { value: '测试消息' },
     });
-    fireEvent.click(screen.getByTestId('agent-rightpanel-chat-send'));
+    fireEvent.click(within(composer).getByTestId('event-send-button'));
 
     await waitFor(() => {
       const outputs = screen.getAllByTestId('agent-runtime-event-output');
@@ -313,12 +315,14 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-rightpanel-chat-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-global-composer')).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByTestId('agent-rightpanel-chat-input'), {
+    let composer = screen.getByTestId('agent-global-composer');
+    fireEvent.change(within(composer).getByTestId('event-input-textarea'), {
       target: { value: '第一轮消息' },
     });
-    fireEvent.click(screen.getByTestId('agent-rightpanel-chat-send'));
+    fireEvent.click(within(composer).getByTestId('event-send-button'));
 
     await waitFor(() => {
       expect(screen.getByText('首轮回复')).toBeInTheDocument();
@@ -336,12 +340,14 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-rightpanel-chat-panel')).toBeInTheDocument();
+      expect(screen.getByTestId('agent-global-composer')).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByTestId('agent-rightpanel-chat-input'), {
+    composer = screen.getByTestId('agent-global-composer');
+    fireEvent.change(within(composer).getByTestId('event-input-textarea'), {
       target: { value: '第二轮消息' },
     });
-    fireEvent.click(screen.getByTestId('agent-rightpanel-chat-send'));
+    fireEvent.click(within(composer).getByTestId('event-send-button'));
 
     await waitFor(() => {
       expect(screen.getByText('resume:sid-365-reopen')).toBeInTheDocument();

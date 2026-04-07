@@ -50,6 +50,7 @@ describe('pty terminal page stop action（全屏终端页结束动作）', () =>
 
     expect(screen.getByTestId('mock-pty-terminal')).toBeInTheDocument();
     expect(screen.getByTestId('pty-terminal-page-stop')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-global-composer')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByTestId('pty-terminal-page-stop')).not.toBeDisabled();
