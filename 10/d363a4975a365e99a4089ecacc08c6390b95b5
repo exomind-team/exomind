@@ -1,0 +1,51 @@
+skills/cross-analysis/SKILL.md
+  76c034ab0045ef82 3,52,56,58,60,62,64,66,68,70-71,73,75,77,79,81,100-108,115,123,125-127,172,174,176-179,181,183,205,207-213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "10d363a4975a365e99a4089ecacc08c6390b95b5",
+  "prompts": {
+    "76c034ab0045ef82": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6615fab3-efd5-40f1-b90e-b85ebc2a2c81",
+        "model": "MiniMax-M2.5"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 46,
+      "overriden_lines": 0
+    },
+    "bacd18fd7a184ad9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d66e6-cc3d-76d1-9e32-1a7d38f8e9d1",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 163,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d704684a77362da0fa1ae5e34b28e9cbb962cddae9a818364ed4bccd9e05796d"
+    },
+    "ca81220fb1a587b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d67c7-b5f2-7802-835c-4289140d2762",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/961b461833840034ef7dd579d960f0f6f7ec97f24eb84e0e92921244379db963"
+    }
+  }
+}
