@@ -112,6 +112,12 @@ L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
 2. 长期保留分支仅限：`dev`、`main`。
 3. 如需临时保留分支，必须在 PR 或 Issue 中写明保留原因和截止时间。
 
+#### Worktree 创建约束（2026-04）
+
+1. 除非用户明确指示，Agent 不得自行创建新的 worktree。
+2. 若 Agent 当前已经运行在某个 worktree 目录中，可以在该 worktree 内继续完成任务；但不得继续层层新开 worktree，除非用户再次明确授权。
+3. 默认优先在当前工作目录推进；只有当用户明确要求隔离开发面时，才切到新 worktree 工作。
+
 #### Issue 修复标准链路（2026-03）
 
 1. 开工前先在对应 Issue/PR 评论中给出：问题判断、拟定方案、验收链路。

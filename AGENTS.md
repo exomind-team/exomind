@@ -49,9 +49,11 @@
 
 ## 端口与 Worktree 约定
 
-1. 多个 worktree 并行开发时，必须为每个 worktree 分配独立端口（Web/HMR/PouchDB/ASR）。
-2. `VITE_SYNC_SERVER_URL` 未设置时，前端会使用“当前浏览器 hostname + `EXOMIND_POUCHDB_PORT`”拼接同步地址。
-3. 同步服务默认仅监听 `127.0.0.1`（本地安全模式）；局域网联调时再显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0` 与 `VITE_SYNC_SERVER_URL=http://<LAN-IP>:<PORT>`。
+1. 除非用户明确指示，Agent 不得自行新建 worktree。
+2. 若 Agent 当前就是在某个 worktree 目录中运行，可直接在该 worktree 内继续工作；但仍不得额外再开新的 worktree，除非用户再次明确授权。
+3. 多个 worktree 并行开发时，必须为每个 worktree 分配独立端口（Web/HMR/PouchDB/ASR）。
+4. `VITE_SYNC_SERVER_URL` 未设置时，前端会使用“当前浏览器 hostname + `EXOMIND_POUCHDB_PORT`”拼接同步地址。
+5. 同步服务默认仅监听 `127.0.0.1`（本地安全模式）；局域网联调时再显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0` 与 `VITE_SYNC_SERVER_URL=http://<LAN-IP>:<PORT>`。
 
 ## Agent 工作流程（执行清单）
 
@@ -109,6 +111,7 @@
 3. 详细方案、边界、验收标准、流程讨论优先写入对应 GitHub issue；聊天窗口只保留简短任务摘要、当前状态和必要决策。
 4. 与用户的默认交流长度应控制在“单个聊天窗口易读上限”附近，优先使用短段落、少层级、可快速扫读的表达。
 5. Windows + Bun 的 worktree 场景下，类型检查优先使用 `bunx tsc --noEmit`；若 `npx tsc --noEmit` 未命中本地 TypeScript，不直接视为代码失败。
+6. 上述“默认在独立 worktree 开发”仅在用户明确要求或任务本身已经运行在该 worktree 中时成立；Agent 不得把它当作可自行触发的默认动作。
 
 ## 图标刷新命令
 
