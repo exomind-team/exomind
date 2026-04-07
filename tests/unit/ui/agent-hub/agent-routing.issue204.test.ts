@@ -22,5 +22,8 @@ describe('issue-204 agent routing wiring（Agent 路由接线）', () => {
     expect(source).toContain("path: '/agents/chat/$agentId'");
     expect(source).toContain("path: '/agents/market'");
   });
-});
 
+  it('adds standalone PTY route for fullscreen terminal page（新增独立 PTY 全屏路由）', () => {
+    expect(source).toContain("path: '/agents/pty/$ptyId'");
+  });
+});
