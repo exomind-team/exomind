@@ -1,0 +1,55 @@
+scripts/dev/tauri-mcp-issue806-charter.ts
+  bacd18fd7a184ad9 601-666,1096-1101,1521-1525,1535-1538,1602
+tests/unit/ui/agent-hub/agents-page.issue806.test.tsx
+  bacd18fd7a184ad9 5,1040,1145,1222
+  5f0f218c9e114e69 848,851-854,1026,1029-1032,1113,1116-1119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "c95e1640ac25841a09d763a92e94a8f096685402",
+  "prompts": {
+    "5f0f218c9e114e69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d67f2-738b-7bf1-aa6e-33030c75edd5",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 3,
+      "accepted_lines": 15,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ae17beeae2d96ecb086d0feaad70167cde9caf0f9bdd9b54a5addb6e21f46596"
+    },
+    "900529e46987bfd9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "26cc412f-a818-47d9-9868-af97680173d6",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 183,
+      "total_deletions": 11,
+      "accepted_lines": 182,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/1c9f48c38432f50c08ce20d255138f105d10382cc46c2f2400ebc6e2f5780823"
+    },
+    "bacd18fd7a184ad9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d66e6-cc3d-76d1-9e32-1a7d38f8e9d1",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 12130,
+      "total_deletions": 356,
+      "accepted_lines": 12116,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f3219d149f617a806aa6fc4d6288e915fb80952886d27ef72a6ebeeb82b2abcd"
+    }
+  }
+}
