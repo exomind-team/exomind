@@ -42,7 +42,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install root dependencies (安装根目录依赖)
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Install website dependencies (安装 website 依赖)
         run: bun run website:install
@@ -67,7 +67,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install root dependencies (安装根目录依赖)
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Install Playwright Chromium (安装 Playwright Chromium 浏览器)
         run: bun x playwright install chromium --with-deps
