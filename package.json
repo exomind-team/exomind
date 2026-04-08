@@ -1,7 +1,7 @@
 {
   "name": "exomind",
   "private": true,
-  "version": "0.3.6",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "icon:all": "bun run icon:tauri && bun run icon:sync-source && bun run icon:web",
     "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
     "build:tag": "bun scripts/dev/build-tag.ts",
+    "release:pages:sync": "bun scripts/dev/sync-release-pages.ts",
     "devlog:gate": "bun scripts/dev/validate-devlog-data.ts --type report",
     "devlog:render": "bun scripts/dev/render-devlog-html.ts --type report",
     "devlog:publish": "bun scripts/dev/publish-devlog.ts",
@@ -54,8 +55,7 @@
     "test:e2e:website:prod": "bun scripts/test/playwright-runner.cjs test tests/e2e/website.smoke.test.ts --config tests/e2e/playwright.website.prod.config.ts",
     "website:install": "bun install --cwd website --frozen-lockfile",
     "website:build": "bun run --cwd website build",
-    "website:cf:dev": "bun run website:build && npx wrangler dev --config wrangler.toml --port 8788 --local",
-    "website:cf:dry-run": "bun run website:build && npx wrangler deploy --config wrangler.toml --dry-run"
+    "website:preview": "bun run website:build && bun run --cwd website preview --host"
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.4",

@@ -1,15 +1,14 @@
 #!/usr/bin/env bun
 
 /**
- * build-tag.ts — 统一构建标签生成脚本
+ * build-tag.ts — 单一发布标签生成脚本
  *
- * 格式: build/v{version}-build.{seq}.{YYYYMMDD}T{HHmm}Z
- * 示例: build/v0.3.3-build.1.20260227T1349Z
+ * 格式: v{version}
+ * 示例: v0.4.0
  *
- * 用法:
- *   bun run build:tag              # 创建并推送标签
- *   bun run build:tag --dry-run    # 仅预览，不执行
- *   bun run build:tag --no-push    # 创建标签但不推送
+ * 说明:
+ * - patch 位（补丁位）就是连续构建序号，不再区分 build 版本和 release 版本
+ * - 版本号必须同时与 package.json / Cargo.toml / tauri.conf.json 对齐
  */
 
 import { execFileSync } from 'node:child_process';
@@ -29,99 +28,88 @@ function parseArgs(): Options {
   };
 }
 
-function readVersion(): string {
-  const pkgPath = join(import.meta.dir, '..', '..', 'package.json');
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-  const version = pkg.version;
-  if (!version) {
-    throw new Error('package.json 中未找到 version 字段');
-  }
-  return version;
-}
-
 function git(...args: string[]): string {
   return execFileSync('git', args, { encoding: 'utf-8' }).trim();
 }
 
-/**
- * 查询当前版本已有的最大构建序号
- *
- * 兼容两种格式:
- *   新格式: build/v{version}-build.{N}.{timestamp}Z  → 提取 N
- *   旧格式: build/v{version}-build.{timestamp}       → 按数量计入
- */
-function getNextBuildNumber(version: string): number {
-  let tags: string;
-  try {
-    tags = git('tag', '--list', `build/v${version}-build.*`);
-  } catch {
-    return 1;
-  }
-
-  if (!tags) return 1;
-
-  const escaped = version.replace(/\./g, '\\.');
-  // 新格式: build/v0.3.3-build.{N}.20260227T1349Z
-  const newPattern = new RegExp(`^build/v${escaped}-build\\.(\\d+)\\.\\d{8}T\\d{4}Z$`);
-  // 旧格式: build/v0.3.3-build.20260227T1545 (无序号)
-  const oldPattern = new RegExp(`^build/v${escaped}-build\\.\\d{8}T\\d{4}$`);
-
-  let maxSeq = 0;
-  let oldCount = 0;
-
-  for (const tag of tags.split('\n')) {
-    const newMatch = tag.match(newPattern);
-    if (newMatch) {
-      const num = parseInt(newMatch[1], 10);
-      if (num > maxSeq) maxSeq = num;
-      continue;
-    }
-    if (oldPattern.test(tag)) {
-      oldCount++;
-    }
-  }
-
-  // 新序号 = max(已有最大序号, 旧标签总数) + 1
-  return Math.max(maxSeq, oldCount) + 1;
+function readPackageVersion(): string {
+  const pkgPath = join(import.meta.dir, '..', '..', 'package.json');
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  return String(pkg.version ?? '').trim();
 }
 
-function formatUtcTimestamp(): string {
-  const now = new Date();
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
-  const h = String(now.getUTCHours()).padStart(2, '0');
-  const min = String(now.getUTCMinutes()).padStart(2, '0');
-  return `${y}${m}${d}T${h}${min}Z`;
+function readCargoVersion(): string {
+  const cargoPath = join(import.meta.dir, '..', '..', 'src-tauri', 'Cargo.toml');
+  const cargoText = readFileSync(cargoPath, 'utf-8');
+  const match = cargoText.match(/^\s*version\s*=\s*"([^"]+)"\s*$/m);
+  return match?.[1]?.trim() ?? '';
+}
+
+function readTauriVersion(): string {
+  const tauriPath = join(import.meta.dir, '..', '..', 'src-tauri', 'tauri.conf.json');
+  const tauriConfig = JSON.parse(readFileSync(tauriPath, 'utf-8'));
+  return String(tauriConfig.version ?? '').trim();
+}
+
+function assertCanonicalVersion(version: string) {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`版本号必须是 0.x.y 形式的纯语义化版本，当前为: ${version}`);
+  }
+}
+
+function resolveCanonicalVersion(): string {
+  const versions = {
+    packageJson: readPackageVersion(),
+    cargoToml: readCargoVersion(),
+    tauriConfig: readTauriVersion(),
+  };
+
+  const uniqueVersions = [...new Set(Object.values(versions).filter(Boolean))];
+  if (uniqueVersions.length !== 1) {
+    throw new Error(
+      `版本号未对齐: package.json=${versions.packageJson}, Cargo.toml=${versions.cargoToml}, tauri.conf.json=${versions.tauriConfig}`,
+    );
+  }
+
+  const version = uniqueVersions[0];
+  assertCanonicalVersion(version);
+  return version;
+}
+
+function tagExists(tag: string): boolean {
+  try {
+    git('rev-parse', '-q', '--verify', `refs/tags/${tag}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function main() {
-  const opts = parseArgs();
-  const version = readVersion();
-  const seq = getNextBuildNumber(version);
-  const timestamp = formatUtcTimestamp();
-  const tag = `build/v${version}-build.${seq}.${timestamp}`;
+  const options = parseArgs();
+  const version = resolveCanonicalVersion();
+  const tag = `v${version}`;
 
-  console.log(`版本: v${version}`);
-  console.log(`构建序号: ${seq}`);
-  console.log(`时间戳 (UTC): ${timestamp}`);
-  console.log(`标签: ${tag}`);
+  console.log(`规范版本 (canonical version / 规范版本): ${version}`);
+  console.log(`发布标签 (release tag / 发布标签): ${tag}`);
 
-  if (opts.dryRun) {
-    console.log('\n[dry-run] 未执行任何操作');
+  if (tagExists(tag)) {
+    throw new Error(`标签已存在，拒绝重复创建: ${tag}`);
+  }
+
+  if (options.dryRun) {
+    console.log('[dry-run] 未执行任何操作');
     return;
   }
 
-  // 创建标签
   git('tag', tag);
-  console.log(`\n✓ 标签已创建: ${tag}`);
+  console.log(`✓ 标签已创建: ${tag}`);
 
-  if (opts.noPush) {
+  if (options.noPush) {
     console.log('(--no-push) 标签未推送');
     return;
   }
 
-  // 推送标签
   git('push', 'origin', tag);
   console.log(`✓ 标签已推送: ${tag}`);
 }

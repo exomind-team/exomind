@@ -1,117 +1,62 @@
 import { describe, expect, it } from 'vitest';
+import { resolvePlatformDownload, type StaticReleaseMetadata } from '../../website/src/lib/downloads-data';
 
-async function loadDownloadRoute() {
-  return import('../../website/src/pages/api/download/[channel]/[version]/[platform].ts');
-}
-
-function createJsonObject(payload: unknown) {
-  const text = JSON.stringify(payload);
+function makeLatest(overrides?: Partial<StaticReleaseMetadata>): StaticReleaseMetadata {
   return {
-    size: Buffer.byteLength(text),
-    body: text,
-    json: async () => payload,
+    version: '0.4.0',
+    tag: 'v0.4.0',
+    published_at: '2026-04-08T08:00:00Z',
+    release_url: 'https://github.com/exomind-team/exomind/releases/tag/v0.4.0',
+    assets: {
+      'windows-x64-setup': {
+        name: 'ExoMind-0.4.0-windows-x64-setup.exe',
+        url: 'https://github.com/exomind-team/exomind/releases/download/v0.4.0/ExoMind-0.4.0-windows-x64-setup.exe',
+        size: 50_000_000,
+        sha256: 'a'.repeat(64),
+      },
+      'windows-x64-installer': {
+        name: 'ExoMind-0.4.0-windows-x64-installer.msi',
+        url: 'https://github.com/exomind-team/exomind/releases/download/v0.4.0/ExoMind-0.4.0-windows-x64-installer.msi',
+        size: 52_000_000,
+        sha256: 'b'.repeat(64),
+      },
+      'android-arm64': {
+        name: 'ExoMind-0.4.0-android-arm64.apk',
+        url: 'https://github.com/exomind-team/exomind/releases/download/v0.4.0/ExoMind-0.4.0-android-arm64.apk',
+        size: 30_000_000,
+        sha256: 'c'.repeat(64),
+      },
+      'android-x86': {
+        name: 'ExoMind-0.4.0-android-x86.apk',
+        url: 'https://github.com/exomind-team/exomind/releases/download/v0.4.0/ExoMind-0.4.0-android-x86.apk',
+        size: 28_000_000,
+        sha256: 'd'.repeat(64),
+      },
+    },
+    ...overrides,
   };
 }
 
-function createBinaryObject(content: string) {
-  return {
-    size: Buffer.byteLength(content),
-    body: content,
-  };
-}
+describe('website download data / 官网下载静态数据解析', () => {
+  it('resolves direct GitHub Release asset URL and extra links / 主下载与附加下载都直接指向 GitHub Release assets', () => {
+    const resolved = resolvePlatformDownload(makeLatest(), 'windows-x64-setup');
 
-describe('website download api / 官网下载 API', () => {
-  it('serves runtime tarball when latest metadata maps Linux desktop to runtime asset / latest 元数据指向 runtime 时仍可下载 Linux 桌面包', async () => {
-    const { GET } = await loadDownloadRoute();
-    const objects = new Map<string, ReturnType<typeof createJsonObject> | ReturnType<typeof createBinaryObject>>([
-      [
-        'release/latest.json',
-        createJsonObject({
-          version: 'v0.3.5',
-          tag: 'release/v0.3.5',
-          published_at: '2026-03-06T01:00:00Z',
-          assets: {
-            'runtime-linux-x64': {
-              url: 'release/v0.3.5/ExoMind-RT-v0.3.5-linux-x64.tar.gz',
-              size: 613568,
-              sha256: '511692bb1b803535ce0290c892629a801c84109655efafa95de37cdd28d2dbbc',
-            },
-          },
-        }),
-      ],
-      [
-        'release/v0.3.5/ExoMind-RT-v0.3.5-linux-x64.tar.gz',
-        createBinaryObject('runtime-linux-binary'),
-      ],
+    expect(resolved).not.toBeNull();
+    expect(resolved?.primary.url).toBe(
+      'https://github.com/exomind-team/exomind/releases/download/v0.4.0/ExoMind-0.4.0-windows-x64-setup.exe',
+    );
+    expect(resolved?.extras).toEqual([
+      {
+        key: 'windows-x64-installer',
+        label: 'MSI 安装包',
+        url: 'https://github.com/exomind-team/exomind/releases/download/v0.4.0/ExoMind-0.4.0-windows-x64-installer.msi',
+        size: 52_000_000,
+      },
     ]);
-
-    const response = await GET({
-      params: {
-        channel: 'release',
-        version: 'v0.3.5',
-        platform: 'linux-x64-appimage',
-      },
-      locals: {
-        runtime: {
-          env: {
-            RELEASES: {
-              get: async (key: string) => objects.get(key) ?? null,
-            },
-          },
-        },
-      },
-      request: new Request('https://exo-mind.ai/api/download/release/v0.3.5/linux-x64-appimage'),
-    } as never);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get('Content-Type')).toBe('application/gzip');
-    expect(response.headers.get('Content-Disposition')).toContain('ExoMind-RT-v0.3.5-linux-x64.tar.gz');
   });
 
-  it('serves windows msi installer when latest metadata exposes windows-x64-installer / latest 元数据包含 windows-x64-installer 时可下载 MSI', async () => {
-    const { GET } = await loadDownloadRoute();
-    const objects = new Map<string, ReturnType<typeof createJsonObject> | ReturnType<typeof createBinaryObject>>([
-      [
-        'preview/latest.json',
-        createJsonObject({
-          version: 'v0.3.5',
-          tag: 'dev',
-          published_at: '2026-03-06T12:00:00Z',
-          assets: {
-            'windows-x64-installer': {
-              url: 'preview/v0.3.5-manual.123.abc1234/ExoMind-v0.3.5-windows-x64-installer.msi',
-              size: 42,
-              sha256: 'msi-sha256',
-            },
-          },
-        }),
-      ],
-      [
-        'preview/v0.3.5-manual.123.abc1234/ExoMind-v0.3.5-windows-x64-installer.msi',
-        createBinaryObject('windows-msi-binary'),
-      ],
-    ]);
-
-    const response = await GET({
-      params: {
-        channel: 'preview',
-        version: 'v0.3.5',
-        platform: 'windows-x64-installer',
-      },
-      locals: {
-        runtime: {
-          env: {
-            RELEASES: {
-              get: async (key: string) => objects.get(key) ?? null,
-            },
-          },
-        },
-      },
-      request: new Request('https://exo-mind.ai/api/download/preview/v0.3.5/windows-x64-installer'),
-    } as never);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get('Content-Type')).toBe('application/octet-stream');
-    expect(response.headers.get('Content-Disposition')).toContain('ExoMind-v0.3.5-windows-x64-installer.msi');
+  it('returns null when the selected platform asset is absent / 当前平台产物缺失时返回 null', () => {
+    const resolved = resolvePlatformDownload(makeLatest({ assets: {} }), 'linux-x64-appimage');
+    expect(resolved).toBeNull();
   });
 });

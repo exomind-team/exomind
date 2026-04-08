@@ -7,39 +7,14 @@ export const prerender = true;
 const t = useTranslations('zh');
 
 const platforms = [
-  {
-    name: 'Windows',
-    icon: 'windows',
-    active: true,
-    req: t('download.sysreq.windows'),
-    assetKey: 'windows-x64-setup',
-  },
-  {
-    name: 'Android',
-    icon: 'android',
-    active: true,
-    req: t('download.sysreq.android'),
-    assetKey: 'android-arm64',
-  },
-  {
-    name: 'macOS',
-    icon: 'macos',
-    active: true,
-    req: t('download.sysreq.macos'),
-    assetKey: 'macos-aarch64',
-  },
-  {
-    name: 'Linux',
-    icon: 'linux',
-    active: true,
-    req: t('download.sysreq.linux'),
-    assetKey: 'linux-x64-appimage',
-  },
+  { name: 'Windows', icon: 'windows', req: t('download.sysreq.windows'), assetKey: 'windows-x64-setup' },
+  { name: 'Android', icon: 'android', req: t('download.sysreq.android'), assetKey: 'android-arm64' },
+  { name: 'macOS', icon: 'macos', req: t('download.sysreq.macos'), assetKey: 'macos-aarch64' },
+  { name: 'Linux', icon: 'linux', req: t('download.sysreq.linux'), assetKey: 'linux-x64-appimage' },
 ];
 ---
 
 <BaseLayout title="下载">
-  {/* Hero */}
   <section class="relative overflow-hidden pt-32 pb-16">
     <div class="section-container relative z-10">
       <div class="mx-auto max-w-3xl text-center">
@@ -56,40 +31,22 @@ const platforms = [
     </div>
   </section>
 
-  {/* Channel Toggle */}
   <section class="pb-8">
     <div class="section-container">
       <div class="mx-auto flex max-w-xs items-center justify-center">
         <div id="channel-toggle" class="inline-flex rounded-xl border border-stone-200 bg-white p-1 dark:border-stone-800 dark:bg-stone-900">
-          <button
-            data-channel="release"
-            class="channel-btn active rounded-lg px-5 py-2 text-sm font-medium transition-all"
-          >
-            稳定版
-          </button>
-          <button
-            data-channel="preview"
-            class="channel-btn rounded-lg px-5 py-2 text-sm font-medium transition-all"
-          >
-            预览版
-          </button>
+          <button data-channel="release" class="channel-btn active rounded-lg px-5 py-2 text-sm font-medium transition-all">稳定版</button>
+          <button data-channel="preview" class="channel-btn rounded-lg px-5 py-2 text-sm font-medium transition-all">预览版</button>
         </div>
       </div>
     </div>
   </section>
 
-  {/* Platform Cards */}
   <section class="pb-20">
     <div class="section-container">
-      <div id="cards-container" class="mx-auto grid max-w-3xl gap-6 sm:grid-cols-2">
-        {/* Loading skeleton */}
+      <div class="mx-auto grid max-w-3xl gap-6 sm:grid-cols-2">
         {platforms.map((platform) => (
-          <div
-            class="card flex flex-col items-center p-8 text-center"
-            data-platform={platform.assetKey}
-            data-active={platform.active ? 'true' : 'false'}
-          >
-            {/* Icon */}
+          <div class="card flex flex-col items-center p-8 text-center" data-platform={platform.assetKey}>
             <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300">
               {platform.icon === 'windows' && (
                 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 30 30" fill="currentColor">
@@ -115,53 +72,33 @@ const platforms = [
                 </svg>
               )}
             </div>
-
-            {/* Platform name */}
             <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{platform.name}</h3>
-
-            {/* Dynamic content area */}
             <div class="card-content mt-2 w-full">
-              {platform.active ? (
-                <div class="card-dynamic">
-                  {/* Skeleton loading state */}
-                  <div class="card-skeleton">
-                    <div class="mx-auto mt-1 h-4 w-20 animate-pulse rounded bg-stone-200 dark:bg-stone-700"></div>
-                    <div class="mx-auto mt-2 h-3 w-32 animate-pulse rounded bg-stone-100 dark:bg-stone-800"></div>
-                    <div class="mt-4">
-                      <div class="mx-auto h-10 w-28 animate-pulse rounded-xl bg-stone-200 dark:bg-stone-700"></div>
-                    </div>
-                  </div>
-                  {/* Loaded state (hidden initially) */}
-                  <div class="card-loaded hidden">
-                    <p class="card-version text-sm text-stone-400"></p>
-                    <p class="card-meta mt-1 text-xs text-stone-400"></p>
-                    <div class="mt-4">
-                      <a class="card-download-btn btn-primary px-6 py-2.5 text-sm" href="#" target="_blank" rel="noopener noreferrer">
-                        {t('download.btn')}
-                      </a>
-                    </div>
-                    <div class="card-extra-links mt-3 flex flex-wrap justify-center gap-3"></div>
-                  </div>
-                  {/* Error state (hidden initially) */}
-                  <div class="card-error hidden">
-                    <p class="mt-1 text-sm text-stone-400">暂无可用版本</p>
-                    <div class="mt-4">
-                      <a href="https://github.com/exomind-team/exomind/releases" target="_blank" rel="noopener noreferrer" class="btn-secondary px-5 py-2 text-sm">
-                        前往 GitHub
-                      </a>
-                    </div>
-                  </div>
+              <div class="card-skeleton">
+                <div class="mx-auto mt-1 h-4 w-20 animate-pulse rounded bg-stone-200 dark:bg-stone-700"></div>
+                <div class="mx-auto mt-2 h-3 w-32 animate-pulse rounded bg-stone-100 dark:bg-stone-800"></div>
+                <div class="mt-4">
+                  <div class="mx-auto h-10 w-28 animate-pulse rounded-xl bg-stone-200 dark:bg-stone-700"></div>
                 </div>
-              ) : (
-                <div>
-                  <p class="mt-1 text-sm text-stone-400">{t('download.version')}</p>
-                  <div class="mt-4">
-                    <span class="inline-flex items-center rounded-lg border border-dashed border-stone-300 px-4 py-2 text-sm text-stone-400 dark:border-stone-700">
-                      {t('download.coming_soon')}
-                    </span>
-                  </div>
+              </div>
+              <div class="card-loaded hidden">
+                <p class="card-version text-sm text-stone-400"></p>
+                <p class="card-meta mt-1 text-xs text-stone-400"></p>
+                <div class="mt-4">
+                  <a class="card-download-btn btn-primary px-6 py-2.5 text-sm" href="#" target="_blank" rel="noopener noreferrer">
+                    {t('download.btn')}
+                  </a>
                 </div>
-              )}
+                <div class="card-extra-links mt-3 flex flex-wrap justify-center gap-3"></div>
+              </div>
+              <div class="card-error hidden">
+                <p class="mt-1 text-sm text-stone-400">暂无可用版本</p>
+                <div class="mt-4">
+                  <a href="https://github.com/exomind-team/exomind/releases" target="_blank" rel="noopener noreferrer" class="btn-secondary px-5 py-2 text-sm">
+                    前往 GitHub
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         ))}
@@ -169,26 +106,18 @@ const platforms = [
     </div>
   </section>
 
-  {/* Preview Version List (hidden by default, shown in preview channel) */}
   <section id="version-list-section" class="hidden pb-20">
     <div class="section-container">
       <div class="mx-auto max-w-3xl">
-        <h2 class="heading-display mb-6 text-center text-2xl text-stone-900 sm:text-3xl dark:text-stone-50">
-          历史版本
-        </h2>
-        <div id="version-list" class="space-y-3">
-          {/* Populated by JS */}
-        </div>
+        <h2 class="heading-display mb-6 text-center text-2xl text-stone-900 sm:text-3xl dark:text-stone-50">历史版本</h2>
+        <div id="version-list" class="space-y-3"></div>
         <div id="version-list-expand" class="mt-4 hidden text-center">
-          <button class="text-sm font-medium text-brand hover:text-brand-600 transition-colors">
-            查看更多版本
-          </button>
+          <button class="text-sm font-medium text-brand transition-colors hover:text-brand-600">查看更多版本</button>
         </div>
       </div>
     </div>
   </section>
 
-  {/* System Requirements */}
   <section class="pb-24">
     <div class="section-container">
       <div class="mx-auto max-w-2xl">
@@ -198,7 +127,7 @@ const platforms = [
         <div class="mt-8 space-y-4">
           {platforms.map((platform) => (
             <div class="flex items-center gap-4 rounded-xl border border-stone-200 bg-white px-6 py-4 dark:border-stone-800 dark:bg-stone-900">
-              <span class="font-medium text-stone-900 dark:text-stone-50 w-24 shrink-0">{platform.name}</span>
+              <span class="w-24 shrink-0 font-medium text-stone-900 dark:text-stone-50">{platform.name}</span>
               <span class="text-sm text-stone-500 dark:text-stone-400">{platform.req}</span>
             </div>
           ))}
@@ -209,9 +138,7 @@ const platforms = [
 </BaseLayout>
 
 <style>
-  .channel-btn {
-    color: theme('colors.stone.500');
-  }
+  .channel-btn { color: theme('colors.stone.500'); }
   .channel-btn:hover:not(.active) {
     color: theme('colors.stone.700');
     background-color: theme('colors.stone.50');
@@ -228,196 +155,138 @@ const platforms = [
 </style>
 
 <script>
-  // --- Helpers ---
-  function formatSize(bytes: number): string {
-    const mb = bytes / (1024 * 1024);
-    return `${mb.toFixed(1)} MB`;
+  import { buildHistoryEntries, resolvePlatformDownload } from '../lib/downloads-data';
+
+  const extraLabels = {
+    'windows-x64-installer': 'MSI 安装包',
+    'android-x86': 'x86 版本',
+    'linux-x64-deb': 'DEB 包',
+  };
+
+  function formatSize(bytes) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  function formatDate(isoStr: string): string {
-    const d = new Date(isoStr);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+  function formatDate(isoStr) {
+    const date = new Date(isoStr);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   }
 
-  // --- State ---
-  let currentChannel: 'release' | 'preview' = 'release';
-  let cache: Record<string, any> = {};
+  let currentChannel = 'release';
+  const cache = {};
+  const toggleBtns = document.querySelectorAll('.channel-btn');
+  const cards = document.querySelectorAll('[data-platform]');
+  const versionListSection = document.getElementById('version-list-section');
+  const versionList = document.getElementById('version-list');
+  const versionListExpand = document.getElementById('version-list-expand');
 
-  // --- DOM refs ---
-  const toggleBtns = document.querySelectorAll<HTMLButtonElement>('.channel-btn');
-  const cards = document.querySelectorAll<HTMLElement>('[data-platform]');
-  const versionListSection = document.getElementById('version-list-section')!;
-  const versionList = document.getElementById('version-list')!;
-  const versionListExpand = document.getElementById('version-list-expand')!;
-
-  // --- Channel toggle ---
   toggleBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
-      const channel = btn.dataset.channel as 'release' | 'preview';
-      if (channel === currentChannel) return;
+      const channel = btn.dataset.channel;
+      if (!channel || channel === currentChannel) return;
       currentChannel = channel;
-
-      toggleBtns.forEach((b) => b.classList.remove('active'));
+      toggleBtns.forEach((item) => item.classList.remove('active'));
       btn.classList.add('active');
-
       loadChannel(channel);
     });
   });
 
-  // --- Fetch & render ---
-  async function loadChannel(channel: string) {
-    // Show skeletons
+  async function loadChannel(channel) {
     cards.forEach((card) => {
-      if (card.dataset.active !== 'true') return;
-      const skeleton = card.querySelector('.card-skeleton') as HTMLElement;
-      const loaded = card.querySelector('.card-loaded') as HTMLElement;
-      const error = card.querySelector('.card-error') as HTMLElement;
-      if (skeleton) skeleton.classList.remove('hidden');
-      if (loaded) loaded.classList.add('hidden');
-      if (error) error.classList.add('hidden');
+      card.querySelector('.card-skeleton')?.classList.remove('hidden');
+      card.querySelector('.card-loaded')?.classList.add('hidden');
+      card.querySelector('.card-error')?.classList.add('hidden');
     });
-
-    // Hide version list while loading
-    versionListSection.classList.add('hidden');
+    versionListSection?.classList.add('hidden');
 
     try {
       let data = cache[channel];
       if (!data) {
-        const res = await fetch(`/api/versions?channel=${channel}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        data = await res.json();
+        const response = await fetch(`/releases/${channel}/versions.json`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        data = await response.json();
         cache[channel] = data;
       }
 
-      renderCards(data);
-
-      if (channel === 'preview' && data.versions?.length) {
-        renderVersionList(data.versions);
+      renderCards(data.latest);
+      if (channel === 'preview' && Array.isArray(data.versions) && data.versions.length > 0) {
+        renderVersionList(data);
       }
-    } catch (err) {
-      console.error('Failed to load versions:', err);
-      // Show error state
+    } catch (error) {
+      console.error('Failed to load release metadata:', error);
       cards.forEach((card) => {
-        if (card.dataset.active !== 'true') return;
-        const skeleton = card.querySelector('.card-skeleton') as HTMLElement;
-        const error = card.querySelector('.card-error') as HTMLElement;
-        if (skeleton) skeleton.classList.add('hidden');
-        if (error) error.classList.remove('hidden');
+        card.querySelector('.card-skeleton')?.classList.add('hidden');
+        card.querySelector('.card-error')?.classList.remove('hidden');
       });
     }
   }
 
-  function renderCards(data: any) {
-    const latest = data.latest;
-    if (!latest) return;
-
+  function renderCards(latest) {
     cards.forEach((card) => {
-      if (card.dataset.active !== 'true') return;
-
-      const platformKey = card.dataset.platform!;
-      const asset = latest.assets?.[platformKey];
-      const skeleton = card.querySelector('.card-skeleton') as HTMLElement;
-      const loaded = card.querySelector('.card-loaded') as HTMLElement;
-      const error = card.querySelector('.card-error') as HTMLElement;
-
-      if (skeleton) skeleton.classList.add('hidden');
-
-      if (!asset) {
-        if (error) error.classList.remove('hidden');
-        if (loaded) loaded.classList.add('hidden');
+      const resolved = resolvePlatformDownload(latest, card.dataset.platform);
+      card.querySelector('.card-skeleton')?.classList.add('hidden');
+      if (!resolved) {
+        card.querySelector('.card-loaded')?.classList.add('hidden');
+        card.querySelector('.card-error')?.classList.remove('hidden');
         return;
       }
 
-      // Fill in data
-      const versionEl = card.querySelector('.card-version') as HTMLElement;
-      const metaEl = card.querySelector('.card-meta') as HTMLElement;
-      const downloadBtn = card.querySelector('.card-download-btn') as HTMLAnchorElement;
+      const versionEl = card.querySelector('.card-version');
+      const metaEl = card.querySelector('.card-meta');
+      const downloadBtn = card.querySelector('.card-download-btn');
+      const extraLinks = card.querySelector('.card-extra-links');
 
-      if (versionEl) versionEl.textContent = latest.version;
-      if (metaEl) {
-        const parts: string[] = [];
-        if (latest.published_at) parts.push(formatDate(latest.published_at));
-        if (asset.size) parts.push(formatSize(asset.size));
-        metaEl.textContent = parts.join(' · ');
-      }
-      if (downloadBtn) {
-        downloadBtn.href = `/api/download/${data.channel}/${latest.version}/${platformKey}`;
-      }
-
-      // Render extra architecture links for Android
-      const extraLinks = card.querySelector('.card-extra-links') as HTMLElement;
+      if (versionEl) versionEl.textContent = `v${resolved.version}`;
+      if (metaEl) metaEl.textContent = `${formatDate(resolved.publishedAt)} · ${formatSize(resolved.primary.size)}`;
+      if (downloadBtn) downloadBtn.href = resolved.primary.url;
       if (extraLinks) {
-        extraLinks.innerHTML = '';
-        const archMap: Record<string, string[]> = {
-          'windows-x64-setup': ['windows-x64-installer'],
-          'android-arm64': ['android-x86'],
-          'linux-x64-appimage': ['linux-x64-deb'],
-        };
-        const extras = archMap[platformKey] || [];
-        for (const extraKey of extras) {
-          const extraAsset = latest.assets?.[extraKey];
-          if (!extraAsset) continue;
-          const labelMap: Record<string, string> = {
-            'windows-x64-installer': 'MSI 安装包',
-            'android-x86': 'x86 版本',
-            'linux-x64-deb': 'DEB 包',
-          };
-          const label = labelMap[extraKey] || extraKey;
-          const href = `/api/download/${data.channel}/${latest.version}/${extraKey}`;
-          extraLinks.innerHTML += `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand hover:text-brand-600 transition-colors underline underline-offset-2">${label}${extraAsset.size ? ' (' + formatSize(extraAsset.size) + ')' : ''}</a>`;
-        }
+        extraLinks.innerHTML = resolved.extras
+          .map((extra) => `<a href="${extra.url}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand transition-colors underline underline-offset-2 hover:text-brand-600">${extraLabels[extra.key] ?? extra.label}${extra.size ? ` (${formatSize(extra.size)})` : ''}</a>`)
+          .join('');
       }
 
-      if (loaded) loaded.classList.remove('hidden');
-      if (error) error.classList.add('hidden');
+      card.querySelector('.card-loaded')?.classList.remove('hidden');
+      card.querySelector('.card-error')?.classList.add('hidden');
     });
   }
 
-  function renderVersionList(versions: any[]) {
-    const INITIAL_COUNT = 5;
+  function renderVersionList(data) {
+    const entries = buildHistoryEntries(data);
+    const initialCount = 5;
     let showAll = false;
 
     function render() {
-      const items = showAll ? versions : versions.slice(0, INITIAL_COUNT);
+      const items = showAll ? entries : entries.slice(0, initialCount);
       versionList.innerHTML = items
-        .map(
-          (v: any) => `
-        <div class="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-6 py-4 dark:border-stone-800 dark:bg-stone-900">
-          <div>
-            <span class="font-medium text-stone-900 dark:text-stone-50">v${v.version}</span>
-            ${v.published_at ? `<span class="ml-3 text-xs text-stone-400">${formatDate(v.published_at)}</span>` : ''}
+        .map((entry) => `
+          <div class="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-6 py-4 dark:border-stone-800 dark:bg-stone-900">
+            <div>
+              <span class="font-medium text-stone-900 dark:text-stone-50">v${entry.version}</span>
+              <span class="ml-3 text-xs text-stone-400">${formatDate(entry.publishedAt)}</span>
+            </div>
+            <a href="${entry.releaseUrl}" target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-brand transition-colors hover:text-brand-600">查看</a>
           </div>
-          <a href="https://github.com/exomind-team/exomind/releases/tag/${encodeURIComponent(v.tag || v.version)}"
-             target="_blank" rel="noopener noreferrer"
-             class="text-sm font-medium text-brand hover:text-brand-600 transition-colors">
-            查看
-          </a>
-        </div>
-      `
-        )
+        `)
         .join('');
     }
 
     render();
-    versionListSection.classList.remove('hidden');
-
-    if (versions.length > INITIAL_COUNT) {
-      versionListExpand.classList.remove('hidden');
-      const expandBtn = versionListExpand.querySelector('button')!;
-      expandBtn.textContent = showAll ? '收起' : '查看更多版本';
-      expandBtn.onclick = () => {
-        showAll = !showAll;
-        expandBtn.textContent = showAll ? '收起' : '查看更多版本';
-        render();
-      };
+    versionListSection?.classList.remove('hidden');
+    if (entries.length > initialCount) {
+      versionListExpand?.classList.remove('hidden');
+      const button = versionListExpand?.querySelector('button');
+      if (button) {
+        button.textContent = showAll ? '收起' : '查看更多版本';
+        button.onclick = () => {
+          showAll = !showAll;
+          button.textContent = showAll ? '收起' : '查看更多版本';
+          render();
+        };
+      }
     } else {
-      versionListExpand.classList.add('hidden');
+      versionListExpand?.classList.add('hidden');
     }
   }
 
-  // --- Init ---
   loadChannel('release');
 </script>

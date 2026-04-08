@@ -24,22 +24,23 @@ Recommended copy / 推荐文案:
 bun run --cwd website dev
 ```
 
-## Build for Cloudflare / Cloudflare 构建
+## Static Build / 静态构建（GitHub Pages）
 
 ```bash
 bun run website:build
 ```
 
-## Local Cloudflare Preview / 本地 Cloudflare 预览
+## Local Preview / 本地预览
 
 ```bash
-bun run website:cf:dev
+bun run website:preview
 ```
 
-## Dry-run Deploy / 部署演练（不真正发布）
+## Release Metadata Sync / 发布元数据同步
 
 ```bash
-bun run website:cf:dry-run
+# 从 GitHub Releases 拉取 metadata，写入 website/public/releases
+bun run release:pages:sync -- --repo exomind-team/exomind
 ```
 
 ## Automated Test / 自动化测试

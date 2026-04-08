@@ -126,18 +126,22 @@
 
 | Tag 格式 | 产出 | Release 类型 |
 |---------|------|-------------|
-| `build/v0.3.2-build.20260222T1430` | GitHub Release | Pre-release（可直接下载） |
-| `release/v0.3.3` | GitHub Release | 正式版 |
-| `release/v0.3.3-beta.1` | GitHub Release | Pre-release |
+| `v0.4.0` | GitHub Release assets + GitHub Pages `preview` 元数据 | Pre-release（预览版） |
+| `v0.4.0` promotion | 同一 tag / 同一 commit，仅切换 GitHub Release `prerelease=false` 并刷新 GitHub Pages `release` 元数据 | 正式版 |
 
 ```bash
-# 日常构建测试（自动时间戳，Releases 页面直接下载）
+# 创建单一发布 tag（会先校验 package.json / tauri.conf.json / Cargo.toml 版本一致）
 bun run build:tag
 
-# 正式发版（先 bump 版本号到 package.json / tauri.conf.json / Cargo.toml，再打 tag）
-git tag release/v0.3.3 && git push origin release/v0.3.3
+# 推送唯一 tag，触发 GitHub Release + GitHub Pages
+git push origin v0.4.0
+
+# 正式发版：在 GitHub Actions 手动执行 workflow_dispatch，并传入 promote_tag=v0.4.0
 ```
 
 版本号规范：
-- 有功能/修复 → bump patch（0.3.x）
+- 唯一版本号格式：`0.x.y`
+- 唯一 tag 格式：`v0.x.y`
+- preview / release 只作为 GitHub Release 状态与 GitHub Pages 元数据视图，不再是第二套 tag 语法
+- 有功能/修复 → bump patch（0.3.x / 0.4.x）
 - 纯资源变更（图标等）→ 不单独 bump，随下一个功能版本一起发

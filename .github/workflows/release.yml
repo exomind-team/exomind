@@ -3,24 +3,18 @@ name: Build & Release
 on:
   push:
     tags:
-      - "build/**" # 构建触发：只构建，不发布
-      - "release/**" # 发布触发：构建 + GitHub Release
+      - 'v*' # 单一发布 tag：v0.x.y
   workflow_dispatch:
     inputs:
-      build_scope:
-        description: Build scope（构建范围）
+      promote_tag:
+        description: Existing tag to promote（要晋升的既有 tag）
         required: true
-        default: all
-        type: choice
-        options:
-          - all
-          - android
-          - windows
-          - macos
-          - linux
+        type: string
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 env:
   RUST_TOOLCHAIN: stable
@@ -32,11 +26,7 @@ jobs:
   # Shared setup runs once; platform-specific builds gated by step-level `if`.
   # ─────────────────────────────────────────────────────────────
   build-apk-exe-selfhosted:
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.build_scope == 'all' ||
-      github.event.inputs.build_scope == 'android' ||
-      github.event.inputs.build_scope == 'windows'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,13 +35,11 @@ jobs:
         id: targets
         shell: pwsh
         run: |
-          $scope = "${{ github.event.inputs.build_scope }}"
-          $isDispatch = "${{ github.event_name }}" -eq "workflow_dispatch"
-          $android = ((-not $isDispatch) -or ($scope -eq "all") -or ($scope -eq "android")).ToString().ToLower()
-          $windows = ((-not $isDispatch) -or ($scope -eq "all") -or ($scope -eq "windows")).ToString().ToLower()
+          $android = "true"
+          $windows = "true"
           "BUILD_ANDROID=$android" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "BUILD_WINDOWS=$windows" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Build Android=$android Windows=$windows (scope=$scope, dispatch=$isDispatch)"
+          Write-Host "Build Android=$android Windows=$windows (push tag flow)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -113,7 +101,6 @@ jobs:
           Write-Host '=== Rust diagnostics / Rust 诊断输出 ==='
           Write-Host ('event_name={0}' -f '${{ github.event_name }}')
           Write-Host ('ref={0}' -f '${{ github.ref }}')
-          Write-Host ('build_scope={0}' -f '${{ github.event.inputs.build_scope || 'n/a' }}')
           Write-Host ('runner={0} os={1} arch={2}' -f $env:RUNNER_NAME, $env:RUNNER_OS, $env:RUNNER_ARCH)
           $currentUser = whoami
           Write-Host ('whoami={0}' -f $currentUser)
@@ -197,10 +184,8 @@ jobs:
           $refName = "${{ github.ref_name }}"
           $appVersion = ""
 
-          if ($refName.StartsWith("release/")) {
-            $appVersion = $refName.Substring("release/".Length)
-          } elseif ($refName.StartsWith("build/")) {
-            $appVersion = $refName.Substring("build/".Length)
+          if ($refName.StartsWith("v")) {
+            $appVersion = $refName.Substring(1)
           }
 
           if (-not $appVersion) {
@@ -543,7 +528,7 @@ jobs:
           }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         id: upload_apk
         uses: actions/upload-artifact@v4
         with:
@@ -552,7 +537,7 @@ jobs:
         continue-on-error: true
 
       - name: Retry Upload Android signed APK Artifact
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/') && steps.upload_apk.outcome == 'failure'
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.upload_apk.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
@@ -746,294 +731,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/runtime | Out-Null
           Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
 
-      - name: Upload self-hosted artifacts to Cloudflare R2 (self-hosted 直传 Cloudflare R2)
-        if: |
-          (
-            github.event_name == 'workflow_dispatch' ||
-            (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/build/'))
-          ) &&
-          (steps.targets.outputs.BUILD_WINDOWS == 'true' || steps.targets.outputs.BUILD_ANDROID == 'true')
-        shell: pwsh
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          if (-not $env:CLOUDFLARE_API_TOKEN -or -not $env:CLOUDFLARE_ACCOUNT_ID) {
-            throw "Missing Cloudflare credentials (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)."
-          }
-
-          $buildWindows = "${{ steps.targets.outputs.BUILD_WINDOWS }}" -eq "true"
-          $buildAndroid = "${{ steps.targets.outputs.BUILD_ANDROID }}" -eq "true"
-          $version = "${{ steps.app_version.outputs.APP_VERSION }}"
-          $shortHash = "${{ steps.hash.outputs.HASH }}"
-          $runNumber = "${{ github.run_number }}"
-          $scope = "${{ github.event.inputs.build_scope }}"
-          if ([string]::IsNullOrWhiteSpace($scope)) {
-            $scope = "tag-build"
-          }
-          $isBuildTagPush = "${{ github.event_name }}" -eq "push" -and "${{ github.ref }}".StartsWith("refs/tags/build/")
-          $isReleaseTagPush = "${{ github.event_name }}" -eq "push" -and "${{ github.ref }}".StartsWith("refs/tags/release/")
-
-          $bucket = "exomind-releases"
-          if ($isReleaseTagPush) {
-            $channel = "release"
-            $versionDir = "${{ github.ref_name }}" -replace '^release/', ''
-          } elseif ($isBuildTagPush) {
-            $channel = "preview"
-            $versionDir = "${{ github.ref_name }}" -replace '^build/', ''
-          } else {
-            $channel = "preview"
-            $versionDir = "v$version-manual.$runNumber.$shortHash"
-          }
-          # artifactVersion (产物版本号): normalize to "v..." for website API compatibility.
-          # （统一标准化为带 v 前缀，确保官网下载 API 与文件名一致）
-          $artifactVersion = if ($isBuildTagPush -or $isReleaseTagPush) { $versionDir } else { "v$version" }
-          $shouldPublishLatestMetadata = $isBuildTagPush -or $isReleaseTagPush -or "${{ github.event_name }}" -eq "workflow_dispatch"
-
-          $stagingDir = Join-Path $env:RUNNER_TEMP "r2-direct-upload"
-          if (Test-Path $stagingDir) {
-            Remove-Item -Path $stagingDir -Recurse -Force
-          }
-          New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
-
-          if ($buildWindows) {
-            $exeCandidates = @(
-              "target/release/exomind.exe",
-              "target/release/ExoMind.exe",
-              "src-tauri/target/release/exomind.exe",
-              "src-tauri/target/release/ExoMind.exe"
-            )
-            $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-            if (-not $exePath) {
-              throw "Missing Windows EXE output in src-tauri/target/release/."
-            }
-            Copy-Item -Path $exePath -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-windows-x64-setup.exe") -Force
-
-            $runtimePath = "artifacts/runtime/exomind-rt-windows-x64.exe"
-            if (Test-Path $runtimePath) {
-              Copy-Item -Path $runtimePath -Destination (Join-Path $stagingDir "ExoMind-RT-$artifactVersion-windows-x64.exe") -Force
-            }
-
-            $msiCandidates = @(
-              "target/release/bundle/msi",
-              "src-tauri/target/release/bundle/msi"
-            )
-            $msiFile = $null
-            foreach ($msiDir in $msiCandidates) {
-              if (Test-Path $msiDir) {
-                $msiFile = Get-ChildItem -Path $msiDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($msiFile) { break }
-              }
-            }
-            if ($msiFile) {
-              Copy-Item -Path $msiFile.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-windows-x64-installer.msi") -Force
-            } else {
-              Write-Warning "MSI artifact not found. Continue with EXE upload only."
-            }
-          }
-
-          if ($buildAndroid) {
-            $apkDir = "src-tauri/gen/android/app/build/outputs/apk-signed"
-            if (-not (Test-Path $apkDir)) {
-              throw "Missing Android signed APK directory: $apkDir"
-            }
-
-            $apkFiles = Get-ChildItem -Path $apkDir -Filter "*-signed.apk" -Recurse
-            if (-not $apkFiles -or $apkFiles.Count -eq 0) {
-              throw "No signed APK files found under $apkDir"
-            }
-
-            $arm64Apk = $apkFiles | Where-Object { $_.Name -match "(?i)arm64|aarch64|arm64-v8a" } | Select-Object -First 1
-            if (-not $arm64Apk) {
-              throw "Missing Android arm64 signed APK."
-            }
-            Copy-Item -Path $arm64Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-android-arm64.apk") -Force
-
-            $x86Apk = $apkFiles | Where-Object { $_.Name -match "(?i)i686|x86" -and $_.Name -notmatch "(?i)x86_64" } | Select-Object -First 1
-            if ($x86Apk) {
-              Copy-Item -Path $x86Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-android-x86.apk") -Force
-            } else {
-              Write-Warning "Android x86 signed APK not found. Uploading arm64 only."
-            }
-          }
-
-          function Write-Utf8NoBom([string]$Path, [string]$Content) {
-            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
-          }
-
-          $preparedFiles = Get-ChildItem -Path $stagingDir -File
-          if (-not $preparedFiles -or $preparedFiles.Count -eq 0) {
-            throw "No artifacts prepared for direct R2 upload."
-          }
-
-          Write-Host "Prepared files for R2 direct upload (R2 直传文件):"
-          foreach ($file in $preparedFiles) {
-            Write-Host " - $($file.FullName)"
-          }
-
-          function Get-ContentType([string]$fileName) {
-            $name = $fileName.ToLowerInvariant()
-            if ($name.EndsWith(".apk")) { return "application/vnd.android.package-archive" }
-            if ($name.EndsWith(".json")) { return "application/json" }
-            return "application/octet-stream"
-          }
-
-          foreach ($file in $preparedFiles) {
-            $contentType = Get-ContentType $file.Name
-            $r2Key = "$channel/$versionDir/$($file.Name)"
-            Write-Host "Uploading (上传) $($file.Name) : $r2Key (Content-Type=$contentType)"
-            & npx wrangler r2 object put "$bucket/$r2Key" --file "$($file.FullName)" --content-type "$contentType" --remote
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload file to R2: $($file.Name)"
-            }
-          }
-
-          $manifestPath = Join-Path $stagingDir "selfhosted-upload-manifest.json"
-          $manifest = @{
-            channel = $channel
-            version = $artifactVersion
-            versionDir = $versionDir
-            hash = $shortHash
-            runNumber = $runNumber
-            scope = $scope
-            files = @($preparedFiles.Name)
-          } | ConvertTo-Json -Depth 5
-          Write-Utf8NoBom -Path $manifestPath -Content $manifest
-          & npx wrangler r2 object put "$bucket/$channel/$versionDir/selfhosted-upload-manifest.json" --file "$manifestPath" --content-type "application/json" --remote
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to upload self-hosted manifest to R2."
-          }
-
-          if ($shouldPublishLatestMetadata) {
-            Write-Host "Generate latest metadata for website consumers (为官网消费者生成 latest 元数据). channel=$channel event=${{ github.event_name }}"
-            $publishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-
-            function Get-AssetKey([string]$fileName) {
-              $name = $fileName.ToLowerInvariant()
-              if ($name -match '^exomind-.*-windows-x64-setup\.exe$') { return "windows-x64-setup" }
-              if ($name -match '^exomind-.*-windows-x64-installer\.msi$') { return "windows-x64-installer" }
-              if ($name -match '^exomind-.*-android-arm64\.apk$') { return "android-arm64" }
-              if ($name -match '^exomind-.*-android-x86\.apk$') { return "android-x86" }
-              if ($name -match '^exomind-rt-.*-windows-x64\.exe$') { return "runtime-windows-x64" }
-              if ($name -match '^exomind-rt-.*-macos-aarch64\.tar\.gz$') { return "runtime-macos-aarch64" }
-              if ($name -match '^exomind-rt-.*-linux-x64\.tar\.gz$') { return "runtime-linux-x64" }
-              return $null
-            }
-
-            $assets = [ordered]@{}
-            foreach ($file in $preparedFiles) {
-              $assetKey = Get-AssetKey $file.Name
-              if (-not $assetKey) { continue }
-              $sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-              $assets[$assetKey] = @{
-                url = "$channel/$versionDir/$($file.Name)"
-                size = [int64]$file.Length
-                sha256 = $sha256
-              }
-            }
-
-            $latestPath = Join-Path $stagingDir "latest.json"
-            function Add-AssetAlias([string]$aliasKey, [string]$sourceKey) {
-              if ($assets.Contains($aliasKey) -or -not $assets.Contains($sourceKey)) {
-                return
-              }
-              $assets[$aliasKey] = $assets[$sourceKey]
-            }
-            Add-AssetAlias "macos-aarch64" "runtime-macos-aarch64"
-            Add-AssetAlias "linux-x64-appimage" "runtime-linux-x64"
-            $latestPayload = @{
-              version = $artifactVersion
-              tag = "${{ github.ref_name }}"
-              published_at = $publishedAt
-              assets = $assets
-            } | ConvertTo-Json -Depth 20
-            Write-Utf8NoBom -Path $latestPath -Content $latestPayload
-            & npx wrangler r2 object put "$bucket/$channel/latest.json" --file "$latestPath" --content-type "application/json" --remote
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload $channel latest.json."
-            }
-
-            # versions.json: only for preview build/release tag push.
-            # （仅 build/release tag push 更新历史列表，避免 workflow_dispatch 产生无效 release 链接）
-            if ($channel -eq "preview" -and ($isBuildTagPush -or $isReleaseTagPush)) {
-              $retention = 15
-              $existingVersionsPath = Join-Path $stagingDir "existing-versions.json"
-              $existingVersions = @()
-
-              & npx wrangler r2 object get "$bucket/$channel/versions.json" --file "$existingVersionsPath" --remote *> $null
-              if ($LASTEXITCODE -eq 0 -and (Test-Path $existingVersionsPath)) {
-                try {
-                  $rawVersions = Get-Content -Path $existingVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                  if ($rawVersions -is [System.Array]) {
-                    $existingVersions = @($rawVersions)
-                  } elseif ($rawVersions -and $rawVersions.PSObject.Properties.Name -contains "versions") {
-                    $existingVersions = @($rawVersions.versions)
-                    if ($rawVersions.PSObject.Properties.Name -contains "retention") {
-                      $parsedRetention = 0
-                      if ([int]::TryParse([string]$rawVersions.retention, [ref]$parsedRetention) -and $parsedRetention -gt 0) {
-                        $retention = $parsedRetention
-                      }
-                    }
-                  }
-                } catch {
-                  Write-Warning "Failed to parse preview versions.json, fallback to empty list."
-                }
-              }
-
-              $newEntry = [ordered]@{
-                version = $artifactVersion
-                tag = "${{ github.ref_name }}"
-                published_at = $publishedAt
-                version_dir = $versionDir
-              }
-
-              $mergedVersions = @($newEntry)
-              foreach ($entry in $existingVersions) {
-                if (-not $entry) { continue }
-                $versionValue = ""
-                if ($entry.PSObject.Properties.Name -contains "version") {
-                  $versionValue = [string]$entry.version
-                }
-                if ([string]::IsNullOrWhiteSpace($versionValue)) { continue }
-                $alreadyExists = $mergedVersions | Where-Object { $_.version -eq $versionValue } | Select-Object -First 1
-                if ($alreadyExists) { continue }
-                $mergedVersions += [ordered]@{
-                  version = $versionValue
-                  tag = [string]$entry.tag
-                  published_at = [string]$entry.published_at
-                  version_dir = if ($entry.PSObject.Properties.Name -contains "version_dir") { [string]$entry.version_dir } else { $versionValue }
-                }
-              }
-
-              if ($mergedVersions.Count -gt $retention) {
-                $mergedVersions = @($mergedVersions | Select-Object -First $retention)
-              }
-
-              $versionsPath = Join-Path $stagingDir "versions.json"
-              $versionsPayload = @{
-                versions = $mergedVersions
-                retention = $retention
-              } | ConvertTo-Json -Depth 20
-              Write-Utf8NoBom -Path $versionsPath -Content $versionsPayload
-              & npx wrangler r2 object put "$bucket/$channel/versions.json" --file "$versionsPath" --content-type "application/json" --remote
-              if ($LASTEXITCODE -ne 0) {
-                throw "Failed to upload $channel versions.json."
-              }
-            }
-          }
-
       - name: Upload Windows runtime Artifact (上传 Windows runtime)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: windows-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-windows-x64.exe
 
       - name: Upload Windows EXE Artifact (上传 EXE)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
@@ -1045,7 +751,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Windows MSI Artifact (上传 MSI)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
@@ -1055,9 +761,7 @@ jobs:
           if-no-files-found: ignore
 
   build-macos:
-    # release only: 非 release 不运行 macOS job（发布专用）
-    if: |
-      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -1083,10 +787,8 @@ jobs:
           ref_name="${{ github.ref_name }}"
           app_version=""
 
-          if [[ "$ref_name" == release/* ]]; then
-            app_version="${ref_name#release/}"
-          elif [[ "$ref_name" == build/* ]]; then
-            app_version="${ref_name#build/}"
+          if [[ "$ref_name" == v* ]]; then
+            app_version="${ref_name#v}"
           fi
 
           if [ -z "$app_version" ]; then
@@ -1140,9 +842,7 @@ jobs:
           if-no-files-found: ignore
 
   build-linux:
-    # release only: 非 release 不运行 Linux job（发布专用）
-    if: |
-      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -1181,10 +881,8 @@ jobs:
           ref_name="${{ github.ref_name }}"
           app_version=""
 
-          if [[ "$ref_name" == release/* ]]; then
-            app_version="${ref_name#release/}"
-          elif [[ "$ref_name" == build/* ]]; then
-            app_version="${ref_name#build/}"
+          if [[ "$ref_name" == v* ]]; then
+            app_version="${ref_name#v}"
           fi
 
           if [ -z "$app_version" ]; then
@@ -1249,10 +947,9 @@ jobs:
   create-release:
     needs: [build-apk-exe-selfhosted, build-macos, build-linux]
     runs-on: ubuntu-latest
-    # 仅 release/* tag 执行发布步骤（build/* 仅做构建与 R2 直传）
     if: |
-      always() &&
-      startsWith(github.ref, 'refs/tags/release/') &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v') &&
       (
         needs.build-apk-exe-selfhosted.result == 'success' ||
         needs.build-macos.result == 'success' ||
@@ -1273,38 +970,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          short_hash="${GITHUB_SHA::7}"
-
-          if [[ "$GITHUB_REF_NAME" == build/* ]]; then
-            # build/v0.3.3-build.20260222T1430 → version=v0.3.3-build.20260222T1430
-            version="${GITHUB_REF_NAME#build/}"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "title=Pre-release $version" >> "$GITHUB_OUTPUT"
-          else
-            # release/v0.3.3 → version=v0.3.3
-            version="${GITHUB_REF_NAME#release/}"
-            lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
-            channel=""
-            if [[ "$lower_version" == *"-alpha."* ]]; then
-              channel="Alpha"
-            elif [[ "$lower_version" == *"-beta."* ]]; then
-              channel="Beta"
-            elif [[ "$lower_version" == *"-rc."* ]]; then
-              channel="RC"
-            elif [[ "$lower_version" == *"-preview."* ]]; then
-              channel="Preview"
-            fi
-
-            if [[ -n "$channel" ]]; then
-              echo "prerelease=true" >> "$GITHUB_OUTPUT"
-              echo "title=$channel $version" >> "$GITHUB_OUTPUT"
-            else
-              echo "prerelease=false" >> "$GITHUB_OUTPUT"
-              echo "title=Release $version" >> "$GITHUB_OUTPUT"
-            fi
-          fi
+          version="${GITHUB_REF_NAME#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
+          echo "title=Preview ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Normalize release artifact names (统一发布产物命名)
         shell: bash
@@ -1313,7 +981,6 @@ jobs:
           shopt -s nullglob globstar
 
           version="${{ steps.meta.outputs.version }}"
-          short_hash="${{ steps.meta.outputs.short_hash }}"
           source_dir="release-files"
           output_dir="release-assets"
           mkdir -p "$output_dir"
@@ -1338,11 +1005,11 @@ jobs:
             echo "::error::Cannot find non-runtime Windows EXE artifact."
             exit 1
           fi
-          cp "$app_exe" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
+          cp "$app_exe" "$output_dir/ExoMind-${version}-windows-x64-setup.exe"
 
           msi_files=("$source_dir"/**/*.msi)
           if (( ${#msi_files[@]} > 0 )); then
-            cp "${msi_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-installer.msi"
+            cp "${msi_files[0]}" "$output_dir/ExoMind-${version}-windows-x64-installer.msi"
           fi
 
           apk_files=("$source_dir"/**/*signed.apk)
@@ -1372,441 +1039,197 @@ jobs:
             exit 1
           fi
 
-          cp "$arm64_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-arm64.apk"
-          cp "$x86_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-x86.apk"
+          cp "$arm64_apk" "$output_dir/ExoMind-${version}-android-arm64.apk"
+          cp "$x86_apk" "$output_dir/ExoMind-${version}-android-x86.apk"
+
+          dmg_files=("$source_dir"/**/*.dmg)
+          if (( ${#dmg_files[@]} > 0 )); then
+            macos_aarch64_dmg=""
+            macos_x64_dmg=""
+
+            for dmg in "${dmg_files[@]}"; do
+              file_name="$(basename "$dmg" | tr '[:upper:]' '[:lower:]')"
+              if [[ -z "$macos_x64_dmg" && ( "$file_name" == *"x64"* || "$file_name" == *"x86_64"* || "$file_name" == *"amd64"* ) ]]; then
+                macos_x64_dmg="$dmg"
+                continue
+              fi
+              if [[ -z "$macos_aarch64_dmg" && ( "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"universal"* ) ]]; then
+                macos_aarch64_dmg="$dmg"
+              fi
+            done
+
+            if [[ -z "$macos_aarch64_dmg" ]]; then
+              macos_aarch64_dmg="${dmg_files[0]}"
+            fi
+
+            cp "$macos_aarch64_dmg" "$output_dir/ExoMind-${version}-macos-aarch64.dmg"
+
+            if [[ -n "$macos_x64_dmg" ]]; then
+              cp "$macos_x64_dmg" "$output_dir/ExoMind-${version}-macos-x64.dmg"
+            fi
+          fi
+
+          deb_files=("$source_dir"/**/*.deb)
+          if (( ${#deb_files[@]} > 0 )); then
+            cp "${deb_files[0]}" "$output_dir/ExoMind-${version}-linux-x64.deb"
+          fi
+
+          appimage_files=("$source_dir"/**/*.AppImage "$source_dir"/**/*.appimage)
+          if (( ${#appimage_files[@]} > 0 )); then
+            cp "${appimage_files[0]}" "$output_dir/ExoMind-${version}-linux-x64.AppImage"
+          fi
 
           runtime_win_files=("$source_dir"/**/exomind-rt-windows-x64.exe)
           if (( ${#runtime_win_files[@]} > 0 )); then
-            cp "${runtime_win_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-windows-x64.exe"
+            cp "${runtime_win_files[0]}" "$output_dir/ExoMind-RT-${version}-windows-x64.exe"
           fi
 
           runtime_macos_files=("$source_dir"/**/exomind-rt-macos-aarch64.tar.gz)
           if (( ${#runtime_macos_files[@]} > 0 )); then
-            cp "${runtime_macos_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-macos-aarch64.tar.gz"
+            cp "${runtime_macos_files[0]}" "$output_dir/ExoMind-RT-${version}-macos-aarch64.tar.gz"
           fi
 
           runtime_linux_files=("$source_dir"/**/exomind-rt-linux-x64.tar.gz)
           if (( ${#runtime_linux_files[@]} > 0 )); then
-            cp "${runtime_linux_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-linux-x64.tar.gz"
+            cp "${runtime_linux_files[0]}" "$output_dir/ExoMind-RT-${version}-linux-x64.tar.gz"
           fi
 
       - name: List Normalized Files
         run: ls -la release-assets/
 
-      - name: Create Release
+      - name: Generate release manifest (生成 release manifest)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.meta.outputs.version }}"
+          output_dir="release-assets"
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          assets_json='{}'
+
+          add_asset() {
+            local key="$1"
+            local file="$2"
+            if [[ ! -f "$file" ]]; then
+              return
+            fi
+
+            local size sha256 name
+            size="$(stat --format=%s "$file")"
+            sha256="$(sha256sum "$file" | awk '{print $1}')"
+            name="$(basename "$file")"
+            assets_json="$(echo "$assets_json" | jq \
+              --arg key "$key" \
+              --arg name "$name" \
+              --argjson size "$size" \
+              --arg sha256 "$sha256" \
+              '. + {($key): {name: $name, size: $size, sha256: $sha256}}')"
+          }
+
+          add_asset "windows-x64-setup" "$output_dir/ExoMind-${version}-windows-x64-setup.exe"
+          add_asset "windows-x64-installer" "$output_dir/ExoMind-${version}-windows-x64-installer.msi"
+          add_asset "android-arm64" "$output_dir/ExoMind-${version}-android-arm64.apk"
+          add_asset "android-x86" "$output_dir/ExoMind-${version}-android-x86.apk"
+          add_asset "macos-aarch64" "$output_dir/ExoMind-${version}-macos-aarch64.dmg"
+          add_asset "macos-x64" "$output_dir/ExoMind-${version}-macos-x64.dmg"
+          add_asset "linux-x64-appimage" "$output_dir/ExoMind-${version}-linux-x64.AppImage"
+          add_asset "linux-x64-deb" "$output_dir/ExoMind-${version}-linux-x64.deb"
+          add_asset "runtime-windows-x64" "$output_dir/ExoMind-RT-${version}-windows-x64.exe"
+          add_asset "runtime-macos-aarch64" "$output_dir/ExoMind-RT-${version}-macos-aarch64.tar.gz"
+          add_asset "runtime-linux-x64" "$output_dir/ExoMind-RT-${version}-linux-x64.tar.gz"
+
+          jq -n \
+            --arg version "$version" \
+            --arg tag "${GITHUB_REF_NAME}" \
+            --arg commit "${GITHUB_SHA}" \
+            --arg generated_at "$generated_at" \
+            --argjson assets "$assets_json" \
+            '{version: $version, tag: $tag, commit: $commit, generated_at: $generated_at, assets: $assets}' \
+            > "$output_dir/exomind-release-manifest.json"
+
+      - name: Create or Update GitHub Release (创建或更新 GitHub Release)
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/**
-          # 从 tag 名称提取版本号 (去掉 release/ 前缀)
           tag_name: ${{ github.ref_name }}
           name: ${{ steps.meta.outputs.title }}
           draft: false
-          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          prerelease: true
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ─────────────────────────────────────────────────────────────
-  # Job 4: Upload to Cloudflare R2 (构建产物上传 R2)
-  # ─────────────────────────────────────────────────────────────
-  upload-r2:
-    needs: create-release
-    if: always() && needs.create-release.result == 'success'
+  promote-release:
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
     steps:
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
+      - name: Promote existing GitHub Release (晋升既有 GitHub Release)
+        uses: actions/github-script@v7
         with:
-          pattern: windows-*
-          path: download-artifacts
-          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = `${{ github.event.inputs.promote_tag }}`.trim();
+            if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
+              core.setFailed(`Invalid promote_tag: ${tag}`);
+              return;
+            }
 
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
+            const { owner, repo } = context.repo;
+            const release = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: release.data.id,
+              tag_name: tag,
+              draft: false,
+              prerelease: false,
+              make_latest: 'true',
+              name: `Release ${tag}`,
+            });
+
+  sync-pages:
+    needs: [create-release, promote-release]
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      (
+        needs.create-release.result == 'success' ||
+        needs.promote-release.result == 'success'
+      )
+    steps:
+      - name: Checkout repository (检出代码)
+        uses: actions/checkout@v4
+
+      - name: Setup Bun (安装 Bun)
+        uses: oven-sh/setup-bun@v2
         with:
-          pattern: macos-*
-          path: download-artifacts
-          merge-multiple: true
+          bun-version: ${{ env.BUN_VERSION }}
 
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: linux-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: Download Android artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: android-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: List downloaded artifacts
-        run: ls -laR download-artifacts/
-
-      - name: Determine channel and version (确定通道与版本)
-        id: r2meta
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          tag_name="${GITHUB_REF_NAME}"
-          short_hash="${GITHUB_SHA::7}"
-
-          if [[ "$tag_name" == release/* ]]; then
-            channel="release"
-            version="${tag_name#release/}"
-          elif [[ "$tag_name" == build/* ]]; then
-            channel="preview"
-            version="${tag_name#build/}"
-          else
-            echo "::error::Unexpected tag format: $tag_name"
-            exit 1
-          fi
-
-          # version_dir: release → v0.3.3, preview → v0.3.4-build.20260227T1430
-          version_dir="$version"
-
-          echo "channel=$channel" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "version_dir=$version_dir" >> "$GITHUB_OUTPUT"
-          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
-          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
-
-          echo "Channel: $channel"
-          echo "Version: $version"
-          echo "Version dir: $version_dir"
-
-      - name: Normalize filenames for R2 (去掉 hash 重命名)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob globstar
-
-          version="${{ steps.r2meta.outputs.version }}"
-          short_hash="${{ steps.r2meta.outputs.short_hash }}"
-          src="download-artifacts"
-          dest="r2-upload"
-          mkdir -p "$dest"
-
-          # Find and copy Windows EXE
-          exe_files=("$src"/**/*.exe)
-          app_exe=""
-          for exe in "${exe_files[@]}"; do
-            file_name="$(basename "$exe" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$file_name" == *"exomind-rt"* ]]; then
-              continue
-            fi
-            app_exe="$exe"
-            if [[ "$file_name" == "exomind.exe" || "$file_name" == *"setup"* || "$file_name" == *"installer"* ]]; then
-              break
-            fi
-          done
-          if [[ -n "$app_exe" ]]; then
-            cp "$app_exe" "$dest/ExoMind-${version}-windows-x64-setup.exe"
-          fi
-
-          # Find and copy Windows MSI
-          msi_files=("$src"/**/*.msi)
-          if (( ${#msi_files[@]} > 0 )); then
-            cp "${msi_files[0]}" "$dest/ExoMind-${version}-windows-x64-installer.msi"
-          fi
-
-          # Find and copy Android APKs
-          apk_files=("$src"/**/*signed.apk)
-          if (( ${#apk_files[@]} == 0 )); then
-            apk_files=("$src"/**/*.apk)
-          fi
-
-          for apk in "${apk_files[@]}"; do
-            file_name="$(basename "$apk" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"arm64-v8a"* ]]; then
-              cp "$apk" "$dest/ExoMind-${version}-android-arm64.apk"
-            elif [[ "$file_name" == *"i686"* || "$file_name" == *"x86"* ]] && [[ "$file_name" != *"x86_64"* ]]; then
-              cp "$apk" "$dest/ExoMind-${version}-android-x86.apk"
-            fi
-          done
-
-          # Find and copy macOS DMG
-          dmg_files=("$src"/**/*.dmg)
-          for dmg in "${dmg_files[@]}"; do
-            file_name="$(basename "$dmg" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$file_name" == *"aarch64"* || "$file_name" == *"arm64"* ]]; then
-              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
-            elif [[ "$file_name" == *"x64"* || "$file_name" == *"x86_64"* ]]; then
-              cp "$dmg" "$dest/ExoMind-${version}-macos-x64.dmg"
-            else
-              # macos-latest is Apple Silicon (aarch64)
-              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
-            fi
-          done
-
-          # Find and copy Linux AppImage
-          appimage_files=("$src"/**/*.AppImage)
-          for ai in "${appimage_files[@]}"; do
-            cp "$ai" "$dest/ExoMind-${version}-linux-x64.AppImage"
-          done
-
-          # Find and copy Linux DEB
-          deb_files=("$src"/**/*.deb)
-          for deb in "${deb_files[@]}"; do
-            cp "$deb" "$dest/ExoMind-${version}-linux-x64.deb"
-          done
-
-          # Find and copy exomind-rt runtime binaries
-          runtime_win_files=("$src"/**/exomind-rt-windows-x64.exe)
-          if (( ${#runtime_win_files[@]} > 0 )); then
-            cp "${runtime_win_files[0]}" "$dest/ExoMind-RT-${version}-windows-x64.exe"
-          fi
-
-          runtime_macos_files=("$src"/**/exomind-rt-macos-aarch64.tar.gz)
-          if (( ${#runtime_macos_files[@]} > 0 )); then
-            cp "${runtime_macos_files[0]}" "$dest/ExoMind-RT-${version}-macos-aarch64.tar.gz"
-          fi
-
-          runtime_linux_files=("$src"/**/exomind-rt-linux-x64.tar.gz)
-          if (( ${#runtime_linux_files[@]} > 0 )); then
-            cp "${runtime_linux_files[0]}" "$dest/ExoMind-RT-${version}-linux-x64.tar.gz"
-          fi
-
-          echo "=== Files prepared for R2 upload ==="
-          ls -la "$dest/"
-
-      - name: Upload assets to R2 (上传构建产物到 R2)
-        shell: bash
+      - name: Sync GitHub Pages release metadata (同步 GitHub Pages release metadata)
+        run: bun scripts/dev/sync-release-pages.ts --repo ${{ github.repository }}
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          bucket="exomind-releases"
-          src="r2-upload"
+      - name: Install website dependencies (安装 website 依赖)
+        run: bun run website:install
 
-          content_type_for() {
-            case "$1" in
-              *.exe)      echo "application/octet-stream" ;;
-              *.msi)      echo "application/octet-stream" ;;
-              *.apk)      echo "application/vnd.android.package-archive" ;;
-              *.dmg)      echo "application/x-apple-diskimage" ;;
-              *.AppImage) echo "application/octet-stream" ;;
-              *.deb)      echo "application/vnd.debian.binary-package" ;;
-              *.tar.gz)   echo "application/gzip" ;;
-              *.json)     echo "application/json" ;;
-              *)          echo "application/octet-stream" ;;
-            esac
-          }
+      - name: Build website for GitHub Pages (构建 GitHub Pages 静态站点)
+        run: bun run website:build
 
-          for file in "$src"/*; do
-            [ -f "$file" ] || continue
-            filename="$(basename "$file")"
-            r2_key="${channel}/${version_dir}/${filename}"
-            ct="$(content_type_for "$filename")"
-            echo "Uploading $filename → $r2_key (Content-Type: $ct)"
-            npx wrangler r2 object put "${bucket}/${r2_key}" \
-              --file "$file" \
-              --content-type "$ct" \
-              --remote
-          done
+      - name: Configure GitHub Pages (配置 GitHub Pages)
+        uses: actions/configure-pages@v5
 
-      - name: Generate and upload latest.json (生成并上传 latest.json)
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
+      - name: Upload GitHub Pages artifact (上传 GitHub Pages 产物)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
 
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version="${{ steps.r2meta.outputs.version }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          tag_name="${{ steps.r2meta.outputs.tag_name }}"
-          bucket="exomind-releases"
-          src="r2-upload"
-          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-          # Build assets JSON object
-          assets_json="{}"
-
-          add_asset() {
-            local key="$1" file="$2" url="$3"
-            if [ -f "$file" ]; then
-              local size sha256
-              size="$(stat --format=%s "$file")"
-              sha256="$(sha256sum "$file" | awk '{print $1}')"
-              assets_json="$(echo "$assets_json" | jq \
-                --arg k "$key" \
-                --arg url "$url" \
-                --argjson size "$size" \
-                --arg sha256 "$sha256" \
-                '. + {($k): {"url": $url, "size": $size, "sha256": $sha256}}')"
-            fi
-          }
-
-          add_asset "windows-x64-setup" \
-            "$src/ExoMind-${version}-windows-x64-setup.exe" \
-            "${channel}/${version_dir}/ExoMind-${version}-windows-x64-setup.exe"
-
-          add_asset "windows-x64-installer" \
-            "$src/ExoMind-${version}-windows-x64-installer.msi" \
-            "${channel}/${version_dir}/ExoMind-${version}-windows-x64-installer.msi"
-
-          add_asset "android-arm64" \
-            "$src/ExoMind-${version}-android-arm64.apk" \
-            "${channel}/${version_dir}/ExoMind-${version}-android-arm64.apk"
-
-          add_asset "android-x86" \
-            "$src/ExoMind-${version}-android-x86.apk" \
-            "${channel}/${version_dir}/ExoMind-${version}-android-x86.apk"
-
-          add_asset "macos-aarch64" \
-            "$src/ExoMind-${version}-macos-aarch64.dmg" \
-            "${channel}/${version_dir}/ExoMind-${version}-macos-aarch64.dmg"
-
-          add_asset "macos-x64" \
-            "$src/ExoMind-${version}-macos-x64.dmg" \
-            "${channel}/${version_dir}/ExoMind-${version}-macos-x64.dmg"
-
-          add_asset "linux-x64-appimage" \
-            "$src/ExoMind-${version}-linux-x64.AppImage" \
-            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.AppImage"
-
-          add_asset "linux-x64-deb" \
-            "$src/ExoMind-${version}-linux-x64.deb" \
-            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.deb"
-
-          add_asset "runtime-windows-x64" \
-            "$src/ExoMind-RT-${version}-windows-x64.exe" \
-            "${channel}/${version_dir}/ExoMind-RT-${version}-windows-x64.exe"
-
-          add_asset "runtime-macos-aarch64" \
-            "$src/ExoMind-RT-${version}-macos-aarch64.tar.gz" \
-            "${channel}/${version_dir}/ExoMind-RT-${version}-macos-aarch64.tar.gz"
-
-          add_asset "runtime-linux-x64" \
-            "$src/ExoMind-RT-${version}-linux-x64.tar.gz" \
-            "${channel}/${version_dir}/ExoMind-RT-${version}-linux-x64.tar.gz"
-
-          alias_asset() {
-            local alias_key="$1" source_key="$2"
-            assets_json="$(echo "$assets_json" | jq \
-              --arg alias_key "$alias_key" \
-              --arg source_key "$source_key" \
-              'if has($alias_key) or (has($source_key) | not) then . else . + {($alias_key): .[$source_key]} end')"
-          }
-
-          alias_asset "macos-aarch64" "runtime-macos-aarch64"
-          alias_asset "linux-x64-appimage" "runtime-linux-x64"
-
-          # Compose latest.json
-          latest_json="$(jq -n \
-            --arg version "$version" \
-            --arg tag "$tag_name" \
-            --arg published_at "$published_at" \
-            --argjson assets "$assets_json" \
-            '{version: $version, tag: $tag, published_at: $published_at, assets: $assets}')"
-
-          echo "$latest_json" > latest.json
-          echo "=== latest.json ==="
-          cat latest.json
-
-          npx wrangler r2 object put "${bucket}/${channel}/latest.json" \
-            --file latest.json \
-            --content-type "application/json" \
-            --remote
-
-      - name: Update versions.json and cleanup old previews (更新版本列表 + 清理旧版本)
-        if: steps.r2meta.outputs.channel == 'preview'
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version="${{ steps.r2meta.outputs.version }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          tag_name="${{ steps.r2meta.outputs.tag_name }}"
-          bucket="exomind-releases"
-          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          max_versions=15
-
-          # Try to fetch existing versions.json
-          existing_versions="[]"
-          if npx wrangler r2 object get "${bucket}/${channel}/versions.json" \
-               --file existing-versions.json --remote 2>/dev/null; then
-            existing_payload="$(cat existing-versions.json)"
-            if echo "$existing_payload" | jq -e 'type == "array"' >/dev/null 2>&1; then
-              # backward-compat: old format was a raw array
-              existing_versions="$existing_payload"
-            else
-              existing_versions="$(echo "$existing_payload" | jq '.versions // []')"
-              configured_retention="$(echo "$existing_payload" | jq -r '.retention // empty')"
-              if [[ "$configured_retention" =~ ^[0-9]+$ ]] && (( configured_retention > 0 )); then
-                max_versions="$configured_retention"
-              fi
-            fi
-          fi
-
-          # Prepend new version entry
-          new_entry="$(jq -n \
-            --arg version "$version" \
-            --arg tag "$tag_name" \
-            --arg published_at "$published_at" \
-            --arg version_dir "$version_dir" \
-            '{version: $version, tag: $tag, published_at: $published_at, version_dir: $version_dir}')"
-
-          updated_versions="$(echo "$existing_versions" | jq \
-            --argjson entry "$new_entry" \
-            '[$entry] + . | unique_by(.version)')"
-
-          # Identify versions to delete (beyond max_versions)
-          total="$(echo "$updated_versions" | jq 'length')"
-          if (( total > max_versions )); then
-            # Extract old version dirs to delete
-            old_versions="$(echo "$updated_versions" | jq -r ".[$max_versions:][].version_dir")"
-
-            # Trim the list
-            updated_versions="$(echo "$updated_versions" | jq ".[:$max_versions]")"
-
-            # Delete old version directories from R2
-            for old_dir in $old_versions; do
-              echo "Cleaning up old preview: ${channel}/${old_dir}/"
-              # List and delete all objects under this prefix
-              # wrangler r2 object delete requires exact keys, so we list first
-              list_output="$(npx wrangler r2 object list "${bucket}" \
-                --prefix "${channel}/${old_dir}/" --remote 2>&1)" || true
-              objects="$(echo "$list_output" | jq -r '.[].key' 2>/dev/null)" || objects=""
-              count=$(echo "$objects" | grep -c . || true)
-              echo "  Found $count object(s) to delete"
-              deleted=0
-              for obj in $objects; do
-                if npx wrangler r2 object delete "${bucket}/${obj}" --remote 2>/dev/null; then
-                  deleted=$((deleted + 1))
-                else
-                  echo "  WARNING: Failed to delete $obj"
-                fi
-              done
-              echo "  Cleanup complete: $deleted/$count deleted"
-            done
-          fi
-
-          kept_total="$(echo "$updated_versions" | jq 'length')"
-          updated_json="$(jq -n \
-            --argjson versions "$updated_versions" \
-            --argjson retention "$max_versions" \
-            '{versions: $versions, retention: $retention}')"
-
-          # Upload updated versions.json
-          echo "$updated_json" | jq '.' > versions.json
-          echo "=== versions.json (input=${total}, kept=${kept_total}, retention=${max_versions}) ==="
-          cat versions.json
-
-          npx wrangler r2 object put "${bucket}/${channel}/versions.json" \
-            --file versions.json \
-            --content-type "application/json" \
-            --remote
+  deploy-pages:
+    needs: sync-pages
+    runs-on: ubuntu-latest
+    if: needs.sync-pages.result == 'success'
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy GitHub Pages (部署 GitHub Pages)
+        uses: actions/deploy-pages@v4
