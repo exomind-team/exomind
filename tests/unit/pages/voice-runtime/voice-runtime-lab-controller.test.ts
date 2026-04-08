@@ -296,4 +296,65 @@ describe('VoiceRuntimeLabController（语音运行时实验台控制器）', () 
       currentMode: 'push-to-talk',
     }));
   });
+
+  it('recovers from missing completion events and allows restart（缺少结束事件时自动回收并可再次开始）', async () => {
+    vi.useFakeTimers();
+    let providerFactoryCalls = 0;
+
+    const controller = new VoiceRuntimeLabController({
+      providerFactory: () => {
+        providerFactoryCalls += 1;
+        return {
+          start: vi.fn(async () => `doubao-session-${providerFactoryCalls}`),
+          pushAudio: pushAudioMock,
+          finish: finishMock,
+          cancel: cancelMock,
+          dispose: disposeMock,
+          getSessionId: () => `doubao-session-${providerFactoryCalls}`,
+        };
+      },
+      getUserMedia: getUserMediaMock,
+      createStreamingCapture: () => ({
+        start: captureStartMock,
+        stop: captureStopMock,
+        cancel: captureCancelMock,
+      }),
+      publishSignal: publishSignalMock,
+      audioPlayerFactory: () => ({
+        enqueuePcm16: audioPlayerEnqueueMock,
+        interrupt: audioPlayerInterruptMock,
+        dispose: audioPlayerDisposeMock,
+      }),
+    });
+
+    controller.updateAppId('4587429383');
+    controller.updateAccessToken('vei-access-token');
+    await controller.startListening();
+    await controller.stopListening();
+
+    expect(controller.getState()).toEqual(expect.objectContaining({
+      status: 'responding',
+      connectionStatus: 'connecting',
+    }));
+
+    await vi.advanceTimersByTimeAsync(12_100);
+    await Promise.resolve();
+
+    expect(controller.getState()).toEqual(expect.objectContaining({
+      status: 'idle',
+      connectionStatus: 'disconnected',
+      microphoneStatus: 'idle',
+    }));
+    expect(disposeMock).toHaveBeenCalledTimes(1);
+
+    await controller.startListening();
+
+    expect(providerFactoryCalls).toBe(2);
+    expect(controller.getState()).toEqual(expect.objectContaining({
+      status: 'listening',
+      sessionId: 'doubao-session-2',
+    }));
+
+    vi.useRealTimers();
+  });
 });

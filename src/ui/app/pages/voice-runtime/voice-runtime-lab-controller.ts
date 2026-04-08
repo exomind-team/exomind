@@ -191,6 +191,8 @@ function resolveProviderInputMode(mode: string): 'keep_alive' | 'push_to_talk' {
   return mode === 'ambient' ? 'keep_alive' : 'push_to_talk';
 }
 
+const VOICE_RUNTIME_RESPONSE_TIMEOUT_MS = 12_000;
+
 export class VoiceRuntimeLabController {
   private readonly listeners = new Set<StateListener>();
   private readonly state: VoiceRuntimeLabState = createDefaultState();
@@ -207,6 +209,7 @@ export class VoiceRuntimeLabController {
   private stream: MediaStream | null = null;
   private sessionStartedAtMs: number | null = null;
   private completedCleanupPending = false;
+  private responseTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
   constructor(dependencies: VoiceRuntimeLabControllerDependencies = {}) {
     this.providerFactory = dependencies.providerFactory ?? ((config, callbacks) =>
@@ -311,13 +314,21 @@ export class VoiceRuntimeLabController {
   }
 
   async startListening(): Promise<void> {
-    if (this.provider || !this.state.credentialConfigured) {
-      if (!this.state.credentialConfigured) {
-        this.setError('请先填写 APP ID 和 Access Token（请先配置豆包 S2S 凭据）');
-      }
+    if (!this.state.credentialConfigured) {
+      this.setError('请先填写 APP ID 和 Access Token（请先配置豆包 S2S 凭据）');
       return;
     }
 
+    if (this.provider) {
+      const isSessionActive = this.state.status === 'connecting' || this.state.status === 'listening';
+      if (isSessionActive) {
+        this.setError('当前已有进行中的语音会话，请先停止或取消（Session already running）');
+        return;
+      }
+      await this.cancelListening();
+    }
+
+    this.clearResponseTimeout();
     this.state.status = 'connecting';
     this.state.connectionStatus = 'connecting';
     this.state.microphoneStatus = 'requesting';
@@ -358,6 +369,7 @@ export class VoiceRuntimeLabController {
       this.state.sessionId = sessionId;
       this.emit();
     } catch (error) {
+      this.clearResponseTimeout();
       await provider.cancel().catch(() => {});
       await provider.dispose().catch(() => {});
       this.releaseStream();
@@ -379,12 +391,14 @@ export class VoiceRuntimeLabController {
       this.capture = null;
       this.releaseStream();
       await this.provider.finish(trailingChunk ?? new Uint8Array());
+      this.armResponseTimeout();
     } catch (error) {
       this.setError(error instanceof Error ? error.message : String(error));
     }
   }
 
   async cancelListening(): Promise<void> {
+    this.clearResponseTimeout();
     if (this.capture) {
       await this.capture.cancel().catch(() => {});
       this.capture = null;
@@ -411,6 +425,7 @@ export class VoiceRuntimeLabController {
   }
 
   async dispose(): Promise<void> {
+    this.clearResponseTimeout();
     await this.cancelListening();
     await this.audioPlayer.dispose().catch(() => {});
     for (const unsubscribe of this.configUnsubscribers.splice(0)) {
@@ -514,6 +529,7 @@ export class VoiceRuntimeLabController {
       || rawEvent.eventType === 'DialogCommonError'
       || rawEvent.eventType === 'error'
     ) {
+      this.clearResponseTimeout();
       this.setError(extractErrorMessage(rawEvent));
       return;
     }
@@ -531,6 +547,7 @@ export class VoiceRuntimeLabController {
     }
 
     if (rawEvent.eventType === 'TTSEnded' || rawEvent.eventType === 'SessionFinished') {
+      this.clearResponseTimeout();
       this.state.ttsPlaybackStatus = 'ended';
       this.state.status = 'idle';
       this.state.connectionStatus = 'disconnected';
@@ -569,6 +586,7 @@ export class VoiceRuntimeLabController {
     }
     this.completedCleanupPending = true;
     try {
+      this.clearResponseTimeout();
       // Do not interrupt queued PCM on normal completion（正常完成时不要打断本地 PCM 队列）.
       // `interrupt()` should only be used for explicit cancel / barge-in.
       if (this.provider) {
@@ -604,6 +622,7 @@ export class VoiceRuntimeLabController {
   }
 
   private setError(message: string): void {
+    this.clearResponseTimeout();
     this.state.status = 'error';
     this.state.connectionStatus = 'error';
     this.state.microphoneStatus = 'idle';
@@ -615,6 +634,30 @@ export class VoiceRuntimeLabController {
   private syncCredentialConfigured(): void {
     this.state.credentialConfigured = Boolean(this.state.appId.trim() && this.state.accessToken.trim());
     this.emit();
+  }
+
+  private clearResponseTimeout(): void {
+    if (!this.responseTimeoutHandle) {
+      return;
+    }
+    clearTimeout(this.responseTimeoutHandle);
+    this.responseTimeoutHandle = null;
+  }
+
+  private armResponseTimeout(): void {
+    this.clearResponseTimeout();
+    this.responseTimeoutHandle = setTimeout(() => {
+      if (this.state.status !== 'responding') {
+        return;
+      }
+      this.state.status = 'idle';
+      this.state.connectionStatus = 'disconnected';
+      this.state.microphoneStatus = 'idle';
+      this.state.sessionId = null;
+      this.state.errorMessage = '等待会话结束事件超时，已自动回收会话（Session timeout recovered）';
+      this.emit();
+      void this.cleanupAfterCompleted();
+    }, VOICE_RUNTIME_RESPONSE_TIMEOUT_MS);
   }
 
   private emit(): void {
