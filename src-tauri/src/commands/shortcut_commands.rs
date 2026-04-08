@@ -730,45 +730,75 @@ fn position_voice_overlay(app: &AppHandle, window: &WebviewWindow) -> Result<(),
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyntheticPasteModifier {
+    Control,
+    Meta,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyntheticShortcutStep {
-    PressControl,
-    ClickV,
-    ReleaseControl,
+    PressPasteModifier,
+    ClickPasteCharacter,
+    ReleasePasteModifier,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn paste_shortcut_modifier() -> SyntheticPasteModifier {
+    #[cfg(target_os = "macos")]
+    {
+        SyntheticPasteModifier::Meta
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        SyntheticPasteModifier::Control
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn paste_shortcut_character() -> char {
+    'v'
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn paste_shortcut_steps() -> [SyntheticShortcutStep; 3] {
     [
-        SyntheticShortcutStep::PressControl,
-        SyntheticShortcutStep::ClickV,
-        SyntheticShortcutStep::ReleaseControl,
+        SyntheticShortcutStep::PressPasteModifier,
+        SyntheticShortcutStep::ClickPasteCharacter,
+        SyntheticShortcutStep::ReleasePasteModifier,
     ]
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-/// Simulate Ctrl+V paste via enigo.
+/// Simulate platform paste shortcut via enigo（macOS = Command+V, others = Ctrl+V）.
 #[tauri::command]
 pub async fn simulate_paste() -> Result<(), String> {
     // Run in blocking thread since enigo is not Send on all platforms
     tokio::task::spawn_blocking(|| {
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
         let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+        let modifier_key = match paste_shortcut_modifier() {
+            SyntheticPasteModifier::Control => Key::Control,
+            SyntheticPasteModifier::Meta => Key::Meta,
+        };
         for step in paste_shortcut_steps() {
             match step {
-                SyntheticShortcutStep::PressControl => {
+                SyntheticShortcutStep::PressPasteModifier => {
                     enigo
-                        .key(Key::Control, Direction::Press)
+                        .key(modifier_key, Direction::Press)
                         .map_err(|e| e.to_string())?;
                 }
-                SyntheticShortcutStep::ClickV => {
+                SyntheticShortcutStep::ClickPasteCharacter => {
                     enigo
-                        .key(Key::V, Direction::Click)
+                        .key(Key::Unicode(paste_shortcut_character()), Direction::Click)
                         .map_err(|e| e.to_string())?;
                 }
-                SyntheticShortcutStep::ReleaseControl => {
+                SyntheticShortcutStep::ReleasePasteModifier => {
                     enigo
-                        .key(Key::Control, Direction::Release)
+                        .key(modifier_key, Direction::Release)
                         .map_err(|e| e.to_string())?;
                 }
             }
@@ -802,7 +832,7 @@ pub async fn simulate_enter() -> Result<(), String> {
     Err("simulate_enter is not supported on mobile targets".to_string())
 }
 
-/// Simulate Ctrl+V paste via enigo（移动端不支持）.
+/// Simulate platform paste shortcut via enigo（移动端不支持）.
 #[tauri::command]
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn simulate_paste() -> Result<(), String> {
@@ -991,7 +1021,8 @@ pub async fn foreground_window_focus(_window_handle: String) -> Result<bool, Str
 mod tests {
     use super::{
         calculate_overlay_position, choose_voice_overlay_anchor, cursor_in_monitor,
-        paste_shortcut_steps, transparent_overlay_background_color, MonitorGeometry,
+        paste_shortcut_character, paste_shortcut_modifier, paste_shortcut_steps,
+        transparent_overlay_background_color, MonitorGeometry, SyntheticPasteModifier,
         SyntheticShortcutStep,
     };
     use tauri::window::Color;
@@ -1129,15 +1160,20 @@ mod tests {
     }
 
     #[test]
-    fn paste_shortcut_uses_physical_v_key_instead_of_unicode_character() {
+    fn paste_shortcut_uses_platform_modifier_and_unicode_v_character() {
         assert_eq!(
             paste_shortcut_steps(),
             [
-                SyntheticShortcutStep::PressControl,
-                SyntheticShortcutStep::ClickV,
-                SyntheticShortcutStep::ReleaseControl,
+                SyntheticShortcutStep::PressPasteModifier,
+                SyntheticShortcutStep::ClickPasteCharacter,
+                SyntheticShortcutStep::ReleasePasteModifier,
             ]
         );
+        #[cfg(target_os = "macos")]
+        assert_eq!(paste_shortcut_modifier(), SyntheticPasteModifier::Meta);
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(paste_shortcut_modifier(), SyntheticPasteModifier::Control);
+        assert_eq!(paste_shortcut_character(), 'v');
     }
 
     #[test]
