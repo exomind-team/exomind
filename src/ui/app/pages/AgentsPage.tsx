@@ -32,6 +32,10 @@ import {
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
 import { resolveLocalServiceHost } from '@/config/local-service-host';
+import {
+  getApiAgentTabEnabled,
+  subscribeApiAgentTabEnabledChanges,
+} from '@/config/api-agent-tab-enabled';
 import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
 import {
   setPersistedRuntimeExternalAddress,
@@ -212,6 +216,7 @@ import { AddNodeSheet, AgentCreateSheet, RuntimeHostManagerSheet } from './agent
 import { RoutesTabView } from './agents/RoutesTabView';
 import { ListTabView, type NodeFilterType } from './agents/NodesTabView';
 import { SignalHistoryTabView } from './agents/SignalHistoryTabView';
+import { ApiAgentTabView } from './agents/ApiAgentTabView';
 import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
 
 export {
@@ -851,9 +856,11 @@ function mergeSignalHistoryEvents(...eventGroups: SignalEvent[][]): SignalEvent[
 }
 
 function TabBar({
+  items,
   value,
   onChange,
 }: {
+  items: typeof VIEW_ITEMS;
   value: AgentHubViewMode;
   onChange: (value: AgentHubViewMode) => void;
 }) {
@@ -862,7 +869,7 @@ function TabBar({
       mode="buttons"
       activeId={value}
       onChange={onChange}
-      items={VIEW_ITEMS.map((item) => ({
+      items={items.map((item) => ({
         id: item.id,
         label: item.label,
         icon: item.icon,
@@ -876,11 +883,16 @@ function TabBar({
 export function AgentsPage() {
   const supportsInlineRightPanel = useIsDesktop(1024);
   const initialRuntimeTarget = getSelectedRuntimeTarget();
+  const initialApiAgentTabEnabled = getApiAgentTabEnabled();
   const initialTiledWorkbenchState = useMemo(() => readAgentsTiledWorkbenchPersistState(), []);
   const initialTiledLayoutRecord = initialTiledWorkbenchState.layouts[initialTiledWorkbenchState.activeLayoutId]
     ?? Object.values(initialTiledWorkbenchState.layouts)[0];
   const initialTiledState = useMemo(() => readAgentsTiledPersistState(), []);
-  const [viewMode, setViewMode] = useState<AgentHubViewMode>(() => readAgentsViewModePersistState());
+  const [apiAgentTabEnabled, setApiAgentTabEnabled] = useState(initialApiAgentTabEnabled);
+  const [viewMode, setViewMode] = useState<AgentHubViewMode>(() => {
+    const persisted = readAgentsViewModePersistState();
+    return persisted === 'api-agent' && !initialApiAgentTabEnabled ? 'topology' : persisted;
+  });
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [topologyLayoutMode, setTopologyLayoutMode] = useState<TopologyLayoutMode>('manual');
   const [topologyLayoutStore, setTopologyLayoutStore] = useState<TopologyLayoutStore>(() => readTopologyLayoutStore());
@@ -2027,6 +2039,19 @@ export function AgentsPage() {
   const [ptySpawnTargetSlotId, setPtySpawnTargetSlotId] = useState<string | null>(null);
   const [ptySpawnTargetLayoutId, setPtySpawnTargetLayoutId] = useState<string | null>(null);
   const [peerPairingOpen, setPeerPairingOpen] = useState(false);
+
+  useEffect(() => subscribeApiAgentTabEnabledChanges(setApiAgentTabEnabled), []);
+
+  useEffect(() => {
+    if (!apiAgentTabEnabled && viewMode === 'api-agent') {
+      setViewMode('topology');
+    }
+  }, [apiAgentTabEnabled, viewMode]);
+
+  const visibleViewItems = useMemo(
+    () => (apiAgentTabEnabled ? VIEW_ITEMS : VIEW_ITEMS.filter((item) => item.id !== 'api-agent')),
+    [apiAgentTabEnabled],
+  );
 
   const openPtyTerminal = useCallback((
     ptyId: string,
@@ -6670,6 +6695,9 @@ export function AgentsPage() {
         />
       );
     }
+    if (viewMode === 'api-agent') {
+      return <ApiAgentTabView />;
+    }
     return (
       <TopologyView
         graph={signalGraph}
@@ -6756,6 +6784,7 @@ export function AgentsPage() {
     runtimeTargetModeValue,
     runtimeExternalAddressDraft,
     runtimeServiceStatus,
+    apiAgentTabEnabled,
     nodesFilter,
     dashboardSessions,
     sessionLoading,
@@ -6845,7 +6874,7 @@ export function AgentsPage() {
               </div>
             </div>
             {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
-            <TabBar value={viewMode} onChange={handleTabChange} />
+            <TabBar items={visibleViewItems} value={viewMode} onChange={handleTabChange} />
           </header>
         </>
       ) : null}

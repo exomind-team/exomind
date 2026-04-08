@@ -11,7 +11,7 @@ export type {
 export type { AgentMarketCategory, AgentMarketItem } from './agent-hub-market';
 
 // Agent Hub view modes（视图模式）
-export const AGENT_HUB_VIEW_MODES = ['topology', 'sessions', 'tiled', 'list', 'history', 'routes', 'device'] as const;
+export const AGENT_HUB_VIEW_MODES = ['topology', 'sessions', 'tiled', 'list', 'history', 'routes', 'device', 'api-agent'] as const;
 export type AgentHubViewMode = (typeof AGENT_HUB_VIEW_MODES)[number];
 
 // 右侧栏状态机

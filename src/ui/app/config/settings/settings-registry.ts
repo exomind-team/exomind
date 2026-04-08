@@ -71,6 +71,11 @@ import {
   subscribeAgentPageEnabledChanges,
 } from '@/config/agent-page-enabled';
 import {
+  getApiAgentTabEnabled,
+  setApiAgentTabEnabled,
+  subscribeApiAgentTabEnabledChanges,
+} from '@/config/api-agent-tab-enabled';
+import {
   getMePageEnabled,
   setMePageEnabled,
   subscribeMePageEnabledChanges,
@@ -1751,6 +1756,19 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getDevtoolsEnabled(),
     set: setDevtoolsEnabledWithSync,
     subscribe: subscribeDevtoolsChanges,
+  },
+  {
+    id: 'api-agent-tab-enabled',
+    label: 'API Agent Tab',
+    description: '???????? API Agent ????',
+    icon: Bot,
+    category: 'developer',
+    controlTestId: 'new-settings-api-agent-tab-switch',
+    type: 'boolean',
+    visible: devOnly,
+    get: () => getApiAgentTabEnabled(),
+    set: setApiAgentTabEnabled,
+    subscribe: subscribeApiAgentTabEnabledChanges,
   },
   ...FEATURE_TOGGLE_SETTINGS.map((setting) => ({
     id: setting.id,

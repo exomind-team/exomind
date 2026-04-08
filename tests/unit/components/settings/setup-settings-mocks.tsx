@@ -94,6 +94,7 @@ export const settingsPageServiceMocks = {
 
 export const settingsPagePreferenceState = {
   developerMode: false,
+  apiAgentTabEnabled: false,
   agentPageEnabled: false,
   mePageEnabled: false,
   proposalInboxEnabled: true,
@@ -195,6 +196,12 @@ vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: vi.fn(() => settingsPagePreferenceState.agentPageEnabled),
   setAgentPageEnabled: vi.fn(),
   subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/api-agent-tab-enabled', () => ({
+  getApiAgentTabEnabled: vi.fn(() => settingsPagePreferenceState.apiAgentTabEnabled),
+  setApiAgentTabEnabled: vi.fn(),
+  subscribeApiAgentTabEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/me-page-enabled', () => ({
