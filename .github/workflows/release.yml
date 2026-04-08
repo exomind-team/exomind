@@ -3,7 +3,7 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*' # 单一发布 tag：v0.x.y
+      - "v*" # 单一发布 tag：v0.x.y
   workflow_dispatch:
     inputs:
       promote_tag:
@@ -22,10 +22,10 @@ env:
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # Job 1: Android APK + Windows EXE on self-hosted Windows runner
-  # Shared setup runs once; platform-specific builds gated by step-level `if`.
+  # Job 1: Android APK on Windows runner
+  # Split from the old combined Windows job so Android/Windows can run in parallel.
   # ─────────────────────────────────────────────────────────────
-  build-apk-exe-selfhosted:
+  build-android-selfhosted:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
@@ -36,10 +36,10 @@ jobs:
         shell: pwsh
         run: |
           $android = "true"
-          $windows = "true"
+          $windows = "false"
           "BUILD_ANDROID=$android" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "BUILD_WINDOWS=$windows" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Build Android=$android Windows=$windows (push tag flow)"
+          Write-Host "Build Android=$android Windows=$windows (parallel Android job / 并行 Android job)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -543,6 +543,269 @@ jobs:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
 
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: Windows EXE/MSI on Windows runner
+  # Split from the old combined Windows job so Android/Windows can run in parallel.
+  # ─────────────────────────────────────────────────────────────
+  build-windows-selfhosted:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine build targets (确定构建目标)
+        id: targets
+        shell: pwsh
+        run: |
+          $android = "false"
+          $windows = "true"
+          "BUILD_ANDROID=$android" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "BUILD_WINDOWS=$windows" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Build Android=$android Windows=$windows (parallel Windows job / 并行 Windows job)"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Ensure local Bun is available (确保本机 Bun 可用，版本锁定)
+        shell: pwsh
+        run: |
+          $requiredVersion = "${{ env.BUN_VERSION }}"
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          $needInstall = $false
+
+          if (-not $bunCmd -or ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            Write-Host "Bun not found or is WSL version."
+            $needInstall = $true
+          } else {
+            $currentVersion = (bun --version 2>$null)
+            if ($currentVersion -ne $requiredVersion) {
+              Write-Host "Bun version mismatch: found $currentVersion, need $requiredVersion"
+              $needInstall = $true
+            } else {
+              Write-Host "Found matching Bun $currentVersion at $($bunCmd.Source)"
+            }
+          }
+
+          if ($needInstall) {
+            Write-Host "Installing bun@$requiredVersion via npm..."
+            npm install -g "bun@$requiredVersion"
+            $npmPrefix = (npm config get prefix).Trim()
+            if ($npmPrefix) {
+              $env:Path = "$npmPrefix;$env:Path"
+              "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            }
+            $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+            if (-not $bunCmd) { throw "Bun is unavailable after installation." }
+            if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+              throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+            }
+          }
+          Write-Host "Using Bun from: $($bunCmd.Source)"
+          bun --version
+
+      - name: Rust diagnostics (Rust 诊断输出)
+        shell: pwsh
+        run: |
+          Write-Host '=== Rust diagnostics / Rust 诊断输出 ==='
+          Write-Host ('event_name={0}' -f '${{ github.event_name }}')
+          Write-Host ('ref={0}' -f '${{ github.ref }}')
+          Write-Host ('runner={0} os={1} arch={2}' -f $env:RUNNER_NAME, $env:RUNNER_OS, $env:RUNNER_ARCH)
+          $currentUser = whoami
+          Write-Host ('whoami={0}' -f $currentUser)
+          Write-Host ('USERPROFILE={0}' -f $env:USERPROFILE)
+          Write-Host ('HOME={0}' -f $env:HOME)
+          Write-Host ('CARGO_HOME={0}' -f $env:CARGO_HOME)
+          Write-Host ('RUSTUP_HOME={0}' -f $env:RUSTUP_HOME)
+
+          $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+          $cargoBinExists = Test-Path $cargoBin
+          Write-Host ('cargoBin={0} exists={1}' -f $cargoBin, $cargoBinExists)
+
+          foreach ($name in @('rustup.exe', 'rustc.exe', 'cargo.exe', 'rustup', 'rustc', 'cargo')) {
+            $candidate = Join-Path $cargoBin $name
+            $candidateExists = Test-Path $candidate
+            Write-Host ('candidate={0} exists={1}' -f $candidate, $candidateExists)
+          }
+
+          Write-Host 'Get-Command (before prepend PATH)'
+          foreach ($cmd in @('rustup', 'rustc', 'cargo')) {
+            $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
+            if ($resolved) {
+              Write-Host (' - {0} [{1}]' -f $cmd, $resolved.Source)
+            } else {
+              Write-Host (' - {0} [NOT_FOUND]' -f $cmd)
+            }
+          }
+
+      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+        shell: pwsh
+        run: |
+          $preferredCargoHome = "D:\actions-runner\rust\cargo"
+          $preferredRustupHome = "D:\actions-runner\rust\rustup"
+          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
+          if (Test-Path $preferredCargoBin) {
+            $env:CARGO_HOME = $preferredCargoHome
+            $env:RUSTUP_HOME = $preferredRustupHome
+            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $env:Path = "$preferredCargoBin;$env:Path"
+            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          if (Test-Path $cargoBin) {
+            $env:Path = "$cargoBin;$env:Path"
+            "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $rustupCmd = Get-Command rustup -ErrorAction SilentlyContinue
+          $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
+          $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+          if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
+            throw "Rust toolchain not found on Windows runner."
+          }
+
+          if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            throw "Detected Rust command from WSL path. Please use native Windows Rust toolchain."
+          }
+
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to select stable Rust toolchain. Please install stable locally first (例如: rustup toolchain install stable)."
+          }
+
+          rustup show active-toolchain
+          rustc -vV
+          cargo -V
+
+      - name: Get short commit hash
+        id: hash
+        shell: pwsh
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Resolve app version (解析应用版本)
+        id: app_version
+        shell: pwsh
+        run: |
+          $refName = "${{ github.ref_name }}"
+          $appVersion = ""
+
+          if ($refName.StartsWith("v")) {
+            $appVersion = $refName.Substring(1)
+          }
+
+          if (-not $appVersion) {
+            $packageVersion = (Get-Content -Path "package.json" -Raw | ConvertFrom-Json).version
+            $appVersion = [string]$packageVersion
+          }
+
+          if ($appVersion.StartsWith("v")) {
+            $appVersion = $appVersion.Substring(1)
+          }
+
+          if (-not $appVersion) {
+            throw "Cannot resolve app version from tag or package.json."
+          }
+
+          "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Resolved app version: $appVersion"
+
+      - name: Clean stale node_modules (清理残留依赖，避免 bun 校验卡死)
+        shell: pwsh
+        run: |
+          if (Test-Path node_modules) {
+            Write-Host "Removing stale node_modules from previous run..."
+            Remove-Item -Recurse -Force node_modules
+          }
+
+      - name: Clear bun global cache (清理 bun 全局缓存)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          try {
+            Write-Host "Running bun pm cache rm (best effort)..."
+            bun pm cache rm
+          } catch {
+            Write-Warning "bun pm cache rm failed: $($_.Exception.Message)"
+          }
+
+          $bunCacheDir = Join-Path $env:USERPROFILE ".bun\install\cache"
+          if (Test-Path $bunCacheDir) {
+            try {
+              Write-Host "Removing bun global cache directory: $bunCacheDir"
+              Remove-Item -Recurse -Force $bunCacheDir -ErrorAction Stop
+            } catch {
+              Write-Warning "Failed to remove bun global cache directory: $($_.Exception.Message)"
+            }
+          } else {
+            Write-Host "Bun global cache directory not found, skip cleanup."
+          }
+
+      - name: Install dependencies with isolated cache and retry (安装依赖：隔离缓存 + 重试)
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-BunInstallWithCache {
+            param(
+              [Parameter(Mandatory = $true)][string]$CacheDir,
+              [Parameter(Mandatory = $true)][string]$AttemptLabel,
+              [int]$TimeoutSeconds = 180
+            )
+
+            if (Test-Path $CacheDir) {
+              Remove-Item -Recurse -Force $CacheDir -ErrorAction SilentlyContinue
+            }
+            New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
+
+            $env:BUN_INSTALL_CACHE_DIR = $CacheDir
+            $arguments = @("install", "--cache-dir", $CacheDir)
+            Write-Host "[$AttemptLabel] Running: bun $($arguments -join ' ')"
+
+            $commandText = "bun $($arguments -join ' ')"
+            $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $commandText -PassThru
+            $finished = $process.WaitForExit($TimeoutSeconds * 1000)
+
+            if (-not $finished) {
+              Write-Warning "[$AttemptLabel] bun install timed out after $TimeoutSeconds seconds."
+              try {
+                & taskkill /PID $process.Id /T /F | Out-Null
+              } catch {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              }
+              throw "bun install timeout in $AttemptLabel"
+            }
+
+            if ($process.ExitCode -ne 0) {
+              throw "bun install failed in $AttemptLabel with exit code $($process.ExitCode)"
+            }
+          }
+
+          $baseCacheDir = Join-Path $env:RUNNER_TEMP "bun-install-cache"
+          $firstAttemptCacheDir = Join-Path $baseCacheDir "attempt-1"
+          $secondAttemptCacheDir = Join-Path $baseCacheDir "attempt-2"
+
+          try {
+            Invoke-BunInstallWithCache -CacheDir $firstAttemptCacheDir -AttemptLabel "attempt 1 / 第一次"
+          } catch {
+            Write-Warning "First install attempt failed: $($_.Exception.Message)"
+            Write-Host "Retry bun install / 重试 bun install with fresh isolated cache."
+            Invoke-BunInstallWithCache -CacheDir $secondAttemptCacheDir -AttemptLabel "attempt 2 / 第二次"
+          }
+
+          "EXOMIND_SKIP_BUN_INSTALL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "EXOMIND_SKIP_BUN_INSTALL=1 (reuse bootstrapped dependencies / 复用前置依赖安装)"
+
       # ─── Windows build ──────────────────────────────────────
 
       - name: Build Windows EXE binary (构建 Windows EXE 可执行文件)
@@ -945,16 +1208,19 @@ jobs:
           if-no-files-found: ignore
 
   create-release:
-    needs: [build-apk-exe-selfhosted, build-macos, build-linux]
+    needs:
+      [
+        build-android-selfhosted,
+        build-windows-selfhosted,
+        build-macos,
+        build-linux,
+      ]
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v') &&
-      (
-        needs.build-apk-exe-selfhosted.result == 'success' ||
-        needs.build-macos.result == 'success' ||
-        needs.build-linux.result == 'success'
-      )
+      needs.build-android-selfhosted.result == 'success' &&
+      needs.build-windows-selfhosted.result == 'success'
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
