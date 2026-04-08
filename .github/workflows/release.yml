@@ -13,8 +13,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 env:
   RUST_TOOLCHAIN: stable
@@ -1461,50 +1459,3 @@ jobs:
               make_latest: 'true',
               name: `Release ${tag}`,
             });
-
-  sync-pages:
-    needs: [create-release, promote-release]
-    runs-on: ubuntu-latest
-    if: |
-      always() &&
-      (
-        needs.create-release.result == 'success' ||
-        needs.promote-release.result == 'success'
-      )
-    steps:
-      - name: Checkout repository (检出代码)
-        uses: actions/checkout@v4
-
-      - name: Setup Bun (安装 Bun)
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Sync GitHub Pages release metadata (同步 GitHub Pages release metadata)
-        run: bun scripts/dev/sync-release-pages.ts --repo ${{ github.repository }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install website dependencies (安装 website 依赖)
-        run: bun run website:install
-
-      - name: Build website for GitHub Pages (构建 GitHub Pages 静态站点)
-        run: bun run website:build
-
-      - name: Configure GitHub Pages (配置 GitHub Pages)
-        uses: actions/configure-pages@v5
-
-      - name: Upload GitHub Pages artifact (上传 GitHub Pages 产物)
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: website/dist
-
-  deploy-pages:
-    needs: sync-pages
-    runs-on: ubuntu-latest
-    if: needs.sync-pages.result == 'success'
-    environment:
-      name: github-pages
-    steps:
-      - name: Deploy GitHub Pages (部署 GitHub Pages)
-        uses: actions/deploy-pages@v4
