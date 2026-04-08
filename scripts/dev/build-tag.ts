@@ -12,8 +12,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readCanonicalVersion } from './release-version-lib.ts';
 
 type Options = {
   dryRun: boolean;
@@ -32,50 +31,6 @@ function git(...args: string[]): string {
   return execFileSync('git', args, { encoding: 'utf-8' }).trim();
 }
 
-function readPackageVersion(): string {
-  const pkgPath = join(import.meta.dir, '..', '..', 'package.json');
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-  return String(pkg.version ?? '').trim();
-}
-
-function readCargoVersion(): string {
-  const cargoPath = join(import.meta.dir, '..', '..', 'src-tauri', 'Cargo.toml');
-  const cargoText = readFileSync(cargoPath, 'utf-8');
-  const match = cargoText.match(/^\s*version\s*=\s*"([^"]+)"\s*$/m);
-  return match?.[1]?.trim() ?? '';
-}
-
-function readTauriVersion(): string {
-  const tauriPath = join(import.meta.dir, '..', '..', 'src-tauri', 'tauri.conf.json');
-  const tauriConfig = JSON.parse(readFileSync(tauriPath, 'utf-8'));
-  return String(tauriConfig.version ?? '').trim();
-}
-
-function assertCanonicalVersion(version: string) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) {
-    throw new Error(`版本号必须是 0.x.y 形式的纯语义化版本，当前为: ${version}`);
-  }
-}
-
-function resolveCanonicalVersion(): string {
-  const versions = {
-    packageJson: readPackageVersion(),
-    cargoToml: readCargoVersion(),
-    tauriConfig: readTauriVersion(),
-  };
-
-  const uniqueVersions = [...new Set(Object.values(versions).filter(Boolean))];
-  if (uniqueVersions.length !== 1) {
-    throw new Error(
-      `版本号未对齐: package.json=${versions.packageJson}, Cargo.toml=${versions.cargoToml}, tauri.conf.json=${versions.tauriConfig}`,
-    );
-  }
-
-  const version = uniqueVersions[0];
-  assertCanonicalVersion(version);
-  return version;
-}
-
 function tagExists(tag: string): boolean {
   try {
     git('rev-parse', '-q', '--verify', `refs/tags/${tag}`);
@@ -85,9 +40,17 @@ function tagExists(tag: string): boolean {
   }
 }
 
+function remoteTagExists(tag: string): boolean {
+  try {
+    return Boolean(git('ls-remote', '--tags', '--refs', 'origin', tag));
+  } catch {
+    return false;
+  }
+}
+
 function main() {
   const options = parseArgs();
-  const version = resolveCanonicalVersion();
+  const version = readCanonicalVersion();
   const tag = `v${version}`;
 
   console.log(`规范版本 (canonical version / 规范版本): ${version}`);
@@ -95,6 +58,9 @@ function main() {
 
   if (tagExists(tag)) {
     throw new Error(`标签已存在，拒绝重复创建: ${tag}`);
+  }
+  if (remoteTagExists(tag)) {
+    throw new Error(`远端标签已存在，拒绝重复创建: ${tag}`);
   }
 
   if (options.dryRun) {
