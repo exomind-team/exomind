@@ -38,6 +38,19 @@ type HighlightSectionKey =
   | "maintenance";
 
 const CANONICAL_TAG_RE = /^v\d+\.\d+\.\d+$/;
+const ASSET_LABELS: Record<string, string> = {
+  "windows-x64-setup": "Windows Setup",
+  "windows-x64-installer": "Windows Installer (MSI)",
+  "android-arm64": "Android APK (arm64)",
+  "android-x86": "Android APK (x86)",
+  "macos-aarch64": "macOS DMG (Apple Silicon)",
+  "macos-x64": "macOS DMG (Intel)",
+  "linux-x64-appimage": "Linux AppImage",
+  "linux-x64-deb": "Linux DEB",
+  "runtime-windows-x64": "Runtime Windows",
+  "runtime-macos-aarch64": "Runtime macOS",
+  "runtime-linux-x64": "Runtime Linux",
+};
 
 function parseSemverParts(tag: string): [number, number, number] | null {
   const match = tag.trim().match(/^v(\d+)\.(\d+)\.(\d+)$/);
@@ -173,12 +186,12 @@ function renderHighlights(input: ReleaseNotesInput): string[] {
 
   if (grouped.size === 0) {
     return [
-      "## Highlights / 功能变化",
+      "## What Changed / 本次变化",
       "- No user-facing changes detected in this range.",
     ];
   }
 
-  const lines = ["## Highlights / 功能变化"];
+  const lines = ["## What Changed / 本次变化"];
   const orderedKeys: HighlightSectionKey[] = [
     "added",
     "fixed",
@@ -199,7 +212,7 @@ function renderHighlights(input: ReleaseNotesInput): string[] {
 }
 
 function renderPullRequests(pullRequests: ReleaseNotesPullRequest[]): string[] {
-  const lines = ["## Merged PRs / 合并 PR"];
+  const lines = ["### Merged PRs / 合并 PR"];
 
   if (pullRequests.length === 0) {
     lines.push("- None in this release range.");
@@ -218,7 +231,7 @@ function renderPullRequests(pullRequests: ReleaseNotesPullRequest[]): string[] {
 function renderDirectCommits(
   directCommits: ReleaseNotesDirectCommit[],
 ): string[] {
-  const lines = ["## Direct Commits / 直接提交"];
+  const lines = ["### Direct Commits / 直接提交"];
 
   if (directCommits.length === 0) {
     lines.push("- None. All detected changes are covered by merged PRs.");
@@ -241,7 +254,7 @@ function renderDirectCommits(
 }
 
 function renderArtifacts(manifest?: ReleaseManifest | null): string[] {
-  const lines = ["## Artifacts / 安装包"];
+  const lines = ["## Downloads / 下载产物"];
 
   if (!manifest) {
     lines.push("- Release manifest is unavailable.");
@@ -254,10 +267,28 @@ function renderArtifacts(manifest?: ReleaseManifest | null): string[] {
     return lines;
   }
 
-  for (const [assetKey, asset] of entries) {
-    lines.push(
-      `- \`${assetKey}\`: \`${asset.name}\` (${formatBytes(asset.size)})`,
-    );
+  const appLines: string[] = [];
+  const runtimeLines: string[] = [];
+  const sortedEntries = [...entries].sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+
+  for (const [assetKey, asset] of sortedEntries) {
+    const label = ASSET_LABELS[assetKey] ?? assetKey;
+    const line = `- ${label}: \`${asset.name}\` (${formatBytes(asset.size)})`;
+    if (assetKey.startsWith("runtime-")) {
+      runtimeLines.push(line);
+      continue;
+    }
+    appLines.push(line);
+  }
+
+  if (appLines.length > 0) {
+    lines.push("", "### App / 主应用", ...appLines);
+  }
+
+  if (runtimeLines.length > 0) {
+    lines.push("", "### Runtime / 运行时", ...runtimeLines);
   }
 
   return lines;
@@ -267,7 +298,7 @@ export function renderReleaseNotesMarkdown(input: ReleaseNotesInput): string {
   const lines: string[] = [
     `## ${input.releaseName}`,
     "",
-    "## Summary / 摘要",
+    "## Release Scope / 发布范围",
     `- Tag: \`${input.currentTag}\``,
     `- Version: \`${input.currentVersion}\``,
   ];
@@ -289,6 +320,8 @@ export function renderReleaseNotesMarkdown(input: ReleaseNotesInput): string {
   lines.push(`- Direct Commits: ${input.directCommits.length}`);
   lines.push("");
   lines.push(...renderHighlights(input));
+  lines.push("");
+  lines.push("## Change Sources / 变更来源");
   lines.push("");
   lines.push(...renderPullRequests(input.pullRequests));
   lines.push("");

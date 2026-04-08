@@ -24,6 +24,11 @@ function makeManifest(version: string): ReleaseManifest {
         size: 19_797_335,
         sha256: "b".repeat(64),
       },
+      "runtime-windows-x64": {
+        name: `ExoMind-RT-${version}-windows-x64.exe`,
+        size: 6_369_792,
+        sha256: "c".repeat(64),
+      },
     },
   };
 }
@@ -82,10 +87,11 @@ describe("release-notes-lib", () => {
       ],
     });
 
-    expect(markdown).toContain("## Summary / 摘要");
+    expect(markdown).toContain("## Release Scope / 发布范围");
     expect(markdown).toContain(
       "Compare: [`v0.4.2...v0.4.3`](https://github.com/exomind-team/exomind/compare/v0.4.2...v0.4.3)",
     );
+    expect(markdown).toContain("## What Changed / 本次变化");
     expect(markdown).toContain("### Added / 新增");
     expect(markdown).toContain(
       "add release note panel ([PR #900](https://github.com/exomind-team/exomind/pull/900) by @HailayLin)",
@@ -94,13 +100,19 @@ describe("release-notes-lib", () => {
     expect(markdown).toContain(
       "prepare v0.4.3 pipeline ([`d99ede9c`](https://github.com/exomind-team/exomind/commit/d99ede9c) by @HailayLin)",
     );
-    expect(markdown).toContain("## Direct Commits / 直接提交");
+    expect(markdown).toContain("## Change Sources / 变更来源");
+    expect(markdown).toContain("### Direct Commits / 直接提交");
     expect(markdown).toContain(
       "Files: .github/workflows/release.yml, package.json",
     );
-    expect(markdown).toContain("## Artifacts / 安装包");
+    expect(markdown).toContain("## Downloads / 下载产物");
+    expect(markdown).toContain("### App / 主应用");
     expect(markdown).toContain(
-      "`windows-x64-setup`: `ExoMind-0.4.3-windows-x64-setup.exe`",
+      "Windows Setup: `ExoMind-0.4.3-windows-x64-setup.exe`",
+    );
+    expect(markdown).toContain("### Runtime / 运行时");
+    expect(markdown).toContain(
+      "Runtime Windows: `ExoMind-RT-0.4.3-windows-x64.exe`",
     );
   });
 });
