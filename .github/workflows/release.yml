@@ -1229,6 +1229,14 @@ jobs:
       needs.build-android-selfhosted.result == 'success' &&
       needs.build-windows-selfhosted.result == 'success'
     steps:
+      - name: Checkout repository (检出代码以生成 release notes)
+        uses: actions/checkout@v4
+
+      - name: Setup Bun (安装 Bun 以生成 release notes)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -1420,15 +1428,26 @@ jobs:
             '{version: $version, tag: $tag, commit: $commit, generated_at: $generated_at, assets: $assets}' \
             > "$output_dir/exomind-release-manifest.json"
 
+      - name: Generate release notes (生成 release notes)
+        run: >
+          bun scripts/dev/generate-release-notes.ts
+          --repo ${{ github.repository }}
+          --tag ${{ github.ref_name }}
+          --title "${{ steps.meta.outputs.title }}"
+          --manifest release-assets/exomind-release-manifest.json
+          --output .tmp/release-notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create or Update GitHub Release (创建或更新 GitHub Release)
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/**
           tag_name: ${{ github.ref_name }}
           name: ${{ steps.meta.outputs.title }}
+          body_path: .tmp/release-notes.md
           draft: false
           prerelease: true
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
