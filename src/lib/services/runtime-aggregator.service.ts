@@ -4,6 +4,7 @@ import { getRuntimeHostService } from './runtime-host.service';
 import { log } from '@/lib/logger';
 import {
   buildRuntimeAuthHeaders,
+  isMeshOnlyConfirmedPeer,
   resolveRuntimeHostBaseUrl,
 } from '@/lib/utils/runtime-host-address';
 
@@ -32,6 +33,7 @@ type RuntimeFetch = typeof fetch;
 
 export interface RuntimeAggregatorServiceOptions {
   fetchImpl?: RuntimeFetch;
+  hostService?: Pick<ReturnType<typeof getRuntimeHostService>, 'listHosts'>;
   timeoutMs?: number;
 }
 
@@ -39,18 +41,19 @@ const DEFAULT_TIMEOUT_MS = 3000;
 
 export class RuntimeAggregatorServiceImpl implements RuntimeAggregatorService {
   private readonly fetchImpl: RuntimeFetch;
+  private readonly hostService: Pick<ReturnType<typeof getRuntimeHostService>, 'listHosts'>;
   private readonly timeoutMs: number;
 
   constructor(options: RuntimeAggregatorServiceOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
+    this.hostService = options.hostService ?? getRuntimeHostService();
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   async aggregateAll(): Promise<AggregatedRuntimeData> {
-    const hostService = getRuntimeHostService();
-    const hosts = await hostService.listHosts();
+    const hosts = await this.hostService.listHosts();
 
-    const onlineHosts = hosts.filter(h => h.status === 'online');
+    const onlineHosts = hosts.filter((host) => host.status === 'online' && !isMeshOnlyConfirmedPeer(host));
 
     const agents: RuntimeAgentInfo[] = [];
     const topologies = new Map<string, RuntimeTopologyResponse>();
@@ -77,24 +80,30 @@ export class RuntimeAggregatorServiceImpl implements RuntimeAggregatorService {
   }
 
   async getAgentsByHost(hostId: string): Promise<RuntimeAgentInfo[]> {
-    const hostService = getRuntimeHostService();
-    const hosts = await hostService.listHosts();
+    const hosts = await this.hostService.listHosts();
     const host = hosts.find(h => h.id === hostId);
 
     if (!host) {
       throw new Error(`Host not found: ${hostId}`);
     }
 
+    if (isMeshOnlyConfirmedPeer(host)) {
+      return [];
+    }
+
     return this.fetchAgents(host);
   }
 
   async getTopologyByHost(hostId: string): Promise<RuntimeTopologyResponse | null> {
-    const hostService = getRuntimeHostService();
-    const hosts = await hostService.listHosts();
+    const hosts = await this.hostService.listHosts();
     const host = hosts.find(h => h.id === hostId);
 
     if (!host) {
       throw new Error(`Host not found: ${hostId}`);
+    }
+
+    if (isMeshOnlyConfirmedPeer(host)) {
+      return null;
     }
 
     return this.fetchTopology(host);

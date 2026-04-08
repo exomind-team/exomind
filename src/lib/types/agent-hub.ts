@@ -1,5 +1,6 @@
 // Re-export split types for backward compatibility
 export type {
+  RuntimeHostAuthTokenSource,
   RuntimeHostStatus,
   RuntimeHostRecord,
   RuntimeHostTrustState,

@@ -192,11 +192,11 @@ export class RuntimeMeshHostSyncService {
     let nextHosts = [...existingHosts];
 
     for (const peer of discoveredPeers) {
-      nextHosts = await this.upsertDiscoveredPeer(nextHosts, peer, localAuthToken);
+      nextHosts = await this.upsertDiscoveredPeer(nextHosts, peer);
     }
 
     for (const peer of meshPeers.filter((item) => item.enabled)) {
-      nextHosts = await this.upsertConfirmedPeer(nextHosts, peer, localAuthToken);
+      nextHosts = await this.upsertConfirmedPeer(nextHosts, peer);
     }
 
     nextHosts = await this.transferCollapsedPeerMetadata(nextHosts, replacedPeerIds);
@@ -337,7 +337,6 @@ export class RuntimeMeshHostSyncService {
   private async upsertDiscoveredPeer(
     hosts: RuntimeHostRecord[],
     peer: RuntimeDiscoveredPeer,
-    localAuthToken?: string,
   ): Promise<RuntimeHostRecord[]> {
     const advertisedListenAddress = formatRuntimeTargetAddress({
       host: peer.host,
@@ -361,7 +360,6 @@ export class RuntimeMeshHostSyncService {
         trustState: 'discovered_candidate',
         advertisedListenAddress,
         manualOverride,
-        authToken: localAuthToken,
       } satisfies AddRuntimeHostInput);
       return [...hosts, created];
     }
@@ -379,7 +377,6 @@ export class RuntimeMeshHostSyncService {
         : 'discovered_candidate',
       advertisedListenAddress,
       manualOverride,
-      authToken: localAuthToken,
     };
     const merged = await this.hostService.mergeHostMetadata(existingHost.id, patch);
     return replaceHost(hosts, merged);
@@ -388,7 +385,6 @@ export class RuntimeMeshHostSyncService {
   private async upsertConfirmedPeer(
     hosts: RuntimeHostRecord[],
     peer: RuntimeMeshPeer,
-    localAuthToken?: string,
   ): Promise<RuntimeHostRecord[]> {
     const parsed = parsePeerBaseUrl(peer.base_url);
     if (!parsed) {
@@ -433,7 +429,6 @@ export class RuntimeMeshHostSyncService {
         trustState: 'confirmed_peer',
         advertisedListenAddress,
         manualOverride,
-        authToken: localAuthToken,
       } satisfies AddRuntimeHostInput);
       return [...hosts, created];
     }
@@ -449,7 +444,6 @@ export class RuntimeMeshHostSyncService {
       trustState: 'confirmed_peer',
       advertisedListenAddress,
       manualOverride,
-      authToken: localAuthToken,
     };
     const merged = await this.hostService.mergeHostMetadata(existingHost.id, patch);
     return replaceHost(hosts, merged);

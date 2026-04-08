@@ -210,6 +210,12 @@ impl MeshState {
                 if peer.last_error.is_none() {
                     peer.last_error = existing.last_error.clone();
                 }
+                if peer.auth_token.is_none() {
+                    peer.auth_token = existing.auth_token.clone();
+                }
+                if peer.inbound_secret.is_none() {
+                    peer.inbound_secret = existing.inbound_secret.clone();
+                }
                 if peer.created_at.is_empty() {
                     peer.created_at = now.clone();
                 }
@@ -872,5 +878,46 @@ mod tests {
                 "non-targeted {topic} should not leak to other peers（不应泄漏到其他节点）"
             );
         }
+    }
+
+    #[test]
+    fn upsert_peer_preserves_existing_secrets_when_request_omits_them() {
+        let pool = Arc::new(SignalPool::new(None));
+        let mesh = MeshState::new("host-local".to_string(), Arc::clone(&pool), None);
+
+        mesh.upsert_peer(PeerInfo {
+            id: "host-phone".to_string(),
+            base_url: "http://host-phone.local:1949".to_string(),
+            enabled: true,
+            capabilities: vec!["relay".to_string()],
+            status: PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            auth_token: Some("token-outbound".to_string()),
+            inbound_secret: Some("token-inbound".to_string()),
+        });
+
+        mesh.upsert_peer(PeerInfo {
+            id: "host-phone".to_string(),
+            base_url: "http://host-phone.local:1950".to_string(),
+            enabled: true,
+            capabilities: vec!["relay".to_string()],
+            status: PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+            auth_token: None,
+            inbound_secret: None,
+        });
+
+        let peer = mesh
+            .get_peer("host-phone")
+            .expect("peer should still exist after upsert");
+        assert_eq!(peer.base_url, "http://host-phone.local:1950");
+        assert_eq!(peer.auth_token.as_deref(), Some("token-outbound"));
+        assert_eq!(peer.inbound_secret.as_deref(), Some("token-inbound"));
     }
 }

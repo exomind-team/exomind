@@ -476,6 +476,83 @@ describe('PeerPairingDialog（设备配对弹窗）', () => {
     });
   });
 
+  it('allows initiator verification before host adoption completes（发起方在首次配对无 host record 时也应进入验证）', async () => {
+    initiatePairingMock.mockResolvedValue({
+      session_id: 'pairing-session-1',
+      pin: '123456',
+    });
+    listMeshPeersMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'phone-peer-id',
+          base_url: 'http://10.0.2.15:9124',
+          enabled: true,
+        },
+      ]);
+    listHostsMock.mockResolvedValue([]);
+    const proofEventTs = Date.now() + 1000;
+    signalHistoryMock.mockResolvedValue([
+      {
+        id: 'evt-proof-request',
+        schema_version: 1,
+        topic: 'system.link_proof.request',
+        ts: proofEventTs,
+        source: 'ui:test',
+        origin_host_id: 'phone-peer-id',
+        hop: 0,
+        trace_id: 'trace-proof',
+        payload: {
+          proof_session_id: 'proof-session-join',
+          attempt_id: 'attempt-peer',
+          initiated_by_peer_id: 'phone-peer-id',
+          target_peer_id: 'desktop-host',
+          trigger: 'pairing_auto',
+          sent_at_ms: proofEventTs,
+        },
+      },
+    ]);
+    runVerificationMock.mockResolvedValue({
+      status: 'verified',
+      proofSessionId: 'proof-session-join',
+      localInitiatedRttMs: 41,
+      peerInitiatedRttMs: 55,
+      completedAt: '2026-03-30T10:00:00.000Z',
+    });
+
+    render(
+      <PeerPairingDialog
+        open
+        onOpenChange={() => {}}
+        runtimeBaseUrl="http://127.0.0.1:4077"
+        localHostId="desktop-host"
+        localAuthToken="embedded-secret"
+        timingOverrides={{
+          initiatorPeerPollIntervalMs: 1,
+          adoptionPollIntervalMs: 1,
+          adoptionWindowMs: 20,
+        }}
+      />
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '发起配对 生成 PIN 码，等待其他设备输入' }));
+    });
+
+    await waitFor(() => {
+      expect(runVerificationMock).toHaveBeenCalledWith(expect.objectContaining({
+        mode: 'joiner',
+        localPeerId: 'desktop-host',
+        peerId: 'phone-peer-id',
+        runtimeHostRecordId: undefined,
+        trigger: 'pairing_auto',
+      }));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('配对成功')).toBeInTheDocument();
+    });
+  });
+
   it('runs responder verification after pin pairing succeeds（响应方在 PIN 成功后进入连接验证）', async () => {
     listDiscoveredPeersMock.mockResolvedValue([
       {
@@ -552,6 +629,64 @@ describe('PeerPairingDialog（设备配对弹窗）', () => {
     await waitFor(() => {
       expect(screen.getByText('配对成功')).toBeInTheDocument();
     });
+  });
+
+  it('starts responder verification without an adopted host record（首次配对无已配对记录时也应启动验证）', async () => {
+    listDiscoveredPeersMock.mockResolvedValue([
+      {
+        host_id: 'android-host-id',
+        host: '10.0.2.15',
+        port: 9124,
+      },
+    ]);
+    respondToPairingMock.mockResolvedValue({
+      paired: true,
+      peer_token: 'peer-token-1',
+      initiator_inbound_token: 'initiator-inbound-1',
+    });
+    registerPeerLocallyMock.mockResolvedValue(undefined);
+    listHostsMock.mockResolvedValue([]);
+    runVerificationMock.mockResolvedValue({
+      status: 'verified',
+      proofSessionId: 'proof-session-owner-zero-state',
+      localInitiatedRttMs: 38,
+      peerInitiatedRttMs: 46,
+      completedAt: '2026-03-30T10:00:00.000Z',
+    });
+
+    render(
+      <PeerPairingDialog
+        open
+        onOpenChange={() => {}}
+        runtimeBaseUrl="http://127.0.0.1:4077"
+        localHostId="desktop-host"
+        localAuthToken="embedded-secret"
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '响应配对 扫描局域网设备，输入对方的 PIN 码' }));
+    const peerAddress = await screen.findByText(/10\.0\.2\.15/);
+    fireEvent.click(peerAddress.closest('button')!);
+
+    const inputs = await screen.findAllByRole('textbox');
+    '123456'.split('').forEach((digit, index) => {
+      fireEvent.change(inputs[index]!, { target: { value: digit } });
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认配对' }));
+
+    await waitFor(() => {
+      expect(runVerificationMock).toHaveBeenCalledWith(expect.objectContaining({
+        mode: 'owner',
+        localPeerId: 'desktop-host',
+        peerId: 'android-host-id',
+        runtimeHostRecordId: undefined,
+        trigger: 'pairing_auto',
+      }));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('配对成功')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('未找到已配对设备记录，无法开始验证')).not.toBeInTheDocument();
   });
 
   it('allows retrying verification without re-entering pin（验证失败后可直接重试，不必重新输入 PIN）', async () => {

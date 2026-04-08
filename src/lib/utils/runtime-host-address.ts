@@ -15,6 +15,16 @@ function normalizeOptionalText(value: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+export function hasRuntimeControlAuth(host: Pick<RuntimeHostRecord, 'authToken'>): boolean {
+  return Boolean(normalizeOptionalText(host.authToken));
+}
+
+export function isMeshOnlyConfirmedPeer(
+  host: Pick<RuntimeHostRecord, 'trustState' | 'authToken'>,
+): boolean {
+  return host.trustState === 'confirmed_peer' && !hasRuntimeControlAuth(host);
+}
+
 export function resolveRuntimeHostAdvertisedAddress(
   host: Pick<RuntimeHostRecord, 'host' | 'port' | 'advertisedListenAddress'>,
 ): string {

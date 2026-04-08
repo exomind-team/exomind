@@ -53,7 +53,6 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
       trustState: 'discovered_candidate',
       advertisedListenAddress: '10.0.2.15:9124',
       manualOverride: '127.0.0.1:39124',
-      authToken: 'shared-secret',
     }));
     expect(hosts[0]).toEqual(expect.objectContaining({
       trustState: 'discovered_candidate',
@@ -122,7 +121,6 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
         name: expect.stringContaining('192.168.101.5:21753'),
         advertisedListenAddress: '192.168.101.5:21753',
         manualOverride: undefined,
-        authToken: 'shared-secret',
       }),
     );
     expect(hosts[0]).toEqual(expect.objectContaining({
@@ -191,12 +189,64 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
         trustState: 'confirmed_peer',
         advertisedListenAddress: '192.168.1.20:9124',
         manualOverride: undefined,
-        authToken: 'shared-secret',
       }),
     );
     expect(hosts[0]).toEqual(expect.objectContaining({
       trustState: 'confirmed_peer',
-      authToken: 'shared-secret',
+    }));
+  });
+
+  it('does not overwrite an explicit remote control token when confirmed peer sync runs（mesh sync 不覆盖显式远端控制面 token）', async () => {
+    const existingConfirmedHost: RuntimeHostRecord = {
+      id: 'runtime-host-desktop',
+      name: 'Desktop Node',
+      host: '192.168.1.20',
+      port: 9124,
+      status: 'unknown',
+      createdAt: '2026-03-30T10:00:00.000Z',
+      updatedAt: '2026-03-30T10:00:00.000Z',
+      hostId: 'rt-desktop',
+      trustState: 'confirmed_peer',
+      authToken: 'remote-control-token',
+    };
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch) => ({
+      ...existingConfirmedHost,
+      hostId: patch.hostId ?? existingConfirmedHost.hostId,
+      trustState: patch.trustState ?? existingConfirmedHost.trustState,
+      advertisedListenAddress: patch.advertisedListenAddress,
+      manualOverride: patch.manualOverride,
+    }));
+    const service = new RuntimeMeshHostSyncService({
+      hostService: {
+        listHosts: vi.fn(async () => [existingConfirmedHost]),
+        addHost: vi.fn(),
+        mergeHostMetadata,
+        removeHost: vi.fn(),
+      },
+      meshService: {
+        listDiscoveredPeers: vi.fn(async () => []),
+        listMeshPeers: vi.fn(async () => [{
+          id: 'rt-desktop',
+          base_url: 'http://192.168.1.20:9124',
+          enabled: true,
+        }]),
+        setPeerEnabled: vi.fn(async () => undefined),
+      },
+      runtimeControlService: {
+        getPeerDialAddress: vi.fn(async () => ({
+          host: '192.168.1.20',
+          port: 9124,
+        })),
+      },
+    });
+
+    const hosts = await service.syncLocalRuntimeMeshState('http://127.0.0.1:31308', 'shared-secret');
+    const patch = mergeHostMetadata.mock.calls[0]?.[1] as Record<string, unknown>;
+
+    expect(Object.prototype.hasOwnProperty.call(patch, 'authToken')).toBe(false);
+    expect(hosts[0]).toEqual(expect.objectContaining({
+      trustState: 'confirmed_peer',
+      authToken: 'remote-control-token',
     }));
   });
 
@@ -265,7 +315,6 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
         port: 9124,
         advertisedListenAddress: '10.0.2.15:9124',
         manualOverride: '127.0.0.1:39124',
-        authToken: 'shared-secret',
       }),
     );
     expect(hosts[0]).toEqual(expect.objectContaining({

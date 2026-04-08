@@ -1980,3 +1980,234 @@
    - 先触发 `关闭 / 强制完成`
    - 再点 `归档`
    - 最后确认 `remainingActiveNoPty = []`
+
+### 阶段补记：LAN pairing 首次验证 401 收敛（2026-04-08）
+
+#### 阶段目标
+
+- 复核“首次 LAN 配对”在真实双桌面实例里，是否已经不再卡在：
+  - `未找到已配对设备记录，无法开始验证`
+- 继续追“配对后自动验证仍失败”的真实断点，确认是否还需要两边开启 `局域网免 token`
+
+#### 本轮观察结果
+
+- UI 侧此前已修掉“必须先有 host record 才能开始验证”的门槛后，新的真实阻塞不在 `PeerPairingDialog` 起跑线，而在 mesh 数据面。
+- Runtime pairing 成功后，会交换两类 per-peer secret：
+  - `auth_token`：本机发请求到对端时带的 Bearer
+  - `inbound_secret`：对端请求本机时必须携带的 Bearer
+- 当前真正的坏态是：
+  - pairing 后又发生一次不带 secret 的 peer replay / upsert
+  - 旧实现会把已有 peer 的 `auth_token / inbound_secret` 直接擦掉
+  - 随后 `/mesh/events`、`/mesh/stream` 就会回到 `401`，链路验证自然超时
+
+#### 代码层结论
+
+- 根因落在 Runtime `MeshState::upsert_peer()` 的覆盖语义：
+  - 旧行为：已有 peer 再次 upsert 且请求里没有 secret 时，会把旧 secret 清空
+  - 新行为：若请求未显式提供 `auth_token / inbound_secret`，保留已有值
+- 为此补了两层回归：
+  - 单测：`upsert_peer_preserves_existing_secrets_when_request_omits_them`
+  - 集成测试：`auth_pairing_relay_survives_peer_replay_without_secrets`
+
+#### 真机验证结果
+
+- 使用 `tauri:manager` 双实例：
+  - `pairing-lan-first`：`Web 1420 / RT 9124 / bridge 9223`
+  - `pairing-lan-second`：`Web 1422 / RT 1950 / bridge 9225`
+- 运行：
+  - `bun scripts/dev/tauri-sync-smoke.ts --bridge-a 9223 --bridge-b 9225 --name-a pairing-lan-first --name-b pairing-lan-second --profile-id pairing-auth-fix-20260408`
+- 结果：
+  - `Overall: PASS`
+  - `Peer convergence: PASS`
+  - `eventlog / task / timeblock / proposal` 四域双向同步全部通过
+- 这轮 smoke 通过时，**没有开启** `局域网免 token`
+
+#### 本轮结论
+
+- “未找到已配对记录无法验证”与“配对后验证 401”是两层不同问题：
+  - 前者是 UI 验证起跑条件错误
+  - 后者是 mesh peer secret 在 pairing 后被 replay 擦掉
+- 当前这两层都已经打通后，首次 pairing 不再需要靠 `局域网免 token` 绕过 mesh 数据面鉴权
+
+#### 可复用操作套路
+
+1. 如果 pairing 成功但自动验证超时，先区分：
+   - 是 UI 没启动验证
+   - 还是 mesh `/events` `/stream` 被 `401`
+2. 看到 `401` 时，优先怀疑“peer replay / setPeerEnabled / ensurePeerPair 是否把 secret 擦掉”，不要先去怪 pairing PIN 本身。
+3. 真实复测优先复用：
+   - `tauri:manager` 起双实例
+   - raw bridge 直连
+   - `tauri-sync-smoke.ts` 验证 peer convergence + 四域同步
+4. 只要 smoke 在未开启 `allow_lan_without_auth` 的前提下通过，就说明 per-peer token 数据面已经重新闭环。
+
+### 阶段补记：pairing 成功后的设备页 `HTTP 401` 语义校正（2026-04-08）
+
+#### 阶段目标
+
+- 解释为什么真实双桌面实例里已经出现：
+  - 配对弹窗 `配对成功`
+  - 设备卡片 `已验证互通`
+- 但“已确认节点”卡片仍同时残留：
+  - `复制状态：异常 / 待重试`
+  - `HTTP 401`
+
+#### 观察结果
+
+- 真实 UI 复核中，双窗口都成功走完：
+  - `发起配对 / 响应配对`
+  - `连接验证中`
+  - `配对成功`
+- 关闭弹窗后，设备页里对应 peer 已进入：
+  - `已确认 peer`
+  - `已验证互通`
+  - RTT 与 `自动配对` 触发时间均已落地
+- 但同一张卡片仍显示：
+  - `异常 / 待重试`
+  - `HTTP 401`
+- 同时直接查 Runtime `/mesh/peers` 真值可见：
+  - peer `status=online`
+  - `last_error=null`
+- 说明 401 不是 mesh 数据面坏了，而是前端还在尝试打远端控制面 `/agents` `/topology`
+  - 这些路由只接受 admin secret / trusted loopback origin
+  - pairing 交换到的是 per-peer mesh secret，不是远端 admin secret
+
+#### 结论
+
+- pairing / verification 与设备页“远端 Runtime 控制面探测”是第三层独立链路：
+  - pairing：建立 peer 关系，交换 `auth_token / inbound_secret`
+  - verification：通过 `/mesh/events` 等数据面完成 `system.link_proof.*`
+  - device card polling：仍走 `/agents` `/topology` 控制面
+- 因此在 secret 正常保留后：
+  - mesh pairing 与 verification 可以成功
+  - 但 confirmed peer 若没有远端 admin token，设备页继续直接 probe 控制面就会得到 `401`
+- 本轮前端修正策略是：
+  - 对 `confirmed_peer + verificationStatus=verified + HTTP 401`，按“控制面未授权”处理
+  - 不再把它误显示为 peer 离线 / 配对失败
+
+#### 可复用操作套路
+
+1. 看到“配对成功 + 已验证互通 + HTTP 401”同时出现时，先不要回滚 pairing。
+2. 先查本地 Runtime 真值：
+   - `GET /mesh/peers`
+   - 若 `status=online` 且 `last_error=null`，优先判定为控制面 auth gap，不是 mesh 断链。
+3. 再对照前端是否还在打：
+   - `/agents`
+   - `/topology`
+4. 若只是 confirmed peer 缺少远端 admin secret，应避免把该 401 直接映射成“异常 / 待重试”。
+
+### 阶段补记：双实例 RT 端口隔离与零 401 复核（2026-04-08）
+
+#### 阶段目标
+
+- 解释为什么 `tauri:manager` 双实例在换了 `Web/HMR` 端口后，仍可能卡在 page ready / pairing smoke 失败。
+- 用新的实例端口组合重新实测：
+  - pairing 成功
+  - `eventlog / task / timeblock / proposal` 四域同步通过
+  - 切到 `/agents` 的 `device` 视图后，不再出现新的 `401`
+
+#### 观察结果
+
+- `tauri:manager` 默认只显式隔离：
+  - `EXOMIND_WEB_PORT`
+  - `EXOMIND_HMR_PORT`
+- 内嵌 Runtime 端口仍由 `EXOMIND_RT_PORT` 决定；如果未显式设置，Rust / 前端都会回退到 `9124`。
+- 本轮失败现场里：
+  - `pairing-401-a` 正常跑在 `RT 9124`
+  - `pairing-401-b` 日志明确报：
+    - `port 9124 busy, waiting for release...`
+    - `failed to bind runtime listener on 0.0.0.0:9124 (os error 10048)`
+- 重新起实例时显式指定：
+  - `pairing-rt-a`：`Web 1440 / HMR 1441 / RT 1960 / bridge 9243`
+  - `pairing-rt-b`：`Web 1442 / HMR 1443 / RT 1962 / bridge 9245`
+- 新实例日志显示：
+  - A 的 signal stream 目标是 `http://127.0.0.1:1960`
+  - B 的 signal stream 目标是 `http://127.0.0.1:1962`
+- 随后运行：
+  - `bun scripts/dev/tauri-sync-smoke.ts --name-a pairing-rt-a --name-b pairing-rt-b --profile-id pairing-no401-20260408`
+- 结果：
+  - `Overall: PASS`
+  - `Peer convergence: PASS`
+  - `eventlog / task / timeblock / proposal` 四域全部 `PASS`
+- 再用 raw bridge 把两边都切到 `/agents` 且强制 `device` 视图停留数秒后，实例日志里没有出现：
+  - `HTTP 401`
+  - `unauthorized runtime request`
+  - `peer eventlog export failed`
+  - `peer task export failed`
+  - `peer timeblock export failed`
+
+#### 结论
+
+- 在 Windows 双实例桌面联调中，只换 `Web/HMR` 端口是不够的；必须同时隔离 `EXOMIND_RT_PORT`。
+- 设备页 `401` 收敛验证应分两步：
+  - 先确认双实例 RT 端口没有互抢
+  - 再进入 `/agents` 的 `device` 视图观察日志
+- 当前这轮修复后，真实双实例链路已经满足：
+  - pairing / verification 正常
+  - 四域业务同步正常
+  - `/agents` 设备视图稳定后无新增 `401`
+
+#### 可复用操作套路
+
+1. `tauri:manager` 起双实例时，不要只指定 `--web-port` / `--hmr-port`。
+2. 必须同时给每个实例注入不同的 `EXOMIND_RT_PORT`，例如：
+   - A：`$env:EXOMIND_RT_PORT='1960'; bun run tauri:manager -- start --name pairing-rt-a --web-port 1440 --hmr-port 1441`
+   - B：`$env:EXOMIND_RT_PORT='1962'; bun run tauri:manager -- start --name pairing-rt-b --web-port 1442 --hmr-port 1443`
+3. 起完后先看日志里的 signal stream 目标地址，确认前端确实连的是预期 RT 端口。
+4. 再跑 `tauri-sync-smoke.ts` 做 pairing + 四域同步验收。
+5. 最后用 raw bridge 切到 `/agents` 的 `device` 视图，停留数秒，再 grep：
+   - `HTTP 401`
+   - `unauthorized runtime request`
+   - `peer .* export failed`
+
+### 2026-04-08 三实例两两同步与 401 扫描
+
+#### 阶段目标
+
+- 在 Windows 下同时拉起 `3` 个 Tauri 桌面实例，并验证它们能两两同步。
+- 覆盖：
+  - `eventlog`
+  - `task`
+  - `timeblock`
+  - `proposal`
+- 三台都切到 `/agents` 的 `device` 视图后，确认日志里没有新的 `401` / `unauthorized` / `export failed`。
+
+#### 观察结果
+
+- 三实例顺序启动时必须继续显式隔离 `EXOMIND_RT_PORT`：
+  - `trio-a`：`Web 1450 / HMR 1451 / RT 1970 / bridge 9253`
+  - `trio-b`：`Web 1452 / HMR 1453 / RT 1972 / bridge 9255`
+  - `trio-c`：`Web 1454 / HMR 1455 / RT 1974 / bridge 9257`
+- 冷启动编译阶段，`bun run tauri:manager -- list` 可能先把实例标成 `stale`，但日志里只有 Rust/Tauri 编译进度，没有崩溃栈。
+- 等冷启动编译完成后再 `list`，三个实例都会回到 `running / ok`；这时再执行 smoke 更稳。
+- 三轮 pair smoke 使用环形顺序即可覆盖全部无序 pair，同时让每台都做过一次 initiator / responder：
+  - `bun scripts/dev/tauri-sync-smoke.ts --name-a trio-a --name-b trio-b --profile-id trio-ab-20260408`
+  - `bun scripts/dev/tauri-sync-smoke.ts --name-a trio-b --name-b trio-c --profile-id trio-bc-20260408`
+  - `bun scripts/dev/tauri-sync-smoke.ts --name-a trio-c --name-b trio-a --profile-id trio-ca-20260408`
+- 三轮结果均为：
+  - `Overall: PASS`
+  - `eventlog / task / timeblock / proposal` 全部 `PASS`
+- 再通过 raw bridge 把三台都切到 `/agents` 且强制 `device` 视图停留约 `5s` 后，分别 grep 最近 `400` 行实例日志，三台都没有命中：
+  - `HTTP 401`
+  - `unauthorized runtime request`
+  - `peer .* export failed`
+
+#### 结论
+
+- 三实例场景不需要新写 trio orchestrator；复用 `tauri-sync-smoke.ts` 跑 `3` 轮 pair smoke 就够做 pairwise 验收。
+- 冷启动时 `stale` 不一定代表实例真死掉；先看日志是否仍在编译，再等待一次 `list` 收敛到 `running`。
+- 当前修复后，三实例 pairwise 同步与 `/agents` 设备视图轮询都没有复现新的 `401`。
+
+#### 可复用操作套路
+
+1. 顺序启动三实例，且每个实例都显式注入不同的 `EXOMIND_RT_PORT`。
+2. 如果第一次 `list` 看到 `stale`，先查日志是否只是冷启动编译；不要立刻误判为崩溃。
+3. 等三实例都进入 `running / ok` 后，再跑环形三组 smoke：
+   - `A->B`
+   - `B->C`
+   - `C->A`
+4. smoke 结束后，用 raw bridge 把三台都切到 `/agents` 的 `device` 视图并停留几秒。
+5. 最后分别 grep 三份实例日志里的：
+   - `HTTP 401`
+   - `unauthorized runtime request`
+   - `peer .* export failed`

@@ -28,7 +28,7 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
     vi.restoreAllMocks();
   });
 
-  it('creates reciprocal peers after confirmed host dial（confirmed host 后创建双向 peer）', async () => {
+  it('only seeds the local mesh peer by default（默认只回放本地 mesh peer，避免无鉴权远端回写）', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 201,
@@ -45,6 +45,38 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
     });
 
     await service.ensurePeerPair(CONFIRMED_DESKTOP);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:4077/mesh/peers', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        id: 'desktop-host',
+        base_url: 'http://192.168.1.10:4077',
+        enabled: true,
+        capabilities: [],
+      }),
+    }));
+  });
+
+  it('creates reciprocal peers only when an explicit remote control auth token is provided（仅显式提供远端控制面鉴权时才回写 reciprocal peer）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({}),
+    }));
+    const service = new RuntimeMeshSyncService({
+      fetchImpl,
+      getLocalRuntimeStatus: vi.fn(async () => LOCAL_STATUS),
+      getReachableAddress: vi.fn(async () => ({
+        host: '192.168.1.20',
+        port: 4077,
+        hostId: 'mobile-host',
+      })),
+    });
+
+    await service.ensurePeerPair(CONFIRMED_DESKTOP, {
+      reciprocalAuthToken: 'remote-admin-secret',
+    });
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(fetchImpl).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:4077/mesh/peers', expect.objectContaining({
@@ -63,6 +95,9 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
         base_url: 'http://192.168.1.20:4077',
         enabled: true,
         capabilities: [],
+      }),
+      headers: expect.objectContaining({
+        Authorization: 'Bearer remote-admin-secret',
       }),
     }));
   });
@@ -90,6 +125,8 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
       ...CONFIRMED_DESKTOP,
       lastSuccessfulDialAddress: '198.18.0.1:25397',
       manualOverride: '198.18.0.1:25397',
+    }, {
+      reciprocalAuthToken: 'remote-admin-secret',
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -140,6 +177,8 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
       port: 29375,
       lastSuccessfulDialAddress: '10.0.2.2:29375',
       manualOverride: '10.0.2.2:29375',
+    }, {
+      reciprocalAuthToken: 'remote-admin-secret',
     });
 
     expect(getReachableAddress).toHaveBeenCalledWith(expect.objectContaining({
@@ -187,6 +226,8 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
       hostId: 'android-host',
       lastSuccessfulDialAddress: '127.0.0.1:39124',
       manualOverride: '127.0.0.1:39124',
+    }, {
+      reciprocalAuthToken: 'remote-admin-secret',
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -238,6 +279,8 @@ describe('runtime mesh sync service（Runtime Mesh 自动配对）', () => {
       hostId: 'desktop-host',
       lastSuccessfulDialAddress: '10.0.2.2:11240',
       manualOverride: '10.0.2.2:11240',
+    }, {
+      reciprocalAuthToken: 'remote-admin-secret',
     });
 
     expect(getReachableAddress).toHaveBeenCalledWith(expect.objectContaining({

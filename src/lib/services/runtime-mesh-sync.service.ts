@@ -51,6 +51,10 @@ export interface RuntimeMeshSyncServiceOptions {
   getReachableAddress?: (remoteHost: RuntimeHostRecord) => Promise<RuntimeReachableAddress | null>;
 }
 
+export interface EnsurePeerPairOptions {
+  reciprocalAuthToken?: string;
+}
+
 export interface RuntimeMeshPeerRecord {
   id: string;
   base_url: string;
@@ -186,7 +190,7 @@ export class RuntimeMeshSyncService {
       ?? ((remoteHost) => getRuntimeControlService().getReachableAddress(remoteHost.host, remoteHost.port));
   }
 
-  async ensurePeerPair(host: RuntimeHostRecord): Promise<void> {
+  async ensurePeerPair(host: RuntimeHostRecord, options: EnsurePeerPairOptions = {}): Promise<void> {
     if (!isConfirmedPeer(host)) {
       return;
     }
@@ -208,6 +212,11 @@ export class RuntimeMeshSyncService {
       capabilities: [],
     });
 
+    const reciprocalAuthToken = options.reciprocalAuthToken?.trim();
+    if (!reciprocalAuthToken) {
+      return;
+    }
+
     const remoteBaseUrlHost = parseBaseUrlHost(remoteBaseUrl);
     const emulatorHostAlias = resolveAndroidEmulatorHostAlias(host.host);
     if (localStatus.hostId && remoteBaseUrlHost && emulatorHostAlias && isAndroidEmulatorHostAlias(remoteBaseUrlHost)) {
@@ -219,7 +228,7 @@ export class RuntimeMeshSyncService {
         base_url: `http://${formatHostForUrl(emulatorHostAlias)}:${localStatus.port}`,
         enabled: true,
         capabilities: [],
-      });
+      }, reciprocalAuthToken);
       return;
     }
 
@@ -254,7 +263,7 @@ export class RuntimeMeshSyncService {
       base_url: `http://${formatHostForUrl(reachableAddress.host)}:${reachableAddress.port}`,
       enabled: true,
       capabilities: [],
-    });
+    }, reciprocalAuthToken);
   }
 
   // ── Pairing API ───────────────────────────────────────────────

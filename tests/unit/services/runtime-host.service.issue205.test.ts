@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IStoragePort, QueryOptions, QueryResult } from '@/lib/environment/interfaces/storage.port';
+import { __resetRuntimeConfigCacheForTests } from '@/config/runtime-config-cache';
+import {
+  setRuntimeExternalAddress,
+  setRuntimeExternalAuthToken,
+} from '@/config/runtime-target';
+import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import {
   RuntimeHostServiceImpl,
   type RuntimeHostMetadataPatch,
@@ -43,6 +49,8 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
 
   beforeEach(() => {
     storage = new InMemoryStorageAdapter();
+    __resetRuntimeConfigCacheForTests();
+    window.localStorage.clear();
   });
 
   it('adds runtime host and persists across service instances（新增主机并跨实例持久化）', async () => {
@@ -224,6 +232,98 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     }));
   });
 
+  it('scrubs legacy confirmed peer auth token without explicit provenance and persists migration（历史 confirmed peer 污染 token 读取时清洗并回写）', async () => {
+    await storage.write('agent_runtime_hosts_v1', [{
+      id: 'confirmed-peer-legacy-token',
+      name: 'Legacy Confirmed Peer',
+      host: '192.168.1.55',
+      port: 9124,
+      status: 'online',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      updatedAt: '2026-04-08T00:00:00.000Z',
+      trustState: 'confirmed_peer',
+      hostId: 'peer-host-id',
+      authToken: 'legacy-copied-token',
+    }]);
+
+    const service = new RuntimeHostServiceImpl({ storage, fetchImpl: vi.fn() });
+    const [host] = await service.listHosts();
+    const persisted = await storage.read<RuntimeHostRecord[]>('agent_runtime_hosts_v1');
+
+    expect(host?.authToken).toBeUndefined();
+    expect(host?.authTokenSource).toBeUndefined();
+    expect(persisted?.[0]?.authToken).toBeUndefined();
+    expect(persisted?.[0]?.authTokenSource).toBeUndefined();
+  });
+
+  it('scrubs legacy discovered candidate auth token without explicit provenance（历史 discovered candidate 污染 token 读取时清洗）', async () => {
+    await storage.write('agent_runtime_hosts_v1', [{
+      id: 'discovered-peer-legacy-token',
+      name: 'Legacy Discovered Peer',
+      host: '192.168.1.56',
+      port: 9124,
+      status: 'online',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      updatedAt: '2026-04-08T00:00:00.000Z',
+      trustState: 'discovered_candidate',
+      hostId: 'discovered-host-id',
+      authToken: 'legacy-copied-token',
+    }]);
+
+    const service = new RuntimeHostServiceImpl({ storage, fetchImpl: vi.fn() });
+    const [host] = await service.listHosts();
+
+    expect(host?.authToken).toBeUndefined();
+    expect(host?.authTokenSource).toBeUndefined();
+  });
+
+  it('preserves manual seed auth token and annotates manual provenance（手工主机 token 保留并补 provenance）', async () => {
+    await storage.write('agent_runtime_hosts_v1', [{
+      id: 'manual-seed-token',
+      name: 'Manual Seed',
+      host: '192.168.1.57',
+      port: 9124,
+      status: 'online',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      updatedAt: '2026-04-08T00:00:00.000Z',
+      trustState: 'manual_seed',
+      authToken: 'manual-control-token',
+    }]);
+
+    const service = new RuntimeHostServiceImpl({ storage, fetchImpl: vi.fn() });
+    const [host] = await service.listHosts();
+    const persisted = await storage.read<RuntimeHostRecord[]>('agent_runtime_hosts_v1');
+
+    expect(host?.authToken).toBe('manual-control-token');
+    expect(host?.authTokenSource).toBe('manual_seed');
+    expect(persisted?.[0]?.authTokenSource).toBe('manual_seed');
+  });
+
+  it('preserves matching external target token for confirmed peer and annotates provenance（匹配 external target 的 confirmed peer token 保留）', async () => {
+    setRuntimeExternalAddress('192.168.1.58:9124');
+    setRuntimeExternalAuthToken('external-control-token');
+    await storage.write('agent_runtime_hosts_v1', [{
+      id: 'confirmed-peer-external-token',
+      name: 'External Target Peer',
+      host: '192.168.1.58',
+      port: 9124,
+      status: 'online',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      updatedAt: '2026-04-08T00:00:00.000Z',
+      trustState: 'confirmed_peer',
+      hostId: 'peer-host-external',
+      authToken: 'external-control-token',
+    }]);
+
+    const service = new RuntimeHostServiceImpl({ storage, fetchImpl: vi.fn() });
+    const [host] = await service.listHosts();
+    const persisted = await storage.read<RuntimeHostRecord[]>('agent_runtime_hosts_v1');
+
+    expect(host?.authToken).toBe('external-control-token');
+    expect(host?.authTokenSource).toBe('external_target');
+    expect(persisted?.[0]?.authTokenSource).toBe('external_target');
+  });
+
   it('allows clearing verification fields with null patch（允许用 null 清空验证字段）', async () => {
     const service = new RuntimeHostServiceImpl({
       storage,
@@ -367,6 +467,32 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     expect(drifted.trustState).toBe('confirmed_peer');
     expect(drifted.hostId).toBe('host-trusted-1');
     expect(drifted.lastSuccessfulDialAddress).toBe('10.0.0.99:1949');
+  });
+
+  it('preserves explicit manual token after manual seed is promoted to confirmed peer（手工种子升级 confirmed 后仍保留显式 token）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-04-08T10:00:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Manual Control Peer',
+      host: '192.168.1.59',
+      port: 9124,
+      authToken: 'manual-control-token',
+    });
+
+    const promoted = await service.mergeHostMetadata(created.id, {
+      hostId: 'manual-control-peer-id',
+      lastSuccessfulDialAddress: '192.168.1.59:9124',
+      advertisedListenAddress: '192.168.1.59:9124',
+    });
+
+    expect(created.authToken).toBe('manual-control-token');
+    expect(created.authTokenSource).toBe('manual_seed');
+    expect(promoted.trustState).toBe('confirmed_peer');
+    expect(promoted.authToken).toBe('manual-control-token');
+    expect(promoted.authTokenSource).toBe('manual_seed');
   });
 
   it('marks host online when probe succeeds（探测成功后标记在线）', async () => {

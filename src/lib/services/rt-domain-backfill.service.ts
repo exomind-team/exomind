@@ -15,7 +15,10 @@ import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { notifyTaskDataChanged } from '@/lib/services/task.service';
 import { notifyTimeBlockDataChanged } from '@/lib/services/timeblock.service';
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
-import { resolveRuntimeHostDialAddress } from '@/lib/utils/runtime-host-address';
+import {
+  hasRuntimeControlAuth,
+  resolveRuntimeHostDialAddress,
+} from '@/lib/utils/runtime-host-address';
 import { log } from '@/lib/logger';
 
 type EventLogBackupLike = Pick<EventLogBackupServiceImpl, 'exportEventsAsSqliteSnapshot'>;
@@ -85,7 +88,11 @@ export class RtDomainBackfillService {
 
   async backfillConfirmedPeers(): Promise<RtDomainBackfillSummary> {
     const hosts = await this.hostService.listHosts();
-    const confirmedPeers = hosts.filter((host) => host.trustState === 'confirmed_peer' && host.hostId);
+    const confirmedPeers = hosts.filter((host) => (
+      host.trustState === 'confirmed_peer'
+      && host.hostId
+      && hasRuntimeControlAuth(host)
+    ));
     const summary = createEmptySummary();
 
     for (const peer of confirmedPeers) {
