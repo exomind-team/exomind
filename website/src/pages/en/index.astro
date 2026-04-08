@@ -1,8 +1,10 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { useTranslations } from '../../i18n';
+import { getLocalizedPath, useTranslations } from '../../i18n';
 
 const t = useTranslations('en');
+const downloadPath = getLocalizedPath('/download', 'en');
+const featuresPath = getLocalizedPath('/features', 'en');
 ---
 
 <BaseLayout title="Home">
@@ -20,10 +22,10 @@ const t = useTranslations('en');
           {t('hero.subtitle')}
         </p>
         <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <a href="/en/download" class="btn-primary px-8 py-3.5 text-base">
+          <a href={downloadPath} class="btn-primary px-8 py-3.5 text-base">
             {t('hero.cta.download')}
           </a>
-          <a href="/en/features" class="btn-secondary px-8 py-3.5 text-base">
+          <a href={featuresPath} class="btn-secondary px-8 py-3.5 text-base">
             {t('hero.cta.learn')}
           </a>
         </div>
@@ -70,7 +72,7 @@ const t = useTranslations('en');
         </div>
       </div>
       <div class="mt-12 text-center">
-        <a href="/en/features" class="inline-flex items-center gap-1 text-brand font-medium hover:text-brand-600 transition-colors">
+        <a href={featuresPath} class="inline-flex items-center gap-1 text-brand font-medium hover:text-brand-600 transition-colors">
           View all features
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
         </a>
@@ -145,7 +147,7 @@ const t = useTranslations('en');
           Free to download, runs locally, your data belongs to you.
         </p>
         <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <a href="/en/download" class="btn-primary px-8 py-3.5 text-base">
+          <a href={downloadPath} class="btn-primary px-8 py-3.5 text-base">
             Download Now
           </a>
           <a href="https://github.com/exomind-team/exomind" target="_blank" rel="noopener" class="btn-secondary px-8 py-3.5 text-base">
