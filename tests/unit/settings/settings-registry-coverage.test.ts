@@ -80,6 +80,7 @@ const AUDITED_SETTINGS_IDS = [
   'developer-mode',
   'use-mock-data',
   'devtools',
+  'api-agent-tab-enabled',
   'me-page-enabled',
   'agent-page-enabled',
   'goals-page-enabled',
@@ -132,6 +133,7 @@ const BOOLEAN_IDS = [
   'developer-mode',
   'use-mock-data',
   'devtools',
+  'api-agent-tab-enabled',
   'me-page-enabled',
   'agent-page-enabled',
   'goals-page-enabled',
@@ -201,6 +203,7 @@ const TAURI_DEV_ONLY_IDS = [
 const DEV_ONLY_IDS = [
   'use-mock-data',
   'devtools',
+  'api-agent-tab-enabled',
   'me-page-enabled',
   'agent-page-enabled',
   'goals-page-enabled',

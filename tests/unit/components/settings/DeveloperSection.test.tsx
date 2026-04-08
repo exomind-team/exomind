@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import './setup-settings-mocks.tsx';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
+import { setApiAgentTabEnabled } from '@/config/api-agent-tab-enabled';
 import { setDevtoolsEnabled } from '@/config/devtools-mode';
 import { setCommandPaletteEnabled } from '@/config/command-palette-enabled';
 import { setMePageEnabled } from '@/config/me-page-enabled';
@@ -23,6 +24,7 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     render(<SettingsPage />);
     expect(screen.getByText('Me 页面')).toBeInTheDocument();
     expect(screen.getByText('网络页面')).toBeInTheDocument();
+    expect(screen.getByText('API Agent Tab')).toBeInTheDocument();
     expect(screen.getByText('请求箱（任务域）')).toBeInTheDocument();
     expect(screen.getByText('桌面端适配')).toBeInTheDocument();
     expect(screen.getByText('命令面板')).toBeInTheDocument();
@@ -52,6 +54,14 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     fireEvent.click(toggle);
 
     expect(vi.mocked(setCommandPaletteEnabled)).toHaveBeenCalledWith(true);
+  });
+
+  it('updates api agent tab state inline in developer section（在开发者分组内联更新 API Agent Tab 开关）', () => {
+    render(<SettingsPage />);
+    const toggle = screen.getByTestId('new-settings-api-agent-tab-switch');
+    fireEvent.click(toggle);
+
+    expect(vi.mocked(setApiAgentTabEnabled)).toHaveBeenCalledWith(true);
   });
 
   it('updates me page state inline in developer section（在开发者分组内联更新 Me 页面开关）', () => {
