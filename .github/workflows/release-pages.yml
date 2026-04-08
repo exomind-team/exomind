@@ -22,6 +22,7 @@ concurrency:
 
 env:
   BUN_VERSION: "1.3.8"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true" # 提前切到 Node 24，规避官方 action 的 Node 20 弃用告警
 
 jobs:
   sync-pages:
