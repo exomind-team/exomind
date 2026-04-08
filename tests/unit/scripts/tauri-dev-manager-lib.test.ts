@@ -187,6 +187,76 @@ describe('tauri-dev-manager-lib', () => {
     expect(cleanupPids).toEqual([333436]);
   });
 
+  it('collects descendants of leftover listener processes when the root pid already died（根进程已死时应连同残留监听进程的子孙进程一起回收）', () => {
+    const cleanupPids = collectManagedTauriCleanupPids(
+      {
+        name: 'desktop',
+        projectRoot: 'D:\\project\\exomind',
+        rootPid: 1234,
+        webPort: 1420,
+        hmrPort: 1421,
+        logPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.log',
+        metaPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.json',
+        startedAt: '2026-03-18T10:02:03.000Z',
+        enableWatch: false,
+        target: 'desktop',
+      },
+      {
+        rootPidAlive: false,
+        webPortListening: true,
+        hmrPortListening: true,
+        appProcessAlive: false,
+        webPortPids: [333436],
+        hmrPortPids: [333436],
+        appPids: [7777],
+        processes: [
+          { ProcessId: 333436, ParentProcessId: 88, Name: 'node.exe' },
+          { ProcessId: 444001, ParentProcessId: 333436, Name: 'node.exe' },
+          { ProcessId: 444002, ParentProcessId: 444001, Name: 'bun.exe' },
+          { ProcessId: 7777, ParentProcessId: 99, Name: 'exomind.exe' },
+          { ProcessId: 8888, ParentProcessId: 7777, Name: 'conhost.exe' },
+        ],
+      },
+    );
+
+    expect(cleanupPids).toEqual([333436, 7777, 444001, 444002, 8888]);
+  });
+
+  it('includes detached listener and app descendants even when the root pid is still alive（根进程仍存活时也应回收已识别监听器与桌面进程的脱链后代）', () => {
+    const cleanupPids = collectManagedTauriCleanupPids(
+      {
+        name: 'desktop',
+        projectRoot: 'D:\\project\\exomind',
+        rootPid: 1234,
+        webPort: 1420,
+        hmrPort: 1421,
+        logPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.log',
+        metaPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.json',
+        startedAt: '2026-03-18T10:02:03.000Z',
+        enableWatch: false,
+        target: 'desktop',
+      },
+      {
+        rootPidAlive: true,
+        webPortListening: true,
+        hmrPortListening: true,
+        appProcessAlive: true,
+        webPortPids: [333436],
+        hmrPortPids: [333436],
+        appPids: [7777],
+        processes: [
+          { ProcessId: 1234, ParentProcessId: 10, Name: 'bun.exe' },
+          { ProcessId: 333436, ParentProcessId: 88, Name: 'node.exe' },
+          { ProcessId: 444001, ParentProcessId: 333436, Name: 'node.exe' },
+          { ProcessId: 7777, ParentProcessId: 99, Name: 'exomind.exe' },
+          { ProcessId: 8888, ParentProcessId: 7777, Name: 'conhost.exe' },
+        ],
+      },
+    );
+
+    expect(cleanupPids).toEqual([1234, 333436, 7777, 444001, 8888]);
+  });
+
   it('recognizes the desktop app by its resolved executable path even when it is no longer a bun descendant（桌面进程脱离 bun 子进程链后仍应被 manager 识别）', () => {
     const appPids = collectManagedDesktopAppPids({
       rootPid: 1234,

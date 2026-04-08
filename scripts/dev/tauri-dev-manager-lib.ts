@@ -47,6 +47,7 @@ export type ManagedTauriInstanceHealthSnapshot = {
   webPortPids?: number[];
   hmrPortPids?: number[];
   appPids?: number[];
+  processes?: ManagedWindowsProcessInfo[];
 };
 
 export type ManagedTauriInstanceHealth = {
@@ -289,13 +290,20 @@ export function collectManagedTauriCleanupPids(
   record: ManagedTauriInstanceRecord,
   snapshot: ManagedTauriInstanceHealthSnapshot,
 ): number[] {
-  if (snapshot.rootPidAlive) {
-    return uniquePositivePids([record.rootPid]);
-  }
-
-  return uniquePositivePids([
+  const rootPids = uniquePositivePids([
+    ...(snapshot.rootPidAlive ? [record.rootPid] : []),
     ...(snapshot.webPortPids ?? []),
     ...(snapshot.hmrPortPids ?? []),
     ...(snapshot.appPids ?? []),
   ]);
+
+  if (!snapshot.processes || snapshot.processes.length === 0 || rootPids.length === 0) {
+    return rootPids;
+  }
+
+  const descendantPids = rootPids.flatMap((pid) =>
+    getDescendantProcesses(snapshot.processes ?? [], pid).map((processInfo) => processInfo.ProcessId),
+  );
+
+  return uniquePositivePids([...rootPids, ...descendantPids]);
 }

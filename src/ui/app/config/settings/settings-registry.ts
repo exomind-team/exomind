@@ -241,6 +241,28 @@ import {
   setVoiceOmniOptimizeEnabled,
 } from '@/config/voice-omni-settings';
 import {
+  getVoiceRuntimeAutoSpeakEnabled,
+  getVoiceRuntimeCloudSessionPolicy,
+  getVoiceRuntimeEnabled,
+  getVoiceRuntimeLabNavEnabled,
+  getVoiceRuntimeProvider,
+  setVoiceRuntimeAutoSpeakEnabled,
+  setVoiceRuntimeCloudSessionPolicy,
+  setVoiceRuntimeEnabled,
+  setVoiceRuntimeLabNavEnabled,
+  setVoiceRuntimeProvider,
+  subscribeVoiceRuntimeAutoSpeakEnabledChanges,
+  subscribeVoiceRuntimeCloudSessionPolicyChanges,
+  subscribeVoiceRuntimeEnabledChanges,
+  subscribeVoiceRuntimeLabNavEnabledChanges,
+  subscribeVoiceRuntimeProviderChanges,
+} from '@/config/voice-runtime-settings';
+import {
+  getVoiceRuntimeMode,
+  setVoiceRuntimeMode,
+  subscribeVoiceRuntimeModeChanges,
+} from '@/config/voice-runtime-mode';
+import {
   getMossApiKey,
   setMossApiKey,
 } from '@/config/moss-api-key';
@@ -1263,6 +1285,130 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     subscribe: subscribeVoiceOmniOptimizeEnabledChanges,
   },
   {
+    id: 'voice-runtime-enabled',
+    label: '启用语音运行时',
+    icon: Mic,
+    category: 'input',
+    rowTestId: 'new-settings-voice-runtime-enabled-row',
+    controlTestId: 'new-settings-voice-runtime-enabled-switch',
+    type: 'boolean',
+    visible: devOnly,
+    description: '开启新的实时语音运行时实验链路，不影响现有快捷键语音功能。',
+    get: getVoiceRuntimeEnabled,
+    set: setVoiceRuntimeEnabled,
+    subscribe: subscribeVoiceRuntimeEnabledChanges,
+  },
+  {
+    id: 'voice-runtime-mode',
+    label: '语音运行时模式',
+    icon: Mic,
+    category: 'input',
+    rowTestId: 'new-settings-voice-runtime-mode-row',
+    type: 'enum',
+    visible: devOnly,
+    options: [
+      { label: '关闭', value: 'off', description: '完全关闭语音运行时。' },
+      { label: '按键说话', value: 'push-to-talk', description: '保留按键触发的交互模式。' },
+      { label: '环境监听', value: 'ambient', description: '本地持续监听，再按策略决定何时上云。' },
+    ],
+    helperText: (value: string) => {
+      if (value === 'ambient') return '当前为环境监听模式。';
+      if (value === 'push-to-talk') return '当前为按键说话模式。';
+      return '当前语音运行时已关闭。';
+    },
+    get: getVoiceRuntimeMode,
+    set: (value: string) => setVoiceRuntimeMode(value as 'off' | 'push-to-talk' | 'ambient'),
+    subscribe: subscribeVoiceRuntimeModeChanges,
+  },
+  {
+    id: 'voice-runtime-provider',
+    label: '语音运行时 Provider',
+    icon: Bot,
+    category: 'input',
+    rowTestId: 'new-settings-voice-runtime-provider-row',
+    type: 'enum',
+    visible: devOnly,
+    enumStyle: 'dialog',
+    dialogTitle: '语音运行时 Provider',
+    dialogDescription: '第一阶段只开放豆包 O2.0 实时语音 Provider。',
+    options: [
+      {
+        label: 'Doubao O2.0 Realtime',
+        value: 'doubao-o2-realtime',
+        description: '第一阶段默认 Provider，用于实时识别与后续端到端能力接入。',
+      },
+    ],
+    get: getVoiceRuntimeProvider,
+    set: (value: string) => setVoiceRuntimeProvider(value as 'doubao-o2-realtime'),
+    subscribe: subscribeVoiceRuntimeProviderChanges,
+  },
+  {
+    id: 'voice-runtime-cloud-session-policy',
+    label: '云端会话策略',
+    icon: Wifi,
+    category: 'input',
+    rowTestId: 'new-settings-voice-runtime-cloud-session-policy-row',
+    type: 'enum',
+    visible: devOnly,
+    enumStyle: 'dialog',
+    dialogTitle: '云端会话策略',
+    dialogDescription: '第一阶段先支持按需上云和前台长连两种策略。',
+    options: [
+      {
+        label: '按需上云',
+        value: 'on-demand',
+        description: '仅在本地 VAD 命中时建立或使用云端会话。',
+      },
+      {
+        label: '前台长连',
+        value: 'foreground-persistent',
+        description: '页面保持前台时持续维持实时会话。',
+      },
+    ],
+    get: getVoiceRuntimeCloudSessionPolicy,
+    set: (value: string) => setVoiceRuntimeCloudSessionPolicy(value as 'on-demand' | 'foreground-persistent'),
+    subscribe: subscribeVoiceRuntimeCloudSessionPolicyChanges,
+  },
+  {
+    id: 'voice-runtime-auto-speak-enabled',
+    label: '启用自动播报',
+    icon: Bot,
+    category: 'input',
+    rowTestId: 'new-settings-voice-runtime-auto-speak-enabled-row',
+    controlTestId: 'new-settings-voice-runtime-auto-speak-enabled-switch',
+    type: 'boolean',
+    visible: devOnly,
+    description: '开启后，语音运行时可响应后续信号驱动的主动播报。V1 仍由信号网络决定是否开口。',
+    get: getVoiceRuntimeAutoSpeakEnabled,
+    set: setVoiceRuntimeAutoSpeakEnabled,
+    subscribe: subscribeVoiceRuntimeAutoSpeakEnabledChanges,
+  },
+  {
+    id: 'voice-runtime-lab-nav-enabled',
+    label: '显示语音实验入口',
+    icon: Mic,
+    category: 'developer',
+    rowTestId: 'new-settings-voice-runtime-lab-nav-enabled-row',
+    controlTestId: 'new-settings-voice-runtime-lab-nav-enabled-switch',
+    type: 'boolean',
+    visible: devOnly,
+    description: '开启后，桌面端侧边栏会出现“语音实验”入口。',
+    get: getVoiceRuntimeLabNavEnabled,
+    set: setVoiceRuntimeLabNavEnabled,
+    subscribe: subscribeVoiceRuntimeLabNavEnabledChanges,
+  },
+  {
+    id: 'open-voice-runtime-lab',
+    label: '打开语音实验页',
+    icon: Mic,
+    category: 'input',
+    type: 'action',
+    visible: devOnly,
+    onAction: () => {
+      window.location.pathname = '/voice-runtime';
+    },
+  },
+  {
     id: 'volcano-engine-key',
     label: '火山引擎 Key',
     category: 'input',
@@ -1760,7 +1906,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'api-agent-tab-enabled',
     label: 'API Agent Tab',
-    description: '???????? API Agent ????',
+    description: '在网络页顶部显示 API Agent 调试页签',
     icon: Bot,
     category: 'developer',
     controlTestId: 'new-settings-api-agent-tab-switch',
@@ -1848,4 +1994,4 @@ export function getVisibleSettings(ctx: SettingsContext): SettingsItem[] {
 export const DEFAULT_VOICE_OVERLAY_OFFSET = DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET;
 export const DEFAULT_LLM_API_KEY = getLLMApiKey();
 export const DEFAULT_VOLCANO_MODEL = DEFAULT_VOLCANO_RESOURCE_ID;
-export const REGISTRY_VERSION = '2026-03-11';
+export const REGISTRY_VERSION = '2026-04-08';

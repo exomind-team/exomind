@@ -10,6 +10,10 @@ use commands::asr_commands::{
 };
 use commands::dev_commands::dev_instance_runtime_info;
 use commands::device_commands::get_device_id;
+use commands::doubao_realtime_commands::{
+    doubao_realtime_session_cancel, doubao_realtime_session_finish,
+    doubao_realtime_session_push, doubao_realtime_session_start, DoubaoRealtimeSessionState,
+};
 use commands::eventlog_commands::{
     eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
     eventlog_rebuild_markdown,
@@ -161,6 +165,8 @@ pub fn run() {
     let voice_shortcut_state = VoiceShortcutState::new();
     let main_window_shortcut_state = MainWindowShortcutState::new();
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
+    let doubao_realtime_session_state =
+        std::sync::Arc::new(DoubaoRealtimeSessionState::default());
     let mut context = tauri::generate_context!();
 
     #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
@@ -217,6 +223,7 @@ pub fn run() {
         .manage(voice_shortcut_state)
         .manage(main_window_shortcut_state)
         .manage(volcano_asr_stream_state)
+        .manage(doubao_realtime_session_state)
         .setup(move |app| {
             #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
             if let Some((main_window_config, main_data_dir)) = main_window_override.as_ref() {
@@ -437,6 +444,10 @@ pub fn run() {
             volcano_asr_stream_finish,
             volcano_asr_stream_cancel,
             volcano_asr_stream_session_exists,
+            doubao_realtime_session_start,
+            doubao_realtime_session_push,
+            doubao_realtime_session_finish,
+            doubao_realtime_session_cancel,
             // Workspace 认知生命体命令
             get_agent_workspace_soul,
             get_agent_workspace_knowledge_list,

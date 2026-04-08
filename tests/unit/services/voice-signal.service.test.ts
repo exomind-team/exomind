@@ -19,7 +19,11 @@ vi.mock('@/lib/services/signal-stream.service', () => ({
   },
 }));
 
-import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
+import {
+  publishVoiceRuntimeSpeakCancelSignal,
+  publishVoiceRuntimeSpeakRequestSignal,
+  publishVoiceTranscriptSignal,
+} from '@/lib/services/voice-signal.service';
 
 describe('voice-signal.service（语音信号服务）', () => {
   beforeEach(() => {
@@ -90,6 +94,33 @@ describe('voice-signal.service（语音信号服务）', () => {
     expect(signalPublishMocks.publish).not.toHaveBeenCalledWith(
       expect.objectContaining({
         topic: 'user.input.normalized',
+      }),
+    );
+  });
+
+  it('publishes voice runtime speak request and cancel topics（发布语音运行时播报请求与取消主题）', async () => {
+    await publishVoiceRuntimeSpeakRequestSignal('请开始播报今天的提醒', {
+      source: 'frontend:voice-runtime-lab',
+    });
+    await publishVoiceRuntimeSpeakCancelSignal({
+      source: 'frontend:voice-runtime-lab',
+    });
+
+    expect(signalPublishMocks.publish).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        topic: 'voice.runtime.speak.request',
+        source: 'frontend:voice-runtime-lab',
+        payload: expect.objectContaining({
+          text: '请开始播报今天的提醒',
+        }),
+      }),
+    );
+    expect(signalPublishMocks.publish).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        topic: 'voice.runtime.speak.cancel',
+        source: 'frontend:voice-runtime-lab',
       }),
     );
   });

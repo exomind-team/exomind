@@ -1,0 +1,367 @@
+Total messages: 38 (Errors: 13, Warnings: 4)
+Returning 224 messages for level "info"
+
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18401/node_modules/.vite/deps/chunk-KDCVS43I.js?v=b976aa8a:21608
+[INFO] [INFO] [ASR-Volcano] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-Volcano] AppKey: *** @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-Volcano] ResourceId: volc.seedasr.sauc.duration @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [ASR-Volcano] ⚠️ 缺少认证信息，请检查 .env 配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [Environment] ExoMindEnvironment 初始化完成: web @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] API Key: 未配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/active?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/active?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] SSE connection started (embedded:127.0.0.1:18401) @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Failed to fetch @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] connection retry: SSE HTTP 404 (target: http://127.0.0.1:18401) @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18401/node_modules/.vite/deps/chunk-KDCVS43I.js?v=b976aa8a:21608
+[INFO] [INFO] [ASR-Volcano] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-Volcano] AppKey: *** @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-Volcano] ResourceId: volc.seedasr.sauc.duration @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [ASR-Volcano] ⚠️ 缺少认证信息，请检查 .env 配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [Environment] ExoMindEnvironment 初始化完成: web @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] API Key: 未配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/active?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/active?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] SSE connection started (embedded:127.0.0.1:18401) @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] connection retry: SSE HTTP 404 (target: http://127.0.0.1:18401) @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/eventlog/backend/status?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/tasks/backend/status?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/backend/status?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/eventlog/backend/status?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/tasks/backend/status?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/backend/status?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18401/node_modules/.vite/deps/chunk-KDCVS43I.js?v=b976aa8a:21608
+[INFO] [INFO] [ASR-Volcano] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-Volcano] AppKey: *** @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-Volcano] ResourceId: volc.seedasr.sauc.duration @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [ASR-Volcano] ⚠️ 缺少认证信息，请检查 .env 配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [Environment] ExoMindEnvironment 初始化完成: web @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] API Key: 未配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/active?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/active?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] SSE connection started (embedded:127.0.0.1:18401) @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] connection retry: SSE HTTP 404 (target: http://127.0.0.1:18401) @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18401/node_modules/.vite/deps/chunk-KDCVS43I.js?v=b976aa8a:21608
+[INFO] [INFO] [ASR-Volcano] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-Volcano] AppKey: *** @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-Volcano] ResourceId: volc.seedasr.sauc.duration @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [ASR-Volcano] ⚠️ 缺少认证信息，请检查 .env 配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [Environment] ExoMindEnvironment 初始化完成: web @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] API Key: 未配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/active?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/timeblocks/active?user_id=anonymous:0
+[INFO] [INFO] [SignalStream] connect:start target=http://127.0.0.1:18401 agentId=ui heartbeat=30s resume=no @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalTransport] openStream:start url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [SignalStream] SSE connection started (embedded:127.0.0.1:18401) @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/reminders?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30:0
+[INFO] [INFO] [SignalTransport] openStream:response url=http://127.0.0.1:18401/signals/stream?agent_id=ui&heartbeat_interval=30 status=404 contentType=unknown body=present @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] open-stream:error target=http://127.0.0.1:18401 error=SSE HTTP 404 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] probe:history-failed target=http://127.0.0.1:18401 error=Unexpected token '<', "<!doctype "... is not valid JSON @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[WARNING] [WARN] [SignalStream] connection retry: SSE HTTP 404 (target: http://127.0.0.1:18401) @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [VoiceInput] 初始化, isSecureContext: true @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [VoiceInput] location: http://127.0.0.1:18401/tasks protocol: http: @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] API Key: 未配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [VoiceInput] 初始化, isSecureContext: true @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [VoiceInput] location: http://127.0.0.1:18401/tasks protocol: http: @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] 适配器初始化 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[INFO] [INFO] [ASR-MOSS] API Key: 未配置 @ http://127.0.0.1:18401/src/lib/logger.ts:38
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/tasks?user_id=anonymous:0
+[ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:18401/tasks?user_id=anonymous:0
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async loadSelectableTasks (http://127.0.0.1:18401/src/ui/app/components/prestart-task-selection.tsx:33:21)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async loadSelectableTasks (http://127.0.0.1:18401/src/ui/app/components/prestart-task-selection.tsx:33:21)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async Promise.all (index 1)
+    at async loadSnapshot (http://127.0.0.1:18401/src/ui/app/components/BlockTaskAssociationList.tsx:50:34)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async loadSelectableTasks (http://127.0.0.1:18401/src/ui/app/components/prestart-task-selection.tsx:33:21)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async loadSelectableTasks (http://127.0.0.1:18401/src/ui/app/components/prestart-task-selection.tsx:33:21)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async Promise.all (index 1)
+    at async loadSnapshot (http://127.0.0.1:18401/src/ui/app/components/BlockTaskAssociationList.tsx:50:34)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async loadSelectableTasks (http://127.0.0.1:18401/src/ui/app/components/prestart-task-selection.tsx:33:21)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async loadSelectableTasks (http://127.0.0.1:18401/src/ui/app/components/prestart-task-selection.tsx:33:21)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async Promise.all (index 1)
+    at async loadSnapshot (http://127.0.0.1:18401/src/ui/app/components/BlockTaskAssociationList.tsx:50:34)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async loadSelectableTasks (http://127.0.0.1:18401/src/ui/app/components/prestart-task-selection.tsx:33:21)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async loadSelectableTasks (http://127.0.0.1:18401/src/ui/app/components/prestart-task-selection.tsx:33:21)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async Promise.all (index 1)
+    at async loadSnapshot (http://127.0.0.1:18401/src/ui/app/components/BlockTaskAssociationList.tsx:50:34)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async loadReminders (http://127.0.0.1:18401/src/ui/app/pages/RemindersPage.tsx:132:20)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async loadReminders (http://127.0.0.1:18401/src/ui/app/pages/RemindersPage.tsx:132:20)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async ReminderServiceImpl.getDuePendingReminders (http://127.0.0.1:18401/src/lib/services/reminder.service.ts:94:23)
+    at async ReminderSchedulerServiceImpl.runNow (http://127.0.0.1:18401/src/lib/services/reminder-scheduler.service.ts:38:26)
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT reminder request failed: 404
+    at ReminderRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:153:13)
+    at async ReminderRtAdapter.listReminders (http://127.0.0.1:18401/src/lib/adapters/reminder-rt-adapter.ts:35:21)
+    at async http://127.0.0.1:18401/src/ui/app/components/ReminderNotifier.tsx:117:23
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async load (http://127.0.0.1:18401/src/ui/app/pages/TasksPage.tsx:113:20)
+Error: RT request failed: 404
+    at TaskRtAdapter.requestJson (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:207:13)
+    at async TaskRtAdapter.listTasks (http://127.0.0.1:18401/src/lib/adapters/task-rt-adapter.ts:84:19)
+    at async load (http://127.0.0.1:18401/src/ui/app/pages/TasksPage.tsx:113:20)

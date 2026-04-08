@@ -41,6 +41,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
 tauri-plugin-mcp-bridge = "0.9"
 thiserror = "1"
 exomind-runtime = { path = "../crates/exomind-runtime" }

@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, Mic, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
@@ -9,6 +9,10 @@ import { getWorkbenchLegacyShimEnabled } from '@/config/workbench-legacy-shim-en
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
+import {
+  getVoiceRuntimeLabNavEnabled,
+  subscribeVoiceRuntimeLabNavEnabledChanges,
+} from '@/config/voice-runtime-settings';
 import {
   getDesktopSidebarCollapsed as getPersistedDesktopSidebarCollapsed,
   setDesktopSidebarCollapsed as setPersistedDesktopSidebarCollapsed,
@@ -124,6 +128,11 @@ const AgentsPage = lazy(async () => {
 const WorkbenchPage = lazy(async () => {
   const module = await import('@/ui/app/pages/workbench/WorkbenchPage');
   return { default: module.WorkbenchPage };
+});
+
+const VoiceRuntimeLabPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/voice-runtime/VoiceRuntimeLabPage');
+  return { default: module.VoiceRuntimeLabPage };
 });
 
 const GoalsPage = lazy(async () => {
@@ -318,6 +327,8 @@ function DesktopSidebar({
   agentPageEnabled,
   mePageEnabled,
   goalsPageEnabled,
+  developerModeEnabled,
+  voiceRuntimeLabNavEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
@@ -325,6 +336,8 @@ function DesktopSidebar({
   agentPageEnabled: boolean;
   mePageEnabled: boolean;
   goalsPageEnabled: boolean;
+  developerModeEnabled: boolean;
+  voiceRuntimeLabNavEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -359,6 +372,13 @@ function DesktopSidebar({
       icon: FlaskConical,
       match: (path: string) => path === '/workbench' || path.startsWith('/workbench/'),
     },
+    ...(developerModeEnabled && voiceRuntimeLabNavEnabled ? [{
+      key: 'voice-runtime-lab',
+      title: '语音实验',
+      path: '/voice-runtime',
+      icon: Mic,
+      match: (path: string) => path === '/voice-runtime' || path.startsWith('/voice-runtime/'),
+    }] : []),
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
@@ -450,6 +470,8 @@ function DesktopLayout({
   agentPageEnabled,
   mePageEnabled,
   goalsPageEnabled,
+  developerModeEnabled,
+  voiceRuntimeLabNavEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
@@ -457,6 +479,8 @@ function DesktopLayout({
   agentPageEnabled: boolean;
   mePageEnabled: boolean;
   goalsPageEnabled: boolean;
+  developerModeEnabled: boolean;
+  voiceRuntimeLabNavEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -468,6 +492,8 @@ function DesktopLayout({
           agentPageEnabled={agentPageEnabled}
           mePageEnabled={mePageEnabled}
           goalsPageEnabled={goalsPageEnabled}
+          developerModeEnabled={developerModeEnabled}
+          voiceRuntimeLabNavEnabled={voiceRuntimeLabNavEnabled}
           collapsed={collapsed}
           onToggleCollapsed={onToggleCollapsed}
         />
@@ -542,6 +568,7 @@ function NewLayout() {
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
+  const [voiceRuntimeLabNavEnabled, setVoiceRuntimeLabNavEnabled] = useState(() => getVoiceRuntimeLabNavEnabled());
   const commandPaletteActive = developerModeEnabled && commandPaletteEnabled;
   const registryService = useMemo(() => getCommandRegistryService(), []);
   const paletteService = useMemo(() => getCommandPaletteService(), []);
@@ -563,6 +590,9 @@ function NewLayout() {
   }, []);
   useEffect(() => {
     return subscribeCommandPaletteEnabledChanges(setCommandPaletteEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeVoiceRuntimeLabNavEnabledChanges(setVoiceRuntimeLabNavEnabled);
   }, []);
   useEffect(() => {
     setPersistedDesktopSidebarCollapsed(desktopSidebarCollapsed);
@@ -639,6 +669,8 @@ function NewLayout() {
           agentPageEnabled={agentPageEnabled}
           mePageEnabled={mePageEnabled}
           goalsPageEnabled={goalsPageEnabled}
+          developerModeEnabled={developerModeEnabled}
+          voiceRuntimeLabNavEnabled={voiceRuntimeLabNavEnabled}
           collapsed={desktopSidebarCollapsed}
           onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
         />
@@ -1040,6 +1072,18 @@ const newWorkbenchRoute = createRoute({
   },
 });
 
+const newVoiceRuntimeLabRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/voice-runtime',
+  component: function NewVoiceRuntimeLab() {
+    return (
+      <LazyPage>
+        <VoiceRuntimeLabPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newUpdateRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/update',
@@ -1162,6 +1206,7 @@ const newRouteTree = newRootRoute.addChildren([
   newSyncTestRoute,
   newAgentsRoute,
   newWorkbenchRoute,
+  newVoiceRuntimeLabRoute,
   newUpdateRoute,
   newAgentDetailRoute,
   newActorDetailRoute,
