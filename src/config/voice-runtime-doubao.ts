@@ -23,6 +23,7 @@ const voiceRuntimeDoubaoAppIdModule = createConfigModule<string>({
   defaultValue: '',
   normalize: normalizeTrimmedString,
   persistMode: 'runtime-preferred',
+  runtimeWriteOptions: { sensitive: true },
 });
 
 const voiceRuntimeDoubaoAccessTokenModule = createConfigModule<string>({
@@ -31,6 +32,7 @@ const voiceRuntimeDoubaoAccessTokenModule = createConfigModule<string>({
   defaultValue: '',
   normalize: normalizeTrimmedString,
   persistMode: 'runtime-preferred',
+  runtimeWriteOptions: { sensitive: true },
 });
 
 const voiceRuntimeDoubaoSecretKeyModule = createConfigModule<string>({
@@ -39,6 +41,7 @@ const voiceRuntimeDoubaoSecretKeyModule = createConfigModule<string>({
   defaultValue: '',
   normalize: normalizeTrimmedString,
   persistMode: 'runtime-preferred',
+  runtimeWriteOptions: { sensitive: true },
 });
 
 const voiceRuntimeDoubaoModelVersionModule = createConfigModule<string>({

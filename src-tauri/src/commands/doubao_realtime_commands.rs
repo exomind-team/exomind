@@ -29,6 +29,8 @@ const DOUBAO_REALTIME_DEFAULT_INPUT_MODE: &str = "push_to_talk";
 const DOUBAO_REALTIME_DEFAULT_TTS_AUDIO_FORMAT: &str = "pcm_s16le";
 const DOUBAO_REALTIME_DEFAULT_TTS_SAMPLE_RATE: u32 = 24000;
 const DOUBAO_REALTIME_CONNECT_TIMEOUT_SECS: u64 = 10;
+const DOUBAO_REALTIME_ALLOWED_WS_HOSTS: [&str; 1] = ["openspeech.bytedance.com"];
+const DOUBAO_REALTIME_ALLOWED_WS_PATH: &str = "/api/v3/realtime/dialogue";
 
 const EVENT_START_CONNECTION: u32 = 1;
 const EVENT_FINISH_CONNECTION: u32 = 2;
@@ -234,9 +236,36 @@ fn build_realtime_ws_request(
 ) -> Result<tungstenite::http::Request<()>, String> {
     let url = Url::parse(base_url.trim())
         .map_err(|error| format!("Doubao Realtime WebSocket 地址无效: {error}"))?;
+    if url.scheme() != "wss" {
+        return Err(format!(
+            "Doubao Realtime 仅允许 wss 协议（only wss is allowed）: {}",
+            url.scheme()
+        ));
+    }
+
     let host = url
         .host_str()
         .ok_or_else(|| "Doubao Realtime WebSocket 地址缺少 host".to_string())?;
+    if !DOUBAO_REALTIME_ALLOWED_WS_HOSTS
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(host))
+    {
+        return Err(format!(
+            "Doubao Realtime WebSocket host 不在白名单内（host not allowed）: {host}"
+        ));
+    }
+    if url.path() != DOUBAO_REALTIME_ALLOWED_WS_PATH {
+        return Err(format!(
+            "Doubao Realtime WebSocket path 非法（path not allowed）: {}",
+            url.path()
+        ));
+    }
+    if url.port().is_some() {
+        return Err("Doubao Realtime WebSocket 不允许自定义端口（custom port is not allowed）".to_string());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("Doubao Realtime WebSocket 不允许携带用户信息（userinfo is not allowed）".to_string());
+    }
 
     let mut builder = HttpRequest::builder()
         .method("GET")
@@ -1075,6 +1104,54 @@ mod tests {
                 .and_then(|value| value.to_str().ok())
                 .is_some(),
             "Sec-WebSocket-Key should be present（应带有标准 WS 握手 key）"
+        );
+    }
+
+    #[test]
+    fn doubao_realtime_request_rejects_non_wss_scheme() {
+        let error = build_realtime_ws_request(
+            "ws://openspeech.bytedance.com/api/v3/realtime/dialogue",
+            "4587429383",
+            "vei-access-token",
+            None,
+        )
+        .expect_err("non-wss scheme should be rejected（非 wss 协议应被拒绝）");
+
+        assert!(
+            error.contains("仅允许 wss 协议"),
+            "error should mention wss restriction（错误信息应包含 wss 限制）: {error}"
+        );
+    }
+
+    #[test]
+    fn doubao_realtime_request_rejects_non_whitelisted_host() {
+        let error = build_realtime_ws_request(
+            "wss://example.com/api/v3/realtime/dialogue",
+            "4587429383",
+            "vei-access-token",
+            None,
+        )
+        .expect_err("non-whitelisted host should be rejected（非白名单 host 应被拒绝）");
+
+        assert!(
+            error.contains("host 不在白名单"),
+            "error should mention host whitelist（错误信息应包含 host 白名单）: {error}"
+        );
+    }
+
+    #[test]
+    fn doubao_realtime_request_rejects_non_whitelisted_path() {
+        let error = build_realtime_ws_request(
+            "wss://openspeech.bytedance.com/api/v3/realtime/other",
+            "4587429383",
+            "vei-access-token",
+            None,
+        )
+        .expect_err("non-whitelisted path should be rejected（非白名单 path 应被拒绝）");
+
+        assert!(
+            error.contains("path 非法"),
+            "error should mention path whitelist（错误信息应包含 path 白名单）: {error}"
         );
     }
 

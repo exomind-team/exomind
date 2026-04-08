@@ -108,6 +108,7 @@ const SENSITIVE_EXACT_KEYS = new Set<string>([
   'moss_api_key',
   'volcano_asr_app_key',
   'volcano_asr_access_key',
+  'exomind:voiceRuntimeDoubaoAppId',
   'exomind:voiceRuntimeDoubaoAccessToken',
   'exomind:voiceRuntimeDoubaoSecretKey',
 ]);

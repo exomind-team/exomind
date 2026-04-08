@@ -10,6 +10,7 @@ import {
   TriangleAlert,
   Waves,
 } from 'lucide-react';
+import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState, type ComponentProps } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -265,10 +266,6 @@ function TranscriptBlock({
   );
 }
 
-function openSettingsPage(): void {
-  window.location.pathname = '/settings';
-}
-
 function formatStartHint(state: VoiceRuntimeLabState): string {
   if (!state.isTauri) {
     return '当前是 Web 预览环境，开始监听仅在 Tauri 桌面端可用。';
@@ -320,6 +317,7 @@ function buildReadinessItems(state: VoiceRuntimeLabState): Array<{
 }
 
 export function VoiceRuntimeLabPage() {
+  const navigate = useNavigate();
   const [controller] = useState(() => new VoiceRuntimeLabController());
   const [state, setState] = useState(() => controller.getState());
 
@@ -417,7 +415,9 @@ export function VoiceRuntimeLabPage() {
                   type="button"
                   variant="ghost"
                   className="h-auto justify-start rounded-2xl border border-border-card bg-background px-4 py-3 text-secondary hover:bg-card hover:text-strong"
-                  onClick={openSettingsPage}
+                  onClick={() => {
+                    void navigate({ to: '/settings' });
+                  }}
                 >
                   <Settings2 className="h-4 w-4" />
                   打开设置
