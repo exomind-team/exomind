@@ -569,7 +569,8 @@ export class VoiceRuntimeLabController {
     }
     this.completedCleanupPending = true;
     try {
-      await this.audioPlayer.interrupt().catch(() => {});
+      // Do not interrupt queued PCM on normal completion（正常完成时不要打断本地 PCM 队列）.
+      // `interrupt()` should only be used for explicit cancel / barge-in.
       if (this.provider) {
         await this.provider.dispose().catch(() => {});
         this.provider = null;

@@ -193,6 +193,7 @@ describe('VoiceRuntimeLabController（语音运行时实验台控制器）', () 
       }),
     }));
     expect(audioPlayerEnqueueMock).toHaveBeenCalledWith(new Uint8Array([1, 2, 3, 4]));
+    expect(audioPlayerInterruptMock).not.toHaveBeenCalled();
     expect(disposeMock).toHaveBeenCalled();
   });
 
