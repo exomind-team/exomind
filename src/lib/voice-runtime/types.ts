@@ -8,7 +8,7 @@ export interface ProviderRawPerception {
 
 export interface NormalizedVoicePerception {
   traceId: string;
-  provider: 'doubao-o2-realtime';
+  provider: string;
   transcript: string;
   isFinal: boolean;
   emotion?: string;

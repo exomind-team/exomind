@@ -39,7 +39,7 @@ export function normalizeVoiceRuntimePerception(
 
   return {
     traceId,
-    provider: 'doubao-o2-realtime',
+    provider: rawPerception.provider,
     transcript: firstResult.text.trim(),
     isFinal: firstResult.is_interim !== true,
     confidence: typeof firstResult.confidence === 'number' ? firstResult.confidence : undefined,

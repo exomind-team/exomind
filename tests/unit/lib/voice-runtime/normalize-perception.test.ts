@@ -77,4 +77,30 @@ describe('normalizeVoiceRuntimePerception（标准化语音运行时感知）', 
       normalizeVoiceRuntimePerception(rawPerception, 'trace-ignore'),
     ).toBeNull();
   });
+
+  it('keeps provider id from raw perception（保留原始感知中的 provider 标识）', () => {
+    const rawPerception: ProviderRawPerception = {
+      provider: 'mock-provider-v2',
+      model: 'mock-model',
+      eventType: 'ASRResponse',
+      payload: {
+        results: [
+          {
+            text: '多 provider 链路验证',
+            is_interim: false,
+          },
+        ],
+      },
+      capturedAt: '2026-04-08T11:00:03.000Z',
+    };
+
+    expect(
+      normalizeVoiceRuntimePerception(rawPerception, 'trace-provider'),
+    ).toEqual(expect.objectContaining({
+      traceId: 'trace-provider',
+      provider: 'mock-provider-v2',
+      transcript: '多 provider 链路验证',
+      isFinal: true,
+    }));
+  });
 });
