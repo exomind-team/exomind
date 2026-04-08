@@ -66,17 +66,20 @@ jobs:
         run: |
           set -euo pipefail
           tar \
+            --dereference \
+            --hard-dereference \
             --directory website/dist \
             --create \
-            --file github-pages.tar \
+            --file artifact.tar \
+            --exclude=.git \
+            --exclude=.github \
             .
-          gzip --force --no-name github-pages.tar
 
       - name: Upload GitHub Pages artifact (上传 GitHub Pages 产物)
         uses: actions/upload-artifact@v7
         with:
           name: github-pages
-          path: github-pages.tar.gz
+          path: artifact.tar
           retention-days: 1
 
   deploy-pages:
