@@ -20,7 +20,7 @@ jobs:
     outputs:
       review: ${{ steps.run_codex.outputs['final-message'] }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -64,7 +64,7 @@ jobs:
     outputs:
       review: ${{ steps.claude.outputs.review }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -143,7 +143,7 @@ jobs:
       issues: write
     steps:
       - name: Post Codex Review
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           CODEX_REVIEW: ${{ needs.codex-review.outputs.review }}
           CODEX_STATUS: ${{ needs.codex-review.result }}
@@ -187,7 +187,7 @@ jobs:
       issues: write
     steps:
       - name: Post Claude Review
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           CLAUDE_REVIEW: ${{ needs.claude-deep-review.outputs.review }}
           CLAUDE_STATUS: ${{ needs.claude-deep-review.result }}

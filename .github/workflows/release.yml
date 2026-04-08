@@ -27,7 +27,7 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Determine build targets (确定构建目标)
         id: targets
@@ -40,13 +40,13 @@ jobs:
           Write-Host "Build Android=$android Windows=$windows (parallel Android job / 并行 Android job)"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
       - name: Setup Java 17
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -528,7 +528,7 @@ jobs:
       - name: Upload Android signed APK Artifact (上传已签名 APK)
         if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         id: upload_apk
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
@@ -536,7 +536,7 @@ jobs:
 
       - name: Retry Upload Android signed APK Artifact
         if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.upload_apk.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
@@ -549,7 +549,7 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Determine build targets (确定构建目标)
         id: targets
@@ -562,7 +562,7 @@ jobs:
           Write-Host "Build Android=$android Windows=$windows (parallel Windows job / 并行 Windows job)"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -1003,14 +1003,14 @@ jobs:
 
       - name: Upload Windows runtime Artifact (上传 Windows runtime)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-windows-x64.exe
 
       - name: Upload Windows EXE Artifact (上传 EXE)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
           path: |
@@ -1022,7 +1022,7 @@ jobs:
 
       - name: Upload Windows MSI Artifact (上传 MSI)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
           path: |
@@ -1034,10 +1034,10 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -1097,13 +1097,13 @@ jobs:
           tar -czf artifacts/runtime/exomind-rt-macos-aarch64.tar.gz -C artifacts/runtime exomind-rt-macos-aarch64
 
       - name: Upload macOS runtime Artifact (上传 macOS runtime)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-macos-aarch64.tar.gz
 
       - name: Upload macOS DMG Artifact (上传 DMG)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-dmg-${{ steps.hash.outputs.HASH }}
           path: |
@@ -1115,10 +1115,10 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -1191,13 +1191,13 @@ jobs:
           tar -czf artifacts/runtime/exomind-rt-linux-x64.tar.gz -C artifacts/runtime exomind-rt-linux-x64
 
       - name: Upload Linux runtime Artifact (上传 Linux runtime)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-linux-x64.tar.gz
 
       - name: Upload Linux DEB Artifact (上传 DEB)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-deb-${{ steps.hash.outputs.HASH }}
           path: |
@@ -1206,7 +1206,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload Linux AppImage Artifact (上传 AppImage)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-appimage-${{ steps.hash.outputs.HASH }}
           path: |
@@ -1230,7 +1230,7 @@ jobs:
       needs.build-windows-selfhosted.result == 'success'
     steps:
       - name: Checkout repository (检出代码以生成 release notes)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Bun (安装 Bun 以生成 release notes)
         uses: oven-sh/setup-bun@v2
@@ -1238,7 +1238,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-files
           merge-multiple: true
@@ -1440,7 +1440,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create or Update GitHub Release (创建或更新 GitHub Release)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.1
         with:
           files: release-assets/**
           tag_name: ${{ github.ref_name }}
@@ -1456,7 +1456,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Promote existing GitHub Release (晋升既有 GitHub Release)
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

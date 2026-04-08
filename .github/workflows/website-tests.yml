@@ -21,9 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: 'Production base URL / 线上基准地址'
+        description: "Production base URL / 线上基准地址"
         required: false
-        default: 'https://exo-mind.ai'
+        default: "https://exo-mind.ai"
 
 jobs:
   website-local-e2e:
@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository (检出代码)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Bun (安装 Bun)
         uses: oven-sh/setup-bun@v2
@@ -56,7 +56,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository (检出代码)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Bun (安装 Bun)
         uses: oven-sh/setup-bun@v2
