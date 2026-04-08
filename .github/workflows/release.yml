@@ -806,6 +806,15 @@ jobs:
           "EXOMIND_SKIP_BUN_INSTALL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "EXOMIND_SKIP_BUN_INSTALL=1 (reuse bootstrapped dependencies / 复用前置依赖安装)"
 
+      - name: Build frontend dist for Windows cargo build (为 Windows cargo 构建预先产出前端 dist)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        shell: pwsh
+        run: bun run build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
       # ─── Windows build ──────────────────────────────────────
 
       - name: Build Windows EXE binary (构建 Windows EXE 可执行文件)
