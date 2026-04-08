@@ -1,0 +1,1473 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>2026-04-06 主题讨论总报告</title>
+    <style>
+      :root {
+        --bg: #f4ede4;
+        --bg-2: #fbf8f4;
+        --ink: #1d1814;
+        --muted: #625951;
+        --line: rgba(41, 31, 23, 0.12);
+        --brand: #c75b3a;
+        --brand-deep: #8d3f26;
+        --olive: #48634e;
+        --blue: #476886;
+        --gold: #9d7a30;
+        --radius-xl: 28px;
+        --radius-lg: 20px;
+        --radius-md: 14px;
+        --shadow: 0 24px 64px rgba(49, 35, 22, 0.12);
+        --font-display: "Iowan Old Style", "Palatino Linotype", "Source Han Serif SC", "Songti SC", serif;
+        --font-body: "Segoe UI Variable Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        font-family: var(--font-body);
+        background:
+          radial-gradient(circle at top left, rgba(199, 91, 58, 0.12), transparent 30%),
+          radial-gradient(circle at top right, rgba(72, 99, 78, 0.10), transparent 22%),
+          linear-gradient(180deg, #f1e7dc 0%, #f8f2eb 42%, #f1ece5 100%);
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(41, 31, 23, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(41, 31, 23, 0.025) 1px, transparent 1px);
+        background-size: 26px 26px;
+        mask-image: radial-gradient(circle at center, black 62%, transparent 100%);
+      }
+
+      a { color: inherit; }
+      code, .mono { font-family: var(--font-mono); }
+      sup.note-ref {
+        margin-left: 3px;
+        font-size: 11px;
+        line-height: 1;
+        vertical-align: super;
+        white-space: nowrap;
+      }
+      sup.note-ref a {
+        text-decoration: none;
+        color: var(--blue);
+        margin-left: 2px;
+      }
+      sup.note-ref a:first-child { margin-left: 0; }
+
+      .page {
+        width: min(1480px, calc(100vw - 32px));
+        margin: 24px auto 56px;
+      }
+
+      .hero,
+      .panel,
+      .theme-card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-xl);
+        background: rgba(255, 252, 248, 0.78);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+      }
+
+      .hero {
+        position: relative;
+        overflow: hidden;
+        padding: 30px 32px;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(248, 240, 230, 0.88)),
+          linear-gradient(120deg, rgba(199, 91, 58, 0.06), transparent 52%);
+      }
+      .hero::after {
+        content: "";
+        position: absolute;
+        right: -80px;
+        top: -80px;
+        width: 240px;
+        height: 240px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(199, 91, 58, 0.18), rgba(199, 91, 58, 0.02) 55%, transparent 72%);
+      }
+      .hero-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.75fr);
+        gap: 24px;
+        position: relative;
+        z-index: 1;
+      }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(29, 24, 20, 0.05);
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h1, h2, h3 {
+        margin: 0;
+        font-family: var(--font-display);
+        letter-spacing: -0.02em;
+      }
+      h1 {
+        margin-top: 14px;
+        font-size: clamp(38px, 5.2vw, 74px);
+        line-height: 0.98;
+      }
+      .hero-copy {
+        margin: 18px 0 0;
+        max-width: 820px;
+        color: #4b423c;
+        font-size: 17px;
+        line-height: 1.72;
+      }
+      .hero-meta,
+      .chip-row,
+      .theme-sources {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .hero-meta { margin-top: 20px; }
+      .chip,
+      .source-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.78);
+        font-size: 12px;
+        line-height: 1.2;
+        text-decoration: none;
+      }
+      .chip strong { color: var(--brand-deep); }
+      .hero-side { display: grid; gap: 12px; }
+      .stat-card {
+        padding: 18px;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.74);
+      }
+      .stat-card .label {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .stat-card .value {
+        margin-top: 8px;
+        font-family: var(--font-display);
+        font-size: 38px;
+        line-height: 0.95;
+      }
+      .stat-card p {
+        margin: 8px 0 0;
+        font-size: 14px;
+        line-height: 1.6;
+        color: #534b44;
+      }
+
+      .filter-bar {
+        position: sticky;
+        top: 12px;
+        z-index: 10;
+        margin-top: 18px;
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: rgba(252, 248, 243, 0.86);
+        box-shadow: 0 10px 28px rgba(44, 33, 24, 0.08);
+        backdrop-filter: blur(12px);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      .filter-title {
+        margin-right: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .filter-button {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.84);
+        border-radius: 999px;
+        padding: 8px 12px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+      }
+      .filter-button.is-active {
+        background: var(--ink);
+        color: white;
+        border-color: var(--ink);
+      }
+      .legend {
+        margin-left: auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        border: 1px solid transparent;
+      }
+      .badge::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .badge-settled { color: var(--brand-deep); background: rgba(199, 91, 58, 0.10); border-color: rgba(199, 91, 58, 0.18); }
+      .badge-partial { color: var(--olive); background: rgba(72, 99, 78, 0.10); border-color: rgba(72, 99, 78, 0.18); }
+      .badge-discussion { color: var(--blue); background: rgba(71, 104, 134, 0.10); border-color: rgba(71, 104, 134, 0.18); }
+      .badge-deferred { color: #5c5651; background: rgba(92, 86, 81, 0.08); border-color: rgba(92, 86, 81, 0.16); }
+
+      .panel {
+        margin-top: 18px;
+        padding: 24px 26px 26px;
+      }
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+      .kicker {
+        margin-bottom: 6px;
+        color: var(--brand-deep);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      h2 {
+        font-size: clamp(28px, 3vw, 44px);
+        line-height: 1.02;
+      }
+      .section-copy {
+        margin: 8px 0 0;
+        max-width: 920px;
+        color: #554b43;
+        font-size: 15px;
+        line-height: 1.68;
+      }
+
+      .grid-5,
+      .grid-2,
+      .atlas-grid,
+      .cluster-grid,
+      .theme-grid,
+      .source-grid,
+      .boundary-grid {
+        display: grid;
+        gap: 14px;
+      }
+      .grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+      .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .atlas-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .cluster-grid,
+      .source-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .boundary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .theme-grid { grid-template-columns: 1fr; }
+
+      .box,
+      .atlas-card,
+      .cluster-card,
+      .boundary-card,
+      .theme-card {
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.72);
+      }
+      .box,
+      .atlas-card,
+      .cluster-card,
+      .boundary-card { padding: 18px; }
+      .box .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      .box .value {
+        margin-top: 8px;
+        font-family: var(--font-display);
+        font-size: 38px;
+        line-height: 0.95;
+      }
+      .box p,
+      .atlas-card p,
+      .cluster-card p,
+      .boundary-card p {
+        margin: 10px 0 0;
+        font-size: 14px;
+        line-height: 1.62;
+        color: #534b43;
+      }
+
+      .atlas-letter,
+      .theme-letter {
+        width: 36px;
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        background: rgba(29, 24, 20, 0.08);
+        font-family: var(--font-display);
+        font-size: 19px;
+      }
+      .atlas-meta { margin-top: 14px; }
+
+      .theme-card {
+        padding: 22px;
+      }
+      .theme-top {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .theme-title-group {
+        display: flex;
+        gap: 14px;
+      }
+      .theme-title-wrap h3 {
+        font-size: 26px;
+        line-height: 1.08;
+      }
+      .theme-subline {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .theme-summary {
+        margin: 14px 0 0;
+        color: #504741;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+      .meter-grid,
+      .theme-columns {
+        display: grid;
+        gap: 12px;
+        margin-top: 16px;
+      }
+      .meter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .theme-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .meter-card,
+      .theme-col {
+        padding: 15px 16px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.68);
+      }
+      .meter-title,
+      .theme-col h4 {
+        margin: 0;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      .meter-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .meter-track {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 5px;
+        flex: 1;
+      }
+      .meter-track span {
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(29, 24, 20, 0.08);
+      }
+      .meter-track span.on {
+        background: linear-gradient(90deg, var(--brand), #d47e58);
+      }
+      .meter-note {
+        font-size: 12px;
+        color: #524a43;
+      }
+      .theme-col ul,
+      .cluster-card ul,
+      .boundary-card ul {
+        margin: 12px 0 0;
+        padding-left: 18px;
+      }
+      .theme-col li,
+      .cluster-card li,
+      .boundary-card li {
+        margin: 8px 0;
+        line-height: 1.6;
+      }
+      .theme-sources {
+        margin-top: 16px;
+        padding-top: 14px;
+        border-top: 1px dashed rgba(41, 31, 23, 0.2);
+      }
+      .source-link.issue { color: var(--blue); background: rgba(71, 104, 134, 0.08); border-color: rgba(71, 104, 134, 0.18); }
+      .source-link.external { color: #76581b; background: rgba(157, 122, 48, 0.08); border-color: rgba(157, 122, 48, 0.18); }
+
+      .callout {
+        margin-top: 16px;
+        padding: 16px 18px;
+        border-radius: 18px;
+        border: 1px solid rgba(199, 91, 58, 0.18);
+        background: rgba(199, 91, 58, 0.08);
+        line-height: 1.7;
+      }
+      details {
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.68);
+        padding: 14px 16px;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .raw-block {
+        margin-top: 14px;
+        padding: 14px 16px;
+        border-radius: 16px;
+        border: 1px solid rgba(41, 31, 23, 0.12);
+        background: rgba(255, 252, 248, 0.9);
+      }
+      .raw-path {
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.04em;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.65;
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+      }
+      .hidden-by-filter { display: none !important; }
+
+      footer {
+        margin-top: 18px;
+        padding: 20px 8px 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.64;
+      }
+
+      @media (max-width: 1180px) {
+        .hero-grid,
+        .grid-5,
+        .grid-2,
+        .atlas-grid,
+        .cluster-grid,
+        .source-grid,
+        .boundary-grid,
+        .meter-grid,
+        .theme-columns { grid-template-columns: 1fr 1fr; }
+        .legend { margin-left: 0; }
+      }
+      @media (max-width: 900px) {
+        .page { width: min(100vw - 20px, 1480px); }
+        .hero, .panel, .theme-card { padding-left: 20px; padding-right: 20px; }
+        .hero-grid,
+        .grid-5,
+        .grid-2,
+        .atlas-grid,
+        .cluster-grid,
+        .source-grid,
+        .boundary-grid,
+        .meter-grid,
+        .theme-columns { grid-template-columns: 1fr; }
+        .theme-top, .section-head { flex-direction: column; align-items: start; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div class="hero-grid">
+          <div>
+            <div class="eyebrow">2026-04-06 · Theme Governance Report</div>
+            <h1>2026-04-06 主题讨论总报告</h1>
+            <p class="hero-copy">
+              这份报告把 2026-04-04 原始讨论材料、4 月 6 日主题总集、4 月 7 日与 4 月 8 日后续收口文档，以及当前
+              <span class="mono">dev</span> 分支代码现状压成同一张治理看板。目标不是再写一份长计划，而是让后续能直接用这份 HTML
+              看主题、看进度、看已决 / 未决、看源文件、继续与星林讨论。<sup class="note-ref"><a href="#raw-materials">[raw appendix]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">[round-2]</a></sup>
+            </p>
+            <div class="hero-meta">
+              <span class="chip">分支 <strong>dev</strong></span>
+              <span class="chip">基线提交 <strong>6e666bb5</strong></span>
+              <span class="chip">归一主题 <strong>10</strong></span>
+              <span class="chip">扩大讨论簇 <strong>3</strong></span>
+              <span class="chip">目标 <strong>能看 · 能溯源 · 能讨论</strong></span>
+            </div>
+          </div>
+          <aside class="hero-side">
+            <div class="stat-card">
+              <div class="label">原始材料压缩结果</div>
+              <div class="value">25 → 10</div>
+              <p>原始零散消息被压成 10 个批次，其中“档案系统 OS 层”已从“集体档案”主题里单独拆出，避免继续混谈。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">[round-2]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[archive-os]</a></sup></p>
+            </div>
+            <div class="stat-card">
+              <div class="label">当前推进分层</div>
+              <div class="value">6 / 3 / 1</div>
+              <p>6 个主题已收口为主线或子计划，3 个主题部分收口，1 个主题明确后置；另有 3 个扩大讨论问题簇。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></p>
+            </div>
+          </aside>
+        </div>
+      </header>
+
+      <div class="filter-bar">
+        <span class="filter-title">筛选主题</span>
+        <button class="filter-button is-active" data-filter="all">全部</button>
+        <button class="filter-button" data-filter="settled">已收口</button>
+        <button class="filter-button" data-filter="partial">部分收口</button>
+        <button class="filter-button" data-filter="deferred">后置</button>
+        <div class="legend">
+          <span class="badge badge-settled">已收口</span>
+          <span class="badge badge-partial">部分收口</span>
+          <span class="badge badge-discussion">扩大讨论</span>
+          <span class="badge badge-deferred">后置</span>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Overview</div>
+            <h2>一眼看全局</h2>
+            <p class="section-copy">先看主题分层，再看当前代码快照和详细主题卡片。后续继续讨论时，直接从“扩大讨论问题簇”接上即可。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">[round-2]</a><a href="#discussion-clusters">[clusters]</a></sup></p>
+          </div>
+        </div>
+        <div class="grid-5">
+          <article class="box"><div class="label">已收口主题</div><div class="value">6</div><p>A/B/E/G/H/I 已有主线或子计划，且 G 与 H 已正式拆开。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[archive-os]</a></sup></p></article>
+          <article class="box"><div class="label">部分收口主题</div><div class="value">3</div><p>C/D/F 已有方向和边界，但未全部进代码。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[multi-agent]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[energy]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md">[docs-pipeline]</a></sup></p></article>
+          <article class="box"><div class="label">后置主题</div><div class="value">1</div><p>J 只保留研究价值，不进入当前关闭条件。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></p></article>
+          <article class="box"><div class="label">扩大讨论簇</div><div class="value">3</div><p>集体 Agent、防伪、审计界面都已转成问题清单。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a><a href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">[issue #860]</a><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></p></article>
+          <article class="box"><div class="label">当前 dev 现实</div><div class="value">混合态</div><p>signal / proposal / energy / website 已有骨架，archive OS / collective archive / blackboard / bookkeeping 仍偏计划驱动。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/config/signal-routes.default.json">[routes]</a><a href="https://github.com/exomind-team/exomind/blob/dev/website/src/pages/docs.astro">[website-docs]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping]</a></sup></p></article>
+        </div>
+        <div class="callout">
+          <strong>阅读提示：</strong>本页强调的是“主题治理”和“推进状态”，不是最终架构定稿，也不是完整验收报告。
+          当前现状评估基于代码 / 文档 / issue 的只读检查，未额外运行新一轮 <span class="mono">tsc</span>、<span class="mono">vitest</span> 或 E2E。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a></sup>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Dev Snapshot</div>
+            <h2>当前 dev 快照</h2>
+            <p class="section-copy">不是理想架构图，而是“今天已经能在仓库里看到什么”。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/config/signal-routes.default.json">[routes]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/workspace.rs">[workspace.rs]</a><a href="https://github.com/exomind-team/exomind/blob/dev/website/src/pages/docs.astro">[website-docs]</a></sup></p>
+          </div>
+        </div>
+        <div class="grid-2">
+          <article class="box">
+            <h3>已经在代码里有锚点</h3>
+            <ul>
+              <li><strong>Signal Network</strong> 已有默认路由 <span class="mono">config/signal-routes.default.json</span>、route 编辑面 <span class="mono">src/components/RouteEditPanel.tsx</span>，以及 Agents 页中的 route/history 观察面 <span class="mono">src/ui/app/pages/agents/RoutesTabView.tsx</span>、<span class="mono">src/ui/app/pages/agents/SignalHistoryTabView.tsx</span>。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/config/signal-routes.default.json">[routes]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/components/RouteEditPanel.tsx">[route-edit]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/ui/app/pages/agents/RoutesTabView.tsx">[routes-tab]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/ui/app/pages/agents/SignalHistoryTabView.tsx">[history-tab]</a></sup></li>
+              <li><strong>单 Agent 记忆 / 提案</strong> 已有 workspace <span class="mono">crates/exomind-runtime/src/agent/workspace.rs</span>、life tick <span class="mono">crates/exomind-runtime/src/agent/life.rs</span>、proposal tools <span class="mono">crates/exomind-runtime/src/agent/proposal_tools.rs</span> 与 proposal store <span class="mono">crates/exomind-runtime/src/proposal/store.rs</span>。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/workspace.rs">[workspace.rs]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/life.rs">[life.rs]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/proposal_tools.rs">[proposal-tools]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/proposal/store.rs">[proposal-store]</a></sup></li>
+              <li><strong>运行能量</strong> 已有能量生命周期锚点 <span class="mono">crates/exomind-runtime/src/agent/life.rs</span> 和能量路由面 <span class="mono">crates/exomind-runtime/src/routes/energy.rs</span>。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/life.rs">[life.rs]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/routes/energy.rs">[energy-route]</a></sup></li>
+              <li><strong>官网承接面</strong> 已有 Astro 站点、导航中的 <span class="mono">website/src/components/Header.astro</span> 指向 <span class="mono">/docs</span>，但正文页 <span class="mono">website/src/pages/docs.astro</span> 仍是占位状态。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/website/src/components/Header.astro">[header]</a><a href="https://github.com/exomind-team/exomind/blob/dev/website/src/pages/docs.astro">[website-docs]</a></sup></li>
+            </ul>
+          </article>
+          <article class="box">
+            <h3>还主要停留在计划 / issue</h3>
+            <ul>
+              <li><strong>blackboard</strong> 在本次对 <span class="mono">src/</span> 与 <span class="mono">crates/</span> 的检索中没有实现命中，当前仍主要存在于 <span class="mono">docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md</span>。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a></sup></li>
+              <li><strong>多 Agent proposal-first 状态机</strong> 虽然 <span class="mono">in_review</span> 已存在于 <span class="mono">src/lib/types/proposal.ts</span> 与 <span class="mono">crates/exomind-runtime/src/proposal/store.rs</span>，但 <span class="mono">changes_requested</span> 仍未进入 inspected code。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/src/lib/types/proposal.ts">[proposal.ts]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/proposal/store.rs">[proposal-store]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[multi-agent]</a></sup></li>
+              <li><strong>档案系统 OS 层</strong> 规划已经写入 <span class="mono">docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md</span>，但当前代码仍广泛保留 <span class="mono">profile</span> 旧词，如 <span class="mono">src/lib/adapters/runtime-profile-scope.ts</span>、<span class="mono">src/components/Chat/ChatPage.tsx</span>。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[archive-os]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/runtime-profile-scope.ts">[runtime-profile-scope]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/components/Chat/ChatPage.tsx">[chat-page]</a></sup></li>
+              <li><strong>独立集体记账</strong> 当前仍是主仓计划资产，按计划应尽快独立出仓，而不是长期留在 ExoMind 主仓实现。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping]</a><a href="https://github.com/exomind-team/exomind/issues/845" target="_blank" rel="noreferrer">[issue #845]</a></sup></li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Roadmap</div>
+            <h2>当前主线 / 并行线 / 扩大讨论顺序</h2>
+            <p class="section-copy">它决定哪些主题现在要变成开发任务，哪些只保留为问题簇。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></p>
+          </div>
+        </div>
+        <div class="grid-2">
+          <article class="box">
+            <h3>主线里程碑</h3>
+            <ul>
+              <li>1. 个人同步基线<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a><a href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">[issue #532]</a></sup></li>
+              <li>2. Signal Network v1<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[signal-plan]</a><a href="https://github.com/exomind-team/exomind/issues/387" target="_blank" rel="noreferrer">[issue #387]</a></sup></li>
+              <li>3. 单 Agent 时间块闭环<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[signal-plan]</a><a href="https://github.com/exomind-team/exomind/issues/677" target="_blank" rel="noreferrer">[issue #677]</a></sup></li>
+              <li>4. 再抬升到多 Agent / 双计量 / 多档案治理层<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[multi-agent]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[energy]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[archive-os]</a></sup></li>
+            </ul>
+          </article>
+          <article class="box">
+            <h3>并行线与问题簇</h3>
+            <ul>
+              <li>并行线：<span class="mono">#865</span> 用户手册、<span class="mono">#847</span> 对外草案包、<span class="mono">#845</span> 独立记账。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-fourth-round-user-manual-phase1-settled-decisions.md">[manual]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md">[docs-pipeline]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping]</a></sup></li>
+              <li>治理层顺序：<span class="mono">#846</span> 多 Agent 先于 <span class="mono">#848</span> 双计量。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[multi-agent]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[energy]</a></sup></li>
+              <li>扩大讨论：<span class="mono">#860</span> 集体 Agent、防伪 / 标识轮换、审计界面。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a><a href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">[issue #860]</a><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Theme Atlas</div>
+            <h2>十大主题总览</h2>
+            <p class="section-copy">先看索引，再往下看详细主题卡片。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">[round-2]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a></sup></p>
+          </div>
+        </div>
+        <div class="atlas-grid">
+          <article class="atlas-card" data-stage="settled"><div class="atlas-letter">A</div><h3>信号网络语义与节点模型</h3><p>signal network v1 的语义合同、节点进入方式与 route 行为。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[signal-plan]</a><a href="https://github.com/exomind-team/exomind/issues/387" target="_blank" rel="noreferrer">[issue #387]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-settled">已收口</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/387" target="_blank" rel="noreferrer">#387</a><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/833" target="_blank" rel="noreferrer">#833</a></div></article>
+          <article class="atlas-card" data-stage="settled"><div class="atlas-letter">B</div><h3>API Agent 记忆、总结与提案闭环</h3><p>以 <span class="mono">timeblock.completed</span> 为中心的单 Agent 闭环。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[signal-plan]</a><a href="https://github.com/exomind-team/exomind/issues/71" target="_blank" rel="noreferrer">[issue #71]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-settled">已收口</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/71" target="_blank" rel="noreferrer">#71</a><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/677" target="_blank" rel="noreferrer">#677</a></div></article>
+          <article class="atlas-card" data-stage="partial"><div class="atlas-letter">C</div><h3>多 Agent 协作与服务员体系</h3><p>proposal-first 四角色治理先行，统一服务员后置。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[multi-agent]</a><a href="https://github.com/exomind-team/exomind/issues/846" target="_blank" rel="noreferrer">[issue #846]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-partial">部分收口</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/846" target="_blank" rel="noreferrer">#846</a></div></article>
+          <article class="atlas-card" data-stage="partial"><div class="atlas-letter">D</div><h3>Agent 能量与资源双计量</h3><p>运行资源 × 模型资源并列表达，先服务治理和调度。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[energy]</a><a href="https://github.com/exomind-team/exomind/issues/848" target="_blank" rel="noreferrer">[issue #848]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-partial">部分收口</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/848" target="_blank" rel="noreferrer">#848</a></div></article>
+          <article class="atlas-card" data-stage="settled"><div class="atlas-letter">E</div><h3>多端同步与验证链</h3><p>先做个人同步基线，再把 network / collective 场景接入验收链。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a><a href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">[issue #532]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-settled">已收口</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">#532</a><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/518" target="_blank" rel="noreferrer">#518</a></div></article>
+          <article class="atlas-card" data-stage="partial"><div class="atlas-letter">F</div><h3>对外文档、用户手册与宣传生成</h3><p>开发文档和普通用户手册双分支并行，后续接 prompt-first 工作流。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md">[docs-pipeline]</a><a href="https://github.com/exomind-team/exomind/issues/865" target="_blank" rel="noreferrer">[issue #865]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-partial">部分收口</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/847" target="_blank" rel="noreferrer">#847</a><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/865" target="_blank" rel="noreferrer">#865</a></div></article>
+          <article class="atlas-card" data-stage="settled"><div class="atlas-letter">G</div><h3>档案系统 OS 层</h3><p>默认档案、档案切换器、ArchiveSession / UiSession、多档案并活。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[archive-os]</a><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-settled">已独立收口</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">#837</a></div></article>
+          <article class="atlas-card" data-stage="settled"><div class="atlas-letter">H</div><h3>集体档案 / 组织档案模型</h3><p>成员座席、邀请、blackboard、集体治理与 route 门禁。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">[collective]</a><a href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">[issue #860]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-settled">主线已收口</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">#837</a><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">#860</a></div></article>
+          <article class="atlas-card" data-stage="settled"><div class="atlas-letter">I</div><h3>集体记账 / Labor Ledger</h3><p>先独立、先承接旧功能、先稳领域事件模型和本地 API。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping]</a><a href="https://github.com/exomind-team/exomind/issues/845" target="_blank" rel="noreferrer">[issue #845]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-settled">独立子计划</span><a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/845" target="_blank" rel="noreferrer">#845</a></div></article>
+          <article class="atlas-card" data-stage="deferred"><div class="atlas-letter">J</div><h3>复杂跨层组织协作</h3><p>保留研究价值，但不进入当前 backlog 的关闭条件。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a><a href="#raw-materials">[raw appendix]</a></sup></p><div class="chip-row atlas-meta"><span class="badge badge-deferred">后置</span></div></article>
+        </div>
+      </section>
+
+      <section class="theme-grid">
+        <article class="theme-card" data-stage="settled" id="theme-a">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">A</div>
+              <div class="theme-title-wrap">
+                <h3>信号网络语义与节点模型</h3>
+                <div class="theme-subline">v1 先收口为固定节点 + 可配边；连边既是默认下游，也是通信门禁。</div>
+              </div>
+            </div>
+            <span class="badge badge-settled">已收口</span>
+          </div>
+          <p class="theme-summary">Theme A 解决的是“外心怎么把 signal、node、actor、Agent、edge 这套词说清楚”。当前已经压到一个足以开工的合同：先做可观测、可配置、能硬失败的网络骨架，而不是一上来做通用编排宇宙。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[plan]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">[round-2]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></div><span class="meter-note">5/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码锚点</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div><span class="meter-note">3/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离落地距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div><span class="meter-note">主线前列</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li><span class="mono">node / actor / Agent</span> 已明确按方法论视角表述，不是程序本体分类。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">[round-2]</a></sup></li>
+                <li><span class="mono">v1</span> 固定为“固定节点 + 可配边”，第一批对象以内建领域节点进入网络，<span class="mono">blackboard</span> 作为特殊共享节点进入 v1 语义。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[plan]</a><a href="https://github.com/exomind-team/exomind/issues/387" target="_blank" rel="noreferrer">[issue #387]</a></sup></li>
+                <li><span class="mono">edge</span> 对用户表达“输出后默认送达给谁”，对系统表达“只有建边才允许通信”；无边发信默认硬失败。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[plan]</a><a href="https://github.com/exomind-team/exomind/issues/833" target="_blank" rel="noreferrer">[issue #833]</a></sup></li>
+                <li>topic 先采用预注册集合，通配 <span class="mono">*</span> 只保留给前端观察与诊断，不作为通用业务兜底。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/config/signal-routes.default.json">[routes]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[plan]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>完整 CRUD 验收清单仍待继续压实，尤其是禁用态、失败态、提示与测试样本。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+                <li>“会话 / 通道”与“节点 / 连边”的边界虽然已有方向，但还没收成最终统一表述。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+                <li>动态建边、临时路由覆盖层、更强编排能力与条件控制节点都明确后置。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">[round-2]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li>默认路由已经存在，且能看到 <span class="mono">timeblock.completed -&gt; reviewer</span> 这样的预置连边雏形。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/config/signal-routes.default.json">[routes]</a></sup></li>
+                <li>前台已有 route 编辑与 signal history 观察面，说明“可看 / 可改”这层已经开始成形。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/src/components/RouteEditPanel.tsx">[ui-route-edit]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/ui/app/pages/agents/SignalHistoryTabView.tsx">[ui-history]</a></sup></li>
+                <li>但 inspected code 仍更像“route table + UI CRUD”，离完整的 workflow 语义合同还有最后一轮统一。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/src/ui/app/pages/agents/RoutesTabView.tsx">[ui-routes]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[plan]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/config/signal-routes.default.json">config/signal-routes.default.json</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/components/RouteEditPanel.tsx">src/components/RouteEditPanel.tsx</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/ui/app/pages/agents/RoutesTabView.tsx">src/ui/app/pages/agents/RoutesTabView.tsx</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/ui/app/pages/agents/SignalHistoryTabView.tsx">src/ui/app/pages/agents/SignalHistoryTabView.tsx</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/387" target="_blank" rel="noreferrer">#387</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/691" target="_blank" rel="noreferrer">#691</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/833" target="_blank" rel="noreferrer">#833</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="settled" id="theme-b">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">B</div>
+              <div class="theme-title-wrap">
+                <h3>API Agent 记忆、总结与提案闭环</h3>
+                <div class="theme-subline">单 Agent 关键用户叙事收口到 <span class="mono">timeblock.completed</span>。</div>
+              </div>
+            </div>
+            <span class="badge badge-settled">已收口</span>
+          </div>
+          <p class="theme-summary">Theme B 不再泛谈“Agent 会不会记忆”，而是明确先把单 Agent 的工作记忆、长期记忆、共享痕迹，以及总结到提案的自动链路压成一个可跑的产品故事。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[plan]</a><a href="https://github.com/exomind-team/exomind/issues/71" target="_blank" rel="noreferrer">[issue #71]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></div><span class="meter-note">5/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码锚点</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div><span class="meter-note">4/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离落地距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div><span class="meter-note">缺 blackboard</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li>工作记忆、长期记忆、公共记忆必须分层；公共痕迹不能偷塞进单 Agent 私有 memory。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a><a href="https://github.com/exomind-team/exomind/issues/71" target="_blank" rel="noreferrer">[issue #71]</a></sup></li>
+                <li>单 Agent 第一条关键叙事是 <span class="mono">timeblock.completed</span>，默认产出“总结 + 建议 + pending proposal”。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[plan]</a><a href="https://github.com/exomind-team/exomind/issues/677" target="_blank" rel="noreferrer">[issue #677]</a></sup></li>
+                <li><span class="mono">blackboard</span> 是 per-archive、语义临时、容量受限的共享工作记忆面，在这条闭环里默认只收摘要痕迹。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a></sup></li>
+                <li>黑板 Phase 1 合同已补到“时间序条目 + 追加修正 + 显式弹出最早条目 + 正式 route 回送”。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>长期记忆与 <span class="mono">blackboard</span> 的精确边界仍待细化，尤其是蒸馏、遗忘、提炼与读取面。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a></sup></li>
+                <li>哪类信号默认写入黑板、哪类只保留在私有经验文件，目前仍需围绕产品叙事继续压实。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+                <li>闭环进入更多对象域前，还需要再验证时间块、事件、任务、提案之间的最小引用合同。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[plan]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li><span class="mono">AgentWorkspace</span> 已经有 <span class="mono">SOUL.md</span>、knowledge、actions log 等物理体布局。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/workspace.rs">[workspace.rs]</a></sup></li>
+                <li><span class="mono">CognitiveLifeAgent</span> 已能基于最近事件做 tick，会话与提案工具链也已存在。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/life.rs">[life.rs]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/proposal_tools.rs">[proposal_tools.rs]</a></sup></li>
+                <li>但真正缺的不是“Agent 能不能调模型”，而是 <span class="mono">blackboard</span> 的独立实现，以及完整的“总结 -&gt; 建议 -&gt; 提案”产品闭环。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/proposal/store.rs">[proposal-store]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/workspace.rs">crates/exomind-runtime/src/agent/workspace.rs</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/life.rs">crates/exomind-runtime/src/agent/life.rs</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/proposal_tools.rs">crates/exomind-runtime/src/agent/proposal_tools.rs</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/proposal/store.rs">crates/exomind-runtime/src/proposal/store.rs</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/lib/types/proposal.ts">src/lib/types/proposal.ts</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/71" target="_blank" rel="noreferrer">#71</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/677" target="_blank" rel="noreferrer">#677</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="partial" id="theme-c">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">C</div>
+              <div class="theme-title-wrap">
+                <h3>多 Agent 协作与服务员体系</h3>
+                <div class="theme-subline">先做 proposal-first 任务治理，不先做统一服务员前台。</div>
+              </div>
+            </div>
+            <span class="badge badge-partial">部分收口</span>
+          </div>
+          <p class="theme-summary">Theme C 的关键不是“多 Agent 很酷”，而是先把它收缩成一个受约束的任务治理层：固定角色、固定门禁、固定人类终审位置。这样才不会让它吞掉 signal / proposal / collective 的讨论边界。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[plan]</a><a href="https://github.com/exomind-team/exomind/issues/846" target="_blank" rel="noreferrer">[issue #846]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div><span class="meter-note">4/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码锚点</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div><span class="meter-note">2/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离落地距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div><span class="meter-note">治理先行</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li>第一阶段先做任务治理，不先做多模态服务员，不先做通用 teammate 框架。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[plan]</a></sup></li>
+                <li>固定四角色：<span class="mono">coordinator</span>、<span class="mono">proposer</span>、<span class="mono">reviewer</span>、<span class="mono">retrospector</span>。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[plan]</a></sup></li>
+                <li>主队列采用 proposal-first；<span class="mono">in_review</span> 的正式语义已纠偏为“等待人类 UI 终审”。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-third-round-super-question-settled-decisions.md">[round-3]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+                <li><span class="mono">reviewer</span> 只能评论 / 退回 / 推进到 <span class="mono">in_review</span>，不能直接批准；默认最多 3 轮退回-修订后强制进入人类终审。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-third-round-super-question-settled-decisions.md">[round-3]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li><span class="mono">changes_requested</span> 的正式产品与代码状态还没落地，前台痕迹面也还未完全实现。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-third-round-super-question-settled-decisions.md">[round-3]</a></sup></li>
+                <li>统一服务员入口、多模态服务员、动态 teammate 持久化都明确后置。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[plan]</a></sup></li>
+                <li>多设备下的复杂分布式裁决只保留边界，不进入第一阶段关闭条件。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">[plan]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li>前台已有提案入口和 Proposal Inbox，说明“任务治理表面”已经有落点。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/src/routes.tsx">[routes.tsx]</a></sup></li>
+                <li>提案状态里已有 <span class="mono">pending / in_review / approved / rejected / snoozed</span>，但 inspected code 尚无 <span class="mono">changes_requested</span>，也还没把 <span class="mono">rejected -&gt; cancelled</span> 这轮纠偏落下去。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/src/lib/types/proposal.ts">[proposal.ts]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-third-round-super-question-settled-decisions.md">[round-3]</a></sup></li>
+                <li>现状更像“提案系统 + 人工入口已存在”，而不是“多 Agent 治理层已实现”。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/proposal/store.rs">[proposal-store]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md">docs/plans/2026-04-06-multi-agent-task-governance-phase1-plan.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-third-round-super-question-settled-decisions.md">docs/plans/2026-04-07-third-round-super-question-settled-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/routes.tsx">src/routes.tsx</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/lib/types/proposal.ts">src/lib/types/proposal.ts</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/proposal/store.rs">crates/exomind-runtime/src/proposal/store.rs</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/846" target="_blank" rel="noreferrer">#846</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="partial" id="theme-d">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">D</div>
+              <div class="theme-title-wrap">
+                <h3>Agent 能量与资源双计量</h3>
+                <div class="theme-subline">actor 与 Agent 都是方法论视角，差别在治理变量，不在程序本体。</div>
+              </div>
+            </div>
+            <span class="badge badge-partial">部分收口</span>
+          </div>
+          <p class="theme-summary">Theme D 现在最重要的纠偏已经完成：不要把“Agent 比 actor 更神秘”写成底层程序分类，而应写成“外心对它额外追踪了更多资源与治理变量”。双计量因此成为治理壳，而不是神秘电池比喻。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[plan]</a><a href="https://github.com/exomind-team/exomind/issues/848" target="_blank" rel="noreferrer">[issue #848]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div><span class="meter-note">4/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码锚点</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div><span class="meter-note">3/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离落地距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div><span class="meter-note">治理面缺口大</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li><span class="mono">actor</span> 与 <span class="mono">Agent</span> 都是方法论概念，差别在系统关注和监控的变量，而不是底层程序先天分类。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[plan]</a></sup></li>
+                <li>第一阶段采用“双账本，同界面”：运行资源看时空资源，模型资源看 token / 调用额度 / 成本。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[plan]</a></sup></li>
+                <li>凡是 RT 托管、且被视作 Agent 节点的对象，都默认进入双计量治理面；记录以 invocation 为主粒度、按 turn 聚合。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+                <li>人类告警与 Agent 自观测先落在 diagnostics / workbench，Agent 侧默认走只读工具 / API。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[plan]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>正式 diagnostics / workbench 界面、告警规则与统一表达尚未落稿。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[plan]</a></sup></li>
+                <li>完整生命叙事、自动补能 / 自动续命、跨多 Agent 的统一配额编排都明确后置。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[plan]</a></sup></li>
+                <li>如果未来把这层扩到 actor 普遍治理，还要补资源面和人机可见面之间的边界。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li>运行时已经有能量快照、tick 成本、降频与补能逻辑，说明底层 life/energy 不是空白。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/life.rs">[life.rs]</a><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/routes/energy.rs">[energy.rs]</a></sup></li>
+                <li>但“token / 调用成本 / 运行能量”仍未在同一治理表面真正合流。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[plan]</a></sup></li>
+                <li>现状更接近“底层能力已有、产品治理面未完成”，而不是双计量已经成型。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/848" target="_blank" rel="noreferrer">[issue #848]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-third-round-super-question-settled-decisions.md">docs/plans/2026-04-07-third-round-super-question-settled-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/life.rs">crates/exomind-runtime/src/agent/life.rs</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/routes/energy.rs">crates/exomind-runtime/src/routes/energy.rs</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/848" target="_blank" rel="noreferrer">#848</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="settled" id="theme-e">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">E</div>
+              <div class="theme-title-wrap">
+                <h3>多端同步与验证链</h3>
+                <div class="theme-subline">先做个人同步基线；Tauri manager 是桌面验收标配。</div>
+              </div>
+            </div>
+            <span class="badge badge-settled">已收口</span>
+          </div>
+          <p class="theme-summary">Theme E 的价值在于给“什么时候算真的可用”定了一条验收梯子。它把同步、manager、真实桌面验收和后续 signal / collective 场景接到了同一条验证链里。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[plan]</a><a href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">[issue #532]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></div><span class="meter-note">5/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码 / 文档锚点</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div><span class="meter-note">4/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离闭环距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div><span class="meter-note">collective 仍缺</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li>实现顺序先做个人同步基线，再往上接 signal network 和更强的 collective 协作。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[plan]</a></sup></li>
+                <li>Tauri manager 被明确锁为桌面真实验收标配，而不是可有可无的开发附属工具。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/518" target="_blank" rel="noreferrer">[issue #518]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/development/tauri-mcp-windows-playbook.md">[playbook]</a></sup></li>
+                <li>第一批标准拓扑至少覆盖 Web + Desktop，后续再接 Windows ↔ Android 与 Android ↔ Android。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[plan]</a></sup></li>
+                <li>验收不能只看数据同步，还要带代表性的 network / agent 用户叙事。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>signal network / collective 场景进入验收链后的标准叙事还需继续补足。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+                <li><span class="mono">Proposal</span> 当前只收口到草案 / 列表 / 状态一致，不包含审批副作用的全链路验收。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[plan]</a></sup></li>
+                <li>Android、Windows、Web 的稳定性闭环与回归清单仍需持续补证据。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">[issue #532]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li><span class="mono">#532</span> 已在追踪新 RT + ECS 跨端同步，<span class="mono">#518</span> 已在追踪受管 <span class="mono">tauri dev</span> 工作流。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">[#532]</a><a href="https://github.com/exomind-team/exomind/issues/518" target="_blank" rel="noreferrer">[#518]</a></sup></li>
+                <li>Windows 侧已有 Tauri MCP / manager 经验库和手工验收清单文档。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/development/tauri-mcp-windows-playbook.md">[playbook]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/testing/2026-03-30-mdns-link-proof-manual-checklist.md">[checklist]</a></sup></li>
+                <li>底层同步与验收工具链已经真实存在，但“最终标准验收梯子”还没有完全收尾。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[plan]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/development/tauri-mcp-windows-playbook.md">docs/development/tauri-mcp-windows-playbook.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/testing/2026-03-30-mdns-link-proof-manual-checklist.md">docs/testing/2026-03-30-mdns-link-proof-manual-checklist.md</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/518" target="_blank" rel="noreferrer">#518</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">#532</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="partial" id="theme-f">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">F</div>
+              <div class="theme-title-wrap">
+                <h3>对外文档、用户手册与宣传生成</h3>
+                <div class="theme-subline">开发手册 / 对外叙事双分支并行；官网 <span class="mono">/docs</span> 收口为 5 个入口。</div>
+              </div>
+            </div>
+            <span class="badge badge-partial">部分收口</span>
+          </div>
+          <p class="theme-summary">Theme F 已拆成两条线并行：一条是 <span class="mono">#847</span> 的已验证里程碑到对外叙事草案包，另一条是 <span class="mono">#865</span> 的普通用户手册与官网 <span class="mono">/docs</span>。再往后，才是 prompt-first 文档生产链。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-fourth-round-user-manual-phase1-settled-decisions.md">[manual]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md">[pipeline]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div><span class="meter-note">4/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码 / 站点锚点</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div><span class="meter-note">3/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离上线距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div><span class="meter-note">内容先行</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li>仓库 Markdown 是 canonical 真相源，网站只镜像已验收内容，当前仓库的 <span class="mono">website/</span> 是承接面。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-fourth-round-user-manual-phase1-settled-decisions.md">[manual]</a><a href="https://github.com/exomind-team/exomind/blob/dev/website/src/components/Header.astro">[header]</a></sup></li>
+                <li>官网 <span class="mono">/docs</span> 最终收为 5 个入口：3 分钟上手、核心概念、场景教程、常见问题 / 排障、进阶。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-fourth-round-user-manual-phase1-settled-decisions.md">[manual]</a></sup></li>
+                <li>首版最小必须有正式正文的只有“3 分钟上手”和“常见问题 / 排障”；其他入口可先以摘要或即将上线承接。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+                <li>prompt-first 文档链 v1 只做到草稿生成层，先产出 <span class="mono">#847</span> 草案包和 <span class="mono">#865</span> 提取清单。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md">[pipeline]</a><a href="https://github.com/exomind-team/exomind/issues/847" target="_blank" rel="noreferrer">[#847]</a><a href="https://github.com/exomind-team/exomind/issues/865" target="_blank" rel="noreferrer">[#865]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>“草稿进入 canonical / 上站链”的正式门禁仍留作后续讨论。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md">[pipeline]</a></sup></li>
+                <li>官网仓是否将来独立、如何与内容源仓解耦，也明确记为后续主题。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-fourth-round-user-manual-phase1-settled-decisions.md">[manual]</a></sup></li>
+                <li>对外宣传叙事仍需继续校准，尤其是旧 README 与当前主线能力之间的差异。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/README.md">[README]</a><a href="https://github.com/exomind-team/exomind/issues/242" target="_blank" rel="noreferrer">[issue #242]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li>README、README-zh、用户指南种子稿和官网导航都已经存在，说明“文档表面”不是空白。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/README.md">[README]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/docs/user-guide.md">[user-guide]</a><a href="https://github.com/exomind-team/exomind/blob/dev/website/src/components/Header.astro">[header]</a></sup></li>
+                <li>但 <span class="mono">website/src/pages/docs.astro</span> 仍是 Coming Soon，占位明显落后于 4 月 7 日和 4 月 8 日的决策。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/website/src/pages/docs.astro">[docs.astro]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-fourth-round-user-manual-phase1-settled-decisions.md">[manual]</a></sup></li>
+                <li>现状更接近“站点壳已在，信息架构已定，内容与工作流还没真正接上”。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md">[pipeline]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-fourth-round-user-manual-phase1-settled-decisions.md">docs/plans/2026-04-07-fourth-round-user-manual-phase1-settled-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md">docs/plans/2026-04-08-sixth-round-docs-pipeline-prompt-first-v1-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/README.md">README.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/README.md">docs/README.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/docs/user-guide.md">src/docs/user-guide.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/website/src/components/Header.astro">website/src/components/Header.astro</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/website/src/pages/docs.astro">website/src/pages/docs.astro</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/242" target="_blank" rel="noreferrer">#242</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/847" target="_blank" rel="noreferrer">#847</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/865" target="_blank" rel="noreferrer">#865</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="settled" id="theme-g">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">G</div>
+              <div class="theme-title-wrap">
+                <h3>档案系统 OS 层</h3>
+                <div class="theme-subline">默认档案、多档案并活、ArchiveSession / UiSession 与档案切换器。</div>
+              </div>
+            </div>
+            <span class="badge badge-settled">已收口</span>
+          </div>
+          <p class="theme-summary">Theme G 现在已经独立于“集体档案”主题。它关注的是 Tauri App 内部如何像操作系统一样管理多个档案：默认档案如何存在、窗口如何切换、会话如何恢复、哪些状态属于 RT，哪些状态属于 UI。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[os-layer]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md">[session]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></div><span class="meter-note">5/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码锚点</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div><span class="meter-note">2/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离落地距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div><span class="meter-note">迁名先行</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li>核心术语正式锁为 <span class="mono">archive</span>，并要求文档与 UI 统一迁移，不再把 <span class="mono">profile</span> 当核心术语。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[os-layer]</a></sup></li>
+                <li>OS 层默认进入固定内置默认档案，通过档案切换器进入其他档案；默认档案可显式升级为正式个人档案。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[os-layer]</a></sup></li>
+                <li><span class="mono">ArchiveSession</span> 表示 RT 本地运行会话，<span class="mono">UiSession</span> 表示 UI 终端连接；切档案采用“先连新档案，再关旧档案”的事务流。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md">[session]</a></sup></li>
+                <li>默认档案第一阶段能力边界固定为“本地功能 + 同步”，明确不承接公开身份与集体接入。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[os-layer]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>默认档案与统一登录壳的最终关系仍后置，不进入当前关闭条件。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[os-layer]</a></sup></li>
+                <li><span class="mono">profile -&gt; archive</span> 的代码层系统性迁移还没完成，只锁了方向和边界策略。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[os-layer]</a></sup></li>
+                <li>默认档案在未来集体层的限制合同，只在边界上有结论，未进入本轮细部定稿。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[os-layer]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li>文档已经把 ArchiveSession、UiSession、默认档案升级流和切换事务讲清楚。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md">[session]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[os-layer]</a></sup></li>
+                <li>但 inspected code 仍大量保留 <span class="mono">profile</span> 旧字段、旧存储键和旧适配器命名。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/runtime-profile-scope.ts">[runtime-profile-scope]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/components/Chat/ChatPage.tsx">[ChatPage]</a></sup></li>
+                <li>Theme G 的现实状态是“文档已成体系，代码仍在迁移前夜”。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md">docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/runtime-profile-scope.ts">src/lib/adapters/runtime-profile-scope.ts</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/components/Chat/ChatPage.tsx">src/components/Chat/ChatPage.tsx</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/config/voice-omni-settings.ts">src/config/voice-omni-settings.ts</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">#837</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="settled" id="theme-h">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">H</div>
+              <div class="theme-title-wrap">
+                <h3>集体档案 / 组织档案模型</h3>
+                <div class="theme-subline">成员座席、邀请、公开规则、blackboard 与集体工作面。</div>
+              </div>
+            </div>
+            <span class="badge badge-settled">已收口</span>
+          </div>
+          <p class="theme-summary">Theme H 不再承担 OS 层问题，而专注于“集体档案本身是什么”。它定义成员怎样进入、哪些数据可以直写、哪些要提案、成员座席怎样成为 UI 入口，以及 <span class="mono">blackboard</span> 与 route 如何成为集体协作介质。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">[settled]</a><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></div><span class="meter-note">5/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码锚点</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span></span><span></span><span></span><span></span></div><span class="meter-note">1/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离落地距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div><span class="meter-note">问题定义已稳</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li>外心默认去中心化，不强制中心化用户服务器或注册服务器；任何设备、任何档案都可组网。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">[settled]</a></sup></li>
+                <li>集体档案与个人档案在身份层同型，但前台进入集体时接入的是“成员对集体的座席”，不是抽象集体本体。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">[settled]</a></sup></li>
+                <li>每档案一个持久 <span class="mono">blackboard</span>；集体事件日志可直写但强审计，时间块与任务结构变更走提案门禁。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">[settled]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a></sup></li>
+                <li>公开标识、邀请材料、成员生命周期与 route 编辑门禁都已进入主线文档。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md">[invitee]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">[settled]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>集体 Agent、防伪 / 公开标识轮换、审计界面都已从本主题拆成扩大讨论簇，不在当前回合硬收口。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></li>
+                <li>“如何找到被邀请者”虽已独立成子计划，但发现机制的产品细节仍要继续讨论。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md">[invitee]</a></sup></li>
+                <li>更复杂的跨层级组织协作只保留研究入口，不进入近期实现关闭条件。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li>文档层已覆盖成员生命周期、提案门禁、公开标识、邀请与 blackboard 合同。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">[settled]</a></sup></li>
+                <li>但 inspected code 仍主要围绕 <span class="mono">profile/user_id</span> 做作用域隔离，并未出现等价的集体档案运行时模型。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/runtime-profile-scope.ts">[runtime-profile-scope]</a><a href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/proposal-rt-adapter.ts">[proposal-rt-adapter]</a></sup></li>
+                <li>Theme H 当前仍主要是计划驱动，尚未进入主代码的真实运行层。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md">docs/plans/2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/runtime-profile-scope.ts">src/lib/adapters/runtime-profile-scope.ts</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/eventlog-rt-adapter.ts">src/lib/adapters/eventlog-rt-adapter.ts</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/proposal-rt-adapter.ts">src/lib/adapters/proposal-rt-adapter.ts</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">#837</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">#860</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="settled" id="theme-i">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">I</div>
+              <div class="theme-title-wrap">
+                <h3>集体记账 / Labor Ledger</h3>
+                <div class="theme-subline">先独立成系统，再讨论怎么并回 ExoMind。</div>
+              </div>
+            </div>
+            <span class="badge badge-settled">已收口</span>
+          </div>
+          <p class="theme-summary">Theme I 的最大价值是把“记账”从当前外心主线里安全拆出。这样既能快速承接旧功能，又不会把 archive / collective / signal 的主线卡死在另一个领域系统上。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping-plan]</a><a href="https://github.com/exomind-team/exomind/issues/845" target="_blank" rel="noreferrer">[issue #845]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></div><span class="meter-note">5/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码锚点</p><div class="meter-row"><div class="meter-track"><span></span><span></span><span></span><span></span><span></span></div><span class="meter-note">0/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">离实现距离</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div><span class="meter-note">应尽快拆仓</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li>第一阶段先做独立配套系统，不作为外心内置数据域推进。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping-plan]</a></sup></li>
+                <li>最应该优先稳住的是“领域事件模型 + 本地 API”，而不是先把 UI 或身份语义绑死到 ExoMind 主仓。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+                <li>第一版交付形态固定为 Rust 内核 + 简 Web UI，权威账本采用“事件账本 + 投影”的结构。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping-plan]</a></sup></li>
+                <li>权威原始层默认采用追加友好的 <span class="mono">JSONL</span>，GitHub 私有仓库只是可替换传输层，不是领域语义核心。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping-plan]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>旧表导入、完整统计看板、并回 ExoMind 的时机与接口都后置。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping-plan]</a></sup></li>
+                <li>第一阶段只保留最小归因，不预留 archive / member 身份语义。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+                <li>拆仓后的 transport、多人协作与更强审计还要单独展开。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping-plan]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li>当前主仓里只有规划文档与 issue，未见实际实现代码。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping-plan]</a></sup></li>
+                <li>这不是落后，而是刻意的边界选择：先把系统独立出来，避免污染 ExoMind 主线。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/845" target="_blank" rel="noreferrer">[issue #845]</a></sup></li>
+                <li>Theme I 当前最重要的推进动作不是写主仓代码，而是尽快完成独立仓库的启动。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md</a>
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md</a>
+            <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/845" target="_blank" rel="noreferrer">#845</a>
+          </div>
+        </article>
+
+        <article class="theme-card" data-stage="deferred" id="theme-j">
+          <div class="theme-top">
+            <div class="theme-title-group">
+              <div class="theme-letter">J</div>
+              <div class="theme-title-wrap">
+                <h3>复杂跨层组织协作</h3>
+                <div class="theme-subline">例如跨级组织、跨集体并桌、复杂联邦协商。</div>
+              </div>
+            </div>
+            <span class="badge badge-deferred">后置</span>
+          </div>
+          <p class="theme-summary">Theme J 保留的是研究价值，而不是近期关闭条件。像“法国跟欧盟坐一桌”这类跨层组织问题，目前只需要记住它们将来会出现，不应该让它们反过来拖慢前面的基础设施建设。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></p>
+          <div class="meter-grid">
+            <div class="meter-card"><p class="meter-title">决策收口</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div><span class="meter-note">2/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">代码锚点</p><div class="meter-row"><div class="meter-track"><span></span><span></span><span></span><span></span><span></span></div><span class="meter-note">0/5</span></div></div>
+            <div class="meter-card"><p class="meter-title">当前策略</p><div class="meter-row"><div class="meter-track"><span class="on"></span><span></span><span></span><span></span><span></span></div><span class="meter-note">只记不做</span></div></div>
+          </div>
+          <div class="theme-columns">
+            <div class="theme-col">
+              <h4>已决</h4>
+              <ul>
+                <li>这类问题明确后置，不进入当前 backlog 的关闭条件。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+                <li>它的存在价值是约束前面主题的抽象边界，而不是反向支配近期实现顺序。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>未决 / 后续细化</h4>
+              <ul>
+                <li>未来何时重开、以何种组织理论模型重开，都尚未决定。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+                <li>它依赖 G/H/C 的基础设施先站稳，否则讨论只会空转。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+              </ul>
+            </div>
+            <div class="theme-col">
+              <h4>当前 dev 现状</h4>
+              <ul>
+                <li>当前代码与 issue 中没有必要的实现锚点，这是符合预期的。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a></sup></li>
+                <li>报告里保留它，是为了防止后续误以为“没提过”或“已经被否决”。<sup class="note-ref"><a href="#raw-materials">[raw appendix]</a></sup></li>
+              </ul>
+            </div>
+          </div>
+          <div class="theme-sources">
+            <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md</a>
+            <a class="source-link" href="#raw-materials">原始讨论材料全文摘录（仓外暂存原件）</a>
+          </div>
+        </article>
+
+      </section>
+
+      <section class="panel" id="discussion-clusters">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Expanded Discussion</div>
+            <h2>扩大讨论问题簇</h2>
+            <p class="section-copy">这三簇问题当前只记录，不在本轮收口。它们的作用是为后续和星林 / <span class="mono">@HailayLin</span> 的扩大讨论提供统一挂点。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a><a href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">[issue #860]</a><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></p>
+          </div>
+        </div>
+        <div class="cluster-grid">
+          <article class="cluster-card">
+            <div class="chip-row"><span class="badge badge-discussion">扩大讨论</span></div>
+            <h3>集体 Agent</h3>
+            <p>当前只锁了问题定义层和最小现实形态，不锁最终执行一致性方案。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></p>
+            <ul>
+              <li>已定最小值：第一阶段默认先挂在成员座席主机上运行。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></li>
+              <li>当前基线：它更像“汇聚管理层”，而不是跨 RT 同步的单一执行实例。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+              <li>待讨论：多设备同时在线时如何定义唯一执行、任务队列与本地临时执行态如何分层、副作用提交怎样门禁。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">[issue #860]</a></sup></li>
+            </ul>
+            <div class="theme-sources">
+              <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md</a>
+              <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md</a>
+              <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">#860</a>
+            </div>
+          </article>
+          <article class="cluster-card">
+            <div class="chip-row"><span class="badge badge-discussion">扩大讨论</span></div>
+            <h3>档案防伪 / 公开标识轮换</h3>
+            <p>当前已经明确“先记问题，不讨论答案”。这簇问题会直接影响公开标识、邀请材料与信任建立方式。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></p>
+            <ul>
+              <li>威胁模型是什么：撞库、冒名、旧标识泄露、伪造邀请、旧 PublicCard 残留。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></li>
+              <li>公开标识的稳定性与轮换能力如何兼容，哪些对象承担信任责任。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-invitee-discovery-public-identifier-and-known-archives-plan.md">[invitee]</a></sup></li>
+              <li>是否需要签名、见证或其他证明材料，目前一律后置到扩大讨论。<sup class="note-ref"><a href="#raw-materials">[raw appendix]</a></sup></li>
+            </ul>
+            <div class="theme-sources">
+              <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md</a>
+              <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">#837</a>
+            </div>
+          </article>
+          <article class="cluster-card">
+            <div class="chip-row"><span class="badge badge-discussion">扩大讨论</span></div>
+            <h3>审计界面</h3>
+            <p>当前只保留问题清单，不把 UI 形态或空间策略误写成既定方案。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></p>
+            <ul>
+              <li>对象局部历史与全局审计总控台如何分层。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></li>
+              <li><span class="mono">blackboard</span> 的移出 / 删除动作是否要保留额外痕迹，以及这些痕迹占多少空间才合理。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a></sup></li>
+              <li>人类、成员、Agent 各自应能看到哪些审计面，目前还没有产品定稿。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></li>
+            </ul>
+            <div class="theme-sources">
+              <a class="source-link" href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md</a>
+              <a class="source-link issue" href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">#837</a>
+            </div>
+          </article>
+        </div>
+        <div class="callout"><strong>当前规则：</strong>这三簇问题进入 GitHub 跟踪时，都应显式提及 <span class="mono">@HailayLin</span>，并以“记录待讨论问题”为目标，而不是假装本轮已经有定案。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[discussion-clusters]</a><a href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">[issue #860]</a><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">[issue #837]</a></sup></div>
+      </section>
+
+      <section class="panel" id="boundaries">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Boundaries</div>
+            <h2>不应混淆的边界</h2>
+            <p class="section-copy">这部分是为了降低后续继续讨论时的语义滑移。它们不是新主题，而是已经在问答中多次出现的纠偏结论。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md">[archive-session]</a></sup></p>
+          </div>
+        </div>
+        <div class="boundary-grid">
+          <article class="boundary-card">
+            <h3>方法论概念 vs 程序本体</h3>
+            <ul>
+              <li><span class="mono">node / actor / Agent</span> 不应被写成三种天生不同的程序种类。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">[master]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-energy-and-dual-metering-phase1-plan.md">[energy]</a></sup></li>
+              <li>它们是外心观察、编排、监控与治理运行体时采用的不同视角。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">[round-2]</a></sup></li>
+            </ul>
+          </article>
+          <article class="boundary-card">
+            <h3>连边语义 vs 可达性神话</h3>
+            <ul>
+              <li><span class="mono">edge</span> 首要语义是“输出后默认送达给谁”。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[signal-plan]</a></sup></li>
+              <li>同时它也是权限门禁，所以“无边不能发”是系统约束，不是图论装饰。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[signal-plan]</a><a href="https://github.com/exomind-team/exomind/issues/833" target="_blank" rel="noreferrer">[issue #833]</a></sup></li>
+            </ul>
+          </article>
+          <article class="boundary-card">
+            <h3>档案系统 OS 层 vs 集体档案层</h3>
+            <ul>
+              <li>OS 层讨论的是默认档案、切换器、ArchiveSession、UiSession、多档案并活。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">[archive-os]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md">[archive-session]</a></sup></li>
+              <li>集体档案层讨论的是成员座席、邀请、公共规则、blackboard 和集体治理。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">[collective]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a></sup></li>
+            </ul>
+          </article>
+          <article class="boundary-card">
+            <h3>个人同步基线 vs 集体协作系统</h3>
+            <ul>
+              <li>多端同步可以先行建立在事件日志、时间块、任务、设置项等个人基线之上。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a><a href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">[issue #532]</a></sup></li>
+              <li>它不必等待完整的信号网络和集体档案系统全部完工。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">[roadmap]</a></sup></li>
+            </ul>
+          </article>
+          <article class="boundary-card">
+            <h3>blackboard vs 业务真相对象</h3>
+            <ul>
+              <li><span class="mono">blackboard</span> 第一阶段只承接共享工作记忆、协调便笺和摘要痕迹。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a></sup></li>
+              <li>任务、时间块、提案、事件日志仍各自保有业务真相地位。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-signal-network-v1-and-timeblock-agent-loop-plan.md">[signal-plan]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">[blackboard]</a></sup></li>
+            </ul>
+          </article>
+          <article class="boundary-card">
+            <h3>独立记账系统 vs ExoMind 主线域</h3>
+            <ul>
+              <li>记账系统近期先独立，不直接塞进档案 / 集体档案 / signal 网络主线。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping]</a><a href="https://github.com/exomind-team/exomind/issues/845" target="_blank" rel="noreferrer">[issue #845]</a></sup></li>
+              <li>真正要保住的是领域事件模型和本地 API，而不是当前主仓里的临时位置。<sup class="note-ref"><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-independent-collective-bookkeeping-system-plan.md">[bookkeeping]</a><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-08-fifth-round-super-question-settled-decisions.md">[round-5]</a></sup></li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel" id="sources">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Source Register</div>
+            <h2>源文件与追踪入口登记</h2>
+            <p class="section-copy">如果后续要继续推进、回读、开 issue、或与星林共读，优先从这些入口进。这里故意偏长，以优先保证可追溯性。</p>
+          </div>
+        </div>
+        <div class="source-grid">
+          <article class="cluster-card">
+            <h3>原始材料 / 总索引</h3>
+            <ul>
+              <li><a href="#raw-materials">原始讨论材料全文摘录（仓外暂存原件）</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md">docs/plans/2026-04-06-agent-network-collective-ideas-consolidation.md</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md">docs/plans/2026-04-06-remaining-themes-second-round-settled-plan.md</a></li>
+            </ul>
+          </article>
+          <article class="cluster-card">
+            <h3>已决主题主文档</h3>
+            <ul>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md">docs/plans/2026-04-06-roadmap-sequencing-personal-sync-baseline-plan.md</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md">docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md">docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md">docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md">docs/plans/2026-04-07-blackboard-phase1-and-expanded-discussion-clusters.md</a></li>
+            </ul>
+          </article>
+          <article class="cluster-card">
+            <h3>代码现状锚点</h3>
+            <ul>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/config/signal-routes.default.json">config/signal-routes.default.json</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/workspace.rs">crates/exomind-runtime/src/agent/workspace.rs</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/agent/life.rs">crates/exomind-runtime/src/agent/life.rs</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/crates/exomind-runtime/src/proposal/store.rs">crates/exomind-runtime/src/proposal/store.rs</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/src/lib/types/proposal.ts">src/lib/types/proposal.ts</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/src/lib/adapters/runtime-profile-scope.ts">src/lib/adapters/runtime-profile-scope.ts</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/blob/dev/website/src/pages/docs.astro">website/src/pages/docs.astro</a></li>
+            </ul>
+          </article>
+          <article class="cluster-card">
+            <h3>Issue 追踪入口</h3>
+            <ul>
+              <li><a href="https://github.com/exomind-team/exomind/issues/71" target="_blank" rel="noreferrer">#71 agent memory</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/387" target="_blank" rel="noreferrer">#387 signal topology lifecycle</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/518" target="_blank" rel="noreferrer">#518 tauri manager</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/532" target="_blank" rel="noreferrer">#532 sync epic</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/677" target="_blank" rel="noreferrer">#677 proposal system</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/837" target="_blank" rel="noreferrer">#837 archive-first / multi-archive epic</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/845" target="_blank" rel="noreferrer">#845 independent bookkeeping</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/846" target="_blank" rel="noreferrer">#846 multi-agent governance</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/847" target="_blank" rel="noreferrer">#847 external docs draft package</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/848" target="_blank" rel="noreferrer">#848 dual metering</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/860" target="_blank" rel="noreferrer">#860 collective agent</a></li>
+              <li><a href="https://github.com/exomind-team/exomind/issues/865" target="_blank" rel="noreferrer">#865 user manual / docs</a></li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel" id="raw-materials">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Raw Appendix</div>
+            <h2>原始材料全文摘录</h2>
+            <p class="section-copy">按你的优先级，这一节优先服务“可追溯性”。这里先把原始材料全文挂上，并显式说明它来自仓外暂存原件；后续若需要，还可以继续追加更多问答原文附录。</p>
+          </div>
+        </div>
+        <details open>
+          <summary>原始讨论材料全文</summary>
+          <div class="raw-block">
+            <div class="raw-path">源说明：仓外暂存原件，HTML 中不展示本地磁盘路径。</div>
+            <pre>集体记账系统，先前讨论过，应该在GitHub上，待检索
+
+---
+
+Agent生成外心软件文档→宣传 对外描述
+
+---
+
+多端同步 功能→Tauri manager验证
+
+---
+
+描述性概念 可由 actor/Agent 区分
+方法论概念 可由 节点/actor 区分
+
+---
+
+方法论区分
+资源消耗计量计量方式不同：时空（算力/存储） + **token**（能量）
+
+---
+
+MVP：演员模型「固定邮箱」🆚网络模型「先天连边」
+演员模型之上：只要说「输出/发消息」就广而告之给别的节点
+❓连边作为呈现：❌节点连边可达✅节点可发消息
+工作流「RSS→总结→汇报」，连接变成了「固定联系人」，节点变成了函数
+→这时候「连边」成了「节点运行『输出』随后自动发给的其他节点」，即「输出后连到哪里」
+📍结论：连边管「下一步给谁」
+
+---
+
+📍定义在「会话」「通道」层次，actor一般不控制连边，也有if分支节点，Agent潜力上能跟任何节点发消息
+但需要「建立『以后可能发消息』的连接」作为连边的语义，🎯这样子旨在与「工作流模型」的「连边」语义
+
+---
+
+测试：增删改查 信号网络
+节点连边→Agent/Codex自己看一看
+
+---
+
+MVP DOD：API Agent有记忆（对话上下文=工作记忆，独立经验文件=长期记忆），输入外心（事件日志，时间块，）→输出「提案」「时间块总结」等内容
+①单Agent：时间块结束后编写总结、推荐任务（提案）。良定义提案系统「不需要下一步，纯程序自动进行」
+②多Agent：「任务治理」「面向人 多模态服务员」
+③Agent的能量系统：定时唤醒、心跳检测、电池（额度）等，贯彻生命自维持
+④网络可变/理论验证：接入可编排的程序，节点actor、连边可变，动态生成节点连边，自然而然引入subAgent、teammate→动态生成 可持久化工作流。只保证「有连边一定有联系」（为了/例子「提案系统→任务」等，不需要放进信号网络）
+⑤网络可变/实际接入：事件日志、时间块、任务（包装到信号网络节点，只读/权限）、提案等，也包括未来的目标，都在信号网络中工作。网络不关心所有，只保证「放在网络里一定是要关注的」，Agent工作流
+💡Agent公共记忆→actor「黑板」节点
+
+---
+
+组织as档案，一个不可登录、可多端同步的档案
+→集体档案，技术上避免个人直接读写，读OR写AND（所有人集体决议）
+安全建议等，「请面向屏幕」这些
+可考虑（作为抽象接口）但不实现（这些让专人去做OAuth等）
+📌底层依然是共享档案，有集体事件日志、集体时间块、集体任务、集体目标、集体知识，但要档案（个人or集体）加入才能用
+💡集体套集体→开始层次组织，开始分布式认知、计算等等
+❓后续造出可能性后，再考虑诸如「跨级组织，法国跟欧盟坐一桌」这样的问题</pre>
+          </div>
+        </details>
+      </section>
+
+      <footer>本页是主题治理报告，不是最终架构定稿，也不是完整验收报告。它的价值在于把讨论对象、已决结论、未决问题、当前进度与追踪入口压到同一张图上。</footer>
+    </div>
+
+    <script>
+      const buttons = Array.from(document.querySelectorAll('[data-filter]'));
+      const targets = Array.from(document.querySelectorAll('[data-stage]'));
+      function applyFilter(filter) {
+        buttons.forEach((button) => button.classList.toggle('is-active', button.dataset.filter === filter));
+        targets.forEach((target) => {
+          const visible = filter === 'all' || target.dataset.stage === filter;
+          target.classList.toggle('hidden-by-filter', !visible);
+        });
+      }
+      buttons.forEach((button) => button.addEventListener('click', () => applyFilter(button.dataset.filter)));
+    </script>
+  </body>
+</html>
