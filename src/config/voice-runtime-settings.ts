@@ -76,8 +76,8 @@ const voiceRuntimeAutoSpeakEnabledModule = createConfigModule<boolean>({
 const voiceRuntimeLabNavEnabledModule = createConfigModule<boolean>({
   storageKey: VOICE_RUNTIME_LAB_NAV_ENABLED_KEY,
   eventName: 'exomind:voice-runtime-lab-nav-enabled-changed',
-  defaultValue: true,
-  normalize: (value) => value == null ? true : normalizeBoolean(value),
+  defaultValue: false,
+  normalize: (value) => value == null ? false : normalizeBoolean(value),
   serialize: (value) => (value ? '1' : '0'),
   persistMode: 'runtime-preferred',
 });

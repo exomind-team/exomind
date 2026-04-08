@@ -52,7 +52,10 @@ import {
   subscribeVoiceRuntimeModeChanges,
   type VoiceRuntimeMode,
 } from '@/config/voice-runtime-mode';
-import type { VoiceRuntimeCloudSessionPolicy } from '@/config/voice-runtime-settings';
+import type {
+  VoiceRuntimeCloudSessionPolicy,
+  VoiceRuntimeProvider,
+} from '@/config/voice-runtime-settings';
 import { isTauriWindow } from '@/config/runtime-target';
 import { createPcmS16leStreamPlayer, type PcmS16leStreamPlayer } from '@/lib/voice-runtime/pcm-s16le-stream-player';
 import { DoubaoE2ERealtimeProvider } from '@/lib/voice-runtime/providers/doubao-e2e-realtime-provider';
@@ -93,9 +96,9 @@ export interface VoiceRuntimeLabState {
   credentialConfigured: boolean;
   runtimeEnabled: boolean;
   autoSpeakEnabled: boolean;
-  providerId: string;
-  currentMode: string;
-  currentCloudSessionPolicy: string;
+  providerId: VoiceRuntimeProvider;
+  currentMode: VoiceRuntimeMode;
+  currentCloudSessionPolicy: VoiceRuntimeCloudSessionPolicy;
   rawEvents: ProviderRawPerception[];
   liveTranscript: string;
   finalTranscript: string;
@@ -187,7 +190,7 @@ function extractErrorMessage(rawEvent: ProviderRawPerception): string {
   return `Voice runtime event failed: ${rawEvent.eventType}`;
 }
 
-function resolveProviderInputMode(mode: string): 'keep_alive' | 'push_to_talk' {
+function resolveProviderInputMode(mode: VoiceRuntimeMode): 'keep_alive' | 'push_to_talk' {
   return mode === 'ambient' ? 'keep_alive' : 'push_to_talk';
 }
 

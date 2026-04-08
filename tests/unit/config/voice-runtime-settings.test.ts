@@ -28,7 +28,7 @@ describe('voice runtime settings（语音运行时设置）', () => {
     expect(getVoiceRuntimeProvider()).toBe('doubao-o2-realtime');
     expect(getVoiceRuntimeCloudSessionPolicy()).toBe('on-demand');
     expect(getVoiceRuntimeAutoSpeakEnabled()).toBe(true);
-    expect(getVoiceRuntimeLabNavEnabled()).toBe(true);
+    expect(getVoiceRuntimeLabNavEnabled()).toBe(false);
   });
 
   it('persists the lightweight settings used by the lab page（保存实验页轻量设置）', () => {

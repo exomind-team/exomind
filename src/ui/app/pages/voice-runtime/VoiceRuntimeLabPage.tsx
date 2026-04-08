@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState, type ComponentProps } from 'react';
+import type { VoiceRuntimeMode } from '@/config/voice-runtime-mode';
+import type { VoiceRuntimeCloudSessionPolicy } from '@/config/voice-runtime-settings';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -138,7 +140,7 @@ function ReadinessBadge({
   );
 }
 
-function formatRuntimeModeLabel(mode: string): string {
+function formatRuntimeModeLabel(mode: VoiceRuntimeMode): string {
   switch (mode) {
     case 'push-to-talk':
       return '按键说话';
@@ -149,7 +151,7 @@ function formatRuntimeModeLabel(mode: string): string {
   }
 }
 
-function formatCloudSessionPolicyLabel(policy: string): string {
+function formatCloudSessionPolicyLabel(policy: VoiceRuntimeCloudSessionPolicy): string {
   switch (policy) {
     case 'foreground-persistent':
       return '前台长连';
@@ -329,8 +331,20 @@ export function VoiceRuntimeLabPage() {
   const canStart = (state.status === 'idle' || state.status === 'error') && state.isTauri;
   const canStop = state.status === 'listening';
   const canCancel = state.status === 'connecting' || state.status === 'listening' || state.status === 'responding';
-  const startHint = useMemo(() => formatStartHint(state), [state]);
-  const readinessItems = useMemo(() => buildReadinessItems(state), [state]);
+  const startHint = useMemo(
+    () => formatStartHint(state),
+    [state.isTauri, state.credentialConfigured, state.runtimeEnabled, state.currentMode],
+  );
+  const readinessItems = useMemo(
+    () => buildReadinessItems(state),
+    [
+      state.isTauri,
+      state.credentialConfigured,
+      state.runtimeEnabled,
+      state.currentMode,
+      state.currentCloudSessionPolicy,
+    ],
+  );
 
   return (
     <PageShell
@@ -488,7 +502,7 @@ export function VoiceRuntimeLabPage() {
                       运行模式
                     </div>
                     <SlidingSegmentedControl
-                      value={state.currentMode as 'off' | 'push-to-talk' | 'ambient'}
+                      value={state.currentMode}
                       onChange={(value) => controller.updateRuntimeMode(value)}
                       options={[
                         { key: 'off', label: '关闭' },
@@ -504,7 +518,7 @@ export function VoiceRuntimeLabPage() {
                       云端会话
                     </div>
                     <SlidingSegmentedControl
-                      value={state.currentCloudSessionPolicy as 'on-demand' | 'foreground-persistent'}
+                      value={state.currentCloudSessionPolicy}
                       onChange={(value) => controller.updateCloudSessionPolicy(value)}
                       options={[
                         { key: 'on-demand', label: '按需上云' },
