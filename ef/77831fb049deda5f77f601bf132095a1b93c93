@@ -1,0 +1,34 @@
+src-tauri/src/commands/asr_commands.rs
+  8468007bd6a1d8c0 14-15,18-21
+src-tauri/src/commands/doubao_realtime_commands.rs
+  8468007bd6a1d8c0 6,10-11,13
+src-tauri/src/commands/file_commands.rs
+  8468007bd6a1d8c0 8
+src-tauri/src/commands/ws_commands.rs
+  8468007bd6a1d8c0 11
+src-tauri/src/commands/shortcut_commands.rs
+  8468007bd6a1d8c0 1,517,539,1019-1021
+src-tauri/src/commands/runtime_commands.rs
+  8468007bd6a1d8c0 8-9,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "ef77831fb049deda5f77f601bf132095a1b93c93",
+  "prompts": {
+    "8468007bd6a1d8c0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fc2-a6ea-7ab2-b84d-fd063f889cd6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 421,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e212411e3f527f3cd51eab73c319524ddbe518396c4d56063a7631fb149d0c4d"
+    }
+  }
+}
