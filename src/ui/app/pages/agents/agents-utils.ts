@@ -50,6 +50,7 @@ export const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: 
   { id: 'history', icon: AlarmClock, label: '信号历史' },
   { id: 'routes', icon: List, label: '路由' },
   { id: 'device', icon: Monitor, label: '设备' },
+  { id: 'api-agent', icon: Webhook, label: 'API Agent' },
 ];
 
 export type AddNodeOption = {

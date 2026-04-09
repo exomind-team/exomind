@@ -2211,3 +2211,86 @@
    - `HTTP 401`
    - `unauthorized runtime request`
    - `peer .* export failed`
+### 阶段补记：#823 API Agent Tab 真机闭环（2026-04-08）
+
+#### 阶段目标
+
+- 在 `网络 / API Agent` 顶部 tab 中完成最小可用真机验收。
+- 不只确认 tab 已挂上，还要确认：
+  - `天气示例`
+  - `发送首轮 / 继续`
+  - `继续执行 Tool Results`
+  - `读取`
+  这些关键按钮都能真实命中 `/agent-sessions`。
+
+#### 观察结果
+
+- 当前桌面实例：
+  - 主窗口标题：`ExoMind [feature/api-agent-tab-minimal] [Web:36648 RT:36651]`
+  - Tauri MCP bridge：`44451`
+- `driver_session start --host 127.0.0.1 --port 44451` 可稳定连通。
+- 当前这轮可用的 MCP 能力：
+  - `manage_window list`
+  - `webview_dom_snapshot`
+  - `webview_execute_js`
+  - `webview_interact`
+- 页面真实可见：
+  - `网络` 顶部 `API Agent` tab
+  - 请求编排 / 轮次结果 / 工具续跑 / 会话读取 / 调试证据 五块分区
+
+#### 关键发现
+
+- 首版默认把 `recent_events` preset 打开，但后端对这个 preset 有明确约束：
+  - `scope_key is required for preset recent_events`
+- 结果就是：
+  - 页面初次进入后直接点 `发送首轮 / 继续`
+  - 会命中 `POST /agent-sessions`
+  - 返回 `400`
+- 这不是 RT 不可用，也不是按钮没绑好，而是前端默认态和后端约束冲突。
+
+#### 本轮修正结论
+
+- API Agent 实验页要做到“开箱可测”，前端需要：
+  - 默认关闭 `recent_events`
+  - 当用户手动开启 `recent_events` 且没填 `Scope Key` 时，直接前端禁用发送/续跑并展示提示
+- 这样能把“默认 UX 断点”与“后端真实不可用”拆开。
+
+#### 真机闭环链路
+
+1. 起本地 fake provider：
+   - `node .tmp/fake-api-agent-provider.mjs`
+   - 监听：`127.0.0.1:36701`
+2. 给当前 RT 写入最小 provider 配置：
+   - `exomind:agentApiProvider=openai`
+   - `exomind:agentApiModel=gpt-4o-mini`
+   - `exomind:agentApiBaseUrl=http://127.0.0.1:36701`
+   - `exomind:agentApiApiKey=stub-key`
+3. 在 Tauri 页面点击：
+   - `天气示例`
+   - `发送首轮 / 继续`
+4. 真实观察：
+   - `201 /agent-sessions`
+   - 页面进入 `needs_tool_calls`
+   - 返回 `tool-weather-1 / get_weather`
+5. 填入 tool result 后点击：
+   - `继续执行 Tool Results`
+6. 真实观察：
+   - 第二次 `201 /agent-sessions`
+   - 页面进入 `completed`
+   - 页面显示最终回答
+7. 把返回的 `sessionId` 填入读取框，点击：
+   - `读取`
+8. 真实观察：
+   - `200 /agent-sessions/:id`
+   - 页面成功回显持久化结果
+
+#### 可复用操作套路
+
+1. API Agent 页先测 RT HTTP，再测桌面按钮，不要反过来。
+2. 遇到“按钮点了没反应”，先在页面里 patch `window.fetch`，记录：
+   - URL
+   - method
+   - status
+   - response body
+3. 对 toggle / 预置按钮，`webview_interact click` 往往比普通 DOM `.click()` 更稳。
+4. 需要稳定复现 Agent API 时，优先接本地 fake provider，不要一开始就依赖真实远程模型。
