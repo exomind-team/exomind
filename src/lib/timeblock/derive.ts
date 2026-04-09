@@ -1,4 +1,4 @@
-import type { BlockTransition } from '@/lib/types/event';
+import type { BlockTransition, TimeBlockData } from '@/lib/types/event';
 
 export function derivePhase(transitions: BlockTransition[]): 'running' | 'paused' | 'feedback' | 'completed' | 'idle' {
   if (transitions.length === 0) return 'idle';
@@ -62,4 +62,58 @@ export function deriveLastResumedAt(transitions: BlockTransition[]): number | un
     if (transitions[i].type === 'resume' || transitions[i].type === 'start') return transitions[i].at;
   }
   return undefined;
+}
+
+export function derivePhaseFromBlock(block: Pick<TimeBlockData, 'transitions' | 'phase' | 'paused' | 'actionEndedAt' | 'feedbackStartedAt' | 'feedbackSubmittedAt'>): 'running' | 'paused' | 'feedback' | 'completed' | 'idle' {
+  const transitions = block.transitions ?? [];
+  if (transitions.length > 0) {
+    return derivePhase(transitions);
+  }
+  if (block.feedbackSubmittedAt || block.phase === 'feedback_submitted') {
+    return 'completed';
+  }
+  if (block.actionEndedAt || block.feedbackStartedAt || block.phase === 'feedback_in_progress' || block.phase === 'action_ended') {
+    return 'feedback';
+  }
+  if (block.phase === 'paused' || block.paused) {
+    return 'paused';
+  }
+  if (block.phase === 'running') {
+    return 'running';
+  }
+  return 'idle';
+}
+
+export function deriveStartTimeFromBlock(block: Pick<TimeBlockData, 'transitions' | 'startTime'>): number | undefined {
+  return deriveStartTime(block.transitions ?? []) ?? block.startTime;
+}
+
+export function deriveEndTimeFromBlock(block: Pick<TimeBlockData, 'transitions' | 'endTime' | 'feedbackSubmittedAt'>): number | undefined {
+  return deriveEndTime(block.transitions ?? []) ?? block.endTime ?? block.feedbackSubmittedAt;
+}
+
+export function deriveAccumulatedRunMsFromBlock(
+  block: Pick<TimeBlockData, 'transitions' | 'accumulatedRunMs' | 'elapsed' | 'mode' | 'targetMinutes'>,
+  now: number = Date.now(),
+): number {
+  if ((block.transitions ?? []).length > 0) {
+    return deriveAccumulatedRunMs(block.transitions ?? [], now);
+  }
+  if (typeof block.accumulatedRunMs === 'number') {
+    return Math.max(0, block.accumulatedRunMs);
+  }
+  if (block.mode === 'countdown') {
+    return Math.max(0, (block.targetMinutes ?? 25) * 60_000 - Math.max(0, block.elapsed ?? 0));
+  }
+  return Math.max(0, block.elapsed ?? 0);
+}
+
+export function derivePauseAccumulatedMsFromBlock(
+  block: Pick<TimeBlockData, 'transitions' | 'pauseAccumulatedMs'>,
+  now: number = Date.now(),
+): number {
+  if ((block.transitions ?? []).length > 0) {
+    return derivePauseAccumulatedMs(block.transitions ?? [], now);
+  }
+  return Math.max(0, block.pauseAccumulatedMs ?? 0);
 }

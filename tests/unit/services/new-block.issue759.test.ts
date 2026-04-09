@@ -40,15 +40,14 @@ import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 
 type TimeBlockRtAdapterLike = {
   listCompletedBlocks: () => Promise<TimeBlockData[]>;
-  replaceCompletedBlocks: (blocks: TimeBlockData[]) => Promise<void>;
   getActiveBlock: () => Promise<ActiveBlockData | null>;
-  putActiveBlock: (block: ActiveBlockData) => Promise<void>;
-  deleteActiveBlock: () => Promise<void>;
+  rtBackfillGapBlocks: () => Promise<{ inserted: number }>;
   rtStartBlock: (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
   rtStopBlock: () => Promise<{ status: string }>;
   rtEndBlock: (params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
   rtPauseBlock: () => Promise<{ status: string }>;
   rtResumeBlock: () => Promise<{ status: string }>;
+  rtPatchActiveBlockTasks: (params: { taskIds: string[]; taskAssociationLog: unknown[] }) => Promise<ActiveBlockData | null>;
 };
 
 function createMemoryEnv() {
@@ -70,12 +69,26 @@ function createRtAdapter(initial?: {
   let activeBlock: ActiveBlockData | null = initial?.activeBlock ?? null;
   return {
     listCompletedBlocks: vi.fn(async () => completedBlocks),
-    replaceCompletedBlocks: vi.fn(async (blocks: TimeBlockData[]) => { completedBlocks = blocks; }),
     getActiveBlock: vi.fn(async () => activeBlock),
-    putActiveBlock: vi.fn(async (block: ActiveBlockData) => { activeBlock = block; }),
-    deleteActiveBlock: vi.fn(async () => { activeBlock = null; }),
+    rtBackfillGapBlocks: vi.fn(async () => ({ inserted: 0 })),
     rtStartBlock: vi.fn(async (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[] }) => {
       const now = Date.now();
+      let completed: TimeBlockData | null = null;
+      if (activeBlock?.blockType === 'gap') {
+        completed = {
+          id: activeBlock.startId,
+          name: activeBlock.name,
+          startId: activeBlock.startId,
+          endId: `rt-gap-end-${now}`,
+          tags: [],
+          startTime: activeBlock.startTime,
+          endTime: now,
+          blockType: 'gap',
+          taskIds: [],
+          taskAssociationLog: activeBlock.taskAssociationLog ?? [],
+        };
+        completedBlocks = [...completedBlocks, completed];
+      }
       const newBlock: ActiveBlockData = {
         startId: `rt-start-${now}`,
         name: params.name,
@@ -95,7 +108,7 @@ function createRtAdapter(initial?: {
         taskAssociationLog: [],
       };
       activeBlock = newBlock;
-      return { completed: null, active: newBlock };
+      return { completed, active: newBlock };
     }),
     rtStopBlock: vi.fn(async () => {
       if (activeBlock) {
@@ -141,6 +154,17 @@ function createRtAdapter(initial?: {
     rtResumeBlock: vi.fn(async () => {
       if (activeBlock) { activeBlock = { ...activeBlock, phase: 'running', paused: false, pausedAt: undefined, lastResumedAt: Date.now() }; }
       return { status: 'ok' };
+    }),
+    rtPatchActiveBlockTasks: vi.fn(async (params: { taskIds: string[]; taskAssociationLog: unknown[] }) => {
+      if (!activeBlock) {
+        return null;
+      }
+      activeBlock = {
+        ...activeBlock,
+        taskIds: params.taskIds,
+        taskAssociationLog: params.taskAssociationLog as ActiveBlockData['taskAssociationLog'],
+      };
+      return activeBlock;
     }),
   };
 }

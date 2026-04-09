@@ -3,7 +3,7 @@ import {
   getSelectedRuntimeTarget,
   type RuntimeTarget,
 } from '@/config/runtime-target';
-import type { ActiveBlockData, TimeBlockData } from '@/lib/types/event';
+import type { TimeBlockData } from '@/lib/types/event';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
@@ -37,24 +37,7 @@ export class TimeBlockRtAdapter {
     return this.requestJson<TimeBlockData[]>('/timeblocks');
   }
 
-  async replaceCompletedBlocks(blocks: TimeBlockData[]): Promise<void> {
-    const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url('/timeblocks', target), {
-      method: 'PUT',
-      headers: buildRuntimeAuthHeaders(target, {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      }),
-      body: JSON.stringify(blocks),
-    });
-    if (!response.ok && response.status !== 204) {
-      const body = await response.text().catch(() => '(no body)');
-      console.error('[TB-RT] replaceCompletedBlocks failed', { status: response.status, body, blockCount: blocks.length, payload: JSON.stringify(blocks).slice(0, 500) });
-      throw new Error(`RT timeblocks replace failed: ${response.status} — ${body}`);
-    }
-  }
-
-  async getActiveBlock(): Promise<ActiveBlockData | null> {
+  async getActiveBlock(): Promise<TimeBlockData | null> {
     const target = this.resolveTarget();
     const response = await this.fetchImpl(this.url('/timeblocks/active', target), {
       method: 'GET',
@@ -66,35 +49,16 @@ export class TimeBlockRtAdapter {
     if (!response.ok) {
       throw new Error(`RT timeblocks active get failed: ${response.status}`);
     }
-    return response.json() as Promise<ActiveBlockData>;
-  }
-
-  async putActiveBlock(block: ActiveBlockData): Promise<void> {
-    const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url('/timeblocks/active', target), {
-      method: 'PUT',
-      headers: buildRuntimeAuthHeaders(target, {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      }),
-      body: JSON.stringify(block),
-    });
-    if (!response.ok && response.status !== 204) {
-      throw new Error(`RT timeblocks active put failed: ${response.status}`);
-    }
-  }
-
-  /**
-   * @deprecated No-op in RT mode. Active block lifecycle is managed via
-   * rtStartBlock / rtEndBlock / rtStopBlock. Kept for interface compatibility.
-   */
-  async deleteActiveBlock(): Promise<void> {
-    console.warn('[TB-RT] deleteActiveBlock is a no-op in RT mode');
+    return response.json() as Promise<TimeBlockData>;
   }
 
   // ── #780 新路由方法 ──
 
-  async rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }> {
+  async rtBackfillGapBlocks(): Promise<{ inserted: number }> {
+    return this.postJson('/timeblocks/backfill-gaps', {});
+  }
+
+  async rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: TimeBlockData }> {
     return this.postJson('/timeblocks/start', params);
   }
 
@@ -102,7 +66,7 @@ export class TimeBlockRtAdapter {
     return this.postJson('/timeblocks/stop', {});
   }
 
-  async rtEndBlock(params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }> {
+  async rtEndBlock(params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }): Promise<{ completed: TimeBlockData | null; active: TimeBlockData }> {
     return this.postJson('/timeblocks/end', params);
   }
 
@@ -120,6 +84,26 @@ export class TimeBlockRtAdapter {
 
   async rtDescribeBlockById(blockId: string, params: { name?: string; note?: string }): Promise<{ updated: string; blockId: string }> {
     return this.postJson(`/timeblocks/${blockId}/describe`, params);
+  }
+
+  async rtPatchActiveBlockTasks(params: { taskIds: string[]; taskAssociationLog: unknown[] }): Promise<TimeBlockData | null> {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/timeblocks/active/tasks', target), {
+      method: 'PATCH',
+      headers: buildRuntimeAuthHeaders(target, {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      }),
+      body: JSON.stringify(params),
+    });
+    if (response.status === 404 || response.status === 409) {
+      return null;
+    }
+    if (!response.ok) {
+      const text = await response.text().catch(() => '(no body)');
+      throw new Error(`RT /timeblocks/active/tasks failed: ${response.status} — ${text}`);
+    }
+    return response.json() as Promise<TimeBlockData>;
   }
 
   async applyReplicationCompletedBlock(block: TimeBlockData): Promise<'inserted' | 'ignored'> {

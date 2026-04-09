@@ -5,7 +5,7 @@ import {
 } from '@/config/runtime-target';
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
 import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
-import type { ActiveBlockData, TimeBlockData } from '@/lib/types/event';
+import type { TimeBlockData } from '@/lib/types/event';
 
 type RuntimeFetch = typeof fetch;
 export type TimeBlockImportStrategy = 'merge' | 'overwrite';
@@ -20,7 +20,7 @@ export interface TimeBlockExportJsonResult {
   fileName: string;
   content: string;
   timeBlockCount: number;
-  activeBlock: ActiveBlockData | null;
+  activeBlock: TimeBlockData | null;
 }
 
 export interface TimeBlockExportSqliteResult {
@@ -40,7 +40,7 @@ export interface TimeBlockImportResult {
 interface TimeBlockBackupJsonPayload {
   version: number;
   time_blocks: TimeBlockData[];
-  active_block: ActiveBlockData | null;
+  active_block: TimeBlockData | null;
 }
 
 interface TimeBlockBackupSqlitePayload {

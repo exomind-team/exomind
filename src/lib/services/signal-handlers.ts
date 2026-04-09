@@ -11,7 +11,7 @@
 
 import type { SignalEvent } from '../types/signal-pool';
 import type { Event as StorageEvent } from '../storage/event-storage';
-import type { ActiveBlockData } from '../types/event';
+import type { TimeBlockData } from '../types/event';
 import type { Reminder } from '../types/reminder';
 import type { TaskNode } from '../types/task';
 
@@ -97,7 +97,7 @@ export interface EventLogReplicationAppendedPayload {
 /** Payload shape for active_block.replication.snapshot signals. */
 export interface ActiveBlockReplicationSnapshotPayload {
   schemaVersion: 1;
-  block: ActiveBlockData;
+  block: TimeBlockData;
   cursor: {
     kind: 'active_block_snapshot';
     startId: string;

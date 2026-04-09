@@ -70,39 +70,56 @@ fn test_router(state: AppState) -> Router {
 }
 
 #[tokio::test]
-async fn put_and_get_active_timeblock() {
+async fn patches_and_gets_active_timeblock_task_links() {
     let dir = tempdir().unwrap();
     let store =
         Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
-    let app = test_router(test_state_with_timeblock_store(store));
+    let app = test_router(test_state_with_timeblock_store(store.clone()));
 
-    let payload = json!({
-        "startId": "active-1",
+    let start_payload = json!({
         "name": "Focus",
         "mode": "countdown",
-        "targetMinutes": 25,
-        "elapsed": 120000,
-        "updatedAt": 1700000010000u64,
-        "phase": "running",
-        "version": 1,
-        "actorId": "actor-a",
-        "lastTransitionAt": 1700000010000u64,
-        "lastResumedAt": 1700000010000u64,
-        "accumulatedRunMs": 0,
-        "startTime": 1700000000000u64,
-        "pauseAccumulatedMs": 0,
-        "paused": false,
+        "targetMinutes": 25
+    });
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/start")
+                .header("content-type", "application/json")
+                .body(Body::from(start_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(start_response.status(), StatusCode::OK);
+    let start_body = start_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let start_parsed: Value = serde_json::from_slice(&start_body).unwrap();
+    let start_id = start_parsed["active"]["startId"]
+        .as_str()
+        .expect("start route should return active.startId")
+        .to_string();
+
+    let patch_payload = json!({
         "taskIds": ["task-1", "task-2"],
         "taskAssociationLog": [
             {
-                "blockId": "active-1",
+                "blockId": start_id.as_str(),
                 "taskId": "task-1",
                 "action": "associated",
                 "timestamp": 1700000000000u64,
                 "source": "block_start"
             },
             {
-                "blockId": "active-1",
+                "blockId": start_id.as_str(),
                 "taskId": "task-2",
                 "action": "associated",
                 "timestamp": 1700000010000u64,
@@ -111,20 +128,34 @@ async fn put_and_get_active_timeblock() {
         ]
     });
 
-    let put_response = app
+    let patch_response = app
         .clone()
         .oneshot(
             Request::builder()
-                .method("PUT")
-                .uri("/timeblocks/active")
+                .method("PATCH")
+                .uri("/timeblocks/active/tasks")
                 .header("content-type", "application/json")
-                .body(Body::from(payload.to_string()))
+                .body(Body::from(patch_payload.to_string()))
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(patch_response.status(), StatusCode::OK);
+    let patch_body = patch_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let patch_parsed: Value = serde_json::from_slice(&patch_body).unwrap();
+    assert_eq!(patch_parsed["taskIds"], json!(["task-1", "task-2"]));
+    assert_eq!(
+        patch_parsed["taskAssociationLog"]
+            .as_array()
+            .map(|items| items.len()),
+        Some(2)
+    );
 
     let get_response = app
         .oneshot(
@@ -139,7 +170,7 @@ async fn put_and_get_active_timeblock() {
     assert_eq!(get_response.status(), StatusCode::OK);
     let body = get_response.into_body().collect().await.unwrap().to_bytes();
     let parsed: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(parsed["startId"], "active-1");
+    assert_eq!(parsed["startId"], start_id);
     assert_eq!(parsed["mode"], "countdown");
     assert_eq!(parsed["taskIds"], json!(["task-1", "task-2"]));
     assert_eq!(
@@ -151,6 +182,718 @@ async fn put_and_get_active_timeblock() {
     assert!(
         parsed.get("taskId").is_none(),
         "legacy taskId should not be serialized"
+    );
+}
+
+#[tokio::test]
+async fn backfills_gap_blocks_via_route() {
+    let dir = tempdir().unwrap();
+    let store =
+        Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
+    store
+        .replace_completed(&[
+            TimeBlockData {
+                id: "tb-1".to_string(),
+                name: "A".to_string(),
+                start_id: "s1".to_string(),
+                end_id: "e1".to_string(),
+                note: None,
+                tags: vec![],
+                start_time: 1_700_000_000_000,
+                end_time: 1_700_000_600_000,
+                task_ids: vec![],
+                task_status_outcomes: None,
+                task_association_log: vec![],
+                source_planned_block_id: None,
+                block_type: Some("active".to_string()),
+                transitions: vec![],
+            },
+            TimeBlockData {
+                id: "tb-2".to_string(),
+                name: "B".to_string(),
+                start_id: "s2".to_string(),
+                end_id: "e2".to_string(),
+                note: None,
+                tags: vec![],
+                start_time: 1_700_000_900_000,
+                end_time: 1_700_001_200_000,
+                task_ids: vec![],
+                task_status_outcomes: None,
+                task_association_log: vec![],
+                source_planned_block_id: None,
+                block_type: Some("active".to_string()),
+                transitions: vec![],
+            },
+        ])
+        .unwrap();
+    let app = test_router(test_state_with_timeblock_store(store.clone()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/backfill-gaps")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed["inserted"], 1);
+
+    let list_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = list_response.into_body().collect().await.unwrap().to_bytes();
+    let list_parsed: Value = serde_json::from_slice(&list_body).unwrap();
+    assert_eq!(list_parsed.as_array().map(|items| items.len()), Some(3));
+    let gap = list_parsed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|block| block["blockType"] == "gap")
+        .expect("gap block should be inserted");
+    assert_eq!(gap["startTime"], 1_700_000_600_000u64);
+    assert_eq!(gap["endTime"], 1_700_000_900_000u64);
+
+    let second_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/backfill-gaps")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second_response.status(), StatusCode::OK);
+    let second_body = second_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let second_parsed: Value = serde_json::from_slice(&second_body).unwrap();
+    assert_eq!(second_parsed["inserted"], 0);
+}
+
+#[tokio::test]
+async fn patch_active_timeblock_tasks_returns_not_found_without_active_block() {
+    let dir = tempdir().unwrap();
+    let store =
+        Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
+    let app = test_router(test_state_with_timeblock_store(store));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/timeblocks/active/tasks")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "taskIds": ["task-1"],
+                        "taskAssociationLog": []
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn legacy_put_timeblock_routes_return_method_not_allowed() {
+    let dir = tempdir().unwrap();
+    let store =
+        Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
+    let app = test_router(test_state_with_timeblock_store(store));
+
+    let put_completed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/timeblocks")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put_completed.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    let put_active = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/timeblocks/active")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put_active.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn timeblock_lifecycle_routes_cover_running_pause_feedback_and_gap() {
+    let dir = tempdir().unwrap();
+    let store =
+        Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
+    let app = test_router(test_state_with_timeblock_store(store));
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/start")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Lifecycle Focus",
+                        "mode": "countdown",
+                        "targetMinutes": 25,
+                        "taskIds": ["task-1"],
+                        "sourcePlannedBlockId": "plan-1"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(start_response.status(), StatusCode::OK);
+    let start_body = start_response.into_body().collect().await.unwrap().to_bytes();
+    let start_payload: Value = serde_json::from_slice(&start_body).unwrap();
+    let start_id = start_payload["active"]["startId"]
+        .as_str()
+        .expect("active startId should be present")
+        .to_string();
+    assert_eq!(start_payload["active"]["phase"], "running");
+    assert_eq!(start_payload["active"]["taskIds"], json!(["task-1"]));
+    assert_eq!(start_payload["active"]["sourcePlannedBlockId"], "plan-1");
+
+    let pause_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/pause")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pause_response.status(), StatusCode::OK);
+
+    let paused_active_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/active")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let paused_active_body = paused_active_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let paused_active: Value = serde_json::from_slice(&paused_active_body).unwrap();
+    assert_eq!(paused_active["startId"], start_id);
+    assert_eq!(paused_active["phase"], "paused");
+    assert_eq!(paused_active["paused"], true);
+
+    let resume_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/resume")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resume_response.status(), StatusCode::OK);
+
+    let resumed_active_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/active")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let resumed_active_body = resumed_active_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let resumed_active: Value = serde_json::from_slice(&resumed_active_body).unwrap();
+    assert_eq!(resumed_active["startId"], start_id);
+    assert_eq!(resumed_active["phase"], "running");
+    assert_eq!(resumed_active["paused"], false);
+
+    let stop_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/stop")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stop_response.status(), StatusCode::OK);
+    let stop_body = stop_response.into_body().collect().await.unwrap().to_bytes();
+    let stop_payload: Value = serde_json::from_slice(&stop_body).unwrap();
+    assert_eq!(stop_payload["status"], "stopped");
+    assert_eq!(stop_payload["phase"], "feedback_in_progress");
+
+    let feedback_active_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/active")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let feedback_active_body = feedback_active_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let feedback_active: Value = serde_json::from_slice(&feedback_active_body).unwrap();
+    assert_eq!(feedback_active["startId"], start_id);
+    assert_eq!(feedback_active["phase"], "feedback_in_progress");
+    assert!(feedback_active["feedbackStartedAt"].as_u64().is_some());
+
+    let end_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/end")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "feedback": "done",
+                        "taskStatusOutcomes": {
+                            "task-1": "completed"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(end_response.status(), StatusCode::OK);
+    let end_body = end_response.into_body().collect().await.unwrap().to_bytes();
+    let end_payload: Value = serde_json::from_slice(&end_body).unwrap();
+    assert_eq!(end_payload["completed"]["startId"], start_id);
+    assert_eq!(end_payload["completed"]["note"], "done");
+    assert_eq!(end_payload["completed"]["taskIds"], json!(["task-1"]));
+    assert_eq!(
+        end_payload["completed"]["taskStatusOutcomes"],
+        json!({ "task-1": "completed" })
+    );
+    assert_eq!(end_payload["completed"]["sourcePlannedBlockId"], "plan-1");
+    assert_eq!(end_payload["active"]["blockType"], "gap");
+    assert_eq!(end_payload["active"]["name"], "");
+
+    let final_active_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/active")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let final_active_body = final_active_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let final_active: Value = serde_json::from_slice(&final_active_body).unwrap();
+    assert_eq!(final_active["blockType"], "gap");
+
+    let completed_blocks_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let completed_blocks_body = completed_blocks_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let completed_blocks: Value = serde_json::from_slice(&completed_blocks_body).unwrap();
+    let items = completed_blocks
+        .as_array()
+        .expect("completed timeblocks should be an array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["startId"], start_id);
+    assert_eq!(items[0]["name"], "Lifecycle Focus");
+}
+
+#[tokio::test]
+async fn patch_active_tasks_returns_not_found_without_active_and_conflict_for_gap() {
+    let dir = tempdir().unwrap();
+    let store =
+        Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
+    let app = test_router(test_state_with_timeblock_store(store));
+
+    let missing_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/timeblocks/active/tasks")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "taskIds": ["task-1"],
+                        "taskAssociationLog": []
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/start")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Gap Patch Guard",
+                        "mode": "countup"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(start_response.status(), StatusCode::OK);
+
+    let stop_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/stop")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stop_response.status(), StatusCode::OK);
+
+    let end_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/end")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "feedback": "done" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(end_response.status(), StatusCode::OK);
+
+    let gap_patch_response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/timeblocks/active/tasks")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "taskIds": ["task-1"],
+                        "taskAssociationLog": []
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(gap_patch_response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn describe_routes_update_active_and_completed_gap_but_keep_completed_active_immutable() {
+    let dir = tempdir().unwrap();
+    let store =
+        Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
+    let app = test_router(test_state_with_timeblock_store(store.clone()));
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/start")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Describe Me",
+                        "mode": "countup"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(start_response.status(), StatusCode::OK);
+    let start_body = start_response.into_body().collect().await.unwrap().to_bytes();
+    let start_payload: Value = serde_json::from_slice(&start_body).unwrap();
+    let active_id = start_payload["active"]["startId"]
+        .as_str()
+        .expect("active startId should be present")
+        .to_string();
+
+    let describe_current_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/describe")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "name": "Renamed Active" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(describe_current_response.status(), StatusCode::OK);
+
+    let renamed_active_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/active")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let renamed_active_body = renamed_active_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let renamed_active: Value = serde_json::from_slice(&renamed_active_body).unwrap();
+    assert_eq!(renamed_active["startId"], active_id);
+    assert_eq!(renamed_active["name"], "Renamed Active");
+
+    let stop_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/stop")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stop_response.status(), StatusCode::OK);
+
+    let end_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/end")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "feedback": "desc done" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(end_response.status(), StatusCode::OK);
+    let end_body = end_response.into_body().collect().await.unwrap().to_bytes();
+    let end_payload: Value = serde_json::from_slice(&end_body).unwrap();
+    let gap_id = end_payload["active"]["startId"]
+        .as_str()
+        .expect("gap active startId should be present")
+        .to_string();
+    let completed_active_id = end_payload["completed"]["id"]
+        .as_str()
+        .expect("completed block id should be present")
+        .to_string();
+
+    let describe_gap_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/timeblocks/{gap_id}/describe"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Recovery Gap",
+                        "note": "retro note"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(describe_gap_response.status(), StatusCode::OK);
+
+    let active_gap_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks/active")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let active_gap_body = active_gap_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let active_gap: Value = serde_json::from_slice(&active_gap_body).unwrap();
+    assert_eq!(active_gap["startId"], gap_id);
+    assert_eq!(active_gap["name"], "Recovery Gap");
+
+    let describe_completed_active_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/timeblocks/{completed_active_id}/describe"))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "name": "Should Fail" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        describe_completed_active_response.status(),
+        StatusCode::CONFLICT
+    );
+
+    let completed_gap = TimeBlockData {
+        id: "gap-completed-1".to_string(),
+        name: "".to_string(),
+        start_id: "gap-start-1".to_string(),
+        end_id: "gap-end-1".to_string(),
+        note: None,
+        tags: vec![],
+        start_time: 10,
+        end_time: 20,
+        task_ids: vec![],
+        task_status_outcomes: None,
+        task_association_log: vec![],
+        source_planned_block_id: None,
+        block_type: Some("gap".to_string()),
+        transitions: vec![],
+    };
+    store
+        .replace_completed(&[completed_gap.clone()])
+        .unwrap();
+
+    let describe_completed_gap_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeblocks/gap-completed-1/describe")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Named Gap",
+                        "note": "Gap note"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(describe_completed_gap_response.status(), StatusCode::OK);
+
+    let completed_gap_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/timeblocks?block_type=gap")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(completed_gap_response.status(), StatusCode::OK);
+    let completed_gap_body = completed_gap_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let completed_gap_payload: Value = serde_json::from_slice(&completed_gap_body).unwrap();
+    let gap_items = completed_gap_payload
+        .as_array()
+        .expect("gap list should be an array");
+    assert!(
+        gap_items.iter().any(
+            |item| item["id"] == "gap-completed-1"
+                && item["name"] == "Named Gap"
+                && item["note"] == "Gap note"
+        ),
+        "completed gap should be renameable via describe route"
     );
 }
 

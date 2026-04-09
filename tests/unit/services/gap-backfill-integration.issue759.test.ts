@@ -31,14 +31,19 @@ vi.mock('@/lib/services/signal-stream.service', () => ({
 }));
 
 import type { ActiveBlockData, TimeBlockData } from '@/lib/types/event';
+import { generateGapBlocks } from '@/lib/services/gap-backfill';
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 
 type TimeBlockRtAdapterLike = {
   listCompletedBlocks: () => Promise<TimeBlockData[]>;
-  replaceCompletedBlocks: (blocks: TimeBlockData[]) => Promise<void>;
   getActiveBlock: () => Promise<ActiveBlockData | null>;
-  putActiveBlock: (block: ActiveBlockData) => Promise<void>;
-  deleteActiveBlock: () => Promise<void>;
+  rtBackfillGapBlocks: () => Promise<{ inserted: number }>;
+  rtStartBlock: (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtStopBlock: () => Promise<{ status: string }>;
+  rtEndBlock: (params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtPauseBlock: () => Promise<{ status: string }>;
+  rtResumeBlock: () => Promise<{ status: string }>;
+  rtPatchActiveBlockTasks: (params: { taskIds: string[]; taskAssociationLog: unknown[] }) => Promise<ActiveBlockData | null>;
 };
 
 function createRtAdapter(initial?: {
@@ -49,10 +54,61 @@ function createRtAdapter(initial?: {
   let activeBlock: ActiveBlockData | null = initial?.activeBlock ?? null;
   return {
     listCompletedBlocks: vi.fn(async () => completedBlocks),
-    replaceCompletedBlocks: vi.fn(async (blocks: TimeBlockData[]) => { completedBlocks = blocks; }),
     getActiveBlock: vi.fn(async () => activeBlock),
-    putActiveBlock: vi.fn(async (block: ActiveBlockData) => { activeBlock = block; }),
-    deleteActiveBlock: vi.fn(async () => { activeBlock = null; }),
+    rtBackfillGapBlocks: vi.fn(async () => {
+      const gaps = generateGapBlocks(completedBlocks);
+      if (gaps.length > 0) {
+        completedBlocks = [...completedBlocks, ...gaps].sort((a, b) => a.startTime - b.startTime);
+      }
+      return { inserted: gaps.length };
+    }),
+    rtStartBlock: vi.fn(async (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[] }) => {
+      const now = Date.now();
+      const nextActive: ActiveBlockData = {
+        startId: `rt-start-${now}`,
+        name: params.name,
+        mode: params.mode as 'countdown' | 'countup',
+        targetMinutes: params.targetMinutes,
+        elapsed: 0,
+        paused: false,
+        startTime: now,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: now,
+        taskIds: params.taskIds ?? [],
+        taskAssociationLog: [],
+      };
+      activeBlock = nextActive;
+      return { completed: null, active: nextActive };
+    }),
+    rtStopBlock: vi.fn(async () => ({ status: 'ok' })),
+    rtEndBlock: vi.fn(async () => ({ completed: null, active: activeBlock ?? {
+      startId: 'rt-gap',
+      name: '',
+      mode: 'countup',
+      elapsed: 0,
+      paused: false,
+      startTime: Date.now(),
+      blockType: 'gap',
+      phase: 'running',
+      version: 1,
+      lastTransitionAt: Date.now(),
+      taskIds: [],
+      taskAssociationLog: [],
+    } })),
+    rtPauseBlock: vi.fn(async () => ({ status: 'ok' })),
+    rtResumeBlock: vi.fn(async () => ({ status: 'ok' })),
+    rtPatchActiveBlockTasks: vi.fn(async (params: { taskIds: string[]; taskAssociationLog: unknown[] }) => {
+      if (!activeBlock) {
+        return null;
+      }
+      activeBlock = {
+        ...activeBlock,
+        taskIds: params.taskIds,
+        taskAssociationLog: params.taskAssociationLog as ActiveBlockData['taskAssociationLog'],
+      };
+      return activeBlock;
+    }),
   };
 }
 
@@ -80,6 +136,7 @@ describe('#759 gap backfill integration', () => {
     const count = await service.backfillGapBlocks();
 
     expect(count).toBe(2);
+    expect(rtAdapter.rtBackfillGapBlocks).toHaveBeenCalledTimes(1);
 
     const updated = await rtAdapter.listCompletedBlocks();
     expect(updated).toHaveLength(5); // 3 active + 2 gaps
@@ -104,6 +161,7 @@ describe('#759 gap backfill integration', () => {
     const count = await service.backfillGapBlocks();
 
     expect(count).toBe(0);
+    expect(rtAdapter.rtBackfillGapBlocks).toHaveBeenCalledTimes(1);
     const updated = await rtAdapter.listCompletedBlocks();
     expect(updated).toHaveLength(3); // unchanged
   });
@@ -120,6 +178,7 @@ describe('#759 gap backfill integration', () => {
     const count = await service.backfillGapBlocks();
 
     expect(count).toBe(1);
+    expect(rtAdapter.rtBackfillGapBlocks).toHaveBeenCalledTimes(1);
     const updated = await rtAdapter.listCompletedBlocks();
     const gaps = updated.filter(b => b.blockType === 'gap');
     expect(gaps).toHaveLength(1);

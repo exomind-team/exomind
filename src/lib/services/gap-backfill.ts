@@ -5,7 +5,7 @@
  * to fill the spaces between adjacent active blocks, forming a
  * continuous time chain.
  */
-import type { TimeBlockData } from '@/lib/types/event';
+import { normalizeTimeBlockData, type TimeBlockData } from '@/lib/types/event';
 
 /**
  * Generate gap blocks for the spaces between adjacent active blocks.
@@ -18,7 +18,9 @@ export function generateGapBlocks(blocks: TimeBlockData[]): TimeBlockData[] {
   if (blocks.length < 2) return [];
 
   // Sort by startTime
-  const sorted = [...blocks].sort((a, b) => a.startTime - b.startTime);
+  const sorted = [...blocks]
+    .map((block) => normalizeTimeBlockData(block))
+    .sort((a, b) => a.startTime - b.startTime);
 
   // Filter to only active blocks (blocks without blockType default to active)
   const activeBlocks = sorted.filter(b => b.blockType !== 'gap');
@@ -35,6 +37,7 @@ export function generateGapBlocks(blocks: TimeBlockData[]): TimeBlockData[] {
   for (let i = 0; i < activeBlocks.length - 1; i++) {
     const current = activeBlocks[i];
     const next = activeBlocks[i + 1];
+    if (typeof current.endTime !== 'number') continue;
     const gapStart = current.endTime;
     const gapEnd = next.startTime;
 
@@ -50,6 +53,10 @@ export function generateGapBlocks(blocks: TimeBlockData[]): TimeBlockData[] {
       startTime: gapStart,
       endTime: gapEnd,
       blockType: 'gap',
+      transitions: [
+        { type: 'start', at: gapStart },
+        { type: 'end', at: gapEnd },
+      ],
     });
   }
 
