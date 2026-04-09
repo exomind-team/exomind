@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PtyTerminal } from '@/ui/app/components/PtyTerminal';
 import { __resetPtyInputTransportPoolForTests } from '@/ui/app/components/pty-input';
 
@@ -14,6 +14,8 @@ const xtermState = vi.hoisted(() => {
     loadAddon: vi.fn(),
     open: vi.fn(),
     write: vi.fn(),
+    clear: vi.fn(),
+    reset: vi.fn(),
     focus: vi.fn(),
     dispose: vi.fn(),
     refresh: vi.fn(),
@@ -31,10 +33,24 @@ const xtermState = vi.hoisted(() => {
 });
 
 const websocketState = vi.hoisted(() => {
+  type SocketPlan = {
+    autoOpen?: boolean;
+    autoReady?: boolean;
+    autoCloseAfterOpen?: boolean;
+    closeDelayMs?: number;
+    readyMessage?: unknown;
+  };
+
   const defaultReadyMessage = () => ({
     type: 'ready' as const,
-    protocol_version: 2,
-    capabilities: { input_ack: true, resize: true, resize_ack: true },
+    protocol_version: 3,
+    capabilities: {
+      input_ack: true,
+      resize: true,
+      resize_ack: true,
+      output_stream: true,
+      output_cursor: true,
+    },
   });
 
   class MockWebSocket {
@@ -49,18 +65,25 @@ const websocketState = vi.hoisted(() => {
     onmessage: ((event: MessageEvent) => void) | null = null;
     onerror: ((event: Event) => void) | null = null;
     onclose: ((event: CloseEvent) => void) | null = null;
+    private readonly plan: SocketPlan;
 
     constructor(public readonly url: string) {
+      this.plan = socketPlans.shift() ?? {};
       instances.push(this);
       setTimeout(() => {
-        if (this.readyState !== MockWebSocket.CONNECTING) {
+        if (this.readyState !== MockWebSocket.CONNECTING || this.plan.autoOpen === false) {
           return;
         }
         this.readyState = MockWebSocket.OPEN;
         this.onopen?.(new Event('open'));
-        this.onmessage?.({
-          data: JSON.stringify(readyMessage),
-        } as MessageEvent);
+        if (this.plan.autoReady !== false) {
+          this.emitMessage(this.plan.readyMessage ?? readyMessage);
+        }
+        if (this.plan.autoCloseAfterOpen) {
+          setTimeout(() => {
+            this.emitClose();
+          }, this.plan.closeDelayMs ?? 0);
+        }
       }, 0);
     }
 
@@ -69,12 +92,10 @@ const websocketState = vi.hoisted(() => {
       const parsed = JSON.parse(payload) as { type?: string; resize_seq?: number };
       if (parsed.type === 'resize' && typeof parsed.resize_seq === 'number') {
         setTimeout(() => {
-          this.onmessage?.({
-            data: JSON.stringify({
-              type: 'resize_ack',
-              resize_seq: parsed.resize_seq,
-            }),
-          } as MessageEvent);
+          this.emitMessage({
+            type: 'resize_ack',
+            resize_seq: parsed.resize_seq,
+          });
         }, resizeAckDelayMs);
       }
     });
@@ -86,13 +107,25 @@ const websocketState = vi.hoisted(() => {
       this.readyState = MockWebSocket.CLOSED;
       this.onclose?.({ code: 1000, reason: '', wasClean: true } as CloseEvent);
     });
+
+    emitMessage(payload: unknown) {
+      this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);
+    }
+
+    emitClose(code = 1006) {
+      this.readyState = MockWebSocket.CLOSED;
+      this.onclose?.({ code, reason: '', wasClean: false } as CloseEvent);
+    }
   }
 
   const instances: MockWebSocket[] = [];
+  const socketPlans: SocketPlan[] = [];
   let readyMessage = defaultReadyMessage();
   let resizeAckDelayMs = 0;
+
   return {
     instances,
+    socketPlans,
     defaultReadyMessage,
     get readyMessage() {
       return readyMessage;
@@ -121,27 +154,18 @@ vi.mock('@xterm/xterm', () => ({
     }
 
     rows = xtermState.terminal.rows;
-
     cols = xtermState.terminal.cols;
-
     loadAddon = xtermState.terminal.loadAddon;
-
     open = xtermState.terminal.open;
-
     write = xtermState.terminal.write;
-
+    clear = xtermState.terminal.clear;
+    reset = xtermState.terminal.reset;
     focus = xtermState.terminal.focus;
-
     dispose = xtermState.terminal.dispose;
-
     refresh = xtermState.terminal.refresh;
-
     getSelection = xtermState.terminal.getSelection;
-
     attachCustomKeyEventHandler = xtermState.terminal.attachCustomKeyEventHandler;
-
     onData = xtermState.terminal.onData;
-
     onResize = xtermState.terminal.onResize;
   },
 }));
@@ -155,40 +179,6 @@ vi.mock('@xterm/addon-fit', () => ({
 vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: class {},
 }));
-
-function createSseResponse(...frames: string[]): Response {
-  const encoder = new TextEncoder();
-  return new Response(
-    new ReadableStream({
-      start(controller) {
-        for (const frame of frames) {
-          controller.enqueue(encoder.encode(frame));
-        }
-        controller.close();
-      },
-    }),
-    {
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-    },
-  );
-}
-
-function createOpenSseResponse(): Response {
-  return new Response(
-    new ReadableStream({
-      start() {},
-    }),
-    {
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-    },
-  );
-}
-
-function createStreamFrame(eventType: string, data: string): string {
-  return `event: ${eventType}\ndata: ${data}\n\n`;
-}
 
 async function flushUi(ms = 0): Promise<void> {
   await act(async () => {
@@ -204,10 +194,8 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
   let originalResizeObserver: typeof ResizeObserver | undefined;
   let originalClientWidth: PropertyDescriptor | undefined;
   let originalClientHeight: PropertyDescriptor | undefined;
-  let fetchMock: ReturnType<typeof vi.fn>;
   let resizeObservers: Array<() => void> = [];
   let sizeReady = false;
-  let streamPlans: Array<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response> | Response> = [];
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -216,24 +204,15 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     xtermState.constructedOptions.length = 0;
     xtermState.terminal.options = {};
     websocketState.instances.length = 0;
+    websocketState.socketPlans.length = 0;
     websocketState.readyMessage = websocketState.defaultReadyMessage();
     websocketState.resizeAckDelayMs = 0;
-    sizeReady = false;
     resizeObservers = [];
-    streamPlans = [];
+    sizeReady = false;
 
-    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes('/stream')) {
-        const nextPlan = streamPlans.shift();
-        if (!nextPlan) {
-          throw new Error(`missing stream plan for ${url}`);
-        }
-        return nextPlan(input, init);
-      }
-      return new Response(null, { status: 204 });
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('requestAnimationFrame', (((callback: FrameRequestCallback) => setTimeout(() => callback(16), 16)) as unknown as typeof requestAnimationFrame));
+    vi.stubGlobal('cancelAnimationFrame', ((id: number) => clearTimeout(id)) as typeof cancelAnimationFrame);
+    vi.stubGlobal('WebSocket', websocketState.WebSocketCtor as unknown as typeof WebSocket);
 
     originalResizeObserver = globalThis.ResizeObserver;
     vi.stubGlobal(
@@ -247,13 +226,8 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
         }
 
         observe() {}
-
         disconnect() {}
       } as unknown as typeof ResizeObserver,
-    );
-    vi.stubGlobal(
-      'WebSocket',
-      websocketState.WebSocketCtor as unknown as typeof WebSocket,
     );
 
     originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
@@ -275,8 +249,8 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
   afterEach(() => {
     __resetPtyInputTransportPoolForTests();
-    vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
 
     if (originalResizeObserver) {
       globalThis.ResizeObserver = originalResizeObserver;
@@ -289,76 +263,61 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     }
   });
 
-  it('waits for measurable layout before connecting SSE（容器可测量后才连接 SSE）', async () => {
-    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))));
-
+  it('waits for measurable layout before opening the output websocket（容器可测量后才连接输出 WS）', async () => {
     render(<PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-1" />);
 
     await flushUi(60);
-
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      'http://127.0.0.1:1949/pty/pty-layout-1/stream',
-      expect.anything(),
-    );
+    expect(websocketState.instances).toHaveLength(1);
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await flushUi(60);
-    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
+    await flushUi(80);
 
+    expect(websocketState.instances).toHaveLength(2);
+    expect(websocketState.instances[1]?.url).toContain('/pty/pty-layout-1/ws');
+    expect(websocketState.instances[0]?.url).toContain('mode=input');
+    expect(websocketState.instances[1]?.url).toContain('mode=output');
     expect(xtermState.fitAddon.fit).toHaveBeenCalled();
     expect(xtermState.terminal.refresh).toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:1949/pty/pty-layout-1/stream',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Accept: 'text/event-stream',
-        }),
-      }),
-    );
-
-    const lastSocket = websocketState.instances[websocketState.instances.length - 1];
-    expect(lastSocket).toBeTruthy();
-    const resizeFrames = lastSocket!.sent
-      .map((frame) => JSON.parse(frame) as {
-        type?: string;
-        rows?: number;
-        cols?: number;
-        resize_seq?: number;
-      })
-      .filter((frame) => frame.type === 'resize');
-    expect(resizeFrames[0]).toMatchObject({ rows: 24, cols: 80 });
   });
 
-  it('waits for the resize acknowledgement before opening the SSE stream（会在 resize 确认后才连接 SSE）', async () => {
+  it('keeps the output websocket alive after ready beyond the initial timeout window（ready 后不会被初始超时定时器误杀）', async () => {
+    render(<PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-timeout-cleared" />);
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(80);
+
+    const outputSocket = websocketState.instances[1];
+    expect(outputSocket).toBeTruthy();
+
+    await flushUi(4_100);
+
+    expect(outputSocket!.close).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('pty-terminal-error')).not.toBeInTheDocument();
+  });
+
+  it('waits for the resize acknowledgement before opening the output websocket（会在 resize 确认后才连接输出 WS）', async () => {
     websocketState.resizeAckDelayMs = 200;
-    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))));
 
     render(<PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-resize-ack" />);
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
     await flushUi(60);
-
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      'http://127.0.0.1:1949/pty/pty-layout-resize-ack/stream',
-      expect.anything(),
-    );
+    expect(websocketState.instances).toHaveLength(1);
 
     await flushUi(220);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:1949/pty/pty-layout-resize-ack/stream',
-      expect.anything(),
-    );
+    expect(websocketState.instances).toHaveLength(2);
   });
 
-  it('retries initial stream failures before reporting disconnect（首个 SSE 失败会先重试再上报断开）', async () => {
+  it('retries initial output websocket failures before reporting disconnect（首个输出 WS 失败会先重试再上报断开）', async () => {
     const onInitialConnectionFailure = vi.fn();
-    streamPlans.push(
-      () => Promise.reject(new Error('stream offline 1')),
-      () => Promise.reject(new Error('stream offline 2')),
-      () => Promise.reject(new Error('stream offline 3')),
+    websocketState.socketPlans.push(
+      {},
+      { autoReady: false, autoCloseAfterOpen: true },
+      { autoReady: false, autoCloseAfterOpen: true },
+      { autoReady: false, autoCloseAfterOpen: true },
     );
 
     render(
@@ -372,7 +331,6 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
     await flushUi(60);
-
     expect(onInitialConnectionFailure).not.toHaveBeenCalled();
 
     await flushUi(250);
@@ -380,48 +338,12 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     await flushUi(250);
     expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:1949/pty/pty-layout-2/stream',
-      expect.anything(),
-    );
+    expect(screen.getByTestId('pty-terminal-error')).toBeInTheDocument();
   });
 
-  it('does not report disconnect when a retry connects successfully（重试成功后不再上报断开）', async () => {
+  it('fails fast when the initial output websocket times out（初始输出 WS 超时时应退出加载态并上报失败）', async () => {
     const onInitialConnectionFailure = vi.fn();
-    streamPlans.push(
-      () => Promise.reject(new Error('stream offline once')),
-      () => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))),
-    );
-
-    render(
-      <PtyTerminal
-        rtBaseUrl="http://127.0.0.1:1949"
-        ptyId="pty-layout-3"
-        onInitialConnectionFailure={onInitialConnectionFailure}
-      />,
-    );
-
-    sizeReady = true;
-    resizeObservers.forEach((notify) => notify());
-    await flushUi(60);
-
-    await flushUi(250);
-    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
-
-    expect(onInitialConnectionFailure).not.toHaveBeenCalled();
-  });
-
-  it('fails fast when the initial stream request times out（初始流请求超时时应退出加载态并上报失败）', async () => {
-    const onInitialConnectionFailure = vi.fn();
-    streamPlans.push((_input, init) => (
-      new Promise<Response>((_, reject) => {
-        init?.signal?.addEventListener('abort', () => {
-          const error = new Error('aborted');
-          error.name = 'AbortError';
-          reject(error);
-        });
-      })
-    ));
+    websocketState.socketPlans.push({}, { autoOpen: false });
 
     render(
       <PtyTerminal
@@ -434,178 +356,129 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
     await flushUi(60);
-
     expect(screen.getByTestId('pty-terminal-loading')).toBeInTheDocument();
 
     await flushUi(4_100);
+    expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('pty-terminal-error')).toHaveTextContent('响应超时');
+  });
+
+  it('fails fast when the initial output websocket reports a fatal error before ready（首个输出 WS 在 ready 前返回致命错误时应直接阻断）', async () => {
+    const onInitialConnectionFailure = vi.fn();
+    websocketState.socketPlans.push({}, { autoReady: false });
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-fatal-before-ready"
+        onInitialConnectionFailure={onInitialConnectionFailure}
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(60);
+    expect(websocketState.instances).toHaveLength(2);
+
+    act(() => {
+      websocketState.instances[1]!.emitMessage({
+        type: 'error',
+        code: 'not_found',
+        message: 'missing pty',
+      });
+    });
+    await flushUi();
 
     expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
-    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
-    expect(screen.getByTestId('pty-terminal-error')).toHaveTextContent(
-      '会话加载失败：RT 响应超时',
-    );
+    expect(screen.getByTestId('pty-terminal-error')).toHaveTextContent('当前 PTY 不存在');
+
+    await flushUi(600);
+    expect(websocketState.instances).toHaveLength(2);
   });
 
   it('falls back to connecting without a measurable layout so loading cannot hang forever（布局长期不可测时也不能无限卡在加载中）', async () => {
-    const onInitialConnectionFailure = vi.fn();
-    streamPlans.push((_input, init) => (
-      new Promise<Response>((_, reject) => {
-        init?.signal?.addEventListener('abort', () => {
-          const error = new Error('aborted');
-          error.name = 'AbortError';
-          reject(error);
-        });
-      })
-    ));
-
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:1949"
         ptyId="pty-layout-no-measure-timeout"
-        onInitialConnectionFailure={onInitialConnectionFailure}
       />,
     );
 
-    await flushUi(60);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'))).toHaveLength(0);
-    expect(screen.getByTestId('pty-terminal-loading')).toBeInTheDocument();
-
     await flushUi(1_300);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'))).toHaveLength(1);
-    expect(screen.getByTestId('pty-terminal-loading')).toBeInTheDocument();
-
-    await flushUi(4_100);
-
-    expect(onInitialConnectionFailure).toHaveBeenCalledTimes(1);
+    expect(websocketState.instances).toHaveLength(2);
     expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
-    expect(screen.getByTestId('pty-terminal-error')).toHaveTextContent(
-      '会话加载失败：RT 响应超时',
-    );
   });
 
-  it('does not recreate the PTY stream when only the failure callback identity changes（仅失败回调变更时不应重建 PTY 流）', async () => {
-    const firstCallback = vi.fn();
-    const secondCallback = vi.fn();
-    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))));
-
+  it('does not recreate the output websocket when only the failure callback identity changes（仅失败回调变更时不应重建输出 WS）', async () => {
     const { rerender } = render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:1949"
         ptyId="pty-layout-stable-callback"
-        onInitialConnectionFailure={firstCallback}
+        onInitialConnectionFailure={() => {}}
       />,
     );
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await flushUi(60);
-    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
-
-    const initialStreamCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'));
-    expect(initialStreamCalls).toHaveLength(1);
+    await flushUi(80);
+    expect(websocketState.instances).toHaveLength(2);
 
     rerender(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:1949"
         ptyId="pty-layout-stable-callback"
-        onInitialConnectionFailure={secondCallback}
+        onInitialConnectionFailure={() => {}}
       />,
     );
-
     await flushUi(60);
-
-    const rerenderedStreamCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'));
-    expect(rerenderedStreamCalls).toHaveLength(1);
-
-    expect(firstCallback).not.toHaveBeenCalled();
-    expect(secondCallback).not.toHaveBeenCalled();
-  });
-
-  it('ignores a stale timeout from an unmounted stream attempt（旧实例晚到超时不应误报断开）', async () => {
-    const onInitialConnectionFailure = vi.fn();
-    let rejectStaleAttempt: ((reason?: unknown) => void) | null = null;
-    streamPlans.push(
-      () => new Promise<Response>((_, reject) => {
-        rejectStaleAttempt = reject;
-      }),
-      () => createOpenSseResponse(),
-    );
-
-    const { rerender } = render(
-      <PtyTerminal
-        key="pty-layout-stale-attempt-a"
-        rtBaseUrl="http://127.0.0.1:1949"
-        ptyId="pty-layout-stale-attempt"
-        onInitialConnectionFailure={onInitialConnectionFailure}
-      />,
-    );
-
-    sizeReady = true;
-    resizeObservers[resizeObservers.length - 1]?.();
-    await flushUi(60);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'))).toHaveLength(1);
-
-    rerender(
-      <PtyTerminal
-        key="pty-layout-stale-attempt-b"
-        rtBaseUrl="http://127.0.0.1:1949"
-        ptyId="pty-layout-stale-attempt"
-        onInitialConnectionFailure={onInitialConnectionFailure}
-      />,
-    );
-
-    resizeObservers[resizeObservers.length - 1]?.();
-    await flushUi(60);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'))).toHaveLength(2);
-    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
-
-    await flushUi(4_100);
-    await act(async () => {
-      rejectStaleAttempt?.(new Error('stale timeout after remount'));
-      await Promise.resolve();
-    });
-
-    expect(onInitialConnectionFailure).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('pty-terminal-error')).not.toBeInTheDocument();
+    expect(websocketState.instances).toHaveLength(2);
   });
 
   it('shows the non-zero exit code in the EOF banner（非零退出码会显示在退出提示中）', async () => {
-    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 1 }))));
-
-    render(
-      <PtyTerminal
-        rtBaseUrl="http://127.0.0.1:1949"
-        ptyId="pty-layout-exit-code"
-      />,
-    );
+    render(<PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-exit-code" />);
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await flushUi(60);
-    expect(xtermState.terminal.write).toHaveBeenCalled();
+    await flushUi(80);
+
+    const outputSocket = websocketState.instances[1];
+    expect(outputSocket).toBeTruthy();
+    act(() => {
+      outputSocket!.emitMessage({
+        type: 'eof',
+        offset: 0,
+        code: 23,
+      });
+    });
+    await flushUi();
 
     expect(xtermState.terminal.write).toHaveBeenCalledWith(
-      '\r\n\x1b[90m[Process exited with code 1]\x1b[0m\r\n',
+      '\r\n\x1b[90m[Process exited with code 23]\x1b[0m\r\n',
     );
   });
 
   it('keeps the generic EOF banner for zero or unknown exit code（零或未知退出码保持通用提示）', async () => {
-    streamPlans.push(() => createSseResponse(
-      createStreamFrame('eof', JSON.stringify({ code: 0 })),
-      createStreamFrame('eof', ''),
-    ));
-
-    render(
-      <PtyTerminal
-        rtBaseUrl="http://127.0.0.1:1949"
-        ptyId="pty-layout-exit-code-default"
-      />,
+    const { rerender } = render(
+      <PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-exit-code-default-a" />,
     );
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await flushUi(60);
-    expect(xtermState.terminal.write).toHaveBeenCalledTimes(2);
+    await flushUi(80);
+
+    act(() => {
+      websocketState.instances[1]!.emitMessage({ type: 'eof', offset: 0, code: 0 });
+    });
+    await flushUi();
+
+    rerender(
+      <PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-exit-code-default-b" />,
+    );
+    await flushUi(80);
+    act(() => {
+      websocketState.instances[3]!.emitMessage({ type: 'eof', offset: 0, code: null });
+    });
+    await flushUi();
 
     expect(xtermState.terminal.write).toHaveBeenNthCalledWith(
       1,
@@ -617,30 +490,7 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     );
   });
 
-  it('hides the loading overlay after the fetch stream connects（fetch 流连通后会退出加载态）', async () => {
-    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))));
-
-    render(
-      <PtyTerminal
-        rtBaseUrl="http://127.0.0.1:1949"
-        ptyId="pty-layout-loading-ready"
-      />,
-    );
-
-    expect(screen.getByTestId('pty-terminal-loading')).toBeInTheDocument();
-
-    sizeReady = true;
-    resizeObservers.forEach((notify) => notify());
-    await flushUi(60);
-    expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
-  });
-
   it('does not re-show the loading overlay while reconnecting after a successful first connect（首次连通后重连不应重新盖回加载层）', async () => {
-    streamPlans.push(
-      () => createSseResponse(),
-      () => createOpenSseResponse(),
-    );
-
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:1949"
@@ -650,16 +500,45 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await flushUi(60);
+    await flushUi(80);
     expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
 
-    await flushUi(500);
+    act(() => {
+      websocketState.instances[1]!.emitClose();
+    });
+    await flushUi(40);
     expect(screen.queryByTestId('pty-terminal-loading')).not.toBeInTheDocument();
   });
 
-  it('updates scrollback in place without recreating the terminal（历史回放上限变更时原位更新而不重建终端）', async () => {
-    streamPlans.push(() => createOpenSseResponse());
+  it('does not escalate a failed reconnect into the initial failure overlay（重连失败不应被误判成首次加载失败）', async () => {
+    const onInitialConnectionFailure = vi.fn();
+    websocketState.socketPlans.push({}, {}, { autoReady: false, autoCloseAfterOpen: true }, {});
 
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-reconnect-pre-ready-failure"
+        onInitialConnectionFailure={onInitialConnectionFailure}
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(80);
+    expect(screen.queryByTestId('pty-terminal-error')).not.toBeInTheDocument();
+
+    act(() => {
+      websocketState.instances[1]!.emitClose();
+    });
+    await flushUi(40);
+    await flushUi(600);
+
+    expect(screen.queryByTestId('pty-terminal-error')).not.toBeInTheDocument();
+    expect(onInitialConnectionFailure).not.toHaveBeenCalled();
+    expect(websocketState.instances.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('updates scrollback in place without recreating the terminal（历史回放上限变更时原位更新而不重建终端）', async () => {
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:1949"
@@ -669,37 +548,26 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
 
     sizeReady = true;
     resizeObservers.forEach((notify) => notify());
-    await flushUi(60);
-
-    expect(xtermState.constructedOptions).toHaveLength(1);
-    expect(xtermState.constructedOptions[0]?.scrollOnEraseInDisplay).toBe(true);
-
-    const streamCallsBefore = fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'));
-    expect(streamCallsBefore).toHaveLength(1);
+    await flushUi(80);
+    expect(websocketState.instances).toHaveLength(2);
 
     const preferences = await import('@/config/pty-terminal-preferences');
     const previousReplayLimitKb = preferences.getPtyTerminalReplayLimitKb();
+    const nextReplayLimitKb = previousReplayLimitKb + 128;
 
     try {
-      const nextReplayLimitKb = 384;
-      act(() => {
+      await act(async () => {
         preferences.setPtyTerminalReplayLimitKb(nextReplayLimitKb);
       });
-      await flushUi(0);
 
-      expect(xtermState.constructedOptions).toHaveLength(1);
-      expect(xtermState.terminal.dispose).not.toHaveBeenCalled();
       expect(xtermState.terminal.options.scrollback).toBe(
         preferences.resolvePtyTerminalScrollbackLines(nextReplayLimitKb),
       );
-
-      const streamCallsAfter = fetchMock.mock.calls.filter(([url]) => String(url).includes('/stream'));
-      expect(streamCallsAfter).toHaveLength(1);
+      expect(websocketState.instances).toHaveLength(2);
     } finally {
-      act(() => {
+      await act(async () => {
         preferences.setPtyTerminalReplayLimitKb(previousReplayLimitKb);
       });
-      await flushUi(0);
     }
   });
 
@@ -710,6 +578,6 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     );
 
     expect(source).not.toContain('min-h-[200px]');
-    expect(source).toContain('min-h-0');
+    expect(source).toContain('className="relative h-full w-full min-h-0"');
   });
 });

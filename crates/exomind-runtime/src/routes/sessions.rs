@@ -672,9 +672,9 @@ mod tests {
             })
             .unwrap();
 
-        let (_buffer, mut rx) = state
+        let (_buffer, _eof_offset, mut rx) = state
             .pty_manager
-            .subscribe_output(&pty.id)
+            .subscribe_output(&pty.id, None)
             .await
             .expect("pty output subscription should succeed");
 
@@ -699,13 +699,13 @@ mod tests {
         let bridged = tokio::time::timeout(Duration::from_secs(5), async move {
             loop {
                 match rx.recv().await {
-                    Ok(crate::pty::PtyOutputMsg::Data(data)) => {
+                    Ok(crate::pty::PtyOutputMsg::Data { data, .. }) => {
                         let text = String::from_utf8_lossy(&data);
                         if text.contains(marker) {
                             return true;
                         }
                     }
-                    Ok(crate::pty::PtyOutputMsg::Eof) => return false,
+                    Ok(crate::pty::PtyOutputMsg::Eof { .. }) => return false,
                     Err(_) => return false,
                 }
             }
