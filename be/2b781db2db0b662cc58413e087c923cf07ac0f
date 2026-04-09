@@ -1,0 +1,254 @@
+website/src/pages/docs.astro
+  a3f581d06bdb89bf 2-3,10
+  2627c607d409afab 7-8
+website/src/pages/index.astro
+  2627c607d409afab 11,28,39,53,57,61,68,72,104,107-112,130,133,185,203,228,231,250,253,256-261
+  a3f581d06bdb89bf 2,4-5,10,12-27,29-38,40-52,54-56,58-60,62-67,69-71,73-78,82,86-98,101,113,125,127-129,132,134,136-181,184,186-189,197-202,204,206-217,223,225-227,229-230,232,234-240,248-249,251-252,254,262-264
+website/src/components/Footer.astro
+  a3f581d06bdb89bf 2,7,16-17,37
+website/src/pages/en/download.astro
+  2627c607d409afab 26-27
+  a3f581d06bdb89bf 3,6,9-25,28
+website/src/layouts/BaseLayout.astro
+  a3f581d06bdb89bf 3,14-22,29-54,56-63,66,78,80-81
+website/src/pages/en/changelog.astro
+  a3f581d06bdb89bf 3-4,11,27-28
+scripts/dev/release-pages-metadata-lib.ts
+  212c8a5f93c4f206 60-75,100-110,198-254
+  a3f581d06bdb89bf 1-2,33-34,50,146
+website/src/pages/en/docs.astro
+  a3f581d06bdb89bf 2-3,6-7,9-10
+  2627c607d409afab 8
+docs/product/2026-04-09-astro-homepage-new-product-positioning-copy.md
+  a3f581d06bdb89bf 1,3-5,9,11,13,15,17-22,24,26,28,30,34,36,38,40-42,44,46-48,50,52,54-61,63,65,67-68,70,74,76,78,80-83,85,87,89,91,93-95,97,99,101,103,105-109,111,113,115,117,119,121-123,125,127-129,133,135,137,139,141,143-148,150,152,154,157-158,162,164-165,167,169,171-175,178-182,186,188,190,192,194,196,198,202,206,211-213,217,219,223-240
+website/public/brandmark.svg
+  a3f581d06bdb89bf 1-120
+website/src/components/BrandMark.astro
+  a3f581d06bdb89bf 1-30
+website/src/components/ChangelogTimeline.astro
+  212c8a5f93c4f206 41-43,55-57,97,101-103,111-112,121,128,135,261,263,286-287,290-291,294,297
+  589b71a1b7b65edd 106-109,114,116-118,131-132,219,221-249,251-252,274,296,364,374,382
+  a3f581d06bdb89bf 1,3,5-14,16-31,37,39,51,53,74,76,78-82,85,88-96,98-100,104-105,110,113,115,119-120,122-127,129-130,133-134,136-147,149-151,161-167,190-198,217-218,250,259-260,262,264-273,275-285,288-289,292-293,295,298-299,327-345,348-350,352-360,363,365-370,372-373,375-381,383-412
+  d579384bde59f3e7 2,4,35-36,47-50,61-73,83-84,86,168-189,199-216,253-258,300-326,346-347
+  fe76c4bbb38b19f5 15,32-34,38,40,44-46,52,54,58-60,75,77,87,148,152-160,220,351,361-362,371
+website/src/lib/docs.ts
+  2627c607d409afab 10,81,115,119,166,171,177,270-271,275,309,315,318-389,477,481,528,533,539,632-633,637,671,674-745,749
+  a3f581d06bdb89bf 1-9,11-80,82-114,116-118,120-165,167-170,172-176,178-269,272-274,276-308,310-314,316-317,390-476,478-480,482-527,529-532,534-538,540-631,634-636,638-670,672-673,746-748,750-947
+website/src/lib/lucide.ts
+  a3f581d06bdb89bf 1-24
+website/src/pages/getting-started.astro
+  212c8a5f93c4f206 15,32,69,87,106-107,125,175,183,189,196-199,201,203-211,217-223,372
+  b5532e801e3e5371 98-99,114-115,450,478,549,555
+  a3f581d06bdb89bf 1-7,12,14,16-18,20,23-30,33-48,52-55,60-67,89-97,100-105,109-113,116-124,173-174,224-230,232-262,264-273,275,277-278,281-282,284-365,367-369,385,394-395,397-410,412-438,497-548,550-554,556-852,865-928,936-987
+  2627c607d409afab 9-11,13,19,49-51,56,74,108,126-172,176-182,184-188,190-195,200,202,212-216,366,370-371,373-384,386-393,396,411,439-449,451-477,479-496,853-864,929-935
+  9971c15c2a8d4b27 8,21-22,31,57-59,68,70-73,75-86,88,231,263,274,276,279-280,283
+website/src/components/DownloadPageContent.astro
+  589b71a1b7b65edd 2-3,24-27,169,189,216,219,221,223-224,235,268-278,302-307,315-317,320-323,325-328,330-331,333-336,338-342,350,364-370,373
+  9971c15c2a8d4b27 35-37,45-46,131-133,135-141,143-144,146-153,155-156,158-166,175,188,190-196,201,248
+  b5532e801e3e5371 33-34,42-44,145,157
+  2627c607d409afab 389,392,406-409
+  a3f581d06bdb89bf 4,10-13,16,19-21,76,84,87-97,99-103,105,107-130,167,208,250,254-267,279-282,284-291,293-299,301,309-312,345-349,351-363,371-372,374-384,387-388,391,393-394,396-397,399-405,410,412,415-419,421-429,433-434,436-437
+  212c8a5f93c4f206 134,142,154
+website/src/pages/en/features.astro
+  a3f581d06bdb89bf 2,4,127,129
+website/src/styles/global.css
+  a3f581d06bdb89bf 20-64,70-119
+website/src/components/SmartDownloadLink.astro
+  2627c607d409afab 16,24,35,41,43,55-62,68-95,98,105,112-133,139
+  a3f581d06bdb89bf 1-15,17-23,25-34,36-40,42,44-54,63-67,96-97,99-104,106-111,134-138,140-192
+website/src/pages/changelog.astro
+  a3f581d06bdb89bf 3-4,11,27-28
+website/src/pages/en/getting-started.astro
+  a3f581d06bdb89bf 1-33
+website/src/lib/downloads-data.ts
+  2627c607d409afab 440-454
+  a3f581d06bdb89bf 1-2,16,42-55,82-85,87-99,101-129,142-146,156-192,221-238,267-313,331-355,378-396,455-458,462,468
+  fe76c4bbb38b19f5 26-41,86,130-141,147-155,193-220,239-266,314-330,356-377
+website/src/pages/download.astro
+  2627c607d409afab 26-27
+  a3f581d06bdb89bf 3,6,9-25,28
+website/src/components/Keycap.astro
+  a3f581d06bdb89bf 1-23
+website/src/lib/release-highlights.ts
+  a3f581d06bdb89bf 1-22,29,93-117,119,122-123,162-172,174-178,180,182-192,218-220,222-224,226-228,234-237
+  2627c607d409afab 23-25,27-28,30-92,118,120-121,124-161,173,179,181,193-217,221,225,229-233
+  212c8a5f93c4f206 26
+scripts/dev/sync-release-pages.ts
+  2627c607d409afab 7,11-21,43-67,71-72,153-268,271-278,281,296,310-319,321,327,331
+  a3f581d06bdb89bf 35,295
+website/src/components/LucideIcon.astro
+  a3f581d06bdb89bf 1-25
+package.json
+  a3f581d06bdb89bf 62
+website/src/i18n/index.ts
+  2627c607d409afab 2-3,8,12-98,100-201,203-210,214-216,220-222,226-233,237-242,246-253,257-260,264-266,270-272,274-281,285-287,289-291
+website/src/pages/en/index.astro
+  a3f581d06bdb89bf 2,4-5,10-77,81,85-97,100,103,106,108,122-125,127-129,131-176,179,181-184,192-195,197-199,201-212,220-223,225-226,230-235,243-245,247-248,251,253-255
+website/src/pages/features.astro
+  212c8a5f93c4f206 7,124-141
+  2627c607d409afab 6
+website/src/components/Header.astro
+  212c8a5f93c4f206 2-8,27-31,48,54,56,155,158,160
+  a3f581d06bdb89bf 9-10,16-24,38-39,41-45,49-50,55,58-61,124-127,129-130,132-135,154,157,164-175,208-209,211-217,258-261,263-267,270-276,279-280,284-304,306,308-312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "be2b781db2db0b662cc58413e087c923cf07ac0f",
+  "prompts": {
+    "212c8a5f93c4f206": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6dcc-718f-7de0-95c1-213127110451",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 569,
+      "total_deletions": 118,
+      "accepted_lines": 529,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ac5b0a360fa43b1f41c9989679677fd1c7ea35a987e071ab6814d83c012f520c"
+    },
+    "2627c607d409afab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7082-a4ae-74e3-82a6-fb0c00f5b082",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 1850,
+      "total_deletions": 1013,
+      "accepted_lines": 1659,
+      "overriden_lines": 1,
+      "messages_url": "https://usegitai.com/cas/b57c64002db35435a331cc6a6621059604ff46d82f433fae00365f5024f79efc"
+    },
+    "3aae3452e9c38559": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7057-f207-7611-9245-90059132a5d9",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 36,
+      "total_deletions": 2,
+      "accepted_lines": 36,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d0b808fb7fbbb24bae0c9b3e614588d22ee279ee84fef407c64e0b9b863d602d"
+    },
+    "3db0997350c08a66": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d72c9-5ef4-7e21-ac9b-b1ff779dc581",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 78,
+      "total_deletions": 59,
+      "accepted_lines": 41,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/a612daca3286c77a9f4e0c162fd7885c81cbafc9b6a3b80634f3ccaa277f002e"
+    },
+    "589b71a1b7b65edd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d70b8-9b61-7561-b7f2-bfef446e8b3d",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 491,
+      "total_deletions": 248,
+      "accepted_lines": 343,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/062d28792e97dbde374399e3d56423cda317b0d4045c19985b5a3490fa6ed9eb"
+    },
+    "9971c15c2a8d4b27": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7057-f233-7e01-a31c-80c2c617448c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 102,
+      "total_deletions": 51,
+      "accepted_lines": 80,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/a8b7325f8a11cf36e6a36a3574986b87483a51dfd1704fc080824cf48a5c5091"
+    },
+    "a3f581d06bdb89bf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d71bd-10fe-7251-ab02-db28b368e774",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 11907,
+      "total_deletions": 6962,
+      "accepted_lines": 10984,
+      "overriden_lines": 8,
+      "messages_url": "https://usegitai.com/cas/a84018ce69674a8697d20fbe44f44a4df3ca590ecdb2fb0d48389418d02d508e"
+    },
+    "b1eedf414ef525d5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6dd6-9333-7483-976b-1a0d21c9d5c9",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 46,
+      "total_deletions": 9,
+      "accepted_lines": 39,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/10a8ab977e4c866c1ee11be267866966791f9f5bb6232333672ea27efc727722"
+    },
+    "b5532e801e3e5371": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7057-f26d-7fe3-bc3e-508aa3b7de34",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 192,
+      "total_deletions": 51,
+      "accepted_lines": 188,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/a5d47f90e10d89200d61f76210bbd45542dcaee8c867e8d8983a7717235030ce"
+    },
+    "d579384bde59f3e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7060-c933-7253-8ce9-653f36f4d7fd",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 157,
+      "total_deletions": 24,
+      "accepted_lines": 129,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/4b1a5434a35cde28bb49d2f9f521d5113933871249f0cb667c3ce8c53d19595a"
+    },
+    "fe76c4bbb38b19f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d72b4-c696-7cb1-99df-8555fbeff446",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 859,
+      "total_deletions": 88,
+      "accepted_lines": 642,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e01cf232ab0294172cfca0990c21ea9473f5da9e0e007c7f00f809b8f5d89375"
+    }
+  }
+}
