@@ -102,12 +102,32 @@ pub async fn get_topology(State(state): State<RuntimeState>) -> Json<TopologyRes
         used_memory_mb,
         capabilities: static_info.capabilities.clone(),
     };
+    let runtime_host_component_id = format!("{}:runtime-host", state.device_id);
     let device = DeviceResponse {
-        id: state.host_id.clone(),
+        id: state.device_id.clone(),
         name: static_info.hostname.clone(),
         kind: infer_device_kind(&static_info.os),
         primary_runtime_host_id: state.host_id.clone(),
     };
+    let device_components = vec![DeviceComponentResponse {
+        id: runtime_host_component_id.clone(),
+        device_id: state.device_id.clone(),
+        kind: "runtime_host".to_string(),
+        name: "Runtime Host".to_string(),
+        status: "online".to_string(),
+        protocol: Some("exomind-runtime".to_string()),
+        runtime_host_id: Some(state.host_id.clone()),
+    }];
+    let device_links = vec![DeviceLinkResponse {
+        id: format!("{}:owns:runtime-host", state.device_id),
+        source_kind: "device".to_string(),
+        source_id: state.device_id.clone(),
+        target_kind: "device_component".to_string(),
+        target_id: runtime_host_component_id,
+        transport: "ownership".to_string(),
+        status: "online".to_string(),
+        latency_ms: None,
+    }];
 
     Json(TopologyResponse {
         host_id: state.host_id.clone(),
@@ -122,8 +142,8 @@ pub async fn get_topology(State(state): State<RuntimeState>) -> Json<TopologyRes
         capabilities: static_info.capabilities.clone(),
         runtime_host,
         device,
-        device_components: Vec::new(),
-        device_links: Vec::new(),
+        device_components,
+        device_links,
     })
 }
 

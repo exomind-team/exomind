@@ -1422,6 +1422,7 @@ mod tests {
         AppState {
             port: 0,
             host_id: host_id.clone(),
+            device_id: "dev-timeblocks-test-host".to_string(),
             registry: registry.clone(),
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(crate::mesh::MeshState::new(

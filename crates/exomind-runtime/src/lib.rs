@@ -42,6 +42,7 @@ pub const BUILD_GIT_HASH: &str = env!("BUILD_GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 pub const DEFAULT_RT_PORT: u16 = 1949;
 const RUNTIME_HOST_ID_CONFIG_KEY: &str = "exomind:runtimeHostId";
+const RUNTIME_DEVICE_ID_CONFIG_KEY: &str = "exomind:deviceId";
 
 #[derive(Debug, Error)]
 pub enum PortConfigError {
@@ -81,30 +82,61 @@ pub fn configured_host_id_from_env() -> String {
     let path = env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| resolve_data_dir().join("config.sqlite"));
-    if let Some(host_id) = load_or_create_persisted_host_id(&path) {
+    if let Some(host_id) = load_or_create_persisted_runtime_identity(
+        &path,
+        RUNTIME_HOST_ID_CONFIG_KEY,
+        "rt",
+        "runtime host id",
+    ) {
         return host_id;
     }
 
     format!("rt-{}", uuid::Uuid::new_v4())
 }
 
-fn load_or_create_persisted_host_id(path: &Path) -> Option<String> {
+/// Read EXOMIND_RT_DEVICE_ID from env（读取逻辑设备 ID）.
+pub fn configured_device_id_from_env() -> String {
+    if let Ok(raw) = env::var("EXOMIND_RT_DEVICE_ID") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    let path = env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolve_data_dir().join("config.sqlite"));
+    if let Some(device_id) = load_or_create_persisted_runtime_identity(
+        &path,
+        RUNTIME_DEVICE_ID_CONFIG_KEY,
+        "dev",
+        "runtime device id",
+    ) {
+        return device_id;
+    }
+
+    format!("dev-{}", uuid::Uuid::new_v4())
+}
+
+fn load_or_create_persisted_runtime_identity(
+    path: &Path,
+    key: &str,
+    prefix: &str,
+    identity_label: &str,
+) -> Option<String> {
     let store = match config::ConfigStore::with_sqlite_path(path) {
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(
                 path = %path.display(),
                 error = %error,
-                "failed to open config store for persisted runtime host id"
+                "failed to open config store for persisted runtime identity"
             );
             return None;
         }
     };
 
-    match store.get(
-        config::types::DEVICE_CONFIG_SCOPE,
-        RUNTIME_HOST_ID_CONFIG_KEY,
-    ) {
+    match store.get(config::types::DEVICE_CONFIG_SCOPE, key) {
         Ok(Some(entry)) => {
             let trimmed = entry.value.trim();
             if !trimmed.is_empty() {
@@ -116,38 +148,36 @@ fn load_or_create_persisted_host_id(path: &Path) -> Option<String> {
             tracing::warn!(
                 path = %path.display(),
                 error = %error,
-                "failed to read persisted runtime host id from config store"
+                key,
+                "failed to read persisted runtime identity from config store"
             );
             return None;
         }
     }
 
-    let generated = format!("rt-{}", uuid::Uuid::new_v4());
+    let generated = format!("{prefix}-{}", uuid::Uuid::new_v4());
     match store.put_if_absent(config::PutConfigEntryInput {
         scope: config::types::DEVICE_CONFIG_SCOPE.to_string(),
-        key: RUNTIME_HOST_ID_CONFIG_KEY.to_string(),
+        key: key.to_string(),
         value: generated.clone(),
         sensitive: false,
         source: Some("runtime-start".to_string()),
         source_origin: None,
     }) {
         Ok(true) => Some(generated),
-        Ok(false) => store
-            .get(
-                config::types::DEVICE_CONFIG_SCOPE,
-                RUNTIME_HOST_ID_CONFIG_KEY,
-            )
-            .ok()
-            .flatten()
-            .and_then(|entry| {
+        Ok(false) => store.get(config::types::DEVICE_CONFIG_SCOPE, key).ok().flatten().and_then(
+            |entry| {
                 let trimmed = entry.value.trim();
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
-            }),
+            },
+        ),
         Err(error) => {
             tracing::warn!(
                 path = %path.display(),
                 error = %error,
-                "failed to persist runtime host id into config store"
+                key,
+                identity_label,
+                "failed to persist runtime identity into config store"
             );
             None
         }
@@ -156,6 +186,10 @@ fn load_or_create_persisted_host_id(path: &Path) -> Option<String> {
 
 fn default_runtime_host_id(port: u16) -> String {
     format!("rt-local-{port}")
+}
+
+fn default_runtime_device_id(port: u16) -> String {
+    format!("dev-local-{port}")
 }
 
 fn bind_host_is_loopback_or_local(host: &str) -> bool {
@@ -205,6 +239,8 @@ pub struct RuntimeStartOptions {
     pub port: u16,
     /// logical runtime host id（逻辑运行时主机 ID）.
     pub host_id: String,
+    /// logical runtime device id（逻辑运行时设备 ID）.
+    pub device_id: String,
     /// spawn built-in rust actors（是否拉起内置 Rust Actor）.
     pub spawn_builtin_actors: bool,
     /// spawn ts agents (reviewer/classifier)（是否拉起 TS Agent）.
@@ -246,6 +282,7 @@ impl Default for RuntimeStartOptions {
             bind_host: configured_bind_host_from_env(),
             port: configured_port_from_env().unwrap_or(DEFAULT_RT_PORT),
             host_id: configured_host_id_from_env(),
+            device_id: configured_device_id_from_env(),
             spawn_builtin_actors: true,
             spawn_ts_agents,
             ts_agent_command: env::var("EXOMIND_RT_AGENT_CMD")
@@ -564,6 +601,7 @@ pub async fn start_with_options(
         options.auth_secret.clone(),
         runtime_storage_paths_for_persistent_start(options.data_dir.clone()),
     );
+    state.device_id = options.device_id.clone();
     state.allow_lan_without_auth = options.allow_lan_without_auth;
 
     // mDNS discovery setup.
@@ -893,6 +931,7 @@ pub fn app_with_state(state: AppState) -> Router {
 pub struct AppState {
     pub port: u16,
     pub host_id: String,
+    pub device_id: String,
     pub registry: agent::AgentRegistry,
     pub signal_pool: Arc<SignalPool>,
     pub mesh: Arc<MeshState>,
@@ -1222,6 +1261,7 @@ impl AppState {
         Self {
             port,
             host_id,
+            device_id: default_runtime_device_id(port),
             registry,
             signal_pool,
             mesh,
@@ -1376,6 +1416,7 @@ mod tests {
         AppState {
             port,
             host_id: host_id.clone(),
+            device_id: format!("dev-lib-test-{port}"),
             registry,
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(mesh::MeshState::new(
@@ -2251,9 +2292,19 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("create config sqlite tempdir");
         let config_path = temp_dir.path().join("config.sqlite");
 
-        let first = load_or_create_persisted_host_id(&config_path)
+        let first = load_or_create_persisted_runtime_identity(
+            &config_path,
+            RUNTIME_HOST_ID_CONFIG_KEY,
+            "rt",
+            "runtime host id",
+        )
             .expect("first runtime host id should persist");
-        let second = load_or_create_persisted_host_id(&config_path)
+        let second = load_or_create_persisted_runtime_identity(
+            &config_path,
+            RUNTIME_HOST_ID_CONFIG_KEY,
+            "rt",
+            "runtime host id",
+        )
             .expect("second runtime host id should reuse persisted value");
 
         assert_eq!(first, second, "runtime host id must survive restarts");
@@ -2269,6 +2320,67 @@ mod tests {
             .expect("runtime host id entry should exist");
 
         assert_eq!(entry.value, first);
+    }
+
+    #[test]
+    fn persisted_runtime_device_id_reuses_device_scope_config_entry() {
+        let temp_dir = tempfile::tempdir().expect("create config sqlite tempdir");
+        let config_path = temp_dir.path().join("config.sqlite");
+
+        let first = load_or_create_persisted_runtime_identity(
+            &config_path,
+            RUNTIME_DEVICE_ID_CONFIG_KEY,
+            "dev",
+            "runtime device id",
+        )
+        .expect("first runtime device id should persist");
+        let second = load_or_create_persisted_runtime_identity(
+            &config_path,
+            RUNTIME_DEVICE_ID_CONFIG_KEY,
+            "dev",
+            "runtime device id",
+        )
+        .expect("second runtime device id should reuse persisted value");
+
+        assert_eq!(first, second, "runtime device id must survive restarts");
+
+        let store = config::ConfigStore::with_sqlite_path(&config_path)
+            .expect("config store should reopen");
+        let entry = store
+            .get(
+                config::types::DEVICE_CONFIG_SCOPE,
+                RUNTIME_DEVICE_ID_CONFIG_KEY,
+            )
+            .expect("config get should succeed")
+            .expect("runtime device id entry should exist");
+
+        assert_eq!(entry.value, first);
+    }
+
+    #[test]
+    fn persisted_runtime_device_id_is_distinct_from_host_id() {
+        let temp_dir = tempfile::tempdir().expect("create config sqlite tempdir");
+        let config_path = temp_dir.path().join("config.sqlite");
+
+        let host_id = load_or_create_persisted_runtime_identity(
+            &config_path,
+            RUNTIME_HOST_ID_CONFIG_KEY,
+            "rt",
+            "runtime host id",
+        )
+        .expect("runtime host id should persist");
+        let device_id = load_or_create_persisted_runtime_identity(
+            &config_path,
+            RUNTIME_DEVICE_ID_CONFIG_KEY,
+            "dev",
+            "runtime device id",
+        )
+        .expect("runtime device id should persist");
+
+        assert_ne!(
+            host_id, device_id,
+            "runtime device id must not alias runtime host id"
+        );
     }
 
     #[test]

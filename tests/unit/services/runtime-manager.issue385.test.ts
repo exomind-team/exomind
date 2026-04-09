@@ -101,5 +101,10 @@ describe('runtime manager issue-385（运行时能力快照）', () => {
     expect(snapshot.hosts[0]?.topology?.capabilities.api_providers).toEqual(['openai', 'anthropic']);
     expect((snapshot.hosts[0]?.topology as { runtime_host?: { capabilities?: { agent_kinds?: string[] } } } | null)?.runtime_host?.capabilities?.agent_kinds)
       .toEqual(['claude_cli', 'api']);
+    expect(snapshot.devices[0]).toEqual(expect.objectContaining({
+      id: 'runtime-host-1',
+      name: 'Hope Desktop',
+      kind: 'desktop',
+    }));
   });
 });

@@ -491,6 +491,7 @@ function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
     ),
     device_components: deviceComponents ?? [],
     device_links: deviceLinks ?? [],
+    device_is_inferred: value.device === undefined,
   };
 }
 

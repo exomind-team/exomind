@@ -1,7 +1,11 @@
 import type { AgentEnergySnapshot, RuntimeHostRecord } from '@/lib/types/agent-hub';
 import {
   normalizeRuntimeTopologyResponse,
+  resolveTopologyDevice,
   resolveTopologyHostId,
+  type RuntimeTopologyDeviceComponent,
+  type RuntimeTopologyDeviceKind,
+  type RuntimeTopologyDeviceLink,
   type RuntimeTopologyResponse,
 } from '@/lib/types/runtime-topology';
 import { DEFAULT_EXTERNAL_RUNTIME_PORT } from '@/config/runtime-target';
@@ -36,9 +40,21 @@ export interface RuntimeHostSnapshot {
   error?: string;
 }
 
+export interface RuntimeDeviceSnapshot {
+  id: string;
+  name: string;
+  kind: RuntimeTopologyDeviceKind;
+  primaryRuntimeHostId?: string;
+  connectionState: RuntimeHostConnectionState;
+  hosts: RuntimeHostSnapshot[];
+  components: RuntimeTopologyDeviceComponent[];
+  links: RuntimeTopologyDeviceLink[];
+}
+
 export interface RuntimeManagerSnapshot {
   updatedAt: string;
   hosts: RuntimeHostSnapshot[];
+  devices: RuntimeDeviceSnapshot[];
   agents: RuntimeAggregatedAgent[];
 }
 
@@ -93,7 +109,88 @@ function toIso(now: () => Date): string {
   return now().toISOString();
 }
 
+function mergeConnectionState(
+  current: RuntimeHostConnectionState,
+  next: RuntimeHostConnectionState,
+): RuntimeHostConnectionState {
+  if (current === 'online' || next === 'online') {
+    return 'online';
+  }
+  if (current === 'error' || next === 'error') {
+    return 'error';
+  }
+  return 'offline';
+}
+
+function pushUniqueComponent(
+  target: RuntimeTopologyDeviceComponent[],
+  component: RuntimeTopologyDeviceComponent,
+): void {
+  if (!target.some((item) => item.id === component.id)) {
+    target.push(component);
+  }
+}
+
+function pushUniqueLink(
+  target: RuntimeTopologyDeviceLink[],
+  link: RuntimeTopologyDeviceLink,
+): void {
+  if (!target.some((item) => item.id === link.id)) {
+    target.push(link);
+  }
+}
+
+function buildRuntimeDeviceSnapshots(hosts: RuntimeHostSnapshot[]): RuntimeDeviceSnapshot[] {
+  const devicesById = new Map<string, RuntimeDeviceSnapshot>();
+
+  hosts.forEach((snapshot) => {
+    const topologyDevice = resolveTopologyDevice(snapshot.topology);
+    const deviceId = topologyDevice?.id ?? snapshot.host.deviceId ?? snapshot.host.hostId ?? snapshot.host.id;
+    const deviceName = topologyDevice?.name ?? snapshot.host.name;
+    const deviceKind = topologyDevice?.kind ?? 'unknown';
+    const primaryRuntimeHostId = topologyDevice?.primary_runtime_host_id
+      ?? resolveTopologyHostId(snapshot.topology)
+      ?? snapshot.host.hostId;
+
+    const existing = devicesById.get(deviceId);
+    if (existing) {
+      existing.hosts.push(snapshot);
+      existing.connectionState = mergeConnectionState(existing.connectionState, snapshot.connectionState);
+      existing.primaryRuntimeHostId = existing.primaryRuntimeHostId ?? primaryRuntimeHostId;
+      const nextName = topologyDevice?.name?.trim();
+      if (nextName) {
+        existing.name = nextName;
+      }
+      existing.kind = topologyDevice?.kind ?? existing.kind;
+      snapshot.topology?.device_components?.forEach((component) => {
+        pushUniqueComponent(existing.components, component);
+      });
+      snapshot.topology?.device_links?.forEach((link) => {
+        pushUniqueLink(existing.links, link);
+      });
+      return;
+    }
+
+    devicesById.set(deviceId, {
+      id: deviceId,
+      name: deviceName,
+      kind: deviceKind,
+      primaryRuntimeHostId,
+      connectionState: snapshot.connectionState,
+      hosts: [snapshot],
+      components: [...(snapshot.topology?.device_components ?? [])],
+      links: [...(snapshot.topology?.device_links ?? [])],
+    });
+  });
+
+  return Array.from(devicesById.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
 function buildUnpolledRuntimeHostSnapshot(host: RuntimeHostRecord): RuntimeHostSnapshot {
+  const cachedTopology = host.lastTopology
+    ? normalizeRuntimeTopologyResponse(host.lastTopology)
+    : null;
+
   if (isMeshOnlyConfirmedPeer(host)) {
     const connectionState: RuntimeHostConnectionState = host.status === 'offline'
       ? 'offline'
@@ -105,19 +202,19 @@ function buildUnpolledRuntimeHostSnapshot(host: RuntimeHostRecord): RuntimeHostS
       host,
       connectionState,
       agents: [],
-      topology: null,
+      topology: cachedTopology,
       error: host.verificationStatus === 'failed' ? host.lastVerificationError : undefined,
     };
   }
 
-  return {
-    host,
-    connectionState: 'error',
-    agents: [],
-    topology: null,
-    error: 'Awaiting verification before protected polling',
-  };
-}
+    return {
+      host,
+      connectionState: 'error',
+      agents: [],
+      topology: cachedTopology,
+      error: 'Awaiting verification before protected polling',
+    };
+  }
 
 function parseHostAddress(hostAddress: string): { host: string; port: number } {
   const raw = hostAddress.trim();
@@ -177,6 +274,7 @@ export class RuntimeManager {
     return {
       updatedAt: toIso(this.now),
       hosts: hostSnapshots,
+      devices: buildRuntimeDeviceSnapshots(hostSnapshots),
       agents,
     };
   }
@@ -288,17 +386,30 @@ export class RuntimeManager {
     topology: RuntimeTopologyResponse,
   ): Promise<RuntimeHostRecord> {
     const liveHostId = resolveTopologyHostId(topology);
-    if (!liveHostId || !this.hostService.mergeHostMetadata) {
+    const liveDeviceId = topology.device_is_inferred ? undefined : resolveTopologyDevice(topology)?.id;
+    if ((!liveHostId && !liveDeviceId) || !this.hostService.mergeHostMetadata) {
       return host;
     }
 
     const patch: RuntimeHostMetadataPatch = {
       hostId: liveHostId,
+      lastTopology: topology,
       lastSuccessfulDialAddress: resolveRuntimeHostDialAddress(host),
     };
+    if (liveDeviceId) {
+      patch.deviceId = liveDeviceId;
+    }
+
+    const currentTopologyJson = host.lastTopology
+      ? JSON.stringify(normalizeRuntimeTopologyResponse(host.lastTopology))
+      : '';
+    const nextTopologyJson = JSON.stringify(topology);
+    const nextDeviceId = liveDeviceId ?? host.deviceId;
 
     if (
       host.hostId === patch.hostId
+      && host.deviceId === nextDeviceId
+      && currentTopologyJson === nextTopologyJson
       && host.lastSuccessfulDialAddress === patch.lastSuccessfulDialAddress
     ) {
       await this.ensureConfirmedPeerPair(host);

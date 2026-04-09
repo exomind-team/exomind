@@ -189,6 +189,7 @@ mod tests {
         AppState {
             port: 0,
             host_id: host_id.clone(),
+            device_id: "dev-config-route-test".to_string(),
             registry: registry.clone(),
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(MeshState::new(

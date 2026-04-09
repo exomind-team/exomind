@@ -63,14 +63,46 @@ async fn topology_exposes_runtime_host_and_device_contract() {
             .is_some_and(|value| !value.is_empty()),
         "topology should expose device.id"
     );
-    assert_eq!(payload["device_components"], json!([]));
-    assert_eq!(payload["device_links"], json!([]));
     assert!(
         payload["host_id"]
             .as_str()
             .is_some_and(|value| !value.is_empty()),
         "topology should still keep legacy host_id"
     );
+    assert_ne!(
+        payload["device"]["id"],
+        payload["host_id"],
+        "device.id should no longer alias host_id"
+    );
+    assert_eq!(
+        payload["device"]["primary_runtime_host_id"],
+        payload["host_id"],
+        "device should still point back to the runtime host"
+    );
+
+    let device_components = payload["device_components"]
+        .as_array()
+        .expect("device_components should be an array");
+    assert!(
+        !device_components.is_empty(),
+        "topology should expose at least one device component"
+    );
+    assert_eq!(device_components[0]["kind"], "runtime_host");
+    assert_eq!(
+        device_components[0]["runtime_host_id"],
+        payload["host_id"],
+        "runtime_host component should point to host_id"
+    );
+
+    let device_links = payload["device_links"]
+        .as_array()
+        .expect("device_links should be an array");
+    assert!(
+        !device_links.is_empty(),
+        "topology should expose at least one device link"
+    );
+    assert_eq!(device_links[0]["source_kind"], "device");
+    assert_eq!(device_links[0]["target_kind"], "device_component");
 }
 
 #[tokio::test]

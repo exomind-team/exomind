@@ -15,6 +15,11 @@ import type {
   RuntimeHostVerificationStatus,
   RuntimeHostVerificationTrigger,
 } from '@/lib/types/agent-hub';
+import {
+  normalizeRuntimeTopologyResponse,
+  resolveTopologyHostId,
+  type RuntimeTopologyResponse,
+} from '@/lib/types/runtime-topology';
 import { createUuidV4 } from '@/lib/utils/uuid';
 import {
   getRuntimeConfigValueSync,
@@ -39,6 +44,8 @@ export interface AddRuntimeHostInput {
   port?: number;
   isLocal?: boolean;
   hostId?: string;
+  deviceId?: string;
+  lastTopology?: RuntimeTopologyResponse;
   trustState?: RuntimeHostTrustState;
   advertisedListenAddress?: string;
   lastSuccessfulDialAddress?: string;
@@ -57,6 +64,8 @@ export interface RuntimeHostMetadataPatch {
   host?: string;
   port?: number;
   hostId?: string;
+  deviceId?: string;
+  lastTopology?: RuntimeTopologyResponse | null;
   trustState?: RuntimeHostTrustState;
   advertisedListenAddress?: string;
   lastSuccessfulDialAddress?: string;
@@ -161,6 +170,15 @@ function normalizeOptionalNumber(value: number | undefined): number | undefined 
   return value;
 }
 
+function normalizeOptionalTopology(
+  value: RuntimeTopologyResponse | undefined,
+): RuntimeTopologyResponse | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  return normalizeRuntimeTopologyResponse(value);
+}
+
 function hasPatchField<T extends object>(patch: T, field: keyof T): boolean {
   return Object.prototype.hasOwnProperty.call(patch, field);
 }
@@ -185,6 +203,16 @@ function mergeOptionalNumberPatch<T extends object>(
     return current;
   }
   return normalizeOptionalNumber((patch[field] ?? undefined) as number | undefined);
+}
+
+function mergeOptionalTopologyPatch(
+  patch: RuntimeHostMetadataPatch,
+  current: RuntimeTopologyResponse | undefined,
+): RuntimeTopologyResponse | undefined {
+  if (!hasPatchField(patch, 'lastTopology')) {
+    return current;
+  }
+  return normalizeOptionalTopology(patch.lastTopology ?? undefined);
 }
 
 function mergeHostNamePatch(
@@ -322,6 +350,8 @@ function normalizeRuntimeHostRecord(
     ...record,
     trustState,
     hostId: normalizeOptionalText(record.hostId),
+    deviceId: normalizeOptionalText(record.deviceId),
+    lastTopology: normalizeOptionalTopology(record.lastTopology),
     advertisedListenAddress: normalizeOptionalText(record.advertisedListenAddress),
     lastSuccessfulDialAddress: normalizeOptionalText(record.lastSuccessfulDialAddress),
     manualOverride: normalizeOptionalText(record.manualOverride)
@@ -392,11 +422,60 @@ function shouldPromoteToConfirmedPeer(
   return Boolean(next.manualOverride);
 }
 
+function lockTopologyHostIdentity(
+  topology: RuntimeTopologyResponse | undefined,
+  lockedHostId: string,
+): RuntimeTopologyResponse | undefined {
+  if (!topology) {
+    return undefined;
+  }
+
+  const normalized = normalizeRuntimeTopologyResponse(topology);
+  return {
+    ...normalized,
+    host_id: lockedHostId,
+    runtime_host: normalized.runtime_host
+      ? {
+          ...normalized.runtime_host,
+          host_id: lockedHostId,
+        }
+      : normalized.runtime_host,
+    device: normalized.device
+      ? {
+          ...normalized.device,
+          primary_runtime_host_id: lockedHostId,
+        }
+      : normalized.device,
+    device_components: normalized.device_components?.map((component) => (
+      component.runtime_host_id || component.kind === 'runtime_host'
+        ? {
+            ...component,
+            runtime_host_id: lockedHostId,
+          }
+        : component
+    )) ?? [],
+  };
+}
+
 function lockConfirmedPeerHostId(
   current: RuntimeHostRecord,
   next: RuntimeHostRecord,
   patch: RuntimeHostMetadataPatch,
 ): RuntimeHostRecord {
+  if (current.trustState === 'confirmed_peer' && current.hostId) {
+    const nextTopologyHostId = next.lastTopology ? resolveTopologyHostId(next.lastTopology) : undefined;
+    const shouldLockHostId = Boolean(patch.hostId && patch.hostId !== current.hostId);
+    const shouldLockTopology = Boolean(nextTopologyHostId && nextTopologyHostId !== current.hostId);
+
+    if (shouldLockHostId || shouldLockTopology) {
+      return {
+        ...next,
+        hostId: current.hostId,
+        lastTopology: lockTopologyHostIdentity(next.lastTopology, current.hostId),
+      };
+    }
+  }
+
   if (
     current.trustState === 'confirmed_peer'
     && current.hostId
@@ -444,6 +523,8 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       updatedAt: nowIso,
       isLocal: Boolean(input.isLocal),
       hostId: normalizeOptionalText(input.hostId),
+      deviceId: normalizeOptionalText(input.deviceId),
+      lastTopology: normalizeOptionalTopology(input.lastTopology),
       trustState,
       advertisedListenAddress: normalizeOptionalText(input.advertisedListenAddress),
       lastSuccessfulDialAddress: normalizeOptionalText(input.lastSuccessfulDialAddress),
@@ -481,6 +562,8 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       host: mergeHostAddressPatch(patch, current.host),
       port: mergeHostPortPatch(patch, current.port),
       hostId: mergeOptionalTextPatch(patch, 'hostId', current.hostId),
+      deviceId: mergeOptionalTextPatch(patch, 'deviceId', current.deviceId),
+      lastTopology: mergeOptionalTopologyPatch(patch, current.lastTopology),
       trustState: patch.trustState ?? current.trustState,
       advertisedListenAddress: mergeOptionalTextPatch(
         patch,

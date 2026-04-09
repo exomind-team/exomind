@@ -47,7 +47,7 @@
     "test:e2e:issue215": "bun scripts/test/playwright-runner.cjs test tests/e2e/me-ui.issue215.test.ts --config tests/e2e/playwright.issue215.config.ts",
     "test:e2e:issue198": "bun scripts/test/playwright-runner.cjs test tests/e2e/settings-desktop.issue198.test.ts --config tests/e2e/playwright.issue198.config.ts",
     "test:e2e:issue204": "bun scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.issue204.test.ts --config tests/e2e/playwright.issue204.config.ts",
-    "test:e2e:issue205": "bun scripts/test/playwright-runner.cjs test tests/e2e/agent-runtime-host.issue205.test.ts --config tests/e2e/playwright.issue205.config.ts",
+    "test:e2e:issue205": "node scripts/test/run-issue205-e2e.cjs",
     "test:e2e:issue201": "bun scripts/test/playwright-runner.cjs test tests/e2e/agents-page.issue201.test.ts --config tests/e2e/playwright.issue201.config.ts",
     "test:e2e:issue245f": "bun scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.signal-routes.issue245f.test.ts --config tests/e2e/playwright.issue245f.config.ts",
     "test:e2e:issue243": "bun scripts/test/playwright-runner.cjs test tests/e2e/command-palette.issue243.test.ts --config tests/e2e/playwright.issue243.config.ts",

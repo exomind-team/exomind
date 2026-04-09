@@ -1,3 +1,5 @@
+import type { RuntimeTopologyResponse } from './runtime-topology';
+
 // Runtime host status（运行主机状态）用于设备页真实探测展示
 export type RuntimeHostStatus = 'unknown' | 'online' | 'offline' | 'warning';
 export type RuntimeHostTrustState = 'manual_seed' | 'discovered_candidate' | 'confirmed_peer';
@@ -17,6 +19,8 @@ export interface RuntimeHostRecord {
   lastError?: string;
   isLocal?: boolean;
   hostId?: string; // host_id（逻辑主机 ID）
+  deviceId?: string; // device_id（逻辑设备 ID）
+  lastTopology?: RuntimeTopologyResponse; // last_topology（最近一次成功获取的拓扑快照）
   trustState?: RuntimeHostTrustState; // trust_state（信任状态）
   advertisedListenAddress?: string; // advertised_listen_address（对端自宣告监听地址）
   lastSuccessfulDialAddress?: string; // last_successful_dial_address（最近一次成功拨号地址）

@@ -44,13 +44,13 @@ import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
 import type { SignalGraphNodeType } from '../agents-signal-topology';
 
 export const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
-  { id: 'topology', icon: Waypoints, label: '拓扑图' },
+  { id: 'topology', icon: Waypoints, label: '信号拓扑' },
   { id: 'sessions', icon: Crosshair, label: '会话' },
   { id: 'tiled', icon: Rocket, label: '平铺' },
   { id: 'list', icon: Bot, label: '节点' },
   { id: 'history', icon: AlarmClock, label: '信号历史' },
   { id: 'routes', icon: List, label: '路由' },
-  { id: 'device', icon: Monitor, label: '设备' },
+  { id: 'device', icon: Monitor, label: '设备网络' },
   { id: 'api-agent', icon: Webhook, label: 'API Agent' },
 ];
 

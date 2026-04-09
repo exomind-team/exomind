@@ -276,6 +276,77 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
     expect(topology.device_links).toEqual([]);
   });
 
+  it('parses populated device_components/device_links arrays（解析非空的设备部件与链路数组）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        runtime_host: {
+          host_id: 'runtime-host-1',
+          hostname: 'local-dev',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 1919,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+        device: {
+          id: 'device-1',
+          name: 'Hope Desktop',
+          kind: 'desktop',
+          primary_runtime_host_id: 'runtime-host-1',
+        },
+        device_components: [{
+          id: 'device-1:runtime-host',
+          device_id: 'device-1',
+          kind: 'runtime_host',
+          name: 'Runtime Host',
+          status: 'online',
+          runtime_host_id: 'runtime-host-1',
+        }],
+        device_links: [{
+          id: 'device-1:owns:runtime-host',
+          source_kind: 'device',
+          source_id: 'device-1',
+          target_kind: 'device_component',
+          target_id: 'device-1:runtime-host',
+          transport: 'ownership',
+          status: 'online',
+        }],
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology(SAMPLE_HOST);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.device_components).toEqual([{
+      id: 'device-1:runtime-host',
+      device_id: 'device-1',
+      kind: 'runtime_host',
+      name: 'Runtime Host',
+      status: 'online',
+      runtime_host_id: 'runtime-host-1',
+    }]);
+    expect(result.data.device_links).toEqual([{
+      id: 'device-1:owns:runtime-host',
+      source_kind: 'device',
+      source_id: 'device-1',
+      target_kind: 'device_component',
+      target_id: 'device-1:runtime-host',
+      transport: 'ownership',
+      status: 'online',
+      latency_ms: undefined,
+    }]);
+    expect(result.data.device_is_inferred).toBe(false);
+  });
+
   it('prefers nested runtime_host as canonical source when flat fields conflict（flat 与 nested 冲突时以 runtime_host 为准）', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,

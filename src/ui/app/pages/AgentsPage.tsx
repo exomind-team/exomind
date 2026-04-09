@@ -79,6 +79,7 @@ import {
   findPreferredRuntimeHostForAgent,
   shouldAutoPollRuntimeHost,
   type RuntimeAggregatedAgent,
+  type RuntimeDeviceSnapshot,
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
 import { RuntimeClient } from '@/services/runtime-client';
@@ -1052,6 +1053,7 @@ export function AgentsPage() {
   const [fallbackRuntimeAgents, setFallbackRuntimeAgents] = useState<RuntimeAggregatedAgent[]>([]);
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
+  const [runtimeDeviceSnapshots, setRuntimeDeviceSnapshots] = useState<RuntimeDeviceSnapshot[]>([]);
   const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
   const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
   const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
@@ -4535,8 +4537,13 @@ export function AgentsPage() {
     void fetchPtyAgentsRef.current();
   }, [fetchPtyList, openPtyTerminal, resolveRuntimeConnectionForHostId]);
 
-  const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
+  const applyRuntimeSnapshot = (snapshot: {
+    hosts: RuntimeHostSnapshot[];
+    devices?: RuntimeDeviceSnapshot[];
+    agents: RuntimeAggregatedAgent[];
+  }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
+    setRuntimeDeviceSnapshots(snapshot.devices ?? []);
     setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
   };
 
@@ -6671,6 +6678,7 @@ export function AgentsPage() {
       return (
         <DeviceView
           groups={deviceGroups}
+          runtimeDeviceSnapshots={runtimeDeviceSnapshots}
           runtimeHostSnapshots={runtimeHostSnapshots}
           runtimeServiceStatus={runtimeServiceStatus}
           runtimeHostError={runtimeHostError}
@@ -6764,6 +6772,7 @@ export function AgentsPage() {
     commitManualNodePosition,
     commitManualViewport,
     deviceGroups,
+    runtimeDeviceSnapshots,
     handleClearSavedTopologyLayouts,
     handleResetCurrentTopologyLayout,
     listSections,

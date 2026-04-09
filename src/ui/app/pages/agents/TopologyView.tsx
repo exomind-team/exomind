@@ -150,6 +150,17 @@ export function TopologyView({
         data-testid="agent-topology-canvas"
         className="relative h-full min-h-0 w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#1C1917]"
       >
+        <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[280px] rounded-xl border border-[#E7E3E0] bg-white/90 px-3 py-2 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
+          <p
+            data-testid="agent-topology-view-title"
+            className="text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
+          >
+            信号拓扑视图
+          </p>
+          <p className="mt-0.5 text-[11px] text-[#78716C] dark:text-[#A8A29E]">
+            这里聚焦 Actor / Agent / Signal Route（信号路由）之间的执行与信号关系。
+          </p>
+        </div>
         <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center justify-end gap-2">
           <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 p-1 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
             <button

@@ -499,7 +499,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
-      expect(screen.getByText('我的节点')).toBeInTheDocument();
+      expect(screen.getByText('设备网络视图')).toBeInTheDocument();
       expect(screen.getByText('已发现节点')).toBeInTheDocument();
       expect(screen.getByText('已确认节点')).toBeInTheDocument();
       expect(screen.getByText('高级 / 兼容模式')).toBeInTheDocument();

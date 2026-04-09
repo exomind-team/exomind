@@ -136,14 +136,120 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
 
     const updated = await service.mergeHostMetadata(created.id, {
       hostId: 'host-desktop-1',
+      deviceId: 'device-desktop-1',
       lastSuccessfulDialAddress: '10.0.0.20:1949',
       advertisedListenAddress: '10.0.0.20:1949',
     });
 
     expect(updated.hostId).toBe('host-desktop-1');
+    expect(updated.deviceId).toBe('device-desktop-1');
     expect(updated.lastSuccessfulDialAddress).toBe('10.0.0.20:1949');
     expect(updated.advertisedListenAddress).toBe('10.0.0.20:1949');
     expect(updated.trustState).toBe('confirmed_peer');
+  });
+
+  it('persists deviceId across service instances（deviceId 应跨实例持久化）', async () => {
+    const serviceA = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-04-09T10:00:00.000Z'),
+    });
+    const created = await serviceA.addHost({
+      name: 'Device Peer',
+      host: '10.0.0.77',
+      port: 1949,
+      hostId: 'host-device-1',
+      deviceId: 'device-device-1',
+    });
+
+    expect(created.deviceId).toBe('device-device-1');
+
+    const serviceB = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+    });
+    const [host] = await serviceB.listHosts();
+
+    expect(host?.hostId).toBe('host-device-1');
+    expect(host?.deviceId).toBe('device-device-1');
+  });
+
+  it('persists cached topology across service instances（缓存拓扑应跨实例持久化）', async () => {
+    const serviceA = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-04-09T11:00:00.000Z'),
+    });
+    const created = await serviceA.addHost({
+      name: 'Topology Peer',
+      host: '10.0.0.78',
+      port: 1949,
+    });
+
+    await serviceA.mergeHostMetadata(created.id, {
+      hostId: 'topology-host-1',
+      deviceId: 'topology-device-1',
+      lastSuccessfulDialAddress: '10.0.0.78:1949',
+      lastTopology: {
+        runtime_host: {
+          host_id: 'topology-host-1',
+          hostname: 'topology-runtime',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 120,
+          version: '0.3.6',
+          port: 1949,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+        device: {
+          id: 'topology-device-1',
+          name: 'Topology Device',
+          kind: 'desktop',
+          primary_runtime_host_id: 'topology-host-1',
+        },
+        device_components: [{
+          id: 'topology-device-1:runtime-host',
+          device_id: 'topology-device-1',
+          kind: 'runtime_host',
+          name: 'Runtime Host',
+          status: 'online',
+          runtime_host_id: 'topology-host-1',
+        }],
+        device_links: [{
+          id: 'topology-device-1:owns:runtime-host',
+          source_kind: 'device',
+          source_id: 'topology-device-1',
+          target_kind: 'device_component',
+          target_id: 'topology-device-1:runtime-host',
+          transport: 'ownership',
+          status: 'online',
+        }],
+        hostname: 'topology-runtime',
+        os: 'Windows 11',
+        arch: 'x86_64',
+        uptime_secs: 120,
+        version: '0.3.6',
+        port: 1949,
+        capabilities: {
+          agent_kinds: ['api'],
+          api_providers: ['openai'],
+        },
+      },
+    });
+
+    const serviceB = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+    });
+    const [host] = await serviceB.listHosts();
+
+    expect(host?.lastTopology?.device?.id).toBe('topology-device-1');
+    expect(host?.lastTopology?.device?.name).toBe('Topology Device');
+    expect(host?.lastTopology?.device_components).toHaveLength(1);
+    expect(host?.lastTopology?.device_links).toHaveLength(1);
   });
 
   it('persists verification result fields across service instances（验证结果字段应跨实例持久化）', async () => {
@@ -467,6 +573,118 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     expect(drifted.trustState).toBe('confirmed_peer');
     expect(drifted.hostId).toBe('host-trusted-1');
     expect(drifted.lastSuccessfulDialAddress).toBe('10.0.0.99:1949');
+  });
+
+  it('locks cached topology host identity for confirmed peer（confirmed peer 的缓存拓扑 host 身份应锁定）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-04-09T12:00:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Trusted Topology Peer',
+      host: '10.0.0.41',
+      port: 1949,
+    });
+
+    await service.mergeHostMetadata(created.id, {
+      hostId: 'host-trusted-1',
+      deviceId: 'device-trusted-1',
+      lastSuccessfulDialAddress: '10.0.0.41:1949',
+      lastTopology: {
+        host_id: 'host-trusted-1',
+        hostname: 'trusted-runtime',
+        os: 'Windows 11',
+        arch: 'x86_64',
+        uptime_secs: 300,
+        version: '0.3.6',
+        port: 1949,
+        capabilities: {
+          agent_kinds: ['api'],
+          api_providers: ['openai'],
+        },
+        runtime_host: {
+          host_id: 'host-trusted-1',
+          hostname: 'trusted-runtime',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 300,
+          version: '0.3.6',
+          port: 1949,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+        device: {
+          id: 'device-trusted-1',
+          name: 'Trusted Device',
+          kind: 'desktop',
+          primary_runtime_host_id: 'host-trusted-1',
+        },
+        device_components: [{
+          id: 'device-trusted-1:runtime-host',
+          device_id: 'device-trusted-1',
+          kind: 'runtime_host',
+          name: 'Runtime Host',
+          status: 'online',
+          runtime_host_id: 'host-trusted-1',
+        }],
+        device_links: [],
+      },
+    });
+
+    const drifted = await service.mergeHostMetadata(created.id, {
+      hostId: 'host-impostor-2',
+      lastSuccessfulDialAddress: '10.0.0.99:1949',
+      lastTopology: {
+        host_id: 'host-impostor-2',
+        hostname: 'impostor-runtime',
+        os: 'Windows 11',
+        arch: 'x86_64',
+        uptime_secs: 10,
+        version: '0.3.7',
+        port: 1949,
+        capabilities: {
+          agent_kinds: ['api'],
+          api_providers: ['openai'],
+        },
+        runtime_host: {
+          host_id: 'host-impostor-2',
+          hostname: 'impostor-runtime',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 10,
+          version: '0.3.7',
+          port: 1949,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+        device: {
+          id: 'device-trusted-1',
+          name: 'Trusted Device',
+          kind: 'desktop',
+          primary_runtime_host_id: 'host-impostor-2',
+        },
+        device_components: [{
+          id: 'device-trusted-1:runtime-host',
+          device_id: 'device-trusted-1',
+          kind: 'runtime_host',
+          name: 'Runtime Host',
+          status: 'online',
+          runtime_host_id: 'host-impostor-2',
+        }],
+        device_links: [],
+      },
+    });
+
+    expect(drifted.hostId).toBe('host-trusted-1');
+    expect(drifted.lastTopology?.host_id).toBe('host-trusted-1');
+    expect(drifted.lastTopology?.runtime_host?.host_id).toBe('host-trusted-1');
+    expect(drifted.lastTopology?.device?.primary_runtime_host_id).toBe('host-trusted-1');
+    expect(drifted.lastTopology?.device_components?.[0]?.runtime_host_id).toBe('host-trusted-1');
   });
 
   it('preserves explicit manual token after manual seed is promoted to confirmed peer（手工种子升级 confirmed 后仍保留显式 token）', async () => {

@@ -5,7 +5,7 @@ import {
   resolveTopologyHostId,
   resolveTopologyRuntimeHost,
 } from '@/lib/types/runtime-topology';
-import type { RuntimeHostSnapshot } from '@/services/runtime-manager';
+import type { RuntimeDeviceSnapshot, RuntimeHostSnapshot } from '@/services/runtime-manager';
 import {
   DEFAULT_EXTERNAL_RUNTIME_PORT,
   DEFAULT_EMBEDDED_RUNTIME_PORT,
@@ -22,6 +22,7 @@ import {
 
 export interface DeviceViewProps {
   groups: AgentDeviceGroup[];
+  runtimeDeviceSnapshots: RuntimeDeviceSnapshot[];
   runtimeHostSnapshots: RuntimeHostSnapshot[];
   runtimeServiceStatus: RuntimeServiceStatus | null;
   runtimeHostError: string;
@@ -45,6 +46,10 @@ export interface DeviceViewProps {
   onOpenHostManager: () => void;
   onOpenPeerPairing: () => void;
 }
+
+type DeviceViewSnapshot = RuntimeDeviceSnapshot & {
+  primaryHostSnapshot?: RuntimeHostSnapshot;
+};
 
 function renderSectionSummary(count: number, label: string): string {
   if (count <= 0) {
@@ -122,6 +127,7 @@ function resolveVerificationPresentation(item: RuntimeHostSnapshot): {
 
 export function DeviceView({
   groups,
+  runtimeDeviceSnapshots,
   runtimeHostSnapshots,
   runtimeServiceStatus,
   runtimeHostError,
@@ -145,6 +151,30 @@ export function DeviceView({
   onOpenHostManager,
   onOpenPeerPairing,
 }: DeviceViewProps) {
+  const displayDeviceSnapshots: DeviceViewSnapshot[] = runtimeDeviceSnapshots.length > 0
+    ? runtimeDeviceSnapshots.map((device) => ({
+        ...device,
+        primaryHostSnapshot: device.hosts.find((item) => (
+          resolveTopologyHostId(item.topology) === device.primaryRuntimeHostId
+          || item.host.hostId === device.primaryRuntimeHostId
+          || item.host.id === device.primaryRuntimeHostId
+        )) ?? device.hosts[0],
+      }))
+    : runtimeHostSnapshots.map((item) => {
+        const topologyDevice = resolveTopologyDevice(item.topology);
+        const runtimeHostId = resolveTopologyHostId(item.topology) ?? item.host.hostId ?? item.host.id;
+        return {
+          id: topologyDevice?.id ?? item.host.deviceId ?? runtimeHostId,
+          name: topologyDevice?.name ?? item.host.name,
+          kind: topologyDevice?.kind ?? 'unknown',
+          primaryRuntimeHostId: topologyDevice?.primary_runtime_host_id ?? runtimeHostId,
+          connectionState: item.connectionState,
+          hosts: [item],
+          components: item.topology?.device_components ?? [],
+          links: item.topology?.device_links ?? [],
+          primaryHostSnapshot: item,
+        };
+      });
   const hostCard = groups.flatMap((group) => group.cards).find((card) => card.isHost) ?? groups[0]?.cards[0];
   const isEmbeddedTarget = runtimeTargetMode === 'embedded';
   const currentRuntimeAddress = runtimeServiceStatus?.running
@@ -153,11 +183,11 @@ export function DeviceView({
   const lastAttemptAddress = runtimeServiceStatus && !runtimeServiceStatus.running
     ? `${runtimeServiceStatus.host}:${runtimeServiceStatus.port}`
     : null;
-  const discoveredPeers = runtimeHostSnapshots.filter((item) => item.host.trustState === 'discovered_candidate');
-  const confirmedPeers = runtimeHostSnapshots.filter((item) => item.host.trustState === 'confirmed_peer');
-  const advancedHosts = runtimeHostSnapshots.filter((item) => (
-    item.host.trustState !== 'discovered_candidate'
-    && item.host.trustState !== 'confirmed_peer'
+  const discoveredPeers = displayDeviceSnapshots.filter((item) => item.primaryHostSnapshot?.host.trustState === 'discovered_candidate');
+  const confirmedPeers = displayDeviceSnapshots.filter((item) => item.primaryHostSnapshot?.host.trustState === 'confirmed_peer');
+  const advancedHosts = displayDeviceSnapshots.filter((item) => (
+    item.primaryHostSnapshot?.host.trustState !== 'discovered_candidate'
+    && item.primaryHostSnapshot?.host.trustState !== 'confirmed_peer'
   ));
   const localNodeName = hostCard?.name ?? '当前设备';
   const localNodeSummary = runtimeServiceStatus?.running
@@ -171,17 +201,22 @@ export function DeviceView({
     : 'grid gap-3';
 
   const renderRuntimePeerCard = (
-    item: RuntimeHostSnapshot,
+    item: DeviceViewSnapshot,
     mode: 'discovered' | 'confirmed' | 'advanced',
   ) => {
+    const primaryHostSnapshot = item.primaryHostSnapshot ?? item.hosts[0];
+    if (!primaryHostSnapshot) {
+      return null;
+    }
+    const primaryHost = primaryHostSnapshot.host;
     const trustLabel = mode === 'confirmed'
       ? '已确认 peer'
       : mode === 'discovered'
         ? '待配对节点'
         : '兼容 / 手工节点';
-    const addressText = item.host.lastSuccessfulDialAddress
-      ?? item.host.manualOverride
-      ?? `${item.host.host}:${item.host.port}`;
+    const addressText = primaryHost.lastSuccessfulDialAddress
+      ?? primaryHost.manualOverride
+      ?? `${primaryHost.host}:${primaryHost.port}`;
     const replicationStatus = mode === 'confirmed'
       ? item.connectionState === 'online'
         ? '已连接'
@@ -190,19 +225,18 @@ export function DeviceView({
           : '异常 / 待重试'
       : null;
     const verificationPresentation = mode === 'confirmed'
-      ? resolveVerificationPresentation(item)
+      ? resolveVerificationPresentation(primaryHostSnapshot)
       : null;
-    const verificationTriggerLabel = formatVerificationTriggerLabel(item.host.lastVerificationTrigger);
-    const verificationTimeLabel = formatVerificationTimeLabel(item.host.lastVerifiedAt);
+    const verificationTriggerLabel = formatVerificationTriggerLabel(primaryHost.lastVerificationTrigger);
+    const verificationTimeLabel = formatVerificationTimeLabel(primaryHost.lastVerifiedAt);
     const verifyButtonLabel = verificationPresentation?.status === 'running' ? '验证中...' : '测试互联';
-    const topologyDevice = resolveTopologyDevice(item.topology);
-    const topologyRuntimeHost = resolveTopologyRuntimeHost(item.topology);
-    const topologyHostId = resolveTopologyHostId(item.topology);
+    const topologyRuntimeHost = resolveTopologyRuntimeHost(primaryHostSnapshot.topology);
+    const topologyHostId = resolveTopologyHostId(primaryHostSnapshot.topology);
 
     return (
       <div
-        key={item.host.id}
-        data-testid={`runtime-host-device-card-${item.host.id}`}
+        key={item.id}
+        data-testid={`runtime-host-device-card-${primaryHost.id}`}
         className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2.5 dark:border-[#292524] dark:bg-[#292524]"
       >
         <div className="flex items-start justify-between gap-3">
@@ -212,30 +246,31 @@ export function DeviceView({
                 <Monitor size={13} />
               </div>
               <div className="min-w-0">
-                <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.host.name}</p>
+                <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</p>
                 <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">
-                  {item.host.host}:{item.host.port}
+                  {primaryHost.host}:{primaryHost.port}
                 </p>
               </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
               <span className="rounded bg-white px-1.5 py-0.5 dark:bg-[#1C1917]">{trustLabel}</span>
               <span>dial: {addressText}</span>
+              <span>device_id: {item.id}</span>
               {topologyHostId && <span>host_id: {topologyHostId}</span>}
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
             <span
-              data-testid={`runtime-host-status-${item.host.id}`}
+              data-testid={`runtime-host-status-${primaryHost.id}`}
               className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${getHostStatusBadgeClass(item.connectionState)}`}
             >
               {item.connectionState}
             </span>
             <button
               type="button"
-              data-testid={`runtime-host-probe-${item.host.id}`}
+              data-testid={`runtime-host-probe-${primaryHost.id}`}
               onClick={() => {
-                void onRuntimeHostProbe(item.host.id);
+                void onRuntimeHostProbe(primaryHost.id);
               }}
               className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]"
             >
@@ -248,7 +283,7 @@ export function DeviceView({
           <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
             <p className="text-[10px] text-[#A8A29E]">设备名称</p>
             <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
-              {topologyDevice?.name ?? topologyRuntimeHost?.hostname ?? item.host.name}
+              {item.name}
             </p>
           </div>
           <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
@@ -258,9 +293,21 @@ export function DeviceView({
             </p>
           </div>
           <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
+            <p className="text-[10px] text-[#A8A29E]">设备类型</p>
+            <p className="truncate text-[11px] font-medium capitalize text-[#1C1917] dark:text-[#FAFAF9]">
+              {item.kind}
+            </p>
+          </div>
+          <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
+            <p className="text-[10px] text-[#A8A29E]">宿主 / 部件</p>
+            <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+              {item.hosts.length} / {item.components.length}
+            </p>
+          </div>
+          <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
             <p className="text-[10px] text-[#A8A29E]">延迟</p>
             <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
-              {item.latencyMs ? `${item.latencyMs} ms` : '--'}
+              {primaryHostSnapshot.latencyMs ? `${primaryHostSnapshot.latencyMs} ms` : '--'}
             </p>
           </div>
           <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
@@ -280,14 +327,14 @@ export function DeviceView({
 
         {verificationPresentation && (
           <div
-            data-testid={`runtime-host-verification-panel-${item.host.id}`}
+            data-testid={`runtime-host-verification-panel-${primaryHost.id}`}
             className="mt-2 rounded-lg border border-[#D6D3D1] bg-white px-2 py-2 dark:border-[#44403C] dark:bg-[#1C1917]"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-[10px] text-[#A8A29E]">互通验证</p>
                 <p
-                  data-testid={`runtime-host-verification-status-${item.host.id}`}
+                  data-testid={`runtime-host-verification-status-${primaryHost.id}`}
                   className={`text-[11px] font-semibold ${verificationPresentation.toneClass}`}
                 >
                   {verificationPresentation.label}
@@ -298,9 +345,9 @@ export function DeviceView({
               </div>
               <button
                 type="button"
-                data-testid={`runtime-host-verify-${item.host.id}`}
+                data-testid={`runtime-host-verify-${primaryHost.id}`}
                 onClick={() => {
-                  void onVerifyPeer(item.host.id);
+                  void onVerifyPeer(primaryHost.id);
                 }}
                 disabled={!canVerifyConfirmedPeer || verificationPresentation.status === 'running'}
                 className="rounded bg-[#0D9488] px-2 py-1 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -312,21 +359,21 @@ export function DeviceView({
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div className="rounded-md bg-[#FAF7F5] px-2 py-1 dark:bg-[#292524]">
                 <p
-                  data-testid={`runtime-host-local-rtt-${item.host.id}`}
+                  data-testid={`runtime-host-local-rtt-${primaryHost.id}`}
                   className="text-[10px] font-medium text-[#1C1917] dark:text-[#FAFAF9]"
                 >
-                  {typeof item.host.localInitiatedRttMs === 'number'
-                    ? `本端 RTT ${item.host.localInitiatedRttMs} ms`
+                  {typeof primaryHost.localInitiatedRttMs === 'number'
+                    ? `本端 RTT ${primaryHost.localInitiatedRttMs} ms`
                     : '本端 RTT --'}
                 </p>
               </div>
               <div className="rounded-md bg-[#FAF7F5] px-2 py-1 dark:bg-[#292524]">
                 <p
-                  data-testid={`runtime-host-peer-rtt-${item.host.id}`}
+                  data-testid={`runtime-host-peer-rtt-${primaryHost.id}`}
                   className="text-[10px] font-medium text-[#1C1917] dark:text-[#FAFAF9]"
                 >
-                  {typeof item.host.peerInitiatedRttMs === 'number'
-                    ? `对端 RTT ${item.host.peerInitiatedRttMs} ms`
+                  {typeof primaryHost.peerInitiatedRttMs === 'number'
+                    ? `对端 RTT ${primaryHost.peerInitiatedRttMs} ms`
                     : '对端 RTT --'}
                 </p>
               </div>
@@ -339,12 +386,12 @@ export function DeviceView({
               </div>
             )}
 
-            {item.host.lastVerificationError && verificationPresentation.status === 'failed' && (
+            {primaryHost.lastVerificationError && verificationPresentation.status === 'failed' && (
               <p
-                data-testid={`runtime-host-verification-error-${item.host.id}`}
+                data-testid={`runtime-host-verification-error-${primaryHost.id}`}
                 className="mt-2 text-[10px] text-[#DC2626]"
               >
-                {item.host.lastVerificationError}
+                {primaryHost.lastVerificationError}
               </p>
             )}
           </div>
@@ -352,14 +399,15 @@ export function DeviceView({
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
           <span>runtime: {topologyRuntimeHost?.version ?? '--'}</span>
+          <span>links: {item.links.length}</span>
           <span>memory: {formatHostMemory(topologyRuntimeHost?.used_memory_mb, topologyRuntimeHost?.total_memory_mb)}</span>
         </div>
 
-        {item.host.lastCheckedAt && (
-          <p className="mt-1 text-[10px] text-[#A8A29E]">last: {item.host.lastCheckedAt}</p>
+        {primaryHost.lastCheckedAt && (
+          <p className="mt-1 text-[10px] text-[#A8A29E]">last: {primaryHost.lastCheckedAt}</p>
         )}
-        {item.error && (
-          <p className="mt-1 text-[10px] text-[#DC2626]">{item.error}</p>
+        {primaryHostSnapshot.error && (
+          <p className="mt-1 text-[10px] text-[#DC2626]">{primaryHostSnapshot.error}</p>
         )}
       </div>
     );
@@ -370,7 +418,7 @@ export function DeviceView({
       <article className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">我的节点</h3>
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">设备网络视图</h3>
             <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">{localNodeSummary}</p>
           </div>
           <button

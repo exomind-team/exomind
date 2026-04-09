@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { DeviceView } from '@/ui/app/pages/agents/DeviceView';
-import type { RuntimeHostSnapshot } from '@/services/runtime-manager';
+import type { RuntimeDeviceSnapshot, RuntimeHostSnapshot } from '@/services/runtime-manager';
 
 function buildNestedSnapshot(): RuntimeHostSnapshot {
   return {
@@ -55,11 +55,40 @@ function buildNestedSnapshot(): RuntimeHostSnapshot {
   };
 }
 
+function buildDeviceSnapshot(): RuntimeDeviceSnapshot {
+  return {
+    id: 'device-name-host',
+    name: 'Galaxy S24',
+    kind: 'phone',
+    primaryRuntimeHostId: 'device-name-host',
+    connectionState: 'online',
+    hosts: [buildNestedSnapshot()],
+    components: [{
+      id: 'component-runtime-host',
+      device_id: 'device-name-host',
+      kind: 'runtime_host',
+      name: 'ExoMind Runtime',
+      status: 'online',
+      runtime_host_id: 'device-name-host',
+    }],
+    links: [{
+      id: 'device-link-runtime-host',
+      source_kind: 'device',
+      source_id: 'device-name-host',
+      target_kind: 'device_component',
+      target_id: 'component-runtime-host',
+      transport: 'ownership',
+      status: 'online',
+    }],
+  };
+}
+
 describe('DeviceView runtime topology selectors（设备页拓扑选择器）', () => {
   it('prefers topology.device.name over legacy hostname（优先显示 topology.device.name）', () => {
     render(
       <DeviceView
         groups={[]}
+        runtimeDeviceSnapshots={[buildDeviceSnapshot()]}
         runtimeHostSnapshots={[buildNestedSnapshot()]}
         runtimeServiceStatus={{
           running: true,
@@ -90,9 +119,14 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
       />,
     );
 
+    expect(screen.getByText('设备网络视图')).toBeInTheDocument();
     const discoveredSection = screen.getByTestId('runtime-peer-section-discovered');
-    expect(within(discoveredSection).getByText('Galaxy S24')).toBeInTheDocument();
+    const deviceCard = within(discoveredSection).getByTestId('runtime-host-device-card-runtime-host-device-name');
+    expect(within(deviceCard).getAllByText('Galaxy S24')).toHaveLength(2);
+    expect(within(deviceCard).getByText('device_id: device-name-host')).toBeInTheDocument();
     expect(within(discoveredSection).getByText('host_id: device-name-host')).toBeInTheDocument();
     expect(within(discoveredSection).getByText('Android')).toBeInTheDocument();
+    expect(within(deviceCard).getByText('1 / 1')).toBeInTheDocument();
+    expect(within(deviceCard).getByText('links: 1')).toBeInTheDocument();
   });
 });

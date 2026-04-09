@@ -78,6 +78,7 @@ export interface RuntimeTopologyResponse {
   device?: RuntimeTopologyDevice; // 规范化设备对象（normalized device）
   device_components?: RuntimeTopologyDeviceComponent[]; // 设备部件（device components）
   device_links?: RuntimeTopologyDeviceLink[]; // 设备链路（device links）
+  device_is_inferred?: boolean; // 内部标记：device 是否由前端 fallback 推断（internal inferred-device flag）
 }
 
 export function resolveTopologyRuntimeHost(
@@ -168,5 +169,6 @@ export function normalizeRuntimeTopologyResponse(
     device: device ?? topology.device,
     device_components: topology.device_components ?? [],
     device_links: topology.device_links ?? [],
+    device_is_inferred: topology.device_is_inferred ?? !topology.device,
   };
 }

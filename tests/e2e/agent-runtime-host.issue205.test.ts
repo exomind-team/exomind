@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
+import type { Socket } from 'node:net';
 
 const RUNTIME_HOST = '127.0.0.1';
 const RUNTIME_PORT = 4477;
@@ -16,6 +17,7 @@ async function setupIssue205Flags(page: Page) {
 test.describe('Issue #205 runtime host device flow（设备页 RuntimeHost 闭环）', () => {
   let runtimeServer: Server | null = null;
   let runtimeOnline = false;
+  const runtimeSockets = new Set<Socket>();
 
   test.beforeAll(async () => {
     runtimeServer = createServer((request, response) => {
@@ -68,6 +70,42 @@ test.describe('Issue #205 runtime host device flow（设备页 RuntimeHost 闭�
             agent_kinds: ['claude_cli', 'codex_cli', 'api'],
             api_providers: ['openai', 'anthropic'],
           },
+          runtime_host: {
+            host_id: 'issue205-host',
+            hostname: RUNTIME_NAME,
+            os: 'Windows 11',
+            arch: 'x86_64',
+            uptime_secs: 120,
+            version: '0.1.0',
+            port: RUNTIME_PORT,
+            capabilities: {
+              agent_kinds: ['claude_cli', 'codex_cli', 'api'],
+              api_providers: ['openai', 'anthropic'],
+            },
+          },
+          device: {
+            id: 'issue205-device',
+            name: 'Issue205 Device',
+            kind: 'desktop',
+            primary_runtime_host_id: 'issue205-host',
+          },
+          device_components: [{
+            id: 'issue205-device:runtime-host',
+            device_id: 'issue205-device',
+            kind: 'runtime_host',
+            name: 'Runtime Host',
+            status: 'online',
+            runtime_host_id: 'issue205-host',
+          }],
+          device_links: [{
+            id: 'issue205-device:owns:runtime-host',
+            source_kind: 'device',
+            source_id: 'issue205-device',
+            target_kind: 'device_component',
+            target_id: 'issue205-device:runtime-host',
+            transport: 'ownership',
+            status: 'online',
+          }],
         }));
         return;
       }
@@ -93,10 +131,22 @@ test.describe('Issue #205 runtime host device flow（设备页 RuntimeHost 闭�
       runtimeServer?.once('error', reject);
       runtimeServer?.listen(RUNTIME_PORT, RUNTIME_HOST, () => resolve());
     });
+    runtimeServer?.on('connection', (socket) => {
+      runtimeSockets.add(socket);
+      socket.on('close', () => {
+        runtimeSockets.delete(socket);
+      });
+    });
   });
 
   test.afterAll(async () => {
     if (!runtimeServer) return;
+    // Force-close keep-alive sockets（强制关闭保活连接）so Playwright can exit cleanly.
+    for (const socket of runtimeSockets) {
+      socket.destroy();
+    }
+    runtimeServer.closeAllConnections?.();
+    runtimeServer.closeIdleConnections?.();
     await new Promise<void>((resolve) => {
       runtimeServer?.close(() => resolve());
     });
@@ -111,6 +161,7 @@ test.describe('Issue #205 runtime host device flow（设备页 RuntimeHost 闭�
     await page.goto('/agents');
     await expect(page.getByRole('heading', { name: '信号网络' })).toBeVisible();
     await expect(page.getByTestId('agent-view-toggle-device')).toBeVisible();
+    await expect(page.getByTestId('agent-view-toggle-topology')).toBeVisible();
 
     await page.getByTestId('agent-view-toggle-device').click();
     await expect(page.getByTestId('runtime-host-panel')).toBeVisible();
@@ -128,5 +179,12 @@ test.describe('Issue #205 runtime host device flow（设备页 RuntimeHost 闭�
     runtimeOnline = true;
     await hostCard.getByRole('button', { name: '重试' }).click();
     await expect(hostCard.locator('[data-testid^="runtime-host-status-"]')).toHaveText('online');
+    await expect(page.getByText('Issue205 Device').first()).toBeVisible();
+    await expect(page.getByText('device_id: issue205-device')).toBeVisible();
+
+    await page.getByTestId('agent-host-manager-overlay').click();
+    await expect(page.getByTestId('agent-host-manager-sheet')).not.toBeVisible();
+    await page.getByTestId('agent-view-toggle-topology').click();
+    await expect(page.getByTestId('agent-topology-view-title')).toBeVisible();
   });
 });
