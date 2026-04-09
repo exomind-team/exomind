@@ -1,0 +1,180 @@
+src/components/TimeBlockWidget.tsx
+  bf672b8321584a34 187,195,482
+crates/exomind-runtime/src/routes/timeblocks.rs
+  bf672b8321584a34 3,11-12,98-106,182-184,227-233,258-261,410-472,499,549,552-553,557,597-623,672,675,733,736,739,744-746,810,813,818-821,869-906,1081,1367,1369,1379,1382,1478-1494,1496-1525,1528-1565,1640-1669,1672-1709,1762,1778-1779,1782-1786,1788,1795,1821,1834,1838-1839,1841-1849,1854,1856,1860-1862,1867,1869,1872-1873,1876-1880,1882,1888,1901,1914,1918-1919,1921-1929,1934,1939-1941,1946,2094-2227
+src/lib/services/gap-backfill.ts
+  bf672b8321584a34 8,21-23,40,56-59
+crates/exomind-runtime/src/signal/actors/replication_actor.rs
+  bf672b8321584a34 331-373,383-388,459-533
+docs/plans/2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md
+  bf672b8321584a34 1-180
+src/lib/services/timeblock.service.ts
+  bf672b8321584a34 23,25,28,45-50,61,68-70,72,75,88,96,100-101,125,134,144,149,188,190-194,196-202,209-213,238-248,270,292,300,311-314,363,387-388,435-438,492-495,565-568,607,609-621,710-714,719-721,740-744,760,762-763,777-778,785,787-799,806-815,1148-1153,1155,1161-1162,1165-1166,1169,1176-1177,1180,1199,1216-1218,1293,1319,1325-1337,1375-1378,1402,1404,1407,1410,1422-1425,1432,1434,1438-1441,1447-1448,1456,1458
+src/lib/timeblock/derive.ts
+  bf672b8321584a34 1,66-118
+tests/unit/adapters/timeblock-rt-adapter.test.ts
+  bf672b8321584a34 71,77-78,86-190,194-212,214-215,217,220,222-227,231-332,334-383,385-389
+tests/unit/services/gap-backfill-integration.issue759.test.ts
+  bf672b8321584a34 34,40-46,58-111,139,164,181
+tests/unit/services/timeblock.service.rt-sqlite.test.ts
+  bf672b8321584a34 45,59,65,95-100,104-119,139,193-205,254,280-310,312-351,366,372-423
+src/lib/adapters/timeblock-rt-adapter.ts
+  bf672b8321584a34 6,40,52,55,57-58,61,69,89-106
+tests/unit/services/timeblock.service.issue104-sync.test.ts
+  bf672b8321584a34 15-21,36-42,85-91,157-168
+src/lib/services/timeblock-backup.service.ts
+  bf672b8321584a34 8,23,43
+src/ui/app/components/FocusTimerWidget.tsx
+  bf672b8321584a34 343,351,512
+src/lib/services/ecs-active-block-replication.service.ts
+  bf672b8321584a34 5,22,43,58
+src/ui/components/MigrationDialogController.tsx
+  bf672b8321584a34 27,129,171-178,182-189
+crates/exomind-runtime/src/routes/today_planner.rs
+  bf672b8321584a34 494,672-719
+src/lib/adapters/today-planner-rt-adapter.ts
+  bf672b8321584a34 9,64-65
+src/lib/timeblock/countdown-progress.ts
+  bf672b8321584a34 1-7,18-20,23-25,30,34-35,41-46,48,51-52,58
+src/ui/app/components/NowTodayTab.tsx
+  bf672b8321584a34 52
+crates/exomind-runtime/tests/timeblock_routes.rs
+  bf672b8321584a34 73,77,79,82-111,115,122,131,135-136,138,144-158,173,188-896
+tests/unit/services/new-block.issue759.test.ts
+  bf672b8321584a34 44,50,73,76-91,111,158-167
+src/lib/services/today-planner.service.ts
+  bf672b8321584a34 6,17,36
+src/lib/timeblock/countdown-overrun.ts
+  bf672b8321584a34 1,4
+tests/e2e/timeblock-task-status.issue374.test.ts
+  bf672b8321584a34 128
+src/lib/types/event.ts
+  bf672b8321584a34 97,100,102,104-106,110-135,142-143,171,420-540
+crates/exomind-runtime/src/timeblock.rs
+  bf672b8321584a34 39-78,253-323,325-332,1203-1251
+tests/unit/services/timeblock-backup.service.test.ts
+  bf672b8321584a34 23-53,91-139,141-158
+src/lib/timeblock/expected-end-time.ts
+  bf672b8321584a34 1-2,14,50
+src/lib/services/signal-handlers.ts
+  bf672b8321584a34 14,100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "174b6ba4a6996f8f6f5a282c2a46bd448ad98170",
+  "prompts": {
+    "14886ab1becfdebb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d71f5-5a1a-7f33-9c04-3ab838e1dbfc",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 34,
+      "total_deletions": 9,
+      "accepted_lines": 27,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/7b06f889310eb58b607450fbd7c21f7cd306c460cc296788c89b2034afbc1858"
+    },
+    "2627c607d409afab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7082-a4ae-74e3-82a6-fb0c00f5b082",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 716,
+      "total_deletions": 1324,
+      "accepted_lines": 532,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/b4a4278a6f87c82b6ecc19e54277a7fb4d2245fb2a1e94624572ffe786cd6695"
+    },
+    "589b71a1b7b65edd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d70b8-9b61-7561-b7f2-bfef446e8b3d",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 292,
+      "total_deletions": 190,
+      "accepted_lines": 1,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/1db893595c6ff836ba4ff4245e3aca8f10f44df5f769ae4e413fd6ec45182b15"
+    },
+    "9971c15c2a8d4b27": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7057-f233-7e01-a31c-80c2c617448c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 27,
+      "total_deletions": 74,
+      "accepted_lines": 16,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/2784d1e19fb229fb738f695e2252b28235024630d7e87bd815000675d05529f8"
+    },
+    "a3f581d06bdb89bf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d71bd-10fe-7251-ab02-db28b368e774",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 66,
+      "total_deletions": 39,
+      "accepted_lines": 44,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/b2799a522e999cb1c7953d858bc4e744f9f2229fa807f19fed9b9ffdf57497a1"
+    },
+    "a6385f73b0f1344f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fed-bc8e-7d33-8d94-d5ca5041b82c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 1,
+      "accepted_lines": 3,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f2f096a8891b4b76d85f52647945d0ae08a3c814676f7764390b01d5658c8c1b"
+    },
+    "bf672b8321584a34": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d722a-d926-7a72-9f9f-88a8c87b6964",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 3031,
+      "total_deletions": 821,
+      "accepted_lines": 3031,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d5948b311209c6caedffd479cb1aec483f38fec3bf581793347972fb1880be05"
+    },
+    "d579384bde59f3e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7060-c933-7253-8ce9-653f36f4d7fd",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 1299,
+      "total_deletions": 680,
+      "accepted_lines": 313,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/4e70b467dd5a45b252a44d128f7a094838f48eb5b63c740b1249998b88a0f428"
+    }
+  }
+}
