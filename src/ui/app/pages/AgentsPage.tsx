@@ -7437,6 +7437,7 @@ export function AgentsPage() {
                           rtBaseUrl={connection.rtBaseUrl}
                           ptyId={activePtyId}
                           authToken={connection.authToken}
+                          interactive={!isActivePtyDisconnected}
                           onInitialConnectionFailure={() => {
                             void handleActivePtyInitialConnectionFailure(activePtyId, resolvedActivePtyHostId);
                           }}

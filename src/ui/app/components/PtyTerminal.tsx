@@ -9,7 +9,15 @@ import {
   subscribePtyTerminalReplayLimitKbChanges,
 } from '@/config/pty-terminal-preferences';
 import { log } from '@/lib/logger';
-import { sendPtyTextInput } from './pty-input';
+import {
+  getPtyInputTransportSnapshot,
+  retainPtyInputTransport,
+  retryPtyInputTransport,
+  sendPtyResize,
+  sendPtyTextInput,
+  type PtyInputTarget,
+  type PtyInputTransportSnapshot,
+} from './pty-input';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -27,6 +35,12 @@ const INITIAL_STREAM_CONNECT_RETRY_DELAY_MS = 250;
 const INITIAL_STREAM_CONNECT_TIMEOUT_MS = 4_000;
 const INITIAL_LAYOUT_READY_FALLBACK_CONNECT_MS = 1_200;
 const STREAM_RECONNECT_DELAY_MS = 500;
+const OUTPUT_WRITE_BATCH_FLUSH_MS = 16;
+const READ_ONLY_INPUT_TRANSPORT_SNAPSHOT: PtyInputTransportSnapshot = {
+  phase: 'idle',
+  errorMessage: null,
+  readOnly: false,
+};
 
 function formatInitialStreamFailureSummary(message: string): string {
   const normalized = message.toLowerCase();
@@ -84,6 +98,19 @@ function parseSseFrame(rawFrame: string): { eventType: string; data: string | nu
   };
 }
 
+function decodePtyOutputPayload(data: string): Uint8Array {
+  try {
+    const decoded = atob(data);
+    const bytes = new Uint8Array(decoded.length);
+    for (let i = 0; i < decoded.length; i++) {
+      bytes[i] = decoded.charCodeAt(i);
+    }
+    return bytes;
+  } catch {
+    return new TextEncoder().encode(data);
+  }
+}
+
 function includesWindowsPlatform(value: string | undefined): boolean {
   return typeof value === 'string' && value.toLowerCase().includes('win');
 }
@@ -130,6 +157,11 @@ export function PtyTerminal({
   );
   const [isStreamConnecting, setIsStreamConnecting] = useState(true);
   const [streamErrorMessage, setStreamErrorMessage] = useState<string | null>(null);
+  const [inputTransportSnapshot, setInputTransportSnapshot] = useState<PtyInputTransportSnapshot>(
+    interactive
+      ? getPtyInputTransportSnapshot({ rtBaseUrl, ptyId, authToken })
+      : READ_ONLY_INPUT_TRANSPORT_SNAPSHOT,
+  );
 
   useEffect(() => {
     onInitialConnectionFailureRef.current = onInitialConnectionFailure;
@@ -170,8 +202,43 @@ export function PtyTerminal({
 
     // ── Build auth helper ────────────────────────────────────
 
+    const inputTarget: PtyInputTarget = {
+      rtBaseUrl,
+      ptyId,
+      authToken,
+    };
+    const inputTransport = interactive ? retainPtyInputTransport(inputTarget) : null;
+    let lastAppliedResizeRequestKey: string | null = null;
+    let pendingResizeRequestKey: string | null = null;
+    let pendingResizePromise: Promise<boolean> | null = null;
+    let latestResizeAttemptId = 0;
+    let sendResize: ((rows: number, cols: number) => Promise<boolean>) | null = null;
+    const updateInputTransportState = (snapshot: PtyInputTransportSnapshot) => {
+      if (disposed) {
+        return;
+      }
+      setInputTransportSnapshot(snapshot);
+      if (snapshot.phase !== 'ready') {
+        lastAppliedResizeRequestKey = null;
+        pendingResizeRequestKey = null;
+        pendingResizePromise = null;
+      }
+      if (terminalRef.current) {
+        terminalRef.current.options.disableStdin = !interactive || snapshot.phase !== 'ready';
+        if (interactive && snapshot.phase === 'ready' && sendResize) {
+          void sendResize(terminalRef.current.rows, terminalRef.current.cols);
+        }
+      }
+    };
+    if (inputTransport) {
+      updateInputTransportState(inputTransport.getSnapshot());
+    } else {
+      updateInputTransportState(READ_ONLY_INPUT_TRANSPORT_SNAPSHOT);
+    }
+    const unsubscribeInputTransport = inputTransport?.subscribe(updateInputTransportState);
+
     const buildHeaders = (): Record<string, string> => {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const headers: Record<string, string> = {};
       if (authToken) {
         headers['Authorization'] = `Bearer ${authToken}`;
       }
@@ -191,62 +258,49 @@ export function PtyTerminal({
       }
       return base;
     };
-
-    let lastResizeRequestKey: string | null = null;
-    let controlRequestPauseUntil = 0;
-
-    const isFatalControlStatus = (status: number) => (
-      status === 401 || status === 403 || status === 404
-    );
-
-    const isControlRequestPaused = () => Date.now() < controlRequestPauseUntil;
-
-    const pauseControlRequests = (
-      action: 'resize' | 'input',
-      status: number,
-    ) => {
-      controlRequestPauseUntil = Date.now() + 1500;
-      log.warn(
-        `[PtyTerminal] pausing PTY ${ptyId} ${action} requests for 1500ms after HTTP ${status} from ${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/${action}`,
-      );
-    };
-
-    const sendResize = (rows: number, cols: number) => {
+    sendResize = (rows: number, cols: number) => {
       if (!interactive) {
-        return;
-      }
-      if (isControlRequestPaused()) {
-        return;
+        return Promise.resolve(true);
       }
 
       const requestKey = `${rows}x${cols}`;
-      if (lastResizeRequestKey === requestKey) {
-        return;
+      if (pendingResizeRequestKey === requestKey && pendingResizePromise) {
+        return pendingResizePromise;
       }
-      lastResizeRequestKey = requestKey;
+      if (!pendingResizeRequestKey && lastAppliedResizeRequestKey === requestKey) {
+        return Promise.resolve(true);
+      }
 
-      void fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize`, {
-        method: 'POST',
-        headers: buildHeaders(),
-        body: JSON.stringify({ rows, cols }),
-      }).then((response) => {
+      const attemptId = ++latestResizeAttemptId;
+      pendingResizeRequestKey = requestKey;
+      pendingResizePromise = sendPtyResize(inputTarget, rows, cols).then((response) => {
+        if (attemptId !== latestResizeAttemptId) {
+          return response.ok;
+        }
+
+        pendingResizeRequestKey = null;
+        pendingResizePromise = null;
         if (response.ok) {
-          return;
+          lastAppliedResizeRequestKey = requestKey;
+          return true;
         }
-        if (!isFatalControlStatus(response.status)) {
-          lastResizeRequestKey = null;
-        } else {
-          pauseControlRequests('resize', response.status);
-        }
+
         log.warn(
-          `[PtyTerminal] resize rejected for PTY ${ptyId} via ${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize with HTTP ${response.status}`,
+          `[PtyTerminal] resize rejected for PTY ${ptyId} via WS with status ${response.status}`,
         );
+        return false;
       }).catch((error: unknown) => {
-        lastResizeRequestKey = null;
+        if (attemptId === latestResizeAttemptId) {
+          pendingResizeRequestKey = null;
+          pendingResizePromise = null;
+        }
         log.error(
-          `[PtyTerminal] resize request failed for PTY ${ptyId}: ${error instanceof Error ? error.message : String(error)}`,
+          `[PtyTerminal] resize request failed for PTY ${ptyId} via WS: ${error instanceof Error ? error.message : String(error)}`,
         );
+        return false;
       });
+
+      return pendingResizePromise;
     };
 
     // ── Create terminal ──────────────────────────────────────
@@ -264,7 +318,7 @@ export function PtyTerminal({
       scrollback: scrollbackLinesRef.current,
       scrollOnEraseInDisplay: true,
       allowProposedApi: true,
-      disableStdin: !interactive,
+      disableStdin: !interactive || inputTransportSnapshot.phase !== 'ready',
       windowsPty: resolveWindowsPtyOptions(),
     });
 
@@ -278,33 +332,57 @@ export function PtyTerminal({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    terminal.options.disableStdin = !interactive || inputTransport?.getSnapshot().phase !== 'ready';
+
+    let outputFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    let pendingOutputChunks: Uint8Array[] = [];
+
+    const flushPendingOutput = () => {
+      if (outputFlushTimer) {
+        clearTimeout(outputFlushTimer);
+        outputFlushTimer = null;
+      }
+      if (pendingOutputChunks.length === 0) {
+        return;
+      }
+
+      const totalLength = pendingOutputChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      const merged = new Uint8Array(totalLength);
+      let offset = 0;
+      pendingOutputChunks.forEach((chunk) => {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+      });
+      pendingOutputChunks = [];
+      terminal.write(merged);
+    };
+
+    const queueOutputChunk = (chunk: Uint8Array) => {
+      pendingOutputChunks.push(chunk);
+      if (outputFlushTimer) {
+        return;
+      }
+      outputFlushTimer = setTimeout(() => {
+        flushPendingOutput();
+      }, OUTPUT_WRITE_BATCH_FLUSH_MS);
+    };
 
     // ── Helper: send raw text to PTY backend ──────────────────
 
     const sendTextInput = (text: string) => {
-      if (isControlRequestPaused()) {
-        return;
-      }
-      void sendPtyTextInput({
-        rtBaseUrl,
-        ptyId,
-        authToken,
-      }, text).then((response) => {
+      void sendPtyTextInput(inputTarget, text).then((response) => {
         if (response.ok) {
           return;
         }
-        if (isFatalControlStatus(response.status)) {
-          pauseControlRequests('input', response.status);
-        }
         log.warn(
-          `[PtyTerminal] input rejected for PTY ${ptyId} via ${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/input with HTTP ${response.status}`,
+          `[PtyTerminal] input rejected for PTY ${ptyId} via WS with status ${response.status}`,
         );
       }).catch((e: unknown) => {
         log.error(`[PtyTerminal] pty input failed: ${e instanceof Error ? e.message : String(e)}`);
       });
     };
 
-    // ── Handle user input → POST to backend ──────────────────
+    // ── Handle user input → WebSocket transport ──────────────
 
     const inputDisposable = interactive
       ? terminal.onData((data) => {
@@ -372,7 +450,7 @@ export function PtyTerminal({
     // ── Handle resize → POST to backend ──────────────────────
 
     const resizeDisposable = terminal.onResize(({ rows, cols }) => {
-      sendResize(rows, cols);
+      void sendResize?.(rows, cols);
     });
 
     // ── ResizeObserver → refit terminal ──────────────────────
@@ -435,13 +513,19 @@ export function PtyTerminal({
         // Ignore fit/refresh errors during rapid resizing
       }
 
-      if (interactive) {
-        sendResize(terminal.rows, terminal.cols);
-      }
-
       if (!initialLayoutReady && !connectScheduled) {
         initialLayoutReady = true;
-        scheduleConnect(50);
+        if (interactive && sendResize) {
+          void sendResize(terminal.rows, terminal.cols).finally(() => {
+            if (!disposed && !connectScheduled) {
+              scheduleConnect(50);
+            }
+          });
+        } else {
+          scheduleConnect(50);
+        }
+      } else if (interactive && sendResize) {
+        void sendResize(terminal.rows, terminal.cols);
       }
 
       return true;
@@ -453,10 +537,10 @@ export function PtyTerminal({
     resizeObserver.observe(container);
     resizeObserverRef.current = resizeObserver;
 
-    // ── Initial fit + resize THEN connect SSE ────────────────
-    // Critical order: fit → resize → SSE.
-    // If SSE connects before resize, the PTY uses default 80 cols
-    // but the terminal may be narrower, causing cursor drift on backspace.
+    // ── Initial fit + resize ack THEN connect SSE ────────────
+    // Critical order: fit → dispatch resize → wait for resize result → SSE.
+    // If SSE connects before the resize result settles, the PTY can emit output
+    // using stale geometry and reintroduce cursor drift on backspace/wrapping.
 
     let streamAbortController: AbortController | null = null;
 
@@ -591,7 +675,6 @@ export function PtyTerminal({
       }
 
       initialStreamRetryCount = 0;
-      controlRequestPauseUntil = 0;
       markStreamReady();
       log.info(
         `[PtyTerminal] PTY stream connected for ${ptyId} with HTTP ${response.status}`,
@@ -619,21 +702,13 @@ export function PtyTerminal({
             }
 
             if (eventType === 'output') {
-              try {
-                const decoded = atob(data);
-                const bytes = new Uint8Array(decoded.length);
-                for (let i = 0; i < decoded.length; i++) {
-                  bytes[i] = decoded.charCodeAt(i);
-                }
-                terminal.write(bytes);
-              } catch {
-                terminal.write(data);
-              }
+              queueOutputChunk(decodePtyOutputPayload(data));
               continue;
             }
 
             if (eventType === 'eof') {
               sawEof = true;
+              flushPendingOutput();
               const exitCode = parsePtyExitCode(data);
               const message = formatPtyProcessExitedMessage(exitCode);
               terminal.write(`\r\n\x1b[90m${message}\x1b[0m\r\n`);
@@ -674,7 +749,7 @@ export function PtyTerminal({
     // 1. fit terminal to container
     // 2. refresh terminal canvas / rows
     // 3. send resize to PTY backend
-    // 4. connect SSE only after resize is dispatched
+    // 4. connect SSE only after the resize request settles
     requestAnimationFrame(() => {
       if (syncTerminalLayout()) {
         // Auto-focus the terminal only when layout is ready
@@ -692,6 +767,8 @@ export function PtyTerminal({
       if (interactive) {
         document.removeEventListener('paste', documentPasteHandler);
       }
+      unsubscribeInputTransport?.();
+      inputTransport?.release();
       inputDisposable.dispose();
       resizeDisposable.dispose();
 
@@ -716,6 +793,7 @@ export function PtyTerminal({
         streamAbortController.abort();
         streamAbortController = null;
       }
+      flushPendingOutput();
 
       terminal.dispose();
       terminalRef.current = null;
@@ -741,6 +819,26 @@ export function PtyTerminal({
           <p className="text-sm text-[#FCA5A5]">
             {streamErrorMessage}
           </p>
+        </div>
+      ) : null}
+      {!isStreamConnecting && !streamErrorMessage && interactive && inputTransportSnapshot.phase === 'error' ? (
+        <div
+          data-testid="pty-terminal-input-error"
+          className="absolute left-3 right-3 top-3 z-20 flex items-center justify-between gap-3 rounded border border-[#92400E] bg-[#1C1917]/95 px-3 py-2 text-xs text-[#FDE68A]"
+        >
+          <p className="min-w-0 flex-1">
+            {inputTransportSnapshot.errorMessage ?? '终端输入通道已断开，当前仅保留只读输出；请手动重试输入通道。'}
+          </p>
+          <button
+            type="button"
+            data-testid="pty-terminal-input-retry"
+            className="shrink-0 rounded border border-[#A16207] px-2 py-1 text-[11px] text-[#FDE68A] hover:border-[#CA8A04]"
+            onClick={() => {
+              retryPtyInputTransport({ rtBaseUrl, ptyId, authToken });
+            }}
+          >
+            重试输入
+          </button>
         </div>
       ) : null}
       <div

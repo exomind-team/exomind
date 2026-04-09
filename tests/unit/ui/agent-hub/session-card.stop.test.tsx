@@ -6,7 +6,20 @@ import { TiledGrid } from '@/ui/app/pages/agents/TiledGrid';
 import type { SessionInfo } from '@/lib/types/session';
 
 vi.mock('@/ui/app/components/PtyTerminal', () => ({
-  PtyTerminal: () => <div data-testid="mock-pty-terminal">Mock PTY Terminal</div>,
+  PtyTerminal: ({
+    ptyId,
+    interactive,
+  }: {
+    ptyId?: string;
+    interactive?: boolean;
+  }) => (
+    <div
+      data-testid={ptyId ? `mock-pty-terminal-${ptyId}` : 'mock-pty-terminal'}
+      data-interactive={interactive === false ? 'false' : 'true'}
+    >
+      Mock PTY Terminal
+    </div>
+  ),
 }));
 
 function buildSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
@@ -366,5 +379,32 @@ describe('tiled grid terminal lifecycle actions（平铺视图终端生命周期
 
     expect(onArchiveSession).toHaveBeenCalledWith(session);
     expect(onStopSession).not.toHaveBeenCalled();
+  });
+
+  it('renders disconnected tiled terminals in read-only mode（断开窗格不会继续建立可输入终端）', () => {
+    const session = buildSession({
+      id: 'terminal-disconnected',
+      interaction_mode: 'terminal',
+      pty_id: 'pty-disconnected-grid',
+    });
+
+    render(
+      <TiledGrid
+        sessions={[session]}
+        layout="1x1"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+        isSessionDisconnected={() => true}
+      />,
+    );
+
+    expect(screen.getByTestId('mock-pty-terminal-pty-disconnected-grid')).toHaveAttribute(
+      'data-interactive',
+      'false',
+    );
+    expect(screen.getByTestId('tiled-grid-pty-disconnected-terminal-disconnected')).toBeInTheDocument();
   });
 });

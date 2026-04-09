@@ -1400,6 +1400,7 @@ function SessionPane({
               rtBaseUrl={connection.rtBaseUrl}
               ptyId={session.pty_id!}
               authToken={connection.authToken}
+              interactive={!showTerminalUnavailable}
               autoFocus={false}
               onInitialConnectionFailure={() => {
                 setInitialConnectionFailed(true);

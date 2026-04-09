@@ -45,6 +45,18 @@ const sessionStreamState = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 
+const ptyInputMocks = vi.hoisted(() => ({
+  sendPtyShortcutInput: vi.fn(),
+}));
+
+vi.mock('@/ui/app/components/pty-input', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/ui/app/components/pty-input')>();
+  return {
+    ...actual,
+    sendPtyShortcutInput: ptyInputMocks.sendPtyShortcutInput,
+  };
+});
+
 vi.mock('@/ui/app/components/PtyTerminal', () => ({
   PtyTerminal: ({
     ptyId,
@@ -228,6 +240,7 @@ function buildRuntimeSnapshot() {
 describe('agents page issue-840（平铺工作台键盘快捷键）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ptyInputMocks.sendPtyShortcutInput.mockResolvedValue(true);
     localStorage.clear();
     localStorage.setItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY, 'tiled');
     vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
@@ -427,13 +440,6 @@ describe('agents page issue-840（平铺工作台键盘快捷键）', () => {
           json: async () => [],
         } as Response;
       }
-      if (url.includes(`/pty/${encodeURIComponent(liveSession.pty_id ?? '')}/input`)) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ ok: true }),
-        } as Response;
-      }
       return {
         ok: false,
         status: 404,
@@ -463,11 +469,11 @@ describe('agents page issue-840（平铺工作台键盘快捷键）', () => {
     });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining(`/pty/${encodeURIComponent(liveSession.pty_id ?? '')}/input`),
+      expect(ptyInputMocks.sendPtyShortcutInput).toHaveBeenCalledWith(
         expect.objectContaining({
-          method: 'POST',
+          ptyId: liveSession.pty_id,
         }),
+        'Alt+Shift+V',
       );
     });
     expect(screen.queryByTestId('tiled-slot-slot-2')).not.toBeInTheDocument();
