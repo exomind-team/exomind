@@ -1,0 +1,28 @@
+docs/plans/2026-04-09-issue-885-eventlog-sync-debug-plan.md
+  8468007bd6a1d8c0 1-252
+docs/plans/2026-04-09-exomind-website-redesign-plan.md
+  8468007bd6a1d8c0 281
+docs/plans/2026-04-09-CRDT-analysis-Grok_fast_4_1.md
+  8468007bd6a1d8c0 1-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "da2b31881d7bc00926f52ac6cecaeefff6b8db2a",
+  "prompts": {
+    "8468007bd6a1d8c0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fc2-a6ea-7ab2-b84d-fd063f889cd6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 400,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e212411e3f527f3cd51eab73c319524ddbe518396c4d56063a7631fb149d0c4d"
+    }
+  }
+}
