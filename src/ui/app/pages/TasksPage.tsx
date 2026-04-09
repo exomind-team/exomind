@@ -176,7 +176,7 @@ export function TasksPage() {
     <PageShell
       title="任务"
       headerBottom={<TaskDomainTabs active="list" />}
-      contentClassName="min-h-0 flex-1"
+      contentClassName="min-h-0 flex flex-1 flex-col overflow-hidden"
       headerAction={(
         <PageMoreMenu />
       )}

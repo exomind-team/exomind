@@ -158,6 +158,24 @@ describe('TasksPage current layout（任务页当前布局）', () => {
     expect(screen.getByPlaceholderText('添加任务与描述...')).toBeInTheDocument();
   });
 
+  it('anchors the quick add input inside a column shell so it stays at the bottom（快速输入区必须位于纵向壳层底部）', async () => {
+    render(<TasksPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalled();
+    });
+
+    const inputRow = screen.getByTestId('new-now-input-row');
+    const listRegion = screen.getByTestId('new-tasks-page');
+    const contentShell = inputRow.parentElement;
+
+    expect(contentShell).not.toBeNull();
+    expect(contentShell).toContainElement(listRegion);
+    expect(contentShell).toHaveClass('flex');
+    expect(contentShell).toHaveClass('flex-col');
+    expect(contentShell).toHaveClass('overflow-hidden');
+  });
+
   it('renders clickable links for current visible tasks', async () => {
     render(<TasksPage />);
 
