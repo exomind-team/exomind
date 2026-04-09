@@ -1,6 +1,6 @@
 # ExoMind Agent Runtime 统一基础对象模型
 
-> **版本**: v0.2-draft  
+> **版本**: v0.2-draft.2  
 > **日期**: 2026-04-09  
 > **状态**: 待评审（review pending，待评审）  
 > **文档类型**: architecture / spec（架构规格）  
@@ -26,6 +26,7 @@
 6. `Budget / Permission / Capability / Lease / Telemetry / Profile` 为什么必须是横切系统
 7. `Model policy belongs to Agent, active model belongs to Session` 应如何落成正式规则
 8. `Actor / Agent / Port / Connection / Signal` 在第一版应如何收口
+9. `Device / RuntimeHost / DeviceComponent / DeviceLink` 应如何进入统一对象模型
 
 ### 0.2 这份文档不回答什么
 
@@ -93,7 +94,7 @@
 
 ## 2. 一级核心对象
 
-本规格收口为 10 个一级核心对象。
+本规格收口为 14 个一级核心对象。
 
 ### 2.1 `Node（节点）`
 
@@ -259,6 +260,114 @@
 - 同一 `Attachment` 可能被多个 `Surface` 观察
 - 交互控制权需要和 `Lease` 联动
 
+### 2.11 `Device（设备）`
+
+`Device` 是具身层对象（embodiment object，具身对象），用于描述 ExoMind 接入现实世界时的设备实体。
+
+职责：
+
+- 描述物理或具身边界
+- 描述设备级能力、健康状态、供电状态与部署位置
+- 聚合多个 `DeviceComponent`
+- 可选挂接一个或多个 `RuntimeHost`
+- 为设备设置页、运维页、编排页提供稳定设备身份
+
+`Device` 不自动等于信号网络里的 `Node`。  
+当 `Device` 需要进入信号网络时，通常通过以下两种方式投影：
+
+1. 投影为一个聚合控制节点，例如 `device controller actor`
+2. 投影为多个部件级节点，例如摄像头、麦克风、电机、机械臂等对应的 `Actor / Port`
+
+因此推荐原则是：
+
+> `Device` 是现实载体，`Node` 是网络可寻址投影。两者相关，但不强制同一。
+
+### 2.12 `RuntimeHost（运行时主机）`
+
+`RuntimeHost` 是运行时宿主（runtime carrier，运行载体），表示某个可运行 ExoMind Runtime 的执行宿主。
+
+职责：
+
+- 提供 `host_id`、拨号地址、监听端口、网络可达性
+- 暴露主机级能力，例如 CPU / GPU / RAM / 存储 / OS / agent kind
+- 承载 `Actor / Agent / Session` 的实际运行
+- 参与 mesh peer（网状对等体）发现、配对、验证、拨号与运维
+
+`RuntimeHost` 可以存在于：
+
+- 本地电脑
+- 手机
+- 嵌入式主板
+- 机器人车载板
+- 云服务器 / VPS
+- 容器 / 虚拟机
+
+推荐关系：
+
+- 一个 `Device` 可以挂接零个、一个或多个 `RuntimeHost`
+- 一个 `RuntimeHost` 也可以独立存在，不要求必须先有 `Device`
+
+这意味着：
+
+- 机器人小车通常同时有 `Device` 和板载 `RuntimeHost`
+- 云服务器通常只有 `RuntimeHost`，不一定要纳入 `Device` 管理
+
+### 2.13 `DeviceComponent（设备部件）`
+
+`DeviceComponent` 是设备内部可识别的部件对象。
+
+典型例子：
+
+- 摄像头
+- 麦克风
+- 扬声器
+- GPS
+- 心率传感器
+- 轮子
+- 电机
+- 机械臂
+- LED
+- 屏幕
+
+职责：
+
+- 描述部件类别、能力、协议、状态
+- 作为 `Device` 内部的可管理部件
+- 为驱动层、绑定层或 `Actor` 提供对接目标
+
+`DeviceComponent` 默认不是 `Actor`。  
+只有在满足以下条件时，才推荐把某个 `DeviceComponent` 升格为独立 `Actor`：
+
+- 有独立生命周期
+- 有独立资源预算
+- 有明确输入/输出端口
+- 需要被复用或被多个对象编排
+- 需要独立监控、隔离、重启或治理
+
+否则更推荐：
+
+- `DeviceComponent` 继续作为部件对象存在
+- 通过一个 `driver actor（驱动执行体）` 统一代理访问
+
+### 2.14 `DeviceLink（设备连接）`
+
+`DeviceLink` 是设备层 / 主机层连接对象，不是信号网络里的业务连线。
+
+职责：
+
+- 描述设备与设备、设备与主机、主机与主机之间的连接
+- 承载配对、认证、连通性、延迟、带宽、可用性、链路状态
+- 对应 BLE / WiFi / USB / Serial / CAN / ADB / WebRTC / IPC 等连接介质
+
+推荐理解：
+
+- `DeviceLink` 解决“链路是否存在、是否可达、质量如何”
+- `Connection` 解决“哪个节点的哪个端口连到哪个节点的哪个端口”
+
+因此：
+
+> `DeviceLink` 属于承载层 / 设备层，`Connection` 属于信号层 / 编排层。两者必须分开。
+
 ---
 
 ## 3. `Actor` 与 `Agent` 的正式区别
@@ -308,6 +417,30 @@
 
 否则，更适合保留为某个较大 `Actor` 或 `Agent` 内部的普通函数。
 
+### 3.4 `DeviceComponent -> Actor` 简版 checklist
+
+为了避免“所有设备部件都被过度 Actor 化”，第一版建议加入一个简单 checklist。
+
+当某个 `DeviceComponent` 同时满足以下大多数条件时，才建议升格为独立 `Actor`：
+
+- [ ] 需要独立启动、停止、重启
+- [ ] 需要独立资源预算或权限策略
+- [ ] 有明确输入端口、输出端口或请求响应接口
+- [ ] 会被多个 `Agent` 或多个流程复用
+- [ ] 需要独立观测、告警、日志或健康检查
+- [ ] 需要跨宿主、跨设备或跨会话长期存在
+
+如果主要只是：
+
+- 被单一执行体内部直接调用
+- 没有独立生命周期
+- 没有独立治理需求
+
+那么更推荐保留为：
+
+- `DeviceComponent`
+- 或某个 `Actor` 内部的 driver / function（驱动函数）
+
 ---
 
 ## 4. 四类最容易混淆的对象边界
@@ -344,6 +477,64 @@
 - `Surface` 负责观察与交互
 
 三者不是一一对应关系。
+
+### 4.5 `Device`、`RuntimeHost`、`Actor` 与 `Agent`
+
+这四者分别回答不同问题：
+
+- `Device`
+  - 这是什么现实载体或具身实体
+- `RuntimeHost`
+  - 这是什么运行时宿主，在哪里可拨号、可运行
+- `Actor`
+  - 这是谁在执行某种能力
+- `Agent`
+  - 这是谁在做认知、规划与调度
+
+典型映射：
+
+1. 一台笔记本电脑
+   - `Device = laptop`
+   - `RuntimeHost = local runtime`
+   - `Actor / Agent =` 跑在这台宿主上的执行体与认知体
+2. 一台云服务器
+   - 可只有 `RuntimeHost`
+   - 不要求一定先建一个 `Device`
+3. 一辆机器人小车
+   - `Device = robot car`
+   - `RuntimeHost = onboard runtime`
+   - `DeviceComponent = camera / wheel / motor / speaker`
+   - `Actor = camera driver / motor controller / telemetry relay`
+   - `Agent = navigation planner / task planner / review agent`
+
+正式建议：
+
+> 不把 `Device` 直接等同为 `Actor`。  
+> 不把 `RuntimeHost` 直接等同为 `Device`。  
+> 不把 `Agent` 混成“高级设备”。
+
+### 4.6 `DeviceLink` 与 `Connection`
+
+两者最容易在机器人、硬件、跨设备运行时里被混淆。
+
+区别如下：
+
+1. `DeviceLink`
+   - 是承载链路
+   - 关心 BLE / WiFi / USB / Serial / CAN 等
+   - 关心配对、延迟、吞吐、掉线、认证
+2. `Connection`
+   - 是信号编排连线
+   - 关心 `from_node.port -> to_node.port`
+   - 关心信号类型、治理模式、过滤、临时/持续
+
+一个 `DeviceLink` 上可以承载很多 `Connection`。  
+同一条 `Connection` 在实现上也可能随着宿主变化而切换底层 `DeviceLink`。
+
+因此推荐分层为：
+
+- `DeviceLink` 对齐 ECS-1 / ECS-2 / ECS-3
+- `Connection` 对齐 ExoMind 的信号网络对象层
 
 ---
 
@@ -495,6 +686,24 @@ type Connection = {
 这也是 ExoMind 和普通 CLI skill（技能脚本）思路的重要差异之一：  
 不是只保存 prompt 技巧，而是把能力沉淀为系统内部可运行、可治理、可复用的对象与连接。
 
+### 6.6 `DeviceLink` 与 `Connection` 的配合关系
+
+当 ExoMind 扩展到机器人、穿戴设备、小车、云主机时，应采用以下配合关系：
+
+1. `DeviceLink`
+   - 先把宿主或设备连起来
+   - 解决 reachability（可达性）、pairing（配对）、auth（认证）、latency（延迟）
+2. `Binding`
+   - 再把 `Session`、provider、runtime 或设备驱动接进系统
+3. `Connection`
+   - 最后在信号层建立 `Node.Port -> Node.Port` 的正式连线
+
+推荐流水线：
+
+`DeviceLink established -> RuntimeHost reachable -> Binding attached -> Connection activated`
+
+这样才能避免把“链路是否可达”和“业务对象是否应连线”混成一件事。
+
 ---
 
 ## 7. Signal（信号）与共享对象读取原则
@@ -555,6 +764,54 @@ type Connection = {
 
 本规格先只收口信号原则，不在本版写死完整字段全集。  
 下一轮讨论应重点回答：`Signal` 的最小必要字段是什么、哪些字段属于事实源、哪些字段属于派生层。
+
+### 7.4 `dora-rs/dora` 的参考边界
+
+本规格确认：`dora-rs/dora` 可以作为 ExoMind 后续底层实现的重要工程参考，但不作为顶层概念设计的来源。
+
+原因是：
+
+1. `dora` 解决得很好的是 `dataflow runtime（数据流运行时）`
+2. ExoMind 当前要定义的是 `signal-native runtime object model（信号原生运行时对象模型）`
+3. 两者在底层通信和执行编排层有明显重叠
+4. 但在 `Session / Context / Memory / Workspace / Agent governance` 这些认知对象层并不等价
+
+可以借鉴的部分：
+
+- `NodeId + input/output id` 的显式连线模型
+- `input_id: source_node_id/output_id` 这类清晰的数据流声明方式
+- 本地共享内存、跨进程高性能消息传递、远端通信抽象
+- payload（正文）与 metadata（元数据）分层
+- queue size / backpressure（队列长度与背压）等运行时细节
+- `send_output` / `Event::Input` 这类稳定端口 API 的设计方式
+
+不直接照搬的部分：
+
+- 以机器人/硬件数据流为中心的产品语义
+- `Arrow-first` 作为唯一正文格式
+- 只用静态数据流图表达全部系统对象
+- 缺少 `Session / Context / Memory / Workspace / Binding / Surface` 的上层对象模型
+
+因此正式建议是：
+
+> 顶层对象模型与语义边界，以 ExoMind 自己的 `Node / Actor / Agent / Session / Context / Memory / Workspace` 为准。  
+> 底层端口、连线、消息传递、共享内存、dataflow runtime 等工程实现，可以系统参考 `dora-rs/dora`。
+
+### 7.5 对 `dora` 的具体吸收方式
+
+如果后续进入实现阶段，推荐吸收顺序如下：
+
+1. 先吸收 `NodeId / PortId / Connection` 的显式建模方式
+2. 再吸收 `payload / metadata / transport` 分层方式
+3. 再评估本地共享内存、零拷贝、跨进程消息总线是否适合 ExoMind Runtime
+4. 最后再决定是否借鉴其 dataflow descriptor / builder（数据流描述与构建器）形式
+
+实现时应始终保持：
+
+- `Signal` 仍以 ExoMind 的语义事件为中心，而不是退化成纯二进制数据包
+- `Connection` 应支持动态创建与治理，不限制为纯静态图
+- `Signal` 默认传轻量事实与引用，不直接把大正文塞进连线上
+- `Actor` 与 `Agent` 的严格分层，不因底层 runtime 借鉴而被打平
 
 ---
 
@@ -718,6 +975,110 @@ type SessionModelState = {
 
 - `declared_capabilities`
 - `runtime_capabilities`
+
+在设备与宿主场景里，建议把能力至少分成 3 层：
+
+1. `DeviceCapability（设备能力）`
+   - 偏具身
+   - 回答“这个现实载体能感知什么、作用什么、是否贴近身体”
+2. `RuntimeHostCapability（宿主能力）`
+   - 偏算力与运行承载
+   - 回答“这台宿主能运行什么、能承载什么超系统”
+3. `NodeCapability（节点能力）`
+   - 偏信号网络
+   - 回答“这个节点暴露什么端口、支持什么协议、能参与什么连接”
+
+### 11.1.1 `DeviceCapability` 与 `RuntimeHostCapability` 的分层
+
+推荐边界如下：
+
+1. `DeviceCapability`
+   - 传感器
+   - 执行器
+   - 移动能力
+   - 供电 / 电池
+   - 位置 / 空间部署
+   - 身体关系（body relation，身体关系）
+2. `RuntimeHostCapability`
+   - CPU / GPU / RAM / 存储 / 网络
+   - 指令集架构（instruction set architecture，指令集架构）
+   - OS / container / sandbox / shell / PTY
+   - 本地模型运行时
+   - provider adapter（提供商适配器）
+   - agent kind support（Agent 类型支持）
+
+推荐理解：
+
+- `DeviceCapability` 描述“身体与环境接口”
+- `RuntimeHostCapability` 描述“计算与执行超系统接口”
+
+### 11.1.2 身体相关 vs 身体无关的设备能力
+
+对于 `DeviceCapability`，建议再加一个轻量区分：
+
+1. `body_related`
+   - 手机
+   - 手表
+   - 耳机
+   - 可穿戴设备
+   - 生理传感器
+2. `body_external`
+   - 桌面电脑
+   - 房间摄像头
+   - 智能音箱
+   - 小车
+   - 机械臂
+   - 环境传感器
+
+也就是说：
+
+- 一类设备更贴近人的身体与生理状态
+- 一类设备更贴近环境、空间、基础设施或外部执行
+
+这个区分应归 `Device`，不归 `RuntimeHost`。
+
+### 11.1.3 `RuntimeHostCapability` 推荐最小结构
+
+```ts
+type RuntimeHostCapability = {
+  compute?: {
+    cpu_arch?: string;
+    instruction_sets?: string[];
+    logical_cores?: number;
+    ram_mb?: number;
+    gpu_kinds?: string[];
+    accelerator_kinds?: string[];
+  };
+  execution_supersystem?: {
+    shell?: boolean;
+    pty?: boolean;
+    sandbox?: boolean;
+    container?: boolean;
+    browser_automation?: boolean;
+    native_api_runtime?: boolean;
+    local_model_runtime?: string[];
+  };
+  agent_runtime_support?: {
+    supported_agent_kinds?: string[];
+    provider_adapters?: string[];
+    acp?: boolean;
+  };
+  storage?: {
+    disk_mb?: number;
+    persistent_workspace?: boolean;
+  };
+  network?: {
+    reachable_modes?: string[];
+    relay_capable?: boolean;
+  };
+};
+```
+
+这里的 `execution_supersystem` 用来表达你说的“超系统能力”。
+
+正式建议：
+
+> `agent kind support` 不是单纯的业务层枚举，而是宿主底层执行超系统是否具备对应支撑条件的结果摘要。
 
 ### 11.2 `Lease（租约）`
 
@@ -893,6 +1254,120 @@ type Workspace = {
 - 有明确输入/输出
 - 需要被多个地方复用
 
+### 13.5 多设备信号网络的全局视图
+
+当 ExoMind 扩展到多设备、多宿主、多具身对象时，推荐采用如下全局视图：
+
+```text
+                         Signal Network（信号网络）
+
+   [Cloud RuntimeHost]
+       ├─ ResearchAgent
+       ├─ SyncActor
+       └─ SchedulerAgent
+                │
+                │ Connection
+                │
+   [Laptop Device] -- DeviceLink(WiFi) -- [Robot Car Device]
+       ├─ Local RuntimeHost                 ├─ Onboard RuntimeHost
+       ├─ ReviewAgent                       ├─ NavigationAgent
+       ├─ EventLogActor                     ├─ MotorDriverActor
+       └─ MicComponent                      ├─ CameraDriverActor
+                                            ├─ WheelComponent
+                                            └─ CameraComponent
+```
+
+这张图里有三层关系：
+
+1. `Device / RuntimeHost / DeviceComponent`
+   - 描述现实载体、宿主与内部部件
+2. `Actor / Agent / Port / Connection`
+   - 描述信号网络中的执行、认知与编排
+3. `DeviceLink`
+   - 描述设备与宿主之间如何真正连通
+
+正式建议：
+
+> 多个设备可以组成一张 ExoMind 信号网络。  
+> 但它们不是靠“设备对象直接互连”完成协作，而是通过宿主、绑定、端口和连接，把现实世界投影进信号网络。
+
+### 13.6 机器人 / 小车 / 云主机 的统一设计
+
+要同时支持硬件小车、手机、桌面端、云服务器，推荐统一方式如下：
+
+1. 对硬件侧
+   - 用 `Device + DeviceComponent + DeviceLink`
+   - 把轮子、电机、摄像头、麦克风、GPS 等建模为设备部件
+   - 需要治理时，再升格为 `Actor`
+2. 对运行时侧
+   - 用 `RuntimeHost`
+   - 统一承载 CPU / GPU / RAM / 存储 / OS / agent kind / dial address / host_id
+3. 对执行与认知侧
+   - 用 `Actor / Agent`
+   - 所有自动化链路、认知链路、技能沉淀都进这一层
+
+于是：
+
+- 小车能接入，因为它有 `Device`、`DeviceComponent`、可能还有板载 `RuntimeHost`
+- 云服务器能接入，因为它天然就是 `RuntimeHost`
+- 两者都能进入同一张信号网络，因为最终都通过 `Actor / Agent / Port / Connection` 暴露统一接口
+
+推荐一句话收口：
+
+> `Device` 负责具身，`RuntimeHost` 负责承载，`Actor` 负责执行，`Agent` 负责认知，`Connection` 负责信号编排，`DeviceLink` 负责真实连通。
+
+### 13.7 跨宿主连接与 relay（中继）语义
+
+跨宿主时，正式推荐优先级如下：
+
+1. 能直接连，就直接连
+2. 直连失败，再走 relay（中继）
+3. relay 默认属于底层通信 / mesh 能力，不默认建模为业务 `Actor`
+
+原因是：
+
+- relay 的首要职责是让链路可达
+- 它更接近 ECS-2 / ECS-3 的承载与组网能力
+- 如果默认把 relay 做成 `Actor`，容易把“网络基础设施”误当成“业务执行体”
+
+但同时，relay 不应该完全隐形。  
+正式建议是：
+
+1. 在主信号拓扑图里
+   - 默认不把 relay 展示成普通 `Actor`
+2. 在设备网络视图 / 诊断视图 / trace 视图里
+   - 要显式展示 relay hop（中继跳点）、relay path（中继路径）、失败原因、延迟贡献
+3. 如果某个 relay 是人为部署、可治理、可运维的专门网关
+   - 可以把它表示为一个带 `relay_gateway` 角色的 `RuntimeHost`
+   - 但仍不推荐把它默认当业务 `Actor`
+
+一句话：
+
+> relay 默认是“底层可见能力”，不是“主业务图上的默认 Actor”；  
+> 但它必须在网络视图和链路追踪里被显化出来。
+
+### 13.8 两张视图，一张底层网
+
+产品面推荐拆成两张主视图，但底层数据仍是一张统一网络：
+
+1. `Device Network View（设备网络视图）`
+   - 关注 `Device / RuntimeHost / DeviceLink / relay path`
+   - 适合看设备、宿主、链路、配对、网络诊断
+2. `Signal Topology View（信号拓扑视图）`
+   - 关注 `Node / Port / Connection / Actor / Agent / Session`
+   - 适合看执行链路、认知链路、自动化编排
+
+两张图的关系应是：
+
+- 不重复造两份数据
+- 共享 `DeviceId / HostId / NodeId`
+- 支持互相跳转和聚焦
+
+推荐原则：
+
+> 人看两张图，系统底层是一张网。  
+> 视图分离是为了认知负担可控，不是为了把数据模型拆裂。
+
 ---
 
 ## 14. Canonical Event（规范事件）
@@ -979,6 +1454,34 @@ type Workspace = {
 - `Attachment = local API runtime handle`
 - `Surface = structured surface`
 
+### 15.5 ExoMind 当前设备页的建议映射
+
+基于现有实现，当前设备页更接近：
+
+- `RuntimeHost / peer control plane（运行时主机 / 对等体控制面）`
+
+而不是：
+
+- 完整的 `Device` 对象模型页
+
+这意味着当前页面里展示的重点应理解为：
+
+1. 哪些 `RuntimeHost` 在线
+2. 哪些 peer 已发现、已配对、已验证
+3. 当前宿主的能力、拨号地址、RTT、版本、内存、认证状态
+
+而不应误解为：
+
+1. 设备内部部件拓扑
+2. 机器人器官结构
+3. 完整具身对象图
+
+因此后续产品面建议拆出：
+
+- `Runtime Hosts / Peers` 视图
+- `Devices / Components` 视图
+- `Signal Topology` 视图
+
 ---
 
 ## 16. 第一版落地范围
@@ -995,6 +1498,8 @@ type Workspace = {
 8. `Budget / Permission / Capability / Lease / Telemetry / Profile` 作为横切系统入模
 9. `Model policy belongs to Agent, active model belongs to Session`
 10. `resume` 的统一语义
+11. `Device / RuntimeHost / DeviceComponent / DeviceLink` 的一级对象边界
+12. “设备连通”和“信号连线”分层
 
 ### 16.2 第一版明确不做重实现
 
@@ -1012,11 +1517,12 @@ type Workspace = {
 这套统一对象模型的核心，不是“把所有 Agent 都做成一个类”，而是：
 
 1. 让 `Node / Actor / Agent` 成为信号网络执行层级
-2. 让 `Session / Context / Memory / Workspace` 成为认知与工作对象层
-3. 让 `Binding / Attachment / Surface` 成为接入与呈现层
-4. 让 `Budget / Permission / Capability / Lease / Telemetry / Profile` 成为横切系统
-5. 让 `Canonical Event` 成为统一语义接口，而 `EventTape` 继续保留事实源地位
+2. 让 `Device / RuntimeHost / DeviceComponent / DeviceLink` 成为具身与承载层
+3. 让 `Session / Context / Memory / Workspace` 成为认知与工作对象层
+4. 让 `Binding / Attachment / Surface` 成为接入与呈现层
+5. 让 `Budget / Permission / Capability / Lease / Telemetry / Profile` 成为横切系统
+6. 让 `Canonical Event` 成为统一语义接口，而 `EventTape` 继续保留事实源地位
 
 一句话总结：
 
-> ExoMind 要统一的不是某一种 CLI，也不是某一种 UI，而是 `Session Kernel（会话内核）` 与 `Signal-Native Runtime Object Model（信号原生运行时对象模型）`。
+> ExoMind 要统一的不是某一种 CLI，也不是某一种 UI，而是 `Session Kernel（会话内核）`、`Signal-Native Runtime Object Model（信号原生运行时对象模型）`，以及它与现实设备 / 运行时宿主之间的稳定映射关系。
