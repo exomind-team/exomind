@@ -132,6 +132,7 @@ pencil/.claude/settings.local.json
 # Agent 本地状态
 agent.test.local.state.json
 runtime-data/
+.worktrees/
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .exomind/
