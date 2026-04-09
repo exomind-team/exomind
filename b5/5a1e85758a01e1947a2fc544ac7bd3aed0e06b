@@ -1,0 +1,84 @@
+.github/workflows/release.yml
+  212c8a5f93c4f206 27,60,131,537,563,634,1197-1198,1206-1207
+  8468007bd6a1d8c0 20
+tests/ci/release-workflow-bun-install.test.ts
+  d8f0b50b4cb40c4e 1-8,13-58,60-64,66-68,81-93,101-119
+  81a3123522f10e41 9-12,59,65,69-80,94-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "b55a1e85758a01e1947a2fc544ac7bd3aed0e06b",
+  "prompts": {
+    "212c8a5f93c4f206": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6dcc-718f-7de0-95c1-213127110451",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 34,
+      "accepted_lines": 10,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/88912c8fdae7a61b4ffbe57075c99e16e69bf830aa1f8ea553d04f13dfde326d"
+    },
+    "81a3123522f10e41": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fdb-28e1-7da2-b12a-66881ece6066",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 25,
+      "total_deletions": 13,
+      "accepted_lines": 25,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f74c58a74bbafdef4586c6fdc30c1d615bcfc7d9c8d61580df1673ac3198c61f"
+    },
+    "8468007bd6a1d8c0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fc2-a6ea-7ab2-b84d-fd063f889cd6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 431,
+      "total_deletions": 145,
+      "accepted_lines": 423,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d9fe32bc6f09816105ee2dd58903f311f8ff8e785963f7877566a9ecafdd3117"
+    },
+    "d8f0b50b4cb40c4e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fdc-aae8-7153-926a-986e6b87c3a7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 107,
+      "total_deletions": 0,
+      "accepted_lines": 94,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/474ae22d9863a8f2abe9fdf4806999d511909084e16c5efe134df372472a040d"
+    },
+    "f6a9d023ca8507eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28a630e9-7ed6-48d8-a75a-c1ee1503694d",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 1039,
+      "total_deletions": 244,
+      "accepted_lines": 657,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/bcbc77557a495c46cfbd5908ce8727114eb57ec2f6a9769ee4d7cec7cf384ba6"
+    }
+  }
+}
