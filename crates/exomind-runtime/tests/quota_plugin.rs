@@ -12,13 +12,13 @@
 
 use std::sync::Arc;
 
+use exomind_runtime::plugins::quota::QuotaMonitor;
+use exomind_runtime::plugins::quota::keys as qk;
 use exomind_runtime::plugins::quota::resolve_display_name;
 use exomind_runtime::plugins::quota::{
     ModelQuota, QuotaCheckedPayload, QuotaErrorPayload, QuotaExhaustedPayload,
     QuotaHeartbeatPayload, QuotaWarningPayload,
 };
-use exomind_runtime::plugins::quota::keys as qk;
-use exomind_runtime::plugins::quota::QuotaMonitor;
 use exomind_runtime::signal::SignalPool;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -59,16 +59,14 @@ async fn check_remains_empty_key_returns_error() {
 /// A fake API key should get an HTTP 401/403 back, not a parse error.
 #[tokio::test]
 async fn check_remains_fake_key_returns_http_error() {
-    let result =
-        exomind_runtime::plugins::quota::check_remains("invalid-key-for-testing")
-            .await;
-    assert!(result.is_err(), "fake key should return HTTP error, got: {result:?}");
+    let result = exomind_runtime::plugins::quota::check_remains("invalid-key-for-testing").await;
+    assert!(
+        result.is_err(),
+        "fake key should return HTTP error, got: {result:?}"
+    );
     let err = result.unwrap_err();
     // MiniMax returns HTTP 401 or 403 for invalid tokens.
-    assert!(
-        err.contains("HTTP"),
-        "expected HTTP error, got: {err}"
-    );
+    assert!(err.contains("HTTP"), "expected HTTP error, got: {err}");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -185,14 +183,8 @@ fn error_payload_without_model_name() {
 fn config_keys_are_stable() {
     // These keys must never change — they are the persistence contract.
     assert_eq!(qk::MINIMAX_API_KEY, "exomind:minimaxApiKey");
-    assert_eq!(
-        qk::QUOTA_WARNING_THRESHOLD,
-        "exomind:quotaWarningThreshold"
-    );
-    assert_eq!(
-        qk::QUOTA_POLLING_ENABLED,
-        "exomind:quotaPollingEnabled"
-    );
+    assert_eq!(qk::QUOTA_WARNING_THRESHOLD, "exomind:quotaWarningThreshold");
+    assert_eq!(qk::QUOTA_POLLING_ENABLED, "exomind:quotaPollingEnabled");
     assert_eq!(
         qk::QUOTA_HEARTBEAT_INTERVAL_MINUTES,
         "exomind:quotaHeartbeatIntervalMinutes"

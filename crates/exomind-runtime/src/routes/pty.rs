@@ -636,8 +636,8 @@ pub fn router() -> Router<AppState> {
 mod tests {
     use super::{
         PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY, register_pty_session,
-        resolve_pty_waiting_input_idle_timeout, router,
-        serialize_pty_eof_payload, stream_pty_output, watch_pty_lifecycle,
+        resolve_pty_waiting_input_idle_timeout, router, serialize_pty_eof_payload,
+        stream_pty_output, watch_pty_lifecycle,
     };
     use axum::body::Body;
     use axum::extract::{Path, State};

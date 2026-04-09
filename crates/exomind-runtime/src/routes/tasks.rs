@@ -370,8 +370,7 @@ async fn cancel_task(
 
     publish_task_signal(&state, "task.cancelled", &task);
     publish_task_replication_signal(&state, scope_key, &task).await;
-    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/cancel")
-        .await;
+    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/cancel").await;
 
     Ok(Json(task))
 }
@@ -387,8 +386,7 @@ async fn delete_task(
 
     publish_task_signal(&state, "task.cancelled", &task);
     publish_task_replication_signal(&state, scope_key, &task).await;
-    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete")
-        .await;
+    write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete").await;
 
     Ok(Json(task))
 }
@@ -1490,8 +1488,14 @@ mod tests {
             .into_iter()
             .find(|event| event.topic == "eventlog.replication.appended")
             .expect("task transition should publish eventlog.replication.appended");
-        assert_eq!(replication.payload["scopeKey"], serde_json::json!("anonymous"));
-        assert_eq!(replication.payload["record"]["tags"], serde_json::json!(["task_started"]));
+        assert_eq!(
+            replication.payload["scopeKey"],
+            serde_json::json!("anonymous")
+        );
+        assert_eq!(
+            replication.payload["record"]["tags"],
+            serde_json::json!(["task_started"])
+        );
         assert_eq!(
             events[0].metadata.as_ref().unwrap()["new_status"],
             "in_progress"

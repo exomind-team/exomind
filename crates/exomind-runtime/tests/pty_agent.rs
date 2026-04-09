@@ -379,9 +379,9 @@ async fn wait_for_session_status(
                     .json()
                     .await
                     .expect("pty list response should be JSON");
-                let pty = pty_payload.as_array().and_then(|ptys| {
-                    ptys.iter().find(|pty| pty["id"].as_str() == Some(pty_id))
-                });
+                let pty = pty_payload
+                    .as_array()
+                    .and_then(|ptys| ptys.iter().find(|pty| pty["id"].as_str() == Some(pty_id)));
                 if let Some(pty) = pty {
                     last_pty_payload = pty.clone();
                     assert_ne!(

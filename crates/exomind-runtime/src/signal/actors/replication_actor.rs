@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::eventlog::{EventLogStore, EventRecord};
 use crate::proposal::{Proposal, ProposalStore};
-use crate::signal::{SignalPool, SignalEvent};
+use crate::signal::{SignalEvent, SignalPool};
 use crate::task::{Task, TaskStore};
 use crate::timeblock::{ActiveBlockData, TimeBlockData, TimeBlockStore};
 
@@ -121,11 +121,9 @@ pub fn spawn_replication_actor(
                             }
                         }
                         PROPOSAL_REPLICATION_TOPIC => {
-                            if let Err(error) = apply_proposal_replication(
-                                &proposal_store,
-                                &local_host_id,
-                                &event,
-                            ) {
+                            if let Err(error) =
+                                apply_proposal_replication(&proposal_store, &local_host_id, &event)
+                            {
                                 warn!(event_id = %event.id, error = %error, "replication_actor: proposal apply failed");
                             }
                         }
@@ -147,10 +145,7 @@ pub fn spawn_replication_actor(
     })
 }
 
-fn apply_eventlog_replication(
-    store: &EventLogStore,
-    event: &SignalEvent,
-) -> Result<(), String> {
+fn apply_eventlog_replication(store: &EventLogStore, event: &SignalEvent) -> Result<(), String> {
     let payload: EventlogReplicationPayload =
         serde_json::from_value(event.payload.clone()).map_err(|error| error.to_string())?;
     let scope_key = payload.scope_key.as_deref();
@@ -230,7 +225,8 @@ fn apply_timeblock_active_replication(
         return Ok(());
     }
 
-    store.put_active_scoped(scope_key, incoming)
+    store
+        .put_active_scoped(scope_key, incoming)
         .map_err(|error| error.to_string())
 }
 
@@ -703,9 +699,11 @@ mod tests {
 
         yield_for_actor().await;
 
-        assert!(proposal_store
-            .get_scoped(Some("profile-sync"), 7)
-            .expect("proposal query")
-            .is_none());
+        assert!(
+            proposal_store
+                .get_scoped(Some("profile-sync"), 7)
+                .expect("proposal query")
+                .is_none()
+        );
     }
 }

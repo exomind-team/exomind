@@ -1820,8 +1820,14 @@ mod tests {
             .into_iter()
             .find(|event| event.topic == "eventlog.replication.appended")
             .expect("timeblock start should publish eventlog.replication.appended");
-        assert_eq!(replication.payload["scopeKey"], serde_json::json!("anonymous"));
-        assert_eq!(replication.payload["record"]["tags"], serde_json::json!(["block_start"]));
+        assert_eq!(
+            replication.payload["scopeKey"],
+            serde_json::json!("anonymous")
+        );
+        assert_eq!(
+            replication.payload["record"]["tags"],
+            serde_json::json!(["block_start"])
+        );
     }
 
     #[tokio::test]
