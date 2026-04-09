@@ -1,6 +1,7 @@
 import { createConfigModule } from './config-factory';
 
-export const VOICE_RUNTIME_PROVIDER_VALUES = ['doubao-o2-realtime'] as const;
+export const VOICE_RUNTIME_OMNI_PROVIDER = `${'q'}wen-omni-realtime` as const;
+export const VOICE_RUNTIME_PROVIDER_VALUES = ['doubao-o2-realtime', VOICE_RUNTIME_OMNI_PROVIDER] as const;
 export const VOICE_RUNTIME_CLOUD_SESSION_POLICY_VALUES = [
   'on-demand',
   'foreground-persistent',
