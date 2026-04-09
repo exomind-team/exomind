@@ -676,6 +676,7 @@ function NewLayout() {
         />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
         <ReminderNotifier />
+        <UpdateToast />
       </>
     );
   }
