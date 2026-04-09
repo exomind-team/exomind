@@ -35,6 +35,7 @@ describe('RtDomainBackfillService', () => {
     isLocal: false,
     hostId: 'peer-host-1',
     trustState: 'confirmed_peer',
+    authToken: 'remote-control-token',
   };
 
   beforeEach(() => {
@@ -146,6 +147,49 @@ describe('RtDomainBackfillService', () => {
 
     expect(mocks.peerEventExportMock).not.toHaveBeenCalled();
     expect(mocks.localEventImportMock).not.toHaveBeenCalled();
+    expect(result.peers).toBe(0);
+  });
+
+  it('skips tokenless confirmed peers to avoid protected snapshot 401s（confirmed peer 缺少控制面 token 时跳过补拉）', async () => {
+    mocks.listHostsMock.mockResolvedValue([
+      {
+        ...confirmedPeer,
+        authToken: undefined,
+      },
+    ]);
+
+    const service = new RtDomainBackfillService({
+      hostService: {
+        listHosts: mocks.listHostsMock,
+      },
+      localEventLogBackupService: {
+        importEventsFromSqliteSnapshot: mocks.localEventImportMock,
+      },
+      localTaskBackupService: {
+        importTasksFromSqliteSnapshot: mocks.localTaskImportMock,
+      },
+      localTimeBlockBackupService: {
+        importTimeBlocksFromSqliteSnapshot: mocks.localTimeBlockImportMock,
+      },
+      createPeerEventLogBackupService: () => ({
+        exportEventsAsSqliteSnapshot: mocks.peerEventExportMock,
+      }),
+      createPeerTaskBackupService: () => ({
+        exportTasksAsSqliteSnapshot: mocks.peerTaskExportMock,
+      }),
+      createPeerTimeBlockBackupService: () => ({
+        exportTimeBlocksAsSqliteSnapshot: mocks.peerTimeBlockExportMock,
+      }),
+    });
+
+    const result = await service.backfillConfirmedPeers();
+
+    expect(mocks.peerEventExportMock).not.toHaveBeenCalled();
+    expect(mocks.peerTaskExportMock).not.toHaveBeenCalled();
+    expect(mocks.peerTimeBlockExportMock).not.toHaveBeenCalled();
+    expect(mocks.localEventImportMock).not.toHaveBeenCalled();
+    expect(mocks.localTaskImportMock).not.toHaveBeenCalled();
+    expect(mocks.localTimeBlockImportMock).not.toHaveBeenCalled();
     expect(result.peers).toBe(0);
   });
 });

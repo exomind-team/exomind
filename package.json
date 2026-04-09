@@ -1,7 +1,7 @@
 {
   "name": "exomind",
   "private": true,
-  "version": "0.4.3",
+  "version": "0.4.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "icon:all": "bun run icon:tauri && bun run icon:sync-source && bun run icon:web",
     "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
     "build:tag": "bun scripts/dev/build-tag.ts",
+    "release:build": "bun scripts/dev/release-build.ts",
     "release:notes": "bun scripts/dev/generate-release-notes.ts",
     "release:pages:sync": "bun scripts/dev/sync-release-pages.ts",
     "devlog:gate": "bun scripts/dev/validate-devlog-data.ts --type report",

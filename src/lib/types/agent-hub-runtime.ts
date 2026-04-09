@@ -3,6 +3,7 @@ export type RuntimeHostStatus = 'unknown' | 'online' | 'offline' | 'warning';
 export type RuntimeHostTrustState = 'manual_seed' | 'discovered_candidate' | 'confirmed_peer';
 export type RuntimeHostVerificationStatus = 'idle' | 'running' | 'verified' | 'failed';
 export type RuntimeHostVerificationTrigger = 'pairing_auto' | 'manual_retry';
+export type RuntimeHostAuthTokenSource = 'manual_seed' | 'external_target';
 
 export interface RuntimeHostRecord {
   id: string;
@@ -20,7 +21,8 @@ export interface RuntimeHostRecord {
   advertisedListenAddress?: string; // advertised_listen_address（对端自宣告监听地址）
   lastSuccessfulDialAddress?: string; // last_successful_dial_address（最近一次成功拨号地址）
   manualOverride?: string; // manual_override（手工固定地址）
-  authToken?: string; // auth_token（Bearer / peer token，配对后获取）
+  authToken?: string; // auth_token（远端 control-plane Bearer；mesh pairing secret 不写入这里）
+  authTokenSource?: RuntimeHostAuthTokenSource; // auth_token_source（控制面 Bearer 来源；历史未知 peer token 会被清洗）
   verificationStatus?: RuntimeHostVerificationStatus; // verification_status（互通验证状态）
   lastVerifiedAt?: string; // last_verified_at（最近验证时间）
   lastVerificationTrigger?: RuntimeHostVerificationTrigger; // last_verification_trigger（最近验证触发来源）

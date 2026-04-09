@@ -1,6 +1,14 @@
 import type { IStoragePort } from '@/lib/environment/interfaces/storage.port';
-import { DEFAULT_EXTERNAL_RUNTIME_PORT, formatHostForUrl } from '@/config/runtime-target';
+import { resolveLocalServiceHost } from '@/config/local-service-host';
+import {
+  DEFAULT_EXTERNAL_RUNTIME_PORT,
+  formatHostForUrl,
+  getRuntimeExternalAddress,
+  getRuntimeExternalAuthToken,
+  parseRuntimeAddress,
+} from '@/config/runtime-target';
 import type {
+  RuntimeHostAuthTokenSource,
   RuntimeHostRecord,
   RuntimeHostStatus,
   RuntimeHostTrustState,
@@ -19,6 +27,11 @@ const RUNTIME_HOST_STORAGE_CHANGED_EVENT = 'exomind:runtime-host-storage-changed
 const DEFAULT_PROBE_TIMEOUT_MS = 2500;
 
 type RuntimeFetch = typeof fetch;
+type RuntimeExternalAuthContext = {
+  host: string;
+  port: number;
+  authToken: string;
+};
 
 export interface AddRuntimeHostInput {
   name?: string;
@@ -219,8 +232,92 @@ function formatDialAddress(host: string, port: number): string {
   return `${normalizedHost}:${port}`;
 }
 
-function normalizeRuntimeHostRecord(record: RuntimeHostRecord): RuntimeHostRecord {
+function normalizeAuthTokenSource(
+  value: RuntimeHostAuthTokenSource | undefined,
+): RuntimeHostAuthTokenSource | undefined {
+  if (value === 'manual_seed' || value === 'external_target') {
+    return value;
+  }
+  return undefined;
+}
+
+function readRuntimeExternalAuthContext(): RuntimeExternalAuthContext | null {
+  const authToken = normalizeOptionalText(getRuntimeExternalAuthToken());
+  if (!authToken) {
+    return null;
+  }
+
+  try {
+    const parsed = parseRuntimeAddress(getRuntimeExternalAddress());
+    return {
+      host: resolveLocalServiceHost(parsed.host),
+      port: parsed.port,
+      authToken,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRuntimeHostAuth(
+  record: Pick<RuntimeHostRecord, 'host' | 'port'> & {
+    trustState: RuntimeHostTrustState;
+    authToken?: string;
+    authTokenSource?: RuntimeHostAuthTokenSource;
+  },
+  externalAuthContext: RuntimeExternalAuthContext | null,
+): Pick<RuntimeHostRecord, 'authToken' | 'authTokenSource'> {
+  const authToken = normalizeOptionalText(record.authToken);
+  const authTokenSource = normalizeAuthTokenSource(record.authTokenSource);
+
+  if (!authToken) {
+    return {};
+  }
+
+  if (authTokenSource === 'manual_seed' || authTokenSource === 'external_target') {
+    return {
+      authToken,
+      authTokenSource,
+    };
+  }
+
+  if (record.trustState === 'manual_seed') {
+    return {
+      authToken,
+      authTokenSource: 'manual_seed',
+    };
+  }
+
+  if (
+    externalAuthContext
+    && authToken === externalAuthContext.authToken
+    && resolveLocalServiceHost(record.host) === externalAuthContext.host
+    && record.port === externalAuthContext.port
+  ) {
+    return {
+      authToken,
+      authTokenSource: 'external_target',
+    };
+  }
+
+  return {};
+}
+
+function normalizeRuntimeHostRecord(
+  record: RuntimeHostRecord,
+  externalAuthContext: RuntimeExternalAuthContext | null = readRuntimeExternalAuthContext(),
+): RuntimeHostRecord {
   const trustState = normalizeTrustState(record.trustState);
+  const normalizedAuth = normalizeRuntimeHostAuth(
+    {
+      host: record.host,
+      port: record.port,
+      trustState,
+      authToken: record.authToken,
+      authTokenSource: record.authTokenSource,
+    },
+    externalAuthContext,
+  );
   return {
     ...record,
     trustState,
@@ -229,7 +326,8 @@ function normalizeRuntimeHostRecord(record: RuntimeHostRecord): RuntimeHostRecor
     lastSuccessfulDialAddress: normalizeOptionalText(record.lastSuccessfulDialAddress),
     manualOverride: normalizeOptionalText(record.manualOverride)
       ?? (trustState === 'manual_seed' ? formatDialAddress(record.host, record.port) : undefined),
-    authToken: normalizeOptionalText(record.authToken),
+    authToken: normalizedAuth.authToken,
+    authTokenSource: normalizedAuth.authTokenSource,
     verificationStatus: normalizeVerificationStatus(record.verificationStatus),
     lastVerifiedAt: normalizeOptionalText(record.lastVerifiedAt),
     lastVerificationTrigger: normalizeVerificationTrigger(record.lastVerificationTrigger),
@@ -360,10 +458,12 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       lastVerificationError: normalizeOptionalText(input.lastVerificationError),
     };
 
+    const externalAuthContext = readRuntimeExternalAuthContext();
     const existing = await this.readHosts();
-    const next = [...existing, normalizeRuntimeHostRecord(nextRecord)];
+    const nextHost = normalizeRuntimeHostRecord(nextRecord, externalAuthContext);
+    const next = [...existing, nextHost];
     await this.writeHosts(next);
-    return next[next.length - 1]!;
+    return nextHost;
   }
 
   async mergeHostMetadata(hostId: string, patch: RuntimeHostMetadataPatch): Promise<RuntimeHostRecord> {
@@ -374,6 +474,7 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
     }
 
     const current = hosts[targetIndex];
+    const externalAuthContext = readRuntimeExternalAuthContext();
     const mergedBase = normalizeRuntimeHostRecord({
       ...current,
       name: mergeHostNamePatch(patch, current.name),
@@ -415,14 +516,14 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
         current.lastVerificationError,
       ),
       updatedAt: toIso(this.now),
-    });
+    }, externalAuthContext);
     const lockedBase = lockConfirmedPeerHostId(current, mergedBase, patch);
 
     const nextHost = shouldPromoteToConfirmedPeer(current, lockedBase, patch)
-      ? {
+      ? normalizeRuntimeHostRecord({
           ...lockedBase,
           trustState: 'confirmed_peer' as const,
-        }
+        }, externalAuthContext)
       : lockedBase;
 
     const nextHosts = [...hosts];
@@ -484,13 +585,19 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
   private async readHosts(): Promise<RuntimeHostRecord[]> {
     const payload = await this.storage.read<RuntimeHostRecord[]>(RUNTIME_HOST_STORAGE_KEY);
     if (!Array.isArray(payload)) return [];
-    return payload.map((record) => normalizeRuntimeHostRecord(record));
+    const externalAuthContext = readRuntimeExternalAuthContext();
+    const normalizedHosts = payload.map((record) => normalizeRuntimeHostRecord(record, externalAuthContext));
+    if (JSON.stringify(payload) !== JSON.stringify(normalizedHosts)) {
+      await this.storage.write(RUNTIME_HOST_STORAGE_KEY, normalizedHosts);
+    }
+    return normalizedHosts;
   }
 
   private async writeHosts(hosts: RuntimeHostRecord[]): Promise<void> {
+    const externalAuthContext = readRuntimeExternalAuthContext();
     await this.storage.write(
       RUNTIME_HOST_STORAGE_KEY,
-      hosts.map((record) => normalizeRuntimeHostRecord(record)),
+      hosts.map((record) => normalizeRuntimeHostRecord(record, externalAuthContext)),
     );
   }
 

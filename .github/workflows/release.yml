@@ -17,13 +17,14 @@ permissions:
 env:
   RUST_TOOLCHAIN: stable
   BUN_VERSION: "1.3.8" # 固定版本，v1.3.10 在 Windows 上有 resolving hang bug
+  VITE_UPDATE_BASE_URL: https://exomind-team.github.io/exomind/
 
 jobs:
   # ─────────────────────────────────────────────────────────────
   # Job 1: Android APK on Windows runner
   # Split from the old combined Windows job so Android/Windows can run in parallel.
   # ─────────────────────────────────────────────────────────────
-  build-android-selfhosted:
+  build-android-windows:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
@@ -56,7 +57,7 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Ensure local Bun is available (确保本机 Bun 可用，版本锁定)
+      - name: Ensure Bun is available on Windows runner (确保 Windows runner 上 Bun 可用，版本锁定)
         shell: pwsh
         run: |
           $requiredVersion = "${{ env.BUN_VERSION }}"
@@ -127,21 +128,9 @@ jobs:
             }
           }
 
-      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+      - name: Ensure Rust toolchain on Windows runner (确保 Windows runner Rust 工具链可用，禁止 WSL)
         shell: pwsh
         run: |
-          $preferredCargoHome = "D:\actions-runner\rust\cargo"
-          $preferredRustupHome = "D:\actions-runner\rust\rustup"
-          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
-          if (Test-Path $preferredCargoBin) {
-            $env:CARGO_HOME = $preferredCargoHome
-            $env:RUSTUP_HOME = $preferredRustupHome
-            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            $env:Path = "$preferredCargoBin;$env:Path"
-            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          }
-
           $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
           if (Test-Path $cargoBin) {
             $env:Path = "$cargoBin;$env:Path"
@@ -545,7 +534,7 @@ jobs:
   # Job 2: Windows EXE/MSI on Windows runner
   # Split from the old combined Windows job so Android/Windows can run in parallel.
   # ─────────────────────────────────────────────────────────────
-  build-windows-selfhosted:
+  build-windows:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
@@ -571,7 +560,7 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Ensure local Bun is available (确保本机 Bun 可用，版本锁定)
+      - name: Ensure Bun is available on Windows runner (确保 Windows runner 上 Bun 可用，版本锁定)
         shell: pwsh
         run: |
           $requiredVersion = "${{ env.BUN_VERSION }}"
@@ -642,21 +631,9 @@ jobs:
             }
           }
 
-      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+      - name: Ensure Rust toolchain on Windows runner (确保 Windows runner Rust 工具链可用，禁止 WSL)
         shell: pwsh
         run: |
-          $preferredCargoHome = "D:\actions-runner\rust\cargo"
-          $preferredRustupHome = "D:\actions-runner\rust\rustup"
-          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
-          if (Test-Path $preferredCargoBin) {
-            $env:CARGO_HOME = $preferredCargoHome
-            $env:RUSTUP_HOME = $preferredRustupHome
-            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            $env:Path = "$preferredCargoBin;$env:Path"
-            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          }
-
           $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
           if (Test-Path $cargoBin) {
             $env:Path = "$cargoBin;$env:Path"
@@ -1217,8 +1194,8 @@ jobs:
   create-release:
     needs:
       [
-        build-android-selfhosted,
-        build-windows-selfhosted,
+        build-android-windows,
+        build-windows,
         build-macos,
         build-linux,
       ]
@@ -1226,8 +1203,8 @@ jobs:
     if: |
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v') &&
-      needs.build-android-selfhosted.result == 'success' &&
-      needs.build-windows-selfhosted.result == 'success'
+      needs.build-android-windows.result == 'success' &&
+      needs.build-windows.result == 'success'
     steps:
       - name: Checkout repository (检出代码以生成 release notes)
         uses: actions/checkout@v6

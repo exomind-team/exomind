@@ -375,6 +375,130 @@ async fn auth_pairing_relay() {
     stop_runtime(&mut rt_a, "e2e-auth-a").await;
 }
 
+#[tokio::test]
+async fn auth_pairing_relay_survives_peer_replay_without_secrets() {
+    let mut rt_a =
+        start_test_runtime_with_secret("e2e-auth-replay-a", Some("secret-a".to_string())).await;
+    let mut rt_b =
+        start_test_runtime_with_secret("e2e-auth-replay-b", Some("secret-b".to_string())).await;
+    let client = reqwest::Client::new();
+    let a_url = runtime_base_url(&rt_a);
+    let b_url = runtime_base_url(&rt_b);
+
+    let responder_inbound_token = "responder-token-for-a";
+    let (_session_id, _pin, _peer_token, initiator_inbound_token) = do_pairing_with_tokens(
+        &client,
+        &a_url,
+        "secret-a",
+        "e2e-auth-replay-b",
+        &b_url,
+        Some(responder_inbound_token),
+    )
+    .await;
+    let initiator_inbound_token =
+        initiator_inbound_token.expect("pairing response should include initiator token");
+
+    client
+        .post(format!("{b_url}/mesh/peers"))
+        .header("Authorization", "Bearer secret-b")
+        .json(&json!({
+            "id": "e2e-auth-replay-a",
+            "base_url": a_url,
+            "enabled": true,
+            "capabilities": ["relay"],
+            "auth_token": initiator_inbound_token,
+            "inbound_secret": responder_inbound_token,
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    client
+        .post(format!("{a_url}/mesh/peers"))
+        .header("Authorization", "Bearer secret-a")
+        .json(&json!({
+            "id": "e2e-auth-replay-b",
+            "base_url": b_url,
+            "enabled": true,
+            "capabilities": ["relay"],
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    client
+        .post(format!("{b_url}/mesh/peers"))
+        .header("Authorization", "Bearer secret-b")
+        .json(&json!({
+            "id": "e2e-auth-replay-a",
+            "base_url": a_url,
+            "enabled": true,
+            "capabilities": ["relay"],
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    client
+        .post(format!("{b_url}/signal-routes"))
+        .header("Authorization", "Bearer secret-b")
+        .json(&json!({
+            "topic": "test.replay",
+            "target_type": "frontend",
+            "target_ref": "ui",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    client
+        .put(format!("{a_url}/mesh/interests/e2e-auth-replay-b"))
+        .header("Authorization", "Bearer secret-a")
+        .json(&json!({ "topics": ["test.replay"] }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let event_id = rt_a.publish_signal(RuntimePublishRequest {
+        topic: "test.replay".to_string(),
+        source: Some("e2e-auth-replay-test".to_string()),
+        payload: json!({ "msg": "hello after replay" }),
+        trace_id: Some("trace-auth-replay-1".to_string()),
+        origin_host_id: None,
+    });
+
+    let delivered = wait_until(Duration::from_secs(5), || {
+        rt_b.clone_signal_pool()
+            .window()
+            .recent(50)
+            .iter()
+            .any(|e| e.topic == "test.replay" && e.id == event_id)
+    })
+    .await;
+
+    assert!(
+        delivered,
+        "RT-B should still receive relay traffic after peer replay omitted secrets.\n\
+         RT-B window: {:?}",
+        rt_b.clone_signal_pool().window().recent(50)
+    );
+
+    stop_runtime(&mut rt_b, "e2e-auth-replay-b").await;
+    stop_runtime(&mut rt_a, "e2e-auth-replay-a").await;
+}
+
 // =========================================================================
 // Test 3: discover_pair_relay (mDNS discovery + pairing + relay)
 // =========================================================================

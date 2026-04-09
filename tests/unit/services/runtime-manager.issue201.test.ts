@@ -132,6 +132,15 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
       ...HOST_B,
       trustState: 'discovered_candidate',
     })).toBe(false);
+    expect(shouldAutoPollRuntimeHost({
+      ...HOST_B,
+      trustState: 'confirmed_peer',
+    })).toBe(false);
+    expect(shouldAutoPollRuntimeHost({
+      ...HOST_B,
+      trustState: 'confirmed_peer',
+      authToken: 'control-plane-token',
+    })).toBe(true);
   });
 
   it('parses host:port and forwards to host service（解析 host:port 并调用 hostService）', async () => {
@@ -263,6 +272,7 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
       ...HOST_B,
       hostId: 'host-b-logic',
       trustState: 'confirmed_peer',
+      authToken: 'control-plane-token',
       lastSuccessfulDialAddress: '192.168.1.22:2919',
       manualOverride: '192.168.1.22:2919',
     };
@@ -309,5 +319,39 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
       trustState: 'confirmed_peer',
       hostId: 'host-b-logic',
     }));
+  });
+
+  it('does not protected-poll confirmed peers without control-plane auth token（已确认 peer 无控制面 token 时不应再发受保护轮询）', async () => {
+    const confirmedHost: RuntimeHostRecord = {
+      ...HOST_B,
+      hostId: 'host-b-logic',
+      trustState: 'confirmed_peer',
+      verificationStatus: 'verified',
+      lastSuccessfulDialAddress: '192.168.1.22:2919',
+      manualOverride: '192.168.1.22:2919',
+    };
+    const hostService = {
+      listHosts: vi.fn(async () => [confirmedHost]),
+      addHost: vi.fn(),
+      removeHost: vi.fn(),
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(),
+      getTopology: vi.fn(),
+      getAllEnergy: vi.fn(),
+    };
+
+    const manager = new RuntimeManager({ hostService, runtimeClient });
+    const snapshot = await manager.refreshSnapshot();
+
+    expect(runtimeClient.getAgents).not.toHaveBeenCalled();
+    expect(runtimeClient.getTopology).not.toHaveBeenCalled();
+    expect(runtimeClient.getAllEnergy).not.toHaveBeenCalled();
+    expect(snapshot.hosts[0]).toMatchObject({
+      connectionState: 'online',
+      agents: [],
+      topology: null,
+    });
+    expect(snapshot.hosts[0]?.error).toBeUndefined();
   });
 });

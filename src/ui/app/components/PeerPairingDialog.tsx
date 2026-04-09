@@ -336,19 +336,12 @@ export function PeerPairingDialog({
     };
   }, []);
 
-  const waitForConfirmedHostRecord = useCallback(async (peerId: string) => {
-    const deadline = Date.now() + adoptionWindowMs;
-    while (Date.now() <= deadline) {
-      const hosts = await hostService.listHosts();
-      const host = hosts.find((item) => item.hostId === peerId && item.trustState === 'confirmed_peer')
-        ?? hosts.find((item) => item.hostId === peerId);
-      if (host) {
-        return host;
-      }
-      await sleep(adoptionPollIntervalMs);
-    }
-    return null;
-  }, [adoptionPollIntervalMs, adoptionWindowMs, hostService]);
+  const findHostRecordByPeerId = useCallback(async (peerId: string) => {
+    const hosts = await hostService.listHosts();
+    return hosts.find((item) => item.hostId === peerId && item.trustState === 'confirmed_peer')
+      ?? hosts.find((item) => item.hostId === peerId)
+      ?? null;
+  }, [hostService]);
 
   const waitForIncomingProofRequest = useCallback(async (peerId: string, minTs: number) => {
     const deadline = Date.now() + adoptionWindowMs;
@@ -433,22 +426,23 @@ export function PeerPairingDialog({
             setStatus('verifying_pending');
             await onPairingSuccess?.();
 
-            const [hostRecord, adoptedRequestEvent] = await Promise.all([
-              waitForConfirmedHostRecord(newPeer.id),
-              waitForIncomingProofRequest(newPeer.id, pairingStartedAtRef.current),
-            ]);
+            const adoptedRequestEvent = await waitForIncomingProofRequest(
+              newPeer.id,
+              pairingStartedAtRef.current,
+            );
 
-            if (!hostRecord || !adoptedRequestEvent) {
+            if (!adoptedRequestEvent) {
               setErrorMessage('等待验证上下文超时');
               setStatus('verification_failed');
               return;
             }
 
+            const hostRecord = await findHostRecordByPeerId(newPeer.id);
             await runVerification({
               mode: 'joiner',
               localPeerId: localHostId,
               peerId: newPeer.id,
-              runtimeHostRecordId: hostRecord.id,
+              runtimeHostRecordId: hostRecord?.id,
               adoptedRequestEvent,
               trigger: 'pairing_auto',
             }, {
@@ -472,7 +466,7 @@ export function PeerPairingDialog({
     localHostId,
     onPairingSuccess,
     runVerification,
-    waitForConfirmedHostRecord,
+    findHostRecordByPeerId,
     waitForIncomingProofRequest,
     initiatorPeerPollIntervalMs,
   ]);
@@ -598,18 +592,12 @@ export function PeerPairingDialog({
         setStatus('verifying');
         await onPairingSuccess?.();
 
-        const hostRecord = await waitForConfirmedHostRecord(selectedPeer.host_id);
-        if (!hostRecord) {
-          setErrorMessage('未找到已配对设备记录，无法开始验证');
-          setStatus('verification_failed');
-          return;
-        }
-
+        const hostRecord = await findHostRecordByPeerId(selectedPeer.host_id);
         await runVerification({
           mode: 'owner',
           localPeerId: localHostId,
           peerId: selectedPeer.host_id,
-          runtimeHostRecordId: hostRecord.id,
+          runtimeHostRecordId: hostRecord?.id,
           trigger: 'pairing_auto',
         }, {
           afterSuccess: onPairingSuccess,
@@ -631,7 +619,7 @@ export function PeerPairingDialog({
     localAuthToken,
     onPairingSuccess,
     runVerification,
-    waitForConfirmedHostRecord,
+    findHostRecordByPeerId,
   ]);
 
   const handleRetryVerification = useCallback(async () => {

@@ -8,7 +8,10 @@ import {
   getRuntimeHostService,
 } from '@/lib/services/runtime-host.service';
 import { getRuntimeMeshSyncService, type RuntimeMeshSyncService } from '@/lib/services/runtime-mesh-sync.service';
-import { resolveRuntimeHostDialAddress } from '@/lib/utils/runtime-host-address';
+import {
+  isMeshOnlyConfirmedPeer,
+  resolveRuntimeHostDialAddress,
+} from '@/lib/utils/runtime-host-address';
 import { RuntimeClient, type RuntimeAgentSummary } from './runtime-client';
 
 export type RuntimeHostConnectionState = 'online' | 'error' | 'offline';
@@ -45,7 +48,8 @@ export interface RuntimeManagerOptions {
 }
 
 export function shouldAutoPollRuntimeHost(host: RuntimeHostRecord): boolean {
-  return !(host.trustState === 'discovered_candidate' && !host.authToken);
+  return !(host.trustState === 'discovered_candidate' && !host.authToken)
+    && !isMeshOnlyConfirmedPeer(host);
 }
 
 export function findPreferredRuntimeHostForAgent(
@@ -83,6 +87,32 @@ function mapErrorToConnectionState(errorCode: 'timeout' | 'network' | 'http' | '
 
 function toIso(now: () => Date): string {
   return now().toISOString();
+}
+
+function buildUnpolledRuntimeHostSnapshot(host: RuntimeHostRecord): RuntimeHostSnapshot {
+  if (isMeshOnlyConfirmedPeer(host)) {
+    const connectionState: RuntimeHostConnectionState = host.status === 'offline'
+      ? 'offline'
+      : host.status === 'warning' || host.verificationStatus === 'failed'
+        ? 'error'
+        : 'online';
+
+    return {
+      host,
+      connectionState,
+      agents: [],
+      topology: null,
+      error: host.verificationStatus === 'failed' ? host.lastVerificationError : undefined,
+    };
+  }
+
+  return {
+    host,
+    connectionState: 'error',
+    agents: [],
+    topology: null,
+    error: 'Awaiting verification before protected polling',
+  };
 }
 
 function parseHostAddress(hostAddress: string): { host: string; port: number } {
@@ -174,13 +204,7 @@ export class RuntimeManager {
 
   private async buildHostSnapshot(host: RuntimeHostRecord): Promise<RuntimeHostSnapshot> {
     if (!shouldAutoPollRuntimeHost(host)) {
-      return {
-        host,
-        connectionState: 'error',
-        agents: [],
-        topology: null,
-        error: 'Awaiting verification before protected polling',
-      };
+      return buildUnpolledRuntimeHostSnapshot(host);
     }
 
     const topologyStartedAtMs = Date.now();
