@@ -316,20 +316,20 @@ async fn append_event(
     Query(query): Query<EventLogQuery>,
     Json(payload): Json<AppendEventPayload>,
 ) -> Result<(StatusCode, Json<EventRecord>), (StatusCode, Json<ErrorResponse>)> {
+    let event_id = payload
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let event = EventRecord {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: event_id,
         timestamp: payload.timestamp,
         content: payload.content,
         tags: payload.tags,
         metadata: payload.metadata,
     };
-
-    if payload.id.is_some() {
-        tracing::info!(
-            user_id = ?query.user_id,
-            "ignoring deprecated client-provided eventlog id; runtime will generate id"
-        );
-    }
 
     state
         .eventlog_store
@@ -903,7 +903,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn append_ignores_client_provided_id_and_returns_runtime_id() {
+    async fn append_preserves_client_provided_id_and_upserts_by_id() {
         let dir = tempdir().unwrap();
         let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
         let app = test_router(test_state_with_eventlog(store.clone()));
@@ -916,11 +916,22 @@ mod tests {
         .await;
 
         let runtime_id = appended["id"].as_str().unwrap();
-        assert_ne!(runtime_id, "client-id");
+        assert_eq!(runtime_id, "client-id");
+
+        let updated = append_event_via_api(
+            &app,
+            r#"{"id":"client-id","timestamp":1700000000002,"content":"runtime id updated","tags":["voice"]}"#,
+            "/eventlog",
+        )
+        .await;
+        assert_eq!(updated["id"].as_str().unwrap(), "client-id");
 
         let stored = store.list_events(None).unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].id, runtime_id);
+        assert_eq!(stored[0].content, "runtime id updated");
+        assert_eq!(stored[0].timestamp, 1700000000002);
+        assert_eq!(stored[0].tags, vec!["voice".to_string()]);
     }
 
     #[tokio::test]

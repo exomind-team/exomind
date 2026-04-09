@@ -25,6 +25,7 @@ interface RuntimeEventPayload {
 }
 
 interface RuntimeAppendEventPayload {
+  id: string;
   timestamp: number;
   content: string;
   tags: string[];
@@ -91,6 +92,7 @@ export class EventLogRtAdapter implements IEventLogPort {
   async appendEvent(event: EventData): Promise<EventData> {
     const target = this.resolveTarget();
     const payload: RuntimeAppendEventPayload = {
+      id: event.id,
       timestamp: event.timestamp,
       content: event.content,
       tags: event.tags,

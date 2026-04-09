@@ -35,7 +35,7 @@ type PortListenerInfo = {
 
 function printUsage(): never {
   console.log(`Usage:
-  bun scripts/dev/tauri-dev-manager.ts start --name <instance> [--target desktop|android] [--web-port <port>] [--hmr-port <port>] [--watch]
+  bun scripts/dev/tauri-dev-manager.ts start --name <instance> [--target desktop|android] [--web-port <port>] [--hmr-port <port>] [--rt-port <port>] [--watch]
   bun scripts/dev/tauri-dev-manager.ts list
   bun scripts/dev/tauri-dev-manager.ts stop --name <instance>
   bun scripts/dev/tauri-dev-manager.ts logs --name <instance> [--tail <n>] [--follow]
@@ -339,8 +339,10 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
   const explicitWebPort = parsePortFlag(flags, '--web-port');
   const webPort = explicitWebPort ?? await findFreePort(DEFAULT_WEB_PORT);
   const hmrPort = parsePortFlag(flags, '--hmr-port') ?? await findFreePort(webPort + 1);
+  const rtPort = parsePortFlag(flags, '--rt-port') ?? await findFreePort(9124);
   const requestedName = getFlagValue(flags, '--name') ?? `${target}-${webPort}`;
   const enableWatch = hasFlag(flags, '--watch');
+  const bridgePort = 9223 + Math.max(0, webPort - DEFAULT_WEB_PORT);
 
   const paths = resolveManagedTauriInstancePaths(PROJECT_ROOT, requestedName);
   await ensureRegistryDir(paths.registryDir);
@@ -354,6 +356,7 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     ...process.env,
     EXOMIND_WEB_PORT: String(webPort),
     EXOMIND_HMR_PORT: String(hmrPort),
+    EXOMIND_RT_PORT: String(rtPort),
     EXOMIND_TAURI_INSTANCE_NAME: paths.name,
     ...(enableWatch ? { EXOMIND_TAURI_ENABLE_WATCH: '1' } : {}),
   };
@@ -364,6 +367,8 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     target,
     webPort,
     hmrPort,
+    rtPort,
+    bridgePort,
     startedAt,
   });
 
@@ -387,6 +392,7 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     rootPid: child.pid ?? -1,
     webPort,
     hmrPort,
+    rtPort,
     logPath: paths.logPath,
     metaPath: paths.metaPath,
     startedAt,
@@ -407,6 +413,8 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
   console.log(`pid: ${record.rootPid}`);
   console.log(`web: http://localhost:${webPort}`);
   console.log(`hmr: ${hmrPort}`);
+  console.log(`rt: http://127.0.0.1:${rtPort}`);
+  console.log(`bridge: ws://127.0.0.1:${bridgePort}`);
   console.log(`log: ${paths.logPath}`);
   console.log(`meta: ${paths.metaPath}`);
 }
@@ -429,6 +437,8 @@ async function listCommand(): Promise<void> {
       detail: health.detail,
       web: `http://localhost:${record.webPort}`,
       hmr: record.hmrPort,
+      rt: record.rtPort ?? '-',
+      bridge: 9223 + Math.max(0, record.webPort - DEFAULT_WEB_PORT),
       log: path.relative(PROJECT_ROOT, record.logPath),
     };
   }));

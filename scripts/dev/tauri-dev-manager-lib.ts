@@ -24,6 +24,7 @@ export type ManagedTauriInstanceRecord = {
   rootPid: number;
   webPort: number;
   hmrPort: number;
+  rtPort?: number;
   logPath: string;
   metaPath: string;
   startedAt: string;
@@ -36,6 +37,8 @@ export type ManagedTauriLogSessionStart = {
   target: TauriDevTarget;
   webPort: number;
   hmrPort: number;
+  rtPort?: number;
+  bridgePort?: number;
   startedAt: string;
 };
 
@@ -202,9 +205,11 @@ function isRecentDesktopStartup(startedAt: string, now = Date.now()): boolean {
 
 export function formatManagedTauriLogSessionStart(input: ManagedTauriLogSessionStart): string {
   const timestamp = input.startedAt.trim();
+  const rtPortLabel = typeof input.rtPort === 'number' ? ` rt=${input.rtPort}` : '';
+  const bridgePortLabel = typeof input.bridgePort === 'number' ? ` bridge=${input.bridgePort}` : '';
   return [
     '',
-    `===== manager session start [${timestamp}] name=${input.name} target=${input.target} web=${input.webPort} hmr=${input.hmrPort} =====`,
+    `===== manager session start [${timestamp}] name=${input.name} target=${input.target} web=${input.webPort} hmr=${input.hmrPort}${rtPortLabel}${bridgePortLabel} =====`,
     '',
   ].join('\n');
 }

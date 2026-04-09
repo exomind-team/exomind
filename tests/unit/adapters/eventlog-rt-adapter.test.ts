@@ -224,6 +224,7 @@ describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
     expect(url.searchParams.get('user_id')).toBe(profileId);
     expect(requestInit?.method).toBe('POST');
     expect(JSON.parse(String(requestInit?.body))).toEqual({
+      id: 'event-2',
       timestamp: 1700000001000,
       content: 'append me',
       tags: ['voice', 'note'],
