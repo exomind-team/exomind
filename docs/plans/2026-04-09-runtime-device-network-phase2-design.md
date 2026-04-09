@@ -1,7 +1,7 @@
 # Runtime Device Network Phase 2 Design
 
-> **日期**: 2026-04-09  
-> **状态**: approved-for-implementation（已进入实现）  
+> **日期**: 2026-04-09
+> **状态**: approved-for-implementation（已进入实现）
 > **范围**: 在 Phase 1 的 additive contract（增量契约）之上，完成 `device identity（设备身份）` 独立化、`device graph（设备图）` 最小真实返回，以及前端 `Device Network View（设备网络视图） / Signal Topology View（信号拓扑视图）` 的产品收口。
 
 ---
