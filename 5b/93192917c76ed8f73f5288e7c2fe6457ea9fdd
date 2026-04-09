@@ -1,0 +1,65 @@
+docs/product/exomind-content-design-principles.md
+  f6a9d023ca8507eb 29,31,33-34,36,38-39,41,43-44,46-56,90-96,98,100-109,111,113,115-118,120,139-142,144-152,159,161-164,166,189,191,193-195,197,199-203,205-207,209,211-213,215,217-219,221-225,250-252,254-266,268,270-278,280-282,306,308,310-315,317,319-320,322-331,358-361,363,365-366,368,370-387,407-434,436,438-441,443,454
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "5b93192917c76ed8f73f5288e7c2fe6457ea9fdd",
+  "prompts": {
+    "04c7bf29779ffd13": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fd1-e5f7-7440-b1cc-ba60c1de6b47",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/182750f4cbdd1e8e5773eea76b8e056af39fe2d73cfd9e60f0e6af6ae51538ce"
+    },
+    "212c8a5f93c4f206": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6dcc-718f-7de0-95c1-213127110451",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 16,
+      "overriden_lines": 0
+    },
+    "d8f0b50b4cb40c4e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fdc-aae8-7153-926a-986e6b87c3a7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 263,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ae75101c87e97c41bd53d52346da260f3744bf44191ff595fdcd58e8ff57d711"
+    },
+    "f6a9d023ca8507eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28a630e9-7ed6-48d8-a75a-c1ee1503694d",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 225,
+      "total_deletions": 63,
+      "accepted_lines": 225,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e1422ca4817d886359b22bfe387195e1eea72b1598ea08649d5a88c341602d81"
+    }
+  }
+}
