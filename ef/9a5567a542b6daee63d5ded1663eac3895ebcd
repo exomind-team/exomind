@@ -1,0 +1,62 @@
+tests/unit/ui/agent-hub/agents-page.session-actions.issue523.test.tsx
+  a3f581d06bdb89bf 705,1072,1157
+src/ui/app/pages/agents/TiledGrid.tsx
+  a3f581d06bdb89bf 1468-1469,1482-1495
+tests/unit/ui/agent-hub/session-card.stop.test.tsx
+  a3f581d06bdb89bf 60,73-75,78,90,93-94,142,152-153,193
+src/ui/app/pages/agents/QuickActionBar.tsx
+  a3f581d06bdb89bf 2,65-66
+src/ui/app/pages/AgentsPage.tsx
+  a3f581d06bdb89bf 4203,4226,4236,4270
+src/ui/app/pages/agents/SessionCard.tsx
+  a3f581d06bdb89bf 1,38,41,43-44,47,61-62,94,126,131,136,167,186,192,197,205,207-213,239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "ef9a5567a542b6daee63d5ded1663eac3895ebcd",
+  "prompts": {
+    "2627c607d409afab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7082-a4ae-74e3-82a6-fb0c00f5b082",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 112,
+      "total_deletions": 33,
+      "accepted_lines": 112,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ff56236869d4cbe4e865ca7281e4290fd8d029b80a3573625f005fa22d1ef437"
+    },
+    "a3f581d06bdb89bf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d71bd-10fe-7251-ab02-db28b368e774",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 4696,
+      "total_deletions": 1344,
+      "accepted_lines": 4663,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/b2a321f387e550e3663160b2e1e76d109ea53d63603060f81cf5ab1217e9315b"
+    },
+    "a6385f73b0f1344f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fed-bc8e-7d33-8d94-d5ca5041b82c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/f84ceda5a70eb80ae2490cd4359937eaf914b9ca2a81e49e383610d16f10c1c0"
+    }
+  }
+}
