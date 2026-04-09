@@ -1,0 +1,34 @@
+crates/exomind-runtime/src/signal/actors/replication_actor.rs
+  8468007bd6a1d8c0 9,124-126,148,228-229,702-707
+crates/exomind-runtime/tests/quota_plugin.rs
+  8468007bd6a1d8c0 15-16,62,64-65,67-69,186-187
+crates/exomind-runtime/src/routes/tasks.rs
+  8468007bd6a1d8c0 373,389,1491-1498
+crates/exomind-runtime/src/routes/pty.rs
+  8468007bd6a1d8c0 639-640
+crates/exomind-runtime/src/routes/timeblocks.rs
+  8468007bd6a1d8c0 1823-1830
+crates/exomind-runtime/tests/pty_agent.rs
+  8468007bd6a1d8c0 382-384
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "26e8c159a6be97e0e3d5d52ff678b0bfff9991e8",
+  "prompts": {
+    "8468007bd6a1d8c0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fc2-a6ea-7ab2-b84d-fd063f889cd6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 467,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e212411e3f527f3cd51eab73c319524ddbe518396c4d56063a7631fb149d0c4d"
+    }
+  }
+}
