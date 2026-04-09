@@ -8,7 +8,18 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
 
-const API_BASE = import.meta.env.VITE_UPDATE_BASE_URL || 'https://exo-mind.ai';
+const DEFAULT_UPDATE_BASE_URL = 'https://exomind-team.github.io/exomind/';
+
+function normalizeApiBase(baseUrl?: string): string {
+  const trimmed = baseUrl?.trim();
+  if (!trimmed) {
+    return DEFAULT_UPDATE_BASE_URL;
+  }
+
+  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+}
+
+const API_BASE = normalizeApiBase(import.meta.env.VITE_UPDATE_BASE_URL);
 
 export type UpdateChannel = 'release' | 'preview';
 export type CheckInterval = 'hourly' | '6h' | 'daily' | 'manual';
@@ -107,8 +118,12 @@ function getAssetKey(platform: string): string {
   return PLATFORM_ASSET_KEY[platform] ?? platform;
 }
 
+function resolveUpdateUrl(pathOrUrl: string): string {
+  return new URL(pathOrUrl.replace(/^\/+/, ''), API_BASE).toString();
+}
+
 function buildChannelUrl(channel: UpdateChannel, fileName: 'latest.json' | 'versions.json'): string {
-  return new URL(`/releases/${channel}/${fileName}`, API_BASE).toString();
+  return resolveUpdateUrl(`releases/${channel}/${fileName}`);
 }
 
 export async function checkForUpdate(params: UpdateCheckParams): Promise<UpdateInfo> {
@@ -155,7 +170,7 @@ export async function getVersions(channel: UpdateChannel): Promise<VersionInfo[]
 }
 
 export async function downloadUpdate(downloadUrl: string, expectedSha256?: string): Promise<void> {
-  const resolvedUrl = new URL(downloadUrl, API_BASE).toString();
+  const resolvedUrl = resolveUpdateUrl(downloadUrl);
 
   if (expectedSha256) {
     const normalizedExpected = expectedSha256.trim().toLowerCase();

@@ -138,7 +138,7 @@ describe('checkForUpdate', () => {
     expect(result.size).toBe(50_000_000);
     expect(result.sha256).toBe('a'.repeat(64));
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(String(spy.mock.calls[0][0])).toBe('https://exo-mind.ai/releases/preview/latest.json');
+    expect(String(spy.mock.calls[0][0])).toBe('https://exomind-team.github.io/exomind/releases/preview/latest.json');
   });
 
   it('returns no update when latest metadata is null / latest.json 为 null 时返回无更新', async () => {
@@ -197,7 +197,7 @@ describe('getVersions', () => {
       { version: '0.4.0', publishedAt: '2026-04-08T08:00:00Z' },
       { version: '0.3.9', publishedAt: '2026-04-05T08:00:00Z' },
     ]);
-    expect(String(spy.mock.calls[0][0])).toBe('https://exo-mind.ai/releases/release/versions.json');
+    expect(String(spy.mock.calls[0][0])).toBe('https://exomind-team.github.io/exomind/releases/release/versions.json');
   });
 
   it('returns empty array for empty versions index / 空版本索引返回空数组', async () => {
@@ -241,7 +241,7 @@ describe('downloadUpdate', () => {
     await downloadUpdate('/downloads/ExoMind-0.4.0-windows-x64-setup.exe');
 
     expect((openUrl as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
-      'https://exo-mind.ai/downloads/ExoMind-0.4.0-windows-x64-setup.exe',
+      'https://exomind-team.github.io/exomind/downloads/ExoMind-0.4.0-windows-x64-setup.exe',
     );
   });
 
