@@ -1,0 +1,24 @@
+website/src/pages/docs.astro
+  8468007bd6a1d8c0 3,5-128,131-135,137-144,146-148,150-160,164,168,170-209,213,215-256,258-260,262-269,271,273-282,284-288,290-313,315-343
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "3bbee0b2aa0401868abda0fea2a94ab8b86eb446",
+  "prompts": {
+    "8468007bd6a1d8c0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fc2-a6ea-7ab2-b84d-fd063f889cd6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 791,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e212411e3f527f3cd51eab73c319524ddbe518396c4d56063a7631fb149d0c4d"
+    }
+  }
+}
