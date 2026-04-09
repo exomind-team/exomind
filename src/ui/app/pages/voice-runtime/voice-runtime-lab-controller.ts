@@ -34,6 +34,48 @@ import {
   subscribeVoiceRuntimeDoubaoWebsocketUrlChanges,
 } from '@/config/voice-runtime-doubao';
 import {
+  getVoiceRuntimeOmniCompatibleAudioFormat,
+  getVoiceRuntimeOmniCompatibleBaseUrl,
+  getVoiceRuntimeOmniCompatibleModel,
+  setVoiceRuntimeOmniCompatibleAudioFormat,
+  setVoiceRuntimeOmniCompatibleBaseUrl,
+  setVoiceRuntimeOmniCompatibleModel,
+  subscribeVoiceRuntimeOmniCompatibleAudioFormatChanges,
+  subscribeVoiceRuntimeOmniCompatibleBaseUrlChanges,
+  subscribeVoiceRuntimeOmniCompatibleModelChanges,
+} from '@/config/voice-runtime-omni-compatible';
+import {
+  getVoiceRuntimeOmniApiKey,
+  getVoiceRuntimeOmniFunctionCallingEnabled,
+  getVoiceRuntimeOmniInstructions,
+  getVoiceRuntimeOmniModel,
+  getVoiceRuntimeOmniSearchEnabled,
+  getVoiceRuntimeOmniToolChoice,
+  getVoiceRuntimeOmniToolsJson,
+  getVoiceRuntimeOmniVoice,
+  getVoiceRuntimeOmniWebsocketUrl,
+  setVoiceRuntimeOmniApiKey,
+  setVoiceRuntimeOmniFunctionCallingEnabled,
+  setVoiceRuntimeOmniInstructions,
+  setVoiceRuntimeOmniModel,
+  setVoiceRuntimeOmniSearchEnabled,
+  setVoiceRuntimeOmniToolChoice,
+  setVoiceRuntimeOmniToolsJson,
+  setVoiceRuntimeOmniVoice,
+  setVoiceRuntimeOmniWebsocketUrl,
+  subscribeVoiceRuntimeOmniApiKeyChanges,
+  subscribeVoiceRuntimeOmniFunctionCallingEnabledChanges,
+  subscribeVoiceRuntimeOmniInstructionsChanges,
+  subscribeVoiceRuntimeOmniModelChanges,
+  subscribeVoiceRuntimeOmniSearchEnabledChanges,
+  subscribeVoiceRuntimeOmniToolChoiceChanges,
+  subscribeVoiceRuntimeOmniToolsJsonChanges,
+  subscribeVoiceRuntimeOmniVoiceChanges,
+  subscribeVoiceRuntimeOmniWebsocketUrlChanges,
+} from '@/config/voice-runtime-omni';
+import {
+  VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER,
+  VOICE_RUNTIME_OMNI_PROVIDER,
   getVoiceRuntimeCloudSessionPolicy,
   getVoiceRuntimeAutoSpeakEnabled,
   getVoiceRuntimeEnabled,
@@ -44,7 +86,6 @@ import {
   subscribeVoiceRuntimeAutoSpeakEnabledChanges,
   subscribeVoiceRuntimeCloudSessionPolicyChanges,
   subscribeVoiceRuntimeEnabledChanges,
-  subscribeVoiceRuntimeProviderChanges,
 } from '@/config/voice-runtime-settings';
 import {
   getVoiceRuntimeMode,
@@ -59,6 +100,8 @@ import type {
 import { isTauriWindow } from '@/config/runtime-target';
 import { createPcmS16leStreamPlayer, type PcmS16leStreamPlayer } from '@/lib/voice-runtime/pcm-s16le-stream-player';
 import { DoubaoE2ERealtimeProvider } from '@/lib/voice-runtime/providers/doubao-e2e-realtime-provider';
+import { QwenOmniCompatibleProvider } from '@/lib/voice-runtime/providers/qwen-omni-compatible-provider';
+import { QwenOmniRealtimeProvider } from '@/lib/voice-runtime/providers/qwen-omni-realtime-provider';
 import type {
   VoiceRuntimeAudioChunkMeta,
   VoiceRuntimeProvider as VoiceRuntimeProviderClient,
@@ -93,6 +136,18 @@ export interface VoiceRuntimeLabState {
   speaker: string;
   connectId: string;
   websocketUrl: string;
+  omniApiKey: string;
+  omniModel: string;
+  omniVoice: string;
+  omniInstructions: string;
+  omniWebsocketUrl: string;
+  omniCompatibleModel: string;
+  omniCompatibleBaseUrl: string;
+  omniCompatibleAudioFormat: 'wav' | 'pcm16';
+  omniSearchEnabled: boolean;
+  omniFunctionCallingEnabled: boolean;
+  omniToolChoice: string;
+  omniToolsJson: string;
   credentialConfigured: boolean;
   runtimeEnabled: boolean;
   autoSpeakEnabled: boolean;
@@ -137,6 +192,8 @@ type StateListener = (state: VoiceRuntimeLabState) => void;
 function createDefaultState(): VoiceRuntimeLabState {
   const appId = getVoiceRuntimeDoubaoAppId();
   const accessToken = getVoiceRuntimeDoubaoAccessToken();
+  const providerId = getVoiceRuntimeProvider();
+  const omniApiKey = getVoiceRuntimeOmniApiKey();
   return {
     status: 'idle',
     connectionStatus: 'disconnected',
@@ -150,10 +207,26 @@ function createDefaultState(): VoiceRuntimeLabState {
     speaker: getVoiceRuntimeDoubaoSpeaker(),
     connectId: getVoiceRuntimeDoubaoConnectId(),
     websocketUrl: getVoiceRuntimeDoubaoWebsocketUrl(),
-    credentialConfigured: Boolean(appId.trim() && accessToken.trim()),
+    omniApiKey,
+    omniModel: getVoiceRuntimeOmniModel(),
+    omniVoice: getVoiceRuntimeOmniVoice(),
+    omniInstructions: getVoiceRuntimeOmniInstructions(),
+    omniWebsocketUrl: getVoiceRuntimeOmniWebsocketUrl(),
+    omniCompatibleModel: getVoiceRuntimeOmniCompatibleModel(),
+    omniCompatibleBaseUrl: getVoiceRuntimeOmniCompatibleBaseUrl(),
+    omniCompatibleAudioFormat: getVoiceRuntimeOmniCompatibleAudioFormat(),
+    omniSearchEnabled: getVoiceRuntimeOmniSearchEnabled(),
+    omniFunctionCallingEnabled: getVoiceRuntimeOmniFunctionCallingEnabled(),
+    omniToolChoice: getVoiceRuntimeOmniToolChoice(),
+    omniToolsJson: getVoiceRuntimeOmniToolsJson(),
+    credentialConfigured: resolveCredentialConfigured(providerId, {
+      appId,
+      accessToken,
+      omniApiKey,
+    }),
     runtimeEnabled: getVoiceRuntimeEnabled(),
     autoSpeakEnabled: getVoiceRuntimeAutoSpeakEnabled(),
-    providerId: getVoiceRuntimeProvider(),
+    providerId,
     currentMode: getVoiceRuntimeMode(),
     currentCloudSessionPolicy: getVoiceRuntimeCloudSessionPolicy(),
     rawEvents: [],
@@ -190,8 +263,108 @@ function extractErrorMessage(rawEvent: ProviderRawPerception): string {
   return `Voice runtime event failed: ${rawEvent.eventType}`;
 }
 
-function resolveProviderInputMode(mode: VoiceRuntimeMode): 'keep_alive' | 'push_to_talk' {
+function resolveProviderInputMode(
+  providerId: VoiceRuntimeProviderId,
+  mode: VoiceRuntimeMode,
+): 'keep_alive' | 'push_to_talk' {
+  if (providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER) {
+    return 'push_to_talk';
+  }
   return mode === 'ambient' ? 'keep_alive' : 'push_to_talk';
+}
+
+function parseOmniToolsJson(rawValue: string): Array<Record<string, unknown>> {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(
+      `Omni tools JSON 解析失败（tools JSON parse failed）: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('Omni tools JSON 必须是数组（tools JSON must be an array）');
+  }
+
+  const tools = parsed.filter((item): item is Record<string, unknown> => {
+    return typeof item === 'object' && item !== null && !Array.isArray(item);
+  });
+
+  if (tools.length !== parsed.length) {
+    throw new Error('Omni tools JSON 数组中的每一项都必须是对象（each tool must be an object）');
+  }
+
+  return tools;
+}
+
+function formatStartListeningError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.trim();
+
+  if (
+    normalized.includes('Command omni_realtime_session_start not found')
+    || normalized.includes('omni_realtime_session_start not found')
+  ) {
+    return [
+      '桌面端未加载 Omni Realtime 命令（omni_realtime_session_start）。',
+      '请完全重启 Tauri 开发进程后再试；若仍失败，请确认当前运行实例来自最新代码。'
+    ].join(' ');
+  }
+
+  if (
+    normalized.includes('Command doubao_realtime_session_start not found')
+    || normalized.includes('doubao_realtime_session_start not found')
+  ) {
+    return [
+      '桌面端未加载 Doubao Realtime 命令（doubao_realtime_session_start）。',
+      '请完全重启 Tauri 开发进程后再试；若仍失败，请确认当前运行实例来自最新代码。'
+    ].join(' ');
+  }
+
+  return normalized || '启动语音会话失败（Unknown start error）';
+}
+
+function formatRuntimeFailureMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.trim();
+  const lower = normalized.toLowerCase();
+
+  if (
+    lower.includes('model access denied')
+    || (lower.includes('close_code=1007') && lower.includes('model'))
+  ) {
+    return [
+      'Omni 模型访问被拒绝（Model access denied）。',
+      '请在百炼控制台确认当前 API Key 已开通目标模型，并确保 Key 地域与当前 endpoint 一致：',
+      '中国内地用 dashscope.aliyuncs.com；新加坡用 dashscope-intl.aliyuncs.com。',
+      '若 realtime 权限未开通，可改用 compatible-mode 的 qwen3.5-omni-plus；若 flash 也被拒绝，说明该账号同样未开通。'
+    ].join(' ');
+  }
+
+  return normalized || '语音会话运行失败（Unknown runtime error）';
+}
+
+function resolveCredentialConfigured(
+  providerId: VoiceRuntimeProviderId,
+  values: {
+    appId: string;
+    accessToken: string;
+    omniApiKey: string;
+  },
+): boolean {
+  if (providerId === VOICE_RUNTIME_OMNI_PROVIDER) {
+    return Boolean(values.omniApiKey.trim());
+  }
+  if (providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER) {
+    return Boolean(values.omniApiKey.trim());
+  }
+  return Boolean(values.appId.trim() && values.accessToken.trim());
 }
 
 const VOICE_RUNTIME_RESPONSE_TIMEOUT_MS = 12_000;
@@ -212,11 +385,16 @@ export class VoiceRuntimeLabController {
   private stream: MediaStream | null = null;
   private sessionStartedAtMs: number | null = null;
   private completedCleanupPending = false;
+  private runtimeFailureCleanupPending = false;
   private responseTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
   constructor(dependencies: VoiceRuntimeLabControllerDependencies = {}) {
     this.providerFactory = dependencies.providerFactory ?? ((config, callbacks) =>
-      new DoubaoE2ERealtimeProvider(config, callbacks));
+      config.provider === VOICE_RUNTIME_OMNI_PROVIDER
+        ? new QwenOmniRealtimeProvider(config, callbacks)
+        : config.provider === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER
+          ? new QwenOmniCompatibleProvider(config, callbacks)
+        : new DoubaoE2ERealtimeProvider(config, callbacks));
     this.getUserMedia = dependencies.getUserMedia ?? ((constraints) =>
       getUserMediaWithConstraintFallback(
         navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices),
@@ -291,6 +469,73 @@ export class VoiceRuntimeLabController {
     this.emit();
   }
 
+  updateProvider(value: VoiceRuntimeProviderId): void {
+    // Lab provider stays local so Omni manual tests don't hijack shared runtime provider
+    // （实验台 Provider 仅作用于本页，避免抢占全局运行时 Provider）。
+    this.state.providerId = value;
+    this.syncCredentialConfigured();
+  }
+
+  updateOmniApiKey(value: string): void {
+    this.state.omniApiKey = setVoiceRuntimeOmniApiKey(value);
+    this.syncCredentialConfigured();
+  }
+
+  updateOmniModel(value: string): void {
+    this.state.omniModel = setVoiceRuntimeOmniModel(value);
+    this.emit();
+  }
+
+  updateOmniVoice(value: string): void {
+    this.state.omniVoice = setVoiceRuntimeOmniVoice(value);
+    this.emit();
+  }
+
+  updateOmniInstructions(value: string): void {
+    this.state.omniInstructions = setVoiceRuntimeOmniInstructions(value);
+    this.emit();
+  }
+
+  updateOmniWebsocketUrl(value: string): void {
+    this.state.omniWebsocketUrl = setVoiceRuntimeOmniWebsocketUrl(value);
+    this.emit();
+  }
+
+  updateOmniCompatibleModel(value: string): void {
+    this.state.omniCompatibleModel = setVoiceRuntimeOmniCompatibleModel(value);
+    this.emit();
+  }
+
+  updateOmniCompatibleBaseUrl(value: string): void {
+    this.state.omniCompatibleBaseUrl = setVoiceRuntimeOmniCompatibleBaseUrl(value);
+    this.emit();
+  }
+
+  updateOmniCompatibleAudioFormat(value: 'wav' | 'pcm16'): void {
+    this.state.omniCompatibleAudioFormat = setVoiceRuntimeOmniCompatibleAudioFormat(value);
+    this.emit();
+  }
+
+  updateOmniSearchEnabled(value: boolean): void {
+    this.state.omniSearchEnabled = setVoiceRuntimeOmniSearchEnabled(value);
+    this.emit();
+  }
+
+  updateOmniFunctionCallingEnabled(value: boolean): void {
+    this.state.omniFunctionCallingEnabled = setVoiceRuntimeOmniFunctionCallingEnabled(value);
+    this.emit();
+  }
+
+  updateOmniToolChoice(value: string): void {
+    this.state.omniToolChoice = setVoiceRuntimeOmniToolChoice(value);
+    this.emit();
+  }
+
+  updateOmniToolsJson(value: string): void {
+    this.state.omniToolsJson = setVoiceRuntimeOmniToolsJson(value);
+    this.emit();
+  }
+
   updateSpeakText(value: string): void {
     this.state.speakText = value;
     this.emit();
@@ -318,7 +563,12 @@ export class VoiceRuntimeLabController {
 
   async startListening(): Promise<void> {
     if (!this.state.credentialConfigured) {
-      this.setError('请先填写 APP ID 和 Access Token（请先配置豆包 S2S 凭据）');
+      this.setError(
+        this.state.providerId === VOICE_RUNTIME_OMNI_PROVIDER
+        || this.state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER
+          ? '请先填写 Omni API Key（请先配置 Omni 凭据）'
+          : '请先填写 APP ID 和 Access Token（请先配置豆包 S2S 凭据）',
+      );
       return;
     }
 
@@ -342,13 +592,15 @@ export class VoiceRuntimeLabController {
     this.state.firstAudioLatencyMs = null;
     this.emit();
 
-    const provider = this.providerFactory(this.buildProviderConfig(), {
-      onRawEvent: (rawEvent) => this.handleProviderRawEvent(rawEvent),
-      onAudioChunk: (chunk, meta) => this.handleProviderAudioChunk(chunk, meta),
-    });
+    let provider: VoiceRuntimeProviderClient | null = null;
 
     try {
-      const sessionId = await provider.start();
+      provider = this.providerFactory(this.buildProviderConfig(), {
+        onRawEvent: (rawEvent) => this.handleProviderRawEvent(rawEvent),
+        onAudioChunk: (chunk, meta) => this.handleProviderAudioChunk(chunk, meta),
+      });
+      const activeProvider = provider;
+      const sessionId = await activeProvider.start();
       const stream = await this.getUserMedia({
         audio: {
           ...DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
@@ -358,14 +610,18 @@ export class VoiceRuntimeLabController {
       const capture = this.createStreamingCapture({
         stream,
         onChunk: async (chunk) => {
-          await provider.pushAudio(chunk);
+          try {
+            await activeProvider.pushAudio(chunk);
+          } catch (error) {
+            await this.handleRuntimeFailure(error);
+          }
         },
       });
 
-      await capture.start();
-      this.provider = provider;
+      this.provider = activeProvider;
       this.capture = capture;
       this.stream = stream;
+      await capture.start();
       this.sessionStartedAtMs = Date.now();
       this.state.status = 'listening';
       this.state.microphoneStatus = 'capturing';
@@ -373,10 +629,10 @@ export class VoiceRuntimeLabController {
       this.emit();
     } catch (error) {
       this.clearResponseTimeout();
-      await provider.cancel().catch(() => {});
-      await provider.dispose().catch(() => {});
+      await provider?.cancel().catch(() => {});
+      await provider?.dispose().catch(() => {});
       this.releaseStream();
-      this.setError(error instanceof Error ? error.message : String(error));
+      this.setError(formatStartListeningError(error));
     }
   }
 
@@ -467,16 +723,60 @@ export class VoiceRuntimeLabController {
         this.state.websocketUrl = value;
         this.emit();
       }),
+      subscribeVoiceRuntimeOmniApiKeyChanges((value) => {
+        this.state.omniApiKey = value;
+        this.syncCredentialConfigured();
+      }),
+      subscribeVoiceRuntimeOmniModelChanges((value) => {
+        this.state.omniModel = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniVoiceChanges((value) => {
+        this.state.omniVoice = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniInstructionsChanges((value) => {
+        this.state.omniInstructions = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniWebsocketUrlChanges((value) => {
+        this.state.omniWebsocketUrl = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniCompatibleModelChanges((value) => {
+        this.state.omniCompatibleModel = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniCompatibleBaseUrlChanges((value) => {
+        this.state.omniCompatibleBaseUrl = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniCompatibleAudioFormatChanges((value) => {
+        this.state.omniCompatibleAudioFormat = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniSearchEnabledChanges((value) => {
+        this.state.omniSearchEnabled = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniFunctionCallingEnabledChanges((value) => {
+        this.state.omniFunctionCallingEnabled = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniToolChoiceChanges((value) => {
+        this.state.omniToolChoice = value;
+        this.emit();
+      }),
+      subscribeVoiceRuntimeOmniToolsJsonChanges((value) => {
+        this.state.omniToolsJson = value;
+        this.emit();
+      }),
       subscribeVoiceRuntimeEnabledChanges((value) => {
         this.state.runtimeEnabled = value;
         this.emit();
       }),
       subscribeVoiceRuntimeAutoSpeakEnabledChanges((value) => {
         this.state.autoSpeakEnabled = value;
-        this.emit();
-      }),
-      subscribeVoiceRuntimeProviderChanges((value) => {
-        this.state.providerId = value;
         this.emit();
       }),
       subscribeVoiceRuntimeModeChanges((value) => {
@@ -491,6 +791,53 @@ export class VoiceRuntimeLabController {
   }
 
   private buildProviderConfig(): VoiceRuntimeProviderConfig {
+    if (this.state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER) {
+      return {
+        provider: VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER,
+        modelVersion: this.state.omniCompatibleModel,
+        sampleRate: 16000,
+        language: 'zh-CN',
+        apiKey: this.state.omniApiKey,
+        baseUrl: this.state.omniCompatibleBaseUrl,
+        websocketUrl: this.state.omniCompatibleBaseUrl,
+        speaker: this.state.omniVoice,
+        instructions: this.state.omniInstructions,
+        inputMode: resolveProviderInputMode(this.state.providerId, this.state.currentMode),
+        ttsAudioFormat: 'pcm_s16le',
+        ttsSampleRate: 24000,
+        audioOutputFormat: this.state.omniCompatibleAudioFormat,
+      };
+    }
+
+    if (this.state.providerId === VOICE_RUNTIME_OMNI_PROVIDER) {
+      const tools = this.state.omniFunctionCallingEnabled
+        ? parseOmniToolsJson(this.state.omniToolsJson)
+        : [];
+      return {
+        provider: VOICE_RUNTIME_OMNI_PROVIDER,
+        modelVersion: this.state.omniModel,
+        sampleRate: 16000,
+        language: 'zh-CN',
+        apiKey: this.state.omniApiKey,
+        websocketUrl: this.state.omniWebsocketUrl,
+        speaker: this.state.omniVoice,
+        instructions: this.state.omniInstructions,
+        inputMode: resolveProviderInputMode(this.state.providerId, this.state.currentMode),
+        ttsAudioFormat: 'pcm_s16le',
+        ttsSampleRate: 24000,
+        enableSearch: this.state.omniSearchEnabled,
+        searchOptions: this.state.omniSearchEnabled
+          ? {
+            enableSource: true,
+          }
+          : undefined,
+        tools: this.state.omniFunctionCallingEnabled ? tools : undefined,
+        toolChoice: this.state.omniFunctionCallingEnabled
+          ? this.state.omniToolChoice.trim() || 'auto'
+          : undefined,
+      };
+    }
+
     return {
       provider: 'doubao-o2-realtime',
       modelVersion: this.state.modelVersion,
@@ -502,7 +849,7 @@ export class VoiceRuntimeLabController {
       websocketUrl: this.state.websocketUrl,
       connectId: this.state.connectId,
       speaker: this.state.speaker,
-      inputMode: resolveProviderInputMode(this.state.currentMode),
+      inputMode: resolveProviderInputMode(this.state.providerId, this.state.currentMode),
       ttsAudioFormat: 'pcm_s16le',
       ttsSampleRate: 24000,
     };
@@ -532,8 +879,7 @@ export class VoiceRuntimeLabController {
       || rawEvent.eventType === 'DialogCommonError'
       || rawEvent.eventType === 'error'
     ) {
-      this.clearResponseTimeout();
-      this.setError(extractErrorMessage(rawEvent));
+      await this.handleRuntimeFailure(extractErrorMessage(rawEvent));
       return;
     }
 
@@ -610,11 +956,14 @@ export class VoiceRuntimeLabController {
       this.clearResponseTimeout();
       // Do not interrupt queued PCM on normal completion（正常完成时不要打断本地 PCM 队列）.
       // `interrupt()` should only be used for explicit cancel / barge-in.
+      if (this.capture) {
+        await this.capture.cancel().catch(() => {});
+        this.capture = null;
+      }
       if (this.provider) {
         await this.provider.dispose().catch(() => {});
         this.provider = null;
       }
-      this.capture = null;
       this.releaseStream();
       this.sessionStartedAtMs = null;
     } finally {
@@ -652,8 +1001,42 @@ export class VoiceRuntimeLabController {
     this.emit();
   }
 
+  private async handleRuntimeFailure(error: unknown): Promise<void> {
+    const message = formatRuntimeFailureMessage(error);
+    this.setError(message);
+    await this.cleanupRuntimeResources();
+  }
+
+  private async cleanupRuntimeResources(): Promise<void> {
+    if (this.runtimeFailureCleanupPending) {
+      return;
+    }
+    this.runtimeFailureCleanupPending = true;
+    try {
+      this.clearResponseTimeout();
+      if (this.capture) {
+        await this.capture.cancel().catch(() => {});
+        this.capture = null;
+      }
+      if (this.provider) {
+        await this.provider.cancel().catch(() => {});
+        await this.provider.dispose().catch(() => {});
+        this.provider = null;
+      }
+      await this.audioPlayer.interrupt().catch(() => {});
+      this.releaseStream();
+      this.sessionStartedAtMs = null;
+    } finally {
+      this.runtimeFailureCleanupPending = false;
+    }
+  }
+
   private syncCredentialConfigured(): void {
-    this.state.credentialConfigured = Boolean(this.state.appId.trim() && this.state.accessToken.trim());
+    this.state.credentialConfigured = resolveCredentialConfigured(this.state.providerId, {
+      appId: this.state.appId,
+      accessToken: this.state.accessToken,
+      omniApiKey: this.state.omniApiKey,
+    });
     this.emit();
   }
 

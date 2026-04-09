@@ -13,7 +13,11 @@ import {
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { VoiceRuntimeMode } from '@/config/voice-runtime-mode';
-import type { VoiceRuntimeCloudSessionPolicy } from '@/config/voice-runtime-settings';
+import {
+  VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER,
+  VOICE_RUNTIME_OMNI_PROVIDER,
+  type VoiceRuntimeCloudSessionPolicy,
+} from '@/config/voice-runtime-settings';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -160,6 +164,16 @@ function formatCloudSessionPolicyLabel(policy: VoiceRuntimeCloudSessionPolicy): 
   }
 }
 
+function formatProviderLabel(providerId: VoiceRuntimeLabState['providerId']): string {
+  if (providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER) {
+    return 'Omni Compatible';
+  }
+  if (providerId === VOICE_RUNTIME_OMNI_PROVIDER) {
+    return 'Omni Realtime';
+  }
+  return 'Doubao O2.0 Realtime';
+}
+
 function ActionButton({
   label,
   meta,
@@ -220,6 +234,91 @@ function ActionButton({
   );
 }
 
+function HoldToTalkButton({
+  disabled,
+  pressed,
+  status,
+  detail,
+  onPressStart,
+  onPressEnd,
+}: {
+  disabled: boolean;
+  pressed: boolean;
+  status: string;
+  detail: string;
+  onPressStart: () => void;
+  onPressEnd: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      aria-label="按住说话，松开提交"
+      disabled={disabled}
+      variant="ghost"
+      className={cn(
+        'h-auto w-full items-start justify-start rounded-2xl border px-4 py-4 text-left shadow-sm transition',
+        pressed
+          ? 'border-brand-accent/35 bg-brand-accent/10 text-strong'
+          : 'border-brand-accent/25 bg-card text-strong hover:bg-background',
+      )}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        onPressStart();
+      }}
+      onPointerUp={(event) => {
+        if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+          event.currentTarget.releasePointerCapture?.(event.pointerId);
+        }
+        onPressEnd();
+      }}
+      onPointerCancel={onPressEnd}
+      onBlur={onPressEnd}
+      onKeyDown={(event) => {
+        if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
+          event.preventDefault();
+          onPressStart();
+        }
+      }}
+      onKeyUp={(event) => {
+        if (event.key === ' ' || event.key === 'Enter') {
+          event.preventDefault();
+          onPressEnd();
+        }
+      }}
+    >
+      <div className="flex w-full items-start gap-3">
+        <div className={cn(
+          'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border',
+          pressed
+            ? 'border-brand-accent/35 bg-brand-accent/15 text-brand-accent'
+            : 'border-brand-accent/20 bg-brand-accent/10 text-brand-accent',
+        )}
+        >
+          <Mic className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-sm font-semibold">按住说话，松开提交</span>
+            <span className={cn(
+              'rounded-full border px-2 py-0.5 text-[11px] font-medium',
+              pressed
+                ? 'border-brand-accent/25 bg-brand-accent/10 text-brand-accent'
+                : 'border-border-card bg-background text-secondary',
+            )}
+            >
+              {status}
+            </span>
+          </div>
+          <span aria-hidden="true" className="mt-1 block text-xs leading-5 text-secondary">
+            {detail}
+          </span>
+        </div>
+      </div>
+    </Button>
+  );
+}
+
 function EventList({ events }: { events: VoiceRuntimeLabState['rawEvents'] }) {
   if (events.length === 0) {
     return (
@@ -273,6 +372,12 @@ function formatStartHint(state: VoiceRuntimeLabState): string {
     return '当前是 Web 预览环境，开始监听仅在 Tauri 桌面端可用。';
   }
   if (!state.credentialConfigured) {
+    if (
+      state.providerId === VOICE_RUNTIME_OMNI_PROVIDER
+      || state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER
+    ) {
+      return '先在下方填入 Omni API Key，再点“开始监听”。';
+    }
     return '先在下方填入 APP ID 和 Access Token，再点“开始监听”。';
   }
   if (!state.runtimeEnabled) {
@@ -280,6 +385,15 @@ function formatStartHint(state: VoiceRuntimeLabState): string {
   }
   if (state.currentMode === 'off') {
     return '建议把运行模式切到“按键说话”或“环境监听”，再开始联调。';
+  }
+  if (state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER) {
+    if (state.currentMode === 'ambient') {
+      return 'Omni Compatible 在实验台里始终按“按住说话 / 松开提交”执行；即使全局仍是环境监听，它也不会改掉全局 Doubao 持续监听 Provider。';
+    }
+    return '配置完成后，直接按住“按住说话，松开提交”开始录音；松开后会把整段音频上传到 Omni Compatible，并流式返回文本与语音。';
+  }
+  if (state.providerId === VOICE_RUNTIME_OMNI_PROVIDER) {
+    return '配置完成后，点击“开始监听”即可建立 Omni Realtime 会话，随后会看到 ASR、Chat 和 TTS 事件流。';
   }
   return '配置完成后，点击“开始监听”即可建立豆包 S2S 会话，随后会看到 ASR、Chat 和 TTS 事件流。';
 }
@@ -297,8 +411,18 @@ function buildReadinessItems(state: VoiceRuntimeLabState): Array<{
     },
     {
       label: '连接凭据',
-      value: state.credentialConfigured ? 'APP ID + Token 已配置' : '缺少必填',
+      value: (
+        state.providerId === VOICE_RUNTIME_OMNI_PROVIDER
+        || state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER
+      )
+        ? (state.credentialConfigured ? 'API Key 已配置' : '缺少 API Key')
+        : (state.credentialConfigured ? 'APP ID + Token 已配置' : '缺少必填'),
       tone: state.credentialConfigured ? 'good' : 'warn',
+    },
+    {
+      label: 'Provider',
+      value: formatProviderLabel(state.providerId),
+      tone: 'neutral',
     },
     {
       label: '运行时',
@@ -322,7 +446,9 @@ export function VoiceRuntimeLabPage() {
   const navigate = useNavigate();
   const [controller] = useState(() => new VoiceRuntimeLabController());
   const [state, setState] = useState(() => controller.getState());
+  const [holdToTalkPressed, setHoldToTalkPressed] = useState(false);
   const pendingDisposeTimerRef = useRef<number | null>(null);
+  const holdToTalkActiveRef = useRef(false);
 
   useEffect(() => {
     if (pendingDisposeTimerRef.current != null) {
@@ -341,12 +467,28 @@ export function VoiceRuntimeLabPage() {
     }, 0);
   }, [controller]);
 
+  const isOmniCompatibleSelected = state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER;
   const canStart = (state.status === 'idle' || state.status === 'error') && state.isTauri;
   const canStop = state.status === 'listening';
   const canCancel = state.status === 'connecting' || state.status === 'listening' || state.status === 'responding';
+  const canUseHoldToTalk = state.isTauri && state.credentialConfigured && state.status !== 'responding';
+  const holdToTalkStatus = state.status === 'listening'
+    ? '录音中'
+    : state.status === 'connecting'
+      ? '连接中'
+      : state.status === 'responding'
+        ? '返回中'
+        : canUseHoldToTalk
+          ? '按住可说'
+          : '待就绪';
+  const holdToTalkDetail = state.status === 'listening'
+    ? '保持按住继续录音；松开后会立即提交整段音频并开始流式返回文本与音频。'
+    : state.status === 'responding'
+      ? '录音已结束，Omni Compatible 正在边返回文本边返回音频；此时可继续看下方事件流。'
+      : '这个按钮只作用于本页的 Omni Compatible 单次录音测试，不会改掉全局 Doubao 持续监听 Provider。';
   const startHint = useMemo(
     () => formatStartHint(state),
-    [state.isTauri, state.credentialConfigured, state.runtimeEnabled, state.currentMode],
+    [state.isTauri, state.credentialConfigured, state.runtimeEnabled, state.currentMode, state.providerId],
   );
   const readinessItems = useMemo(
     () => buildReadinessItems(state),
@@ -356,14 +498,50 @@ export function VoiceRuntimeLabPage() {
       state.runtimeEnabled,
       state.currentMode,
       state.currentCloudSessionPolicy,
+      state.providerId,
     ],
   );
+  useEffect(() => {
+    if (isOmniCompatibleSelected) {
+      return;
+    }
+    holdToTalkActiveRef.current = false;
+    setHoldToTalkPressed(false);
+  }, [isOmniCompatibleSelected]);
+  const beginHoldToTalk = async () => {
+    if (holdToTalkActiveRef.current) {
+      return;
+    }
+    holdToTalkActiveRef.current = true;
+    setHoldToTalkPressed(true);
+
+    if (state.status === 'idle' || state.status === 'error') {
+      await controller.startListening();
+    }
+
+    const latestState = controller.getState();
+    if (!holdToTalkActiveRef.current && latestState.status === 'listening') {
+      await controller.stopListening();
+    }
+  };
+  const endHoldToTalk = async () => {
+    const wasActive = holdToTalkActiveRef.current;
+    holdToTalkActiveRef.current = false;
+    setHoldToTalkPressed(false);
+    if (!wasActive) {
+      return;
+    }
+    const latestState = controller.getState();
+    if (latestState.status === 'listening') {
+      await controller.stopListening();
+    }
+  };
 
   return (
     <PageShell
       title="语音运行时实验台"
       eyebrow="Voice Runtime Lab / 语音运行时实验"
-      subtitle="这页现在对齐火山官方端到端实时语音 S2S。你可以直接在这里配置 APP ID / Access Token / Secret Key，开始一次完整的 ASR → Chat → TTS 联调。"
+      subtitle="这页支持 Doubao Realtime、Omni Realtime 与 Omni Compatible 三条语音链路。你可以直接在这里按 Provider 配置凭据并完成一次 ASR → Chat → TTS 联调。"
       headerAction={(
         <Badge
           variant="outline"
@@ -394,7 +572,9 @@ export function VoiceRuntimeLabPage() {
                       端到端实时语音从这页直接开始
                     </CardTitle>
                     <CardDescription className="mt-2 max-w-3xl text-sm leading-6 text-secondary">
-                      不需要先猜流程，也不需要先跳到设置页。先在本页打开运行时、选择模式、填 APP ID / Access Token / Secret Key，再点“开始监听”，说完后点“停止并提交”，下方会同时看到用户识别文本、模型回复文本和语音播报状态。
+                      {isOmniCompatibleSelected
+                        ? '当前实验 Provider 是 Omni Compatible。它在本页按“按住说话 / 松开提交”工作：松开后上传整段音频，服务端再流式回传文本与音频。这个实验 Provider 不会改掉全局 Doubao 持续监听 Provider。'
+                        : '不需要先猜流程，也不需要先跳到设置页。先在本页打开运行时、选好 Provider 与模式并填凭据，再点“开始监听”，说完后点“停止并提交”，下方会同时看到用户识别文本、模型回复文本和语音播报状态。Omni Compatible 属于“手动结束后上传整段音频”，不要把它当成真正的实时逐帧上行。'}
                     </CardDescription>
                   </div>
                 </div>
@@ -406,29 +586,46 @@ export function VoiceRuntimeLabPage() {
             </CardHeader>
             <CardContent className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
               <div className="grid gap-3 md:grid-cols-2">
-                <StepItem index="1" title="打开运行时" detail="先把“启用语音运行时”打开，运行模式建议切到“环境监听”或“按键说话”。" />
-                <StepItem index="2" title="填连接参数" detail="在下方填入 APP ID、Access Token 和 Secret Key；模型版本默认对齐官方 O2.0：1.2.1.1。" />
-                <StepItem index="3" title="开始一次识别" detail="点击“开始监听”，对着麦克风说话；说完后点击“停止并提交”，服务端会继续返回 Chat 与 TTS 结果。" />
+                <StepItem index="1" title="打开运行时" detail={isOmniCompatibleSelected ? '如果你同时在别处跑豆包持续监听，可以保持全局运行时不变；Omni Compatible 的单次录音按钮只作用于本页。' : '先把“启用语音运行时”打开，运行模式建议切到“环境监听”或“按键说话”。'} />
+                <StepItem index="2" title="填连接参数" detail="先选择 Provider，再按 Provider 填对应凭据（Doubao: APP ID/Token；Omni: API Key。Compatible 另配 Base URL / 模型）。" />
+                <StepItem index="3" title="开始一次识别" detail={isOmniCompatibleSelected ? '按住“按住说话，松开提交”开始录音；松开后会把整段音频上传到 Omni Compatible，并继续流式返回 Chat / TTS 结果。' : '点击“开始监听”，对着麦克风说话；说完后点击“停止并提交”，服务端会继续返回 Chat 与 TTS 结果。'} />
                 <StepItem index="4" title="核对结果" detail="看实时字幕、最终文本、模型回复文本、语音播报状态和原始事件时间线是否一致。" />
               </div>
               <div className="grid gap-3">
-                <ActionButton
-                  label="开始监听"
-                  meta="建立实时会话并开始推送麦克风音频"
-                  status={canStart ? '可开始' : '待就绪'}
-                  icon={Mic}
-                  disabled={!canStart}
-                  onClick={() => void controller.startListening()}
-                />
-                <ActionButton
-                  label="停止并提交"
-                  meta="结束本轮采集，等待服务端返回 Chat / TTS 结果"
-                  status={canStop ? '可提交' : '监听后可用'}
-                  icon={Radio}
-                  disabled={!canStop}
-                  onClick={() => void controller.stopListening()}
-                  variant="secondary"
-                />
+                {isOmniCompatibleSelected ? (
+                  <HoldToTalkButton
+                    disabled={!canUseHoldToTalk}
+                    pressed={holdToTalkPressed || state.status === 'listening'}
+                    status={holdToTalkStatus}
+                    detail={holdToTalkDetail}
+                    onPressStart={() => {
+                      void beginHoldToTalk();
+                    }}
+                    onPressEnd={() => {
+                      void endHoldToTalk();
+                    }}
+                  />
+                ) : (
+                  <>
+                    <ActionButton
+                      label="开始监听"
+                      meta="建立实时会话并开始推送麦克风音频"
+                      status={canStart ? '可开始' : '待就绪'}
+                      icon={Mic}
+                      disabled={!canStart}
+                      onClick={() => void controller.startListening()}
+                    />
+                    <ActionButton
+                      label="停止并提交"
+                      meta="结束本轮采集，等待服务端返回 Chat / TTS 结果"
+                      status={canStop ? '可提交' : '监听后可用'}
+                      icon={Radio}
+                      disabled={!canStop}
+                      onClick={() => void controller.stopListening()}
+                      variant="secondary"
+                    />
+                  </>
+                )}
                 <ActionButton
                   label="取消监听"
                   meta="立即释放麦克风、本地采集和云端会话"
@@ -474,7 +671,9 @@ export function VoiceRuntimeLabPage() {
                     测试路径
                   </div>
                   <p className="mt-2 text-sm leading-6 text-secondary">
-                    先看上面的准备情况，把阻塞项消掉；然后点击“开始监听”，说完后点击“停止并提交”；最后对照下方的用户识别文本、模型回复文本、播报状态与原始事件，确认一次完整链路收尾正常。
+                    {isOmniCompatibleSelected
+                      ? '先看上面的准备情况，把阻塞项消掉；然后按住“按住说话，松开提交”完成一轮录音；最后对照下方的用户识别文本、模型回复文本、播报状态与原始事件，确认一次完整链路收尾正常。'
+                      : '先看上面的准备情况，把阻塞项消掉；然后点击“开始监听”，说完后点击“停止并提交”；最后对照下方的用户识别文本、模型回复文本、播报状态与原始事件，确认一次完整链路收尾正常。'}
                   </p>
                 </div>
               </div>
@@ -493,6 +692,29 @@ export function VoiceRuntimeLabPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-secondary">
+                    <Bot className="h-4 w-4 text-brand-accent" />
+                    实验 Provider
+                  </div>
+                  <SlidingSegmentedControl
+                    value={state.providerId}
+                    onChange={(value) => controller.updateProvider(value)}
+                    options={[
+                      { key: 'doubao-o2-realtime', label: 'Doubao' },
+                      { key: VOICE_RUNTIME_OMNI_PROVIDER, label: 'Omni Realtime' },
+                      { key: VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER, label: 'Omni Compatible' },
+                    ]}
+                    minButtonWidthClassName="min-w-[96px]"
+                    buttonClassName="py-2 text-xs"
+                  />
+                  {isOmniCompatibleSelected ? (
+                    <p className="rounded-2xl border border-dashed border-border-card bg-background px-4 py-3 text-xs leading-6 text-secondary">
+                      Omni Compatible 只切换本页实验 Provider，不会改掉全局 Doubao 持续监听 Provider。你可以保持豆包环境监听继续运行，再在这里做单次按住说话测试。
+                    </p>
+                  ) : null}
+                </div>
+
                 <div className="grid gap-3 md:grid-cols-2">
                   <SettingToggle
                     label="启用语音运行时"
@@ -543,89 +765,272 @@ export function VoiceRuntimeLabPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="voice-runtime-app-id" className="text-sm text-strong">APP ID</Label>
-                    <Input
-                      id="voice-runtime-app-id"
-                      aria-label="APP ID"
-                      value={state.appId}
-                      onChange={(event) => controller.updateAppId(event.target.value)}
-                      placeholder="输入火山控制台的 APP ID"
-                      className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
-                    />
+                {state.providerId === VOICE_RUNTIME_OMNI_PROVIDER ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="voice-runtime-omni-api-key" className="text-sm text-strong">Omni API Key</Label>
+                      <Input
+                        id="voice-runtime-omni-api-key"
+                        aria-label="Omni API Key"
+                        type="password"
+                        value={state.omniApiKey}
+                        onChange={(event) => controller.updateOmniApiKey(event.target.value)}
+                        placeholder="输入 Omni Realtime API Key"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-omni-model" className="text-sm text-strong">模型</Label>
+                      <Input
+                        id="voice-runtime-omni-model"
+                        aria-label="Omni 模型"
+                        value={state.omniModel}
+                        onChange={(event) => controller.updateOmniModel(event.target.value)}
+                        placeholder={`${'q'}wen3.5-omni-plus-realtime`}
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-omni-voice" className="text-sm text-strong">音色</Label>
+                      <Input
+                        id="voice-runtime-omni-voice"
+                        aria-label="Omni 音色"
+                        value={state.omniVoice}
+                        onChange={(event) => controller.updateOmniVoice(event.target.value)}
+                        placeholder="Ethan"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="grid gap-3 md:col-span-2 md:grid-cols-2">
+                      <SettingToggle
+                        label="启用 Web Search"
+                        description="开启后在 session.update 里带上联网搜索配置，并请求返回来源。"
+                        checked={state.omniSearchEnabled}
+                        onCheckedChange={(checked) => controller.updateOmniSearchEnabled(checked)}
+                      />
+                      <SettingToggle
+                        label="启用 Function Calling"
+                        description="开启后会把下方工具 JSON 和 tool choice 一并传给 Omni Realtime。"
+                        checked={state.omniFunctionCallingEnabled}
+                        onCheckedChange={(checked) => controller.updateOmniFunctionCallingEnabled(checked)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-omni-tool-choice" className="text-sm text-strong">
+                        Tool Choice / 工具选择
+                      </Label>
+                      <Input
+                        id="voice-runtime-omni-tool-choice"
+                        aria-label="Tool Choice"
+                        value={state.omniToolChoice}
+                        onChange={(event) => controller.updateOmniToolChoice(event.target.value)}
+                        placeholder="auto / required / none"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="voice-runtime-omni-tools-json" className="text-sm text-strong">
+                        Tools JSON / 工具定义
+                      </Label>
+                      <Textarea
+                        id="voice-runtime-omni-tools-json"
+                        aria-label="Tools JSON"
+                        value={state.omniToolsJson}
+                        onChange={(event) => controller.updateOmniToolsJson(event.target.value)}
+                        placeholder='[{"type":"function","name":"get_weather"}]'
+                        rows={8}
+                        className="settings-dialog-input min-h-[180px] rounded-2xl border-border-card bg-background font-mono text-xs"
+                      />
+                      <p className="text-xs leading-5 text-secondary">
+                        仅在启用 Function Calling 时生效。这里填写 tools 数组 JSON，非法 JSON 会在开始监听前直接报错。
+                      </p>
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="voice-runtime-omni-instructions" className="text-sm text-strong">System Instructions</Label>
+                      <Textarea
+                        id="voice-runtime-omni-instructions"
+                        aria-label="Omni 指令"
+                        value={state.omniInstructions}
+                        onChange={(event) => controller.updateOmniInstructions(event.target.value)}
+                        placeholder="设置 Omni Realtime 会话指令"
+                        rows={3}
+                        className="settings-dialog-input min-h-[96px] rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="voice-runtime-omni-websocket-url" className="text-sm text-strong">WebSocket 地址</Label>
+                      <Input
+                        id="voice-runtime-omni-websocket-url"
+                        aria-label="Omni WebSocket 地址"
+                        value={state.omniWebsocketUrl}
+                        onChange={(event) => controller.updateOmniWebsocketUrl(event.target.value)}
+                        placeholder="wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="voice-runtime-access-token" className="text-sm text-strong">Access Token</Label>
-                    <Input
-                      id="voice-runtime-access-token"
-                      aria-label="Access Token"
-                      type="password"
-                      value={state.accessToken}
-                      onChange={(event) => controller.updateAccessToken(event.target.value)}
-                      placeholder="输入火山控制台的 Access Token"
-                      className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
-                    />
+                ) : state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="voice-runtime-omni-api-key" className="text-sm text-strong">Omni API Key</Label>
+                      <Input
+                        id="voice-runtime-omni-api-key"
+                        aria-label="Omni API Key"
+                        type="password"
+                        value={state.omniApiKey}
+                        onChange={(event) => controller.updateOmniApiKey(event.target.value)}
+                        placeholder="输入 Omni Compatible API Key"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-omni-compatible-model" className="text-sm text-strong">Compatible 模型</Label>
+                      <Input
+                        id="voice-runtime-omni-compatible-model"
+                        aria-label="Compatible 模型"
+                        value={state.omniCompatibleModel}
+                        onChange={(event) => controller.updateOmniCompatibleModel(event.target.value)}
+                        placeholder={`${'q'}wen3.5-omni-plus`}
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-omni-voice" className="text-sm text-strong">音色</Label>
+                      <Input
+                        id="voice-runtime-omni-voice"
+                        aria-label="Omni 音色"
+                        value={state.omniVoice}
+                        onChange={(event) => controller.updateOmniVoice(event.target.value)}
+                        placeholder="Ethan"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-omni-compatible-base-url" className="text-sm text-strong">Compatible Base URL</Label>
+                      <Input
+                        id="voice-runtime-omni-compatible-base-url"
+                        aria-label="Compatible Base URL"
+                        value={state.omniCompatibleBaseUrl}
+                        onChange={(event) => controller.updateOmniCompatibleBaseUrl(event.target.value)}
+                        placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-omni-compatible-audio-format" className="text-sm text-strong">输出音频格式</Label>
+                      <SlidingSegmentedControl
+                        value={state.omniCompatibleAudioFormat}
+                        onChange={(value) => controller.updateOmniCompatibleAudioFormat(value as 'wav' | 'pcm16')}
+                        options={[
+                          { key: 'wav', label: 'wav' },
+                          { key: 'pcm16', label: 'pcm16' },
+                        ]}
+                        buttonClassName="py-2 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="voice-runtime-omni-instructions" className="text-sm text-strong">System Instructions</Label>
+                      <Textarea
+                        id="voice-runtime-omni-instructions"
+                        aria-label="Omni 指令"
+                        value={state.omniInstructions}
+                        onChange={(event) => controller.updateOmniInstructions(event.target.value)}
+                        placeholder="设置 Omni Compatible 会话指令"
+                        rows={3}
+                        className="settings-dialog-input min-h-[96px] rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="voice-runtime-secret-key" className="text-sm text-strong">Secret Key</Label>
-                    <Input
-                      id="voice-runtime-secret-key"
-                      aria-label="Secret Key"
-                      type="password"
-                      value={state.secretKey}
-                      onChange={(event) => controller.updateSecretKey(event.target.value)}
-                      placeholder="本字段当前保留给后续 REST / 签名链路"
-                      className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
-                    />
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="voice-runtime-app-id" className="text-sm text-strong">APP ID</Label>
+                      <Input
+                        id="voice-runtime-app-id"
+                        aria-label="APP ID"
+                        value={state.appId}
+                        onChange={(event) => controller.updateAppId(event.target.value)}
+                        placeholder="输入火山控制台的 APP ID"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-access-token" className="text-sm text-strong">Access Token</Label>
+                      <Input
+                        id="voice-runtime-access-token"
+                        aria-label="Access Token"
+                        type="password"
+                        value={state.accessToken}
+                        onChange={(event) => controller.updateAccessToken(event.target.value)}
+                        placeholder="输入火山控制台的 Access Token"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-secret-key" className="text-sm text-strong">Secret Key</Label>
+                      <Input
+                        id="voice-runtime-secret-key"
+                        aria-label="Secret Key"
+                        type="password"
+                        value={state.secretKey}
+                        onChange={(event) => controller.updateSecretKey(event.target.value)}
+                        placeholder="本字段当前保留给后续 REST / 签名链路"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-model-version" className="text-sm text-strong">模型版本</Label>
+                      <Input
+                        id="voice-runtime-model-version"
+                        aria-label="模型版本"
+                        value={state.modelVersion}
+                        onChange={(event) => controller.updateModelVersion(event.target.value)}
+                        placeholder="1.2.1.1"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-speaker" className="text-sm text-strong">发音人</Label>
+                      <Input
+                        id="voice-runtime-speaker"
+                        aria-label="发音人"
+                        value={state.speaker}
+                        onChange={(event) => controller.updateSpeaker(event.target.value)}
+                        placeholder="zh_female_vv_jupiter_bigtts"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="voice-runtime-connect-id" className="text-sm text-strong">Connect ID</Label>
+                      <Input
+                        id="voice-runtime-connect-id"
+                        value={state.connectId}
+                        onChange={(event) => controller.updateConnectId(event.target.value)}
+                        placeholder="可选，便于服务端追踪连接"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="voice-runtime-websocket-url" className="text-sm text-strong">WebSocket 地址</Label>
+                      <Input
+                        id="voice-runtime-websocket-url"
+                        value={state.websocketUrl}
+                        onChange={(event) => controller.updateWebsocketUrl(event.target.value)}
+                        placeholder="wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
+                        className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="voice-runtime-model-version" className="text-sm text-strong">模型版本</Label>
-                    <Input
-                      id="voice-runtime-model-version"
-                      aria-label="模型版本"
-                      value={state.modelVersion}
-                      onChange={(event) => controller.updateModelVersion(event.target.value)}
-                      placeholder="1.2.1.1"
-                      className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="voice-runtime-speaker" className="text-sm text-strong">发音人</Label>
-                    <Input
-                      id="voice-runtime-speaker"
-                      aria-label="发音人"
-                      value={state.speaker}
-                      onChange={(event) => controller.updateSpeaker(event.target.value)}
-                      placeholder="zh_female_vv_jupiter_bigtts"
-                      className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="voice-runtime-connect-id" className="text-sm text-strong">Connect ID</Label>
-                    <Input
-                      id="voice-runtime-connect-id"
-                      value={state.connectId}
-                      onChange={(event) => controller.updateConnectId(event.target.value)}
-                      placeholder="可选，便于服务端追踪连接"
-                      className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
-                    />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="voice-runtime-websocket-url" className="text-sm text-strong">WebSocket 地址</Label>
-                    <Input
-                      id="voice-runtime-websocket-url"
-                      value={state.websocketUrl}
-                      onChange={(event) => controller.updateWebsocketUrl(event.target.value)}
-                      placeholder="wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
-                      className="settings-dialog-input h-11 rounded-2xl border-border-card bg-background"
-                    />
-                  </div>
-                </div>
+                )}
 
                 <div className="rounded-2xl border border-dashed border-border-card bg-background px-4 py-3 text-xs leading-6 text-secondary">
-                  Provider 固定为 <span className="font-semibold text-strong">Doubao O2.0 S2S</span>；
-                  当前协议对齐火山官方端到端实时语音：`StartConnection` → `StartSession` → `TaskRequest / EndASR` → `ASRResponse / ChatResponse / TTSResponse`。
+                  当前 Provider：
+                  <span className="font-semibold text-strong"> {formatProviderLabel(state.providerId)}</span>。
+                  {state.providerId === VOICE_RUNTIME_OMNI_PROVIDER
+                    ? ` 当前协议对齐 Omni Realtime WebSocket：session.update → input_audio_buffer.append/commit → response.* 事件流。搜索=${state.omniSearchEnabled ? '开' : '关'}，函数调用=${state.omniFunctionCallingEnabled ? '开' : '关'}。`
+                    : state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER
+                      ? ` 当前协议对齐 OpenAI Compatible chat.completions：先本地录音，再在停止时把整段音频作为 input_audio 上传；服务端用 SSE 流式返回文本与音频。Compatible 是流式返回，不是实时逐帧上行。输出格式=${state.omniCompatibleAudioFormat}。`
+                    : ' 当前协议对齐豆包官方端到端实时语音：StartConnection → StartSession → TaskRequest / EndASR → ASRResponse / ChatResponse / TTSResponse。'}
                 </div>
               </CardContent>
             </SurfaceCard>
@@ -676,7 +1081,15 @@ export function VoiceRuntimeLabPage() {
                 <StatusRow label="会话策略" value={state.currentCloudSessionPolicy} />
                 <StatusRow label="当前会话" value={state.sessionId ?? '未建立'} />
                 <StatusRow label="Provider" value={state.providerId} />
-                <StatusRow label="连接凭据" value={state.credentialConfigured ? 'APP ID + Token 已配置' : '未配置'} />
+                <StatusRow
+                  label="连接凭据"
+                  value={(
+                    state.providerId === VOICE_RUNTIME_OMNI_PROVIDER
+                    || state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER
+                  )
+                    ? (state.credentialConfigured ? 'API Key 已配置' : '未配置')
+                    : (state.credentialConfigured ? 'APP ID + Token 已配置' : '未配置')}
+                />
                 <StatusRow label="首包播报延迟" value={state.firstAudioLatencyMs == null ? '暂无' : `${state.firstAudioLatencyMs} ms`} />
                 {state.errorMessage ? (
                   <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm leading-6 text-destructive">

@@ -5,6 +5,7 @@ import {
   __resetRuntimeConfigCacheForTests,
 } from '@/config/runtime-config-cache';
 import {
+  VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER,
   VOICE_RUNTIME_PROVIDER_VALUES,
   getVoiceRuntimeAutoSpeakEnabled,
   getVoiceRuntimeCloudSessionPolicy,
@@ -27,6 +28,7 @@ describe('voice runtime settings（语音运行时设置）', () => {
   it('uses the expected defaults（默认值正确）', () => {
     expect(getVoiceRuntimeEnabled()).toBe(false);
     expect(getVoiceRuntimeProvider()).toBe('doubao-o2-realtime');
+    expect(VOICE_RUNTIME_PROVIDER_VALUES).toContain(VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER);
     expect(getVoiceRuntimeCloudSessionPolicy()).toBe('on-demand');
     expect(getVoiceRuntimeAutoSpeakEnabled()).toBe(true);
     expect(getVoiceRuntimeLabNavEnabled()).toBe(false);

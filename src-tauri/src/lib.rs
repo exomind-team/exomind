@@ -11,8 +11,8 @@ use commands::asr_commands::{
 use commands::dev_commands::dev_instance_runtime_info;
 use commands::device_commands::get_device_id;
 use commands::doubao_realtime_commands::{
-    doubao_realtime_session_cancel, doubao_realtime_session_finish,
-    doubao_realtime_session_push, doubao_realtime_session_start, DoubaoRealtimeSessionState,
+    doubao_realtime_session_cancel, doubao_realtime_session_finish, doubao_realtime_session_push,
+    doubao_realtime_session_start, DoubaoRealtimeSessionState,
 };
 use commands::eventlog_commands::{
     eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
@@ -27,6 +27,10 @@ use commands::now_workbench_overlay_commands::{
     ensure_now_workbench_overlay_window, now_workbench_overlay_ensure,
     now_workbench_overlay_focus_main, now_workbench_overlay_hide, now_workbench_overlay_restore,
     now_workbench_overlay_set_position, now_workbench_overlay_show,
+};
+use commands::qwen_omni_realtime_commands::{
+    omni_realtime_session_cancel, omni_realtime_session_finish, omni_realtime_session_push,
+    omni_realtime_session_start, QwenOmniRealtimeSessionState,
 };
 use commands::runtime_commands::{
     ensure_runtime_started, load_persisted_runtime_network_mode,
@@ -165,8 +169,9 @@ pub fn run() {
     let voice_shortcut_state = VoiceShortcutState::new();
     let main_window_shortcut_state = MainWindowShortcutState::new();
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
-    let doubao_realtime_session_state =
-        std::sync::Arc::new(DoubaoRealtimeSessionState::default());
+    let doubao_realtime_session_state = std::sync::Arc::new(DoubaoRealtimeSessionState::default());
+    let qwen_omni_realtime_session_state =
+        std::sync::Arc::new(QwenOmniRealtimeSessionState::default());
     let mut context = tauri::generate_context!();
 
     #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
@@ -224,6 +229,7 @@ pub fn run() {
         .manage(main_window_shortcut_state)
         .manage(volcano_asr_stream_state)
         .manage(doubao_realtime_session_state)
+        .manage(qwen_omni_realtime_session_state)
         .setup(move |app| {
             #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
             if let Some((main_window_config, main_data_dir)) = main_window_override.as_ref() {
@@ -448,6 +454,10 @@ pub fn run() {
             doubao_realtime_session_push,
             doubao_realtime_session_finish,
             doubao_realtime_session_cancel,
+            omni_realtime_session_start,
+            omni_realtime_session_push,
+            omni_realtime_session_finish,
+            omni_realtime_session_cancel,
             // Workspace 认知生命体命令
             get_agent_workspace_soul,
             get_agent_workspace_knowledge_list,

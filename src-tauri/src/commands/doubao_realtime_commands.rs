@@ -1,11 +1,6 @@
 //! Doubao Realtime S2S（豆包端到端实时语音）Tauri 命令
 
-use std::{
-    collections::HashMap,
-    io::Read,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, io::Read, sync::Arc, time::Duration};
 
 use flate2::read::GzDecoder;
 use futures_util::{stream::SplitSink, stream::SplitStream, SinkExt, StreamExt};
@@ -193,8 +188,9 @@ fn resolve_app_id(config: &DoubaoRealtimeConfig) -> Result<String, String> {
 }
 
 fn resolve_access_token(config: &DoubaoRealtimeConfig) -> Result<String, String> {
-    trim_to_option(config.access_token.as_deref())
-        .ok_or_else(|| "Doubao Realtime Access Token 不能为空（Access Token is required）".to_string())
+    trim_to_option(config.access_token.as_deref()).ok_or_else(|| {
+        "Doubao Realtime Access Token 不能为空（Access Token is required）".to_string()
+    })
 }
 
 fn resolve_connect_id(config: &DoubaoRealtimeConfig) -> Option<String> {
@@ -261,10 +257,14 @@ fn build_realtime_ws_request(
         ));
     }
     if url.port().is_some() {
-        return Err("Doubao Realtime WebSocket 不允许自定义端口（custom port is not allowed）".to_string());
+        return Err(
+            "Doubao Realtime WebSocket 不允许自定义端口（custom port is not allowed）".to_string(),
+        );
     }
     if !url.username().is_empty() || url.password().is_some() {
-        return Err("Doubao Realtime WebSocket 不允许携带用户信息（userinfo is not allowed）".to_string());
+        return Err(
+            "Doubao Realtime WebSocket 不允许携带用户信息（userinfo is not allowed）".to_string(),
+        );
     }
 
     let mut builder = HttpRequest::builder()
@@ -464,7 +464,9 @@ fn parse_realtime_frame(data: &[u8]) -> Result<ParsedRealtimeFrame, String> {
         if data.len() < offset + 4 {
             return Err("错误帧缺少 error code".to_string());
         }
-        error_code = Some(u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()));
+        error_code = Some(u32::from_be_bytes(
+            data[offset..offset + 4].try_into().unwrap(),
+        ));
         offset += 4;
     } else {
         if is_sequence_present(flags) {
@@ -478,7 +480,9 @@ fn parse_realtime_frame(data: &[u8]) -> Result<ParsedRealtimeFrame, String> {
             if data.len() < offset + 4 {
                 return Err("响应缺少 event id".to_string());
             }
-            event_id = Some(u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()));
+            event_id = Some(u32::from_be_bytes(
+                data[offset..offset + 4].try_into().unwrap(),
+            ));
             offset += 4;
         }
 
@@ -1057,7 +1061,10 @@ mod tests {
             "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
         );
         assert_eq!(
-            request.headers().get("X-Api-App-ID").and_then(|value| value.to_str().ok()),
+            request
+                .headers()
+                .get("X-Api-App-ID")
+                .and_then(|value| value.to_str().ok()),
             Some("4587429383")
         );
         assert_eq!(
@@ -1075,19 +1082,31 @@ mod tests {
             Some("volc.speech.dialog")
         );
         assert_eq!(
-            request.headers().get("X-Api-App-Key").and_then(|value| value.to_str().ok()),
+            request
+                .headers()
+                .get("X-Api-App-Key")
+                .and_then(|value| value.to_str().ok()),
             Some("PlgvMymc7f3tQnJ6")
         );
         assert_eq!(
-            request.headers().get("X-Api-Connect-Id").and_then(|value| value.to_str().ok()),
+            request
+                .headers()
+                .get("X-Api-Connect-Id")
+                .and_then(|value| value.to_str().ok()),
             Some("connect-1")
         );
         assert_eq!(
-            request.headers().get("Connection").and_then(|value| value.to_str().ok()),
+            request
+                .headers()
+                .get("Connection")
+                .and_then(|value| value.to_str().ok()),
             Some("Upgrade")
         );
         assert_eq!(
-            request.headers().get("Upgrade").and_then(|value| value.to_str().ok()),
+            request
+                .headers()
+                .get("Upgrade")
+                .and_then(|value| value.to_str().ok()),
             Some("websocket")
         );
         assert_eq!(
@@ -1174,7 +1193,9 @@ mod tests {
                 app_id: Some("4587429383".to_string()),
                 access_token: Some("vei-access-token".to_string()),
                 secret_key: Some("vei-secret-key".to_string()),
-                websocket_url: Some("wss://openspeech.bytedance.com/api/v3/realtime/dialogue".to_string()),
+                websocket_url: Some(
+                    "wss://openspeech.bytedance.com/api/v3/realtime/dialogue".to_string(),
+                ),
                 connect_id: Some("connect-1".to_string()),
                 speaker: Some("zh_female_vv_jupiter_bigtts".to_string()),
                 input_mode: Some("push_to_talk".to_string()),
@@ -1187,7 +1208,9 @@ mod tests {
 
         let parsed = parse_realtime_frame(&frame)
             .expect("start session frame should parse（StartSession 帧应能被解析）");
-        let payload = parsed.payload_json.expect("json payload should exist（应带有 JSON payload）");
+        let payload = parsed
+            .payload_json
+            .expect("json payload should exist（应带有 JSON payload）");
 
         assert_eq!(parsed.message_type, 0b0001);
         assert_eq!(parsed.event_id, Some(100));
@@ -1280,7 +1303,10 @@ mod tests {
         assert_eq!(payload.event_type, "TTSResponse");
         assert_eq!(payload.audio_format.as_deref(), Some("pcm_s16le"));
         assert_eq!(payload.sample_rate, Some(24000));
-        assert_eq!(payload.audio_data.as_deref(), Some(&[79_u8, 103, 103, 83][..]));
+        assert_eq!(
+            payload.audio_data.as_deref(),
+            Some(&[79_u8, 103, 103, 83][..])
+        );
     }
 
     #[test]
@@ -1319,7 +1345,9 @@ mod tests {
                 app_id: Some("4587429383".to_string()),
                 access_token: Some("vei-access-token".to_string()),
                 secret_key: Some("vei-secret-key".to_string()),
-                websocket_url: Some("wss://openspeech.bytedance.com/api/v3/realtime/dialogue".to_string()),
+                websocket_url: Some(
+                    "wss://openspeech.bytedance.com/api/v3/realtime/dialogue".to_string()
+                ),
                 connect_id: None,
                 speaker: None,
                 input_mode: None,

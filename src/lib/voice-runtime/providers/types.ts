@@ -1,6 +1,13 @@
 import type { ProviderRawPerception } from '../types';
+import {
+  VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER,
+  VOICE_RUNTIME_OMNI_PROVIDER,
+} from '@/config/voice-runtime-settings';
 
-export type VoiceRuntimeProviderId = 'doubao-o2-realtime';
+export type VoiceRuntimeProviderId =
+  'doubao-o2-realtime'
+  | typeof VOICE_RUNTIME_OMNI_PROVIDER
+  | typeof VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER;
 
 export interface VoiceRuntimeProviderConfig {
   provider: VoiceRuntimeProviderId;
@@ -11,11 +18,26 @@ export interface VoiceRuntimeProviderConfig {
   accessToken?: string;
   secretKey?: string;
   websocketUrl?: string;
+  baseUrl?: string;
   connectId?: string;
   speaker?: string;
+  apiKey?: string;
+  instructions?: string;
   inputMode?: 'keep_alive' | 'push_to_talk' | 'text' | 'audio_file';
   ttsAudioFormat?: 'pcm' | 'pcm_s16le';
   ttsSampleRate?: number;
+  audioOutputFormat?: 'wav' | 'pcm16';
+  // Omni Realtime WebSearch toggle（实时联网搜索开关）
+  enableSearch?: boolean;
+  // Omni Realtime search options（搜索配置）
+  searchOptions?: {
+    // Whether to include source links in answers（是否返回来源）
+    enableSource?: boolean;
+  };
+  // Omni Realtime function-calling tools schema（函数调用工具声明）
+  tools?: Array<Record<string, unknown>>;
+  // Tool routing mode or explicit tool selector（工具选择策略）
+  toolChoice?: string | Record<string, unknown>;
 }
 
 export interface VoiceRuntimeAudioChunkMeta {
@@ -41,7 +63,7 @@ export interface VoiceRuntimeProvider {
   getSessionId(): string | null;
 }
 
-export interface DoubaoRealtimeEventPayload {
+export interface VoiceRuntimeProviderEventPayload {
   sessionId: string;
   eventType: string;
   model?: string;
@@ -51,3 +73,6 @@ export interface DoubaoRealtimeEventPayload {
   sampleRate?: number;
   capturedAt?: string;
 }
+
+export type DoubaoRealtimeEventPayload = VoiceRuntimeProviderEventPayload;
+export type QwenOmniRealtimeEventPayload = VoiceRuntimeProviderEventPayload;

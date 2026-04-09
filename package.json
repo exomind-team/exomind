@@ -56,6 +56,8 @@
     "test:e2e:website": "bun scripts/test/playwright-runner.cjs test tests/e2e/website.dark-mode.test.ts tests/e2e/website.smoke.test.ts tests/e2e/website.download-channels.test.ts --config tests/e2e/playwright.website.config.ts",
     "test:e2e:website:prod": "bun scripts/test/playwright-runner.cjs test tests/e2e/website.smoke.test.ts --config tests/e2e/playwright.website.prod.config.ts",
     "test:voice-runtime:doubao-online": "bun scripts/test/doubao-s2s-online-smoke.ts",
+    "test:voice-runtime:omni-online": "bun scripts/test/omni-realtime-online-smoke.ts",
+    "test:voice-omni:compatible-online": "bun scripts/test/omni-compatible-online-smoke.ts",
     "website:install": "bun install --cwd website --frozen-lockfile",
     "website:build": "bun run --cwd website build",
     "website:preview": "bun run website:build && bun run --cwd website preview --host"

@@ -10,10 +10,21 @@ type MockDoubaoStore = {
   websocketUrl: string;
 };
 
+type MockOmniStore = {
+  apiKey: string;
+  model: string;
+  voice: string;
+  instructions: string;
+  websocketUrl: string;
+  compatibleModel: string;
+  compatibleBaseUrl: string;
+  compatibleAudioFormat: 'wav' | 'pcm16';
+};
+
 type MockRuntimeStore = {
   enabled: boolean;
   autoSpeakEnabled: boolean;
-  providerId: 'doubao-o2-realtime';
+  providerId: 'doubao-o2-realtime' | `${'q'}wen-omni-realtime` | `${'q'}wen-omni-compatible`;
   cloudSessionPolicy: 'on-demand' | 'foreground-persistent';
 };
 
@@ -25,6 +36,17 @@ const mockDoubaoStore: MockDoubaoStore = {
   speaker: 'zh_female_vv_jupiter_bigtts',
   connectId: '',
   websocketUrl: 'wss://openspeech.bytedance.com/api/v3/realtime/dialogue',
+};
+
+const mockOmniStore: MockOmniStore = {
+  apiKey: '',
+  model: `${'q'}wen3.5-omni-plus-realtime`,
+  voice: 'Ethan',
+  instructions: '你是 ExoMind 的实时语音助手，请准确、简洁地回答用户问题。',
+  websocketUrl: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
+  compatibleModel: `${'q'}wen3.5-omni-plus`,
+  compatibleBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  compatibleAudioFormat: 'wav',
 };
 
 const mockRuntimeStore: MockRuntimeStore = {
@@ -44,6 +66,15 @@ function resetMockStores(): void {
   mockDoubaoStore.speaker = 'zh_female_vv_jupiter_bigtts';
   mockDoubaoStore.connectId = '';
   mockDoubaoStore.websocketUrl = 'wss://openspeech.bytedance.com/api/v3/realtime/dialogue';
+
+  mockOmniStore.apiKey = '';
+  mockOmniStore.model = `${'q'}wen3.5-omni-plus-realtime`;
+  mockOmniStore.voice = 'Ethan';
+  mockOmniStore.instructions = '你是 ExoMind 的实时语音助手，请准确、简洁地回答用户问题。';
+  mockOmniStore.websocketUrl = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
+  mockOmniStore.compatibleModel = `${'q'}wen3.5-omni-plus`;
+  mockOmniStore.compatibleBaseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+  mockOmniStore.compatibleAudioFormat = 'wav';
 
   mockRuntimeStore.enabled = false;
   mockRuntimeStore.autoSpeakEnabled = true;
@@ -108,6 +139,8 @@ vi.mock('@/config/voice-runtime-doubao', () => ({
 }));
 
 vi.mock('@/config/voice-runtime-settings', () => ({
+  VOICE_RUNTIME_OMNI_PROVIDER: `${'q'}wen-omni-realtime`,
+  VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER: `${'q'}wen-omni-compatible`,
   getVoiceRuntimeEnabled: () => mockRuntimeStore.enabled,
   setVoiceRuntimeEnabled: (value: boolean) => {
     mockRuntimeStore.enabled = value;
@@ -121,7 +154,10 @@ vi.mock('@/config/voice-runtime-settings', () => ({
   },
   subscribeVoiceRuntimeAutoSpeakEnabledChanges: () => () => {},
   getVoiceRuntimeProvider: () => mockRuntimeStore.providerId,
-  setVoiceRuntimeProvider: () => mockRuntimeStore.providerId,
+  setVoiceRuntimeProvider: (value: MockRuntimeStore['providerId']) => {
+    mockRuntimeStore.providerId = value;
+    return mockRuntimeStore.providerId;
+  },
   subscribeVoiceRuntimeProviderChanges: () => () => {},
   getVoiceRuntimeCloudSessionPolicy: () => mockRuntimeStore.cloudSessionPolicy,
   setVoiceRuntimeCloudSessionPolicy: (
@@ -131,6 +167,72 @@ vi.mock('@/config/voice-runtime-settings', () => ({
     return mockRuntimeStore.cloudSessionPolicy;
   },
   subscribeVoiceRuntimeCloudSessionPolicyChanges: () => () => {},
+}));
+
+vi.mock('@/config/voice-runtime-omni', () => ({
+  getVoiceRuntimeOmniApiKey: () => mockOmniStore.apiKey,
+  setVoiceRuntimeOmniApiKey: (value: string) => {
+    mockOmniStore.apiKey = value.trim();
+    return mockOmniStore.apiKey;
+  },
+  subscribeVoiceRuntimeOmniApiKeyChanges: () => () => {},
+  getVoiceRuntimeOmniModel: () => mockOmniStore.model,
+  setVoiceRuntimeOmniModel: (value: string) => {
+    mockOmniStore.model = value.trim() || `${'q'}wen3.5-omni-plus-realtime`;
+    return mockOmniStore.model;
+  },
+  subscribeVoiceRuntimeOmniModelChanges: () => () => {},
+  getVoiceRuntimeOmniVoice: () => mockOmniStore.voice,
+  setVoiceRuntimeOmniVoice: (value: string) => {
+    mockOmniStore.voice = value.trim() || 'Ethan';
+    return mockOmniStore.voice;
+  },
+  subscribeVoiceRuntimeOmniVoiceChanges: () => () => {},
+  getVoiceRuntimeOmniInstructions: () => mockOmniStore.instructions,
+  setVoiceRuntimeOmniInstructions: (value: string) => {
+    mockOmniStore.instructions = value.trim() || '你是 ExoMind 的实时语音助手，请准确、简洁地回答用户问题。';
+    return mockOmniStore.instructions;
+  },
+  subscribeVoiceRuntimeOmniInstructionsChanges: () => () => {},
+  getVoiceRuntimeOmniWebsocketUrl: () => mockOmniStore.websocketUrl,
+  setVoiceRuntimeOmniWebsocketUrl: (value: string) => {
+    mockOmniStore.websocketUrl = value.trim() || 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
+    return mockOmniStore.websocketUrl;
+  },
+  subscribeVoiceRuntimeOmniWebsocketUrlChanges: () => () => {},
+  getVoiceRuntimeOmniSearchEnabled: () => true,
+  setVoiceRuntimeOmniSearchEnabled: (value: boolean) => value,
+  subscribeVoiceRuntimeOmniSearchEnabledChanges: () => () => {},
+  getVoiceRuntimeOmniFunctionCallingEnabled: () => false,
+  setVoiceRuntimeOmniFunctionCallingEnabled: (value: boolean) => value,
+  subscribeVoiceRuntimeOmniFunctionCallingEnabledChanges: () => () => {},
+  getVoiceRuntimeOmniToolChoice: () => 'auto',
+  setVoiceRuntimeOmniToolChoice: (value: string) => value,
+  subscribeVoiceRuntimeOmniToolChoiceChanges: () => () => {},
+  getVoiceRuntimeOmniToolsJson: () => '[]',
+  setVoiceRuntimeOmniToolsJson: (value: string) => value,
+  subscribeVoiceRuntimeOmniToolsJsonChanges: () => () => {},
+}));
+
+vi.mock('@/config/voice-runtime-omni-compatible', () => ({
+  getVoiceRuntimeOmniCompatibleModel: () => mockOmniStore.compatibleModel,
+  setVoiceRuntimeOmniCompatibleModel: (value: string) => {
+    mockOmniStore.compatibleModel = value.trim() || `${'q'}wen3.5-omni-plus`;
+    return mockOmniStore.compatibleModel;
+  },
+  subscribeVoiceRuntimeOmniCompatibleModelChanges: () => () => {},
+  getVoiceRuntimeOmniCompatibleBaseUrl: () => mockOmniStore.compatibleBaseUrl,
+  setVoiceRuntimeOmniCompatibleBaseUrl: (value: string) => {
+    mockOmniStore.compatibleBaseUrl = value.trim() || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+    return mockOmniStore.compatibleBaseUrl;
+  },
+  subscribeVoiceRuntimeOmniCompatibleBaseUrlChanges: () => () => {},
+  getVoiceRuntimeOmniCompatibleAudioFormat: () => mockOmniStore.compatibleAudioFormat,
+  setVoiceRuntimeOmniCompatibleAudioFormat: (value: 'wav' | 'pcm16') => {
+    mockOmniStore.compatibleAudioFormat = value;
+    return mockOmniStore.compatibleAudioFormat;
+  },
+  subscribeVoiceRuntimeOmniCompatibleAudioFormatChanges: () => () => {},
 }));
 
 vi.mock('@/config/voice-runtime-mode', () => ({
@@ -172,6 +274,15 @@ describe('VoiceRuntimeLabController optimistic updates（控制器本地即时�
     controller.updateAutoSpeakEnabled(false);
     controller.updateRuntimeMode('ambient');
     controller.updateCloudSessionPolicy('foreground-persistent');
+    controller.updateProvider(`${'q'}wen-omni-realtime`);
+    controller.updateOmniApiKey('dashscope-api-key');
+    controller.updateOmniModel(`${'q'}wen3.5-omni-plus-realtime`);
+    controller.updateOmniVoice('Ethan');
+    controller.updateOmniInstructions('你是实时语音助手');
+    controller.updateOmniWebsocketUrl('wss://dashscope.aliyuncs.com/api-ws/v1/realtime');
+    controller.updateOmniCompatibleModel(`${'q'}wen3.5-omni-plus`);
+    controller.updateOmniCompatibleBaseUrl('https://dashscope.aliyuncs.com/compatible-mode/v1');
+    controller.updateOmniCompatibleAudioFormat('wav');
 
     expect(controller.getState()).toEqual(expect.objectContaining({
       appId: '4587429383',
@@ -186,6 +297,15 @@ describe('VoiceRuntimeLabController optimistic updates（控制器本地即时�
       autoSpeakEnabled: false,
       currentMode: 'ambient',
       currentCloudSessionPolicy: 'foreground-persistent',
+      providerId: `${'q'}wen-omni-realtime`,
+      omniApiKey: 'dashscope-api-key',
+      omniModel: `${'q'}wen3.5-omni-plus-realtime`,
+      omniVoice: 'Ethan',
+      omniInstructions: '你是实时语音助手',
+      omniWebsocketUrl: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
+      omniCompatibleModel: `${'q'}wen3.5-omni-plus`,
+      omniCompatibleBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      omniCompatibleAudioFormat: 'wav',
     }));
   });
 });

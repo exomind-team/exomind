@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +17,12 @@ import {
 import {
   setVoiceRuntimeEnabled,
 } from '@/config/voice-runtime-settings';
+import {
+  getVoiceRuntimeOmniFunctionCallingEnabled,
+  getVoiceRuntimeOmniSearchEnabled,
+  getVoiceRuntimeOmniToolChoice,
+  getVoiceRuntimeOmniToolsJson,
+} from '@/config/voice-runtime-omni';
 import {
   setVoiceRuntimeMode,
 } from '@/config/voice-runtime-mode';
@@ -93,6 +99,79 @@ describe('VoiceRuntimeLabPage（语音运行时实验页）', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('已开启').length).toBeGreaterThan(0);
+    });
+  });
+
+  it('switches provider-specific form fields without mixing credentials（切换 Provider 时字段不混用）', async () => {
+    const user = userEvent.setup();
+    render(<VoiceRuntimeLabPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Omni Realtime' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Omni API Key')).toBeInTheDocument();
+      expect(screen.queryByLabelText('APP ID')).not.toBeInTheDocument();
+    });
+  });
+
+  it('renders Omni search and function calling controls and persists edits（渲染 Omni 搜索与函数调用配置并持久化）', async () => {
+    const user = userEvent.setup();
+    render(<VoiceRuntimeLabPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Omni Realtime' }));
+
+    const searchSwitch = screen.getByRole('switch', { name: '启用 Web Search' });
+    const functionCallingSwitch = screen.getByRole('switch', { name: '启用 Function Calling' });
+    const toolChoiceInput = screen.getByLabelText('Tool Choice');
+    const toolsJsonInput = screen.getByLabelText('Tools JSON');
+
+    expect(searchSwitch).toBeChecked();
+    expect(functionCallingSwitch).not.toBeChecked();
+
+    await user.click(searchSwitch);
+    await user.click(functionCallingSwitch);
+    fireEvent.change(toolChoiceInput, {
+      target: { value: 'required' },
+    });
+    fireEvent.change(toolsJsonInput, {
+      target: { value: '[{"type":"function","name":"search_web"}]' },
+    });
+
+    expect(getVoiceRuntimeOmniSearchEnabled()).toBe(false);
+    expect(getVoiceRuntimeOmniFunctionCallingEnabled()).toBe(true);
+    expect(getVoiceRuntimeOmniToolChoice()).toBe('required');
+    expect(getVoiceRuntimeOmniToolsJson()).toBe('[{"type":"function","name":"search_web"}]');
+  });
+
+  it('renders a dedicated Omni Compatible form with non-realtime hints（Omni Compatible 独立表单与提示）', async () => {
+    const user = userEvent.setup();
+    render(<VoiceRuntimeLabPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Omni Compatible' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Omni API Key')).toBeInTheDocument();
+      expect(screen.getByLabelText('Compatible 模型')).toBeInTheDocument();
+      expect(screen.getByLabelText('Compatible Base URL')).toBeInTheDocument();
+      expect(screen.getByText('输出音频格式')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'wav' })).toBeInTheDocument();
+      expect(screen.queryByRole('switch', { name: '启用 Web Search' })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Omni WebSocket 地址')).not.toBeInTheDocument();
+      expect(screen.getByText(/Compatible 是流式返回，不是实时逐帧上行/)).toBeInTheDocument();
+    });
+  });
+
+  it('renders hold-to-talk controls for Omni Compatible（Omni Compatible 显示按住说话控件）', async () => {
+    const user = userEvent.setup();
+    render(<VoiceRuntimeLabPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Omni Compatible' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '按住说话，松开提交' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '开始监听' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '停止并提交' })).not.toBeInTheDocument();
+      expect(screen.getAllByText(/不会改掉全局 Doubao 持续监听 Provider/).length).toBeGreaterThan(0);
     });
   });
 });

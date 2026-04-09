@@ -245,6 +245,8 @@ import {
   getVoiceRuntimeCloudSessionPolicy,
   getVoiceRuntimeEnabled,
   getVoiceRuntimeLabNavEnabled,
+  VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER,
+  VOICE_RUNTIME_OMNI_PROVIDER,
   getVoiceRuntimeProvider,
   setVoiceRuntimeAutoSpeakEnabled,
   setVoiceRuntimeCloudSessionPolicy,
@@ -256,6 +258,7 @@ import {
   subscribeVoiceRuntimeEnabledChanges,
   subscribeVoiceRuntimeLabNavEnabledChanges,
   subscribeVoiceRuntimeProviderChanges,
+  type VoiceRuntimeProvider,
 } from '@/config/voice-runtime-settings';
 import {
   getVoiceRuntimeMode,
@@ -1330,16 +1333,26 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     visible: devOnly,
     enumStyle: 'dialog',
     dialogTitle: '语音运行时 Provider',
-    dialogDescription: '第一阶段只开放豆包 O2.0 实时语音 Provider。',
+    dialogDescription: '支持按 Provider 独立配置：豆包 O2.0、Omni Realtime 与 Omni Compatible。',
     options: [
       {
         label: 'Doubao O2.0 Realtime',
         value: 'doubao-o2-realtime',
-        description: '第一阶段默认 Provider，用于实时识别与后续端到端能力接入。',
+        description: '豆包 O2.0 端到端实时语音链路。'
+      },
+      {
+        label: 'Omni Realtime',
+        value: VOICE_RUNTIME_OMNI_PROVIDER,
+        description: 'Omni 实时音频对话链路（WebSocket）。',
+      },
+      {
+        label: 'Omni Compatible',
+        value: VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER,
+        description: 'OpenAI Compatible 模式，停止录音后上传整段音频并流式返回文本/音频。',
       },
     ],
     get: getVoiceRuntimeProvider,
-    set: (value: string) => setVoiceRuntimeProvider(value as 'doubao-o2-realtime'),
+    set: (value: string) => setVoiceRuntimeProvider(value as VoiceRuntimeProvider),
     subscribe: subscribeVoiceRuntimeProviderChanges,
   },
   {
