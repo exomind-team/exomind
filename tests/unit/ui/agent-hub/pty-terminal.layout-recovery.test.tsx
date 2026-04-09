@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { PtyTerminal } from '@/ui/app/components/PtyTerminal';
+import { __resetPtyInputTransportPoolForTests } from '@/ui/app/components/pty-input';
 
 const xtermState = vi.hoisted(() => {
   const constructedOptions: Array<Record<string, unknown>> = [];
@@ -27,6 +28,86 @@ const xtermState = vi.hoisted(() => {
   };
 
   return { constructedOptions, terminal, fitAddon };
+});
+
+const websocketState = vi.hoisted(() => {
+  const defaultReadyMessage = () => ({
+    type: 'ready' as const,
+    protocol_version: 2,
+    capabilities: { input_ack: true, resize: true, resize_ack: true },
+  });
+
+  class MockWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+
+    readyState = MockWebSocket.CONNECTING;
+    sent: string[] = [];
+    onopen: ((event: Event) => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    onclose: ((event: CloseEvent) => void) | null = null;
+
+    constructor(public readonly url: string) {
+      instances.push(this);
+      setTimeout(() => {
+        if (this.readyState !== MockWebSocket.CONNECTING) {
+          return;
+        }
+        this.readyState = MockWebSocket.OPEN;
+        this.onopen?.(new Event('open'));
+        this.onmessage?.({
+          data: JSON.stringify(readyMessage),
+        } as MessageEvent);
+      }, 0);
+    }
+
+    send = vi.fn((payload: string) => {
+      this.sent.push(payload);
+      const parsed = JSON.parse(payload) as { type?: string; resize_seq?: number };
+      if (parsed.type === 'resize' && typeof parsed.resize_seq === 'number') {
+        setTimeout(() => {
+          this.onmessage?.({
+            data: JSON.stringify({
+              type: 'resize_ack',
+              resize_seq: parsed.resize_seq,
+            }),
+          } as MessageEvent);
+        }, resizeAckDelayMs);
+      }
+    });
+
+    close = vi.fn(() => {
+      if (this.readyState === MockWebSocket.CLOSED) {
+        return;
+      }
+      this.readyState = MockWebSocket.CLOSED;
+      this.onclose?.({ code: 1000, reason: '', wasClean: true } as CloseEvent);
+    });
+  }
+
+  const instances: MockWebSocket[] = [];
+  let readyMessage = defaultReadyMessage();
+  let resizeAckDelayMs = 0;
+  return {
+    instances,
+    defaultReadyMessage,
+    get readyMessage() {
+      return readyMessage;
+    },
+    set readyMessage(next: ReturnType<typeof defaultReadyMessage>) {
+      readyMessage = next;
+    },
+    get resizeAckDelayMs() {
+      return resizeAckDelayMs;
+    },
+    set resizeAckDelayMs(next: number) {
+      resizeAckDelayMs = next;
+    },
+    WebSocketCtor: MockWebSocket,
+  };
 });
 
 vi.mock('@xterm/xterm', () => ({
@@ -131,8 +212,12 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    __resetPtyInputTransportPoolForTests();
     xtermState.constructedOptions.length = 0;
     xtermState.terminal.options = {};
+    websocketState.instances.length = 0;
+    websocketState.readyMessage = websocketState.defaultReadyMessage();
+    websocketState.resizeAckDelayMs = 0;
     sizeReady = false;
     resizeObservers = [];
     streamPlans = [];
@@ -166,6 +251,10 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
         disconnect() {}
       } as unknown as typeof ResizeObserver,
     );
+    vi.stubGlobal(
+      'WebSocket',
+      websocketState.WebSocketCtor as unknown as typeof WebSocket,
+    );
 
     originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
@@ -185,6 +274,7 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
   });
 
   afterEach(() => {
+    __resetPtyInputTransportPoolForTests();
     vi.useRealTimers();
     vi.unstubAllGlobals();
 
@@ -226,9 +316,40 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
         }),
       }),
     );
+
+    const lastSocket = websocketState.instances[websocketState.instances.length - 1];
+    expect(lastSocket).toBeTruthy();
+    const resizeFrames = lastSocket!.sent
+      .map((frame) => JSON.parse(frame) as {
+        type?: string;
+        rows?: number;
+        cols?: number;
+        resize_seq?: number;
+      })
+      .filter((frame) => frame.type === 'resize');
+    expect(resizeFrames[0]).toMatchObject({ rows: 24, cols: 80 });
+  });
+
+  it('waits for the resize acknowledgement before opening the SSE stream（会在 resize 确认后才连接 SSE）', async () => {
+    websocketState.resizeAckDelayMs = 200;
+    streamPlans.push(() => createSseResponse(createStreamFrame('eof', JSON.stringify({ code: 0 }))));
+
+    render(<PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-resize-ack" />);
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(60);
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/pty/pty-layout-resize-ack/stream',
+      expect.anything(),
+    );
+
+    await flushUi(220);
+
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:1949/pty/pty-layout-1/resize',
-      expect.objectContaining({ method: 'POST' }),
+      'http://127.0.0.1:1949/pty/pty-layout-resize-ack/stream',
+      expect.anything(),
     );
   });
 

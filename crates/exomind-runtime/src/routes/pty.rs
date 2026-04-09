@@ -1,6 +1,12 @@
-use axum::extract::{Path, Query, State};
+use axum::extract::{
+    Path, Query, State,
+    ws::{Message, WebSocket, WebSocketUpgrade},
+};
 use axum::http::StatusCode;
-use axum::response::sse::{Event, Sse};
+use axum::response::{
+    Response,
+    sse::{Event, Sse},
+};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -38,6 +44,18 @@ struct PtyResizeBody {
     cols: u16,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum PtyWsClientMessage {
+    Input { input_seq: u64, data: String },
+    Resize {
+        resize_seq: u64,
+        rows: u16,
+        cols: u16,
+    },
+    Ping { nonce: Option<u64> },
+}
+
 #[derive(Debug, Serialize)]
 struct PtyRemoveResponse {
     status: String,
@@ -60,6 +78,39 @@ struct PtyStreamEofPayload {
     code: Option<i32>,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct PtyWsCapabilities {
+    input_ack: bool,
+    resize: bool,
+    resize_ack: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum PtyWsServerMessage {
+    Ready {
+        protocol_version: u8,
+        capabilities: PtyWsCapabilities,
+    },
+    Ack {
+        input_seq: u64,
+    },
+    ResizeAck {
+        resize_seq: u64,
+    },
+    Pong {
+        nonce: Option<u64>,
+    },
+    Error {
+        code: String,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input_seq: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resize_seq: Option<u64>,
+    },
+}
+
 const PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY: &str = "exomind:ptyWaitingInputIdleTimeoutSeconds";
 const DEFAULT_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS: u64 = 60;
 const MIN_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS: u64 = 1;
@@ -69,6 +120,7 @@ const DEFAULT_PTY_REPLAY_LIMIT_KB: usize = 256;
 const MIN_PTY_REPLAY_LIMIT_KB: usize = 128;
 const MAX_PTY_REPLAY_LIMIT_KB: usize = 2048;
 const PTY_LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const PTY_WS_PROTOCOL_VERSION: u8 = 2;
 
 // ── Error mapping ───────────────────────────────────────────────
 
@@ -123,6 +175,62 @@ fn build_pty_eof_event(exit_code: Option<i32>) -> Event {
 
 fn build_pty_ready_event() -> Event {
     Event::default().event("ready").data("{}")
+}
+
+fn build_pty_ws_ready_message() -> PtyWsServerMessage {
+    PtyWsServerMessage::Ready {
+        protocol_version: PTY_WS_PROTOCOL_VERSION,
+        capabilities: PtyWsCapabilities {
+            input_ack: true,
+            resize: true,
+            resize_ack: true,
+        },
+    }
+}
+
+fn build_pty_ws_ack_message(input_seq: u64) -> PtyWsServerMessage {
+    PtyWsServerMessage::Ack { input_seq }
+}
+
+fn build_pty_ws_resize_ack_message(resize_seq: u64) -> PtyWsServerMessage {
+    PtyWsServerMessage::ResizeAck { resize_seq }
+}
+
+fn build_pty_ws_pong_message(nonce: Option<u64>) -> PtyWsServerMessage {
+    PtyWsServerMessage::Pong { nonce }
+}
+
+fn map_pty_ws_error_code(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::BAD_REQUEST => "bad_request",
+        StatusCode::UNAUTHORIZED => "unauthorized",
+        StatusCode::FORBIDDEN => "forbidden",
+        StatusCode::NOT_FOUND => "not_found",
+        _ => "transport_error",
+    }
+}
+
+fn build_pty_ws_error_message(
+    status: StatusCode,
+    message: impl Into<String>,
+    input_seq: Option<u64>,
+    resize_seq: Option<u64>,
+) -> PtyWsServerMessage {
+    PtyWsServerMessage::Error {
+        code: map_pty_ws_error_code(status).to_string(),
+        message: message.into(),
+        input_seq,
+        resize_seq,
+    }
+}
+
+async fn send_pty_ws_message(
+    socket: &mut WebSocket,
+    message: &PtyWsServerMessage,
+) -> Result<(), axum::Error> {
+    let payload = serde_json::to_string(message)
+        .expect("PTY WS server message serialization should not fail");
+    socket.send(Message::Text(payload.into())).await
 }
 
 fn clamp_pty_waiting_input_idle_timeout_seconds(value: u64) -> u64 {
@@ -362,6 +470,34 @@ fn watch_pty_lifecycle(state: AppState, id: String) {
     });
 }
 
+async fn apply_pty_input_bytes(
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+) -> Result<(), (StatusCode, String)> {
+    state
+        .pty_manager
+        .write_input(id, data)
+        .await
+        .map_err(map_pty_error)?;
+    let _ = restore_terminal_session_to_running_on_input(state, id)?;
+    Ok(())
+}
+
+async fn apply_pty_resize_request(
+    state: &AppState,
+    id: &str,
+    rows: u16,
+    cols: u16,
+) -> Result<(), (StatusCode, String)> {
+    state
+        .pty_manager
+        .resize(id, rows, cols)
+        .await
+        .map_err(map_pty_error)?;
+    Ok(())
+}
+
 // ── Handlers ────────────────────────────────────────────────────
 
 /// GET /pty — List all PTY agents.
@@ -549,6 +685,158 @@ async fn stream_pty_output(
     Ok(Sse::new(ReceiverStream::new(event_rx)))
 }
 
+async fn pty_websocket(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, (StatusCode, String)> {
+    state
+        .pty_manager
+        .activity_idle_for(&id)
+        .await
+        .map_err(map_pty_error)?;
+
+    Ok(ws.on_upgrade(move |socket| handle_pty_websocket(socket, state, id)))
+}
+
+async fn handle_pty_websocket(mut socket: WebSocket, state: AppState, id: String) {
+    if send_pty_ws_message(&mut socket, &build_pty_ws_ready_message())
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    while let Some(result) = socket.recv().await {
+        let message = match result {
+            Ok(message) => message,
+            Err(error) => {
+                tracing::debug!(pty_id = %id, error = %error, "PTY WS receive failed");
+                return;
+            }
+        };
+
+        let payload = match message {
+            Message::Text(text) => text.to_string(),
+            Message::Binary(bytes) => match String::from_utf8(bytes.to_vec()) {
+                Ok(text) => text,
+                Err(error) => {
+                    let _ = send_pty_ws_message(
+                        &mut socket,
+                        &build_pty_ws_error_message(
+                            StatusCode::BAD_REQUEST,
+                            format!("invalid websocket payload: {error}"),
+                            None,
+                            None,
+                        ),
+                    )
+                    .await;
+                    continue;
+                }
+            },
+            Message::Ping(payload) => {
+                if socket.send(Message::Pong(payload)).await.is_err() {
+                    return;
+                }
+                continue;
+            }
+            Message::Pong(_) => continue,
+            Message::Close(_) => return,
+        };
+
+        let parsed = match serde_json::from_str::<PtyWsClientMessage>(&payload) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                let _ = send_pty_ws_message(
+                    &mut socket,
+                        &build_pty_ws_error_message(
+                            StatusCode::BAD_REQUEST,
+                            format!("invalid websocket json: {error}"),
+                            None,
+                            None,
+                        ),
+                    )
+                    .await;
+                continue;
+            }
+        };
+
+        match parsed {
+            PtyWsClientMessage::Input { input_seq, data } => {
+                let decoded = match BASE64.decode(&data) {
+                    Ok(decoded) => decoded,
+                    Err(error) => {
+                        let _ = send_pty_ws_message(
+                            &mut socket,
+                            &build_pty_ws_error_message(
+                                StatusCode::BAD_REQUEST,
+                                format!("invalid base64: {error}"),
+                                Some(input_seq),
+                                None,
+                            ),
+                        )
+                        .await;
+                        continue;
+                    }
+                };
+
+                match apply_pty_input_bytes(&state, &id, &decoded).await {
+                    Ok(()) => {
+                        if send_pty_ws_message(
+                            &mut socket,
+                            &build_pty_ws_ack_message(input_seq),
+                        )
+                        .await
+                        .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err((status, message)) => {
+                        let _ = send_pty_ws_message(
+                            &mut socket,
+                            &build_pty_ws_error_message(status, message, Some(input_seq), None),
+                        )
+                        .await;
+                    }
+                }
+            }
+            PtyWsClientMessage::Resize {
+                resize_seq,
+                rows,
+                cols,
+            } => match apply_pty_resize_request(&state, &id, rows, cols).await {
+                Ok(()) => {
+                    if send_pty_ws_message(
+                        &mut socket,
+                        &build_pty_ws_resize_ack_message(resize_seq),
+                    )
+                    .await
+                    .is_err()
+                    {
+                        return;
+                    }
+                }
+                Err((status, message)) => {
+                    let _ = send_pty_ws_message(
+                        &mut socket,
+                        &build_pty_ws_error_message(status, message, None, Some(resize_seq)),
+                    )
+                    .await;
+                }
+            },
+            PtyWsClientMessage::Ping { nonce } => {
+                if send_pty_ws_message(&mut socket, &build_pty_ws_pong_message(nonce))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
 /// POST /pty/{id}/input — Write to PTY stdin (base64-encoded body).
 async fn write_pty_input(
     Path(id): Path<String>,
@@ -559,13 +847,7 @@ async fn write_pty_input(
         .decode(&body.data)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid base64: {e}")))?;
 
-    state
-        .pty_manager
-        .write_input(&id, &data)
-        .await
-        .map_err(map_pty_error)?;
-    let _ = restore_terminal_session_to_running_on_input(&state, &id)?;
-
+    apply_pty_input_bytes(&state, &id, &data).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -575,12 +857,7 @@ async fn resize_pty(
     State(state): State<AppState>,
     Json(body): Json<PtyResizeBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    state
-        .pty_manager
-        .resize(&id, body.rows, body.cols)
-        .await
-        .map_err(map_pty_error)?;
-
+    apply_pty_resize_request(&state, &id, body.rows, body.cols).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -626,6 +903,7 @@ pub fn router() -> Router<AppState> {
         .route("/pty/sessions/detail", get(get_historical_session_detail))
         .route("/pty/claude-sessions", get(list_claude_sessions))
         .route("/pty/:id/stream", get(stream_pty_output))
+        .route("/pty/:id/ws", get(pty_websocket))
         .route("/pty/:id/input", post(write_pty_input))
         .route("/pty/:id/resize", post(resize_pty))
         .route("/pty/:id/stop", post(stop_pty_agent))
@@ -635,6 +913,7 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
+        PtyWsServerMessage, PTY_WS_PROTOCOL_VERSION,
         PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY, register_pty_session,
         resolve_pty_waiting_input_idle_timeout, router, serialize_pty_eof_payload,
         stream_pty_output, watch_pty_lifecycle,
@@ -642,11 +921,14 @@ mod tests {
     use axum::body::Body;
     use axum::extract::{Path, State};
     use axum::http::{Request, StatusCode};
-    use axum::response::IntoResponse;
+    use axum::{Router, response::IntoResponse};
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64;
-    use futures_util::StreamExt;
-    use std::time::Duration;
+    use futures_util::{SinkExt, StreamExt};
+    use std::{net::SocketAddr, time::Duration};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
     use tower::ServiceExt;
 
     use crate::AppState;
@@ -675,6 +957,36 @@ mod tests {
                 cols: 80,
             }
         }
+    }
+
+    async fn spawn_router_server(app: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener should expose local addr");
+        let handle = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .expect("test router should serve");
+        });
+        (addr, handle)
+    }
+
+    async fn read_ws_json(
+        stream: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> PtyWsServerMessage {
+        let next = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("websocket message should arrive promptly")
+            .expect("websocket stream should stay open")
+            .expect("websocket frame should decode");
+        let text = next.into_text().expect("websocket frame should be text");
+        serde_json::from_str(text.as_ref()).expect("websocket payload should be valid json")
     }
 
     #[test]
@@ -836,6 +1148,174 @@ mod tests {
         assert_eq!(session.interaction_mode, InteractionMode::Terminal);
         assert_eq!(session.status, SessionStatus::Running);
 
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn pty_websocket_route_acks_input_and_wakes_waiting_input_session() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-ws-input-host".to_string());
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+        register_pty_session(&state, &pty).expect("PTY-backed session should register");
+        state
+            .session_store
+            .update(
+                &pty.id,
+                UpdateSessionInput {
+                    status: Some(SessionStatus::WaitingInput),
+                    ..Default::default()
+                },
+            )
+            .expect("session should transition to waiting_input for test setup");
+
+        let (addr, server) = spawn_router_server(router().with_state(state.clone())).await;
+        let url = format!("ws://{addr}/pty/{}/ws", pty.id);
+        let (mut socket, _) = connect_async(&url)
+            .await
+            .expect("PTY websocket should connect");
+
+        let ready = read_ws_json(&mut socket).await;
+        assert_eq!(
+            ready,
+            PtyWsServerMessage::Ready {
+                protocol_version: PTY_WS_PROTOCOL_VERSION,
+                capabilities: super::PtyWsCapabilities {
+                    input_ack: true,
+                    resize: true,
+                    resize_ack: true,
+                },
+            }
+        );
+
+        let payload = serde_json::json!({
+            "type": "input",
+            "input_seq": 7,
+            "data": BASE64.encode("\n"),
+        });
+        socket
+            .send(TungsteniteMessage::Text(payload.to_string().into()))
+            .await
+            .expect("input websocket frame should send");
+
+        let ack = read_ws_json(&mut socket).await;
+        assert_eq!(ack, PtyWsServerMessage::Ack { input_seq: 7 });
+
+        let session = state
+            .session_store
+            .get(&pty.id)
+            .expect("session lookup should succeed")
+            .expect("session should exist");
+        assert_eq!(session.status, SessionStatus::Running);
+
+        let _ = socket.close(None).await;
+        server.abort();
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn pty_websocket_route_reports_invalid_base64_without_ack() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-ws-invalid-input-host".to_string());
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+
+        let (addr, server) = spawn_router_server(router().with_state(state.clone())).await;
+        let url = format!("ws://{addr}/pty/{}/ws", pty.id);
+        let (mut socket, _) = connect_async(&url)
+            .await
+            .expect("PTY websocket should connect");
+
+        let _ = read_ws_json(&mut socket).await;
+
+        let payload = serde_json::json!({
+            "type": "input",
+            "input_seq": 9,
+            "data": "@@@not-base64@@@",
+        });
+        socket
+            .send(TungsteniteMessage::Text(payload.to_string().into()))
+            .await
+            .expect("invalid websocket frame should send");
+
+        let error = read_ws_json(&mut socket).await;
+        match error {
+            PtyWsServerMessage::Error {
+                code,
+                message,
+                input_seq,
+                resize_seq,
+            } => {
+                assert_eq!(code, "bad_request");
+                assert_eq!(input_seq, Some(9));
+                assert_eq!(resize_seq, None);
+                assert!(message.starts_with("invalid base64:"));
+            }
+            other => panic!("expected websocket error frame, got {other:?}"),
+        }
+
+        let _ = socket.close(None).await;
+        server.abort();
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn pty_websocket_route_acks_resize_after_applying_geometry() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-ws-resize-host".to_string());
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+
+        let (addr, server) = spawn_router_server(router().with_state(state.clone())).await;
+        let url = format!("ws://{addr}/pty/{}/ws", pty.id);
+        let (mut socket, _) = connect_async(&url)
+            .await
+            .expect("PTY websocket should connect");
+
+        let ready = read_ws_json(&mut socket).await;
+        assert_eq!(
+            ready,
+            PtyWsServerMessage::Ready {
+                protocol_version: PTY_WS_PROTOCOL_VERSION,
+                capabilities: super::PtyWsCapabilities {
+                    input_ack: true,
+                    resize: true,
+                    resize_ack: true,
+                },
+            }
+        );
+
+        let payload = serde_json::json!({
+            "type": "resize",
+            "resize_seq": 3,
+            "rows": 31,
+            "cols": 111,
+        });
+        socket
+            .send(TungsteniteMessage::Text(payload.to_string().into()))
+            .await
+            .expect("resize websocket frame should send");
+
+        let ack = read_ws_json(&mut socket).await;
+        assert_eq!(ack, PtyWsServerMessage::ResizeAck { resize_seq: 3 });
+
+        let _ = socket.close(None).await;
+        server.abort();
         let _ = state.pty_manager.stop(&pty.id).await;
         let _ = state.pty_manager.remove(&pty.id).await;
     }

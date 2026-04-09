@@ -18,7 +18,7 @@ path = "tests/bin/fake-codex-cli.rs"
 
 [dependencies]
 anyhow = "1"
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
@@ -48,5 +48,6 @@ dirs = "5"
 
 [dev-dependencies]
 http-body-util = "0.1"
+tokio-tungstenite = "0.24"
 tower = { version = "0.5", features = ["util"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }

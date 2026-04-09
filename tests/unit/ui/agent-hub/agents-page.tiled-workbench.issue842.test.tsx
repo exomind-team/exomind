@@ -46,6 +46,18 @@ const sessionStreamState = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 
+const ptyInputMocks = vi.hoisted(() => ({
+  sendPtyShortcutInput: vi.fn(),
+}));
+
+vi.mock('@/ui/app/components/pty-input', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/ui/app/components/pty-input')>();
+  return {
+    ...actual,
+    sendPtyShortcutInput: ptyInputMocks.sendPtyShortcutInput,
+  };
+});
+
 vi.mock('@/ui/app/components/PtyTerminal', () => ({
   PtyTerminal: ({
     ptyId,
@@ -229,6 +241,7 @@ function buildRuntimeSnapshot() {
 describe('agents page issue-842（平铺窗格树工作台骨架）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ptyInputMocks.sendPtyShortcutInput.mockResolvedValue(true);
     localStorage.clear();
     localStorage.setItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY, 'tiled');
     vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
@@ -546,11 +559,11 @@ describe('agents page issue-842（平铺窗格树工作台骨架）', () => {
     });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/pty/pty-live-840-pass/input'),
+      expect(ptyInputMocks.sendPtyShortcutInput).toHaveBeenCalledWith(
         expect.objectContaining({
-          method: 'POST',
+          ptyId: 'pty-live-840-pass',
         }),
+        'Alt+Shift+V',
       );
     });
 
