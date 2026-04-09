@@ -1,5 +1,10 @@
 import { ChevronRight, Link2, Monitor, ShieldCheck, Wifi } from 'lucide-react';
 import type { AgentDeviceGroup, RuntimeServiceStatus } from '@/lib/types/agent-hub';
+import {
+  resolveTopologyDevice,
+  resolveTopologyHostId,
+  resolveTopologyRuntimeHost,
+} from '@/lib/types/runtime-topology';
 import type { RuntimeHostSnapshot } from '@/services/runtime-manager';
 import {
   DEFAULT_EXTERNAL_RUNTIME_PORT,
@@ -190,6 +195,9 @@ export function DeviceView({
     const verificationTriggerLabel = formatVerificationTriggerLabel(item.host.lastVerificationTrigger);
     const verificationTimeLabel = formatVerificationTimeLabel(item.host.lastVerifiedAt);
     const verifyButtonLabel = verificationPresentation?.status === 'running' ? '验证中...' : '测试互联';
+    const topologyDevice = resolveTopologyDevice(item.topology);
+    const topologyRuntimeHost = resolveTopologyRuntimeHost(item.topology);
+    const topologyHostId = resolveTopologyHostId(item.topology);
 
     return (
       <div
@@ -213,7 +221,7 @@ export function DeviceView({
             <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
               <span className="rounded bg-white px-1.5 py-0.5 dark:bg-[#1C1917]">{trustLabel}</span>
               <span>dial: {addressText}</span>
-              {item.topology?.host_id && <span>host_id: {item.topology.host_id}</span>}
+              {topologyHostId && <span>host_id: {topologyHostId}</span>}
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -240,13 +248,13 @@ export function DeviceView({
           <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
             <p className="text-[10px] text-[#A8A29E]">设备名称</p>
             <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
-              {item.topology?.hostname ?? item.host.name}
+              {topologyDevice?.name ?? topologyRuntimeHost?.hostname ?? item.host.name}
             </p>
           </div>
           <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
             <p className="text-[10px] text-[#A8A29E]">系统</p>
             <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
-              {item.topology?.os ?? '--'}
+              {topologyRuntimeHost?.os ?? '--'}
             </p>
           </div>
           <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
@@ -258,7 +266,7 @@ export function DeviceView({
           <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
             <p className="text-[10px] text-[#A8A29E]">在线时长</p>
             <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
-              {formatHostUptime(item.topology?.uptime_secs)}
+              {formatHostUptime(topologyRuntimeHost?.uptime_secs)}
             </p>
           </div>
         </div>
@@ -343,8 +351,8 @@ export function DeviceView({
         )}
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
-          <span>runtime: {item.topology?.version ?? '--'}</span>
-          <span>memory: {formatHostMemory(item.topology?.used_memory_mb, item.topology?.total_memory_mb)}</span>
+          <span>runtime: {topologyRuntimeHost?.version ?? '--'}</span>
+          <span>memory: {formatHostMemory(topologyRuntimeHost?.used_memory_mb, topologyRuntimeHost?.total_memory_mb)}</span>
         </div>
 
         {item.host.lastCheckedAt && (

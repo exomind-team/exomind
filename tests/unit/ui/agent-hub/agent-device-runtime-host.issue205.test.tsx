@@ -355,7 +355,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   it('opens manager sheet from device view and adds runtime host with host-only input（设备页支持 host-only 手工地址）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-host-panel')).toBeInTheDocument();
@@ -384,7 +384,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     window.localStorage.setItem('exomind:runtimeExternalAuthToken', 'external-admin-token');
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-host-panel')).toBeInTheDocument();
@@ -410,7 +410,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   it('requires local embedded runtime before pairing（未启动本机 RT 时禁用配对入口）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
@@ -425,7 +425,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   it('uses equal-width overview cards when companion card exists（顶部概览多卡片时平分宽度）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     const overviewGrid = await screen.findByTestId('runtime-device-overview-grid');
     expect(screen.getByTestId('agent-device-overview-card')).toBeInTheDocument();
@@ -436,7 +436,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     agentHubMocks.getDeviceView.mockResolvedValue([]);
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     const overviewGrid = await screen.findByTestId('runtime-device-overview-grid');
     expect(screen.queryByTestId('agent-device-overview-card')).not.toBeInTheDocument();
@@ -496,7 +496,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByText('我的节点')).toBeInTheDocument();
@@ -572,7 +572,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     const view = render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
@@ -604,7 +604,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
     view.unmount();
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     const restoredSection = await screen.findByTestId('runtime-peer-section-confirmed');
     await waitFor(() => {
@@ -634,7 +634,27 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     };
     topologyByHostId = {
       'runtime-host-confirmed': {
-        host_id: 'paired-laptop-host-live',
+        runtime_host: {
+          host_id: 'paired-laptop-host-live',
+          hostname: 'paired-laptop-runtime',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 3600,
+          version: '0.1.0',
+          port: 9124,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+        device: {
+          id: 'paired-laptop-host-live',
+          name: 'Paired Laptop',
+          kind: 'laptop',
+          primary_runtime_host_id: 'paired-laptop-host-live',
+        },
+        device_components: [],
+        device_links: [],
       },
     };
     runtimeControlMocks.getStatus.mockResolvedValue({
@@ -654,7 +674,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     const confirmedSection = await screen.findByTestId('runtime-peer-section-confirmed');
     fireEvent.click(within(confirmedSection).getByTestId('runtime-host-verify-runtime-host-confirmed'));
@@ -701,7 +721,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     const confirmedSection = await screen.findByTestId('runtime-peer-section-confirmed');
     expect(within(confirmedSection).getByText('online')).toBeInTheDocument();
@@ -752,7 +772,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
@@ -804,7 +824,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
@@ -884,7 +904,27 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     };
     topologyByHostId = {
       'runtime-host-confirmed': {
-        host_id: 'paired-laptop-host-live',
+        runtime_host: {
+          host_id: 'paired-laptop-host-live',
+          hostname: 'paired-laptop-runtime',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 3600,
+          version: '0.1.0',
+          port: 9124,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+        device: {
+          id: 'paired-laptop-host-live',
+          name: 'Paired Laptop',
+          kind: 'laptop',
+          primary_runtime_host_id: 'paired-laptop-host-live',
+        },
+        device_components: [],
+        device_links: [],
       },
     };
     runtimeControlMocks.getStatus.mockResolvedValue({
@@ -904,7 +944,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
@@ -976,7 +1016,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
@@ -1061,7 +1101,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     const confirmedSection = await screen.findByTestId('runtime-peer-section-confirmed');
     fireEvent.click(within(confirmedSection).getByTestId('runtime-host-verify-runtime-host-confirmed'));
@@ -1125,7 +1165,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   it('probes runtime host and updates status badge（探测后更新状态徽标）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-host-status-runtime-host-1')).toHaveTextContent('offline');
@@ -1141,7 +1181,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   it('starts and stops local runtime from device panel（设备页可启停本地 Runtime）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
@@ -1176,7 +1216,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
@@ -1219,7 +1259,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
@@ -1252,7 +1292,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
@@ -1284,7 +1324,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
@@ -1324,7 +1364,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(runtimeMeshSyncMocks.ensurePeerPair).toHaveBeenCalledWith(
@@ -1353,7 +1393,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     ];
 
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-target-mode-embedded')).toHaveAttribute('aria-pressed', 'true');

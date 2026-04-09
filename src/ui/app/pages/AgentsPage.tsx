@@ -84,6 +84,7 @@ import {
 import { RuntimeClient } from '@/services/runtime-client';
 import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
 import type { QuickActionResponse, SessionInfo, UpdateSessionRequest } from '@/lib/types/session';
+import { resolveTopologyCapabilities, resolveTopologyHostId } from '@/lib/types/runtime-topology';
 import {
   createProviderProfile,
   listProviderProfiles,
@@ -1216,7 +1217,7 @@ export function AgentsPage() {
   ) => {
     if (snapshot.connectionState !== 'online') return false;
     if (kind === 'echo') return true;
-    const capabilities = snapshot.topology?.capabilities;
+    const capabilities = resolveTopologyCapabilities(snapshot.topology);
     if (!capabilities) return true;
     if (kind === 'api') {
       return capabilities.agent_kinds.includes('api')
@@ -2303,13 +2304,13 @@ export function AgentsPage() {
     const matchedHost = runtimeHostSnapshots.find((snapshot) => (
       snapshot.host.hostId === sourceHostId
       || snapshot.host.id === sourceHostId
-      || snapshot.topology?.host_id === sourceHostId
+      || resolveTopologyHostId(snapshot.topology) === sourceHostId
     ))?.host;
     return matchedHost ?? null;
   };
 
   const resolveRuntimeSnapshotPeerId = (snapshot: RuntimeHostSnapshot): string | undefined => (
-    snapshot.topology?.host_id ?? snapshot.host.hostId
+    resolveTopologyHostId(snapshot.topology) ?? snapshot.host.hostId
   );
 
   const toLiveRuntimePeerHost = (snapshot: RuntimeHostSnapshot): RuntimeHostRecord => {

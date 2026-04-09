@@ -34,6 +34,46 @@ async fn topology_exposes_host_id() {
 }
 
 #[tokio::test]
+async fn topology_exposes_runtime_host_and_device_contract() {
+    let app = test_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/topology")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+
+    assert!(
+        payload["runtime_host"]["host_id"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
+        "topology should expose runtime_host.host_id"
+    );
+    assert!(
+        payload["device"]["id"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
+        "topology should expose device.id"
+    );
+    assert_eq!(payload["device_components"], json!([]));
+    assert_eq!(payload["device_links"], json!([]));
+    assert!(
+        payload["host_id"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
+        "topology should still keep legacy host_id"
+    );
+}
+
+#[tokio::test]
 async fn mesh_peers_crud_roundtrip() {
     let app = test_app();
 

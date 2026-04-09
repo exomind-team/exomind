@@ -109,7 +109,8 @@ test.describe('Issue #205 runtime host device flow（设备页 RuntimeHost 闭�
 
   test('add host then probe to online status（新增主机并探测在线）', async ({ page }) => {
     await page.goto('/agents');
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('heading', { name: '信号网络' })).toBeVisible();
+    await expect(page.getByTestId('agent-view-toggle-device')).toBeVisible();
 
     await page.getByTestId('agent-view-toggle-device').click();
     await expect(page.getByTestId('runtime-host-panel')).toBeVisible();

@@ -1,5 +1,9 @@
 import type { AgentEnergySnapshot, RuntimeHostRecord } from '@/lib/types/agent-hub';
-import type { RuntimeTopologyResponse } from '@/lib/types/runtime-topology';
+import {
+  normalizeRuntimeTopologyResponse,
+  resolveTopologyHostId,
+  type RuntimeTopologyResponse,
+} from '@/lib/types/runtime-topology';
 import { DEFAULT_EXTERNAL_RUNTIME_PORT } from '@/config/runtime-target';
 import {
   type AddRuntimeHostInput,
@@ -226,6 +230,9 @@ export class RuntimeManager {
       energyRequest,
     ]);
     const topologyResult = topologyEnvelope.result;
+    const normalizedTopology = topologyResult.ok
+      ? normalizeRuntimeTopologyResponse(topologyResult.data)
+      : null;
 
     // Build energy lookup map by agent_id
     const energyMap = new Map<string, AgentEnergySnapshot>();
@@ -240,7 +247,7 @@ export class RuntimeManager {
         host,
         connectionState: mapErrorToConnectionState(agentsResult.error.code),
         agents: [],
-        topology: topologyResult.ok ? topologyResult.data : null,
+        topology: normalizedTopology,
         latencyMs: topologyEnvelope.latencyMs,
         error: agentsResult.error.message,
       };
@@ -265,13 +272,13 @@ export class RuntimeManager {
       };
     }
 
-    const resolvedHost = await this.persistSuccessfulDialMetadata(host, topologyResult.data);
+    const resolvedHost = await this.persistSuccessfulDialMetadata(host, normalizedTopology!);
 
     return {
       host: resolvedHost,
       connectionState: 'online',
       agents: nextAgents,
-      topology: topologyResult.data,
+      topology: normalizedTopology,
       latencyMs: topologyEnvelope.latencyMs,
     };
   }
@@ -280,12 +287,13 @@ export class RuntimeManager {
     host: RuntimeHostRecord,
     topology: RuntimeTopologyResponse,
   ): Promise<RuntimeHostRecord> {
-    if (!topology.host_id || !this.hostService.mergeHostMetadata) {
+    const liveHostId = resolveTopologyHostId(topology);
+    if (!liveHostId || !this.hostService.mergeHostMetadata) {
       return host;
     }
 
     const patch: RuntimeHostMetadataPatch = {
-      hostId: topology.host_id,
+      hostId: liveHostId,
       lastSuccessfulDialAddress: resolveRuntimeHostDialAddress(host),
     };
 

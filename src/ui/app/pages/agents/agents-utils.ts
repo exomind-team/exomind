@@ -38,6 +38,7 @@ import type {
   AgentHubViewMode,
   RuntimeHostRecord,
 } from '@/lib/types/agent-hub';
+import { resolveTopologyHostId } from '@/lib/types/runtime-topology';
 import type { RuntimeAggregatedAgent, RuntimeHostSnapshot } from '@/services/runtime-manager';
 import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
 import type { SignalGraphNodeType } from '../agents-signal-topology';
@@ -361,7 +362,7 @@ function buildRuntimeBaseUrl(host: string, port: number): string {
 }
 
 function resolveRuntimeSnapshotPeerId(snapshot: RuntimeHostSnapshot): string | undefined {
-  return snapshot.topology?.host_id ?? snapshot.host.hostId;
+  return resolveTopologyHostId(snapshot.topology) ?? snapshot.host.hostId;
 }
 
 function isLoopbackLikeHost(host: string): boolean {

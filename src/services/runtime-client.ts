@@ -5,8 +5,14 @@ import type {
   RuntimeCapabilityAgentKind,
   RuntimeCapabilityApiProvider,
   RuntimeTopologyCapabilities,
+  RuntimeTopologyDevice,
+  RuntimeTopologyDeviceComponent,
+  RuntimeTopologyDeviceKind,
+  RuntimeTopologyDeviceLink,
   RuntimeTopologyResponse,
+  RuntimeTopologyRuntimeHost,
 } from '@/lib/types/runtime-topology';
+import { normalizeRuntimeTopologyResponse } from '@/lib/types/runtime-topology';
 import {
   buildRuntimeAuthHeaders,
   resolveRuntimeHostBaseUrl,
@@ -202,6 +208,21 @@ function readOptionalString(
   return typeof camelValue === 'string' && camelValue ? camelValue : undefined;
 }
 
+function readOptionalNumber(
+  record: Record<string, unknown>,
+  snakeCaseKey: string,
+  camelCaseKey?: string,
+): number | undefined {
+  const snakeValue = record[snakeCaseKey];
+  if (typeof snakeValue === 'number' && Number.isFinite(snakeValue)) {
+    return snakeValue;
+  }
+
+  if (!camelCaseKey) return undefined;
+  const camelValue = record[camelCaseKey];
+  return typeof camelValue === 'number' && Number.isFinite(camelValue) ? camelValue : undefined;
+}
+
 function parseStringUnionArray<T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -242,31 +263,234 @@ function parseTopologyCapabilities(value: unknown): RuntimeTopologyCapabilities 
   };
 }
 
-function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
+function parseTopologyDeviceKind(value: unknown): RuntimeTopologyDeviceKind | null {
+  if (typeof value !== 'string') return null;
+  const allowedKinds: RuntimeTopologyDeviceKind[] = [
+    'desktop',
+    'laptop',
+    'phone',
+    'server',
+    'embedded',
+    'wearable',
+    'unknown',
+  ];
+  return allowedKinds.includes(value as RuntimeTopologyDeviceKind)
+    ? value as RuntimeTopologyDeviceKind
+    : 'unknown';
+}
+
+function parseTopologyRuntimeHost(value: unknown): RuntimeTopologyRuntimeHost | null {
   if (!isObjectRecord(value)) return null;
-  if (value.host_id != null && typeof value.host_id !== 'string') return null;
-  if (typeof value.hostname !== 'string') return null;
-  if (typeof value.os !== 'string') return null;
-  if (typeof value.arch !== 'string') return null;
-  if (typeof value.uptime_secs !== 'number') return null;
-  if (typeof value.version !== 'string') return null;
-  if (typeof value.port !== 'number') return null;
-  if (value.total_memory_mb != null && typeof value.total_memory_mb !== 'number') return null;
-  if (value.used_memory_mb != null && typeof value.used_memory_mb !== 'number') return null;
+
+  const hostname = readOptionalString(value, 'hostname');
+  const os = readOptionalString(value, 'os');
+  const arch = readOptionalString(value, 'arch');
+  const version = readOptionalString(value, 'version');
+  const uptimeSecs = readOptionalNumber(value, 'uptime_secs', 'uptimeSecs');
+  const port = readOptionalNumber(value, 'port');
   const capabilities = parseTopologyCapabilities(value.capabilities);
-  if (!capabilities) return null;
+
+  if (!hostname || !os || !arch || !version || uptimeSecs == null || port == null || !capabilities) {
+    return null;
+  }
 
   return {
-    host_id: typeof value.host_id === 'string' ? value.host_id : undefined,
-    hostname: value.hostname,
-    os: value.os,
-    arch: value.arch,
-    uptime_secs: value.uptime_secs,
-    version: value.version,
-    port: value.port,
-    total_memory_mb: typeof value.total_memory_mb === 'number' ? value.total_memory_mb : undefined,
-    used_memory_mb: typeof value.used_memory_mb === 'number' ? value.used_memory_mb : undefined,
+    host_id: readOptionalString(value, 'host_id', 'hostId'),
+    hostname,
+    os,
+    arch,
+    uptime_secs: uptimeSecs,
+    version,
+    port,
+    total_memory_mb: readOptionalNumber(value, 'total_memory_mb', 'totalMemoryMb'),
+    used_memory_mb: readOptionalNumber(value, 'used_memory_mb', 'usedMemoryMb'),
     capabilities,
+  };
+}
+
+function parseTopologyDevice(value: unknown): RuntimeTopologyDevice | null {
+  if (!isObjectRecord(value)) return null;
+
+  const id = readOptionalString(value, 'id');
+  const name = readOptionalString(value, 'name');
+  const kind = parseTopologyDeviceKind(value.kind);
+
+  if (!id || !name || !kind) {
+    return null;
+  }
+
+  return {
+    id,
+    name,
+    kind,
+    primary_runtime_host_id: readOptionalString(value, 'primary_runtime_host_id', 'primaryRuntimeHostId'),
+  };
+}
+
+function parseTopologyDeviceComponent(value: unknown): RuntimeTopologyDeviceComponent | null {
+  if (!isObjectRecord(value)) return null;
+
+  const id = readOptionalString(value, 'id');
+  const deviceId = readOptionalString(value, 'device_id', 'deviceId');
+  const kind = readOptionalString(value, 'kind');
+  const name = readOptionalString(value, 'name');
+  const status = readOptionalString(value, 'status');
+
+  if (!id || !deviceId || !kind || !name || !status) {
+    return null;
+  }
+
+  return {
+    id,
+    device_id: deviceId,
+    kind,
+    name,
+    status,
+    protocol: readOptionalString(value, 'protocol'),
+    runtime_host_id: readOptionalString(value, 'runtime_host_id', 'runtimeHostId'),
+  };
+}
+
+function parseTopologyDeviceComponentList(value: unknown): RuntimeTopologyDeviceComponent[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: RuntimeTopologyDeviceComponent[] = [];
+  for (const item of value) {
+    const component = parseTopologyDeviceComponent(item);
+    if (!component) {
+      return null;
+    }
+    parsed.push(component);
+  }
+  return parsed;
+}
+
+function parseTopologyDeviceLink(value: unknown): RuntimeTopologyDeviceLink | null {
+  if (!isObjectRecord(value)) return null;
+
+  const id = readOptionalString(value, 'id');
+  const sourceKind = readOptionalString(value, 'source_kind', 'sourceKind');
+  const sourceId = readOptionalString(value, 'source_id', 'sourceId');
+  const targetKind = readOptionalString(value, 'target_kind', 'targetKind');
+  const targetId = readOptionalString(value, 'target_id', 'targetId');
+  const transport = readOptionalString(value, 'transport');
+  const status = readOptionalString(value, 'status');
+
+  if (!id || !sourceKind || !sourceId || !targetKind || !targetId || !transport || !status) {
+    return null;
+  }
+
+  return {
+    id,
+    source_kind: sourceKind,
+    source_id: sourceId,
+    target_kind: targetKind,
+    target_id: targetId,
+    transport,
+    status,
+    latency_ms: readOptionalNumber(value, 'latency_ms', 'latencyMs'),
+  };
+}
+
+function parseTopologyDeviceLinkList(value: unknown): RuntimeTopologyDeviceLink[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: RuntimeTopologyDeviceLink[] = [];
+  for (const item of value) {
+    const link = parseTopologyDeviceLink(item);
+    if (!link) {
+      return null;
+    }
+    parsed.push(link);
+  }
+  return parsed;
+}
+
+function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
+  if (!isObjectRecord(value)) return null;
+
+  const nestedRuntimeHost = value.runtime_host === undefined
+    ? null
+    : parseTopologyRuntimeHost(value.runtime_host);
+  if (value.runtime_host !== undefined && !nestedRuntimeHost) {
+    return null;
+  }
+
+  const flatCapabilities = value.capabilities === undefined
+    ? null
+    : parseTopologyCapabilities(value.capabilities);
+  if (value.capabilities !== undefined && !flatCapabilities && !nestedRuntimeHost) {
+    return null;
+  }
+
+  const capabilities = flatCapabilities ?? nestedRuntimeHost?.capabilities ?? null;
+  if (!capabilities) {
+    return null;
+  }
+
+  const hostname = readOptionalString(value, 'hostname') ?? nestedRuntimeHost?.hostname;
+  const os = readOptionalString(value, 'os') ?? nestedRuntimeHost?.os;
+  const arch = readOptionalString(value, 'arch') ?? nestedRuntimeHost?.arch;
+  const uptimeSecs = readOptionalNumber(value, 'uptime_secs', 'uptimeSecs') ?? nestedRuntimeHost?.uptime_secs;
+  const version = readOptionalString(value, 'version') ?? nestedRuntimeHost?.version;
+  const port = readOptionalNumber(value, 'port') ?? nestedRuntimeHost?.port;
+
+  if (!hostname || !os || !arch || uptimeSecs == null || !version || port == null) {
+    return null;
+  }
+
+  const hostId = readOptionalString(value, 'host_id', 'hostId') ?? nestedRuntimeHost?.host_id;
+  const totalMemoryMb = readOptionalNumber(value, 'total_memory_mb', 'totalMemoryMb') ?? nestedRuntimeHost?.total_memory_mb;
+  const usedMemoryMb = readOptionalNumber(value, 'used_memory_mb', 'usedMemoryMb') ?? nestedRuntimeHost?.used_memory_mb;
+
+  const device = value.device === undefined
+    ? null
+    : parseTopologyDevice(value.device);
+
+  const deviceComponents = value.device_components === undefined
+    ? undefined
+    : parseTopologyDeviceComponentList(value.device_components);
+
+  const deviceLinks = value.device_links === undefined
+    ? undefined
+    : parseTopologyDeviceLinkList(value.device_links);
+
+  const runtimeHost = nestedRuntimeHost ?? {
+    host_id: hostId,
+    hostname,
+    os,
+    arch,
+    uptime_secs: uptimeSecs,
+    version,
+    port,
+    total_memory_mb: totalMemoryMb,
+    used_memory_mb: usedMemoryMb,
+    capabilities,
+  };
+  const fallbackDeviceId = runtimeHost.host_id ?? runtimeHost.hostname;
+
+  return {
+    host_id: hostId,
+    hostname,
+    os,
+    arch,
+    uptime_secs: uptimeSecs,
+    version,
+    port,
+    total_memory_mb: totalMemoryMb,
+    used_memory_mb: usedMemoryMb,
+    capabilities,
+    runtime_host: runtimeHost,
+    device: device ?? (
+      fallbackDeviceId
+        ? {
+            id: fallbackDeviceId,
+            name: runtimeHost.hostname,
+            kind: 'unknown',
+            primary_runtime_host_id: runtimeHost.host_id ?? fallbackDeviceId,
+          }
+        : undefined
+    ),
+    device_components: deviceComponents ?? [],
+    device_links: deviceLinks ?? [],
   };
 }
 
@@ -490,7 +714,7 @@ export class RuntimeClient {
 
     return {
       ok: true,
-      data: parsed,
+      data: normalizeRuntimeTopologyResponse(parsed),
     };
   }
 

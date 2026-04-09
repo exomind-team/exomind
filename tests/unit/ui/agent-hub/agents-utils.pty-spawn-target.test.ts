@@ -185,6 +185,59 @@ describe('resolvePtySpawnConnectionTarget', () => {
     });
   });
 
+  it('reads peer id from topology.runtime_host.host_id when legacy host_id is absent', () => {
+    const result = resolvePtySpawnConnectionTarget({
+      selectedTarget: buildSelectedTarget({
+        host: '127.0.0.1',
+        port: 9124,
+      }),
+      runtimeServiceStatus: buildRuntimeStatus({
+        host: '127.0.0.1',
+        port: 1919,
+        hostId: undefined,
+      }),
+      runtimeHostSnapshots: [
+        buildSnapshot({
+          host: {
+            id: 'local-runtime-record',
+            name: '127.0.0.1:1919',
+            host: '127.0.0.1',
+            port: 1919,
+          },
+          topology: {
+            runtime_host: {
+              host_id: 'runtime-host-nested',
+              hostname: 'runtime-host-nested',
+              os: 'Windows 11',
+              arch: 'x64',
+              uptime_secs: 120,
+              version: '0.3.6',
+              port: 1919,
+              capabilities: {
+                agent_kinds: ['claude_cli', 'codex_cli'],
+                api_providers: ['openai'],
+              },
+            },
+            device: {
+              id: 'runtime-host-nested',
+              name: 'Hope Desktop',
+              kind: 'desktop',
+              primary_runtime_host_id: 'runtime-host-nested',
+            },
+            device_components: [],
+            device_links: [],
+          },
+        }),
+      ],
+    });
+
+    expect(result).toEqual({
+      rtBaseUrl: 'http://127.0.0.1:1919',
+      authToken: 'local-selected-token',
+      hostId: 'runtime-host-nested',
+    });
+  });
+
   it('prefers the local loopback snapshot when the embedded runtime is represented by multiple addresses', () => {
     const result = resolvePtySpawnConnectionTarget({
       selectedTarget: buildSelectedTarget(),

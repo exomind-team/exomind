@@ -23,8 +23,8 @@ pub struct RuntimeCapabilitiesResponse {
     pub api_providers: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct TopologyResponse {
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeHostResponse {
     pub host_id: String,
     pub hostname: String,
     pub os: String,
@@ -37,10 +37,78 @@ pub struct TopologyResponse {
     pub capabilities: RuntimeCapabilitiesResponse,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceResponse {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub primary_runtime_host_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceComponentResponse {
+    pub id: String,
+    pub device_id: String,
+    pub kind: String,
+    pub name: String,
+    pub status: String,
+    pub protocol: Option<String>,
+    pub runtime_host_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceLinkResponse {
+    pub id: String,
+    pub source_kind: String,
+    pub source_id: String,
+    pub target_kind: String,
+    pub target_id: String,
+    pub transport: String,
+    pub status: String,
+    pub latency_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TopologyResponse {
+    pub host_id: String,
+    pub hostname: String,
+    pub os: String,
+    pub arch: String,
+    pub uptime_secs: u64,
+    pub version: &'static str,
+    pub port: u16,
+    pub total_memory_mb: u64,
+    pub used_memory_mb: u64,
+    pub capabilities: RuntimeCapabilitiesResponse,
+    pub runtime_host: RuntimeHostResponse,
+    pub device: DeviceResponse,
+    pub device_components: Vec<DeviceComponentResponse>,
+    pub device_links: Vec<DeviceLinkResponse>,
+}
+
 pub async fn get_topology(State(state): State<RuntimeState>) -> Json<TopologyResponse> {
     // Cache mostly-static host identity data（缓存基本静态的主机身份信息）.
     let static_info = TOPOLOGY_STATIC_INFO.get_or_init(build_static_info);
     let (total_memory_mb, used_memory_mb) = read_memory_stats_mb();
+    let runtime_host = RuntimeHostResponse {
+        host_id: state.host_id.clone(),
+        hostname: static_info.hostname.clone(),
+        os: static_info.os.clone(),
+        arch: static_info.arch.clone(),
+        uptime_secs: System::uptime(),
+        version: RUNTIME_VERSION,
+        port: state.port,
+        total_memory_mb,
+        used_memory_mb,
+        capabilities: static_info.capabilities.clone(),
+    };
+    let device = DeviceResponse {
+        id: state.host_id.clone(),
+        name: static_info.hostname.clone(),
+        kind: infer_device_kind(&static_info.os),
+        primary_runtime_host_id: state.host_id.clone(),
+    };
+
     Json(TopologyResponse {
         host_id: state.host_id.clone(),
         hostname: static_info.hostname.clone(),
@@ -52,6 +120,10 @@ pub async fn get_topology(State(state): State<RuntimeState>) -> Json<TopologyRes
         total_memory_mb,
         used_memory_mb,
         capabilities: static_info.capabilities.clone(),
+        runtime_host,
+        device,
+        device_components: Vec::new(),
+        device_links: Vec::new(),
     })
 }
 
@@ -97,6 +169,21 @@ fn read_arch() -> String {
     System::cpu_arch()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| std::env::consts::ARCH.to_string())
+}
+
+fn infer_device_kind(os: &str) -> String {
+    let normalized = os.to_ascii_lowercase();
+    if normalized.contains("android") {
+        return "phone".to_string();
+    }
+    if normalized.contains("windows")
+        || normalized.contains("mac")
+        || normalized.contains("darwin")
+        || normalized.contains("linux")
+    {
+        return "desktop".to_string();
+    }
+    "unknown".to_string()
 }
 
 fn read_memory_stats_mb() -> (u64, u64) {

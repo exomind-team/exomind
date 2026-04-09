@@ -172,6 +172,248 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
     expect(result.data.capabilities.api_providers).toEqual(['openai', 'anthropic']);
   });
 
+  it('parses nested runtime_host/device contract and backfills legacy fields（解析嵌套拓扑契约并回填旧字段）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        runtime_host: {
+          host_id: 'runtime-host-1',
+          hostname: 'local-dev',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 1919,
+          total_memory_mb: 16000,
+          used_memory_mb: 8000,
+          capabilities: {
+            agent_kinds: ['claude_cli', 'api'],
+            api_providers: ['openai', 'anthropic'],
+          },
+        },
+        device: {
+          id: 'runtime-host-1',
+          name: 'Hope Desktop',
+          kind: 'desktop',
+          primary_runtime_host_id: 'runtime-host-1',
+        },
+        device_components: [],
+        device_links: [],
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology(SAMPLE_HOST);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const topology = result.data as typeof result.data & {
+      runtime_host?: {
+        host_id?: string;
+        capabilities?: {
+          agent_kinds?: string[];
+          api_providers?: string[];
+        };
+      };
+      device?: {
+        id?: string;
+        name?: string;
+      };
+    };
+
+    expect(topology.runtime_host?.host_id).toBe('runtime-host-1');
+    expect(topology.device?.id).toBe('runtime-host-1');
+    expect(topology.device?.name).toBe('Hope Desktop');
+    expect(topology.host_id).toBe('runtime-host-1');
+    expect(topology.hostname).toBe('local-dev');
+    expect(topology.capabilities.agent_kinds).toEqual(['claude_cli', 'api']);
+    expect(topology.runtime_host?.capabilities?.api_providers).toEqual(['openai', 'anthropic']);
+  });
+
+  it('accepts empty device_components/device_links arrays（接受空的设备部件与链路数组）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        runtime_host: {
+          host_id: 'runtime-host-1',
+          hostname: 'local-dev',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 1919,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+        device: {
+          id: 'runtime-host-1',
+          name: 'Hope Desktop',
+          kind: 'desktop',
+          primary_runtime_host_id: 'runtime-host-1',
+        },
+        device_components: [],
+        device_links: [],
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology(SAMPLE_HOST);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const topology = result.data as typeof result.data & {
+      device_components?: unknown[];
+      device_links?: unknown[];
+    };
+
+    expect(topology.device_components).toEqual([]);
+    expect(topology.device_links).toEqual([]);
+  });
+
+  it('prefers nested runtime_host as canonical source when flat fields conflict（flat 与 nested 冲突时以 runtime_host 为准）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        host_id: 'flat-host-id',
+        hostname: 'flat-hostname',
+        os: 'FlatOS',
+        arch: 'flat-arch',
+        uptime_secs: 1,
+        version: 'flat-version',
+        port: 9000,
+        capabilities: {
+          agent_kinds: ['api'],
+          api_providers: ['openai'],
+        },
+        runtime_host: {
+          host_id: 'nested-host-id',
+          hostname: 'nested-hostname',
+          os: 'NestedOS',
+          arch: 'nested-arch',
+          uptime_secs: 200,
+          version: 'nested-version',
+          port: 1919,
+          total_memory_mb: 16000,
+          used_memory_mb: 8000,
+          capabilities: {
+            agent_kinds: ['claude_cli', 'api'],
+            api_providers: ['openai', 'anthropic'],
+          },
+        },
+        device: {
+          id: 'nested-device-id',
+          name: 'Hope Desktop',
+          kind: 'desktop',
+          primary_runtime_host_id: 'nested-host-id',
+        },
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology(SAMPLE_HOST);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.host_id).toBe('nested-host-id');
+    expect(result.data.hostname).toBe('nested-hostname');
+    expect(result.data.os).toBe('NestedOS');
+    expect(result.data.arch).toBe('nested-arch');
+    expect(result.data.uptime_secs).toBe(200);
+    expect(result.data.version).toBe('nested-version');
+    expect(result.data.port).toBe(1919);
+    expect(result.data.capabilities.agent_kinds).toEqual(['claude_cli', 'api']);
+    expect(result.data.runtime_host?.host_id).toBe('nested-host-id');
+    expect(result.data.device?.id).toBe('nested-device-id');
+  });
+
+  it('falls back to runtime_host when legacy flat fields are malformed（旧 flat 字段损坏时回退到 runtime_host）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        host_id: 42,
+        hostname: { bad: true },
+        os: ['bad'],
+        arch: false,
+        uptime_secs: 'oops',
+        version: 123,
+        port: '9124',
+        capabilities: 'invalid',
+        runtime_host: {
+          host_id: 'runtime-host-1',
+          hostname: 'nested-hostname',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 1919,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology(SAMPLE_HOST);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.host_id).toBe('runtime-host-1');
+    expect(result.data.hostname).toBe('nested-hostname');
+    expect(result.data.os).toBe('Windows 11');
+    expect(result.data.arch).toBe('x86_64');
+    expect(result.data.port).toBe(1919);
+    expect(result.data.capabilities.agent_kinds).toEqual(['api']);
+  });
+
+  it('synthesizes fallback device and empty arrays for minimal nested-only payload（最小 nested-only 载荷会补齐设备与空数组）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        runtime_host: {
+          host_id: 'runtime-host-1',
+          hostname: 'nested-hostname',
+          os: 'Windows 11',
+          arch: 'x86_64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 1919,
+          capabilities: {
+            agent_kinds: ['api'],
+            api_providers: ['openai'],
+          },
+        },
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology(SAMPLE_HOST);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.device).toEqual({
+      id: 'runtime-host-1',
+      name: 'nested-hostname',
+      kind: 'unknown',
+      primary_runtime_host_id: 'runtime-host-1',
+    });
+    expect(result.data.device_components).toEqual([]);
+    expect(result.data.device_links).toEqual([]);
+  });
+
   it('streams agent chat chunks from SSE（从 SSE 流式解析 Agent 对话分片）', async () => {
     const encoder = new TextEncoder();
     const fetchImpl = vi.fn(async () => ({

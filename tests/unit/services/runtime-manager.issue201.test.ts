@@ -92,6 +92,70 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
     expect(snapshot.hosts[0]?.connectionState).toBe('offline');
   });
 
+  it('persists local hostId from mixed topology when flat host_id is absent（本机 mixed topology 缺少 flat host_id 时仍持久化）', async () => {
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch: { hostId?: string; lastSuccessfulDialAddress?: string }) => ({
+      ...HOST_A,
+      hostId: patch.hostId,
+      lastSuccessfulDialAddress: patch.lastSuccessfulDialAddress,
+    }));
+    const hostService = {
+      listHosts: vi.fn(async () => [HOST_A]),
+      addHost: vi.fn(),
+      removeHost: vi.fn(),
+      mergeHostMetadata,
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(async () => ({
+        ok: true as const,
+        data: [],
+      })),
+      getTopology: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          hostname: 'local-flat-hostname',
+          os: 'windows',
+          arch: 'x86_64',
+          uptime_secs: 100,
+          version: '0.1.0',
+          port: 1919,
+          capabilities: {
+            agent_kinds: ['api' as const],
+            api_providers: ['openai' as const],
+          },
+          runtime_host: {
+            host_id: 'runtime-host-live-201',
+            hostname: 'local-runtime-host',
+            os: 'windows',
+            arch: 'x86_64',
+            uptime_secs: 100,
+            version: '0.1.0',
+            port: 1919,
+            capabilities: {
+              agent_kinds: ['api' as const],
+              api_providers: ['openai' as const],
+            },
+          },
+          device: {
+            id: 'runtime-host-live-201',
+            name: 'Hope Desktop',
+            kind: 'desktop' as const,
+            primary_runtime_host_id: 'runtime-host-live-201',
+          },
+          device_components: [],
+          device_links: [],
+        },
+      })),
+    };
+
+    const manager = new RuntimeManager({ hostService, runtimeClient });
+    await manager.refreshSnapshot();
+
+    expect(mergeHostMetadata).toHaveBeenCalledWith('host-a', {
+      hostId: 'runtime-host-live-201',
+      lastSuccessfulDialAddress: '127.0.0.1:1919',
+    });
+  });
+
   it('does not auto-poll discovered candidates without auth token（未验证 discovered candidate 不自动轮询受保护接口）', async () => {
     const discoveredHost: RuntimeHostRecord = {
       ...HOST_B,
@@ -266,6 +330,70 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
     }));
   });
 
+  it('persists peer hostId from mixed topology when flat host_id is absent（peer mixed topology 缺少 flat host_id 时仍持久化）', async () => {
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch: { hostId?: string; lastSuccessfulDialAddress?: string }) => ({
+      ...HOST_B,
+      hostId: patch.hostId,
+      lastSuccessfulDialAddress: patch.lastSuccessfulDialAddress,
+    }));
+    const hostService = {
+      listHosts: vi.fn(async () => [HOST_B]),
+      addHost: vi.fn(),
+      removeHost: vi.fn(),
+      mergeHostMetadata,
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(async () => ({
+        ok: true as const,
+        data: [],
+      })),
+      getTopology: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          hostname: 'peer-b',
+          os: 'android',
+          arch: 'arm64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 2919,
+          capabilities: {
+            agent_kinds: ['api' as const],
+            api_providers: ['openai' as const, 'anthropic' as const],
+          },
+          runtime_host: {
+            host_id: 'host-b-runtime-nested',
+            hostname: 'peer-b',
+            os: 'android',
+            arch: 'arm64',
+            uptime_secs: 100,
+            version: '0.3.6',
+            port: 2919,
+            capabilities: {
+              agent_kinds: ['api' as const],
+              api_providers: ['openai' as const, 'anthropic' as const],
+            },
+          },
+          device: {
+            id: 'host-b-runtime-nested',
+            name: 'Peer B',
+            kind: 'phone' as const,
+            primary_runtime_host_id: 'host-b-runtime-nested',
+          },
+          device_components: [],
+          device_links: [],
+        },
+      })),
+    };
+
+    const manager = new RuntimeManager({ hostService, runtimeClient });
+    await manager.refreshSnapshot();
+
+    expect(mergeHostMetadata).toHaveBeenCalledWith('host-b', {
+      hostId: 'host-b-runtime-nested',
+      lastSuccessfulDialAddress: '192.168.1.22:2919',
+    });
+  });
+
   it('retries mesh sync for unchanged confirmed peer metadata（confirmed peer 元数据未变化时仍重试 mesh 配对）', async () => {
     const ensurePeerPair = vi.fn(async () => undefined);
     const confirmedHost: RuntimeHostRecord = {
@@ -319,6 +447,60 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
       trustState: 'confirmed_peer',
       hostId: 'host-b-logic',
     }));
+  });
+
+  it('persists local hostId from nested-only topology（本机 nested-only topology 仍可持久化 hostId）', async () => {
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch: { hostId?: string; lastSuccessfulDialAddress?: string }) => ({
+      ...HOST_A,
+      hostId: patch.hostId,
+      lastSuccessfulDialAddress: patch.lastSuccessfulDialAddress,
+    }));
+    const hostService = {
+      listHosts: vi.fn(async () => [HOST_A]),
+      addHost: vi.fn(),
+      removeHost: vi.fn(),
+      mergeHostMetadata,
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(async () => ({
+        ok: true as const,
+        data: [],
+      })),
+      getTopology: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          runtime_host: {
+            host_id: 'runtime-host-live',
+            hostname: 'local',
+            os: 'windows',
+            arch: 'x86_64',
+            uptime_secs: 100,
+            version: '0.3.6',
+            port: 1919,
+            capabilities: {
+              agent_kinds: ['api'],
+              api_providers: ['openai'],
+            },
+          },
+          device: {
+            id: 'runtime-host-live',
+            name: 'Hope Desktop',
+            kind: 'desktop',
+            primary_runtime_host_id: 'runtime-host-live',
+          },
+          device_components: [],
+          device_links: [],
+        } as unknown,
+      })),
+    };
+
+    const manager = new RuntimeManager({ hostService, runtimeClient });
+    await manager.refreshSnapshot();
+
+    expect(mergeHostMetadata).toHaveBeenCalledWith('host-a', {
+      hostId: 'runtime-host-live',
+      lastSuccessfulDialAddress: '127.0.0.1:1919',
+    });
   });
 
   it('does not protected-poll confirmed peers without control-plane auth token（已确认 peer 无控制面 token 时不应再发受保护轮询）', async () => {
