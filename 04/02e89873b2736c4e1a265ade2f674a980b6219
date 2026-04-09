@@ -1,0 +1,52 @@
+docs/product/exomind-content-design-principles.md
+  f6a9d023ca8507eb 1-311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "0402e89873b2736c4e1a265ade2f674a980b6219",
+  "prompts": {
+    "212c8a5f93c4f206": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6dcc-718f-7de0-95c1-213127110451",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 16,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/25028a8d71a318baf6bf983d7a45345925c3726547ecd72dfb5451ab443e8d42"
+    },
+    "d8f0b50b4cb40c4e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fdc-aae8-7153-926a-986e6b87c3a7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 263,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ae75101c87e97c41bd53d52346da260f3744bf44191ff595fdcd58e8ff57d711"
+    },
+    "f6a9d023ca8507eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28a630e9-7ed6-48d8-a75a-c1ee1503694d",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 311,
+      "total_deletions": 0,
+      "accepted_lines": 311,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/7240a54d7138992ce1b4a998386a66f5cb6d77700adfe63108e79deacdeaee99"
+    }
+  }
+}
