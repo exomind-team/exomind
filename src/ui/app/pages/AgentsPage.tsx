@@ -4200,7 +4200,7 @@ export function AgentsPage() {
       };
 
       if (!recoverableSnapshot) {
-        const failureMessage = '该会话没有关联 PTY；可在“网络 / 会话”中点击右上角“强制完成”将其收敛。';
+        const failureMessage = '该会话没有关联 PTY；可在“网络 / 会话”中点击右上角“结束”将其收敛。';
         console.warn('[agent-hub][pty][open] session is missing pty_id and cannot resume', missingPtyLogPayload);
         setRuntimeHostError(failureMessage);
         return;
@@ -4223,7 +4223,7 @@ export function AgentsPage() {
         return;
       }
       if (session.source_host_id && !matchedHost && !shouldFallbackToActiveRuntimeHost) {
-        const failureMessage = 'Terminal 会话缺少 PTY，且原始 RT 已不可用；可在“网络 / 会话”中点击右上角“强制完成”将其收敛。';
+        const failureMessage = 'Terminal 会话缺少 PTY，且原始 RT 已不可用；可在“网络 / 会话”中点击右上角“结束”将其收敛。';
         setRuntimeHostError(failureMessage);
         console.warn('[agent-hub][pty][open] missing-PTY resume skipped because source host is unavailable', {
           ...missingPtyLogPayload,
@@ -4233,7 +4233,7 @@ export function AgentsPage() {
       }
 
       setRuntimeHostError(
-        'Terminal 会话缺少 PTY，正在尝试恢复历史终端；若恢复失败，可在“网络 / 会话”中点击右上角“强制完成”将其收敛。',
+        'Terminal 会话缺少 PTY，正在尝试恢复历史终端；若恢复失败，可在“网络 / 会话”中点击右上角“结束”将其收敛。',
       );
       console.info('[agent-hub][pty][open] session is missing pty_id; attempting historical resume', {
         ...missingPtyLogPayload,
@@ -4267,7 +4267,7 @@ export function AgentsPage() {
         });
         return;
       } catch (error) {
-        const failureMessage = 'Terminal 会话缺少 PTY，自动恢复失败；可在“网络 / 会话”中点击右上角“强制完成”将其收敛。';
+        const failureMessage = 'Terminal 会话缺少 PTY，自动恢复失败；可在“网络 / 会话”中点击右上角“结束”将其收敛。';
         setRuntimeHostError(failureMessage);
         console.warn('[agent-hub][pty][open] failed to resume terminal session without PTY', {
           ...missingPtyLogPayload,

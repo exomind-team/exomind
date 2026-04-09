@@ -702,6 +702,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '等待决策' })).toBeInTheDocument();
     });
+    expect(screen.queryByTestId('quick-action-bar')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '等待决策' }));
 
@@ -1068,7 +1069,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
   });
 
-  it('shows the updated force-complete copy when historical resume fails（历史恢复失败时也应引导去网络会话页强制完成）', async () => {
+  it('shows the updated end-action copy when historical resume fails（历史恢复失败时也应引导去网络会话页结束会话）', async () => {
     sessionStreamState.sessions = [
       buildSession({
         id: 'session-banner-resume-fail',
@@ -1153,7 +1154,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     const banner = await screen.findByTestId('agent-runtime-error-banner');
     expect(banner).toHaveTextContent('自动恢复失败');
     expect(banner).toHaveTextContent('网络 / 会话');
-    expect(banner).toHaveTextContent('强制完成');
+    expect(banner).toHaveTextContent('结束');
   });
 
   it('tries to resume a recoverable terminal session without PTY when opened from the session list（点开无 PTY 且可恢复的终端会话时应尝试恢复）', async () => {

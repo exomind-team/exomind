@@ -57,7 +57,7 @@ describe('session card stop action（列表卡片停止动作）', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('shows a close button for structured sessions without PTY（无 PTY 的结构化会话显示关闭按钮）', () => {
+  it('shows a unified close button for structured sessions without PTY（无 PTY 的结构化会话显示统一关闭按钮）', () => {
     render(
       <SessionCard
         session={buildSession({
@@ -70,10 +70,12 @@ describe('session card stop action（列表卡片停止动作）', () => {
     );
 
     expect(screen.queryByTestId('session-card-stop-session-no-stop')).not.toBeInTheDocument();
-    expect(screen.getByTestId('session-card-close-session-no-stop')).toHaveTextContent('关闭');
+    const closeButton = screen.getByTestId('session-card-close-session-no-stop');
+    expect(closeButton).toHaveAttribute('title', '关闭');
+    expect(closeButton).toHaveClass('rounded-full');
   });
 
-  it('shows visible force-complete action for terminal sessions without PTY（无 PTY 的终端会话显示显式强制完成按钮）', () => {
+  it('shows unified end action for terminal sessions without PTY（无 PTY 的终端会话显示统一结束按钮）', () => {
     const session = buildSession({
       id: 'session-no-pty-terminal',
       pty_id: undefined,
@@ -85,9 +87,11 @@ describe('session card stop action（列表卡片停止动作）', () => {
     expect(screen.queryByTestId('session-card-stop-session-no-pty-terminal')).not.toBeInTheDocument();
     expect(screen.getByTestId('session-card-missing-pty-note-session-no-pty-terminal')).toHaveTextContent('该会话没有关联 PTY');
     expect(screen.getByTestId('session-card-missing-pty-note-session-no-pty-terminal')).toHaveTextContent('若存在可恢复的历史终端');
+    expect(screen.getByTestId('session-card-missing-pty-note-session-no-pty-terminal')).toHaveTextContent('结束');
 
     const stopButton = screen.getByTestId('session-card-force-complete-session-no-pty-terminal');
-    expect(stopButton).toHaveTextContent('强制完成');
+    expect(stopButton).toHaveAttribute('title', '结束');
+    expect(stopButton).toHaveClass('rounded-full');
 
     fireEvent.click(stopButton);
 
@@ -135,7 +139,7 @@ describe('session card stop action（列表卡片停止动作）', () => {
     expect(onStopSession).toHaveBeenCalledWith(session);
   });
 
-  it('uses force-complete semantics for terminal sessions without PTY（无 PTY 的终端会话应显示强制完成动作）', () => {
+  it('uses end semantics for terminal sessions without PTY（无 PTY 的终端会话应显示结束动作）', () => {
     const session = buildSession({
       id: 'session-no-pty',
       pty_id: undefined,
@@ -145,7 +149,8 @@ describe('session card stop action（列表卡片停止动作）', () => {
     render(<SessionCard session={session} onStop={onStop} />);
 
     const stopButton = screen.getByTestId('session-card-force-complete-session-no-pty');
-    expect(stopButton).toHaveTextContent('强制完成');
+    expect(stopButton).toHaveAttribute('title', '结束');
+    expect(stopButton).toHaveClass('rounded-full');
 
     fireEvent.click(stopButton);
 
@@ -185,7 +190,7 @@ describe('session card stop action（列表卡片停止动作）', () => {
     expect(screen.queryByTestId('session-card-stop-session-no-pty-pending')).not.toBeInTheDocument();
     const stopButton = screen.getByTestId('session-card-force-complete-session-no-pty-pending');
     expect(stopButton).toBeDisabled();
-    expect(stopButton).toHaveTextContent('处理中');
+    expect(stopButton).toHaveAttribute('title', '处理中');
   });
 
   it('shows archive button for completed PTY sessions and does not trigger stop/main click（已完成 PTY 会话显示归档按钮且不触发停止或主点击）', () => {

@@ -1465,13 +1465,11 @@ function SessionPane({
         )}
       </div>
 
-      {/* Quick action bar / manual wait action（动作栏 / 手动等待决策） */}
-      {(showQuickActions || showManualMarkWaiting) && (
+      {/* Quick action bar（动作栏） */}
+      {showQuickActions && (
         <QuickActionBar
           actions={session.quick_actions ?? []}
           onSubmit={(response) => onQuickAction?.(response)}
-          showMarkWaiting={showManualMarkWaiting}
-          onMarkWaiting={() => onMarkWaiting?.()}
         />
       )}
 
@@ -1481,6 +1479,20 @@ function SessionPane({
           <span className="text-[10px] font-medium" style={{ color: statusIndicator.color }}>
             {statusIndicator.label}
           </span>
+        ) : showManualMarkWaiting ? (
+          <button
+            type="button"
+            data-testid={`tiled-grid-mark-waiting-${session.id}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onMarkWaiting?.();
+            }}
+            disabled={!onMarkWaiting}
+            className="inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium text-amber-300 transition-colors hover:bg-amber-400/10 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-amber-300"
+            title="手动标记此会话为等待决策状态"
+          >
+            等待决策
+          </button>
         ) : (
           <span className="text-[10px] text-[#57534E]">
             {session.turn_count > 0 ? `${session.turn_count} turns` : ''}

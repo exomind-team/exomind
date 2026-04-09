@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Send, Check, X, MessageSquare, Hand } from 'lucide-react';
+import { Send, Check, X, MessageSquare } from 'lucide-react';
 import type { QuickAction, QuickActionResponse } from '@/lib/types/session';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -13,10 +13,6 @@ export interface QuickActionBarProps {
   onSubmit: (response: QuickActionResponse) => void;
   /** Whether the submit is in progress */
   isSubmitting?: boolean;
-  /** For PTY terminal mode: manual mark button */
-  showMarkWaiting?: boolean;
-  /** Callback when user clicks "mark as waiting" for PTY sessions */
-  onMarkWaiting?: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -26,8 +22,6 @@ export function QuickActionBar({
   prompt,
   onSubmit,
   isSubmitting = false,
-  showMarkWaiting = false,
-  onMarkWaiting,
 }: QuickActionBarProps) {
   const [textValue, setTextValue] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -68,8 +62,8 @@ export function QuickActionBar({
     [handleTextSubmit],
   );
 
-  // If no actions defined and no mark-waiting, show nothing
-  if (actions.length === 0 && !showMarkWaiting) return null;
+  // If no actions defined, show nothing
+  if (actions.length === 0) return null;
 
   return (
     <div
@@ -173,20 +167,6 @@ export function QuickActionBar({
 
           return null;
         })}
-
-        {/* Manual mark-waiting button (for PTY terminal mode) */}
-        {showMarkWaiting && (
-          <button
-            type="button"
-            onClick={onMarkWaiting}
-            disabled={isSubmitting}
-            className="flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 transition-colors hover:bg-amber-200 disabled:opacity-50 dark:bg-amber-900/50 dark:text-amber-200 dark:hover:bg-amber-800/50"
-            title="手动标记此会话为等待决策状态"
-          >
-            <Hand size={8} />
-            等待决策
-          </button>
-        )}
       </div>
     </div>
   );

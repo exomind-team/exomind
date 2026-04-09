@@ -1,4 +1,4 @@
-import { Clock, ExternalLink, Loader2, Square, X } from 'lucide-react';
+import { Clock, Loader2, Square, X } from 'lucide-react';
 import type { SessionInfo } from '@/lib/types/session';
 import {
   AGENT_KIND_LABELS,
@@ -35,15 +35,16 @@ export function SessionCard({
   const isArchived = session.status === 'archived';
   const canResolveSession = !isCompleted && !isArchived;
   const canStopPtyTerminal = canResolveSession && session.interaction_mode === 'terminal' && !!session.pty_id;
-  const canForceCompleteTerminal = canResolveSession && session.interaction_mode === 'terminal' && !session.pty_id;
+  const canEndTerminalWithoutPty = canResolveSession && session.interaction_mode === 'terminal' && !session.pty_id;
   const canCloseSessionWithoutPty = canResolveSession && session.interaction_mode !== 'terminal' && !session.pty_id;
   const canArchive = isCompleted;
-  const hasActionButton = canStopPtyTerminal || canForceCompleteTerminal || canCloseSessionWithoutPty || canArchive;
+  const hasActionButton = canStopPtyTerminal || canEndTerminalWithoutPty || canCloseSessionWithoutPty || canArchive;
   const stopLabel = stopDisabled ? '停止中' : '停止';
-  const noPtyActionLabel = canForceCompleteTerminal ? '强制完成' : '关闭';
-  const noPtyActionTestId = canForceCompleteTerminal
+  const noPtyActionLabel = canEndTerminalWithoutPty ? '结束' : '关闭';
+  const noPtyActionTestId = canEndTerminalWithoutPty
     ? `session-card-force-complete-${session.id}`
     : `session-card-close-${session.id}`;
+  const sharedActionButtonClassName = 'absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#E7E5E4] hover:text-[#1C1917] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-[#F5F0ED] disabled:hover:text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#44403C] dark:hover:text-[#FAFAF9] dark:disabled:hover:bg-[#292524] dark:disabled:hover:text-[#A8A29E]';
 
   return (
     <div className="relative">
@@ -57,8 +58,8 @@ export function SessionCard({
         ${hasActionButton ? 'pr-28' : ''}
         ${isCompleted ? 'opacity-50' : ''}
         ${needsAttention
-          ? 'border-yellow-400/60 bg-yellow-50/50 shadow-sm dark:border-yellow-500/40 dark:bg-yellow-950/20'
-          : 'border-[#E7E5E4] bg-white hover:border-[#D6D3D1] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:border-[#44403C]'
+          ? 'border-yellow-400/60 bg-yellow-50/50 shadow-sm hover:border-yellow-400/80 hover:bg-yellow-50/80 dark:border-yellow-500/40 dark:bg-yellow-950/20 dark:hover:border-yellow-500/55 dark:hover:bg-yellow-950/30'
+          : 'border-[#E7E5E4] bg-white hover:border-[#D6D3D1] hover:bg-[#FCFAF8] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:border-[#44403C] dark:hover:bg-[#221F1D]'
         }
       `}
       >
@@ -90,7 +91,7 @@ export function SessionCard({
           </div>
 
           {/* Relative time */}
-          <div className="flex flex-shrink-0 items-center gap-1 text-xs text-[#A8A29E]">
+          <div className="flex flex-shrink-0 items-center gap-1 text-xs text-[#A8A29E] transition-colors group-hover:text-[#78716C] dark:group-hover:text-[#D6D3D1]">
             <Clock size={12} />
             <span>{formatRelativeTime(session.last_active_at)}</span>
           </div>
@@ -122,17 +123,17 @@ export function SessionCard({
 
         {/* Row 3: Summary / last output preview */}
         {(session.summary || session.last_output_preview) && (
-          <p className="line-clamp-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+          <p className="line-clamp-2 text-xs text-[#78716C] transition-colors group-hover:text-[#57534E] dark:text-[#A8A29E] dark:group-hover:text-[#D6D3D1]">
             {session.summary || session.last_output_preview}
           </p>
         )}
 
-        {canForceCompleteTerminal && (
+        {canEndTerminalWithoutPty && (
           <p
             data-testid={`session-card-missing-pty-note-${session.id}`}
             className="text-xs text-red-600 dark:text-red-400"
           >
-            该会话没有关联 PTY，可点击右上角“强制完成”将其收敛；点开会话后若存在可恢复的历史终端，系统会自动尝试恢复。
+            该会话没有关联 PTY，可点击右上角“结束”将其收敛；点开会话后若存在可恢复的历史终端，系统会自动尝试恢复。
           </p>
         )}
 
@@ -150,12 +151,6 @@ export function SessionCard({
             </span>
           </div>
         )}
-
-        {/* Hover arrow indicator */}
-        <ExternalLink
-          size={14}
-          className={`absolute top-4 text-[#D6D3D1] opacity-0 transition-opacity group-hover:opacity-100 dark:text-[#44403C] ${hasActionButton ? 'right-11' : 'right-3'}`}
-        />
       </button>
 
       {canArchive && onArchive && (
@@ -169,7 +164,7 @@ export function SessionCard({
             event.stopPropagation();
             onArchive(session);
           }}
-          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#E7E5E4] hover:text-[#1C1917] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#44403C] dark:hover:text-[#FAFAF9]"
+          className={sharedActionButtonClassName}
         >
           <X size={12} />
         </button>
@@ -188,17 +183,18 @@ export function SessionCard({
             if (stopDisabled) return;
             onStop(session);
           }}
-          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] transition-colors hover:bg-[#E7E5E4] hover:text-[#1C1917] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-[#F5F0ED] disabled:hover:text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#44403C] dark:hover:text-[#FAFAF9] dark:disabled:hover:bg-[#292524] dark:disabled:hover:text-[#A8A29E]"
+          className={sharedActionButtonClassName}
         >
           {stopDisabled ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}
         </button>
       )}
 
-      {(canForceCompleteTerminal || canCloseSessionWithoutPty) && onStop && (
+      {(canEndTerminalWithoutPty || canCloseSessionWithoutPty) && onStop && (
         <button
           type="button"
           data-testid={noPtyActionTestId}
           aria-label={stopDisabled ? '处理中' : noPtyActionLabel}
+          title={stopDisabled ? '处理中' : noPtyActionLabel}
           disabled={stopDisabled}
           onClick={(event) => {
             event.preventDefault();
@@ -206,10 +202,15 @@ export function SessionCard({
             if (stopDisabled) return;
             onStop(session);
           }}
-          className="absolute right-3 top-3 inline-flex h-7 items-center gap-1 rounded-md bg-red-600 px-2 text-[11px] font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-400 dark:bg-red-700 dark:hover:bg-red-600 dark:disabled:bg-red-800/60"
+          className={sharedActionButtonClassName}
         >
-          {stopDisabled ? <Loader2 size={12} className="animate-spin" /> : <Square size={11} />}
-          <span>{stopDisabled ? '处理中' : noPtyActionLabel}</span>
+          {stopDisabled ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : canEndTerminalWithoutPty ? (
+            <Square size={12} />
+          ) : (
+            <X size={12} />
+          )}
         </button>
       )}
     </div>
@@ -235,7 +236,7 @@ function ContextChip({
   children: React.ReactNode;
 }) {
   return (
-    <span className="inline-flex items-center gap-0.5 rounded-md bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] font-medium text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
+    <span className="inline-flex items-center gap-0.5 rounded-md bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] font-medium text-[#57534E] transition-colors group-hover:bg-[#EEE7E1] group-hover:text-[#44403C] dark:bg-[#292524] dark:text-[#A8A29E] dark:group-hover:bg-[#312D2B] dark:group-hover:text-[#D6D3D1]">
       <span className="opacity-60">{CHIP_ICONS[icon]}</span>
       {children}
     </span>
