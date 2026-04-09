@@ -2064,3 +2064,65 @@
    - response body
 3. 对 toggle / 预置按钮，`webview_interact click` 往往比普通 DOM `.click()` 更稳。
 4. 需要稳定复现 Agent API 时，优先接本地 fake provider，不要一开始就依赖真实远程模型。
+
+### 阶段补记：#885 RT id 持久化桌面实测（2026-04-09）
+
+#### 阶段目标
+
+- 用真实 `tauri dev` 桌面实例验证 embedded RT 的 `host_id` 是否随实例数据库固定。
+- 自动执行：
+  - 读取重启前 `runtime_service_status` / `/topology`
+  - 停止 RT
+  - 重新启动 RT
+  - 再次读取 `runtime_service_status` / `/topology`
+  - 对照当前实例 `config.sqlite`
+
+#### 观察结果
+
+- 当前受控实例：
+  - name: `issue885-tauri`
+  - web: `1430`
+  - hmr: `1431`
+  - embedded RT: `9124`
+  - MCP bridge: `9233`
+- 官方 `driver_session` 在这轮环境里仍返回 `Transport closed`。
+- raw bridge `ws://127.0.0.1:9233` 可稳定执行：
+  - `execute_js`
+  - `window.__TAURI__.core.invoke('runtime_service_status')`
+  - `window.__TAURI__.core.invoke('runtime_service_stop')`
+  - `window.__TAURI__.core.invoke('runtime_service_start')`
+- 本轮自动重启前后观测到：
+  - `runtimeStatusBefore.hostId == runtimeStatusAfter.hostId`
+  - `topologyBefore.host_id == topologyAfter.host_id`
+  - 值均为：`rt-3b493e5e-b73b-4ea0-8d28-39d1659f1437`
+- 当前实例数据库：
+  - `.tmp/tauri-dev-state/issue885-tauri/app-data/runtime/config.sqlite`
+  - 表：`runtime_config_entries`
+  - 记录：
+    - `scope=device`
+    - `entry_key=exomind:runtimeHostId`
+    - `value=rt-3b493e5e-b73b-4ea0-8d28-39d1659f1437`
+    - `source=src-tauri:seed-runtime-identity`
+
+#### 结论
+
+- `#885` 在桌面实例实测上成立：
+  - embedded RT 的 `host_id` 会跨 RT stop/start 保持不变
+  - 且与实例 `config.sqlite` 中的 device-scope 持久化值一致
+- 当前 Windows 环境下，要区分：
+  - 官方 `driver_session` 失败
+  - raw bridge 不可用
+- 这次属于前者失败、后者可用；因此仍能完成自动化桌面验收。
+
+#### 可复用操作套路
+
+1. 用 `bun run tauri:manager -- start --name <name> --web-port <port> --hmr-port <port>` 拉起受控实例。
+2. 优先读 `.tmp/tauri-dev-state/<name>/app-data/runtime/`，不要误读 `%APPDATA%` legacy shared 路径。
+3. 若 `driver_session` 报 `Transport closed`，直接退回 raw bridge：
+   - `ws://127.0.0.1:<bridge-port>`
+4. 通过 bridge 执行：
+   - `runtime_service_status`
+   - `runtime_service_stop`
+   - `runtime_service_start`
+   - 页面上下文 `fetch('http://127.0.0.1:<rt-port>/topology')`
+5. 最后读取实例 `config.sqlite`，核对 `runtime_config_entries.entry_key=exomind:runtimeHostId` 与 `/topology.host_id` 是否一致。

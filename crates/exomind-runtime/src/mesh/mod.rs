@@ -807,6 +807,7 @@ fn parse_signal_event_from_block(block: &str) -> Option<SignalEvent> {
 mod tests {
     use super::*;
     use crate::signal::SignalPool;
+    use tempfile::tempdir;
 
     fn make_peer(id: &str) -> PeerInfo {
         PeerInfo {
@@ -919,5 +920,55 @@ mod tests {
         assert_eq!(peer.base_url, "http://host-phone.local:1950");
         assert_eq!(peer.auth_token.as_deref(), Some("token-outbound"));
         assert_eq!(peer.inbound_secret.as_deref(), Some("token-inbound"));
+    }
+
+    #[test]
+    fn reloads_persisted_peers_and_interests_from_disk() {
+        let temp_dir = tempdir().unwrap();
+        let persist_path = temp_dir.path().join("mesh-state.json");
+        let pool = Arc::new(SignalPool::new(None));
+
+        let original = MeshState::new(
+            "host-local".to_string(),
+            Arc::clone(&pool),
+            Some(persist_path.clone()),
+        );
+        original.upsert_peer(PeerInfo {
+            id: "host-phone".to_string(),
+            base_url: "http://host-phone.local:1949".to_string(),
+            enabled: true,
+            capabilities: vec!["relay".to_string()],
+            status: PeerStatus::Online,
+            last_seen: Some(chrono::Utc::now().to_rfc3339()),
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            auth_token: Some("token-outbound".to_string()),
+            inbound_secret: Some("token-inbound".to_string()),
+        });
+        original.set_peer_interests(
+            "host-phone",
+            vec!["eventlog.replication.appended".to_string()],
+        );
+
+        let reopened = MeshState::new(
+            "host-local".to_string(),
+            Arc::clone(&pool),
+            Some(persist_path),
+        );
+        let peer = reopened
+            .get_peer("host-phone")
+            .expect("peer should reload from persisted mesh state");
+        assert_eq!(peer.base_url, "http://host-phone.local:1949");
+        assert_eq!(peer.auth_token.as_deref(), Some("token-outbound"));
+        assert_eq!(peer.inbound_secret.as_deref(), Some("token-inbound"));
+
+        let interests = reopened
+            .get_peer_interests("host-phone")
+            .expect("peer interests should reload from persisted mesh state");
+        assert_eq!(
+            interests.topics,
+            vec!["eventlog.replication.appended".to_string()]
+        );
     }
 }

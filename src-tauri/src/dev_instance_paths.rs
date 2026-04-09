@@ -23,7 +23,11 @@ const RUNTIME_SQLITE_BASENAMES: &[&str] = &[
     "sessions.sqlite",
     "config.sqlite",
 ];
-const RUNTIME_JSON_FILE_NAMES: &[&str] = &["runtime-network-mode.json", "runtime-target-mode.json"];
+const RUNTIME_JSON_FILE_NAMES: &[&str] = &[
+    "runtime-network-mode.json",
+    "runtime-target-mode.json",
+    "mesh-state.json",
+];
 const RUNTIME_DIR_ENTRY_NAMES: &[&str] = &["agents", "eventlog"];
 
 fn resolve_env_path(key: &str) -> Option<PathBuf> {
@@ -448,6 +452,8 @@ mod tests {
             "legacy-eventlog-markdown",
         )
         .expect("legacy runtime eventlog markdown should be written");
+        fs::write(legacy_dir.join("mesh-state.json"), "{\"peers\":[]}")
+            .expect("legacy mesh state should be written");
         fs::write(legacy_dir.join("note.txt"), "ignore-me")
             .expect("non-whitelist file should be written");
 
@@ -471,6 +477,11 @@ mod tests {
             fs::read_to_string(runtime_dir.join("eventlog").join("profile-v2.md"))
                 .expect("runtime eventlog markdown snapshot should exist"),
             "legacy-eventlog-markdown"
+        );
+        assert_eq!(
+            fs::read_to_string(runtime_dir.join("mesh-state.json"))
+                .expect("mesh state snapshot should be copied"),
+            "{\"peers\":[]}"
         );
         assert!(
             !runtime_dir.join("note.txt").exists(),

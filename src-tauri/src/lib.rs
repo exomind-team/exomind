@@ -4,9 +4,9 @@ mod commands;
 mod dev_instance_paths;
 
 use commands::asr_commands::{
-    volcano_asr_check_config, volcano_asr_recognize, volcano_asr_stream_cancel,
-    volcano_asr_stream_finish, volcano_asr_stream_push, volcano_asr_stream_session_exists,
-    volcano_asr_stream_start, VolcanoAsrStreamState,
+    VolcanoAsrStreamState, volcano_asr_check_config, volcano_asr_recognize,
+    volcano_asr_stream_cancel, volcano_asr_stream_finish, volcano_asr_stream_push,
+    volcano_asr_stream_session_exists, volcano_asr_stream_start,
 };
 use commands::dev_commands::dev_instance_runtime_info;
 use commands::device_commands::get_device_id;
@@ -33,27 +33,27 @@ use commands::qwen_omni_realtime_commands::{
     omni_realtime_session_start, QwenOmniRealtimeSessionState,
 };
 use commands::runtime_commands::{
-    ensure_runtime_started, load_persisted_runtime_network_mode,
-    load_persisted_runtime_target_mode, runtime_external_address_get, runtime_external_address_set,
-    runtime_lan_no_auth_get, runtime_lan_no_auth_set, runtime_network_mode_get,
-    runtime_network_mode_set, runtime_service_peer_dial_address, runtime_service_reachable_address,
-    runtime_service_start, runtime_service_status, runtime_service_stop, runtime_target_mode_get,
-    runtime_target_mode_set, signal_publish_fast, sync_android_runtime_keepalive,
-    RuntimeProcessState, RuntimeTargetMode,
+    RuntimeProcessState, RuntimeTargetMode, ensure_runtime_started,
+    load_persisted_runtime_network_mode, load_persisted_runtime_target_mode,
+    runtime_external_address_get, runtime_external_address_set, runtime_lan_no_auth_get,
+    runtime_lan_no_auth_set, runtime_network_mode_get, runtime_network_mode_set,
+    runtime_service_peer_dial_address, runtime_service_reachable_address, runtime_service_start,
+    runtime_service_status, runtime_service_stop, runtime_target_mode_get, runtime_target_mode_set,
+    signal_publish_fast, sync_android_runtime_keepalive,
 };
 use commands::shortcut_commands::{
-    ensure_voice_overlay_window, foreground_window_get, main_window_shortcut_get,
-    main_window_shortcut_set, main_window_shortcut_take_pending_activation,
-    register_main_window_shortcut, register_voice_shortcut, simulate_enter, simulate_paste,
-    voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
-    voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, MainWindowShortcutState,
-    VoiceShortcutState,
+    MainWindowShortcutState, VoiceShortcutState, ensure_voice_overlay_window,
+    foreground_window_get, main_window_shortcut_get, main_window_shortcut_set,
+    main_window_shortcut_take_pending_activation, register_main_window_shortcut,
+    register_voice_shortcut, simulate_enter, simulate_paste, voice_overlay_hide,
+    voice_overlay_set_bottom_offset, voice_overlay_show, voice_recording_set_active,
+    voice_shortcut_get, voice_shortcut_set,
 };
 use commands::workspace_commands::{
     get_agent_workspace_actions, get_agent_workspace_knowledge, get_agent_workspace_knowledge_list,
     get_agent_workspace_soul, get_agent_workspace_status,
 };
-use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
+use commands::ws_commands::{WsClientState, ws_connect, ws_disconnect, ws_get_state, ws_send};
 use dev_instance_paths::{
     resolve_instance_app_data_dir, resolve_instance_runtime_dir_from_app_data_dir,
     resolve_legacy_shared_app_data_dir, resolve_legacy_shared_runtime_dir,
@@ -61,12 +61,17 @@ use dev_instance_paths::{
     resolve_mcp_bridge_base_port, seed_instance_app_data_dir_if_needed,
     seed_instance_runtime_dir_if_needed, seed_instance_webview_main_data_dir_if_needed,
 };
+use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
+use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 const DEFAULT_SIGNAL_ROUTES_FILE_NAME: &str = "signal-routes.default.json";
 const DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON: &str =
     include_str!("../../config/signal-routes.default.json");
+const DEFAULT_MESH_STATE_FILE_NAME: &str = "mesh-state.json";
+const DEVICE_RUNTIME_HOST_ID_KEY: &str = "exomind:runtimeHostId";
+const RUNTIME_IDENTITY_SOURCE: &str = "src-tauri:seed-runtime-identity";
 
 fn seed_runtime_default_signal_routes_path(runtime_dir: &std::path::Path) {
     if std::env::var_os("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT").is_some() {
@@ -96,6 +101,66 @@ fn seed_runtime_default_signal_routes_path(runtime_dir: &std::path::Path) {
     // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
     unsafe {
         std::env::set_var("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT", &bundled_routes_path);
+    }
+}
+
+fn resolve_runtime_config_sqlite_path(runtime_dir: &std::path::Path) -> std::path::PathBuf {
+    std::env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH")
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| runtime_dir.join("config.sqlite"))
+}
+
+fn resolve_or_create_runtime_host_id(
+    config_store: &ConfigStore,
+) -> Result<String, exomind_runtime::config::ConfigStoreError> {
+    if let Some(entry) = config_store.get(DEVICE_CONFIG_SCOPE, DEVICE_RUNTIME_HOST_ID_KEY)? {
+        let persisted = entry.value.trim();
+        if !persisted.is_empty() {
+            return Ok(persisted.to_string());
+        }
+    }
+
+    let generated = format!("rt-{}", uuid::Uuid::new_v4());
+    config_store.put(PutConfigEntryInput {
+        scope: DEVICE_CONFIG_SCOPE.to_string(),
+        key: DEVICE_RUNTIME_HOST_ID_KEY.to_string(),
+        value: generated.clone(),
+        sensitive: false,
+        source: Some(RUNTIME_IDENTITY_SOURCE.to_string()),
+        source_origin: None,
+    })?;
+    Ok(generated)
+}
+
+fn seed_runtime_identity_env_paths(runtime_dir: &std::path::Path) {
+    if std::env::var_os("EXOMIND_RT_HOST_ID").is_none() {
+        let config_sqlite_path = resolve_runtime_config_sqlite_path(runtime_dir);
+        let host_id = match ConfigStore::with_sqlite_path(&config_sqlite_path)
+            .and_then(|store| resolve_or_create_runtime_host_id(&store))
+        {
+            Ok(host_id) => host_id,
+            Err(error) => {
+                log::error!(
+                    "failed to resolve persistent runtime host id from {:?}: {error}",
+                    config_sqlite_path
+                );
+                format!("rt-{}", uuid::Uuid::new_v4())
+            }
+        };
+
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_HOST_ID", host_id);
+        }
+    }
+
+    if std::env::var_os("EXOMIND_RT_MESH_STATE_PATH").is_none() {
+        let mesh_state_path = runtime_dir.join(DEFAULT_MESH_STATE_FILE_NAME);
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_MESH_STATE_PATH", mesh_state_path);
+        }
     }
 }
 
@@ -151,6 +216,7 @@ fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
     }
 
     seed_runtime_default_signal_routes_path(runtime_dir);
+    seed_runtime_identity_env_paths(runtime_dir);
 }
 
 fn resolve_embedded_runtime_port() -> u16 {
@@ -497,7 +563,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::seed_runtime_sqlite_env_paths;
+    use exomind_runtime::config::store::ConfigStore;
+    use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
+    use std::sync::{Mutex, OnceLock};
     use uuid::Uuid;
+
+    fn runtime_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn clear_runtime_sqlite_envs() {
         for key in [
@@ -508,6 +582,8 @@ mod tests {
             "EXOMIND_RT_SESSION_SQLITE_PATH",
             "EXOMIND_RT_CONFIG_SQLITE_PATH",
             "EXOMIND_RT_REMINDER_SQLITE_PATH",
+            "EXOMIND_RT_HOST_ID",
+            "EXOMIND_RT_MESH_STATE_PATH",
             "EXOMIND_RT_SIGNAL_ROUTES_DEFAULT",
         ] {
             // SAFETY: tests mutate process env in a controlled single-threaded scope.
@@ -519,6 +595,7 @@ mod tests {
 
     #[test]
     fn seed_runtime_sqlite_env_paths_sets_all_runtime_databases() {
+        let _guard = runtime_env_lock().lock().unwrap();
         let runtime_dir = std::env::temp_dir().join("exomind-tauri-runtime-env-test");
         clear_runtime_sqlite_envs();
 
@@ -557,7 +634,86 @@ mod tests {
     }
 
     #[test]
+    fn seed_runtime_sqlite_env_paths_persists_and_reuses_runtime_host_id() {
+        let _guard = runtime_env_lock().lock().unwrap();
+        let runtime_dir = std::env::temp_dir().join(format!(
+            "exomind-tauri-runtime-host-id-test-{}",
+            Uuid::new_v4()
+        ));
+        clear_runtime_sqlite_envs();
+
+        seed_runtime_sqlite_env_paths(&runtime_dir);
+
+        let first_host_id =
+            std::env::var("EXOMIND_RT_HOST_ID").expect("runtime host id should be seeded");
+        assert!(
+            first_host_id.starts_with("rt-"),
+            "seeded runtime host id should use rt-* format"
+        );
+        assert_eq!(
+            std::env::var_os("EXOMIND_RT_MESH_STATE_PATH"),
+            Some(runtime_dir.join("mesh-state.json").into_os_string())
+        );
+
+        let config_store = ConfigStore::with_sqlite_path(&runtime_dir.join("config.sqlite"))
+            .expect("config sqlite should open");
+        let persisted = config_store
+            .get(DEVICE_CONFIG_SCOPE, "exomind:runtimeHostId")
+            .expect("config read should succeed")
+            .expect("runtime host id should persist");
+        assert_eq!(persisted.value, first_host_id);
+
+        clear_runtime_sqlite_envs();
+        seed_runtime_sqlite_env_paths(&runtime_dir);
+
+        let second_host_id = std::env::var("EXOMIND_RT_HOST_ID")
+            .expect("runtime host id should be reseeded from persisted config");
+        assert_eq!(
+            second_host_id, first_host_id,
+            "repeated seeding should reuse the persisted runtime host id"
+        );
+
+        std::fs::remove_dir_all(&runtime_dir).ok();
+        clear_runtime_sqlite_envs();
+    }
+
+    #[test]
+    fn seed_runtime_sqlite_env_paths_preserves_explicit_runtime_host_id_override() {
+        let _guard = runtime_env_lock().lock().unwrap();
+        let runtime_dir = std::env::temp_dir().join(format!(
+            "exomind-tauri-runtime-host-id-override-test-{}",
+            Uuid::new_v4()
+        ));
+        clear_runtime_sqlite_envs();
+        // SAFETY: tests mutate process env in a controlled single-threaded scope.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_HOST_ID", "rt-explicit-override");
+        }
+
+        seed_runtime_sqlite_env_paths(&runtime_dir);
+
+        assert_eq!(
+            std::env::var("EXOMIND_RT_HOST_ID"),
+            Ok("rt-explicit-override".to_string())
+        );
+
+        let config_store = ConfigStore::with_sqlite_path(&runtime_dir.join("config.sqlite"))
+            .expect("config sqlite should open");
+        let persisted = config_store
+            .get(DEVICE_CONFIG_SCOPE, "exomind:runtimeHostId")
+            .expect("config read should succeed");
+        assert!(
+            persisted.is_none(),
+            "explicit EXOMIND_RT_HOST_ID override should not be backfilled into device config"
+        );
+
+        std::fs::remove_dir_all(&runtime_dir).ok();
+        clear_runtime_sqlite_envs();
+    }
+
+    #[test]
     fn seed_runtime_sqlite_env_paths_sets_default_signal_routes_path() {
+        let _guard = runtime_env_lock().lock().unwrap();
         let runtime_dir = std::env::temp_dir().join(format!(
             "exomind-tauri-runtime-routes-test-{}",
             Uuid::new_v4()

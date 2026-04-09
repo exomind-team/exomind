@@ -41,6 +41,7 @@ pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const BUILD_GIT_HASH: &str = env!("BUILD_GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 pub const DEFAULT_RT_PORT: u16 = 1949;
+const RUNTIME_HOST_ID_CONFIG_KEY: &str = "exomind:runtimeHostId";
 
 #[derive(Debug, Error)]
 pub enum PortConfigError {
@@ -70,7 +71,87 @@ pub fn configured_bind_host_from_env() -> String {
 
 /// Read EXOMIND_RT_HOST_ID from env（读取逻辑主机 ID）.
 pub fn configured_host_id_from_env() -> String {
-    env::var("EXOMIND_RT_HOST_ID").unwrap_or_else(|_| format!("rt-{}", uuid::Uuid::new_v4()))
+    if let Ok(raw) = env::var("EXOMIND_RT_HOST_ID") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    let path = env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolve_data_dir().join("config.sqlite"));
+    if let Some(host_id) = load_or_create_persisted_host_id(&path) {
+        return host_id;
+    }
+
+    format!("rt-{}", uuid::Uuid::new_v4())
+}
+
+fn load_or_create_persisted_host_id(path: &Path) -> Option<String> {
+    let store = match config::ConfigStore::with_sqlite_path(path) {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to open config store for persisted runtime host id"
+            );
+            return None;
+        }
+    };
+
+    match store.get(
+        config::types::DEVICE_CONFIG_SCOPE,
+        RUNTIME_HOST_ID_CONFIG_KEY,
+    ) {
+        Ok(Some(entry)) => {
+            let trimmed = entry.value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to read persisted runtime host id from config store"
+            );
+            return None;
+        }
+    }
+
+    let generated = format!("rt-{}", uuid::Uuid::new_v4());
+    match store.put_if_absent(config::PutConfigEntryInput {
+        scope: config::types::DEVICE_CONFIG_SCOPE.to_string(),
+        key: RUNTIME_HOST_ID_CONFIG_KEY.to_string(),
+        value: generated.clone(),
+        sensitive: false,
+        source: Some("runtime-start".to_string()),
+        source_origin: None,
+    }) {
+        Ok(true) => Some(generated),
+        Ok(false) => store
+            .get(
+                config::types::DEVICE_CONFIG_SCOPE,
+                RUNTIME_HOST_ID_CONFIG_KEY,
+            )
+            .ok()
+            .flatten()
+            .and_then(|entry| {
+                let trimmed = entry.value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }),
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "failed to persist runtime host id into config store"
+            );
+            None
+        }
+    }
 }
 
 fn default_runtime_host_id(port: u16) -> String {
@@ -99,6 +180,20 @@ fn ensure_auth_secret_for_bind_host(options: &mut RuntimeStartOptions) {
         options.bind_host
     );
     options.auth_secret = Some(format!("rt-admin-{}", uuid::Uuid::new_v4()));
+}
+
+fn configured_mesh_state_path_from_env(data_dir: Option<&Path>) -> Option<PathBuf> {
+    env::var("EXOMIND_RT_MESH_STATE_PATH")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            Some(
+                data_dir
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(resolve_data_dir)
+                    .join("mesh-state.json"),
+            )
+        })
 }
 
 /// Runtime startup options（运行时启动选项）.
@@ -138,6 +233,7 @@ impl Default for RuntimeStartOptions {
             cfg!(any(target_os = "android", target_os = "ios")),
             env::var("EXOMIND_RT_DISABLE_TS_AGENTS").ok().as_deref(),
         );
+        let data_dir = env::var("EXOMIND_RT_DATA_DIR").ok().map(PathBuf::from);
 
         let enable_mdns = env::var("EXOMIND_RT_MDNS")
             .map(|value| {
@@ -155,16 +251,14 @@ impl Default for RuntimeStartOptions {
             ts_agent_command: env::var("EXOMIND_RT_AGENT_CMD")
                 .unwrap_or_else(|_| "bun".to_string()),
             ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
-            mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH")
-                .ok()
-                .map(PathBuf::from),
+            mesh_state_path: configured_mesh_state_path_from_env(data_dir.as_deref()),
             signal_storage_path: env::var("EXOMIND_RT_SIGNAL_SQLITE_PATH")
                 .ok()
                 .map(PathBuf::from),
             auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
             allow_lan_without_auth: false,
             enable_mdns,
-            data_dir: env::var("EXOMIND_RT_DATA_DIR").ok().map(PathBuf::from),
+            data_dir,
         }
     }
 }
@@ -1228,9 +1322,43 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
+    use std::sync::OnceLock;
     use tower::util::ServiceExt;
 
     struct TempRouteAgent;
+
+    fn env_lock() -> &'static StdMutex<()> {
+        static LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| StdMutex::new(()))
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            // SAFETY: tests hold a process-wide env lock while mutating env vars.
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: tests hold a process-wide env lock while mutating env vars.
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 
     fn app_state_with_registry(
         port: u16,
@@ -2116,6 +2244,44 @@ mod tests {
             "resolved project root must contain classifier agent entry: {}",
             resolved.display()
         );
+    }
+
+    #[test]
+    fn persisted_runtime_host_id_reuses_device_scope_config_entry() {
+        let temp_dir = tempfile::tempdir().expect("create config sqlite tempdir");
+        let config_path = temp_dir.path().join("config.sqlite");
+
+        let first = load_or_create_persisted_host_id(&config_path)
+            .expect("first runtime host id should persist");
+        let second = load_or_create_persisted_host_id(&config_path)
+            .expect("second runtime host id should reuse persisted value");
+
+        assert_eq!(first, second, "runtime host id must survive restarts");
+
+        let store = config::ConfigStore::with_sqlite_path(&config_path)
+            .expect("config store should reopen");
+        let entry = store
+            .get(
+                config::types::DEVICE_CONFIG_SCOPE,
+                RUNTIME_HOST_ID_CONFIG_KEY,
+            )
+            .expect("config get should succeed")
+            .expect("runtime host id entry should exist");
+
+        assert_eq!(entry.value, first);
+    }
+
+    #[test]
+    fn mesh_state_path_defaults_to_runtime_data_dir() {
+        let _env_guard = env_lock().lock().expect("env lock");
+        let _mesh_path_guard = EnvVarGuard::remove("EXOMIND_RT_MESH_STATE_PATH");
+        let runtime_data_dir =
+            std::env::temp_dir().join(format!("exomind-runtime-data-{}", uuid::Uuid::new_v4()));
+
+        let resolved = configured_mesh_state_path_from_env(Some(runtime_data_dir.as_path()))
+            .expect("mesh state path should default from runtime data dir");
+
+        assert_eq!(resolved, runtime_data_dir.join("mesh-state.json"));
     }
 
     #[test]
