@@ -1,0 +1,38 @@
+docs/product/exomind-website-competitive-analysis.md
+  f6a9d023ca8507eb 1-367
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "a658ec2cb526d5ea11e3977a8656dde28a0c8ddf",
+  "prompts": {
+    "d8f0b50b4cb40c4e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fdc-aae8-7153-926a-986e6b87c3a7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 1079,
+      "total_deletions": 7,
+      "accepted_lines": 1079,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ae75101c87e97c41bd53d52346da260f3744bf44191ff595fdcd58e8ff57d711"
+    },
+    "f6a9d023ca8507eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28a630e9-7ed6-48d8-a75a-c1ee1503694d",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 367,
+      "total_deletions": 0,
+      "accepted_lines": 367,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/d43d9c23f7e5b86243c15051abc31f513ec74a758e060beadf71c8a781e2bdd0"
+    }
+  }
+}
