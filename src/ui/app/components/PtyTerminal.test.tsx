@@ -6,11 +6,13 @@ import { __resetPtyInputTransportPoolForTests } from './pty-input';
 const hoisted = vi.hoisted(() => {
   const defaultReadyMessage = () => ({
     type: 'ready' as const,
-    protocol_version: 2,
+    protocol_version: 3,
     capabilities: {
       input_ack: true,
       resize: true,
       resize_ack: true,
+      output_stream: true,
+      output_cursor: true,
     },
   });
 
@@ -27,6 +29,8 @@ const hoisted = vi.hoisted(() => {
     focus = vi.fn();
     refresh = vi.fn();
     dispose = vi.fn();
+    clear = vi.fn();
+    reset = vi.fn();
     getSelection = vi.fn(() => '');
     attachCustomKeyEventHandler = vi.fn(() => true);
     write = vi.fn((data: string | Uint8Array) => {
@@ -385,9 +389,13 @@ describe('PtyTerminal', () => {
     await settleInteractiveStartup();
 
     const terminal = hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
-    const websocket = hoisted.websocketInstances[hoisted.websocketInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
+    const outputSocket = hoisted.websocketInstances[1];
     expect(terminal).toBeTruthy();
-    expect(websocket).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
+    expect(outputSocket).toBeTruthy();
+    expect(inputSocket!.url).toContain('mode=input');
+    expect(outputSocket!.url).toContain('mode=output');
 
     act(() => {
       terminal!.emitData('h');
@@ -395,14 +403,14 @@ describe('PtyTerminal', () => {
     });
     await flushUi();
 
-    const framesBeforeFlush = websocket!.sent
+    const framesBeforeFlush = inputSocket!.sent
       .map((frame) => JSON.parse(frame) as { type?: string })
       .filter((frame) => frame.type === 'input');
     expect(framesBeforeFlush).toEqual([]);
 
     await flushUi(20);
 
-    const inputFrames = websocket!.sent
+    const inputFrames = inputSocket!.sent
       .map((frame) => JSON.parse(frame) as { type?: string; data?: string })
       .filter((frame) => frame.type === 'input');
     expect(inputFrames).toHaveLength(1);
@@ -427,12 +435,25 @@ describe('PtyTerminal', () => {
     const terminal = hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
     expect(terminal).toBeTruthy();
     await settleInteractiveStartup();
+    const outputSocket = hoisted.websocketInstances[1];
+    expect(outputSocket).toBeTruthy();
 
     act(() => {
-      streamReader.pushText(
-        `event: output\ndata: ${btoa('hello')}\n\n`
-          + `event: output\ndata: ${btoa(' world')}\n\n`,
-      );
+      outputSocket!.emitMessage({
+        type: 'output_reset',
+        offset: 0,
+        truncated: false,
+      });
+      outputSocket!.emitMessage({
+        type: 'output',
+        offset: 0,
+        data: btoa('hello'),
+      });
+      outputSocket!.emitMessage({
+        type: 'output',
+        offset: 5,
+        data: btoa(' world'),
+      });
     });
     await flushUi();
 
@@ -480,7 +501,7 @@ describe('PtyTerminal', () => {
     });
     await flushUi(20);
 
-    expect(hoisted.websocketInstances).toHaveLength(2);
+    expect(hoisted.websocketInstances).toHaveLength(3);
     expect(screen.queryByTestId('pty-terminal-input-error')).not.toBeInTheDocument();
     restoreClientSize();
   });
@@ -493,7 +514,9 @@ describe('PtyTerminal', () => {
       capabilities: {
         input_ack: true,
         resize: true,
-        resize_ack: false,
+        resize_ack: true,
+        output_stream: true,
+        output_cursor: true,
       },
     };
 
@@ -507,7 +530,7 @@ describe('PtyTerminal', () => {
 
     await settleInteractiveStartup();
 
-    expect(screen.getByTestId('pty-terminal-input-error')).toHaveTextContent(
+    expect(screen.getByTestId('pty-terminal-error')).toHaveTextContent(
       '协议版本不兼容',
     );
     restoreClientSize();
@@ -528,9 +551,9 @@ describe('PtyTerminal', () => {
     await settleInteractiveStartup();
 
     const terminal = hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
-    const websocket = hoisted.websocketInstances[hoisted.websocketInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
     expect(terminal).toBeTruthy();
-    expect(websocket).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
 
     act(() => {
       terminal!.emitData('x');
@@ -538,7 +561,7 @@ describe('PtyTerminal', () => {
     await flushUi(20);
 
     act(() => {
-      websocket!.emitMessage({
+      inputSocket!.emitMessage({
         type: 'error',
         code: 'transport_error',
         message: 'write failed',
@@ -548,6 +571,120 @@ describe('PtyTerminal', () => {
     await flushUi();
 
     expect(screen.getByTestId('pty-terminal-input-error')).toHaveTextContent('write failed');
+    restoreClientSize();
+  });
+
+  it('reconnects the output websocket after a post-ready server error（ready 后收到错误会主动重连输出 WS）', async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-output-error-reconnect"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal = hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const firstOutputSocket = hoisted.websocketInstances[1];
+    expect(terminal).toBeTruthy();
+    expect(firstOutputSocket).toBeTruthy();
+
+    act(() => {
+      firstOutputSocket!.emitMessage({
+        type: 'error',
+        message: 'live output stream stalled',
+      });
+    });
+    await flushUi();
+
+    expect(firstOutputSocket!.close).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('pty-terminal-output-reconnecting')).toHaveTextContent(
+      '终端输出通道重连中',
+    );
+    expect(terminal!.options.disableStdin).toBe(true);
+
+    await flushUi(600);
+    expect(hoisted.websocketInstances).toHaveLength(3);
+    expect(hoisted.websocketInstances[2]!.url).toContain('mode=output');
+    expect(screen.queryByTestId('pty-terminal-output-reconnecting')).not.toBeInTheDocument();
+
+    restoreClientSize();
+  });
+
+  it('blocks further input after a fatal output error（输出致命错误后不再允许继续输入）', async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-output-fatal-error"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal = hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
+    const outputSocket = hoisted.websocketInstances[1];
+    expect(terminal).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
+    expect(outputSocket).toBeTruthy();
+
+    const inputFramesBefore = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string })
+      .filter((frame) => frame.type === 'input').length;
+
+    act(() => {
+      outputSocket!.emitMessage({
+        type: 'error',
+        code: 'forbidden',
+        message: 'write blocked',
+      });
+    });
+    await flushUi();
+
+    expect(screen.getByTestId('pty-terminal-error')).toHaveTextContent('RT 鉴权失败');
+    expect(terminal!.options.disableStdin).toBe(true);
+
+    act(() => {
+      terminal!.emitData('blocked');
+    });
+    await flushUi(20);
+
+    const inputFramesAfter = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string })
+      .filter((frame) => frame.type === 'input').length;
+    expect(inputFramesAfter).toBe(inputFramesBefore);
+
+    restoreClientSize();
+  });
+
+  it('disables stdin after EOF so ended terminals are no longer writable（EOF 后终端进入不可输入态）', async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-eof-readonly"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal = hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const outputSocket = hoisted.websocketInstances[1];
+    expect(terminal).toBeTruthy();
+    expect(outputSocket).toBeTruthy();
+
+    act(() => {
+      outputSocket!.emitMessage({ type: 'eof', offset: 0, code: 0 });
+    });
+    await flushUi();
+
+    expect(terminal!.options.disableStdin).toBe(true);
+
     restoreClientSize();
   });
 
@@ -567,7 +704,7 @@ describe('PtyTerminal', () => {
     });
     await flushUi(80);
 
-    expect(hoisted.websocketInstances).toHaveLength(0);
+    expect(hoisted.websocketInstances).toHaveLength(1);
     expect(screen.queryByTestId('pty-terminal-input-error')).not.toBeInTheDocument();
     restoreClientSize();
   });

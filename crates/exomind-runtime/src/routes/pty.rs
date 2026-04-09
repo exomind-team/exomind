@@ -11,17 +11,19 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::time::Duration;
+use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::AppState;
 use crate::config::types::USER_CONFIG_SCOPE;
 use crate::pty::{
     ClaudeSessionInfo, PtyAgentInfo, PtyAgentStatus, PtyAgentType, PtyError,
-    PtyHistoricalSessionInfo, PtyHistoricalSessionPreview, PtyOutputMsg, PtyResumeRequest,
-    PtySpawnRequest,
+    PtyHistoricalSessionInfo, PtyHistoricalSessionPreview, PtyOutputMsg, PtyOutputReplaySnapshot,
+    PtyResumeRequest, PtySpawnRequest,
 };
 use crate::routes::sessions::{
     broadcast_session_created, broadcast_session_updated,
@@ -44,16 +46,35 @@ struct PtyResizeBody {
     cols: u16,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct PtyWsQuery {
+    cursor: Option<u64>,
+    mode: Option<PtyWsMode>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum PtyWsMode {
+    Duplex,
+    Input,
+    Output,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum PtyWsClientMessage {
-    Input { input_seq: u64, data: String },
+    Input {
+        input_seq: u64,
+        data: String,
+    },
     Resize {
         resize_seq: u64,
         rows: u16,
         cols: u16,
     },
-    Ping { nonce: Option<u64> },
+    Ping {
+        nonce: Option<u64>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +104,8 @@ struct PtyWsCapabilities {
     input_ack: bool,
     resize: bool,
     resize_ack: bool,
+    output_stream: bool,
+    output_cursor: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,6 +114,19 @@ enum PtyWsServerMessage {
     Ready {
         protocol_version: u8,
         capabilities: PtyWsCapabilities,
+        read_only: bool,
+    },
+    OutputReset {
+        offset: u64,
+        truncated: bool,
+    },
+    Output {
+        offset: u64,
+        data: String,
+    },
+    Eof {
+        offset: u64,
+        code: Option<i32>,
     },
     Ack {
         input_seq: u64,
@@ -111,6 +147,13 @@ enum PtyWsServerMessage {
     },
 }
 
+#[derive(Debug)]
+struct PtyWsStreamSource {
+    snapshot: PtyOutputReplaySnapshot,
+    live_rx: Option<broadcast::Receiver<PtyOutputMsg>>,
+    read_only: bool,
+}
+
 const PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY: &str = "exomind:ptyWaitingInputIdleTimeoutSeconds";
 const DEFAULT_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS: u64 = 60;
 const MIN_PTY_WAITING_INPUT_IDLE_TIMEOUT_SECONDS: u64 = 1;
@@ -120,7 +163,7 @@ const DEFAULT_PTY_REPLAY_LIMIT_KB: usize = 256;
 const MIN_PTY_REPLAY_LIMIT_KB: usize = 128;
 const MAX_PTY_REPLAY_LIMIT_KB: usize = 2048;
 const PTY_LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(250);
-const PTY_WS_PROTOCOL_VERSION: u8 = 2;
+const PTY_WS_PROTOCOL_VERSION: u8 = 3;
 
 // ── Error mapping ───────────────────────────────────────────────
 
@@ -177,15 +220,36 @@ fn build_pty_ready_event() -> Event {
     Event::default().event("ready").data("{}")
 }
 
-fn build_pty_ws_ready_message() -> PtyWsServerMessage {
+fn build_pty_ws_ready_message(read_only: bool) -> PtyWsServerMessage {
     PtyWsServerMessage::Ready {
         protocol_version: PTY_WS_PROTOCOL_VERSION,
         capabilities: PtyWsCapabilities {
-            input_ack: true,
-            resize: true,
-            resize_ack: true,
+            input_ack: !read_only,
+            resize: !read_only,
+            resize_ack: !read_only,
+            output_stream: true,
+            output_cursor: true,
         },
+        read_only,
     }
+}
+
+fn build_pty_ws_output_reset_message(snapshot: &PtyOutputReplaySnapshot) -> PtyWsServerMessage {
+    PtyWsServerMessage::OutputReset {
+        offset: snapshot.offset,
+        truncated: snapshot.truncated,
+    }
+}
+
+fn build_pty_ws_output_message(offset: u64, data: &[u8]) -> PtyWsServerMessage {
+    PtyWsServerMessage::Output {
+        offset,
+        data: BASE64.encode(data),
+    }
+}
+
+fn build_pty_ws_eof_message(offset: u64, code: Option<i32>) -> PtyWsServerMessage {
+    PtyWsServerMessage::Eof { offset, code }
 }
 
 fn build_pty_ws_ack_message(input_seq: u64) -> PtyWsServerMessage {
@@ -224,13 +288,22 @@ fn build_pty_ws_error_message(
     }
 }
 
-async fn send_pty_ws_message(
-    socket: &mut WebSocket,
-    message: &PtyWsServerMessage,
-) -> Result<(), axum::Error> {
+fn serialize_pty_ws_message(message: &PtyWsServerMessage) -> Message {
     let payload = serde_json::to_string(message)
         .expect("PTY WS server message serialization should not fail");
-    socket.send(Message::Text(payload.into())).await
+    Message::Text(payload.into())
+}
+
+async fn queue_pty_ws_message(tx: &mpsc::Sender<Message>, message: PtyWsServerMessage) -> bool {
+    tx.send(serialize_pty_ws_message(&message)).await.is_ok()
+}
+
+async fn queue_pty_ws_frame(tx: &mpsc::Sender<Message>, frame: Message) -> bool {
+    tx.send(frame).await.is_ok()
+}
+
+async fn queue_pty_ws_close(tx: &mpsc::Sender<Message>) -> bool {
+    queue_pty_ws_frame(tx, Message::Close(None)).await
 }
 
 fn clamp_pty_waiting_input_idle_timeout_seconds(value: u64) -> u64 {
@@ -281,6 +354,292 @@ async fn resolve_pty_exit_code_for_eof(state: &AppState, id: &str) -> Option<i32
             _ => None,
         },
         Ok(None) | Err(_) => None,
+    }
+}
+
+async fn maybe_upgrade_snapshot_from_transcript(
+    state: &AppState,
+    id: &str,
+    cursor: Option<u64>,
+    snapshot: PtyOutputReplaySnapshot,
+) -> PtyOutputReplaySnapshot {
+    if cursor.is_none() || !snapshot.truncated {
+        return snapshot;
+    }
+
+    match state.pty_manager.load_persisted_output(id, cursor).await {
+        Ok(Some(persisted)) if persisted.offset < snapshot.offset => persisted,
+        _ => snapshot,
+    }
+}
+
+async fn resolve_pty_ws_stream_source(
+    state: &AppState,
+    id: &str,
+    cursor: Option<u64>,
+) -> Result<PtyWsStreamSource, (StatusCode, String)> {
+    match state.pty_manager.subscribe_output(id, cursor).await {
+        Ok((snapshot, eof_offset, live_rx)) => {
+            let snapshot =
+                maybe_upgrade_snapshot_from_transcript(state, id, cursor, snapshot).await;
+            let live_info = state
+                .pty_manager
+                .refresh_process_state(id)
+                .await
+                .map_err(map_pty_error)?;
+            let is_running = !matches!(
+                live_info,
+                Some(info)
+                    if matches!(info.status, PtyAgentStatus::Stopped | PtyAgentStatus::Exited { .. })
+            );
+            Ok(PtyWsStreamSource {
+                snapshot,
+                live_rx: if eof_offset.is_none() {
+                    Some(live_rx)
+                } else {
+                    None
+                },
+                read_only: !is_running,
+            })
+        }
+        Err(PtyError::NotFound { .. }) => {
+            match state.pty_manager.load_completed_output(id, cursor).await {
+                Ok(Some(snapshot)) => Ok(PtyWsStreamSource {
+                    snapshot,
+                    live_rx: None,
+                    read_only: true,
+                }),
+                Ok(None) => Err(map_pty_error(PtyError::NotFound { id: id.to_string() })),
+                Err(error) => Err(map_pty_error(error)),
+            }
+        }
+        Err(error) => Err(map_pty_error(error)),
+    }
+}
+
+async fn queue_pty_ws_output_bytes(
+    tx: &mpsc::Sender<Message>,
+    offset: u64,
+    data: &[u8],
+    current_offset: &mut u64,
+) -> bool {
+    let mut chunk_offset = offset;
+    let mut remaining = data;
+
+    if chunk_offset < *current_offset {
+        let skip = (*current_offset - chunk_offset) as usize;
+        if skip >= remaining.len() {
+            return true;
+        }
+        chunk_offset = chunk_offset.saturating_add(skip as u64);
+        remaining = &remaining[skip..];
+    }
+
+    for chunk in remaining.chunks(4096) {
+        if !queue_pty_ws_message(tx, build_pty_ws_output_message(chunk_offset, chunk)).await {
+            return false;
+        }
+        chunk_offset = chunk_offset.saturating_add(chunk.len() as u64);
+    }
+
+    *current_offset = chunk_offset;
+    true
+}
+
+async fn queue_pty_ws_output_snapshot(
+    tx: &mpsc::Sender<Message>,
+    snapshot: &PtyOutputReplaySnapshot,
+    current_offset: &mut u64,
+    force_reset: bool,
+) -> bool {
+    let needs_reset = force_reset || snapshot.truncated || snapshot.offset != *current_offset;
+    if needs_reset {
+        if !queue_pty_ws_message(tx, build_pty_ws_output_reset_message(snapshot)).await {
+            return false;
+        }
+        *current_offset = snapshot.offset;
+    }
+
+    if snapshot.data.is_empty() {
+        return true;
+    }
+
+    queue_pty_ws_output_bytes(tx, snapshot.offset, &snapshot.data, current_offset).await
+}
+
+async fn recover_pty_ws_output_stream(
+    tx: &mpsc::Sender<Message>,
+    state: &AppState,
+    id: &str,
+    current_offset: &mut u64,
+) -> Option<broadcast::Receiver<PtyOutputMsg>> {
+    match state
+        .pty_manager
+        .subscribe_output(id, Some(*current_offset))
+        .await
+    {
+        Ok((snapshot, eof_offset, live_rx)) => {
+            let snapshot =
+                maybe_upgrade_snapshot_from_transcript(state, id, Some(*current_offset), snapshot)
+                    .await;
+            let read_only = match state.pty_manager.refresh_process_state(id).await {
+                Ok(info) => info,
+                Err(error) => {
+                    let _ = queue_pty_ws_message(
+                        tx,
+                        build_pty_ws_error_message(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("failed to refresh PTY status during recovery: {error}"),
+                            None,
+                            None,
+                        ),
+                    )
+                    .await;
+                    let _ = queue_pty_ws_close(tx).await;
+                    return None;
+                }
+            }
+            .is_some_and(|info| {
+                matches!(
+                    info.status,
+                    PtyAgentStatus::Stopped | PtyAgentStatus::Exited { .. }
+                )
+            });
+            if !queue_pty_ws_output_snapshot(tx, &snapshot, current_offset, false).await {
+                return None;
+            }
+            if eof_offset.is_none() {
+                Some(live_rx)
+            } else {
+                let exit_code = resolve_pty_exit_code_for_eof(state, id).await;
+                let final_offset = if read_only {
+                    (*current_offset).max(eof_offset.unwrap_or(*current_offset))
+                } else {
+                    *current_offset
+                };
+                let _ = queue_pty_ws_message(tx, build_pty_ws_eof_message(final_offset, exit_code))
+                    .await;
+                let _ = queue_pty_ws_close(tx).await;
+                None
+            }
+        }
+        Err(PtyError::NotFound { .. }) => {
+            if let Ok(Some(snapshot)) = state
+                .pty_manager
+                .load_completed_output(id, Some(*current_offset))
+                .await
+            {
+                if !queue_pty_ws_output_snapshot(tx, &snapshot, current_offset, false).await {
+                    return None;
+                }
+                let exit_code = resolve_pty_exit_code_for_eof(state, id).await;
+                let _ =
+                    queue_pty_ws_message(tx, build_pty_ws_eof_message(*current_offset, exit_code))
+                        .await;
+                let _ = queue_pty_ws_close(tx).await;
+                return None;
+            }
+            let _ = queue_pty_ws_message(
+                tx,
+                build_pty_ws_error_message(
+                    StatusCode::NOT_FOUND,
+                    format!("PTY {id} was removed before output recovery completed"),
+                    None,
+                    None,
+                ),
+            )
+            .await;
+            let _ = queue_pty_ws_close(tx).await;
+            None
+        }
+        Err(error) => {
+            let _ = queue_pty_ws_message(
+                tx,
+                build_pty_ws_error_message(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("failed to recover PTY output stream: {error}"),
+                    None,
+                    None,
+                ),
+            )
+            .await;
+            let _ = queue_pty_ws_close(tx).await;
+            None
+        }
+    }
+}
+
+async fn pump_pty_ws_output(
+    tx: mpsc::Sender<Message>,
+    state: AppState,
+    id: String,
+    source: PtyWsStreamSource,
+) {
+    if !queue_pty_ws_message(&tx, build_pty_ws_ready_message(source.read_only)).await {
+        return;
+    }
+
+    let mut current_offset = source.snapshot.offset;
+    if !queue_pty_ws_output_snapshot(&tx, &source.snapshot, &mut current_offset, true).await {
+        return;
+    }
+
+    let Some(mut live_rx) = source.live_rx else {
+        let exit_code = resolve_pty_exit_code_for_eof(&state, &id).await;
+        let _ =
+            queue_pty_ws_message(&tx, build_pty_ws_eof_message(current_offset, exit_code)).await;
+        let _ = queue_pty_ws_close(&tx).await;
+        return;
+    };
+
+    loop {
+        match live_rx.recv().await {
+            Ok(PtyOutputMsg::Data { offset, data }) => {
+                let chunk_end = offset.saturating_add(data.len() as u64);
+                if chunk_end <= current_offset {
+                    continue;
+                }
+
+                if offset > current_offset {
+                    let Some(next_live_rx) =
+                        recover_pty_ws_output_stream(&tx, &state, &id, &mut current_offset).await
+                    else {
+                        return;
+                    };
+                    live_rx = next_live_rx;
+                    continue;
+                }
+
+                if !queue_pty_ws_output_bytes(&tx, offset, &data, &mut current_offset).await {
+                    return;
+                }
+            }
+            Ok(PtyOutputMsg::Eof { offset }) => {
+                let exit_code = resolve_pty_exit_code_for_eof(&state, &id).await;
+                let final_offset = offset.max(current_offset);
+                let _ =
+                    queue_pty_ws_message(&tx, build_pty_ws_eof_message(final_offset, exit_code))
+                        .await;
+                let _ = queue_pty_ws_close(&tx).await;
+                return;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                let Some(next_live_rx) =
+                    recover_pty_ws_output_stream(&tx, &state, &id, &mut current_offset).await
+                else {
+                    return;
+                };
+                live_rx = next_live_rx;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                let Some(next_live_rx) =
+                    recover_pty_ws_output_stream(&tx, &state, &id, &mut current_offset).await
+                else {
+                    return;
+                };
+                live_rx = next_live_rx;
+            }
+        }
     }
 }
 
@@ -583,13 +942,16 @@ async fn stream_pty_output(
     sync_pty_replay_limit_from_config(&state);
     let (event_tx, event_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(1024);
 
-    let live_subscription = match state.pty_manager.subscribe_output(&id).await {
-        Ok((buffer_snapshot, rx)) => Some((buffer_snapshot, rx)),
+    let live_subscription = match state.pty_manager.subscribe_output(&id, None).await {
+        Ok((buffer_snapshot, eof_offset, rx)) => Some((
+            buffer_snapshot,
+            if eof_offset.is_none() { Some(rx) } else { None },
+        )),
         Err(PtyError::NotFound { .. }) => None,
         Err(error) => return Err(map_pty_error(error)),
     };
     let persisted_snapshot = if live_subscription.is_none() {
-        match state.pty_manager.load_persisted_output(&id).await {
+        match state.pty_manager.load_completed_output(&id, None).await {
             Ok(Some(buffer_snapshot)) => Some(buffer_snapshot),
             Ok(None) => {
                 return Err(map_pty_error(PtyError::NotFound { id }));
@@ -605,7 +967,7 @@ async fn stream_pty_output(
         let stream_state = state.clone();
         let stream_id = id.clone();
         let (buffer_snapshot, rx) = match live_subscription {
-            Some((buffer_snapshot, rx)) => (buffer_snapshot, Some(rx)),
+            Some((buffer_snapshot, rx)) => (buffer_snapshot, rx),
             None => (persisted_snapshot.unwrap_or_default(), None),
         };
 
@@ -616,8 +978,8 @@ async fn stream_pty_output(
         }
 
         // 1. Replay scrollback buffer.
-        if !buffer_snapshot.is_empty() {
-            for chunk in buffer_snapshot.chunks(4096) {
+        if !buffer_snapshot.data.is_empty() {
+            for chunk in buffer_snapshot.data.chunks(4096) {
                 let encoded = BASE64.encode(chunk);
                 let event = Ok(Event::default().event("output").data(encoded));
                 if event_tx.send(event).await.is_err() {
@@ -627,7 +989,8 @@ async fn stream_pty_output(
         }
 
         if rx.is_none() {
-            let _ = event_tx.send(Ok(build_pty_eof_event(None))).await;
+            let exit_code = resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
+            let _ = event_tx.send(Ok(build_pty_eof_event(exit_code))).await;
             return;
         }
 
@@ -640,11 +1003,11 @@ async fn stream_pty_output(
             tokio::select! {
                 result = rx.recv() => {
                     let event = match result {
-                        Ok(PtyOutputMsg::Data(data)) => {
+                        Ok(PtyOutputMsg::Data { data, .. }) => {
                             let encoded = BASE64.encode(&data);
                             Ok(Event::default().event("output").data(encoded))
                         }
-                        Ok(PtyOutputMsg::Eof) => {
+                        Ok(PtyOutputMsg::Eof { .. }) => {
                             let exit_code =
                                 resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
                             let _ = event_tx
@@ -687,32 +1050,57 @@ async fn stream_pty_output(
 
 async fn pty_websocket(
     Path(id): Path<String>,
+    Query(query): Query<PtyWsQuery>,
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, (StatusCode, String)> {
-    state
-        .pty_manager
-        .activity_idle_for(&id)
-        .await
-        .map_err(map_pty_error)?;
-
-    Ok(ws.on_upgrade(move |socket| handle_pty_websocket(socket, state, id)))
+    sync_pty_replay_limit_from_config(&state);
+    let mode = query.mode.unwrap_or(PtyWsMode::Duplex);
+    let stream_source = resolve_pty_ws_stream_source(&state, &id, query.cursor).await?;
+    Ok(ws.on_upgrade(move |socket| handle_pty_websocket(socket, state, id, stream_source, mode)))
 }
 
-async fn handle_pty_websocket(mut socket: WebSocket, state: AppState, id: String) {
-    if send_pty_ws_message(&mut socket, &build_pty_ws_ready_message())
-        .await
-        .is_err()
-    {
-        return;
-    }
+async fn handle_pty_websocket(
+    socket: WebSocket,
+    state: AppState,
+    id: String,
+    stream_source: PtyWsStreamSource,
+    mode: PtyWsMode,
+) {
+    let read_only = stream_source.read_only;
+    let (mut socket_tx, mut socket_rx) = socket.split();
+    let (outbound_tx, mut outbound_rx) = mpsc::channel::<Message>(1024);
 
-    while let Some(result) = socket.recv().await {
+    let writer_task = tokio::spawn(async move {
+        while let Some(message) = outbound_rx.recv().await {
+            if socket_tx.send(message).await.is_err() {
+                return;
+            }
+        }
+    });
+
+    let output_task = if mode == PtyWsMode::Input {
+        if !queue_pty_ws_message(&outbound_tx, build_pty_ws_ready_message(read_only)).await {
+            drop(outbound_tx);
+            let _ = writer_task.await;
+            return;
+        }
+        None
+    } else {
+        Some(tokio::spawn(pump_pty_ws_output(
+            outbound_tx.clone(),
+            state.clone(),
+            id.clone(),
+            stream_source,
+        )))
+    };
+
+    while let Some(result) = socket_rx.next().await {
         let message = match result {
             Ok(message) => message,
             Err(error) => {
                 tracing::debug!(pty_id = %id, error = %error, "PTY WS receive failed");
-                return;
+                break;
             }
         };
 
@@ -721,9 +1109,9 @@ async fn handle_pty_websocket(mut socket: WebSocket, state: AppState, id: String
             Message::Binary(bytes) => match String::from_utf8(bytes.to_vec()) {
                 Ok(text) => text,
                 Err(error) => {
-                    let _ = send_pty_ws_message(
-                        &mut socket,
-                        &build_pty_ws_error_message(
+                    let _ = queue_pty_ws_message(
+                        &outbound_tx,
+                        build_pty_ws_error_message(
                             StatusCode::BAD_REQUEST,
                             format!("invalid websocket payload: {error}"),
                             None,
@@ -735,40 +1123,54 @@ async fn handle_pty_websocket(mut socket: WebSocket, state: AppState, id: String
                 }
             },
             Message::Ping(payload) => {
-                if socket.send(Message::Pong(payload)).await.is_err() {
-                    return;
+                if !queue_pty_ws_frame(&outbound_tx, Message::Pong(payload)).await {
+                    break;
                 }
                 continue;
             }
             Message::Pong(_) => continue,
-            Message::Close(_) => return,
+            Message::Close(_) => break,
         };
 
         let parsed = match serde_json::from_str::<PtyWsClientMessage>(&payload) {
             Ok(parsed) => parsed,
             Err(error) => {
-                let _ = send_pty_ws_message(
-                    &mut socket,
-                        &build_pty_ws_error_message(
-                            StatusCode::BAD_REQUEST,
-                            format!("invalid websocket json: {error}"),
-                            None,
-                            None,
-                        ),
-                    )
-                    .await;
+                let _ = queue_pty_ws_message(
+                    &outbound_tx,
+                    build_pty_ws_error_message(
+                        StatusCode::BAD_REQUEST,
+                        format!("invalid websocket json: {error}"),
+                        None,
+                        None,
+                    ),
+                )
+                .await;
                 continue;
             }
         };
 
         match parsed {
             PtyWsClientMessage::Input { input_seq, data } => {
+                if read_only {
+                    let _ = queue_pty_ws_message(
+                        &outbound_tx,
+                        build_pty_ws_error_message(
+                            StatusCode::FORBIDDEN,
+                            "PTY websocket is read-only",
+                            Some(input_seq),
+                            None,
+                        ),
+                    )
+                    .await;
+                    continue;
+                }
+
                 let decoded = match BASE64.decode(&data) {
                     Ok(decoded) => decoded,
                     Err(error) => {
-                        let _ = send_pty_ws_message(
-                            &mut socket,
-                            &build_pty_ws_error_message(
+                        let _ = queue_pty_ws_message(
+                            &outbound_tx,
+                            build_pty_ws_error_message(
                                 StatusCode::BAD_REQUEST,
                                 format!("invalid base64: {error}"),
                                 Some(input_seq),
@@ -782,20 +1184,16 @@ async fn handle_pty_websocket(mut socket: WebSocket, state: AppState, id: String
 
                 match apply_pty_input_bytes(&state, &id, &decoded).await {
                     Ok(()) => {
-                        if send_pty_ws_message(
-                            &mut socket,
-                            &build_pty_ws_ack_message(input_seq),
-                        )
-                        .await
-                        .is_err()
+                        if !queue_pty_ws_message(&outbound_tx, build_pty_ws_ack_message(input_seq))
+                            .await
                         {
-                            return;
+                            break;
                         }
                     }
                     Err((status, message)) => {
-                        let _ = send_pty_ws_message(
-                            &mut socket,
-                            &build_pty_ws_error_message(status, message, Some(input_seq), None),
+                        let _ = queue_pty_ws_message(
+                            &outbound_tx,
+                            build_pty_ws_error_message(status, message, Some(input_seq), None),
                         )
                         .await;
                     }
@@ -805,36 +1203,54 @@ async fn handle_pty_websocket(mut socket: WebSocket, state: AppState, id: String
                 resize_seq,
                 rows,
                 cols,
-            } => match apply_pty_resize_request(&state, &id, rows, cols).await {
-                Ok(()) => {
-                    if send_pty_ws_message(
-                        &mut socket,
-                        &build_pty_ws_resize_ack_message(resize_seq),
-                    )
-                    .await
-                    .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err((status, message)) => {
-                    let _ = send_pty_ws_message(
-                        &mut socket,
-                        &build_pty_ws_error_message(status, message, None, Some(resize_seq)),
+            } => {
+                if read_only {
+                    let _ = queue_pty_ws_message(
+                        &outbound_tx,
+                        build_pty_ws_error_message(
+                            StatusCode::FORBIDDEN,
+                            "PTY websocket is read-only",
+                            None,
+                            Some(resize_seq),
+                        ),
                     )
                     .await;
+                    continue;
                 }
-            },
+
+                match apply_pty_resize_request(&state, &id, rows, cols).await {
+                    Ok(()) => {
+                        if !queue_pty_ws_message(
+                            &outbound_tx,
+                            build_pty_ws_resize_ack_message(resize_seq),
+                        )
+                        .await
+                        {
+                            break;
+                        }
+                    }
+                    Err((status, message)) => {
+                        let _ = queue_pty_ws_message(
+                            &outbound_tx,
+                            build_pty_ws_error_message(status, message, None, Some(resize_seq)),
+                        )
+                        .await;
+                    }
+                }
+            }
             PtyWsClientMessage::Ping { nonce } => {
-                if send_pty_ws_message(&mut socket, &build_pty_ws_pong_message(nonce))
-                    .await
-                    .is_err()
-                {
-                    return;
+                if !queue_pty_ws_message(&outbound_tx, build_pty_ws_pong_message(nonce)).await {
+                    break;
                 }
             }
         }
     }
+
+    if let Some(output_task) = output_task {
+        output_task.abort();
+    }
+    drop(outbound_tx);
+    let _ = writer_task.await;
 }
 
 /// POST /pty/{id}/input — Write to PTY stdin (base64-encoded body).
@@ -913,12 +1329,13 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PtyWsServerMessage, PTY_WS_PROTOCOL_VERSION,
-        PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY, register_pty_session,
+        PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY, PTY_WS_PROTOCOL_VERSION, PtyWsServerMessage,
+        PtyWsStreamSource, pump_pty_ws_output, register_pty_session,
         resolve_pty_waiting_input_idle_timeout, router, serialize_pty_eof_payload,
         stream_pty_output, watch_pty_lifecycle,
     };
     use axum::body::Body;
+    use axum::extract::ws::Message;
     use axum::extract::{Path, State};
     use axum::http::{Request, StatusCode};
     use axum::{Router, response::IntoResponse};
@@ -927,6 +1344,7 @@ mod tests {
     use futures_util::{SinkExt, StreamExt};
     use std::{net::SocketAddr, time::Duration};
     use tokio::net::TcpListener;
+    use tokio::sync::{broadcast, mpsc};
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
     use tower::ServiceExt;
@@ -934,6 +1352,7 @@ mod tests {
     use crate::AppState;
     use crate::config::PutConfigEntryInput;
     use crate::config::types::USER_CONFIG_SCOPE;
+    use crate::pty::{PtyOutputMsg, PtyOutputReplaySnapshot};
     use crate::session::{InteractionMode, SessionStatus, UpdateSessionInput};
 
     #[cfg(not(target_os = "android"))]
@@ -963,7 +1382,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("test listener should bind");
-        let addr = listener.local_addr().expect("listener should expose local addr");
+        let addr = listener
+            .local_addr()
+            .expect("listener should expose local addr");
         let handle = tokio::spawn(async move {
             axum::serve(
                 listener,
@@ -987,6 +1408,38 @@ mod tests {
             .expect("websocket frame should decode");
         let text = next.into_text().expect("websocket frame should be text");
         serde_json::from_str(text.as_ref()).expect("websocket payload should be valid json")
+    }
+
+    async fn read_ws_json_until<F>(
+        stream: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        mut predicate: F,
+    ) -> PtyWsServerMessage
+    where
+        F: FnMut(&PtyWsServerMessage) -> bool,
+    {
+        loop {
+            let message = read_ws_json(stream).await;
+            if predicate(&message) {
+                return message;
+            }
+        }
+    }
+
+    async fn read_queued_ws_frame(rx: &mut mpsc::Receiver<Message>) -> Message {
+        tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("queued websocket frame should arrive promptly")
+            .expect("queued websocket frame should exist")
+    }
+
+    fn decode_queued_ws_json(frame: Message) -> PtyWsServerMessage {
+        match frame {
+            Message::Text(text) => serde_json::from_str(text.as_ref())
+                .expect("queued websocket payload should be valid json"),
+            other => panic!("expected queued websocket text frame, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1189,7 +1642,10 @@ mod tests {
                     input_ack: true,
                     resize: true,
                     resize_ack: true,
+                    output_stream: true,
+                    output_cursor: true,
                 },
+                read_only: false,
             }
         );
 
@@ -1203,7 +1659,10 @@ mod tests {
             .await
             .expect("input websocket frame should send");
 
-        let ack = read_ws_json(&mut socket).await;
+        let ack = read_ws_json_until(&mut socket, |message| {
+            matches!(message, PtyWsServerMessage::Ack { .. })
+        })
+        .await;
         assert_eq!(ack, PtyWsServerMessage::Ack { input_seq: 7 });
 
         let session = state
@@ -1248,7 +1707,10 @@ mod tests {
             .await
             .expect("invalid websocket frame should send");
 
-        let error = read_ws_json(&mut socket).await;
+        let error = read_ws_json_until(&mut socket, |message| {
+            matches!(message, PtyWsServerMessage::Error { .. })
+        })
+        .await;
         match error {
             PtyWsServerMessage::Error {
                 code,
@@ -1296,7 +1758,10 @@ mod tests {
                     input_ack: true,
                     resize: true,
                     resize_ack: true,
+                    output_stream: true,
+                    output_cursor: true,
                 },
+                read_only: false,
             }
         );
 
@@ -1311,12 +1776,261 @@ mod tests {
             .await
             .expect("resize websocket frame should send");
 
-        let ack = read_ws_json(&mut socket).await;
+        let ack = read_ws_json_until(&mut socket, |message| {
+            matches!(message, PtyWsServerMessage::ResizeAck { .. })
+        })
+        .await;
         assert_eq!(ack, PtyWsServerMessage::ResizeAck { resize_seq: 3 });
 
         let _ = socket.close(None).await;
         server.abort();
         let _ = state.pty_manager.stop(&pty.id).await;
         let _ = state.pty_manager.remove(&pty.id).await;
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn pty_websocket_input_mode_suppresses_output_stream_frames() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-ws-input-mode-host".to_string());
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+
+        let (addr, server) = spawn_router_server(router().with_state(state.clone())).await;
+        let url = format!("ws://{addr}/pty/{}/ws?mode=input", pty.id);
+        let (mut socket, _) = connect_async(&url)
+            .await
+            .expect("PTY websocket should connect");
+
+        let ready = read_ws_json(&mut socket).await;
+        assert_eq!(
+            ready,
+            PtyWsServerMessage::Ready {
+                protocol_version: PTY_WS_PROTOCOL_VERSION,
+                capabilities: super::PtyWsCapabilities {
+                    input_ack: true,
+                    resize: true,
+                    resize_ack: true,
+                    output_stream: true,
+                    output_cursor: true,
+                },
+                read_only: false,
+            }
+        );
+
+        let next_frame = tokio::time::timeout(Duration::from_millis(200), socket.next()).await;
+        assert!(
+            next_frame.is_err(),
+            "input-only websocket should not receive output frames before it sends input"
+        );
+
+        let payload = serde_json::json!({
+            "type": "input",
+            "input_seq": 11,
+            "data": BASE64.encode("\n"),
+        });
+        socket
+            .send(TungsteniteMessage::Text(payload.to_string().into()))
+            .await
+            .expect("input websocket frame should send");
+
+        let ack = read_ws_json_until(&mut socket, |message| {
+            matches!(message, PtyWsServerMessage::Ack { .. })
+        })
+        .await;
+        assert_eq!(ack, PtyWsServerMessage::Ack { input_seq: 11 });
+
+        let _ = socket.close(None).await;
+        server.abort();
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
+    }
+
+    #[tokio::test]
+    async fn pump_pty_ws_output_drains_read_only_tail_before_eof() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-ws-read-only-tail-host".to_string());
+        let (outbound_tx, mut outbound_rx) = mpsc::channel::<Message>(16);
+        let (live_tx, _) = broadcast::channel::<PtyOutputMsg>(16);
+        let source = PtyWsStreamSource {
+            snapshot: PtyOutputReplaySnapshot::default(),
+            live_rx: Some(live_tx.subscribe()),
+            read_only: true,
+        };
+
+        let task = tokio::spawn(pump_pty_ws_output(
+            outbound_tx,
+            state.clone(),
+            "missing-pty".to_string(),
+            source,
+        ));
+
+        assert_eq!(
+            decode_queued_ws_json(read_queued_ws_frame(&mut outbound_rx).await),
+            PtyWsServerMessage::Ready {
+                protocol_version: PTY_WS_PROTOCOL_VERSION,
+                capabilities: super::PtyWsCapabilities {
+                    input_ack: false,
+                    resize: false,
+                    resize_ack: false,
+                    output_stream: true,
+                    output_cursor: true,
+                },
+                read_only: true,
+            }
+        );
+        assert_eq!(
+            decode_queued_ws_json(read_queued_ws_frame(&mut outbound_rx).await),
+            PtyWsServerMessage::OutputReset {
+                offset: 0,
+                truncated: false,
+            }
+        );
+
+        live_tx
+            .send(PtyOutputMsg::Data {
+                offset: 0,
+                data: b"tail".to_vec(),
+            })
+            .expect("tail output should broadcast");
+        live_tx
+            .send(PtyOutputMsg::Eof { offset: 4 })
+            .expect("EOF should broadcast");
+
+        assert_eq!(
+            decode_queued_ws_json(read_queued_ws_frame(&mut outbound_rx).await),
+            PtyWsServerMessage::Output {
+                offset: 0,
+                data: BASE64.encode(b"tail"),
+            }
+        );
+        assert_eq!(
+            decode_queued_ws_json(read_queued_ws_frame(&mut outbound_rx).await),
+            PtyWsServerMessage::Eof {
+                offset: 4,
+                code: None,
+            }
+        );
+
+        let close_frame = read_queued_ws_frame(&mut outbound_rx).await;
+        assert!(matches!(close_frame, Message::Close(_)));
+        task.await.expect("pump task should finish cleanly");
+    }
+
+    #[tokio::test]
+    async fn pump_pty_ws_output_reports_not_found_when_recovery_loses_unfinished_stream() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-ws-recovery-not-found-host".to_string());
+        let (outbound_tx, mut outbound_rx) = mpsc::channel::<Message>(16);
+        let (live_tx, _) = broadcast::channel::<PtyOutputMsg>(16);
+        let source = PtyWsStreamSource {
+            snapshot: PtyOutputReplaySnapshot::default(),
+            live_rx: Some(live_tx.subscribe()),
+            read_only: true,
+        };
+
+        let task = tokio::spawn(pump_pty_ws_output(
+            outbound_tx,
+            state.clone(),
+            "missing-pty".to_string(),
+            source,
+        ));
+
+        let _ready = decode_queued_ws_json(read_queued_ws_frame(&mut outbound_rx).await);
+        let _reset = decode_queued_ws_json(read_queued_ws_frame(&mut outbound_rx).await);
+
+        drop(live_tx);
+
+        let error = decode_queued_ws_json(read_queued_ws_frame(&mut outbound_rx).await);
+        match error {
+            PtyWsServerMessage::Error { code, message, .. } => {
+                assert_eq!(code, "not_found");
+                assert!(message.contains("removed before output recovery completed"));
+            }
+            other => panic!("expected not_found recovery error, got {other:?}"),
+        }
+
+        let close_frame = read_queued_ws_frame(&mut outbound_rx).await;
+        assert!(matches!(close_frame, Message::Close(_)));
+        task.await.expect("pump task should finish cleanly");
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn pty_websocket_reconnect_to_persisted_output_is_read_only_and_eof_terminated() {
+        let (tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-ws-stopped-host".to_string());
+        let pty_id = "persisted-pty-output";
+        let marker = "websocket-finished";
+        let transcript_dir = tempdir.path().join("runtime-data").join("pty-transcripts");
+        std::fs::create_dir_all(&transcript_dir).expect("transcript dir should exist");
+        let transcript_path = transcript_dir.join(format!("{pty_id}.log"));
+        let completion_path = transcript_dir.join(format!("{pty_id}.eof"));
+        std::fs::write(&transcript_path, format!("prompt\r\n{marker}\r\n"))
+            .expect("transcript should persist");
+        std::fs::write(&completion_path, b"0").expect("completion marker should persist");
+
+        let (addr, server) = spawn_router_server(router().with_state(state.clone())).await;
+        let url = format!("ws://{addr}/pty/{pty_id}/ws?mode=output");
+        let (mut socket, _) = connect_async(&url)
+            .await
+            .expect("PTY websocket should connect");
+
+        let ready = read_ws_json(&mut socket).await;
+        assert_eq!(
+            ready,
+            PtyWsServerMessage::Ready {
+                protocol_version: PTY_WS_PROTOCOL_VERSION,
+                capabilities: super::PtyWsCapabilities {
+                    input_ack: false,
+                    resize: false,
+                    resize_ack: false,
+                    output_stream: true,
+                    output_cursor: true,
+                },
+                read_only: true,
+            }
+        );
+
+        let _reset = read_ws_json_until(&mut socket, |message| {
+            matches!(message, PtyWsServerMessage::OutputReset { .. })
+        })
+        .await;
+        let output = read_ws_json_until(&mut socket, |message| {
+            matches!(message, PtyWsServerMessage::Output { .. })
+        })
+        .await;
+        match output {
+            PtyWsServerMessage::Output { data, .. } => {
+                let decoded = BASE64
+                    .decode(data)
+                    .expect("persisted websocket output should decode");
+                assert!(
+                    String::from_utf8_lossy(&decoded).contains(marker),
+                    "persisted websocket output should include transcript marker"
+                );
+            }
+            other => panic!("expected output frame after reconnect, got {other:?}"),
+        }
+        let eof = read_ws_json_until(&mut socket, |message| {
+            matches!(message, PtyWsServerMessage::Eof { .. })
+        })
+        .await;
+        assert!(
+            matches!(eof, PtyWsServerMessage::Eof { .. }),
+            "expected EOF after reconnecting to a stopped PTY"
+        );
+
+        let close_frame = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .expect("close frame should arrive")
+            .expect("socket should yield close frame")
+            .expect("close frame should decode");
+        assert!(close_frame.is_close());
+
+        server.abort();
     }
 }

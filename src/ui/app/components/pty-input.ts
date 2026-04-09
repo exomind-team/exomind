@@ -10,17 +10,20 @@ const PTY_INPUT_ACK_TIMEOUT_MS = 500;
 const PTY_RESIZE_ACK_TIMEOUT_MS = 500;
 const PTY_INPUT_READY_TIMEOUT_MS = 1_500;
 const PTY_INPUT_IDLE_CLOSE_MS = 15_000;
-const PTY_WS_PROTOCOL_VERSION = 2;
+export const PTY_WS_PROTOCOL_VERSION = 3;
 
 type PtyInputTransportPhase = 'idle' | 'connecting' | 'ready' | 'error';
 
 interface PtyWsReadyMessage {
   type: 'ready';
   protocol_version: number;
+  read_only?: boolean;
   capabilities: {
     input_ack?: boolean;
     resize?: boolean;
     resize_ack?: boolean;
+    output_stream?: boolean;
+    output_cursor?: boolean;
   };
 }
 
@@ -120,6 +123,7 @@ function buildPtyWebSocketUrl(target: PtyInputTarget): string {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = `${url.pathname.replace(/\/$/, '')}/pty/${encodeURIComponent(target.ptyId)}/ws`;
   url.search = '';
+  url.searchParams.set('mode', 'input');
 
   const token = normalizeAuthToken(target.authToken);
   if (token) {
@@ -196,9 +200,21 @@ function formatProtocolMismatchMessage(): string {
   return '终端输入通道不可用：当前 RT 的 PTY WebSocket 协议版本不兼容，请升级 Runtime 后重试。';
 }
 
+function formatReadOnlyTransportMessage(): string {
+  return '终端输入通道不可用：当前 PTY 仅保留只读输出；请重连或恢复会话后再试。';
+}
+
 function resolveReadyMessageCompatibilityError(message: PtyWsReadyMessage): string | null {
   if (message.protocol_version !== PTY_WS_PROTOCOL_VERSION) {
     return formatProtocolMismatchMessage();
+  }
+
+  if (message.capabilities.output_stream !== true || message.capabilities.output_cursor !== true) {
+    return formatProtocolMismatchMessage();
+  }
+
+  if (message.read_only === true) {
+    return formatReadOnlyTransportMessage();
   }
 
   if (message.capabilities.input_ack !== true) {

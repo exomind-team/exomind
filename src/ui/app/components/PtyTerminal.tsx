@@ -10,6 +10,7 @@ import {
 } from '@/config/pty-terminal-preferences';
 import { log } from '@/lib/logger';
 import {
+  PTY_WS_PROTOCOL_VERSION,
   getPtyInputTransportSnapshot,
   retainPtyInputTransport,
   retryPtyInputTransport,
@@ -42,7 +43,55 @@ const READ_ONLY_INPUT_TRANSPORT_SNAPSHOT: PtyInputTransportSnapshot = {
   readOnly: false,
 };
 
+interface PtyOutputWsReadyMessage {
+  type: 'ready';
+  protocol_version: number;
+  read_only?: boolean;
+  capabilities?: {
+    output_stream?: boolean;
+    output_cursor?: boolean;
+  };
+}
+
+interface PtyOutputWsResetMessage {
+  type: 'output_reset';
+  offset: number;
+  truncated: boolean;
+}
+
+interface PtyOutputWsOutputMessage {
+  type: 'output';
+  offset: number;
+  data: string;
+}
+
+interface PtyOutputWsEofMessage {
+  type: 'eof';
+  offset: number;
+  code?: number | null;
+}
+
+interface PtyOutputWsErrorMessage {
+  type: 'error';
+  code?: string;
+  message?: string;
+}
+
+type PtyOutputWsServerMessage =
+  | PtyOutputWsReadyMessage
+  | PtyOutputWsResetMessage
+  | PtyOutputWsOutputMessage
+  | PtyOutputWsEofMessage
+  | PtyOutputWsErrorMessage;
+
 function formatInitialStreamFailureSummary(message: string): string {
+  if (
+    message.startsWith('会话加载失败：')
+    || message.includes('协议版本不兼容')
+    || message.includes('WebSocket 协议版本不兼容')
+  ) {
+    return message;
+  }
   const normalized = message.toLowerCase();
   if (normalized.includes('401') || normalized.includes('403')) {
     return '会话加载失败：RT 鉴权失败';
@@ -56,21 +105,6 @@ function formatInitialStreamFailureSummary(message: string): string {
   return '会话加载失败：请检查 RT 或稍后重试';
 }
 
-function parsePtyExitCode(data: string): number | null {
-  if (!data) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(data) as { code?: unknown };
-    return typeof payload.code === 'number' && Number.isInteger(payload.code)
-      ? payload.code
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function formatPtyProcessExitedMessage(exitCode: number | null): string {
   if (exitCode != null && exitCode !== 0) {
     return `[Process exited with code ${exitCode}]`;
@@ -78,24 +112,66 @@ function formatPtyProcessExitedMessage(exitCode: number | null): string {
   return '[Process exited]';
 }
 
-function parseSseFrame(rawFrame: string): { eventType: string; data: string | null } {
-  let eventType = 'message';
-  const dataLines: string[] = [];
+function formatOutputProtocolMismatchMessage(): string {
+  return '会话加载失败：当前 RT 的 PTY WebSocket 协议版本不兼容，请升级 Runtime 后重试。';
+}
 
-  for (const rawLine of rawFrame.split(/\r?\n/)) {
-    if (rawLine.startsWith('event:')) {
-      eventType = rawLine.slice(6).trim() || 'message';
-      continue;
-    }
-    if (rawLine.startsWith('data:')) {
-      dataLines.push(rawLine.slice(5).trim());
-    }
+function isFatalOutputErrorCode(code: string | undefined): boolean {
+  return code === 'not_found' || code === 'unauthorized' || code === 'forbidden';
+}
+
+function formatOutputServerErrorSummary(message: PtyOutputWsErrorMessage): string {
+  switch (message.code) {
+    case 'not_found':
+      return '会话加载失败：当前 PTY 不存在';
+    case 'unauthorized':
+    case 'forbidden':
+      return '会话加载失败：RT 鉴权失败';
+    default:
+      return formatInitialStreamFailureSummary(message.message?.trim() || 'transport error（终端流连接失败）');
+  }
+}
+
+function formatOutputReconnectSummary(): string {
+  return '终端输出通道重连中，输入已暂停；恢复后可继续输入。';
+}
+
+function resolveOutputReadyCompatibilityError(message: PtyOutputWsReadyMessage): string | null {
+  if (message.protocol_version !== PTY_WS_PROTOCOL_VERSION) {
+    return formatOutputProtocolMismatchMessage();
   }
 
-  return {
-    eventType,
-    data: dataLines.length > 0 ? dataLines.join('\n') : null,
-  };
+  if (
+    message.capabilities?.output_stream !== true
+    || message.capabilities?.output_cursor !== true
+  ) {
+    return formatOutputProtocolMismatchMessage();
+  }
+
+  return null;
+}
+
+function buildPtyOutputWebSocketUrl(
+  rtBaseUrl: string,
+  ptyId: string,
+  authToken?: string,
+  cursor?: number | null,
+): string {
+  const url = new URL(rtBaseUrl);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.pathname = `${url.pathname.replace(/\/$/, '')}/pty/${encodeURIComponent(ptyId)}/ws`;
+  url.search = '';
+
+  const normalizedToken = authToken?.trim();
+  url.searchParams.set('mode', 'output');
+  if (normalizedToken) {
+    url.searchParams.set('token', normalizedToken);
+  }
+  if (typeof cursor === 'number' && Number.isFinite(cursor)) {
+    url.searchParams.set('cursor', String(cursor));
+  }
+
+  return url.toString();
 }
 
 function decodePtyOutputPayload(data: string): Uint8Array {
@@ -148,7 +224,8 @@ export function PtyTerminal({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const streamAbortControllerRef = useRef<AbortController | null>(null);
+  const outputSocketRef = useRef<WebSocket | null>(null);
+  const outputCursorRef = useRef<number | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const onInitialConnectionFailureRef = useRef(onInitialConnectionFailure);
   const hasConnectedOnceRef = useRef(false);
@@ -157,6 +234,7 @@ export function PtyTerminal({
   );
   const [isStreamConnecting, setIsStreamConnecting] = useState(true);
   const [streamErrorMessage, setStreamErrorMessage] = useState<string | null>(null);
+  const [outputReconnectMessage, setOutputReconnectMessage] = useState<string | null>(null);
   const [inputTransportSnapshot, setInputTransportSnapshot] = useState<PtyInputTransportSnapshot>(
     interactive
       ? getPtyInputTransportSnapshot({ rtBaseUrl, ptyId, authToken })
@@ -182,23 +260,7 @@ export function PtyTerminal({
     if (!container) return;
     let disposed = false;
     hasConnectedOnceRef.current = false;
-
-    const markStreamReady = () => {
-      if (!disposed) {
-        hasConnectedOnceRef.current = true;
-        setStreamErrorMessage(null);
-        setIsStreamConnecting(false);
-      }
-    };
-
-    const resetStreamLoading = () => {
-      if (!disposed && !hasConnectedOnceRef.current) {
-        setStreamErrorMessage(null);
-        setIsStreamConnecting(true);
-      }
-    };
-
-    resetStreamLoading();
+    outputCursorRef.current = null;
 
     // ── Build auth helper ────────────────────────────────────
 
@@ -212,7 +274,66 @@ export function PtyTerminal({
     let pendingResizeRequestKey: string | null = null;
     let pendingResizePromise: Promise<boolean> | null = null;
     let latestResizeAttemptId = 0;
+    let outputTerminated = false;
+    let outputInputBlocked = true;
     let sendResize: ((rows: number, cols: number) => Promise<boolean>) | null = null;
+    const getCurrentInputTransportSnapshot = (): PtyInputTransportSnapshot => (
+      inputTransport?.getSnapshot() ?? READ_ONLY_INPUT_TRANSPORT_SNAPSHOT
+    );
+    const syncTerminalWritableState = (snapshot: PtyInputTransportSnapshot = getCurrentInputTransportSnapshot()) => {
+      if (terminalRef.current) {
+        terminalRef.current.options.disableStdin = (
+          !interactive
+          || outputTerminated
+          || outputInputBlocked
+          || snapshot.phase !== 'ready'
+        );
+      }
+    };
+    const clearOutputReconnectNotice = () => {
+      if (!disposed) {
+        setOutputReconnectMessage(null);
+      }
+    };
+    const showOutputReconnectNotice = () => {
+      outputInputBlocked = true;
+      syncTerminalWritableState();
+      if (!disposed) {
+        setIsStreamConnecting(false);
+        setStreamErrorMessage(null);
+        setOutputReconnectMessage(formatOutputReconnectSummary());
+      }
+    };
+    const showOutputFatalOverlay = (message: string) => {
+      outputInputBlocked = true;
+      syncTerminalWritableState();
+      if (!disposed) {
+        setOutputReconnectMessage(null);
+        setIsStreamConnecting(false);
+        setStreamErrorMessage(formatInitialStreamFailureSummary(message));
+      }
+    };
+    const markStreamReady = () => {
+      outputInputBlocked = false;
+      syncTerminalWritableState();
+      if (!disposed) {
+        hasConnectedOnceRef.current = true;
+        clearOutputReconnectNotice();
+        setStreamErrorMessage(null);
+        setIsStreamConnecting(false);
+      }
+    };
+    const resetStreamLoading = () => {
+      outputInputBlocked = true;
+      syncTerminalWritableState();
+      if (!disposed && !hasConnectedOnceRef.current) {
+        clearOutputReconnectNotice();
+        setStreamErrorMessage(null);
+        setIsStreamConnecting(true);
+      }
+    };
+
+    resetStreamLoading();
     const updateInputTransportState = (snapshot: PtyInputTransportSnapshot) => {
       if (disposed) {
         return;
@@ -223,11 +344,9 @@ export function PtyTerminal({
         pendingResizeRequestKey = null;
         pendingResizePromise = null;
       }
-      if (terminalRef.current) {
-        terminalRef.current.options.disableStdin = !interactive || snapshot.phase !== 'ready';
-        if (interactive && snapshot.phase === 'ready' && sendResize) {
-          void sendResize(terminalRef.current.rows, terminalRef.current.cols);
-        }
+      syncTerminalWritableState(snapshot);
+      if (terminalRef.current && interactive && snapshot.phase === 'ready' && sendResize) {
+        void sendResize(terminalRef.current.rows, terminalRef.current.cols);
       }
     };
     if (inputTransport) {
@@ -237,27 +356,6 @@ export function PtyTerminal({
     }
     const unsubscribeInputTransport = inputTransport?.subscribe(updateInputTransportState);
 
-    const buildHeaders = (): Record<string, string> => {
-      const headers: Record<string, string> = {};
-      if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-      }
-      return headers;
-    };
-
-    const buildStreamHeaders = (): Record<string, string> => ({
-      ...buildHeaders(),
-      Accept: 'text/event-stream',
-      'Cache-Control': 'no-cache',
-    });
-
-    const buildStreamUrl = (): string => {
-      const base = `${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/stream`;
-      if (authToken) {
-        return `${base}?token=${encodeURIComponent(authToken)}`;
-      }
-      return base;
-    };
     sendResize = (rows: number, cols: number) => {
       if (!interactive) {
         return Promise.resolve(true);
@@ -318,7 +416,7 @@ export function PtyTerminal({
       scrollback: scrollbackLinesRef.current,
       scrollOnEraseInDisplay: true,
       allowProposedApi: true,
-      disableStdin: !interactive || inputTransportSnapshot.phase !== 'ready',
+      disableStdin: !interactive || outputTerminated || outputInputBlocked || inputTransportSnapshot.phase !== 'ready',
       windowsPty: resolveWindowsPtyOptions(),
     });
 
@@ -332,7 +430,7 @@ export function PtyTerminal({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
-    terminal.options.disableStdin = !interactive || inputTransport?.getSnapshot().phase !== 'ready';
+    syncTerminalWritableState();
 
     let outputFlushTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingOutputChunks: Uint8Array[] = [];
@@ -367,9 +465,70 @@ export function PtyTerminal({
       }, OUTPUT_WRITE_BATCH_FLUSH_MS);
     };
 
+    const resetTerminalOutput = () => {
+      flushPendingOutput();
+      const resettableTerminal = terminal as Terminal & {
+        clear?: () => void;
+        reset?: () => void;
+      };
+      if (typeof resettableTerminal.clear === 'function') {
+        resettableTerminal.clear();
+        return;
+      }
+      if (typeof resettableTerminal.reset === 'function') {
+        resettableTerminal.reset();
+        return;
+      }
+      terminal.write('\x1bc');
+    };
+
+    const applyOutputReset = (offset: number, truncated: boolean) => {
+      const currentCursor = outputCursorRef.current;
+      const needsReset = currentCursor == null || truncated || currentCursor !== offset;
+      if (needsReset) {
+        resetTerminalOutput();
+      }
+      outputCursorRef.current = offset;
+    };
+
+    const applyOutputChunk = (offset: number, encodedData: string) => {
+      let nextOffset = offset;
+      let chunk = decodePtyOutputPayload(encodedData);
+      const currentCursor = outputCursorRef.current;
+
+      if (currentCursor != null) {
+        const chunkEnd = offset + chunk.length;
+        if (chunkEnd <= currentCursor) {
+          return;
+        }
+        if (offset < currentCursor) {
+          const skip = currentCursor - offset;
+          chunk = chunk.slice(skip);
+          nextOffset = currentCursor;
+        } else if (offset > currentCursor) {
+          log.warn(
+            `[PtyTerminal] output cursor gap for PTY ${ptyId}: expected ${currentCursor}, got ${offset}`,
+          );
+          resetTerminalOutput();
+          outputCursorRef.current = offset;
+        }
+      }
+
+      if (chunk.length === 0) {
+        return;
+      }
+
+      queueOutputChunk(chunk);
+      outputCursorRef.current = nextOffset + chunk.length;
+    };
+
     // ── Helper: send raw text to PTY backend ──────────────────
 
     const sendTextInput = (text: string) => {
+      const snapshot = getCurrentInputTransportSnapshot();
+      if (outputTerminated || outputInputBlocked || snapshot.phase !== 'ready') {
+        return;
+      }
       void sendPtyTextInput(inputTarget, text).then((response) => {
         if (response.ok) {
           return;
@@ -474,12 +633,12 @@ export function PtyTerminal({
       }
     };
 
-    const clearConnectedStreamController = (controller: AbortController) => {
-      if (streamAbortControllerRef.current === controller) {
-        streamAbortControllerRef.current = null;
+    const clearConnectedOutputSocket = (socket: WebSocket) => {
+      if (outputSocketRef.current === socket) {
+        outputSocketRef.current = null;
       }
-      if (streamAbortController === controller) {
-        streamAbortController = null;
+      if (outputSocket === socket) {
+        outputSocket = null;
       }
     };
 
@@ -537,12 +696,12 @@ export function PtyTerminal({
     resizeObserver.observe(container);
     resizeObserverRef.current = resizeObserver;
 
-    // ── Initial fit + resize ack THEN connect SSE ────────────
-    // Critical order: fit → dispatch resize → wait for resize result → SSE.
-    // If SSE connects before the resize result settles, the PTY can emit output
+    // ── Initial fit + resize ack THEN connect output WS ─────
+    // Critical order: fit → dispatch resize → wait for resize result → output WS.
+    // If output WS connects before the resize result settles, the PTY can emit output
     // using stale geometry and reintroduce cursor drift on backspace/wrapping.
 
-    let streamAbortController: AbortController | null = null;
+    let outputSocket: WebSocket | null = null;
 
     const finalizeInitialStreamFailure = (
       attemptId: number,
@@ -553,8 +712,7 @@ export function PtyTerminal({
       }
       if (!disposed) {
         hasConnectedOnceRef.current = true;
-        setIsStreamConnecting(false);
-        setStreamErrorMessage(formatInitialStreamFailureSummary(message));
+        showOutputFatalOverlay(message);
       }
       if (!initialFailureNotified && onInitialConnectionFailureRef.current) {
         initialFailureNotified = true;
@@ -583,9 +741,20 @@ export function PtyTerminal({
     const handleInitialStreamFailure = (
       attemptId: number,
       message: string,
-      options?: { skipRetry?: boolean },
+      options?: { skipRetry?: boolean; fatal?: boolean },
     ) => {
       if (!isLatestConnectAttempt(attemptId)) {
+        return;
+      }
+      if (hasConnectedOnceRef.current) {
+        if (options?.fatal) {
+          showOutputFatalOverlay(message);
+          invalidateConnectAttempt(attemptId);
+          return;
+        }
+        log.warn(`[PtyTerminal] PTY output reconnect failed for ${ptyId}; retrying: ${message}`);
+        invalidateConnectAttempt(attemptId);
+        scheduleConnect(STREAM_RECONNECT_DELAY_MS);
         return;
       }
       if (!options?.skipRetry && initialStreamRetryCount < INITIAL_STREAM_CONNECT_RETRY_LIMIT) {
@@ -609,38 +778,129 @@ export function PtyTerminal({
       resetStreamLoading();
       const attemptId = ++connectAttemptSerial;
       latestConnectAttemptId = attemptId;
-      const streamUrl = buildStreamUrl();
-      const controller = new AbortController();
-      streamAbortControllerRef.current = controller;
-      streamAbortController = controller;
+      const streamUrl = buildPtyOutputWebSocketUrl(
+        rtBaseUrl,
+        ptyId,
+        authToken,
+        outputCursorRef.current,
+      );
+      const socket = new WebSocket(streamUrl);
+      outputSocketRef.current = socket;
+      outputSocket = socket;
+      let sawReady = false;
       let sawEof = false;
       let connectTimedOut = false;
+      let reconnectFailureMessage: string | null = null;
       const connectTimeoutId = setTimeout(() => {
         if (disposed || latestConnectAttemptId !== attemptId) {
           return;
         }
         connectTimedOut = true;
-        controller.abort();
+        socket.close();
       }, INITIAL_STREAM_CONNECT_TIMEOUT_MS);
 
-      log.info(`[PtyTerminal] opening PTY stream ${ptyId} via ${streamUrl}`);
+      log.info(`[PtyTerminal] opening PTY output websocket ${ptyId} via ${streamUrl}`);
 
-      let response: Response;
-      try {
-        response = await fetch(streamUrl, {
-          headers: buildStreamHeaders(),
-          signal: controller.signal,
-        });
-      } catch (error) {
+      socket.onopen = () => {
+        log.info(`[PtyTerminal] PTY output websocket opened for ${ptyId}`);
+      };
+
+      socket.onmessage = (event) => {
+        let message: PtyOutputWsServerMessage;
+        try {
+          message = JSON.parse(String(event.data)) as PtyOutputWsServerMessage;
+        } catch {
+          if (!sawReady) {
+            clearTimeout(connectTimeoutId);
+            clearConnectedOutputSocket(socket);
+            handleInitialStreamFailure(attemptId, 'invalid websocket payload（终端流消息不可识别）');
+          } else {
+            log.error(
+              `[PtyTerminal] PTY output websocket sent invalid payload after ready for ${ptyId}; reconnecting`,
+            );
+            socket.close();
+          }
+          return;
+        }
+
+        if (message.type === 'ready') {
+          const compatibilityError = resolveOutputReadyCompatibilityError(message);
+          if (compatibilityError) {
+            clearTimeout(connectTimeoutId);
+            clearConnectedOutputSocket(socket);
+            handleInitialStreamFailure(attemptId, compatibilityError, { skipRetry: true, fatal: true });
+            socket.close();
+            return;
+          }
+
+          clearTimeout(connectTimeoutId);
+          sawReady = true;
+          initialStreamRetryCount = 0;
+          markStreamReady();
+          return;
+        }
+
+        if (message.type === 'output_reset') {
+          applyOutputReset(message.offset, message.truncated);
+          return;
+        }
+
+        if (message.type === 'output') {
+          applyOutputChunk(message.offset, message.data);
+          return;
+        }
+
+        if (message.type === 'eof') {
+          sawEof = true;
+          outputTerminated = true;
+          outputInputBlocked = true;
+          clearTimeout(connectTimeoutId);
+          clearOutputReconnectNotice();
+          flushPendingOutput();
+          outputCursorRef.current = Math.max(outputCursorRef.current ?? 0, message.offset);
+          syncTerminalWritableState();
+          const exitCode = typeof message.code === 'number' ? message.code : null;
+          terminal.write(`\r\n\x1b[90m${formatPtyProcessExitedMessage(exitCode)}\x1b[0m\r\n`);
+          return;
+        }
+
+        if (message.type === 'error') {
+          clearTimeout(connectTimeoutId);
+          if (!sawReady) {
+            clearConnectedOutputSocket(socket);
+            const summary = isFatalOutputErrorCode(message.code)
+              ? formatOutputServerErrorSummary(message)
+              : (message.message?.trim() || 'transport error（终端流连接失败）');
+            handleInitialStreamFailure(
+              attemptId,
+              summary,
+              isFatalOutputErrorCode(message.code)
+                ? { skipRetry: true, fatal: true }
+                : undefined,
+            );
+            return;
+          }
+
+          log.error(
+            `[PtyTerminal] PTY output websocket reported an error for ${ptyId}: ${message.message?.trim() || 'transport error'}`,
+          );
+          if (isFatalOutputErrorCode(message.code)) {
+            reconnectFailureMessage = formatOutputServerErrorSummary(message);
+          }
+          socket.close();
+        }
+      };
+
+      socket.onerror = () => {
+        // Browser WebSocket errors do not expose actionable details.
+      };
+
+      socket.onclose = () => {
         clearTimeout(connectTimeoutId);
         if (!isLatestConnectAttempt(attemptId)) {
           return;
         }
-        if (controller.signal.aborted && !connectTimedOut) {
-          invalidateConnectAttempt(attemptId);
-          return;
-        }
-        clearConnectedStreamController(controller);
+        clearConnectedOutputSocket(socket);
         if (connectTimedOut) {
           handleInitialStreamFailure(
             attemptId,
@@ -649,107 +909,38 @@ export function PtyTerminal({
           );
           return;
         }
-        handleInitialStreamFailure(attemptId, error instanceof Error ? error.message : String(error));
-        return;
-      }
-      clearTimeout(connectTimeoutId);
 
-      if (!isLatestConnectAttempt(attemptId)) {
-        try {
-          response.body?.cancel();
-        } catch {
-          // Ignore cancellation failures for superseded attempts
+        if (!sawReady) {
+          handleInitialStreamFailure(attemptId, 'websocket closed before ready（终端流连接关闭）');
+          return;
         }
-        return;
-      }
 
-      if (!response.ok || !response.body) {
-        clearConnectedStreamController(controller);
-        handleInitialStreamFailure(
-          attemptId,
-          !response.ok
-            ? `HTTP ${response.status}`
-            : 'empty stream body（终端流响应体为空）',
-        );
-        return;
-      }
-
-      initialStreamRetryCount = 0;
-      markStreamReady();
-      log.info(
-        `[PtyTerminal] PTY stream connected for ${ptyId} with HTTP ${response.status}`,
-      );
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      try {
-        while (!disposed) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split(/\r?\n\r?\n/);
-          buffer = frames.pop() ?? '';
-
-          for (const frame of frames) {
-            const { eventType, data } = parseSseFrame(frame);
-            if (data == null) {
-              continue;
-            }
-
-            if (eventType === 'output') {
-              queueOutputChunk(decodePtyOutputPayload(data));
-              continue;
-            }
-
-            if (eventType === 'eof') {
-              sawEof = true;
-              flushPendingOutput();
-              const exitCode = parsePtyExitCode(data);
-              const message = formatPtyProcessExitedMessage(exitCode);
-              terminal.write(`\r\n\x1b[90m${message}\x1b[0m\r\n`);
-            }
-          }
-        }
-      } catch (error) {
-        if (!disposed && !controller.signal.aborted) {
-          log.warn(
-            `[PtyTerminal] PTY stream reader failed for ${ptyId}: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      } finally {
-        const shouldReconnect = (
-          !disposed
-          && latestConnectAttemptId === attemptId
-          && !controller.signal.aborted
-          && !sawEof
-        );
-        try {
-          reader.releaseLock();
-        } catch {
-          // Ignore release errors during abort/dispose
-        }
-        clearConnectedStreamController(controller);
-        if (!shouldReconnect) {
+        if (disposed || sawEof) {
           invalidateConnectAttempt(attemptId);
           return;
         }
-      }
 
-      log.warn(`[PtyTerminal] PTY stream closed unexpectedly for ${ptyId}; reconnecting`);
-      invalidateConnectAttempt(attemptId);
-      scheduleConnect(STREAM_RECONNECT_DELAY_MS);
+        if (reconnectFailureMessage) {
+          outputInputBlocked = true;
+          syncTerminalWritableState();
+          clearOutputReconnectNotice();
+          setStreamErrorMessage(reconnectFailureMessage);
+          invalidateConnectAttempt(attemptId);
+          return;
+        }
+
+        log.warn(`[PtyTerminal] PTY output websocket closed unexpectedly for ${ptyId}; reconnecting`);
+        showOutputReconnectNotice();
+        invalidateConnectAttempt(attemptId);
+        scheduleConnect(STREAM_RECONNECT_DELAY_MS);
+      };
     };
 
     // Use rAF to wait for first measurable layout, then:
     // 1. fit terminal to container
     // 2. refresh terminal canvas / rows
     // 3. send resize to PTY backend
-    // 4. connect SSE only after the resize request settles
+    // 4. connect output WS only after the resize request settles
     requestAnimationFrame(() => {
       if (syncTerminalLayout()) {
         // Auto-focus the terminal only when layout is ready
@@ -777,9 +968,9 @@ export function PtyTerminal({
         resizeObserverRef.current = null;
       }
 
-      if (streamAbortControllerRef.current) {
-        streamAbortControllerRef.current.abort();
-        streamAbortControllerRef.current = null;
+      if (outputSocketRef.current) {
+        outputSocketRef.current.close();
+        outputSocketRef.current = null;
       }
       if (connectTimer) {
         clearTimeout(connectTimer);
@@ -789,9 +980,9 @@ export function PtyTerminal({
         clearTimeout(layoutFallbackTimer);
         layoutFallbackTimer = null;
       }
-      if (streamAbortController) {
-        streamAbortController.abort();
-        streamAbortController = null;
+      if (outputSocket) {
+        outputSocket.close();
+        outputSocket = null;
       }
       flushPendingOutput();
 
@@ -819,6 +1010,14 @@ export function PtyTerminal({
           <p className="text-sm text-[#FCA5A5]">
             {streamErrorMessage}
           </p>
+        </div>
+      ) : null}
+      {!isStreamConnecting && !streamErrorMessage && outputReconnectMessage ? (
+        <div
+          data-testid="pty-terminal-output-reconnecting"
+          className="absolute left-3 right-3 top-3 z-20 rounded border border-[#0F766E] bg-[#1C1917]/95 px-3 py-2 text-xs text-[#99F6E4]"
+        >
+          <p>{outputReconnectMessage}</p>
         </div>
       ) : null}
       {!isStreamConnecting && !streamErrorMessage && interactive && inputTransportSnapshot.phase === 'error' ? (

@@ -27,10 +27,65 @@ fn clamp_output_buffer_limit_bytes(value: usize) -> usize {
     value.clamp(MIN_OUTPUT_BUFFER_LIMIT_BYTES, MAX_OUTPUT_BUFFER_LIMIT_BYTES)
 }
 
-fn trim_output_buffer_to_limit(buffer: &mut Vec<u8>, limit_bytes: usize) {
-    if buffer.len() > limit_bytes {
-        let drain = buffer.len() - limit_bytes;
-        buffer.drain(..drain);
+#[derive(Debug, Clone, Default)]
+pub struct PtyOutputReplaySnapshot {
+    pub offset: u64,
+    pub data: Vec<u8>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PtyOutputBufferState {
+    start_offset: u64,
+    data: Vec<u8>,
+    eof_offset: Option<u64>,
+}
+
+impl PtyOutputBufferState {
+    fn end_offset(&self) -> u64 {
+        self.start_offset.saturating_add(self.data.len() as u64)
+    }
+}
+
+fn trim_output_buffer_to_limit(buffer: &mut PtyOutputBufferState, limit_bytes: usize) {
+    if buffer.data.len() > limit_bytes {
+        let drain = buffer.data.len() - limit_bytes;
+        buffer.data.drain(..drain);
+        buffer.start_offset = buffer.start_offset.saturating_add(drain as u64);
+    }
+}
+
+fn slice_output_replay_snapshot(
+    buffer: &PtyOutputBufferState,
+    cursor: Option<u64>,
+) -> PtyOutputReplaySnapshot {
+    let start_offset = buffer.start_offset;
+    let end_offset = start_offset.saturating_add(buffer.data.len() as u64);
+
+    match cursor {
+        None => PtyOutputReplaySnapshot {
+            offset: start_offset,
+            data: buffer.data.clone(),
+            truncated: start_offset > 0,
+        },
+        Some(cursor) if cursor <= start_offset => PtyOutputReplaySnapshot {
+            offset: start_offset,
+            data: buffer.data.clone(),
+            truncated: cursor < start_offset,
+        },
+        Some(cursor) if cursor >= end_offset => PtyOutputReplaySnapshot {
+            offset: end_offset,
+            data: Vec::new(),
+            truncated: false,
+        },
+        Some(cursor) => {
+            let skip = (cursor - start_offset) as usize;
+            PtyOutputReplaySnapshot {
+                offset: cursor,
+                data: buffer.data[skip..].to_vec(),
+                truncated: false,
+            }
+        }
     }
 }
 
@@ -58,9 +113,9 @@ pub enum PtyError {
 #[derive(Debug, Clone)]
 pub enum PtyOutputMsg {
     /// Raw bytes from the PTY process.
-    Data(Vec<u8>),
+    Data { offset: u64, data: Vec<u8> },
     /// The PTY process has exited / reader hit EOF.
-    Eof,
+    Eof { offset: u64 },
 }
 
 // ---------------------------------------------------------------------------
@@ -229,13 +284,14 @@ struct PtyInstance {
     /// Monotonic PTY activity clock used for idle -> waiting_input detection.
     last_activity_at: Arc<StdMutex<Instant>>,
     /// Scrollback buffer — stores recent output for replay on SSE reconnect.
-    output_buffer: Arc<Mutex<Vec<u8>>>,
+    output_buffer: Arc<Mutex<PtyOutputBufferState>>,
     /// Broadcast sender — every SSE consumer subscribes here for live data.
     output_tx: broadcast::Sender<PtyOutputMsg>,
 }
 
 struct TranscriptWriter {
     path: PathBuf,
+    eof_path: PathBuf,
     file: File,
 }
 
@@ -376,7 +432,7 @@ impl PtyManager {
         };
 
         // Create output buffering infrastructure
-        let output_buffer = Arc::new(Mutex::new(Vec::new()));
+        let output_buffer = Arc::new(Mutex::new(PtyOutputBufferState::default()));
         let last_activity_at = Arc::new(StdMutex::new(Instant::now()));
         let (output_tx, _) = broadcast::channel::<PtyOutputMsg>(1024);
         let transcript_writer = self
@@ -425,7 +481,7 @@ impl PtyManager {
         pty_id: String,
         mut reader: Box<dyn Read + Send>,
         activity: Arc<StdMutex<Instant>>,
-        buffer: Arc<Mutex<Vec<u8>>>,
+        buffer: Arc<Mutex<PtyOutputBufferState>>,
         scrollback_limit_bytes: Arc<AtomicUsize>,
         tx: broadcast::Sender<PtyOutputMsg>,
         mut transcript_writer: Option<TranscriptWriter>,
@@ -435,7 +491,16 @@ impl PtyManager {
             match reader.read(&mut buf) {
                 Ok(0) => {
                     // EOF
-                    let _ = tx.send(PtyOutputMsg::Eof);
+                    let offset = {
+                        let mut b = buffer.blocking_lock();
+                        let offset = b.end_offset();
+                        b.eof_offset = Some(offset);
+                        offset
+                    };
+                    if let Some(writer) = transcript_writer.as_ref() {
+                        persist_transcript_completion_marker(writer, offset);
+                    }
+                    let _ = tx.send(PtyOutputMsg::Eof { offset });
                     break;
                 }
                 Ok(n) => {
@@ -455,22 +520,33 @@ impl PtyManager {
                         transcript_writer = None;
                     }
                     // Append to scrollback buffer
-                    {
+                    let offset = {
                         let mut b = buffer.blocking_lock();
-                        b.extend_from_slice(&data);
+                        let offset = b.end_offset();
+                        b.data.extend_from_slice(&data);
                         trim_output_buffer_to_limit(
                             &mut b,
                             clamp_output_buffer_limit_bytes(
                                 scrollback_limit_bytes.load(Ordering::Relaxed),
                             ),
                         );
-                    }
+                        offset
+                    };
                     Self::record_activity(&activity);
                     // Broadcast to SSE consumers (ignore if no receivers)
-                    let _ = tx.send(PtyOutputMsg::Data(data));
+                    let _ = tx.send(PtyOutputMsg::Data { offset, data });
                 }
                 Err(_) => {
-                    let _ = tx.send(PtyOutputMsg::Eof);
+                    let offset = {
+                        let mut b = buffer.blocking_lock();
+                        let offset = b.end_offset();
+                        b.eof_offset = Some(offset);
+                        offset
+                    };
+                    if let Some(writer) = transcript_writer.as_ref() {
+                        persist_transcript_completion_marker(writer, offset);
+                    }
+                    let _ = tx.send(PtyOutputMsg::Eof { offset });
                     break;
                 }
             }
@@ -575,7 +651,15 @@ impl PtyManager {
     pub async fn subscribe_output(
         &self,
         id: &str,
-    ) -> Result<(Vec<u8>, broadcast::Receiver<PtyOutputMsg>), PtyError> {
+        cursor: Option<u64>,
+    ) -> Result<
+        (
+            PtyOutputReplaySnapshot,
+            Option<u64>,
+            broadcast::Receiver<PtyOutputMsg>,
+        ),
+        PtyError,
+    > {
         // Extract Arc clones while holding the instances lock, then drop it
         // before awaiting the output_buffer lock. Holding both locks across
         // an await would make the future !Send (PtyInstance contains
@@ -591,22 +675,48 @@ impl PtyManager {
             )
         };
 
-        let mut buffer_snapshot = output_buffer.lock().await.clone();
-        trim_output_buffer_to_limit(&mut buffer_snapshot, self.scrollback_limit_bytes());
-        Ok((buffer_snapshot, rx))
+        let buffer_snapshot = output_buffer.lock().await.clone();
+        Ok((
+            slice_output_replay_snapshot(&buffer_snapshot, cursor),
+            buffer_snapshot.eof_offset,
+            rx,
+        ))
     }
 
-    pub async fn load_persisted_output(&self, id: &str) -> Result<Option<Vec<u8>>, PtyError> {
+    pub async fn load_persisted_output(
+        &self,
+        id: &str,
+        cursor: Option<u64>,
+    ) -> Result<Option<PtyOutputReplaySnapshot>, PtyError> {
         let Some(path) = self.transcript_path(id) else {
             return Ok(None);
         };
         let limit_bytes = self.scrollback_limit_bytes();
 
-        tokio::task::spawn_blocking(move || read_transcript_tail(&path, limit_bytes))
+        tokio::task::spawn_blocking(move || read_transcript_tail(&path, limit_bytes, cursor))
             .await
             .map_err(|error| PtyError::SpawnFailed {
                 reason: format!("load_persisted_output task failed: {error}"),
             })?
+    }
+
+    pub async fn load_completed_output(
+        &self,
+        id: &str,
+        cursor: Option<u64>,
+    ) -> Result<Option<PtyOutputReplaySnapshot>, PtyError> {
+        let Some(path) = self.transcript_path(id) else {
+            return Ok(None);
+        };
+        let limit_bytes = self.scrollback_limit_bytes();
+
+        tokio::task::spawn_blocking(move || {
+            read_completed_transcript_tail(&path, limit_bytes, cursor)
+        })
+        .await
+        .map_err(|error| PtyError::SpawnFailed {
+            reason: format!("load_completed_output task failed: {error}"),
+        })?
     }
 
     /// Resize the PTY terminal.
@@ -1358,13 +1468,29 @@ fn truncate_unicode_preview_text(value: Option<&str>) -> Option<String> {
 }
 
 fn create_transcript_writer(pty_id: &str, path: PathBuf) -> Option<TranscriptWriter> {
+    let eof_path = transcript_completion_marker_path(&path);
+    if let Err(error) = std::fs::remove_file(&eof_path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(
+            pty_id = %pty_id,
+            path = %eof_path.display(),
+            error = %error,
+            "failed to clear PTY transcript completion marker"
+        );
+    }
+
     match OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&path)
     {
-        Ok(file) => Some(TranscriptWriter { path, file }),
+        Ok(file) => Some(TranscriptWriter {
+            path,
+            eof_path,
+            file,
+        }),
         Err(error) => {
             tracing::warn!(
                 pty_id = %pty_id,
@@ -1377,7 +1503,25 @@ fn create_transcript_writer(pty_id: &str, path: PathBuf) -> Option<TranscriptWri
     }
 }
 
-fn read_transcript_tail(path: &Path, limit_bytes: usize) -> Result<Option<Vec<u8>>, PtyError> {
+fn transcript_completion_marker_path(path: &Path) -> PathBuf {
+    path.with_extension("eof")
+}
+
+fn persist_transcript_completion_marker(writer: &TranscriptWriter, offset: u64) {
+    if let Err(error) = std::fs::write(&writer.eof_path, offset.to_string()) {
+        tracing::warn!(
+            path = %writer.eof_path.display(),
+            error = %error,
+            "failed to persist PTY transcript completion marker"
+        );
+    }
+}
+
+fn read_transcript_tail(
+    path: &Path,
+    limit_bytes: usize,
+    cursor: Option<u64>,
+) -> Result<Option<PtyOutputReplaySnapshot>, PtyError> {
     if !path.is_file() {
         return Ok(None);
     }
@@ -1389,7 +1533,47 @@ fn read_transcript_tail(path: &Path, limit_bytes: usize) -> Result<Option<Vec<u8
 
     let mut data = Vec::with_capacity((file_len - start) as usize);
     file.read_to_end(&mut data)?;
-    Ok(Some(data))
+
+    let snapshot = match cursor {
+        None => PtyOutputReplaySnapshot {
+            offset: start,
+            data,
+            truncated: start > 0,
+        },
+        Some(cursor) if cursor <= start => PtyOutputReplaySnapshot {
+            offset: start,
+            data,
+            truncated: cursor < start,
+        },
+        Some(cursor) if cursor >= file_len => PtyOutputReplaySnapshot {
+            offset: file_len,
+            data: Vec::new(),
+            truncated: false,
+        },
+        Some(cursor) => {
+            let skip = (cursor - start) as usize;
+            PtyOutputReplaySnapshot {
+                offset: cursor,
+                data: data[skip..].to_vec(),
+                truncated: false,
+            }
+        }
+    };
+
+    Ok(Some(snapshot))
+}
+
+fn read_completed_transcript_tail(
+    path: &Path,
+    limit_bytes: usize,
+    cursor: Option<u64>,
+) -> Result<Option<PtyOutputReplaySnapshot>, PtyError> {
+    let eof_path = transcript_completion_marker_path(path);
+    if !eof_path.is_file() {
+        return Ok(None);
+    }
+
+    read_transcript_tail(path, limit_bytes, cursor)
 }
 
 fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
@@ -2010,12 +2194,68 @@ mod tests {
             .collect::<Vec<_>>();
         fs::write(&transcript_path, &data).unwrap();
 
-        let replay = read_transcript_tail(&transcript_path, requested_limit)
+        let replay = read_transcript_tail(&transcript_path, requested_limit, None)
             .unwrap()
             .expect("tail should exist");
 
-        assert_eq!(replay.len(), expected_limit);
-        assert_eq!(replay, data[data.len() - expected_limit..].to_vec());
+        assert_eq!(replay.offset, (data.len() - expected_limit) as u64);
+        assert!(replay.truncated);
+        assert_eq!(replay.data.len(), expected_limit);
+        assert_eq!(replay.data, data[data.len() - expected_limit..].to_vec());
+    }
+
+    #[test]
+    fn slice_output_replay_snapshot_clamps_future_cursor_to_buffer_end() {
+        let snapshot = slice_output_replay_snapshot(
+            &PtyOutputBufferState {
+                start_offset: 10,
+                data: b"hello".to_vec(),
+                eof_offset: None,
+            },
+            Some(999),
+        );
+
+        assert_eq!(snapshot.offset, 15);
+        assert!(snapshot.data.is_empty());
+        assert!(!snapshot.truncated);
+    }
+
+    #[test]
+    fn read_transcript_tail_clamps_future_cursor_to_file_end() {
+        let dir = tempdir().unwrap();
+        let transcript_path = dir.path().join("cursor-tail.log");
+        fs::write(&transcript_path, b"abcdef").unwrap();
+
+        let replay = read_transcript_tail(&transcript_path, 1024, Some(999))
+            .unwrap()
+            .expect("tail should exist");
+
+        assert_eq!(replay.offset, 6);
+        assert!(replay.data.is_empty());
+        assert!(!replay.truncated);
+    }
+
+    #[test]
+    fn read_completed_transcript_tail_requires_completion_marker() {
+        let dir = tempdir().unwrap();
+        let transcript_path = dir.path().join("completed-tail.log");
+        fs::write(&transcript_path, b"abcdef").unwrap();
+
+        assert!(
+            read_completed_transcript_tail(&transcript_path, 1024, None)
+                .unwrap()
+                .is_none()
+        );
+
+        let eof_path = transcript_completion_marker_path(&transcript_path);
+        fs::write(&eof_path, b"6").unwrap();
+
+        let replay = read_completed_transcript_tail(&transcript_path, 1024, None)
+            .unwrap()
+            .expect("completed tail should exist");
+        assert_eq!(replay.offset, 0);
+        assert_eq!(replay.data, b"abcdef".to_vec());
+        assert!(!replay.truncated);
     }
 
     #[test]
