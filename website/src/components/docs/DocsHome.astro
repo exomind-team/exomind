@@ -1,0 +1,282 @@
+---
+import { ArrowRight, ArrowUpRight } from "lucide-static";
+import LucideIcon from "../LucideIcon.astro";
+import DocsSidebar from "./DocsSidebar.astro";
+import DocsToc from "./DocsToc.astro";
+import {
+  getDocsPagePath,
+  getDocsResources,
+  getDocsSections,
+  type DocsLocale,
+} from "../../lib/docs";
+
+interface Props {
+  lang: DocsLocale;
+}
+
+const { lang } = Astro.props;
+const sections = getDocsSections(lang);
+const resources = getDocsResources(lang);
+const allPages = sections.flatMap((section) => section.items);
+const copy =
+  lang === "zh"
+    ? {
+        eyebrow: "Documentation / 文档",
+        title: "文档",
+        lead:
+          "这套文档围绕外心的核心使用方式来写：记录、语音输入、时间块、任务系统、设备连接与排障。它不是落地页，也不是快速导航页，而是系统说明这些能力应该怎样被使用、又怎样彼此配合。",
+        introTitle: "总体介绍",
+        introLead:
+          "起步页负责第一次上手；这里负责系统说明，帮助你理解记录、时间块、任务系统各自解决什么问题、分别覆盖哪些页面，以及遇到边界时应当去哪里继续看。",
+        introCards: [
+          {
+            title: "阅读方式",
+            description: "按章节系统阅读，或在真实使用中回来看某一章都可以。",
+          },
+          {
+            title: "写作方式",
+            description: "优先回答使用问题，也会写清记录、时间块与任务之间怎么互相承接。",
+          },
+          {
+            title: "边界判断",
+            description: "版本变化和当前能力边界，以版本日志与发布记录为准。",
+          },
+        ],
+        chaptersTitle: "各章简介",
+        chaptersLead: "下面按章节说明每一部分的重点，以及它包含的具体页面。",
+        chapterLabel: "章节",
+        chapterCount: "篇页面",
+        chapterCta: "阅读本章页面",
+        resourcesTitle: "版本与项目入口",
+        resourcesLead: "这些链接不属于正文指南，但通常会和文档一起使用。",
+        factPages: "篇正文",
+        factSections: "个章节",
+        factResources: "个附加入口",
+      }
+    : {
+        eyebrow: "Documentation",
+        title: "Docs",
+        lead:
+          "These docs explain how ExoMind is meant to be used in practice: capture, voice input, time blocks, the task system, device connection, and troubleshooting. This page is a documentation index, not another landing page or quick-start router.",
+        introTitle: "Overview",
+        introLead:
+          "The standalone getting-started page handles first use. This page is for structured reading: what capture, time blocks, and the task system each solve, which guides belong to them, and where to go when you need release boundaries or project context.",
+        introCards: [
+          {
+            title: "How to read it",
+            description: "Read chapter by chapter, or return to one chapter when a real task sends you back here.",
+          },
+          {
+            title: "How it is written",
+            description: "The guides prioritize real usage questions and explain how capture, time blocks, and tasks connect.",
+          },
+          {
+            title: "Where boundaries live",
+            description: "Current release boundaries and changes are defined by the changelog and release records.",
+          },
+        ],
+        chaptersTitle: "Chapter Guide",
+        chaptersLead: "This index explains what each chapter is responsible for and which pages it includes.",
+        chapterLabel: "Chapter",
+        chapterCount: "pages",
+        chapterCta: "Open chapter pages",
+        resourcesTitle: "Version & Project Links",
+        resourcesLead: "These links are not core guides, but they are part of the normal docs workflow.",
+        factPages: "guides",
+        factSections: "chapters",
+        factResources: "resource links",
+      };
+const tocItems = [
+  { id: "docs-home-overview", title: copy.introTitle, index: 1 },
+  ...sections.map((section, index) => ({
+    id: `docs-home-${section.id}`,
+    title: section.title,
+    index: index + 2,
+  })),
+  {
+    id: "docs-home-resources",
+    title: copy.resourcesTitle,
+    index: sections.length + 2,
+  },
+];
+---
+
+<section class="docs-shell pt-16">
+  <div class="docs-shell-grid">
+    <DocsSidebar lang={lang} activeRoot />
+
+    <div class="docs-shell-main">
+      <div class="docs-shell-content">
+        <div class="docs-article-layout">
+          <article class="docs-article-main">
+            <header class="border-b border-stone-200 pb-10 dark:border-stone-800">
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+                {copy.eyebrow}
+              </p>
+              <h1 class="mt-4 text-4xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+                {copy.title}
+              </h1>
+              <p class="mt-4 max-w-4xl text-base leading-relaxed text-stone-500 dark:text-stone-400">
+                {copy.lead}
+              </p>
+              <div class="mt-6 flex flex-wrap gap-3">
+                <div class="inline-flex items-baseline gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
+                  <p class="text-lg font-semibold text-stone-900 dark:text-stone-50">{allPages.length}</p>
+                  <p class="text-sm text-stone-500 dark:text-stone-400">{copy.factPages}</p>
+                </div>
+                <div class="inline-flex items-baseline gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
+                  <p class="text-lg font-semibold text-stone-900 dark:text-stone-50">{sections.length}</p>
+                  <p class="text-sm text-stone-500 dark:text-stone-400">{copy.factSections}</p>
+                </div>
+                <div class="inline-flex items-baseline gap-2 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
+                  <p class="text-lg font-semibold text-stone-900 dark:text-stone-50">{resources.length}</p>
+                  <p class="text-sm text-stone-500 dark:text-stone-400">{copy.factResources}</p>
+                </div>
+              </div>
+            </header>
+
+            <div class="space-y-12 pt-10">
+              <section
+                id="docs-home-overview"
+                class="scroll-mt-28 border-b border-stone-200 pb-10 dark:border-stone-800"
+              >
+                <div class="max-w-4xl">
+                  <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+                    {copy.introTitle}
+                  </p>
+                  <p class="mt-3 text-base leading-relaxed text-stone-500 dark:text-stone-400">
+                    {copy.introLead}
+                  </p>
+                </div>
+
+                <div class="mt-6 grid gap-4 md:grid-cols-3">
+                  {copy.introCards.map((card) => (
+                    <article class="rounded-3xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-900">
+                      <h2 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{card.title}</h2>
+                      <p class="mt-3 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                        {card.description}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section class="space-y-6">
+                <div class="max-w-4xl">
+                  <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+                    {copy.chaptersTitle}
+                  </p>
+                  <p class="mt-3 text-base leading-relaxed text-stone-500 dark:text-stone-400">
+                    {copy.chaptersLead}
+                  </p>
+                </div>
+
+                {sections.map((section, sectionIndex) => (
+                  <article
+                    id={`docs-home-${section.id}`}
+                    class="scroll-mt-28 rounded-[32px] border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900 md:p-8"
+                  >
+                    <div class="flex flex-col gap-4 border-b border-stone-200 pb-6 dark:border-stone-800 lg:flex-row lg:items-end lg:justify-between">
+                      <div class="max-w-3xl">
+                        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+                          {copy.chapterLabel} {String(sectionIndex + 1).padStart(2, "0")}
+                        </p>
+                        <h2 class="mt-3 text-2xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+                          {section.title}
+                        </h2>
+                        <p class="mt-3 text-base leading-relaxed text-stone-500 dark:text-stone-400">
+                          {section.description}
+                        </p>
+                      </div>
+
+                      <div class="rounded-full border border-stone-200 px-3 py-1.5 text-sm text-stone-500 dark:border-stone-700 dark:text-stone-400">
+                        <span class="font-semibold text-stone-900 dark:text-stone-50">{section.items.length}</span>{" "}
+                        {copy.chapterCount}
+                      </div>
+                    </div>
+
+                    <div class="mt-6 divide-y divide-stone-200 dark:divide-stone-800">
+                      {section.items.map((item) => (
+                        <a
+                          href={getDocsPagePath(lang, item.slug)}
+                          class="group grid gap-4 py-5 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+                        >
+                          <div class="min-w-0">
+                            <h3 class="text-lg font-semibold text-stone-900 transition-colors group-hover:text-brand dark:text-stone-50">
+                              {item.title}
+                            </h3>
+                            <p class="mt-2 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                              {item.summary}
+                            </p>
+                            <p class="mt-2 text-sm leading-relaxed text-stone-400 dark:text-stone-500">
+                              {item.description}
+                            </p>
+                          </div>
+
+                          <span class="inline-flex h-fit items-center gap-2 rounded-full border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition-colors group-hover:border-brand/30 group-hover:text-brand dark:border-stone-700 dark:text-stone-300 dark:group-hover:border-brand/30 dark:group-hover:text-brand">
+                            <span>{copy.chapterCta}</span>
+                            <LucideIcon icon={ArrowRight} size={16} class="h-4 w-4 shrink-0" />
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </section>
+
+              <section
+                id="docs-home-resources"
+                class="scroll-mt-28 border-t border-stone-200 pt-10 dark:border-stone-800"
+              >
+                <div class="max-w-4xl">
+                  <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+                    {copy.resourcesTitle}
+                  </p>
+                  <p class="mt-3 text-base leading-relaxed text-stone-500 dark:text-stone-400">
+                    {copy.resourcesLead}
+                  </p>
+                </div>
+
+                <div class="mt-6 divide-y divide-stone-200 border-y border-stone-200 dark:divide-stone-800 dark:border-stone-800">
+                  {resources.map((resource) => (
+                    <a
+                      href={resource.href}
+                      target={resource.external ? "_blank" : undefined}
+                      rel={resource.external ? "noopener noreferrer" : undefined}
+                      class="group grid gap-4 py-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+                    >
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand">
+                            {resource.tag}
+                          </span>
+                          <h3 class="text-lg font-semibold text-stone-900 transition-colors group-hover:text-brand dark:text-stone-50">
+                            {resource.title}
+                          </h3>
+                        </div>
+                        <p class="mt-3 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                          {resource.description}
+                        </p>
+                      </div>
+
+                      <span class="inline-flex h-fit items-center gap-2 rounded-full border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 transition-colors group-hover:border-brand/30 group-hover:text-brand dark:border-stone-700 dark:text-stone-300 dark:group-hover:border-brand/30 dark:group-hover:text-brand">
+                        <span>{resource.cta}</span>
+                        <LucideIcon
+                          icon={resource.external ? ArrowUpRight : ArrowRight}
+                          size={16}
+                          class="h-4 w-4 shrink-0"
+                        />
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </article>
+
+          <DocsToc lang={lang} items={tocItems} />
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

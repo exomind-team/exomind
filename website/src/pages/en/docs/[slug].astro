@@ -1,0 +1,52 @@
+---
+import DocsShell from "../../../components/docs/DocsShell.astro";
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+import { getDocsPages, getDocsPage, type DocSlug } from "../../../lib/docs";
+
+export function getStaticPaths() {
+  return getDocsPages("en").map((page) => ({
+    params: { slug: page.slug },
+  }));
+}
+
+const slug = Astro.params.slug as DocSlug;
+const page = getDocsPage("en", slug);
+const missingPageCopy = {
+  title: "Documentation Not Found",
+  description: "The requested page is not part of the current docs center.",
+};
+
+if (!page) {
+  Astro.response.status = 404;
+}
+---
+
+<BaseLayout title={page?.title ?? missingPageCopy.title} description={page?.description ?? missingPageCopy.description}>
+  {page ? (
+    <DocsShell lang="en" page={page} />
+  ) : (
+    <section class="pt-32 pb-24">
+      <div class="section-container">
+        <div class="mx-auto max-w-2xl rounded-[32px] border border-stone-200 bg-white p-8 shadow-sm dark:border-stone-800 dark:bg-stone-900 md:p-10">
+          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+            Documentation
+          </p>
+          <h1 class="mt-4 text-3xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+            This page is no longer part of the docs center
+          </h1>
+          <p class="mt-4 text-base leading-relaxed text-stone-500 dark:text-stone-400">
+            The docs center now keeps only task-based guides. This URL is no longer maintained as a docs page.
+          </p>
+          <div class="mt-8 flex flex-wrap gap-3">
+            <a href="/en/docs" class="btn-primary px-6 py-3 text-base">
+              Back to docs
+            </a>
+            <a href="/en/getting-started" class="btn-secondary px-6 py-3 text-base">
+              Open standalone getting started
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  )}
+</BaseLayout>

@@ -17,9 +17,106 @@
   }
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 180ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: center top;
+  }
+
+  ::view-transition-old(root) {
+    animation-name: exomind-page-out;
+  }
+
+  ::view-transition-new(root) {
+    animation-name: exomind-page-in;
+  }
+}
+
+@keyframes exomind-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes exomind-page-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+    filter: blur(4px);
+  }
+}
+
 @layer components {
   .section-container {
     @apply mx-auto max-w-6xl px-6 lg:px-8;
+  }
+
+  .docs-shell {
+    @apply w-full border-t border-stone-200/70 bg-stone-50 dark:border-stone-800/70 dark:bg-stone-950;
+  }
+
+  .docs-shell-grid {
+    @apply grid w-full lg:grid-cols-[300px_minmax(0,1fr)];
+  }
+
+  .docs-shell-sidebar {
+    @apply border-b border-stone-200 bg-white/90 px-5 py-6 dark:border-stone-800 dark:bg-stone-950/90 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:overflow-y-auto lg:border-b-0 lg:border-r;
+  }
+
+  .docs-shell-main {
+    @apply min-w-0 bg-stone-50 dark:bg-stone-950;
+  }
+
+  .docs-shell-content {
+    @apply min-w-0 px-6 py-8 md:px-10 md:py-10 xl:px-14 xl:py-12;
+  }
+
+  .docs-article-layout {
+    @apply grid min-w-0 gap-10 xl:grid-cols-[minmax(0,1fr)_240px] 2xl:grid-cols-[minmax(0,1fr)_260px];
+  }
+
+  .docs-article-main {
+    @apply min-w-0 max-w-none;
+  }
+
+  .docs-article-toc {
+    @apply hidden xl:block;
+  }
+
+  .docs-article-toc-card {
+    @apply sticky top-24 border-l border-stone-200 pl-5 dark:border-stone-800;
+  }
+
+  .docs-toc-link {
+    @apply flex items-start gap-3 py-1.5 text-sm text-stone-500 transition-colors hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-50;
+  }
+
+  .docs-toc-link[aria-current='location'] {
+    @apply font-medium text-stone-900 dark:text-stone-50;
+  }
+
+  .docs-toc-index {
+    @apply mt-0.5 shrink-0 text-[11px] font-semibold uppercase tracking-[0.2em] text-stone-400 dark:text-stone-500;
+  }
+
+  .docs-toc-link[aria-current='location'] .docs-toc-index {
+    @apply text-brand;
   }
 
   .heading-display {

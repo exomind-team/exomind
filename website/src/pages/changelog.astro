@@ -1,52 +1,14 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import DownloadPageContent from '../components/DownloadPageContent.astro';
+import ChangelogTimeline from '../components/ChangelogTimeline.astro';
 import { useTranslations } from '../i18n';
 
 const t = useTranslations('zh');
-
-const changelog = [
-  {
-    version: 'v0.3.2',
-    date: '2026-02-22',
-    changes: [
-      { type: '新功能', text: '桌面端更新适配' },
-      { type: '新功能', text: '命令面板首期落地' },
-      { type: '修复', text: '同步命令面板滚动' },
-    ],
-  },
-  {
-    version: 'v0.3.1',
-    date: '2026-02-15',
-    changes: [
-      { type: '新功能', text: '事件日志 UI 重构' },
-      { type: '新功能', text: '时间块计时器' },
-      { type: '优化', text: '性能优化' },
-    ],
-  },
-  {
-    version: 'v0.3.0',
-    date: '2026-02-01',
-    changes: [
-      { type: '新功能', text: 'AI 智能体框架' },
-      { type: '新功能', text: '本地存储引擎' },
-      { type: '新功能', text: '全平台构建支持' },
-    ],
-  },
-];
-
-function tagClasses(type: string) {
-  switch (type) {
-    case '新功能': return 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300';
-    case '修复': return 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
-    case '优化': return 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300';
-    default: return 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400';
-  }
-}
 ---
 
 <BaseLayout title={t('changelog.title')}>
-  {/* Hero */}
-  <section class="relative overflow-hidden pt-32 pb-16">
+  <section class="relative overflow-hidden pb-16 pt-32">
     <div class="section-container relative z-10">
       <div class="mx-auto max-w-3xl text-center">
         <h1 class="heading-display text-4xl leading-tight text-stone-900 sm:text-5xl lg:text-6xl dark:text-stone-50">
@@ -62,39 +24,6 @@ function tagClasses(type: string) {
     </div>
   </section>
 
-  {/* Timeline */}
-  <section class="pb-24">
-    <div class="section-container">
-      <div class="mx-auto max-w-3xl">
-        <div class="relative border-l-2 border-brand/20 pl-8 dark:border-brand/30">
-          {changelog.map((release, i) => (
-            <div class:list={['relative', i > 0 ? 'mt-12' : '']}>
-              {/* Dot on timeline */}
-              <div class="absolute -left-[calc(2rem+5px)] top-0 h-3 w-3 rounded-full border-2 border-brand bg-white dark:bg-stone-950"></div>
-
-              {/* Version + Date */}
-              <div class="flex flex-wrap items-center gap-3">
-                <span class="rounded-full bg-brand px-3 py-1 text-sm font-medium text-white">
-                  {release.version}
-                </span>
-                <span class="text-sm text-stone-400">{release.date}</span>
-              </div>
-
-              {/* Changes */}
-              <div class="mt-4 space-y-3">
-                {release.changes.map((change) => (
-                  <div class="card flex items-start gap-3 p-4">
-                    <span class:list={['inline-flex shrink-0 rounded-md px-2 py-0.5 text-xs font-medium', tagClasses(change.type)]}>
-                      {change.type}
-                    </span>
-                    <span class="text-sm text-stone-700 dark:text-stone-300">{change.text}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  </section>
+  <DownloadPageContent lang="zh" showHero={false} />
+  <ChangelogTimeline lang="zh" />
 </BaseLayout>

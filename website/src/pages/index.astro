@@ -1,31 +1,116 @@
 ---
+import { Dot, Sparkles } from "lucide-static";
 import BaseLayout from '../layouts/BaseLayout.astro';
+import LucideIcon from '../components/LucideIcon.astro';
+import SmartDownloadLink from '../components/SmartDownloadLink.astro';
 import { getLocalizedPath, useTranslations } from '../i18n';
 
 const t = useTranslations('zh');
-const downloadPath = getLocalizedPath('/download', 'zh');
 const featuresPath = getLocalizedPath('/features', 'zh');
+const versionLogPath = getLocalizedPath('/changelog', 'zh');
+const heroHighlights = ['外化心智', '持续运行', '多端互联'];
+const stableDownloadLabel = '立即下载';
+
+const capabilityLayers = [
+  {
+    eyebrow: '成长层',
+    title: '把经历沉淀成可继续的上下文',
+    description:
+      '语音记录、事件日志、时间块与任务协同工作，让真实发生过的事、正在做的事和下一步行动连起来。',
+    icon: 'growth',
+    points: [
+      '语音记录与事件日志保留原始语境',
+      '时间块与任务把注意力转换成可推进的节奏',
+    ],
+  },
+  {
+    eyebrow: '运行层',
+    title: 'Agent由你调度，而非包办代替',
+    description:
+      '终端工作台与自定义信号网络把 Agent 能力接入真实工作流，但预算、权限与能力边界始终由你设定。',
+    icon: 'runtime',
+    points: [
+      '终端工作台承接真实操作链路',
+      '信号网络把自动化接入个人成长场景',
+    ],
+  },
+  {
+    eyebrow: '基础设施层',
+    title: '工作跨端接续，而非多端割裂',
+    description:
+      '本地优先、档案隔离与分布式多端互联，让持续会话建立在你自己的认知基础设施上，而不是一堆云端副本。',
+    icon: 'infrastructure',
+    points: [
+      '本地档案与隔离空间承载长期记忆',
+      '多端互联让同一条线程在不同宿主继续',
+    ],
+  },
+];
+
+const workflowSteps = [
+  {
+    title: '记录',
+    description: '留下事件、时间与任务，让生活从真实发生过的事开始。',
+  },
+  {
+    title: '编排',
+    description: '在你设定的边界里调用工具与 Agent，让自动化真正解放繁复工作。',
+  },
+  {
+    title: '接续',
+    description: '切换终端、结构化界面或设备时，事件如一、专注继续、任务随身，Agent随处可控。',
+  },
+];
+
+const trustPillars = [
+  {
+    value: '本地优先',
+        label: '记忆留在你的设备与档案里',
+  },
+  {
+    value: '档案隔离',
+    label: '身份、项目、上下文，边界明确',
+  },
+  {
+    value: '多端互联',
+    label: '同一线程在不同设备继续',
+  },
+];
 ---
 
 <BaseLayout title="首页">
-  <!-- Hero Section -->
-  <section class="relative overflow-hidden pt-32 pb-24">
+  <section class="relative overflow-hidden pb-24 pt-32">
     <div class="section-container relative z-10">
       <div class="mx-auto max-w-3xl text-center">
         <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white/80 px-4 py-1.5 text-sm text-stone-600 backdrop-blur dark:border-stone-800 dark:bg-stone-900/80 dark:text-stone-400">
-          <span class="inline-block h-1.5 w-1.5 rounded-full bg-brand animate-pulse"></span>
-          开源 · 本地优先 · AI 驱动
+          <LucideIcon icon={Sparkles} size={14} class="h-3.5 w-3.5 shrink-0 text-brand" />
+          {heroHighlights.map((item, index) => (
+            <Fragment>
+              {index > 0 && (
+                <LucideIcon
+                  icon={Dot}
+                  size={14}
+                  class="h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500"
+                />
+              )}
+              <span>{item}</span>
+            </Fragment>
+          ))}
         </div>
         <h1 class="heading-display text-5xl leading-tight text-stone-900 sm:text-6xl lg:text-7xl dark:text-stone-50">
-          {t('hero.title')}
+          你认知的外骨骼
         </h1>
         <p class="mt-6 text-lg leading-relaxed text-stone-500 sm:text-xl">
-          {t('hero.subtitle')}
+          外化我们的心智，并在终端、结构化界面与多设备之间接续，无惧遗忘，无需每次重新开始。
         </p>
         <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <a href={downloadPath} class="btn-primary px-8 py-3.5 text-base">
-            {t('hero.cta.download')}
-          </a>
+          <SmartDownloadLink
+            lang="zh"
+            class="btn-primary max-w-full px-8 py-3.5 text-center text-base leading-snug whitespace-normal"
+            label={stableDownloadLabel}
+          >
+            {stableDownloadLabel}
+          </SmartDownloadLink>
           <a href={featuresPath} class="btn-secondary px-8 py-3.5 text-base">
             {t('hero.cta.learn')}
           </a>
@@ -37,150 +122,146 @@ const featuresPath = getLocalizedPath('/features', 'zh');
     </div>
   </section>
 
-  <!-- Features Preview -->
-  <section class="py-24 bg-stone-100/50 dark:bg-stone-900/50">
+  <section class="bg-stone-100/50 py-24 dark:bg-stone-900/50">
     <div class="section-container">
-      <div class="mx-auto max-w-2xl text-center mb-16">
-        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
-          {t('features.title')}
+      <div class="mx-auto max-w-3xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">Positioning</p>
+        <h2 class="mt-4 heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
+          另一个Agent工具？立足于人的分布式认知基础设施
         </h2>
-        <p class="mt-4 text-stone-500">{t('features.subtitle')}</p>
+        <p class="mt-4 text-stone-500 sm:text-lg">
+          从个人成长、受控 Agent 运行到多端接续三层展开，一线贯穿成长、运行与基础设施
+        </p>
       </div>
-      <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <!-- Event Log -->
-        <div class="card hover:-translate-y-1 transition-all duration-300">
-          <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
-            <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 1-4 4v14a3 3 0 0 0 3-3h7z"/>
-            </svg>
-          </div>
-          <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.eventlog.title')}</h3>
-          <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.eventlog.desc')}</p>
-        </div>
-        <!-- Time Blocks -->
-        <div class="card hover:-translate-y-1 transition-all duration-300">
-          <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
-            <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>
-            </svg>
-          </div>
-          <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.timeblock.title')}</h3>
-          <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.timeblock.desc')}</p>
-        </div>
-        <!-- AI Agents -->
-        <div class="card hover:-translate-y-1 transition-all duration-300">
-          <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
-            <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
-            </svg>
-          </div>
-          <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.agents.title')}</h3>
-          <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.agents.desc')}</p>
-        </div>
-        <!-- Local First -->
-        <div class="card hover:-translate-y-1 transition-all duration-300">
-          <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
-            <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
-            </svg>
-          </div>
-          <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.privacy.title')}</h3>
-          <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.privacy.desc')}</p>
-        </div>
-        <!-- Tasks -->
-        <div class="card hover:-translate-y-1 transition-all duration-300">
-          <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
-            <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>
-            </svg>
-          </div>
-          <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.tasks.title')}</h3>
-          <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.tasks.desc')}</p>
-        </div>
-        <!-- Cross Platform -->
-        <div class="card hover:-translate-y-1 transition-all duration-300">
-          <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
-            <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>
-            </svg>
-          </div>
-          <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.crossplatform.title')}</h3>
-          <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.crossplatform.desc')}</p>
-        </div>
+      <div class="mt-16 grid gap-6 lg:grid-cols-3">
+        {capabilityLayers.map((layer) => (
+          <article class="card flex h-full flex-col rounded-3xl border border-stone-200/80 bg-white/90 p-8 shadow-sm dark:border-stone-800 dark:bg-stone-900/90">
+            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand dark:bg-brand-900/30">
+              {layer.icon === 'growth' && (
+                <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 20V10" />
+                  <path d="M18 20V4" />
+                  <path d="M6 20v-4" />
+                  <path d="M4 20h16" />
+                </svg>
+              )}
+              {layer.icon === 'runtime' && (
+                <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 8V4H8" />
+                  <rect width="16" height="12" x="4" y="8" rx="2" />
+                  <path d="M2 14h2" />
+                  <path d="M20 14h2" />
+                  <path d="M15 13v2" />
+                  <path d="M9 13v2" />
+                </svg>
+              )}
+              {layer.icon === 'infrastructure' && (
+                <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="20" height="6" x="2" y="4" rx="2" />
+                  <rect width="20" height="6" x="2" y="14" rx="2" />
+                  <path d="M6 7h.01" />
+                  <path d="M6 17h.01" />
+                  <path d="M10 7h8" />
+                  <path d="M10 17h8" />
+                </svg>
+              )}
+            </div>
+            <p class="mt-6 text-xs font-semibold uppercase tracking-[0.22em] text-brand/80">{layer.eyebrow}</p>
+            <h3 class="mt-3 text-xl font-semibold text-stone-900 dark:text-stone-50">{layer.title}</h3>
+            <p class="mt-3 text-sm leading-relaxed text-stone-500">{layer.description}</p>
+            <ul class="mt-6 space-y-3 text-sm text-stone-600 dark:text-stone-300">
+              {layer.points.map((point) => (
+                <li class="flex items-start gap-3">
+                  <span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-brand"></span>
+                  <span>{point}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+        ))}
       </div>
       <div class="mt-12 text-center">
-        <a href={featuresPath} class="inline-flex items-center gap-2 text-brand font-medium hover:underline">
-          查看全部功能
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        <a href={featuresPath} class="inline-flex items-center gap-2 font-medium text-brand hover:underline">
+          全功能一览
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14" />
+            <path d="m12 5 7 7-7 7" />
+          </svg>
         </a>
       </div>
     </div>
   </section>
 
-  <!-- How It Works -->
   <section class="py-24">
     <div class="section-container">
-      <div class="mx-auto max-w-2xl text-center mb-16">
-        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">简单三步，开始成长</h2>
+      <div class="mx-auto max-w-3xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">Workflow</p>
+        <h2 class="mt-4 heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
+          一条工作线程如何持续
+        </h2>
+        <p class="mt-4 text-stone-500 sm:text-lg">
+          延展你的心智，编排你的行动，调度你的资源。以你为始，以你为终。
+        </p>
       </div>
-      <div class="relative mx-auto max-w-3xl">
-        <div class="absolute top-8 left-[calc(16.67%-1px)] right-[calc(16.67%-1px)] h-0.5 border-t-2 border-dashed border-stone-200 dark:border-stone-700 hidden sm:block"></div>
-        <div class="grid gap-12 sm:grid-cols-3 sm:gap-8">
-          <div class="text-center">
-            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-white text-xl font-bold">1</div>
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">记录</h3>
-            <p class="mt-2 text-sm text-stone-500">用事件日志记录你的每一天，像写日记一样自然</p>
-          </div>
-          <div class="text-center">
-            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-white text-xl font-bold">2</div>
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">反思</h3>
-            <p class="mt-2 text-sm text-stone-500">AI 帮你发现生活中的模式和洞察，看见看不见的自己</p>
-          </div>
-          <div class="text-center">
-            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-white text-xl font-bold">3</div>
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">成长</h3>
-            <p class="mt-2 text-sm text-stone-500">基于数据和反思，做出更好的决策，持续进化</p>
-          </div>
+      <div class="relative mx-auto mt-16 max-w-5xl">
+        <div class="absolute left-[calc(16.67%-1px)] right-[calc(16.67%-1px)] top-8 hidden h-0.5 border-t-2 border-dashed border-stone-200 dark:border-stone-700 sm:block"></div>
+        <div class="grid gap-10 sm:grid-cols-3 sm:gap-8">
+          {workflowSteps.map((step, index) => (
+            <div class="relative text-center">
+              <div class="relative mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-brand text-xl font-bold text-white">
+                {index + 1}
+              </div>
+              <h3 class="mt-6 text-lg font-semibold text-stone-900 dark:text-stone-50">{step.title}</h3>
+              <p class="mt-3 text-sm leading-relaxed text-stone-500">{step.description}</p>
+            </div>
+          ))}
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Privacy / Trust -->
-  <section class="py-24 bg-stone-100/50 dark:bg-stone-900/50">
+  <section class="bg-stone-100/50 py-24 dark:bg-stone-900/50">
     <div class="section-container">
-      <div class="mx-auto max-w-2xl text-center mb-16">
-        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">你的数据，只属于你</h2>
-        <p class="mt-4 text-stone-500">ExoMind 采用本地优先架构，所有数据存储在你的设备上。没有云端服务器，没有数据收集，没有隐私担忧。</p>
+      <div class="mx-auto max-w-3xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">Boundaries</p>
+        <h2 class="mt-4 heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
+          没有人的外心，毫无意义
+        </h2>
+        <p class="mt-4 text-stone-500 sm:text-lg">
+          本地优先、档案隔离、分布式多端互联，持续会话。留存记忆，留存人的智慧与意义。
+        </p>
       </div>
-      <div class="grid gap-6 sm:grid-cols-3">
-        <div class="rounded-2xl border border-stone-200 bg-white p-8 text-center dark:border-stone-800 dark:bg-stone-900">
-          <div class="text-3xl font-bold text-brand">100%</div>
-          <div class="mt-2 text-sm text-stone-500">本地存储</div>
-        </div>
-        <div class="rounded-2xl border border-stone-200 bg-white p-8 text-center dark:border-stone-800 dark:bg-stone-900">
-          <div class="text-3xl font-bold text-brand">零</div>
-          <div class="mt-2 text-sm text-stone-500">云端依赖</div>
-        </div>
-        <div class="rounded-2xl border border-stone-200 bg-white p-8 text-center dark:border-stone-800 dark:bg-stone-900">
-          <div class="text-3xl font-bold text-brand">完全</div>
-          <div class="mt-2 text-sm text-stone-500">开源透明</div>
-        </div>
+      <div class="mt-12 grid gap-6 sm:grid-cols-3">
+        {trustPillars.map((pillar) => (
+          <div class="rounded-2xl border border-stone-200 bg-white p-8 text-center dark:border-stone-800 dark:bg-stone-900">
+            <div class="text-3xl font-bold text-brand">{pillar.value}</div>
+            <div class="mt-2 text-sm text-stone-500">{pillar.label}</div>
+          </div>
+        ))}
       </div>
     </div>
   </section>
 
-  <!-- CTA -->
   <section class="py-24">
     <div class="section-container">
       <div class="mx-auto max-w-2xl text-center">
-        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">准备好掌控你的生命过程了吗？</h2>
-        <p class="mt-4 text-stone-500">免费下载，本地运行，数据完全属于你。</p>
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">Download</p>
+        <h2 class="mt-4 heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
+          认知外化，在Agent时代开始心的旅程
+        </h2>
+        <p class="mt-4 text-stone-500 sm:text-lg">
+          下载最新版本，或纵览各版历史。
+        </p>
         <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <a href={downloadPath} class="btn-primary px-8 py-3.5 text-base">免费下载</a>
-          <a href="https://github.com/exomind-team/exomind" target="_blank" rel="noopener" class="btn-secondary px-8 py-3.5 text-base">
-            <svg class="mr-2 h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-            GitHub
+          <SmartDownloadLink
+            lang="zh"
+            class="btn-primary max-w-full px-8 py-3.5 text-center text-base leading-snug whitespace-normal"
+            label={stableDownloadLabel}
+          >
+            {stableDownloadLabel}
+          </SmartDownloadLink>
+          <a href={versionLogPath} class="btn-secondary px-8 py-3.5 text-base">
+            版本日志
           </a>
         </div>
       </div>

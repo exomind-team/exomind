@@ -1,3 +1,5 @@
+import type { ReleaseHighlight } from '../../website/src/lib/release-highlights.ts';
+
 export type ReleaseChannel = 'preview' | 'release';
 
 export interface ReleaseManifestAsset {
@@ -28,6 +30,8 @@ export interface GithubReleaseSummary {
   htmlUrl: string;
   assets: GithubReleaseAssetSummary[];
   manifest?: ReleaseManifest | null;
+  body?: string | null;
+  highlights?: ReleaseHighlight[];
 }
 
 export interface PagesReleaseAsset {
@@ -43,6 +47,7 @@ export interface PagesReleaseMetadata {
   published_at: string;
   release_url: string;
   assets: Record<string, PagesReleaseAsset>;
+  highlights: ReleaseHighlight[];
 }
 
 export interface PagesReleaseVersionsIndex {
@@ -50,6 +55,22 @@ export interface PagesReleaseVersionsIndex {
   generated_at: string;
   latest: PagesReleaseMetadata | null;
   versions: PagesReleaseMetadata[];
+}
+
+export interface PagesTimelineReleaseMetadata {
+  channel: ReleaseChannel;
+  tag: string;
+  display_tag: string;
+  published_at: string;
+  release_url: string;
+  highlights: ReleaseHighlight[];
+}
+
+export interface PagesReleaseTimeline {
+  generated_at: string;
+  latest: Record<ReleaseChannel, PagesTimelineReleaseMetadata | null>;
+  preview: PagesTimelineReleaseMetadata[];
+  release: PagesTimelineReleaseMetadata[];
 }
 
 const CANONICAL_TAG_RE = /^v\d+\.\d+\.\d+$/;
@@ -74,6 +95,17 @@ export function compareReleaseVersions(a: string, b: string): number {
 
 export function isCanonicalReleaseTag(tagName: string): boolean {
   return CANONICAL_TAG_RE.test(tagName.trim());
+}
+
+function isTimelineTag(tagName: string): boolean {
+  const normalized = tagName.trim();
+  return isCanonicalReleaseTag(normalized) || normalized.startsWith('release/');
+}
+
+function toDisplayTag(tagName: string): string {
+  const normalized = tagName.trim();
+  const segments = normalized.split('/');
+  return segments[segments.length - 1] ?? normalized;
 }
 
 function buildReleaseMetadata(release: GithubReleaseSummary): PagesReleaseMetadata | null {
@@ -111,6 +143,7 @@ function buildReleaseMetadata(release: GithubReleaseSummary): PagesReleaseMetada
     published_at: release.publishedAt ?? release.manifest.generated_at,
     release_url: release.htmlUrl,
     assets,
+    highlights: release.highlights ?? [],
   };
 }
 
@@ -160,5 +193,64 @@ export function buildPagesReleaseMetadata(
   return {
     preview: createVersionsIndex('preview', previewVersions, generatedAt),
     release: createVersionsIndex('release', releaseVersions, generatedAt),
+  };
+}
+
+function buildTimelineReleaseMetadata(
+  release: GithubReleaseSummary,
+): PagesTimelineReleaseMetadata | null {
+  if (release.draft || !isTimelineTag(release.tagName)) {
+    return null;
+  }
+
+  const channel: ReleaseChannel = release.prerelease ? 'preview' : 'release';
+
+  return {
+    channel,
+    tag: release.tagName.trim(),
+    display_tag: toDisplayTag(release.tagName),
+    published_at: release.publishedAt ?? new Date().toISOString(),
+    release_url: release.htmlUrl,
+    highlights: release.highlights ?? [],
+  };
+}
+
+export function buildPagesReleaseTimeline(
+  releases: GithubReleaseSummary[],
+  generatedAt = new Date().toISOString(),
+): PagesReleaseTimeline {
+  const preview: PagesTimelineReleaseMetadata[] = [];
+  const release: PagesTimelineReleaseMetadata[] = [];
+
+  for (const currentRelease of releases) {
+    const metadata = buildTimelineReleaseMetadata(currentRelease);
+    if (!metadata) {
+      continue;
+    }
+
+    if (metadata.channel === 'preview') {
+      preview.push(metadata);
+      continue;
+    }
+
+    release.push(metadata);
+  }
+
+  const sortByPublishedAtDesc = (
+    left: PagesTimelineReleaseMetadata,
+    right: PagesTimelineReleaseMetadata,
+  ) => new Date(right.published_at).getTime() - new Date(left.published_at).getTime();
+
+  preview.sort(sortByPublishedAtDesc);
+  release.sort(sortByPublishedAtDesc);
+
+  return {
+    generated_at: generatedAt,
+    latest: {
+      preview: preview[0] ?? null,
+      release: release[0] ?? null,
+    },
+    preview,
+    release,
   };
 }

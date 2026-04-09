@@ -1,0 +1,192 @@
+---
+import { getLocalizedPath, prependBasePath } from '../i18n';
+
+type Lang = 'zh' | 'en';
+
+interface Props {
+  lang: Lang;
+  class?: string;
+  label: string;
+}
+
+const { lang, label } = Astro.props;
+const className = Astro.props.class ?? '';
+const fallbackPath = getLocalizedPath('/changelog', lang);
+const releaseIndexUrl = prependBasePath('/releases/release/versions.json');
+const previewIndexUrl = prependBasePath('/releases/preview/versions.json');
+---
+
+<a
+  href={fallbackPath}
+  class={className}
+  data-smart-download
+  data-release-index={releaseIndexUrl}
+  data-preview-index={previewIndexUrl}
+  data-fallback-href={fallbackPath}
+  data-smart-download-ready="false"
+>
+  <slot>{label}</slot>
+</a>
+
+<script>
+  import {
+    detectPlatformDownloadKey,
+    loadReleaseIndexWithFallback,
+    resolvePreferredPlatformDownload,
+  } from '../lib/downloads-data';
+
+  const SMART_DOWNLOAD_KEY = '__exomindSmartDownload';
+  const SMART_DOWNLOAD_BOUND_KEY = '__exomindSmartDownloadBound';
+
+  async function loadReleaseIndex(channel, url) {
+    return loadReleaseIndexWithFallback({
+      channel,
+      localUrl: url,
+    });
+  }
+
+  function getSharedState() {
+    const existing = window[SMART_DOWNLOAD_KEY];
+    if (existing) {
+      return existing;
+    }
+
+    const state = {
+      release: {
+        promise: null,
+        index: null,
+      },
+      preview: {
+        promise: null,
+        index: null,
+      },
+    };
+    window[SMART_DOWNLOAD_KEY] = state;
+    return state;
+  }
+
+  async function loadChannelIndex(sharedState, channel, url) {
+    if (!url) {
+      return null;
+    }
+
+    const cachedChannelState = sharedState[channel];
+    if (cachedChannelState.index) {
+      return cachedChannelState.index;
+    }
+
+    if (!cachedChannelState.promise) {
+      cachedChannelState.promise = loadReleaseIndex(channel, url)
+        .then((index) => {
+          cachedChannelState.index = index;
+          return index;
+        })
+        .catch((error) => {
+          console.error(`Failed to load ${channel} release metadata:`, error);
+          return null;
+        })
+        .finally(() => {
+          cachedChannelState.promise = null;
+        });
+    }
+
+    return cachedChannelState.promise;
+  }
+
+  async function resolveDownloadHref(anchor) {
+    const releaseIndex = anchor.dataset.releaseIndex;
+    const previewIndex = anchor.dataset.previewIndex;
+    const fallbackHref = anchor.dataset.fallbackHref || anchor.getAttribute('href') || '/changelog';
+    const platformKey = detectPlatformDownloadKey({
+      userAgent: navigator.userAgent || '',
+      platform: navigator.userAgentData?.platform || navigator.platform || '',
+    });
+
+    if (!platformKey) {
+      anchor.href = fallbackHref;
+      anchor.dataset.smartDownloadReady = 'true';
+      return fallbackHref;
+    }
+
+    const sharedState = getSharedState();
+    const releaseData = releaseIndex
+      ? await loadChannelIndex(sharedState, 'release', releaseIndex)
+      : sharedState.release.index;
+    let previewData = sharedState.preview.index;
+
+    let resolved = resolvePreferredPlatformDownload({
+      release: releaseData?.latest ?? null,
+      preview: previewData?.latest ?? null,
+      platformKey,
+    });
+
+    if (!resolved && previewIndex) {
+      previewData = await loadChannelIndex(sharedState, 'preview', previewIndex);
+      resolved = resolvePreferredPlatformDownload({
+        release: releaseData?.latest ?? null,
+        preview: previewData?.latest ?? null,
+        platformKey,
+      });
+    }
+
+    if (resolved) {
+      const href = resolved.primary.url;
+      anchor.href = href;
+      anchor.dataset.smartDownloadReady = 'true';
+      return href;
+    }
+
+    const href = fallbackHref;
+    anchor.href = href;
+    anchor.dataset.smartDownloadReady = 'true';
+    return href;
+  }
+
+  function bindClickHandler(anchor) {
+    if (anchor.dataset.smartDownloadClickBound === 'true') {
+      return;
+    }
+
+    anchor.dataset.smartDownloadClickBound = 'true';
+    anchor.addEventListener('click', async (event) => {
+      const currentHref = anchor.getAttribute('href') || '';
+      const isResolvedDownload =
+        anchor.dataset.smartDownloadReady === 'true' &&
+        currentHref &&
+        currentHref !== (anchor.dataset.fallbackHref || '');
+
+      if (isResolvedDownload) {
+        return;
+      }
+
+      event.preventDefault();
+      anchor.setAttribute('aria-busy', 'true');
+
+      try {
+        const href = await resolveDownloadHref(anchor);
+        window.location.assign(href);
+      } finally {
+        anchor.removeAttribute('aria-busy');
+      }
+    });
+  }
+
+  function bindSmartDownloads() {
+    const links = Array.from(document.querySelectorAll('[data-smart-download]'));
+    if (!links.length) return;
+
+    links.forEach((link) => {
+      const anchor = link;
+      bindClickHandler(anchor);
+      void resolveDownloadHref(anchor);
+    });
+  }
+
+  if (!window[SMART_DOWNLOAD_BOUND_KEY]) {
+    document.addEventListener('astro:page-load', bindSmartDownloads);
+    document.addEventListener('astro:after-swap', bindSmartDownloads);
+    window[SMART_DOWNLOAD_BOUND_KEY] = true;
+  }
+
+  bindSmartDownloads();
+</script>

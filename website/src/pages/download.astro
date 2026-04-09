@@ -1,10 +1,29 @@
 ---
-import DownloadPageContent from '../components/DownloadPageContent.astro';
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { getLocalizedPath } from '../i18n';
 
 export const prerender = true;
+const target = getLocalizedPath('/changelog', 'zh');
 ---
 
-<BaseLayout title="下载">
-  <DownloadPageContent lang="zh" />
+<BaseLayout title="版本日志">
+  <section class="relative overflow-hidden pt-32 pb-24">
+    <div class="section-container relative z-10">
+      <div class="mx-auto max-w-2xl text-center">
+        <h1 class="heading-display text-4xl leading-tight text-stone-900 sm:text-5xl dark:text-stone-50">
+          下载页已合并到版本日志
+        </h1>
+        <p class="mt-4 text-lg leading-relaxed text-stone-500">
+          外心的下载入口、版本记录与发行通道已统一收口到版本日志页。
+        </p>
+        <div class="mt-8">
+          <a href={target} class="btn-primary px-8 py-3 text-base">前往版本日志</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script is:inline define:vars={{ target }}>
+    window.location.replace(target);
+  </script>
 </BaseLayout>

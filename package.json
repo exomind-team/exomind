@@ -59,6 +59,7 @@
     "test:voice-runtime:omni-online": "bun scripts/test/omni-realtime-online-smoke.ts",
     "test:voice-omni:compatible-online": "bun scripts/test/omni-compatible-online-smoke.ts",
     "website:install": "bun install --cwd website --frozen-lockfile",
+    "website:dev": "cd website && node node_modules/astro/astro.js dev --host localhost --port 5173",
     "website:build": "bun run --cwd website build",
     "website:preview": "bun run website:build && bun run --cwd website preview --host"
   },

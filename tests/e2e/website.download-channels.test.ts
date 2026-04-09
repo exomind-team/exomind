@@ -155,4 +155,74 @@ test.describe('官网下载页版本通道 (Website download channels)', () => {
     const previewChannel = page.getByTestId('download-channel-preview');
     await expect(previewChannel).toContainText('v0.4.3');
   });
+
+  test('首页 SmartDownloadLink 优先直达当前平台稳定版安装包', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        get: () => 'Win32',
+      });
+      Object.defineProperty(navigator, 'userAgent', {
+        configurable: true,
+        get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      });
+      Object.defineProperty(navigator, 'userAgentData', {
+        configurable: true,
+        get: () => ({ platform: 'Windows' }),
+      });
+    });
+    await page.route('**/releases/release/versions.json', async (route) => {
+      await route.fulfill({ json: releaseVersions });
+    });
+    await page.route('**/releases/preview/versions.json', async (route) => {
+      await route.fulfill({ json: previewVersions });
+    });
+
+    await page.goto('/');
+
+    await expect(page.locator('[data-smart-download]').first()).toHaveAttribute(
+      'href',
+      'https://github.com/exomind-team/exomind/releases/download/v0.4.0/ExoMind-0.4.0-windows-x64-setup.exe',
+    );
+  });
+
+  test('首页 SmartDownloadLink 在稳定版缺少当前平台安装包时回退到预览版', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        get: () => 'Win32',
+      });
+      Object.defineProperty(navigator, 'userAgent', {
+        configurable: true,
+        get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      });
+      Object.defineProperty(navigator, 'userAgentData', {
+        configurable: true,
+        get: () => ({ platform: 'Windows' }),
+      });
+    });
+    await page.route('**/releases/release/versions.json', async (route) => {
+      await route.fulfill({
+        json: {
+          ...releaseVersions,
+          latest: {
+            ...releaseVersions.latest,
+            assets: {
+              'android-arm64': releaseVersions.latest.assets['android-arm64'],
+            },
+          },
+        },
+      });
+    });
+    await page.route('**/releases/preview/versions.json', async (route) => {
+      await route.fulfill({ json: previewVersions });
+    });
+
+    await page.goto('/');
+
+    await expect(page.locator('[data-smart-download]').first()).toHaveAttribute(
+      'href',
+      'https://github.com/exomind-team/exomind/releases/download/v0.4.3/ExoMind-0.4.3-windows-x64-setup.exe',
+    );
+  });
 });

@@ -1,0 +1,134 @@
+---
+import type { DocsLocale } from "../../lib/docs";
+
+interface TocItem {
+  id: string;
+  title: string;
+  index?: number;
+}
+
+interface Props {
+  lang: DocsLocale;
+  items: TocItem[];
+}
+
+const { lang, items } = Astro.props;
+const copy =
+  lang === "zh"
+    ? {
+        eyebrow: "On This Page / 本页章节",
+        ariaLabel: "当前页面章节索引",
+      }
+    : {
+        eyebrow: "On This Page",
+        ariaLabel: "Current page section index",
+      };
+---
+
+<aside class="docs-article-toc">
+  <div class="docs-article-toc-card" data-docs-toc-root>
+    <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+      {copy.eyebrow}
+    </p>
+    <nav aria-label={copy.ariaLabel} class="mt-4">
+      <ol class="space-y-1.5">
+        {items.map((item, index) => (
+          <li>
+            <a
+              href={`#${item.id}`}
+              data-docs-toc-link={item.id}
+              class="docs-toc-link"
+            >
+              <span class="docs-toc-index">
+                {String(item.index ?? index + 1).padStart(2, "0")}
+              </span>
+              <span class="leading-relaxed">{item.title}</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  </div>
+</aside>
+
+<script is:inline>
+  (() => {
+    const STATE_KEY = "__exomindDocsTocLifecycle";
+
+    const bindDocsToc = () => {
+      window.__exomindDocsTocCleanup?.();
+
+      const root = document.querySelector("[data-docs-toc-root]");
+      if (!root) {
+        window.__exomindDocsTocCleanup = undefined;
+        return;
+      }
+
+      const links = Array.from(root.querySelectorAll("[data-docs-toc-link]"));
+      const sections = links
+        .map((link) => {
+          const id = link.getAttribute("data-docs-toc-link");
+          return id ? document.getElementById(id) : null;
+        })
+        .filter(Boolean);
+
+      if (!links.length || !sections.length) {
+        window.__exomindDocsTocCleanup = undefined;
+        return;
+      }
+
+      const setActive = (id) => {
+        links.forEach((link) => {
+          const active = link.getAttribute("data-docs-toc-link") === id;
+          if (active) {
+            link.setAttribute("aria-current", "location");
+          } else {
+            link.removeAttribute("aria-current");
+          }
+        });
+      };
+
+      const resolveActiveSection = () => {
+        let activeId = sections[0].id;
+
+        sections.forEach((section) => {
+          if (section.getBoundingClientRect().top <= 160) {
+            activeId = section.id;
+          }
+        });
+
+        setActive(activeId);
+      };
+
+      let frame = 0;
+      const onScroll = () => {
+        if (frame) return;
+        frame = window.requestAnimationFrame(() => {
+          frame = 0;
+          resolveActiveSection();
+        });
+      };
+
+      window.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("resize", onScroll);
+      resolveActiveSection();
+
+      window.__exomindDocsTocCleanup = () => {
+        window.removeEventListener("scroll", onScroll);
+        window.removeEventListener("resize", onScroll);
+        if (frame) {
+          window.cancelAnimationFrame(frame);
+          frame = 0;
+        }
+      };
+    };
+
+    if (!window[STATE_KEY]) {
+      document.addEventListener("astro:page-load", bindDocsToc);
+      document.addEventListener("astro:after-swap", bindDocsToc);
+      window[STATE_KEY] = true;
+    }
+
+    bindDocsToc();
+  })();
+</script>
