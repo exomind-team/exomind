@@ -1,0 +1,50 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "dcad6ad3faef09363e240b8438b8501e07ee574a",
+  "prompts": {
+    "2627c607d409afab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7082-a4ae-74e3-82a6-fb0c00f5b082",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 109,
+      "total_deletions": 23,
+      "accepted_lines": 103,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/e37b51fe7ce61d26322f0aa0a3110d4782a38e49214d192355fc552bed5c2643"
+    },
+    "54b5f35caf964f98": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d70fc-30ef-7730-ba6d-bc2c61ccc362",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 287,
+      "total_deletions": 16,
+      "accepted_lines": 268,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/079d12710ae24664820b3550006b3c688090ab8ace37ddf43b43d31a2045c6e1"
+    },
+    "a6385f73b0f1344f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fed-bc8e-7d33-8d94-d5ca5041b82c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 135,
+      "total_deletions": 11,
+      "accepted_lines": 128,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/a3e3d782f80883c218e13bd7b69ba1c9d58a636be76256cf2e3f217630a92702"
+    }
+  }
+}
