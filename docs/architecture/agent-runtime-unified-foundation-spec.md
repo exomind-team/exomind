@@ -1,6 +1,6 @@
 # ExoMind Agent Runtime 统一基础对象模型
 
-> **版本**: v0.1-draft  
+> **版本**: v0.2-draft  
 > **日期**: 2026-04-09  
 > **状态**: 待评审（review pending，待评审）  
 > **文档类型**: architecture / spec（架构规格）  
@@ -25,6 +25,7 @@
 5. `em_session_id / provider session / attachment id / resume locator` 的身份模型应该怎样分层
 6. `Budget / Permission / Capability / Lease / Telemetry / Profile` 为什么必须是横切系统
 7. `Model policy belongs to Agent, active model belongs to Session` 应如何落成正式规则
+8. `Actor / Agent / Port / Connection / Signal` 在第一版应如何收口
 
 ### 0.2 这份文档不回答什么
 
@@ -35,6 +36,7 @@
 3. ACP 全量映射规范的逐字段 SDK 细节
 4. 每种 provider 的最终命令行参数表
 5. 多 Agent 自繁殖、自复制、治理系统的完整协议
+6. `Signal` 的最终完整字段全集与跨版本兼容协议
 
 ### 0.3 术语约定
 
@@ -108,33 +110,47 @@
 
 ### 2.2 `Actor（执行体）`
 
-`Actor` 是可运行的节点实例。
+`Actor` 是通用执行体，是信号网络中的基础执行节点。
 
 职责：
 
 - 拥有生命周期
 - 拥有邮箱（mailbox，消息箱）
+- 持有资源引用
+- 暴露输入/输出端口
 - 被调度、被监督
 - 受本地资源预算约束
 - 受底层权限隔离约束
 
-`Actor` 关心的是“能不能跑、在哪跑、占多少资源、能访问什么系统边界”。
+`Actor` 关心的是“能不能跑、在哪跑、占多少资源、能访问什么系统边界、接什么输入、产什么输出”。
+
+`Actor` 不是：
+
+- workflow step（工作流步骤）
+- 普通函数
+- 默认带大模型认知的对象
 
 ### 2.3 `Agent（认知执行体）`
 
-`Agent` 是具备认知契约的 `Actor`。
+`Agent` 是认知节点，是更高层的认知对象。
 
 职责：
 
 - 持有默认模型策略
+- 持有或挂接 `Memory`
+- 持有 `Context` 策略
 - 持有认知预算
 - 持有工具策略
 - 持有高层权限策略
 - 可以调度模型、规划、压缩、总结、调用工具
+- 可以创建 `Actor`
+- 可以建立或沉淀 `Connection`
 
 一句话：
 
-> `Actor` 解决“能不能执行”，`Agent` 解决“能不能思考与决策”。
+> `Actor` 解决“执行”，`Agent` 解决“认知与调度”。
+
+在领域模型和产品层命名中，必须严格区分 `Actor` 和 `Agent`，不使用 `agent actor` 这种混合叫法。底层实现即使共享部分 trait / interface（接口）机制，也不改变两者在对象模型中的分层差异。
 
 ### 2.4 `Session（会话）`
 
@@ -245,23 +261,72 @@
 
 ---
 
-## 3. 四类最容易混淆的对象边界
+## 3. `Actor` 与 `Agent` 的正式区别
 
-### 3.1 `Session` 与 `Context`
+### 3.1 为什么必须严格分开
+
+如果不把 `Actor` 和 `Agent` 分开，会很快出现两个问题：
+
+1. 把所有可执行逻辑都误升格为认知体
+2. 把所有认知处理都误塞进通用执行体，导致预算、权限、Session、Context 语义混乱
+
+因此：
+
+- `Actor` 是丰富的、便宜的、可大量生成的执行体
+- `Agent` 是稀缺的、昂贵的、需要治理的认知体
+
+### 3.2 典型例子
+
+更适合建模为 `Actor` 的对象：
+
+- `WeChatGatewayActor`
+- `FeishuGatewayActor`
+- `RssSourceActor`
+- `TaskManagerActor`
+- `TimeBlockActor`
+- `EventLogActor`
+- `LedgerActor`
+
+更适合建模为 `Agent` 的对象：
+
+- 时间块总结 Agent
+- 科研文献调研 Agent
+- 论文写作 Agent
+- 财务分析 Agent
+- 通用 Assistant Agent
+
+### 3.3 何时升格为 `Actor`
+
+满足以下条件中的至少 2 条，通常才值得升格为 `Actor`：
+
+1. 持有长期资源
+2. 需要独立预算/权限
+3. 需要独立生命周期
+4. 有明确输入/输出端口
+5. 需要被多个地方复用
+6. 需要被连接编排
+
+否则，更适合保留为某个较大 `Actor` 或 `Agent` 内部的普通函数。
+
+---
+
+## 4. 四类最容易混淆的对象边界
+
+### 4.1 `Session` 与 `Context`
 
 - `Session` 是“这次连续任务/对话线程是什么”
 - `Context` 是“这次线程当前正在使用的工作记忆是什么”
 
 一个 `Session` 在任意时刻只激活一个 `Context`，但同一个 `Context` 可以被多个 `Session` 复用。
 
-### 3.2 `Context` 与 `Memory`
+### 4.2 `Context` 与 `Memory`
 
 - `Context = working memory`
 - `Memory = long-term memory`
 
 `Context` 强调当前任务活跃内容，`Memory` 强调跨会话长期持久知识。
 
-### 3.3 `Actor` 与 `Workspace`
+### 4.3 `Actor` 与 `Workspace`
 
 - `Actor` 是执行体
 - `Workspace` 是执行环境
@@ -272,7 +337,7 @@
 - `Agent` 挂接 `Memory`
 - `Session` 激活 `Context`
 
-### 3.4 `Binding`、`Attachment` 与 `Surface`
+### 4.4 `Binding`、`Attachment` 与 `Surface`
 
 - `Binding` 负责接入外部运行时
 - `Attachment` 负责某次实时附着
@@ -282,16 +347,16 @@
 
 ---
 
-## 4. 身份模型（Identity Model，身份模型）
+## 5. 身份模型（Identity Model，身份模型）
 
-### 4.1 基本原则
+### 5.1 基本原则
 
 1. `em_session_id` 是内部唯一稳定主键
 2. `provider session` 是外部身份，允许漂移
 3. `attachment_id` 是实时附着句柄，不承担持久身份
 4. `resume` 恢复的是 `Session`，不是某个旧的 terminal/attachment 实例
 
-### 4.2 第一版核心身份字段
+### 5.2 第一版核心身份字段
 
 ```ts
 type ProviderSessionRef = {
@@ -315,7 +380,7 @@ type SessionIdentity = {
 
 第一版不引入 `agent_session_id` 作为核心字段。
 
-### 4.3 `resume` 的统一语义
+### 5.3 `resume` 的统一语义
 
 统一语义如下：
 
@@ -331,16 +396,178 @@ type SessionIdentity = {
 
 ---
 
-## 5. Budget（预算系统）
+## 6. Port / Connection（端口与连接）
 
-### 5.1 总原则
+### 6.1 `Port` 的角色
+
+`Port` 不是 UI 按钮，也不是“一个节点只有一个输入一个输出”的简化别名。
+
+`Port` 是 `Actor` 或 `Agent` 暴露出来的能力入口/出口，用于声明：
+
+- 从哪里接收信号
+- 向哪里发出结果
+- 支持什么 `signal_type`
+- 采用什么交互模式
+
+第一版采用中间路线：
+
+- 明确 `signal_type`
+- 可选 `schema`
+- 不强制一开始做超重强类型系统
+
+### 6.2 `Port` 推荐最小结构
+
+```ts
+type Port = {
+  port_id: string;
+  name: string;
+  direction: 'input' | 'output';
+  signal_type: string;
+  mode: 'event' | 'request_response' | 'stream' | 'command';
+  schema?: string;
+  required?: boolean;
+  cardinality?: 'one' | 'many';
+  accepts_multiple?: boolean;
+  buffer_policy?: 'drop' | 'queue' | 'latest';
+};
+```
+
+### 6.3 `Connection` 的角色
+
+`Connection` 用于表达：
+
+- 哪个对象的哪个输出端口
+- 连到哪个对象的哪个输入端口
+- 是预配置还是动态创建
+- 是临时还是持续
+
+第一版必须同时支持：
+
+- `preset` 预配置连接
+- `dynamic` 动态连接
+- `ephemeral` 临时连接
+- `persistent` 持续连接
+
+### 6.4 `Connection` 推荐最小结构
+
+```ts
+type Connection = {
+  connection_id: string;
+  from_node_id: string;
+  from_port_id: string;
+  to_node_id: string;
+  to_port_id: string;
+  creation_mode: 'preset' | 'dynamic';
+  lifespan: 'ephemeral' | 'persistent';
+  owned_by?: 'system' | 'agent' | 'user';
+  delivery_mode?: 'push' | 'pull';
+  enabled?: boolean;
+  filter_ref?: string;
+  transform_ref?: string;
+  governance_mode?: 'normal' | 'restricted' | 'approval_required';
+  metadata?: Record<string, unknown>;
+};
+```
+
+说明：
+
+1. 这里使用 `from_node_id / to_node_id` 而不是写死 `actor_id`
+   - 为的是允许：
+     - `Actor -> Actor`
+     - `Actor -> Agent`
+     - `Agent -> Actor`
+     - `Agent -> Agent`
+2. `Agent -> Agent` 连接允许存在，但默认要更谨慎治理
+3. `owned_by` 用于区分：
+   - 系统默认连线
+   - 用户手动连线
+   - Agent 运行时沉淀出来的连线
+
+### 6.5 `Agent` 可沉淀的结构
+
+`Agent` 当前临时表现出来的能力，可以沉淀为：
+
+1. 可长期运行的 `Actor`
+2. 可复用的 `Connection`
+3. 可复用的 `Profile / Policy`
+4. 可写入 `Memory` 的长期知识
+
+这也是 ExoMind 和普通 CLI skill（技能脚本）思路的重要差异之一：  
+不是只保存 prompt 技巧，而是把能力沉淀为系统内部可运行、可治理、可复用的对象与连接。
+
+---
+
+## 7. Signal（信号）与共享对象读取原则
+
+### 7.1 核心原则
+
+第一版推荐明确采用：
+
+> `Connection` 默认传信号与引用，不直接传大正文。
+
+也就是说：
+
+- 连接线主要传：
+  - 事件类型
+  - 轻量 payload（轻量载荷）
+  - 标识符
+  - 引用
+  - 控制信号
+- 真正的大内容：
+  - 长文本
+  - 文件
+  - 图像
+  - 草稿
+  - 大块上下文
+  - 实验结果
+  应进入共享对象层，再由接收方按引用读取
+
+### 7.2 共享对象读取
+
+接收方通常应从以下对象中读取正文或大内容：
+
+- `Workspace`
+- `Memory`
+- `ContextSnapshot`
+- `Artifact`
+
+典型模式：
+
+1. 上游对象完成处理
+2. 将结果写入共享对象
+3. 发出轻量信号，附带引用
+4. 下游对象收到信号后再读取共享对象
+
+这条原则特别适合：
+
+- `Agent -> Agent`
+- `Actor -> Agent`
+- `Agent -> Actor`
+
+因为它可以显著降低：
+
+- 耦合度
+- token 成本
+- 调试复杂度
+- 权限边界模糊
+
+### 7.3 `Signal` 最小结构
+
+本规格先只收口信号原则，不在本版写死完整字段全集。  
+下一轮讨论应重点回答：`Signal` 的最小必要字段是什么、哪些字段属于事实源、哪些字段属于派生层。
+
+---
+
+## 8. Budget（预算系统）
+
+### 8.1 总原则
 
 `Budget（预算）` 与 `Telemetry（遥测）` 必须分离：
 
 - `budget_limit` 表示允许花多少
 - `budget_usage` 表示当前已经花了多少
 
-### 5.2 `ActorBudget`
+### 8.2 `ActorBudget`
 
 `ActorBudget` 面向本地资源：
 
@@ -359,7 +586,7 @@ type ActorBudgetLimit = {
 };
 ```
 
-### 5.3 `AgentBudget`
+### 8.3 `AgentBudget`
 
 `AgentBudget` 面向认知与资金：
 
@@ -379,7 +606,7 @@ type AgentBudgetLimit = {
 };
 ```
 
-### 5.4 预算归属
+### 8.4 预算归属
 
 - `ActorBudget` 归 `Actor`
 - `AgentBudget` 归 `Agent`
@@ -387,9 +614,9 @@ type AgentBudgetLimit = {
 
 ---
 
-## 6. Permission（权限系统）
+## 9. Permission（权限系统）
 
-### 6.1 双层权限系统
+### 9.1 双层权限系统
 
 ExoMind 采用两层权限系统：
 
@@ -398,7 +625,7 @@ ExoMind 采用两层权限系统：
 2. `AgentPermissionPolicy`
    - 高层认知、工具、升级、生成对象的决策权限
 
-### 6.2 继承与覆盖规则
+### 9.2 继承与覆盖规则
 
 推荐继承链：
 
@@ -406,7 +633,7 @@ ExoMind 采用两层权限系统：
 
 后层允许覆盖前层，但不能突破底层硬限制。
 
-### 6.3 示例
+### 9.3 示例
 
 ```ts
 type ActorPermissionPolicy = {
@@ -429,14 +656,14 @@ type AgentPermissionPolicy = {
 
 ---
 
-## 7. Model（模型）归属规则
+## 10. Model（模型）归属规则
 
-### 7.1 正式规则
+### 10.1 正式规则
 
 > `Model policy belongs to Agent, active model belongs to Session.`  
 > 模型策略属于 `Agent`，当前激活模型属于 `Session`。
 
-### 7.2 `Agent` 持有默认模型策略
+### 10.2 `Agent` 持有默认模型策略
 
 ```ts
 type AgentModelPolicy = {
@@ -448,7 +675,7 @@ type AgentModelPolicy = {
 };
 ```
 
-### 7.3 `Session` 持有当前激活模型状态
+### 10.3 `Session` 持有当前激活模型状态
 
 ```ts
 type SessionModelState = {
@@ -460,7 +687,7 @@ type SessionModelState = {
 };
 ```
 
-### 7.4 动态路由能力
+### 10.4 动态路由能力
 
 `Agent` 必须允许保留动态切模接口，即：
 
@@ -470,9 +697,9 @@ type SessionModelState = {
 
 ---
 
-## 8. 横切系统
+## 11. 横切系统
 
-### 8.1 `Capability（能力声明）`
+### 11.1 `Capability（能力声明）`
 
 `Capability` 说明某个对象或绑定支持什么。
 
@@ -492,7 +719,7 @@ type SessionModelState = {
 - `declared_capabilities`
 - `runtime_capabilities`
 
-### 8.2 `Lease（租约）`
+### 11.2 `Lease（租约）`
 
 `Lease` 解决控制权问题。
 
@@ -508,7 +735,7 @@ type Lease = {
 };
 ```
 
-### 8.3 `TelemetrySnapshot（遥测快照）`
+### 11.3 `TelemetrySnapshot（遥测快照）`
 
 `TelemetrySnapshot` 记录实时消耗值，不等于预算上限。
 
@@ -524,7 +751,7 @@ type Lease = {
 - 人民币花费
 - 工具调用次数
 
-### 8.4 `Profile（配置画像）`
+### 11.4 `Profile（配置画像）`
 
 每类对象都可能拥有自己的配置画像或设置页，但 `Profile` 不作为一级运行时核心对象，而作为控制面系统存在。
 
@@ -536,11 +763,14 @@ type Lease = {
 - `WorkspaceProfile`
 - `SurfaceProfile`
 
+每个 `Actor` 或 `Agent` 都可以拥有自己的设置页，但设置页壳不需要为每个节点手写一套 UI。  
+推荐做法是：使用统一模板壳，由 `ProfileSchema（配置画像 schema）` 驱动具体设置项生成。
+
 ---
 
-## 9. Context / Memory / Workspace 的数据语义
+## 12. Context / Memory / Workspace 的数据语义
 
-### 9.1 `Context`
+### 12.1 `Context`
 
 推荐最小结构：
 
@@ -567,7 +797,7 @@ type ContextSnapshot = {
 };
 ```
 
-### 9.2 `Memory`
+### 12.2 `Memory`
 
 推荐最小结构：
 
@@ -583,7 +813,7 @@ type Memory = {
 
 `Memory` 可以由文件夹、数据库、向量库或其他外部接口承载。
 
-### 9.3 `Workspace`
+### 12.3 `Workspace`
 
 推荐最小结构：
 
@@ -619,9 +849,55 @@ type Workspace = {
 
 ---
 
-## 10. Canonical Event（规范事件）
+## 13. 典型场景映射
 
-### 10.1 和 `EventTape` 的关系
+### 13.1 时间块结束后的认知处理
+
+推荐链路：
+
+1. `TimeBlockActor` 发布 `timeblock.completed`
+2. 通过 `Connection` 路由到专门的 `Agent`
+3. 该 `Agent` 读取相关 `Workspace / EventLog / Context / Memory`
+4. 生成总结、建议、后续动作
+
+这里的认知处理对象应明确建模为 `Agent`，不与 `Actor` 混名。
+
+### 13.2 任务系统
+
+推荐拆分：
+
+- 任务 CRUD / 持久化 / 关联更新 更适合 `TaskManagerActor`
+- 规划、拆解、排序、复盘 更适合专门的 `Agent`
+
+### 13.3 记账 / 财务
+
+推荐拆分：
+
+- 凭证接收、账本写入、预算检查 适合 `Actor`
+- 模糊分类、异常分析、月度总结 适合 `Agent`
+
+### 13.4 外部消息与订阅
+
+像以下对象都天然适合 `Actor`：
+
+- 微信消息接收/发送
+- 飞书消息接收/发送
+- RSS 拉取
+- Webhook 接收
+- 通知推送
+
+因为它们通常：
+
+- 持有长期资源
+- 有独立生命周期
+- 有明确输入/输出
+- 需要被多个地方复用
+
+---
+
+## 14. Canonical Event（规范事件）
+
+### 14.1 和 `EventTape` 的关系
 
 沿用现有架构主张：
 
@@ -634,7 +910,7 @@ type Workspace = {
 - 规范事件层负责稳定 UI、调度、恢复、预算、权限语义
 - 新旧实现之间必须保留 traceability（可追踪映射）
 
-### 10.2 第一版最小事件族
+### 14.2 第一版最小事件族
 
 - `session.created`
 - `session.renamed`
@@ -669,9 +945,9 @@ type Workspace = {
 
 ---
 
-## 11. ExoMind 现有实现的映射建议
+## 15. ExoMind 现有实现的映射建议
 
-### 11.1 `runtime agent`
+### 15.1 `runtime agent`
 
 映射为：
 
@@ -679,7 +955,7 @@ type Workspace = {
 - `Attachment = current runtime stream/process handle`
 - `Surface = structured surface` 或 `hybrid surface`
 
-### 11.2 `PTY terminal`
+### 15.2 `PTY terminal`
 
 映射为：
 
@@ -687,7 +963,7 @@ type Workspace = {
 - `Attachment = pty_id`
 - `Surface = terminal surface`
 
-### 11.3 `future ACP`
+### 15.3 `future ACP`
 
 映射为：
 
@@ -695,7 +971,7 @@ type Workspace = {
 - `Attachment = ACP live channel / session handle`
 - `Surface = structured surface` 或 `hybrid surface`
 
-### 11.4 `native API agent`
+### 15.4 `native API agent`
 
 映射为：
 
@@ -705,29 +981,33 @@ type Workspace = {
 
 ---
 
-## 12. 第一版落地范围
+## 16. 第一版落地范围
 
-### 12.1 第一版必须落地
+### 16.1 第一版必须落地
 
 1. 一级对象边界
 2. `em_session_id` 与 `provider_session_ref` 分层
 3. `Context` 升格为一级对象
 4. `Memory` 与 `Workspace` 升格为一级对象
-5. `Budget / Permission / Capability / Lease / Telemetry / Profile` 作为横切系统入模
-6. `Model policy belongs to Agent, active model belongs to Session`
-7. `resume` 的统一语义
+5. 明确 `Actor` 与 `Agent` 的严格分层
+6. 明确 `Port / Connection` 的第一版规则
+7. 明确“默认传信号与引用，不直传大正文”的连接原则
+8. `Budget / Permission / Capability / Lease / Telemetry / Profile` 作为横切系统入模
+9. `Model policy belongs to Agent, active model belongs to Session`
+10. `resume` 的统一语义
 
-### 12.2 第一版明确不做重实现
+### 16.2 第一版明确不做重实现
 
 1. 不要求立即消灭所有旧 runtime / PTY 路径
 2. 不要求立即完成 ACP 全量接入
 3. 不要求立即完成长期记忆具体存储后端
 4. 不要求立即完成所有设置页 schema 设计
 5. 不要求立即完成多 Agent 自繁殖/治理协议
+6. 不要求在本版就定死 `Signal` 的完整字段全集
 
 ---
 
-## 13. 最终收口
+## 17. 最终收口
 
 这套统一对象模型的核心，不是“把所有 Agent 都做成一个类”，而是：
 
