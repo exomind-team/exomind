@@ -184,7 +184,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     }
 
     setTaskName(block.name);
-    setTimerMode(block.mode);
+    setTimerMode(block.mode ?? 'countup');
     if (block.mode === 'countdown' && block.targetMinutes) {
       setCountdownMinutes(block.targetMinutes);
     }
@@ -192,7 +192,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       ? resolveCountdownOverrunMs(block)
       : 0;
     const hasRestoredOverrun = restoredOverrunMs > 0;
-    setElapsed(block.mode === 'countdown' && hasRestoredOverrun ? 0 : Math.max(0, block.elapsed));
+    setElapsed(block.mode === 'countdown' && hasRestoredOverrun ? 0 : Math.max(0, block.elapsed ?? 0));
     const nextFeedbackInProgress = isFeedbackStage(block);
     setFeedbackInProgress(nextFeedbackInProgress);
     setFeedbackSubmitting(false);
@@ -479,7 +479,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     const block = await timeBlockService.startBlock(name, config, description || undefined);
     activeBlockDataRef.current = block;
     setTaskName(name);
-    setElapsed(block.elapsed);
+    setElapsed(block.elapsed ?? 0);
     setFeedbackInProgress(false);
     setTimerState('running');
     startTimeRef.current = block.startTime;

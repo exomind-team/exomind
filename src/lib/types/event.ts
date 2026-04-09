@@ -94,23 +94,53 @@ export interface BlockTransition {
 }
 
 export interface TimeBlockData {
-  id: UUID;
+  id?: UUID;
   name: string;
   startId: UUID;
-  endId: UUID;
+  endId?: UUID;
   note?: string;
-  tags: string[];
+  tags?: string[];
   startTime: Timestamp;
-  endTime: Timestamp;
+  endTime?: Timestamp;
+  mode?: 'countup' | 'countdown';
+  targetMinutes?: number;
   /** 'active' = 用户主动触发, 'gap' = 自动间隙。缺省视为 'active'（向后兼容） */
   blockType?: BlockType;
   transitions?: BlockTransition[];
+  /** 兼容旧结构：逐步迁移中，优先由 transitions 派生 */
+  elapsed?: number;
+  /** 兼容旧结构：逐步迁移中 */
+  updatedAt?: Timestamp;
+  /** 状态机阶段（单调前进） */
+  phase?: ActiveBlockPhase;
+  /** 状态版本号（每次状态迁移递增） */
+  version?: number;
+  /** 写入来源端标识（用于并发可观测性与裁决） */
+  actorId?: string;
+  /** 最近一次状态迁移时刻 */
+  lastTransitionAt?: Timestamp;
+  /** 最近一次进入 running 的时刻 */
+  lastResumedAt?: Timestamp;
+  /** 已累计有效专注时长（不含当前 running 切片） */
+  accumulatedRunMs?: number;
+  /** 点击“结束”的时刻（行动结束） */
+  actionEndedAt?: Timestamp;
+  /** 反馈弹窗打开的时刻（通常与 actionEndedAt 一致） */
+  feedbackStartedAt?: Timestamp;
+  /** 反馈提交完成时刻（终态标记，防止并发回退） */
+  feedbackSubmittedAt?: Timestamp;
+  /** 累计暂停时长（毫秒） */
+  pauseAccumulatedMs?: number;
+  paused?: boolean;
+  pausedAt?: Timestamp;
   /** 结束时仍关联的任务快照；历史全集请看 taskAssociationLog */
   taskIds?: UUID[];
   taskStatusOutcomes?: Record<string, string>;
   /** 关联历史日志：可回放”曾关联过哪些任务”以及后续计算任务出现程度 */
   taskAssociationLog?: BlockTaskAssociationEvent[];
   sourcePlannedBlockId?: UUID;
+  /** @deprecated Use taskIds. Kept for deserialization compat only. */
+  taskId?: UUID;
 }
 
 // 时间块类型（UI 使用）
@@ -132,58 +162,13 @@ export interface TimeBlock {
   sourcePlannedBlockId?: UUID;
 }
 
-// 活跃时间块（进行中）
 export type ActiveBlockPhase =
   | 'running'
   | 'paused'
   | 'feedback_in_progress'
   | 'action_ended' // legacy phase value（兼容旧数据）
   | 'feedback_submitted';
-
-export interface ActiveBlockData {
-  startId: UUID;
-  name: string;
-  mode: 'countup' | 'countdown';
-  targetMinutes?: number;
-  /** 'active' = 用户主动触发, 'gap' = 自动间隙。缺省视为 'active'（向后兼容） */
-  blockType?: BlockType;
-  transitions?: BlockTransition[];
-  /** 兼容旧结构：逐步迁移中，优先由锚点字段推导 */
-  elapsed: number;
-  /** 兼容旧结构：逐步迁移中 */
-  updatedAt?: Timestamp;
-  /** 状态机阶段（单调前进） */
-  phase?: ActiveBlockPhase;
-  /** 状态版本号（每次状态迁移递增） */
-  version?: number;
-  /** 写入来源端标识（用于并发可观测性与裁决） */
-  actorId?: string;
-  /** 最近一次状态迁移时刻 */
-  lastTransitionAt?: Timestamp;
-  /** 最近一次进入 running 的时刻 */
-  lastResumedAt?: Timestamp;
-  /** 已累计有效专注时长（不含当前 running 切片） */
-  accumulatedRunMs?: number;
-  /** 点击“开始”的时刻（行动结束） */
-  startTime: Timestamp;
-  /** 点击“结束”的时刻（行动结束） */
-  actionEndedAt?: Timestamp;
-  /** 反馈弹窗打开的时刻（通常与 actionEndedAt 一致） */
-  feedbackStartedAt?: Timestamp;
-  /** 反馈提交完成时刻（终态标记，防止并发回退） */
-  feedbackSubmittedAt?: Timestamp;
-  /** 累计暂停时长（毫秒） */
-  pauseAccumulatedMs?: number;
-  paused: boolean;
-  pausedAt?: Timestamp;
-  /** 当前仍关联的任务快照 */
-  taskIds: UUID[];
-  /** 运行期关联历史：不仅能恢复当前关联，也能保留“曾经关联过”的任务全集 */
-  taskAssociationLog: BlockTaskAssociationEvent[];
-  sourcePlannedBlockId?: UUID;
-  /** @deprecated Use taskIds. Kept for deserialization compat only. */
-  taskId?: UUID;
-}
+export type ActiveBlockData = TimeBlockData;
 
 export type RhythmPresetKey = 'pomodoro_25_5' | 'focus_45_10' | 'focus_45_15';
 
@@ -430,5 +415,128 @@ export function normalizeTimeBlockTaskIds<T extends { taskIds?: UUID[] }>(
   return {
     ...block,
     taskIds: block.taskIds ?? [],
+  };
+}
+
+function resolveFirstTransitionAt(transitions: BlockTransition[] | undefined): number | undefined {
+  return transitions?.[0]?.at;
+}
+
+function resolveLastTransition(
+  transitions: BlockTransition[] | undefined,
+): BlockTransition | undefined {
+  return transitions?.length ? transitions[transitions.length - 1] : undefined;
+}
+
+export function resolveTimeBlockId<T extends { id?: UUID; startId?: UUID }>(
+  block: T | null | undefined,
+): UUID | undefined {
+  if (!block) return undefined;
+  return block.id ?? block.startId;
+}
+
+export function resolveTimeBlockStartTime<T extends { startTime?: Timestamp; transitions?: BlockTransition[] }>(
+  block: T | null | undefined,
+): Timestamp | undefined {
+  if (!block) return undefined;
+  return resolveFirstTransitionAt(block.transitions) ?? block.startTime;
+}
+
+export function resolveTimeBlockEndTime<T extends {
+  endTime?: Timestamp;
+  feedbackSubmittedAt?: Timestamp;
+  transitions?: BlockTransition[];
+}>(
+  block: T | null | undefined,
+): Timestamp | undefined {
+  if (!block) return undefined;
+  const transitions = block.transitions ?? [];
+  for (let index = transitions.length - 1; index >= 0; index -= 1) {
+    if (transitions[index].type === 'end') {
+      return transitions[index].at;
+    }
+  }
+  return block.endTime ?? block.feedbackSubmittedAt;
+}
+
+export function resolveTimeBlockLastTransitionAt<T extends {
+  lastTransitionAt?: Timestamp;
+  updatedAt?: Timestamp;
+  transitions?: BlockTransition[];
+}>(
+  block: T | null | undefined,
+): Timestamp | undefined {
+  if (!block) return undefined;
+  return resolveLastTransition(block.transitions)?.at ?? block.lastTransitionAt ?? block.updatedAt;
+}
+
+export function resolveTimeBlockPhase<T extends TimeBlockData>(
+  block: T | null | undefined,
+): ActiveBlockPhase | 'completed' | 'idle' {
+  if (!block) return 'idle';
+
+  const lastTransition = resolveLastTransition(block.transitions);
+  if (lastTransition) {
+    switch (lastTransition.type) {
+      case 'start':
+      case 'resume':
+        return 'running';
+      case 'pause':
+        return 'paused';
+      case 'feedback_start':
+        return 'feedback_in_progress';
+      case 'feedback_submit':
+      case 'end':
+        return 'completed';
+      default:
+        break;
+    }
+  }
+
+  if (block.feedbackSubmittedAt || block.phase === 'feedback_submitted') {
+    return 'completed';
+  }
+  if (block.actionEndedAt || block.feedbackStartedAt || block.phase === 'feedback_in_progress' || block.phase === 'action_ended') {
+    return 'feedback_in_progress';
+  }
+  if (block.phase === 'paused' || block.paused) {
+    return 'paused';
+  }
+  if (block.phase === 'running') {
+    return 'running';
+  }
+  return 'idle';
+}
+
+export function isTimeBlockCompleted<T extends TimeBlockData>(
+  block: T | null | undefined,
+): boolean {
+  if (!block) return false;
+  return resolveTimeBlockPhase(block) === 'completed'
+    || Boolean(resolveTimeBlockEndTime(block));
+}
+
+export function normalizeTimeBlockData(
+  block: TimeBlockData,
+): TimeBlockData & {
+  id: UUID;
+  tags: string[];
+  transitions: BlockTransition[];
+  taskIds: UUID[];
+  taskAssociationLog: BlockTaskAssociationEvent[];
+} {
+  const normalizedTaskIds = resolveActiveBlockTaskIds(block);
+  const normalizedTransitions = block.transitions ?? [];
+  const id = resolveTimeBlockId(block) ?? `timeblock-${resolveTimeBlockStartTime(block) ?? 'unknown'}`;
+
+  const { taskId: _legacyTaskId, ...rest } = block;
+  return {
+    ...rest,
+    id,
+    startId: block.startId ?? id,
+    tags: block.tags ?? [],
+    transitions: normalizedTransitions,
+    taskIds: normalizedTaskIds,
+    taskAssociationLog: block.taskAssociationLog ?? [],
   };
 }

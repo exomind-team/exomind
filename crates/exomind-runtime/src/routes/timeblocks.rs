@@ -1,6 +1,6 @@
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::signal::types::SignalEvent;
 use crate::timeblock::{
-    ActiveBlockData, BlockTransition, BlockTransitionType, TimeBlockData, TimeBlockStore,
+    ActiveBlockData, BlockTaskAssociationEvent, BlockTransition, BlockTransitionType,
+    TimeBlockData, TimeBlockStore,
 };
 
 #[derive(Debug, Deserialize)]
@@ -94,6 +95,15 @@ fn conflict(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
     )
 }
 
+fn not_found(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
+}
+
 fn normalize_scope_key(scope_key: Option<&str>) -> String {
     scope_key
         .map(str::trim)
@@ -169,7 +179,9 @@ async fn publish_active_timeblock_replication_signal(
             "cursor": {
                 "kind": "timeblock_active",
                 "startId": active.start_id,
-                "updatedAt": active.updated_at.unwrap_or(active.start_time),
+                "updatedAt": active
+                    .resolve_last_transition_at()
+                    .unwrap_or(active.updated_at.unwrap_or(active.resolve_start_time())),
                 "originHostId": state.host_id.clone(),
             },
             "active": active,
@@ -212,6 +224,15 @@ struct StartBlockRequest {
     source_planned_block_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PatchActiveBlockTasksRequest {
+    #[serde(default)]
+    task_ids: Vec<String>,
+    #[serde(default)]
+    task_association_log: Vec<BlockTaskAssociationEvent>,
+}
+
 fn default_mode() -> String {
     "countup".to_string()
 }
@@ -232,6 +253,12 @@ struct CompletedReplicationRequest {
 #[derive(Debug, Serialize)]
 struct CompletedReplicationResponse {
     status: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackfillGapBlocksResponse {
+    inserted: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -380,6 +407,71 @@ pub fn do_new_block(
     })
 }
 
+fn generate_gap_blocks(blocks: &[TimeBlockData]) -> Vec<TimeBlockData> {
+    if blocks.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut sorted = blocks.to_vec();
+    sorted.sort_by_key(|block| block.start_time);
+
+    let active_blocks = sorted
+        .iter()
+        .filter(|block| block.block_type.as_deref() != Some("gap"))
+        .collect::<Vec<_>>();
+
+    let existing_gaps = sorted
+        .iter()
+        .filter(|block| block.block_type.as_deref() == Some("gap"))
+        .map(|block| (block.start_time, block.end_time))
+        .collect::<std::collections::HashSet<_>>();
+
+    let mut gaps = Vec::new();
+    for pair in active_blocks.windows(2) {
+        let current = pair[0];
+        let next = pair[1];
+        if current.end_time == 0 {
+            continue;
+        }
+
+        let gap_start = current.end_time;
+        let gap_end = next.start_time;
+        if existing_gaps.contains(&(gap_start, gap_end)) {
+            continue;
+        }
+
+        gaps.push(TimeBlockData {
+            id: format!("gap-{}-{}", current.resolve_id(), next.resolve_id()),
+            name: String::new(),
+            start_id: format!("gap-start-{}-{}", current.resolve_id(), next.resolve_id()),
+            end_id: format!("gap-end-{}-{}", current.resolve_id(), next.resolve_id()),
+            note: None,
+            tags: Vec::new(),
+            start_time: gap_start,
+            end_time: gap_end,
+            task_ids: Vec::new(),
+            task_status_outcomes: None,
+            task_association_log: Vec::new(),
+            source_planned_block_id: None,
+            block_type: Some("gap".to_string()),
+            transitions: vec![
+                BlockTransition {
+                    transition_type: BlockTransitionType::Start,
+                    at: gap_start,
+                    actor_id: None,
+                },
+                BlockTransition {
+                    transition_type: BlockTransitionType::End,
+                    at: gap_end,
+                    actor_id: None,
+                },
+            ],
+        });
+    }
+
+    gaps
+}
+
 /// POST /timeblocks/new — raw primitive, no guard. For Agent/script use.
 async fn new_block(
     State(state): State<AppState>,
@@ -404,7 +496,7 @@ async fn start_block(
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
     {
-        if current.block_type.as_deref() != Some("gap") && current.feedback_submitted_at.is_none() {
+        if !current.is_gap() && !current.is_completed() {
             return Err(conflict("cannot start: active block in progress"));
         }
     }
@@ -454,12 +546,15 @@ async fn end_block(
         .map_err(|e| internal_error(e.to_string()))?
         .ok_or_else(|| conflict("cannot end: no active block"))?;
 
-    if current.block_type.as_deref() == Some("gap") {
+    if current.is_gap() {
         return Err(conflict("cannot end: current block is a gap"));
+    }
+    if current.is_completed() {
+        return Err(conflict("cannot end: current block already ended"));
     }
 
     // Guard: must have stopped first (feedback phase required for active blocks)
-    if current.action_ended_at.is_none() && current.feedback_started_at.is_none() {
+    if !current.is_feedback_in_progress() {
         return Err(conflict(
             "cannot end: must stop first (use POST /timeblocks/stop)",
         ));
@@ -497,6 +592,35 @@ async fn end_block(
     publish_active_timeblock_replication_signal(&state, scope_key, &result.active).await;
 
     Ok(Json(result))
+}
+
+async fn backfill_gap_blocks(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<BackfillGapBlocksResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let blocks = state
+        .timeblock_store
+        .list_completed_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?;
+
+    let gaps = generate_gap_blocks(&blocks);
+    if gaps.is_empty() {
+        return Ok(Json(BackfillGapBlocksResponse { inserted: 0 }));
+    }
+
+    let mut merged = blocks;
+    merged.extend(gaps.iter().cloned());
+    merged.sort_by_key(|block| block.start_time);
+
+    state
+        .timeblock_store
+        .replace_completed_scoped(scope_key, &merged)
+        .map_err(|error| internal_error(error.to_string()))?;
+
+    Ok(Json(BackfillGapBlocksResponse {
+        inserted: gaps.len(),
+    }))
 }
 
 async fn replication_completed_block(
@@ -545,10 +669,10 @@ async fn stop_block(
         .map_err(|e| internal_error(e.to_string()))?
         .ok_or_else(|| conflict("cannot stop: no active block"))?;
 
-    if current.block_type.as_deref() == Some("gap") {
+    if current.is_gap() {
         return Err(conflict("cannot stop: current block is a gap"));
     }
-    if current.action_ended_at.is_some() || current.feedback_started_at.is_some() {
+    if current.is_feedback_in_progress() || current.is_completed() {
         return Err(conflict("cannot stop: already in feedback phase"));
     }
 
@@ -606,18 +730,20 @@ async fn pause_block(
         .map_err(|e| internal_error(e.to_string()))?
         .ok_or_else(|| conflict("cannot pause: no active block"))?;
 
-    if current.block_type.as_deref() == Some("gap") {
+    if current.is_gap() {
         return Err(conflict("cannot pause: current block is a gap"));
     }
-    if current.paused {
+    if current.is_paused_state() {
         return Err(conflict("cannot pause: already paused"));
     }
-    if current.action_ended_at.is_some() {
+    if current.is_feedback_in_progress() || current.is_completed() {
         return Err(conflict("cannot pause: block is in feedback phase"));
     }
 
     // Calculate accumulated run time
-    let run_since = current.last_resumed_at.unwrap_or(current.start_time);
+    let run_since = current
+        .last_resumed_at
+        .unwrap_or(current.resolve_start_time());
     let new_run_ms = now.saturating_sub(run_since);
     let accumulated = current.accumulated_run_ms.unwrap_or(0) + new_run_ms;
 
@@ -681,15 +807,18 @@ async fn resume_block(
         .map_err(|e| internal_error(e.to_string()))?
         .ok_or_else(|| conflict("cannot resume: no active block"))?;
 
-    if current.block_type.as_deref() == Some("gap") {
+    if current.is_gap() {
         return Err(conflict("cannot resume: current block is a gap"));
     }
-    if !current.paused {
+    if !current.is_paused_state() {
         return Err(conflict("cannot resume: not paused"));
     }
 
     // Calculate accumulated pause time
-    let pause_since = current.paused_at.unwrap_or(now);
+    let pause_since = current
+        .paused_at
+        .or(current.resolve_last_transition_at())
+        .unwrap_or(now);
     let new_pause_ms = now.saturating_sub(pause_since);
     let pause_accumulated = current.pause_accumulated_ms.unwrap_or(0) + new_pause_ms;
 
@@ -735,6 +864,46 @@ async fn resume_block(
     }
 
     Ok(Json(serde_json::json!({ "status": "resumed" })))
+}
+
+async fn patch_active_block_tasks(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+    Json(payload): Json<PatchActiveBlockTasksRequest>,
+) -> Result<Json<ActiveBlockData>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock error")
+        .as_millis() as u64;
+
+    let current = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?
+        .ok_or_else(|| not_found("active timeblock not found"))?;
+
+    if current.is_gap() {
+        return Err(conflict("cannot patch tasks: current block is a gap"));
+    }
+    if current.is_completed() {
+        return Err(conflict("cannot patch tasks: current block already ended"));
+    }
+
+    let mut updated = current;
+    updated.task_ids = payload.task_ids;
+    updated.task_association_log = payload.task_association_log;
+    updated.version = Some(updated.version.unwrap_or(0) + 1);
+    updated.updated_at = Some(now);
+    updated.actor_id = Some("rt:active-task-links".to_string());
+
+    state
+        .timeblock_store
+        .put_active_scoped(scope_key, updated.clone())
+        .map_err(|error| internal_error(error.to_string()))?;
+    publish_active_timeblock_replication_signal(&state, scope_key, &updated).await;
+
+    Ok(Json(updated))
 }
 
 /// POST /timeblocks/describe — modify name of the current active block (no id needed)
@@ -888,26 +1057,6 @@ async fn list_timeblocks(
     Ok(Json(filtered))
 }
 
-/// PUT /timeblocks — replace completed blocks list.
-///
-/// Still used by rt-sqlite mode for:
-///   - `backfillGapBlocks` (bulk insert gap blocks)
-///   - `writeCompletedBlockData` in legacy endBlock/startBlock gap truncation
-///
-/// TODO(#780): Migrate remaining callers to atomic RT primitives, then deprecate.
-async fn replace_timeblocks(
-    State(state): State<AppState>,
-    Query(query): Query<ScopeQuery>,
-    Json(payload): Json<Vec<TimeBlockData>>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    state
-        .timeblock_store
-        .replace_completed_scoped(scope_key, &payload)
-        .map_err(|error| internal_error(error.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 async fn get_active_timeblock(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
@@ -928,90 +1077,8 @@ async fn get_active_timeblock(
     }
 }
 
-/// PUT /timeblocks/active — raw active block write.
-///
-/// Still used by rt-sqlite mode for:
-///   - `saveActiveBlock` (ECS replication write-back)
-///   - `applyReplicatedActiveBlock` (cross-device sync)
-///
-/// The main lifecycle (start/pause/resume/stop/end) has migrated to POST routes.
-/// TODO(#780): Migrate remaining callers to event-driven or PATCH approach, then deprecate.
-async fn put_active_timeblock(
-    State(state): State<AppState>,
-    Query(query): Query<ScopeQuery>,
-    Json(payload): Json<ActiveBlockData>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let normalized = payload.normalize_task_ids();
-    let existing_active = state
-        .timeblock_store
-        .get_active_scoped(scope_key)
-        .map_err(|error| internal_error(error.to_string()))?;
-    let is_new_block = existing_active
-        .as_ref()
-        .map(|block| block.start_id != normalized.start_id)
-        .unwrap_or(true);
-
-    state
-        .timeblock_store
-        .put_active_scoped(scope_key, normalized.clone())
-        .map_err(|error| internal_error(error.to_string()))?;
-    publish_active_timeblock_replication_signal(&state, scope_key, &normalized).await;
-
-    if is_new_block {
-        write_timeblock_eventlog(
-            &state,
-            scope_key,
-            "block_start",
-            &normalized.name,
-            &normalized.start_id,
-            &normalized.task_ids,
-        )
-        .await;
-    } else if let Some(existing) = existing_active.as_ref() {
-        if !is_timeblock_ended(existing) && is_timeblock_ended(&normalized) {
-            write_timeblock_eventlog(
-                &state,
-                scope_key,
-                "block_end",
-                &normalized.name,
-                &normalized.start_id,
-                &normalized.task_ids,
-            )
-            .await;
-        } else if !existing.paused && normalized.paused {
-            write_timeblock_eventlog(
-                &state,
-                scope_key,
-                "block_pause",
-                &normalized.name,
-                &normalized.start_id,
-                &normalized.task_ids,
-            )
-            .await;
-        } else if existing.paused && !normalized.paused {
-            write_timeblock_eventlog(
-                &state,
-                scope_key,
-                "block_resume",
-                &normalized.name,
-                &normalized.start_id,
-                &normalized.task_ids,
-            )
-            .await;
-        }
-    }
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
 fn is_timeblock_ended(block: &ActiveBlockData) -> bool {
-    matches!(
-        block.phase.as_deref(),
-        Some("action_ended" | "feedback_in_progress" | "feedback_submitted")
-    ) || block.action_ended_at.is_some()
-        || block.feedback_started_at.is_some()
-        || block.feedback_submitted_at.is_some()
+    block.is_feedback_in_progress() || block.is_completed()
 }
 
 async fn timeblock_backend_status(
@@ -1297,8 +1364,9 @@ fn read_timeblocks_from_sqlite_snapshot(
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/timeblocks", get(list_timeblocks).put(replace_timeblocks))
+        .route("/timeblocks", get(list_timeblocks))
         .route("/timeblocks/new", post(new_block))
+        .route("/timeblocks/backfill-gaps", post(backfill_gap_blocks))
         .route("/timeblocks/start", post(start_block))
         .route("/timeblocks/end", post(end_block))
         .route(
@@ -1308,12 +1376,10 @@ pub fn router() -> Router<AppState> {
         .route("/timeblocks/stop", post(stop_block))
         .route("/timeblocks/pause", post(pause_block))
         .route("/timeblocks/resume", post(resume_block))
+        .route("/timeblocks/active/tasks", patch(patch_active_block_tasks))
         .route("/timeblocks/describe", post(describe_current_block))
         .route("/timeblocks/:block_id/describe", post(describe_block))
-        .route(
-            "/timeblocks/active",
-            get(get_active_timeblock).put(put_active_timeblock),
-        )
+        .route("/timeblocks/active", get(get_active_timeblock))
         .route("/timeblocks/backend/status", get(timeblock_backend_status))
         .route("/timeblocks/backup/json", get(export_timeblocks_json))
         .route("/timeblocks/backup/sqlite", get(export_timeblocks_sqlite))
@@ -1409,132 +1475,96 @@ mod tests {
         let timeblock_store =
             Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
         let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&vec![TimeBlockData {
-                            id: "tb-anonymous".to_string(),
-                            name: "Anonymous block".to_string(),
-                            start_id: "start-anonymous".to_string(),
-                            end_id: "end-anonymous".to_string(),
-                            note: None,
-                            tags: vec!["focus".to_string()],
-                            start_time: 1_700_000_000_000,
-                            end_time: 1_700_000_060_000,
-                            task_ids: vec![],
-                            task_status_outcomes: None,
-                            task_association_log: vec![],
-                            source_planned_block_id: None,
-                            block_type: None,
-                            transitions: vec![],
-                        }])
-                        .unwrap(),
-                    ))
-                    .unwrap(),
-            )
-            .await
+        timeblock_store
+            .replace_completed(&[TimeBlockData {
+                id: "tb-anonymous".to_string(),
+                name: "Anonymous block".to_string(),
+                start_id: "start-anonymous".to_string(),
+                end_id: "end-anonymous".to_string(),
+                note: None,
+                tags: vec!["focus".to_string()],
+                start_time: 1_700_000_000_000,
+                end_time: 1_700_000_060_000,
+                task_ids: vec![],
+                task_status_outcomes: None,
+                task_association_log: vec![],
+                source_planned_block_id: None,
+                block_type: None,
+                transitions: vec![],
+            }])
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks?profile_id=profile-a")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&vec![TimeBlockData {
-                            id: "tb-profile-a".to_string(),
-                            name: "Profile A block".to_string(),
-                            start_id: "start-profile-a".to_string(),
-                            end_id: "end-profile-a".to_string(),
-                            note: Some("scoped".to_string()),
-                            tags: vec!["focus".to_string()],
-                            start_time: 1_700_000_100_000,
-                            end_time: 1_700_000_160_000,
-                            task_ids: vec!["task-profile-a".to_string()],
-                            task_status_outcomes: Some(std::collections::HashMap::from([(
-                                "task-profile-a".to_string(),
-                                "continue".to_string(),
-                            )])),
-                            task_association_log: vec![
-                                crate::timeblock::BlockTaskAssociationEvent {
-                                    block_id: "tb-profile-a".to_string(),
-                                    task_id: "task-profile-a".to_string(),
-                                    action: "associated".to_string(),
-                                    timestamp: 1_700_000_100_000,
-                                    source: "block_start".to_string(),
-                                },
-                            ],
-                            source_planned_block_id: None,
-                            block_type: None,
-                            transitions: vec![],
-                        }])
-                        .unwrap(),
-                    ))
-                    .unwrap(),
+        timeblock_store
+            .replace_completed_scoped(
+                Some("profile-a"),
+                &[TimeBlockData {
+                    id: "tb-profile-a".to_string(),
+                    name: "Profile A block".to_string(),
+                    start_id: "start-profile-a".to_string(),
+                    end_id: "end-profile-a".to_string(),
+                    note: Some("scoped".to_string()),
+                    tags: vec!["focus".to_string()],
+                    start_time: 1_700_000_100_000,
+                    end_time: 1_700_000_160_000,
+                    task_ids: vec!["task-profile-a".to_string()],
+                    task_status_outcomes: Some(std::collections::HashMap::from([(
+                        "task-profile-a".to_string(),
+                        "continue".to_string(),
+                    )])),
+                    task_association_log: vec![
+                        crate::timeblock::BlockTaskAssociationEvent {
+                            block_id: "tb-profile-a".to_string(),
+                            task_id: "task-profile-a".to_string(),
+                            action: "associated".to_string(),
+                            timestamp: 1_700_000_100_000,
+                            source: "block_start".to_string(),
+                        },
+                    ],
+                    source_planned_block_id: None,
+                    block_type: None,
+                    transitions: vec![],
+                }],
             )
-            .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active?profile_id=profile-a")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&ActiveBlockData {
-                            start_id: "active-profile-a".to_string(),
-                            name: "Scoped active".to_string(),
-                            mode: "countdown".to_string(),
-                            target_minutes: Some(25),
-                            elapsed: 30_000,
-                            updated_at: Some(1_700_000_101_000),
-                            phase: Some("running".to_string()),
-                            version: Some(1),
-                            actor_id: Some("actor-a".to_string()),
-                            last_transition_at: Some(1_700_000_101_000),
-                            last_resumed_at: Some(1_700_000_101_000),
-                            accumulated_run_ms: Some(30_000),
-                            start_time: 1_700_000_100_000,
-                            action_ended_at: None,
-                            feedback_started_at: None,
-                            feedback_submitted_at: None,
-                            pause_accumulated_ms: Some(0),
-                            paused: false,
-                            paused_at: None,
-                            task_ids: vec!["task-profile-a".to_string()],
-                            task_association_log: vec![
-                                crate::timeblock::BlockTaskAssociationEvent {
-                                    block_id: "active-profile-a".to_string(),
-                                    task_id: "task-profile-a".to_string(),
-                                    action: "associated".to_string(),
-                                    timestamp: 1_700_000_100_000,
-                                    source: "block_start".to_string(),
-                                },
-                            ],
-                            source_planned_block_id: None,
-                            block_type: None,
-                            transitions: vec![],
-                            task_id: Some("task-profile-a".to_string()),
-                        })
-                        .unwrap(),
-                    ))
-                    .unwrap(),
+        timeblock_store
+            .put_active_scoped(
+                Some("profile-a"),
+                ActiveBlockData {
+                    start_id: "active-profile-a".to_string(),
+                    name: "Scoped active".to_string(),
+                    mode: "countdown".to_string(),
+                    target_minutes: Some(25),
+                    elapsed: 30_000,
+                    updated_at: Some(1_700_000_101_000),
+                    phase: Some("running".to_string()),
+                    version: Some(1),
+                    actor_id: Some("actor-a".to_string()),
+                    last_transition_at: Some(1_700_000_101_000),
+                    last_resumed_at: Some(1_700_000_101_000),
+                    accumulated_run_ms: Some(30_000),
+                    start_time: 1_700_000_100_000,
+                    action_ended_at: None,
+                    feedback_started_at: None,
+                    feedback_submitted_at: None,
+                    pause_accumulated_ms: Some(0),
+                    paused: false,
+                    paused_at: None,
+                    task_ids: vec!["task-profile-a".to_string()],
+                    task_association_log: vec![
+                        crate::timeblock::BlockTaskAssociationEvent {
+                            block_id: "active-profile-a".to_string(),
+                            task_id: "task-profile-a".to_string(),
+                            action: "associated".to_string(),
+                            timestamp: 1_700_000_100_000,
+                            source: "block_start".to_string(),
+                        },
+                    ],
+                    source_planned_block_id: None,
+                    block_type: None,
+                    transitions: vec![],
+                    task_id: Some("task-profile-a".to_string()),
+                },
             )
-            .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
         let response = app
             .clone()
@@ -1607,100 +1637,78 @@ mod tests {
         let timeblock_store =
             Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
         let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks?user_id=user-a")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&vec![TimeBlockData {
-                            id: "tb-user-a".to_string(),
-                            name: "User A block".to_string(),
-                            start_id: "start-user-a".to_string(),
-                            end_id: "end-user-a".to_string(),
-                            note: None,
-                            tags: vec!["focus".to_string()],
-                            start_time: 1_700_000_100_000,
-                            end_time: 1_700_000_160_000,
-                            task_ids: vec!["task-user-a".to_string()],
-                            task_status_outcomes: Some(std::collections::HashMap::from([(
-                                "task-user-a".to_string(),
-                                "continue".to_string(),
-                            )])),
-                            task_association_log: vec![
-                                crate::timeblock::BlockTaskAssociationEvent {
-                                    block_id: "tb-user-a".to_string(),
-                                    task_id: "task-user-a".to_string(),
-                                    action: "associated".to_string(),
-                                    timestamp: 1_700_000_100_000,
-                                    source: "block_start".to_string(),
-                                },
-                            ],
-                            source_planned_block_id: None,
-                            block_type: None,
-                            transitions: vec![],
-                        }])
-                        .unwrap(),
-                    ))
-                    .unwrap(),
+        timeblock_store
+            .replace_completed_scoped(
+                Some("user-a"),
+                &[TimeBlockData {
+                    id: "tb-user-a".to_string(),
+                    name: "User A block".to_string(),
+                    start_id: "start-user-a".to_string(),
+                    end_id: "end-user-a".to_string(),
+                    note: None,
+                    tags: vec!["focus".to_string()],
+                    start_time: 1_700_000_100_000,
+                    end_time: 1_700_000_160_000,
+                    task_ids: vec!["task-user-a".to_string()],
+                    task_status_outcomes: Some(std::collections::HashMap::from([(
+                        "task-user-a".to_string(),
+                        "continue".to_string(),
+                    )])),
+                    task_association_log: vec![
+                        crate::timeblock::BlockTaskAssociationEvent {
+                            block_id: "tb-user-a".to_string(),
+                            task_id: "task-user-a".to_string(),
+                            action: "associated".to_string(),
+                            timestamp: 1_700_000_100_000,
+                            source: "block_start".to_string(),
+                        },
+                    ],
+                    source_planned_block_id: None,
+                    block_type: None,
+                    transitions: vec![],
+                }],
             )
-            .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active?user_id=user-a")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(&ActiveBlockData {
-                            start_id: "active-user-a".to_string(),
-                            name: "Scoped active".to_string(),
-                            mode: "countdown".to_string(),
-                            target_minutes: Some(25),
-                            elapsed: 30_000,
-                            updated_at: Some(1_700_000_101_000),
-                            phase: Some("running".to_string()),
-                            version: Some(1),
-                            actor_id: Some("actor-a".to_string()),
-                            last_transition_at: Some(1_700_000_101_000),
-                            last_resumed_at: Some(1_700_000_101_000),
-                            accumulated_run_ms: Some(30_000),
-                            start_time: 1_700_000_100_000,
-                            action_ended_at: None,
-                            feedback_started_at: None,
-                            feedback_submitted_at: None,
-                            pause_accumulated_ms: Some(0),
-                            paused: false,
-                            paused_at: None,
-                            task_ids: vec!["task-user-a".to_string()],
-                            task_association_log: vec![
-                                crate::timeblock::BlockTaskAssociationEvent {
-                                    block_id: "active-user-a".to_string(),
-                                    task_id: "task-user-a".to_string(),
-                                    action: "associated".to_string(),
-                                    timestamp: 1_700_000_100_000,
-                                    source: "block_start".to_string(),
-                                },
-                            ],
-                            source_planned_block_id: None,
-                            block_type: None,
-                            transitions: vec![],
-                            task_id: Some("task-user-a".to_string()),
-                        })
-                        .unwrap(),
-                    ))
-                    .unwrap(),
+        timeblock_store
+            .put_active_scoped(
+                Some("user-a"),
+                ActiveBlockData {
+                    start_id: "active-user-a".to_string(),
+                    name: "Scoped active".to_string(),
+                    mode: "countdown".to_string(),
+                    target_minutes: Some(25),
+                    elapsed: 30_000,
+                    updated_at: Some(1_700_000_101_000),
+                    phase: Some("running".to_string()),
+                    version: Some(1),
+                    actor_id: Some("actor-a".to_string()),
+                    last_transition_at: Some(1_700_000_101_000),
+                    last_resumed_at: Some(1_700_000_101_000),
+                    accumulated_run_ms: Some(30_000),
+                    start_time: 1_700_000_100_000,
+                    action_ended_at: None,
+                    feedback_started_at: None,
+                    feedback_submitted_at: None,
+                    pause_accumulated_ms: Some(0),
+                    paused: false,
+                    paused_at: None,
+                    task_ids: vec!["task-user-a".to_string()],
+                    task_association_log: vec![
+                        crate::timeblock::BlockTaskAssociationEvent {
+                            block_id: "active-user-a".to_string(),
+                            task_id: "task-user-a".to_string(),
+                            action: "associated".to_string(),
+                            timestamp: 1_700_000_100_000,
+                            source: "block_start".to_string(),
+                        },
+                    ],
+                    source_planned_block_id: None,
+                    block_type: None,
+                    transitions: vec![],
+                    task_id: Some("task-user-a".to_string()),
+                },
             )
-            .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
         let response = app
             .clone()
@@ -1751,7 +1759,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_active_writes_block_start_to_eventlog() {
+    async fn start_route_writes_block_start_to_eventlog() {
         let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
             std::env::temp_dir().join(format!(
                 "exomind-test-timeblock-start-eventlog-{}",
@@ -1767,45 +1775,24 @@ mod tests {
         let response = app
             .oneshot(
                 Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active")
+                    .method("POST")
+                    .uri("/timeblocks/start")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        serde_json::to_vec(&ActiveBlockData {
-                            start_id: "active-1".to_string(),
-                            name: "Morning focus".to_string(),
-                            mode: "countdown".to_string(),
-                            target_minutes: Some(25),
-                            elapsed: 0,
-                            updated_at: Some(1_700_000_101_000),
-                            phase: Some("running".to_string()),
-                            version: Some(1),
-                            actor_id: Some("actor-a".to_string()),
-                            last_transition_at: Some(1_700_000_101_000),
-                            last_resumed_at: Some(1_700_000_101_000),
-                            accumulated_run_ms: Some(0),
-                            start_time: 1_700_000_100_000,
-                            action_ended_at: None,
-                            feedback_started_at: None,
-                            feedback_submitted_at: None,
-                            pause_accumulated_ms: Some(0),
-                            paused: false,
-                            paused_at: None,
-                            task_ids: vec!["task-a".to_string()],
-                            task_association_log: vec![],
-                            source_planned_block_id: None,
-                            block_type: None,
-                            transitions: vec![],
-                            task_id: Some("task-a".to_string()),
+                        serde_json::json!({
+                            "name": "Morning focus",
+                            "mode": "countdown",
+                            "targetMinutes": 25,
+                            "taskIds": ["task-a"],
                         })
-                        .unwrap(),
+                        .to_string(),
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::OK);
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].tags, vec!["block_start".to_string()]);
@@ -1831,7 +1818,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_active_feedback_transition_writes_block_end_once_to_eventlog() {
+    async fn stop_then_end_writes_block_end_once_to_eventlog() {
         let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
             std::env::temp_dir().join(format!(
                 "exomind-test-timeblock-put-end-eventlog-{}",
@@ -1844,108 +1831,61 @@ mod tests {
         );
         let app = test_router(state);
 
-        let active = ActiveBlockData {
-            start_id: "active-1".to_string(),
-            name: "Morning focus".to_string(),
-            mode: "countdown".to_string(),
-            target_minutes: Some(25),
-            elapsed: 0,
-            updated_at: Some(1_700_000_101_000),
-            phase: Some("running".to_string()),
-            version: Some(1),
-            actor_id: Some("actor-a".to_string()),
-            last_transition_at: Some(1_700_000_101_000),
-            last_resumed_at: Some(1_700_000_101_000),
-            accumulated_run_ms: Some(0),
-            start_time: 1_700_000_100_000,
-            action_ended_at: None,
-            feedback_started_at: None,
-            feedback_submitted_at: None,
-            pause_accumulated_ms: Some(0),
-            paused: false,
-            paused_at: None,
-            task_ids: vec!["task-a".to_string()],
-            task_association_log: vec![],
-            source_planned_block_id: None,
-            block_type: None,
-            transitions: vec![],
-            task_id: Some("task-a".to_string()),
-        };
-
-        let put_response = app
+        let start_response = app
             .clone()
             .oneshot(
                 Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&active).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
-
-        let feedback_in_progress_response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active")
+                    .method("POST")
+                    .uri("/timeblocks/start")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        serde_json::to_vec(&ActiveBlockData {
-                            phase: Some("feedback_in_progress".to_string()),
-                            version: Some(2),
-                            action_ended_at: Some(1_700_000_130_000),
-                            feedback_started_at: Some(1_700_000_130_000),
-                            accumulated_run_ms: Some(1_800_000),
-                            last_transition_at: Some(1_700_000_130_000),
-                            last_resumed_at: None,
-                            paused: false,
-                            paused_at: None,
-                            updated_at: Some(1_700_000_130_000),
-                            ..active.clone()
+                        serde_json::json!({
+                            "name": "Morning focus",
+                            "mode": "countdown",
+                            "targetMinutes": 25,
+                            "taskIds": ["task-a"],
                         })
-                        .unwrap(),
+                        .to_string(),
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(
-            feedback_in_progress_response.status(),
-            StatusCode::NO_CONTENT
-        );
+        assert_eq!(start_response.status(), StatusCode::OK);
 
-        let feedback_submitted_response = app
+        let stop_response = app
+            .clone()
             .oneshot(
                 Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active")
+                    .method("POST")
+                    .uri("/timeblocks/stop")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stop_response.status(), StatusCode::OK);
+
+        let end_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/end")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        serde_json::to_vec(&ActiveBlockData {
-                            phase: Some("feedback_submitted".to_string()),
-                            version: Some(3),
-                            action_ended_at: Some(1_700_000_130_000),
-                            feedback_started_at: Some(1_700_000_130_000),
-                            feedback_submitted_at: Some(1_700_000_150_000),
-                            accumulated_run_ms: Some(1_800_000),
-                            last_transition_at: Some(1_700_000_150_000),
-                            last_resumed_at: None,
-                            paused: false,
-                            paused_at: None,
-                            updated_at: Some(1_700_000_150_000),
-                            ..active
+                        serde_json::json!({
+                            "feedback": "done",
+                            "taskStatusOutcomes": {
+                                "task-a": "completed"
+                            }
                         })
-                        .unwrap(),
+                        .to_string(),
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(feedback_submitted_response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(end_response.status(), StatusCode::OK);
 
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(
@@ -1958,7 +1898,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_active_pause_writes_block_pause_to_eventlog() {
+    async fn pause_route_writes_block_pause_to_eventlog() {
         let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
             std::env::temp_dir().join(format!(
                 "exomind-test-timeblock-pause-eventlog-{}",
@@ -1971,67 +1911,39 @@ mod tests {
         );
         let app = test_router(state);
 
-        let active = ActiveBlockData {
-            start_id: "active-1".to_string(),
-            name: "Morning focus".to_string(),
-            mode: "countdown".to_string(),
-            target_minutes: Some(25),
-            elapsed: 0,
-            updated_at: Some(1_700_000_101_000),
-            phase: Some("running".to_string()),
-            version: Some(1),
-            actor_id: Some("actor-a".to_string()),
-            last_transition_at: Some(1_700_000_101_000),
-            last_resumed_at: Some(1_700_000_101_000),
-            accumulated_run_ms: Some(0),
-            start_time: 1_700_000_100_000,
-            action_ended_at: None,
-            feedback_started_at: None,
-            feedback_submitted_at: None,
-            pause_accumulated_ms: Some(0),
-            paused: false,
-            paused_at: None,
-            task_ids: vec!["task-a".to_string()],
-            task_association_log: vec![],
-            source_planned_block_id: None,
-            block_type: None,
-            transitions: vec![],
-            task_id: Some("task-a".to_string()),
-        };
-
-        let put_response = app
+        let start_response = app
             .clone()
             .oneshot(
                 Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&active).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
-
-        let paused_response = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/timeblocks/active")
+                    .method("POST")
+                    .uri("/timeblocks/start")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        serde_json::to_vec(&ActiveBlockData {
-                            paused: true,
-                            paused_at: Some(1_700_000_102_000),
-                            ..active
+                        serde_json::json!({
+                            "name": "Morning focus",
+                            "mode": "countdown",
+                            "targetMinutes": 25,
+                            "taskIds": ["task-a"],
                         })
-                        .unwrap(),
+                        .to_string(),
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(paused_response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(start_response.status(), StatusCode::OK);
+
+        let paused_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/pause")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(paused_response.status(), StatusCode::OK);
 
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 2);
@@ -2178,5 +2090,140 @@ mod tests {
             timeblock_store.list_completed().unwrap().is_empty(),
             "anonymous scope should remain isolated from replicated scoped timeblocks"
         );
+    }
+
+    #[tokio::test]
+    async fn start_route_replaces_transition_completed_active_without_legacy_feedback_fields() {
+        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::new());
+        timeblock_store
+            .put_active(ActiveBlockData {
+                start_id: "completed-active-1".to_string(),
+                name: "Finished by transitions".to_string(),
+                mode: "countdown".to_string(),
+                target_minutes: Some(25),
+                block_type: Some("active".to_string()),
+                elapsed: 0,
+                updated_at: Some(1_700_000_003_000),
+                phase: None,
+                version: Some(3),
+                actor_id: Some("actor-a".to_string()),
+                last_transition_at: Some(1_700_000_003_000),
+                last_resumed_at: Some(1_700_000_000_000),
+                accumulated_run_ms: Some(1_800_000),
+                start_time: 1_700_000_000_000,
+                action_ended_at: None,
+                feedback_started_at: None,
+                feedback_submitted_at: None,
+                pause_accumulated_ms: Some(0),
+                paused: false,
+                paused_at: None,
+                task_ids: vec![],
+                task_association_log: vec![],
+                source_planned_block_id: None,
+                transitions: vec![
+                    BlockTransition {
+                        transition_type: BlockTransitionType::Start,
+                        at: 1_700_000_000_000,
+                        actor_id: Some("actor-a".to_string()),
+                    },
+                    BlockTransition {
+                        transition_type: BlockTransitionType::FeedbackStart,
+                        at: 1_700_000_001_000,
+                        actor_id: Some("actor-a".to_string()),
+                    },
+                    BlockTransition {
+                        transition_type: BlockTransitionType::End,
+                        at: 1_700_000_003_000,
+                        actor_id: Some("actor-a".to_string()),
+                    },
+                ],
+                task_id: None,
+            })
+            .unwrap();
+        let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/start")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"name":"Next block","mode":"countdown","targetMinutes":25,"taskIds":[]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let completed = timeblock_store.list_completed().unwrap();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].start_id, "completed-active-1");
+        let active = timeblock_store.get_active().unwrap().expect("replacement active");
+        assert_ne!(active.start_id, "completed-active-1");
+        assert_eq!(active.name, "Next block");
+    }
+
+    #[tokio::test]
+    async fn pause_route_rejects_transition_feedback_phase_without_legacy_feedback_fields() {
+        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::new());
+        timeblock_store
+            .put_active(ActiveBlockData {
+                start_id: "feedback-active-1".to_string(),
+                name: "Feedback only transitions".to_string(),
+                mode: "countdown".to_string(),
+                target_minutes: Some(25),
+                block_type: Some("active".to_string()),
+                elapsed: 0,
+                updated_at: Some(1_700_000_002_000),
+                phase: None,
+                version: Some(2),
+                actor_id: Some("actor-a".to_string()),
+                last_transition_at: Some(1_700_000_002_000),
+                last_resumed_at: Some(1_700_000_000_000),
+                accumulated_run_ms: Some(1_200_000),
+                start_time: 1_700_000_000_000,
+                action_ended_at: None,
+                feedback_started_at: None,
+                feedback_submitted_at: None,
+                pause_accumulated_ms: Some(0),
+                paused: false,
+                paused_at: None,
+                task_ids: vec![],
+                task_association_log: vec![],
+                source_planned_block_id: None,
+                transitions: vec![
+                    BlockTransition {
+                        transition_type: BlockTransitionType::Start,
+                        at: 1_700_000_000_000,
+                        actor_id: Some("actor-a".to_string()),
+                    },
+                    BlockTransition {
+                        transition_type: BlockTransitionType::FeedbackStart,
+                        at: 1_700_000_002_000,
+                        actor_id: Some("actor-a".to_string()),
+                    },
+                ],
+                task_id: None,
+            })
+            .unwrap();
+        let app = test_router(test_state_with_timeblock_store(timeblock_store));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/pause")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let error: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "cannot pause: block is in feedback phase");
     }
 }

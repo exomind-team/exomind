@@ -1,4 +1,10 @@
-import type { ActiveBlockData } from '@/lib/types/event';
+import type { TimeBlockData } from '@/lib/types/event';
+import {
+  deriveAccumulatedRunMsFromBlock,
+  deriveLastResumedAt,
+  derivePhaseFromBlock,
+  derivePauseAccumulatedMsFromBlock,
+} from '@/lib/timeblock/derive';
 
 export interface CountdownTimingSnapshot {
   effectiveNow: number;
@@ -9,45 +15,47 @@ export interface CountdownTimingSnapshot {
   isFeedbackStage: boolean;
 }
 
-function isFeedbackStage(block: ActiveBlockData): boolean {
-  return block.phase === 'feedback_in_progress'
-    || block.phase === 'action_ended'
-    || block.phase === 'feedback_submitted'
-    || Boolean(block.actionEndedAt || block.feedbackStartedAt || block.feedbackSubmittedAt);
+function isFeedbackStage(block: TimeBlockData): boolean {
+  return derivePhaseFromBlock(block) === 'feedback'
+    || derivePhaseFromBlock(block) === 'completed';
 }
 
-function resolveEffectiveNow(block: ActiveBlockData, now: number): number {
+function resolveEffectiveNow(block: TimeBlockData, now: number): number {
+  const transitions = block.transitions ?? [];
+  const lastTransitionAt = transitions.length > 0 ? transitions[transitions.length - 1].at : block.lastTransitionAt;
   if (isFeedbackStage(block)) {
     return block.actionEndedAt
       ?? block.feedbackStartedAt
       ?? block.feedbackSubmittedAt
-      ?? block.lastTransitionAt
+      ?? lastTransitionAt
       ?? now;
   }
 
-  if (block.paused) {
-    return block.pausedAt ?? block.lastTransitionAt ?? now;
+  if (derivePhaseFromBlock(block) === 'paused') {
+    return block.pausedAt ?? lastTransitionAt ?? now;
   }
 
   return now;
 }
 
-function resolveWorkDurationMs(block: ActiveBlockData, effectiveNow: number): number {
-  if (typeof block.accumulatedRunMs === 'number') {
-    const runningSliceMs = (!block.paused && !block.actionEndedAt)
-      ? Math.max(0, effectiveNow - (block.lastResumedAt ?? effectiveNow))
+function resolveWorkDurationMs(block: TimeBlockData, effectiveNow: number): number {
+  const phase = derivePhaseFromBlock(block);
+  const accumulatedRunMs = deriveAccumulatedRunMsFromBlock(block, effectiveNow);
+  if (typeof block.accumulatedRunMs === 'number' || (block.transitions?.length ?? 0) > 0) {
+    const runningSliceMs = (phase === 'running')
+      ? Math.max(0, effectiveNow - (block.lastResumedAt ?? deriveLastResumedAt(block.transitions ?? []) ?? effectiveNow))
       : 0;
-    return Math.max(0, block.accumulatedRunMs + runningSliceMs);
+    return Math.max(0, accumulatedRunMs + runningSliceMs);
   }
 
-  const basePausedMs = Math.max(0, block.pauseAccumulatedMs ?? 0);
-  const pausedSliceMs = block.paused && typeof block.pausedAt === 'number'
+  const basePausedMs = derivePauseAccumulatedMsFromBlock(block, effectiveNow);
+  const pausedSliceMs = phase === 'paused' && typeof block.pausedAt === 'number'
     ? Math.max(0, effectiveNow - block.pausedAt)
     : 0;
   return Math.max(0, effectiveNow - block.startTime - basePausedMs - pausedSliceMs);
 }
 
-export function resolveCountdownTiming(block: ActiveBlockData, now: number = Date.now()): CountdownTimingSnapshot | null {
+export function resolveCountdownTiming(block: TimeBlockData, now: number = Date.now()): CountdownTimingSnapshot | null {
   if (block.mode !== 'countdown') {
     return null;
   }

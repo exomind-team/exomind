@@ -491,9 +491,7 @@ async fn update_segment(
 }
 
 fn can_replace_active_block_for_planner_start(active: &ActiveBlockData) -> bool {
-    active.block_type.as_deref() == Some("gap")
-        || matches!(active.phase.as_deref(), Some("feedback_submitted"))
-        || active.feedback_submitted_at.is_some()
+    active.is_gap() || active.is_completed()
 }
 
 async fn start_segment(
@@ -670,4 +668,53 @@ pub fn router() -> Router<AppState> {
             "/act/today-planner/segments/:segment_id/start",
             post(start_segment),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planner_can_replace_transition_completed_active_without_feedback_fields() {
+        let active = ActiveBlockData {
+            start_id: "active-1".to_string(),
+            name: "Transition completed".to_string(),
+            mode: "countdown".to_string(),
+            target_minutes: Some(25),
+            block_type: Some("active".to_string()),
+            elapsed: 0,
+            updated_at: Some(1_700_000_002_000),
+            phase: None,
+            version: Some(2),
+            actor_id: Some("actor-a".to_string()),
+            last_transition_at: Some(1_700_000_002_000),
+            last_resumed_at: Some(1_700_000_000_000),
+            accumulated_run_ms: Some(1_200_000),
+            start_time: 1_700_000_000_000,
+            action_ended_at: None,
+            feedback_started_at: None,
+            feedback_submitted_at: None,
+            pause_accumulated_ms: Some(0),
+            paused: false,
+            paused_at: None,
+            task_ids: vec![],
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            transitions: vec![
+                crate::timeblock::BlockTransition {
+                    transition_type: crate::timeblock::BlockTransitionType::Start,
+                    at: 1_700_000_000_000,
+                    actor_id: Some("actor-a".to_string()),
+                },
+                crate::timeblock::BlockTransition {
+                    transition_type: crate::timeblock::BlockTransitionType::End,
+                    at: 1_700_000_002_000,
+                    actor_id: Some("actor-a".to_string()),
+                },
+            ],
+            task_id: None,
+        };
+
+        assert!(can_replace_active_block_for_planner_start(&active));
+    }
 }

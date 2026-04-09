@@ -2,7 +2,7 @@ import { getTimeblockBackendMode } from '@/config/domain-backend-mode';
 import { getSelectedRuntimeTarget } from '@/config/runtime-target';
 import { getCurrentProfileOrLegacyId } from '@/lib/profile/profile-storage';
 import { getActiveBlockStorage } from '@/lib/storage/active-block-storage';
-import type { ActiveBlockData } from '@/lib/types/event';
+import type { TimeBlockData } from '@/lib/types/event';
 import { SignalStreamService } from './signal-stream.service';
 import { getTimeBlockService } from './timeblock.service';
 
@@ -19,7 +19,7 @@ export interface ActiveBlockReplicationCursor {
 export interface ActiveBlockReplicationSnapshotPayload {
   schemaVersion: 1;
   scopeKey?: string;
-  block: ActiveBlockData;
+  block: TimeBlockData;
   cursor: ActiveBlockReplicationCursor;
 }
 
@@ -40,7 +40,7 @@ function buildRuntimeHostRecord() {
   };
 }
 
-function buildReplicationPayload(block: ActiveBlockData): ActiveBlockReplicationSnapshotPayload {
+function buildReplicationPayload(block: TimeBlockData): ActiveBlockReplicationSnapshotPayload {
   return {
     schemaVersion: 1,
     scopeKey: getCurrentProfileOrLegacyId(),
@@ -55,7 +55,7 @@ function buildReplicationPayload(block: ActiveBlockData): ActiveBlockReplication
   };
 }
 
-export async function publishActiveBlockReplicationSnapshot(block: ActiveBlockData): Promise<void> {
+export async function publishActiveBlockReplicationSnapshot(block: TimeBlockData): Promise<void> {
   const signalPublisher = new SignalStreamService({
     host: buildRuntimeHostRecord(),
     agentId: 'ui',

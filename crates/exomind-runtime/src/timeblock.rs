@@ -36,6 +36,46 @@ pub struct TimeBlockData {
     pub transitions: Vec<BlockTransition>,
 }
 
+impl TimeBlockData {
+    pub fn resolve_id(&self) -> &str {
+        if self.id.trim().is_empty() {
+            self.start_id.as_str()
+        } else {
+            self.id.as_str()
+        }
+    }
+
+    pub fn resolve_start_time(&self) -> u64 {
+        self.transitions
+            .first()
+            .map(|transition| transition.at)
+            .unwrap_or(self.start_time)
+    }
+
+    pub fn resolve_end_time(&self) -> u64 {
+        self.transitions
+            .iter()
+            .rev()
+            .find(|transition| transition.transition_type == BlockTransitionType::End)
+            .map(|transition| transition.at)
+            .unwrap_or(self.end_time)
+    }
+
+    pub fn resolve_last_transition_at(&self) -> u64 {
+        self.transitions
+            .last()
+            .map(|transition| transition.at)
+            .unwrap_or(self.end_time)
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.transitions
+            .iter()
+            .any(|transition| transition.transition_type == BlockTransitionType::End)
+            || self.end_time > 0
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PlannedTimeBlockType {
@@ -209,6 +249,86 @@ impl ActiveBlockData {
             }
         }
         self
+    }
+
+    pub fn resolve_start_time(&self) -> u64 {
+        self.transitions
+            .first()
+            .map(|transition| transition.at)
+            .unwrap_or(self.start_time)
+    }
+
+    pub fn resolve_phase(&self) -> Option<&'static str> {
+        if let Some(last_transition) = self.transitions.last() {
+            return match last_transition.transition_type {
+                BlockTransitionType::Start | BlockTransitionType::Resume => Some("running"),
+                BlockTransitionType::Pause => Some("paused"),
+                BlockTransitionType::FeedbackStart => Some("feedback_in_progress"),
+                BlockTransitionType::FeedbackSubmit | BlockTransitionType::End => {
+                    Some("feedback_submitted")
+                }
+            };
+        }
+
+        if self.feedback_submitted_at.is_some()
+            || matches!(self.phase.as_deref(), Some("feedback_submitted"))
+        {
+            return Some("feedback_submitted");
+        }
+
+        if self.action_ended_at.is_some()
+            || self.feedback_started_at.is_some()
+            || matches!(
+                self.phase.as_deref(),
+                Some("feedback_in_progress" | "action_ended")
+            )
+        {
+            return Some("feedback_in_progress");
+        }
+
+        if self.paused || matches!(self.phase.as_deref(), Some("paused")) {
+            return Some("paused");
+        }
+
+        if matches!(self.phase.as_deref(), Some("running")) {
+            return Some("running");
+        }
+
+        None
+    }
+
+    pub fn resolve_end_time(&self) -> Option<u64> {
+        self.transitions
+            .iter()
+            .rev()
+            .find(|transition| transition.transition_type == BlockTransitionType::End)
+            .map(|transition| transition.at)
+            .or(self.feedback_submitted_at)
+    }
+
+    pub fn resolve_last_transition_at(&self) -> Option<u64> {
+        self.transitions
+            .last()
+            .map(|transition| transition.at)
+            .or(self.last_transition_at)
+            .or(self.updated_at)
+    }
+
+    pub fn is_gap(&self) -> bool {
+        self.block_type.as_deref() == Some("gap")
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.resolve_end_time().is_some()
+            || matches!(self.resolve_phase(), Some("feedback_submitted"))
+    }
+
+    pub fn is_feedback_in_progress(&self) -> bool {
+        matches!(self.resolve_phase(), Some("feedback_in_progress"))
+    }
+
+    pub fn is_paused_state(&self) -> bool {
+        matches!(self.resolve_phase(), Some("paused"))
     }
 }
 
@@ -1078,6 +1198,57 @@ mod tests {
         assert_eq!(normalized.task_ids, vec!["task-2".to_string()]);
         assert_eq!(serialized["taskIds"], json!(["task-2"]));
         assert!(serialized.get("taskId").is_none());
+    }
+
+    #[test]
+    fn active_block_derives_phase_from_transitions_without_legacy_phase_fields() {
+        let block: ActiveBlockData = serde_json::from_value(json!({
+            "startId": "transition-active",
+            "name": "Transition active",
+            "mode": "countup",
+            "elapsed": 0,
+            "paused": false,
+            "startTime": 100,
+            "transitions": [
+                { "type": "start", "at": 100 },
+                { "type": "pause", "at": 250 },
+                { "type": "resume", "at": 400 },
+                { "type": "feedback_start", "at": 900 },
+                { "type": "end", "at": 1200 }
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(block.resolve_start_time(), 100);
+        assert_eq!(block.resolve_phase(), Some("feedback_submitted"));
+        assert_eq!(block.resolve_end_time(), Some(1200));
+        assert_eq!(block.resolve_last_transition_at(), Some(1200));
+        assert!(block.is_completed());
+    }
+
+    #[test]
+    fn completed_block_prefers_transition_end_time_when_present() {
+        let block: TimeBlockData = serde_json::from_value(json!({
+            "id": "completed-1",
+            "name": "Completed block",
+            "startId": "completed-1",
+            "endId": "end-1",
+            "tags": ["block_feedback"],
+            "startTime": 100,
+            "endTime": 1500,
+            "transitions": [
+                { "type": "start", "at": 120 },
+                { "type": "feedback_submit", "at": 1600 },
+                { "type": "end", "at": 1700 }
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(block.resolve_id(), "completed-1");
+        assert_eq!(block.resolve_start_time(), 120);
+        assert_eq!(block.resolve_end_time(), 1700);
+        assert_eq!(block.resolve_last_transition_at(), 1700);
+        assert!(block.is_completed());
     }
 
     #[test]

@@ -24,6 +24,7 @@ import { WebStorageAdapter } from '@/lib/adapters/web-storage';
 import { EventLogRtAdapter } from '@/lib/adapters/eventlog-rt-adapter';
 import { TaskRtAdapter } from '@/lib/adapters/task-rt-adapter';
 import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
+import { TimeBlockBackupServiceImpl } from '@/lib/services/timeblock-backup.service';
 import { getSelectedRuntimeTarget } from '@/config/runtime-target';
 
 // Legacy localStorage keys used by TimeBlockService via WebStorageAdapter
@@ -125,6 +126,7 @@ export function MigrationDialogController() {
       const legacyEventLogAdapter = new TauriEventLogStorageAdapter();
       const legacyTaskAdapter = new TaskPouchAdapter();
       const legacyStorage = new WebStorageAdapter();
+      const rtTimeBlockBackupService = new TimeBlockBackupServiceImpl();
 
       // Re-read legacy data at migration time to get the most up-to-date snapshot.
       // Detection and execution are separate reads — this is intentional (TOCTOU acknowledged).
@@ -166,29 +168,25 @@ export function MigrationDialogController() {
         },
 
         writeCompletedBlocksToRt: async (blocks) => {
-          const baseUrl = buildRtBaseUrl();
-          const url = `${baseUrl}${appendRuntimeProfileScope('/timeblocks')}`;
-          const response = await fetch(url, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(blocks),
-          });
-          if (!response.ok) {
-            throw new Error(`Write completed blocks failed: ${response.status}`);
-          }
+          await rtTimeBlockBackupService.importTimeBlocksFromJson(
+            JSON.stringify({
+              version: 1,
+              time_blocks: blocks,
+              active_block: null,
+            }),
+            'merge',
+          );
         },
 
         writeActiveBlockToRt: async (block) => {
-          const baseUrl = buildRtBaseUrl();
-          const url = `${baseUrl}${appendRuntimeProfileScope('/timeblocks/active')}`;
-          const response = await fetch(url, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(block),
-          });
-          if (!response.ok) {
-            throw new Error(`Write active block failed: ${response.status}`);
-          }
+          await rtTimeBlockBackupService.importTimeBlocksFromJson(
+            JSON.stringify({
+              version: 1,
+              time_blocks: [],
+              active_block: block,
+            }),
+            'merge',
+          );
         },
       };
 

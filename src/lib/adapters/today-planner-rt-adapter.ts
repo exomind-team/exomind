@@ -4,9 +4,9 @@ import {
   type RuntimeTarget,
 } from '@/config/runtime-target';
 import type {
-  ActiveBlockData,
   CreateSchedulingWindowInput,
   ReflowSchedulingWindowInput,
+  TimeBlockData,
   TodayPlannerSnapshot,
   TodayPlannerSegment,
   TodayPlannerWindow,
@@ -61,8 +61,8 @@ export class TodayPlannerRtAdapter {
     );
   }
 
-  async startWorkSegment(segmentId: string): Promise<ActiveBlockData> {
-    return this.requestJsonWithBody<ActiveBlockData>(
+  async startWorkSegment(segmentId: string): Promise<TimeBlockData> {
+    return this.requestJsonWithBody<TimeBlockData>(
       `/act/today-planner/segments/${encodeURIComponent(segmentId)}/start`,
       'POST',
     );

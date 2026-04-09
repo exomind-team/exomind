@@ -1,4 +1,5 @@
-import type { ActiveBlockData } from '@/lib/types/event';
+import type { TimeBlockData } from '@/lib/types/event';
+import { derivePhaseFromBlock } from '@/lib/timeblock/derive';
 import { resolveCountdownTiming } from '@/lib/timeblock/countdown-progress';
 
 export interface CountdownEndTimeDisplay {
@@ -10,7 +11,7 @@ export interface CountdownEndTimeDisplay {
 }
 
 interface ResolveCountdownEndTimeDisplayInput {
-  block?: ActiveBlockData | null;
+  block?: TimeBlockData | null;
   mode?: 'countup' | 'countdown';
   remainingMs?: number;
   overtimeMs?: number;
@@ -46,7 +47,7 @@ export function resolveCountdownEndTimeDisplay(
       return null;
     }
 
-    paused = input.block.paused;
+    paused = derivePhaseFromBlock(input.block) === 'paused';
     if (timing.overrunMs > 0) {
       kind = 'actual';
       timestamp = timing.effectiveNow - timing.overrunMs;

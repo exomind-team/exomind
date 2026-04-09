@@ -11,10 +11,14 @@ const {
   deleteActiveBlockMock,
   getEventStorageMock,
   rtListCompletedBlocksMock,
-  rtReplaceCompletedBlocksMock,
   rtGetActiveBlockMock,
-  rtPutActiveBlockMock,
-  rtDeleteActiveBlockMock,
+  rtBackfillGapBlocksMock,
+  rtStartBlockMock,
+  rtStopBlockMock,
+  rtEndBlockMock,
+  rtPauseBlockMock,
+  rtResumeBlockMock,
+  rtPatchActiveBlockTasksMock,
   publishActiveBlockReplicationSnapshotMock,
   appendEventWithEcsReplicationMock,
 } = vi.hoisted(() => ({
@@ -28,10 +32,14 @@ const {
   deleteActiveBlockMock: vi.fn(),
   getEventStorageMock: vi.fn(() => ({ addEvent: vi.fn() })),
   rtListCompletedBlocksMock: vi.fn(async () => []),
-  rtReplaceCompletedBlocksMock: vi.fn(async () => undefined),
   rtGetActiveBlockMock: vi.fn(async () => null),
-  rtPutActiveBlockMock: vi.fn(async () => undefined),
-  rtDeleteActiveBlockMock: vi.fn(async () => undefined),
+  rtBackfillGapBlocksMock: vi.fn(async () => ({ inserted: 0 })),
+  rtStartBlockMock: vi.fn(),
+  rtStopBlockMock: vi.fn(async () => ({ status: 'ok' })),
+  rtEndBlockMock: vi.fn(),
+  rtPauseBlockMock: vi.fn(async () => ({ status: 'ok' })),
+  rtResumeBlockMock: vi.fn(async () => ({ status: 'ok' })),
+  rtPatchActiveBlockTasksMock: vi.fn(async () => null),
   publishActiveBlockReplicationSnapshotMock: vi.fn(),
   appendEventWithEcsReplicationMock: vi.fn(async (event) => event),
 }));
@@ -73,10 +81,14 @@ vi.mock('@/config/domain-backend-mode', () => ({
 vi.mock('@/lib/adapters/timeblock-rt-adapter', () => ({
   TimeBlockRtAdapter: class MockTimeBlockRtAdapter {
     listCompletedBlocks = rtListCompletedBlocksMock;
-    replaceCompletedBlocks = rtReplaceCompletedBlocksMock;
     getActiveBlock = rtGetActiveBlockMock;
-    putActiveBlock = rtPutActiveBlockMock;
-    deleteActiveBlock = rtDeleteActiveBlockMock;
+    rtBackfillGapBlocks = rtBackfillGapBlocksMock;
+    rtStartBlock = rtStartBlockMock;
+    rtStopBlock = rtStopBlockMock;
+    rtEndBlock = rtEndBlockMock;
+    rtPauseBlock = rtPauseBlockMock;
+    rtResumeBlock = rtResumeBlockMock;
+    rtPatchActiveBlockTasks = rtPatchActiveBlockTasksMock;
   },
 }));
 
@@ -140,14 +152,20 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     getEventStorageMock.mockClear();
     rtListCompletedBlocksMock.mockReset();
     rtListCompletedBlocksMock.mockResolvedValue([]);
-    rtReplaceCompletedBlocksMock.mockReset();
-    rtReplaceCompletedBlocksMock.mockResolvedValue(undefined);
     rtGetActiveBlockMock.mockReset();
     rtGetActiveBlockMock.mockResolvedValue(null);
-    rtPutActiveBlockMock.mockReset();
-    rtPutActiveBlockMock.mockResolvedValue(undefined);
-    rtDeleteActiveBlockMock.mockReset();
-    rtDeleteActiveBlockMock.mockResolvedValue(undefined);
+    rtBackfillGapBlocksMock.mockReset();
+    rtBackfillGapBlocksMock.mockResolvedValue({ inserted: 0 });
+    rtStartBlockMock.mockReset();
+    rtStopBlockMock.mockReset();
+    rtStopBlockMock.mockResolvedValue({ status: 'ok' });
+    rtEndBlockMock.mockReset();
+    rtPauseBlockMock.mockReset();
+    rtPauseBlockMock.mockResolvedValue({ status: 'ok' });
+    rtResumeBlockMock.mockReset();
+    rtResumeBlockMock.mockResolvedValue({ status: 'ok' });
+    rtPatchActiveBlockTasksMock.mockReset();
+    rtPatchActiveBlockTasksMock.mockResolvedValue(null);
     publishActiveBlockReplicationSnapshotMock.mockReset();
     appendEventWithEcsReplicationMock.mockClear();
   });

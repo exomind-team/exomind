@@ -340,7 +340,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
     setTaskName(block.name);
     setTaskNameDraft(block.name);
-    setTimerMode(block.mode);
+    setTimerMode(block.mode ?? 'countup');
     if (block.mode === 'countdown' && block.targetMinutes) {
       setCountdownMinutes(block.targetMinutes);
     }
@@ -348,7 +348,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       ? resolveCountdownOverrunMs(block)
       : 0;
     const hasRestoredOverrun = restoredOverrunMs > 0;
-    setElapsedMs(block.mode === 'countdown' && hasRestoredOverrun ? 0 : Math.max(0, block.elapsed));
+    setElapsedMs(block.mode === 'countdown' && hasRestoredOverrun ? 0 : Math.max(0, block.elapsed ?? 0));
     const nextFeedbackInProgress = isFeedbackStage(block);
     setFeedbackInProgress(nextFeedbackInProgress);
     setFeedbackSubmitting(false);
@@ -509,7 +509,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     activeBlockDataRef.current = block;
     setTaskName(name);
     setTaskNameDraft(name);
-    setElapsedMs(Math.max(0, block.elapsed));
+    setElapsedMs(Math.max(0, block.elapsed ?? 0));
     setFeedbackInProgress(false);
     setRunningSubState('running');
     setUiState('running');

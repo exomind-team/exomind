@@ -20,12 +20,14 @@ import { type DomainBackendMode } from '@/config/domain-backend-mode';
 import { TimeBlockRtAdapter } from '@/lib/adapters/timeblock-rt-adapter';
 import {
   normalizeActiveBlockTaskIds,
+  normalizeTimeBlockData,
   normalizeTimeBlockTaskIds,
+  resolveTimeBlockLastTransitionAt,
 } from '../types/event';
 import type {
+  ActiveBlockData,
   TimeBlock,
   TimeBlockData,
-  ActiveBlockData,
   ActiveBlockPhase,
   BlockTaskAssociationEvent,
   TimerConfig,
@@ -40,6 +42,12 @@ import { getEventLogService } from './eventlog.service';
 import { publishActiveBlockReplicationSnapshot } from './ecs-active-block-replication.service';
 import { SignalStreamService } from './signal-stream.service';
 import { log } from '@/lib/logger';
+import {
+  deriveAccumulatedRunMsFromBlock,
+  deriveLastResumedAt,
+  derivePauseAccumulatedMsFromBlock,
+  derivePhaseFromBlock,
+} from '@/lib/timeblock/derive';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -50,24 +58,21 @@ function perfNow(): number {
 }
 
 interface BlockPreferenceDecision {
-  preferred: ActiveBlockData;
+  preferred: TimeBlockData;
   reason: string;
   compared: 'start_time' | 'phase' | 'version' | 'transition_time' | 'actor_id' | 'fallback';
 }
 
 interface TimeBlockRtPort {
   listCompletedBlocks(): Promise<TimeBlockData[]>;
-  /** TODO(#780): migrate backfillGapBlocks to atomic RT primitive, then remove */
-  replaceCompletedBlocks(blocks: TimeBlockData[]): Promise<void>;
-  getActiveBlock(): Promise<ActiveBlockData | null>;
-  /** TODO(#780): migrate saveActiveBlock/applyReplicatedActiveBlock callers, then remove */
-  putActiveBlock(block: ActiveBlockData): Promise<void>;
-  // #780 new RT routes
-  rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  getActiveBlock(): Promise<TimeBlockData | null>;
+  rtBackfillGapBlocks(): Promise<{ inserted: number }>;
+  rtStartBlock(params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }): Promise<{ completed: TimeBlockData | null; active: TimeBlockData }>;
   rtStopBlock(): Promise<{ status: string }>;
-  rtEndBlock(params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }): Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
+  rtEndBlock(params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }): Promise<{ completed: TimeBlockData | null; active: TimeBlockData }>;
   rtPauseBlock(): Promise<{ status: string }>;
   rtResumeBlock(): Promise<{ status: string }>;
+  rtPatchActiveBlockTasks(params: { taskIds: string[]; taskAssociationLog: BlockTaskAssociationEvent[] }): Promise<TimeBlockData | null>;
 }
 
 export interface TimeBlockServiceOptions {
@@ -80,7 +85,7 @@ export interface TimeBlockService {
   loadTimeBlocks(): Promise<TimeBlock[]>;
 
   /** 加载当前进行中的时间块 */
-  loadActiveBlock(): Promise<ActiveBlockData | null>;
+  loadActiveBlock(): Promise<TimeBlockData | null>;
 
   /** 开始时间块 */
   startBlock(
@@ -88,12 +93,12 @@ export interface TimeBlockService {
     config: TimerConfig,
     description?: string,
     taskBinding?: string | { taskIds: string[] },
-  ): Promise<ActiveBlockData>;
+  ): Promise<TimeBlockData>;
 
   /** 更新当前进行中时间块的任务关联 */
   updateActiveBlock(
-    patch: Partial<Pick<ActiveBlockData, 'taskIds' | 'taskAssociationLog'>>,
-  ): Promise<ActiveBlockData | null>;
+    patch: Partial<Pick<TimeBlockData, 'taskIds' | 'taskAssociationLog'>>,
+  ): Promise<TimeBlockData | null>;
 
   /** 标记“行动结束/开始填写反馈”（点击结束时刻） */
   markEnding(): Promise<void>;
@@ -117,7 +122,7 @@ export interface TimeBlockService {
   updateElapsed(elapsed: number): Promise<void>;
 
   /** 监听时间块变化 */
-  onBlockChange(callback: (block: ActiveBlockData | null) => void): () => void;
+  onBlockChange(callback: (block: TimeBlockData | null) => void): () => void;
 
   /** 启动进行中时间块同步 */
   startSync(remoteUrl?: string): Promise<void>;
@@ -126,7 +131,7 @@ export interface TimeBlockService {
   stopSync(): Promise<void>;
 
   /** 应用来自远端复制的 active block 快照 */
-  applyReplicatedActiveBlock(block: ActiveBlockData): Promise<void>;
+  applyReplicatedActiveBlock(block: TimeBlockData): Promise<void>;
 }
 
 export class TimeBlockServiceImpl implements TimeBlockService {
@@ -136,12 +141,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private readonly useInjectedEnvStorage: boolean;
   private readonly backendMode: DomainBackendMode;
   private readonly rtAdapter: TimeBlockRtPort | null;
-  private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
+  private listeners: Set<(block: TimeBlockData | null) => void> = new Set();
   private syncSubscriberCount = 0;
   private activeSyncRemoteUrl: string | null = null;
   private pendingStorageStop: Promise<void> = Promise.resolve();
   private unsubscribeStorageListener: (() => void) | null = null;
-  private lastAcceptedBlock: ActiveBlockData | null = null;
+  private lastAcceptedBlock: TimeBlockData | null = null;
   private lastCanonicalWriteBackSignature: string | null = null;
   private readonly actorId = createUuidV4();
 
@@ -180,16 +185,32 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (!data) return [];
 
     return data.map((block) => {
-      const normalized = normalizeTimeBlockTaskIds(block);
+      const normalized = normalizeTimeBlockData(normalizeTimeBlockTaskIds(block));
       return {
-        ...normalized,
+        id: normalized.id,
+        name: normalized.name,
+        startId: normalized.startId,
+        endId: normalized.endId ?? `${normalized.id}-completed`,
+        note: normalized.note,
         tags: new Set(normalized.tags),
+        startTime: normalized.startTime,
+        endTime: normalized.endTime ?? normalized.startTime,
+        blockType: normalized.blockType,
+        taskIds: normalized.taskIds,
+        taskStatusOutcomes: normalized.taskStatusOutcomes,
+        taskAssociationLog: normalized.taskAssociationLog,
+        sourcePlannedBlockId: normalized.sourcePlannedBlockId,
       };
     });
   }
 
   /** #759: 全量补创历史 gap 块。返回插入的 gap 数量。 */
   async backfillGapBlocks(): Promise<number> {
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      const result = await this.rtAdapter.rtBackfillGapBlocks();
+      return result.inserted;
+    }
+
     const blocks = await this.readCompletedBlockData();
     if (!blocks || blocks.length < 2) return 0;
 
@@ -214,6 +235,19 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return null;
     }
 
+    if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
+      const updated = await this.rtAdapter.rtPatchActiveBlockTasks({
+        taskIds: patch.taskIds ?? normalizedExisting.taskIds ?? [],
+        taskAssociationLog: patch.taskAssociationLog ?? normalizedExisting.taskAssociationLog ?? [],
+      });
+      if (!updated) {
+        return null;
+      }
+      this.rememberAcceptedBlock(updated);
+      this.notifyChange(updated);
+      return updated;
+    }
+
     const updated = this.normalizeActiveBlock({
       ...normalizedExisting,
       ...patch,
@@ -233,7 +267,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (!data) return null;
 
     const normalized = this.normalizeActiveBlock(data);
-    if (this.shouldPersistCanonicalization(data, normalized)) {
+    if (this.backendMode !== 'rt-sqlite' && this.shouldPersistCanonicalization(data, normalized)) {
       await this.saveActiveBlock(normalized);
     }
 
@@ -255,7 +289,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const existing = await this.readActiveBlock();
     if (existing) {
       const normalized = this.normalizeActiveBlock(existing);
-      if (this.shouldPersistCanonicalization(existing, normalized)) {
+      if (this.backendMode !== 'rt-sqlite' && this.shouldPersistCanonicalization(existing, normalized)) {
         await this.saveActiveBlock(normalized);
       }
       this.rememberAcceptedBlock(normalized);
@@ -263,7 +297,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         return normalized;
       }
       // #759: 截断 gap 块，存为 completed TimeBlockData
-      if (normalized.blockType === 'gap') {
+      if (this.backendMode !== 'rt-sqlite' && normalized.blockType === 'gap') {
         const now = Date.now();
         const completedGap: TimeBlockData = {
           id: normalized.startId,
@@ -274,6 +308,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
           startTime: normalized.startTime,
           endTime: now,
           blockType: 'gap',
+          transitions: [
+            ...((normalized.transitions?.length ?? 0) > 0 ? normalized.transitions ?? [] : [{ type: 'start' as const, at: normalized.startTime, actorId: normalized.actorId }]),
+            { type: 'end' as const, at: now, actorId: this.actorId },
+          ],
         };
         const completed = await this.readCompletedBlockData();
         completed.push(completedGap);
@@ -322,6 +360,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 保存进行中的时间块
     const activeBlock: ActiveBlockData = {
+      id: startId,
       startId,
       name,
       startTime: now,
@@ -345,6 +384,8 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       taskIds: resolvedTaskIds,
       taskAssociationLog,
       taskId: undefined,
+      tags: [],
+      transitions: [{ type: 'start' as const, at: now, actorId: this.actorId }],
     };
     const normalizedActiveBlock = this.normalizeActiveBlock(activeBlock, now);
 
@@ -391,6 +432,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       accumulatedRunMs: this.calculateRunDurationMs(normalized, now),
       updatedAt: now,
       pauseAccumulatedMs: normalized.pauseAccumulatedMs ?? 0,
+      transitions: [
+        ...((normalized.transitions?.length ?? 0) > 0 ? normalized.transitions ?? [] : [{ type: 'start' as const, at: normalized.startTime, actorId: normalized.actorId }]),
+        { type: 'pause' as const, at: now, actorId: this.actorId },
+      ],
     }, now);
 
     const saveStart = perfNow();
@@ -444,6 +489,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pauseAccumulatedMs,
       updatedAt: now,
       accumulatedRunMs: normalized.accumulatedRunMs ?? this.calculateRunDurationMs(normalized, now),
+      transitions: [
+        ...((normalized.transitions?.length ?? 0) > 0 ? normalized.transitions ?? [] : [{ type: 'start' as const, at: normalized.startTime, actorId: normalized.actorId }]),
+        { type: 'resume' as const, at: now, actorId: this.actorId },
+      ],
     }, now);
 
     const saveStart = perfNow();
@@ -513,6 +562,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pausedAt: undefined,
       pauseAccumulatedMs,
       updatedAt: actionEndedAt,
+      transitions: [
+        ...((normalized.transitions?.length ?? 0) > 0 ? normalized.transitions ?? [] : [{ type: 'start' as const, at: normalized.startTime, actorId: normalized.actorId }]),
+        { type: 'feedback_start' as const, at: actionEndedAt, actorId: this.actorId },
+      ],
     }, actionEndedAt);
 
     const saveStart = perfNow();
@@ -551,9 +604,21 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       this.notifyChange(result.active);
 
       if (result.completed) {
+        const completed = normalizeTimeBlockData(result.completed);
         return {
-          ...result.completed,
-          tags: new Set(result.completed.tags),
+          id: completed.id,
+          name: completed.name,
+          startId: completed.startId,
+          endId: completed.endId ?? `${completed.id}-completed`,
+          note: completed.note,
+          tags: new Set(completed.tags),
+          startTime: completed.startTime,
+          endTime: completed.endTime ?? completed.startTime,
+          blockType: completed.blockType,
+          taskIds: completed.taskIds,
+          taskStatusOutcomes: completed.taskStatusOutcomes,
+          taskAssociationLog: completed.taskAssociationLog,
+          sourcePlannedBlockId: completed.sourcePlannedBlockId,
         };
       }
       return null;
@@ -642,13 +707,18 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       taskStatusOutcomes: options?.taskStatusOutcomes,
       taskAssociationLog: activeData.taskAssociationLog ?? [],
       sourcePlannedBlockId: activeData.sourcePlannedBlockId,
+      transitions: [
+        ...((activeData.transitions?.length ?? 0) > 0 ? activeData.transitions ?? [] : [{ type: 'start' as const, at: activeData.startTime, actorId: activeData.actorId }]),
+        { type: 'feedback_submit' as const, at: submittedAt, actorId: this.actorId },
+        { type: 'end' as const, at: submittedAt, actorId: this.actorId },
+      ],
     };
 
     // 追加到已完成列表
     const completedWriteStart = perfNow();
-    const completed = await this.readCompletedBlockData();
-    completed.push(timeBlock);
-    await this.writeCompletedBlockData(completed);
+    const completedBlocks = await this.readCompletedBlockData();
+    completedBlocks.push(timeBlock);
+    await this.writeCompletedBlockData(completedBlocks);
     const completedWriteMs = Math.round(perfNow() - completedWriteStart);
 
     // 保留终态标记，防止多端并发把状态回退到进行中
@@ -667,6 +737,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       accumulatedRunMs: workDurationMs,
       pauseAccumulatedMs: pausedDurationMs,
       updatedAt: submittedAt,
+      transitions: [
+        ...((activeData.transitions?.length ?? 0) > 0 ? activeData.transitions ?? [] : [{ type: 'start' as const, at: activeData.startTime, actorId: activeData.actorId }]),
+        { type: 'feedback_submit' as const, at: submittedAt, actorId: this.actorId },
+        { type: 'end' as const, at: submittedAt, actorId: this.actorId },
+      ],
     }, submittedAt);
     const saveTerminalStart = perfNow();
     await this.saveActiveBlock(terminalBlock);
@@ -682,8 +757,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
 
     // #759: 创建 gap 块代替 notifyChange(null)
+    const gapStartId = createUuidV4();
     const gapBlock: ActiveBlockData = this.normalizeActiveBlock({
-      startId: createUuidV4(),
+      id: gapStartId,
+      startId: gapStartId,
       name: '',
       mode: 'countup' as const,
       elapsed: 0,
@@ -697,23 +774,45 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       actorId: this.actorId,
       lastTransitionAt: submittedAt,
       updatedAt: submittedAt,
+      tags: [],
+      transitions: [{ type: 'start' as const, at: submittedAt, actorId: this.actorId }],
     }, submittedAt);
     await this.saveActiveBlock(gapBlock);
     this.rememberAcceptedBlock(gapBlock);
     this.notifyChange(gapBlock);
     log.info(`[TB-SVC] endBlock done, gap created ${JSON.stringify({ startId: terminalBlock.startId, gapStartId: gapBlock.startId, feedbackEventMs, completedWriteMs, saveTerminalMs, totalMs: Math.round(perfNow() - opStart) })}`);
 
+    const completedBlock = normalizeTimeBlockData(timeBlock);
     return {
-      ...timeBlock,
-      tags: new Set(timeBlock.tags),
+      id: completedBlock.id,
+      name: completedBlock.name,
+      startId: completedBlock.startId,
+      endId: completedBlock.endId ?? `${completedBlock.id}-completed`,
+      note: completedBlock.note,
+      tags: new Set(completedBlock.tags),
+      startTime: completedBlock.startTime,
+      endTime: completedBlock.endTime ?? completedBlock.startTime,
+      blockType: completedBlock.blockType,
+      taskIds: completedBlock.taskIds,
+      taskStatusOutcomes: completedBlock.taskStatusOutcomes,
+      taskAssociationLog: completedBlock.taskAssociationLog,
+      sourcePlannedBlockId: completedBlock.sourcePlannedBlockId,
     };
   }
 
   async applyReplicatedActiveBlock(block: ActiveBlockData): Promise<void> {
     const normalized = this.normalizeActiveBlock(block);
     if (this.backendMode === 'rt-sqlite') {
-      await this.rtAdapter?.putActiveBlock(normalized);
-    } else if (this.useInjectedEnvStorage) {
+      this.rememberAcceptedBlock(normalized);
+      if (this.isCompletedBlock(normalized)) {
+        this.notifyChange(null);
+        return;
+      }
+      this.notifyChange(normalized);
+      return;
+    }
+
+    if (this.useInjectedEnvStorage) {
       await this.env.storage.write(ACTIVE_BLOCK_KEY, normalized);
     } else {
       await this.getActiveStorage().projectReplicatedActiveBlock(normalized);
@@ -963,14 +1062,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private async saveActiveBlock(block: ActiveBlockData): Promise<void> {
-    if (this.backendMode === 'rt-sqlite') {
-      await this.rtAdapter?.putActiveBlock(block);
-      if (this.syncSubscriberCount > 0) {
-        void this.publishLocalActiveBlockSnapshot(block);
-      }
-      return;
-    }
-
     if (this.useInjectedEnvStorage) {
       await this.env.storage.write(ACTIVE_BLOCK_KEY, block);
       return;
@@ -989,12 +1080,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private async writeCompletedBlockData(blocks: TimeBlockData[]): Promise<void> {
-    if (this.backendMode === 'rt-sqlite') {
-      console.log('[TB-SVC] writeCompletedBlockData', { count: blocks.length, payload: JSON.stringify(blocks).slice(0, 1000) });
-      await this.rtAdapter?.replaceCompletedBlocks(blocks);
-      return;
-    }
-
     await this.env.storage.write(TIME_BLOCKS_KEY, blocks);
   }
 
@@ -1060,36 +1145,39 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private normalizeActiveBlock(data: ActiveBlockData, now: number = Date.now()): ActiveBlockData {
     const normalizedTaskData = normalizeActiveBlockTaskIds(data);
-    const taskAssociationLog = normalizedTaskData.taskAssociationLog ?? [];
-    const phase = this.resolvePhase(data);
-    const effectiveNow = this.getPhaseEffectiveNow(data, phase, now);
-    const accumulatedRunMs = this.resolveAccumulatedRunMs(data);
+    const normalizedBlock = normalizeTimeBlockData(normalizedTaskData);
+    const taskAssociationLog = normalizedBlock.taskAssociationLog ?? [];
+    const phase = this.resolvePhase(normalizedBlock);
+    const effectiveNow = this.getPhaseEffectiveNow(normalizedBlock, phase, now);
+    const accumulatedRunMs = this.resolveAccumulatedRunMs(normalizedBlock, effectiveNow);
+    const transitionLastResumedAt = deriveLastResumedAt(normalizedBlock.transitions ?? []);
     const runningStartedAt = phase === 'running'
-      ? (data.lastResumedAt ?? this.resolveLegacyRunningStart(data, accumulatedRunMs, effectiveNow))
+      ? (transitionLastResumedAt ?? normalizedBlock.lastResumedAt ?? this.resolveLegacyRunningStart(normalizedBlock, accumulatedRunMs, effectiveNow))
       : undefined;
     const runningSliceMs = phase === 'running' && runningStartedAt
       ? Math.max(0, effectiveNow - runningStartedAt)
       : 0;
     const runDurationMs = Math.max(0, accumulatedRunMs + runningSliceMs);
-    const elapsed = data.mode === 'countdown'
-      ? Math.max(0, this.getExpectedDurationMs(data) - runDurationMs)
+    const elapsed = normalizedBlock.mode === 'countdown'
+      ? Math.max(0, this.getExpectedDurationMs(normalizedBlock) - runDurationMs)
       : runDurationMs;
     const paused = phase === 'paused';
-    const lastTransitionAt = this.resolveLastTransitionAt(data, phase, effectiveNow);
+    const lastTransitionAt = this.resolveLastTransitionAt(normalizedBlock, phase, effectiveNow);
+    const pauseAccumulatedMs = derivePauseAccumulatedMsFromBlock(normalizedBlock, effectiveNow);
 
     return {
-      ...normalizedTaskData,
+      ...normalizedBlock,
       phase,
       version: data.version ?? this.defaultVersionByPhase(phase),
       lastTransitionAt,
       lastResumedAt: phase === 'running' ? (runningStartedAt ?? effectiveNow) : undefined,
       accumulatedRunMs,
       paused,
-      pausedAt: paused ? (data.pausedAt ?? lastTransitionAt) : undefined,
-      pauseAccumulatedMs: data.pauseAccumulatedMs ?? 0,
+      pausedAt: paused ? (normalizedBlock.pausedAt ?? lastTransitionAt) : undefined,
+      pauseAccumulatedMs,
       elapsed,
       updatedAt: lastTransitionAt,
-      taskIds: normalizedTaskData.taskIds,
+      taskIds: normalizedBlock.taskIds,
       taskAssociationLog,
       taskId: undefined,
     };
@@ -1108,6 +1196,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       || prev.feedbackStartedAt !== next.feedbackStartedAt
       || prev.feedbackSubmittedAt !== next.feedbackSubmittedAt
       || prev.pauseAccumulatedMs !== next.pauseAccumulatedMs
+      || JSON.stringify(prev.transitions ?? []) !== JSON.stringify(next.transitions ?? [])
       || JSON.stringify(prev.taskIds ?? []) !== JSON.stringify(next.taskIds ?? [])
       || JSON.stringify(prev.taskAssociationLog ?? []) !== JSON.stringify(next.taskAssociationLog ?? []);
   }
@@ -1124,7 +1213,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private isCompletedBlock(block: ActiveBlockData): boolean {
-    return block.blockType === 'gap' || Boolean(block.feedbackSubmittedAt);
+    return block.blockType === 'gap'
+      || Boolean(block.feedbackSubmittedAt)
+      || (block.transitions ?? []).some((transition) => transition.type === 'end');
   }
 
   private pickPreferredBlock(
@@ -1199,7 +1290,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private getBlockOrderTime(block: ActiveBlockData): number {
-    return block.lastTransitionAt
+    return resolveTimeBlockLastTransitionAt(block)
       ?? block.feedbackSubmittedAt
       ?? block.actionEndedAt
       ?? block.pausedAt
@@ -1225,11 +1316,25 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       && a.pauseAccumulatedMs === b.pauseAccumulatedMs
       && a.paused === b.paused
       && a.pausedAt === b.pausedAt
+      && JSON.stringify(a.transitions ?? []) === JSON.stringify(b.transitions ?? [])
       && JSON.stringify(a.taskIds ?? []) === JSON.stringify(b.taskIds ?? [])
       && JSON.stringify(a.taskAssociationLog ?? []) === JSON.stringify(b.taskAssociationLog ?? []);
   }
 
   private resolvePhase(block: ActiveBlockData): ActiveBlockPhase {
+    const derivedPhase = derivePhaseFromBlock(block);
+    if (derivedPhase === 'completed') {
+      return 'feedback_submitted';
+    }
+    if (derivedPhase === 'feedback') {
+      return 'feedback_in_progress';
+    }
+    if (derivedPhase === 'paused') {
+      return 'paused';
+    }
+    if (derivedPhase === 'running') {
+      return 'running';
+    }
     if (block.feedbackSubmittedAt) {
       return 'feedback_submitted';
     }
@@ -1267,6 +1372,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     phase: ActiveBlockPhase,
     fallback: number,
   ): number {
+    const derivedLastTransitionAt = resolveTimeBlockLastTransitionAt(block);
+    if (typeof derivedLastTransitionAt === 'number') {
+      return derivedLastTransitionAt;
+    }
     if (typeof block.lastTransitionAt === 'number') {
       return block.lastTransitionAt;
     }
@@ -1290,14 +1399,15 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     phase: ActiveBlockPhase,
     now: number,
   ): number {
+    const derivedLastTransitionAt = resolveTimeBlockLastTransitionAt(block);
     if (phase === 'feedback_submitted') {
-      return block.feedbackSubmittedAt ?? now;
+      return block.feedbackSubmittedAt ?? derivedLastTransitionAt ?? now;
     }
     if (phase === 'feedback_in_progress' || phase === 'action_ended') {
-      return block.actionEndedAt ?? now;
+      return block.actionEndedAt ?? block.feedbackStartedAt ?? derivedLastTransitionAt ?? now;
     }
     if (phase === 'paused') {
-      return block.pausedAt ?? now;
+      return block.pausedAt ?? derivedLastTransitionAt ?? now;
     }
     return now;
   }
@@ -1309,26 +1419,33 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return (block.targetMinutes ?? 25) * 60 * 1000;
   }
 
-  private resolveAccumulatedRunMs(block: ActiveBlockData): number {
+  private resolveAccumulatedRunMs(block: ActiveBlockData, now: number = Date.now()): number {
+    if ((block.transitions?.length ?? 0) > 0) {
+      return deriveAccumulatedRunMsFromBlock(block, now);
+    }
     if (typeof block.accumulatedRunMs === 'number') {
       return Math.max(0, block.accumulatedRunMs);
     }
 
     if (block.mode === 'countdown') {
       const expectedDurationMs = this.getExpectedDurationMs(block);
-      return Math.max(0, expectedDurationMs - Math.max(0, block.elapsed));
+      return Math.max(0, expectedDurationMs - Math.max(0, block.elapsed ?? 0));
     }
-    return Math.max(0, block.elapsed);
+    return Math.max(0, block.elapsed ?? 0);
   }
 
   private resolveLegacyRunningStart(block: ActiveBlockData, accumulatedRunMs: number, now: number): number {
+    const transitionLastResumedAt = deriveLastResumedAt(block.transitions ?? []);
+    if (typeof transitionLastResumedAt === 'number') {
+      return transitionLastResumedAt;
+    }
     if (typeof block.updatedAt === 'number') {
       return block.updatedAt;
     }
 
     const elapsedRunMs = block.mode === 'countdown'
-      ? Math.max(0, this.getExpectedDurationMs(block) - Math.max(0, block.elapsed))
-      : Math.max(0, block.elapsed);
+      ? Math.max(0, this.getExpectedDurationMs(block) - Math.max(0, block.elapsed ?? 0))
+      : Math.max(0, block.elapsed ?? 0);
     const runningSliceMs = Math.max(0, elapsedRunMs - accumulatedRunMs);
     return Math.max(block.startTime, now - runningSliceMs);
   }
@@ -1336,9 +1453,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private calculateRunDurationMs(block: ActiveBlockData, at: number): number {
     const normalized = this.normalizeActiveBlock(block, at);
     if (normalized.mode === 'countdown') {
-      return Math.max(0, this.getExpectedDurationMs(normalized) - Math.max(0, normalized.elapsed));
+      return Math.max(0, this.getExpectedDurationMs(normalized) - Math.max(0, normalized.elapsed ?? 0));
     }
-    return Math.max(0, normalized.elapsed);
+    return Math.max(0, normalized.elapsed ?? 0);
   }
 
   private isFeedbackInProgress(block: ActiveBlockData): boolean {

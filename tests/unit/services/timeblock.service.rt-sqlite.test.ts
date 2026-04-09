@@ -42,6 +42,7 @@ vi.mock('@/lib/services/signal-stream.service', () => ({
 }));
 
 import type { ActiveBlockData, TimeBlockData } from '@/lib/types/event';
+import { generateGapBlocks } from '@/lib/services/gap-backfill';
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 
 type MemoryEnv = {
@@ -54,16 +55,14 @@ type MemoryEnv = {
 
 type TimeBlockRtAdapterLike = {
   listCompletedBlocks: () => Promise<TimeBlockData[]>;
-  replaceCompletedBlocks: (blocks: TimeBlockData[]) => Promise<void>;
   getActiveBlock: () => Promise<ActiveBlockData | null>;
-  putActiveBlock: (block: ActiveBlockData) => Promise<void>;
-  deleteActiveBlock: () => Promise<void>;
-  // #780 new RT routes
+  rtBackfillGapBlocks: () => Promise<{ inserted: number }>;
   rtStartBlock: (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[]; sourcePlannedBlockId?: string }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
   rtStopBlock: () => Promise<{ status: string }>;
   rtEndBlock: (params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
   rtPauseBlock: () => Promise<{ status: string }>;
   rtResumeBlock: () => Promise<{ status: string }>;
+  rtPatchActiveBlockTasks: (params: { taskIds: string[]; taskAssociationLog: unknown[] }) => Promise<ActiveBlockData | null>;
 };
 
 function createMemoryEnv(initial: Record<string, unknown> = {}): MemoryEnv {
@@ -92,19 +91,32 @@ function createRtAdapter(initial?: {
 
   const adapter: TimeBlockRtAdapterLike = {
     listCompletedBlocks: vi.fn(async () => completedBlocks),
-    replaceCompletedBlocks: vi.fn(async (blocks: TimeBlockData[]) => {
-      completedBlocks = blocks;
-    }),
     getActiveBlock: vi.fn(async () => activeBlock),
-    putActiveBlock: vi.fn(async (block: ActiveBlockData) => {
-      activeBlock = block;
+    rtBackfillGapBlocks: vi.fn(async () => {
+      const gaps = generateGapBlocks(completedBlocks);
+      if (gaps.length > 0) {
+        completedBlocks = [...completedBlocks, ...gaps].sort((a, b) => a.startTime - b.startTime);
+      }
+      return { inserted: gaps.length };
     }),
-    deleteActiveBlock: vi.fn(async () => {
-      activeBlock = null;
-    }),
-    // #780 new RT route mocks
     rtStartBlock: vi.fn(async (params: { name: string; mode: string; targetMinutes?: number; taskIds?: string[] }) => {
       const now = Date.now();
+      let completed: TimeBlockData | null = null;
+      if (activeBlock?.blockType === 'gap') {
+        completed = {
+          id: activeBlock.startId,
+          name: activeBlock.name,
+          startId: activeBlock.startId,
+          endId: `rt-gap-end-${now}`,
+          tags: [],
+          startTime: activeBlock.startTime,
+          endTime: now,
+          blockType: 'gap',
+          taskIds: [],
+          taskAssociationLog: activeBlock.taskAssociationLog ?? [],
+        };
+        completedBlocks = [...completedBlocks, completed];
+      }
       const newBlock: ActiveBlockData = {
         startId: `rt-start-${now}`,
         name: params.name,
@@ -124,7 +136,7 @@ function createRtAdapter(initial?: {
         taskAssociationLog: [],
       };
       activeBlock = newBlock;
-      return { completed: null, active: newBlock };
+      return { completed, active: newBlock };
     }),
     rtStopBlock: vi.fn(async () => {
       if (activeBlock) {
@@ -178,6 +190,20 @@ function createRtAdapter(initial?: {
       }
       return { status: 'ok' };
     }),
+    rtPatchActiveBlockTasks: vi.fn(async (params: { taskIds: string[]; taskAssociationLog: unknown[] }) => {
+      if (!activeBlock) {
+        return null;
+      }
+      const now = Date.now();
+      activeBlock = {
+        ...activeBlock,
+        taskIds: params.taskIds,
+        taskAssociationLog: params.taskAssociationLog as ActiveBlockData['taskAssociationLog'],
+        updatedAt: now,
+        version: (activeBlock.version ?? 0) + 1,
+      };
+      return activeBlock;
+    }),
   };
   return adapter;
 }
@@ -225,7 +251,7 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     const blocks = await service.loadTimeBlocks();
 
     // Migration is now handled by MigrationDialog, not lazily by the service
-    expect(rtAdapter.replaceCompletedBlocks).not.toHaveBeenCalled();
+    expect(rtAdapter.listCompletedBlocks).toHaveBeenCalledTimes(1);
     expect(blocks).toEqual([]);
   });
 
@@ -251,8 +277,78 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     const block = await service.loadActiveBlock();
 
     // Migration is now handled by MigrationDialog, not lazily by the service
-    expect(rtAdapter.putActiveBlock).not.toHaveBeenCalled();
+    expect(rtAdapter.getActiveBlock).toHaveBeenCalledTimes(1);
     expect(block).toBeNull();
+  });
+
+  it('hides transition-ended active block from RT adapter without writing back canonical terminal phase', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter({
+      activeBlock: {
+        startId: 'active-ended-1',
+        name: 'Transition ended',
+        mode: 'countdown',
+        targetMinutes: 25,
+        elapsed: 0,
+        paused: false,
+        startTime: 1_700_000_000_000,
+        transitions: [
+          { type: 'start', at: 1_700_000_000_000, actorId: 'actor-a' },
+          { type: 'end', at: 1_700_000_030_000, actorId: 'actor-a' },
+        ],
+        taskIds: [],
+        taskAssociationLog: [],
+      },
+    });
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+
+    const block = await service.loadActiveBlock();
+    const stored = await rtAdapter.getActiveBlock();
+
+    expect(block).toBeNull();
+    expect(stored?.startId).toBe('active-ended-1');
+    expect(stored?.phase).toBeUndefined();
+    expect(rtAdapter.rtPatchActiveBlockTasks).not.toHaveBeenCalled();
+  });
+
+  it('allows starting a new block when current RT active block is transition-completed', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter({
+      activeBlock: {
+        startId: 'active-ended-1',
+        name: 'Transition ended',
+        mode: 'countdown',
+        targetMinutes: 25,
+        elapsed: 0,
+        paused: false,
+        startTime: 1_700_000_000_000,
+        transitions: [
+          { type: 'start', at: 1_700_000_000_000, actorId: 'actor-a' },
+          { type: 'feedback_start', at: 1_700_000_020_000, actorId: 'actor-a' },
+          { type: 'end', at: 1_700_000_030_000, actorId: 'actor-a' },
+        ],
+        taskIds: [],
+        taskAssociationLog: [],
+      },
+    });
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+
+    const block = await service.startBlock('Fresh block', { mode: 'countup' });
+
+    expect(rtAdapter.rtStartBlock).toHaveBeenCalledWith({
+      name: 'Fresh block',
+      mode: 'countup',
+      targetMinutes: undefined,
+      taskIds: [],
+    });
+    expect(block.name).toBe('Fresh block');
+    expect(block.startId).not.toBe('active-ended-1');
   });
 
   it('writes new active block and completed block to RT adapter when ending a block', async () => {
@@ -267,10 +363,64 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     await service.markEnding();
     await service.endBlock('done');
 
-    // #780: now uses RT routes instead of direct putActiveBlock/replaceCompletedBlocks
+    // #780: rt-sqlite flow now goes through dedicated RT lifecycle routes
     expect(rtAdapter.rtStartBlock).toHaveBeenCalled();
     expect(rtAdapter.rtStopBlock).toHaveBeenCalled();
     expect(rtAdapter.rtEndBlock).toHaveBeenCalled();
+  });
+
+  it('patches active block task links via dedicated RT route in rt-sqlite mode', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter({
+      activeBlock: {
+        startId: 'active-1',
+        name: 'Deep Work',
+        mode: 'countdown',
+        targetMinutes: 25,
+        elapsed: 300000,
+        paused: false,
+        startTime: 1_700_000_000_000,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: 1_700_000_000_000,
+        taskIds: ['task-1'],
+        taskAssociationLog: [],
+      },
+    });
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+
+    const updated = await service.updateActiveBlock({
+      taskIds: ['task-1', 'task-2'],
+      taskAssociationLog: [
+        {
+          blockId: 'active-1',
+          taskId: 'task-2',
+          action: 'associated',
+          timestamp: 1_700_000_010_000,
+          source: 'manual',
+        },
+      ],
+    });
+
+    expect(rtAdapter.rtPatchActiveBlockTasks).toHaveBeenCalledWith({
+      taskIds: ['task-1', 'task-2'],
+      taskAssociationLog: [
+        {
+          blockId: 'active-1',
+          taskId: 'task-2',
+          action: 'associated',
+          timestamp: 1_700_000_010_000,
+          source: 'manual',
+        },
+      ],
+    });
+    expect(updated).toMatchObject({
+      startId: 'active-1',
+      taskIds: ['task-1', 'task-2'],
+    });
   });
 
   it('does not duplicate block_start/pause/resume eventlog writes in rt-sqlite mode', async () => {

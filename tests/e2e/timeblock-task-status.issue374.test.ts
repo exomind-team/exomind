@@ -125,8 +125,7 @@ async function installFakeTimeblockRt(page: Page) {
     }
 
     if (pathname === '/timeblocks/active' && method === 'PUT') {
-      activeBlock = request.postDataJSON() as MockActiveBlock;
-      await route.fulfill({ status: 204 });
+      await fulfillJson(route, 405, { error: 'legacy PUT /timeblocks/active disabled' });
       return;
     }
 

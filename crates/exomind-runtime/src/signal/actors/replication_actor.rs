@@ -328,6 +328,49 @@ fn should_accept_replicated_active(
     source_host_id: &str,
     local_host_id: &str,
 ) -> bool {
+    if existing.start_id != incoming.start_id {
+        let incoming_start = incoming.resolve_start_time();
+        let existing_start = existing.resolve_start_time();
+        if incoming_start > existing_start {
+            return true;
+        }
+        if incoming_start < existing_start {
+            return false;
+        }
+
+        let incoming_order = incoming
+            .resolve_last_transition_at()
+            .unwrap_or(incoming.updated_at.unwrap_or(incoming.resolve_start_time()));
+        let existing_order = existing
+            .resolve_last_transition_at()
+            .unwrap_or(existing.updated_at.unwrap_or(existing.resolve_start_time()));
+        if incoming_order > existing_order {
+            return true;
+        }
+        if incoming_order < existing_order {
+            return false;
+        }
+
+        return source_host_id > local_host_id;
+    }
+
+    let incoming_phase = match incoming.resolve_phase() {
+        Some("feedback_submitted") => 2,
+        Some("feedback_in_progress") => 1,
+        _ => 0,
+    };
+    let existing_phase = match existing.resolve_phase() {
+        Some("feedback_submitted") => 2,
+        Some("feedback_in_progress") => 1,
+        _ => 0,
+    };
+    if incoming_phase > existing_phase {
+        return true;
+    }
+    if incoming_phase < existing_phase {
+        return false;
+    }
+
     let incoming_version = incoming.version.unwrap_or(0);
     let existing_version = existing.version.unwrap_or(0);
     if incoming_version > existing_version {
@@ -337,8 +380,12 @@ fn should_accept_replicated_active(
         return false;
     }
 
-    let incoming_updated = incoming.updated_at.unwrap_or(incoming.start_time);
-    let existing_updated = existing.updated_at.unwrap_or(existing.start_time);
+    let incoming_updated = incoming
+        .resolve_last_transition_at()
+        .unwrap_or(incoming.updated_at.unwrap_or(incoming.resolve_start_time()));
+    let existing_updated = existing
+        .resolve_last_transition_at()
+        .unwrap_or(existing.updated_at.unwrap_or(existing.resolve_start_time()));
     if incoming_updated > existing_updated {
         return true;
     }
@@ -407,6 +454,83 @@ mod tests {
             Arc::clone(timeblock_store),
             Arc::clone(proposal_store),
         );
+    }
+
+    fn sample_active_block(start_id: &str) -> ActiveBlockData {
+        ActiveBlockData {
+            start_id: start_id.to_string(),
+            name: "focus".to_string(),
+            mode: "countdown".to_string(),
+            target_minutes: Some(25),
+            block_type: Some("active".to_string()),
+            elapsed: 0,
+            updated_at: Some(1_710_000_000_000),
+            phase: Some("running".to_string()),
+            version: Some(1),
+            actor_id: Some("actor-a".to_string()),
+            last_transition_at: Some(1_710_000_000_000),
+            last_resumed_at: Some(1_710_000_000_000),
+            accumulated_run_ms: Some(0),
+            start_time: 1_710_000_000_000,
+            action_ended_at: None,
+            feedback_started_at: None,
+            feedback_submitted_at: None,
+            pause_accumulated_ms: Some(0),
+            paused: false,
+            paused_at: None,
+            task_ids: vec![],
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            transitions: vec![crate::timeblock::BlockTransition {
+                transition_type: crate::timeblock::BlockTransitionType::Start,
+                at: 1_710_000_000_000,
+                actor_id: Some("actor-a".to_string()),
+            }],
+            task_id: None,
+        }
+    }
+
+    #[test]
+    fn replicated_active_prefers_higher_transition_derived_phase_before_updated_at() {
+        let existing = sample_active_block("active-1");
+        let mut incoming = sample_active_block("active-1");
+        incoming.updated_at = Some(1_709_999_999_000);
+        incoming.last_transition_at = Some(1_710_000_005_000);
+        incoming
+            .transitions
+            .push(crate::timeblock::BlockTransition {
+            transition_type: crate::timeblock::BlockTransitionType::FeedbackStart,
+            at: 1_710_000_005_000,
+            actor_id: Some("actor-b".to_string()),
+        });
+
+        assert!(should_accept_replicated_active(
+            &existing,
+            &incoming,
+            "host-remote",
+            "host-local",
+        ));
+    }
+
+    #[test]
+    fn replicated_active_prefers_newer_start_for_different_blocks() {
+        let existing = sample_active_block("active-old");
+        let mut incoming = sample_active_block("active-new");
+        incoming.start_time = 1_710_000_010_000;
+        incoming.updated_at = Some(1_709_999_999_000);
+        incoming.last_transition_at = Some(1_710_000_010_000);
+        incoming.transitions = vec![crate::timeblock::BlockTransition {
+            transition_type: crate::timeblock::BlockTransitionType::Start,
+            at: 1_710_000_010_000,
+            actor_id: Some("actor-b".to_string()),
+        }];
+
+        assert!(should_accept_replicated_active(
+            &existing,
+            &incoming,
+            "host-remote",
+            "host-local",
+        ));
     }
 
     #[tokio::test]
