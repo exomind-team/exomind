@@ -8,7 +8,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::sync::Mutex;
 use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::{connect_async, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, connect_async};
 use tungstenite::Message;
 use url::Url;
 

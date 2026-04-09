@@ -11,14 +11,14 @@ use std::{
     sync::Arc,
 };
 
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
-use futures_util::{stream::SplitSink, stream::SplitStream, SinkExt, StreamExt};
+use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use futures_util::{SinkExt, StreamExt, stream::SplitSink, stream::SplitStream};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{mpsc, oneshot, Mutex};
-use tokio::time::{interval, Duration, MissedTickBehavior};
-use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
-use tungstenite::{http::Request as HttpRequest, Message};
+use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::time::{Duration, MissedTickBehavior, interval};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite};
+use tungstenite::{Message, http::Request as HttpRequest};
 
 const VOLCANO_STREAM_EVENT_NAME: &str = "volcano-asr-stream-event";
 const VOLCANO_STREAM_CANCELLED_MESSAGE: &str = "火山流式会话已取消";
