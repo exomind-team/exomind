@@ -1,1 +1,36 @@
-function normalizePathname(pathname: string) {  if (!pathname || pathname === '/') return '';  return pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;}function normalizeRoute(route: string) {  if (!route || route === '/') return '/';  const withLeadingSlash = route.startsWith('/') ? route : `/${route}`;  return withLeadingSlash === '/' ? '/' : withLeadingSlash.replace(/\/+$/, '');}function resolveWebsiteBasePath() {  const baseUrl = process.env.EXOMIND_WEBSITE_BASE_URL;  if (!baseUrl) {    return '';  }  try {    return normalizePathname(new URL(baseUrl).pathname);  } catch {    return '';  }}const websiteBasePath = resolveWebsiteBasePath();export function websiteRoute(route: string) {  const normalizedRoute = normalizeRoute(route);  if (!websiteBasePath) {    return normalizedRoute;  }  return normalizedRoute === '/'    ? `${websiteBasePath}/`    : `${websiteBasePath}${normalizedRoute}`;}
+function normalizePathname(pathname: string) {
+  if (!pathname || pathname === '/') return '';
+  return pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+}
+
+function normalizeRoute(route: string) {
+  if (!route || route === '/') return '/';
+  const withLeadingSlash = route.startsWith('/') ? route : `/${route}`;
+  return withLeadingSlash === '/' ? '/' : withLeadingSlash.replace(/\/+$/, '');
+}
+
+function resolveWebsiteBasePath() {
+  const baseUrl = process.env.EXOMIND_WEBSITE_BASE_URL;
+  if (!baseUrl) {
+    return '';
+  }
+
+  try {
+    return normalizePathname(new URL(baseUrl).pathname);
+  } catch {
+    return '';
+  }
+}
+
+const websiteBasePath = resolveWebsiteBasePath();
+
+export function websiteRoute(route: string) {
+  const normalizedRoute = normalizeRoute(route);
+  if (!websiteBasePath) {
+    return normalizedRoute;
+  }
+
+  return normalizedRoute === '/'
+    ? `${websiteBasePath}/`
+    : `${websiteBasePath}${normalizedRoute}`;
+}

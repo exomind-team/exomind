@@ -4,6 +4,8 @@ import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import type { ASRResult } from '@/lib/ports/asr-port';
 import {
   VOICE_INPUT_TRANSCRIPT_TOPIC,
+  VOICE_RUNTIME_SPEAK_CANCEL_TOPIC,
+  VOICE_RUNTIME_SPEAK_REQUEST_TOPIC,
 } from '@/lib/constants/signal-topics';
 import type {
   AgentInteractionContext,
@@ -148,5 +150,54 @@ export async function publishVoiceTranscriptSignal(
     source,
     trace_id: traceId,
     payload: transcriptPayload,
+  });
+}
+
+export async function publishVoiceRuntimeSpeakRequestSignal(
+  text: string,
+  options: PublishVoiceTranscriptOptions = {},
+): Promise<void> {
+  const normalizedText = text.trim();
+  if (!normalizedText) {
+    return;
+  }
+
+  const publisher = new SignalStreamService({
+    host: buildRuntimeHostRecord(),
+    agentId: 'voice-runtime-lab',
+  });
+  const source = options.source?.trim() || 'frontend:voice-runtime-lab';
+  const traceId = buildTraceId(options.traceId);
+
+  await publisher.publish({
+    topic: VOICE_RUNTIME_SPEAK_REQUEST_TOPIC,
+    source,
+    trace_id: traceId,
+    payload: {
+      text: normalizedText,
+      traceId,
+      captureSource: options.captureSource?.trim() || source,
+    },
+  });
+}
+
+export async function publishVoiceRuntimeSpeakCancelSignal(
+  options: PublishVoiceTranscriptOptions = {},
+): Promise<void> {
+  const publisher = new SignalStreamService({
+    host: buildRuntimeHostRecord(),
+    agentId: 'voice-runtime-lab',
+  });
+  const source = options.source?.trim() || 'frontend:voice-runtime-lab';
+  const traceId = buildTraceId(options.traceId);
+
+  await publisher.publish({
+    topic: VOICE_RUNTIME_SPEAK_CANCEL_TOPIC,
+    source,
+    trace_id: traceId,
+    payload: {
+      traceId,
+      captureSource: options.captureSource?.trim() || source,
+    },
   });
 }

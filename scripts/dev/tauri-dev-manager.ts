@@ -270,6 +270,10 @@ async function collectManagedTauriHealthSnapshot(
     };
   }
 
+  const processes = runPowerShellJson<ManagedWindowsProcessInfo>(
+    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json -Compress',
+  );
+
   if (!rootPidAlive) {
     return {
       rootPidAlive,
@@ -279,6 +283,7 @@ async function collectManagedTauriHealthSnapshot(
       webPortPids,
       hmrPortPids,
       appPids: [],
+      processes,
     };
   }
 
@@ -292,9 +297,6 @@ async function collectManagedTauriHealthSnapshot(
       `${expectedDesktopProcess}.exe`,
     )
     : null;
-  const processes = runPowerShellJson<ManagedWindowsProcessInfo>(
-    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json -Compress',
-  );
   const appPids = collectManagedDesktopAppPids({
     processes,
     rootPid: record.rootPid,
@@ -310,6 +312,7 @@ async function collectManagedTauriHealthSnapshot(
     webPortPids,
     hmrPortPids,
     appPids,
+    processes,
   };
 }
 

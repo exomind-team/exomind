@@ -1401,6 +1401,7 @@ dependencies = [
 name = "exomind"
 version = "0.4.3"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "enigo",
  "exomind-android-keepalive",

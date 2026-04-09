@@ -93,6 +93,13 @@ export const RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS = [
   'exomind:ai-registry:snapshot',
   'exomind-update-settings',
   'agent_runtime_hosts_v1',
+  'exomind:voiceRuntimeDoubaoAppId',
+  'exomind:voiceRuntimeDoubaoAccessToken',
+  'exomind:voiceRuntimeDoubaoSecretKey',
+  'exomind:voiceRuntimeDoubaoModelVersion',
+  'exomind:voiceRuntimeDoubaoSpeaker',
+  'exomind:voiceRuntimeDoubaoConnectId',
+  'exomind:voiceRuntimeDoubaoWebsocketUrl',
 ] as const;
 export const RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES = [
   'exomind:ai-registry:energy-secret:',
@@ -101,6 +108,9 @@ const SENSITIVE_EXACT_KEYS = new Set<string>([
   'moss_api_key',
   'volcano_asr_app_key',
   'volcano_asr_access_key',
+  'exomind:voiceRuntimeDoubaoAppId',
+  'exomind:voiceRuntimeDoubaoAccessToken',
+  'exomind:voiceRuntimeDoubaoSecretKey',
 ]);
 const SENSITIVE_PREFIXES = [
   'exomind:ai-registry:energy-secret:',

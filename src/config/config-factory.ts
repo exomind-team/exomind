@@ -23,6 +23,7 @@ import {
   getRuntimeConfigValueSync,
   setRuntimeConfigValue,
 } from './runtime-config-cache';
+import type { RuntimeConfigWriteOptions } from './runtime-config-types';
 
 export interface ConfigModuleOptions<T> {
   /** localStorage key */
@@ -43,6 +44,8 @@ export interface ConfigModuleOptions<T> {
   serialize?: (value: T) => string;
   /** Persist to Runtime first while still mirroring localStorage（优先写 Runtime，同时镜像到 localStorage） */
   persistMode?: 'localStorage' | 'runtime-preferred';
+  /** Extra runtime write metadata（Runtime 写入附加元数据） */
+  runtimeWriteOptions?: RuntimeConfigWriteOptions;
 }
 
 export interface ConfigModule<T> {
@@ -64,6 +67,7 @@ export function createConfigModule<T>(options: ConfigModuleOptions<T>): ConfigMo
   const { storageKey, eventName, defaultValue, normalize } = options;
   const serialize: (value: T) => string = options.serialize ?? String;
   const persistMode = options.persistMode ?? 'localStorage';
+  const runtimeWriteOptions = options.runtimeWriteOptions;
 
   function get(): T {
     if (persistMode === 'runtime-preferred') {
@@ -93,6 +97,7 @@ export function createConfigModule<T>(options: ConfigModuleOptions<T>): ConfigMo
         setRuntimeConfigValue(storageKey, serialize(normalized), {
           source: eventName,
           sourceOrigin: typeof window !== 'undefined' ? window.location?.origin : undefined,
+          ...runtimeWriteOptions,
         });
       } else {
         const storage = getStorage();

@@ -4,6 +4,7 @@
 pub mod asr_commands;
 pub mod dev_commands;
 pub mod device_commands;
+pub mod doubao_realtime_commands;
 pub mod eventlog_commands;
 pub mod file_commands;
 pub mod now_workbench_overlay_commands;
