@@ -22,6 +22,7 @@ export type Category =
   | 'appearance'
   | 'timer'
   | 'input'
+  | 'voice'
   | 'feedback'
   | 'ai'
   | 'connection'
@@ -40,6 +41,8 @@ export interface SettingsContext {
   developerMode?: boolean;
   desktopAdaptiveEnabled?: boolean;
   voiceShortcutAsrProvider?: string;
+  voiceRuntimeProvider?: string;
+  voiceRuntimeMode?: string;
   embeddedRuntimeNetworkMode?: 'local' | 'lan';
   runtimeTargetMode?: 'embedded' | 'external';
 }
@@ -158,7 +161,7 @@ export interface ActionSettingsItem extends SettingsItemBase {
 
 export interface GroupSettingsItem extends SettingsItemBase {
   type: 'group';
-  groupStyle?: 'adaptive-overlay';
+  groupStyle?: 'adaptive-overlay' | 'inline-panel';
   dialogTitle?: string;
   dialogDescription?: string;
   children: SettingsItem[];

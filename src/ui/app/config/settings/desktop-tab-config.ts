@@ -8,6 +8,7 @@ export const DESKTOP_TAB_CONFIG: Array<{
   { key: 'appearance', label: '外观主题', categories: ['appearance'] },
   { key: 'focus', label: '专注设置', categories: ['timer', 'feedback'] },
   { key: 'input', label: '输入', categories: ['input'] },
+  { key: 'voice', label: '语音', categories: ['voice'] },
   { key: 'services', label: '服务', categories: ['ai', 'sync'] },
   { key: 'connection', label: '连接', categories: ['connection'] },
   { key: 'terminal-agent', label: '终端 Agent', categories: ['terminal-agent'] },

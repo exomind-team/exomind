@@ -16,6 +16,10 @@ import {
   getVoiceShortcutMicPrewarmEnabled,
   subscribeVoiceShortcutMicPrewarmChanges,
 } from '@/config/voice-shortcut-mic-prewarm';
+import {
+  getVoiceShortcutEnabled,
+  subscribeVoiceShortcutEnabledChanges,
+} from '@/config/voice-shortcut-enabled';
 import { getVoiceAutoRecordEnabled } from '@/config/voice-auto-record';
 import {
   getDeveloperModeEnabled,
@@ -180,6 +184,7 @@ export class VoiceShortcutService {
   private unlistenHotkey: (() => void) | null = null;
   private unlistenProvider: (() => void) | null = null;
   private unlistenMicPrewarm: (() => void) | null = null;
+  private unlistenVoiceShortcutEnabled: (() => void) | null = null;
   private unlistenDeveloperMode: (() => void) | null = null;
   private unlistenOverlayBottomOffset: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -202,6 +207,7 @@ export class VoiceShortcutService {
   private developerModeEnabled = getDeveloperModeEnabled();
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
   private micPrewarmEnabled = getVoiceShortcutMicPrewarmEnabled();
+  private voiceShortcutEnabled = getVoiceShortcutEnabled();
   private livePreviewSource: VoiceLivePreviewSource;
   private livePreviewSession: VoiceLivePreviewSession | null = null;
   private livePreviewText = '';
@@ -272,6 +278,7 @@ export class VoiceShortcutService {
       unlistenHotkey: (() => void) | null;
       unlistenProvider: (() => void) | null;
       unlistenMicPrewarm: (() => void) | null;
+      unlistenVoiceShortcutEnabled: (() => void) | null;
       unlistenDeveloperMode: (() => void) | null;
       unlistenOverlayBottomOffset: (() => void) | null;
       windowFocusBound: boolean;
@@ -282,6 +289,7 @@ export class VoiceShortcutService {
       unlistenHotkey: null,
       unlistenProvider: null,
       unlistenMicPrewarm: null,
+      unlistenVoiceShortcutEnabled: null,
       unlistenDeveloperMode: null,
       unlistenOverlayBottomOffset: null,
       windowFocusBound: false,
@@ -294,6 +302,7 @@ export class VoiceShortcutService {
       localHandles.unlistenHotkey?.();
       localHandles.unlistenProvider?.();
       localHandles.unlistenMicPrewarm?.();
+      localHandles.unlistenVoiceShortcutEnabled?.();
       localHandles.unlistenDeveloperMode?.();
       localHandles.unlistenOverlayBottomOffset?.();
       if (localHandles.windowFocusBound && typeof window !== 'undefined') {
@@ -327,6 +336,13 @@ export class VoiceShortcutService {
         this.micPrewarmEnabled = enabled;
         this.syncWarmMaintenanceLoop();
         void this.prewarmResourcesForProvider();
+      });
+
+      localHandles.unlistenVoiceShortcutEnabled = subscribeVoiceShortcutEnabledChanges((enabled) => {
+        this.voiceShortcutEnabled = enabled;
+        if (!enabled) {
+          void this.handleCancel();
+        }
       });
 
       localHandles.unlistenDeveloperMode = subscribeDeveloperModeChanges((enabled) => {
@@ -373,6 +389,7 @@ export class VoiceShortcutService {
       this.unlistenHotkey = localHandles.unlistenHotkey;
       this.unlistenProvider = localHandles.unlistenProvider;
       this.unlistenMicPrewarm = localHandles.unlistenMicPrewarm;
+      this.unlistenVoiceShortcutEnabled = localHandles.unlistenVoiceShortcutEnabled;
       this.unlistenDeveloperMode = localHandles.unlistenDeveloperMode;
       this.unlistenOverlayBottomOffset = localHandles.unlistenOverlayBottomOffset;
       this.syncWarmMaintenanceLoop();
@@ -410,6 +427,8 @@ export class VoiceShortcutService {
     this.unlistenProvider = null;
     this.unlistenMicPrewarm?.();
     this.unlistenMicPrewarm = null;
+    this.unlistenVoiceShortcutEnabled?.();
+    this.unlistenVoiceShortcutEnabled = null;
     this.unlistenDeveloperMode?.();
     this.unlistenDeveloperMode = null;
     this.unlistenOverlayBottomOffset?.();
@@ -929,6 +948,9 @@ export class VoiceShortcutService {
   }
 
   private async handleStart(): Promise<void> {
+    if (!this.voiceShortcutEnabled) {
+      return;
+    }
     if (this.startPending) {
       return;
     }

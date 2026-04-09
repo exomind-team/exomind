@@ -11,6 +11,7 @@ const SECTION_TEST_IDS: Record<string, string> = {
   appearance: 'new-settings-desktop-vc-section-theme',
   focus: 'new-settings-desktop-vc-section-focus',
   input: 'new-settings-desktop-vc-section-input',
+  voice: 'new-settings-desktop-vc-section-voice',
   services: 'new-settings-desktop-vc-section-services',
   'terminal-agent': 'new-settings-desktop-vc-section-terminal-agent',
   data: 'new-settings-desktop-vc-section-data',

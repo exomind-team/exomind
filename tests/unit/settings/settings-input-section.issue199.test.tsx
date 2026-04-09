@@ -3,47 +3,17 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { settingsPagePreferenceState } from '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
-import { getDeveloperModeEnabled } from '@/config/developer-mode';
-import { setInputSendMode } from '@/config/input-send-mode';
-import { setTaskPageFuzzySearchEnabled } from '@/config/task-page-fuzzy-search';
-import { setTaskCreateSuccessAction } from '@/config/task-create-success-action';
-import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
-import { setVoiceShortcutSendMode } from '@/config/voice-shortcut-send-mode';
-import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
-import { setMainWindowShortcutSelection } from '@/config/main-window-shortcut';
-import { setMainWindowShortcutQuickFocusEnabled } from '@/config/main-window-shortcut-focus';
-import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
-import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
-import {
-  setVoiceOmniModelId,
-  setVoiceOmniOptimizeEnabled,
-  setVoiceOmniProfileId,
-} from '@/config/voice-omni-settings';
-import { setVoiceAutoRecordEnabled } from '@/config/voice-auto-record';
-import {
-  setVoiceOverlayOpacity,
-  setVoiceOverlayBottomOffset,
-  setVoiceOverlayShowDiagnostics,
-  setVoiceOverlayTranscriptLines,
-} from '@/config/voice-overlay-preferences';
-import {
-  setVolcanoAccessKey,
-  setVolcanoAppKey,
-  setVolcanoResourceIdSetting,
-} from '@/config/volcano-asr-settings';
 
-const invokeMock = vi.fn();
-const isTauriMock = vi.fn(() => false);
-
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (...args: unknown[]) => invokeMock(...args),
-  isTauri: (...args: unknown[]) => isTauriMock(...args),
-}));
-
-describe('SettingsPage input section（输入分组语音配置）', () => {
+describe('SettingsPage voice section（语音分组设置）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setVoiceShortcutAsrProvider('moss');
+    settingsPagePreferenceState.developerMode = false;
+    settingsPagePreferenceState.voiceShortcutAsrProvider = 'moss';
+    settingsPagePreferenceState.voiceShortcutEnabled = true;
+    settingsPagePreferenceState.voiceRuntimeEnabled = false;
+    settingsPagePreferenceState.voiceRuntimeMode = 'push-to-talk';
+    settingsPagePreferenceState.voiceRuntimeProvider = 'doubao-o2-realtime';
+
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -54,570 +24,61 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
-
-    const storage = window.localStorage as Partial<Storage>;
-    if (typeof storage.removeItem === 'function') {
-      storage.removeItem('moss_api_key');
-    }
-
-    settingsPagePreferenceState.isTauriWindow = false;
-    settingsPagePreferenceState.isDesktopOperatingSystem = false;
-    settingsPagePreferenceState.mainWindowShortcutSelection = ['Ctrl', 'E'];
-    settingsPagePreferenceState.mainWindowShortcutQuickFocusEnabled = false;
-    settingsPagePreferenceState.voiceOmniProfileId = '';
-    settingsPagePreferenceState.voiceOmniModelId = 'qwen3-omni-flash';
-    settingsPagePreferenceState.voiceOmniOptimizeEnabled = false;
-    isTauriMock.mockReturnValue(false);
-    invokeMock.mockResolvedValue(null);
   });
 
-  it('renders input section with voice-related rows', () => {
+  it('moves voice configuration out of input section（语音配置不再平铺在输入分组）', () => {
     render(<SettingsPage />);
 
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
-    expect(screen.getByText('输入框发送方式')).toBeInTheDocument();
-    expect(screen.getByText('任务页输入框模糊搜索')).toBeInTheDocument();
-    expect(screen.getByText('创建任务后')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-voice-section')).toBeInTheDocument();
+    expect(screen.getAllByText('快捷语音输入').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('常驻语音助手').length).toBeGreaterThan(0);
+
+    expect(screen.queryByText('快捷语音引擎')).not.toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
-    expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
-    expect(screen.getByText('语音输入自动记录')).toBeInTheDocument();
-    expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
-    expect(screen.queryByText('主窗口全局快捷键')).not.toBeInTheDocument();
-    expect(screen.queryByText('唤起后快速聚焦输入')).not.toBeInTheDocument();
-    expect(screen.getByText('快捷语音引擎')).toBeInTheDocument();
-    expect(screen.getByText('预启动麦克风')).toBeInTheDocument();
-    expect(screen.getByText('悬浮窗透明度')).toBeInTheDocument();
-    expect(screen.getByText('显示语音悬浮窗诊断信息')).toBeInTheDocument();
-    expect(screen.getByText('悬浮窗实时文本行数')).toBeInTheDocument();
-    expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
-    expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
-    expect(screen.getByText('统一控制「任务 / 当下」输入框使用 Enter 发送还是 Ctrl/Cmd+Enter 发送')).toBeInTheDocument();
-    expect(screen.getByText('仅作用于任务页；开启后会用输入框第一行对任务标题做防抖模糊过滤')).toBeInTheDocument();
-    expect(screen.getByText('仅作用于任务页快速添加；默认继续回焦，也可切换为直接打开新建任务详情')).toBeInTheDocument();
-    expect(screen.getByText('仅作用于「当下」页面输入框，默认插入输入框')).toBeInTheDocument();
-    expect(screen.getByText('Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束')).toBeInTheDocument();
-    expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
+    expect(screen.getByText('启用常驻语音助手')).toBeInTheDocument();
   });
 
-  it('shows provider-matched voice settings rows when developer mode is enabled', async () => {
-    vi.mocked(getDeveloperModeEnabled).mockReturnValue(true);
-
+  it('shows shortcut voice input inline and switches provider panels（快捷语音输入在当前页直接展示并切换 provider）', async () => {
     render(<SettingsPage />);
 
-    expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
-    expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
-    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
-    expect(screen.queryByText('火山资源模型')).not.toBeInTheDocument();
-    expect(screen.getByText('可用')).toBeInTheDocument();
+    expect(screen.getByText('Provider / 服务提供方：MOSS')).toBeInTheDocument();
+    expect(screen.getByText('启用快捷语音输入')).toBeInTheDocument();
+    expect(screen.getByText('语音转写后')).toBeInTheDocument();
+    expect(screen.getByText('MOSS 本地识别配置区')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
+    fireEvent.click(screen.getByRole('button', { name: '火山' }));
 
     await waitFor(() => {
-      expect(screen.queryByText('MOSS API Token')).not.toBeInTheDocument();
-      expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-      expect(screen.getByText('火山引擎 ASR 测试')).toBeInTheDocument();
+      expect(screen.getByText('火山 ASR 配置区')).toBeInTheDocument();
       expect(screen.getByText('火山引擎 Key')).toBeInTheDocument();
       expect(screen.getByText('火山识别模式')).toBeInTheDocument();
-      expect(screen.getByText('火山资源模型')).toBeInTheDocument();
-      expect(screen.getByText('火山 Resource ID')).toBeInTheDocument();
-      expect(screen.getByText('火山识别语言')).toBeInTheDocument();
-      expect(screen.getByText('进入')).toBeInTheDocument();
     });
   });
 
-  it('shows volcano config fields without developer mode when provider is volcano', async () => {
-    vi.mocked(getDeveloperModeEnabled).mockReturnValue(false);
-
+  it('shows assistant settings inline and reflects mode/provider changes（常驻语音助手在当前页直接展示并反映模式与 provider 切换）', async () => {
     render(<SettingsPage />);
 
-    fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
+    expect(screen.getByText('启用常驻语音助手')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-voice-runtime-cloud-session-policy-row')).toBeInTheDocument();
+    expect(screen.getByText('Doubao App ID')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Omni Compatible' }));
+    fireEvent.click(screen.getByRole('radio', { name: '环境监听' }));
 
     await waitFor(() => {
-      expect(screen.getByText('火山引擎 Key')).toBeInTheDocument();
-      expect(screen.getByText('火山识别模式')).toBeInTheDocument();
-      expect(screen.getByText('火山资源模型')).toBeInTheDocument();
-      expect(screen.getByText('火山 Resource ID')).toBeInTheDocument();
-      expect(screen.getByText('火山识别语言')).toBeInTheDocument();
-      expect(screen.getByText('火山用量概览')).toBeInTheDocument();
-    });
-
-    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
-    expect(screen.queryByText('MOSS API Token')).not.toBeInTheDocument();
-    expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-  });
-
-  it('edits volcano engine keys in one dialog', async () => {
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
-
-    await waitFor(() => {
-      expect(screen.getByText('火山引擎 Key')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('new-settings-volcano-engine-key-row'));
-
-    expect(screen.getByTestId('new-settings-volcano-engine-app-key-input')).toHaveAttribute('type', 'password');
-    expect(screen.getByTestId('new-settings-volcano-engine-access-key-input')).toHaveAttribute('type', 'password');
-    expect(screen.getByTestId('new-settings-volcano-engine-app-key-clear')).toBeInTheDocument();
-    expect(screen.getByTestId('new-settings-volcano-engine-access-key-clear')).toBeInTheDocument();
-    expect(screen.getByTestId('new-settings-volcano-engine-app-key-visibility')).toBeInTheDocument();
-    expect(screen.getByTestId('new-settings-volcano-engine-access-key-visibility')).toBeInTheDocument();
-
-    fireEvent.change(screen.getByTestId('new-settings-volcano-engine-app-key-input'), {
-      target: { value: ' app-key-1 ' },
-    });
-    fireEvent.change(screen.getByTestId('new-settings-volcano-engine-access-key-input'), {
-      target: { value: ' access-key-1 ' },
-    });
-    fireEvent.click(screen.getByTestId('new-settings-volcano-engine-key-save'));
-
-    await waitFor(() => {
-      expect(setVolcanoAppKey).toHaveBeenCalledWith(' app-key-1 ');
-      expect(setVolcanoAccessKey).toHaveBeenCalledWith(' access-key-1 ');
-    });
-    await waitFor(() => {
-      expect(screen.queryByTestId('new-settings-volcano-engine-app-key-input')).not.toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('Omni Compatible 当前只支持按键说话，不支持环境监听。');
+      expect(screen.getByText('Omni Compatible 模型')).toBeInTheDocument();
+      expect(screen.getByText('Omni Compatible Base URL')).toBeInTheDocument();
     });
   });
 
-
-  it('switches shortcut voice provider from input section', async () => {
-    const setProviderMock = vi.mocked(setVoiceShortcutAsrProvider);
-    render(<SettingsPage />);
-
-    const volcanoButton = screen.getByTestId('new-settings-voice-provider-volcano');
-    const mossButton = screen.getByTestId('new-settings-voice-provider-moss');
-    const qwenButton = screen.getByTestId('new-settings-voice-provider-qwen-omni');
-
-    fireEvent.click(volcanoButton);
-    await waitFor(() => {
-      expect(volcanoButton).toHaveAttribute('aria-pressed', 'true');
-      expect(mossButton).toHaveAttribute('aria-pressed', 'false');
-      expect(qwenButton).toHaveAttribute('aria-pressed', 'false');
-    });
-    expect(setProviderMock).toHaveBeenCalledWith('volcano');
-
-    fireEvent.click(qwenButton);
-    await waitFor(() => {
-      expect(qwenButton).toHaveAttribute('aria-pressed', 'true');
-      expect(mossButton).toHaveAttribute('aria-pressed', 'false');
-      expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
-    });
-    expect(setProviderMock).toHaveBeenCalledWith('qwen-omni');
-
-    fireEvent.click(mossButton);
-    await waitFor(() => {
-      expect(mossButton).toHaveAttribute('aria-pressed', 'true');
-      expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
-      expect(qwenButton).toHaveAttribute('aria-pressed', 'false');
-    });
-    expect(setProviderMock).toHaveBeenCalledWith('moss');
-  });
-
-  it('shows qwen omni settings rows when provider is qwen-omni', async () => {
-    const setProfileMock = vi.mocked(setVoiceOmniProfileId);
-    const setModelMock = vi.mocked(setVoiceOmniModelId);
-    const setOptimizeMock = vi.mocked(setVoiceOmniOptimizeEnabled);
+  it('shows assistant diagnostics rows only in developer mode（常驻助手诊断项仅在开发者模式出现）', () => {
+    settingsPagePreferenceState.developerMode = true;
 
     render(<SettingsPage />);
 
-    fireEvent.click(screen.getByTestId('new-settings-voice-provider-qwen-omni'));
-
-    await waitFor(() => {
-      expect(screen.getByText('Qwen Omni 供应商档案')).toBeInTheDocument();
-      expect(screen.getByText('Qwen Omni 提示词')).toBeInTheDocument();
-      expect(screen.getByText('Qwen Omni 模型 ID')).toBeInTheDocument();
-      expect(screen.getByText('启用 Qwen 二次排版')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-omni-profile-row'));
-    fireEvent.click(screen.getByTestId('new-settings-voice-omni-profile-option-registry-qwen-voice'));
-    await waitFor(() => {
-      expect(setProfileMock).toHaveBeenCalledWith('registry-qwen-voice');
-    });
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-omni-model-row'));
-    fireEvent.change(screen.getByTestId('new-settings-voice-omni-model-input'), {
-      target: { value: 'qwen-omni-turbo-latest' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-    await waitFor(() => {
-      expect(setModelMock).toHaveBeenCalledWith('qwen-omni-turbo-latest');
-    });
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-omni-optimize-switch'));
-    expect(setOptimizeMock).toHaveBeenCalledWith(true);
-  });
-
-  it('allows selecting volcano resource model from input section', () => {
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
-
-    const group = screen.getByRole('group', { name: '火山资源模型' });
-    expect(screen.queryByTestId('new-settings-volcano-resource-select')).toBeNull();
-    expect(screen.queryByText('模型 1.0 小时版')).toBeNull();
-    expect(screen.getByRole('button', { name: '1.0 小时版' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '1.0 并发版' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '2.0 小时版' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '2.0 并发版' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '1.0 小时版' }));
-
-    expect(setVolcanoResourceIdSetting('volc.bigasr.sauc.duration')).toBe('volc.bigasr.sauc.duration');
-    expect(group).toBeInTheDocument();
-    expect(screen.getByText('当前默认资源：1.0 小时版。')).toBeInTheDocument();
-  });
-
-  it('toggles voice auto-record from input section', () => {
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-auto-record-switch'));
-
-    expect(setVoiceAutoRecordEnabled).toHaveBeenCalledWith(false);
-  });
-
-  it('updates voice overlay opacity from input section', () => {
-    render(<SettingsPage />);
-
-    const slider = screen.getByTestId('new-settings-voice-overlay-opacity-slider');
-    expect(slider).toHaveAttribute('min', '32');
-    expect(slider).toHaveAttribute('max', '92');
-    fireEvent.change(slider, { target: { value: '74' } });
-
-    expect(setVoiceOverlayOpacity(74)).toBe(74);
-    expect(screen.getByText('74%')).toBeInTheDocument();
-  });
-
-  it('toggles chat and external input send mode from input section', () => {
-    const setModeMock = vi.mocked(setVoiceShortcutSendMode);
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-send-mode-auto-enter-send'));
-
-    expect(setModeMock).toHaveBeenCalledWith('auto-enter-send');
-    expect(screen.getByTestId('new-settings-voice-shortcut-send-mode-auto-enter-send')).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('toggles keyboard input send mode from input section', () => {
-    const setModeMock = vi.mocked(setInputSendMode);
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-input-send-mode-enter-send'));
-
-    expect(setModeMock).toHaveBeenCalledWith('enter-send');
-    expect(screen.getByTestId('new-settings-input-send-mode-enter-send')).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('toggles task page fuzzy search from input section', () => {
-    const setEnabledMock = vi.mocked(setTaskPageFuzzySearchEnabled);
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-task-page-fuzzy-search-switch'));
-
-    expect(setEnabledMock).toHaveBeenCalledWith(false);
-  });
-
-  it('switches task create success action from input section', () => {
-    const setActionMock = vi.mocked(setTaskCreateSuccessAction);
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-task-create-success-action-open-detail'));
-
-    expect(setActionMock).toHaveBeenCalledWith('open-detail');
-    expect(screen.getByTestId('new-settings-task-create-success-action-open-detail')).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('toggles overlay diagnostics visibility from input section', () => {
-    const setDiagnosticsMock = vi.mocked(setVoiceOverlayShowDiagnostics);
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-overlay-diagnostics-switch'));
-
-    expect(setDiagnosticsMock).toHaveBeenCalledWith(true);
-  });
-
-  it('updates overlay transcript line count from input section', () => {
-    const setLinesMock = vi.mocked(setVoiceOverlayTranscriptLines);
-    render(<SettingsPage />);
-
-    const slider = screen.getByTestId('new-settings-voice-overlay-transcript-lines-slider');
-    fireEvent.change(slider, { target: { value: '5' } });
-
-    expect(setLinesMock).toHaveBeenCalledWith(5);
-    expect(screen.getByText('5 行')).toBeInTheDocument();
-  });
-
-  it('updates overlay bottom offset from input section', () => {
-    const setOffsetMock = vi.mocked(setVoiceOverlayBottomOffset);
-    render(<SettingsPage />);
-
-    const slider = screen.getByTestId('new-settings-voice-overlay-bottom-offset-slider');
-    fireEvent.change(slider, { target: { value: '72' } });
-
-    expect(setOffsetMock).toHaveBeenCalledWith(72);
-    expect(screen.getByText('72px')).toBeInTheDocument();
-  });
-
-  it('toggles microphone prewarm from input section', () => {
-    render(<SettingsPage />);
-
-    const prewarmSwitch = screen.getByTestId('new-settings-voice-prewarm-switch');
-    fireEvent.click(prewarmSwitch);
-
-    expect(setVoiceShortcutMicPrewarmEnabled).toHaveBeenCalledWith(false);
-  });
-
-  it('toggles voice transcript send mode from input section', () => {
-    const setModeMock = vi.mocked(setVoiceTranscriptSendMode);
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-transcript-mode-direct-send'));
-    expect(setModeMock).toHaveBeenCalledWith('direct-send');
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-transcript-mode-insert'));
-    expect(setModeMock).toHaveBeenCalledWith('insert');
-  });
-
-  it('updates global voice shortcut from input section', () => {
-    const setHotkeyMock = vi.mocked(setVoiceShortcutHotkey);
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-ctrl-space'));
-    fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-alt-w'));
-    return waitFor(() => {
-      expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
-      expect(setHotkeyMock).toHaveBeenCalledWith('Alt+W');
-    });
-  });
-
-  it('shows main-window shortcut settings on desktop operating systems even in mobile layout', () => {
-    settingsPagePreferenceState.isDesktopOperatingSystem = true;
-
-    render(<SettingsPage />);
-
-    expect(screen.getByText('主窗口全局快捷键')).toBeInTheDocument();
-    expect(screen.getByText('唤起后快速聚焦输入')).toBeInTheDocument();
-  });
-
-  it('shows main-window shortcut settings on desktop web-first layout', () => {
-    settingsPagePreferenceState.isDesktopOperatingSystem = true;
-    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-      matches: true,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }));
-
-    render(<SettingsPage />);
-
-    expect(screen.getByText('主窗口全局快捷键')).toBeInTheDocument();
-    expect(screen.getByText('唤起后快速聚焦输入')).toBeInTheDocument();
-  });
-
-  it('updates main-window shortcut selection from input section', async () => {
-    settingsPagePreferenceState.isDesktopOperatingSystem = true;
-    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-      matches: true,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }));
-
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-main-window-shortcut-ctrl'));
-    fireEvent.click(screen.getByTestId('new-settings-main-window-shortcut-space'));
-    fireEvent.click(screen.getByTestId('new-settings-main-window-shortcut-e'));
-
-    await waitFor(() => {
-      expect(vi.mocked(setMainWindowShortcutSelection)).toHaveBeenCalled();
-    });
-  });
-
-  it('toggles main-window quick-focus from input section', () => {
-    settingsPagePreferenceState.isDesktopOperatingSystem = true;
-    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-      matches: true,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }));
-
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-main-window-shortcut-quick-focus-switch'));
-
-    expect(vi.mocked(setMainWindowShortcutQuickFocusEnabled)).toHaveBeenCalledWith(true);
-  });
-
-  it.skip('syncs hotkey from runtime on mount in tauri（Tauri 挂载时同步运行时快捷键）— TODO: restore mount-time sync in registry version', async () => {
-    const setHotkeyMock = vi.mocked(setVoiceShortcutHotkey);
-    isTauriMock.mockReturnValue(true);
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'voice_shortcut_get') {
-        return 'Ctrl+Space';
-      }
-      return null;
-    });
-
-    render(<SettingsPage />);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('voice_shortcut_get');
-    });
-    expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
-  });
-
-  it('syncs main-window shortcut selection from runtime on mount in tauri', async () => {
-    settingsPagePreferenceState.isTauriWindow = true;
-    isTauriMock.mockReturnValue(true);
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'main_window_shortcut_get') {
-        return 'Ctrl+Space';
-      }
-      return null;
-    });
-
-    render(<SettingsPage />);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('main_window_shortcut_get');
-    });
-    expect(vi.mocked(setMainWindowShortcutSelection)).toHaveBeenCalledWith(
-      ['Ctrl', 'Space'],
-      { emitEvent: false, customized: false },
-    );
-  });
-
-  it('reverts to runtime hotkey when tauri shortcut switch fails（Tauri 切换失败时回滚到实际快捷键）', async () => {
-    isTauriMock.mockReturnValue(true);
-    vi.mocked(getVoiceShortcutHotkey).mockReturnValue('Alt+Q');
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'voice_shortcut_set') {
-        throw new Error('shortcut already registered');
-      }
-      if (command === 'voice_shortcut_get') {
-        return 'Alt+Q';
-      }
-      return null;
-    });
-
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-ctrl-space'));
-
-    await waitFor(() => {
-      expect(screen.getByText('全局语音快捷键切换失败：shortcut already registered')).toBeInTheDocument();
-    });
-    expect(screen.getByTestId('new-settings-voice-shortcut-alt-q')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('new-settings-voice-shortcut-ctrl-space')).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  it('saves MOSS token from input settings dialog', () => {
-    render(<SettingsPage />);
-
-    const tokenRow = screen.getByTestId('new-settings-voice-token-row');
-    expect(tokenRow.querySelector('.lucide-key')).not.toBeNull();
-    expect(tokenRow.querySelector('.lucide-bot')).toBeNull();
-
-    fireEvent.click(screen.getByText('MOSS API Token'));
-    expect(screen.getByText('语音输入设置')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '显示 Token' })).toBeInTheDocument();
-    expect(screen.getByText('用于新 UI 语音输入转写')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '清空' })).toBeInTheDocument();
-
-    const tokenInput = screen.getByPlaceholderText('输入 MOSS API Token');
-    fireEvent.change(tokenInput, { target: { value: 'Bearer sk-test-123456' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-
-    expect(screen.getByText('MOSS API Token 已保存')).toBeInTheDocument();
-    expect(screen.getByText('已配置 (sk-t***56)')).toBeInTheDocument();
-  });
-
-  it('keeps RT address dialog as plain single-value editor without secret-only footer controls', () => {
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByText('RT 地址'));
-
-    expect(screen.getByText('需要连接另一台电脑或手机上的 ExoMind 时，在这里填写对方显示的地址；平时只在本机使用就不用改。')).toBeInTheDocument();
-    expect(screen.getByText('填写你想连接的那台设备地址，例如 192.168.1.23:9124。保存后，当前设备会切换到这个地址继续连接。')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '显示 Token' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '清空' })).toBeNull();
-
-    const syncInput = screen.getByPlaceholderText('192.168.1.23:9124');
-    expect(syncInput).toHaveAttribute('type', 'text');
-
-    const cancelButton = screen.getByRole('button', { name: '取消' });
-    const saveButton = screen.getByRole('button', { name: '保存' });
-    expect(cancelButton.className).toContain('flex-1');
-    expect(saveButton.className).toContain('flex-1');
-  });
-
-  it('hides voice test rows when developer mode is disabled', () => {
-    vi.mocked(getDeveloperModeEnabled).mockReturnValue(false);
-
-    render(<SettingsPage />);
-
-    expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
-    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
-  });
-
-  it('renders the new voice settings in desktop layout（桌面布局也包含新增语音设置项）', () => {
-    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-      matches: true,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }));
-
-    render(<SettingsPage />);
-
-    expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
-    expect(screen.getByText('显示语音悬浮窗诊断信息')).toBeInTheDocument();
-    expect(screen.getByText('悬浮窗实时文本行数')).toBeInTheDocument();
-    expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
-  });
-
-  it('uses dev dialog input classes for AI registry fields（AI 注册中心输入框严格复用 dev 焦点样式）', () => {
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByText('AI Registry').closest('button') as HTMLButtonElement);
-
-    const apiKeyInput = screen.getByPlaceholderText('sk-...');
-    const baseUrlInput = screen.getByPlaceholderText('https://api.openai.com/v1');
-    const modelInput = screen.getByPlaceholderText('gpt-4o');
-
-    for (const input of [apiKeyInput, baseUrlInput, modelInput]) {
-      expect(input.className).toContain('border-[#F0ECE8]');
-      expect(input.className).toContain('bg-white');
-      expect(input.className).toContain('text-[#1C1917]');
-      expect(input.className).toContain('placeholder:text-[#D6D3D1]');
-      expect(input.className).toContain('focus:border-[#C75B3A]');
-      expect(input.className).toContain('focus:ring-1');
-      expect(input.className).toContain('focus:ring-[#C75B3A]');
-      expect(input.className).toContain('dark:border-[#292524]');
-      expect(input.className).toContain('dark:bg-[#1C1917]');
-      expect(input.className).toContain('dark:text-[#FAFAF9]');
-      expect(input.className).toContain('dark:placeholder:text-[#57534E]');
-    }
+    expect(screen.getByText('显示语音诊断入口')).toBeInTheDocument();
+    expect(screen.getByText('打开语音诊断页')).toBeInTheDocument();
   });
 });

@@ -20,6 +20,7 @@ const items: SettingsItem[] = [
   makeCustomItem('theme', 'appearance', '主题'),
   makeCustomItem('feedback-content', 'feedback', '反馈内容'),
   makeCustomItem('voice-transcript-send-mode', 'input', '语音转写后'),
+  makeCustomItem('voice-input-settings', 'voice', '快捷语音输入'),
   makeCustomItem('ai-registry', 'ai', 'AI Registry'),
   makeCustomItem('runtime-target-mode', 'connection', 'RT 配置'),
   makeCustomItem('pty-waiting-input-idle-timeout', 'terminal-agent', '超时待决策时间'),
@@ -37,6 +38,7 @@ describe('settings layouts', () => {
     expect(screen.getByText('外观')).toBeInTheDocument();
     expect(screen.getByText('时间块反馈')).toBeInTheDocument();
     expect(screen.getByText('输入')).toBeInTheDocument();
+    expect(screen.getByText('语音')).toBeInTheDocument();
     expect(screen.getByText('AI 设置')).toBeInTheDocument();
     expect(screen.getByText('连接')).toBeInTheDocument();
     expect(screen.getByText('终端 Agent')).toBeInTheDocument();
@@ -59,6 +61,7 @@ describe('settings layouts', () => {
     expect(screen.getByRole('button', { name: '外观主题' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '专注设置' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '输入' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '语音' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '服务' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '连接' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '终端 Agent' })).toBeInTheDocument();

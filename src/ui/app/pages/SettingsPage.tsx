@@ -11,6 +11,8 @@ import {
   subscribeRuntimeTargetChanges,
 } from '@/config/runtime-target';
 import { getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges } from '@/config/voice-shortcut-asr-provider';
+import { getVoiceRuntimeProvider, subscribeVoiceRuntimeProviderChanges } from '@/config/voice-runtime-settings';
+import { getVoiceRuntimeMode, subscribeVoiceRuntimeModeChanges } from '@/config/voice-runtime-mode';
 import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { UserCard } from '@/ui/app/components/UserCard';
@@ -41,6 +43,8 @@ function useSettingsContext(): SettingsContext {
   const developerMode = useSubscribed(getDeveloperModeEnabled, subscribeDeveloperModeChanges);
   const desktopAdaptiveEnabled = useSubscribed(getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges);
   const voiceShortcutAsrProvider = useSubscribed(getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges);
+  const voiceRuntimeProvider = useSubscribed(getVoiceRuntimeProvider, subscribeVoiceRuntimeProviderChanges);
+  const voiceRuntimeMode = useSubscribed(getVoiceRuntimeMode, subscribeVoiceRuntimeModeChanges);
   const embeddedRuntimeNetworkMode = useSubscribed(
     getEmbeddedRuntimeNetworkMode,
     subscribeEmbeddedRuntimeNetworkModeChanges,
@@ -57,6 +61,8 @@ function useSettingsContext(): SettingsContext {
     developerMode,
     desktopAdaptiveEnabled,
     voiceShortcutAsrProvider,
+    voiceRuntimeProvider,
+    voiceRuntimeMode,
     embeddedRuntimeNetworkMode,
     runtimeTargetMode,
   }), [
@@ -64,6 +70,8 @@ function useSettingsContext(): SettingsContext {
     developerMode,
     desktopAdaptiveEnabled,
     voiceShortcutAsrProvider,
+    voiceRuntimeProvider,
+    voiceRuntimeMode,
     embeddedRuntimeNetworkMode,
     runtimeTargetMode,
   ]);

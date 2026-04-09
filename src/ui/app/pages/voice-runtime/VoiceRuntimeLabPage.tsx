@@ -27,10 +27,10 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { getVoiceAssistantRuntimeService } from '@/services/voice-assistant-runtime.service';
 import { SlidingSegmentedControl } from '@/ui/app/components/SlidingSegmentedControl';
 import { PageShell } from '@/ui/app/components/PageShell';
 import {
-  VoiceRuntimeLabController,
   type VoiceRuntimeLabState,
 } from '@/ui/app/pages/voice-runtime/voice-runtime-lab-controller';
 
@@ -444,27 +444,13 @@ function buildReadinessItems(state: VoiceRuntimeLabState): Array<{
 
 export function VoiceRuntimeLabPage() {
   const navigate = useNavigate();
-  const [controller] = useState(() => new VoiceRuntimeLabController());
+  const [controller] = useState(() => getVoiceAssistantRuntimeService().getController());
   const [state, setState] = useState(() => controller.getState());
   const [holdToTalkPressed, setHoldToTalkPressed] = useState(false);
-  const pendingDisposeTimerRef = useRef<number | null>(null);
   const holdToTalkActiveRef = useRef(false);
 
   useEffect(() => {
-    if (pendingDisposeTimerRef.current != null) {
-      window.clearTimeout(pendingDisposeTimerRef.current);
-      pendingDisposeTimerRef.current = null;
-    }
     return controller.subscribe(setState);
-  }, [controller]);
-
-  useEffect(() => () => {
-    // Defer disposal by one macrotask so StrictMode fake-unmount won't
-    // permanently tear down the controller in development.
-    pendingDisposeTimerRef.current = window.setTimeout(() => {
-      pendingDisposeTimerRef.current = null;
-      void controller.dispose();
-    }, 0);
   }, [controller]);
 
   const isOmniCompatibleSelected = state.providerId === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER;

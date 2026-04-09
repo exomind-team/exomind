@@ -1171,6 +1171,8 @@ function GroupRenderer({
 }) {
   const toneColor = useSettingsToneColor();
   const [open, setOpen] = useState(false);
+  const visibleChildren = item.children.filter((childItem) => !childItem.visible || childItem.visible(ctx));
+  const inlinePanel = item.groupStyle === 'inline-panel';
 
   const overlayMode = item.groupStyle ?? 'adaptive-overlay';
   const shouldUseDialog = overlayMode === 'adaptive-overlay' && Boolean(ctx.isLandscape);
@@ -1182,15 +1184,39 @@ function GroupRenderer({
       className="px-5 pb-8 pt-2"
     >
       <div className="mt-4 overflow-hidden rounded-2xl border settings-tone-border bg-white dark:border-[#FFFFFF15] dark:bg-[#1C1917]">
-        {item.children.map((childItem, index) => (
+        {visibleChildren.map((childItem, index) => (
           <div key={childItem.id}>
             <SettingsItemRenderer item={childItem} ctx={ctx} />
-            {index < item.children.length - 1 ? <Divider toneColor={toneColor} /> : null}
+            {index < visibleChildren.length - 1 ? <Divider toneColor={toneColor} /> : null}
           </div>
         ))}
       </div>
     </div>
   );
+
+  if (inlinePanel) {
+    return (
+      <div data-testid={item.rowTestId ?? `${item.id}-inline-panel`}>
+        <div className="px-4 pb-3 pt-4">
+          <div className="flex items-center gap-2">
+            {item.icon ? renderRowIcon(item.icon) : null}
+            <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.label}</p>
+          </div>
+          {item.description ? (
+            <p className="mt-1 pl-[26px] text-xs leading-5 text-[#A8A29E]">{item.description}</p>
+          ) : null}
+        </div>
+        <div className="border-t border-[#F0ECE8] dark:border-[#292524]">
+          {visibleChildren.map((childItem, index) => (
+            <div key={childItem.id}>
+              <SettingsItemRenderer item={childItem} ctx={ctx} />
+              {index < visibleChildren.length - 1 ? <Divider toneColor={toneColor} /> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

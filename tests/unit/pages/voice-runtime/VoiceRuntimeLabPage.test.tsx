@@ -26,12 +26,14 @@ import {
 import {
   setVoiceRuntimeMode,
 } from '@/config/voice-runtime-mode';
+import { __resetVoiceAssistantRuntimeServiceForTests } from '@/services/voice-assistant-runtime.service';
 import { VoiceRuntimeLabPage } from '@/ui/app/pages/voice-runtime/VoiceRuntimeLabPage';
 
 describe('VoiceRuntimeLabPage（语音运行时实验页）', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     window.localStorage.clear();
     __resetRuntimeConfigCacheForTests();
+    await __resetVoiceAssistantRuntimeServiceForTests();
   });
 
   it('renders the desktop lab page skeleton（渲染桌面实验台骨架）', () => {

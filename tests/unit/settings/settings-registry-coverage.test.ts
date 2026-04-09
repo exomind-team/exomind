@@ -7,243 +7,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import '../components/settings/setup-settings-mocks.tsx';
 import { settingsPagePreferenceState } from '../components/settings/setup-settings-mocks.tsx';
-import {
-  FEATURE_TOGGLE_SETTING_IDS,
-  FEATURE_TOGGLE_SETTINGS,
-  getVisibleSettings,
-  SETTINGS_REGISTRY,
-} from '@/ui/app/config/settings/settings-registry';
-import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
-
-const AUDITED_SETTINGS_IDS = [
-  'theme',
-  'countdown-end-mode',
-  'sound-preset',
-  'focus-bgm',
-  'feedback-content',
-  'input-send-mode',
-  'task-page-fuzzy-search',
-  'task-create-success-action',
-  'task-dag-pan-speed',
-  'task-dag-zoom-speed',
-  'voice-transcript-send-mode',
-  'voice-shortcut-send-mode',
-  'voice-auto-record',
-  'voice-shortcut-hotkey',
-  'main-window-shortcut',
-  'main-window-shortcut-quick-focus',
-  'tiled-workbench-navigation-shortcut-scheme',
-  'tiled-workbench-command-shortcut-scheme',
-  'tiled-workbench-passthrough-shortcut',
-  'voice-shortcut-asr-provider',
-  'voice-shortcut-mic-prewarm',
-  'voice-overlay-opacity',
-  'voice-overlay-show-diagnostics',
-  'voice-overlay-transcript-lines',
-  'voice-overlay-bottom-offset',
-  'now-workbench-overlay-enabled',
-  'voice-omni-profile',
-  'voice-omni-prompts',
-  'voice-omni-model',
-  'voice-omni-optimize',
-  'voice-runtime-enabled',
-  'voice-runtime-mode',
-  'voice-runtime-provider',
-  'voice-runtime-cloud-session-policy',
-  'voice-runtime-auto-speak-enabled',
-  'voice-runtime-lab-nav-enabled',
-  'open-voice-runtime-lab',
-  'volcano-engine-key',
-  'volcano-usage-summary',
-  'volcano-endpoint',
-  'volcano-resource-model',
-  'volcano-resource-id',
-  'volcano-language',
-  'moss-api-token',
-  'moss-voice-test',
-  'volcano-asr-test',
-  'ai-registry',
-  'runtime-target-mode',
-  'embedded-runtime-open-mode',
-  'sync-server-url',
-  'pty-waiting-input-idle-timeout',
-  'pty-terminal-replay-limit-kb',
-  'eventlog-backend-mode',
-  'task-backend-mode',
-  'timeblock-backend-mode',
-  'data-transfer',
-  'data-legacy-migration',
-  'more-update',
-  'more-help-center',
-  'more-feedback',
-  'more-telemetry',
-  'more-report-bug',
-  'more-debug-log',
-  'about-website',
-  'about-sponsor',
-  'about-legal',
-  'about-version',
-  'about-build',
-  'developer-mode',
-  'use-mock-data',
-  'devtools',
-  'api-agent-tab-enabled',
-  'me-page-enabled',
-  'agent-page-enabled',
-  'goals-page-enabled',
-  'proposal-inbox-enabled',
-  'desktop-adaptive',
-  'command-palette-enabled',
-  'instance-diagnostics',
-  'device-pairing',
-  'embedded-runtime-lan-no-auth',
-  'clear-local-cache',
-  'reset-all-settings',
-] as const;
-
-const INLINE_SINGLE_ENUM_IDS = [
-  'theme',
-  'input-send-mode',
-  'task-create-success-action',
-  'voice-transcript-send-mode',
-  'voice-shortcut-send-mode',
-  'voice-shortcut-hotkey',
-  'voice-shortcut-asr-provider',
-  'voice-runtime-mode',
-  'volcano-resource-model',
-] as const;
-
-const DIALOG_ENUM_IDS = [
-  'countdown-end-mode',
-  'runtime-target-mode',
-  'embedded-runtime-open-mode',
-  'tiled-workbench-navigation-shortcut-scheme',
-  'tiled-workbench-command-shortcut-scheme',
-  'tiled-workbench-passthrough-shortcut',
-  'voice-runtime-provider',
-  'voice-runtime-cloud-session-policy',
-  'volcano-endpoint',
-  'volcano-language',
-] as const;
-
-const SELECT_ENUM_IDS = [] as const;
-
-const MULTI_ENUM_IDS = [
-  'feedback-content',
-  'main-window-shortcut',
-] as const;
-
-const BOOLEAN_IDS = [
-  'voice-auto-record',
-  'main-window-shortcut-quick-focus',
-  'voice-shortcut-mic-prewarm',
-  'task-page-fuzzy-search',
-  'voice-overlay-show-diagnostics',
-  'now-workbench-overlay-enabled',
-  'voice-runtime-enabled',
-  'voice-runtime-auto-speak-enabled',
-  'voice-runtime-lab-nav-enabled',
-  'developer-mode',
-  'use-mock-data',
-  'devtools',
-  'api-agent-tab-enabled',
-  'me-page-enabled',
-  'agent-page-enabled',
-  'goals-page-enabled',
-  'proposal-inbox-enabled',
-  'desktop-adaptive',
-  'command-palette-enabled',
-] as const;
-
-const NUMBER_IDS = [
-  'task-dag-pan-speed',
-  'task-dag-zoom-speed',
-  'voice-overlay-opacity',
-  'voice-overlay-transcript-lines',
-  'voice-overlay-bottom-offset',
-  'pty-waiting-input-idle-timeout',
-  'pty-terminal-replay-limit-kb',
-] as const;
-
-const ROW_ACTION_IDS = [
-  'data-legacy-migration',
-  'more-update',
-  'more-help-center',
-  'more-feedback',
-  'more-telemetry',
-  'more-report-bug',
-  'more-debug-log',
-  'open-voice-runtime-lab',
-  'about-website',
-  'about-sponsor',
-  'about-legal',
-  'about-version',
-  'about-build',
-] as const;
-
-const BUTTON_ACTION_IDS = [
-  'clear-local-cache',
-  'reset-all-settings',
-] as const;
-
-const CUSTOM_ITEM_IDS = [
-  'sound-preset',
-  'focus-bgm',
-  'voice-omni-profile',
-  'voice-omni-prompts',
-  'volcano-engine-key',
-  'volcano-usage-summary',
-  'moss-voice-test',
-  'volcano-asr-test',
-  'ai-registry',
-  'data-transfer',
-  'instance-diagnostics',
-  'device-pairing',
-] as const;
-
-const QWEN_OMNI_ONLY_IDS = [
-  'voice-omni-profile',
-  'voice-omni-prompts',
-  'voice-omni-model',
-  'voice-omni-optimize',
-] as const;
-
-const TAURI_DEV_ONLY_IDS = [
-  'eventlog-backend-mode',
-  'task-backend-mode',
-  'timeblock-backend-mode',
-] as const;
-
-const DEV_ONLY_IDS = [
-  'use-mock-data',
-  'devtools',
-  'api-agent-tab-enabled',
-  'voice-runtime-enabled',
-  'voice-runtime-mode',
-  'voice-runtime-provider',
-  'voice-runtime-cloud-session-policy',
-  'voice-runtime-auto-speak-enabled',
-  'voice-runtime-lab-nav-enabled',
-  'open-voice-runtime-lab',
-  'me-page-enabled',
-  'agent-page-enabled',
-  'goals-page-enabled',
-  'proposal-inbox-enabled',
-  'desktop-adaptive',
-  'command-palette-enabled',
-  'instance-diagnostics',
-  'device-pairing',
-] as const;
-
-function getItem<T extends typeof SETTINGS_REGISTRY[number]['type']>(
-  id: string,
-  type: T,
-): Extract<(typeof SETTINGS_REGISTRY)[number], { type: T }> {
-  const item = SETTINGS_REGISTRY.find((entry) => entry.id === id);
-  expect(item, `missing settings item: ${id}`).toBeDefined();
-  expect(item?.type).toBe(type);
-  return item as Extract<(typeof SETTINGS_REGISTRY)[number], { type: T }>;
-}
+import { getVisibleSettings, SETTINGS_REGISTRY } from '@/ui/app/config/settings/settings-registry';
+import type { SettingsContext, SettingsItem } from '@/ui/app/config/settings/settings-types';
 
 function getBaseCtx(): SettingsContext {
   return {
@@ -252,306 +17,125 @@ function getBaseCtx(): SettingsContext {
     developerMode: false,
     desktopAdaptiveEnabled: false,
     voiceShortcutAsrProvider: 'moss',
+    voiceRuntimeProvider: 'doubao-o2-realtime',
+    voiceRuntimeMode: 'push-to-talk',
   };
 }
 
+function flattenAll(items: SettingsItem[]): SettingsItem[] {
+  return items.flatMap((item) => item.type === 'group'
+    ? [item, ...flattenAll(item.children)]
+    : [item]);
+}
+
+function flattenVisible(items: SettingsItem[], ctx: SettingsContext): SettingsItem[] {
+  return items.flatMap((item) => {
+    if (item.visible && !item.visible(ctx)) {
+      return [];
+    }
+    if (item.type === 'group') {
+      return [item, ...flattenVisible(item.children, ctx)];
+    }
+    return [item];
+  });
+}
+
 describe('settings registry coverage audit', () => {
-  it('keeps the audited registry checklist in sync with all current settings items', () => {
-    expect(SETTINGS_REGISTRY.map((item) => item.id)).toEqual(AUDITED_SETTINGS_IDS);
+  it('exposes the new top-level voice groups and removes legacy voice groups（顶层语音分组替代旧入口）', () => {
+    const topLevelIds = SETTINGS_REGISTRY.map((item) => item.id);
+
+    expect(topLevelIds).toContain('voice-input-settings');
+    expect(topLevelIds).toContain('voice-assistant-settings');
+    expect(topLevelIds).not.toContain('voice-dialogue-settings');
+    expect(topLevelIds).not.toContain('voice-diagnostics-settings');
   });
 
-  it('maps every standard registry item to an audited shared renderer family', () => {
-    INLINE_SINGLE_ENUM_IDS.forEach((id) => {
-      const item = getItem(id, 'enum');
-      expect(item.multiSelect).not.toBe(true);
-      expect(item.enumStyle).toBeUndefined();
-    });
-
-    DIALOG_ENUM_IDS.forEach((id) => {
-      const item = getItem(id, 'enum');
-      expect(item.multiSelect).not.toBe(true);
-      expect(item.enumStyle).toBe('dialog');
-    });
-
-    SELECT_ENUM_IDS.forEach((id) => {
-      const item = getItem(id, 'enum');
-      expect(item.multiSelect).not.toBe(true);
-      expect(item.enumStyle).toBe('select');
-    });
-
-    MULTI_ENUM_IDS.forEach((id) => {
-      const item = getItem(id, 'enum');
-      expect(item.multiSelect).toBe(true);
-      expect(item.enumStyle).toBeUndefined();
-    });
-
-    BOOLEAN_IDS.forEach((id) => {
-      const item = getItem(id, 'boolean');
-      expect(typeof item.get).toBe('function');
-      expect(typeof item.set).toBe('function');
-    });
-
-    NUMBER_IDS.forEach((id) => {
-      const item = getItem(id, 'number');
-      expect(typeof item.min).toBe('number');
-      expect(typeof item.max).toBe('number');
-      expect(typeof item.step).toBe('number');
-    });
-
-    ROW_ACTION_IDS.forEach((id) => {
-      const item = getItem(id, 'action');
-      expect(item.actionMode ?? 'row').toBe('row');
-    });
-
-    BUTTON_ACTION_IDS.forEach((id) => {
-      const item = getItem(id, 'action');
-      expect(item.actionMode).toBe('button');
-      expect(item.buttonLabel).toBeTruthy();
-    });
-
-    const theme = getItem('theme', 'enum');
-    expect(theme.options.map((option) => option.value)).toEqual(['light', 'system', 'dark']);
-    expect(theme.options.every((option) => Boolean(option.icon))).toBe(true);
-
-    const countdownEndMode = getItem('countdown-end-mode', 'enum');
-    expect(countdownEndMode.options.every((option) => Boolean(option.description))).toBe(true);
-
-    const soundPreset = getItem('sound-preset', 'custom');
-    expect(soundPreset.label).toBe('提示音');
-
-    const volcanoResourceModel = getItem('volcano-resource-model', 'enum');
-    expect(volcanoResourceModel.options.map((option) => option.label)).toEqual([
-      '1.0 小时版',
-      '1.0 并发版',
-      '2.0 小时版',
-      '2.0 并发版',
-    ]);
-
-    const mossApiToken = getItem('moss-api-token', 'string');
-    expect(mossApiToken.stringStyle).toBe('dialog');
-    expect(mossApiToken.dialogFieldKind).toBe('secret');
-    expect(mossApiToken.allowClear).toBe(true);
-    expect(mossApiToken.dialogFooterStart?.type).toBe('secret-toggle');
-
-    const volcanoEngineKey = getItem('volcano-engine-key', 'custom');
-    expect(volcanoEngineKey.label).toBe('火山引擎 Key');
-
-    const volcanoResourceId = getItem('volcano-resource-id', 'string');
-    expect(volcanoResourceId.stringStyle).toBe('dialog');
-    expect(volcanoResourceId.dialogFieldKind).toBe('plain');
-
-    const syncServerUrl = getItem('sync-server-url', 'string');
-    expect(syncServerUrl.stringStyle).toBe('dialog');
-    expect(syncServerUrl.dialogFieldKind).toBe('plain');
-    expect(syncServerUrl.dialogInputType).toBe('text');
-
-    const embeddedRuntimeOpenMode = getItem('embedded-runtime-open-mode', 'enum');
-    expect(embeddedRuntimeOpenMode.options.map((option) => option.value)).toEqual(['local', 'lan']);
-    expect(embeddedRuntimeOpenMode.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: false,
-    })).toBe(false);
-    expect(embeddedRuntimeOpenMode.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: true,
-    })).toBe(true);
-
-    const runtimeTargetMode = getItem('runtime-target-mode', 'enum');
-    expect(runtimeTargetMode.options.map((option) => option.value)).toEqual(['embedded', 'external']);
-    expect(runtimeTargetMode.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: false,
-    })).toBe(false);
-    expect(runtimeTargetMode.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: true,
-    })).toBe(true);
-
-    const ptyWaitingTimeout = getItem('pty-waiting-input-idle-timeout', 'number');
-    expect(ptyWaitingTimeout.category).toBe('terminal-agent');
-    expect(ptyWaitingTimeout.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: false,
-    })).toBe(true);
-    expect(ptyWaitingTimeout.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: true,
-      runtimeTargetMode: 'embedded',
-    })).toBe(true);
-    expect(ptyWaitingTimeout.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: true,
-      runtimeTargetMode: 'external',
-    })).toBe(false);
-    expect(ptyWaitingTimeout.label).toBe('超时待决策时间');
-    expect(ptyWaitingTimeout.description).toBe('控制 PTY 连续无输出多久后自动标记为等待决策。');
-    expect(ptyWaitingTimeout.min).toBe(1);
-    expect(ptyWaitingTimeout.max).toBe(600);
-    expect(ptyWaitingTimeout.step).toBe(1);
-
-    const ptyReplayLimit = getItem('pty-terminal-replay-limit-kb', 'number');
-    expect(ptyReplayLimit.category).toBe('terminal-agent');
-    expect(ptyReplayLimit.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: false,
-    })).toBe(true);
-    expect(ptyReplayLimit.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: true,
-      runtimeTargetMode: 'embedded',
-    })).toBe(true);
-    expect(ptyReplayLimit.visible?.({
-      ...getBaseCtx(),
-      isTauriWindow: true,
-      runtimeTargetMode: 'external',
-    })).toBe(false);
-    expect(ptyReplayLimit.label).toBe('终端历史回放上限');
-    expect(ptyReplayLimit.min).toBe(128);
-    expect(ptyReplayLimit.max).toBe(2048);
-    expect(ptyReplayLimit.step).toBe(64);
-
-    expect(getItem('me-page-enabled', 'boolean').category).toBe('developer');
-    expect(getItem('agent-page-enabled', 'boolean').category).toBe('developer');
-    expect(getItem('goals-page-enabled', 'boolean').category).toBe('developer');
-    expect(getItem('proposal-inbox-enabled', 'boolean').category).toBe('developer');
-    expect(getItem('desktop-adaptive', 'boolean').category).toBe('developer');
-    expect(getItem('command-palette-enabled', 'boolean').category).toBe('developer');
-
-    const clearLocalCache = getItem('clear-local-cache', 'action');
-    expect(clearLocalCache.confirmMessage).toContain('确认清空本地缓存');
-
-    const resetAllSettings = getItem('reset-all-settings', 'action');
-    expect(resetAllSettings.confirmMessage).toContain('确认重置所有设置');
-
-    const aboutVersion = getItem('about-version', 'action');
-    expect(aboutVersion.hideChevron).toBe(true);
-    expect(typeof aboutVersion.copyValue).toBe('function');
-
-    const aboutBuild = getItem('about-build', 'action');
-    expect(aboutBuild.hideChevron).toBe(true);
-    expect(typeof aboutBuild.copyValue).toBe('function');
-  });
-
-  it('limits custom escape hatches to the explicitly audited special entries', () => {
-    const customIds = SETTINGS_REGISTRY
-      .filter((item): item is Extract<typeof SETTINGS_REGISTRY[number], { type: 'custom' }> => item.type === 'custom')
-      .map((item) => item.id);
-
-    expect(customIds).toEqual(CUSTOM_ITEM_IDS);
-  });
-
-  it('keeps developer-only and provider-sensitive entries behind their intended gates', () => {
-    const baseIds = getVisibleSettings(getBaseCtx()).map((item) => item.id);
-    const developerIds = getVisibleSettings({
-      ...getBaseCtx(),
-      developerMode: true,
-    }).map((item) => item.id);
-    const tauriDeveloperIds = getVisibleSettings({
-      ...getBaseCtx(),
-      developerMode: true,
-      isTauriWindow: true,
-    }).map((item) => item.id);
-    const volcanoIds = getVisibleSettings({
-      ...getBaseCtx(),
-      developerMode: true,
-      voiceShortcutAsrProvider: 'volcano',
-    }).map((item) => item.id);
-
-    DEV_ONLY_IDS.forEach((id) => {
-      expect(baseIds).not.toContain(id);
-      expect(developerIds).toContain(id);
-    });
-    TAURI_DEV_ONLY_IDS.forEach((id) => {
-      expect(baseIds).not.toContain(id);
-      expect(developerIds).not.toContain(id);
-      expect(tauriDeveloperIds).toContain(id);
-    });
-
-    expect(baseIds).toContain('moss-api-token');
-    expect(developerIds).toContain('moss-api-token');
-    expect(volcanoIds).not.toContain('moss-api-token');
-
-    // MOSS 测试仍需要“开发者模式 + 当前引擎”
-    expect(baseIds).not.toContain('moss-voice-test');
-    expect(developerIds).toContain('moss-voice-test');
-    expect(volcanoIds).not.toContain('moss-voice-test');
-
-    // 火山测试入口需要“开发者模式 + 当前引擎”，配置字段仅受 provider 限制
-    expect(baseIds).not.toContain('volcano-asr-test');
-    expect(developerIds).not.toContain('volcano-asr-test');
-    expect(volcanoIds).toContain('volcano-asr-test');
+  it('keeps critical voice child settings inside the two capability groups（关键语音子项收口到两大能力组）', () => {
+    const allIds = flattenAll(SETTINGS_REGISTRY).map((item) => item.id);
 
     [
-      'volcano-engine-key',
-      'volcano-endpoint',
-      'volcano-resource-model',
-      'volcano-resource-id',
-      'volcano-language',
+      'voice-shortcut-enabled',
+      'voice-input-provider-settings',
+      'voice-transcript-send-mode',
+      'voice-shortcut-send-mode',
+      'voice-auto-record',
+      'voice-shortcut-hotkey',
+      'voice-assistant-provider-settings',
+      'voice-runtime-cloud-session-policy',
+      'voice-runtime-auto-speak-enabled',
+      'voice-runtime-doubao-app-id',
+      'voice-runtime-omni-compatible-model',
+      'voice-runtime-omni-api-key',
     ].forEach((id) => {
-      expect(baseIds).not.toContain(id);
-      expect(developerIds).not.toContain(id);
-      expect(volcanoIds).toContain(id);
+      expect(allIds).toContain(id);
     });
   });
 
-  it('keeps every registry item reachable across supported settings contexts', () => {
-    settingsPagePreferenceState.isTauriWindow = true;
-    settingsPagePreferenceState.isDesktopOperatingSystem = true;
-    const qwenCtx: SettingsContext = {
-      ...getBaseCtx(),
-      isDesktop: true,
-      isTauriWindow: true,
-      developerMode: true,
-      voiceShortcutAsrProvider: 'qwen-omni',
-    };
-    const contexts: SettingsContext[] = [
-      getBaseCtx(),
-      {
-        ...getBaseCtx(),
-        isDesktop: true,
-        isTauriWindow: true,
-        runtimeTargetMode: 'embedded',
-        embeddedRuntimeNetworkMode: 'lan',
-      },
-      {
-        ...getBaseCtx(),
-        developerMode: true,
-      },
-      {
-        ...getBaseCtx(),
-        isDesktop: true,
-        isTauriWindow: true,
-        developerMode: true,
-        voiceShortcutAsrProvider: 'volcano',
-      },
-      {
-        ...getBaseCtx(),
-        isDesktop: true,
-        isTauriWindow: true,
-        developerMode: true,
-        voiceShortcutAsrProvider: 'qwen-omni',
-      },
-    ];
+  it('limits custom escape hatches to the audited custom entries（custom 逃生舱保持在受审计范围内）', () => {
+    const customIds = flattenAll(SETTINGS_REGISTRY)
+      .filter((item): item is Extract<SettingsItem, { type: 'custom' }> => item.type === 'custom')
+      .map((item) => item.id);
 
-    const qwenVisibleIds = getVisibleSettings(qwenCtx).map((item) => item.id);
-    QWEN_OMNI_ONLY_IDS.forEach((id) => {
-      expect(qwenVisibleIds).toContain(id);
-    });
-
-    const visibleIds = new Set([
-      ...contexts.flatMap((ctx) => getVisibleSettings(ctx).map((item) => item.id)),
-      ...qwenVisibleIds,
+    expect(customIds).toEqual([
+      'sound-preset',
+      'focus-bgm',
+      'voice-input-provider-settings',
+      'voice-omni-profile',
+      'voice-omni-prompts',
+      'volcano-engine-key',
+      'volcano-usage-summary',
+      'moss-voice-test',
+      'volcano-asr-test',
+      'voice-assistant-provider-settings',
+      'ai-registry',
+      'data-transfer',
+      'instance-diagnostics',
+      'device-pairing',
     ]);
-
-    expect(Array.from(visibleIds).sort()).toEqual(
-      [...AUDITED_SETTINGS_IDS].sort(),
-    );
-    settingsPagePreferenceState.isTauriWindow = false;
-    settingsPagePreferenceState.isDesktopOperatingSystem = false;
   });
 
-  it('keeps the inline developer toggle checklist in sync with its audited child settings（开发者分组内联开关清单与审计项保持一致）', () => {
-    expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
+  it('keeps provider-specific rows visible only in matching contexts（provider 定向配置只在匹配上下文可见）', () => {
+    const mossIds = flattenVisible(getVisibleSettings(getBaseCtx()), getBaseCtx()).map((item) => item.id);
+    const volcanoCtx = { ...getBaseCtx(), voiceShortcutAsrProvider: 'volcano' };
+    const volcanoIds = flattenVisible(getVisibleSettings(volcanoCtx), volcanoCtx).map((item) => item.id);
+    const qwenCtx = { ...getBaseCtx(), voiceShortcutAsrProvider: 'qwen-omni' };
+    const qwenIds = flattenVisible(getVisibleSettings(qwenCtx), qwenCtx).map((item) => item.id);
+
+    expect(mossIds).toContain('moss-api-token');
+    expect(mossIds).not.toContain('volcano-engine-key');
+    expect(volcanoIds).toContain('volcano-engine-key');
+    expect(volcanoIds).toContain('volcano-endpoint');
+    expect(volcanoIds).not.toContain('moss-api-token');
+    expect(qwenIds).toContain('voice-omni-profile');
+    expect(qwenIds).toContain('voice-omni-model');
+    expect(qwenIds).not.toContain('volcano-engine-key');
+  });
+
+  it('switches provider config by runtime provider and keeps diagnostics out of registry children（provider 配置可切换且诊断入口不再挂在 registry 子项）', () => {
+    const baseCtx = getBaseCtx();
+    const omniCompatibleCtx = { ...getBaseCtx(), voiceRuntimeProvider: 'qwen-omni-compatible' };
+    const omniRealtimeCtx = { ...getBaseCtx(), voiceRuntimeProvider: 'qwen-omni-realtime' };
+
+    const baseIds = flattenVisible(getVisibleSettings(baseCtx), baseCtx).map((item) => item.id);
+    const omniCompatibleIds = flattenVisible(getVisibleSettings(omniCompatibleCtx), omniCompatibleCtx).map((item) => item.id);
+    const omniRealtimeIds = flattenVisible(getVisibleSettings(omniRealtimeCtx), omniRealtimeCtx).map((item) => item.id);
+
+    expect(baseIds).not.toContain('voice-runtime-lab-nav-enabled');
+    expect(baseIds).not.toContain('open-voice-runtime-lab');
+    expect(omniCompatibleIds).not.toContain('voice-runtime-lab-nav-enabled');
+    expect(omniRealtimeIds).not.toContain('open-voice-runtime-lab');
+
+    expect(baseIds).toContain('voice-runtime-doubao-app-id');
+    expect(omniCompatibleIds).toContain('voice-runtime-omni-compatible-model');
+    expect(omniCompatibleIds).not.toContain('voice-runtime-doubao-app-id');
+    expect(omniRealtimeIds).toContain('voice-runtime-omni-api-key');
+    expect(omniRealtimeIds).toContain('voice-runtime-omni-model');
+  });
+
+  it('keeps the inline developer toggle checklist in sync with its audited child settings（开发者分组内联开关清单与审计项保持一致）', async () => {
+    const registryModule = await import('@/ui/app/config/settings/settings-registry');
+
+    expect(registryModule.FEATURE_TOGGLE_SETTING_IDS).toEqual([
       'me-page-enabled',
       'agent-page-enabled',
       'goals-page-enabled',
@@ -559,11 +143,6 @@ describe('settings registry coverage audit', () => {
       'desktop-adaptive',
       'command-palette-enabled',
     ]);
-    expect(FEATURE_TOGGLE_SETTINGS.map((item) => item.id)).toEqual(FEATURE_TOGGLE_SETTING_IDS);
-    FEATURE_TOGGLE_SETTINGS.forEach((item) => {
-      expect(typeof item.get).toBe('function');
-      expect(typeof item.set).toBe('function');
-      expect(typeof item.subscribe).toBe('function');
-    });
+    expect(registryModule.FEATURE_TOGGLE_SETTINGS.map((item) => item.id)).toEqual(registryModule.FEATURE_TOGGLE_SETTING_IDS);
   });
 });

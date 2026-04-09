@@ -103,10 +103,17 @@ export const settingsPagePreferenceState = {
   isTauriWindow: false,
   isDesktopOperatingSystem: false,
   voiceShortcutAsrProvider: 'moss' as string,
+  voiceShortcutEnabled: true,
   voiceOmniProfileId: '',
   voiceOmniModelId: 'qwen3-omni-flash',
   voiceOmniOptimizeEnabled: false,
   voiceAutoRecordEnabled: true,
+  voiceRuntimeEnabled: false,
+  voiceRuntimeMode: 'push-to-talk',
+  voiceRuntimeProvider: 'doubao-o2-realtime',
+  voiceRuntimeCloudSessionPolicy: 'on-demand',
+  voiceRuntimeAutoSpeakEnabled: true,
+  voiceRuntimeLabNavEnabled: false,
   mainWindowShortcutSelection: ['Ctrl', 'E'] as string[],
   mainWindowShortcutQuickFocusEnabled: false,
 };
@@ -446,6 +453,100 @@ vi.mock('@/config/voice-shortcut-asr-provider', () => {
       return value;
     }),
     subscribeVoiceShortcutAsrProviderChanges: vi.fn((listener: (value: string) => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    }),
+  };
+});
+
+vi.mock('@/config/voice-shortcut-enabled', () => {
+  const listeners = new Set<(value: boolean) => void>();
+  return {
+    getVoiceShortcutEnabled: vi.fn(() => settingsPagePreferenceState.voiceShortcutEnabled),
+    setVoiceShortcutEnabled: vi.fn((value: boolean) => {
+      settingsPagePreferenceState.voiceShortcutEnabled = value;
+      listeners.forEach((listener) => listener(value));
+      return value;
+    }),
+    subscribeVoiceShortcutEnabledChanges: vi.fn((listener: (value: boolean) => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    }),
+  };
+});
+
+vi.mock('@/config/voice-runtime-settings', () => {
+  const providerListeners = new Set<(value: string) => void>();
+  const enabledListeners = new Set<(value: boolean) => void>();
+  const policyListeners = new Set<(value: string) => void>();
+  const autoSpeakListeners = new Set<(value: boolean) => void>();
+  const labListeners = new Set<(value: boolean) => void>();
+  return {
+    VOICE_RUNTIME_OMNI_PROVIDER: 'qwen-omni-realtime',
+    VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER: 'qwen-omni-compatible',
+    getVoiceRuntimeEnabled: vi.fn(() => settingsPagePreferenceState.voiceRuntimeEnabled),
+    setVoiceRuntimeEnabled: vi.fn((value: boolean) => {
+      settingsPagePreferenceState.voiceRuntimeEnabled = value;
+      enabledListeners.forEach((listener) => listener(value));
+      return value;
+    }),
+    subscribeVoiceRuntimeEnabledChanges: vi.fn((listener: (value: boolean) => void) => {
+      enabledListeners.add(listener);
+      return () => { enabledListeners.delete(listener); };
+    }),
+    getVoiceRuntimeProvider: vi.fn(() => settingsPagePreferenceState.voiceRuntimeProvider),
+    setVoiceRuntimeProvider: vi.fn((value: string) => {
+      settingsPagePreferenceState.voiceRuntimeProvider = value;
+      providerListeners.forEach((listener) => listener(value));
+      return value;
+    }),
+    subscribeVoiceRuntimeProviderChanges: vi.fn((listener: (value: string) => void) => {
+      providerListeners.add(listener);
+      return () => { providerListeners.delete(listener); };
+    }),
+    getVoiceRuntimeCloudSessionPolicy: vi.fn(() => settingsPagePreferenceState.voiceRuntimeCloudSessionPolicy),
+    setVoiceRuntimeCloudSessionPolicy: vi.fn((value: string) => {
+      settingsPagePreferenceState.voiceRuntimeCloudSessionPolicy = value;
+      policyListeners.forEach((listener) => listener(value));
+      return value;
+    }),
+    subscribeVoiceRuntimeCloudSessionPolicyChanges: vi.fn((listener: (value: string) => void) => {
+      policyListeners.add(listener);
+      return () => { policyListeners.delete(listener); };
+    }),
+    getVoiceRuntimeAutoSpeakEnabled: vi.fn(() => settingsPagePreferenceState.voiceRuntimeAutoSpeakEnabled),
+    setVoiceRuntimeAutoSpeakEnabled: vi.fn((value: boolean) => {
+      settingsPagePreferenceState.voiceRuntimeAutoSpeakEnabled = value;
+      autoSpeakListeners.forEach((listener) => listener(value));
+      return value;
+    }),
+    subscribeVoiceRuntimeAutoSpeakEnabledChanges: vi.fn((listener: (value: boolean) => void) => {
+      autoSpeakListeners.add(listener);
+      return () => { autoSpeakListeners.delete(listener); };
+    }),
+    getVoiceRuntimeLabNavEnabled: vi.fn(() => settingsPagePreferenceState.voiceRuntimeLabNavEnabled),
+    setVoiceRuntimeLabNavEnabled: vi.fn((value: boolean) => {
+      settingsPagePreferenceState.voiceRuntimeLabNavEnabled = value;
+      labListeners.forEach((listener) => listener(value));
+      return value;
+    }),
+    subscribeVoiceRuntimeLabNavEnabledChanges: vi.fn((listener: (value: boolean) => void) => {
+      labListeners.add(listener);
+      return () => { labListeners.delete(listener); };
+    }),
+  };
+});
+
+vi.mock('@/config/voice-runtime-mode', () => {
+  const listeners = new Set<(value: string) => void>();
+  return {
+    getVoiceRuntimeMode: vi.fn(() => settingsPagePreferenceState.voiceRuntimeMode),
+    setVoiceRuntimeMode: vi.fn((value: string) => {
+      settingsPagePreferenceState.voiceRuntimeMode = value;
+      listeners.forEach((listener) => listener(value));
+      return value;
+    }),
+    subscribeVoiceRuntimeModeChanges: vi.fn((listener: (value: string) => void) => {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     }),

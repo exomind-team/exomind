@@ -8,6 +8,7 @@ const MOBILE_CATEGORY_ORDER: Category[] = [
   'appearance',
   'timer',
   'input',
+  'voice',
   'feedback',
   'ai',
   'connection',
@@ -24,6 +25,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
   appearance: '外观',
   timer: '计时器',
   input: '输入',
+  voice: '语音',
   feedback: '时间块反馈',
   ai: 'AI 设置',
   connection: '连接',
@@ -38,6 +40,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
 
 const CATEGORY_TEST_IDS: Partial<Record<Category, string>> = {
   input: 'new-settings-input-section',
+  voice: 'new-settings-voice-section',
   feedback: 'new-settings-feedback-section',
 };
 
