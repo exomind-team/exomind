@@ -11,7 +11,7 @@ import {
   Waves,
 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { VoiceRuntimeMode } from '@/config/voice-runtime-mode';
 import type { VoiceRuntimeCloudSessionPolicy } from '@/config/voice-runtime-settings';
 
@@ -322,10 +322,23 @@ export function VoiceRuntimeLabPage() {
   const navigate = useNavigate();
   const [controller] = useState(() => new VoiceRuntimeLabController());
   const [state, setState] = useState(() => controller.getState());
+  const pendingDisposeTimerRef = useRef<number | null>(null);
 
-  useEffect(() => controller.subscribe(setState), [controller]);
+  useEffect(() => {
+    if (pendingDisposeTimerRef.current != null) {
+      window.clearTimeout(pendingDisposeTimerRef.current);
+      pendingDisposeTimerRef.current = null;
+    }
+    return controller.subscribe(setState);
+  }, [controller]);
+
   useEffect(() => () => {
-    void controller.dispose();
+    // Defer disposal by one macrotask so StrictMode fake-unmount won't
+    // permanently tear down the controller in development.
+    pendingDisposeTimerRef.current = window.setTimeout(() => {
+      pendingDisposeTimerRef.current = null;
+      void controller.dispose();
+    }, 0);
   }, [controller]);
 
   const canStart = (state.status === 'idle' || state.status === 'error') && state.isTauri;

@@ -1,4 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tanstack/react-router', () => ({
@@ -75,6 +77,22 @@ describe('VoiceRuntimeLabPage（语音运行时实验页）', () => {
       expect(screen.getAllByText('APP ID + Token 已配置').length).toBeGreaterThan(0);
       expect(screen.getAllByText('已开启').length).toBeGreaterThan(0);
       expect(screen.getAllByText('按键说话').length).toBeGreaterThan(0);
+    });
+  });
+
+  it('keeps controls interactive under StrictMode（严格模式下控件仍可交互）', async () => {
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <VoiceRuntimeLabPage />
+      </StrictMode>,
+    );
+
+    const runtimeSwitch = screen.getByRole('switch', { name: '启用语音运行时' });
+    await user.click(runtimeSwitch);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('已开启').length).toBeGreaterThan(0);
     });
   });
 });

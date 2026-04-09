@@ -27,6 +27,7 @@ import {
 import {
   setVoiceRuntimeMode,
 } from '@/config/voice-runtime-mode';
+import type { VoiceRuntimeProviderConfig } from '@/lib/voice-runtime/providers/types';
 
 type FakeProviderCallbacks = NonNullable<VoiceRuntimeLabControllerDependencies['providerFactory']> extends (
   config: never,
@@ -60,10 +61,12 @@ describe('VoiceRuntimeLabController（语音运行时实验台控制器）', () 
   let audioPlayerEnqueueMock: ReturnType<typeof vi.fn>;
   let audioPlayerInterruptMock: ReturnType<typeof vi.fn>;
   let audioPlayerDisposeMock: ReturnType<typeof vi.fn>;
+  let lastProviderConfig: VoiceRuntimeProviderConfig | null;
 
   function createController() {
     return new VoiceRuntimeLabController({
       providerFactory: (config, callbacks) => {
+        lastProviderConfig = config;
         providerCallbacks = callbacks;
         return {
           start: vi.fn(async () => 'doubao-session-1'),
@@ -105,6 +108,7 @@ describe('VoiceRuntimeLabController（语音运行时实验台控制器）', () 
     audioPlayerEnqueueMock = vi.fn(async () => undefined);
     audioPlayerInterruptMock = vi.fn(async () => undefined);
     audioPlayerDisposeMock = vi.fn(async () => undefined);
+    lastProviderConfig = null;
   });
 
   it('starts listening with realtime provider and microphone capture（启动实时 Provider 与麦克风采集）', async () => {
@@ -197,6 +201,31 @@ describe('VoiceRuntimeLabController（语音运行时实验台控制器）', () 
     expect(disposeMock).toHaveBeenCalled();
   });
 
+  it('keeps listening state when final ASR arrives before manual stop（手动停止前收到 final ASR 仍保持 listening）', async () => {
+    const controller = createController();
+
+    controller.updateAppId('4587429383');
+    controller.updateAccessToken('vei-access-token');
+    await controller.startListening();
+    expect(providerCallbacks?.onRawEvent).toBeTypeOf('function');
+
+    await providerCallbacks?.onRawEvent?.(
+      createRawEvent('ASRResponse', {
+        results: [{
+          text: '这段 final 识别在停止前就到了',
+          is_interim: false,
+          confidence: 0.95,
+        }],
+      }),
+    );
+
+    expect(controller.getState()).toEqual(expect.objectContaining({
+      status: 'listening',
+      microphoneStatus: 'capturing',
+      finalTranscript: '这段 final 识别在停止前就到了',
+    }));
+  });
+
   it('stops listening by flushing the trailing audio chunk（停止监听时提交尾部音频块）', async () => {
     const controller = createController();
 
@@ -251,6 +280,17 @@ describe('VoiceRuntimeLabController（语音运行时实验台控制器）', () 
     }));
   });
 
+  it('uses keep_alive input mode in ambient mode（环境实时模式使用 keep_alive 输入模式）', async () => {
+    const controller = createController();
+
+    controller.updateAppId('4587429383');
+    controller.updateAccessToken('vei-access-token');
+    controller.updateRuntimeMode('ambient');
+    await controller.startListening();
+
+    expect(lastProviderConfig?.inputMode).toBe('keep_alive');
+  });
+
   it('stores the new credential fields and player interruption status（保存新凭据字段并处理播报打断）', async () => {
     const controller = createController();
 
@@ -295,6 +335,39 @@ describe('VoiceRuntimeLabController（语音运行时实验台控制器）', () 
       runtimeEnabled: true,
       currentMode: 'push-to-talk',
     }));
+  });
+
+  it('keeps session alive after TTSEnded in ambient mode（环境实时模式下 TTSEnded 后保持会话）', async () => {
+    const controller = createController();
+
+    controller.updateAppId('4587429383');
+    controller.updateAccessToken('vei-access-token');
+    controller.updateRuntimeMode('ambient');
+    await controller.startListening();
+
+    await providerCallbacks?.onRawEvent?.(
+      createRawEvent('SessionStarted', {}),
+    );
+    await providerCallbacks?.onRawEvent?.(
+      createRawEvent('ASRResponse', {
+        results: [{
+          text: '环境模式持续监听测试',
+          is_interim: false,
+        }],
+      }),
+    );
+    await providerCallbacks?.onRawEvent?.(
+      createRawEvent('TTSEnded', {
+        reply_id: 'reply-ambient',
+      }),
+    );
+
+    expect(controller.getState()).toEqual(expect.objectContaining({
+      status: 'listening',
+      connectionStatus: 'ready',
+      microphoneStatus: 'capturing',
+    }));
+    expect(disposeMock).not.toHaveBeenCalled();
   });
 
   it('recovers from missing completion events and allows restart（缺少结束事件时自动回收并可再次开始）', async () => {

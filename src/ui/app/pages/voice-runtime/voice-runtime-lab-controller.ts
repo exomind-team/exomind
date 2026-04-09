@@ -54,14 +54,14 @@ import {
 } from '@/config/voice-runtime-mode';
 import type {
   VoiceRuntimeCloudSessionPolicy,
-  VoiceRuntimeProvider,
+  VoiceRuntimeProvider as VoiceRuntimeProviderId,
 } from '@/config/voice-runtime-settings';
 import { isTauriWindow } from '@/config/runtime-target';
 import { createPcmS16leStreamPlayer, type PcmS16leStreamPlayer } from '@/lib/voice-runtime/pcm-s16le-stream-player';
 import { DoubaoE2ERealtimeProvider } from '@/lib/voice-runtime/providers/doubao-e2e-realtime-provider';
 import type {
   VoiceRuntimeAudioChunkMeta,
-  VoiceRuntimeProvider,
+  VoiceRuntimeProvider as VoiceRuntimeProviderClient,
   VoiceRuntimeProviderCallbacks,
   VoiceRuntimeProviderConfig,
 } from '@/lib/voice-runtime/providers/types';
@@ -96,7 +96,7 @@ export interface VoiceRuntimeLabState {
   credentialConfigured: boolean;
   runtimeEnabled: boolean;
   autoSpeakEnabled: boolean;
-  providerId: VoiceRuntimeProvider;
+  providerId: VoiceRuntimeProviderId;
   currentMode: VoiceRuntimeMode;
   currentCloudSessionPolicy: VoiceRuntimeCloudSessionPolicy;
   rawEvents: ProviderRawPerception[];
@@ -116,7 +116,7 @@ export interface VoiceRuntimeLabControllerDependencies {
   providerFactory?: (
     config: VoiceRuntimeProviderConfig,
     callbacks: VoiceRuntimeProviderCallbacks,
-  ) => VoiceRuntimeProvider;
+  ) => VoiceRuntimeProviderClient;
   getUserMedia?: (
     constraints: MediaStreamConstraints,
   ) => Promise<MediaStream>;
@@ -207,7 +207,7 @@ export class VoiceRuntimeLabController {
   private readonly audioPlayer: PcmS16leStreamPlayer;
   private readonly agentService = new VoiceRuntimeAgentService();
 
-  private provider: VoiceRuntimeProvider | null = null;
+  private provider: VoiceRuntimeProviderClient | null = null;
   private capture: VolcanoStreamingCapture | null = null;
   private stream: MediaStream | null = null;
   private sessionStartedAtMs: number | null = null;
@@ -537,7 +537,7 @@ export class VoiceRuntimeLabController {
       return;
     }
 
-    const normalized = await this.agentService.handleProviderRawEvent(rawEvent);
+    await this.agentService.handleProviderRawEvent(rawEvent);
     const agentState = this.agentService.getState();
     this.state.rawEvents = agentState.rawEvents;
     this.state.liveTranscript = agentState.liveTranscript;
@@ -545,13 +545,31 @@ export class VoiceRuntimeLabController {
     this.state.lastNormalizedPerception = agentState.lastNormalizedPerception;
     this.state.lastEventType = rawEvent.eventType;
 
-    if (normalized?.isFinal) {
-      this.state.status = 'responding';
-    }
-
-    if (rawEvent.eventType === 'TTSEnded' || rawEvent.eventType === 'SessionFinished') {
+    if (rawEvent.eventType === 'TTSEnded') {
       this.clearResponseTimeout();
       this.state.ttsPlaybackStatus = 'ended';
+      const shouldKeepListeningInAmbientMode =
+        this.state.currentMode === 'ambient'
+        && this.provider != null
+        && this.capture != null;
+      if (shouldKeepListeningInAmbientMode) {
+        this.state.status = 'listening';
+        this.state.connectionStatus = 'ready';
+        this.state.microphoneStatus = 'capturing';
+        this.emit();
+        return;
+      }
+      this.state.status = 'idle';
+      this.state.connectionStatus = 'disconnected';
+      this.state.microphoneStatus = 'idle';
+      this.state.sessionId = null;
+      this.emit();
+      await this.cleanupAfterCompleted();
+      return;
+    }
+
+    if (rawEvent.eventType === 'SessionFinished' || rawEvent.eventType === 'ConnectionFinished') {
+      this.clearResponseTimeout();
       this.state.status = 'idle';
       this.state.connectionStatus = 'disconnected';
       this.state.microphoneStatus = 'idle';
