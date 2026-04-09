@@ -6,6 +6,10 @@ function readReleaseWorkflow(): string {
   return readFileSync(resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8');
 }
 
+function readReleasePagesWorkflow(): string {
+  return readFileSync(resolve(process.cwd(), '.github/workflows/release-pages.yml'), 'utf8');
+}
+
 function readTauriConfig(): string {
   return readFileSync(resolve(process.cwd(), 'src-tauri/tauri.conf.json'), 'utf8');
 }
@@ -52,20 +56,48 @@ describe('release workflow / 发布流程：单 tag + GitHub Pages', () => {
   it('uses single v* tags and removes build/release dual-tag logic / 改为单一 v* tag，移除 build/release 双 tag 逻辑', () => {
     const workflowContent = readReleaseWorkflow();
 
-    expect(workflowContent).toContain("- 'v*'");
+    expect(workflowContent).toContain('- "v*"');
     expect(workflowContent).toContain("startsWith(github.ref, 'refs/tags/v')");
     expect(workflowContent).not.toContain("refs/tags/release/");
     expect(workflowContent).not.toContain("refs/tags/build/");
   });
 
-  it('creates or updates GitHub Release and deploys GitHub Pages / 创建或更新 GitHub Release，并部署 GitHub Pages', () => {
+  it('creates or updates GitHub Release / 创建或更新 GitHub Release', () => {
     const workflowContent = readReleaseWorkflow();
 
     expect(workflowContent).toContain('softprops/action-gh-release@v2');
-    expect(workflowContent).toContain('actions/configure-pages@v5');
-    expect(workflowContent).toContain('actions/upload-pages-artifact@v3');
-    expect(workflowContent).toContain('actions/deploy-pages@v4');
-    expect(workflowContent).toContain('scripts/dev/sync-release-pages.ts');
+  });
+
+  it('deploys GitHub Pages in dedicated workflow / 在独立 workflow 中部署 GitHub Pages', () => {
+    const pagesWorkflowContent = readReleasePagesWorkflow();
+
+    expect(pagesWorkflowContent).toContain('workflow_run:');
+    expect(pagesWorkflowContent).toContain('Build & Release');
+    expect(pagesWorkflowContent).toContain('scripts/dev/sync-release-pages.ts');
+    expect(pagesWorkflowContent).toContain('actions/configure-pages@v6');
+    expect(pagesWorkflowContent).toContain('actions/upload-artifact@v7');
+    expect(pagesWorkflowContent).toContain('actions/deploy-pages@v5');
+    expect(pagesWorkflowContent).not.toContain('actions/upload-pages-artifact@v3');
+  });
+
+  it('uses github-hosted windows job ids and removes self-hosted residue / 使用 github-hosted windows job 命名并移除 self-hosted 残留', () => {
+    const workflowContent = readReleaseWorkflow();
+
+    expect(workflowContent).toContain('build-android-windows:');
+    expect(workflowContent).toContain('build-windows:');
+    expect(workflowContent).toContain('needs.build-android-windows.result');
+    expect(workflowContent).toContain('needs.build-windows.result');
+    expect(workflowContent).not.toContain('build-android-selfhosted');
+    expect(workflowContent).not.toContain('build-windows-selfhosted');
+    expect(workflowContent).not.toContain('D:\\actions-runner\\rust\\cargo');
+    expect(workflowContent).not.toContain('D:\\actions-runner\\rust\\rustup');
+  });
+
+  it('pins update checks to the GitHub Pages base URL for release builds / 发布构建显式固定更新基址到 GitHub Pages', () => {
+    const workflowContent = readReleaseWorkflow();
+
+    expect(workflowContent).toContain('VITE_UPDATE_BASE_URL: https://exomind-team.github.io/exomind/');
+    expect(workflowContent).not.toContain('VITE_UPDATE_BASE_URL: "https://exomind-team.github.io/exomind"');
   });
 
   it('removes Cloudflare R2 upload steps / 不再包含 Cloudflare R2 上传逻辑', () => {

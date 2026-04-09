@@ -47,7 +47,7 @@ Expected:
 
 **Files:**
 - Modify: `tests/unit/services/update.service.test.ts`
-- Modify: `tests/ci/release-selfhosted-bun-install.test.ts`
+- Modify: `tests/ci/release-workflow-bun-install.test.ts`
 - Modify: `tests/unit/website-download-api.test.ts`
 - Modify: `tests/unit/website-update-api-utils.test.ts`
 - Create: `tests/unit/scripts/release-pages-metadata.test.ts`
@@ -101,7 +101,7 @@ expect(result.preview.versions[0].assets['android-arm64'].sha256).toHaveLength(6
 Run:
 
 ```powershell
-bun x vitest run tests/unit/services/update.service.test.ts tests/unit/website-download-api.test.ts tests/unit/website-update-api-utils.test.ts tests/unit/scripts/release-pages-metadata.test.ts tests/ci/release-selfhosted-bun-install.test.ts
+bun x vitest run tests/unit/services/update.service.test.ts tests/unit/website-download-api.test.ts tests/unit/website-update-api-utils.test.ts tests/unit/scripts/release-pages-metadata.test.ts tests/ci/release-workflow-bun-install.test.ts
 ```
 
 Expected:
@@ -238,7 +238,7 @@ export default defineConfig({
 Run:
 
 ```powershell
-bun x vitest run tests/ci/release-selfhosted-bun-install.test.ts
+bun x vitest run tests/ci/release-workflow-bun-install.test.ts
 ```
 
 Expected:
@@ -265,7 +265,7 @@ bunx tsc --noEmit
 Run:
 
 ```powershell
-bun x vitest run tests/unit/services/update.service.test.ts tests/unit/website-download-api.test.ts tests/unit/website-update-api-utils.test.ts tests/unit/scripts/release-pages-metadata.test.ts tests/ci/release-selfhosted-bun-install.test.ts
+bun x vitest run tests/unit/services/update.service.test.ts tests/unit/website-download-api.test.ts tests/unit/website-update-api-utils.test.ts tests/unit/scripts/release-pages-metadata.test.ts tests/ci/release-workflow-bun-install.test.ts
 ```
 
 - [x] **Step 3: 跑官网构建**
