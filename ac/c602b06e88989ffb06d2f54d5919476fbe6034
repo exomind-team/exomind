@@ -1,0 +1,51 @@
+docs/plans/2026-04-09-exomind-website-redesign-plan.md
+  25038719a011d6eb 1-281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "acc602b06e88989ffb06d2f54d5919476fbe6034",
+  "prompts": {
+    "212c8a5f93c4f206": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6dcc-718f-7de0-95c1-213127110451",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 16,
+      "overriden_lines": 0
+    },
+    "25038719a011d6eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e56b43ab-1fcb-49f1-a86f-6b32d50274fc",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 281,
+      "total_deletions": 0,
+      "accepted_lines": 281,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/b7b0849f6271318f6b7aa7077812549233a5b466a695be7b4ac311df9aa11eca"
+    },
+    "d8f0b50b4cb40c4e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fdc-aae8-7153-926a-986e6b87c3a7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 263,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ae75101c87e97c41bd53d52346da260f3744bf44191ff595fdcd58e8ff57d711"
+    }
+  }
+}
