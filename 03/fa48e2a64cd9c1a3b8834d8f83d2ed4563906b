@@ -1,0 +1,49 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "03fa48e2a64cd9c1a3b8834d8f83d2ed4563906b",
+  "prompts": {
+    "04c7bf29779ffd13": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fd1-e5f7-7440-b1cc-ba60c1de6b47",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/4eafc347abc0a1faf1c1875d1ccfccbc6b8111071f90bc0221979f91a7a16d6c"
+    },
+    "212c8a5f93c4f206": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6dcc-718f-7de0-95c1-213127110451",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 16,
+      "overriden_lines": 0
+    },
+    "d8f0b50b4cb40c4e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fdc-aae8-7153-926a-986e6b87c3a7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 263,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ae75101c87e97c41bd53d52346da260f3744bf44191ff595fdcd58e8ff57d711"
+    }
+  }
+}
