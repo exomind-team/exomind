@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
+use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
+use exomind_runtime::config::ConfigStore;
+
 pub const DEV_APP_DATA_DIR_ENV: &str = "EXOMIND_DEV_APP_DATA_DIR";
 pub const DEV_RUNTIME_DATA_DIR_ENV: &str = "EXOMIND_DEV_RUNTIME_DATA_DIR";
 pub const DEV_WEBVIEW_MAIN_DATA_DIR_ENV: &str = "EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR";
@@ -14,6 +17,10 @@ const RUNTIME_DIR_NAME: &str = "runtime";
 const APP_DATA_LEGACY_SEED_MARKER_NAME: &str = ".legacy-app-data-seeded";
 const WEBVIEW_MAIN_LEGACY_SEED_MARKER_NAME: &str = ".legacy-webview-main-seeded";
 const RUNTIME_LEGACY_SEED_MARKER_NAME: &str = ".legacy-runtime-seeded";
+const RUNTIME_CONFIG_SQLITE_FILE_NAME: &str = "config.sqlite";
+const RUNTIME_MESH_STATE_FILE_NAME: &str = "mesh-state.json";
+const DEVICE_RUNTIME_HOST_ID_KEY: &str = "exomind:runtimeHostId";
+const DEVICE_RUNTIME_DEVICE_ID_KEY: &str = "exomind:deviceId";
 const APP_DATA_SEED_ENTRY_NAMES: &[&str] = &[".exomind", "eventlog", "settings"];
 const RUNTIME_SQLITE_BASENAMES: &[&str] = &[
     "signal-pool.sqlite",
@@ -193,6 +200,41 @@ fn write_seed_marker(target_dir: &Path, marker_name: &str) -> Result<(), String>
     })
 }
 
+fn reset_cloned_runtime_identity_state(runtime_dir: &Path) -> Result<(), String> {
+    let config_sqlite_path = runtime_dir.join(RUNTIME_CONFIG_SQLITE_FILE_NAME);
+    if config_sqlite_path.exists() {
+        let config_store = ConfigStore::with_sqlite_path(&config_sqlite_path).map_err(|error| {
+            format!(
+                "failed to open seeded runtime config sqlite {:?}: {error}",
+                config_sqlite_path
+            )
+        })?;
+
+        for key in [DEVICE_RUNTIME_HOST_ID_KEY, DEVICE_RUNTIME_DEVICE_ID_KEY] {
+            config_store
+                .delete(DEVICE_CONFIG_SCOPE, key)
+                .map_err(|error| {
+                    format!(
+                        "failed to clear seeded runtime identity key {key} from {:?}: {error}",
+                        config_sqlite_path
+                    )
+                })?;
+        }
+    }
+
+    let mesh_state_path = runtime_dir.join(RUNTIME_MESH_STATE_FILE_NAME);
+    if mesh_state_path.exists() {
+        std::fs::remove_file(&mesh_state_path).map_err(|error| {
+            format!(
+                "failed to clear seeded mesh state {:?}: {error}",
+                mesh_state_path
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
 pub fn seed_instance_app_data_dir_if_needed(
     app_data_dir: &Path,
     legacy_app_data_dir: &Path,
@@ -224,6 +266,7 @@ pub fn seed_instance_runtime_dir_if_needed(
     if legacy_runtime_dir.exists() {
         let entry_names = runtime_seed_entry_names();
         seed_named_entries_if_missing(runtime_dir, legacy_runtime_dir, &entry_names)?;
+        reset_cloned_runtime_identity_state(runtime_dir)?;
     }
 
     write_seed_marker(runtime_dir, RUNTIME_LEGACY_SEED_MARKER_NAME)
@@ -275,6 +318,8 @@ pub fn seed_instance_webview_main_data_dir_if_needed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
+    use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
     use std::ffi::OsString;
     use std::fs;
     use std::sync::Mutex;
@@ -313,6 +358,19 @@ mod tests {
             .expect("clock should be after unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("exomind-{name}-{nanos}"))
+    }
+
+    fn put_runtime_identity(store: &ConfigStore, key: &str, value: &str) {
+        store
+            .put(PutConfigEntryInput {
+                scope: DEVICE_CONFIG_SCOPE.to_string(),
+                key: key.to_string(),
+                value: value.to_string(),
+                sensitive: false,
+                source: Some("legacy-seed".to_string()),
+                source_origin: None,
+            })
+            .expect("runtime identity should be seeded into config sqlite");
     }
 
     #[test]
@@ -435,6 +493,18 @@ mod tests {
         fs::create_dir_all(legacy_dir.join("eventlog"))
             .expect("legacy runtime eventlog dir should exist");
 
+        let legacy_config_store = ConfigStore::with_sqlite_path(&legacy_dir.join("config.sqlite"))
+            .expect("legacy config sqlite should open");
+        put_runtime_identity(
+            &legacy_config_store,
+            DEVICE_RUNTIME_HOST_ID_KEY,
+            "rt-legacy-shared",
+        );
+        put_runtime_identity(
+            &legacy_config_store,
+            DEVICE_RUNTIME_DEVICE_ID_KEY,
+            "dev-legacy-shared",
+        );
         fs::write(legacy_dir.join("eventlog.sqlite"), "legacy-eventlog")
             .expect("legacy eventlog should be written");
         fs::write(legacy_dir.join("tasks.sqlite"), "legacy-tasks")
@@ -479,9 +549,27 @@ mod tests {
             "legacy-eventlog-markdown"
         );
         assert_eq!(
-            fs::read_to_string(runtime_dir.join("mesh-state.json"))
-                .expect("mesh state snapshot should be copied"),
-            "{\"peers\":[]}"
+            runtime_dir.join("mesh-state.json").exists(),
+            false,
+            "legacy mesh state must be cleared so each instance starts from a fresh peer graph"
+        );
+
+        let runtime_config_store =
+            ConfigStore::with_sqlite_path(&runtime_dir.join("config.sqlite"))
+                .expect("runtime config sqlite should remain readable");
+        assert!(
+            runtime_config_store
+                .get(DEVICE_CONFIG_SCOPE, DEVICE_RUNTIME_HOST_ID_KEY)
+                .expect("runtime host id lookup should succeed")
+                .is_none(),
+            "legacy runtime host id must be cleared so the instance can mint its own stable id"
+        );
+        assert!(
+            runtime_config_store
+                .get(DEVICE_CONFIG_SCOPE, DEVICE_RUNTIME_DEVICE_ID_KEY)
+                .expect("runtime device id lookup should succeed")
+                .is_none(),
+            "legacy device id must be cleared so the instance can mint its own device identity"
         );
         assert!(
             !runtime_dir.join("note.txt").exists(),
