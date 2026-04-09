@@ -421,6 +421,43 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
     });
   });
 
+  it('keeps the full-day timeline scrollable, auto-focuses occupied slots, and hides today history（保留全天滚动、默认聚焦有区间时段，并隐藏今日记录）', async () => {
+    const snapshotWindow = makeWindow({
+      id: 'window-focused',
+      title: '下午推进',
+      plannedStartAt: plannerTs('13:00'),
+      plannedEndAt: plannerTs('14:00'),
+      segments: [
+        makeSegment({
+          id: 'segment-work-focused',
+          windowId: 'window-focused',
+          kind: 'work',
+          title: 'Focused Work',
+          plannedStartAt: plannerTs('13:00'),
+          plannedEndAt: plannerTs('14:00'),
+          order: 0,
+        }),
+      ],
+    });
+
+    getTodayPlannerMock.mockResolvedValue({ date: '2026-03-27', windows: [snapshotWindow] });
+
+    render(<NowTodayTab />);
+
+    const scrollViewport = await screen.findByTestId('today-planner-scroll-viewport');
+    expect(await screen.findByTestId('planner-window-window-focused')).toBeInTheDocument();
+    expect(screen.getByTestId('planner-slot-13:00')).toBeInTheDocument();
+    expect(screen.getByTestId('planner-slot-00:00')).toBeInTheDocument();
+    expect(screen.getByTestId('planner-slot-23:45')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(scrollViewport.scrollTop).toBeGreaterThan(0);
+    });
+    expect(screen.queryByRole('button', { name: '展开全天' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '聚焦有时间块时段' })).toBeNull();
+    expect(screen.queryByText('今日记录')).toBeNull();
+    expect(screen.queryByText('执行后的时间块会继续留在这里。')).toBeNull();
+  });
+
   it('refreshes planner date after midnight even without an active block（无活跃块时跨午夜也会刷新今日日期）', async () => {
     vi.setSystemTime(new Date('2026-03-27T23:59:00+08:00'));
     getTodayPlannerMock.mockImplementation(async (date: string) => ({ date, windows: [] }));

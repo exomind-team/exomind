@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getTodayPlannerService } from '@/lib/services';
 import type { RhythmPresetKey, TodayPlannerSegment, TodayPlannerSnapshot, TodayPlannerWindow } from '@/lib/types/event';
@@ -8,6 +8,11 @@ const SLOT_MINUTES = 15;
 const SLOT_MS = SLOT_MINUTES * 60_000;
 const SLOT_HEIGHT = 24;
 const SLOT_COUNT = (24 * 60) / SLOT_MINUTES;
+const HOUR_SLOT_COUNT = 60 / SLOT_MINUTES;
+const FOCUSED_PADDING_SLOTS = 2;
+const EMPTY_VIEW_BEFORE_SLOTS = 8;
+const EMPTY_VIEW_AFTER_SLOTS = 24;
+const FOCUS_OFFSET_SLOTS = 2;
 
 const RHYTHM_OPTIONS: Array<{ key: RhythmPresetKey; label: string }> = [
   { key: 'pomodoro_25_5', label: '25 / 5 · Pomodoro' },
@@ -32,11 +37,22 @@ interface NowTodayPlannerTimelineProps {
   error: string | null;
   setError(message: string | null): void;
   refreshPlanner(): Promise<void>;
-  refreshHistory(forceRefreshTasks?: boolean): Promise<void>;
 }
 
 function normalizeRange(startIndex: number, endIndex: number): SlotRange {
   return { startIndex: Math.min(startIndex, endIndex), endIndex: Math.max(startIndex, endIndex) };
+}
+
+function clampSlotIndex(index: number): number {
+  return Math.max(0, Math.min(SLOT_COUNT - 1, index));
+}
+
+function alignRangeStart(index: number): number {
+  return Math.floor(index / HOUR_SLOT_COUNT) * HOUR_SLOT_COUNT;
+}
+
+function alignRangeEnd(index: number): number {
+  return Math.min(SLOT_COUNT - 1, Math.ceil((index + 1) / HOUR_SLOT_COUNT) * HOUR_SLOT_COUNT - 1);
 }
 
 function buildTs(dateKey: string, timeValue: string): number {
@@ -79,6 +95,27 @@ function rangeLabel(startAt: number, endAt: number): string {
   return `${clock(startAt)} - ${clock(endAt)} · ${Math.max(1, Math.round((endAt - startAt) / 60_000))} 分钟`;
 }
 
+// Focused range（聚焦时段） trims empty leading / trailing slots until the user expands back to full day.
+function resolveFocusedRange(dateKey: string, windows: TodayPlannerWindow[], nowTs: number): SlotRange {
+  if (windows.length === 0) {
+    const nowIndex = clampSlotIndex(Math.floor((nowTs - dayStart(dateKey)) / SLOT_MS));
+    return normalizeRange(
+      alignRangeStart(Math.max(0, nowIndex - EMPTY_VIEW_BEFORE_SLOTS)),
+      alignRangeEnd(Math.min(SLOT_COUNT - 1, nowIndex + EMPTY_VIEW_AFTER_SLOTS)),
+    );
+  }
+
+  const earliestStartAt = Math.min(...windows.map((window) => window.plannedStartAt));
+  const latestEndAt = Math.max(...windows.map((window) => window.plannedEndAt));
+  const earliestIndex = clampSlotIndex(Math.floor((earliestStartAt - dayStart(dateKey)) / SLOT_MS));
+  const latestIndex = clampSlotIndex(Math.ceil((latestEndAt - dayStart(dateKey)) / SLOT_MS) - 1);
+
+  return normalizeRange(
+    alignRangeStart(Math.max(0, earliestIndex - FOCUSED_PADDING_SLOTS)),
+    alignRangeEnd(Math.min(SLOT_COUNT - 1, latestIndex + FOCUSED_PADDING_SLOTS)),
+  );
+}
+
 function topFor(dateKey: string, timestamp: number): number {
   return ((timestamp - dayStart(dateKey)) / SLOT_MS) * SLOT_HEIGHT;
 }
@@ -101,7 +138,6 @@ export function NowTodayPlannerTimeline({
   error,
   setError,
   refreshPlanner,
-  refreshHistory,
 }: NowTodayPlannerTimelineProps) {
   const [dragRange, setDragRange] = useState<SlotRange | null>(null);
   const [draft, setDraft] = useState<DraftState | null>(null);
@@ -110,6 +146,7 @@ export function NowTodayPlannerTimeline({
   const [editorTaskIds, setEditorTaskIds] = useState<string[]>([]);
   const [actualEndTime, setActualEndTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const selectableTasks = usePrestartSelectableTasks();
 
   useEffect(() => {
@@ -134,6 +171,25 @@ export function NowTodayPlannerTimeline({
     () => [...(snapshot?.windows ?? [])].sort((left, right) => left.plannedStartAt - right.plannedStartAt),
     [snapshot],
   );
+
+  const focusRange = useMemo(
+    () => resolveFocusedRange(dateKey, windows, Date.now()),
+    [dateKey, windows],
+  );
+  const timelineHeight = `${SLOT_COUNT * SLOT_HEIGHT}px`;
+  const focusRangeLabel = useMemo(() => {
+    const startAt = dayStart(dateKey) + focusRange.startIndex * SLOT_MS;
+    const endAt = dayStart(dateKey) + (focusRange.endIndex + 1) * SLOT_MS;
+    return `${clock(startAt)} - ${clock(endAt)}`;
+  }, [dateKey, focusRange.endIndex, focusRange.startIndex]);
+
+  useEffect(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    viewport.scrollTop = Math.max(0, (focusRange.startIndex - FOCUS_OFFSET_SLOTS) * SLOT_HEIGHT);
+  }, [dateKey, focusRange.startIndex, focusRange.endIndex]);
 
   const selectedContext = useMemo(() => {
     for (const window of windows) {
@@ -160,7 +216,10 @@ export function NowTodayPlannerTimeline({
   const preview = draft ?? (dragRange ? normalizeRange(dragRange.startIndex, dragRange.endIndex) : null);
   const previewRect = preview ? (() => {
     const { startAt, endAt } = selectionRange(dateKey, preview);
-    return { top: topFor(dateKey, startAt), height: ((endAt - startAt) / SLOT_MS) * SLOT_HEIGHT };
+    return {
+      top: topFor(dateKey, startAt),
+      height: ((endAt - startAt) / SLOT_MS) * SLOT_HEIGHT,
+    };
   })() : null;
 
   async function createWindow(): Promise<void> {
@@ -208,7 +267,7 @@ export function NowTodayPlannerTimeline({
     setError(null);
     try {
       await getTodayPlannerService().startWorkSegment(selectedWork.segment.id);
-      await Promise.all([refreshPlanner(), refreshHistory(true)]);
+      await refreshPlanner();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '开始工作片段失败');
     } finally {
@@ -240,19 +299,26 @@ export function NowTodayPlannerTimeline({
         <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">拖出可调度区间，再自动切成工作片段与休息窗。</p>
       </div>
       {error ? <p className="mt-3 text-xs text-[#C75B3A]" role="alert">{error}</p> : null}
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="rounded-3xl border border-[#E7E5E4] bg-[#FCFBFA] p-3 dark:border-[#292524] dark:bg-[#120F0D]">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">Timeline / 时间线</p>
-              <p className="mt-1 text-sm text-[#57534E] dark:text-[#D6D3D1]">15 分钟一格，拖拽创建可调度区间。</p>
+              <p className="mt-1 text-sm text-[#57534E] dark:text-[#D6D3D1]">15 分钟一格，默认聚焦有时间块的时段。</p>
+              <p className="mt-1 text-xs text-[#A8A29E] dark:text-[#78716C]">
+                {`默认定位 · ${focusRangeLabel}`}
+              </p>
             </div>
             <span className="rounded-full bg-[#F5F0ED] px-3 py-1 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
               {loading ? '同步中...' : `${windows.length} 个区间`}
             </span>
           </div>
-          <div className="max-h-[720px] overflow-y-auto rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-            <div className="relative" style={{ height: `${SLOT_COUNT * SLOT_HEIGHT}px` }}>
+          <div
+            ref={scrollViewportRef}
+            data-testid="today-planner-scroll-viewport"
+            className="min-h-[240px] max-h-[calc(100dvh-280px)] overflow-y-auto rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]"
+          >
+            <div className="relative" style={{ height: timelineHeight }}>
               {slots.map((slot) => (
                 <div
                   key={slot.label}
@@ -285,7 +351,10 @@ export function NowTodayPlannerTimeline({
                   key={window.id}
                   data-testid={`planner-window-${window.id}`}
                   className="absolute left-16 right-3 z-10 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white shadow-sm dark:border-[#44403C] dark:bg-[#1F1B18]"
-                  style={{ top: `${topFor(dateKey, window.plannedStartAt)}px`, height: `${heightFor(window)}px` }}
+                  style={{
+                    top: `${topFor(dateKey, window.plannedStartAt)}px`,
+                    height: `${heightFor(window)}px`,
+                  }}
                 >
                   <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex items-center justify-between gap-2">
                     <div className="truncate rounded-full bg-white/80 px-2 py-1 text-[10px] font-medium text-[#57534E] shadow-sm dark:bg-[#120F0D]/80 dark:text-[#E7E5E4]">
@@ -331,7 +400,7 @@ export function NowTodayPlannerTimeline({
             </div>
           </div>
         </div>
-        <aside className="rounded-3xl border border-[#E7E5E4] bg-[#FCFBFA] p-4 dark:border-[#292524] dark:bg-[#120F0D]">
+        <aside className="rounded-3xl border border-[#E7E5E4] bg-[#FCFBFA] p-4 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-220px)] lg:overflow-y-auto dark:border-[#292524] dark:bg-[#120F0D]">
           {draft ? (
             <div data-testid="today-planner-window-draft" className="space-y-4">
               <div>
@@ -447,11 +516,7 @@ export function NowTodayPlannerTimeline({
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-[#E7E5E4] bg-white/70 p-4 text-sm text-[#57534E] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
-              <p>1. 在左侧时间线上拖出一个可调度区间。</p>
-              <p className="mt-2">2. 选节奏预设，让系统自动切分工作片段和休息窗。</p>
-              <p className="mt-2">3. 点击工作片段，挂任务、开始执行，必要时只重算当前区间。</p>
-            </div>
+            <div className="min-h-[120px]" aria-hidden="true" />
           )}
         </aside>
       </div>
