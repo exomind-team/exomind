@@ -254,7 +254,7 @@ function buildRuntimeSnapshot() {
   };
 }
 
-function seedBoundTiledLayout(sessionId: string): void {
+function seedBoundTiledLayout(sessionId: string, options: { immersive?: boolean } = {}): void {
   writeAgentsTiledPersistState({
     version: 2,
     layout: '1x1',
@@ -264,7 +264,7 @@ function seedBoundTiledLayout(sessionId: string): void {
     focusedSlotId: 'slot-1',
     unassignedSessionIds: [],
     unassignedPoolCollapsed: false,
-    immersive: false,
+    immersive: options.immersive ?? false,
   });
 }
 
@@ -557,6 +557,26 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
   });
 
+  it('does not render the page-level composer when no session target is selected（未选中会话或终端时不应显示全局输入框）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-no-composer-idle',
+        role: 'Idle Session',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('agent-global-composer')).not.toBeInTheDocument();
+  });
+
   it('shows the page-level global composer for the right-side terminal panel（右侧终端面板应改为页面级全局草稿输入器）', async () => {
     sessionStreamState.sessions = [
       buildSession({
@@ -583,6 +603,27 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
       expect(screen.getByTestId('agent-global-composer')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('pty-prompt-composer')).not.toBeInTheDocument();
+  });
+
+  it('hides the page-level composer in tiled immersive mode（沉浸模式下不显示全局输入框）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-immersive-composer',
+        role: 'Immersive Composer Session',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+      }),
+    ];
+    seedBoundTiledLayout('session-immersive-composer', { immersive: true });
+    localStorage.setItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY, 'tiled');
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-grid')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-pty-523')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('agent-global-composer')).not.toBeInTheDocument();
   });
 
   it('injects global-shortcut transcript into the page-level draft box（Ctrl+Space 转写应写入页面级草稿箱）', async () => {

@@ -7505,7 +7505,9 @@ export function AgentsPage() {
         )}
       </div>
 
-      <AgentGlobalComposer target={activeComposerTarget} />
+      {activeComposerTarget && !isTiledWorkbenchImmersive ? (
+        <AgentGlobalComposer target={activeComposerTarget} />
+      ) : null}
 
       {/* PTY Spawn Dialog */}
       <PtySpawnDialog

@@ -80,6 +80,10 @@ export function AgentGlobalComposer({
     inputRef.current?.focusText();
   }), [target]);
 
+  if (!target) {
+    return null;
+  }
+
   return (
     <div
       data-testid="agent-global-composer"
@@ -94,40 +98,25 @@ export function AgentGlobalComposer({
             data-testid="agent-global-composer-target"
             className={badgeClassName}
           >
-            {target?.label ?? '请先选中会话或终端'}
+            {target.label}
           </p>
         </div>
         <p className={`${hintClassName} text-right`}>
-          {target?.description ?? 'Ctrl+Space 转写会写入这里'}
+          {target.description ?? 'Ctrl+Space 转写会写入这里'}
         </p>
       </div>
 
-      {target ? (
-        <VoiceMessageInput
-          ref={inputRef}
-          onSend={target.send}
-          placeholder={target.placeholder}
-          inputClassName={inputClassName}
-          buttonSize={36}
-          minRows={1}
-          maxRows={5}
-          showTimer={false}
-          inputSendModeOverride="enter-send"
-        />
-      ) : (
-        <div className="px-4 py-3">
-          <div
-            className={[
-              'rounded-2xl border border-dashed px-3 py-3 text-sm',
-              isTerminalVariant
-                ? 'border-[#3F3A37] bg-[#1C1917] text-[#78716C]'
-                : 'border-[#D6D3D1] bg-white/80 text-[#A8A29E] dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#57534E]',
-            ].join(' ')}
-          >
-            选中一个终端或 Agent 对话后，这里会出现统一草稿输入框。
-          </div>
-        </div>
-      )}
+      <VoiceMessageInput
+        ref={inputRef}
+        onSend={target.send}
+        placeholder={target.placeholder}
+        inputClassName={inputClassName}
+        buttonSize={36}
+        minRows={1}
+        maxRows={5}
+        showTimer={false}
+        inputSendModeOverride="enter-send"
+      />
     </div>
   );
 }
