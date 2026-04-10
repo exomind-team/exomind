@@ -264,7 +264,7 @@ fn apply_proposal_replication(
     let scope_key = payload.scope_key.as_deref();
 
     let should_apply = match store
-        .get_scoped(scope_key, payload.proposal.id)
+        .get_scoped(scope_key, &payload.proposal.id)
         .map_err(|error| error.to_string())?
     {
         Some(existing) => should_accept_replicated_proposal(
@@ -499,10 +499,10 @@ mod tests {
         incoming
             .transitions
             .push(crate::timeblock::BlockTransition {
-            transition_type: crate::timeblock::BlockTransitionType::FeedbackStart,
-            at: 1_710_000_005_000,
-            actor_id: Some("actor-b".to_string()),
-        });
+                transition_type: crate::timeblock::BlockTransitionType::FeedbackStart,
+                at: 1_710_000_005_000,
+                actor_id: Some("actor-b".to_string()),
+            });
 
         assert!(should_accept_replicated_active(
             &existing,
@@ -744,7 +744,7 @@ mod tests {
             serde_json::json!({
                 "scopeKey": "profile-sync",
                 "proposal": {
-                    "id": 42,
+                    "id": "proposal-42",
                     "title": "replicated proposal",
                     "body": "from remote",
                     "action_type": "append_event",
@@ -767,7 +767,7 @@ mod tests {
         yield_for_actor().await;
 
         let proposal = proposal_store
-            .get_scoped(Some("profile-sync"), 42)
+            .get_scoped(Some("profile-sync"), "proposal-42")
             .expect("proposal query")
             .expect("proposal");
         assert_eq!(proposal.title, "replicated proposal");
@@ -799,7 +799,7 @@ mod tests {
             serde_json::json!({
                 "scopeKey": "profile-sync",
                 "proposal": {
-                    "id": 7,
+                    "id": "proposal-7",
                     "title": "should be ignored",
                     "body": "",
                     "action_type": "append_event",
@@ -825,7 +825,7 @@ mod tests {
 
         assert!(
             proposal_store
-                .get_scoped(Some("profile-sync"), 7)
+                .get_scoped(Some("profile-sync"), "proposal-7")
                 .expect("proposal query")
                 .is_none()
         );

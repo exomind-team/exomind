@@ -37,7 +37,7 @@ interface RuntimeProposalCommentPayload {
 }
 
 interface RuntimeProposalPayload {
-  id: number;
+  id: string;
   title: string;
   body?: string | null;
   action_type: ProposalActionType;
@@ -183,7 +183,7 @@ export class ProposalRtAdapter {
     return payload.map(toProposal);
   }
 
-  async getProposal(id: number): Promise<Proposal | null> {
+  async getProposal(id: string): Promise<Proposal | null> {
     const target = this.resolveTarget();
     const url = this.url(`${PROPOSAL_API_BASE_PATH}/${id}`, target);
     const response = await this.fetchWithTimeout(url, {
@@ -217,7 +217,7 @@ export class ProposalRtAdapter {
   }
 
   async updateProposal(
-    id: number,
+    id: string,
     input: UpdateProposalInput,
   ): Promise<Proposal | null> {
     const target = this.resolveTarget();
@@ -245,7 +245,7 @@ export class ProposalRtAdapter {
   }
 
   async addComment(
-    id: number,
+    id: string,
     content: string,
     author: ProposalPublisher,
   ): Promise<Proposal> {

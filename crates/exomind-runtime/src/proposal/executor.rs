@@ -209,7 +209,7 @@ mod tests {
     fn sample_proposal(action_type: ActionType, action_params: serde_json::Value) -> Proposal {
         let now = chrono::Utc::now();
         Proposal {
-            id: 7,
+            id: "proposal-7".to_string(),
             title: "Sample".to_string(),
             body: "Because".to_string(),
             action_type,

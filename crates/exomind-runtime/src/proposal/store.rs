@@ -5,6 +5,7 @@ use std::sync::{Mutex, RwLock};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::proposal::{
@@ -33,7 +34,7 @@ pub struct ProposalFilter {
 #[derive(Debug, Error)]
 pub enum ProposalStoreError {
     #[error("proposal not found: {0}")]
-    NotFound(u64),
+    NotFound(String),
     #[error("proposal title must not be empty")]
     InvalidTitle,
     #[error("invalid publisher: {0}")]
@@ -71,8 +72,7 @@ enum ProposalStoreBackend {
 
 #[derive(Default)]
 struct MemoryProposalStore {
-    next_id: u64,
-    scopes: HashMap<String, BTreeMap<u64, Proposal>>,
+    scopes: HashMap<String, BTreeMap<String, Proposal>>,
 }
 
 struct SqliteProposalStore {
@@ -120,9 +120,8 @@ impl ProposalStore {
                     Err(poisoned) => poisoned.into_inner(),
                 };
                 let now = Utc::now();
-                state.next_id = state.next_id.saturating_add(1).max(1);
                 let proposal = Proposal {
-                    id: state.next_id,
+                    id: generate_proposal_id(),
                     title: input.title,
                     body: input.body,
                     action_type: input.action_type,
@@ -139,7 +138,7 @@ impl ProposalStore {
                     .scopes
                     .entry(normalized_scope.to_string())
                     .or_default()
-                    .insert(proposal.id, proposal.clone());
+                    .insert(proposal.id.clone(), proposal.clone());
                 Ok(proposal)
             }
             ProposalStoreBackend::Sqlite(store) => store.create_scoped(normalized_scope, input),
@@ -187,14 +186,14 @@ impl ProposalStore {
         Ok(items)
     }
 
-    pub fn get(&self, id: u64) -> Result<Option<Proposal>, ProposalStoreError> {
+    pub fn get(&self, id: &str) -> Result<Option<Proposal>, ProposalStoreError> {
         self.get_scoped(None, id)
     }
 
     pub fn get_scoped(
         &self,
         scope_key: Option<&str>,
-        id: u64,
+        id: &str,
     ) -> Result<Option<Proposal>, ProposalStoreError> {
         let normalized_scope = normalize_scope_key(scope_key);
         match &self.backend {
@@ -206,7 +205,7 @@ impl ProposalStore {
                 Ok(state
                     .scopes
                     .get(normalized_scope)
-                    .and_then(|scope| scope.get(&id))
+                    .and_then(|scope| scope.get(id))
                     .cloned())
             }
             ProposalStoreBackend::Sqlite(store) => store.get_scoped(normalized_scope, id),
@@ -215,7 +214,7 @@ impl ProposalStore {
 
     pub fn update_status(
         &self,
-        id: u64,
+        id: &str,
         status: ProposalStatus,
         snooze_until: Option<DateTime<Utc>>,
     ) -> Result<Proposal, ProposalStoreError> {
@@ -225,14 +224,14 @@ impl ProposalStore {
     pub fn update_status_scoped(
         &self,
         scope_key: Option<&str>,
-        id: u64,
+        id: &str,
         status: ProposalStatus,
         snooze_until: Option<DateTime<Utc>>,
     ) -> Result<Proposal, ProposalStoreError> {
         let normalized_scope = normalize_scope_key(scope_key);
         let mut proposal = self
             .get_scoped(scope_key, id)?
-            .ok_or(ProposalStoreError::NotFound(id))?;
+            .ok_or_else(|| ProposalStoreError::NotFound(id.to_string()))?;
 
         validate_status_transition(proposal.status, status)?;
 
@@ -249,7 +248,7 @@ impl ProposalStore {
 
     pub fn update_action_params(
         &self,
-        id: u64,
+        id: &str,
         action_params: Value,
     ) -> Result<Proposal, ProposalStoreError> {
         self.update_action_params_scoped(None, id, action_params)
@@ -258,13 +257,13 @@ impl ProposalStore {
     pub fn update_action_params_scoped(
         &self,
         scope_key: Option<&str>,
-        id: u64,
+        id: &str,
         action_params: Value,
     ) -> Result<Proposal, ProposalStoreError> {
         let normalized_scope = normalize_scope_key(scope_key);
         let mut proposal = self
             .get_scoped(scope_key, id)?
-            .ok_or(ProposalStoreError::NotFound(id))?;
+            .ok_or_else(|| ProposalStoreError::NotFound(id.to_string()))?;
 
         if proposal.status.is_terminal() {
             return Err(ProposalStoreError::InvalidStatusTransition {
@@ -280,21 +279,25 @@ impl ProposalStore {
         Ok(proposal)
     }
 
-    pub fn add_comment(&self, id: u64, comment: Comment) -> Result<Proposal, ProposalStoreError> {
+    pub fn add_comment(
+        &self,
+        id: &str,
+        comment: Comment,
+    ) -> Result<Proposal, ProposalStoreError> {
         self.add_comment_scoped(None, id, comment)
     }
 
     pub fn add_comment_scoped(
         &self,
         scope_key: Option<&str>,
-        id: u64,
+        id: &str,
         comment: Comment,
     ) -> Result<Proposal, ProposalStoreError> {
         let normalized_scope = normalize_scope_key(scope_key);
         validate_comment(&comment)?;
         let mut proposal = self
             .get_scoped(scope_key, id)?
-            .ok_or(ProposalStoreError::NotFound(id))?;
+            .ok_or_else(|| ProposalStoreError::NotFound(id.to_string()))?;
 
         proposal.comments.push(comment);
         proposal.updated_at = Utc::now();
@@ -314,12 +317,11 @@ impl ProposalStore {
                     Ok(lock) => lock,
                     Err(poisoned) => poisoned.into_inner(),
                 };
-                state.next_id = state.next_id.max(proposal.id);
                 state
                     .scopes
                     .entry(normalized_scope.to_string())
                     .or_default()
-                    .insert(proposal.id, proposal.clone());
+                    .insert(proposal.id.clone(), proposal.clone());
                 Ok(proposal)
             }
             ProposalStoreBackend::Sqlite(store) => {
@@ -340,7 +342,7 @@ impl ProposalStore {
                     .scopes
                     .entry(scope_key.to_string())
                     .or_default()
-                    .insert(proposal.id, proposal.clone());
+                    .insert(proposal.id.clone(), proposal.clone());
                 Ok(())
             }
             ProposalStoreBackend::Sqlite(store) => store.save_scoped(scope_key, proposal),
@@ -369,31 +371,43 @@ impl SqliteProposalStore {
         input: CreateProposalInput,
     ) -> Result<Proposal, ProposalStoreError> {
         let now = Utc::now();
-        let id = {
-            let connection = self.connection();
-            connection.execute(
-                "INSERT INTO proposals (
-                    scope_key, title, body, action_type, action_params_json, references_json, status,
-                    publisher_json, comments_json, snooze_until, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11)",
-                params![
-                    scope_key,
-                    input.title,
-                    input.body,
-                    action_type_to_str(input.action_type),
-                    serde_json::to_string(&input.action_params)?,
-                    serde_json::to_string(&input.references)?,
-                    proposal_status_to_str(ProposalStatus::Pending),
-                    serde_json::to_string(&input.publisher)?,
-                    serde_json::to_string(&Vec::<Comment>::new())?,
-                    now.to_rfc3339(),
-                    now.to_rfc3339(),
-                ],
-            )?;
-            connection.last_insert_rowid() as u64
+        let id = generate_proposal_id();
+        let proposal = Proposal {
+            id,
+            title: input.title,
+            body: input.body,
+            action_type: input.action_type,
+            action_params: input.action_params,
+            references: input.references,
+            status: ProposalStatus::Pending,
+            publisher: input.publisher,
+            comments: Vec::new(),
+            snooze_until: None,
+            created_at: now,
+            updated_at: now,
         };
-        self.get_scoped(scope_key, id)?
-            .ok_or(ProposalStoreError::NotFound(id))
+        let connection = self.connection();
+        connection.execute(
+            "INSERT INTO proposals (
+                id, scope_key, title, body, action_type, action_params_json, references_json, status,
+                publisher_json, comments_json, snooze_until, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?12)",
+            params![
+                &proposal.id,
+                scope_key,
+                &proposal.title,
+                &proposal.body,
+                action_type_to_str(proposal.action_type),
+                serde_json::to_string(&proposal.action_params)?,
+                serde_json::to_string(&proposal.references)?,
+                proposal_status_to_str(proposal.status),
+                serde_json::to_string(&proposal.publisher)?,
+                serde_json::to_string(&proposal.comments)?,
+                now.to_rfc3339(),
+                now.to_rfc3339(),
+            ],
+        )?;
+        Ok(proposal)
     }
 
     fn list_scoped(&self, scope_key: &str) -> Result<Vec<Proposal>, ProposalStoreError> {
@@ -411,7 +425,7 @@ impl SqliteProposalStore {
             .map_err(ProposalStoreError::from)
     }
 
-    fn get_scoped(&self, scope_key: &str, id: u64) -> Result<Option<Proposal>, ProposalStoreError> {
+    fn get_scoped(&self, scope_key: &str, id: &str) -> Result<Option<Proposal>, ProposalStoreError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT id, title, body, action_type, action_params_json, references_json, status,
@@ -467,27 +481,10 @@ impl SqliteProposalStore {
 
     fn init(&self) -> Result<(), ProposalStoreError> {
         let connection = self.connection();
-        connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS proposals (
-                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-                scope_key          TEXT NOT NULL DEFAULT 'anonymous',
-                title              TEXT NOT NULL,
-                body               TEXT NOT NULL DEFAULT '',
-                action_type        TEXT NOT NULL,
-                action_params_json TEXT NOT NULL DEFAULT '{}',
-                references_json    TEXT NOT NULL DEFAULT '[]',
-                status             TEXT NOT NULL DEFAULT 'pending',
-                publisher_json     TEXT NOT NULL DEFAULT '{}',
-                comments_json      TEXT NOT NULL DEFAULT '[]',
-                snooze_until       TEXT NULL,
-                created_at         TEXT NOT NULL,
-                updated_at         TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_proposals_scope_created
-                ON proposals(scope_key, created_at DESC, id DESC);
-            CREATE INDEX IF NOT EXISTS idx_proposals_scope_status
-                ON proposals(scope_key, status);",
-        )?;
+        if has_legacy_integer_id_schema(&connection)? {
+            migrate_legacy_integer_schema(&connection)?;
+        }
+        create_proposal_schema(&connection)?;
         Ok(())
     }
 
@@ -497,6 +494,171 @@ impl SqliteProposalStore {
             Err(poisoned) => poisoned.into_inner(),
         }
     }
+}
+
+#[derive(Debug)]
+struct LegacyProposalRow {
+    old_id: i64,
+    scope_key: String,
+    title: String,
+    body: String,
+    action_type: String,
+    action_params_json: String,
+    references_json: String,
+    status: String,
+    publisher_json: String,
+    comments_json: String,
+    snooze_until: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+fn generate_proposal_id() -> String {
+    format!("prp-{}", uuid::Uuid::new_v4())
+}
+
+fn create_proposal_schema(connection: &Connection) -> Result<(), ProposalStoreError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS proposals (
+            id                 TEXT PRIMARY KEY,
+            scope_key          TEXT NOT NULL DEFAULT 'anonymous',
+            title              TEXT NOT NULL,
+            body               TEXT NOT NULL DEFAULT '',
+            action_type        TEXT NOT NULL,
+            action_params_json TEXT NOT NULL DEFAULT '{}',
+            references_json    TEXT NOT NULL DEFAULT '[]',
+            status             TEXT NOT NULL DEFAULT 'pending',
+            publisher_json     TEXT NOT NULL DEFAULT '{}',
+            comments_json      TEXT NOT NULL DEFAULT '[]',
+            snooze_until       TEXT NULL,
+            created_at         TEXT NOT NULL,
+            updated_at         TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_proposals_scope_created
+            ON proposals(scope_key, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_proposals_scope_status
+            ON proposals(scope_key, status);",
+    )?;
+    Ok(())
+}
+
+fn has_legacy_integer_id_schema(connection: &Connection) -> Result<bool, ProposalStoreError> {
+    let exists = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'proposals' LIMIT 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !exists {
+        return Ok(false);
+    }
+
+    let mut statement = connection.prepare("PRAGMA table_info(proposals)")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+
+    for row in rows {
+        let (name, column_type) = row?;
+        if name == "id" {
+            return Ok(!column_type.eq_ignore_ascii_case("TEXT"));
+        }
+    }
+
+    Ok(false)
+}
+
+fn migrate_legacy_integer_schema(connection: &Connection) -> Result<(), ProposalStoreError> {
+    connection.execute_batch(
+        "BEGIN IMMEDIATE;
+        ALTER TABLE proposals RENAME TO proposals_legacy;
+        DROP INDEX IF EXISTS idx_proposals_scope_created;
+        DROP INDEX IF EXISTS idx_proposals_scope_status;",
+    )?;
+
+    create_proposal_schema(connection)?;
+
+    let mut statement = connection.prepare(
+        "SELECT id, scope_key, title, body, action_type, action_params_json, references_json,
+                status, publisher_json, comments_json, snooze_until, created_at, updated_at
+         FROM proposals_legacy
+         ORDER BY created_at ASC, id ASC",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(LegacyProposalRow {
+            old_id: row.get(0)?,
+            scope_key: row.get(1)?,
+            title: row.get(2)?,
+            body: row.get(3)?,
+            action_type: row.get(4)?,
+            action_params_json: row.get(5)?,
+            references_json: row.get(6)?,
+            status: row.get(7)?,
+            publisher_json: row.get(8)?,
+            comments_json: row.get(9)?,
+            snooze_until: row.get(10)?,
+            created_at: row.get(11)?,
+            updated_at: row.get(12)?,
+        })
+    })?;
+
+    for row in rows {
+        let row = row?;
+        let migrated_id = build_legacy_proposal_id(&row);
+        connection.execute(
+            "INSERT INTO proposals (
+                id, scope_key, title, body, action_type, action_params_json, references_json,
+                status, publisher_json, comments_json, snooze_until, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                migrated_id,
+                row.scope_key,
+                row.title,
+                row.body,
+                row.action_type,
+                row.action_params_json,
+                row.references_json,
+                row.status,
+                row.publisher_json,
+                row.comments_json,
+                row.snooze_until,
+                row.created_at,
+                row.updated_at,
+            ],
+        )?;
+    }
+
+    connection.execute_batch(
+        "DROP TABLE proposals_legacy;
+        COMMIT;",
+    )?;
+    Ok(())
+}
+
+fn build_legacy_proposal_id(row: &LegacyProposalRow) -> String {
+    let mut hasher = Sha256::new();
+    for part in [
+        row.scope_key.as_str(),
+        &row.old_id.to_string(),
+        row.created_at.as_str(),
+        row.action_type.as_str(),
+        row.title.as_str(),
+        row.body.as_str(),
+        row.references_json.as_str(),
+        row.publisher_json.as_str(),
+    ] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+
+    let digest = hasher.finalize();
+    let hex = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("legacy-{}", &hex[..32])
 }
 
 fn map_proposal_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proposal> {
@@ -510,7 +672,7 @@ fn map_proposal_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proposal> {
     let updated_at: String = row.get(11)?;
 
     Ok(Proposal {
-        id: row.get::<_, i64>(0)? as u64,
+        id: row.get(0)?,
         title: row.get(1)?,
         body: row.get(2)?,
         action_type: parse_action_type(&action_type)?,
@@ -747,6 +909,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+    use rusqlite::{Connection, params};
     use tempfile::tempdir;
 
     use crate::proposal::{ActionType, ProposalStatus, Publisher, PublisherType};
@@ -780,7 +944,7 @@ mod tests {
         assert_eq!(listed[1].id, first.id);
 
         let approved = store
-            .update_status(first.id, ProposalStatus::Approved, None)
+            .update_status(&first.id, ProposalStatus::Approved, None)
             .unwrap();
         assert_eq!(approved.status, ProposalStatus::Approved);
 
@@ -804,28 +968,157 @@ mod tests {
             .create_scoped(Some("profile-a"), sample_input("Profile A"))
             .unwrap();
 
-        assert!(store.get(anonymous.id).unwrap().is_some());
+        assert!(store.get(&anonymous.id).unwrap().is_some());
         assert!(
             store
-                .get_scoped(Some("profile-a"), scoped.id)
+                .get_scoped(Some("profile-a"), &scoped.id)
                 .unwrap()
                 .is_some()
         );
         assert!(
             store
-                .get_scoped(Some("profile-b"), scoped.id)
+                .get_scoped(Some("profile-b"), &scoped.id)
                 .unwrap()
                 .is_none()
         );
 
         store
-            .update_status_scoped(Some("profile-a"), scoped.id, ProposalStatus::Approved, None)
+            .update_status_scoped(Some("profile-a"), &scoped.id, ProposalStatus::Approved, None)
             .unwrap();
         let conflict = store.update_action_params_scoped(
             Some("profile-a"),
-            scoped.id,
+            &scoped.id,
             serde_json::json!({ "title": "Edited" }),
         );
         assert!(conflict.is_err());
+    }
+
+    #[test]
+    fn independent_sqlite_stores_do_not_generate_colliding_first_ids() {
+        let dir = tempdir().unwrap();
+        let store_a =
+            ProposalStore::with_sqlite_path(&dir.path().join("proposals-a.sqlite")).unwrap();
+        let store_b =
+            ProposalStore::with_sqlite_path(&dir.path().join("proposals-b.sqlite")).unwrap();
+
+        let first = store_a
+            .create_scoped(Some("profile-a"), sample_input("First from A"))
+            .unwrap();
+        let second = store_b
+            .create_scoped(Some("profile-a"), sample_input("First from B"))
+            .unwrap();
+
+        assert_ne!(
+            first.id, second.id,
+            "proposal ids must be globally stable across independent stores"
+        );
+    }
+
+    #[test]
+    fn replica_save_keeps_independent_proposals_from_separate_stores() {
+        let dir = tempdir().unwrap();
+        let store_a =
+            ProposalStore::with_sqlite_path(&dir.path().join("proposals-a.sqlite")).unwrap();
+        let store_b =
+            ProposalStore::with_sqlite_path(&dir.path().join("proposals-b.sqlite")).unwrap();
+
+        let local = store_a
+            .create_scoped(Some("profile-a"), sample_input("Local proposal"))
+            .unwrap();
+        let remote = store_b
+            .create_scoped(Some("profile-a"), sample_input("Remote proposal"))
+            .unwrap();
+
+        store_a
+            .save_replica_scoped(Some("profile-a"), remote.clone())
+            .unwrap();
+
+        let listed = store_a
+            .list_scoped(Some("profile-a"), &ProposalFilter::default())
+            .unwrap();
+        let titles = listed
+            .iter()
+            .map(|proposal| proposal.title.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            listed.len(),
+            2,
+            "replica save should not collapse independent proposals into one row",
+        );
+        assert!(titles.contains(&local.title.as_str()));
+        assert!(titles.contains(&remote.title.as_str()));
+    }
+
+    #[test]
+    fn sqlite_store_migrates_legacy_integer_id_schema_to_stable_strings() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-proposals.sqlite");
+        let connection = Connection::open(&sqlite_path).unwrap();
+        let now = Utc::now().to_rfc3339();
+        connection
+            .execute_batch(
+                "CREATE TABLE proposals (
+                    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope_key          TEXT NOT NULL DEFAULT 'anonymous',
+                    title              TEXT NOT NULL,
+                    body               TEXT NOT NULL DEFAULT '',
+                    action_type        TEXT NOT NULL,
+                    action_params_json TEXT NOT NULL DEFAULT '{}',
+                    references_json    TEXT NOT NULL DEFAULT '[]',
+                    status             TEXT NOT NULL DEFAULT 'pending',
+                    publisher_json     TEXT NOT NULL DEFAULT '{}',
+                    comments_json      TEXT NOT NULL DEFAULT '[]',
+                    snooze_until       TEXT NULL,
+                    created_at         TEXT NOT NULL,
+                    updated_at         TEXT NOT NULL
+                );
+                CREATE INDEX idx_proposals_scope_created
+                    ON proposals(scope_key, created_at DESC, id DESC);
+                CREATE INDEX idx_proposals_scope_status
+                    ON proposals(scope_key, status);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO proposals (
+                    scope_key, title, body, action_type, action_params_json, references_json, status,
+                    publisher_json, comments_json, snooze_until, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11)",
+                params![
+                    "profile-a",
+                    "Legacy proposal",
+                    "migrated from integer ids",
+                    "create_task",
+                    r#"{"title":"Legacy task"}"#,
+                    "[]",
+                    "pending",
+                    r#"{"publisher_type":"agent","id":"legacy-agent","name":"Legacy Agent"}"#,
+                    "[]",
+                    &now,
+                    &now,
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = ProposalStore::with_sqlite_path(&sqlite_path).unwrap();
+        let migrated = store
+            .list_scoped(Some("profile-a"), &ProposalFilter::default())
+            .unwrap();
+        assert_eq!(migrated.len(), 1);
+        assert!(
+            migrated[0].id.starts_with("legacy-"),
+            "legacy integer rows should migrate to deterministic stable ids"
+        );
+
+        let created = store
+            .create_scoped(Some("profile-a"), sample_input("Fresh proposal"))
+            .unwrap();
+        assert!(
+            created.id.starts_with("prp-"),
+            "new proposals should use generated stable ids"
+        );
+        assert_ne!(created.id, migrated[0].id);
     }
 }

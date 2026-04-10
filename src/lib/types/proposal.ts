@@ -33,7 +33,7 @@ export interface ProposalComment {
 }
 
 export interface Proposal {
-  id: number;
+  id: string;
   title: string;
   body: string;
   actionType: ProposalActionType;

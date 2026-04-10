@@ -116,26 +116,26 @@ async fn create_proposal(
             },
         )
         .map_err(map_store_error)?;
-    publish_proposal_replication_signal(&state, scope_key, &proposal).await;
+    publish_proposal_replication_signal(&state, scope_key, &proposal);
     Ok((StatusCode::CREATED, Json(proposal)))
 }
 
 async fn get_proposal(
-    Path(id): Path<u64>,
+    Path(id): Path<String>,
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Proposal>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = scope_key_from_query(query.profile_id.as_deref(), query.user_id.as_deref());
     let proposal = state
         .proposal_store
-        .get_scoped(scope_key, id)
+        .get_scoped(scope_key, &id)
         .map_err(map_store_error)?
-        .ok_or_else(|| not_found(id))?;
+        .ok_or_else(|| not_found(&id))?;
     Ok(Json(proposal))
 }
 
 async fn update_proposal(
-    Path(id): Path<u64>,
+    Path(id): Path<String>,
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
     Json(payload): Json<UpdateProposalRequest>,
@@ -152,22 +152,22 @@ async fn update_proposal(
     let scope_key = scope_key_from_query(query.profile_id.as_deref(), query.user_id.as_deref());
     let before = state
         .proposal_store
-        .get_scoped(scope_key, id)
+        .get_scoped(scope_key, &id)
         .map_err(map_store_error)?
-        .ok_or_else(|| not_found(id))?;
+        .ok_or_else(|| not_found(&id))?;
 
     let mut proposal = before.clone();
     if let Some(action_params) = payload.action_params {
         proposal = state
             .proposal_store
-            .update_action_params_scoped(scope_key, id, action_params)
+            .update_action_params_scoped(scope_key, &id, action_params)
             .map_err(map_store_error)?;
     }
 
     if let Some(status) = payload.status {
         proposal = state
             .proposal_store
-            .update_status_scoped(scope_key, id, status, payload.snooze_until)
+            .update_status_scoped(scope_key, &id, status, payload.snooze_until)
             .map_err(map_store_error)?;
     }
 
@@ -178,7 +178,7 @@ async fn update_proposal(
             state.timeblock_store.clone(),
         );
         if let Err(error) = executor.execute_scoped(scope_key, &proposal) {
-            tracing::error!(proposal_id = proposal.id, error = %error, "proposal execution failed after approval");
+            tracing::error!(proposal_id = %proposal.id, error = %error, "proposal execution failed after approval");
             let comment = Comment {
                 author: Publisher {
                     publisher_type: PublisherType::Agent,
@@ -190,19 +190,19 @@ async fn update_proposal(
             };
             if let Ok(updated) = state
                 .proposal_store
-                .add_comment_scoped(scope_key, id, comment)
+                .add_comment_scoped(scope_key, &id, comment)
             {
                 proposal = updated;
             }
         }
     }
 
-    publish_proposal_replication_signal(&state, scope_key, &proposal).await;
+    publish_proposal_replication_signal(&state, scope_key, &proposal);
     Ok(Json(proposal))
 }
 
 async fn add_comment(
-    Path(id): Path<u64>,
+    Path(id): Path<String>,
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
     Json(payload): Json<AddCommentRequest>,
@@ -212,7 +212,7 @@ async fn add_comment(
         .proposal_store
         .add_comment_scoped(
             scope_key,
-            id,
+            &id,
             Comment {
                 author: payload.author,
                 content: payload.content,
@@ -220,7 +220,7 @@ async fn add_comment(
             },
         )
         .map_err(map_store_error)?;
-    publish_proposal_replication_signal(&state, scope_key, &proposal).await;
+    publish_proposal_replication_signal(&state, scope_key, &proposal);
     Ok((StatusCode::CREATED, Json(proposal)))
 }
 
@@ -231,11 +231,7 @@ fn scope_key_from_query<'a>(
     profile_id.or(user_id)
 }
 
-async fn publish_proposal_replication_signal(
-    state: &AppState,
-    scope_key: Option<&str>,
-    proposal: &Proposal,
-) {
+fn publish_proposal_replication_signal(state: &AppState, scope_key: Option<&str>, proposal: &Proposal) {
     let signal = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
@@ -260,13 +256,16 @@ async fn publish_proposal_replication_signal(
 
     state.signal_pool.publish(signal.clone());
     if let Some(mesh_relay) = &state.mesh_relay {
-        mesh_relay.forward_event_to_peers(signal).await;
+        let relay = std::sync::Arc::clone(mesh_relay);
+        tokio::spawn(async move {
+            relay.forward_event_to_peers(signal).await;
+        });
     }
 }
 
 fn map_store_error(error: ProposalStoreError) -> (StatusCode, Json<ErrorResponse>) {
     match error {
-        ProposalStoreError::NotFound(id) => not_found(id),
+        ProposalStoreError::NotFound(id) => not_found(&id),
         ProposalStoreError::InvalidStatusTransition { .. } => (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
@@ -303,7 +302,7 @@ fn bad_request(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) 
     )
 }
 
-fn not_found(id: u64) -> (StatusCode, Json<ErrorResponse>) {
+fn not_found(id: &str) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::NOT_FOUND,
         Json(ErrorResponse {
@@ -454,7 +453,7 @@ mod tests {
                 Request::builder()
                     .uri(format!(
                         "/api/proposals/{}",
-                        created["id"].as_u64().unwrap()
+                        created["id"].as_str().unwrap()
                     ))
                     .body(Body::empty())
                     .unwrap(),
@@ -498,7 +497,7 @@ mod tests {
             .unwrap()
             .to_bytes();
         let created: Value = serde_json::from_slice(&body).unwrap();
-        let proposal_id = created["id"].as_u64().unwrap();
+        let proposal_id = created["id"].as_str().unwrap().to_string();
 
         let approve_response = app
             .clone()
@@ -580,7 +579,7 @@ mod tests {
             .unwrap()
             .to_bytes();
         let created: Value = serde_json::from_slice(&body).unwrap();
-        let proposal_id = created["id"].as_u64().unwrap();
+        let proposal_id = created["id"].as_str().unwrap().to_string();
 
         let comment_response = app
             .oneshot(
@@ -642,7 +641,7 @@ mod tests {
             .unwrap()
             .to_bytes();
         let created: Value = serde_json::from_slice(&body).unwrap();
-        let proposal_id = created["id"].as_u64().unwrap();
+        let proposal_id = created["id"].as_str().unwrap().to_string();
 
         let approve_response = app
             .clone()

@@ -33,6 +33,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getEventlogPathForTab } from '@/ui/app/pages/eventlog-route-memory';
 import {
+  formatProposalShortId,
   formatProposalAbsoluteTime,
   formatProposalRelativeTime,
   normalizeProposalActionParams,
@@ -87,8 +88,8 @@ const DEFAULT_COMMENT_AUTHOR: ProposalPublisher = {
 
 function resolveSelection(
   proposals: Proposal[],
-  currentId: number | null,
-): number | null {
+  currentId: string | null,
+): string | null {
   if (currentId !== null && proposals.some((proposal) => proposal.id === currentId)) {
     return currentId;
   }
@@ -190,7 +191,7 @@ export function ProposalInboxPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [selectedProposalId, setSelectedProposalId] = useState<number | null>(null);
+  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProposalFilterKey>('all');
   const [actionParamsText, setActionParamsText] = useState('{}');
   const [commentDraft, setCommentDraft] = useState('');
@@ -630,7 +631,7 @@ export function ProposalInboxPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <ProposalStatusPill status={selectedProposal.status} />
                           <span className="rounded-full bg-[#F5F0ED] px-2 py-1 text-[11px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
-                            #{selectedProposal.id}
+                            #{formatProposalShortId(selectedProposal.id)}
                           </span>
                         </div>
                         <h2 className="mt-3 text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">

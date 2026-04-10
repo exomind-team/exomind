@@ -25,7 +25,7 @@ const sampleReferences: ProposalReference[] = [
 ];
 
 const sampleProposal: Proposal = {
-  id: 7,
+  id: 'proposal-7',
   title: '整理会议记录',
   body: '根据上午的会话记录生成任务。',
   actionType: 'create_task',
@@ -176,7 +176,7 @@ describe('ProposalRtAdapter', () => {
   it('returns null when getProposal receives 404', async () => {
     fetchImpl.mockResolvedValueOnce(new Response('', { status: 404 }));
 
-    const result = await adapter.getProposal(99);
+    const result = await adapter.getProposal('proposal-99');
 
     expect(result).toBeNull();
   });
@@ -249,7 +249,7 @@ describe('ProposalRtAdapter', () => {
       snoozeUntil: null,
     };
 
-    await adapter.updateProposal(7, patch);
+    await adapter.updateProposal('proposal-7', patch);
 
     const [, init] = fetchImpl.mock.calls[0] ?? [];
     expect(init?.method).toBe('PATCH');

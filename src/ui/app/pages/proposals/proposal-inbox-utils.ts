@@ -75,8 +75,12 @@ export function sortProposals(proposals: Proposal[]): Proposal[] {
       return createdDiff;
     }
 
-    return right.id - left.id;
+    return right.id.localeCompare(left.id);
   });
+}
+
+export function formatProposalShortId(id: string): string {
+  return id.length > 8 ? id.slice(0, 8) : id;
 }
 
 export function normalizeProposalActionParams(value: unknown): string {

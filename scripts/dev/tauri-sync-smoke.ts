@@ -349,12 +349,15 @@ async function readManagedInstanceRecords(projectRoot: string): Promise<ManagedT
   return records.sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function recordToInstanceDescriptor(record: ManagedTauriInstanceRecord): ManagedInstanceDescriptor {
+function recordToInstanceDescriptor(
+  record: ManagedTauriInstanceRecord,
+  bridgePortOverride?: number,
+): ManagedInstanceDescriptor {
   return {
     name: record.name,
     webPort: record.webPort,
     hmrPort: record.hmrPort,
-    bridgePort: resolveManagedInstanceBridgePort(record.webPort),
+    bridgePort: bridgePortOverride ?? resolveManagedInstanceBridgePort(record.webPort),
     rootPid: record.rootPid,
     source: 'manager',
   };
@@ -387,8 +390,8 @@ async function resolveManagedInstances(
   if (selectedA && selectedB) {
     return {
       instances: {
-        a: recordToInstanceDescriptor(selectedA),
-        b: recordToInstanceDescriptor(selectedB),
+        a: recordToInstanceDescriptor(selectedA, options.bridgePortA),
+        b: recordToInstanceDescriptor(selectedB, options.bridgePortB),
       },
       managerSnapshot: records,
     };
@@ -401,8 +404,8 @@ async function resolveManagedInstances(
     }
     return {
       instances: {
-        a: recordToInstanceDescriptor(selectedA),
-        b: recordToInstanceDescriptor(candidate),
+        a: recordToInstanceDescriptor(selectedA, options.bridgePortA),
+        b: recordToInstanceDescriptor(candidate, options.bridgePortB),
       },
       managerSnapshot: records,
     };
@@ -415,8 +418,8 @@ async function resolveManagedInstances(
     }
     return {
       instances: {
-        a: recordToInstanceDescriptor(candidate),
-        b: recordToInstanceDescriptor(selectedB),
+        a: recordToInstanceDescriptor(candidate, options.bridgePortA),
+        b: recordToInstanceDescriptor(selectedB, options.bridgePortB),
       },
       managerSnapshot: records,
     };
@@ -448,8 +451,8 @@ async function resolveManagedInstances(
 
   return {
     instances: {
-      a: recordToInstanceDescriptor(liveRecords[0]),
-      b: recordToInstanceDescriptor(liveRecords[1]),
+      a: recordToInstanceDescriptor(liveRecords[0], options.bridgePortA),
+      b: recordToInstanceDescriptor(liveRecords[1], options.bridgePortB),
     },
     managerSnapshot: records,
   };
@@ -467,6 +470,9 @@ class RawBridgeClient {
   >();
   private readonly opened: Promise<void>;
   private sequence = 0;
+  private runtimeBaseUrl: string | null = null;
+  private runtimeHostId: string | null = null;
+  private runtimeHref: string | null = null;
 
   constructor(private readonly url: string) {
     this.ws = new WebSocket(url);
@@ -509,7 +515,11 @@ class RawBridgeClient {
     await this.opened;
   }
 
-  async send<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+  async send<T>(
+    command: string,
+    args: Record<string, unknown> = {},
+    timeoutMs = 15_000,
+  ): Promise<T> {
     await this.ready();
 
     return await new Promise<T>((resolve, reject) => {
@@ -517,7 +527,7 @@ class RawBridgeClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`bridge command timeout: ${command}`));
-      }, 15_000);
+      }, timeoutMs);
 
       this.pending.set(id, {
         resolve: (message) => {
@@ -535,11 +545,28 @@ class RawBridgeClient {
     });
   }
 
-  async executeJs<T>(script: string): Promise<T> {
+  async executeJs<T>(script: string, timeoutMs = 15_000): Promise<T> {
     return await this.send<T>('execute_js', {
       script,
       windowLabel: 'main',
-    });
+    }, timeoutMs);
+  }
+
+  bindRuntimeContext(context: Pick<BridgeRuntimeContext, 'rtBaseUrl' | 'runtimeStatus' | 'href'>): void {
+    this.runtimeBaseUrl = context.rtBaseUrl;
+    this.runtimeHostId = context.runtimeStatus.hostId ?? null;
+    this.runtimeHref = context.href;
+  }
+
+  getBoundRuntimeContext(): { rtBaseUrl: string; hostId: string | null; href: string | null } | null {
+    if (!this.runtimeBaseUrl) {
+      return null;
+    }
+    return {
+      rtBaseUrl: this.runtimeBaseUrl,
+      hostId: this.runtimeHostId,
+      href: this.runtimeHref,
+    };
   }
 
   close(): void {
@@ -626,15 +653,86 @@ async function pageFetch<T>(
     timeoutMs: number;
   },
 ): Promise<PageFetchResponse<T>> {
+  const boundRuntime = client.getBoundRuntimeContext();
+  if (boundRuntime) {
+    const targetUrl = input.url ?? `${boundRuntime.rtBaseUrl}${input.path ?? ''}`;
+    const response = await fetchRuntimeResponse<T>(targetUrl, input.timeoutMs, {
+      method: input.method ?? 'GET',
+      headers: input.headers,
+      body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    });
+    return {
+      ...response,
+      rtBaseUrl: boundRuntime.rtBaseUrl,
+      hostId: boundRuntime.hostId,
+      href: boundRuntime.href ?? targetUrl,
+    };
+  }
+
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
+  const requestTimeoutMs = Math.max(1_500, Math.min(input.timeoutMs, 8_000));
   return await client.executeJs<PageFetchResponse<T>>(buildPageFetchScript({
     path: input.path,
     url: input.url,
     method: input.method,
     headers: input.headers,
     body,
-    timeoutMs: input.timeoutMs,
-  }));
+    timeoutMs: requestTimeoutMs,
+  }), Math.max(input.timeoutMs + 5_000, 20_000));
+}
+
+async function fetchRuntimeResponse<T>(
+  url: string,
+  timeoutMs: number,
+  init?: RequestInit,
+): Promise<{
+  ok: boolean;
+  status: number;
+  text: string;
+  json: T | null;
+  error: string | null;
+}> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers = new Headers(init?.headers ?? {});
+    if (!headers.has('Origin')) {
+      headers.set('Origin', 'http://localhost');
+    }
+    if (!headers.has('Accept')) {
+      headers.set('Accept', 'application/json');
+    }
+
+    const response = await fetch(url, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let json: T | null = null;
+    try {
+      json = text ? JSON.parse(text) as T : null;
+    } catch {
+      json = null;
+    }
+    return {
+      ok: response.ok,
+      status: response.status,
+      text,
+      json,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      text: '',
+      json: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function pollUntil<T>(
@@ -709,6 +807,7 @@ async function waitForPageReady(
       };
     })()`);
     if (snapshot.pathname === route && snapshot.runtimeStatus?.running === true) {
+      client.bindRuntimeContext(snapshot);
       return {
         ...snapshot,
         instance,
@@ -795,28 +894,14 @@ async function collectScopeSnapshot(
 }
 
 async function fetchRuntimeJson<T>(url: string, timeoutMs: number): Promise<{ ok: boolean; status: number; json: T | null }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let json: T | null = null;
-    try {
-      json = text ? JSON.parse(text) as T : null;
-    } catch {
-      json = null;
-    }
-    return {
-      ok: response.ok,
-      status: response.status,
-      json,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
+  const response = await fetchRuntimeResponse<T>(url, timeoutMs, {
+    method: 'GET',
+  });
+  return {
+    ok: response.ok,
+    status: response.status,
+    json: response.json,
+  };
 }
 
 async function collectScopeSnapshotFromRuntime(
@@ -1589,7 +1674,7 @@ async function runProposalTest(
   const pathPrefix = `/api/proposals?user_id=${encodeURIComponent(scopeKey)}`;
   const steps: VerificationStep[] = [];
 
-  const create = await pageFetch<{ id: number; title: string; status: string }>(source, {
+  const create = await pageFetch<{ id: string; title: string; status: string }>(source, {
     path: pathPrefix,
     method: 'POST',
     headers: {
@@ -1921,6 +2006,16 @@ async function main(): Promise<void> {
   const { instances, managerSnapshot } = await resolveManagedInstances(options);
   const bridgePortA = options.bridgePortA ?? instances.a.bridgePort;
   const bridgePortB = options.bridgePortB ?? instances.b.bridgePort;
+  const effectiveInstances = {
+    a: {
+      ...instances.a,
+      bridgePort: bridgePortA,
+    },
+    b: {
+      ...instances.b,
+      bridgePort: bridgePortB,
+    },
+  };
   const clientA = new RawBridgeClient(`ws://${options.host}:${bridgePortA}`);
   const clientB = new RawBridgeClient(`ws://${options.host}:${bridgePortB}`);
 
@@ -2017,7 +2112,7 @@ async function main(): Promise<void> {
         bridgePortA,
         bridgePortB,
       },
-      instances,
+      instances: effectiveInstances,
       managerSnapshot,
       bridge: { a: bridgeA, b: bridgeB },
       mesh: {
@@ -2043,7 +2138,7 @@ async function main(): Promise<void> {
       reportPath: jsonReportPath,
       markdownReportPath,
       profileId: options.profileId,
-      instances,
+      instances: effectiveInstances,
       bridgeA: bridgeA.rtBaseUrl,
       bridgeB: bridgeB.rtBaseUrl,
       overallPassed,
@@ -2059,4 +2154,12 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  await sleep(50);
+  process.exit(process.exitCode ?? 0);
+}

@@ -11,7 +11,7 @@ pub use store::{CreateProposalInput, ProposalFilter, ProposalStore, ProposalStor
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Proposal {
-    pub id: u64,
+    pub id: String,
     pub title: String,
     pub body: String,
     pub action_type: ActionType,
