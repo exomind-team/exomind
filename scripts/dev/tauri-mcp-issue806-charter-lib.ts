@@ -1,5 +1,9 @@
 export interface RtSessionRecord {
   agent_kind?: string | null;
+  context?: {
+    work_dir?: string | null;
+    worktree_path?: string | null;
+  } | null;
   id: string;
   status: string;
   interaction_mode?: string | null;

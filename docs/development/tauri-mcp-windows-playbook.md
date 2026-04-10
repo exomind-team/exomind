@@ -149,8 +149,8 @@
   - `window.__TAURI__.core.invoke('runtime_service_start')`
 - 可直接用页面上下文 `fetch('http://127.0.0.1:9124/...')` 验证 RT；不要把裸 `curl` 的 401 直接等同于“页面里也 401”。
 - 普通终端 transcript 回放已在页面上下文直接验证成功：
-  - `EventSource('http://127.0.0.1:9124/pty/<pty_id>/stream')`
-  - 对 `output` 事件做 base64 解码后，确认包含 marker：
+  - `WebSocket('ws://127.0.0.1:9124/pty/<pty_id>/ws?mode=output')`
+  - 对 `output` 帧做 base64 解码后，确认包含 marker：
   - `ISSUE806_CMD_1775147010819`
 - 当需要验证“按钮到底有没有触发 React 逻辑”时，单靠 `button.click()` 不够稳定。
   - 更稳的做法：从 DOM 节点上找 `__reactProps$*`，直接调用 `onClick(...)`
@@ -191,8 +191,8 @@
    - `sessions`
    - `pty`
    - `topology`
-3. 需要验证 transcript 是否真的可回放时，直接在页面里建 `EventSource`
-   - 收 `output` / `eof`
+3. 需要验证 transcript 是否真的可回放时，直接在页面里建 PTY output WebSocket
+   - 收 `ready` / `output_reset` / `output` / `eof`
    - base64 解码后断言 marker
 4. 需要验证按钮逻辑时，不要只依赖 DOM click
    - 先查 DOM 上的 `__reactProps$*`
@@ -203,7 +203,7 @@
    - localStorage 持久化键
    - fetch 轨迹
    - 关键 transcript marker
-   一起保存到文档里，避免下轮重复排查
+     一起保存到文档里，避免下轮重复排查
 
 ### 阶段补记：#818 终端 Agent 九条叙事全量通过（2026-04-04）
 
@@ -252,7 +252,7 @@
    - `loadingObserved: false`
    - 只有 `[agent-hub][pty][open]`
    - 没有 `[PtyTerminal] opening/connected`
-   优先怀疑“点到了当前 active PTY，但没有触发真正的 reconnect/remount”。
+     优先怀疑“点到了当前 active PTY，但没有触发真正的 reconnect/remount”。
 3. 如果 spawn 后平铺顺序异常，先检查 localStorage：
    - `exomind:agentHubTiledState.paneOrder` 是否混入了 `ptyId`
 4. 如果 RT 重启后恢复错位，先检查 localStorage：
@@ -261,7 +261,7 @@
    - charter 命令
    - report 路径
    - 通过/失败结论
-   一并写回 PR / issue / playbook，避免下轮重复试错
+     一并写回 PR / issue / playbook，避免下轮重复试错
 
 ### 阶段补记：RT 重启后的重复 session / 归档残留（2026-04-02 深夜）
 
@@ -344,7 +344,7 @@
   - 没有对应 `exomind.exe`
   - raw bridge 不可连
   - 目标 RT 端口不通
-  就不能继续把它当成可用实例。
+    就不能继续把它当成可用实例。
 - 只看 pairing / peer online 会误判问题已经解决；这轮首次新版章程跑出的失败就是：
   - 四域主对象部分可同步
   - 但 Task / TimeBlock 内部动作写出来的 EventLog 副产物没有跨 RT replication
@@ -388,7 +388,7 @@
    - pairing 结果
    - 分域延迟
    - final snapshot
-   一起回写 issue / playbook，避免下轮重复取证。
+     一起回写 issue / playbook，避免下轮重复取证。
 
 #### 本轮踩坑记录
 
@@ -398,7 +398,7 @@
   - task create
   - timeblock start
   - proposal transition
-  结论不是“同步错误”，而是“当前仍有明显延迟尾部，后续应继续压缩”。
+    结论不是“同步错误”，而是“当前仍有明显延迟尾部，后续应继续压缩”。
 - 文档里出现的实例名、端口、报告路径都只是现场样例；下一轮复跑必须先取当前真值，不要机械复用。
 
 ### 阶段补记：#806 章程在真窗实例中完整跑通（2026-04-04）
@@ -547,7 +547,7 @@
   - `192.168.x.x`
   - `10.x.x.x`
   - 其他私网/link-local
-  都应直接绕过 token，不再要求 `Origin`
+    都应直接绕过 token，不再要求 `Origin`
 - trusted loopback origin 这条旧路径仍保留，只是不再是开启 LAN 免 token 后访问本机 RT 的唯一通道
 
 #### 本轮现场验证
@@ -667,7 +667,7 @@
 - 用正在运行的 Tauri dev 实例，把 #806 的两条核心终端用户故事在真实桌面窗口里跑通：
   - Claude/Codex Terminal 在 RT stop/start 后，能够自动恢复并继续原对话
   - 普通终端（CMD）在 RT stop/start 后不自动恢复，但关闭前 transcript 仍可查看
-- 同时沉淀一套 raw bridge + 页面内 `fetch`/`EventSource` 的最小可复用验收套路
+- 同时沉淀一套 raw bridge + 页面内 `fetch` / PTY WebSocket 的最小可复用验收套路
 
 #### 本轮关键实现结论
 
@@ -691,9 +691,9 @@
   - raw bridge `ws://127.0.0.1:9223` 可用
 - Claude 创建后，首次真实交互前不一定立刻出现在 `/pty/sessions?agent_type=claude`
   - 至少发起一次真实对话后，历史 session 才会稳定出现
-- 向 PTY 发输入时，页面内请求体必须是：
-  - `POST /pty/:id/input`
-  - `{ "data": "<base64>" }`
+- 向 PTY 发输入时，页面内输入帧必须是：
+  - `{"type":"input","input_seq":<n>,"data":"<base64>"}`
+  - 通过 `mode=input` 的 PTY WebSocket 发送
   - 不是 `{ "input": "..." }`
 - Claude 历史 session 补绑已在现场验证通过：
   - 创建 Claude PTY
@@ -715,8 +715,8 @@
 
 1. 用 raw bridge 执行 `window.__TAURI__.core.invoke('runtime_service_status')`
 2. 在页面上下文里直接 `fetch('http://127.0.0.1:9124/sessions')` / `fetch('/pty')`
-3. 需要验证 transcript 时，直接在页面里建 `EventSource('/pty/:id/stream')`
-4. 收到 `output` 事件后做 base64 解码，再断言 marker 文本
+3. 需要验证 transcript 时，直接在页面里建 `WebSocket('/pty/:id/ws?mode=output')`
+4. 收到 `output` 帧后做 base64 解码，再断言 marker 文本
 5. 需要确认按钮逻辑是否真正命中 React 时，优先取 DOM 上的 `__reactProps$*` 并直接调 `onClick(...)`
 
 #### 对后续 Agent 的直接提醒
@@ -727,7 +727,7 @@
   - `/sessions`
   - `/pty`
   - `localStorage['exomind:agentHubTiledState']`
-  - `/pty/:id/stream` 的 transcript 内容
+  - PTY output WebSocket 的 transcript 内容
 
 ### 阶段补记：#806 新 PTY 误判 disconnected 竞态修复（2026-04-03）
 
@@ -826,7 +826,7 @@
   - 当前 live `/pty`
   - `tiledPaneOrder`
   - `last_active_at`
-  来挑选某个 `inner_session_id` 的 canonical session
+    来挑选某个 `inner_session_id` 的 canonical session
 - 当用户点击一个旧的重复 session 卡片，或 auto-resume 命中重复历史会话时：
   - 不再发第二次 `/pty/resume`
   - 直接切到 canonical PTY
@@ -872,7 +872,7 @@
 - 通过页面内：
   - `window.__TAURI__.core.invoke('runtime_service_stop')`
   - `window.__TAURI__.core.invoke('runtime_service_start')`
-  做 RT stop/start
+    做 RT stop/start
 - 现场结果：
   - `fullscreenPtyIdBefore = 48e1365a-dcdd-4bb8-be1b-b6807ac60132`
   - `fullscreenPtyIdAfter = 4ebd609b-5103-42d4-b56d-b8cfdf5dfc79`
@@ -1139,7 +1139,7 @@
 3. 如果日志里出现双向 superseded retirement：
    - `new -> old`
    - `old -> new`
-   优先检查：
+     优先检查：
    - `activePtyId` 是否给了断开会话额外加分
    - `/pty` 的 `stopped` 条目是否被误当成 live
 4. 验证“不再 orphan”不要只看 UI：
@@ -1439,7 +1439,7 @@
 
 - 当前 `issue806-g / UI 1420 / RT 9124 / raw bridge 9223` 现场里，若直接跑：
   - `bun scripts/dev/tauri-mcp-issue806-charter.ts --name issue806-g --web-port 1420 --bridge-port 9223 --runtime-db .tmp/tauri-dev-state/issue806-g/app-data/runtime/sessions.sqlite`
-  但当前窗口没有任何活跃终端、`localStorage.exomind:agentHubTiledState` 也没有 `fullscreenTerminalRecovery`，章程会在 RT 重启恢复阶段超时。
+    但当前窗口没有任何活跃终端、`localStorage.exomind:agentHubTiledState` 也没有 `fullscreenTerminalRecovery`，章程会在 RT 重启恢复阶段超时。
 - 这不一定说明产品回归，更常见的真实原因是：
   - 当前实例没有 `#818` 所需的前置态
   - 也就是没有 “Claude/Codex 活跃终端 + 已打开右侧 PTY + fullscreen 恢复快照已落盘”
@@ -1494,11 +1494,11 @@
    - DOM 状态
    - `/sessions`
    - `/pty`
-   拆成短脚本或短轮询；不要塞进一个超长 `execute_js`
+     拆成短脚本或短轮询；不要塞进一个超长 `execute_js`
 5. 当章程 stdout 出现：
    - `issue818Preparation.status = ready/prepared`
    - `fullscreenRecoveryPresent = true`
-   再开始解读后面的 RT 重启恢复结果，才是有效的 `#818` 验收
+     再开始解读后面的 RT 重启恢复结果，才是有效的 `#818` 验收
 
 ### 阶段补记：冲突收敛后再次回归验证 #806 / #818（2026-04-05）
 
@@ -1575,7 +1575,7 @@
 4. 当官方 Tauri MCP 可用时，补两条代表性现场抽查即可：
    - 读 `window.location.pathname` + `localStorage.exomind:agentHubViewMode`
    - 读当前 `tiledVisible / sessionsVisible / topologyVisible`
-   这样能快速确认“导航持久化”和“当前页面真相”
+     这样能快速确认“导航持久化”和“当前页面真相”
 5. 如果章程通过、官方 MCP 抽查也通过，就不要继续怀疑“还有隐藏冲突”：
    - 这时应把问题切换到新的功能需求或新的现场故障
 
@@ -1605,8 +1605,8 @@
   - 这类现象优先解释为前台焦点限制，不直接判产品坏
 - 对 RT 或 PTY 交互，优先走页面内同路径验证，而不是外部旁路猜测：
   - 页面内 `fetch('/sessions')`、`fetch('/pty')`
-  - 页面内 `fetch('/pty/:id/input', ...)`
-  - 页面内 `EventSource('/pty/:id/stream')`
+  - 页面内 PTY input WebSocket helper
+  - 页面内 PTY output WebSocket
 
 #### 固定排障顺序
 
@@ -1669,7 +1669,7 @@
   - `clear-history`
   - 用户操作
   - `history-current`
-  这条链路比“后台 watch 写文件”更可信
+    这条链路比“后台 watch 写文件”更可信
 
 #### 本轮收敛出的调试方法论
 
@@ -1701,7 +1701,7 @@
   - “数据没了”
   - “DOM 没了”
   - “内部测量退化了”
-  分开看。
+    分开看。
 - 另一个单独收敛出的经验是：
   - 对沉浸模式 / 浮层 / 控制面板一类交互，不要只测 DOM 存在
   - 要直接验证：
@@ -1794,9 +1794,9 @@
    - 用多次短读替代一次大轮询
 5. 如果需要验证 PTY 输入交互，而 MCP 键盘/剪贴板因为焦点限制不稳定：
    - 先确认右侧或平铺页 `.xterm` 文本确实在渲染
-   - 再用与 `PtyTerminal.sendTextInput()` 相同的页面内 `fetch('/pty/:id/input', { body: JSON.stringify({ data }) })` 路径验证
+   - 再用与 `PtyTerminal.sendTextInput()` 同链路的页面内 PTY input WebSocket helper 验证
    - 验证重点是：
-     - 请求 `204`
+     - 收到对应 `ack`
      - 页面 `.xterm` 文本出现 marker
    - 同时在文档里注明这是“与 UI 同路径的页面内注入”，不是 RT 外部旁路
 6. 如果 `issue806-g` 与 `web-1420` 混用，先停下来重核实例：
@@ -1860,7 +1860,7 @@
   - 运行一段时间后，`GET /sessions` 观察到：
     - `status = waiting_input`
   - 再调用与前端同路径的：
-    - `POST /pty/<id>/input`
+    - PTY input WebSocket 唤醒字节
   - 2 秒后 `GET /sessions` 观察到：
     - `status = running`
   - 设置页也确认可见：
@@ -1909,7 +1909,7 @@
    - 用隔离 PTY，不要碰用户自己的 Claude / Codex 会话
    - 先用 RT `spawn` 起一个会保持交互态但会空闲的 shell
    - 再用 `GET /sessions` 看状态转移
-   - 唤醒时优先走和前端一致的 `/pty/:id/input`
+   - 唤醒时优先走和前端一致的 PTY input WebSocket
 6. 模态 / 对话框类布局 bug，不要只看截图：
    - 同时用 `getBoundingClientRect()` 记录 dialog 与关键控件宽度
    - 本轮这类几何证据比肉眼截图更容易判断“是否真的没越界”
@@ -1951,14 +1951,14 @@
 
 - 当前无 PTY 会话动作矩阵已经在真实桌面闭环验证通过：
   - `running + structured + no PTY` → `关闭`
-  - `running + terminal + no PTY` → `强制完成`
+  - `running + terminal + no PTY` → `结束`
   - `completed + no PTY` → `归档`
 - 红色提示横幅的交互也已符合预期：
   - 整条可点击
   - 点击后立即消失
   - 不再依赖右上角 `×`
 - 本轮还再次验证了动作结果：
-  - 点击 `关闭` / `强制完成` 后，会话状态从 `running` 进入 `completed`
+  - 点击 `关闭` / `结束` 后，会话状态从 `running` 进入 `completed`
   - 随后卡片动作切换为 `归档`
   - 归档后不再残留活动态 no-PTY 会话
 
@@ -1977,9 +1977,10 @@
    - 是否为整条 button
    - 是否已经移除单独 dismiss 按钮
 5. 验收完成后要把临时会话收敛并归档：
-   - 先触发 `关闭 / 强制完成`
-   - 再点 `归档`
-   - 最后确认 `remainingActiveNoPty = []`
+
+- 先触发 `关闭 / 结束`
+  - 再点 `归档`
+  - 最后确认 `remainingActiveNoPty = []`
 
 ### 阶段补记：#823 API Agent Tab 真机闭环（2026-04-08）
 
@@ -1991,7 +1992,7 @@
   - `发送首轮 / 继续`
   - `继续执行 Tool Results`
   - `读取`
-  这些关键按钮都能真实命中 `/agent-sessions`。
+    这些关键按钮都能真实命中 `/agent-sessions`。
 
 #### 观察结果
 
@@ -2126,3 +2127,105 @@
    - `runtime_service_start`
    - 页面上下文 `fetch('http://127.0.0.1:<rt-port>/topology')`
 5. 最后读取实例 `config.sqlite`，核对 `runtime_config_entries.entry_key=exomind:runtimeHostId` 与 `/topology.host_id` 是否一致。
+
+### 阶段补记：#780 时间块统一桌面叙事实测（2026-04-09）
+
+#### 阶段目标
+
+- 用真实 `tauri dev` 外心实例验证 `#780` 的统一时间块结构，重点不是再看单测，而是确认桌面 UI、RT 路由和持久化在用户叙事上没有割裂。
+- 本轮优先跑：
+  - 叙事 1：从空闲开始新的 active 时间块
+  - 叙事 2：pause -> resume
+  - 叙事 3：stop -> feedback_submit -> gap
+  - 叙事 4：gap / terminal active 不阻塞下一块开始
+  - 叙事 6：reload / RT 重启后的恢复
+
+#### 观察结果
+
+- 当前受控实例：
+  - name: `issue780-tb`
+  - web: `1444`
+  - hmr: `1445`
+  - embedded RT: `1954`
+  - raw bridge: `9247`
+- 官方 `driver_session` 在当前环境里仍返回 `Transport closed`，但 raw bridge `ws://127.0.0.1:9247` 可稳定执行：
+  - `list_windows`
+  - `execute_js`
+- 当前主窗口真实 URL：
+  - `http://localhost:1444/eventlog`
+- 页面上下文直接 `fetch('http://127.0.0.1:1954/timeblocks/active')` 会返回 `200`，但要带：
+  - `?user_id=<current-profile-or-anonymous>`
+- 裸 `curl http://127.0.0.1:1954/timeblocks/active` 现场返回过 `401`；
+  - 对时间块桌面验收，不要把这类裸请求直接当成产品行为真相。
+- 本轮现场先观察到一个 legacy terminal active：
+  - `phase=feedback_submitted`
+  - `transitions=[]`
+  - 但桌面 UI 没把它继续渲染成 running 卡片
+- 从桌面配置态点击开始后，RT 正确把这个 terminal active 收敛为 completed，并创建新 active：
+  - completed 补上 `transitions=[end]`
+  - 新 active 以 `transitions=[start]` 起步
+- pause / resume 实测结果：
+  - RT `phase` 与 UI 按钮文案同步切换
+  - `transitions` 追加 `pause` / `resume`
+- stop / feedback_submit 实测结果：
+  - RT 先进入 `feedback_in_progress`
+  - 完成提交后，当前 active 变为 `blockType=gap`
+  - 已完成块保留：
+    - `start`
+    - `pause`
+    - `resume`
+    - `feedback_start`
+    - `feedback_submit`
+    - `end`
+- 从 gap 再开始下一块时，桌面 UI 未被误阻塞：
+  - gap 先以 completed 形式落库
+  - 新 active 正常创建
+- 持久化旁证：
+  - `.tmp/tauri-dev-state/issue780-tb/app-data/runtime/timeblocks.sqlite`
+  - 当前库内已可直接看到：
+    - active 行：`payload_json.transitions=[start]`
+    - gap 行：`transitions_json=[start,end]`
+    - completed 行：含 `feedback_start / feedback_submit / end`
+- reload 后恢复通过：
+  - 同一个 `startId` 的 active block 被桌面 UI 正确恢复
+- RT stop/start 后恢复通过，但自动脚本本身曾超时：
+  - `runtime_service_status.startedAt` 发生变化，说明 RT 确实重启
+  - 重启后同一个 `startId` 的 active block 重新从 RT 与桌面 UI 同步恢复
+  - 这轮阻塞点在 bridge 脚本等待时序，不在时间块语义本身
+
+#### 结论
+
+- `#780` 本轮桌面叙事主链可判定通过：
+  - terminal active 不再阻塞开始新块
+  - pause / resume / feedback / gap 都能由 `transitions` 派生出一致语义
+  - reload / RT 重启后，没有把 completed / gap 重新误认成 running active
+- 当前仍未在桌面 UI 上补跑的只剩：
+  - Today Planner 入口叙事（`sourcePlannedBlockId`）
+- 因此这轮更像：
+  - 时间块统一主链通过
+  - planner provenance 叙事待补
+
+#### 可复用操作套路
+
+1. 先用 raw bridge 确认主窗口 route 和时间块 testid：
+   - `new-focus-idle-card`
+   - `new-focus-start-button`
+   - `new-focus-pause-resume-button`
+   - `new-focus-end-button`
+   - `new-focus-feedback-confirm`
+2. 页面上下文取 RT 证据时，统一走：
+   - `fetch('http://127.0.0.1:<rt-port>/<path>?user_id=<scope>')`
+3. 不要只看 DOM：
+   - 同步抓 `/timeblocks/active`
+   - `/timeblocks`
+   - 必要时补 `timeblocks.sqlite`
+4. 验证 terminal active 替换时，重点比对三件事：
+   - 旧 active 是否被收敛进 completed
+   - 新 active 是否以 `transitions=[start]` 起步
+   - UI 是否没有继续显示旧 running 卡片
+5. 验证 gap 不阻塞时，重点比对：
+   - 提交反馈后 active 是否变成 `blockType=gap`
+   - 再次开始时是否直接切回新 active
+6. 验证恢复性时，允许把“bridge 脚本等待超时”和“产品状态恢复失败”分开判断：
+   - 前者属于工具时序噪音
+   - 后者才属于时间块统一回归
