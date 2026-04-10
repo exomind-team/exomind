@@ -84,6 +84,8 @@ htmlcov/
 
 # === Website build artifacts ===
 website/preview/
+.astro/
+website/.astro/
 
 # === Agent output (local cache) ===
 agent-output/
