@@ -7,19 +7,23 @@ import { SignalStreamService } from './signal-stream.service';
 import { getTimeBlockService } from './timeblock.service';
 
 export const ACTIVE_BLOCK_REPLICATION_SNAPSHOT_TOPIC = 'active_block.replication.snapshot';
+export const TIMEBLOCK_ACTIVE_REPLICATION_UPSERTED_TOPIC = 'timeblock.replication.active_upserted';
 
 export interface ActiveBlockReplicationCursor {
-  kind: 'active_block_snapshot';
+  kind: 'active_block_snapshot' | 'timeblock_active';
   startId: string;
-  version: number;
-  lastTransitionAt: number;
+  version?: number;
+  updatedAt?: number;
+  lastTransitionAt?: number;
   actorId?: string;
+  originHostId?: string;
 }
 
 export interface ActiveBlockReplicationSnapshotPayload {
   schemaVersion: 1;
   scopeKey?: string;
-  block: TimeBlockData;
+  block?: TimeBlockData;
+  active?: TimeBlockData;
   cursor: ActiveBlockReplicationCursor;
 }
 
@@ -68,6 +72,12 @@ export async function publishActiveBlockReplicationSnapshot(block: TimeBlockData
   });
 }
 
+export function getReplicatedActiveBlock(
+  payload: ActiveBlockReplicationSnapshotPayload,
+): TimeBlockData | null {
+  return payload.block ?? payload.active ?? null;
+}
+
 export async function projectActiveBlockReplicationSnapshot(
   payload: ActiveBlockReplicationSnapshotPayload,
   userId?: string,
@@ -77,9 +87,14 @@ export async function projectActiveBlockReplicationSnapshot(
     return;
   }
 
-  if (getTimeblockBackendMode() === 'rt-sqlite') {
-    await getTimeBlockService().applyReplicatedActiveBlock(payload.block);
+  const block = getReplicatedActiveBlock(payload);
+  if (!block) {
     return;
   }
-  await getActiveBlockStorage(userId).projectReplicatedActiveBlock(payload.block);
+
+  if (getTimeblockBackendMode() === 'rt-sqlite') {
+    await getTimeBlockService().applyReplicatedActiveBlock(block);
+    return;
+  }
+  await getActiveBlockStorage(userId).projectReplicatedActiveBlock(block);
 }

@@ -132,6 +132,7 @@ vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
 
 vi.mock('@/lib/services/ecs-active-block-replication.service', () => ({
   projectActiveBlockReplicationSnapshot: projectActiveBlockSnapshotMock,
+  getReplicatedActiveBlock: (payload: { block?: unknown; active?: unknown }) => payload.block ?? payload.active ?? null,
 }));
 
 vi.mock('@/lib/services/ecs-reminder-replication.service', () => ({
@@ -469,6 +470,78 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     expect(projectActiveBlockSnapshotMock).toHaveBeenLastCalledWith(payloadV2);
   });
 
+  it('projects runtime active-upserted payloads through the same throttled path（运行时 active_upserted 走同一条节流投影链）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    const onActiveBlockReplicationSnapshot = signalHandlerOptions[0].onActiveBlockReplicationSnapshot as
+      | ((payload: {
+        schemaVersion: 1;
+        scopeKey?: string;
+        active?: {
+          startId: string;
+          startTime: number;
+          name: string;
+          mode: 'countup';
+          elapsed: number;
+          paused: boolean;
+          phase: 'running';
+          version?: number;
+          lastTransitionAt?: number;
+          updatedAt?: number;
+          actorId?: string;
+          taskIds?: string[];
+          taskAssociationLog?: unknown[];
+        };
+        cursor: {
+          kind: 'timeblock_active';
+          startId: string;
+          updatedAt: number;
+          originHostId?: string;
+        };
+      }) => Promise<void>)
+      | undefined;
+
+    const payload = {
+      schemaVersion: 1 as const,
+      scopeKey: 'profile-local',
+      active: {
+        startId: 'runtime-block-1',
+        startTime: 1773810410000,
+        name: '运行时专注中',
+        mode: 'countup' as const,
+        elapsed: 42,
+        paused: false,
+        phase: 'running' as const,
+        version: 7,
+        lastTransitionAt: 1773810414000,
+        updatedAt: 1773810414000,
+        actorId: 'rt-a',
+        taskIds: ['task-a'],
+        taskAssociationLog: [],
+      },
+      cursor: {
+        kind: 'timeblock_active' as const,
+        startId: 'runtime-block-1',
+        updatedAt: 1773810414000,
+        originHostId: 'rt-a',
+      },
+    };
+
+    await onActiveBlockReplicationSnapshot?.(payload);
+
+    expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(1);
+    expect(projectActiveBlockSnapshotMock).toHaveBeenLastCalledWith(payload);
+  });
+
   it('notifies task and event listeners from RT lifecycle signals（RT 生命周期信号触发前端热更新）', async () => {
     runtimeStatuses.push({
       running: true,
@@ -525,12 +598,12 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     expect(notifyEventLogChangedMock).toHaveBeenCalledTimes(3);
   });
 
-  it('projects task replication payload and then notifies task listeners（任务复制快照投影后再触发列表刷新）', async () => {
+  it('projects remote task replication payload and then notifies task listeners（远端任务复制快照投影后触发列表刷新）', async () => {
     runtimeStatuses.push({
       running: true,
       host: '127.0.0.1',
       port: 19574,
-      hostId: 'desktop-host',
+      hostId: 'local-host',
       authSecret: 'embedded-secret',
     });
 
@@ -561,6 +634,83 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
 
     expect(projectTaskReplicationUpsertMock).toHaveBeenCalledTimes(1);
     expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifies task listeners when remote replication was already applied by runtime actor（远端任务已被运行时先落地时也要刷新 UI）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'local-host',
+      authSecret: 'embedded-secret',
+    });
+    projectTaskReplicationUpsertMock.mockResolvedValueOnce('ignored');
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    await signalHandlerOptions[0].onTaskReplicationUpserted?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'task_snapshot',
+        taskId: 'task-rep-ignored',
+        updatedAt: 1_700_000_002_000,
+        originHostId: 'peer-host',
+      },
+      task: {
+        id: 'task-rep-ignored',
+        title: 'Replicated task already applied',
+        status: 'pending',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_002_000,
+        timeBlockIds: [],
+      },
+    });
+
+    expect(projectTaskReplicationUpsertMock).toHaveBeenCalledTimes(1);
+    expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips same-host task replication echo to avoid duplicate local refresh（同源任务复制回声不应重复投影与刷新）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    await signalHandlerOptions[0].onTaskReplicationUpserted?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'task_snapshot',
+        taskId: 'task-local-echo',
+        updatedAt: 1_700_000_003_000,
+        originHostId: 'desktop-host',
+      },
+      task: {
+        id: 'task-local-echo',
+        title: 'Local echo task',
+        status: 'pending',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_003_000,
+        timeBlockIds: [],
+      },
+    });
+
+    expect(projectTaskReplicationUpsertMock).not.toHaveBeenCalled();
+    expect(notifyTaskDataChangedMock).not.toHaveBeenCalled();
   });
 
   it('projects reminder replication payload and then notifies reminder listeners（提醒复制快照投影后再触发提醒刷新）', async () => {

@@ -526,6 +526,9 @@ async fn start_block(
         &result.active.task_ids,
     )
     .await;
+    if let Some(ref completed) = result.completed {
+        publish_completed_timeblock_replication_signal(&state, scope_key, completed).await;
+    }
     publish_active_timeblock_replication_signal(&state, scope_key, &result.active).await;
 
     Ok(Json(result))
@@ -1198,6 +1201,91 @@ fn parse_import_strategy(
     }
 }
 
+fn active_block_phase_rank(block: &ActiveBlockData) -> u8 {
+    match block.resolve_phase() {
+        Some("feedback_submitted") => 2,
+        Some("feedback_in_progress") => 1,
+        _ => 0,
+    }
+}
+
+fn active_block_order_time(block: &ActiveBlockData) -> u64 {
+    block
+        .resolve_last_transition_at()
+        .unwrap_or(block.updated_at.unwrap_or(block.resolve_start_time()))
+}
+
+fn should_accept_imported_active_block(existing: &ActiveBlockData, incoming: &ActiveBlockData) -> bool {
+    if existing.start_id != incoming.start_id {
+        let incoming_start = incoming.resolve_start_time();
+        let existing_start = existing.resolve_start_time();
+        if incoming_start > existing_start {
+            return true;
+        }
+        if incoming_start < existing_start {
+            return false;
+        }
+
+        let incoming_order = active_block_order_time(incoming);
+        let existing_order = active_block_order_time(existing);
+        if incoming_order > existing_order {
+            return true;
+        }
+        if incoming_order < existing_order {
+            return false;
+        }
+    }
+
+    let incoming_phase = active_block_phase_rank(incoming);
+    let existing_phase = active_block_phase_rank(existing);
+    if incoming_phase > existing_phase {
+        return true;
+    }
+    if incoming_phase < existing_phase {
+        return false;
+    }
+
+    let incoming_version = incoming.version.unwrap_or(0);
+    let existing_version = existing.version.unwrap_or(0);
+    if incoming_version > existing_version {
+        return true;
+    }
+    if incoming_version < existing_version {
+        return false;
+    }
+
+    let incoming_order = active_block_order_time(incoming);
+    let existing_order = active_block_order_time(existing);
+    if incoming_order > existing_order {
+        return true;
+    }
+    if incoming_order < existing_order {
+        return false;
+    }
+
+    let incoming_actor = incoming.actor_id.as_deref().unwrap_or("");
+    let existing_actor = existing.actor_id.as_deref().unwrap_or("");
+    incoming_actor > existing_actor
+}
+
+fn merge_active_block_import(
+    existing: Option<ActiveBlockData>,
+    imported: Option<ActiveBlockData>,
+) -> Option<ActiveBlockData> {
+    match (existing, imported) {
+        (Some(existing), Some(imported)) => {
+            if should_accept_imported_active_block(&existing, &imported) {
+                Some(imported)
+            } else {
+                Some(existing)
+            }
+        }
+        (Some(existing), None) => Some(existing),
+        (None, Some(imported)) => Some(imported),
+        (None, None) => None,
+    }
+}
+
 fn apply_timeblock_import(
     state: &AppState,
     scope_key: Option<&str>,
@@ -1254,10 +1342,12 @@ fn apply_timeblock_import(
 
     let next_active_block = match strategy {
         TimeBlockImportStrategy::Overwrite => imported_active_block,
-        TimeBlockImportStrategy::Merge => imported_active_block.or(existing_active_block),
+        TimeBlockImportStrategy::Merge => {
+            merge_active_block_import(existing_active_block.clone(), imported_active_block)
+        }
     };
 
-    let active_block_updated = next_active_block.is_some();
+    let active_block_updated = next_active_block != existing_active_block;
     match next_active_block {
         Some(block) => state
             .timeblock_store
@@ -1391,6 +1481,7 @@ pub fn router() -> Router<AppState> {
 mod tests {
     use super::*;
     use crate::signal::SignalPool;
+    use crate::timeblock::{ActiveBlockData, BlockTransition, BlockTransitionType};
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
@@ -1511,15 +1602,13 @@ mod tests {
                         "task-profile-a".to_string(),
                         "continue".to_string(),
                     )])),
-                    task_association_log: vec![
-                        crate::timeblock::BlockTaskAssociationEvent {
-                            block_id: "tb-profile-a".to_string(),
-                            task_id: "task-profile-a".to_string(),
-                            action: "associated".to_string(),
-                            timestamp: 1_700_000_100_000,
-                            source: "block_start".to_string(),
-                        },
-                    ],
+                    task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
+                        block_id: "tb-profile-a".to_string(),
+                        task_id: "task-profile-a".to_string(),
+                        action: "associated".to_string(),
+                        timestamp: 1_700_000_100_000,
+                        source: "block_start".to_string(),
+                    }],
                     source_planned_block_id: None,
                     block_type: None,
                     transitions: vec![],
@@ -1550,15 +1639,13 @@ mod tests {
                     paused: false,
                     paused_at: None,
                     task_ids: vec!["task-profile-a".to_string()],
-                    task_association_log: vec![
-                        crate::timeblock::BlockTaskAssociationEvent {
-                            block_id: "active-profile-a".to_string(),
-                            task_id: "task-profile-a".to_string(),
-                            action: "associated".to_string(),
-                            timestamp: 1_700_000_100_000,
-                            source: "block_start".to_string(),
-                        },
-                    ],
+                    task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
+                        block_id: "active-profile-a".to_string(),
+                        task_id: "task-profile-a".to_string(),
+                        action: "associated".to_string(),
+                        timestamp: 1_700_000_100_000,
+                        source: "block_start".to_string(),
+                    }],
                     source_planned_block_id: None,
                     block_type: None,
                     transitions: vec![],
@@ -1655,15 +1742,13 @@ mod tests {
                         "task-user-a".to_string(),
                         "continue".to_string(),
                     )])),
-                    task_association_log: vec![
-                        crate::timeblock::BlockTaskAssociationEvent {
-                            block_id: "tb-user-a".to_string(),
-                            task_id: "task-user-a".to_string(),
-                            action: "associated".to_string(),
-                            timestamp: 1_700_000_100_000,
-                            source: "block_start".to_string(),
-                        },
-                    ],
+                    task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
+                        block_id: "tb-user-a".to_string(),
+                        task_id: "task-user-a".to_string(),
+                        action: "associated".to_string(),
+                        timestamp: 1_700_000_100_000,
+                        source: "block_start".to_string(),
+                    }],
                     source_planned_block_id: None,
                     block_type: None,
                     transitions: vec![],
@@ -1694,15 +1779,13 @@ mod tests {
                     paused: false,
                     paused_at: None,
                     task_ids: vec!["task-user-a".to_string()],
-                    task_association_log: vec![
-                        crate::timeblock::BlockTaskAssociationEvent {
-                            block_id: "active-user-a".to_string(),
-                            task_id: "task-user-a".to_string(),
-                            action: "associated".to_string(),
-                            timestamp: 1_700_000_100_000,
-                            source: "block_start".to_string(),
-                        },
-                    ],
+                    task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
+                        block_id: "active-user-a".to_string(),
+                        task_id: "task-user-a".to_string(),
+                        action: "associated".to_string(),
+                        timestamp: 1_700_000_100_000,
+                        source: "block_start".to_string(),
+                    }],
                     source_planned_block_id: None,
                     block_type: None,
                     transitions: vec![],
@@ -2026,6 +2109,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scoped_start_block_publishes_completed_gap_replication_when_replacing_gap() {
+        let state =
+            test_state_with_timeblock_store(Arc::new(crate::timeblock::TimeBlockStore::new()));
+        state
+            .timeblock_store
+            .put_active_scoped(
+                Some("profile-argon"),
+                ActiveBlockData {
+                    start_id: "gap-scoped-1".to_string(),
+                    name: String::new(),
+                    mode: "countup".to_string(),
+                    target_minutes: None,
+                    elapsed: 0,
+                    updated_at: Some(1_700_000_101_000),
+                    phase: None,
+                    version: Some(1),
+                    actor_id: Some("actor-gap".to_string()),
+                    last_transition_at: Some(1_700_000_101_000),
+                    last_resumed_at: None,
+                    accumulated_run_ms: None,
+                    start_time: 1_700_000_100_000,
+                    action_ended_at: None,
+                    feedback_started_at: None,
+                    feedback_submitted_at: None,
+                    pause_accumulated_ms: None,
+                    paused: false,
+                    paused_at: None,
+                    task_ids: vec![],
+                    task_association_log: vec![],
+                    source_planned_block_id: None,
+                    block_type: Some("gap".to_string()),
+                    transitions: vec![BlockTransition {
+                        transition_type: BlockTransitionType::Start,
+                        at: 1_700_000_100_000,
+                        actor_id: Some("actor-gap".to_string()),
+                    }],
+                    task_id: None,
+                },
+            )
+            .unwrap();
+        let app = test_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/start?user_id=profile-argon")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"Scoped focus","mode":"countup"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| event.topic == "timeblock.replication.completed")
+            .expect("timeblock start should publish completed gap replication");
+
+        assert_eq!(
+            replication.payload["scopeKey"],
+            serde_json::json!("profile-argon")
+        );
+        assert_eq!(
+            replication.payload["block"]["blockType"],
+            serde_json::json!("gap")
+        );
+        assert_eq!(
+            replication.payload["block"]["startId"],
+            serde_json::json!("gap-scoped-1")
+        );
+    }
+
+    #[tokio::test]
     async fn replication_completed_upsert_inserts_scoped_block_and_ignores_duplicate() {
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("timeblocks-replication.sqlite");
@@ -2161,7 +2322,10 @@ mod tests {
         let completed = timeblock_store.list_completed().unwrap();
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].start_id, "completed-active-1");
-        let active = timeblock_store.get_active().unwrap().expect("replacement active");
+        let active = timeblock_store
+            .get_active()
+            .unwrap()
+            .expect("replacement active");
         assert_ne!(active.start_id, "completed-active-1");
         assert_eq!(active.name, "Next block");
     }
@@ -2226,5 +2390,170 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let error: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(error["error"], "cannot pause: block is in feedback phase");
+    }
+
+    #[test]
+    fn merge_import_keeps_newer_existing_active_block() {
+        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::new());
+        let existing = ActiveBlockData {
+            start_id: "active-existing".to_string(),
+            name: "Existing active".to_string(),
+            mode: "countdown".to_string(),
+            target_minutes: Some(25),
+            block_type: Some("active".to_string()),
+            elapsed: 0,
+            updated_at: Some(3_000),
+            phase: Some("running".to_string()),
+            version: Some(3),
+            actor_id: Some("actor-b".to_string()),
+            last_transition_at: Some(3_000),
+            last_resumed_at: Some(1_000),
+            accumulated_run_ms: Some(2_000),
+            start_time: 1_000,
+            action_ended_at: None,
+            feedback_started_at: None,
+            feedback_submitted_at: None,
+            pause_accumulated_ms: Some(0),
+            paused: false,
+            paused_at: None,
+            task_ids: vec![],
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            transitions: vec![BlockTransition {
+                transition_type: BlockTransitionType::Start,
+                at: 1_000,
+                actor_id: Some("actor-b".to_string()),
+            }],
+            task_id: None,
+        };
+        let imported = ActiveBlockData {
+            start_id: "active-existing".to_string(),
+            name: "Imported older active".to_string(),
+            mode: "countdown".to_string(),
+            target_minutes: Some(25),
+            block_type: Some("active".to_string()),
+            elapsed: 0,
+            updated_at: Some(2_000),
+            phase: Some("running".to_string()),
+            version: Some(2),
+            actor_id: Some("actor-a".to_string()),
+            last_transition_at: Some(2_000),
+            last_resumed_at: Some(1_000),
+            accumulated_run_ms: Some(1_000),
+            start_time: 1_000,
+            action_ended_at: None,
+            feedback_started_at: None,
+            feedback_submitted_at: None,
+            pause_accumulated_ms: Some(0),
+            paused: false,
+            paused_at: None,
+            task_ids: vec![],
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            transitions: vec![BlockTransition {
+                transition_type: BlockTransitionType::Start,
+                at: 1_000,
+                actor_id: Some("actor-a".to_string()),
+            }],
+            task_id: None,
+        };
+        timeblock_store.put_active(existing.clone()).unwrap();
+        let state = test_state_with_timeblock_store(timeblock_store.clone());
+
+        let result =
+            apply_timeblock_import(&state, None, vec![], Some(imported), TimeBlockImportStrategy::Merge)
+                .unwrap();
+
+        assert!(!result.active_block_updated);
+        let active = timeblock_store.get_active().unwrap().expect("active block");
+        assert_eq!(active.name, existing.name);
+        assert_eq!(active.version, existing.version);
+        assert_eq!(active.actor_id, existing.actor_id);
+    }
+
+    #[test]
+    fn merge_import_prefers_higher_phase_active_block() {
+        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::new());
+        let existing = ActiveBlockData {
+            start_id: "active-phase".to_string(),
+            name: "Running active".to_string(),
+            mode: "countdown".to_string(),
+            target_minutes: Some(25),
+            block_type: Some("active".to_string()),
+            elapsed: 0,
+            updated_at: Some(3_000),
+            phase: Some("running".to_string()),
+            version: Some(3),
+            actor_id: Some("actor-a".to_string()),
+            last_transition_at: Some(3_000),
+            last_resumed_at: Some(1_000),
+            accumulated_run_ms: Some(2_000),
+            start_time: 1_000,
+            action_ended_at: None,
+            feedback_started_at: None,
+            feedback_submitted_at: None,
+            pause_accumulated_ms: Some(0),
+            paused: false,
+            paused_at: None,
+            task_ids: vec![],
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            transitions: vec![BlockTransition {
+                transition_type: BlockTransitionType::Start,
+                at: 1_000,
+                actor_id: Some("actor-a".to_string()),
+            }],
+            task_id: None,
+        };
+        let imported = ActiveBlockData {
+            start_id: "active-phase".to_string(),
+            name: "Feedback active".to_string(),
+            mode: "countdown".to_string(),
+            target_minutes: Some(25),
+            block_type: Some("active".to_string()),
+            elapsed: 0,
+            updated_at: Some(3_000),
+            phase: Some("feedback_in_progress".to_string()),
+            version: Some(3),
+            actor_id: Some("actor-b".to_string()),
+            last_transition_at: Some(3_500),
+            last_resumed_at: Some(1_000),
+            accumulated_run_ms: Some(2_000),
+            start_time: 1_000,
+            action_ended_at: Some(3_500),
+            feedback_started_at: Some(3_500),
+            feedback_submitted_at: None,
+            pause_accumulated_ms: Some(0),
+            paused: false,
+            paused_at: None,
+            task_ids: vec![],
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            transitions: vec![
+                BlockTransition {
+                    transition_type: BlockTransitionType::Start,
+                    at: 1_000,
+                    actor_id: Some("actor-b".to_string()),
+                },
+                BlockTransition {
+                    transition_type: BlockTransitionType::FeedbackStart,
+                    at: 3_500,
+                    actor_id: Some("actor-b".to_string()),
+                },
+            ],
+            task_id: None,
+        };
+        timeblock_store.put_active(existing).unwrap();
+        let state = test_state_with_timeblock_store(timeblock_store.clone());
+
+        let result =
+            apply_timeblock_import(&state, None, vec![], Some(imported.clone()), TimeBlockImportStrategy::Merge)
+                .unwrap();
+
+        assert!(result.active_block_updated);
+        let active = timeblock_store.get_active().unwrap().expect("active block");
+        assert_eq!(active.name, imported.name);
+        assert_eq!(active.version, imported.version);
+        assert_eq!(active.feedback_started_at, imported.feedback_started_at);
     }
 }

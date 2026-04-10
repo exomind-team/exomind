@@ -24,14 +24,18 @@ import {
   appendEventWithEcsReplication,
   projectEventLogReplicationAppend,
 } from '@/lib/services/ecs-eventlog-replication.service';
-import type { ActiveBlockReplicationSnapshotPayload } from '@/lib/services/ecs-active-block-replication.service';
-import { projectActiveBlockReplicationSnapshot as projectActiveBlockSnapshot } from '@/lib/services/ecs-active-block-replication.service';
+import {
+  getReplicatedActiveBlock,
+  projectActiveBlockReplicationSnapshot as projectActiveBlockSnapshot,
+  type ActiveBlockReplicationSnapshotPayload,
+} from '@/lib/services/ecs-active-block-replication.service';
 import { projectTaskReplicationUpsert } from '@/lib/services/ecs-task-replication.service';
 import { projectReminderReplicationUpsert } from '@/lib/services/ecs-reminder-replication.service';
 import { projectTimeBlockCompletedReplication } from '@/lib/services/ecs-timeblock-completed-replication.service';
 import {
   getSelectedRuntimeTarget,
   persistEmbeddedRuntimeStatus,
+  readEmbeddedRuntimeStatus,
   subscribeRuntimeTargetChanges,
   type RuntimeTarget,
 } from '@/config/runtime-target';
@@ -45,13 +49,24 @@ import { log } from '@/lib/logger';
 const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
 
 function buildActiveBlockSnapshotSignature(payload: ActiveBlockReplicationSnapshotPayload): string {
+  const block = getReplicatedActiveBlock(payload);
+  if (!block) {
+    return [
+      payload.cursor.startId,
+      payload.cursor.version ?? '',
+      payload.cursor.lastTransitionAt ?? payload.cursor.updatedAt ?? '',
+      payload.cursor.actorId ?? payload.cursor.originHostId ?? '',
+      'missing-block',
+    ].join('|');
+  }
+
   return [
     payload.cursor.startId,
-    payload.cursor.version,
-    payload.cursor.lastTransitionAt,
-    payload.cursor.actorId ?? '',
-    payload.block.phase ?? '',
-    payload.block.paused ? '1' : '0',
+    payload.cursor.version ?? block.version ?? '',
+    payload.cursor.lastTransitionAt ?? payload.cursor.updatedAt ?? block.lastTransitionAt ?? block.updatedAt ?? block.startTime,
+    payload.cursor.actorId ?? payload.cursor.originHostId ?? block.actorId ?? '',
+    block.phase ?? '',
+    block.paused ? '1' : '0',
   ].join('|');
 }
 
@@ -181,6 +196,9 @@ export function useSignalStream(): void {
       return;
     }
 
+    const currentRuntimeHostId = runtimeTarget.mode === 'embedded'
+      ? readEmbeddedRuntimeStatus()?.hostId ?? null
+      : null;
     const targetLabel = `${runtimeTarget.mode}:${runtimeTarget.host}:${runtimeTarget.port}`;
     const service = new SignalStreamService({
       host: {
@@ -213,8 +231,17 @@ export function useSignalStream(): void {
         notifyEventLogChanged();
       },
       onTaskReplicationUpserted: async (payload) => {
+        const isSameRuntimeOrigin = Boolean(
+          currentRuntimeHostId
+          && payload.cursor.originHostId
+          && payload.cursor.originHostId === currentRuntimeHostId,
+        );
+        if (isSameRuntimeOrigin) {
+          return;
+        }
+
         const result = await projectTaskReplicationUpsert(payload);
-        if (result !== 'ignored') {
+        if (result !== 'ignored' || !currentRuntimeHostId || payload.cursor.originHostId !== currentRuntimeHostId) {
           notifyTaskDataChanged();
         }
       },
@@ -277,8 +304,8 @@ export function useSignalStream(): void {
           log.info('[SignalStream] eventlog.replication.appended → EventStorage');
         }
       },
-      // Throttle: RT dispatches active_block.replication.snapshot at high frequency
-      // (dozens per second), causing UI state overwrites. Cap at 1s. See #554.
+      // Throttle: RT may dispatch active block replication at high frequency,
+      // causing UI state overwrites. Cap at 1s. See #554.
       onActiveBlockReplicationSnapshot: (() => {
         let lastProcessedAt = 0;
         let lastProcessedSignature: string | null = null;

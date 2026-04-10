@@ -298,6 +298,44 @@ describe('signal-handlers: active_block.replication.snapshot', () => {
     expect(onActiveBlockReplicationSnapshot).toHaveBeenCalledTimes(1);
     expect(onActiveBlockReplicationSnapshot).toHaveBeenCalledWith(payload);
   });
+
+  it('calls onActiveBlockReplicationSnapshot when topic is timeblock.replication.active_upserted', async () => {
+    const onActiveBlockReplicationSnapshot = vi
+      .fn<[ActiveBlockReplicationSnapshotPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onActiveBlockReplicationSnapshot });
+    const now = Date.now();
+    const payload: ActiveBlockReplicationSnapshotPayload = {
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      active: {
+        startId: 'tb-ecs-2',
+        name: '运行时活跃时间块',
+        startTime: now - 20_000,
+        elapsed: 8_000,
+        mode: 'countup',
+        paused: false,
+        phase: 'running',
+        version: 3,
+        actorId: 'desktop-host',
+        lastTransitionAt: now - 500,
+        updatedAt: now - 500,
+        pauseAccumulatedMs: 0,
+      },
+      cursor: {
+        kind: 'timeblock_active',
+        startId: 'tb-ecs-2',
+        updatedAt: now - 500,
+        originHostId: 'desktop-host',
+      },
+    };
+
+    await handler(makeSignalEvent('timeblock.replication.active_upserted', payload));
+
+    expect(onActiveBlockReplicationSnapshot).toHaveBeenCalledTimes(1);
+    expect(onActiveBlockReplicationSnapshot).toHaveBeenCalledWith(payload);
+  });
 });
 
 describe('signal-handlers: task.replication.upserted', () => {

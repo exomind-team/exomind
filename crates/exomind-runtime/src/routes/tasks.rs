@@ -155,7 +155,7 @@ async fn create_task(
     let task = state.task_store.create_scoped(scope_key, input);
 
     publish_task_signal(&state, "task.created", &task);
-    publish_task_replication_signal(&state, scope_key, &task).await;
+    publish_task_replication_signal(&state, scope_key, &task);
 
     (StatusCode::CREATED, Json(task))
 }
@@ -177,7 +177,7 @@ async fn update_task(
         })?;
 
     publish_task_signal(&state, "task.updated", &task);
-    publish_task_replication_signal(&state, scope_key, &task).await;
+    publish_task_replication_signal(&state, scope_key, &task);
 
     Ok(Json(task))
 }
@@ -202,7 +202,7 @@ async fn transition_task(
 
         for (old_status, task) in &steps {
             publish_task_transition_signal(&state, *old_status, task);
-            publish_task_replication_signal(&state, scope_key, task).await;
+            publish_task_replication_signal(&state, scope_key, task);
             write_task_transition_eventlog(
                 &state,
                 scope_key,
@@ -222,7 +222,7 @@ async fn transition_task(
         .map_err(map_task_store_error)?;
 
     publish_task_transition_signal(&state, old_status, &task);
-    publish_task_replication_signal(&state, scope_key, &task).await;
+    publish_task_replication_signal(&state, scope_key, &task);
     write_task_transition_eventlog(
         &state,
         scope_key,
@@ -264,7 +264,7 @@ async fn batch_transition_tasks(
                 Ok((steps, (old_status, task))) => {
                     for (step_old_status, step_task) in &steps {
                         publish_task_transition_signal(&state, *step_old_status, step_task);
-                        publish_task_replication_signal(&state, scope_key, step_task).await;
+                        publish_task_replication_signal(&state, scope_key, step_task);
                         write_task_transition_eventlog(
                             &state,
                             scope_key,
@@ -303,7 +303,7 @@ async fn batch_transition_tasks(
         {
             Ok((old_status, task)) => {
                 publish_task_transition_signal(&state, old_status, &task);
-                publish_task_replication_signal(&state, scope_key, &task).await;
+                publish_task_replication_signal(&state, scope_key, &task);
                 write_task_transition_eventlog(
                     &state,
                     scope_key,
@@ -369,7 +369,7 @@ async fn cancel_task(
     let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
 
     publish_task_signal(&state, "task.cancelled", &task);
-    publish_task_replication_signal(&state, scope_key, &task).await;
+    publish_task_replication_signal(&state, scope_key, &task);
     write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/cancel").await;
 
     Ok(Json(task))
@@ -385,7 +385,7 @@ async fn delete_task(
     let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
 
     publish_task_signal(&state, "task.cancelled", &task);
-    publish_task_replication_signal(&state, scope_key, &task).await;
+    publish_task_replication_signal(&state, scope_key, &task);
     write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete").await;
 
     Ok(Json(task))
@@ -491,7 +491,7 @@ fn build_task_replication_payload(
     })
 }
 
-async fn publish_task_replication_signal(state: &AppState, scope_key: Option<&str>, task: &Task) {
+fn publish_task_replication_signal(state: &AppState, scope_key: Option<&str>, task: &Task) {
     let event = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
@@ -506,7 +506,10 @@ async fn publish_task_replication_signal(state: &AppState, scope_key: Option<&st
 
     state.signal_pool.publish(event.clone());
     if let Some(mesh_relay) = &state.mesh_relay {
-        mesh_relay.forward_event_to_peers(event).await;
+        let relay = std::sync::Arc::clone(mesh_relay);
+        tokio::spawn(async move {
+            relay.forward_event_to_peers(event).await;
+        });
     }
 }
 
@@ -713,12 +716,21 @@ fn apply_task_import(
             let mut imported = 0usize;
             let mut skipped = 0usize;
             for task in incoming {
-                if merged.contains_key(&task.id) {
-                    skipped += 1;
-                } else {
-                    imported += 1;
+                match merged.get(&task.id) {
+                    Some(current)
+                        if should_accept_replicated_task(current, &task, None, &state.host_id) =>
+                    {
+                        skipped += 1;
+                        merged.insert(task.id.clone(), task);
+                    }
+                    Some(_) => {
+                        skipped += 1;
+                    }
+                    None => {
+                        imported += 1;
+                        merged.insert(task.id.clone(), task);
+                    }
                 }
-                merged.insert(task.id.clone(), task);
             }
 
             let next = merged.into_values().collect::<Vec<_>>();
@@ -2085,6 +2097,7 @@ mod tests {
             estimated_minutes: None,
             time_block_ids: vec![],
         });
+        let newer_updated_at = existing.updated_at + 1_000;
         let app = test_router(state.clone());
 
         let response = app
@@ -2112,7 +2125,7 @@ mod tests {
                                     "estimated_minutes": null,
                                     "time_block_ids": [],
                                     "created_at": 1000,
-                                    "updated_at": 2000,
+                                    "updated_at": {},
                                     "completed_at": null
                                 }},
                                 {{
@@ -2135,7 +2148,7 @@ mod tests {
                                 }}
                             ]
                         }}"#,
-                        existing.id
+                        existing.id, newer_updated_at
                     )))
                     .unwrap(),
             )
@@ -2153,6 +2166,79 @@ mod tests {
         assert_eq!(tasks.len(), 2);
         assert!(tasks.iter().any(|task| task.title == "Imported task"));
         assert!(tasks.iter().any(|task| task.title == "Existing replaced"));
+    }
+
+    #[tokio::test]
+    async fn merge_import_ignores_older_task_snapshot() {
+        let state = test_state();
+        let existing = state.task_store.create(CreateTaskInput {
+            title: "Existing".to_string(),
+            description: Some("newer local".to_string()),
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let existing_updated_at = existing.updated_at;
+        let older_updated_at = existing_updated_at.saturating_sub(1_000);
+        let app = test_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/import/json?strategy=merge")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{
+                            "version": 1,
+                            "tasks": [
+                                {{
+                                    "id": "{}",
+                                    "title": "Existing older snapshot",
+                                    "description": "older remote",
+                                    "done_condition": null,
+                                    "status": "pending",
+                                    "priority": "medium",
+                                    "tags": [],
+                                    "source": null,
+                                    "parent_id": null,
+                                    "depends_on": [],
+                                    "due_at": null,
+                                    "estimated_minutes": null,
+                                    "time_block_ids": [],
+                                    "created_at": 1000,
+                                    "updated_at": {},
+                                    "completed_at": null
+                                }}
+                            ]
+                        }}"#,
+                        existing.id, older_updated_at
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["imported"], 0);
+        assert_eq!(result["skipped"], 1);
+        assert_eq!(result["total"], 1);
+
+        let merged = state
+            .task_store
+            .get(&existing.id)
+            .expect("existing task should remain after import");
+        assert_eq!(merged.title, "Existing");
+        assert_eq!(merged.description.as_deref(), Some("newer local"));
+        assert_eq!(merged.updated_at, existing_updated_at);
     }
 
     #[tokio::test]

@@ -97,13 +97,17 @@ export interface EventLogReplicationAppendedPayload {
 /** Payload shape for active_block.replication.snapshot signals. */
 export interface ActiveBlockReplicationSnapshotPayload {
   schemaVersion: 1;
-  block: TimeBlockData;
+  scopeKey?: string;
+  block?: TimeBlockData;
+  active?: TimeBlockData;
   cursor: {
-    kind: 'active_block_snapshot';
+    kind: 'active_block_snapshot' | 'timeblock_active';
     startId: string;
-    version: number;
-    lastTransitionAt: number;
+    version?: number;
+    updatedAt?: number;
+    lastTransitionAt?: number;
     actorId?: string;
+    originHostId?: string;
   };
 }
 
@@ -231,6 +235,7 @@ export function startSignalHandlers(
         break;
 
       case 'active_block.replication.snapshot':
+      case 'timeblock.replication.active_upserted':
         if (options.onActiveBlockReplicationSnapshot) {
           await options.onActiveBlockReplicationSnapshot(event.payload as ActiveBlockReplicationSnapshotPayload);
         }
