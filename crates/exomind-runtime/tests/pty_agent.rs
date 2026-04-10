@@ -8,10 +8,16 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use exomind_runtime::{RuntimeStartOptions, start_with_options};
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
+use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
 use tempfile::TempDir;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Error as WsError;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+const PTY_WS_PROTOCOL_VERSION: u8 = 3;
 
 /// Helper: start a lightweight runtime with no builtin actors or TS agents.
 async fn start_test_runtime() -> (exomind_runtime::RuntimeHandle, String) {
@@ -181,16 +187,157 @@ async fn put_runtime_config(client: &reqwest::Client, base_url: &str, key: &str,
     );
 }
 
-async fn write_pty_input(client: &reqwest::Client, base_url: &str, pty_id: &str, data: &[u8]) {
-    let response = client
-        .post(format!("{base_url}/pty/{pty_id}/input"))
-        .json(&serde_json::json!({
-            "data": BASE64.encode(data),
-        }))
-        .send()
+type PtyWsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct PtyWsCapabilities {
+    input_ack: bool,
+    resize: bool,
+    resize_ack: bool,
+    output_stream: bool,
+    output_cursor: bool,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum PtyWsServerMessage {
+    Ready {
+        protocol_version: u8,
+        capabilities: PtyWsCapabilities,
+        read_only: bool,
+    },
+    OutputReset {
+        offset: u64,
+        truncated: bool,
+    },
+    Output {
+        offset: u64,
+        data: String,
+    },
+    Eof {
+        offset: u64,
+        code: Option<i32>,
+    },
+    Ack {
+        input_seq: u64,
+    },
+    ResizeAck {
+        resize_seq: u64,
+    },
+    Pong {
+        nonce: Option<u64>,
+    },
+    Error {
+        code: String,
+        message: String,
+        input_seq: Option<u64>,
+        resize_seq: Option<u64>,
+    },
+}
+
+fn build_pty_ws_url(base_url: &str, pty_id: &str, mode: &str) -> String {
+    let ws_base = if let Some(rest) = base_url.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base_url.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        panic!("unexpected runtime base url: {base_url}");
+    };
+    format!("{ws_base}/pty/{pty_id}/ws?mode={mode}")
+}
+
+async fn connect_pty_ws(base_url: &str, pty_id: &str, mode: &str) -> PtyWsStream {
+    let (socket, _) = connect_async(build_pty_ws_url(base_url, pty_id, mode))
         .await
-        .expect("pty input request should succeed");
-    assert_eq!(response.status().as_u16(), 204);
+        .expect("pty websocket should connect");
+    socket
+}
+
+async fn connect_pty_ws_eventually(
+    base_url: &str,
+    pty_id: &str,
+    mode: &str,
+    timeout: Duration,
+) -> PtyWsStream {
+    let url = build_pty_ws_url(base_url, pty_id, mode);
+    let started = std::time::Instant::now();
+
+    loop {
+        match connect_async(&url).await {
+            Ok((socket, _)) => return socket,
+            Err(WsError::Http(response))
+                if response.status().as_u16() == 404 && started.elapsed() < timeout =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(error) => panic!("pty websocket should connect eventually: {error:?}"),
+        }
+    }
+}
+
+async fn read_pty_ws_json(stream: &mut PtyWsStream) -> PtyWsServerMessage {
+    let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("pty websocket should yield a frame before timeout")
+        .expect("pty websocket should stay open")
+        .expect("pty websocket frame should decode");
+    let text = frame
+        .into_text()
+        .expect("pty websocket frame should be text");
+    serde_json::from_str(text.as_ref()).expect("pty websocket payload should be valid json")
+}
+
+async fn read_pty_ws_json_until<F>(stream: &mut PtyWsStream, mut predicate: F) -> PtyWsServerMessage
+where
+    F: FnMut(&PtyWsServerMessage) -> bool,
+{
+    loop {
+        let message = read_pty_ws_json(stream).await;
+        if predicate(&message) {
+            return message;
+        }
+    }
+}
+
+fn assert_writable_pty_ws_ready(message: PtyWsServerMessage) {
+    assert_eq!(
+        message,
+        PtyWsServerMessage::Ready {
+            protocol_version: PTY_WS_PROTOCOL_VERSION,
+            capabilities: PtyWsCapabilities {
+                input_ack: true,
+                resize: true,
+                resize_ack: true,
+                output_stream: true,
+                output_cursor: true,
+            },
+            read_only: false,
+        }
+    );
+}
+
+async fn write_pty_input_via_ws(base_url: &str, pty_id: &str, data: &[u8]) {
+    let mut socket = connect_pty_ws(base_url, pty_id, "input").await;
+    assert_writable_pty_ws_ready(read_pty_ws_json(&mut socket).await);
+
+    let payload = serde_json::json!({
+        "type": "input",
+        "input_seq": 1,
+        "data": BASE64.encode(data),
+    });
+    socket
+        .send(WsMessage::Text(payload.to_string().into()))
+        .await
+        .expect("pty input websocket frame should send");
+
+    let ack = read_pty_ws_json_until(&mut socket, |message| {
+        matches!(message, PtyWsServerMessage::Ack { .. })
+    })
+    .await;
+    assert_eq!(ack, PtyWsServerMessage::Ack { input_seq: 1 });
+
+    let _ = socket.close(None).await;
 }
 
 fn build_large_output_input_script(head_marker: &str, tail_marker: &str) -> String {
@@ -234,78 +381,49 @@ fn expected_short_history_middle_marker() -> &'static str {
 }
 
 #[derive(Default)]
-struct DecodedPtySse {
+struct DecodedPtyWs {
     output: String,
     saw_ready: bool,
+    saw_reset: bool,
     saw_eof: bool,
 }
 
-fn decode_sse_event_block(block: &str, decoded: &mut DecodedPtySse) {
-    let mut current_event = String::new();
-
-    for line in block.lines() {
-        if let Some(event) = line.strip_prefix("event: ") {
-            current_event = event.to_string();
-            continue;
+fn decode_pty_ws_message(message: PtyWsServerMessage, decoded: &mut DecodedPtyWs) {
+    match message {
+        PtyWsServerMessage::Ready { .. } => decoded.saw_ready = true,
+        PtyWsServerMessage::OutputReset { .. } => decoded.saw_reset = true,
+        PtyWsServerMessage::Output { data, .. } => {
+            let chunk = BASE64
+                .decode(data)
+                .expect("output frame should contain valid base64");
+            decoded.output.push_str(&String::from_utf8_lossy(&chunk));
         }
-
-        if let Some(data) = line.strip_prefix("data: ") {
-            match current_event.as_str() {
-                "output" => {
-                    let chunk = BASE64
-                        .decode(data)
-                        .expect("output event should contain valid base64");
-                    decoded.output.push_str(&String::from_utf8_lossy(&chunk));
-                }
-                "ready" => decoded.saw_ready = true,
-                "eof" => decoded.saw_eof = true,
-                _ => {}
-            }
+        PtyWsServerMessage::Eof { .. } => decoded.saw_eof = true,
+        PtyWsServerMessage::Error { code, message, .. } => {
+            panic!("unexpected PTY websocket error {code}: {message}");
         }
+        PtyWsServerMessage::Ack { .. }
+        | PtyWsServerMessage::ResizeAck { .. }
+        | PtyWsServerMessage::Pong { .. } => {}
     }
 }
 
-async fn collect_pty_sse_until(
-    response: reqwest::Response,
-    predicate: impl Fn(&DecodedPtySse) -> bool,
-) -> DecodedPtySse {
-    let mut stream = response.bytes_stream();
-    let mut pending = String::new();
-    let mut decoded = DecodedPtySse::default();
+async fn collect_pty_ws_until(
+    stream: &mut PtyWsStream,
+    predicate: impl Fn(&DecodedPtyWs) -> bool,
+) -> DecodedPtyWs {
+    let mut decoded = DecodedPtyWs::default();
     let started = std::time::Instant::now();
 
     while started.elapsed() < Duration::from_secs(10) {
-        let next_chunk = tokio::time::timeout(Duration::from_secs(5), stream.next())
-            .await
-            .expect("PTY SSE stream should produce a chunk before timeout");
-
-        match next_chunk {
-            Some(Ok(chunk)) => {
-                pending.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
-
-                while let Some(event_end) = pending.find("\n\n") {
-                    let block = pending[..event_end].to_string();
-                    pending.drain(..event_end + 2);
-                    if block.trim().is_empty() {
-                        continue;
-                    }
-                    decode_sse_event_block(&block, &mut decoded);
-                    if predicate(&decoded) {
-                        return decoded;
-                    }
-                }
-            }
-            Some(Err(error)) => panic!("PTY SSE stream should not error: {error}"),
-            None => {
-                if !pending.trim().is_empty() {
-                    decode_sse_event_block(&pending, &mut decoded);
-                }
-                return decoded;
-            }
+        let message = read_pty_ws_json(stream).await;
+        decode_pty_ws_message(message, &mut decoded);
+        if predicate(&decoded) {
+            return decoded;
         }
     }
 
-    panic!("timed out while waiting for PTY SSE predicate");
+    panic!("timed out while waiting for PTY websocket predicate");
 }
 
 async fn wait_for_session_completed(client: &reqwest::Client, base_url: &str, pty_id: &str) {
@@ -400,32 +518,14 @@ async fn wait_for_session_status(
     );
 }
 
-fn decode_pty_sse_output(body: &str) -> (String, bool) {
-    let mut output = Vec::new();
-    let mut current_event = String::new();
-    let mut saw_eof = false;
-
-    for line in body.lines() {
-        if let Some(event) = line.strip_prefix("event: ") {
-            current_event = event.to_string();
-            continue;
-        }
-
-        if let Some(data) = line.strip_prefix("data: ") {
-            match current_event.as_str() {
-                "output" => {
-                    let chunk = BASE64
-                        .decode(data)
-                        .expect("output data should be valid base64");
-                    output.extend_from_slice(&chunk);
-                }
-                "eof" => saw_eof = true,
-                _ => {}
-            }
-        }
-    }
-
-    (String::from_utf8_lossy(&output).to_string(), saw_eof)
+async fn collect_completed_pty_ws_output(
+    base_url: &str,
+    pty_id: &str,
+) -> (DecodedPtyWs, PtyWsStream) {
+    let mut socket =
+        connect_pty_ws_eventually(base_url, pty_id, "output", Duration::from_secs(5)).await;
+    let decoded = collect_pty_ws_until(&mut socket, |state| state.saw_ready && state.saw_eof).await;
+    (decoded, socket)
 }
 
 #[tokio::test]
@@ -856,7 +956,7 @@ async fn interactive_pty_waiting_input_roundtrip_keeps_session_live() {
     )
     .await;
 
-    write_pty_input(&client, &base_url, &pty_id, b"\n").await;
+    write_pty_input_via_ws(&base_url, &pty_id, b"\n").await;
 
     wait_for_session_status(
         &client,
@@ -891,7 +991,43 @@ async fn interactive_pty_waiting_input_roundtrip_keeps_session_live() {
 }
 
 #[tokio::test]
-async fn pty_stream_replays_persisted_history_after_remove() {
+async fn legacy_pty_http_endpoints_return_not_found() {
+    let (mut handle, base_url) = start_test_runtime().await;
+    let client = reqwest::Client::new();
+    let pty_id = spawn_interactive_shell(&client, &base_url, "legacy-http-endpoint-probe").await;
+    let legacy_input_segment = ["in", "put"].concat();
+    let legacy_stream_segment = ["str", "eam"].concat();
+
+    let input_resp = client
+        .post(format!("{base_url}/pty/{pty_id}/{legacy_input_segment}"))
+        .json(&serde_json::json!({
+            "data": BASE64.encode("\n"),
+        }))
+        .send()
+        .await
+        .expect("legacy input probe should complete");
+    assert_eq!(input_resp.status().as_u16(), 404);
+
+    let stream_resp = client
+        .get(format!("{base_url}/pty/{pty_id}/{legacy_stream_segment}"))
+        .send()
+        .await
+        .expect("legacy stream probe should complete");
+    assert_eq!(stream_resp.status().as_u16(), 404);
+
+    let _ = client
+        .post(format!("{base_url}/pty/{pty_id}/stop"))
+        .send()
+        .await;
+    let _ = client
+        .delete(format!("{base_url}/pty/{pty_id}"))
+        .send()
+        .await;
+    handle.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn pty_ws_output_replays_persisted_history_after_remove() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let (mut handle, base_url) =
         start_test_runtime_with_data_dir(Some(temp_dir.path().to_path_buf())).await;
@@ -908,29 +1044,34 @@ async fn pty_stream_replays_persisted_history_after_remove() {
         .expect("delete request should succeed");
     assert_eq!(delete_resp.status().as_u16(), 200);
 
-    let stream_resp = client
-        .get(format!("{base_url}/pty/{pty_id}/stream"))
-        .send()
+    let (decoded, mut socket) = collect_completed_pty_ws_output(&base_url, &pty_id).await;
+    let close_frame = tokio::time::timeout(Duration::from_secs(2), socket.next())
         .await
-        .expect("stream request should succeed for persisted transcript");
-    assert_eq!(stream_resp.status().as_u16(), 200);
+        .expect("persisted websocket close should arrive")
+        .expect("persisted websocket should yield close frame")
+        .expect("persisted websocket close frame should decode");
 
-    let body = stream_resp
-        .text()
-        .await
-        .expect("persisted transcript stream should complete");
-    let (output, saw_eof) = decode_pty_sse_output(&body);
     assert!(
-        output.contains(marker),
-        "persisted stream should replay terminal history, got {output:?}"
+        decoded.output.contains(marker),
+        "persisted websocket should replay terminal history, got {:?}",
+        decoded.output
     );
-    assert!(saw_eof, "persisted stream should end with eof event");
+    assert!(decoded.saw_ready, "persisted websocket should emit ready");
+    assert!(
+        decoded.saw_reset,
+        "persisted websocket should emit output reset"
+    );
+    assert!(decoded.saw_eof, "persisted websocket should end with eof");
+    assert!(
+        close_frame.is_close(),
+        "persisted websocket should close after eof"
+    );
 
     handle.stop().await.expect("runtime should stop");
 }
 
 #[tokio::test]
-async fn pty_stream_replays_persisted_history_after_runtime_restart() {
+async fn pty_ws_output_replays_persisted_history_after_runtime_restart() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let client = reqwest::Client::new();
     let marker = "persisted-restart-history";
@@ -961,25 +1102,30 @@ async fn pty_stream_replays_persisted_history_after_runtime_restart() {
         "restarted runtime should not auto-recreate live PTY instances"
     );
 
-    let stream_resp = client
-        .get(format!("{restarted_base_url}/pty/{pty_id}/stream"))
-        .send()
+    let (decoded, mut socket) = collect_completed_pty_ws_output(&restarted_base_url, &pty_id).await;
+    let close_frame = tokio::time::timeout(Duration::from_secs(2), socket.next())
         .await
-        .expect("stream request should succeed after restart");
-    assert_eq!(stream_resp.status().as_u16(), 200);
+        .expect("restarted websocket close should arrive")
+        .expect("restarted websocket should yield close frame")
+        .expect("restarted websocket close frame should decode");
 
-    let body = stream_resp
-        .text()
-        .await
-        .expect("persisted transcript stream should complete after restart");
-    let (output, saw_eof) = decode_pty_sse_output(&body);
     assert!(
-        output.contains(marker),
-        "restarted runtime should replay persisted terminal history, got {output:?}"
+        decoded.output.contains(marker),
+        "restarted runtime should replay persisted terminal history, got {:?}",
+        decoded.output
     );
     assert!(
-        saw_eof,
-        "restarted runtime persisted stream should end with eof event"
+        decoded.saw_eof,
+        "restarted runtime persisted websocket should end with eof event"
+    );
+    assert!(decoded.saw_ready, "restarted websocket should emit ready");
+    assert!(
+        decoded.saw_reset,
+        "restarted websocket should emit output reset"
+    );
+    assert!(
+        close_frame.is_close(),
+        "restarted websocket should close after eof"
     );
 
     restarted_handle
@@ -989,7 +1135,7 @@ async fn pty_stream_replays_persisted_history_after_runtime_restart() {
 }
 
 #[tokio::test]
-async fn pty_stream_live_replay_cap_respects_configured_floor_and_keeps_live_updates() {
+async fn pty_ws_output_live_replay_cap_respects_configured_floor_and_keeps_live_updates() {
     let (mut handle, base_url) = start_test_runtime().await;
     let client = reqwest::Client::new();
     let head_marker = "replay-cap-head-live";
@@ -999,8 +1145,7 @@ async fn pty_stream_live_replay_cap_respects_configured_floor_and_keeps_live_upd
     put_runtime_config(&client, &base_url, "exomind:ptyTerminalReplayLimitKb", "64").await;
 
     let pty_id = spawn_interactive_shell(&client, &base_url, "replay-cap-live").await;
-    write_pty_input(
-        &client,
+    write_pty_input_via_ws(
         &base_url,
         &pty_id,
         build_large_output_input_script(head_marker, tail_marker).as_bytes(),
@@ -1009,43 +1154,44 @@ async fn pty_stream_live_replay_cap_respects_configured_floor_and_keeps_live_upd
 
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    let stream_resp = client
-        .get(format!("{base_url}/pty/{pty_id}/stream"))
-        .send()
-        .await
-        .expect("live stream request should succeed");
-    assert_eq!(stream_resp.status().as_u16(), 200);
-
-    write_pty_input(
-        &client,
+    let mut socket = connect_pty_ws(&base_url, &pty_id, "output").await;
+    write_pty_input_via_ws(
         &base_url,
         &pty_id,
         build_live_marker_input_script(live_marker).as_bytes(),
     )
     .await;
 
-    let decoded = collect_pty_sse_until(stream_resp, |state| {
-        state.saw_ready && state.output.contains(tail_marker) && state.output.contains(live_marker)
+    let decoded = collect_pty_ws_until(&mut socket, |state| {
+        state.saw_ready
+            && state.saw_reset
+            && state.output.contains(tail_marker)
+            && state.output.contains(live_marker)
     })
     .await;
 
-    assert!(decoded.saw_ready, "live stream should emit a ready event");
+    assert!(
+        decoded.saw_ready,
+        "live websocket should emit a ready event"
+    );
+    assert!(decoded.saw_reset, "live websocket should emit output reset");
     assert!(
         decoded.output.contains(tail_marker),
-        "live replay should include the tail marker, got {:?}",
+        "live websocket replay should include the tail marker, got {:?}",
         decoded.output
     );
     assert!(
         decoded.output.contains(live_marker),
-        "live replay stream should continue with fresh output, got {:?}",
+        "live websocket replay should continue with fresh output, got {:?}",
         decoded.output
     );
     assert!(
         !decoded.output.contains(head_marker),
-        "live replay should trim old head output once over the configured cap, got {:?}",
+        "live websocket replay should trim old head output once over the configured cap, got {:?}",
         decoded.output
     );
 
+    let _ = socket.close(None).await;
     let _ = client
         .post(format!("{base_url}/pty/{pty_id}/stop"))
         .send()
@@ -1058,7 +1204,7 @@ async fn pty_stream_live_replay_cap_respects_configured_floor_and_keeps_live_upd
 }
 
 #[tokio::test]
-async fn pty_stream_live_replay_preserves_short_history_under_default_cap() {
+async fn pty_ws_output_live_replay_preserves_short_history_under_default_cap() {
     let (mut handle, base_url) = start_test_runtime().await;
     let client = reqwest::Client::new();
     let head_marker = "short-history-head";
@@ -1066,8 +1212,7 @@ async fn pty_stream_live_replay_preserves_short_history_under_default_cap() {
     let middle_marker = expected_short_history_middle_marker();
 
     let pty_id = spawn_interactive_shell(&client, &base_url, "short-history-live").await;
-    write_pty_input(
-        &client,
+    write_pty_input_via_ws(
         &base_url,
         &pty_id,
         build_short_history_input_script(head_marker, tail_marker).as_bytes(),
@@ -1076,38 +1221,38 @@ async fn pty_stream_live_replay_preserves_short_history_under_default_cap() {
 
     tokio::time::sleep(Duration::from_millis(1200)).await;
 
-    let stream_resp = client
-        .get(format!("{base_url}/pty/{pty_id}/stream"))
-        .send()
-        .await
-        .expect("live short-history stream request should succeed");
-    assert_eq!(stream_resp.status().as_u16(), 200);
-
-    let decoded = collect_pty_sse_until(stream_resp, |state| {
+    let mut socket = connect_pty_ws(&base_url, &pty_id, "output").await;
+    let decoded = collect_pty_ws_until(&mut socket, |state| {
         state.saw_ready
+            && state.saw_reset
             && state.output.contains(head_marker)
             && state.output.contains(middle_marker)
             && state.output.contains(tail_marker)
     })
     .await;
 
-    assert!(decoded.saw_ready, "live replay should emit a ready event");
+    assert!(
+        decoded.saw_ready,
+        "live websocket should emit a ready event"
+    );
+    assert!(decoded.saw_reset, "live websocket should emit output reset");
     assert!(
         decoded.output.contains(head_marker),
-        "under-cap replay should keep the head marker, got {:?}",
+        "under-cap websocket replay should keep the head marker, got {:?}",
         decoded.output
     );
     assert!(
         decoded.output.contains(middle_marker),
-        "under-cap replay should keep a middle line marker, got {:?}",
+        "under-cap websocket replay should keep a middle line marker, got {:?}",
         decoded.output
     );
     assert!(
         decoded.output.contains(tail_marker),
-        "under-cap replay should keep the tail marker, got {:?}",
+        "under-cap websocket replay should keep the tail marker, got {:?}",
         decoded.output
     );
 
+    let _ = socket.close(None).await;
     let _ = client
         .post(format!("{base_url}/pty/{pty_id}/stop"))
         .send()
@@ -1120,7 +1265,7 @@ async fn pty_stream_live_replay_preserves_short_history_under_default_cap() {
 }
 
 #[tokio::test]
-async fn pty_stream_persisted_replay_cap_respects_configured_floor_after_remove() {
+async fn pty_ws_output_persisted_replay_cap_respects_configured_floor_after_remove() {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let (mut handle, base_url) =
         start_test_runtime_with_data_dir(Some(temp_dir.path().to_path_buf())).await;
@@ -1140,28 +1285,39 @@ async fn pty_stream_persisted_replay_cap_respects_configured_floor_after_remove(
         .expect("delete request should succeed");
     assert_eq!(delete_resp.status().as_u16(), 200);
 
-    let stream_resp = client
-        .get(format!("{base_url}/pty/{pty_id}/stream"))
-        .send()
+    let (decoded, mut socket) = collect_completed_pty_ws_output(&base_url, &pty_id).await;
+    let close_frame = tokio::time::timeout(Duration::from_secs(2), socket.next())
         .await
-        .expect("persisted replay stream request should succeed");
-    assert_eq!(stream_resp.status().as_u16(), 200);
-
-    let body = stream_resp
-        .text()
-        .await
-        .expect("persisted replay body should complete");
-    let (output, saw_eof) = decode_pty_sse_output(&body);
+        .expect("persisted replay websocket close should arrive")
+        .expect("persisted replay websocket should yield close frame")
+        .expect("persisted replay websocket close frame should decode");
 
     assert!(
-        output.contains(tail_marker),
-        "persisted replay should include the tail marker, got {output:?}"
+        decoded.output.contains(tail_marker),
+        "persisted websocket replay should include the tail marker, got {:?}",
+        decoded.output
     );
     assert!(
-        !output.contains(head_marker),
-        "persisted replay should trim the old head marker once over the configured cap, got {output:?}"
+        !decoded.output.contains(head_marker),
+        "persisted websocket replay should trim the old head marker once over the configured cap, got {:?}",
+        decoded.output
     );
-    assert!(saw_eof, "persisted replay should still end with eof event");
+    assert!(
+        decoded.saw_ready,
+        "persisted websocket replay should emit ready"
+    );
+    assert!(
+        decoded.saw_reset,
+        "persisted websocket replay should emit output reset"
+    );
+    assert!(
+        decoded.saw_eof,
+        "persisted websocket replay should still end with eof event"
+    );
+    assert!(
+        close_frame.is_close(),
+        "persisted websocket replay should close after eof"
+    );
 
     handle.stop().await.expect("runtime should stop");
 }

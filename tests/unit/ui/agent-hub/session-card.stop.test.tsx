@@ -8,14 +8,14 @@ import type { SessionInfo } from '@/lib/types/session';
 vi.mock('@/ui/app/components/PtyTerminal', () => ({
   PtyTerminal: ({
     ptyId,
-    interactive,
+    inputPaused,
   }: {
     ptyId?: string;
-    interactive?: boolean;
+    inputPaused?: boolean;
   }) => (
     <div
       data-testid={ptyId ? `mock-pty-terminal-${ptyId}` : 'mock-pty-terminal'}
-      data-interactive={interactive === false ? 'false' : 'true'}
+      data-input-paused={inputPaused === true ? 'true' : 'false'}
     >
       Mock PTY Terminal
     </div>
@@ -407,8 +407,8 @@ describe('tiled grid terminal lifecycle actions（平铺视图终端生命周期
     );
 
     expect(screen.getByTestId('mock-pty-terminal-pty-disconnected-grid')).toHaveAttribute(
-      'data-interactive',
-      'false',
+      'data-input-paused',
+      'true',
     );
     expect(screen.getByTestId('tiled-grid-pty-disconnected-terminal-disconnected')).toBeInTheDocument();
   });

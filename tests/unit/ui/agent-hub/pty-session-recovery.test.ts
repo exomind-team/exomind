@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionInfo } from '@/lib/types/session';
 import {
+  buildDisconnectedTerminalAutoResumeAttemptKey,
   buildRecoverableTerminalSessionSnapshot,
   detectAndPersistHistoricalSessionId,
   hasMatchingHistoricalSessionRecord,
@@ -87,6 +88,45 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
         body: JSON.stringify({ inner_session_id: 'codex-thread-match' }),
       }),
     );
+  });
+
+  it('changes the auto-resume attempt key when runtime epoch or host context changes（自动恢复尝试键会随 RT 重启或 host 环境变化而变化）', () => {
+    const session = buildSession({
+      id: 'retryable-session',
+      status: 'waiting_input',
+      pty_id: 'retryable-pty',
+      inner_session_id: 'claude-thread-match',
+      source_host_id: 'rt-old',
+      last_active_at: '2026-04-09T15:32:51.465Z',
+    });
+
+    const baselineKey = buildDisconnectedTerminalAutoResumeAttemptKey(session, {
+      runtimeStartedAt: '2026-04-09T15:30:00.000Z',
+      loadedPtyHostId: 'rt-old',
+      activeEmbeddedRuntimeHostId: 'rt-old',
+    });
+    const sameInputsKey = buildDisconnectedTerminalAutoResumeAttemptKey(session, {
+      runtimeStartedAt: '2026-04-09T15:30:00.000Z',
+      loadedPtyHostId: 'rt-old',
+      activeEmbeddedRuntimeHostId: 'rt-old',
+    });
+    const restartedRuntimeKey = buildDisconnectedTerminalAutoResumeAttemptKey(
+      session,
+      {
+        runtimeStartedAt: '2026-04-09T15:35:00.000Z',
+        loadedPtyHostId: 'rt-old',
+        activeEmbeddedRuntimeHostId: 'rt-old',
+      },
+    );
+    const rehostedKey = buildDisconnectedTerminalAutoResumeAttemptKey(session, {
+      runtimeStartedAt: '2026-04-09T15:30:00.000Z',
+      loadedPtyHostId: 'rt-new',
+      activeEmbeddedRuntimeHostId: 'rt-new',
+    });
+
+    expect(sameInputsKey).toBe(baselineKey);
+    expect(restartedRuntimeKey).not.toBe(baselineKey);
+    expect(rehostedKey).not.toBe(baselineKey);
   });
 
   it('persists the unique encoded project match for Claude（Claude 会用编码后的 project_path 精确补写 session）', async () => {
@@ -435,23 +475,26 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
   it('validates that stored inner_session_id still belongs to the same workdir（恢复前会校验 inner_session_id 仍归属同一工作目录）', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/pty/sessions?agent_type=codex')) {
+      if (url.includes('/pty/sessions/detail?agent_type=codex&session_id=codex-thread-match')) {
         return {
           ok: true,
-          json: async () => [
-            {
-              agent_type: 'codex',
-              session_id: 'codex-thread-match',
-              project_path: 'D:/project/exomind',
-              last_modified: '2026-04-02T00:00:05.000Z',
-            },
-            {
-              agent_type: 'codex',
-              session_id: 'codex-thread-other',
-              project_path: 'D:/project/other',
-              last_modified: '2026-04-02T00:00:05.000Z',
-            },
-          ],
+          json: async () => ({
+            agent_type: 'codex',
+            session_id: 'codex-thread-match',
+            project_path: 'D:/project/exomind',
+            last_modified: '2026-04-02T00:00:05.000Z',
+          }),
+        } as Response;
+      }
+      if (url.includes('/pty/sessions/detail?agent_type=codex&session_id=codex-thread-other')) {
+        return {
+          ok: true,
+          json: async () => ({
+            agent_type: 'codex',
+            session_id: 'codex-thread-other',
+            project_path: 'D:/project/other',
+            last_modified: '2026-04-02T00:00:05.000Z',
+          }),
         } as Response;
       }
       throw new Error(`unexpected fetch: ${url}`);
@@ -477,23 +520,26 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
   it('validates Claude inner_session_id against encoded project paths（Claude 恢复前也会校验编码后的 project_path）', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/pty/sessions?agent_type=claude')) {
+      if (url.includes('/pty/sessions/detail?agent_type=claude&session_id=claude-thread-match')) {
         return {
           ok: true,
-          json: async () => [
-            {
-              agent_type: 'claude',
-              session_id: 'claude-thread-match',
-              project_path: 'H--A137442-Develop-AGI-exomind',
-              last_modified: '2026-04-02T00:00:05.000Z',
-            },
-            {
-              agent_type: 'claude',
-              session_id: 'claude-thread-other',
-              project_path: 'H--A137442-Develop-AGI-other',
-              last_modified: '2026-04-02T00:00:05.000Z',
-            },
-          ],
+          json: async () => ({
+            agent_type: 'claude',
+            session_id: 'claude-thread-match',
+            project_path: 'H--A137442-Develop-AGI-exomind',
+            last_modified: '2026-04-02T00:00:05.000Z',
+          }),
+        } as Response;
+      }
+      if (url.includes('/pty/sessions/detail?agent_type=claude&session_id=claude-thread-other')) {
+        return {
+          ok: true,
+          json: async () => ({
+            agent_type: 'claude',
+            session_id: 'claude-thread-other',
+            project_path: 'H--A137442-Develop-AGI-other',
+            last_modified: '2026-04-02T00:00:05.000Z',
+          }),
         } as Response;
       }
       throw new Error(`unexpected fetch: ${url}`);
@@ -528,6 +574,41 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
     ).resolves.toBe(false);
   });
 
+  it('times out when historical session detail body stalls after headers arrive（历史会话详情在 headers 后卡住时也应超时）', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/pty/sessions/detail?agent_type=codex&session_id=codex-thread-stalled-body')) {
+          return {
+            ok: true,
+            status: 200,
+            json: () => new Promise(() => {}),
+          } as Response;
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const promise = hasMatchingHistoricalSessionRecord(
+        'http://127.0.0.1:1949',
+        buildSession({
+          id: 'session-recovery-stalled-body',
+          inner_session_id: 'codex-thread-stalled-body',
+        }),
+        undefined,
+        500,
+      );
+      const assertion = expect(promise).rejects.toThrow('request timeout（请求超时）');
+
+      await vi.advanceTimersByTimeAsync(600);
+
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('matches persisted recovery snapshots by logical inner_session_id instead of workdir alone（持久恢复快照不能只按 workdir 误绑别的 live 会话）', () => {
     const snapshot = buildRecoverableTerminalSessionSnapshot(buildSession({
       id: 'session-persisted-818',
@@ -551,6 +632,35 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
         pty_id: 'pty-live-same-workdir-818',
         inner_session_id: 'codex-thread-other-818',
         role: 'Live Same Workdir 818',
+      }),
+      snapshot!,
+    )).toBe(false);
+  });
+
+  it('requires the same project path when the inner_session_id matches（即使 inner_session_id 相同，也必须匹配同一 projectPathKey）', () => {
+    const snapshot = buildRecoverableTerminalSessionSnapshot(buildSession({
+      id: 'session-persisted-project-818',
+      inner_session_id: 'codex-thread-project-818',
+      role: 'Persisted Project 818',
+      context: {
+        issue_refs: [],
+        labels: [],
+        work_dir: 'D:/project/exomind',
+      },
+    }));
+
+    expect(snapshot).not.toBeNull();
+    expect(matchesRecoverableTerminalSessionSnapshot(
+      buildSession({
+        id: 'session-live-same-id-other-project-818',
+        pty_id: 'pty-live-same-id-other-project-818',
+        inner_session_id: 'codex-thread-project-818',
+        role: 'Live Same ID Other Project 818',
+        context: {
+          issue_refs: [],
+          labels: [],
+          work_dir: 'D:/project/other',
+        },
       }),
       snapshot!,
     )).toBe(false);
@@ -580,7 +690,7 @@ describe('pty-session-recovery（PTY 历史会话恢复辅助）', () => {
       });
       const assertion = expect(promise).rejects.toThrow('request timeout（请求超时）');
 
-      await vi.advanceTimersByTimeAsync(4_000);
+      await vi.advanceTimersByTimeAsync(8_500);
 
       await assertion;
     } finally {

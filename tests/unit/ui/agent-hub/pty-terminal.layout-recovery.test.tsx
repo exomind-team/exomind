@@ -434,6 +434,42 @@ describe('PtyTerminal layout recovery（终端布局恢复）', () => {
     expect(websocketState.instances).toHaveLength(2);
   });
 
+  it('does not recreate the output websocket when input is only paused for a disconnected overlay（仅切换输入暂停态时不应重建输出 WS）', async () => {
+    const { rerender } = render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-input-paused"
+      />,
+    );
+
+    sizeReady = true;
+    resizeObservers.forEach((notify) => notify());
+    await flushUi(80);
+    expect(websocketState.instances).toHaveLength(2);
+
+    rerender(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-input-paused"
+        inputPaused
+      />,
+    );
+    await flushUi(20);
+
+    expect(websocketState.instances).toHaveLength(2);
+    expect(xtermState.terminal.options.disableStdin).toBe(true);
+
+    rerender(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:1949"
+        ptyId="pty-layout-input-paused"
+      />,
+    );
+    await flushUi(20);
+
+    expect(websocketState.instances).toHaveLength(2);
+  });
+
   it('shows the non-zero exit code in the EOF banner（非零退出码会显示在退出提示中）', async () => {
     render(<PtyTerminal rtBaseUrl="http://127.0.0.1:1949" ptyId="pty-layout-exit-code" />);
 

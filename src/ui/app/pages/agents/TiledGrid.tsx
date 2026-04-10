@@ -1161,6 +1161,7 @@ function EmptyPane({
             <button
               key={session.id}
               type="button"
+              data-testid={`tiled-slot-bind-${slotId}-${session.id}`}
               onClick={(event) => {
                 event.stopPropagation();
                 onAssignSession?.(slotId, session.id);
@@ -1295,6 +1296,8 @@ function SessionPane({
   return (
     <div
       data-testid={slotId ? `tiled-slot-${slotId}` : undefined}
+      data-session-id={session.id}
+      data-pty-id={session.pty_id ?? ""}
       className={`
         flex h-full min-h-0 flex-col overflow-hidden rounded-lg border transition-all
         ${isDragging ? 'opacity-50 shadow-2xl ring-2 ring-[#C75B3A]/40' : ''}
@@ -1400,7 +1403,7 @@ function SessionPane({
               rtBaseUrl={connection.rtBaseUrl}
               ptyId={session.pty_id!}
               authToken={connection.authToken}
-              interactive={!showTerminalUnavailable}
+              inputPaused={showDisconnected}
               autoFocus={false}
               onInitialConnectionFailure={() => {
                 setInitialConnectionFailed(true);

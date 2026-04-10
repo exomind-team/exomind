@@ -569,6 +569,19 @@ impl PtyManager {
         Ok(info)
     }
 
+    pub async fn attach_session_id(
+        &self,
+        id: &str,
+        session_id: String,
+    ) -> Result<PtyAgentInfo, PtyError> {
+        let mut instances = self.instances.lock().await;
+        let instance = instances
+            .get_mut(id)
+            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+        instance.info.session_id = Some(session_id);
+        Ok(instance.info.clone())
+    }
+
     /// Write raw input data to the PTY.
     ///
     /// Uses `spawn_blocking` to avoid blocking the tokio runtime with synchronous I/O.

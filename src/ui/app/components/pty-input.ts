@@ -1,21 +1,24 @@
+import { log } from "@/lib/logger";
+
 const PTY_ARROW_SEQUENCE_BY_KEY: Record<string, string> = {
-  ArrowUp: 'A',
-  ArrowDown: 'B',
-  ArrowRight: 'C',
-  ArrowLeft: 'D',
+  ArrowUp: "A",
+  ArrowDown: "B",
+  ArrowRight: "C",
+  ArrowLeft: "D",
 };
 
 const PTY_INPUT_BATCH_WINDOW_MS = 12;
-const PTY_INPUT_ACK_TIMEOUT_MS = 500;
+const PTY_INPUT_ACK_TIMEOUT_MS = 1_200;
 const PTY_RESIZE_ACK_TIMEOUT_MS = 500;
 const PTY_INPUT_READY_TIMEOUT_MS = 1_500;
 const PTY_INPUT_IDLE_CLOSE_MS = 15_000;
+const PTY_INPUT_MAX_CHUNK_BYTES = 1_024;
 export const PTY_WS_PROTOCOL_VERSION = 3;
 
-type PtyInputTransportPhase = 'idle' | 'connecting' | 'ready' | 'error';
+type PtyInputTransportPhase = "idle" | "connecting" | "ready" | "error";
 
 interface PtyWsReadyMessage {
-  type: 'ready';
+  type: "ready";
   protocol_version: number;
   read_only?: boolean;
   capabilities: {
@@ -28,22 +31,22 @@ interface PtyWsReadyMessage {
 }
 
 interface PtyWsAckMessage {
-  type: 'ack';
+  type: "ack";
   input_seq: number;
 }
 
 interface PtyWsPongMessage {
-  type: 'pong';
+  type: "pong";
   nonce?: number | null;
 }
 
 interface PtyWsResizeAckMessage {
-  type: 'resize_ack';
+  type: "resize_ack";
   resize_seq: number;
 }
 
 interface PtyWsErrorMessage {
-  type: 'error';
+  type: "error";
   code?: string;
   message?: string;
   input_seq?: number;
@@ -88,6 +91,7 @@ export interface PtyInputTransportResponse {
 export interface PtyInputTransportSnapshot {
   phase: PtyInputTransportPhase;
   errorMessage: string | null;
+  errorCode: string | null;
   readOnly: boolean;
 }
 
@@ -103,15 +107,48 @@ const transportPool = new Map<string, PtyInputWsTransport>();
 function encodeTextAsBase64(text: string): string {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(text);
-  let binary = '';
+  let binary = "";
   bytes.forEach((value) => {
     binary += String.fromCharCode(value);
   });
   return btoa(binary);
 }
 
+function splitTextIntoTransportChunks(text: string): string[] {
+  if (!text) {
+    return [];
+  }
+
+  const encoder = new TextEncoder();
+  const chunks: string[] = [];
+  let currentChunk = "";
+  let currentChunkBytes = 0;
+
+  for (const char of Array.from(text)) {
+    const charBytes = encoder.encode(char).length;
+    if (
+      currentChunk &&
+      currentChunkBytes + charBytes > PTY_INPUT_MAX_CHUNK_BYTES
+    ) {
+      chunks.push(currentChunk);
+      currentChunk = char;
+      currentChunkBytes = charBytes;
+      continue;
+    }
+
+    currentChunk += char;
+    currentChunkBytes += charBytes;
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks;
+}
+
 function normalizeAuthToken(authToken?: string): string {
-  return authToken?.trim() ?? '';
+  return authToken?.trim() ?? "";
 }
 
 function buildTransportKey(target: PtyInputTarget): string {
@@ -120,24 +157,28 @@ function buildTransportKey(target: PtyInputTarget): string {
 
 function buildPtyWebSocketUrl(target: PtyInputTarget): string {
   const url = new URL(target.rtBaseUrl);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = `${url.pathname.replace(/\/$/, '')}/pty/${encodeURIComponent(target.ptyId)}/ws`;
-  url.search = '';
-  url.searchParams.set('mode', 'input');
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/pty/${encodeURIComponent(target.ptyId)}/ws`;
+  url.search = "";
+  url.searchParams.set("mode", "input");
 
   const token = normalizeAuthToken(target.authToken);
   if (token) {
-    url.searchParams.set('token', token);
+    url.searchParams.set("token", token);
   }
 
   return url.toString();
 }
 
+function describePtyTarget(target: PtyInputTarget): string {
+  return `pty=${target.ptyId}`;
+}
+
 function resolveArrowModifierCode(shortcut: string): number | null {
-  if (shortcut.startsWith('Alt+Shift+')) {
+  if (shortcut.startsWith("Alt+Shift+")) {
     return 4;
   }
-  if (shortcut.startsWith('Alt+')) {
+  if (shortcut.startsWith("Alt+")) {
     return 3;
   }
   return null;
@@ -147,7 +188,10 @@ function createOkResponse(status = 204): PtyInputTransportResponse {
   return { ok: true, status };
 }
 
-function createErrorResponse(status: number, statusText: string): PtyInputTransportResponse {
+function createErrorResponse(
+  status: number,
+  statusText: string,
+): PtyInputTransportResponse {
   return { ok: false, status, statusText };
 }
 
@@ -157,31 +201,33 @@ function createTransportError(message: string): Error {
 
 function shouldFlushImmediately(text: string): boolean {
   return (
-    text.includes('\r')
-    || text.includes('\n')
-    || text.includes('\u0003')
-    || text.includes('\u001b')
+    text.includes("\r") ||
+    text.includes("\n") ||
+    text.includes("\u0003") ||
+    text.includes("\u001b")
   );
 }
 
 function isFatalServerError(code: string | undefined): boolean {
-  return code === 'not_found'
-    || code === 'unauthorized'
-    || code === 'forbidden'
-    || code === 'transport_error';
+  return (
+    code === "not_found" ||
+    code === "unauthorized" ||
+    code === "forbidden" ||
+    code === "transport_error"
+  );
 }
 
 function mapServerErrorCodeToStatus(code: string | undefined): number {
   switch (code) {
-    case 'bad_request':
+    case "bad_request":
       return 400;
-    case 'unauthorized':
+    case "unauthorized":
       return 401;
-    case 'forbidden':
+    case "forbidden":
       return 403;
-    case 'not_found':
+    case "not_found":
       return 404;
-    case 'transport_error':
+    case "transport_error":
       return 500;
     default:
       return 500;
@@ -189,27 +235,38 @@ function mapServerErrorCodeToStatus(code: string | undefined): number {
 }
 
 function formatInitialTransportFailureMessage(): string {
-  return '终端输入通道不可用：当前 RT 可能还不支持 PTY WebSocket，请升级 Runtime 后重试。';
+  return "终端输入通道不可用：当前 RT 可能还不支持 PTY WebSocket，请升级 Runtime 后重试。";
 }
 
 function formatDisconnectedTransportMessage(): string {
-  return '终端输入通道已断开，当前仅保留只读输出；请手动重试输入通道。';
+  return "终端输入通道已断开，当前仅保留只读输出；请手动重试输入通道。";
 }
 
 function formatProtocolMismatchMessage(): string {
-  return '终端输入通道不可用：当前 RT 的 PTY WebSocket 协议版本不兼容，请升级 Runtime 后重试。';
+  return "终端输入通道不可用：当前 RT 的 PTY WebSocket 协议版本不兼容，请升级 Runtime 后重试。";
 }
 
 function formatReadOnlyTransportMessage(): string {
-  return '终端输入通道不可用：当前 PTY 仅保留只读输出；请重连或恢复会话后再试。';
+  return "终端输入通道不可用：当前 PTY 仅保留只读输出；请重连或恢复会话后再试。";
 }
 
-function resolveReadyMessageCompatibilityError(message: PtyWsReadyMessage): string | null {
+export function isPtyInputTransportPtyUnavailable(
+  snapshot: PtyInputTransportSnapshot,
+): boolean {
+  return snapshot.phase === "error" && snapshot.errorCode === "not_found";
+}
+
+function resolveReadyMessageCompatibilityError(
+  message: PtyWsReadyMessage,
+): string | null {
   if (message.protocol_version !== PTY_WS_PROTOCOL_VERSION) {
     return formatProtocolMismatchMessage();
   }
 
-  if (message.capabilities.output_stream !== true || message.capabilities.output_cursor !== true) {
+  if (
+    message.capabilities.output_stream !== true ||
+    message.capabilities.output_cursor !== true
+  ) {
     return formatProtocolMismatchMessage();
   }
 
@@ -221,7 +278,10 @@ function resolveReadyMessageCompatibilityError(message: PtyWsReadyMessage): stri
     return formatProtocolMismatchMessage();
   }
 
-  if (message.capabilities.resize !== true || message.capabilities.resize_ack !== true) {
+  if (
+    message.capabilities.resize !== true ||
+    message.capabilities.resize_ack !== true
+  ) {
     return formatProtocolMismatchMessage();
   }
 
@@ -229,7 +289,7 @@ function resolveReadyMessageCompatibilityError(message: PtyWsReadyMessage): stri
 }
 
 function getWindowTimeoutApi() {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     return window;
   }
   return globalThis;
@@ -241,8 +301,9 @@ class PtyInputWsTransport {
   private ws: WebSocket | null = null;
   private listeners = new Set<PtyTransportListener>();
   private snapshot: PtyInputTransportSnapshot = {
-    phase: 'idle',
+    phase: "idle",
     errorMessage: null,
+    errorCode: null,
     readOnly: false,
   };
   private connectPromise: Promise<void> | null = null;
@@ -256,7 +317,7 @@ class PtyInputWsTransport {
   private pendingAcks = new Map<number, PtyPendingAck>();
   private pendingResizeAcks = new Map<number, PtyPendingAck>();
   private retainCount = 0;
-  private hasEverReady = false;
+  private readyReceivedForCurrentConnection = false;
 
   constructor(target: PtyInputTarget) {
     this.target = {
@@ -293,6 +354,9 @@ class PtyInputWsTransport {
   }
 
   retry(): void {
+    log.info(
+      `[PtyInputTransport] retry requested for ${describePtyTarget(this.target)}`,
+    );
     this.resetConnection({ keepErrorState: false });
     void this.ensureReady().catch(() => {
       // Snapshot already carries failure details.
@@ -305,13 +369,26 @@ class PtyInputWsTransport {
     }
 
     await this.ensureReady();
-    return this.enqueueInput(text);
+    const chunks = splitTextIntoTransportChunks(text);
+    let lastResponse = createOkResponse();
+    for (const chunk of chunks) {
+      lastResponse = await this.enqueueInput(chunk);
+      if (!lastResponse.ok) {
+        return lastResponse;
+      }
+    }
+    return lastResponse;
   }
 
-  async sendResize(rows: number, cols: number): Promise<PtyInputTransportResponse> {
+  async sendResize(
+    rows: number,
+    cols: number,
+  ): Promise<PtyInputTransportResponse> {
     await this.ensureReady();
-    if (!this.ws || this.snapshot.phase !== 'ready') {
-      throw createTransportError(this.snapshot.errorMessage ?? formatInitialTransportFailureMessage());
+    if (!this.ws || this.snapshot.phase !== "ready") {
+      throw createTransportError(
+        this.snapshot.errorMessage ?? formatInitialTransportFailureMessage(),
+      );
     }
 
     return new Promise<PtyInputTransportResponse>((resolve, reject) => {
@@ -320,14 +397,18 @@ class PtyInputWsTransport {
       const timeoutApi = getWindowTimeoutApi();
 
       try {
-        this.ws!.send(JSON.stringify({
-          type: 'resize',
-          resize_seq: resizeSeq,
-          rows,
-          cols,
-        }));
+        this.ws!.send(
+          JSON.stringify({
+            type: "resize",
+            resize_seq: resizeSeq,
+            rows,
+            cols,
+          }),
+        );
       } catch {
-        const error = createTransportError(formatDisconnectedTransportMessage());
+        const error = createTransportError(
+          formatDisconnectedTransportMessage(),
+        );
         reject(error);
         this.failTransport(formatDisconnectedTransportMessage());
         return;
@@ -335,9 +416,13 @@ class PtyInputWsTransport {
 
       const ackTimerId = timeoutApi.setTimeout(() => {
         this.pendingResizeAcks.delete(resizeSeq);
-        const timeoutError = createTransportError('终端尺寸同步超时，当前仅保留只读输出；请手动重试输入通道。');
-        reject(timeoutError);
-        this.failTransport(timeoutError.message, { rejectAsIndeterminate: true });
+        const timeoutMessage =
+          "终端尺寸同步超时；终端将保持当前尺寸，请稍后重试。";
+        log.warn(
+          `[PtyInputTransport] resize ack timed out for ${describePtyTarget(this.target)} resize_seq=${resizeSeq}`,
+        );
+        resolve(createErrorResponse(504, timeoutMessage));
+        this.scheduleIdleClose();
       }, PTY_RESIZE_ACK_TIMEOUT_MS);
 
       this.pendingResizeAcks.set(resizeSeq, {
@@ -349,15 +434,16 @@ class PtyInputWsTransport {
   }
 
   destroyForTests(): void {
-    this.resetConnection({ keepErrorState: false, nextPhase: 'idle' });
+    this.resetConnection({ keepErrorState: false, nextPhase: "idle" });
     transportPool.delete(this.poolKey);
   }
 
   private setSnapshot(next: PtyInputTransportSnapshot): void {
     if (
-      this.snapshot.phase === next.phase
-      && this.snapshot.errorMessage === next.errorMessage
-      && this.snapshot.readOnly === next.readOnly
+      this.snapshot.phase === next.phase &&
+      this.snapshot.errorMessage === next.errorMessage &&
+      this.snapshot.errorCode === next.errorCode &&
+      this.snapshot.readOnly === next.readOnly
     ) {
       return;
     }
@@ -406,8 +492,8 @@ class PtyInputWsTransport {
       this.ws.onclose = null;
 
       if (
-        this.ws.readyState === WebSocket.OPEN
-        || this.ws.readyState === WebSocket.CONNECTING
+        this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING
       ) {
         this.ws.close();
       }
@@ -416,8 +502,9 @@ class PtyInputWsTransport {
 
     if (!options.keepErrorState) {
       this.setSnapshot({
-        phase: options.nextPhase ?? 'idle',
+        phase: options.nextPhase ?? "idle",
         errorMessage: null,
+        errorCode: null,
         readOnly: false,
       });
     }
@@ -433,11 +520,11 @@ class PtyInputWsTransport {
 
   private scheduleIdleClose(): void {
     if (
-      this.retainCount > 0
-      || this.connectPromise
-      || this.currentBatch
-      || this.pendingAcks.size > 0
-      || this.pendingResizeAcks.size > 0
+      this.retainCount > 0 ||
+      this.connectPromise ||
+      this.currentBatch ||
+      this.pendingAcks.size > 0 ||
+      this.pendingResizeAcks.size > 0
     ) {
       return;
     }
@@ -446,25 +533,33 @@ class PtyInputWsTransport {
     const timeoutApi = getWindowTimeoutApi();
     this.idleCloseTimerId = timeoutApi.setTimeout(() => {
       if (
-        this.retainCount > 0
-        || this.connectPromise
-        || this.currentBatch
-        || this.pendingAcks.size > 0
-        || this.pendingResizeAcks.size > 0
+        this.retainCount > 0 ||
+        this.connectPromise ||
+        this.currentBatch ||
+        this.pendingAcks.size > 0 ||
+        this.pendingResizeAcks.size > 0
       ) {
         return;
       }
-      this.resetConnection({ keepErrorState: false, nextPhase: 'idle' });
+      log.info(
+        `[PtyInputTransport] closing idle transport for ${describePtyTarget(this.target)}`,
+      );
+      this.resetConnection({ keepErrorState: false, nextPhase: "idle" });
       transportPool.delete(this.poolKey);
     }, PTY_INPUT_IDLE_CLOSE_MS);
   }
 
   private async ensureReady(): Promise<void> {
-    if (this.snapshot.phase === 'error') {
-      throw createTransportError(this.snapshot.errorMessage ?? formatInitialTransportFailureMessage());
+    if (this.snapshot.phase === "error") {
+      throw createTransportError(
+        this.snapshot.errorMessage ?? formatInitialTransportFailureMessage(),
+      );
     }
 
-    if (this.snapshot.phase === 'ready' && this.ws?.readyState === WebSocket.OPEN) {
+    if (
+      this.snapshot.phase === "ready" &&
+      this.ws?.readyState === WebSocket.OPEN
+    ) {
       return;
     }
 
@@ -473,12 +568,17 @@ class PtyInputWsTransport {
     }
 
     const websocketUrl = buildPtyWebSocketUrl(this.target);
+    log.info(
+      `[PtyInputTransport] opening PTY input websocket for ${describePtyTarget(this.target)} via ${websocketUrl}`,
+    );
     const ws = new WebSocket(websocketUrl);
     this.ws = ws;
+    this.readyReceivedForCurrentConnection = false;
     this.clearIdleCloseTimer();
     this.setSnapshot({
-      phase: 'connecting',
+      phase: "connecting",
       errorMessage: null,
+      errorCode: null,
       readOnly: false,
     });
 
@@ -489,12 +589,20 @@ class PtyInputWsTransport {
 
     const timeoutApi = getWindowTimeoutApi();
     this.readyTimerId = timeoutApi.setTimeout(() => {
-      if (this.snapshot.phase !== 'ready') {
-        this.failTransport(formatInitialTransportFailureMessage(), { rejectAsIndeterminate: false });
+      if (this.snapshot.phase !== "ready") {
+        log.warn(
+          `[PtyInputTransport] PTY input websocket timed out before ready for ${describePtyTarget(this.target)}`,
+        );
+        this.failTransport(formatInitialTransportFailureMessage(), {
+          rejectAsIndeterminate: false,
+        });
       }
     }, PTY_INPUT_READY_TIMEOUT_MS);
 
     ws.onopen = () => {
+      log.info(
+        `[PtyInputTransport] PTY input websocket opened for ${describePtyTarget(this.target)}`,
+      );
       // Wait for explicit ready frame before entering interactive state.
     };
 
@@ -507,17 +615,22 @@ class PtyInputWsTransport {
     };
 
     ws.onclose = () => {
-      const message = this.hasEverReady
+      const message = this.readyReceivedForCurrentConnection
         ? formatDisconnectedTransportMessage()
         : formatInitialTransportFailureMessage();
-      this.failTransport(message, { rejectAsIndeterminate: this.hasEverReady });
+      log.warn(
+        `[PtyInputTransport] PTY input websocket closed for ${describePtyTarget(this.target)}${this.readyReceivedForCurrentConnection ? " after ready" : " before ready"}`,
+      );
+      this.failTransport(message, {
+        rejectAsIndeterminate: this.readyReceivedForCurrentConnection,
+      });
     };
 
     return this.connectPromise;
   }
 
   private handleServerMessage(rawData: unknown): void {
-    if (typeof rawData !== 'string') {
+    if (typeof rawData !== "string") {
       return;
     }
 
@@ -525,28 +638,37 @@ class PtyInputWsTransport {
     try {
       message = JSON.parse(rawData) as PtyWsServerMessage;
     } catch {
-      this.failTransport('终端输入通道返回了无法识别的消息。');
+      log.error(
+        `[PtyInputTransport] PTY input websocket returned invalid JSON for ${describePtyTarget(this.target)}`,
+      );
+      this.failTransport("终端输入通道返回了无法识别的消息。");
       return;
     }
 
-    if (message.type === 'ready') {
+    if (message.type === "ready") {
       const compatibilityError = resolveReadyMessageCompatibilityError(message);
       if (compatibilityError) {
-        this.failTransport(compatibilityError, { rejectAsIndeterminate: false });
+        this.failTransport(compatibilityError, {
+          rejectAsIndeterminate: false,
+        });
         return;
       }
 
-      this.hasEverReady = true;
+      this.readyReceivedForCurrentConnection = true;
       const timeoutApi = getWindowTimeoutApi();
       if (this.readyTimerId != null) {
         timeoutApi.clearTimeout(this.readyTimerId);
         this.readyTimerId = null;
       }
       this.setSnapshot({
-        phase: 'ready',
+        phase: "ready",
         errorMessage: null,
+        errorCode: null,
         readOnly: false,
       });
+      log.info(
+        `[PtyInputTransport] PTY input websocket ready for ${describePtyTarget(this.target)}`,
+      );
       this.resolveConnect?.();
       this.connectPromise = null;
       this.resolveConnect = null;
@@ -555,7 +677,7 @@ class PtyInputWsTransport {
       return;
     }
 
-    if (message.type === 'ack') {
+    if (message.type === "ack") {
       const pendingAck = this.pendingAcks.get(message.input_seq);
       if (!pendingAck) {
         return;
@@ -568,7 +690,7 @@ class PtyInputWsTransport {
       return;
     }
 
-    if (message.type === 'resize_ack') {
+    if (message.type === "resize_ack") {
       const pendingResizeAck = this.pendingResizeAcks.get(message.resize_seq);
       if (!pendingResizeAck) {
         return;
@@ -576,14 +698,19 @@ class PtyInputWsTransport {
       const timeoutApi = getWindowTimeoutApi();
       timeoutApi.clearTimeout(pendingResizeAck.timerId);
       this.pendingResizeAcks.delete(message.resize_seq);
-      pendingResizeAck.resolvers.forEach((resolve) => resolve(createOkResponse()));
+      pendingResizeAck.resolvers.forEach((resolve) =>
+        resolve(createOkResponse()),
+      );
       this.scheduleIdleClose();
       return;
     }
 
-    if (message.type === 'error') {
-      const errorMessage = message.message?.trim() || '发送到终端失败';
-      if (typeof message.input_seq === 'number') {
+    if (message.type === "error") {
+      const errorMessage = message.message?.trim() || "发送到终端失败";
+      log.warn(
+        `[PtyInputTransport] server error for ${describePtyTarget(this.target)}: ${message.code ?? "unknown"} ${errorMessage}`,
+      );
+      if (typeof message.input_seq === "number") {
         const pendingAck = this.pendingAcks.get(message.input_seq);
         if (pendingAck) {
           const timeoutApi = getWindowTimeoutApi();
@@ -597,7 +724,7 @@ class PtyInputWsTransport {
         }
       }
 
-      if (typeof message.resize_seq === 'number') {
+      if (typeof message.resize_seq === "number") {
         const pendingResizeAck = this.pendingResizeAcks.get(message.resize_seq);
         if (pendingResizeAck) {
           const timeoutApi = getWindowTimeoutApi();
@@ -612,7 +739,10 @@ class PtyInputWsTransport {
       }
 
       if (isFatalServerError(message.code)) {
-        this.failTransport(errorMessage, { rejectAsIndeterminate: false });
+        this.failTransport(errorMessage, {
+          rejectAsIndeterminate: false,
+          errorCode: message.code ?? null,
+        });
         return;
       }
 
@@ -627,7 +757,7 @@ class PtyInputWsTransport {
       if (!this.currentBatch) {
         this.currentBatch = {
           inputSeq: this.nextInputSeq,
-          data: '',
+          data: "",
           timerId: null,
           resolvers: [],
           rejecters: [],
@@ -664,7 +794,7 @@ class PtyInputWsTransport {
     }
     this.currentBatch = null;
 
-    if (!this.ws || this.snapshot.phase !== 'ready') {
+    if (!this.ws || this.snapshot.phase !== "ready") {
       const error = createTransportError(
         this.snapshot.errorMessage ?? formatDisconnectedTransportMessage(),
       );
@@ -673,11 +803,13 @@ class PtyInputWsTransport {
     }
 
     try {
-      this.ws.send(JSON.stringify({
-        type: 'input',
-        input_seq: batch.inputSeq,
-        data: encodeTextAsBase64(batch.data),
-      }));
+      this.ws.send(
+        JSON.stringify({
+          type: "input",
+          input_seq: batch.inputSeq,
+          data: encodeTextAsBase64(batch.data),
+        }),
+      );
     } catch {
       const error = createTransportError(formatDisconnectedTransportMessage());
       batch.rejecters.forEach((reject) => reject(error));
@@ -687,7 +819,12 @@ class PtyInputWsTransport {
 
     const ackTimerId = timeoutApi.setTimeout(() => {
       this.pendingAcks.delete(batch.inputSeq);
-      const timeoutError = createTransportError('终端输入确认超时，当前仅保留只读输出；请手动重试输入通道。');
+      const timeoutError = createTransportError(
+        "终端输入确认超时，当前仅保留只读输出；请手动重试输入通道。",
+      );
+      log.warn(
+        `[PtyInputTransport] input ack timed out for ${describePtyTarget(this.target)} input_seq=${batch.inputSeq}`,
+      );
       batch.rejecters.forEach((reject) => reject(timeoutError));
       this.failTransport(timeoutError.message, { rejectAsIndeterminate: true });
     }, PTY_INPUT_ACK_TIMEOUT_MS);
@@ -701,9 +838,15 @@ class PtyInputWsTransport {
 
   private failTransport(
     message: string,
-    options: { rejectAsIndeterminate?: boolean } = {},
+    options: {
+      rejectAsIndeterminate?: boolean;
+      errorCode?: string | null;
+    } = {},
   ): void {
     const timeoutApi = getWindowTimeoutApi();
+    log.warn(
+      `[PtyInputTransport] failing transport for ${describePtyTarget(this.target)}: ${message}`,
+    );
 
     if (this.readyTimerId != null) {
       timeoutApi.clearTimeout(this.readyTimerId);
@@ -744,8 +887,8 @@ class PtyInputWsTransport {
       this.ws.onerror = null;
       this.ws.onclose = null;
       if (
-        this.ws.readyState === WebSocket.OPEN
-        || this.ws.readyState === WebSocket.CONNECTING
+        this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING
       ) {
         this.ws.close();
       }
@@ -757,8 +900,9 @@ class PtyInputWsTransport {
     }
 
     this.setSnapshot({
-      phase: 'error',
+      phase: "error",
       errorMessage: message,
+      errorCode: options.errorCode ?? null,
       readOnly: true,
     });
 
@@ -768,7 +912,9 @@ class PtyInputWsTransport {
   }
 }
 
-function getOrCreatePtyInputTransport(target: PtyInputTarget): PtyInputWsTransport {
+function getOrCreatePtyInputTransport(
+  target: PtyInputTarget,
+): PtyInputWsTransport {
   const key = buildTransportKey(target);
   const existing = transportPool.get(key);
   if (existing) {
@@ -780,7 +926,9 @@ function getOrCreatePtyInputTransport(target: PtyInputTarget): PtyInputWsTranspo
   return transport;
 }
 
-export function retainPtyInputTransport(target: PtyInputTarget): PtyInputTransportLease {
+export function retainPtyInputTransport(
+  target: PtyInputTarget,
+): PtyInputTransportLease {
   const transport = getOrCreatePtyInputTransport(target);
   transport.retain();
   return {
@@ -791,7 +939,9 @@ export function retainPtyInputTransport(target: PtyInputTarget): PtyInputTranspo
   };
 }
 
-export function getPtyInputTransportSnapshot(target: PtyInputTarget): PtyInputTransportSnapshot {
+export function getPtyInputTransportSnapshot(
+  target: PtyInputTarget,
+): PtyInputTransportSnapshot {
   return getOrCreatePtyInputTransport(target).getSnapshot();
 }
 
@@ -808,29 +958,29 @@ export function subscribePtyInputTransport(
 
 export function encodeShortcutForPty(shortcut: string): string | null {
   const modifierCode = resolveArrowModifierCode(shortcut);
-  const key = shortcut.split('+').pop() ?? '';
+  const key = shortcut.split("+").pop() ?? "";
 
   if (key in PTY_ARROW_SEQUENCE_BY_KEY && modifierCode != null) {
     return `\u001b[1;${modifierCode}${PTY_ARROW_SEQUENCE_BY_KEY[key]}`;
   }
 
-  if (key === 'Enter' && modifierCode != null) {
-    return '\u001b\r';
+  if (key === "Enter" && modifierCode != null) {
+    return "\u001b\r";
   }
 
-  if (key === 'Backspace' && modifierCode != null) {
-    return '\u001b\u007f';
+  if (key === "Backspace" && modifierCode != null) {
+    return "\u001b\u007f";
   }
 
-  if (/^[A-Z]$/.test(key) && shortcut.startsWith('Alt+')) {
-    const typed = shortcut.startsWith('Alt+Shift+') ? key : key.toLowerCase();
+  if (/^[A-Z]$/.test(key) && shortcut.startsWith("Alt+")) {
+    const typed = shortcut.startsWith("Alt+Shift+") ? key : key.toLowerCase();
     return `\u001b${typed}`;
   }
 
   return null;
 }
 
-export async function sendPtyTextInput(
+export async function sendPtyWsTextInput(
   target: PtyInputTarget,
   text: string,
 ): Promise<PtyInputTransportResponse> {
@@ -854,7 +1004,7 @@ export async function sendPtyShortcutInput(
     return false;
   }
 
-  const response = await sendPtyTextInput(target, text);
+  const response = await sendPtyWsTextInput(target, text);
   return response.ok;
 }
 

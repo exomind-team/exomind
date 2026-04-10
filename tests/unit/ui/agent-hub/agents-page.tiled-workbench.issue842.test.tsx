@@ -450,8 +450,78 @@ describe('agents page issue-842（平铺窗格树工作台骨架）', () => {
     });
 
     const slot = screen.getByTestId('tiled-slot-slot-1');
+    expect(slot).toHaveAttribute('data-session-id', 'session-live-842');
+    expect(slot).toHaveAttribute('data-pty-id', 'pty-live-842');
     expect(within(slot).queryByText('可恢复终端')).not.toBeInTheDocument();
     expect(within(slot).queryByRole('button', { name: '恢复' })).not.toBeInTheDocument();
+  });
+
+  it('shows bind actions for every still-live terminal in empty tiled slots, including non-recoverable sessions（空窗格应能绑定所有仍活跃的终端，包括不可恢复会话）', async () => {
+    const codexSession = buildSession({
+      id: 'session-codex-897',
+      role: 'Codex Session 897',
+      pty_id: 'pty-codex-897',
+      inner_session_id: 'codex-thread-897',
+      agent_kind: 'codex',
+    });
+    const claudeSession = buildSession({
+      id: 'session-claude-897',
+      role: 'Claude Session 897',
+      pty_id: 'pty-claude-897',
+      inner_session_id: 'claude-thread-897',
+      agent_kind: 'claude',
+    });
+    const apiTerminalSession = buildSession({
+      id: 'session-api-897',
+      role: 'API Session 897',
+      pty_id: 'pty-api-897',
+      inner_session_id: undefined,
+      agent_kind: 'api',
+    });
+    sessionStreamState.sessions = [
+      codexSession,
+      claudeSession,
+      apiTerminalSession,
+    ];
+
+    writeAgentsTiledPersistState({
+      version: 2,
+      layout: '2x2',
+      paneOrder: ['session-codex-897', 'session-claude-897'],
+      tree: createTemplatePaneTree('2x2'),
+      slots: [
+        {
+          slotId: 'slot-1',
+          sessionId: 'session-codex-897',
+        },
+        {
+          slotId: 'slot-2',
+          sessionId: 'session-claude-897',
+        },
+        {
+          slotId: 'slot-3',
+        },
+        {
+          slotId: 'slot-4',
+        },
+      ],
+      focusedSlotId: 'slot-3',
+      unassignedSessionIds: [],
+      unassignedPoolCollapsed: false,
+      immersive: false,
+    });
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tiled-slot-slot-3')).toBeInTheDocument();
+    });
+
+    const slot = screen.getByTestId('tiled-slot-slot-3');
+    expect(
+      within(slot).getByTestId('tiled-slot-bind-slot-3-session-api-897'),
+    ).toBeInTheDocument();
+    expect(within(slot).getByText('绑定 API Session 897')).toBeInTheDocument();
   });
 
   it('splits the focused tiled slot from keyboard shortcuts（键盘快捷键可直接分割当前聚焦窗格）', async () => {

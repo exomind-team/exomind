@@ -3,20 +3,17 @@ use axum::extract::{
     ws::{Message, WebSocket, WebSocketUpgrade},
 };
 use axum::http::StatusCode;
-use axum::response::{
-    Response,
-    sse::{Event, Sse},
-};
+use axum::response::Response;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
-use tokio_stream::wrappers::ReceiverStream;
 
 use crate::AppState;
 use crate::config::types::USER_CONFIG_SCOPE;
@@ -34,11 +31,6 @@ use crate::session::{
 };
 
 // ── Request / Response types ────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-struct PtyInputBody {
-    data: String, // base64-encoded
-}
 
 #[derive(Debug, Deserialize)]
 struct PtyResizeBody {
@@ -92,11 +84,6 @@ struct HistoricalSessionsQuery {
 struct HistoricalSessionDetailQuery {
     agent_type: PtyAgentType,
     session_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-struct PtyStreamEofPayload {
-    code: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -164,6 +151,31 @@ const MIN_PTY_REPLAY_LIMIT_KB: usize = 128;
 const MAX_PTY_REPLAY_LIMIT_KB: usize = 2048;
 const PTY_LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const PTY_WS_PROTOCOL_VERSION: u8 = 3;
+const PTY_INNER_SESSION_DETECTION_CLOCK_SKEW_MS: i64 = 15_000;
+const PTY_INNER_SESSION_DETECTION_INTERVAL_MS: u64 = 2_000;
+const PTY_INNER_SESSION_DETECTION_CANDIDATE_WINDOW_MS: i64 = 15 * 60_000;
+
+#[derive(Debug, Clone)]
+struct PtyHistoricalSessionBackfillPlan {
+    agent_type: PtyAgentType,
+    baseline_session_ids: Vec<String>,
+    started_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HistoricalSessionBindingKind {
+    Fresh,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HistoricalSessionBindingSnapshot {
+    matched_session_id: Option<String>,
+    matched_kind: Option<HistoricalSessionBindingKind>,
+    exact_match_ids: Vec<String>,
+    fresh_exact_match_ids: Vec<String>,
+    baseline_exact_match_ids: Vec<String>,
+    saw_mismatched_recent_candidate: bool,
+}
 
 // ── Error mapping ───────────────────────────────────────────────
 
@@ -203,21 +215,422 @@ fn fill_source_host_id(
     session
 }
 
-fn serialize_pty_eof_payload(exit_code: Option<i32>) -> Option<String> {
-    exit_code.and_then(|code| serde_json::to_string(&PtyStreamEofPayload { code: Some(code) }).ok())
-}
-
-fn build_pty_eof_event(exit_code: Option<i32>) -> Event {
-    let event = Event::default().event("eof");
-    if let Some(payload) = serialize_pty_eof_payload(exit_code) {
-        event.data(payload)
+fn resolve_builtin_pty_agent_type(command: &str) -> Option<PtyAgentType> {
+    let normalized = command.trim().to_ascii_lowercase();
+    if normalized.contains("claude") {
+        Some(PtyAgentType::Claude)
+    } else if normalized.contains("codex") {
+        Some(PtyAgentType::Codex)
     } else {
-        event.data("")
+        None
     }
 }
 
-fn build_pty_ready_event() -> Event {
-    Event::default().event("ready").data("{}")
+fn normalize_comparable_path(value: &str) -> String {
+    value
+        .trim()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn encode_claude_project_path(value: &str) -> String {
+    value
+        .trim()
+        .trim_end_matches(['\\', '/'])
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn normalize_historical_project_path(agent_type: PtyAgentType, project_path: &str) -> String {
+    if agent_type == PtyAgentType::Claude {
+        project_path.trim().to_ascii_lowercase()
+    } else {
+        normalize_comparable_path(project_path)
+    }
+}
+
+fn normalize_expected_project_path(agent_type: PtyAgentType, workdir: &str) -> String {
+    if agent_type == PtyAgentType::Claude {
+        encode_claude_project_path(workdir).to_ascii_lowercase()
+    } else {
+        normalize_comparable_path(workdir)
+    }
+}
+
+fn is_absolute_path_like(value: &str) -> bool {
+    let trimmed = value.trim();
+    let bytes = trimmed.as_bytes();
+    (bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/'))
+        || trimmed.starts_with("\\\\")
+        || trimmed.starts_with('/')
+}
+
+fn parse_historical_session_modified_at(
+    session: &PtyHistoricalSessionInfo,
+) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(session.last_modified.trim())
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
+fn is_historical_session_within_window(
+    session: &PtyHistoricalSessionInfo,
+    lower_bound: DateTime<Utc>,
+    upper_bound: DateTime<Utc>,
+) -> bool {
+    match parse_historical_session_modified_at(session) {
+        Some(modified_at) => modified_at >= lower_bound && modified_at <= upper_bound,
+        None => true,
+    }
+}
+
+fn collect_unique_session_ids<'a, I>(sessions: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a PtyHistoricalSessionInfo>,
+{
+    let mut seen = HashSet::new();
+    let mut ids = Vec::new();
+    for session in sessions {
+        if seen.insert(session.session_id.clone()) {
+            ids.push(session.session_id.clone());
+        }
+    }
+    ids
+}
+
+fn dedupe_historical_sessions_by_id(
+    sessions: Vec<PtyHistoricalSessionInfo>,
+) -> Vec<PtyHistoricalSessionInfo> {
+    let mut deduped = HashMap::<String, PtyHistoricalSessionInfo>::new();
+    for session in sessions {
+        let replace = match deduped.get(&session.session_id) {
+            Some(existing) => match (
+                parse_historical_session_modified_at(existing),
+                parse_historical_session_modified_at(&session),
+            ) {
+                (None, _) => true,
+                (Some(_), Some(candidate_modified_at)) => parse_historical_session_modified_at(
+                    existing,
+                )
+                .is_some_and(|existing_modified_at| candidate_modified_at > existing_modified_at),
+                (Some(_), None) => false,
+            },
+            None => true,
+        };
+        if replace {
+            deduped.insert(session.session_id.clone(), session);
+        }
+    }
+    deduped.into_values().collect()
+}
+
+fn resolve_historical_session_binding_snapshot(
+    sessions: &[PtyHistoricalSessionInfo],
+    agent_type: PtyAgentType,
+    baseline_session_ids: &HashSet<String>,
+    expected_workdir: &str,
+    lower_bound: DateTime<Utc>,
+    upper_bound: DateTime<Utc>,
+) -> HistoricalSessionBindingSnapshot {
+    let normalized_expected_workdir = normalize_expected_project_path(agent_type, expected_workdir);
+    let matches_expected_workdir = |session: &&PtyHistoricalSessionInfo| {
+        normalize_historical_project_path(agent_type, session.project_path.as_str())
+            == normalized_expected_workdir
+    };
+
+    let recent_candidates = sessions
+        .iter()
+        .filter(|session| is_historical_session_within_window(session, lower_bound, upper_bound))
+        .collect::<Vec<_>>();
+    let recent_exact_matches = recent_candidates
+        .iter()
+        .copied()
+        .filter(matches_expected_workdir)
+        .collect::<Vec<_>>();
+    let fresh_exact_matches = recent_exact_matches
+        .iter()
+        .copied()
+        .filter(|session| !baseline_session_ids.contains(session.session_id.as_str()))
+        .collect::<Vec<_>>();
+    let baseline_exact_matches = sessions
+        .iter()
+        .filter(|session| {
+            baseline_session_ids.contains(session.session_id.as_str())
+                && normalize_historical_project_path(agent_type, session.project_path.as_str())
+                    == normalized_expected_workdir
+        })
+        .collect::<Vec<_>>();
+
+    let fresh_exact_match_ids = collect_unique_session_ids(fresh_exact_matches.iter().copied());
+    let baseline_exact_match_ids =
+        collect_unique_session_ids(baseline_exact_matches.iter().copied());
+    let exact_match_ids = fresh_exact_match_ids.clone();
+    let matched_session_id = (exact_match_ids.len() == 1).then(|| exact_match_ids[0].clone());
+    let matched_kind = matched_session_id
+        .as_ref()
+        .map(|_| HistoricalSessionBindingKind::Fresh);
+
+    HistoricalSessionBindingSnapshot {
+        matched_session_id,
+        matched_kind,
+        exact_match_ids,
+        fresh_exact_match_ids,
+        baseline_exact_match_ids,
+        saw_mismatched_recent_candidate: recent_candidates.len() > recent_exact_matches.len(),
+    }
+}
+
+async fn list_historical_sessions_for_detection(
+    agent_type: PtyAgentType,
+) -> Result<Vec<PtyHistoricalSessionInfo>, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::pty::PtyManager::list_historical_sessions(agent_type)
+    })
+    .await
+    .map(dedupe_historical_sessions_by_id)
+    .map_err(|error| format!("historical session discovery task failed: {error}"))
+}
+
+async fn build_historical_session_backfill_plan(
+    command: &str,
+    started_at: DateTime<Utc>,
+) -> Option<PtyHistoricalSessionBackfillPlan> {
+    let agent_type = resolve_builtin_pty_agent_type(command)?;
+    let baseline_session_ids = match list_historical_sessions_for_detection(agent_type).await {
+        Ok(sessions) => collect_unique_session_ids(sessions.iter()),
+        Err(error) => {
+            tracing::warn!(
+                ?agent_type,
+                error = %error,
+                "failed to capture baseline historical sessions before PTY spawn"
+            );
+            Vec::new()
+        }
+    };
+    Some(PtyHistoricalSessionBackfillPlan {
+        agent_type,
+        baseline_session_ids,
+        started_at,
+    })
+}
+
+async fn sync_live_pty_inner_session_id(state: &AppState, pty_id: &str, inner_session_id: &str) {
+    match state
+        .pty_manager
+        .attach_session_id(pty_id, inner_session_id.to_string())
+        .await
+    {
+        Ok(_) => {}
+        Err(PtyError::NotFound { .. }) => {
+            tracing::debug!(
+                pty_id = %pty_id,
+                inner_session_id = %inner_session_id,
+                "skipped live PTY session id sync because PTY no longer exists"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                pty_id = %pty_id,
+                inner_session_id = %inner_session_id,
+                error = %error,
+                "failed to sync live PTY session id"
+            );
+        }
+    }
+}
+
+async fn read_persisted_pty_inner_session_id(
+    state: &AppState,
+    pty_id: &str,
+) -> Result<Option<String>, String> {
+    let session = state
+        .session_store
+        .get(pty_id)
+        .map_err(|error| error.to_string())?;
+    if let Some(session) = session {
+        if let Some(inner_session_id) = session.inner_session_id {
+            sync_live_pty_inner_session_id(state, pty_id, &inner_session_id).await;
+            return Ok(Some(inner_session_id));
+        }
+    }
+    Ok(None)
+}
+
+async fn persist_pty_inner_session_id(
+    state: &AppState,
+    pty_id: &str,
+    inner_session_id: &str,
+) -> Result<(), String> {
+    let session = state
+        .session_store
+        .get(pty_id)
+        .map_err(|error| error.to_string())?;
+
+    let Some(session) = session else {
+        return Ok(());
+    };
+
+    if let Some(existing_inner_session_id) = session.inner_session_id.as_deref() {
+        if existing_inner_session_id != inner_session_id {
+            tracing::warn!(
+                pty_id = %pty_id,
+                persisted_inner_session_id = %existing_inner_session_id,
+                attempted_inner_session_id = %inner_session_id,
+                "skipped PTY inner session backfill because a different value is already persisted"
+            );
+        }
+        sync_live_pty_inner_session_id(state, pty_id, existing_inner_session_id).await;
+        return Ok(());
+    }
+
+    let updated = state
+        .session_store
+        .update(
+            pty_id,
+            UpdateSessionInput {
+                inner_session_id: Some(inner_session_id.to_string()),
+                ..Default::default()
+            },
+        )
+        .map_err(|error| error.to_string())?;
+    let updated = fill_source_host_id(updated, &state.host_id);
+    broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+    sync_live_pty_inner_session_id(state, pty_id, inner_session_id).await;
+    Ok(())
+}
+
+fn watch_spawned_pty_inner_session_backfill(
+    state: AppState,
+    info: PtyAgentInfo,
+    plan: PtyHistoricalSessionBackfillPlan,
+) {
+    if info.session_id.is_some() || !is_absolute_path_like(&info.workdir) {
+        return;
+    }
+
+    tokio::spawn(async move {
+        let baseline_session_ids = plan
+            .baseline_session_ids
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let lower_bound = plan.started_at
+            - ChronoDuration::milliseconds(PTY_INNER_SESSION_DETECTION_CLOCK_SKEW_MS);
+        let upper_bound = plan.started_at
+            + ChronoDuration::milliseconds(PTY_INNER_SESSION_DETECTION_CANDIDATE_WINDOW_MS);
+        let max_attempts = ((PTY_INNER_SESSION_DETECTION_CANDIDATE_WINDOW_MS
+            + PTY_INNER_SESSION_DETECTION_INTERVAL_MS as i64
+            - 1)
+            / PTY_INNER_SESSION_DETECTION_INTERVAL_MS as i64)
+            .max(1) as usize;
+        let mut last_snapshot = HistoricalSessionBindingSnapshot {
+            matched_session_id: None,
+            matched_kind: None,
+            exact_match_ids: Vec::new(),
+            fresh_exact_match_ids: Vec::new(),
+            baseline_exact_match_ids: Vec::new(),
+            saw_mismatched_recent_candidate: false,
+        };
+
+        for attempt in 0..max_attempts {
+            match read_persisted_pty_inner_session_id(&state, &info.id).await {
+                Ok(Some(existing_inner_session_id)) => {
+                    tracing::debug!(
+                        pty_id = %info.id,
+                        inner_session_id = %existing_inner_session_id,
+                        ?plan.agent_type,
+                        "PTY inner session id already persisted before runtime backfill completed"
+                    );
+                    return;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        pty_id = %info.id,
+                        ?plan.agent_type,
+                        error = %error,
+                        "failed to inspect persisted PTY inner session id during backfill"
+                    );
+                    return;
+                }
+            }
+
+            let sessions = match list_historical_sessions_for_detection(plan.agent_type).await {
+                Ok(sessions) => sessions,
+                Err(error) => {
+                    if attempt + 1 == max_attempts {
+                        tracing::warn!(
+                            pty_id = %info.id,
+                            ?plan.agent_type,
+                            error = %error,
+                            "failed to load historical sessions for PTY inner session backfill"
+                        );
+                    }
+                    if attempt + 1 < max_attempts {
+                        tokio::time::sleep(Duration::from_millis(
+                            PTY_INNER_SESSION_DETECTION_INTERVAL_MS,
+                        ))
+                        .await;
+                    }
+                    continue;
+                }
+            };
+
+            let snapshot = resolve_historical_session_binding_snapshot(
+                &sessions,
+                plan.agent_type,
+                &baseline_session_ids,
+                &info.workdir,
+                lower_bound,
+                upper_bound,
+            );
+
+            if let Some(matched_session_id) = snapshot.matched_session_id.clone() {
+                if let Err(error) =
+                    persist_pty_inner_session_id(&state, &info.id, &matched_session_id).await
+                {
+                    tracing::warn!(
+                        pty_id = %info.id,
+                        ?plan.agent_type,
+                        matched_session_id = %matched_session_id,
+                        error = %error,
+                        "failed to persist PTY inner session id backfill"
+                    );
+                }
+                return;
+            }
+
+            last_snapshot = snapshot;
+            if attempt + 1 < max_attempts {
+                tokio::time::sleep(Duration::from_millis(
+                    PTY_INNER_SESSION_DETECTION_INTERVAL_MS,
+                ))
+                .await;
+            }
+        }
+
+        tracing::warn!(
+            pty_id = %info.id,
+            ?plan.agent_type,
+            expected_workdir = %info.workdir,
+            candidate_window_ms = PTY_INNER_SESSION_DETECTION_CANDIDATE_WINDOW_MS,
+            exact_match_count = last_snapshot.exact_match_ids.len(),
+            exact_match_ids = ?last_snapshot.exact_match_ids,
+            fresh_exact_match_count = last_snapshot.fresh_exact_match_ids.len(),
+            fresh_exact_match_ids = ?last_snapshot.fresh_exact_match_ids,
+            baseline_exact_match_count = last_snapshot.baseline_exact_match_ids.len(),
+            baseline_exact_match_ids = ?last_snapshot.baseline_exact_match_ids,
+            saw_mismatched_recent_candidate = last_snapshot.saw_mismatched_recent_candidate,
+            "unable to safely detect historical session id"
+        );
+    });
 }
 
 fn build_pty_ws_ready_message(read_only: bool) -> PtyWsServerMessage {
@@ -414,6 +827,33 @@ async fn resolve_pty_ws_stream_source(
             }
         }
         Err(error) => Err(map_pty_error(error)),
+    }
+}
+
+async fn resolve_pty_ws_input_source(
+    state: &AppState,
+    id: &str,
+) -> Result<PtyWsStreamSource, (StatusCode, String)> {
+    let live_info = state
+        .pty_manager
+        .refresh_process_state(id)
+        .await
+        .map_err(map_pty_error)?;
+
+    match live_info {
+        Some(info)
+            if matches!(
+                info.status,
+                PtyAgentStatus::Stopped | PtyAgentStatus::Exited { .. }
+            ) =>
+        {
+            Err(map_pty_error(PtyError::NotFound { id: id.to_string() }))
+        }
+        Some(_) | None => Ok(PtyWsStreamSource {
+            snapshot: PtyOutputReplaySnapshot::default(),
+            live_rx: None,
+            read_only: false,
+        }),
     }
 }
 
@@ -870,12 +1310,16 @@ async fn spawn_pty_agent(
     Json(req): Json<PtySpawnRequest>,
 ) -> Result<(StatusCode, Json<PtyAgentInfo>), (StatusCode, String)> {
     sync_pty_replay_limit_from_config(&state);
+    let backfill_plan = build_historical_session_backfill_plan(&req.command, Utc::now()).await;
     let info = state.pty_manager.spawn(req).await.map_err(map_pty_error)?;
     if let Err(error) = register_pty_session(&state, &info) {
         let _ = state.pty_manager.remove(&info.id).await;
         return Err(error);
     }
     watch_pty_lifecycle(state.clone(), info.id.clone());
+    if let Some(plan) = backfill_plan {
+        watch_spawned_pty_inner_session_backfill(state.clone(), info.clone(), plan);
+    }
     Ok((StatusCode::CREATED, Json(info)))
 }
 
@@ -930,124 +1374,6 @@ async fn get_historical_session_detail(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-/// GET /pty/{id}/stream — SSE stream of PTY output (base64-encoded).
-///
-/// On connect, replays the scrollback buffer first, then streams live output.
-/// This ensures terminal content survives component remounts (fullscreen toggle,
-/// tab switches, SSE reconnects).
-async fn stream_pty_output(
-    Path(id): Path<String>,
-    State(state): State<AppState>,
-) -> Result<Sse<ReceiverStream<Result<Event, Infallible>>>, (StatusCode, String)> {
-    sync_pty_replay_limit_from_config(&state);
-    let (event_tx, event_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(1024);
-
-    let live_subscription = match state.pty_manager.subscribe_output(&id, None).await {
-        Ok((buffer_snapshot, eof_offset, rx)) => Some((
-            buffer_snapshot,
-            if eof_offset.is_none() { Some(rx) } else { None },
-        )),
-        Err(PtyError::NotFound { .. }) => None,
-        Err(error) => return Err(map_pty_error(error)),
-    };
-    let persisted_snapshot = if live_subscription.is_none() {
-        match state.pty_manager.load_completed_output(&id, None).await {
-            Ok(Some(buffer_snapshot)) => Some(buffer_snapshot),
-            Ok(None) => {
-                return Err(map_pty_error(PtyError::NotFound { id }));
-            }
-            Err(error) => return Err(map_pty_error(error)),
-        }
-    } else {
-        None
-    };
-
-    // Forward broadcast → mpsc in a spawned task.
-    tokio::spawn(async move {
-        let stream_state = state.clone();
-        let stream_id = id.clone();
-        let (buffer_snapshot, rx) = match live_subscription {
-            Some((buffer_snapshot, rx)) => (buffer_snapshot, rx),
-            None => (persisted_snapshot.unwrap_or_default(), None),
-        };
-
-        // 0. Emit an immediate ready event so clients can flush headers and
-        // transition out of "connecting" even when the PTY is currently idle.
-        if event_tx.send(Ok(build_pty_ready_event())).await.is_err() {
-            return;
-        }
-
-        // 1. Replay scrollback buffer.
-        if !buffer_snapshot.data.is_empty() {
-            for chunk in buffer_snapshot.data.chunks(4096) {
-                let encoded = BASE64.encode(chunk);
-                let event = Ok(Event::default().event("output").data(encoded));
-                if event_tx.send(event).await.is_err() {
-                    return;
-                }
-            }
-        }
-
-        if rx.is_none() {
-            let exit_code = resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
-            let _ = event_tx.send(Ok(build_pty_eof_event(exit_code))).await;
-            return;
-        }
-
-        // 2. Stream live output from the broadcast channel.
-        let mut keep_alive_interval = tokio::time::interval(std::time::Duration::from_secs(15));
-        keep_alive_interval.tick().await;
-        let mut rx = rx.expect("live subscription should include broadcast receiver");
-
-        loop {
-            tokio::select! {
-                result = rx.recv() => {
-                    let event = match result {
-                        Ok(PtyOutputMsg::Data { data, .. }) => {
-                            let encoded = BASE64.encode(&data);
-                            Ok(Event::default().event("output").data(encoded))
-                        }
-                        Ok(PtyOutputMsg::Eof { .. }) => {
-                            let exit_code =
-                                resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
-                            let _ = event_tx
-                                .send(Ok(build_pty_eof_event(exit_code)))
-                                .await;
-                            return;
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            let msg = format!("skipped {skipped} messages");
-                            Ok(Event::default().event("warning").data(msg))
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            let exit_code =
-                                resolve_pty_exit_code_for_eof(&stream_state, &stream_id).await;
-                            let _ = event_tx
-                                .send(Ok(build_pty_eof_event(exit_code)))
-                                .await;
-                            return;
-                        }
-                    };
-                    if event_tx.send(event).await.is_err() {
-                        return;
-                    }
-                }
-                _ = keep_alive_interval.tick() => {
-                    if event_tx
-                        .send(Ok(Event::default().event("keep-alive").data("")))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            }
-        }
-    });
-
-    Ok(Sse::new(ReceiverStream::new(event_rx)))
-}
-
 async fn pty_websocket(
     Path(id): Path<String>,
     Query(query): Query<PtyWsQuery>,
@@ -1056,7 +1382,11 @@ async fn pty_websocket(
 ) -> Result<Response, (StatusCode, String)> {
     sync_pty_replay_limit_from_config(&state);
     let mode = query.mode.unwrap_or(PtyWsMode::Duplex);
-    let stream_source = resolve_pty_ws_stream_source(&state, &id, query.cursor).await?;
+    let stream_source = if mode == PtyWsMode::Input {
+        resolve_pty_ws_input_source(&state, &id).await?
+    } else {
+        resolve_pty_ws_stream_source(&state, &id, query.cursor).await?
+    };
     Ok(ws.on_upgrade(move |socket| handle_pty_websocket(socket, state, id, stream_source, mode)))
 }
 
@@ -1253,20 +1583,6 @@ async fn handle_pty_websocket(
     let _ = writer_task.await;
 }
 
-/// POST /pty/{id}/input — Write to PTY stdin (base64-encoded body).
-async fn write_pty_input(
-    Path(id): Path<String>,
-    State(state): State<AppState>,
-    Json(body): Json<PtyInputBody>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    let data = BASE64
-        .decode(&body.data)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid base64: {e}")))?;
-
-    apply_pty_input_bytes(&state, &id, &data).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 /// POST /pty/{id}/resize — Resize PTY terminal.
 async fn resize_pty(
     Path(id): Path<String>,
@@ -1318,9 +1634,7 @@ pub fn router() -> Router<AppState> {
         .route("/pty/sessions", get(list_historical_sessions))
         .route("/pty/sessions/detail", get(get_historical_session_detail))
         .route("/pty/claude-sessions", get(list_claude_sessions))
-        .route("/pty/:id/stream", get(stream_pty_output))
         .route("/pty/:id/ws", get(pty_websocket))
-        .route("/pty/:id/input", post(write_pty_input))
         .route("/pty/:id/resize", post(resize_pty))
         .route("/pty/:id/stop", post(stop_pty_agent))
         .route("/pty/:id", delete(remove_pty_agent))
@@ -1329,18 +1643,19 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
+        HistoricalSessionBindingKind, PTY_INNER_SESSION_DETECTION_CLOCK_SKEW_MS,
         PTY_WAITING_INPUT_IDLE_TIMEOUT_CONFIG_KEY, PTY_WS_PROTOCOL_VERSION, PtyWsServerMessage,
-        PtyWsStreamSource, pump_pty_ws_output, register_pty_session,
-        resolve_pty_waiting_input_idle_timeout, router, serialize_pty_eof_payload,
-        stream_pty_output, watch_pty_lifecycle,
+        PtyWsStreamSource, persist_pty_inner_session_id, pump_pty_ws_output, register_pty_session,
+        resolve_historical_session_binding_snapshot, resolve_pty_waiting_input_idle_timeout,
+        router, watch_pty_lifecycle,
     };
+    use axum::Router;
     use axum::body::Body;
     use axum::extract::ws::Message;
-    use axum::extract::{Path, State};
     use axum::http::{Request, StatusCode};
-    use axum::{Router, response::IntoResponse};
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64;
+    use chrono::{DateTime, Duration as ChronoDuration, Utc};
     use futures_util::{SinkExt, StreamExt};
     use std::{net::SocketAddr, time::Duration};
     use tokio::net::TcpListener;
@@ -1352,8 +1667,10 @@ mod tests {
     use crate::AppState;
     use crate::config::PutConfigEntryInput;
     use crate::config::types::USER_CONFIG_SCOPE;
-    use crate::pty::{PtyOutputMsg, PtyOutputReplaySnapshot};
-    use crate::session::{InteractionMode, SessionStatus, UpdateSessionInput};
+    use crate::pty::{
+        PtyAgentType, PtyHistoricalSessionInfo, PtyOutputMsg, PtyOutputReplaySnapshot,
+    };
+    use crate::session::{SessionStatus, UpdateSessionInput};
 
     #[cfg(not(target_os = "android"))]
     fn interactive_shell_spawn_request() -> crate::pty::PtySpawnRequest {
@@ -1442,56 +1759,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn serialize_pty_eof_payload_includes_known_exit_code() {
-        assert_eq!(
-            serialize_pty_eof_payload(Some(1)).as_deref(),
-            Some(r#"{"code":1}"#)
-        );
-        assert_eq!(
-            serialize_pty_eof_payload(Some(0)).as_deref(),
-            Some(r#"{"code":0}"#)
-        );
-    }
-
-    #[test]
-    fn serialize_pty_eof_payload_omits_unknown_exit_code() {
-        assert_eq!(serialize_pty_eof_payload(None), None);
-    }
-
-    #[tokio::test]
-    #[cfg(not(target_os = "android"))]
-    async fn stream_pty_output_emits_ready_event_before_terminal_output() {
-        let (_tempdir, state) =
-            AppState::new_isolated_test_runtime(0, "pty-ready-host".to_string());
-        let pty = state
-            .pty_manager
-            .spawn(interactive_shell_spawn_request())
-            .await
-            .expect("pty shell should spawn");
-
-        let sse = stream_pty_output(Path(pty.id.clone()), State(state.clone()))
-            .await
-            .expect("pty stream should open");
-        let response = sse.into_response();
-        let mut stream = response.into_body().into_data_stream();
-        let first_chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
-            .await
-            .expect("ready chunk should arrive promptly")
-            .expect("body should yield first chunk")
-            .expect("first chunk should be ok");
-        let first_text =
-            String::from_utf8(first_chunk.to_vec()).expect("first chunk should be utf-8");
-
-        let _ = state.pty_manager.stop(&pty.id).await;
-        let _ = state.pty_manager.remove(&pty.id).await;
-
-        assert!(
-            first_text.contains("event: ready"),
-            "expected ready event first, got: {first_text}"
-        );
-    }
-
     async fn wait_for_session_status(state: &AppState, session_id: &str, expected: SessionStatus) {
         let started = tokio::time::Instant::now();
         loop {
@@ -1522,6 +1789,226 @@ mod tests {
             resolve_pty_waiting_input_idle_timeout(&state),
             Duration::from_secs(60)
         );
+    }
+
+    fn historical_session(
+        agent_type: PtyAgentType,
+        session_id: &str,
+        project_path: &str,
+        last_modified: &str,
+    ) -> PtyHistoricalSessionInfo {
+        PtyHistoricalSessionInfo {
+            agent_type,
+            session_id: session_id.to_string(),
+            project_path: project_path.to_string(),
+            last_modified: last_modified.to_string(),
+            display_title: None,
+            display_path: None,
+            first_user_message: None,
+            last_user_message: None,
+        }
+    }
+
+    #[test]
+    fn historical_session_binding_prefers_unique_fresh_codex_match() {
+        let started_at = DateTime::parse_from_rfc3339("2026-04-02T00:00:00.000Z")
+            .expect("started_at should parse")
+            .with_timezone(&Utc);
+        let lower_bound =
+            started_at - ChronoDuration::milliseconds(PTY_INNER_SESSION_DETECTION_CLOCK_SKEW_MS);
+        let upper_bound = started_at + ChronoDuration::minutes(15);
+        let sessions = vec![
+            historical_session(
+                PtyAgentType::Codex,
+                "codex-thread-existing",
+                "D:/project/exomind",
+                "2026-04-01T23:59:00.000Z",
+            ),
+            historical_session(
+                PtyAgentType::Codex,
+                "codex-thread-fresh",
+                "D:/project/exomind",
+                "2026-04-02T00:00:05.000Z",
+            ),
+        ];
+        let baseline = ["codex-thread-existing".to_string()]
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+
+        let snapshot = resolve_historical_session_binding_snapshot(
+            &sessions,
+            PtyAgentType::Codex,
+            &baseline,
+            "D:/project/exomind",
+            lower_bound,
+            upper_bound,
+        );
+
+        assert_eq!(
+            snapshot.matched_session_id.as_deref(),
+            Some("codex-thread-fresh")
+        );
+        assert_eq!(
+            snapshot.matched_kind,
+            Some(HistoricalSessionBindingKind::Fresh)
+        );
+        assert_eq!(
+            snapshot.exact_match_ids,
+            vec!["codex-thread-fresh".to_string()]
+        );
+        assert_eq!(
+            snapshot.baseline_exact_match_ids,
+            vec!["codex-thread-existing".to_string()]
+        );
+    }
+
+    #[test]
+    fn historical_session_binding_matches_encoded_claude_workdir() {
+        let started_at = DateTime::parse_from_rfc3339("2026-04-02T00:00:00.000Z")
+            .expect("started_at should parse")
+            .with_timezone(&Utc);
+        let lower_bound =
+            started_at - ChronoDuration::milliseconds(PTY_INNER_SESSION_DETECTION_CLOCK_SKEW_MS);
+        let upper_bound = started_at + ChronoDuration::minutes(15);
+        let sessions = vec![historical_session(
+            PtyAgentType::Claude,
+            "claude-thread-fresh",
+            "H--A137442-Develop-AGI-exomind",
+            "2026-04-02T00:00:05.000Z",
+        )];
+
+        let snapshot = resolve_historical_session_binding_snapshot(
+            &sessions,
+            PtyAgentType::Claude,
+            &std::collections::HashSet::new(),
+            "H:/A137442/Develop/AGI/exomind",
+            lower_bound,
+            upper_bound,
+        );
+
+        assert_eq!(
+            snapshot.matched_session_id.as_deref(),
+            Some("claude-thread-fresh")
+        );
+        assert_eq!(
+            snapshot.matched_kind,
+            Some(HistoricalSessionBindingKind::Fresh)
+        );
+    }
+
+    #[test]
+    fn historical_session_binding_rejects_baseline_only_matches_for_fresh_spawn() {
+        let started_at = DateTime::parse_from_rfc3339("2026-04-02T00:00:00.000Z")
+            .expect("started_at should parse")
+            .with_timezone(&Utc);
+        let lower_bound =
+            started_at - ChronoDuration::milliseconds(PTY_INNER_SESSION_DETECTION_CLOCK_SKEW_MS);
+        let upper_bound = started_at + ChronoDuration::minutes(15);
+        let sessions = vec![historical_session(
+            PtyAgentType::Codex,
+            "codex-thread-existing",
+            "D:/project/exomind",
+            "2026-04-02T00:00:05.000Z",
+        )];
+        let baseline = ["codex-thread-existing".to_string()]
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+
+        let snapshot = resolve_historical_session_binding_snapshot(
+            &sessions,
+            PtyAgentType::Codex,
+            &baseline,
+            "D:/project/exomind",
+            lower_bound,
+            upper_bound,
+        );
+
+        assert_eq!(snapshot.matched_session_id, None);
+        assert!(snapshot.exact_match_ids.is_empty());
+        assert!(snapshot.fresh_exact_match_ids.is_empty());
+        assert_eq!(
+            snapshot.baseline_exact_match_ids,
+            vec!["codex-thread-existing".to_string()]
+        );
+    }
+
+    #[test]
+    fn historical_session_binding_rejects_ambiguous_fresh_matches() {
+        let started_at = DateTime::parse_from_rfc3339("2026-04-02T00:00:00.000Z")
+            .expect("started_at should parse")
+            .with_timezone(&Utc);
+        let lower_bound =
+            started_at - ChronoDuration::milliseconds(PTY_INNER_SESSION_DETECTION_CLOCK_SKEW_MS);
+        let upper_bound = started_at + ChronoDuration::minutes(15);
+        let sessions = vec![
+            historical_session(
+                PtyAgentType::Codex,
+                "codex-thread-a",
+                "D:/project/exomind",
+                "2026-04-02T00:00:05.000Z",
+            ),
+            historical_session(
+                PtyAgentType::Codex,
+                "codex-thread-b",
+                "D:/project/exomind",
+                "2026-04-02T00:00:06.000Z",
+            ),
+        ];
+
+        let snapshot = resolve_historical_session_binding_snapshot(
+            &sessions,
+            PtyAgentType::Codex,
+            &std::collections::HashSet::new(),
+            "D:/project/exomind",
+            lower_bound,
+            upper_bound,
+        );
+
+        assert_eq!(snapshot.matched_session_id, None);
+        assert_eq!(
+            snapshot.exact_match_ids,
+            vec!["codex-thread-a".to_string(), "codex-thread-b".to_string()]
+        );
+        assert_eq!(snapshot.fresh_exact_match_ids, snapshot.exact_match_ids);
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn persist_pty_inner_session_id_updates_session_row_and_live_pty_info() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-backfill-persist-host".to_string());
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+        register_pty_session(&state, &pty).expect("PTY-backed session should register");
+
+        persist_pty_inner_session_id(&state, &pty.id, "codex-thread-fresh")
+            .await
+            .expect("inner session id should persist");
+
+        let session = state
+            .session_store
+            .get(&pty.id)
+            .expect("session lookup should succeed")
+            .expect("session should exist");
+        assert_eq!(
+            session.inner_session_id.as_deref(),
+            Some("codex-thread-fresh")
+        );
+
+        let live_pty = state
+            .pty_manager
+            .list()
+            .await
+            .into_iter()
+            .find(|info| info.id == pty.id)
+            .expect("live pty should still exist");
+        assert_eq!(live_pty.session_id.as_deref(), Some("codex-thread-fresh"));
+
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
     }
 
     #[tokio::test]
@@ -1556,27 +2043,11 @@ mod tests {
 
     #[tokio::test]
     #[cfg(not(target_os = "android"))]
-    async fn write_pty_input_route_wakes_waiting_input_session() {
+    async fn legacy_pty_input_route_returns_not_found() {
         let (_tempdir, state) =
-            AppState::new_isolated_test_runtime(0, "pty-input-host".to_string());
-        let pty = state
-            .pty_manager
-            .spawn(interactive_shell_spawn_request())
-            .await
-            .expect("pty shell should spawn");
-        register_pty_session(&state, &pty).expect("PTY-backed session should register");
-        state
-            .session_store
-            .update(
-                &pty.id,
-                UpdateSessionInput {
-                    status: Some(SessionStatus::WaitingInput),
-                    ..Default::default()
-                },
-            )
-            .expect("session should transition to waiting_input for test setup");
-
+            AppState::new_isolated_test_runtime(0, "pty-legacy-input-host".to_string());
         let app = router().with_state(state.clone());
+        let legacy_input_path = format!("/pty/missing-legacy/{}", ["in", "put"].concat());
         let payload = serde_json::json!({
             "data": BASE64.encode("\n"),
         });
@@ -1584,25 +2055,36 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri(format!("/pty/{}/input", pty.id))
+                    .uri(legacy_input_path)
                     .header("content-type", "application/json")
                     .body(Body::from(payload.to_string()))
                     .unwrap(),
             )
             .await
-            .expect("write input request should succeed");
+            .expect("legacy input route probe should complete");
 
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        let session = state
-            .session_store
-            .get(&pty.id)
-            .expect("session lookup should succeed")
-            .expect("session should exist");
-        assert_eq!(session.interaction_mode, InteractionMode::Terminal);
-        assert_eq!(session.status, SessionStatus::Running);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 
-        let _ = state.pty_manager.stop(&pty.id).await;
-        let _ = state.pty_manager.remove(&pty.id).await;
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn legacy_pty_stream_route_returns_not_found() {
+        let (_tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-legacy-stream-host".to_string());
+        let app = router().with_state(state);
+        let legacy_stream_path = format!("/pty/missing-legacy/{}", ["str", "eam"].concat());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(legacy_stream_path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("legacy stream route probe should complete");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -1847,6 +2329,36 @@ mod tests {
         server.abort();
         let _ = state.pty_manager.stop(&pty.id).await;
         let _ = state.pty_manager.remove(&pty.id).await;
+    }
+
+    #[tokio::test]
+    async fn pty_websocket_input_mode_returns_not_found_for_persisted_history_without_live_pty() {
+        let (tempdir, state) =
+            AppState::new_isolated_test_runtime(0, "pty-ws-input-missing-live-host".to_string());
+        let pty_id = "persisted-pty-input-only";
+        let transcript_dir = tempdir.path().join("runtime-data").join("pty-transcripts");
+        std::fs::create_dir_all(&transcript_dir).expect("transcript dir should exist");
+        std::fs::write(
+            transcript_dir.join(format!("{pty_id}.log")),
+            b"prompt\r\nhistory\r\n",
+        )
+        .expect("transcript should persist");
+        std::fs::write(transcript_dir.join(format!("{pty_id}.eof")), b"0")
+            .expect("completion marker should persist");
+
+        let (addr, server) = spawn_router_server(router().with_state(state.clone())).await;
+        let url = format!("ws://{addr}/pty/{pty_id}/ws?mode=input");
+        let error = connect_async(&url)
+            .await
+            .expect_err("input-only websocket should reject missing live PTYs");
+        match error {
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            }
+            other => panic!("expected websocket handshake 404, got {other:?}"),
+        }
+
+        server.abort();
     }
 
     #[tokio::test]

@@ -52,7 +52,8 @@ interface PtyResumeResponse {
 const DETECTION_CLOCK_SKEW_MS = 15_000;
 const DEFAULT_DETECTION_INTERVAL_MS = 2_000;
 const DEFAULT_DETECTION_CANDIDATE_WINDOW_MS = 15 * 60_000;
-const PTY_RECOVERY_REQUEST_TIMEOUT_MS = 3_500;
+const PTY_RECOVERY_REQUEST_TIMEOUT_MS = 8_000;
+const HISTORICAL_SESSION_DETAIL_RETRY_INTERVAL_MS = 200;
 const inFlightHistoricalSessionDetections = new Map<string, Promise<string | null>>();
 
 function buildHeaders(authToken?: string, includeJsonContentType = false): Record<string, string> {
@@ -128,7 +129,43 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-function isPtyRecoveryTimeoutError(error: unknown): boolean {
+function resolveRemainingRecoveryTimeoutMs(
+  startedAtMs: number,
+  timeoutMs: number,
+): number {
+  return Math.max(1, timeoutMs - (Date.now() - startedAtMs));
+}
+
+async function runPtyRecoveryOperationWithTimeout<T>(
+  operation: () => Promise<T>,
+  controller: AbortController | null,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      timer = setTimeout(() => {
+        controller?.abort();
+        reject(new Error('request timeout（请求超时）'));
+      }, timeoutMs);
+
+      void operation().then(resolve).catch((error) => {
+        if (isPtyRecoveryTimeoutError(error)) {
+          reject(new Error('request timeout（请求超时）'));
+          return;
+        }
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    });
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+export function isPtyRecoveryTimeoutError(error: unknown): boolean {
   if (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError') {
     return true;
   }
@@ -143,24 +180,30 @@ async function fetchPtyRecoveryWithTimeout(
   input: RequestInfo | URL,
   init?: RequestInit,
   timeoutMs: number = PTY_RECOVERY_REQUEST_TIMEOUT_MS,
-): Promise<Response> {
+): Promise<{
+  response: Response;
+  controller: AbortController | null;
+  startedAtMs: number;
+  timeoutMs: number;
+}> {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const startedAtMs = Date.now();
 
   try {
-    return await fetch(input, {
-      ...init,
-      signal: controller?.signal,
-    });
+    const response = await runPtyRecoveryOperationWithTimeout(
+      () => fetch(input, {
+        ...init,
+        signal: controller?.signal,
+      }),
+      controller,
+      timeoutMs,
+    );
+    return { response, controller, startedAtMs, timeoutMs };
   } catch (error) {
     if (isPtyRecoveryTimeoutError(error)) {
       throw new Error('request timeout（请求超时）');
     }
     throw error instanceof Error ? error : new Error(String(error));
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
   }
 }
 
@@ -274,10 +317,14 @@ export function getRecoverableTerminalSessionSnapshotKey(
   snapshot: Pick<RecoverableTerminalSessionSnapshot, 'agentType' | 'innerSessionId' | 'projectPathKey'>,
 ): string {
   const innerSessionId = snapshot.innerSessionId.trim();
+  const projectPathKey = snapshot.projectPathKey.trim();
+  if (innerSessionId.length > 0 && projectPathKey.length > 0) {
+    return `${snapshot.agentType}:${innerSessionId}:${projectPathKey}`;
+  }
   if (innerSessionId.length > 0) {
     return `${snapshot.agentType}:${innerSessionId}`;
   }
-  return `${snapshot.agentType}:${snapshot.projectPathKey}`;
+  return `${snapshot.agentType}:${projectPathKey}`;
 }
 
 export function matchesRecoverableTerminalSessionSnapshot(
@@ -294,7 +341,8 @@ export function matchesRecoverableTerminalSessionSnapshot(
   if (candidate.agentType !== snapshot.agentType) {
     return false;
   }
-  return candidate.innerSessionId === snapshot.innerSessionId;
+  return candidate.innerSessionId === snapshot.innerSessionId
+    && candidate.projectPathKey === snapshot.projectPathKey;
 }
 
 export function resolveRecoverableTerminalProjectPathKey(
@@ -323,6 +371,29 @@ export function canResumeHistoricalTerminalSession(
   return buildRecoverableTerminalSessionSnapshot(session) !== null
     && session.status !== 'completed'
     && session.status !== 'archived';
+}
+
+export function buildDisconnectedTerminalAutoResumeAttemptKey(
+  session: Pick<
+    SessionInfo,
+    'status' | 'pty_id' | 'inner_session_id' | 'source_host_id' | 'last_active_at'
+  >,
+  options: {
+    runtimeStartedAt?: string | null;
+    loadedPtyHostId?: string | null;
+    activeEmbeddedRuntimeHostId?: string | null;
+  } = {},
+): string {
+  return [
+    session.status,
+    session.pty_id ?? '',
+    session.inner_session_id ?? '',
+    session.source_host_id ?? '',
+    session.last_active_at ?? '',
+    options.runtimeStartedAt ?? '',
+    options.loadedPtyHostId ?? '',
+    options.activeEmbeddedRuntimeHostId ?? '',
+  ].join('|');
 }
 
 export function isRecoverableTerminalSession(session: SessionInfo): boolean {
@@ -357,15 +428,96 @@ async function fetchHistoricalSessions(
   rtBaseUrl: string,
   agentType: RecoverableTerminalAgentType,
   authToken?: string,
+  timeoutMs?: number,
 ): Promise<HistoricalSessionInfo[]> {
-  const response = await fetchPtyRecoveryWithTimeout(
+  const {
+    response,
+    controller,
+    startedAtMs,
+    timeoutMs: resolvedTimeoutMs,
+  } = await fetchPtyRecoveryWithTimeout(
     `${rtBaseUrl}/pty/sessions?agent_type=${encodeURIComponent(agentType)}`,
     { headers: buildHeaders(authToken) },
+    timeoutMs,
   );
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
-  return response.json() as Promise<HistoricalSessionInfo[]>;
+  return runPtyRecoveryOperationWithTimeout(
+    () => response.json() as Promise<HistoricalSessionInfo[]>,
+    controller,
+    resolveRemainingRecoveryTimeoutMs(startedAtMs, resolvedTimeoutMs),
+  );
+}
+
+async function fetchHistoricalSessionDetail(
+  rtBaseUrl: string,
+  snapshot: Pick<RecoverableTerminalSessionSnapshot, 'agentType' | 'innerSessionId'>,
+  authToken?: string,
+  timeoutMs?: number,
+): Promise<HistoricalSessionInfo | null> {
+  const {
+    response,
+    controller,
+    startedAtMs,
+    timeoutMs: resolvedTimeoutMs,
+  } = await fetchPtyRecoveryWithTimeout(
+    `${rtBaseUrl}/pty/sessions/detail?agent_type=${encodeURIComponent(snapshot.agentType)}&session_id=${encodeURIComponent(snapshot.innerSessionId)}`,
+    { headers: buildHeaders(authToken) },
+    timeoutMs,
+  );
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return runPtyRecoveryOperationWithTimeout(
+    () => response.json() as Promise<HistoricalSessionInfo>,
+    controller,
+    resolveRemainingRecoveryTimeoutMs(startedAtMs, resolvedTimeoutMs),
+  );
+}
+
+async function fetchHistoricalSessionDetailWithRetry(
+  rtBaseUrl: string,
+  snapshot: Pick<RecoverableTerminalSessionSnapshot, 'agentType' | 'innerSessionId'>,
+  authToken?: string,
+  timeoutMs?: number,
+): Promise<HistoricalSessionInfo | null> {
+  const resolvedTimeoutMs = timeoutMs ?? PTY_RECOVERY_REQUEST_TIMEOUT_MS;
+  const startedAtMs = Date.now();
+
+  while (true) {
+    const remainingTimeoutMs = resolveRemainingRecoveryTimeoutMs(
+      startedAtMs,
+      resolvedTimeoutMs,
+    );
+    const matchedSession = await fetchHistoricalSessionDetail(
+      rtBaseUrl,
+      snapshot,
+      authToken,
+      remainingTimeoutMs,
+    );
+    if (matchedSession) {
+      return matchedSession;
+    }
+
+    const remainingAfterAttemptMs = resolveRemainingRecoveryTimeoutMs(
+      startedAtMs,
+      resolvedTimeoutMs,
+    );
+    if (remainingAfterAttemptMs <= HISTORICAL_SESSION_DETAIL_RETRY_INTERVAL_MS) {
+      return null;
+    }
+
+    await delay(
+      Math.min(
+        HISTORICAL_SESSION_DETAIL_RETRY_INTERVAL_MS,
+        remainingAfterAttemptMs - 1,
+      ),
+    );
+  }
 }
 
 function buildResumeRequestBody(
@@ -394,25 +546,40 @@ export async function resumeHistoricalPtySnapshot({
   snapshot,
   rows = 24,
   cols = 80,
+  timeoutMs,
 }: {
   rtBaseUrl: string;
   authToken?: string;
   snapshot: RecoverableTerminalSessionSnapshot;
   rows?: number;
   cols?: number;
+  timeoutMs?: number;
 }): Promise<PtyResumeResponse> {
-  const response = await fetchPtyRecoveryWithTimeout(`${rtBaseUrl}/pty/resume`, {
+  const {
+    response,
+    controller,
+    startedAtMs,
+    timeoutMs: resolvedTimeoutMs,
+  } = await fetchPtyRecoveryWithTimeout(`${rtBaseUrl}/pty/resume`, {
     method: 'POST',
     headers: buildHeaders(authToken, true),
     body: JSON.stringify(buildResumeRequestBody(snapshot, rows, cols)),
-  });
+  }, timeoutMs);
 
   if (!response.ok) {
-    const text = await response.text();
+    const text = await runPtyRecoveryOperationWithTimeout(
+      () => response.text(),
+      controller,
+      resolveRemainingRecoveryTimeoutMs(startedAtMs, resolvedTimeoutMs),
+    );
     throw new Error(text || `HTTP ${response.status}`);
   }
 
-  return response.json() as Promise<PtyResumeResponse>;
+  return runPtyRecoveryOperationWithTimeout(
+    () => response.json() as Promise<PtyResumeResponse>,
+    controller,
+    resolveRemainingRecoveryTimeoutMs(startedAtMs, resolvedTimeoutMs),
+  );
 }
 
 export async function resumeHistoricalPtySession({
@@ -433,14 +600,13 @@ export async function hasMatchingHistoricalSessionSnapshotRecord(
   rtBaseUrl: string,
   snapshot: RecoverableTerminalSessionSnapshot,
   authToken?: string,
+  timeoutMs?: number,
 ): Promise<boolean> {
-  const historicalSessions = await fetchHistoricalSessions(
+  const matchedSession = await fetchHistoricalSessionDetailWithRetry(
     rtBaseUrl,
-    snapshot.agentType,
+    snapshot,
     authToken,
-  );
-  const matchedSession = historicalSessions.find(
-    (item) => item.session_id === snapshot.innerSessionId,
+    timeoutMs,
   );
   if (!matchedSession) {
     return false;
@@ -454,12 +620,18 @@ export async function hasMatchingHistoricalSessionRecord(
   rtBaseUrl: string,
   session: SessionInfo,
   authToken?: string,
+  timeoutMs?: number,
 ): Promise<boolean> {
   const snapshot = buildRecoverableTerminalSessionSnapshot(session);
   if (!snapshot) {
     return false;
   }
-  return hasMatchingHistoricalSessionSnapshotRecord(rtBaseUrl, snapshot, authToken);
+  return hasMatchingHistoricalSessionSnapshotRecord(
+    rtBaseUrl,
+    snapshot,
+    authToken,
+    timeoutMs,
+  );
 }
 
 export async function detectAndPersistHistoricalSessionId({
