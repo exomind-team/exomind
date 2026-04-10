@@ -165,12 +165,14 @@ fn load_or_create_persisted_runtime_identity(
         source_origin: None,
     }) {
         Ok(true) => Some(generated),
-        Ok(false) => store.get(config::types::DEVICE_CONFIG_SCOPE, key).ok().flatten().and_then(
-            |entry| {
+        Ok(false) => store
+            .get(config::types::DEVICE_CONFIG_SCOPE, key)
+            .ok()
+            .flatten()
+            .and_then(|entry| {
                 let trimmed = entry.value.trim();
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
-            },
-        ),
+            }),
         Err(error) => {
             tracing::warn!(
                 path = %path.display(),
@@ -2298,14 +2300,14 @@ mod tests {
             "rt",
             "runtime host id",
         )
-            .expect("first runtime host id should persist");
+        .expect("first runtime host id should persist");
         let second = load_or_create_persisted_runtime_identity(
             &config_path,
             RUNTIME_HOST_ID_CONFIG_KEY,
             "rt",
             "runtime host id",
         )
-            .expect("second runtime host id should reuse persisted value");
+        .expect("second runtime host id should reuse persisted value");
 
         assert_eq!(first, second, "runtime host id must survive restarts");
 

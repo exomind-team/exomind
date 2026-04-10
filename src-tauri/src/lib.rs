@@ -4,9 +4,9 @@ mod commands;
 mod dev_instance_paths;
 
 use commands::asr_commands::{
-    VolcanoAsrStreamState, volcano_asr_check_config, volcano_asr_recognize,
-    volcano_asr_stream_cancel, volcano_asr_stream_finish, volcano_asr_stream_push,
-    volcano_asr_stream_session_exists, volcano_asr_stream_start,
+    volcano_asr_check_config, volcano_asr_recognize, volcano_asr_stream_cancel,
+    volcano_asr_stream_finish, volcano_asr_stream_push, volcano_asr_stream_session_exists,
+    volcano_asr_stream_start, VolcanoAsrStreamState,
 };
 use commands::dev_commands::dev_instance_runtime_info;
 use commands::device_commands::get_device_id;
@@ -33,27 +33,27 @@ use commands::qwen_omni_realtime_commands::{
     omni_realtime_session_start, QwenOmniRealtimeSessionState,
 };
 use commands::runtime_commands::{
-    RuntimeProcessState, RuntimeTargetMode, ensure_runtime_started,
-    load_persisted_runtime_network_mode, load_persisted_runtime_target_mode,
-    runtime_external_address_get, runtime_external_address_set, runtime_lan_no_auth_get,
-    runtime_lan_no_auth_set, runtime_network_mode_get, runtime_network_mode_set,
-    runtime_service_peer_dial_address, runtime_service_reachable_address, runtime_service_start,
-    runtime_service_status, runtime_service_stop, runtime_target_mode_get, runtime_target_mode_set,
-    signal_publish_fast, sync_android_runtime_keepalive,
+    ensure_runtime_started, load_persisted_runtime_network_mode,
+    load_persisted_runtime_target_mode, runtime_external_address_get, runtime_external_address_set,
+    runtime_lan_no_auth_get, runtime_lan_no_auth_set, runtime_network_mode_get,
+    runtime_network_mode_set, runtime_service_peer_dial_address, runtime_service_reachable_address,
+    runtime_service_start, runtime_service_status, runtime_service_stop, runtime_target_mode_get,
+    runtime_target_mode_set, signal_publish_fast, sync_android_runtime_keepalive,
+    RuntimeProcessState, RuntimeTargetMode,
 };
 use commands::shortcut_commands::{
-    MainWindowShortcutState, VoiceShortcutState, ensure_voice_overlay_window,
-    foreground_window_get, main_window_shortcut_get, main_window_shortcut_set,
-    main_window_shortcut_take_pending_activation, register_main_window_shortcut,
-    register_voice_shortcut, simulate_enter, simulate_paste, voice_overlay_hide,
-    voice_overlay_set_bottom_offset, voice_overlay_show, voice_recording_set_active,
-    voice_shortcut_get, voice_shortcut_set,
+    ensure_voice_overlay_window, foreground_window_get, main_window_shortcut_get,
+    main_window_shortcut_set, main_window_shortcut_take_pending_activation,
+    register_main_window_shortcut, register_voice_shortcut, simulate_enter, simulate_paste,
+    voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
+    voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, MainWindowShortcutState,
+    VoiceShortcutState,
 };
 use commands::workspace_commands::{
     get_agent_workspace_actions, get_agent_workspace_knowledge, get_agent_workspace_knowledge_list,
     get_agent_workspace_soul, get_agent_workspace_status,
 };
-use commands::ws_commands::{WsClientState, ws_connect, ws_disconnect, ws_get_state, ws_send};
+use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 use dev_instance_paths::{
     resolve_instance_app_data_dir, resolve_instance_runtime_dir_from_app_data_dir,
     resolve_legacy_shared_app_data_dir, resolve_legacy_shared_runtime_dir,

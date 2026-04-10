@@ -1,7 +1,7 @@
-use std::sync::Mutex;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use crate::dev_instance_paths::resolve_overlay_webview_data_dir;
 use serde::{Deserialize, Serialize};
@@ -514,7 +514,7 @@ fn foreground_window_context() -> ForegroundWindowContext {
     #[link(name = "kernel32")]
     extern "system" {
         fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32)
-        -> Handle;
+            -> Handle;
         fn QueryFullProcessImageNameW(
             h_process: Handle,
             dw_flags: u32,
@@ -536,7 +536,11 @@ fn foreground_window_context() -> ForegroundWindowContext {
         }
         let os = OsString::from_wide(&buffer[..written as usize]);
         let title = os.to_string_lossy().trim().to_string();
-        if title.is_empty() { None } else { Some(title) }
+        if title.is_empty() {
+            None
+        } else {
+            Some(title)
+        }
     }
 
     fn read_process_name(process_id: u32) -> Option<String> {
@@ -1016,9 +1020,10 @@ pub async fn foreground_window_focus(_window_handle: String) -> Result<bool, Str
 #[cfg(test)]
 mod tests {
     use super::{
-        MonitorGeometry, SyntheticPasteModifier, SyntheticShortcutStep, calculate_overlay_position,
-        choose_voice_overlay_anchor, cursor_in_monitor, paste_shortcut_character,
-        paste_shortcut_modifier, paste_shortcut_steps, transparent_overlay_background_color,
+        calculate_overlay_position, choose_voice_overlay_anchor, cursor_in_monitor,
+        paste_shortcut_character, paste_shortcut_modifier, paste_shortcut_steps,
+        transparent_overlay_background_color, MonitorGeometry, SyntheticPasteModifier,
+        SyntheticShortcutStep,
     };
     use tauri::window::Color;
 

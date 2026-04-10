@@ -70,13 +70,11 @@ async fn topology_exposes_runtime_host_and_device_contract() {
         "topology should still keep legacy host_id"
     );
     assert_ne!(
-        payload["device"]["id"],
-        payload["host_id"],
+        payload["device"]["id"], payload["host_id"],
         "device.id should no longer alias host_id"
     );
     assert_eq!(
-        payload["device"]["primary_runtime_host_id"],
-        payload["host_id"],
+        payload["device"]["primary_runtime_host_id"], payload["host_id"],
         "device should still point back to the runtime host"
     );
 
@@ -89,8 +87,7 @@ async fn topology_exposes_runtime_host_and_device_contract() {
     );
     assert_eq!(device_components[0]["kind"], "runtime_host");
     assert_eq!(
-        device_components[0]["runtime_host_id"],
-        payload["host_id"],
+        device_components[0]["runtime_host_id"], payload["host_id"],
         "runtime_host component should point to host_id"
     );
 

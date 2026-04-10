@@ -5,8 +5,8 @@ use crate::dev_instance_paths::resolve_instance_app_data_dir;
 use chrono::Utc;
 use exomind_android_keepalive::AndroidRuntimeKeepaliveExt;
 use exomind_runtime::{
-    DEFAULT_RT_PORT, RuntimeHandle, RuntimePublishRequest, RuntimeStartError, RuntimeStartOptions,
-    start_with_options,
+    start_with_options, RuntimeHandle, RuntimePublishRequest, RuntimeStartError,
+    RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, TcpListener as StdTcpListener, ToSocketAddrs, UdpSocket};
@@ -15,7 +15,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::{Duration, sleep, timeout};
+use tokio::time::{sleep, timeout, Duration};
 
 struct RuntimeInner {
     handle: Option<RuntimeHandle>,

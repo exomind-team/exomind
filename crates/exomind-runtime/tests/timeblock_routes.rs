@@ -256,7 +256,12 @@ async fn backfills_gap_blocks_via_route() {
         .await
         .unwrap();
     assert_eq!(list_response.status(), StatusCode::OK);
-    let list_body = list_response.into_body().collect().await.unwrap().to_bytes();
+    let list_body = list_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let list_parsed: Value = serde_json::from_slice(&list_body).unwrap();
     assert_eq!(list_parsed.as_array().map(|items| items.len()), Some(3));
     let gap = list_parsed
@@ -379,7 +384,12 @@ async fn timeblock_lifecycle_routes_cover_running_pause_feedback_and_gap() {
         .await
         .unwrap();
     assert_eq!(start_response.status(), StatusCode::OK);
-    let start_body = start_response.into_body().collect().await.unwrap().to_bytes();
+    let start_body = start_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let start_payload: Value = serde_json::from_slice(&start_body).unwrap();
     let start_id = start_payload["active"]["startId"]
         .as_str()
@@ -469,7 +479,12 @@ async fn timeblock_lifecycle_routes_cover_running_pause_feedback_and_gap() {
         .await
         .unwrap();
     assert_eq!(stop_response.status(), StatusCode::OK);
-    let stop_body = stop_response.into_body().collect().await.unwrap().to_bytes();
+    let stop_body = stop_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let stop_payload: Value = serde_json::from_slice(&stop_body).unwrap();
     assert_eq!(stop_payload["status"], "stopped");
     assert_eq!(stop_payload["phase"], "feedback_in_progress");
@@ -692,7 +707,12 @@ async fn describe_routes_update_active_and_completed_gap_but_keep_completed_acti
         .await
         .unwrap();
     assert_eq!(start_response.status(), StatusCode::OK);
-    let start_body = start_response.into_body().collect().await.unwrap().to_bytes();
+    let start_body = start_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let start_payload: Value = serde_json::from_slice(&start_body).unwrap();
     let active_id = start_payload["active"]["startId"]
         .as_str()
@@ -843,9 +863,7 @@ async fn describe_routes_update_active_and_completed_gap_but_keep_completed_acti
         block_type: Some("gap".to_string()),
         transitions: vec![],
     };
-    store
-        .replace_completed(&[completed_gap.clone()])
-        .unwrap();
+    store.replace_completed(&[completed_gap.clone()]).unwrap();
 
     let describe_completed_gap_response = app
         .clone()
@@ -888,11 +906,9 @@ async fn describe_routes_update_active_and_completed_gap_but_keep_completed_acti
         .as_array()
         .expect("gap list should be an array");
     assert!(
-        gap_items.iter().any(
-            |item| item["id"] == "gap-completed-1"
-                && item["name"] == "Named Gap"
-                && item["note"] == "Gap note"
-        ),
+        gap_items.iter().any(|item| item["id"] == "gap-completed-1"
+            && item["name"] == "Named Gap"
+            && item["note"] == "Gap note"),
         "completed gap should be renameable via describe route"
     );
 }

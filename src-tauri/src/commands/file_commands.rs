@@ -5,7 +5,7 @@ use crate::dev_instance_paths::resolve_instance_app_data_dir;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, ipc::InvokeError};
+use tauri::{ipc::InvokeError, AppHandle};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_fs::{FsExt, OpenOptions};
 use thiserror::Error;

@@ -3,14 +3,14 @@
 use std::{collections::HashMap, io::Read, sync::Arc, time::Duration};
 
 use flate2::read::GzDecoder;
-use futures_util::{SinkExt, StreamExt, stream::SplitSink, stream::SplitStream};
+use futures_util::{stream::SplitSink, stream::SplitStream, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{Mutex, mpsc, oneshot};
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tungstenite::handshake::client::generate_key;
-use tungstenite::{Message, http::Request as HttpRequest};
+use tungstenite::{http::Request as HttpRequest, Message};
 use url::Url;
 
 const DOUBAO_REALTIME_EVENT_NAME: &str = "doubao-realtime-event";
