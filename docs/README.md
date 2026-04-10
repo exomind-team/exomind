@@ -6,6 +6,7 @@
 
 ## 架构与设计
 
+- [系统原则](architecture/principles.md) -- invariant / affordance、生命判据与命名语义
 - [架构总览](architecture/overview.md) -- 分层模型、Port/Service、Phase 路线（唯一权威）
 - [Agent Workbench 共享工作图谱](architecture/agent-workbench-shared-graph-spec.md) -- Agent Workbench 长期架构规格与实施阶段
 - [信号池架构](architecture/ARCH-signal-pool-agent-process.md) -- SignalPool 进程模型与信号流
@@ -42,6 +43,7 @@
 
 ## 产品方向
 
+- [Vision](product/vision.md) -- 外心的产品使命、愿景与边界
 - [PRD](product/PRD.md) -- 功能需求文档（全自动 Agent + 个人生命成长双核心）
 - [路线图](product/roadmap.md) -- 自主生命体路线图（Phase 0-5）
 - [已完成功能](product/completed-features.md) -- 已完成功能需求拆分清单
@@ -50,6 +52,7 @@
 
 ## 开发指南
 
+- [Repo Agent Workflow](development/repo-agent-workflow.md) -- 源码工作目录 Agent 的技术操作细节、评论/验证/jj/发布规则
 - [快速上手](development/quickstart.md) -- 开发环境搭建指南
 - [前端设计规范](development/ui-spec.md) -- ExoMind 前端 UI 统一规范，含 token、页面分类、例外边界与评审清单
 - [设备配对流程](development/device-pairing-flow.md) -- node-first 配对、地址解析、Android 模拟器特殊规则
@@ -75,20 +78,25 @@
 
 ## Agent 文档
 
+### Runtime / 用户侧 Agent
+
+- [概览](agents/README.md) -- runtime agent 契约与专项 agent 文档入口
+- [Runtime Agent Contract](agents/runtime-agent-contract.md) -- 用户侧人格、对话风格与 prompt 边界
+
 ### Review Agent
 
-- [索引](agents/review-agent/index.md) -- 审核 Agent 文档入口
-- [公共契约](agents/review-agent/common-contract.md) -- 审核 Agent 公共契约
-- [发现循环](agents/review-agent/discovery-loop.md) -- PR/Issue 发现循环
-- [审阅循环](agents/review-agent/review-loop.md) -- 审阅执行循环
-- [Router 与恢复](agents/review-agent/router-and-recovery.md) -- Router 与重启恢复
-- [状态文件与 Worktree](agents/review-agent/state-files-and-worktrees.md) -- 状态文件与工作树管理
-- [评论策略与模板](agents/review-agent/comment-policy-and-templates.md) -- PR 评论策略与模板
-- [统一入口 Prompt](agents/review-agent/review-agent.prompt.md) -- 审阅 Agent 统一入口 Prompt
+- [索引](../agents/review-agent/references/index.md) -- 审核 Agent 文档入口
+- [公共契约](../agents/review-agent/references/common-contract.md) -- 审核 Agent 公共契约
+- [发现循环](../agents/review-agent/references/discovery-loop.md) -- PR/Issue 发现循环
+- [审阅循环](../agents/review-agent/references/review-loop.md) -- 审阅执行循环
+- [Router 与恢复](../agents/review-agent/references/router-and-recovery.md) -- Router 与重启恢复
+- [状态文件与 Worktree](../agents/review-agent/references/state-files-and-worktrees.md) -- 状态文件与工作树管理
+- [评论策略与模板](../agents/review-agent/references/comment-policy-and-templates.md) -- PR 评论策略与模板
+- [统一入口 Prompt](../agents/review-agent/references/review-agent.prompt.md) -- 审阅 Agent 统一入口 Prompt
 
 ### 开发航线
 
-- [开发航线](agents/dev-route/) -- Issue 聚类分析与批次实施规划航线图
+- [开发航线 Skill](../skills/dev-route/SKILL.md) -- Issue 聚类分析与批次实施规划 skill
 
 ---
 
@@ -135,7 +143,6 @@
 
 - [ExoBuffer Connector 技术需求](plans/archive/01_ExoBufferConnector技术需求报告.md) -- ExoBuffer 连接器技术需求报告
 - [API 设计](plans/archive/API.md) -- 早期 API 设计文档
-- [自主生命体规格](plans/archive/AUTONOMOUS_LIFE_SPEC.md) -- 自主生命体原始规格
 - [开发流程](plans/archive/DEVELOPMENT_PROCESS.md) -- 早期开发流程定义
 - [通知权限守护](plans/archive/ExoMind-Notification-Permission-Guard.md) -- 通知权限守护设计
 
@@ -162,10 +169,9 @@
 
 > 以下文档位于项目根目录（非 docs/ 内），此处提供交叉引用。
 
-- [src/docs/user-guide.md](../src/docs/user-guide.md) -- 用户指南，包含设备配对与多端互联说明
 - [README.md](../README.md) -- 项目介绍、快速上手、**多实例管理器用法（tauri:manager）**
-- [CLAUDE.md](../CLAUDE.md) -- Claude Code 专用指令
-- [AGENTS.md](../AGENTS.md) -- Codex 专用指令
+- [AGENTS.md](../AGENTS.md) -- 源码工作目录 Agent 合同（单真源）
+- [CLAUDE.md](../CLAUDE.md) -- 兼容入口，指向 AGENTS.md
 - [BUILD.md](../BUILD.md) -- 构建说明（CI/CD、跨平台构建）
 - [CHANGELOG.md](../CHANGELOG.md) -- 版本历史
 - [QUICK-START.md](../QUICK-START.md) -- 快速上手指南
@@ -175,10 +181,10 @@
 
 ## 通用 AI 上下文
 
-- [AI-CONTEXT.md](AI-CONTEXT.md) -- AI 工具通用项目上下文
+- [AI-CONTEXT.md](AI-CONTEXT.md) -- AI 工具通用项目上下文与文档索引
 - [ARCHIVE-INDEX.md](ARCHIVE-INDEX.md) -- 已删除文档的历史索引
 
 ---
 
-> 最后更新: 2026-03-31
-> 导航版本: v4.2
+> 最后更新: 2026-04-10
+> 导航版本: v4.3
