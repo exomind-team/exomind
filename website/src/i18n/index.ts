@@ -233,6 +233,11 @@ export function stripBasePath(pathname: string, basePath = runtimeBasePath) {
     return normalizedPathname;
 }
 
+export function isDocsPath(pathname: string, basePath = runtimeBasePath) {
+    const contentPath = stripBasePath(pathname, basePath);
+    return /^\/(?:en\/)?docs(?:\/|$)/.test(contentPath);
+}
+
 export function prependBasePath(path: string, basePath = runtimeBasePath) {
     const normalizedBasePath = normalizeBasePath(basePath);
     const normalizedPath = normalizeContentPath(path);
