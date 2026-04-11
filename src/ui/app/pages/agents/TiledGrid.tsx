@@ -78,11 +78,17 @@ export interface TiledGridProps {
   onOpenEmptySlot?: (slotId: string) => void;
   onSpawnInSlot?: (slotId: string) => void;
   onResumeRecoverableSlot?: (slotId: string) => void;
+  slotStates?: Record<string, TiledSlotState | undefined>;
   unassignedSessions?: SessionInfo[];
   unassignedPoolCollapsed?: boolean;
   onToggleUnassignedPool?: () => void;
   onAssignSessionToSlot?: (slotId: string, sessionId: string) => void;
   onBindSessionToSlot?: (slotId: string, sessionId: string) => void;
+}
+
+export interface TiledSlotState {
+  status: 'creating' | 'error';
+  message?: string;
 }
 
 type TiledPaneEntry =
@@ -156,6 +162,7 @@ export function TiledGrid({
   onOpenEmptySlot,
   onSpawnInSlot,
   onResumeRecoverableSlot,
+  slotStates,
   unassignedSessions,
   unassignedPoolCollapsed,
   onToggleUnassignedPool,
@@ -173,6 +180,7 @@ export function TiledGrid({
         sessions={sessions}
         tree={resolvedTree}
         slots={resolvedSlots}
+        slotStates={slotStates}
         resolveSessionConnection={resolveSessionConnection}
         focusedIndex={focusedIndex}
         onFocusPane={onFocusPane}
@@ -411,6 +419,7 @@ interface PaneTreeGridProps {
   sessions: SessionInfo[];
   tree: TiledPaneTreeNode;
   slots: TiledPaneSlotBinding[];
+  slotStates?: Record<string, TiledSlotState | undefined>;
   resolveSessionConnection: (session: SessionInfo) => {
     rtBaseUrl: string;
     authToken?: string;
@@ -462,6 +471,7 @@ function PaneTreeGrid({
   onCloseSlot,
   onOpenEmptySlot,
   onResumeRecoverableSlot,
+  slotStates,
   unassignedSessions = [],
   unassignedPoolCollapsed = false,
   onToggleUnassignedPool,
@@ -546,6 +556,7 @@ function PaneTreeGrid({
       slotId,
       kind: 'empty' as const,
     };
+    const slotState = slotStates?.[slotId] ?? null;
     const isFocused = resolvedFocusedSlotId === slotId;
     const commonSlotActions = {
       onSplitHorizontal: onSplitSlot ? () => onSplitSlot(slotId, 'horizontal') : undefined,
@@ -616,6 +627,7 @@ function PaneTreeGrid({
         isFocused={isFocused}
         onFocus={() => handleFocusSlot(slotId)}
         onOpen={() => onOpenEmptySlot?.(slotId)}
+        slotState={slotState}
         unassignedSessions={unassignedSessions}
         onAssignSession={onAssignSessionToSlot}
         onSplitHorizontal={commonSlotActions.onSplitHorizontal}
@@ -643,6 +655,7 @@ function PaneTreeGrid({
     onStopSession,
     resolveSessionConnection,
     resolvedFocusedSlotId,
+    slotStates,
     treeEntries,
     unassignedSessions,
   ]);
@@ -1104,6 +1117,7 @@ interface EmptyPaneProps {
   isFocused: boolean;
   onFocus: () => void;
   onOpen?: () => void;
+  slotState?: TiledSlotState | null;
   onSplitHorizontal?: () => void;
   onSplitVertical?: () => void;
   onClose?: () => void;
@@ -1116,6 +1130,7 @@ function EmptyPane({
   isFocused,
   onFocus,
   onOpen,
+  slotState,
   onSplitHorizontal,
   onSplitVertical,
   onClose,
@@ -1134,7 +1149,11 @@ function EmptyPane({
     >
       <div className="flex items-center justify-between border-b border-dashed border-[#E7E5E4] px-2 py-1 dark:border-[#292524]">
         <span className="truncate text-[10px] font-medium text-[#78716C] dark:text-[#A8A29E]">
-          空窗格
+          {slotState?.status === 'creating'
+            ? '创建中'
+            : slotState?.status === 'error'
+              ? '创建失败'
+              : '空窗格'}
         </span>
         <PaneWorkbenchActions
           onSplitHorizontal={onSplitHorizontal}
@@ -1143,9 +1162,30 @@ function EmptyPane({
         />
       </div>
       <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
-        <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
-          选择已有会话，或新建终端代理绑定到这个窗格。
-        </p>
+        {slotState?.status === 'creating' ? (
+          <>
+            <div className="flex items-center gap-2 text-sm font-medium text-[#57534E] dark:text-[#D6D3D1]">
+              <Loader2 size={14} className="animate-spin" />
+              <span>正在创建终端</span>
+            </div>
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+              参数已提交到运行时；终端准备完成后会自动绑定回这个窗格。
+            </p>
+          </>
+        ) : slotState?.status === 'error' ? (
+          <>
+            <p className="text-sm font-medium text-[#9A3412] dark:text-[#FDBA74]">
+              创建失败
+            </p>
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+              {slotState.message || '终端创建未成功，请重试或改为绑定已有会话。'}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+            选择已有会话，或新建终端代理绑定到这个窗格。
+          </p>
+        )}
         <div className="flex max-h-full w-full flex-wrap items-center justify-center gap-2 overflow-auto">
           <button
             type="button"
@@ -1155,7 +1195,7 @@ function EmptyPane({
             }}
             className="rounded-md border border-[#D6D3D1] bg-white px-3 py-1 text-xs font-medium text-[#1C1917] hover:border-[#C75B3A]/50 dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
           >
-            新建终端
+            {slotState?.status === 'error' ? '重新打开创建器' : '新建终端'}
           </button>
           {unassignedSessions.map((session) => (
             <button

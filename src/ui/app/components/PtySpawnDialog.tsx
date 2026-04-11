@@ -45,6 +45,8 @@ export interface PtySpawnDialogProps {
   authToken?: string;
   defaultWorkdir?: string;
   onSpawned: (info: { id: string; name: string }) => void;
+  onSpawnStart?: () => void;
+  onSpawnError?: (message: string) => void;
   occupiedHistoricalSessionIds?: string[];
   occupiedHistoricalSessionLabels?: Record<string, string>;
 }
@@ -229,6 +231,8 @@ export function PtySpawnDialog({
   authToken,
   defaultWorkdir,
   onSpawned,
+  onSpawnStart,
+  onSpawnError,
   occupiedHistoricalSessionIds = [],
   occupiedHistoricalSessionLabels = {},
 }: PtySpawnDialogProps) {
@@ -402,12 +406,21 @@ export function PtySpawnDialog({
   // ── Spawn new session ───────────────────────────────────────
 
   const handleSpawn = useCallback(async () => {
-    setLoading(true);
     setError("");
+    const delegateLifecycle = typeof onSpawnStart === "function";
+
+    if (!delegateLifecycle) {
+      setLoading(true);
+    }
 
     try {
       const body = buildSpawnPayload();
       const startedAtMs = Date.now();
+
+      if (delegateLifecycle) {
+        onSpawnStart();
+        onOpenChange(false);
+      }
 
       const res = await fetch(`${rtBaseUrl}/pty/spawn`, {
         method: "POST",
@@ -453,18 +466,29 @@ export function PtySpawnDialog({
         });
       }
       onSpawned(result);
-      onOpenChange(false);
+      if (!delegateLifecycle) {
+        onOpenChange(false);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      if (delegateLifecycle) {
+        onSpawnError?.(message);
+      } else {
+        setError(message);
+      }
     } finally {
-      setLoading(false);
+      if (!delegateLifecycle) {
+        setLoading(false);
+      }
     }
   }, [
     agentType,
     buildHeaders,
     buildSpawnPayload,
     onOpenChange,
+    onSpawnError,
     onSpawned,
+    onSpawnStart,
     authToken,
     rtBaseUrl,
     sessions,

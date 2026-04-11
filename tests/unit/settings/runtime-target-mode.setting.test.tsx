@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { settingsPagePreferenceState } from '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
@@ -59,17 +59,27 @@ describe('SettingsPage runtime target mode setting', () => {
 
     expect(screen.getByRole('button', { name: '连接' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '终端 Agent' })).toBeInTheDocument();
-    expect(screen.getByText('RT 配置')).toBeInTheDocument();
-    expect(screen.getByText('RT 开放模式')).toBeInTheDocument();
+    expect(screen.getByText('连接方式')).toBeInTheDocument();
+    expect(screen.getByText('本机开放范围')).toBeInTheDocument();
     expect(screen.getByText('超时待决策时间')).toBeInTheDocument();
     expect(screen.getByText('控制 PTY 连续无输出多久后自动标记为等待决策。')).toBeInTheDocument();
     expect(screen.getByText('终端历史回放上限')).toBeInTheDocument();
     expect(screen.queryByText('RT 地址')).toBeNull();
 
-    fireEvent.click(screen.getByText('RT 配置'));
+    const inputSection = screen.getByTestId('new-settings-desktop-vc-section-input');
+    const terminalAgentSection = screen.getByTestId('new-settings-desktop-vc-section-terminal-agent');
+
+    expect(within(inputSection).queryByText('平铺工作台方向快捷键')).toBeNull();
+    expect(within(inputSection).queryByText('平铺工作台命令快捷键')).toBeNull();
+    expect(within(inputSection).queryByText('平铺工作台单次透传快捷键')).toBeNull();
+    expect(within(terminalAgentSection).getByText('平铺工作台方向快捷键')).toBeInTheDocument();
+    expect(within(terminalAgentSection).getByText('平铺工作台命令快捷键')).toBeInTheDocument();
+    expect(within(terminalAgentSection).getByText('平铺工作台单次透传快捷键')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('连接方式'));
 
     await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: 'RT 配置' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '连接方式' })).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText('外部'));
@@ -81,15 +91,18 @@ describe('SettingsPage runtime target mode setting', () => {
 
     await waitFor(() => {
       expect(screen.getByText('RT 地址')).toBeInTheDocument();
-      expect(screen.queryByText('RT 开放模式')).toBeNull();
-      expect(screen.queryByRole('button', { name: '终端 Agent' })).toBeNull();
+      expect(screen.queryByText('本机开放范围')).toBeNull();
+      expect(screen.getByRole('button', { name: '终端 Agent' })).toBeInTheDocument();
       expect(screen.queryByText('超时待决策时间')).toBeNull();
       expect(screen.queryByText('终端历史回放上限')).toBeNull();
+      expect(within(screen.getByTestId('new-settings-desktop-vc-section-terminal-agent')).getByText('平铺工作台方向快捷键')).toBeInTheDocument();
+      expect(within(screen.getByTestId('new-settings-desktop-vc-section-terminal-agent')).getByText('平铺工作台命令快捷键')).toBeInTheDocument();
+      expect(within(screen.getByTestId('new-settings-desktop-vc-section-terminal-agent')).getByText('平铺工作台单次透传快捷键')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('RT 配置'));
+    fireEvent.click(screen.getByText('连接方式'));
     await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: 'RT 配置' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '连接方式' })).toBeInTheDocument();
     });
     fireEvent.click(screen.getByText('内置'));
 
@@ -102,7 +115,7 @@ describe('SettingsPage runtime target mode setting', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('RT 开放模式')).toBeInTheDocument();
+      expect(screen.getByText('本机开放范围')).toBeInTheDocument();
       expect(screen.queryByText('RT 地址')).toBeNull();
       expect(screen.getByRole('button', { name: '终端 Agent' })).toBeInTheDocument();
       expect(screen.getByText('超时待决策时间')).toBeInTheDocument();
@@ -115,7 +128,7 @@ describe('SettingsPage runtime target mode setting', () => {
 
     render(<SettingsPage />);
 
-    expect(screen.queryByText('RT 配置')).toBeNull();
-    expect(screen.queryByText('RT 开放模式')).toBeNull();
+    expect(screen.queryByText('连接方式')).toBeNull();
+    expect(screen.queryByText('本机开放范围')).toBeNull();
   });
 });

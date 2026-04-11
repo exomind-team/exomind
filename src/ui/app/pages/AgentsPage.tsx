@@ -146,6 +146,7 @@ import {
   LayoutSelector,
   GlobalStatusIndicator,
   type TiledLayout,
+  type TiledSlotState,
 } from "./agents/TiledGrid";
 import { useSessionStream } from "@/hooks/useSessionStream";
 import {
@@ -286,6 +287,20 @@ type PendingSpawnedPtyBinding = {
   slotId?: string | null;
   layoutId?: string | null;
 };
+
+type PendingTiledSlotState = {
+  layoutId: string;
+  slotId: string;
+  status: TiledSlotState["status"];
+  message?: string;
+};
+
+function buildPendingTiledSlotStateKey(
+  layoutId: string,
+  slotId: string,
+): string {
+  return `${layoutId}:${slotId}`;
+}
 
 function isActiveTiledWorkbenchSession(session: SessionInfo): boolean {
   return session.status !== "completed" && session.status !== "archived";
@@ -1203,6 +1218,9 @@ export function AgentsPage() {
     const index = tiledSlotIds.indexOf(tiledFocusedSlotId);
     return index === -1 ? null : index;
   }, [tiledFocusedSlotId, tiledSlotIds]);
+  const [pendingTiledSlotStates, setPendingTiledSlotStates] = useState<
+    Record<string, PendingTiledSlotState>
+  >({});
   const setTiledPaneOrder = useCallback(
     (next: string[] | ((prev: string[]) => string[])) => {
       setTiledPaneSlots((prev) => {
@@ -1213,6 +1231,109 @@ export function AgentsPage() {
     },
     [tiledPaneTree],
   );
+  const setPendingTiledSlotState = useCallback(
+    (nextState: PendingTiledSlotState) => {
+      const key = buildPendingTiledSlotStateKey(
+        nextState.layoutId,
+        nextState.slotId,
+      );
+      setPendingTiledSlotStates((prev) => {
+        const current = prev[key];
+        if (
+          current?.layoutId === nextState.layoutId &&
+          current.slotId === nextState.slotId &&
+          current.status === nextState.status &&
+          current.message === nextState.message
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [key]: nextState,
+        };
+      });
+    },
+    [],
+  );
+  const clearPendingTiledSlotState = useCallback(
+    (layoutId: string | null | undefined, slotId: string | null | undefined) => {
+      if (!layoutId || !slotId) {
+        return;
+      }
+
+      const key = buildPendingTiledSlotStateKey(layoutId, slotId);
+      setPendingTiledSlotStates((prev) => {
+        if (!(key in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    },
+    [],
+  );
+  const clearPendingTiledSlotStatesForLayout = useCallback(
+    (layoutId: string | null | undefined) => {
+      if (!layoutId) {
+        return;
+      }
+
+      setPendingTiledSlotStates((prev) => {
+        let changed = false;
+        const nextEntries = Object.entries(prev).filter(([, state]) => {
+          const keep = state.layoutId !== layoutId;
+          if (!keep) {
+            changed = true;
+          }
+          return keep;
+        });
+        return changed ? Object.fromEntries(nextEntries) : prev;
+      });
+    },
+    [],
+  );
+  const removePendingSpawnedPtyBindingsForTarget = useCallback(
+    (layoutId: string | null | undefined, slotId: string | null | undefined) => {
+      if (!layoutId || !slotId) {
+        return;
+      }
+
+      setPendingSpawnedPtyBindings((prev) => {
+        const next = prev.filter(
+          (entry) => entry.layoutId !== layoutId || entry.slotId !== slotId,
+        );
+        return next.length === prev.length ? prev : next;
+      });
+    },
+    [],
+  );
+  const removePendingSpawnedPtyBindingsForLayout = useCallback(
+    (layoutId: string | null | undefined) => {
+      if (!layoutId) {
+        return;
+      }
+
+      setPendingSpawnedPtyBindings((prev) => {
+        const next = prev.filter((entry) => entry.layoutId !== layoutId);
+        return next.length === prev.length ? prev : next;
+      });
+    },
+    [],
+  );
+  const activeTiledSlotStates = useMemo<Record<string, TiledSlotState>>(() => {
+    const nextStates: Record<string, TiledSlotState> = {};
+    Object.values(pendingTiledSlotStates).forEach((state) => {
+      if (state.layoutId !== tiledActiveLayoutId) {
+        return;
+      }
+      nextStates[state.slotId] = {
+        status: state.status,
+        ...(state.message ? { message: state.message } : {}),
+      };
+    });
+    return nextStates;
+  }, [pendingTiledSlotStates, tiledActiveLayoutId]);
   const handleTiledFocusPane = useCallback(
     (index: number | null) => {
       if (index == null) {
@@ -3353,6 +3474,8 @@ export function AgentsPage() {
       const targetLayoutId = layoutId ?? tiledActiveLayoutId;
       if (targetLayoutId === tiledActiveLayoutId) {
         if (slotId && !tiledSlotIds.includes(slotId)) {
+          clearPendingTiledSlotState(targetLayoutId, slotId);
+          removePendingSpawnedPtyBindingsForTarget(targetLayoutId, slotId);
           appendTiledUnassignedSessionIds([sessionId]);
           return;
         }
@@ -3364,11 +3487,15 @@ export function AgentsPage() {
           ...(slotId ? { slotId } : {}),
         });
         applyTiledLayoutSnapshot(nextSnapshot);
+        clearPendingTiledSlotState(targetLayoutId, slotId);
+        removePendingSpawnedPtyBindingsForTarget(targetLayoutId, slotId);
         return;
       }
 
       const targetLayout = tiledWorkbenchLayouts[targetLayoutId];
       if (!targetLayout) {
+        clearPendingTiledSlotState(targetLayoutId, slotId);
+        removePendingSpawnedPtyBindingsForTarget(targetLayoutId, slotId);
         appendTiledUnassignedSessionIds([sessionId]);
         return;
       }
@@ -3394,12 +3521,16 @@ export function AgentsPage() {
           },
         };
       });
+      clearPendingTiledSlotState(targetLayoutId, slotId);
+      removePendingSpawnedPtyBindingsForTarget(targetLayoutId, slotId);
     },
     [
       appendTiledUnassignedSessionIds,
       applyTiledLayoutSnapshot,
       buildCurrentTiledLayoutSnapshot,
+      clearPendingTiledSlotState,
       dashboardSessions,
+      removePendingSpawnedPtyBindingsForTarget,
       tiledActiveLayoutId,
       tiledSlotIds,
       tiledWorkbenchLayouts,
@@ -3412,6 +3543,8 @@ export function AgentsPage() {
         return;
       }
 
+      clearPendingTiledSlotState(tiledActiveLayoutId, slotId);
+      removePendingSpawnedPtyBindingsForTarget(tiledActiveLayoutId, slotId);
       setTiledPaneSlots((prev) =>
         clearTiledPaneSlotBinding(tiledPaneTree, prev, slotId),
       );
@@ -3428,6 +3561,9 @@ export function AgentsPage() {
     [
       activeTiledSessions,
       appendTiledUnassignedSessionIds,
+      clearPendingTiledSlotState,
+      removePendingSpawnedPtyBindingsForTarget,
+      tiledActiveLayoutId,
       tiledPaneSlots,
       tiledPaneTree,
     ],
@@ -3443,6 +3579,8 @@ export function AgentsPage() {
       const nextTree = removeTiledPaneTreeSlot(tiledPaneTree, slotId);
       const nextSlotIds = flattenTiledPaneTreeSlotIds(nextTree);
 
+      clearPendingTiledSlotState(tiledActiveLayoutId, slotId);
+      removePendingSpawnedPtyBindingsForTarget(tiledActiveLayoutId, slotId);
       setTiledPaneTree(nextTree);
       setTiledPaneSlots((prev) =>
         prev.filter(
@@ -3466,6 +3604,9 @@ export function AgentsPage() {
       activeTiledSessions,
       appendTiledUnassignedSessionIds,
       clearTiledSlot,
+      clearPendingTiledSlotState,
+      removePendingSpawnedPtyBindingsForTarget,
+      tiledActiveLayoutId,
       tiledPaneSlots,
       tiledPaneTree,
       tiledSlotIds.length,
@@ -3704,10 +3845,14 @@ export function AgentsPage() {
       prev.filter((layoutId) => layoutId !== tiledActiveLayoutId),
     );
     setTiledActiveLayoutId(fallbackLayoutId);
+    clearPendingTiledSlotStatesForLayout(tiledActiveLayoutId);
+    removePendingSpawnedPtyBindingsForLayout(tiledActiveLayoutId);
     applyTiledLayoutSnapshot(nextSnapshot);
     setTiledActiveLayoutNameDraft(fallbackLayout.name);
   }, [
     applyTiledLayoutSnapshot,
+    clearPendingTiledSlotStatesForLayout,
+    removePendingSpawnedPtyBindingsForLayout,
     tiledActiveLayoutId,
     tiledWorkbenchLayoutOrder,
     tiledWorkbenchLayouts,
@@ -8599,6 +8744,7 @@ export function AgentsPage() {
               layout={tiledLayout}
               tree={tiledPaneTree}
               slots={tiledPaneSlots}
+              slotStates={activeTiledSlotStates}
               resolveSessionConnection={resolveRuntimeConnectionForSession}
               isSessionDisconnected={isSessionPtyDisconnected}
               isSessionAutoResuming={(session) =>
@@ -9780,6 +9926,25 @@ export function AgentsPage() {
         defaultWorkdir={import.meta.env.VITE_PTY_DEFAULT_WORKDIR ?? ""}
         occupiedHistoricalSessionIds={occupiedHistoricalSessionIds}
         occupiedHistoricalSessionLabels={occupiedHistoricalSessionLabels}
+        {...(ptySpawnTargetSlotId && ptySpawnTargetLayoutId
+          ? {
+              onSpawnStart: () => {
+                setPendingTiledSlotState({
+                  layoutId: ptySpawnTargetLayoutId,
+                  slotId: ptySpawnTargetSlotId,
+                  status: "creating",
+                });
+              },
+              onSpawnError: (message: string) => {
+                setPendingTiledSlotState({
+                  layoutId: ptySpawnTargetLayoutId,
+                  slotId: ptySpawnTargetSlotId,
+                  status: "error",
+                  message,
+                });
+              },
+            }
+          : {})}
         onSpawned={(info) => {
           const matchingSession = dashboardSessions.find(
             (session) => session.pty_id === info.id,

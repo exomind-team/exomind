@@ -1713,7 +1713,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     id: 'tiled-workbench-navigation-shortcut-scheme',
     label: '平铺工作台方向快捷键',
     icon: Waypoints,
-    category: 'input',
+    category: 'terminal-agent',
     description: '仅作用于 Agent Hub 平铺工作台；控制焦点在窗格之间切换的宿主快捷键。',
     rowTestId: 'new-settings-tiled-workbench-navigation-shortcut-scheme-row',
     type: 'enum',
@@ -1746,7 +1746,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     id: 'tiled-workbench-command-shortcut-scheme',
     label: '平铺工作台命令快捷键',
     icon: Command,
-    category: 'input',
+    category: 'terminal-agent',
     description: '仅作用于 Agent Hub 平铺工作台；控制分割、清空、关闭、打开入口等宿主动作。',
     rowTestId: 'new-settings-tiled-workbench-command-shortcut-scheme-row',
     type: 'enum',
@@ -1779,7 +1779,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     id: 'tiled-workbench-passthrough-shortcut',
     label: '平铺工作台单次透传快捷键',
     icon: Monitor,
-    category: 'input',
+    category: 'terminal-agent',
     description: '用于把下一次宿主快捷键透传到当前聚焦 PTY，而不是执行工作台动作。',
     rowTestId: 'new-settings-tiled-workbench-passthrough-shortcut-row',
     type: 'enum',
@@ -1830,24 +1830,24 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   },
   {
     id: 'runtime-target-mode',
-    label: 'RT 配置',
+    label: '连接方式',
     icon: Wifi,
     category: 'connection',
     type: 'enum',
     enumStyle: 'dialog',
     visible: tauriWindowOnly,
-    dialogTitle: 'RT 配置',
-    dialogDescription: '选择使用当前设备自带的 RT，还是连接到另一台设备上的 RT。切换时会自动启动或关闭内置 RT。',
+    dialogTitle: '连接方式',
+    dialogDescription: '选择使用当前设备，还是连接另一台设备。切换时会自动启动或关闭当前设备上的内置服务。',
     options: [
       {
         label: '内置',
         value: 'embedded',
-        description: '使用当前设备自带的 RT。切换后会自动启动内置 RT。',
+        description: '使用当前设备上的内置服务。切换后会自动启动本机服务。',
       },
       {
         label: '外部',
         value: 'external',
-        description: '连接到另一台设备上的 RT。切换后会自动关闭内置 RT，并使用下面填写的 RT 地址。',
+        description: '连接到另一台设备。切换后会自动关闭本机服务，并使用下面填写的设备地址。',
       },
     ],
     optionTestId: (value) => `new-settings-runtime-target-mode-${value}`,
@@ -1855,43 +1855,43 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     set: async (value: string) => await setPersistedRuntimeTargetMode(value as 'embedded' | 'external'),
     subscribe: (cb: (value: string) => void) => subscribeRuntimeTargetChanges((target) => cb(target.mode)),
     successMessage: (value: string) => value === 'external'
-      ? '已切换为外部 RT，内置 RT 会自动关闭'
-      : '已切换为内置 RT，系统会自动启动本机 RT',
-    errorMessagePrefix: 'RT 配置切换失败',
+      ? '已切换为连接其他设备，本机服务会自动关闭'
+      : '已切换为使用本机，系统会自动启动本机服务',
+    errorMessagePrefix: '连接方式切换失败',
   },
   {
     id: 'embedded-runtime-open-mode',
-    label: 'RT 开放模式',
+    label: '本机开放范围',
     icon: Wifi,
     category: 'connection',
     type: 'enum',
     enumStyle: 'dialog',
     visible: embeddedRuntimeOnly,
-    dialogTitle: 'RT 开放模式',
-    dialogDescription: '决定 Tauri 启动内嵌 RT 时对外开放的范围；修改后在下次启动或手动重启 RT 时生效。',
+    dialogTitle: '本机开放范围',
+    dialogDescription: '决定当前设备上的内置服务只供本机使用，还是允许局域网访问；修改后在下次启动或手动重启时生效。',
     options: [
       {
         label: '仅本机',
         value: 'local',
-        description: '监听 127.0.0.1，仅当前设备可访问，不做局域网广播。',
+        description: '只监听 127.0.0.1，仅当前设备可访问，不对局域网开放。',
       },
       {
         label: '局域网',
         value: 'lan',
-        description: '监听 0.0.0.0，并允许局域网设备通过本机 IP 访问与发现。',
+        description: '监听 0.0.0.0，局域网设备可通过本机 IP 访问。',
       },
     ],
     optionTestId: (value) => `new-settings-embedded-runtime-open-mode-${value}`,
     helperText: (value: string) => value === 'lan'
-      ? '当前会在下次启动或手动重启 RT 时切换为局域网开放。'
-      : '当前会在下次启动或手动重启 RT 时切换为仅本机开放。',
+      ? '当前会在下次启动或手动重启时切换为允许局域网访问。'
+      : '当前会在下次启动或手动重启时切换为仅本机使用。',
     get: () => getEmbeddedRuntimeNetworkMode(),
     set: async (value: string) => await setPersistedEmbeddedRuntimeNetworkMode(value as 'local' | 'lan'),
     subscribe: subscribeEmbeddedRuntimeNetworkModeChanges,
     successMessage: (value: string) => value === 'lan'
-      ? 'RT 开放模式已切换为局域网'
-      : 'RT 开放模式已切换为仅本机',
-    errorMessagePrefix: 'RT 开放模式保存失败',
+      ? '已切换为允许局域网访问'
+      : '已切换为仅本机使用',
+    errorMessagePrefix: '开放范围保存失败',
   },
   {
     id: 'sync-server-url',

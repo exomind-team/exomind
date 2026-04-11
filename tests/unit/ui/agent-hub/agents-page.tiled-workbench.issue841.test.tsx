@@ -51,6 +51,7 @@ const sessionStreamState = vi.hoisted(() => ({
 }));
 
 const ptySpawnDialogState = vi.hoisted(() => ({
+  mode: 'success' as 'success' | 'start-only',
   nextSpawnedInfo: {
     id: 'pty-855-spawned',
     name: 'Spawned Session 855',
@@ -60,6 +61,7 @@ const ptySpawnDialogState = vi.hoisted(() => ({
     status: 'running',
     created_at: '2026-04-06T00:00:00.000Z',
   },
+  lastOnSpawnError: null as null | ((message: string) => void),
 }));
 
 vi.mock('@/ui/app/components/PtyTerminal', () => ({
@@ -75,10 +77,14 @@ vi.mock('@/ui/app/components/PtySpawnDialog', () => ({
     open,
     onOpenChange,
     onSpawned,
+    onSpawnStart,
+    onSpawnError,
   }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onSpawned: (info: typeof ptySpawnDialogState.nextSpawnedInfo) => void;
+    onSpawnStart?: () => void;
+    onSpawnError?: (message: string) => void;
   }) => (
     open ? (
       <div data-testid="mock-pty-spawn-dialog">
@@ -86,6 +92,15 @@ vi.mock('@/ui/app/components/PtySpawnDialog', () => ({
           type="button"
           data-testid="mock-pty-spawn-dialog-confirm"
           onClick={() => {
+            ptySpawnDialogState.lastOnSpawnError = onSpawnError ?? null;
+            if (onSpawnStart) {
+              onSpawnStart();
+              onOpenChange(false);
+              if (ptySpawnDialogState.mode === 'success') {
+                onSpawned(ptySpawnDialogState.nextSpawnedInfo);
+              }
+              return;
+            }
             onSpawned(ptySpawnDialogState.nextSpawnedInfo);
             onOpenChange(false);
           }}
@@ -273,6 +288,8 @@ describe('agents page issue-841（平铺命名布局工作台）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    ptySpawnDialogState.mode = 'success';
+    ptySpawnDialogState.lastOnSpawnError = null;
     localStorage.setItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY, 'tiled');
     vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
 
@@ -724,6 +741,86 @@ describe('agents page issue-841（平铺命名布局工作台）', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('mock-pty-terminal-pty-855-spawned')).toBeInTheDocument();
+    });
+  });
+
+  it('surfaces tiled slot creation progress and routes failures back to the originating slot（平铺窗格创建中与失败态回到原始槽位）', async () => {
+    ptySpawnDialogState.mode = 'start-only';
+
+    writeAgentsTiledWorkbenchPersistState({
+      version: 3,
+      activeLayoutId: DEFAULT_TILED_WORKBENCH_LAYOUT_ID,
+      layoutOrder: [DEFAULT_TILED_WORKBENCH_LAYOUT_ID, 'layout-review'],
+      layouts: {
+        [DEFAULT_TILED_WORKBENCH_LAYOUT_ID]: {
+          id: DEFAULT_TILED_WORKBENCH_LAYOUT_ID,
+          name: '默认布局',
+          createdAt: '2026-04-06T00:00:00.000Z',
+          updatedAt: '2026-04-06T00:00:00.000Z',
+          lastUsedAt: '2026-04-06T00:00:00.000Z',
+          snapshot: {
+            version: 2,
+            layout: '1x1',
+            paneOrder: [],
+            tree: createTemplatePaneTree('1x1'),
+            slots: createTemplatePaneSlotBindings('1x1'),
+            focusedSlotId: 'slot-1',
+            unassignedSessionIds: [],
+            unassignedPoolCollapsed: false,
+            immersive: false,
+          },
+        },
+        'layout-review': {
+          id: 'layout-review',
+          name: 'Review',
+          createdAt: '2026-04-06T01:00:00.000Z',
+          updatedAt: '2026-04-06T01:00:00.000Z',
+          lastUsedAt: '2026-04-06T01:00:00.000Z',
+          snapshot: {
+            version: 2,
+            layout: '1x1',
+            paneOrder: [],
+            tree: createTemplatePaneTree('1x1'),
+            slots: createTemplatePaneSlotBindings('1x1'),
+            focusedSlotId: 'slot-1',
+            unassignedSessionIds: [],
+            unassignedPoolCollapsed: false,
+            immersive: false,
+          },
+        },
+      },
+    });
+
+    render(<AgentsPage />);
+
+    const originSlot = await screen.findByTestId('tiled-slot-slot-1');
+    fireEvent.click(within(originSlot).getByRole('button', { name: '新建终端' }));
+    fireEvent.click(await screen.findByTestId('mock-pty-spawn-dialog-confirm'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-pty-spawn-dialog')).not.toBeInTheDocument();
+      expect(within(screen.getByTestId('tiled-slot-slot-1')).getByText('正在创建终端')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('agents-tiled-layout-select'), {
+      target: { value: 'layout-review' },
+    });
+
+    await waitFor(() => {
+      expect((screen.getByTestId('agents-tiled-layout-select') as HTMLSelectElement).value).toBe('layout-review');
+      expect(within(screen.getByTestId('tiled-slot-slot-1')).getByText('空窗格')).toBeInTheDocument();
+    });
+
+    ptySpawnDialogState.lastOnSpawnError?.('spawn failed');
+
+    fireEvent.change(screen.getByTestId('agents-tiled-layout-select'), {
+      target: { value: DEFAULT_TILED_WORKBENCH_LAYOUT_ID },
+    });
+
+    await waitFor(() => {
+      const failedSlot = screen.getByTestId('tiled-slot-slot-1');
+      expect(within(failedSlot).getAllByText('创建失败').length).toBeGreaterThan(0);
+      expect(within(failedSlot).getByText('spawn failed')).toBeInTheDocument();
     });
   });
 });

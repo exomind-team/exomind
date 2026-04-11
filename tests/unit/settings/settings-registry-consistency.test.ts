@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { DESKTOP_TAB_CONFIG } from '@/ui/app/config/settings/desktop-tab-config';
 import { SETTINGS_REGISTRY } from '@/ui/app/config/settings/settings-registry';
+import type { SettingsItem } from '@/ui/app/config/settings/settings-types';
+
+function findRegistryItemById(items: SettingsItem[], id: string): SettingsItem | undefined {
+  for (const item of items) {
+    if (item.id === id) {
+      return item;
+    }
+    if (item.type === 'group') {
+      const child = findRegistryItemById(item.children, id);
+      if (child) {
+        return child;
+      }
+    }
+  }
+  return undefined;
+}
 
 describe('Settings Registry Consistency', () => {
   it('every registry item has a unique id', () => {
@@ -34,6 +50,19 @@ describe('Settings Registry Consistency', () => {
     }
   });
 
+  it('keeps tiled workbench shortcut settings under terminal-agent', () => {
+    [
+      'tiled-workbench-navigation-shortcut-scheme',
+      'tiled-workbench-command-shortcut-scheme',
+      'tiled-workbench-passthrough-shortcut',
+    ].forEach((id) => {
+      const item = SETTINGS_REGISTRY.find((entry) => entry.id === id);
+
+      expect(item).toBeDefined();
+      expect(item?.category).toBe('terminal-agent');
+    });
+  });
+
   it('hides domain backend mode toggles in Web runtime because Web data flow is RT-only', () => {
     const webCtx = {
       isDesktop: true,
@@ -49,7 +78,7 @@ describe('Settings Registry Consistency', () => {
   });
 
   it('voice-shortcut-hotkey allows await when set returns a promise', async () => {
-    const hotkeyItem = SETTINGS_REGISTRY.find((item) => item.id === 'voice-shortcut-hotkey');
+    const hotkeyItem = findRegistryItemById(SETTINGS_REGISTRY, 'voice-shortcut-hotkey');
 
     expect(hotkeyItem).toBeDefined();
     expect(hotkeyItem?.type).toBe('enum');
@@ -63,7 +92,7 @@ describe('Settings Registry Consistency', () => {
   });
 
   it('main-window-shortcut allows await when set returns a promise', async () => {
-    const shortcutItem = SETTINGS_REGISTRY.find((item) => item.id === 'main-window-shortcut');
+    const shortcutItem = findRegistryItemById(SETTINGS_REGISTRY, 'main-window-shortcut');
 
     expect(shortcutItem).toBeDefined();
     expect(shortcutItem?.type).toBe('enum');

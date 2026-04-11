@@ -26,12 +26,12 @@ describe('SettingsPage runtime open mode setting', () => {
   it('shows RT open mode only in tauri and persists lan mode via native command', async () => {
     render(<SettingsPage />);
 
-    expect(screen.getByText('RT 开放模式')).toBeInTheDocument();
+    expect(screen.getByText('本机开放范围')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('RT 开放模式'));
+    fireEvent.click(screen.getByText('本机开放范围'));
 
     await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: 'RT 开放模式' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '本机开放范围' })).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText('局域网'));
@@ -47,6 +47,6 @@ describe('SettingsPage runtime open mode setting', () => {
 
     render(<SettingsPage />);
 
-    expect(screen.queryByText('RT 开放模式')).toBeNull();
+    expect(screen.queryByText('本机开放范围')).toBeNull();
   });
 });
