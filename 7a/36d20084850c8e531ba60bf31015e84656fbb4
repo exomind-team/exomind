@@ -1,0 +1,55 @@
+src/ui/app/pages/agents/SessionStatusMark.tsx
+  a6385f73b0f1344f 1-5,7-17,19-63
+  0e77f94d514915f5 6,18
+tests/unit/ui/agent-hub/terminal-status-layering.test.tsx
+  a6385f73b0f1344f 1-198
+src/ui/app/pages/agents/TiledGrid.tsx
+  a6385f73b0f1344f 21,26-30,41,1279,1293-1294,1301-1302,1322,1329-1361,1408,1422-1427,1430-1444,1504-1507,1578-1584,1606-1623
+src/ui/app/components/PtyTerminal.tsx
+  a6385f73b0f1344f 34-36,39-49,162-180,292,331-356,358-367
+src/ui/app/pages/agents/SessionCard.tsx
+  a6385f73b0f1344f 1,10,66-68,70-73,75-78,80-81,85-86
+src/ui/app/components/PtyTerminal.test.tsx
+  a6385f73b0f1344f 1,4-7,500,502,508,522-527,530-533,538,572,575,582,609-614,654,711,715,717,723,744-747,753,760,766,785-789,799-802,809
+src/lib/types/session.test.ts
+  a6385f73b0f1344f 71,75-79
+src/lib/types/session.ts
+  a6385f73b0f1344f 145-158,161,163-168
+docs/plans/2026-04-11-agent-hub-terminal-status-layering-plan.md
+  a6385f73b0f1344f 1-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "7a36d20084850c8e531ba60bf31015e84656fbb4",
+  "prompts": {
+    "0e77f94d514915f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7127-aed2-7992-b0db-24ac258ee08b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 2,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/8ffb7dca8d0a141a6f988464f84d93d7803976c8b68837b78645fc3648e52cca"
+    },
+    "a6385f73b0f1344f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fed-bc8e-7d33-8d94-d5ca5041b82c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 739,
+      "total_deletions": 130,
+      "accepted_lines": 737,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/b76b6f2caecfc55fb52c96f6904d604d70adb6724944b900578744042ca9d03a"
+    }
+  }
+}
