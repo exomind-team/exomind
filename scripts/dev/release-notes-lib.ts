@@ -161,6 +161,84 @@ function formatHighlightSource(
   return `[\`${source.shortSha}\`](${source.url}) by ${author}`;
 }
 
+function createNormalizedTitleKey(title: string): string {
+  return normalizeChangeTitle(title).trim().toLowerCase();
+}
+
+function isMergeCommitTitle(title: string): boolean {
+  return title.trim().toLowerCase().startsWith("merge ");
+}
+
+function isCoveredByPullRequestTitle(
+  directCommitTitleKey: string,
+  pullRequestTitleKeys: string[],
+): boolean {
+  if (!directCommitTitleKey) {
+    return false;
+  }
+
+  const directCommitTokens = directCommitTitleKey.split(/\s+/).filter(Boolean);
+  return pullRequestTitleKeys.some(
+    (pullRequestTitleKey) => {
+      if (pullRequestTitleKey === directCommitTitleKey) {
+        return true;
+      }
+
+      const pullRequestTokens = pullRequestTitleKey.split(/\s+/).filter(Boolean);
+      if (
+        directCommitTokens.length < 3 ||
+        directCommitTokens.length >= pullRequestTokens.length
+      ) {
+        return false;
+      }
+
+      return directCommitTokens.every(
+        (token, index) => token === pullRequestTokens[index],
+      );
+    },
+  );
+}
+
+function normalizeReleaseNotesInput(input: ReleaseNotesInput): ReleaseNotesInput {
+  const pullRequestMap = new Map<number, ReleaseNotesPullRequest>();
+  for (const pullRequest of input.pullRequests) {
+    if (!pullRequestMap.has(pullRequest.number)) {
+      pullRequestMap.set(pullRequest.number, pullRequest);
+    }
+  }
+
+  const pullRequests = [...pullRequestMap.values()];
+  const pullRequestTitleKeys = pullRequests
+    .map((pullRequest) => createNormalizedTitleKey(pullRequest.title))
+    .filter(Boolean);
+  const directCommits: ReleaseNotesDirectCommit[] = [];
+  const seenCommitShas = new Set<string>();
+
+  for (const directCommit of input.directCommits) {
+    if (seenCommitShas.has(directCommit.sha)) {
+      continue;
+    }
+    seenCommitShas.add(directCommit.sha);
+
+    if (isMergeCommitTitle(directCommit.title)) {
+      continue;
+    }
+
+    const directCommitTitleKey = createNormalizedTitleKey(directCommit.title);
+    if (isCoveredByPullRequestTitle(directCommitTitleKey, pullRequestTitleKeys)) {
+      continue;
+    }
+
+    directCommits.push(directCommit);
+  }
+
+  return {
+    ...input,
+    pullRequests,
+    directCommits,
+  };
+}
+
 function renderHighlights(input: ReleaseNotesInput): string[] {
   const sectionTitles: Record<HighlightSectionKey, string> = {
     added: "### Added / 新增",
@@ -295,39 +373,40 @@ function renderArtifacts(manifest?: ReleaseManifest | null): string[] {
 }
 
 export function renderReleaseNotesMarkdown(input: ReleaseNotesInput): string {
+  const normalizedInput = normalizeReleaseNotesInput(input);
   const lines: string[] = [
-    `## ${input.releaseName}`,
+    `## ${normalizedInput.releaseName}`,
     "",
     "## Release Scope / 发布范围",
-    `- Tag: \`${input.currentTag}\``,
-    `- Version: \`${input.currentVersion}\``,
+    `- Tag: \`${normalizedInput.currentTag}\``,
+    `- Version: \`${normalizedInput.currentVersion}\``,
   ];
 
-  if (input.previousTag) {
-    lines.push(`- Previous Tag: \`${input.previousTag}\``);
+  if (normalizedInput.previousTag) {
+    lines.push(`- Previous Tag: \`${normalizedInput.previousTag}\``);
   } else {
     lines.push("- Previous Tag: initial canonical tag range");
   }
 
-  if (input.compareUrl) {
-    const compareLabel = input.previousTag
-      ? `${input.previousTag}...${input.currentTag}`
-      : input.currentTag;
-    lines.push(`- Compare: [\`${compareLabel}\`](${input.compareUrl})`);
+  if (normalizedInput.compareUrl) {
+    const compareLabel = normalizedInput.previousTag
+      ? `${normalizedInput.previousTag}...${normalizedInput.currentTag}`
+      : normalizedInput.currentTag;
+    lines.push(`- Compare: [\`${compareLabel}\`](${normalizedInput.compareUrl})`);
   }
 
-  lines.push(`- Merged PRs: ${input.pullRequests.length}`);
-  lines.push(`- Direct Commits: ${input.directCommits.length}`);
+  lines.push(`- Merged PRs: ${normalizedInput.pullRequests.length}`);
+  lines.push(`- Direct Commits: ${normalizedInput.directCommits.length}`);
   lines.push("");
-  lines.push(...renderHighlights(input));
+  lines.push(...renderHighlights(normalizedInput));
   lines.push("");
   lines.push("## Change Sources / 变更来源");
   lines.push("");
-  lines.push(...renderPullRequests(input.pullRequests));
+  lines.push(...renderPullRequests(normalizedInput.pullRequests));
   lines.push("");
-  lines.push(...renderDirectCommits(input.directCommits));
+  lines.push(...renderDirectCommits(normalizedInput.directCommits));
   lines.push("");
-  lines.push(...renderArtifacts(input.manifest));
+  lines.push(...renderArtifacts(normalizedInput.manifest));
 
   return `${lines.join("\n").trim()}\n`;
 }

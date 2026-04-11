@@ -42,6 +42,7 @@ Pages timeline output is looser and may still show non-draft canonical or legacy
 
 1. Decide the release path before touching version files:
    - default `bump+tag`: do not pre-bump local version files; keep `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` aligned with the latest released version so `release:build` can bump them itself
+   - when the repo tracks `Cargo.lock`, the script also normalizes the root `exomind` package version there before commit so the worktree returns to a clean state after release
    - manual/tag-prepared path: only pre-align those files yourself when you intentionally plan to use `--tag-only` or another manual fallback
 2. Preferred local entry:
 
@@ -60,7 +61,7 @@ bun run release:build
    - require local `dev` HEAD and local version files to already match the latest remote `dev` commit
    - require the latest remote `dev` commit to be untagged
    - require the latest remote `dev` commit to still carry the latest released version number
-   - bump local canonical version files
+   - bump local canonical version files and sync tracked `Cargo.lock` root package version when present
    - run the default local checks: `bun x tsc --noEmit` + `bun run website:build`
    - commit and push the version bump to `dev`
    - tag the latest remote `dev` commit and wait for `Build & Release` to finish

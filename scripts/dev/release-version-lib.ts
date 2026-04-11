@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,12 +37,17 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROJECT_ROOT = resolve(SCRIPT_DIR, '..', '..');
 const CANONICAL_VERSION_RE = /^\d+\.\d+\.\d+$/;
 const CANONICAL_TAG_RE = /^v\d+\.\d+\.\d+$/;
+const ROOT_CARGO_PACKAGE_NAME = 'exomind';
 
 export const VERSION_FILE_RELATIVE_PATHS = {
   packageJson: 'package.json',
   cargoToml: 'src-tauri/Cargo.toml',
   tauriConfig: 'src-tauri/tauri.conf.json',
 } satisfies CanonicalVersionPaths;
+
+export const OPTIONAL_VERSION_FILE_RELATIVE_PATHS = {
+  cargoLock: 'Cargo.lock',
+} as const;
 
 export function assertCanonicalVersion(version: string): void {
   if (!CANONICAL_VERSION_RE.test(version.trim())) {
@@ -242,6 +247,27 @@ export function updateTauriConfigVersionText(
   return `${JSON.stringify(parsed, null, 2)}\n`;
 }
 
+export function updateCargoLockRootPackageVersionText(
+  text: string,
+  version: string,
+  packageName = ROOT_CARGO_PACKAGE_NAME,
+): string {
+  assertCanonicalVersion(version);
+  const escapedPackageName = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const updated = text.replace(
+    new RegExp(
+      `(\\[\\[package\\]\\]\\r?\\nname = "${escapedPackageName}"\\r?\\nversion = ")([^"]+)(")`,
+    ),
+    `$1${version}$3`,
+  );
+
+  if (updated === text) {
+    throw new Error(`未找到 Cargo.lock 中 ${packageName} 对应的根 package 版本块`);
+  }
+
+  return updated;
+}
+
 export function applyCanonicalVersionToTexts(
   texts: CanonicalVersionTexts,
   version: string,
@@ -258,6 +284,7 @@ export async function writeCanonicalVersion(
   projectRoot = DEFAULT_PROJECT_ROOT,
 ): Promise<CanonicalVersionPaths> {
   const paths = resolveVersionFilePaths(projectRoot);
+  const cargoLockPath = resolve(projectRoot, OPTIONAL_VERSION_FILE_RELATIVE_PATHS.cargoLock);
   const updatedTexts = applyCanonicalVersionToTexts(
     {
       packageJson: readFileSync(paths.packageJson, 'utf-8'),
@@ -266,10 +293,19 @@ export async function writeCanonicalVersion(
     },
     version,
   );
+  const updatedCargoLock = existsSync(cargoLockPath)
+    ? updateCargoLockRootPackageVersionText(
+        readFileSync(cargoLockPath, 'utf-8'),
+        version,
+      )
+    : null;
 
   await writeFile(paths.packageJson, updatedTexts.packageJson, 'utf-8');
   await writeFile(paths.cargoToml, updatedTexts.cargoToml, 'utf-8');
   await writeFile(paths.tauriConfig, updatedTexts.tauriConfig, 'utf-8');
+  if (updatedCargoLock) {
+    await writeFile(cargoLockPath, updatedCargoLock, 'utf-8');
+  }
 
   return paths;
 }

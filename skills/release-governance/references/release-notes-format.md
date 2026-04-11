@@ -13,6 +13,7 @@ They are generated from repository / GitHub metadata, not handwritten in the nor
    - PR / direct commit counts
 2. `What Changed / 本次变化`
    - grouped into `Added` / `Fixed` / `Changed` / `Docs` / `Maintenance`
+   - rendered highlights prefer merged PRs first, then only the remaining direct commits
    - `refactor` usually lands in `Changed`
    - `ci` / `build` / `test` / `chore` currently collapse into `Maintenance`
 3. `Change Sources / 变更来源`
@@ -31,6 +32,8 @@ First canonical release caveat:
 - Prefer short functional phrasing in highlights; strip conventional commit prefixes when rendering summaries.
 - The current generator path is `scripts/dev/generate-release-notes.ts` + `scripts/dev/release-notes-lib.ts`, and `scripts/dev/sync-release-pages.ts` also parses release bodies for compare/highlight metadata; update this reference doc when either contract changes.
 - PRs are primary evidence when present.
+- Direct commits whose normalized title is already covered by a merged PR title should be suppressed from rendered notes.
+- Merge commits (`Merge ...`) should be filtered out of rendered highlights and direct-commit listings.
 - Commits without merged PRs must still be listed explicitly.
 - Artifact section should be grouped by app vs runtime, not a flat raw manifest dump.
 - Release notes should reflect the current project policy tag range (`v0.x.y` today); do not describe legacy `build/...` or `release/...` tag flows as active behavior.

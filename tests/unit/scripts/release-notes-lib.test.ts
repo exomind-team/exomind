@@ -115,4 +115,54 @@ describe("release-notes-lib", () => {
       "Runtime Windows: `ExoMind-RT-0.4.3-windows-x64.exe`",
     );
   });
+
+  it("prefers merged PRs over covered commits and filters merge noise（应优先保留 PR 并过滤被覆盖的 commit 与 merge 噪声）", () => {
+    const markdown = renderReleaseNotesMarkdown({
+      releaseName: "Preview v0.4.6",
+      currentTag: "v0.4.6",
+      currentVersion: "0.4.6",
+      previousTag: "v0.4.5",
+      compareUrl:
+        "https://github.com/exomind-team/exomind/compare/v0.4.5...v0.4.6",
+      manifest: makeManifest("0.4.6"),
+      pullRequests: [
+        {
+          number: 891,
+          title: "feat(agent-hub): add API Agent tab test console on network page",
+          url: "https://github.com/exomind-team/exomind/pull/891",
+          authorLogin: "HailayLin",
+        },
+      ],
+      directCommits: [
+        {
+          sha: "4548a64bc079cb0076220110c1d8e28d21b8e3e3",
+          shortSha: "4548a64b",
+          title: "feat: add api agent tab test console",
+          url: "https://github.com/exomind-team/exomind/commit/4548a64b",
+          authorName: "星林",
+          authorLogin: "HailayLin",
+          files: ["src/ui/app/pages/network.tsx"],
+        },
+        {
+          sha: "fa00453eda07e8f4ac24e70c83fa84795374d528",
+          shortSha: "fa00453e",
+          title: "Merge branch 'dev' of https://github.com/exomind-team/exomind into dev",
+          url: "https://github.com/exomind-team/exomind/commit/fa00453e",
+          authorName: "星林",
+          authorLogin: "HailayLin",
+        },
+      ],
+    });
+
+    expect(markdown).toContain("Merged PRs: 1");
+    expect(markdown).toContain("Direct Commits: 0");
+    expect(markdown).toContain(
+      "add API Agent tab test console on network page ([PR #891](https://github.com/exomind-team/exomind/pull/891) by @HailayLin)",
+    );
+    expect(markdown).not.toContain("[`4548a64b`]");
+    expect(markdown).not.toContain("Merge branch 'dev'");
+    expect(markdown).toContain(
+      "- None. All detected changes are covered by merged PRs.",
+    );
+  });
 });

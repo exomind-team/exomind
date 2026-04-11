@@ -1,9 +1,12 @@
 #!/usr/bin/env bun
 
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   compareCanonicalVersions,
   findLatestCanonicalTag,
+  OPTIONAL_VERSION_FILE_RELATIVE_PATHS,
   readCanonicalVersion,
   resolveCanonicalVersionFromTexts,
   resolveReleaseVersionPlan,
@@ -375,11 +378,15 @@ async function runBumpAndTag(options: Options, state: RemoteState): Promise<void
   }
 
   const commitMessage = `chore(release): bump version to ${nextVersion}`;
-  run('git', [
-    'add',
+  const filesToCommit = [
     VERSION_FILE_RELATIVE_PATHS.packageJson,
     VERSION_FILE_RELATIVE_PATHS.cargoToml,
     VERSION_FILE_RELATIVE_PATHS.tauriConfig,
+    OPTIONAL_VERSION_FILE_RELATIVE_PATHS.cargoLock,
+  ].filter((relativePath) => existsSync(resolve(process.cwd(), relativePath)));
+  run('git', [
+    'add',
+    ...filesToCommit,
   ]);
   run('git', ['commit', '-m', commitMessage]);
   run('git', ['push', options.remote, options.branch]);
