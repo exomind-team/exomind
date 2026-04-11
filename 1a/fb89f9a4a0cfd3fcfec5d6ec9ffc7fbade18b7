@@ -1,0 +1,28 @@
+crates/exomind-runtime/tests/today_planner_routes.rs
+  0e77f94d514915f5 24
+crates/exomind-runtime/tests/timeblock_routes.rs
+  0e77f94d514915f5 25
+crates/exomind-runtime/tests/agent_lifecycle_routes.rs
+  0e77f94d514915f5 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "1afb89f9a4a0cfd3fcfec5d6ec9ffc7fbade18b7",
+  "prompts": {
+    "0e77f94d514915f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7127-aed2-7992-b0db-24ac258ee08b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 411,
+      "total_deletions": 62,
+      "accepted_lines": 411,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/71a131f733fc917da590d7dcd1bee6a664c8c402a441ae059e93eb392dcf2109"
+    }
+  }
+}
