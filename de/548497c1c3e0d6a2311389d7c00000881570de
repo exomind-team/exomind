@@ -1,0 +1,36 @@
+skills/release-governance/references/workflow.md
+  5b42db0b08d48424 45,64
+scripts/dev/release-version-lib.ts
+  5b42db0b08d48424 1,40,48-51,250-268,287,296-301,306-308
+scripts/dev/release-build.ts
+  5b42db0b08d48424 4-5,9,381,385-389
+skills/release-governance/references/release-notes-format.md
+  5b42db0b08d48424 16,35-36
+tests/unit/scripts/release-notes-lib.test.ts
+  5b42db0b08d48424 118-167
+tests/unit/scripts/release-version-lib.test.ts
+  5b42db0b08d48424 1-3,11,92-182
+scripts/dev/release-notes-lib.ts
+  5b42db0b08d48424 164-241,376,378,381-382,385-386,391-395,398-399,401,405,407,409
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "de548497c1c3e0d6a2311389d7c00000881570de",
+  "prompts": {
+    "5b42db0b08d48424": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d76cd-98cd-7252-ac14-194f8b1d7694",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 292,
+      "total_deletions": 20,
+      "accepted_lines": 292,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/4c20bb258dbed48f1bc134f50d62093b1703b4a6843fed5ac1b2450801b18175"
+    }
+  }
+}
