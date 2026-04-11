@@ -27,6 +27,7 @@
    - refreshes `website/public/releases/**`
    - rebuilds and deploys GitHub Pages from `dev`
    - note: in the default `release:build` path, the version-bump commit is pushed to `dev` before the tag is pushed, so an earlier `Sync Release Pages` run may also happen from the `push` trigger before the release-tag workflow completes
+   - observed on 2026-04-11: that earlier `push`-triggered Pages run completed before the preview GitHub Release existed, so it could not publish the new `releases/preview/latest.json`; treat the later `workflow_run` sync as the final source of truth for the freshly cut preview metadata
 4. Promote existing tag:
    - preferred path: use `workflow_dispatch` input `promote_tag`
    - this updates the existing GitHub Release to `prerelease: false`
@@ -53,6 +54,7 @@ bun run release:build
 
    Practical prerequisite:
    - install and authenticate GitHub CLI (`gh`), because the non-dry-run path uses `gh run list` / `gh run watch` after pushing the tag.
+   - observed on 2026-04-11: `--dry-run` validates remote state and prints the planned next version/tag, but it does not run the default local checks (`bun x tsc --noEmit` / `bun run website:build`)
 
    Default mode is `bump+tag`:
    - treat the latest canonical `v0.x.y` tag on `origin` as the only version truth source
