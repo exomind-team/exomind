@@ -51,6 +51,9 @@ export function NowPage() {
   const activeTab = resolveEventlogTabFromLocation(location.pathname, location.searchStr ?? '');
 
   useEffect(() => {
+    if (!location.pathname.startsWith('/eventlog')) {
+      return;
+    }
     const hasExplicitLegacyTab = resolveLegacyEventlogTabSearch(location.searchStr ?? '') !== null;
     if (location.pathname === '/eventlog' && !hasExplicitLegacyTab) {
       return;

@@ -114,4 +114,24 @@ describe('NowPage tab routing', () => {
 
     expect(window.sessionStorage.getItem(EVENTLOG_LAST_TAB_KEY)).toBe('today');
   });
+
+  it('does not reset remembered tab when leaving the eventlog domain（离开当下域时不重置已记忆页签）', () => {
+    locationState = {
+      pathname: '/eventlog/record',
+      searchStr: '',
+    };
+
+    const { rerender } = render(<NowPage />);
+
+    expect(window.sessionStorage.getItem(EVENTLOG_LAST_TAB_KEY)).toBe('record');
+
+    locationState = {
+      pathname: '/tasks',
+      searchStr: '',
+    };
+
+    rerender(<NowPage />);
+
+    expect(window.sessionStorage.getItem(EVENTLOG_LAST_TAB_KEY)).toBe('record');
+  });
 });
