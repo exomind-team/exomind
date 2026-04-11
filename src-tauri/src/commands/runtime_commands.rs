@@ -469,7 +469,14 @@ fn should_restart_running_runtime(
     requested_host: &str,
     requested_port: u16,
 ) -> bool {
-    current_host != requested_host || current_port != requested_port
+    current_host != requested_host || (requested_port != 0 && current_port != requested_port)
+}
+
+fn should_fallback_to_random_port(
+    requested_port: u16,
+    healthy_runtime_on_requested_port: bool,
+) -> bool {
+    requested_port > 0 && !healthy_runtime_on_requested_port
 }
 
 fn should_enable_mdns_for_bind_host(host: &str) -> bool {
@@ -810,54 +817,105 @@ pub async fn ensure_runtime_started(
         ensure_runtime_stopped(state.clone()).await?;
     }
 
-    // 等待端口可用（处理热重载时旧端口 TIME_WAIT 延迟，最多等 2s）
-    {
-        use std::net::TcpListener as StdTcpListener;
+    if requested_port > 0 {
+        // 等待端口可用（处理热重载时旧端口 TIME_WAIT 延迟，最多等 2s）
         let addr = format!("{}:{}", options.bind_host, options.port);
+        let mut requested_port_available = false;
         for i in 0..20u8 {
             if StdTcpListener::bind(&addr).is_ok() {
+                requested_port_available = true;
                 break;
             }
             if probe_runtime_health(&options.bind_host, options.port).await {
                 return mark_external_runtime_running(&state, &options.bind_host, options.port);
             }
             if i == 0 {
-                log::info!("port {} busy, waiting for release...", options.port);
+                log::warn!(
+                    "embedded runtime requested port {} on {} is busy; waiting for release or healthy runtime reuse",
+                    requested_port,
+                    requested_host
+                );
             }
             sleep(Duration::from_millis(100)).await;
         }
+
+        if !requested_port_available {
+            log::warn!(
+                "embedded runtime requested port {} on {} remained occupied by a non-runtime listener; retrying on a random available port",
+                requested_port,
+                requested_host
+            );
+            options.port = 0;
+        }
     }
 
-    let handle = match start_with_options(options).await {
-        Ok(handle) => handle,
-        Err(error) => {
-            if let RuntimeStartError::BindListener { source, .. } = &error {
-                if source.kind() == std::io::ErrorKind::AddrInUse
-                    && probe_runtime_health(&requested_host, requested_port).await
-                {
-                    return mark_external_runtime_running(&state, &requested_host, requested_port);
-                }
-            }
-
-            // Handle startup race gracefully（处理并发启动竞争）.
-            for _ in 0..10 {
-                if let Ok(status) = runtime_status_snapshot(state.clone()) {
-                    if status.running {
-                        return Ok(status);
+    let handle = loop {
+        match start_with_options(options.clone()).await {
+            Ok(handle) => break handle,
+            Err(error) => {
+                if let RuntimeStartError::BindListener { source, .. } = &error {
+                    if source.kind() == std::io::ErrorKind::AddrInUse {
+                        let healthy_runtime_on_requested_port =
+                            probe_runtime_health(&requested_host, requested_port).await;
+                        if healthy_runtime_on_requested_port {
+                            return mark_external_runtime_running(
+                                &state,
+                                &requested_host,
+                                requested_port,
+                            );
+                        }
+                        if should_fallback_to_random_port(
+                            requested_port,
+                            healthy_runtime_on_requested_port,
+                        ) && options.port != 0
+                        {
+                            log::warn!(
+                                "embedded runtime requested port {} on {} became busy during startup; retrying on a random available port",
+                                requested_port,
+                                requested_host
+                            );
+                            options.port = 0;
+                            continue;
+                        }
                     }
                 }
-                sleep(Duration::from_millis(25)).await;
-            }
 
-            let message = format!("failed to start embedded runtime: {error}");
-            let mut inner = lock_or_error(&state)?;
-            inner.last_error = Some(message.clone());
-            inner.external_runtime = false;
-            return Err(message);
+                // Handle startup race gracefully（处理并发启动竞争）.
+                for _ in 0..10 {
+                    if let Ok(status) = runtime_status_snapshot(state.clone()) {
+                        if status.running {
+                            return Ok(status);
+                        }
+                    }
+                    sleep(Duration::from_millis(25)).await;
+                }
+
+                let message = format!("failed to start embedded runtime: {error}");
+                let mut inner = lock_or_error(&state)?;
+                inner.last_error = Some(message.clone());
+                inner.external_runtime = false;
+                return Err(message);
+            }
         }
     };
     let started_host = handle.host();
     let started_port = handle.port();
+
+    if requested_port == 0 {
+        log::info!(
+            "embedded runtime selected random available port {} on {}",
+            started_port,
+            started_host
+        );
+    } else if started_host != requested_host || started_port != requested_port {
+        log::warn!(
+            "embedded runtime requested {}:{} but started on {}:{} after fallback",
+            requested_host,
+            requested_port,
+            started_host,
+            started_port
+        );
+    }
 
     let mut inner = lock_or_error(&state)?;
     inner.host = started_host;
@@ -1133,6 +1191,23 @@ mod tests {
             "127.0.0.1",
             9124,
         ));
+    }
+
+    #[test]
+    fn should_not_restart_running_runtime_when_requested_port_is_dynamic() {
+        assert!(!super::should_restart_running_runtime(
+            "127.0.0.1",
+            9231,
+            "127.0.0.1",
+            0,
+        ));
+    }
+
+    #[test]
+    fn fixed_requested_port_without_healthy_runtime_falls_back_to_random_port() {
+        assert!(super::should_fallback_to_random_port(9124, false));
+        assert!(!super::should_fallback_to_random_port(9124, true));
+        assert!(!super::should_fallback_to_random_port(0, false));
     }
 
     #[test]

@@ -8,6 +8,7 @@ describe('runtime embedded startup m1（Runtime 内嵌启动约束）', () => {
     expect(tauriLib).toMatch(/runtime.*start/i);
     expect(tauriLib).toContain('fn resolve_embedded_runtime_port() -> u16');
     expect(tauriLib).toContain('unwrap_or(9124)');
+    expect(tauriLib).not.toContain('.filter(|port| *port > 0)');
     expect(tauriLib).toContain('Some(runtime_bind_host)');
   });
 

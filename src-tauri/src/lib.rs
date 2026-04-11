@@ -223,7 +223,6 @@ fn resolve_embedded_runtime_port() -> u16 {
     std::env::var("EXOMIND_RT_PORT")
         .ok()
         .and_then(|raw| raw.trim().parse::<u16>().ok())
-        .filter(|port| *port > 0)
         .unwrap_or(9124)
 }
 
@@ -410,7 +409,7 @@ pub fn run() {
                 let runtime_port = resolve_embedded_runtime_port();
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    // Keep embedded runtime port aligned with EXOMIND_RT_PORT（与前端端口配置保持一致）.
+                    // Honor EXOMIND_RT_PORT for embedded runtime startup（包括 `0` 表示随机端口）.
                     match ensure_runtime_started(
                         &app_handle,
                         runtime_state,
@@ -740,5 +739,37 @@ mod tests {
 
         std::fs::remove_dir_all(&runtime_dir).ok();
         clear_runtime_sqlite_envs();
+    }
+
+    #[test]
+    fn resolve_embedded_runtime_port_accepts_zero_for_random_port() {
+        let _guard = runtime_env_lock().lock().unwrap();
+        // SAFETY: tests mutate process env in a controlled single-threaded scope.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_PORT", "0");
+        }
+
+        assert_eq!(super::resolve_embedded_runtime_port(), 0);
+
+        // SAFETY: tests mutate process env in a controlled single-threaded scope.
+        unsafe {
+            std::env::remove_var("EXOMIND_RT_PORT");
+        }
+    }
+
+    #[test]
+    fn resolve_embedded_runtime_port_falls_back_when_value_is_invalid() {
+        let _guard = runtime_env_lock().lock().unwrap();
+        // SAFETY: tests mutate process env in a controlled single-threaded scope.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_PORT", "not-a-port");
+        }
+
+        assert_eq!(super::resolve_embedded_runtime_port(), 9124);
+
+        // SAFETY: tests mutate process env in a controlled single-threaded scope.
+        unsafe {
+            std::env::remove_var("EXOMIND_RT_PORT");
+        }
     }
 }
