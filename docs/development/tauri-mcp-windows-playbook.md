@@ -90,6 +90,72 @@
    - 再点 `tiled-grid-retry-input-*`
    - 最后确认 footer 回到 `等待输入`
 
+### 阶段补记：Agent Hub 可选模型对话框真窗验收（2026-04-11）
+
+#### 本轮阶段目标
+
+- 在真实 Tauri 窗口里确认 Agent Hub 的 PTY 创建/恢复对话框已经收敛到新的“可选模型”契约：
+  - 创建 Claude 时，模型与额外参数占位符都只是示例，不暗示默认值
+  - 关闭再打开后，Claude 的模型草稿仍保留
+  - 创建 Codex 时，模型占位符为示例格式，推理强度仅在创建模式出现
+  - 恢复已有终端时，不再出现模型/推理强度控件
+- 本轮明确复用现有窗口，不额外新开 Tauri dev 实例
+
+#### 本轮观察结果
+
+- 官方 `driver_session` 依旧直接报：
+  - `Transport closed`
+- 现有窗口对应端口仍存活：
+  - Web `1420`
+  - RT `9124`
+  - bridge `9223`
+- raw bridge 仍可稳定复用到当前窗口，无需重启 app。
+- 对话框按钮在真实窗口里，单纯 `HTMLElement.click()` 不够稳。
+  - 更可靠的方式是派发完整序列：
+    - `pointerdown`
+    - `mousedown`
+    - `pointerup`
+    - `mouseup`
+    - `click`
+- React 受控输入在真窗里不能只靠 `el.value = ...` 再派发事件来改值。
+  - 直接赋值只会改 DOM，不一定进 React state
+  - 要使用：
+    - `HTMLInputElement.prototype.value` 的原生 setter
+    - 再补 `input` / `change` 事件
+- 本轮实测读取到的真实 UI 状态：
+  - 创建 Claude：
+    - `pty-model.placeholder = 例如：claude-sonnet-4-5`
+    - `pty-extra-args.placeholder = 例如：--search --full-auto`
+  - 使用原生 setter 写入 Claude 模型草稿后，关闭再打开：
+    - `pty-model.value = claude-react-setter-verify`
+  - 创建 Codex：
+    - `pty-model.placeholder = 例如：gpt-5.4`
+    - `pty-reasoning-effort` 可见
+  - 恢复已有终端（切到 Codex）：
+    - `pty-model` 不可见
+    - `pty-reasoning-effort` 不可见
+    - 说明文案为：
+      - `恢复已有终端时将沿用历史会话自身路径与模型配置，无需重新填写工作目录或模型。`
+
+#### 本轮结论
+
+- 可选模型对话框的关键 UX 已在真实 Tauri 窗口中验证通过。
+- “对话框关闭后草稿是否真的保留”这类问题，真窗验证必须注意 React 受控输入写入方式；否则容易把 automation 自己的写值方式误判成产品 bug。
+- 本轮不需要新建额外窗口；复用现有 `1420/9124/9223` 实例即可完成验收。
+
+#### 可复用操作套路
+
+1. 先检查 `1420 / 9124 / 9223` 是否仍在监听，再决定是否复用当前窗口。
+2. 若官方 `driver_session` 仍是 `Transport closed`，直接切 raw bridge，不在官方会话上反复重试。
+3. 对真实按钮交互优先派发完整 pointer/mouse 序列，不假设裸 `click()` 足够。
+4. 对 React 受控输入必须用原生 setter：
+   - `Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set`
+   - 再补 `input` / `change`
+5. 真窗验收该类表单时，至少覆盖：
+   - 创建态示例占位符
+   - 关闭再打开后的草稿保留
+   - 恢复态的控件隐藏
+
 ### 阶段目标
 
 - 验证 `#806` 及其衍生 issue 的终端用户故事。

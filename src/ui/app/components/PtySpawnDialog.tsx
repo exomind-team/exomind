@@ -19,6 +19,7 @@ import { detectAndPersistHistoricalSessionId } from "@/ui/app/pages/agents/pty-s
 // ── Types ──────────────────────────────────────────────────────
 
 type PtyAgentType = "claude" | "codex" | "custom";
+type BuiltInPtyAgentType = Exclude<PtyAgentType, "custom">;
 type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 type PtyDialogMode = "route" | "create" | "resume";
 
@@ -37,6 +38,14 @@ interface HistoricalSessionInfo {
 
 const HISTORICAL_SESSION_PREVIEW_CHAR_LIMIT = 200;
 const HISTORICAL_SESSION_PRIMARY_LABEL_CHAR_LIMIT = 80;
+const DEFAULT_MODEL_DRAFTS: Record<BuiltInPtyAgentType, string> = {
+  claude: "",
+  codex: "",
+};
+const MODEL_PLACEHOLDER_BY_AGENT_TYPE: Record<BuiltInPtyAgentType, string> = {
+  claude: "例如：claude-sonnet-4-5",
+  codex: "例如：gpt-5.4",
+};
 
 export interface PtySpawnDialogProps {
   open: boolean;
@@ -111,6 +120,10 @@ function parseExtraArgs(input: string): string[] {
   }
 
   return tokens;
+}
+
+function isBuiltInPtyAgentType(value: PtyAgentType): value is BuiltInPtyAgentType {
+  return value === "claude" || value === "codex";
 }
 
 function sanitizeHistoricalSessionPathLabel(value?: string | null): string {
@@ -240,7 +253,7 @@ export function PtySpawnDialog({
   const [agentType, setAgentType] = useState<PtyAgentType>("claude");
   const [name, setName] = useState("");
   const [workdir, setWorkdir] = useState(defaultWorkdir || "");
-  const [model, setModel] = useState("");
+  const [modelDrafts, setModelDrafts] = useState(DEFAULT_MODEL_DRAFTS);
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort>("xhigh");
   const [customCommand, setCustomCommand] = useState("");
@@ -250,6 +263,8 @@ export function PtySpawnDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const occupiedHistoricalSessionIdSet = new Set(occupiedHistoricalSessionIds);
+  const model =
+    isBuiltInPtyAgentType(agentType) ? modelDrafts[agentType] : "";
 
   // ── Build auth headers ──────────────────────────────────────
 
@@ -271,7 +286,6 @@ export function PtySpawnDialog({
       setAgentType("claude");
       setName("");
       setWorkdir(defaultWorkdir || "");
-      setModel("");
       setReasoningEffort("xhigh");
       setCustomCommand("");
       setExtraArgs("");
@@ -349,16 +363,17 @@ export function PtySpawnDialog({
   const buildSpawnPayload = useCallback(() => {
     const args: string[] = [];
     let command = "claude";
+    const trimmedModel = model.trim();
 
     if (agentType === "claude") {
       command = "claude";
-      if (model.trim()) {
-        args.push("--model", model.trim());
+      if (trimmedModel) {
+        args.push("--model", trimmedModel);
       }
     } else if (agentType === "codex") {
       command = "codex";
-      if (model.trim()) {
-        args.push("-m", model.trim());
+      if (trimmedModel) {
+        args.push("-m", trimmedModel);
       }
       if (reasoningEffort.trim()) {
         args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
@@ -509,10 +524,6 @@ export function PtySpawnDialog({
           session_id: session.session_id,
         };
         if (name.trim()) body.name = name.trim();
-        if (model.trim()) body.model = model.trim();
-        if (session.agent_type === "codex" && reasoningEffort.trim()) {
-          body.reasoning_effort = reasoningEffort.trim();
-        }
         if (parsedExtraArgs.length > 0) {
           body.extra_args = parsedExtraArgs;
         }
@@ -539,13 +550,10 @@ export function PtySpawnDialog({
     },
     [
       extraArgs,
-      model,
       name,
       onOpenChange,
       onSpawned,
-      reasoningEffort,
       rtBaseUrl,
-      workdir,
       buildHeaders,
     ],
   );
@@ -693,11 +701,11 @@ export function PtySpawnDialog({
                   data-testid="pty-resume-workdir-note"
                   className="rounded-xl border border-dashed border-border-card bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground"
                 >
-                  恢复已有终端时将沿用历史会话自身路径，无需重新填写工作目录。
+                  恢复已有终端时将沿用历史会话自身路径与模型配置，无需重新填写工作目录或模型。
                 </div>
               )}
 
-              {(agentType === "claude" || agentType === "codex") && (
+              {dialogMode === "create" && isBuiltInPtyAgentType(agentType) && (
                 <div className="space-y-1.5 min-w-0">
                   <label className="text-xs font-medium text-muted-foreground">
                     模型（model）
@@ -705,18 +713,21 @@ export function PtySpawnDialog({
                   <input
                     data-testid="pty-model"
                     type="text"
-                    placeholder={
-                      agentType === "claude" ? "claude-sonnet-4-5" : "gpt-5.4"
-                    }
+                    placeholder={MODEL_PLACEHOLDER_BY_AGENT_TYPE[agentType]}
                     value={model}
-                    onChange={(e) => setModel(e.target.value)}
+                    onChange={(e) =>
+                      setModelDrafts((prev) => ({
+                        ...prev,
+                        [agentType]: e.target.value,
+                      }))
+                    }
                     className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
                     disabled={loading}
                   />
                 </div>
               )}
 
-              {agentType === "codex" && (
+              {dialogMode === "create" && agentType === "codex" && (
                 <div className="space-y-1.5 min-w-0">
                   <label className="text-xs font-medium text-muted-foreground">
                     推理强度（reasoning effort）
@@ -768,7 +779,7 @@ export function PtySpawnDialog({
                 <input
                   data-testid="pty-extra-args"
                   type="text"
-                  placeholder="--search --full-auto"
+                  placeholder="例如：--search --full-auto"
                   value={extraArgs}
                   onChange={(e) => setExtraArgs(e.target.value)}
                   className="h-9 w-full max-w-full min-w-0 rounded-lg border border-border-card bg-card px-3 text-sm outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"

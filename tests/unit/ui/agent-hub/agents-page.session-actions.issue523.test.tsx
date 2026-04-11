@@ -1666,7 +1666,6 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
           body: JSON.stringify({
             agent_type: 'codex',
             session_id: '019d0011-aaaa-bbbb-cccc-1234567890ab',
-            reasoning_effort: 'xhigh',
           }),
         }),
       );

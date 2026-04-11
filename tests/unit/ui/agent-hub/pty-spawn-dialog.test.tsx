@@ -97,6 +97,14 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
 
     await openCreateMode();
     await chooseDialogSelect("pty-agent-type", "Codex");
+    expect(screen.getByTestId("pty-model")).toHaveAttribute(
+      "placeholder",
+      "例如：gpt-5.4",
+    );
+    expect(screen.getByTestId("pty-extra-args")).toHaveAttribute(
+      "placeholder",
+      "例如：--search --full-auto",
+    );
     fireEvent.change(screen.getByTestId("pty-session-name"), {
       target: { value: "codex-main" },
     });
@@ -140,6 +148,126 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
       });
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
+  });
+
+  it("does not send a model flag when the Claude model input is blank（Claude 模型留空时不附加 --model）", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.includes("/pty/sessions?agent_type=claude")) {
+        return { ok: true, json: async () => [] } as Response;
+      }
+      if (input.endsWith("/pty/spawn")) {
+        return {
+          ok: true,
+          json: async () => ({ id: "pty-claude-blank", name: "claude-main" }),
+        } as Response;
+      }
+      if (
+        input.endsWith("/sessions/pty-claude-blank") &&
+        init?.method === "PATCH"
+      ) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: "pty-claude-blank",
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${input} ${JSON.stringify(init)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PtySpawnDialog
+        open={true}
+        onOpenChange={() => {}}
+        rtBaseUrl="http://127.0.0.1:1949"
+        defaultWorkdir="D:/project/exomind"
+        onSpawned={() => {}}
+      />,
+    );
+
+    await openCreateMode();
+    expect(screen.getByTestId("pty-model")).toHaveAttribute(
+      "placeholder",
+      "例如：claude-sonnet-4-5",
+    );
+    expect(screen.getByTestId("pty-extra-args")).toHaveAttribute(
+      "placeholder",
+      "例如：--search --full-auto",
+    );
+    fireEvent.change(screen.getByTestId("pty-session-name"), {
+      target: { value: "claude-main" },
+    });
+    fireEvent.change(screen.getByTestId("pty-session-workdir"), {
+      target: { value: "D:/project/exomind" },
+    });
+    fireEvent.click(screen.getByTestId("pty-spawn-submit"));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:1949/pty/spawn",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            name: "claude-main",
+            workdir: "D:/project/exomind",
+            command: "claude",
+            args: [],
+            rows: 24,
+            cols: 80,
+          }),
+        }),
+      );
+    });
+  });
+
+  it("remembers model drafts per agent type across switching and reopening（模型草稿会按 Agent 类型分别记忆，并在重开对话框后保留）", async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (
+        input.includes("/pty/sessions?agent_type=claude") ||
+        input.includes("/pty/sessions?agent_type=codex")
+      ) {
+        return { ok: true, json: async () => [] } as Response;
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const props = {
+      onOpenChange: () => {},
+      rtBaseUrl: "http://127.0.0.1:1949",
+      onSpawned: () => {},
+    };
+    const { rerender } = render(<PtySpawnDialog open={true} {...props} />);
+
+    await openCreateMode();
+    const modelInput = screen.getByTestId("pty-model");
+    expect(modelInput).toHaveAttribute("placeholder", "例如：claude-sonnet-4-5");
+    fireEvent.change(modelInput, {
+      target: { value: "claude-3-7-custom" },
+    });
+
+    await chooseDialogSelect("pty-agent-type", "Codex");
+    expect(screen.getByTestId("pty-model")).toHaveAttribute(
+      "placeholder",
+      "例如：gpt-5.4",
+    );
+    expect(screen.getByTestId("pty-model")).toHaveValue("");
+    fireEvent.change(screen.getByTestId("pty-model"), {
+      target: { value: "gpt-5.7-preview" },
+    });
+
+    await chooseDialogSelect("pty-agent-type", "Claude");
+    expect(screen.getByTestId("pty-model")).toHaveValue("claude-3-7-custom");
+
+    rerender(<PtySpawnDialog open={false} {...props} />);
+    rerender(<PtySpawnDialog open={true} {...props} />);
+
+    await openCreateMode();
+    expect(screen.getByTestId("pty-model")).toHaveValue("claude-3-7-custom");
+
+    await chooseDialogSelect("pty-agent-type", "Codex");
+    expect(screen.getByTestId("pty-model")).toHaveValue("gpt-5.7-preview");
   });
 
   it("persists the detected Codex inner session id after spawning with runtime-resolved workdir（新建 Codex 后会用 RT 返回的绝对目录补写 inner_session_id）", async () => {
@@ -300,7 +428,7 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
     });
   });
 
-  it("resumes codex historical session with agent_type（按 Agent 类型恢复 Codex 历史会话）", async () => {
+  it("resumes codex historical session without exposing model overrides（恢复 Codex 历史会话时不再暴露模型覆盖）", async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input.includes("/pty/sessions?agent_type=claude")) {
         return { ok: true, json: async () => [] } as Response;
@@ -357,10 +485,10 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
     });
     expect(screen.queryByTestId("pty-session-workdir")).not.toBeInTheDocument();
     expect(screen.getByTestId("pty-resume-workdir-note")).toBeInTheDocument();
-    fireEvent.change(screen.getByTestId("pty-model"), {
-      target: { value: "gpt-5.4" },
-    });
-    await chooseDialogSelect("pty-reasoning-effort", "xhigh");
+    expect(screen.queryByTestId("pty-model")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("pty-reasoning-effort"),
+    ).not.toBeInTheDocument();
     fireEvent.change(screen.getByTestId("pty-extra-args"), {
       target: { value: "--search --full-auto" },
     });
@@ -379,8 +507,6 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
             agent_type: "codex",
             session_id: "019d0011-aaaa-bbbb-cccc-1234567890ab",
             name: "resume-codex",
-            model: "gpt-5.4",
-            reasoning_effort: "xhigh",
             extra_args: ["--search", "--full-auto"],
           }),
         }),
@@ -436,6 +562,8 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
 
     expect(screen.queryByTestId("pty-session-workdir")).not.toBeInTheDocument();
     expect(screen.getByTestId("pty-resume-workdir-note")).toBeInTheDocument();
+    expect(screen.queryByTestId("pty-model")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pty-reasoning-effort")).not.toBeInTheDocument();
 
     const historyButton = await screen.findByTestId(
       "pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab",
@@ -450,7 +578,6 @@ describe("PtySpawnDialog（终端会话启动弹窗）", () => {
           body: JSON.stringify({
             agent_type: "codex",
             session_id: "019d0011-aaaa-bbbb-cccc-1234567890ab",
-            reasoning_effort: "xhigh",
           }),
         }),
       );
