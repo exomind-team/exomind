@@ -2229,3 +2229,164 @@
 6. 验证恢复性时，允许把“bridge 脚本等待超时”和“产品状态恢复失败”分开判断：
    - 前者属于工具时序噪音
    - 后者才属于时间块统一回归
+
+### 阶段补记：#868 / #869 同步边界双实例实测（2026-04-11）
+
+#### 阶段目标
+
+- 用真实双实例桌面环境验证四大系统的同步边界，而不是只停留在 happy-path：
+  - EventLog
+  - TimeBlock
+  - Task
+  - Proposal
+- 本轮重点观察三类边界：
+  - 恢复性同步
+  - 冲突合并
+  - 分叉后的重收敛
+
+#### 观察结果
+
+- 官方 `driver_session` 在本轮环境里仍然不可用：
+  - 返回 `Transport closed`
+- 当前可工作的桌面验收路径仍然是：
+  - raw bridge + RT HTTP + 页面上下文 `execute_js`
+- 本轮受控双实例真值：
+  - A: Web `1480`, raw bridge `9283`, embedded RT `9160`
+  - B: Web `1484`, raw bridge `9287`, embedded RT `9164`
+- 当前桌面窗口的真实 scope 不是 profile scope，而是：
+  - `localStorage['exomind:profile-session'] === null`
+  - effective UI scope = `anonymous`
+- 主报告路径：
+  - `.tmp/reports/tauri-sync-boundary/2026-04-11T02-10-19-928Z/report.md`
+  - `.tmp/reports/tauri-sync-boundary/2026-04-11T02-10-19-928Z/report.json`
+- 已确认的强通过项：
+  - task recovery UI
+  - timeblock recovery RT
+  - task terminal conflict -> `cancelled`
+  - timeblock phase conflict -> `feedback_in_progress`
+  - eventlog fork union
+  - task fork union
+- 已确认的强失败项：
+  - eventlog same-id conflict 在重连后仍各保留各自内容，没有自动重收敛
+  - proposal status/comment conflict 会丢失较早的 status 更新，最终收敛到较晚 comment 分支
+- 已确认的部分/非确定项：
+  - eventlog recovery 在 RT truth 上恢复成功，但当前 `/eventlog` 页面 DOM probe 未在观察窗口内看到 marker
+  - proposal recovery 在 RT truth 上恢复成功，但 inbox 可见性不是 signal-driven，而是带明显 polling 时序
+
+#### 结论
+
+- 在 Windows 下，官方 `driver_session` 失败不等于这轮桌面验收无法继续。
+  - 需要先区分：
+    - 官方 driver 失败
+    - raw bridge 失败
+  - 本轮属于前者失败、后者可用
+- 对同步边界验证，必须把：
+  - RT truth
+  - UI truth
+  分开记录，不能只凭其中一层下结论。
+- Proposal 当前最危险的不是“完全不同步”，而是：
+  - RT 已经同步
+  - 但前端 inbox 仍以 polling 为主
+  - 导致恢复性观察具有时序噪音，容易把“延迟出现”误判成“必须手动刷新”
+- EventLog 当前最明确的未闭环问题是：
+  - same-id divergent content 没有明确定义或实现自动重收敛契约
+- Proposal 当前最明确的未闭环问题是：
+  - status 更新会被后到的 comment 分支覆盖，产生真实数据丢失
+
+#### 可复用操作套路
+
+1. 先确认当前实例真值，不要直接套用历史端口：
+   - Web
+   - raw bridge
+   - embedded RT
+2. 如果 `driver_session` 报 `Transport closed`，直接切 raw bridge，不要卡住：
+   - 页面上下文 `execute_js`
+   - 页面内 `fetch('http://127.0.0.1:<rt-port>/...')`
+3. 先读页面作用域，再决定用哪个 scope 做验证：
+   - 当前真实桌面 UI scope 用 `anonymous`
+   - 需要避免污染现网 UI 时，用 synthetic scope 做 RT-only conflict/fork 测试
+4. 做 Proposal 验证时，先记住 inbox 不是即时 signal-driven：
+   - `src/ui/app/pages/proposals/ProposalInboxPage.tsx`
+   - `POLL_INTERVAL_MS = 30_000`
+   - 因此“看到了延迟出现”与“必须手动刷新”不是一回事
+5. 做 EventLog / Proposal 的边界报告时，至少分三层写清：
+   - 写入前 truth
+   - 重连后 RT truth
+   - 重连后 UI visibility
+6. 若主报告脚本失败，不要把脚本 bug 当产品 bug：
+   - 本轮 `fork_eventlog_union` 首报失败是脚本里的 `poll` 初始化错误
+   - 单独补跑后应重新归类产品结论
+
+### 阶段补记：#901 / #875 / #878 推送后桌面 smoke（2026-04-11）
+
+#### 阶段目标
+
+- 在代码已提交并推送到 `dev` 后，用真实桌面实例验证这轮改动，而不是只停留在 `vitest + tsc`。
+- 重点覆盖：
+  - `#901` 平铺空槽位创建终端时，主反馈是否回到目标槽位
+  - `#875` 平铺工作台快捷键是否已收口到「终端 Agent」
+  - `#878` 连接区主标签是否已切到用户语义
+
+#### 观察结果
+
+- 官方 `tauri_mcp_server` 在本轮环境里仍不可用：
+  - `driver_session`
+  - `get_setup_instructions`
+  均直接报 `Transport closed`
+- raw bridge 仍然可正常工作，可直接连现成桌面实例：
+  - `ws://127.0.0.1:9287`
+  - 对应窗口：`ExoMind [dev] [Web:1484 RT:9164]`
+- 现成实例的 bridge 端口可由 `webPort` 直接推导：
+  - 公式：`9223 + (webPort - 1420)`
+  - 例：
+    - `web-1480` => `9283`
+    - `web-1484` => `9287`
+- 尝试重新拉起 `web-1420 / rt-9124` 新实例时，Rust 构建在链接阶段中断：
+  - `link.exe` 返回 `0xc000013a`
+  - `ring` build script 随后失败
+  - 结论：当前机器上已有可用桌面实例时，优先复用现成实例比强拉新实例更稳
+
+#### 本轮已验证的产品结论
+
+- `#875` 桌面设置页已看到真实结果：
+  - 「终端 Agent」分区中出现：
+    - `平铺工作台方向快捷键`
+    - `平铺工作台命令快捷键`
+    - `平铺工作台单次透传快捷键`
+- `#878` 本轮最小范围已在桌面设置页看到真实结果：
+  - 「连接」分区主标签显示为：
+    - `连接方式`
+    - `本机开放范围`
+- `#901` 真实创建链路通过 smoke：
+  - 在 `网络 / 平铺` 里，从空槽位点击 `新建终端`
+  - 选择 `pty-mode-create`
+  - 点击 `启动新会话`
+  - 立即观察到：
+    - 创建弹窗关闭
+    - 原始 `slot-1` 切换成 `创建中 / 正在创建终端`
+  - 约 10 秒后：
+    - 同一槽位切换为真实 Claude 终端画面
+
+#### 可复用操作套路
+
+1. 先锁定现成实例真值，不要先假设 `1420 / 9124 / 9223`
+   - `Get-Process exomind`
+   - `Get-NetTCPConnection`
+2. 如果官方 `driver_session` 直接 `Transport closed`
+   - 不要继续卡在官方 driver
+   - 直接退到 raw bridge
+3. raw bridge 最小客户端只需要两个命令：
+   - `list_windows`
+   - `execute_js`
+4. 设置页验收优先抓稳定 selector：
+   - `new-settings-desktop-vc-section-connection`
+   - `new-settings-desktop-vc-section-terminal-agent`
+5. 平铺终端验收优先抓稳定 selector：
+   - `agent-view-toggle-tiled`
+   - `tiled-slot-slot-1`
+   - `pty-mode-create`
+6. 若字符串匹配出现异常，不要先怀疑产品逻辑：
+   - 先看 `outerHTML`
+   - 先看 `data-testid`
+   - 先看 button 顺序
+   - 当前环境里，部分按钮文本会被字体或隐藏字符干扰，直接按 `data-testid` 或索引更稳
