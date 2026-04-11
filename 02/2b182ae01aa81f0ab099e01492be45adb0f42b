@@ -1,0 +1,42 @@
+src/ui/app/components/PtySpawnDialog.tsx
+  0e77f94d514915f5 22,41-48,125-128,256,266-267,366,370-371,375-376,704,708,716,718-723,730,782
+tests/unit/ui/agent-hub/pty-spawn-dialog.test.tsx
+  0e77f94d514915f5 100-107,153-257,259-270,431,488-491,565-566
+docs/plans/2026-04-11-agent-hub-optional-model-dialog-plan.md
+  0e77f94d514915f5 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "022b182ae01aa81f0ab099e01492be45adb0f42b",
+  "prompts": {
+    "0e77f94d514915f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7127-aed2-7992-b0db-24ac258ee08b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 408,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/71a131f733fc917da590d7dcd1bee6a664c8c402a441ae059e93eb392dcf2109"
+    },
+    "a6385f73b0f1344f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fed-bc8e-7d33-8d94-d5ca5041b82c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 218,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/b67b7bc3fe4e61d417d69f4d707c9fc2043b34e6e25280cd01a86ee073b21e5c"
+    }
+  }
+}
