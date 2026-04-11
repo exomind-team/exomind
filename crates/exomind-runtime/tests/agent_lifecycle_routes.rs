@@ -20,6 +20,7 @@ fn test_app_state(port: u16, host_id: &str, signal_pool: Arc<SignalPool>) -> App
     AppState {
         port,
         host_id: host_id.to_string(),
+        device_id: format!("dev-{host_id}"),
         registry: registry.clone(),
         signal_pool: Arc::clone(&signal_pool),
         mesh: Arc::new(MeshState::new(

@@ -1080,10 +1080,6 @@ async fn get_active_timeblock(
     }
 }
 
-fn is_timeblock_ended(block: &ActiveBlockData) -> bool {
-    block.is_feedback_in_progress() || block.is_completed()
-}
-
 async fn timeblock_backend_status(
     State(state): State<AppState>,
 ) -> Json<TimeBlockBackendStatusResponse> {

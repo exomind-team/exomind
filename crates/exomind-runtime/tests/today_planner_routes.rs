@@ -21,6 +21,7 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
     AppState {
         port: 0,
         host_id: host_id.clone(),
+        device_id: "dev-today-planner-test-host".to_string(),
         registry: registry.clone(),
         signal_pool: Arc::clone(&signal_pool),
         mesh: Arc::new(MeshState::new(
