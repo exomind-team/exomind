@@ -1,0 +1,55 @@
+tests/unit/tauri/runtime-embedded.m1.test.ts
+  528def08a95f58fc 11
+src-tauri/src/commands/runtime_commands.rs
+  528def08a95f58fc 472,475-479,820-821,823,826,833-837,841-848,852-880,883-888,890,893-898,904-918,1196-1202,1204-1210
+src-tauri/src/lib.rs
+  528def08a95f58fc 412,743-773
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "1c4692c98a4a2544d05c511c7d0bbf98afa1b4f1",
+  "prompts": {
+    "0e77f94d514915f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7127-aed2-7992-b0db-24ac258ee08b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/71a131f733fc917da590d7dcd1bee6a664c8c402a441ae059e93eb392dcf2109"
+    },
+    "528def08a95f58fc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7ac5-4fc1-7ff2-ab7c-b2c77bf79681",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 137,
+      "total_deletions": 28,
+      "accepted_lines": 137,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/44ad3912b8b27d53f9b08b5de7fcb70dd9f2f1d7b96d697ed692e22dc59d16b8"
+    },
+    "a6385f73b0f1344f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d6fed-bc8e-7d33-8d94-d5ca5041b82c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
