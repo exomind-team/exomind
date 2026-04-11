@@ -142,17 +142,30 @@ export const AGENT_KIND_COLORS: Record<AgentKind, string> = {
   api: '#6366F1',      // Indigo
 };
 
-/** Status indicator shape + color for accessibility (color-blind friendly) */
+export type SessionStatusTone =
+  | 'success'
+  | 'warning'
+  | 'danger'
+  | 'neutral'
+  | 'muted';
+
+export interface SessionStatusIndicator {
+  color: string;
+  label: string;
+  tone: SessionStatusTone;
+}
+
+/** Session status metadata used by UI presentation layers */
 export const SESSION_STATUS_INDICATORS: Record<
   SessionStatus,
-  { color: string; shape: string; label: string }
+  SessionStatusIndicator
 > = {
-  running:       { color: '#22C55E', shape: '●', label: '运行中' },
-  waiting_input: { color: '#EAB308', shape: '▲', label: '等待输入' },
-  completed:     { color: '#6B7280', shape: '✓', label: '已完成' },
-  error:         { color: '#EF4444', shape: '✕', label: '出错' },
-  paused:        { color: '#A8A29E', shape: '⏸', label: '已暂停' },
-  archived:      { color: '#78716C', shape: '◻', label: '已归档' },
+  running:       { color: '#22C55E', label: '运行中', tone: 'success' },
+  waiting_input: { color: '#EAB308', label: '等待输入', tone: 'warning' },
+  completed:     { color: '#6B7280', label: '已完成', tone: 'neutral' },
+  error:         { color: '#EF4444', label: '出错', tone: 'danger' },
+  paused:        { color: '#A8A29E', label: '已暂停', tone: 'muted' },
+  archived:      { color: '#78716C', label: '已归档', tone: 'muted' },
 };
 
 /** Check if a session needs user attention */

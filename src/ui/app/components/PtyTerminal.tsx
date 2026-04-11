@@ -14,7 +14,6 @@ import {
   getPtyInputTransportSnapshot,
   isPtyInputTransportPtyUnavailable,
   retainPtyInputTransport,
-  retryPtyInputTransport,
   sendPtyResize,
   sendPtyWsTextInput,
   type PtyInputTarget,
@@ -32,7 +31,21 @@ export interface PtyTerminalProps {
   autoFocus?: boolean;
   onInitialConnectionFailure?: () => void;
   onPtyUnavailable?: () => void;
+  onTransportPresentationChange?: (
+    state: PtyTransportPresentationState | null,
+  ) => void;
 }
+
+export type PtyTransportPresentationState =
+  | {
+      kind: "output-reconnecting";
+      message: "输出重连中，输入暂停";
+    }
+  | {
+      kind: "input-readonly";
+      message: "输入只读，可重连";
+      actionLabel: "重连输入";
+    };
 
 const INITIAL_STREAM_CONNECT_RETRY_LIMIT = 2;
 const INITIAL_STREAM_CONNECT_RETRY_DELAY_MS = 250;
@@ -146,6 +159,27 @@ function formatOutputReconnectSummary(): string {
   return "终端输出通道重连中，输入已暂停；恢复后可继续输入。";
 }
 
+function isRetryableInputReadOnlyState(
+  snapshot: PtyInputTransportSnapshot,
+): boolean {
+  if (snapshot.phase !== "error" || !snapshot.readOnly) {
+    return false;
+  }
+
+  if (
+    snapshot.errorCode === "not_found" ||
+    snapshot.errorCode === "unauthorized" ||
+    snapshot.errorCode === "forbidden"
+  ) {
+    return false;
+  }
+
+  const message = snapshot.errorMessage ?? "";
+  return (
+    !message.includes("协议版本不兼容") && !message.includes("升级 Runtime")
+  );
+}
+
 function shouldAutoRetryErroredInputTransport(
   snapshot: PtyInputTransportSnapshot,
 ): boolean {
@@ -255,6 +289,7 @@ export function PtyTerminal({
   autoFocus = interactive && !inputPaused,
   onInitialConnectionFailure,
   onPtyUnavailable,
+  onTransportPresentationChange,
 }: PtyTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -292,6 +327,43 @@ export function PtyTerminal({
   useEffect(() => {
     onPtyUnavailableRef.current = onPtyUnavailable;
   }, [onPtyUnavailable]);
+
+  useEffect(() => {
+    if (onTransportPresentationChange == null) {
+      return;
+    }
+
+    if (!isStreamConnecting && !streamErrorMessage && outputReconnectMessage) {
+      onTransportPresentationChange({
+        kind: "output-reconnecting",
+        message: "输出重连中，输入暂停",
+      });
+      return;
+    }
+
+    if (
+      !isStreamConnecting &&
+      !streamErrorMessage &&
+      interactive &&
+      isRetryableInputReadOnlyState(inputTransportSnapshot)
+    ) {
+      onTransportPresentationChange({
+        kind: "input-readonly",
+        message: "输入只读，可重连",
+        actionLabel: "重连输入",
+      });
+      return;
+    }
+
+    onTransportPresentationChange(null);
+  }, [
+    inputTransportSnapshot,
+    interactive,
+    isStreamConnecting,
+    onTransportPresentationChange,
+    outputReconnectMessage,
+    streamErrorMessage,
+  ]);
 
   useEffect(() => {
     inputPausedRef.current = inputPaused;
@@ -1191,38 +1263,6 @@ export function PtyTerminal({
           className="absolute inset-0 z-10 flex items-center justify-center bg-[#1C1917]/92 px-6 text-center"
         >
           <p className="text-sm text-[#FCA5A5]">{streamErrorMessage}</p>
-        </div>
-      ) : null}
-      {!isStreamConnecting && !streamErrorMessage && outputReconnectMessage ? (
-        <div
-          data-testid="pty-terminal-output-reconnecting"
-          className="absolute left-3 right-3 top-3 z-20 rounded border border-[#0F766E] bg-[#1C1917]/95 px-3 py-2 text-xs text-[#99F6E4]"
-        >
-          <p>{outputReconnectMessage}</p>
-        </div>
-      ) : null}
-      {!isStreamConnecting &&
-      !streamErrorMessage &&
-      interactive &&
-      inputTransportSnapshot.phase === "error" ? (
-        <div
-          data-testid="pty-terminal-input-error"
-          className="absolute left-3 right-3 top-3 z-20 flex items-center justify-between gap-3 rounded border border-[#92400E] bg-[#1C1917]/95 px-3 py-2 text-xs text-[#FDE68A]"
-        >
-          <p className="min-w-0 flex-1">
-            {inputTransportSnapshot.errorMessage ??
-              "终端输入通道已断开，当前仅保留只读输出；请手动重试输入通道。"}
-          </p>
-          <button
-            type="button"
-            data-testid="pty-terminal-input-retry"
-            className="shrink-0 rounded border border-[#A16207] px-2 py-1 text-[11px] text-[#FDE68A] hover:border-[#CA8A04]"
-            onClick={() => {
-              retryPtyInputTransport({ rtBaseUrl, ptyId, authToken });
-            }}
-          >
-            重试输入
-          </button>
         </div>
       ) : null}
       <div

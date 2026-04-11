@@ -14,6 +14,82 @@
 
 更新时间：`2026-04-02`
 
+### 阶段补记：Agent Hub 终端状态分层实测（2026-04-11）
+
+#### 本轮阶段目标
+
+- 验证 Agent Hub 终端状态分层改动已经真正落到桌面窗口，而不是只停留在单测：
+  - `SessionCard` 顶部把 `Claude · 刚刚` 收敛到左侧状态簇
+  - `TiledGrid` pane header 左上显示状态图标 + `Claude · 刚刚`
+  - pane footer 左下优先显示 `等待输入`
+  - PTY 非阻塞展示态可切到：
+    - `输出重连中，输入暂停`
+    - `输入只读，可重连`
+    - 右侧动作 `重连输入`
+- 清掉旧的无效测试 session，尽量用新建终端而不是历史脏数据做验收。
+
+#### 本轮观察结果
+
+- 官方 `driver_session` 在当前 Windows 现场仍直接报：
+  - `Transport closed`
+- raw bridge `ws://127.0.0.1:9223` 可稳定工作，且本轮足以完成真实验收。
+- 新开的隔离实例里残留了一批旧测试 session（例如 `sid-123`、`sid-message-only`、`tmcp-missing-pty-*`）。
+  - 这些脏数据可直接通过页面现有 `close / archive` 按钮清掉
+  - 不必为了“清现场”绕过产品逻辑直接删库
+- 通过页面自身 `pty-spawn-button -> 创建新终端` 成功新建了全新终端：
+  - 先验证了 `Claude` 新终端可直接创建
+  - `SessionCard` 元信息为 `Claude·刚刚`
+  - `TiledGrid` pane footer 默认回到 `等待输入`
+- `waiting_input` 的左上状态图标已在真实桌面窗口中切换为：
+  - `lucide-hand`
+  - 不再是告警三角
+- 真实窗口里：
+  - `SessionCard` 已无右上角独立时间块
+  - `SessionCard` 内也无 clock icon 残留
+  - `TiledGrid` pane meta 位于左侧状态簇，动作按钮仍在右侧
+- 单靠 `runtime_service_stop()` 去抓瞬时 footer 态不稳定：
+  - 现场更容易触发 pane 替换 / 会话切换
+  - 不适合做“非阻塞 presentation 文案”的精确验收
+- 更稳的做法是：
+  - 从真实 pane DOM 节点拿到 `__reactFiber$*`
+  - 找到 `PtyTerminal` function component fiber
+  - 直接调用其 `memoizedProps.onTransportPresentationChange(...)`
+- 本轮用这条路径在真实桌面窗口里确认了：
+  - footer 可切到 `输出重连中，输入暂停`
+  - footer 可切到 `输入只读，可重连`
+  - 右侧会出现 `重连输入`
+  - 点击 `重连输入` 后，footer 可回到 `等待输入`
+
+#### 本轮结论
+
+- 这轮终端状态分层改动已经通过真实 Tauri 桌面窗口验证，不只是测试桩层通过。
+- 对“展示层状态文案 / 右侧动作是否正确”的验收：
+  - raw bridge + React fiber 注入，比 stop/start RT 更稳、更精确
+- 对“清理无效会话再新建终端”的诉求：
+  - 先用页面现有 close/archive 收敛旧 session
+  - 再用新建终端建立最小干净测试态
+  - 是当前最可靠的桌面验收顺序
+
+#### 可复用操作套路
+
+1. 先尝试官方 `driver_session`；若仍是 `Transport closed`，直接切 raw bridge，不要卡住。
+2. 打开 `/agents` 后，先清理旧测试 session：
+   - 用页面现有 `session-card-close-*`
+   - 再点 `session-card-archive-*`
+3. 用 `pty-spawn-button` 新建一个全新终端，优先不要复用历史脏会话。
+4. 先验证静态展示层：
+   - `SessionCard` 的 `session-card-meta-*`
+   - `TiledGrid` 的 `tiled-grid-pane-meta-*`
+   - `tiled-grid-footer-status-*`
+5. 若要精确验证 PTY 非阻塞状态，不优先 stop/start RT。
+   - 先从 pane 内容节点取 `__reactFiber$*`
+   - 向下找到 `PtyTerminal`
+   - 直接调用 `memoizedProps.onTransportPresentationChange(...)`
+6. 验证输入只读恢复链时：
+   - 先注入 `input-readonly`
+   - 再点 `tiled-grid-retry-input-*`
+   - 最后确认 footer 回到 `等待输入`
+
 ### 阶段目标
 
 - 验证 `#806` 及其衍生 issue 的终端用户故事。

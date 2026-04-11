@@ -1,7 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PtyTerminal } from "./PtyTerminal";
-import { __resetPtyInputTransportPoolForTests } from "./pty-input";
+import {
+  __resetPtyInputTransportPoolForTests,
+  retryPtyInputTransport,
+} from "./pty-input";
 
 const hoisted = vi.hoisted(() => {
   const defaultReadyMessage = () => ({
@@ -494,13 +497,15 @@ describe("PtyTerminal", () => {
     restoreClientSize();
   });
 
-  it("shows explicit input transport error and allows manual retry（输入 WS 失败后显示错误并允许手动重试）", async () => {
+  it("reports input-readonly presentation state and supports external retry（输入 WS 失败后应外抛只读展示态并支持外部重试）", async () => {
     const restoreClientSize = withElementClientSize(960, 640);
+    const onTransportPresentationChange = vi.fn();
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:4317"
         ptyId="pty-input-error"
         interactive
+        onTransportPresentationChange={onTransportPresentationChange}
       />,
     );
 
@@ -514,19 +519,23 @@ describe("PtyTerminal", () => {
     });
     await flushUi();
 
-    expect(screen.getByTestId("pty-terminal-input-error")).toHaveTextContent(
-      "终端输入通道已断开",
-    );
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "input-readonly",
+      message: "输入只读，可重连",
+      actionLabel: "重连输入",
+    });
+    expect(screen.queryByTestId("pty-terminal-input-error")).not.toBeInTheDocument();
 
     act(() => {
-      fireEvent.click(screen.getByTestId("pty-terminal-input-retry"));
+      retryPtyInputTransport({
+        rtBaseUrl: "http://127.0.0.1:4317",
+        ptyId: "pty-input-error",
+      });
     });
     await flushUi(20);
 
     expect(hoisted.websocketInstances).toHaveLength(3);
-    expect(
-      screen.queryByTestId("pty-terminal-input-error"),
-    ).not.toBeInTheDocument();
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith(null);
     restoreClientSize();
   });
 
@@ -560,15 +569,17 @@ describe("PtyTerminal", () => {
     restoreClientSize();
   });
 
-  it("promotes fatal server-side input errors into the explicit read-only transport state（服务端写入失败会进入显式只读态）", async () => {
+  it("promotes fatal server-side input errors into the input-readonly presentation state（服务端写入失败会进入只读展示态）", async () => {
     const restoreClientSize = withElementClientSize(960, 640);
     hoisted.autoAckInput = false;
+    const onTransportPresentationChange = vi.fn();
 
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:4317"
         ptyId="pty-input-fatal-error"
         interactive
+        onTransportPresentationChange={onTransportPresentationChange}
       />,
     );
 
@@ -595,9 +606,12 @@ describe("PtyTerminal", () => {
     });
     await flushUi();
 
-    expect(screen.getByTestId("pty-terminal-input-error")).toHaveTextContent(
-      "write failed",
-    );
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "input-readonly",
+      message: "输入只读，可重连",
+      actionLabel: "重连输入",
+    });
+    expect(screen.queryByTestId("pty-terminal-input-error")).not.toBeInTheDocument();
     restoreClientSize();
   });
 
@@ -637,9 +651,7 @@ describe("PtyTerminal", () => {
 
     expect(resizeFramesAfter).toBe(resizeFramesBefore + 1);
     expect(inputSocket!.close).not.toHaveBeenCalled();
-    expect(
-      screen.queryByTestId("pty-terminal-input-error"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pty-terminal-input-error")).not.toBeInTheDocument();
     expect(terminal!.options.disableStdin).toBe(false);
 
     act(() => {
@@ -696,19 +708,19 @@ describe("PtyTerminal", () => {
     await flushUi();
 
     expect(onPtyUnavailable).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("pty-terminal-input-error")).toHaveTextContent(
-      "PTY instance not found",
-    );
+    expect(screen.queryByTestId("pty-terminal-input-error")).not.toBeInTheDocument();
     restoreClientSize();
   });
 
-  it("reconnects the output websocket after a post-ready server error（ready 后收到错误会主动重连输出 WS）", async () => {
+  it("reports output reconnecting presentation state after a post-ready server error（ready 后收到错误会外抛输出重连展示态）", async () => {
     const restoreClientSize = withElementClientSize(960, 640);
+    const onTransportPresentationChange = vi.fn();
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:4317"
         ptyId="pty-output-error-reconnect"
         interactive
+        onTransportPresentationChange={onTransportPresentationChange}
       />,
     );
 
@@ -729,28 +741,29 @@ describe("PtyTerminal", () => {
     await flushUi();
 
     expect(firstOutputSocket!.close).toHaveBeenCalledTimes(1);
-    expect(
-      screen.getByTestId("pty-terminal-output-reconnecting"),
-    ).toHaveTextContent("终端输出通道重连中");
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "output-reconnecting",
+      message: "输出重连中，输入暂停",
+    });
     expect(terminal!.options.disableStdin).toBe(true);
 
     await flushUi(600);
     expect(hoisted.websocketInstances).toHaveLength(3);
     expect(hoisted.websocketInstances[2]!.url).toContain("mode=output");
-    expect(
-      screen.queryByTestId("pty-terminal-output-reconnecting"),
-    ).not.toBeInTheDocument();
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith(null);
 
     restoreClientSize();
   });
 
   it("auto-retries a stale read-only input transport after output recovery（输出恢复后应自动重试卡死的输入通道）", async () => {
     const restoreClientSize = withElementClientSize(960, 640);
+    const onTransportPresentationChange = vi.fn();
     render(
       <PtyTerminal
         rtBaseUrl="http://127.0.0.1:4317"
         ptyId="pty-output-recovers-input"
         interactive
+        onTransportPresentationChange={onTransportPresentationChange}
       />,
     );
 
@@ -769,9 +782,11 @@ describe("PtyTerminal", () => {
     });
     await flushUi();
 
-    expect(screen.getByTestId("pty-terminal-input-error")).toHaveTextContent(
-      "终端输入通道已断开",
-    );
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "input-readonly",
+      message: "输入只读，可重连",
+      actionLabel: "重连输入",
+    });
 
     act(() => {
       firstOutputSocket!.emitMessage({
@@ -781,18 +796,17 @@ describe("PtyTerminal", () => {
     });
     await flushUi();
 
-    expect(
-      screen.getByTestId("pty-terminal-output-reconnecting"),
-    ).toHaveTextContent("终端输出通道重连中");
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "output-reconnecting",
+      message: "输出重连中，输入暂停",
+    });
 
     await flushUi(600);
 
     expect(hoisted.websocketInstances).toHaveLength(4);
     expect(hoisted.websocketInstances[2]!.url).toContain("mode=output");
     expect(hoisted.websocketInstances[3]!.url).toContain("mode=input");
-    expect(
-      screen.queryByTestId("pty-terminal-input-error"),
-    ).not.toBeInTheDocument();
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith(null);
     expect(terminal!.options.disableStdin).toBe(false);
 
     restoreClientSize();

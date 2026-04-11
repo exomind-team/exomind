@@ -18,11 +18,16 @@ import { CSS } from '@dnd-kit/utilities';
 import type { SessionInfo } from '@/lib/types/session';
 import {
   SESSION_STATUS_INDICATORS,
+  AGENT_KIND_COLORS,
   AGENT_KIND_LABELS,
   sessionNeedsAttention,
   formatRelativeTime,
 } from '@/lib/types/session';
-import { PtyTerminal } from '../../components/PtyTerminal';
+import {
+  PtyTerminal,
+  type PtyTransportPresentationState,
+} from '../../components/PtyTerminal';
+import { retryPtyInputTransport } from '../../components/pty-input';
 import { QuickActionBar } from './QuickActionBar';
 import type { QuickActionResponse } from '@/lib/types/session';
 import type { TiledLayout } from './tiled-layout';
@@ -33,6 +38,7 @@ import {
   type TiledPaneTreeNode,
   type TiledPaneTreePath,
 } from './tiled-pane-tree';
+import { SessionStatusMark } from './SessionStatusMark';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -1270,6 +1276,7 @@ function SessionPane({
   onClose,
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
+  const agentColor = AGENT_KIND_COLORS[session.agent_kind];
   const needsAttention = sessionNeedsAttention(session.status);
   const connection = resolveSessionConnection(session);
   const isCompleted = session.status === 'completed';
@@ -1283,12 +1290,16 @@ function SessionPane({
     && !isTerminalCompleted;
   const [initialConnectionFailed, setInitialConnectionFailed] = useState(false);
   const [terminalNonce, setTerminalNonce] = useState(0);
+  const [transportPresentationState, setTransportPresentationState] =
+    useState<PtyTransportPresentationState | null>(null);
   const previousRecoveryStateRef = useRef({
     isDisconnected,
     isAutoResuming,
   });
   const showDisconnected = isDisconnected || initialConnectionFailed || isTerminalCompleted;
   const showTerminalUnavailable = showDisconnected || isTerminalMissingPty;
+  const showFooterTerminalUnavailable =
+    !isTerminalCompleted && showTerminalUnavailable;
   const showQuickActions =
     !showTerminalUnavailable
     && session.status === 'waiting_input'
@@ -1308,11 +1319,46 @@ function SessionPane({
   useEffect(() => {
     setInitialConnectionFailed(false);
     setTerminalNonce(0);
+    setTransportPresentationState(null);
     previousRecoveryStateRef.current = {
       isDisconnected,
       isAutoResuming,
     };
   }, [isAutoResuming, isDisconnected, session.id, session.pty_id]);
+
+  const footerStatus = showFooterTerminalUnavailable
+    ? {
+        text: isAutoResuming
+          ? '终端恢复中'
+          : isTerminalMissingPty
+            ? '终端会话缺少 PTY'
+            : '终端已断开',
+        color: isAutoResuming ? '#99F6E4' : '#A8A29E',
+      }
+    : transportPresentationState
+      ? {
+          text: transportPresentationState.message,
+          color:
+            transportPresentationState.kind === 'output-reconnecting'
+              ? '#99F6E4'
+              : '#FDE68A',
+        }
+      : session.status === 'waiting_input' ||
+          session.status === 'paused' ||
+          session.status === 'error'
+        ? {
+            text: statusIndicator.label,
+            color: statusIndicator.color,
+          }
+        : null;
+  const canRetryInputTransport =
+    transportPresentationState?.kind === 'input-readonly' &&
+    !showFooterTerminalUnavailable &&
+    !!session.pty_id;
+  const inputRetryActionLabel =
+    transportPresentationState?.kind === 'input-readonly'
+      ? transportPresentationState.actionLabel
+      : null;
 
   useEffect(() => {
     const previousRecoveryState = previousRecoveryStateRef.current;
@@ -1359,7 +1405,7 @@ function SessionPane({
         className="flex flex-col gap-0 border-b border-[#E7E5E4] bg-[#F5F0ED] px-2 py-1 dark:border-[#292524] dark:bg-[#1C1917]"
         onDoubleClick={onDoubleClick}
       >
-        {/* Row 1: Drag handle + Status + Role + Time + Expand button */}
+        {/* Row 1: Drag handle + Status + Role + Agent + Time + Expand button */}
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
             {/* Drag handle */}
@@ -1373,19 +1419,29 @@ function SessionPane({
                 <GripVertical size={10} />
               </button>
             )}
-            <span
-              className="flex-shrink-0 text-xs"
-              style={{ color: statusIndicator.color }}
-              title={statusIndicator.label}
-            >
-              {statusIndicator.shape}
-            </span>
-            <span className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+            <SessionStatusMark
+              status={session.status}
+              size={9}
+              className="h-4 w-4"
+            />
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
               {session.role || '未命名'}
             </span>
-            <span className="flex-shrink-0 text-[9px] text-[#A8A29E]">
-              {AGENT_KIND_LABELS[session.agent_kind]}
-            </span>
+            <div
+              data-testid={`tiled-grid-pane-meta-${session.id}`}
+              className="flex shrink-0 items-center gap-1 text-[10px]"
+            >
+              <span
+                className="font-medium"
+                style={{ color: agentColor }}
+              >
+                {AGENT_KIND_LABELS[session.agent_kind]}
+              </span>
+              <span className="text-[#A8A29E]">·</span>
+              <span className="text-[#A8A29E]">
+                {formatRelativeTime(session.last_active_at)}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-1">
             <PaneWorkbenchActions
@@ -1394,9 +1450,6 @@ function SessionPane({
               onClear={onClear}
               onClose={onClose}
             />
-            <span className="text-[10px] text-[#A8A29E]">
-              {formatRelativeTime(session.last_active_at)}
-            </span>
             <button
               type="button"
               onClick={(e) => {
@@ -1448,6 +1501,10 @@ function SessionPane({
               onInitialConnectionFailure={() => {
                 setInitialConnectionFailed(true);
               }}
+              onPtyUnavailable={() => {
+                setInitialConnectionFailed(true);
+              }}
+              onTransportPresentationChange={setTransportPresentationState}
             />
             {showTerminalUnavailable ? (
               <div
@@ -1518,9 +1575,13 @@ function SessionPane({
 
       {/* Pane action bar (32px) */}
       <div className="flex items-center justify-between border-t border-[#292524] bg-[#1C1917] px-2 py-1">
-        {needsAttention ? (
-          <span className="text-[10px] font-medium" style={{ color: statusIndicator.color }}>
-            {statusIndicator.label}
+        {footerStatus ? (
+          <span
+            data-testid={`tiled-grid-footer-status-${session.id}`}
+            className="text-[10px] font-medium"
+            style={{ color: footerStatus.color }}
+          >
+            {footerStatus.text}
           </span>
         ) : showManualMarkWaiting ? (
           <button
@@ -1542,6 +1603,24 @@ function SessionPane({
           </span>
         )}
         <div className="flex items-center gap-1">
+          {canRetryInputTransport ? (
+            <button
+              type="button"
+              data-testid={`tiled-grid-retry-input-${session.id}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                retryPtyInputTransport({
+                  rtBaseUrl: connection.rtBaseUrl,
+                  ptyId: session.pty_id!,
+                  authToken: connection.authToken,
+                });
+              }}
+              className="rounded border border-[#A16207] px-1.5 py-0.5 text-[10px] font-medium text-[#FDE68A] transition-colors hover:border-[#CA8A04] hover:text-[#FEF3C7]"
+              title={inputRetryActionLabel ?? '重连输入'}
+            >
+              {inputRetryActionLabel ?? '重连输入'}
+            </button>
+          ) : null}
           <button
             type="button"
             className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E]"

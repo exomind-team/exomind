@@ -67,15 +67,16 @@ describe('session types', () => {
         const indicator = SESSION_STATUS_INDICATORS[status];
         expect(indicator).toBeDefined();
         expect(indicator.color).toBeTruthy();
-        expect(indicator.shape).toBeTruthy();
         expect(indicator.label).toBeTruthy();
+        expect(indicator.tone).toBeTruthy();
       }
     });
 
-    it('uses distinct shapes for accessibility', () => {
-      const shapes = Object.values(SESSION_STATUS_INDICATORS).map((i) => i.shape);
-      const uniqueShapes = new Set(shapes);
-      expect(uniqueShapes.size).toBe(shapes.length);
+    it('uses a supported tone for each status', () => {
+      const tones = Object.values(SESSION_STATUS_INDICATORS).map((i) => i.tone);
+      tones.forEach((tone) => {
+        expect(['success', 'warning', 'danger', 'neutral', 'muted']).toContain(tone);
+      });
     });
   });
 

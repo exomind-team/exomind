@@ -1,4 +1,4 @@
-import { Clock, Loader2, Square, X } from 'lucide-react';
+import { Loader2, Square, X } from 'lucide-react';
 import type { SessionInfo } from '@/lib/types/session';
 import {
   AGENT_KIND_LABELS,
@@ -7,6 +7,7 @@ import {
   sessionNeedsAttention,
   formatRelativeTime,
 } from '@/lib/types/session';
+import { SessionStatusMark } from './SessionStatusMark';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -28,7 +29,6 @@ export function SessionCard({
   stopDisabled = false,
 }: SessionCardProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
-  const agentColor = AGENT_KIND_COLORS[session.agent_kind];
   const agentLabel = AGENT_KIND_LABELS[session.agent_kind];
   const needsAttention = sessionNeedsAttention(session.status);
   const isCompleted = session.status === 'completed';
@@ -63,37 +63,27 @@ export function SessionCard({
         }
       `}
       >
-        {/* Row 1: Status + Role + Time */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            {/* Status indicator (shape for accessibility) */}
-            <span
-              className="flex-shrink-0 text-sm"
-              style={{ color: statusIndicator.color }}
-              title={statusIndicator.label}
-              aria-label={statusIndicator.label}
-            >
-              {statusIndicator.shape}
-            </span>
+        {/* Row 1: Status + Role + Agent + Relative time */}
+        <div className="flex items-center gap-2 min-w-0">
+          <SessionStatusMark status={session.status} size={11} className="h-5 w-5" />
 
-            {/* Role name */}
-            <span className="truncate text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
-              {session.role || '未命名'}
-            </span>
+          {/* Role name */}
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+            {session.role || '未命名'}
+          </span>
 
-            {/* Agent kind badge */}
+          <div
+            data-testid={`session-card-meta-${session.id}`}
+            className="flex shrink-0 items-center gap-1 text-[10px]"
+          >
             <span
-              className="flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
-              style={{ backgroundColor: agentColor }}
+              className="font-medium"
+              style={{ color: AGENT_KIND_COLORS[session.agent_kind] }}
             >
               {agentLabel}
             </span>
-          </div>
-
-          {/* Relative time */}
-          <div className="flex flex-shrink-0 items-center gap-1 text-xs text-[#A8A29E] transition-colors group-hover:text-[#78716C] dark:group-hover:text-[#D6D3D1]">
-            <Clock size={12} />
-            <span>{formatRelativeTime(session.last_active_at)}</span>
+            <span className="text-[#A8A29E]">·</span>
+            <span className="text-[#A8A29E]">{formatRelativeTime(session.last_active_at)}</span>
           </div>
         </div>
 
