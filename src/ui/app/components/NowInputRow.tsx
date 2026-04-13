@@ -4,6 +4,8 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -30,13 +32,26 @@ import { clearInputDraft, readInputDraft, writeInputDraft } from '@/lib/storage/
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
 import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
+import type { EventRef } from '@/lib/types/event';
+import {
+  buildEventRefQuoteLine,
+  extractEventPermalinksFromContent,
+  normalizeEventRefs,
+} from '@/lib/eventlog/event-refs';
 
 interface NowInputRowProps {
-  onSend: (content: string, tags?: string[]) => void | Promise<void>;
+  onSend: (content: string, tags?: string[], refs?: EventRef[]) => void | Promise<void>;
   onValueChange?: (value: string) => void;
   placeholder?: string;
   draftStorageKey?: string | null;
   draftDebounceMs?: number;
+  features?: {
+    quote?: boolean;
+  };
+  quotedRefs?: EventRef[];
+  onQuotedRefsChange?: (refs: EventRef[]) => void;
+  resolveQuotedRefSummary?: (eventId: string) => string | undefined;
+  onOpenQuotedEvent?: (eventId: string) => void;
 }
 
 function buildAutoDraftStorageKey(placeholder: string): string {
@@ -89,12 +104,72 @@ function focusTextarea(textarea: HTMLTextAreaElement | null): void {
   });
 }
 
+function areEventRefsEqual(left: readonly EventRef[], right: readonly EventRef[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((ref, index) => (
+    ref.kind === right[index]?.kind
+    && ref.eventId === right[index]?.eventId
+    && ref.summary === right[index]?.summary
+  ));
+}
+
+function insertMissingQuotedRefLines(content: string, refs: readonly EventRef[]): string {
+  if (refs.length === 0) {
+    return content;
+  }
+
+  const existingEventIds = new Set(extractEventPermalinksFromContent(content).map((item) => item.eventId));
+  const missingLines = refs
+    .filter((ref) => !existingEventIds.has(ref.eventId))
+    .map((ref) => buildEventRefQuoteLine(ref));
+
+  if (missingLines.length === 0) {
+    return content;
+  }
+
+  return content.length > 0 ? `${missingLines.join('\n')}\n${content}` : missingLines.join('\n');
+}
+
+function removeQuotedRefLines(content: string, eventIds: readonly string[]): string {
+  if (eventIds.length === 0 || content.length === 0) {
+    return content;
+  }
+
+  const removedIds = new Set(eventIds);
+  const filteredLines = content
+    .split(/\r?\n/u)
+    .filter((line) => !extractEventPermalinksFromContent(line).some((item) => removedIds.has(item.eventId)));
+  return filteredLines.join('\n').replace(/^\n+/u, '');
+}
+
+function deriveQuotedRefsFromContent(
+  content: string,
+  currentRefs: readonly EventRef[],
+  resolveSummary?: (eventId: string) => string | undefined,
+): EventRef[] {
+  const currentById = new Map(currentRefs.map((ref) => [ref.eventId, ref]));
+  const contentRefs = extractEventPermalinksFromContent(content).map((item) => ({
+    kind: 'event' as const,
+    eventId: item.eventId,
+    summary: currentById.get(item.eventId)?.summary ?? item.label ?? resolveSummary?.(item.eventId),
+  }));
+  return normalizeEventRefs(contentRefs);
+}
+
 export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>(function NowInputRow({
   onSend,
   onValueChange,
   placeholder = '记录当下的事实...',
   draftStorageKey,
   draftDebounceMs = 300,
+  features,
+  quotedRefs = [],
+  onQuotedRefsChange,
+  resolveQuotedRefSummary,
+  onOpenQuotedEvent,
 }, ref) {
   const effectiveDraftStorageKey = draftStorageKey === null ? null : draftStorageKey ?? buildAutoDraftStorageKey(placeholder);
   const [value, setValue] = useState('');
@@ -110,6 +185,13 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   const attachmentFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const submittingRef = useRef(false);
+  const previousQuotedRefsRef = useRef<EventRef[]>([]);
+  const quoteSyncPendingRef = useRef(false);
+  const quoteFeatureEnabled = features?.quote === true;
+  const normalizedQuotedRefs = useMemo(
+    () => quoteFeatureEnabled ? normalizeEventRefs(quotedRefs) : [],
+    [quoteFeatureEnabled, quotedRefs],
+  );
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -130,6 +212,27 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   useEffect(() => {
     onValueChange?.(value);
   }, [onValueChange, value]);
+
+  useEffect(() => {
+    if (!quoteFeatureEnabled) {
+      quoteSyncPendingRef.current = false;
+      return;
+    }
+
+    const nextQuotedRefs = deriveQuotedRefsFromContent(value, normalizedQuotedRefs, resolveQuotedRefSummary);
+    if (quoteSyncPendingRef.current) {
+      if (!areEventRefsEqual(nextQuotedRefs, normalizedQuotedRefs)) {
+        return;
+      }
+      quoteSyncPendingRef.current = false;
+    }
+
+    if (!onQuotedRefsChange || areEventRefsEqual(nextQuotedRefs, normalizedQuotedRefs)) {
+      return;
+    }
+
+    onQuotedRefsChange(nextQuotedRefs);
+  }, [normalizedQuotedRefs, onQuotedRefsChange, quoteFeatureEnabled, resolveQuotedRefSummary, value]);
 
   useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
 
@@ -183,23 +286,54 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     };
   }, [draftDebounceMs, effectiveDraftStorageKey, value]);
 
+  useLayoutEffect(() => {
+    if (!quoteFeatureEnabled) {
+      previousQuotedRefsRef.current = [];
+      quoteSyncPendingRef.current = false;
+      return;
+    }
+    const previousRefs = previousQuotedRefsRef.current;
+    const nextIds = new Set(normalizedQuotedRefs.map((ref) => ref.eventId));
+    const removedIds = previousRefs
+      .filter((ref) => !nextIds.has(ref.eventId))
+      .map((ref) => ref.eventId);
+
+    setValue((current) => {
+      const withoutRemoved = removeQuotedRefLines(current, removedIds);
+      const nextValue = insertMissingQuotedRefLines(withoutRemoved, normalizedQuotedRefs);
+      if (nextValue !== current) {
+        quoteSyncPendingRef.current = true;
+      }
+      return nextValue;
+    });
+
+    previousQuotedRefsRef.current = normalizedQuotedRefs;
+  }, [normalizedQuotedRefs, quoteFeatureEnabled]);
+
   const submitInput = useCallback(async () => {
     if (submittingRef.current) return;
 
-    const trimmed = value.trim();
+    const preparedValue = quoteFeatureEnabled ? insertMissingQuotedRefLines(value, normalizedQuotedRefs) : value;
+    const trimmed = preparedValue.trim();
     if (!trimmed) return;
+    const resolvedRefs = quoteFeatureEnabled
+      ? deriveQuotedRefsFromContent(trimmed, normalizedQuotedRefs, resolveQuotedRefSummary)
+      : [];
     submittingRef.current = true;
     setIsSubmitting(true);
-    const saved = value;
+    const saved = preparedValue;
     setValue('');
     try {
-      await onSend(trimmed);
+      await onSend(trimmed, undefined, quoteFeatureEnabled ? resolvedRefs : undefined);
       if (draftPersistTimerRef.current) {
         clearTimeout(draftPersistTimerRef.current);
         draftPersistTimerRef.current = null;
       }
       if (effectiveDraftStorageKey) {
         clearInputDraft(effectiveDraftStorageKey);
+      }
+      if (quoteFeatureEnabled) {
+        onQuotedRefsChange?.([]);
       }
       focusTextarea(textareaRef.current);
     } catch (error) {
@@ -218,7 +352,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [effectiveDraftStorageKey, onSend, value]);
+  }, [effectiveDraftStorageKey, normalizedQuotedRefs, onQuotedRefsChange, onSend, quoteFeatureEnabled, resolveQuotedRefSummary, value]);
 
   const insertClipboardText = useCallback((text: string) => {
     if (!text) return;
@@ -278,7 +412,11 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     });
 
     if (voiceTranscriptSendMode === 'direct-send') {
-      void onSend(normalized, ['voice']);
+      const preparedValue = quoteFeatureEnabled ? insertMissingQuotedRefLines(normalized, normalizedQuotedRefs) : normalized;
+      const refs = quoteFeatureEnabled
+        ? deriveQuotedRefsFromContent(preparedValue, normalizedQuotedRefs, resolveQuotedRefSummary)
+        : [];
+      void onSend(preparedValue, ['voice'], quoteFeatureEnabled ? refs : undefined);
       return;
     }
 
@@ -292,7 +430,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
         textareaRef.current.selectionEnd = end;
       }
     });
-  }, [onSend, voiceTranscriptSendMode]);
+  }, [normalizedQuotedRefs, onSend, quoteFeatureEnabled, resolveQuotedRefSummary, voiceTranscriptSendMode]);
 
   const appendDraftText = useCallback((text: string) => {
     const normalized = normalizeRecognitionText(text);
@@ -372,6 +510,45 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   return (
     <div className="shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]" data-testid="new-now-input-row">
       <div className="px-4 py-2">
+        {quoteFeatureEnabled && normalizedQuotedRefs.length > 0 ? (
+          <div className="mb-2 flex flex-col gap-2" data-testid="new-now-quote-banner">
+            {normalizedQuotedRefs.map((ref) => (
+              <div
+                key={ref.eventId}
+                className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 shadow-sm dark:border-[#292524] dark:bg-[#1C1917]"
+              >
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => onOpenQuotedEvent?.(ref.eventId)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onOpenQuotedEvent?.(ref.eventId);
+                  }}
+                  data-testid={`new-now-quote-open-${ref.eventId}`}
+                >
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#C75B3A] dark:text-[#FDBA74]">
+                    引用
+                  </div>
+                  <div className="truncate text-xs font-medium text-stone-700 dark:text-stone-100">
+                    {ref.summary ?? '事件引用'}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onQuotedRefsChange?.(normalizedQuotedRefs.filter((item) => item.eventId !== ref.eventId));
+                  }}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:text-[#78716C] dark:hover:bg-[#292524] dark:hover:text-[#E7E5E4]"
+                  aria-label={`移除引用：${ref.summary ?? ref.eventId}`}
+                  data-testid={`new-now-quote-remove-${ref.eventId}`}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="flex items-center gap-2">
           <button
             type="button"

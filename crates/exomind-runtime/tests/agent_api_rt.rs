@@ -689,6 +689,7 @@ async fn route_runs_session_with_runtime_config_fallback() {
                 timestamp: 1,
                 content: "梳理 agent session service".to_string(),
                 tags: vec!["analysis".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )
@@ -702,6 +703,7 @@ async fn route_runs_session_with_runtime_config_fallback() {
                 timestamp: 2,
                 content: "接入 HTTP route".to_string(),
                 tags: vec!["code".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )
@@ -885,6 +887,7 @@ async fn life_tick_persists_internal_agent_session() {
                 timestamp: 1,
                 content: "梳理 session runtime context".to_string(),
                 tags: vec!["analysis".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )
@@ -897,6 +900,7 @@ async fn life_tick_persists_internal_agent_session() {
                 timestamp: 2,
                 content: "接 life-agent tick".to_string(),
                 tags: vec!["code".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )
@@ -1227,6 +1231,7 @@ async fn broker_combined_story_contract_reads_events_weather_and_creates_two_tas
                 timestamp: 2,
                 content: "明天要出门去银行存钱，不知天气如何".to_string(),
                 tags: vec!["life".to_string(), "bank".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )
@@ -1239,6 +1244,7 @@ async fn broker_combined_story_contract_reads_events_weather_and_creates_two_tas
                 timestamp: 1,
                 content: "家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了".to_string(),
                 tags: vec!["home".to_string(), "umbrella".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )
@@ -1575,6 +1581,7 @@ async fn broker_combined_story_skips_without_env_and_uses_real_upstream_when_pre
                 timestamp: 2,
                 content: "明天要出门去银行存钱，不知天气如何".to_string(),
                 tags: vec!["life".to_string(), "bank".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )
@@ -1587,6 +1594,7 @@ async fn broker_combined_story_skips_without_env_and_uses_real_upstream_when_pre
                 timestamp: 1,
                 content: "家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了".to_string(),
                 tags: vec!["home".to_string(), "umbrella".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )

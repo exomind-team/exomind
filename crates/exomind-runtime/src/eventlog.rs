@@ -21,11 +21,22 @@ const MIRROR_HEADER: &str = "# EventLog Mirror\n\n";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EventRef {
+    pub kind: String,
+    pub event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EventRecord {
     pub id: String,
     pub timestamp: i64,
     pub content: String,
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<EventRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 }
@@ -535,6 +546,7 @@ mod tests {
             timestamp: 1700000000000,
             content: "hello".to_string(),
             tags: vec!["note".to_string()],
+            refs: Vec::new(),
             metadata: None,
         };
 
@@ -557,6 +569,7 @@ mod tests {
             timestamp: 1700000000000,
             content: "persist me".to_string(),
             tags: vec!["note".to_string()],
+            refs: Vec::new(),
             metadata: None,
         };
         store.append_event(None, event.clone()).unwrap();
@@ -583,6 +596,7 @@ mod tests {
                     timestamp: 1,
                     content: "first".to_string(),
                     tags: vec![],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -605,6 +619,7 @@ mod tests {
                     timestamp: 1,
                     content: "data".to_string(),
                     tags: vec![],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -628,6 +643,7 @@ mod tests {
                     timestamp: 100,
                     content: "original".to_string(),
                     tags: vec![],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -641,6 +657,7 @@ mod tests {
                     timestamp: 200,
                     content: "updated".to_string(),
                     tags: vec!["changed".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -664,6 +681,7 @@ mod tests {
                     timestamp: 1000,
                     content: "mirror test".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -691,6 +709,7 @@ mod tests {
                     timestamp: 1,
                     content: "alice data".to_string(),
                     tags: vec![],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -704,6 +723,7 @@ mod tests {
                     timestamp: 1,
                     content: "bob data".to_string(),
                     tags: vec![],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )

@@ -44,7 +44,7 @@ impl SqliteEventLogStore {
     ) -> Result<Vec<EventRecord>, String> {
         let connection = self.connection();
         let mut sql = String::from(
-            "SELECT id, timestamp, content, tags_json, metadata_json
+            "SELECT id, timestamp, content, tags_json, refs_json, metadata_json
              FROM eventlog_events
              WHERE user_key = ?",
         );
@@ -84,12 +84,13 @@ impl SqliteEventLogStore {
         connection
             .execute(
                 "INSERT INTO eventlog_events (
-                    user_key, id, timestamp, content, tags_json, metadata_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    user_key, id, timestamp, content, tags_json, refs_json, metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                 ON CONFLICT(user_key, id) DO UPDATE SET
                     timestamp = excluded.timestamp,
                     content = excluded.content,
                     tags_json = excluded.tags_json,
+                    refs_json = excluded.refs_json,
                     metadata_json = excluded.metadata_json",
                 params![
                     user_key,
@@ -98,6 +99,8 @@ impl SqliteEventLogStore {
                     event.content,
                     serde_json::to_string(&event.tags)
                         .map_err(|error| format!("failed to encode tags: {error}"))?,
+                    serde_json::to_string(&event.refs)
+                        .map_err(|error| format!("failed to encode refs: {error}"))?,
                     event
                         .metadata
                         .as_ref()
@@ -114,7 +117,7 @@ impl SqliteEventLogStore {
         let connection = self.connection();
         let mut statement = connection
             .prepare(
-                "SELECT id, timestamp, content, tags_json, metadata_json
+                "SELECT id, timestamp, content, tags_json, refs_json, metadata_json
                  FROM eventlog_events
                  WHERE user_key = ?1 AND id = ?2",
             )
@@ -151,8 +154,8 @@ impl SqliteEventLogStore {
         for event in events {
             tx.execute(
                 "INSERT INTO eventlog_events (
-                    user_key, id, timestamp, content, tags_json, metadata_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    user_key, id, timestamp, content, tags_json, refs_json, metadata_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     user_key,
                     event.id,
@@ -160,6 +163,8 @@ impl SqliteEventLogStore {
                     event.content,
                     serde_json::to_string(&event.tags)
                         .map_err(|error| format!("failed to encode tags: {error}"))?,
+                    serde_json::to_string(&event.refs)
+                        .map_err(|error| format!("failed to encode refs: {error}"))?,
                     event
                         .metadata
                         .as_ref()
@@ -210,11 +215,13 @@ impl SqliteEventLogStore {
                     timestamp INTEGER NOT NULL,
                     content TEXT NOT NULL,
                     tags_json TEXT NOT NULL,
+                    refs_json TEXT NOT NULL DEFAULT '[]',
                     metadata_json TEXT NULL,
                     PRIMARY KEY (user_key, id)
                 );",
             )
             .map_err(|error| format!("failed to init eventlog sqlite schema: {error}"))?;
+        ensure_refs_json_column(&connection)?;
         Ok(())
     }
 
@@ -228,8 +235,10 @@ impl SqliteEventLogStore {
 
 fn map_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
     let tags_json: String = row.get(3)?;
-    let metadata_json: Option<String> = row.get(4)?;
+    let refs_json: String = row.get(4)?;
+    let metadata_json: Option<String> = row.get(5)?;
     let tags: Vec<String> = serde_json::from_str(&tags_json).map_err(map_json_error)?;
+    let refs = serde_json::from_str(&refs_json).map_err(map_json_error)?;
     let metadata: Option<Value> = metadata_json
         .as_deref()
         .map(serde_json::from_str::<Value>)
@@ -241,8 +250,35 @@ fn map_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         timestamp: row.get(1)?,
         content: row.get(2)?,
         tags,
+        refs,
         metadata,
     })
+}
+
+fn ensure_refs_json_column(connection: &Connection) -> Result<(), String> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(eventlog_events)")
+        .map_err(|error| format!("failed to inspect eventlog sqlite schema: {error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("failed to read eventlog sqlite schema: {error}"))?;
+    let has_refs_json = columns
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("failed to collect eventlog sqlite schema: {error}"))?
+        .iter()
+        .any(|column| column == "refs_json");
+
+    if has_refs_json {
+        return Ok(());
+    }
+
+    connection
+        .execute(
+            "ALTER TABLE eventlog_events ADD COLUMN refs_json TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )
+        .map_err(|error| format!("failed to migrate eventlog sqlite refs_json column: {error}"))?;
+    Ok(())
 }
 
 fn map_json_error(error: serde_json::Error) -> rusqlite::Error {

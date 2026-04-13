@@ -1,3 +1,10 @@
+import {
+  buildEventPermalink,
+  buildEventRecordPath,
+  EVENTLOG_RECORD_EVENT_QUERY_KEY,
+  EVENTLOG_RECORD_LOCATE_QUERY_KEY,
+} from '@/lib/eventlog/event-refs';
+
 export const EVENTLOG_LAST_TAB_KEY = 'exomind:last-eventlog-tab';
 export const EVENTLOG_TAB_VALUES = ['focus', 'record', 'today'] as const;
 export const EVENTLOG_TAB_PATHS = {
@@ -7,6 +14,10 @@ export const EVENTLOG_TAB_PATHS = {
 } as const;
 
 export type EventlogTabValue = (typeof EVENTLOG_TAB_VALUES)[number];
+export interface EventlogRecordLocateTarget {
+  eventId: string | null;
+  shouldLocate: boolean;
+}
 
 export function normalizeEventlogTab(rawValue: string | null | undefined): EventlogTabValue {
   return EVENTLOG_TAB_VALUES.includes(rawValue as EventlogTabValue)
@@ -56,6 +67,26 @@ export function resolveLegacyEventlogTabSearch(search: string): EventlogTabValue
   return EVENTLOG_TAB_VALUES.includes(explicitTab as EventlogTabValue)
     ? explicitTab as EventlogTabValue
     : null;
+}
+
+export function parseEventlogLocateSearch(search: string): EventlogRecordLocateTarget {
+  const normalizedSearch = search.startsWith('?') ? search.slice(1) : search;
+  const params = new URLSearchParams(normalizedSearch);
+  const rawEventId = params.get(EVENTLOG_RECORD_EVENT_QUERY_KEY)?.trim() ?? '';
+  const rawLocate = params.get(EVENTLOG_RECORD_LOCATE_QUERY_KEY)?.trim().toLowerCase() ?? '';
+
+  return {
+    eventId: rawEventId.length > 0 ? rawEventId : null,
+    shouldLocate: rawLocate === '1' || rawLocate === 'true' || rawLocate === 'yes',
+  };
+}
+
+export function buildEventlogRecordLocatePath(eventId: string, locate = true): string {
+  return buildEventRecordPath(eventId, locate);
+}
+
+export function buildEventlogRecordPermalink(eventId: string, origin?: string): string {
+  return buildEventPermalink(eventId, origin);
 }
 
 export function getEventlogPathForTab(tab: string): string {

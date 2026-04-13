@@ -12,6 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useLocation, useNavigate } from '@tanstack/react-router';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Play, Pause, Square, FileText, NotepadText, Bot, Mic, Link2, ListTodo } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -22,17 +23,28 @@ import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import { MessageActions } from '@/components/Chat/MessageActions';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
-import type { Event } from '@/lib/types/event';
+import type { Event, EventRef } from '@/lib/types/event';
 import { getEventLogService, type EventLogLoadResult } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { log } from '@/lib/logger';
 import { registerMainWindowFocusTarget } from '@/services/main-window-focus-targets';
 import { MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT } from '@/services/main-window-shortcut.service';
 import { mergeLatestEventsAscending } from './chat-event-pagination';
+import {
+  extractEventPermalinksFromContent,
+  normalizeEventRefs,
+  summarizeEventRefContent,
+} from '@/lib/eventlog/event-refs';
+import {
+  buildEventlogRecordLocatePath,
+  buildEventlogRecordPermalink,
+  parseEventlogLocateSearch,
+} from '@/ui/app/pages/eventlog-route-memory';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
+const EVENT_HIGHLIGHT_DURATION_MS = 2_000;
 const RT_REFRESH_INTERVAL_MS = 2_000;
 const RT_FULL_RECONCILE_INTERVAL_MS = 60_000;
 const TASK_CREATED_EVENT_TAGS = [
@@ -211,10 +223,15 @@ export function ChatPage({
   hideHeader = false,
   showTimerWidget = true,
 }: ChatPageProps = {}) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
+  const [quotedRefs, setQuotedRefs] = useState<EventRef[]>([]);
+  const [pendingLocateEventId, setPendingLocateEventId] = useState<string | null>(null);
+  const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
   const allEventsRef = useRef<Event[]>([]);
@@ -227,6 +244,8 @@ export function ChatPage({
   const refreshQueuedTriggerRef = useRef<RefreshTrigger>('poll');
   const lastFullRefreshAtRef = useRef(0);
   const lastAppliedSnapshotRevisionRef = useRef<string | null | undefined>(undefined);
+  const eventRowRefs = useRef(new Map<string, HTMLDivElement>());
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn, activeProfileId } = useSyncStore();
   const syncStatus: 'connected' | 'disconnected' | 'syncing' = isLoggedIn && Boolean(currentUser)
@@ -237,6 +256,10 @@ export function ChatPage({
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
   const userDisplayName = useMemo(() => resolveEventLogUserDisplayName(currentUser), [currentUser]);
   const userAvatarInitial = useMemo(() => resolveAvatarInitial(userDisplayName), [userDisplayName]);
+  const locateTarget = useMemo(
+    () => location.pathname === '/eventlog/record' ? parseEventlogLocateSearch(location.searchStr ?? '') : { eventId: null, shouldLocate: false },
+    [location.pathname, location.searchStr],
+  );
 
   useEffect(() => registerMainWindowFocusTarget(
     MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT,
@@ -248,6 +271,62 @@ export function ChatPage({
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     listEndRef.current?.scrollIntoView({ behavior, block: 'end' });
   }, []);
+
+  useEffect(() => () => {
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = null;
+    }
+  }, []);
+
+  const assignEventRowRef = useCallback((eventId: string) => (node: HTMLDivElement | null) => {
+    if (node) {
+      eventRowRefs.current.set(eventId, node);
+      return;
+    }
+
+    eventRowRefs.current.delete(eventId);
+  }, []);
+
+  const resolveEventRefSummary = useCallback((eventId: string): string | undefined => {
+    const matched = allEventsRef.current.find((event) => event.id === eventId);
+    return matched ? summarizeEventRefContent(matched.content) : undefined;
+  }, []);
+
+  const buildRefsFromContent = useCallback((content: string, seededRefs: readonly EventRef[] = []): EventRef[] => {
+    const seededById = new Map(normalizeEventRefs(seededRefs).map((ref) => [ref.eventId, ref]));
+    const contentRefs = extractEventPermalinksFromContent(content).map((item) => ({
+      kind: 'event' as const,
+      eventId: item.eventId,
+      summary: seededById.get(item.eventId)?.summary ?? item.label ?? resolveEventRefSummary(item.eventId),
+    }));
+    return normalizeEventRefs(contentRefs);
+  }, [resolveEventRefSummary]);
+
+  const locateEventInRecord = useCallback((eventId: string, syncUrl = false) => {
+    if (syncUrl) {
+      void navigate({
+        to: buildEventlogRecordLocatePath(eventId) as never,
+      });
+    }
+    setPendingLocateEventId(eventId);
+  }, [navigate]);
+
+  const handleQuoteEvent = useCallback((event: Event) => {
+    if (variant !== 'new-mobile') {
+      return;
+    }
+
+    setQuotedRefs((current) => normalizeEventRefs([
+      ...current,
+      {
+        kind: 'event',
+        eventId: event.id,
+        summary: summarizeEventRefContent(event.content),
+      },
+    ]));
+    voiceMessageInputRef.current?.focusText();
+  }, [variant]);
 
   const isNearBottom = useCallback(() => {
     const container = listContainerRef.current;
@@ -424,6 +503,47 @@ export function ChatPage({
     }
   }, [loadOlderEvents]);
 
+  useEffect(() => {
+    if (locateTarget.eventId && locateTarget.shouldLocate) {
+      setPendingLocateEventId(locateTarget.eventId);
+    }
+  }, [locateTarget.eventId, locateTarget.shouldLocate]);
+
+  useEffect(() => {
+    if (!pendingLocateEventId) {
+      return;
+    }
+
+    if (!events.some((event) => event.id === pendingLocateEventId)) {
+      const targetIndex = allEventsRef.current.findIndex((event) => event.id === pendingLocateEventId);
+      if (targetIndex < 0) {
+        return;
+      }
+
+      const requiredVisibleCount = allEventsRef.current.length - targetIndex;
+      if (requiredVisibleCount > visibleCountRef.current) {
+        applyVisibleWindow(allEventsRef.current, requiredVisibleCount);
+      }
+      return;
+    }
+
+    const targetNode = eventRowRefs.current.get(pendingLocateEventId);
+    if (!targetNode) {
+      return;
+    }
+
+    targetNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedEventId(pendingLocateEventId);
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedEventId((current) => current === pendingLocateEventId ? null : current);
+      highlightTimerRef.current = null;
+    }, EVENT_HIGHLIGHT_DURATION_MS);
+    setPendingLocateEventId(null);
+  }, [applyVisibleWindow, events, pendingLocateEventId]);
+
   // 初始化 RT EventLog 读源，并用轮询补齐跨链路写入后的 UI 刷新。
   useEffect(() => {
     visibleCountRef.current = PAGE_SIZE;
@@ -451,20 +571,26 @@ export function ChatPage({
   ]);
 
   // 处理发送消息
-  const handleSend = useCallback(async (content: string) => {
+  const handleSend = useCallback(async (content: string, tags?: string[], refs?: EventRef[]) => {
     const trimmed = content.trim();
     if (!trimmed) return;
+    const resolvedRefs = buildRefsFromContent(trimmed, refs);
 
     const t0 = perfNow();
     shouldStickToBottomRef.current = true;
     try {
-      await eventLogService.current.addEvent(trimmed);
+      await eventLogService.current.addEvent(
+        trimmed,
+        tags ? new Set(tags) : undefined,
+        resolvedRefs,
+      );
+      setQuotedRefs([]);
       log.info(`[ChatPage] handleSend done ${JSON.stringify({ totalMs: Math.round(perfNow() - t0) })}`);
     } catch (error) {
       log.error(`[ChatPage] handleSend failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
-  }, []);
+  }, [buildRefsFromContent]);
 
   // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦
   useEffect(() => {
@@ -647,6 +773,39 @@ export function ChatPage({
     });
   };
 
+  const getEventRowHighlightClassName = useCallback((eventId: string) => (
+    highlightedEventId === eventId
+      ? 'ring-2 ring-[#F59E0B]/70 ring-offset-2 ring-offset-transparent transition-shadow'
+      : ''
+  ), [highlightedEventId]);
+
+  const renderForwardRefsSummary = useCallback((event: Event) => {
+    if (event.refs.length === 0) {
+      return null;
+    }
+
+    const primaryRef = event.refs[0];
+    const remainingCount = Math.max(0, event.refs.length - 1);
+
+    return (
+      <button
+        type="button"
+        className="mt-2 flex max-w-full flex-col items-start rounded-xl border border-[#E7E5E4] bg-white/80 px-3 py-2 text-left text-[11px] text-stone-500 hover:bg-stone-50 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+        onClick={() => locateEventInRecord(primaryRef.eventId, true)}
+        data-testid={`event-forward-refs-${event.id}`}
+      >
+        <span className="truncate">
+          引用：{primaryRef.summary ?? primaryRef.eventId}
+        </span>
+        {remainingCount > 0 ? (
+          <span className="mt-0.5 text-[10px] text-stone-400 dark:text-[#78716C]">
+            还有 {remainingCount} 条引用
+          </span>
+        ) : null}
+      </button>
+    );
+  }, [locateEventInRecord]);
+
   const isSystemEvent = (event: Event) => (
     event.tags.has('block_start')
     || event.tags.has('block_pause')
@@ -762,7 +921,9 @@ export function ChatPage({
                 return (
                   <div
                     key={event.id}
-                    className="flex items-start gap-2"
+                    ref={assignEventRowRef(event.id)}
+                    className={`flex items-start gap-2 ${getEventRowHighlightClassName(event.id)}`}
+                    data-event-id={event.id}
                     data-testid="new-mobile-system-message-row"
                   >
                     <Avatar className="mt-0.5 h-8 w-8 shrink-0">
@@ -789,7 +950,17 @@ export function ChatPage({
                       >
                         <EventMarkdown content={event.content} />
                       </div>
-                      <MessageActions content={event.content} align="start" />
+                      {renderForwardRefsSummary(event)}
+                      <MessageActions
+                        content={event.content}
+                        align="start"
+                        permalink={buildEventlogRecordPermalink(event.id)}
+                        onQuote={variant === 'new-mobile' ? () => handleQuoteEvent(event) : undefined}
+                        features={{
+                          permalink: true,
+                          quote: variant === 'new-mobile',
+                        }}
+                      />
                     </div>
                   </div>
                 );
@@ -798,7 +969,9 @@ export function ChatPage({
               return (
                 <div
                   key={event.id}
-                  className="flex justify-end gap-2"
+                  ref={assignEventRowRef(event.id)}
+                  className={`flex justify-end gap-2 ${getEventRowHighlightClassName(event.id)}`}
+                  data-event-id={event.id}
                   data-testid="new-mobile-user-message-row"
                 >
                   <div className="flex max-w-[84%] flex-col items-end">
@@ -814,7 +987,17 @@ export function ChatPage({
                     <div className="rounded-2xl bg-user-bubble px-[14px] py-[10px] text-[13px] leading-[1.6] text-user-bubble-text [&_.prose]:text-inherit [&_.prose_p]:text-inherit [&_.prose_li]:text-inherit">
                       <EventMarkdown content={event.content} />
                     </div>
-                    <MessageActions content={event.content} align="end" />
+                    {renderForwardRefsSummary(event)}
+                    <MessageActions
+                      content={event.content}
+                      align="end"
+                      permalink={buildEventlogRecordPermalink(event.id)}
+                      onQuote={() => handleQuoteEvent(event)}
+                      features={{
+                        permalink: true,
+                        quote: true,
+                      }}
+                    />
                   </div>
                   <Avatar className="h-8 w-8 shrink-0">
                     <AvatarFallback className="rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100">
@@ -843,7 +1026,12 @@ export function ChatPage({
                 </div>
                 <div className="space-y-2 sm:space-y-3">
                   {dateEvents.map((event) => (
-                    <div key={event.id} className="flex gap-2 sm:gap-3">
+                    <div
+                      key={event.id}
+                      ref={assignEventRowRef(event.id)}
+                      className={`flex gap-2 sm:gap-3 ${getEventRowHighlightClassName(event.id)}`}
+                      data-event-id={event.id}
+                    >
                       <Avatar className="h-6 w-6 sm:h-8 sm:w-8 shrink-0">
                         <AvatarFallback className={getEventBgColor(event)}>
                           {getEventIcon(event)}
@@ -860,7 +1048,13 @@ export function ChatPage({
                           )}
                           <EventMarkdown content={event.content} />
                         </div>
-                        <MessageActions content={event.content} align="start" />
+                        {renderForwardRefsSummary(event)}
+                        <MessageActions
+                          content={event.content}
+                          align="start"
+                          permalink={buildEventlogRecordPermalink(event.id)}
+                          features={{ permalink: true }}
+                        />
                         <div className="mt-0.5 flex items-center gap-2 sm:mt-1">
                           <p className="text-xs text-muted-foreground">
                             {formatTime(event.timestamp)}
@@ -884,6 +1078,11 @@ export function ChatPage({
           ref={voiceMessageInputRef}
           onSend={handleSend}
           placeholder="记录当下的事实..."
+          features={{ quote: true }}
+          quotedRefs={quotedRefs}
+          onQuotedRefsChange={setQuotedRefs}
+          resolveQuotedRefSummary={resolveEventRefSummary}
+          onOpenQuotedEvent={(eventId) => locateEventInRecord(eventId, true)}
         />
       ) : (
         <VoiceMessageInput

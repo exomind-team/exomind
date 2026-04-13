@@ -31,6 +31,7 @@ fn app_state_runtime_reuses_eventlog_sqlite_storage() {
                 timestamp: 1700000000000,
                 content: "runtime persisted".to_string(),
                 tags: vec!["note".to_string()],
+                refs: Vec::new(),
                 metadata: None,
             },
         )

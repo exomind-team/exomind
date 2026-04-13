@@ -154,7 +154,7 @@ describe('NowInputRow', () => {
     const sendButton = screen.getByTestId('new-now-send-button');
     fireEvent.click(sendButton);
 
-    expect(onSend).toHaveBeenCalledWith('像素级复刻输入行');
+    expect(onSend).toHaveBeenCalledWith('像素级复刻输入行', undefined, undefined);
     expect((textarea as HTMLTextAreaElement).value).toBe('');
   });
 
@@ -210,7 +210,7 @@ describe('NowInputRow', () => {
     fireEvent.change(textarea, { target: { value: 'Ctrl+Enter 发送' } });
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
-    expect(onSend).toHaveBeenCalledWith('Ctrl+Enter 发送');
+    expect(onSend).toHaveBeenCalledWith('Ctrl+Enter 发送', undefined, undefined);
   });
 
   it('inserts newline when pressing Enter without Ctrl', () => {
@@ -235,7 +235,7 @@ describe('NowInputRow', () => {
     fireEvent.change(textarea, { target: { value: '直接回车发送' } });
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
 
-    expect(onSend).toHaveBeenCalledWith('直接回车发送');
+    expect(onSend).toHaveBeenCalledWith('直接回车发送', undefined, undefined);
   });
 
   it('submits only once for repeated Enter keydown in auto-enter-send mode（按住回车自动连发时也只发送一次）', () => {
@@ -249,7 +249,7 @@ describe('NowInputRow', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', repeat: true });
 
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledWith('重复提交保护');
+    expect(onSend).toHaveBeenCalledWith('重复提交保护', undefined, undefined);
   });
 
   it('prevents duplicate submit while onSend is still pending（发送未返回前禁止重复提交）', async () => {
@@ -340,7 +340,7 @@ describe('NowInputRow', () => {
       getLatestVoiceProps()?.onResult?.('  直接发送内容  ');
     });
 
-    expect(onSend).toHaveBeenCalledWith('直接发送内容', ['voice']);
+    expect(onSend).toHaveBeenCalledWith('直接发送内容', ['voice'], undefined);
     expect((textarea as HTMLTextAreaElement).value).toBe('');
   });
 
@@ -360,8 +360,123 @@ describe('NowInputRow', () => {
       vi.advanceTimersByTime(20);
     });
 
-    expect(onSend).toHaveBeenCalledWith('发送后回焦');
+    expect(onSend).toHaveBeenCalledWith('发送后回焦', undefined, undefined);
     expect(textarea).toHaveFocus();
+  });
+
+  it('keeps quote feature disabled by default', () => {
+    render(
+      <NowInputRow
+        onSend={vi.fn()}
+        quotedRefs={[{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }]}
+      />,
+    );
+
+    expect(screen.queryByTestId('new-now-quote-banner')).not.toBeInTheDocument();
+  });
+
+  it('renders quote banner and sends refs when quote feature is enabled', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onQuotedRefsChange = vi.fn();
+    render(
+      <NowInputRow
+        onSend={onSend}
+        features={{ quote: true }}
+        quotedRefs={[{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }]}
+        onQuotedRefsChange={onQuotedRefsChange}
+        placeholder="输入内容记录事件..."
+      />,
+    );
+
+    const textarea = screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('new-now-quote-banner')).toBeInTheDocument();
+    expect(textarea.value).toContain('/eventlog/record?event=evt-1&locate=1');
+
+    fireEvent.change(textarea, { target: { value: `${textarea.value}\n继续写正文` } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-now-send-button'));
+      await Promise.resolve();
+    });
+
+    expect(onSend).toHaveBeenCalledWith(
+      expect.stringContaining('继续写正文'),
+      undefined,
+      [{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }],
+    );
+  });
+
+  it('does not emit quote removal before externally added refs sync into textarea', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onQuotedRefsChange = vi.fn();
+    render(
+      <NowInputRow
+        onSend={onSend}
+        features={{ quote: true }}
+        quotedRefs={[{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }]}
+        onQuotedRefsChange={onQuotedRefsChange}
+        placeholder="输入内容记录事件..."
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('new-now-quote-banner')).toBeInTheDocument();
+    expect((screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement).value).toContain(
+      '/eventlog/record?event=evt-1&locate=1',
+    );
+    expect(onQuotedRefsChange).not.toHaveBeenCalledWith([]);
+  });
+
+  it('emits quote clearing after successful send and banner disappears once parent clears refs', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onQuotedRefsChange = vi.fn();
+    const view = render(
+      <NowInputRow
+        onSend={onSend}
+        features={{ quote: true }}
+        quotedRefs={[{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }]}
+        onQuotedRefsChange={onQuotedRefsChange}
+        placeholder="输入内容记录事件..."
+      />,
+    );
+
+    const textarea = screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.change(textarea, { target: { value: `${textarea.value}\n继续写正文` } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-now-send-button'));
+      await Promise.resolve();
+    });
+
+    expect(onSend).toHaveBeenCalledWith(
+      expect.stringContaining('继续写正文'),
+      undefined,
+      [{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }],
+    );
+    expect(onQuotedRefsChange).toHaveBeenCalledWith([]);
+
+    view.rerender(
+      <NowInputRow
+        onSend={onSend}
+        features={{ quote: true }}
+        quotedRefs={[]}
+        onQuotedRefsChange={onQuotedRefsChange}
+        placeholder="输入内容记录事件..."
+      />,
+    );
+
+    expect(screen.queryByTestId('new-now-quote-banner')).not.toBeInTheDocument();
+    expect(textarea.value).toBe('');
   });
 
   it('publishes voice transcript signal when ASR returns text（语音结果会发布信号）', () => {

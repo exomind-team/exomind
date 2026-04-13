@@ -5,6 +5,12 @@ import type {
   EventLogListSemantics,
   IEventLogPort,
 } from '../environment/interfaces/eventlog.port';
+import {
+  mergeMetadataWithEventRefs,
+  normalizeEventRefs,
+  readEventRefsFromMetadata,
+  stripEventRefsFromMetadata,
+} from '../eventlog/event-refs';
 import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
 import { appendEventWithEcsReplication } from '../services/ecs-eventlog-replication.service';
 
@@ -95,7 +101,7 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
   }
 
   private toStorageEvent(event: EventData): StorageEvent {
-    const metadata = this.mergeMetadataWithTags(event.metadata, event.tags);
+    const metadata = this.mergeMetadataWithTags(event.metadata, event.tags, event.refs);
     return {
       id: event.id,
       content: event.content,
@@ -109,6 +115,7 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     const parsedTimestamp = Date.parse(event.createdAt);
     const metadataRecord = this.toMetadataRecord(event.metadata);
     const tags = this.normalizeTags(metadataRecord?.[TAGS_METADATA_KEY], event.type);
+    const refs = readEventRefsFromMetadata(metadataRecord);
     const metadata = this.stripTagsFromMetadata(metadataRecord);
 
     return {
@@ -117,11 +124,16 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
       content: event.content,
       tags,
       metadata,
+      refs,
     };
   }
 
-  private mergeMetadataWithTags(metadata: EventMetadata | undefined, tags: Tag[]): Record<string, unknown> {
-    const baseMetadata = isRecord(metadata) ? { ...metadata } : {};
+  private mergeMetadataWithTags(
+    metadata: EventMetadata | undefined,
+    tags: Tag[],
+    refs: EventData['refs'],
+  ): Record<string, unknown> {
+    const baseMetadata = mergeMetadataWithEventRefs(metadata, normalizeEventRefs(refs));
     return {
       ...baseMetadata,
       [TAGS_METADATA_KEY]: [...tags],
@@ -141,7 +153,7 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     }
     const nextMetadata = { ...metadata };
     delete nextMetadata[TAGS_METADATA_KEY];
-    return Object.keys(nextMetadata).length > 0 ? (nextMetadata as EventMetadata) : undefined;
+    return stripEventRefsFromMetadata(nextMetadata);
   }
 
   private normalizeTags(rawTags: unknown, fallbackType?: string): Tag[] {

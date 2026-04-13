@@ -626,6 +626,7 @@ async fn write_task_transition_eventlog(
         timestamp: chrono::Utc::now().timestamp_millis(),
         content: format!("{}：{}", task_transition_event_content(tag), task.title),
         tags: vec![tag.to_string()],
+        refs: vec![],
         metadata: Some(serde_json::json!({
             "task_id": task.id,
             "task_title": task.title,

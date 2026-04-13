@@ -152,11 +152,35 @@ describe('MessageActions', () => {
     expect(screen.queryByText(label)).not.toBeInTheDocument();
   });
 
-  // --- 引用按钮预留 ---
+  // --- 可选功能默认关闭 ---
 
-  it('renders quote button as disabled placeholder', () => {
+  it('hides quote and permalink actions by default', () => {
     render(<MessageActions content="hello" align="start" />);
+    expect(screen.queryByTestId('msg-quote-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('msg-link-btn')).not.toBeInTheDocument();
+  });
+
+  it('renders quote button when quote feature is enabled', () => {
+    render(<MessageActions content="hello" align="start" onQuote={vi.fn()} features={{ quote: true }} />);
     expect(screen.getByTestId('msg-quote-btn')).toBeInTheDocument();
     expect(screen.getByText('引用')).toBeInTheDocument();
+  });
+
+  it('copies permalink when permalink feature is enabled', async () => {
+    render(
+      <MessageActions
+        content="hello"
+        align="start"
+        permalink="https://app.local/eventlog/record?event=e1&locate=1"
+        features={{ permalink: true }}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('msg-link-btn'));
+    });
+
+    expect(mockClipboardWriteText).toHaveBeenCalledWith('https://app.local/eventlog/record?event=e1&locate=1');
+    expect(screen.getByText('已复制链接')).toBeInTheDocument();
   });
 });

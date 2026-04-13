@@ -92,6 +92,7 @@ impl ProposalExecutor {
                         "proposal-approved".to_string(),
                         "create_task".to_string(),
                     ],
+                    refs: vec![],
                     metadata: Some(serde_json::json!({
                         "proposal_id": proposal.id,
                         "action_type": "create_task",
@@ -122,6 +123,7 @@ impl ProposalExecutor {
                     timestamp: Utc::now().timestamp_millis(),
                     content: params.content,
                     tags,
+                    refs: vec![],
                     metadata: Some(serde_json::json!({
                         "proposal_id": proposal.id,
                         "action_type": "append_event",
@@ -174,6 +176,7 @@ impl ProposalExecutor {
                     timestamp: Utc::now().timestamp_millis(),
                     content: format!("时间块开始: {}", result.active.name),
                     tags,
+                    refs: vec![],
                     metadata: Some(serde_json::json!({
                         "proposal_id": proposal.id,
                         "action_type": "start_timeblock",

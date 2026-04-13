@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Copy, Check, Quote, X } from 'lucide-react';
+import { Copy, Check, Link2, Quote, X } from 'lucide-react';
 import { toast } from '@/components/ui/toast-hook';
 import { getClipboardService } from '@/lib/services';
 import type { ClipboardFailureReason } from '@/lib/services';
@@ -15,6 +15,12 @@ import { log } from '@/lib/logger';
 interface MessageActionsProps {
   content: string;
   align: 'start' | 'end';
+  permalink?: string;
+  onQuote?: () => void;
+  features?: {
+    permalink?: boolean;
+    quote?: boolean;
+  };
 }
 
 function getCopyFailureLabel(reason: ClipboardFailureReason): string {
@@ -24,11 +30,17 @@ function getCopyFailureLabel(reason: ClipboardFailureReason): string {
   return '未复制';
 }
 
-export function MessageActions({ content, align }: MessageActionsProps) {
-  const [copied, setCopied] = useState(false);
-  const [copyFailed, setCopyFailed] = useState(false);
-  const [copyFailureLabel, setCopyFailureLabel] = useState('未复制');
+type ClipboardActionKind = 'content' | 'permalink';
+type ClipboardFeedbackState =
+  | { kind: ClipboardActionKind; status: 'success' }
+  | { kind: ClipboardActionKind; status: 'error'; label: string }
+  | null;
+
+export function MessageActions({ content, align, permalink, onQuote, features }: MessageActionsProps) {
+  const [feedback, setFeedback] = useState<ClipboardFeedbackState>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const permalinkEnabled = features?.permalink === true && typeof permalink === 'string' && permalink.length > 0;
+  const quoteEnabled = features?.quote === true && typeof onQuote === 'function';
 
   useEffect(() => () => {
     if (timerRef.current) {
@@ -36,59 +48,92 @@ export function MessageActions({ content, align }: MessageActionsProps) {
     }
   }, []);
 
-  const handleCopy = useCallback(async () => {
+  const handleCopy = useCallback(async (kind: ClipboardActionKind, value: string) => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = undefined;
     }
 
-    const result = await getClipboardService().writeText(content);
+    const result = await getClipboardService().writeText(value);
     if (!result.ok) {
-      setCopied(false);
-      setCopyFailureLabel(getCopyFailureLabel(result.reason));
-      setCopyFailed(true);
+      setFeedback({
+        kind,
+        status: 'error',
+        label: getCopyFailureLabel(result.reason),
+      });
       timerRef.current = setTimeout(() => {
-        setCopyFailed(false);
+        setFeedback(null);
       }, 1500);
-      log.error(`[MessageActions] clipboard.writeText failed: ${result.error instanceof Error ? result.error.message : String(result.error)} ${JSON.stringify({ reason: result.reason })}`);
+      log.error(`[MessageActions] clipboard.writeText failed: ${result.error instanceof Error ? result.error.message : String(result.error)} ${JSON.stringify({ kind, reason: result.reason })}`);
       toast({ title: result.title, description: result.description, variant: 'destructive' });
       return;
     }
 
-    setCopyFailed(false);
-    setCopied(true);
-    timerRef.current = setTimeout(() => setCopied(false), 1500);
-  }, [content]);
+    setFeedback({ kind, status: 'success' });
+    timerRef.current = setTimeout(() => setFeedback(null), 1500);
+  }, []);
 
   if (!content?.trim()) return null;
+
+  const renderClipboardButton = (
+    kind: ClipboardActionKind,
+    defaultLabel: string,
+    successLabel: string,
+    errorFallbackLabel: string,
+    icon: JSX.Element,
+    value: string,
+    testId: string,
+  ) => {
+    const isActive = feedback?.kind === kind;
+    const isSuccess = isActive && feedback?.status === 'success';
+    const isError = isActive && feedback?.status === 'error';
+    const label = isSuccess
+      ? successLabel
+      : isError
+        ? (feedback.label || errorFallbackLabel)
+        : defaultLabel;
+    const buttonIcon = isError
+      ? <X className="h-3.5 w-3.5" />
+      : isSuccess
+        ? <Check className="h-3.5 w-3.5" />
+        : icon;
+
+    return (
+      <button
+        data-testid={testId}
+        onClick={() => {
+          void handleCopy(kind, value);
+        }}
+        className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] hover:bg-stone-100 dark:hover:bg-stone-800 ${
+          isError ? 'text-red-500 dark:text-red-400' : 'text-[#C8C0BA]'
+        }`}
+      >
+        {buttonIcon}
+        {label}
+      </button>
+    );
+  };
 
   return (
     <div
       data-testid="msg-actions-row"
       className={`flex items-center gap-1 pt-0.5 ${align === 'start' ? 'justify-start pl-1' : 'justify-end pr-1'}`}
     >
-      <button
-        data-testid="msg-copy-btn"
-        onClick={handleCopy}
-        className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] hover:bg-stone-100 dark:hover:bg-stone-800 ${
-          copyFailed ? 'text-red-500 dark:text-red-400' : 'text-[#C8C0BA]'
-        }`}
-      >
-        {copyFailed
-          ? <X className="h-3.5 w-3.5" />
-          : copied
-            ? <Check className="h-3.5 w-3.5" />
-            : <Copy className="h-3.5 w-3.5" />}
-        {copyFailed ? copyFailureLabel : copied ? '已复制' : '复制'}
-      </button>
-      <button
-        data-testid="msg-quote-btn"
-        disabled
-        className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-[#C8C0BA] opacity-50 cursor-not-allowed"
-      >
-        <Quote className="h-3.5 w-3.5" />
-        引用
-      </button>
+      {renderClipboardButton('content', '复制', '已复制', '未复制', <Copy className="h-3.5 w-3.5" />, content, 'msg-copy-btn')}
+      {permalinkEnabled
+        ? renderClipboardButton('permalink', '链接', '已复制链接', '未链接', <Link2 className="h-3.5 w-3.5" />, permalink, 'msg-link-btn')
+        : null}
+      {quoteEnabled ? (
+        <button
+          data-testid="msg-quote-btn"
+          type="button"
+          onClick={onQuote}
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-[#C8C0BA] hover:bg-stone-100 dark:hover:bg-stone-800"
+        >
+          <Quote className="h-3.5 w-3.5" />
+          引用
+        </button>
+      ) : null}
     </div>
   );
 }

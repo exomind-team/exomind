@@ -1,3 +1,4 @@
+import { isEventRef, normalizeEventRefs } from './event-refs';
 import type { EventData } from '../types/event';
 
 export type ImportStrategy = 'merge' | 'overwrite';
@@ -27,7 +28,8 @@ function isEventData(value: unknown): value is EventData {
     typeof item.content === 'string' &&
     Array.isArray(item.tags) &&
     item.tags.every((tag) => typeof tag === 'string') &&
-    (item.metadata === undefined || isRecord(item.metadata))
+    (item.metadata === undefined || isRecord(item.metadata)) &&
+    (item.refs === undefined || (Array.isArray(item.refs) && item.refs.every(isEventRef)))
   );
 }
 
@@ -69,7 +71,10 @@ export function parseTransferPayload(raw: string): EventLogTransferPayloadV1 {
   return {
     version: 1,
     exportedAt: typeof payload.exportedAt === 'string' ? payload.exportedAt : new Date().toISOString(),
-    events: payload.events,
+    events: payload.events.map((event) => ({
+      ...event,
+      refs: normalizeEventRefs(event.refs),
+    })),
   };
 }
 

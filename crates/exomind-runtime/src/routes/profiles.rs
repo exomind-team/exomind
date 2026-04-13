@@ -157,6 +157,7 @@ mod tests {
                     timestamp: 1,
                     content: "one".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -169,6 +170,7 @@ mod tests {
                     timestamp: 2,
                     content: "two".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -181,6 +183,7 @@ mod tests {
                     timestamp: 3,
                     content: "anonymous".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )

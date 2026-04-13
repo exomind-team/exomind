@@ -16,9 +16,10 @@ import type {
   EventLogListSemantics,
   IEventLogPort,
 } from '../environment/interfaces/eventlog.port';
-import type { Event, NoteContent, Tag, EventData } from '../types/event';
+import type { Event, EventData, EventRef, NoteContent, Tag } from '../types/event';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
+import { normalizeEventRefs } from '../eventlog/event-refs';
 import {
   createTransferPayload,
   parseTransferPayload,
@@ -49,7 +50,7 @@ export interface EventLogService {
   loadEventsDetailed(options?: EventLogListOptions): Promise<EventLogLoadResult>;
 
   /** 添加普通事件 */
-  addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event>;
+  addEvent(content: NoteContent, tags?: Set<Tag>, refs?: EventRef[]): Promise<Event>;
 
   /** 追加原始事件数据（保留外部时间戳 / 标签 / 元数据） */
   appendEventData(event: EventData): Promise<Event>;
@@ -92,7 +93,7 @@ export class EventLogServiceImpl implements EventLogService {
     };
   }
 
-  async addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event> {
+  async addEvent(content: NoteContent, tags?: Set<Tag>, refs?: EventRef[]): Promise<Event> {
     const eventData: EventData = {
       id: createUuidV4(),
       timestamp: Date.now(),
@@ -101,6 +102,7 @@ export class EventLogServiceImpl implements EventLogService {
       metadata: {
         source: getEventSourceMetadata(),
       },
+      refs: normalizeEventRefs(refs),
     };
 
     const persisted = await this.port.appendEvent(eventData);
@@ -183,6 +185,7 @@ export class EventLogServiceImpl implements EventLogService {
       content: data.content,
       tags: new Set(data.tags),
       metadata: data.metadata,
+      refs: normalizeEventRefs(data.refs),
     };
   }
 

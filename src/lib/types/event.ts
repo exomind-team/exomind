@@ -22,6 +22,12 @@ export interface EventMetadata {
   [key: string]: unknown;
 }
 
+export interface EventRef {
+  kind: 'event';
+  eventId: UUID;
+  summary?: string;
+}
+
 export interface TaskEventMetadata extends EventMetadata {
   taskId: UUID;
   taskTitle: string;
@@ -63,6 +69,7 @@ export interface EventData {
   content: string;
   tags: string[];
   metadata?: EventMetadata;
+  refs?: EventRef[];
 }
 
 // 事件类型（UI 使用）
@@ -72,6 +79,7 @@ export interface Event {
   content: string;
   tags: Set<Tag>;
   metadata?: EventMetadata;
+  refs: EventRef[];
 }
 
 export interface BlockTaskAssociationEvent {

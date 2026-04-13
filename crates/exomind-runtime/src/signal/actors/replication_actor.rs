@@ -169,6 +169,7 @@ fn legacy_event_to_record(record: EventlogLegacyRecord) -> Option<EventRecord> {
         timestamp,
         content: record.content,
         tags: vec![tag],
+        refs: vec![],
         metadata: record.metadata,
     })
 }

@@ -1383,6 +1383,7 @@ async fn write_timeblock_eventlog(
         timestamp: chrono::Utc::now().timestamp_millis(),
         content,
         tags: vec![event_type.to_string()],
+        refs: vec![],
         metadata: Some(serde_json::json!({
             "block_name": block_name,
             "start_id": start_id,

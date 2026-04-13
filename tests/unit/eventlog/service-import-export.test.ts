@@ -87,6 +87,9 @@ describe('EventLogService import/export', () => {
           app: 'ExoMind',
         },
       },
+      refs: [
+        { kind: 'event', eventId: 'evt-anchor', summary: '上游事件' },
+      ],
     });
 
     expect(port.appendEvent).toHaveBeenCalledWith({
@@ -102,8 +105,14 @@ describe('EventLogService import/export', () => {
           app: 'ExoMind',
         },
       },
+      refs: [
+        { kind: 'event', eventId: 'evt-anchor', summary: '上游事件' },
+      ],
     });
     expect(appended.tags.has('block_start')).toBe(true);
     expect(appended.timestamp).toBe(1700000000000);
+    expect(appended.refs).toEqual([
+      { kind: 'event', eventId: 'evt-anchor', summary: '上游事件' },
+    ]);
   });
 });

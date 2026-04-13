@@ -9,7 +9,8 @@ import type {
   EventLogListSemantics,
   IEventLogPort,
 } from '@/lib/environment/interfaces/eventlog.port';
-import type { EventData } from '@/lib/types/event';
+import { normalizeEventRefs } from '@/lib/eventlog/event-refs';
+import type { EventData, EventRef } from '@/lib/types/event';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
@@ -22,6 +23,7 @@ interface RuntimeEventPayload {
   content: string;
   tags: string[];
   metadata?: Record<string, unknown>;
+  refs?: EventRef[];
 }
 
 interface RuntimeAppendEventPayload {
@@ -30,6 +32,7 @@ interface RuntimeAppendEventPayload {
   content: string;
   tags: string[];
   metadata?: Record<string, unknown>;
+  refs?: EventRef[];
 }
 
 export interface EventLogRtAdapterOptions {
@@ -55,6 +58,7 @@ function toEventData(payload: RuntimeEventPayload): EventData {
     content: payload.content,
     tags: payload.tags ?? [],
     metadata: payload.metadata,
+    refs: normalizeEventRefs(payload.refs),
   };
 }
 
@@ -97,6 +101,7 @@ export class EventLogRtAdapter implements IEventLogPort {
       content: event.content,
       tags: event.tags,
       ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
+      ...(normalizeEventRefs(event.refs).length > 0 ? { refs: normalizeEventRefs(event.refs) } : {}),
     };
     const response = await this.fetchImpl(this.url('/eventlog', target), {
       method: 'POST',

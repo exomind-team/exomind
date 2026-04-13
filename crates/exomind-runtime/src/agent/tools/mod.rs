@@ -103,6 +103,7 @@ mod tests {
                     timestamp: 10,
                     content: "复盘 Agent API 设计".to_string(),
                     tags: vec!["work".to_string(), "agent".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -115,6 +116,7 @@ mod tests {
                     timestamp: 20,
                     content: "整理 runtime 路由".to_string(),
                     tags: vec!["code".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -156,6 +158,7 @@ mod tests {
                         timestamp: index as i64,
                         content: format!("event-{index}"),
                         tags: Vec::new(),
+                        refs: Vec::new(),
                         metadata: None,
                     },
                 )

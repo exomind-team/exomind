@@ -6,6 +6,11 @@ import {
   type Event as StorageEvent,
   type ProjectReplicatedEventResult,
 } from '@/lib/storage/event-storage';
+import {
+  mergeMetadataWithEventRefs,
+  normalizeEventRefs,
+  readEventRefsFromMetadata,
+} from '@/lib/eventlog/event-refs';
 import type { Event as EventLogEvent, EventData } from '@/lib/types/event';
 import { getCurrentProfileOrLegacyId } from '@/lib/profile/profile-storage';
 import { getEventLogService } from './eventlog.service';
@@ -25,6 +30,7 @@ export interface EventLogReplicationAppendedPayload {
   replicationSeq: number;
   cursor: EventLogReplicationCursor;
   event: StorageEvent;
+  record?: EventData;
 }
 
 export type AppendableStorageEvent = Omit<StorageEvent, 'id'> & { id?: string };
@@ -86,6 +92,7 @@ function storageEventToEventData(event: AppendableStorageEvent): EventData {
     content: normalized.content,
     tags: typeof normalized.type === 'string' && normalized.type.length > 0 ? [normalized.type] : ['note'],
     metadata: normalized.metadata,
+    refs: readEventRefsFromMetadata(normalized.metadata ?? null),
   };
 }
 
@@ -96,7 +103,10 @@ function eventLogEventToStorageEvent(event: EventLogEvent): StorageEvent {
     content: event.content,
     createdAt: new Date(event.timestamp).toISOString(),
     type: typeof firstTag === 'string' && firstTag.length > 0 ? firstTag : 'note',
-    metadata: event.metadata as Record<string, unknown> | undefined,
+    metadata: mergeMetadataWithEventRefs(
+      event.metadata,
+      normalizeEventRefs(event.refs),
+    ),
   };
 }
 
@@ -156,7 +166,7 @@ export async function projectEventLogReplicationAppend(
     if (existing) {
       return 'duplicate';
     }
-    await getEventLogService().appendEventData(storageEventToEventData(payload.event));
+    await getEventLogService().appendEventData(payload.record ?? storageEventToEventData(payload.event));
     return 'inserted';
   }
   return getEventStorage(userId).projectReplicatedEvent(payload.event);

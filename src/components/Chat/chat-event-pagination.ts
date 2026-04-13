@@ -1,5 +1,6 @@
 import type { Event as StorageEvent } from '@/lib/storage/event-storage';
 import type { Event as UiEvent, EventMetadata, Tag } from '@/lib/types/event';
+import { readEventRefsFromMetadata } from '@/lib/eventlog/event-refs';
 
 const TAGS_METADATA_KEY = 'tags';
 
@@ -55,6 +56,7 @@ export function toUiEvent(event: StorageEvent): UiEvent {
     content: event.content,
     tags: new Set<string>(tags),
     metadata: toEventMetadata(event.metadata),
+    refs: readEventRefsFromMetadata(isRecord(event.metadata) ? event.metadata : null),
   };
 }
 

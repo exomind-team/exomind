@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use tokio::time::{Duration, Instant};
 
 use crate::AppState;
-use crate::eventlog::{EventListFilter, EventRecord, sanitize_user_id};
+use crate::eventlog::{EventListFilter, EventRecord, EventRef, sanitize_user_id};
 use crate::signal::types::SignalEvent;
 
 const EVENTLOG_REVISION_HEADER: &str = "x-exomind-eventlog-revision";
@@ -50,6 +50,8 @@ struct AppendEventPayload {
     content: String,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    refs: Vec<EventRef>,
     metadata: Option<serde_json::Value>,
 }
 
@@ -328,6 +330,7 @@ async fn append_event(
         timestamp: payload.timestamp,
         content: payload.content,
         tags: payload.tags,
+        refs: payload.refs,
         metadata: payload.metadata,
     };
 
@@ -1062,6 +1065,7 @@ mod tests {
                     timestamp: 1000,
                     content: "note one".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -1074,6 +1078,7 @@ mod tests {
                     timestamp: 2000,
                     content: "agent note".to_string(),
                     tags: vec!["note".to_string(), "agent_feedback".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -1086,6 +1091,7 @@ mod tests {
                     timestamp: 3000,
                     content: "agent only".to_string(),
                     tags: vec!["agent_feedback".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -1366,6 +1372,7 @@ mod tests {
                     timestamp: 1234,
                     content: "json backup".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: Some(serde_json::json!({
                         "source": { "deviceId": "dev-1" }
                     })),
@@ -1409,6 +1416,7 @@ mod tests {
                     timestamp: 5678,
                     content: "sqlite backup".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -1447,6 +1455,7 @@ mod tests {
                     timestamp: 1000,
                     content: "from user a".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -1459,6 +1468,7 @@ mod tests {
                     timestamp: 2000,
                     content: "from user b".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -1511,6 +1521,7 @@ mod tests {
                     timestamp: 1000,
                     content: "existing".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -1583,6 +1594,7 @@ mod tests {
                     timestamp: 1234,
                     content: "imported for user a".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -1671,6 +1683,7 @@ mod tests {
                     timestamp: 1111,
                     content: "cleanup export".to_string(),
                     tags: vec!["note".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )

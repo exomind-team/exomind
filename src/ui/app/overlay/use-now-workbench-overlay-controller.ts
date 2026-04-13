@@ -8,6 +8,7 @@ import {
   getTaskTimerService,
   getTimeBlockService,
 } from '@/lib/services';
+import { readEventRefsFromMetadata } from '@/lib/eventlog/event-refs';
 import { appendTaskStatusChangeDescription } from '@/lib/task/task-status-change-description';
 import { resolveActiveBlockTaskIds, type ActiveBlockData, type Event as UiEvent, type TimerConfig } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
@@ -63,6 +64,7 @@ function toUiEvent(event: StoredEvent): UiEvent {
     timestamp: Date.parse(event.createdAt),
     tags: new Set(event.type ? [event.type] : []),
     metadata: event.metadata,
+    refs: readEventRefsFromMetadata(event.metadata ?? null),
   };
 }
 

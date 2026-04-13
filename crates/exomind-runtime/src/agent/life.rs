@@ -932,6 +932,7 @@ mod tests {
                     timestamp: 1,
                     content: "梳理 agent session 持久化".to_string(),
                     tags: vec!["analysis".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
@@ -944,6 +945,7 @@ mod tests {
                     timestamp: 2,
                     content: "接入 runtime HTTP route".to_string(),
                     tags: vec!["code".to_string()],
+                    refs: Vec::new(),
                     metadata: None,
                 },
             )
