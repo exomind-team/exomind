@@ -1,13 +1,13 @@
 # 2026-04-13 release/update metadata 新架构与单 origin 下载模型断层调查
 
 > 状态：基于本仓库当前代码与文档的只读调查  
-> 范围：`src/lib/services/update.service.ts`、`scripts/dev/release-pages-metadata-lib.ts`、`scripts/dev/sync-release-pages.ts`、`website/src/lib/downloads-data.ts`、`.github/workflows/release.yml`、`.github/workflows/release-pages.yml`、`website/public/releases/*`、`docs/analysis/2026-04-10-open-issue-source-census.md`、`docs/plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md`
+> 范围：`src/lib/services/update.service.ts`、`scripts/dev/release-pages-metadata-lib.ts`、`scripts/dev/sync-release-pages.ts`、`website/src/lib/downloads-data.ts`、[release.yml](../../.github/workflows/release.yml)、[release-pages.yml](../../.github/workflows/release-pages.yml)、`website/public/releases/*`、[2026-04-10-open-issue-source-census.md](2026-04-10-open-issue-source-census.md)、[2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md](../plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md)
 
 ## 1. 问题定义
 
 当前的断层，不是“release/update metadata 还没做出来”，而是**控制面已经切到 GitHub Pages 静态 metadata + preview/release 分流，但数据面仍然是每个 asset 只有一个最终下载 URL，且这个 URL 仍被默认理解为 GitHub Release**。
 
-`docs/plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md:5-8` 已把新契约写死为：单一 `v0.x.y` tag、`preview/release` 由 GitHub Pages 静态 JSON 表达、官网与应用更新消费这些 JSON、安装包本体走 GitHub Release assets。`.github/workflows/release.yml:3-21` 和 `.github/workflows/release-pages.yml:27-60` 也已经按这个方向落地。  
+[2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md](../plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md):5-8 已把新契约写死为：单一 `v0.x.y` tag、`preview/release` 由 GitHub Pages 静态 JSON 表达、官网与应用更新消费这些 JSON、安装包本体走 GitHub Release assets。[release.yml](../../.github/workflows/release.yml):3-21 和 [release-pages.yml](../../.github/workflows/release-pages.yml):27-60 也已经按这个方向落地。  
 但这套新契约只解决了“版本信息从哪里读、preview/release 如何分流”，没有解决“同一个版本的安装包是否可以有多个下载源、消费者如何在这些源之间切换”。这一点在 `scripts/dev/release-pages-metadata-lib.ts:37-50`、`src/lib/services/update.service.ts:33-56`、`website/src/lib/downloads-data.ts:3-16` 上都能看到：asset schema 仍然只有单个 `url`。
 
 所以真正的问题是：**metadata 层已经有 channel 维度，没有 source 维度。**
@@ -18,14 +18,14 @@
 
 ### 2.1 发布控制面已经切到 single-tag + Pages metadata
 
-`docs/plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md:5-8` 明确要求：
+[2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md](../plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md):5-8 明确要求：
 
 - 唯一 tag 是 `v0.x.y`
 - `preview/release` 由 GitHub Release `prerelease` 状态和 GitHub Pages metadata 共同表达
 - 官网与更新检查消费静态 JSON
 - 安装包本体走 GitHub Release assets
 
-这不是停留在文档上。`.github/workflows/release.yml:3-21` 已经只监听 `v*` tag，并把 `VITE_UPDATE_BASE_URL` 固定到 `https://exomind-team.github.io/exomind/`；`.github/workflows/release.yml:1419-1455` 说明发布与 promotion 也都围绕同一个 GitHub Release 展开。`.github/workflows/release-pages.yml:50-60` 则把 `scripts/dev/sync-release-pages.ts` 接进 Pages workflow，先同步 metadata，再构建站点。
+这不是停留在文档上。[release.yml](../../.github/workflows/release.yml):3-21 已经只监听 `v*` tag，并把 `VITE_UPDATE_BASE_URL` 固定到 `https://exomind-team.github.io/exomind/`；[release.yml](../../.github/workflows/release.yml):1419-1455 说明发布与 promotion 也都围绕同一个 GitHub Release 展开。[release-pages.yml](../../.github/workflows/release-pages.yml):50-60 则把 `scripts/dev/sync-release-pages.ts` 接进 Pages workflow，先同步 metadata，再构建站点。
 
 `tests/ci/release-workflow-bun-install.test.ts:56-69`、`tests/ci/release-workflow-bun-install.test.ts:71-80`、`tests/ci/release-workflow-bun-install.test.ts:96-109` 进一步把这些约束写成静态守卫：必须是单 `v*` tag、必须有独立 Pages workflow、必须固定 `VITE_UPDATE_BASE_URL`、必须移除 Cloudflare R2 上传逻辑。
 
@@ -48,7 +48,7 @@ checked-in 产物也证明这条链已经跑通：
 
 ### 2.3 官网与桌面更新都已经转向静态 metadata 消费
 
-桌面端 `src/lib/services/update.service.ts:11-22` 会把 `VITE_UPDATE_BASE_URL` 规范化为 metadata 基址，`src/lib/services/update.service.ts:125-166` 再固定去读 `/releases/${channel}/latest.json` 与 `/releases/${channel}/versions.json`。这和计划里的目标 URL（`docs/plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md:144-151`）一致。  
+桌面端 `src/lib/services/update.service.ts:11-22` 会把 `VITE_UPDATE_BASE_URL` 规范化为 metadata 基址，`src/lib/services/update.service.ts:125-166` 再固定去读 `/releases/${channel}/latest.json` 与 `/releases/${channel}/versions.json`。这和计划里的目标 URL（[2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md](../plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md):144-151）一致。  
 对应测试也已经围绕 Pages metadata 改写：`tests/unit/services/update.service.test.ts:123-142` 断言更新检查从 Pages `latest.json` 取值，`tests/unit/services/update.service.test.ts:190-200` 断言版本历史来自 Pages `versions.json`。
 
 官网端 `website/src/lib/downloads-data.ts:334-377` 也优先加载本地静态 JSON，只在本地 JSON 不存在或内容为空时才退到远端 fallback。
@@ -92,7 +92,7 @@ checked-in 产物印证了这一点。`website/public/releases/preview/latest.js
 
 UI 层也没有 source 概念。`src/ui/stores/update-store.ts:22-45` 的持久化状态只有 `channel`、`checkInterval`、`autoDownloadPreview`，没有 `updateSource` 或等价字段。`src/ui/app/components/UpdateSettingsCard.tsx:12-128` 只允许切换 `release/preview` 和自动下载预览版；`src/ui/app/components/UpdateStatusCard.tsx:43-53`、`src/ui/app/components/UpdateStatusCard.tsx:128-136` 则只会把那个单一 `downloadUrl` 传进 `downloadUpdate()`。
 
-这和 `docs/analysis/2026-04-10-open-issue-source-census.md:195-199` 对 `#890`、`#886` 的判断是一致的：更新源切换、多源分发这两个需求区域有代码基础，但 source 维度并未真正落进实现合同。
+这和 [2026-04-10-open-issue-source-census.md](2026-04-10-open-issue-source-census.md):195-199 对 `#890`、`#886` 的判断是一致的：更新源切换、多源分发这两个需求区域有代码基础，但 source 维度并未真正落进实现合同。
 
 ## 4. 为什么这使多源切换困难
 
@@ -113,7 +113,7 @@ UI 层也没有 source 概念。`src/ui/stores/update-store.ts:22-45` 的持久�
 - 官网下载组件看见 `primary.url`
 - 桌面更新看见 `downloadUrl`
 
-一旦用户想切“GitHub | 官网 | 内地”，消费者没有任何可以决策的结构化信息。它拿不到“有哪些源、优先级是什么、当前地区该选谁、失败后如何退避”。这就是为什么 `#890` 到现在仍只能算 `partial code evidence`，见 `docs/analysis/2026-04-10-open-issue-source-census.md:195-199`。
+一旦用户想切“GitHub | 官网 | 内地”，消费者没有任何可以决策的结构化信息。它拿不到“有哪些源、优先级是什么、当前地区该选谁、失败后如何退避”。这就是为什么 `#890` 到现在仍只能算 `partial code evidence`，见 [2026-04-10-open-issue-source-census.md](2026-04-10-open-issue-source-census.md):195-199。
 
 ### 4.3 当前 fallback 反而把 GitHub 单源假设重新钉死
 
@@ -149,7 +149,7 @@ UI 层也没有 source 概念。`src/ui/stores/update-store.ts:22-45` 的持久�
 - UI/store：必须引入 source 选择或 source policy
 - 测试：现有大量断言都要从“直接等于 GitHub URL”改成“按 source policy 解析”
 
-这就是为什么 `#886` 在 census 里被标成 `relevant area exists, requirement still unproven`，而不是“快完成了”，见 `docs/analysis/2026-04-10-open-issue-source-census.md:109-118`、`docs/analysis/2026-04-10-open-issue-source-census.md:199`。
+这就是为什么 `#886` 在 census 里被标成 `relevant area exists, requirement still unproven`，而不是“快完成了”，见 [2026-04-10-open-issue-source-census.md](2026-04-10-open-issue-source-census.md):109-118、[2026-04-10-open-issue-source-census.md](2026-04-10-open-issue-source-census.md):199。
 
 ### 5.2 发布历史本身还处在过渡态
 
@@ -166,7 +166,7 @@ UI 层也没有 source 概念。`src/ui/stores/update-store.ts:22-45` 的持久�
 
 这本身没错，但它意味着多源分发如果要回来，不能偷偷加旁路。
 
-`docs/plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md:113-161` 明确要求删除旧 `/api/versions`、`/api/update/check`、`/api/download/...` 动态接口，并让下载按钮直接跳 GitHub Release asset URL。  
+[2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md](../plans/2026-04-08-single-tag-github-pages-release-flow-implementation-plan.md):113-161 明确要求删除旧 `/api/versions`、`/api/update/check`、`/api/download/...` 动态接口，并让下载按钮直接跳 GitHub Release asset URL。  
 `tests/ci/release-workflow-bun-install.test.ts:103-109` 还把“不得再出现 Cloudflare R2 上传逻辑”写成了测试守卫。
 
 因此后续如果真的做“对象存储 + OneDrive 兜底”，不能回到旧式“另外偷偷传一份 R2 URL”。必须先重写当前静态 metadata 契约，让多源成为一等公民。
@@ -177,7 +177,7 @@ UI 层也没有 source 概念。`src/ui/stores/update-store.ts:22-45` 的持久�
    现在所有实现都只有 `url`。需要先决定是 `primary + mirrors[]`、还是 `origins[region][provider]`、还是 `candidates[] + priority`。
 
 2. `VITE_UPDATE_BASE_URL` 未来只是 metadata base，还是也要承载 source policy？
-   现状见 `src/lib/services/update.service.ts:11-22` 与 `.github/workflows/release.yml:17-21`。如果它只是 metadata base，就不能被误当成“更新源切换”。
+   现状见 `src/lib/services/update.service.ts:11-22` 与 [release.yml](../../.github/workflows/release.yml):17-21。如果它只是 metadata base，就不能被误当成“更新源切换”。
 
 3. 官网 fallback 还要不要直接回 GitHub Releases API？
    现状见 `website/src/lib/downloads-data.ts:270-377`。如果保留这条路径，多源分发在异常路径上仍会退回 GitHub 单源。

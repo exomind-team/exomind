@@ -14,14 +14,14 @@
 
 直接来源是 2026-04-13 新生成的 8 份专题调查：
 
-- `docs/analysis/2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md`
-- `docs/analysis/2026-04-13-headless-runtime-vs-ui-owned-side-effects.md`
-- `docs/analysis/2026-04-13-proposal-governance-vs-current-proposal-stack.md`
-- `docs/analysis/2026-04-13-archive-scope-migration-vs-profile-user-legacy.md`
-- `docs/analysis/2026-04-13-workbench-vs-legacy-pages-architecture-gap.md`
-- `docs/analysis/2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md`
-- `docs/analysis/2026-04-13-release-distribution-metadata-vs-single-origin-model.md`
-- `docs/analysis/2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md`
+- [2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md](2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md)
+- [2026-04-13-headless-runtime-vs-ui-owned-side-effects.md](2026-04-13-headless-runtime-vs-ui-owned-side-effects.md)
+- [2026-04-13-proposal-governance-vs-current-proposal-stack.md](2026-04-13-proposal-governance-vs-current-proposal-stack.md)
+- [2026-04-13-archive-scope-migration-vs-profile-user-legacy.md](2026-04-13-archive-scope-migration-vs-profile-user-legacy.md)
+- [2026-04-13-workbench-vs-legacy-pages-architecture-gap.md](2026-04-13-workbench-vs-legacy-pages-architecture-gap.md)
+- [2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md](2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md)
+- [2026-04-13-release-distribution-metadata-vs-single-origin-model.md](2026-04-13-release-distribution-metadata-vs-single-origin-model.md)
+- [2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md](2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md)
 
 这些专题文档已经分别回链到对应计划、架构文档和源码行号。下面的综合判断以它们为直接证据源，不再重复展开全部代码细节。
 
@@ -51,7 +51,7 @@
 
 对应调查：
 
-- `docs/analysis/2026-04-13-headless-runtime-vs-ui-owned-side-effects.md`
+- [2026-04-13-headless-runtime-vs-ui-owned-side-effects.md](2026-04-13-headless-runtime-vs-ui-owned-side-effects.md)
 
 ### 2. `profileId / user_id / scopeKey / anonymous` 继续作为底层 canonical scope
 
@@ -65,7 +65,7 @@
 
 对应调查：
 
-- `docs/analysis/2026-04-13-archive-scope-migration-vs-profile-user-legacy.md`
+- [2026-04-13-archive-scope-migration-vs-profile-user-legacy.md](2026-04-13-archive-scope-migration-vs-profile-user-legacy.md)
 
 ### 3. `旧页面仍掌握工作台主权`
 
@@ -79,7 +79,7 @@
 
 对应调查：
 
-- `docs/analysis/2026-04-13-workbench-vs-legacy-pages-architecture-gap.md`
+- [2026-04-13-workbench-vs-legacy-pages-architecture-gap.md](2026-04-13-workbench-vs-legacy-pages-architecture-gap.md)
 
 ### 4. `字段 PATCH + 快照复制` 继续承担未来治理与同步主干
 
@@ -94,8 +94,8 @@
 
 对应调查：
 
-- `docs/analysis/2026-04-13-proposal-governance-vs-current-proposal-stack.md`
-- `docs/analysis/2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md`
+- [2026-04-13-proposal-governance-vs-current-proposal-stack.md](2026-04-13-proposal-governance-vs-current-proposal-stack.md)
+- [2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md](2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md)
 
 ### 5. `默认 host/port + fallback 地址` 继续被视为 runtime 真相
 
@@ -109,7 +109,7 @@
 
 对应调查：
 
-- `docs/analysis/2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md`
+- [2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md](2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md)
 
 ### 6. `GitHub 单 origin` 继续作为默认下载真相
 
@@ -123,7 +123,7 @@
 
 对应调查：
 
-- `docs/analysis/2026-04-13-release-distribution-metadata-vs-single-origin-model.md`
+- [2026-04-13-release-distribution-metadata-vs-single-origin-model.md](2026-04-13-release-distribution-metadata-vs-single-origin-model.md)
 
 ### 7. `共享记忆 = 复用 Agent 私有 workspace/knowledge`
 
@@ -137,7 +137,7 @@
 
 对应调查：
 
-- `docs/analysis/2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md`
+- [2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md](2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md)
 
 ## 二、这些成果不该丢，应该搬进新骨架
 
@@ -155,8 +155,8 @@
 
 来源：
 
-- `docs/analysis/2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md`
-- `docs/analysis/2026-04-13-proposal-governance-vs-current-proposal-stack.md`
+- [2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md](2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md)
+- [2026-04-13-proposal-governance-vs-current-proposal-stack.md](2026-04-13-proposal-governance-vs-current-proposal-stack.md)
 
 ### 2. RT durable 基础已经前进
 
@@ -173,7 +173,7 @@
 
 来源：
 
-- `docs/analysis/2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md`
+- [2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md](2026-04-13-durable-runtime-vs-fallback-host-port-legacy.md)
 
 ### 3. `single-tag + Pages metadata` 控制面已经成立
 
@@ -188,7 +188,7 @@
 
 来源：
 
-- `docs/analysis/2026-04-13-release-distribution-metadata-vs-single-origin-model.md`
+- [2026-04-13-release-distribution-metadata-vs-single-origin-model.md](2026-04-13-release-distribution-metadata-vs-single-origin-model.md)
 
 ### 4. Workbench 长期对象模型已经足够清晰
 
@@ -205,7 +205,7 @@
 
 来源：
 
-- `docs/analysis/2026-04-13-workbench-vs-legacy-pages-architecture-gap.md`
+- [2026-04-13-workbench-vs-legacy-pages-architecture-gap.md](2026-04-13-workbench-vs-legacy-pages-architecture-gap.md)
 
 ### 5. Archive OS 命名与会话分层已经想清楚
 
@@ -221,7 +221,7 @@
 
 来源：
 
-- `docs/analysis/2026-04-13-archive-scope-migration-vs-profile-user-legacy.md`
+- [2026-04-13-archive-scope-migration-vs-profile-user-legacy.md](2026-04-13-archive-scope-migration-vs-profile-user-legacy.md)
 
 ### 6. Proposal-first 与 blackboard 的边界已经有清楚决策
 
@@ -236,8 +236,8 @@
 
 来源：
 
-- `docs/analysis/2026-04-13-proposal-governance-vs-current-proposal-stack.md`
-- `docs/analysis/2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md`
+- [2026-04-13-proposal-governance-vs-current-proposal-stack.md](2026-04-13-proposal-governance-vs-current-proposal-stack.md)
+- [2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md](2026-04-13-blackboard-knowledge-layer-vs-existing-memory-carriers.md)
 
 ### 7. Backfill、snapshot、projector 不是最终形态，但可作为迁移桥
 
@@ -251,8 +251,8 @@
 
 来源：
 
-- `docs/analysis/2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md`
-- `docs/analysis/2026-04-13-headless-runtime-vs-ui-owned-side-effects.md`
+- [2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md](2026-04-13-eds-crdt-vs-rt-sync-architecture-gap.md)
+- [2026-04-13-headless-runtime-vs-ui-owned-side-effects.md](2026-04-13-headless-runtime-vs-ui-owned-side-effects.md)
 
 ## 三、搬迁的核心原则
 

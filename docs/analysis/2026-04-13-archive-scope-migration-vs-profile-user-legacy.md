@@ -2,7 +2,7 @@
 
 ## 问题定义
 
-4 月 6 日到 4 月 7 日的计划文档，已经把 ExoMind 的核心对象从 `profile` 收口到 `archive`，并且把 `archive_id`、`ArchiveSession`、`UiSession`、默认档案、档案切换器、多档案并活、集体档案同型等语义讲清楚了；文档甚至明确写了第一阶段要把 `activeProfileId / unlockedProfileIds` 迁成 `activeArchiveId / unlockedArchiveIds`，并采用“旧 `profile` 键双读，新 `archive` 键单写”的迁移策略（`docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md:15-30`，`docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md:28-55`）。
+4 月 6 日到 4 月 7 日的计划文档，已经把 ExoMind 的核心对象从 `profile` 收口到 `archive`，并且把 `archive_id`、`ArchiveSession`、`UiSession`、默认档案、档案切换器、多档案并活、集体档案同型等语义讲清楚了；文档甚至明确写了第一阶段要把 `activeProfileId / unlockedProfileIds` 迁成 `activeArchiveId / unlockedArchiveIds`，并采用“旧 `profile` 键双读，新 `archive` 键单写”的迁移策略（[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](../plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md):15-30，[2026-04-06-multi-archive-and-collective-settled-decisions.md](../plans/2026-04-06-multi-archive-and-collective-settled-decisions.md):28-55）。
 
 现实代码没有跟上这层语义迁移。当前实现真正驱动本地会话、RT HTTP query、复制信号、SQLite/PouchDB 分库、CLI 兼容和 UI 账户入口的，仍然是四套旧原语：
 
@@ -17,7 +17,7 @@
 
 ### 1. 核心对象已经正式改名为 `archive`
 
-`docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md:15-30` 已经给出明确决策：
+[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](../plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md):15-30 已经给出明确决策：
 
 - 正式术语统一为 `archive`
 - `profile` 退回展示层、资料卡、对外描述等轻表面
@@ -28,7 +28,7 @@
 
 ### 2. 新语义不只是对象改名，还重定义了会话边界
 
-`docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md:11-19`、`22-55`、`58-87`、`90-99` 把边界收口为：
+[2026-04-07-archive-session-and-ui-session-clarifications.md](../plans/2026-04-07-archive-session-and-ui-session-clarifications.md):11-19、`22-55`、`58-87`、`90-99` 把边界收口为：
 
 - `ArchiveSession` 是某个 `RT` 上某个档案的本地运行会话
 - `UiSession / ClientSession` 是外部 UI 终端连接
@@ -39,7 +39,7 @@
 
 ### 3. 多档案与集体档案已被定义为同一身份层
 
-`docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md:30-55`、`102-107`、`214-245` 已经定稿：
+[2026-04-06-multi-archive-and-collective-settled-decisions.md](../plans/2026-04-06-multi-archive-and-collective-settled-decisions.md):30-55、`102-107`、`214-245` 已经定稿：
 
 - 档案稳定主键是不可变 `archive_id`
 - 个人档案与集体档案在身份层同型
@@ -50,7 +50,7 @@
 
 ### 4. 默认档案与切换器的语义已经落在 OS 层
 
-`docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md:33-45`、`50-76`、`79-108`、`134-153` 明确要求：
+[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](../plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md):33-45、`50-76`、`79-108`、`134-153` 明确要求：
 
 - 一个 Tauri App 内，RT 持有多个 `ArchiveSession`
 - 默认启动入口是固定存在的本地默认档案
@@ -181,9 +181,9 @@ RT 路由 `crates/exomind-runtime/src/routes/agent_sessions.rs:17-32`、`40-58` 
 
 文档要求的是：
 
-- `archive` 取代 `profile` 成为核心对象（`docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md:15-30`）
-- `archive_id` 取代旧主键语义，统一承载个人档案和集体档案（`docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md:30-35`、`102-107`、`214-245`）
-- `ArchiveSession` / `UiSession` 取代“当前 active profile”的单活心智（`docs/plans/2026-04-07-archive-session-and-ui-session-clarifications.md:22-55`、`58-87`）
+- `archive` 取代 `profile` 成为核心对象（[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](../plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md):15-30）
+- `archive_id` 取代旧主键语义，统一承载个人档案和集体档案（[2026-04-06-multi-archive-and-collective-settled-decisions.md](../plans/2026-04-06-multi-archive-and-collective-settled-decisions.md):30-35、`102-107`、`214-245`）
+- `ArchiveSession` / `UiSession` 取代“当前 active profile”的单活心智（[2026-04-07-archive-session-and-ui-session-clarifications.md](../plans/2026-04-07-archive-session-and-ui-session-clarifications.md):22-55、`58-87`）
 
 而代码当前仍然以“单个 active profile + 若干 unlocked profiles”组织会话（`src/lib/profile/types.ts:53-57`，`src/ui/stores/sync-store.ts:43-47`、`226-244`）。这两者不是词汇差异，而是运行模型差异。
 
@@ -217,7 +217,7 @@ RT 路由 `crates/exomind-runtime/src/routes/agent_sessions.rs:17-32`、`40-58` 
 
 ### 5. 文档要求的 OS 层对象，代码里根本还不存在
 
-文档要求默认档案、运行中档案、已占用、已锁定、ArchiveSession、UiSession、默认档案升级为正式档案（`docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md:33-45`、`79-108`、`134-153`）。
+文档要求默认档案、运行中档案、已占用、已锁定、ArchiveSession、UiSession、默认档案升级为正式档案（[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](../plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md):33-45、`79-108`、`134-153`）。
 
 当前代码只有：
 
@@ -231,7 +231,7 @@ RT 路由 `crates/exomind-runtime/src/routes/agent_sessions.rs:17-32`、`40-58` 
 
 ### 1. 先前 profile 架构已经部分落地，代码会自然抗拒直接覆盖
 
-`docs/plans/2026-03-07-user-system-hybrid-identity-architecture.md:152-155`、`273-279`、`295-316`、`484-490`、`607-610` 明确把上一轮路线写成：
+[2026-03-07-user-system-hybrid-identity-architecture.md](../plans/2026-03-07-user-system-hybrid-identity-architecture.md):152-155、`273-279`、`295-316`、`484-490`、`607-610` 明确把上一轮路线写成：
 
 - `profileId` 作为本地数据分库和内部关联根键
 - `currentUser -> activeProfileId`
@@ -253,7 +253,7 @@ RT 路由 `crates/exomind-runtime/src/routes/agent_sessions.rs:17-32`、`40-58` 
 
 `src/lib/profile/profile-storage.ts:314-315`、`crates/exomind-runtime/src/task/store.rs:61-72`、`crates/exomind-runtime/src/timeblock_sqlite.rs:11`、`crates/exomind-runtime/src/routes/profiles.rs:37-42` 都在承认一个事实：系统里存在默认匿名/空壳 scope。
 
-但文档现在要求的是“固定存在的本地默认档案”，并且这个默认档案还能升级为正式档案（`docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md:63-76`、`97-108`）。
+但文档现在要求的是“固定存在的本地默认档案”，并且这个默认档案还能升级为正式档案（[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](../plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md):63-76、`97-108`）。
 
 这两者不是同义词。`anonymous` 是无元信息分区；“默认档案”是 OS 层一等对象。迁移要解决的是“anonymous scope 如何升级成 default archive”，不是把匿名字符串换个名字。
 
@@ -289,7 +289,7 @@ RT 路由 `crates/exomind-runtime/src/routes/agent_sessions.rs:17-32`、`40-58` 
    如果等价，迁移主要是协议和模型换名；如果不等价，就必须先定义 profile -> archive 的映射表和双向查找规则。
 
 2. 默认档案的稳定主键是什么？
-   今天默认回退是 `anonymous`（`src/lib/profile/profile-storage.ts:314-315`），文档要的是固定存在的默认档案（`docs/plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md:63-76`）。这两者怎样映射，必须先定。
+   今天默认回退是 `anonymous`（`src/lib/profile/profile-storage.ts:314-315`），文档要的是固定存在的默认档案（[2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md](../plans/2026-04-07-archive-os-layer-default-archive-and-switcher-decisions.md):63-76）。这两者怎样映射，必须先定。
 
 3. RT 的 canonical scope wire primitive 到底是什么？
    要决定：
@@ -304,7 +304,7 @@ RT 路由 `crates/exomind-runtime/src/routes/agent_sessions.rs:17-32`、`40-58` 
    是写进现有 `session_store`，还是另建 archive session store / ui session store？如果不回答这个问题，文档里的会话边界永远只是计划文本。
 
 6. 当前 `scopeKey` 在集体档案阶段是否仍然等于单个 archive？
-   文档已经要求“集体档案有自己的 ArchiveSession，但 UI 接入的是成员座席”（`docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md:102-107`）。如果未来 `scopeKey` 需要表达 seat scope，而不只是 archive scope，那么这轮迁移就更不能直接做字符串 rename。
+   文档已经要求“集体档案有自己的 ArchiveSession，但 UI 接入的是成员座席”（[2026-04-06-multi-archive-and-collective-settled-decisions.md](../plans/2026-04-06-multi-archive-and-collective-settled-decisions.md):102-107）。如果未来 `scopeKey` 需要表达 seat scope，而不只是 archive scope，那么这轮迁移就更不能直接做字符串 rename。
 
 7. 本地身份绑定与同步凭据是否同步 rename？
    当前仍是 `profileId` / `localProfileId` / IdentityLink(profileId)（`src/lib/profile/identity-link-storage.ts:53-59`、`69-129`；`src/environment/interfaces/sync.port.ts:101-114`）。如果 archive 成为核心对象，这套边界要不要一并升级成 `archiveId / localArchiveId`，需要明确。

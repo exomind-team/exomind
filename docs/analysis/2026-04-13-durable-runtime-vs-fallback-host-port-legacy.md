@@ -1,7 +1,7 @@
 # 2026-04-13 durable runtime 核心与 fallback/host-port 历史假设断层调查
 
 > 状态：基于本仓库当前代码与文档的只读取证  
-> 范围：`crates/exomind-runtime/src/lib.rs`、`crates/exomind-runtime/tests/runtime_startup.rs`、`src-tauri/src/commands/runtime_commands.rs`、`src-tauri/src/lib.rs`、`src/ui/app/pages/AgentsPage.tsx`、`docs/analysis/2026-04-10-open-issue-source-census.md`
+> 范围：`crates/exomind-runtime/src/lib.rs`、`crates/exomind-runtime/tests/runtime_startup.rs`、`src-tauri/src/commands/runtime_commands.rs`、`src-tauri/src/lib.rs`、`src/ui/app/pages/AgentsPage.tsx`、[2026-04-10-open-issue-source-census.md](2026-04-10-open-issue-source-census.md)
 
 ## 1. 问题定义
 
@@ -120,7 +120,7 @@ runtime 库默认端口是 `1949`，但 Tauri 入口 `resolve_embedded_runtime_p
 
 ### 5.1 `#896 bug(runtime-port)` 的核心诊断已经部分过时
 
-`docs/analysis/2026-04-10-open-issue-source-census.md:190` 当前写的是：
+[2026-04-10-open-issue-source-census.md](2026-04-10-open-issue-source-census.md):190 当前写的是：
 
 - runtime 库层已支持 `port=0`
 - 但 `src-tauri/src/commands/runtime_commands.rs` “仍未把 `AddrInUse` 自动重试到随机端口”
@@ -130,7 +130,7 @@ runtime 库默认端口是 `1949`，但 Tauri 入口 `resolve_embedded_runtime_p
 
 ### 5.2 `#885 bug(sync/pairing)` 的“未做设备级持久化”说法已经不成立
 
-`docs/analysis/2026-04-10-open-issue-source-census.md:200` 仍把 `#885` 归纳成“RT id 未做设备级持久化”。  
+[2026-04-10-open-issue-source-census.md](2026-04-10-open-issue-source-census.md):200 仍把 `#885` 归纳成“RT id 未做设备级持久化”。  
 这个判断对当前库层也已经过时：
 
 - `configured_host_id_from_env()` 已经把 `host_id` 绑定到 `config.sqlite`，见 `crates/exomind-runtime/src/lib.rs:73-95`。
