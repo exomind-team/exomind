@@ -42,11 +42,12 @@
 5. **结构化落地**
    - 标题：`[平台/模块] 症状`，禁止模糊词。
    - 正文至少包含：背景、预期、实际、现状快照、验收标准、关联/依赖。
-   - 文件路径必须使用项目根目录相对路径。
+   - 关键路径必须保持项目根目录相对路径语义；在 issue / 评论正文里，展示形式应为可点击的 Markdown 链接。
 6. **正文降噪与发布前复核**
    - issue / 评论里禁止裸贴 URL、禁止 `[https://...](https://...)`、禁止本地绝对路径。
-   - 仓库文件、文档、workflow、报告引用尽量写成简短命名的 Markdown 链接。
+   - 仓库文件、文档、workflow、报告引用必须写成简短命名的 Markdown 链接；若路径本身就是必要定位信息，可直接用相对路径作为链接文本，但仍必须是链接。
    - 发布前必须回读 `--body-file` 的临时 Markdown，检查是否残留不可点击的反引号路径或高噪音链接。
+   - 当前仓库可用 `node scripts/check-issue-link-hygiene.cjs <body-file>` 做最小机械检查。
 7. **关联图谱**
    - 在新旧 issue 互贴链接；同链路问题统一标注共享上下文（版本、数据链路、迁移窗口）。
 8. **回报用户**
@@ -78,7 +79,9 @@
 
 ## 现状快照
 - dev: <short-hash>
-- 关键路径：<relative/path>
+- 关键路径：
+  - [src/xxx.ts](<repo-blob-url>)
+  - [docs/xxx.md](<repo-blob-url>)
 
 ## 验收标准
 - [ ] AC1
@@ -124,6 +127,9 @@ gh issue edit <id> --body-file /tmp/issue.md
 
 # 5) 追加评论
 gh issue comment <id> --body-file /tmp/comment.md
+
+# 6) 发布前检查正文链接卫生
+node scripts/check-issue-link-hygiene.cjs /tmp/issue.md
 ```
 
 依赖关系（blocked-by / sub-issue）请按章程中的 GraphQL 命令执行。
@@ -136,12 +142,14 @@ Do：
 - 对“数据不兼容/链路切换”类问题，写清时间窗与版本窗。
 - 允许并鼓励多级 Markdown 列表与 mermaid 图表（复杂关系）。
 - 仓库引用使用简短命名的 Markdown 链接，而不是裸 URL。
+- 关键路径若需要保留定位语义，直接把 `src/...` 或 `docs/...` 作为链接文本，但不要裸写成普通文本。
 
 Don’t：
 - 不检索就直接新建。
 - 一个 issue 混多个独立问题。
 - 只写“无法复现”，不记录环境与假设。
 - 不把本地绝对路径、裸 URL 或 URL 直出式链接文本发到 issue 正文/评论里。
+- 不把 `docs/...md`、`src/...ts`、`.github/workflows/...yml` 只放在反引号里而不加链接。
 
 ## 9. 一句话指令（给 Agent）
 
