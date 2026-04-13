@@ -28,3 +28,4 @@ Use this skill when the user asks to:
 - Always deduplicate before deciding to create or update an issue.
 - Always inspect current `dev` implementation state and record file-path evidence.
 - Use dependency links and bidirectional references when the charter requires them.
+- Normalize issue/comment link formatting before publishing: avoid bare URLs, avoid local absolute paths, and turn repository references into short-named Markdown links.
