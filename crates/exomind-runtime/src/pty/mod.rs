@@ -1029,8 +1029,8 @@ fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo>
             let display_meta = HistoricalSessionDisplayMeta {
                 display_title: session_meta
                     .display_title
-                    .or(history_display_meta.display_title)
-                    .or(index_display_title),
+                    .or(index_display_title)
+                    .or(history_display_meta.display_title),
                 fallback_title: history_display_meta.fallback_title,
                 display_path: history_display_meta.display_path,
                 last_modified: history_display_meta.last_modified,
@@ -1971,6 +1971,135 @@ mod tests {
         assert_eq!(
             sessions[0].display_title.as_deref(),
             Some("Session file title")
+        );
+    }
+
+    #[test]
+    fn discover_codex_sessions_prefers_session_index_over_history_prompt_fallback() {
+        let dir = tempdir().unwrap();
+        let codex_root = dir.path().join(".codex");
+        let sessions_dir = codex_root.join("sessions");
+        let day_dir = sessions_dir.join("2026").join("04").join("13");
+        fs::create_dir_all(&day_dir).unwrap();
+        let session_id = "019d7777-aaaa-bbbb-cccc-1234567890ab";
+        let session_path =
+            day_dir.join(format!("rollout-2026-04-13T10-20-30-{session_id}.jsonl"));
+        fs::write(
+            &session_path,
+            format!(
+                concat!(
+                    "{{\"timestamp\":\"2026-04-13T02:20:32.696Z\",\"type\":\"session_meta\",",
+                    "\"payload\":{{\"id\":\"{session_id}\",",
+                    "\"cwd\":\"D:\\\\project\\\\exomind\",\"originator\":\"codex_cli_rs\"}}}}\n",
+                    "{{\"timestamp\":\"2026-04-13T02:20:33.000Z\",\"type\":\"event\",",
+                    "\"payload\":{{\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",",
+                    "\"text\":\"Session file prompt\"}}]}}}}\n"
+                ),
+                session_id = session_id,
+            ),
+        )
+        .unwrap();
+        fs::write(
+            codex_root.join("history.jsonl"),
+            format!(
+                concat!(
+                    "{{\"session_id\":\"{session_id}\",\"ts\":1,\"text\":\"/model gpt-5.4\"}}\n",
+                    "{{\"session_id\":\"{session_id}\",\"ts\":2,\"text\":\"History prompt title\"}}\n"
+                ),
+                session_id = session_id,
+            ),
+        )
+        .unwrap();
+        fs::write(
+            codex_root.join("session_index.jsonl"),
+            format!(
+                concat!(
+                    "{{\"id\":\"{session_id}\",",
+                    "\"thread_name\":\"Index rename title\",",
+                    "\"updated_at\":\"2026-04-13T02:06:02.19584Z\"}}\n"
+                ),
+                session_id = session_id,
+            ),
+        )
+        .unwrap();
+
+        let sessions = discover_codex_sessions(&sessions_dir);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, session_id);
+        assert_eq!(
+            sessions[0].display_title.as_deref(),
+            Some("Index rename title")
+        );
+        assert_eq!(
+            sessions[0].first_user_message.as_deref(),
+            Some("History prompt title")
+        );
+        assert_eq!(
+            sessions[0].last_user_message.as_deref(),
+            Some("History prompt title")
+        );
+    }
+
+    #[test]
+    fn discover_codex_sessions_prefers_session_index_over_history_rename() {
+        let dir = tempdir().unwrap();
+        let codex_root = dir.path().join(".codex");
+        let sessions_dir = codex_root.join("sessions");
+        let day_dir = sessions_dir.join("2026").join("04").join("13");
+        fs::create_dir_all(&day_dir).unwrap();
+        let session_id = "019d7778-aaaa-bbbb-cccc-1234567890ab";
+        let session_path =
+            day_dir.join(format!("rollout-2026-04-13T10-20-30-{session_id}.jsonl"));
+        fs::write(
+            &session_path,
+            format!(
+                concat!(
+                    "{{\"timestamp\":\"2026-04-13T02:20:32.696Z\",\"type\":\"session_meta\",",
+                    "\"payload\":{{\"id\":\"{session_id}\",",
+                    "\"cwd\":\"D:\\\\project\\\\exomind\",\"originator\":\"codex_cli_rs\"}}}}\n"
+                ),
+                session_id = session_id,
+            ),
+        )
+        .unwrap();
+        fs::write(
+            codex_root.join("history.jsonl"),
+            format!(
+                concat!(
+                    "{{\"session_id\":\"{session_id}\",\"ts\":1,\"text\":\"/rename History rename title\"}}\n",
+                    "{{\"session_id\":\"{session_id}\",\"ts\":2,\"text\":\"Follow-up history prompt\"}}\n"
+                ),
+                session_id = session_id,
+            ),
+        )
+        .unwrap();
+        fs::write(
+            codex_root.join("session_index.jsonl"),
+            format!(
+                concat!(
+                    "{{\"id\":\"{session_id}\",",
+                    "\"thread_name\":\"Index rename title\",",
+                    "\"updated_at\":\"2026-04-13T02:06:02.19584Z\"}}\n"
+                ),
+                session_id = session_id,
+            ),
+        )
+        .unwrap();
+
+        let sessions = discover_codex_sessions(&sessions_dir);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, session_id);
+        assert_eq!(
+            sessions[0].display_title.as_deref(),
+            Some("Index rename title")
+        );
+        assert_eq!(
+            sessions[0].first_user_message.as_deref(),
+            Some("Follow-up history prompt")
+        );
+        assert_eq!(
+            sessions[0].last_user_message.as_deref(),
+            Some("Follow-up history prompt")
         );
     }
 
