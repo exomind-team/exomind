@@ -6,6 +6,7 @@ export const EVENTLOG_RECORD_EVENT_QUERY_KEY = 'event';
 export const EVENTLOG_RECORD_LOCATE_QUERY_KEY = 'locate';
 const DEFAULT_EVENT_REF_SUMMARY = '事件引用';
 const EVENT_REF_SUMMARY_MAX_LENGTH = 48;
+const EVENT_REF_EXCERPT_MAX_LENGTH = 72;
 const MARKDOWN_LINK_PATTERN = /\[([^\]]*?)\]\(([^)\s]+)\)/g;
 const APP_URL_PATTERN = /(?:https?:\/\/[^\s<>()]+|\/eventlog\/record\?[^\s<>()]+)/g;
 
@@ -36,6 +37,14 @@ function resolveBaseOrigin(origin?: string): string {
 
 function escapeMarkdownLinkLabel(label: string): string {
   return label.replace(/([\\[\]])/g, '\\$1');
+}
+
+function normalizeInlineText(value: string): string {
+  return value
+    .replace(MARKDOWN_LINK_PATTERN, '$1')
+    .replace(/^>\s?/u, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
 }
 
 function normalizeEventId(value: unknown): string | null {
@@ -86,12 +95,28 @@ export function normalizeEventRefs(refs: readonly EventRef[] | null | undefined)
 export function summarizeEventRefContent(content: string, maxLength = EVENT_REF_SUMMARY_MAX_LENGTH): string {
   const firstLine = content
     .split(/\r?\n/u)
-    .map((line) => line.trim())
+    .map((line) => normalizeInlineText(line))
     .find((line) => line.length > 0);
   const summary = firstLine ?? DEFAULT_EVENT_REF_SUMMARY;
   return summary.length > maxLength
     ? `${summary.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`
     : summary;
+}
+
+export function summarizeEventRefExcerpt(content: string, maxLength = EVENT_REF_EXCERPT_MAX_LENGTH): string | undefined {
+  const lines = content
+    .split(/\r?\n/u)
+    .map((line) => normalizeInlineText(line))
+    .filter((line) => line.length > 0);
+
+  const excerpt = lines.slice(1).join(' ').trim();
+  if (excerpt.length === 0) {
+    return undefined;
+  }
+
+  return excerpt.length > maxLength
+    ? `${excerpt.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`
+    : excerpt;
 }
 
 export function buildEventRecordPath(eventId: string, locate = true): string {
@@ -120,9 +145,26 @@ export function parseEventPermalink(input: string, origin?: string): string | nu
   }
 }
 
-export function buildEventRefQuoteLine(ref: EventRef, origin?: string): string {
+export interface BuildEventRefQuoteLineOptions {
+  origin?: string;
+  excerpt?: string;
+  absolute?: boolean;
+}
+
+export function buildEventRefQuoteLine(ref: EventRef, options?: string | BuildEventRefQuoteLineOptions): string {
+  const normalizedOptions = typeof options === 'string'
+    ? { origin: options, absolute: true }
+    : options;
   const summary = ref.summary ?? DEFAULT_EVENT_REF_SUMMARY;
-  return `> 引用：[${escapeMarkdownLinkLabel(summary)}](${buildEventPermalink(ref.eventId, origin)})`;
+  const useAbsoluteUrl = normalizedOptions?.absolute ?? Boolean(normalizedOptions?.origin);
+  const href = useAbsoluteUrl
+    ? buildEventPermalink(ref.eventId, normalizedOptions?.origin)
+    : buildEventRecordPath(ref.eventId);
+  const excerpt = normalizeSummary(normalizedOptions?.excerpt);
+
+  return excerpt
+    ? `> 引用：[${escapeMarkdownLinkLabel(summary)}](${href}) | ${excerpt}`
+    : `> 引用：[${escapeMarkdownLinkLabel(summary)}](${href})`;
 }
 
 export function extractEventPermalinksFromContent(

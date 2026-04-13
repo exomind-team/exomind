@@ -384,6 +384,7 @@ describe('NowInputRow', () => {
         features={{ quote: true }}
         quotedRefs={[{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }]}
         onQuotedRefsChange={onQuotedRefsChange}
+        resolveQuotedRefExcerpt={() => '第二行补充摘要'}
         placeholder="输入内容记录事件..."
       />,
     );
@@ -393,7 +394,9 @@ describe('NowInputRow', () => {
       await Promise.resolve();
     });
     expect(screen.getByTestId('new-now-quote-banner')).toBeInTheDocument();
-    expect(textarea.value).toContain('/eventlog/record?event=evt-1&locate=1');
+    expect(textarea.value).toBe(
+      '> 引用：[引用事件](/eventlog/record?event=evt-1&locate=1) | 第二行补充摘要\n\n',
+    );
 
     fireEvent.change(textarea, { target: { value: `${textarea.value}\n继续写正文` } });
 
@@ -407,6 +410,78 @@ describe('NowInputRow', () => {
       undefined,
       [{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }],
     );
+  });
+
+  it('leaves a blank line and places the caret after the quote block when inserting into empty textarea', async () => {
+    render(
+      <NowInputRow
+        onSend={vi.fn()}
+        features={{ quote: true }}
+        quotedRefs={[{ kind: 'event', eventId: 'evt-1', summary: '引用事件' }]}
+        resolveQuotedRefExcerpt={() => '附带内容'}
+        placeholder="输入内容记录事件..."
+      />,
+    );
+
+    const textarea = screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(textarea.value).toBe(
+      '> 引用：[引用事件](/eventlog/record?event=evt-1&locate=1) | 附带内容\n\n',
+    );
+    expect(textarea.selectionStart).toBe(textarea.value.length);
+    expect(textarea.selectionEnd).toBe(textarea.value.length);
+  });
+
+  it('keeps the caret on the typing line when adding another quote above quote-only content', async () => {
+    const resolveQuotedRefExcerpt = (eventId: string) => {
+      if (eventId === 'evt-1') return '第一条补充';
+      if (eventId === 'evt-2') return '第二条补充';
+      return undefined;
+    };
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <NowInputRow
+        onSend={onSend}
+        features={{ quote: true }}
+        quotedRefs={[{ kind: 'event', eventId: 'evt-1', summary: '第一条引用' }]}
+        resolveQuotedRefExcerpt={resolveQuotedRefExcerpt}
+        placeholder="输入内容记录事件..."
+      />,
+    );
+
+    const textarea = screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    rerender(
+      <NowInputRow
+        onSend={onSend}
+        features={{ quote: true }}
+        quotedRefs={[
+          { kind: 'event', eventId: 'evt-1', summary: '第一条引用' },
+          { kind: 'event', eventId: 'evt-2', summary: '第二条引用' },
+        ]}
+        resolveQuotedRefExcerpt={resolveQuotedRefExcerpt}
+        placeholder="输入内容记录事件..."
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(textarea.value).toBe([
+      '> 引用：[第二条引用](/eventlog/record?event=evt-2&locate=1) | 第二条补充',
+      '> 引用：[第一条引用](/eventlog/record?event=evt-1&locate=1) | 第一条补充',
+      '',
+      '',
+    ].join('\n'));
+    expect(textarea.selectionStart).toBe(textarea.value.length);
+    expect(textarea.selectionEnd).toBe(textarea.value.length);
   });
 
   it('does not emit quote removal before externally added refs sync into textarea', async () => {

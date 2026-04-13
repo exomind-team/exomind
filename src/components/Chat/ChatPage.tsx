@@ -33,6 +33,7 @@ import { mergeLatestEventsAscending } from './chat-event-pagination';
 import {
   extractEventPermalinksFromContent,
   normalizeEventRefs,
+  summarizeEventRefExcerpt,
   summarizeEventRefContent,
 } from '@/lib/eventlog/event-refs';
 import {
@@ -230,6 +231,7 @@ export function ChatPage({
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
   const [quotedRefs, setQuotedRefs] = useState<EventRef[]>([]);
+  const [expandedForwardRefsEventId, setExpandedForwardRefsEventId] = useState<string | null>(null);
   const [pendingLocateEventId, setPendingLocateEventId] = useState<string | null>(null);
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
@@ -304,6 +306,7 @@ export function ChatPage({
   }, [resolveEventRefSummary]);
 
   const locateEventInRecord = useCallback((eventId: string, syncUrl = false) => {
+    setExpandedForwardRefsEventId(null);
     if (syncUrl) {
       void navigate({
         to: buildEventlogRecordLocatePath(eventId) as never,
@@ -327,6 +330,11 @@ export function ChatPage({
     ]));
     voiceMessageInputRef.current?.focusText();
   }, [variant]);
+
+  const resolveQuotedRefExcerpt = useCallback((eventId: string): string | undefined => {
+    const matched = allEventsRef.current.find((event) => event.id === eventId);
+    return matched ? summarizeEventRefExcerpt(matched.content) : undefined;
+  }, []);
 
   const isNearBottom = useCallback(() => {
     const container = listContainerRef.current;
@@ -785,26 +793,73 @@ export function ChatPage({
     }
 
     const primaryRef = event.refs[0];
-    const remainingCount = Math.max(0, event.refs.length - 1);
+    const isExpandable = event.refs.length > 1;
+    const isExpanded = expandedForwardRefsEventId === event.id;
 
     return (
-      <button
-        type="button"
-        className="mt-2 flex max-w-full flex-col items-start rounded-xl border border-[#E7E5E4] bg-white/80 px-3 py-2 text-left text-[11px] text-stone-500 hover:bg-stone-50 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
-        onClick={() => locateEventInRecord(primaryRef.eventId, true)}
-        data-testid={`event-forward-refs-${event.id}`}
-      >
-        <span className="truncate">
-          引用：{primaryRef.summary ?? primaryRef.eventId}
-        </span>
-        {remainingCount > 0 ? (
-          <span className="mt-0.5 text-[10px] text-stone-400 dark:text-[#78716C]">
-            还有 {remainingCount} 条引用
+      <div className="mt-2 flex max-w-full flex-col gap-2">
+        <button
+          type="button"
+          className="flex max-w-full flex-col items-start rounded-xl border border-[#E7E5E4] bg-white/80 px-3 py-2 text-left text-[11px] text-stone-500 hover:bg-stone-50 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+          onClick={() => {
+            if (!isExpandable) {
+              locateEventInRecord(primaryRef.eventId, true);
+              return;
+            }
+
+            setExpandedForwardRefsEventId((current) => (current === event.id ? null : event.id));
+          }}
+          aria-expanded={isExpandable ? isExpanded : undefined}
+          data-testid={`event-forward-refs-${event.id}`}
+        >
+          <span className="truncate">
+            引用：{primaryRef.summary ?? primaryRef.eventId}
           </span>
+          {isExpandable ? (
+            <span className="mt-0.5 text-[10px] text-stone-400 dark:text-[#78716C]">
+              总共 {event.refs.length} 条引用
+            </span>
+          ) : null}
+        </button>
+        {isExpandable && isExpanded ? (
+          <div
+            className="flex flex-col gap-2 rounded-2xl border border-[#E7E5E4] bg-white/70 p-2 dark:border-[#292524] dark:bg-[#1C1917]/80"
+            data-testid={`event-forward-refs-panel-${event.id}`}
+          >
+            {event.refs.map((ref) => {
+              const targetEvent = allEventsRef.current.find((item) => item.id === ref.eventId);
+              const title = ref.summary ?? (targetEvent ? summarizeEventRefContent(targetEvent.content) : ref.eventId);
+              const excerpt = targetEvent ? summarizeEventRefExcerpt(targetEvent.content) : undefined;
+
+              return (
+                <button
+                  key={`${event.id}:${ref.eventId}`}
+                  type="button"
+                  className="flex items-start gap-2 rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-left hover:bg-stone-50 dark:border-[#292524] dark:bg-[#1C1917] dark:hover:bg-[#292524]"
+                  onClick={() => locateEventInRecord(ref.eventId, true)}
+                  data-testid={`event-forward-ref-item-${event.id}-${ref.eventId}`}
+                >
+                  <span className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#C75B3A] dark:text-[#FDBA74]">
+                    引用
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[11px] font-medium text-stone-700 dark:text-stone-100">
+                      {title}
+                    </span>
+                    {excerpt ? (
+                      <span className="mt-0.5 block truncate text-[10px] text-stone-400 dark:text-[#78716C]">
+                        {excerpt}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         ) : null}
-      </button>
+      </div>
     );
-  }, [locateEventInRecord]);
+  }, [expandedForwardRefsEventId, locateEventInRecord]);
 
   const isSystemEvent = (event: Event) => (
     event.tags.has('block_start')
@@ -1082,6 +1137,7 @@ export function ChatPage({
           quotedRefs={quotedRefs}
           onQuotedRefsChange={setQuotedRefs}
           resolveQuotedRefSummary={resolveEventRefSummary}
+          resolveQuotedRefExcerpt={resolveQuotedRefExcerpt}
           onOpenQuotedEvent={(eventId) => locateEventInRecord(eventId, true)}
         />
       ) : (

@@ -51,6 +51,7 @@ interface NowInputRowProps {
   quotedRefs?: EventRef[];
   onQuotedRefsChange?: (refs: EventRef[]) => void;
   resolveQuotedRefSummary?: (eventId: string) => string | undefined;
+  resolveQuotedRefExcerpt?: (eventId: string) => string | undefined;
   onOpenQuotedEvent?: (eventId: string) => void;
 }
 
@@ -116,7 +117,11 @@ function areEventRefsEqual(left: readonly EventRef[], right: readonly EventRef[]
   ));
 }
 
-function insertMissingQuotedRefLines(content: string, refs: readonly EventRef[]): string {
+function insertMissingQuotedRefLines(
+  content: string,
+  refs: readonly EventRef[],
+  resolveExcerpt?: (eventId: string) => string | undefined,
+): string {
   if (refs.length === 0) {
     return content;
   }
@@ -124,13 +129,18 @@ function insertMissingQuotedRefLines(content: string, refs: readonly EventRef[])
   const existingEventIds = new Set(extractEventPermalinksFromContent(content).map((item) => item.eventId));
   const missingLines = refs
     .filter((ref) => !existingEventIds.has(ref.eventId))
-    .map((ref) => buildEventRefQuoteLine(ref));
+    .map((ref) => buildEventRefQuoteLine(ref, { excerpt: resolveExcerpt?.(ref.eventId) }));
 
   if (missingLines.length === 0) {
     return content;
   }
 
-  return content.length > 0 ? `${missingLines.join('\n')}\n${content}` : missingLines.join('\n');
+  const normalizedContent = content.trim().length === 0 ? '' : content;
+  if (normalizedContent.length === 0) {
+    return `${missingLines.join('\n')}\n\n`;
+  }
+
+  return `${missingLines.join('\n')}\n${normalizedContent}`;
 }
 
 function removeQuotedRefLines(content: string, eventIds: readonly string[]): string {
@@ -169,6 +179,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   quotedRefs = [],
   onQuotedRefsChange,
   resolveQuotedRefSummary,
+  resolveQuotedRefExcerpt,
   onOpenQuotedEvent,
 }, ref) {
   const effectiveDraftStorageKey = draftStorageKey === null ? null : draftStorageKey ?? buildAutoDraftStorageKey(placeholder);
@@ -187,6 +198,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   const submittingRef = useRef(false);
   const previousQuotedRefsRef = useRef<EventRef[]>([]);
   const quoteSyncPendingRef = useRef(false);
+  const quoteCursorTargetRef = useRef<number | null>(null);
   const quoteFeatureEnabled = features?.quote === true;
   const normalizedQuotedRefs = useMemo(
     () => quoteFeatureEnabled ? normalizeEventRefs(quotedRefs) : [],
@@ -216,6 +228,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   useEffect(() => {
     if (!quoteFeatureEnabled) {
       quoteSyncPendingRef.current = false;
+      quoteCursorTargetRef.current = null;
       return;
     }
 
@@ -237,6 +250,24 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
 
   useEffect(() => subscribeInputSendModeChanges(setInputSendMode), []);
+  useLayoutEffect(() => {
+    if (quoteCursorTargetRef.current === null) {
+      return;
+    }
+
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      quoteCursorTargetRef.current = null;
+      return;
+    }
+
+    const nextCursor = Math.min(quoteCursorTargetRef.current, value.length);
+    quoteCursorTargetRef.current = null;
+    textarea.focus();
+    textarea.selectionStart = nextCursor;
+    textarea.selectionEnd = nextCursor;
+  }, [value]);
+
   useEffect(() => () => {
     if (pasteFeedbackTimerRef.current) {
       clearTimeout(pasteFeedbackTimerRef.current);
@@ -290,9 +321,11 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     if (!quoteFeatureEnabled) {
       previousQuotedRefsRef.current = [];
       quoteSyncPendingRef.current = false;
+      quoteCursorTargetRef.current = null;
       return;
     }
     const previousRefs = previousQuotedRefsRef.current;
+    const previousQuotedIds = previousRefs.map((ref) => ref.eventId);
     const nextIds = new Set(normalizedQuotedRefs.map((ref) => ref.eventId));
     const removedIds = previousRefs
       .filter((ref) => !nextIds.has(ref.eventId))
@@ -300,20 +333,26 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
 
     setValue((current) => {
       const withoutRemoved = removeQuotedRefLines(current, removedIds);
-      const nextValue = insertMissingQuotedRefLines(withoutRemoved, normalizedQuotedRefs);
+      const nextValue = insertMissingQuotedRefLines(withoutRemoved, normalizedQuotedRefs, resolveQuotedRefExcerpt);
       if (nextValue !== current) {
         quoteSyncPendingRef.current = true;
+        const authoredContent = removeQuotedRefLines(withoutRemoved, previousQuotedIds);
+        if (authoredContent.trim().length === 0) {
+          quoteCursorTargetRef.current = nextValue.length;
+        }
       }
       return nextValue;
     });
 
     previousQuotedRefsRef.current = normalizedQuotedRefs;
-  }, [normalizedQuotedRefs, quoteFeatureEnabled]);
+  }, [normalizedQuotedRefs, quoteFeatureEnabled, resolveQuotedRefExcerpt]);
 
   const submitInput = useCallback(async () => {
     if (submittingRef.current) return;
 
-    const preparedValue = quoteFeatureEnabled ? insertMissingQuotedRefLines(value, normalizedQuotedRefs) : value;
+    const preparedValue = quoteFeatureEnabled
+      ? insertMissingQuotedRefLines(value, normalizedQuotedRefs, resolveQuotedRefExcerpt)
+      : value;
     const trimmed = preparedValue.trim();
     if (!trimmed) return;
     const resolvedRefs = quoteFeatureEnabled
@@ -352,7 +391,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [effectiveDraftStorageKey, normalizedQuotedRefs, onQuotedRefsChange, onSend, quoteFeatureEnabled, resolveQuotedRefSummary, value]);
+  }, [effectiveDraftStorageKey, normalizedQuotedRefs, onQuotedRefsChange, onSend, quoteFeatureEnabled, resolveQuotedRefExcerpt, resolveQuotedRefSummary, value]);
 
   const insertClipboardText = useCallback((text: string) => {
     if (!text) return;
@@ -412,7 +451,9 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     });
 
     if (voiceTranscriptSendMode === 'direct-send') {
-      const preparedValue = quoteFeatureEnabled ? insertMissingQuotedRefLines(normalized, normalizedQuotedRefs) : normalized;
+      const preparedValue = quoteFeatureEnabled
+        ? insertMissingQuotedRefLines(normalized, normalizedQuotedRefs, resolveQuotedRefExcerpt)
+        : normalized;
       const refs = quoteFeatureEnabled
         ? deriveQuotedRefsFromContent(preparedValue, normalizedQuotedRefs, resolveQuotedRefSummary)
         : [];
@@ -430,7 +471,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
         textareaRef.current.selectionEnd = end;
       }
     });
-  }, [normalizedQuotedRefs, onSend, quoteFeatureEnabled, resolveQuotedRefSummary, voiceTranscriptSendMode]);
+  }, [normalizedQuotedRefs, onSend, quoteFeatureEnabled, resolveQuotedRefExcerpt, resolveQuotedRefSummary, voiceTranscriptSendMode]);
 
   const appendDraftText = useCallback((text: string) => {
     const normalized = normalizeRecognitionText(text);
