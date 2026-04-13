@@ -660,6 +660,51 @@ export function bindSessionToTiledPaneSlot(
   ));
 }
 
+export function moveOrSwapTiledPaneSlotBinding(
+  tree: TiledPaneTreeNode,
+  slots: TiledPaneSlotBinding[],
+  sourceSlotId: string,
+  targetSlotId: string,
+): TiledPaneSlotBinding[] {
+  const normalized = normalizeTiledPaneSlotBindings(tree, slots);
+  const clonedNormalized = normalized.map(cloneSlotBinding);
+
+  if (sourceSlotId === targetSlotId) {
+    return clonedNormalized;
+  }
+
+  const source = normalized.find((slot) => slot.slotId === sourceSlotId);
+  const target = normalized.find((slot) => slot.slotId === targetSlotId);
+
+  if (!source?.sessionId || !target) {
+    return clonedNormalized;
+  }
+
+  if (!target.sessionId && target.terminalRecovery) {
+    return clonedNormalized;
+  }
+
+  return normalized.map((slot) => {
+    if (slot.slotId === sourceSlotId) {
+      return {
+        slotId: sourceSlotId,
+        ...(target.sessionId ? { sessionId: target.sessionId } : {}),
+        ...(target.terminalRecovery ? { terminalRecovery: target.terminalRecovery } : {}),
+      };
+    }
+
+    if (slot.slotId === targetSlotId) {
+      return {
+        slotId: targetSlotId,
+        sessionId: source.sessionId,
+        ...(source.terminalRecovery ? { terminalRecovery: source.terminalRecovery } : {}),
+      };
+    }
+
+    return cloneSlotBinding(slot);
+  });
+}
+
 export function clearTiledPaneSlotBinding(
   tree: TiledPaneTreeNode,
   slots: TiledPaneSlotBinding[],

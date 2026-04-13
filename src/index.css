@@ -132,6 +132,16 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  body.exomind-tree-pane-dragging,
+  body.exomind-tree-pane-dragging * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  body.exomind-tree-pane-dragging {
+    cursor: grabbing;
+  }
 }
 
 @layer utilities {

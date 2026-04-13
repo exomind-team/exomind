@@ -1,4 +1,12 @@
-import { useState, useCallback, useEffect, useMemo, useRef, type MouseEvent as ReactMouseEvent } from 'react';
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical, Loader2, X } from 'lucide-react';
 import {
   DndContext,
@@ -90,6 +98,7 @@ export interface TiledGridProps {
   onToggleUnassignedPool?: () => void;
   onAssignSessionToSlot?: (slotId: string, sessionId: string) => void;
   onBindSessionToSlot?: (slotId: string, sessionId: string) => void;
+  onMoveSessionBetweenSlots?: (sourceSlotId: string, targetSlotId: string) => void;
 }
 
 export interface TiledSlotState {
@@ -137,6 +146,36 @@ const LAYOUT_CONFIG: Record<TiledLayout, { cols: number; rows: number; maxPanes:
   '2x4': { cols: 4, rows: 2, maxPanes: 8 },
 };
 
+const TREE_MODE_DRAG_ACTIVATION_DISTANCE = 8;
+const TREE_MODE_DRAGGING_BODY_CLASS = 'exomind-tree-pane-dragging';
+
+interface TreeModeDragPreviewState {
+  sourceSlotId: string;
+  hoverSlotId: string | null;
+  previewLeft: number;
+  previewTop: number;
+  previewWidth: number;
+  previewHeight: number;
+}
+
+interface TreeModeDragState {
+  pointerId: number;
+  sourceSlotId: string;
+  sourceElement: HTMLDivElement | null;
+  startX: number;
+  startY: number;
+  pointerOffsetX: number;
+  pointerOffsetY: number;
+  sourceRect: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
+  dragging: boolean;
+  hoverSlotId: string | null;
+}
+
 // ── Component ──────────────────────────────────────────────────
 
 export function TiledGrid({
@@ -174,6 +213,7 @@ export function TiledGrid({
   onToggleUnassignedPool,
   onAssignSessionToSlot,
   onBindSessionToSlot,
+  onMoveSessionBetweenSlots,
 }: TiledGridProps) {
   const resolvedTree = paneTree ?? tree;
   const resolvedSlots = paneSlots ?? slots;
@@ -210,6 +250,7 @@ export function TiledGrid({
         unassignedPoolCollapsed={unassignedPoolCollapsed}
         onToggleUnassignedPool={onToggleUnassignedPool}
         onAssignSessionToSlot={handleAssignSessionToSlot}
+        onMoveSessionBetweenSlots={onMoveSessionBetweenSlots}
       />
     );
   }
@@ -452,6 +493,7 @@ interface PaneTreeGridProps {
   unassignedPoolCollapsed?: boolean;
   onToggleUnassignedPool?: () => void;
   onAssignSessionToSlot?: (slotId: string, sessionId: string) => void;
+  onMoveSessionBetweenSlots?: (sourceSlotId: string, targetSlotId: string) => void;
 }
 
 function PaneTreeGrid({
@@ -482,9 +524,13 @@ function PaneTreeGrid({
   unassignedPoolCollapsed = false,
   onToggleUnassignedPool,
   onAssignSessionToSlot,
+  onMoveSessionBetweenSlots,
 }: PaneTreeGridProps) {
   const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
+  const [treeDragPreview, setTreeDragPreview] = useState<TreeModeDragPreviewState | null>(null);
   const orderedSlotIds = useMemo(() => flattenTiledPaneTreeSlotIds(tree), [tree]);
+  const treeDragStateRef = useRef<TreeModeDragState | null>(null);
+  const treeDragCleanupRef = useRef<(() => void) | null>(null);
   const slotMap = useMemo(
     () => new Map(slots.map((slot) => [slot.slotId, slot])),
     [slots],
@@ -496,6 +542,8 @@ function PaneTreeGrid({
   const resolvedFocusedSlotId = focusedSlotId ?? (
     focusedIndex != null ? orderedSlotIds[focusedIndex] ?? null : null
   );
+  const dragSourceSlotId = treeDragPreview?.sourceSlotId ?? null;
+  const dragHoverSlotId = treeDragPreview?.hoverSlotId ?? null;
 
   const treeEntries = useMemo(() => {
     const next = new Map<string, TreePaneEntry>();
@@ -556,6 +604,247 @@ function PaneTreeGrid({
     setExpandedSlotId((prev) => (prev === slotId ? null : slotId));
   }, []);
 
+  const releaseTreeDragPointerCapture = useCallback((dragState: TreeModeDragState | null) => {
+    if (!dragState?.sourceElement) {
+      return;
+    }
+
+    try {
+      dragState.sourceElement.releasePointerCapture(dragState.pointerId);
+    } catch {
+      // Ignore browsers / test environments without active pointer capture on this element.
+    }
+  }, []);
+
+  const stopTreeDrag = useCallback(() => {
+    const activeDrag = treeDragStateRef.current;
+    treeDragCleanupRef.current?.();
+    treeDragCleanupRef.current = null;
+    releaseTreeDragPointerCapture(activeDrag);
+    treeDragStateRef.current = null;
+    document.body.classList.remove(TREE_MODE_DRAGGING_BODY_CLASS);
+    setTreeDragPreview(null);
+  }, [releaseTreeDragPointerCapture]);
+
+  useEffect(() => () => {
+    treeDragCleanupRef.current?.();
+    releaseTreeDragPointerCapture(treeDragStateRef.current);
+    document.body.classList.remove(TREE_MODE_DRAGGING_BODY_CLASS);
+    treeDragCleanupRef.current = null;
+    treeDragStateRef.current = null;
+  }, [releaseTreeDragPointerCapture]);
+
+  const resolveTreeDragTargetSlotId = useCallback((target: EventTarget | null) => {
+    let current: Element | null = null;
+
+    if (target instanceof Element) {
+      current = target;
+    } else if (target instanceof Node) {
+      current = target.parentElement;
+    }
+
+    while (current) {
+      const slotId = current.getAttribute('data-tiled-slot-id');
+      if (slotId) {
+        return slotId;
+      }
+      current = current.parentElement;
+    }
+
+    return null;
+  }, []);
+
+  const resolveTreeDragTargetSlotIdAtPoint = useCallback((
+    clientX: number,
+    clientY: number,
+    fallbackTarget: EventTarget | null,
+  ) => {
+    const pointTarget = typeof document.elementFromPoint === 'function'
+      ? document.elementFromPoint(clientX, clientY)
+      : null;
+
+    return resolveTreeDragTargetSlotId(pointTarget ?? fallbackTarget);
+  }, [resolveTreeDragTargetSlotId]);
+
+  const resolveValidTreeDragTargetSlotId = useCallback((
+    sourceSlotId: string,
+    clientX: number,
+    clientY: number,
+    fallbackTarget: EventTarget | null,
+  ) => {
+    const targetSlotId = resolveTreeDragTargetSlotIdAtPoint(clientX, clientY, fallbackTarget);
+    if (!targetSlotId || targetSlotId === sourceSlotId) {
+      return null;
+    }
+
+    const targetEntry = treeEntries.get(targetSlotId);
+    if (!targetEntry) {
+      return null;
+    }
+
+    if (targetEntry.kind === 'session') {
+      return targetSlotId;
+    }
+
+    if (targetEntry.kind === 'empty' && slotStates?.[targetSlotId]?.status !== 'creating') {
+      return targetSlotId;
+    }
+
+    return null;
+  }, [resolveTreeDragTargetSlotIdAtPoint, slotStates, treeEntries]);
+
+  const syncTreeDragPreview = useCallback((
+    dragState: TreeModeDragState,
+    clientX: number,
+    clientY: number,
+    fallbackTarget: EventTarget | null,
+  ) => {
+    const hoverSlotId = resolveValidTreeDragTargetSlotId(
+      dragState.sourceSlotId,
+      clientX,
+      clientY,
+      fallbackTarget,
+    );
+    const nextPreview = {
+      sourceSlotId: dragState.sourceSlotId,
+      hoverSlotId,
+      previewLeft: clientX - dragState.pointerOffsetX,
+      previewTop: clientY - dragState.pointerOffsetY,
+      previewWidth: dragState.sourceRect.width,
+      previewHeight: dragState.sourceRect.height,
+    };
+
+    dragState.hoverSlotId = hoverSlotId;
+    setTreeDragPreview((previousPreview) => {
+      if (
+        previousPreview
+        && previousPreview.sourceSlotId === nextPreview.sourceSlotId
+        && previousPreview.hoverSlotId === nextPreview.hoverSlotId
+        && previousPreview.previewLeft === nextPreview.previewLeft
+        && previousPreview.previewTop === nextPreview.previewTop
+        && previousPreview.previewWidth === nextPreview.previewWidth
+        && previousPreview.previewHeight === nextPreview.previewHeight
+      ) {
+        return previousPreview;
+      }
+
+      return nextPreview;
+    });
+  }, [resolveValidTreeDragTargetSlotId]);
+
+  const handleTreeModeHeaderPointerDown = useCallback((
+    sourceSlotId: string,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (!onMoveSessionBetweenSlots || !event.isPrimary || event.button !== 0) {
+      return;
+    }
+
+    event.stopPropagation();
+    stopTreeDrag();
+
+    const sourcePaneElement = event.currentTarget.closest('[data-tiled-slot-id]');
+    const sourceRect = (sourcePaneElement instanceof HTMLElement ? sourcePaneElement : event.currentTarget)
+      .getBoundingClientRect();
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Ignore browsers / test environments that cannot capture this pointer.
+    }
+
+    treeDragStateRef.current = {
+      pointerId: event.pointerId,
+      sourceSlotId,
+      sourceElement: event.currentTarget,
+      startX: event.clientX,
+      startY: event.clientY,
+      pointerOffsetX: event.clientX - sourceRect.left,
+      pointerOffsetY: event.clientY - sourceRect.top,
+      sourceRect: {
+        left: sourceRect.left,
+        top: sourceRect.top,
+        width: Math.max(sourceRect.width, 1),
+        height: Math.max(sourceRect.height, 1),
+      },
+      dragging: false,
+      hoverSlotId: null,
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const currentDrag = treeDragStateRef.current;
+      if (!currentDrag || moveEvent.pointerId !== currentDrag.pointerId) {
+        return;
+      }
+
+      const deltaX = moveEvent.clientX - currentDrag.startX;
+      const deltaY = moveEvent.clientY - currentDrag.startY;
+      if (!currentDrag.dragging && Math.hypot(deltaX, deltaY) < TREE_MODE_DRAG_ACTIVATION_DISTANCE) {
+        return;
+      }
+
+      if (moveEvent.cancelable) {
+        moveEvent.preventDefault();
+      }
+      window.getSelection()?.removeAllRanges();
+
+      if (!currentDrag.dragging) {
+        currentDrag.dragging = true;
+        document.body.classList.add(TREE_MODE_DRAGGING_BODY_CLASS);
+      }
+
+      syncTreeDragPreview(currentDrag, moveEvent.clientX, moveEvent.clientY, moveEvent.target);
+    };
+
+    const finishTreeDrag = (finishEvent: PointerEvent, cancelled: boolean) => {
+      const currentDrag = treeDragStateRef.current;
+      if (!currentDrag || finishEvent.pointerId !== currentDrag.pointerId) {
+        return;
+      }
+
+      const wasDragging = currentDrag.dragging;
+      const dragSourceId = currentDrag.sourceSlotId;
+      const targetSlotId = currentDrag.hoverSlotId ?? resolveValidTreeDragTargetSlotId(
+        dragSourceId,
+        finishEvent.clientX,
+        finishEvent.clientY,
+        finishEvent.target,
+      );
+      stopTreeDrag();
+
+      if (cancelled || !wasDragging || !targetSlotId) {
+        return;
+      }
+
+      onMoveSessionBetweenSlots(dragSourceId, targetSlotId);
+    };
+
+    const handlePointerUp = (upEvent: PointerEvent) => {
+      finishTreeDrag(upEvent, false);
+    };
+    const handlePointerCancel = (cancelEvent: PointerEvent) => {
+      finishTreeDrag(cancelEvent, true);
+    };
+    const handleWindowBlur = () => {
+      if (!treeDragStateRef.current) {
+        return;
+      }
+
+      stopTreeDrag();
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp, { passive: false });
+    window.addEventListener('pointercancel', handlePointerCancel, { passive: false });
+    window.addEventListener('blur', handleWindowBlur);
+    treeDragCleanupRef.current = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [onMoveSessionBetweenSlots, resolveValidTreeDragTargetSlotId, stopTreeDrag, syncTreeDragPreview]);
+
   const renderSlotEntry = useCallback((slotId: string) => {
     const entry = treeEntries.get(slotId) ?? {
       id: slotId,
@@ -582,10 +871,16 @@ function PaneTreeGrid({
           isAutoResuming={isSessionAutoResuming?.(entry.session) ?? false}
           isFocused={isFocused}
           isExpanded={expandedSlotId === slotId}
-          isDragging={false}
+          isDragging={dragSourceSlotId === slotId}
+          isTreeDragTarget={dragHoverSlotId === slotId}
           onDoubleClick={() => handleToggleExpanded(slotId)}
           onFocus={() => handleFocusSlot(slotId)}
           onClick={() => onSessionClick?.(entry.session)}
+          onHeaderBackgroundPointerDown={
+            onMoveSessionBetweenSlots
+              ? (event) => handleTreeModeHeaderPointerDown(slotId, event)
+              : undefined
+          }
           onQuickAction={onQuickAction ? (response) => onQuickAction(entry.session, response) : undefined}
           onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(entry.session) : undefined}
           onStop={onStopSession ? () => onStopSession(entry.session) : undefined}
@@ -631,6 +926,7 @@ function PaneTreeGrid({
         key={slotId}
         slotId={slotId}
         isFocused={isFocused}
+        isTreeDragTarget={dragHoverSlotId === slotId}
         onFocus={() => handleFocusSlot(slotId)}
         onOpen={() => onOpenEmptySlot?.(slotId)}
         slotState={slotState}
@@ -642,8 +938,11 @@ function PaneTreeGrid({
       />
     );
   }, [
+    dragHoverSlotId,
+    dragSourceSlotId,
     expandedSlotId,
     handleFocusSlot,
+    handleTreeModeHeaderPointerDown,
     handleToggleExpanded,
     isSessionAutoResuming,
     isSessionDisconnected,
@@ -652,6 +951,7 @@ function PaneTreeGrid({
     onClearSlot,
     onCloseSlot,
     onMarkWaiting,
+    onMoveSessionBetweenSlots,
     onOpenEmptySlot,
     onAssignSessionToSlot,
     onQuickAction,
@@ -669,7 +969,11 @@ function PaneTreeGrid({
   const renderTree = useCallback((node: TiledPaneTreeNode, path: TiledPaneTreePath = []) => {
     if (node.type === 'slot') {
       return (
-        <div key={node.slotId} className="h-full min-h-0 min-w-0">
+        <div
+          key={node.slotId}
+          data-tiled-slot-id={node.slotId}
+          className="h-full min-h-0 min-w-0"
+        >
           {renderSlotEntry(node.slotId)}
         </div>
       );
@@ -696,6 +1000,12 @@ function PaneTreeGrid({
 
   const expandedEntry = expandedSlotId ? treeEntries.get(expandedSlotId) : null;
   const canAssignToFocusedSlot = !!resolvedFocusedSlotId && !!onAssignSessionToSlot;
+  const treeDragPreviewSession = treeDragPreview
+    ? (() => {
+        const previewEntry = treeEntries.get(treeDragPreview.sourceSlotId);
+        return previewEntry?.kind === 'session' ? previewEntry.session : null;
+      })()
+    : null;
 
   return (
     <div data-testid="tiled-grid" className="flex h-full min-h-0 flex-col gap-2">
@@ -743,6 +1053,83 @@ function PaneTreeGrid({
         ) : (
           renderTree(tree)
         )}
+      </div>
+      {treeDragPreview && treeDragPreviewSession ? (
+        <TreeModeDragPreview
+          session={treeDragPreviewSession}
+          preview={treeDragPreview}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+interface TreeModeDragPreviewProps {
+  session: SessionInfo;
+  preview: TreeModeDragPreviewState;
+}
+
+function TreeModeDragPreview({ session, preview }: TreeModeDragPreviewProps) {
+  const agentColor = AGENT_KIND_COLORS[session.agent_kind];
+  const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
+
+  return (
+    <div
+      data-testid="tiled-grid-tree-drag-preview"
+      className="pointer-events-none fixed z-50 flex overflow-hidden rounded-lg border border-[#C75B3A]/60 bg-[#1C1917]/96 shadow-2xl ring-1 ring-[#C75B3A]/30 backdrop-blur-sm"
+      style={{
+        left: preview.previewLeft,
+        top: preview.previewTop,
+        width: preview.previewWidth,
+        height: preview.previewHeight,
+      }}
+    >
+      <div className="flex h-full min-h-0 flex-1 flex-col">
+        <div className="flex flex-col gap-0 border-b border-[#E7E5E4]/20 bg-[#F5F0ED] px-2 py-1 dark:border-[#292524] dark:bg-[#1C1917]">
+          <div className="flex items-center justify-between gap-1">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <SessionStatusMark
+                status={session.status}
+                size={9}
+                className="h-4 w-4"
+              />
+              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                {session.role || '未命名'}
+              </span>
+              <div className="flex shrink-0 items-center gap-1 text-[10px]">
+                <span
+                  className="font-medium"
+                  style={{ color: agentColor }}
+                >
+                  {AGENT_KIND_LABELS[session.agent_kind]}
+                </span>
+                <span className="text-[#A8A29E]">·</span>
+                <span className="text-[#A8A29E]">
+                  {formatRelativeTime(session.last_active_at)}
+                </span>
+              </div>
+            </div>
+            <span
+              className="shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium"
+              style={{
+                color: statusIndicator.color,
+                backgroundColor: `${statusIndicator.color}20`,
+              }}
+            >
+              {statusIndicator.label}
+            </span>
+          </div>
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-[linear-gradient(180deg,rgba(28,25,23,0.92)_0%,rgba(28,25,23,0.78)_100%)] px-4 text-center">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-[#FAFAF9]">
+              拖拽中
+            </p>
+            <p className="text-[10px] text-[#A8A29E]">
+              拖到空窗格移动，拖到已占用窗格换位
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -949,6 +1336,7 @@ function PaneWorkbenchActions({
       {onSplitHorizontal && (
         <button
           type="button"
+          onPointerDown={stopPaneHeaderPointerDown}
           onClick={(event) => {
             event.stopPropagation();
             onSplitHorizontal();
@@ -962,6 +1350,7 @@ function PaneWorkbenchActions({
       {onSplitVertical && (
         <button
           type="button"
+          onPointerDown={stopPaneHeaderPointerDown}
           onClick={(event) => {
             event.stopPropagation();
             onSplitVertical();
@@ -975,6 +1364,7 @@ function PaneWorkbenchActions({
       {onClear && (
         <button
           type="button"
+          onPointerDown={stopPaneHeaderPointerDown}
           onClick={(event) => {
             event.stopPropagation();
             onClear();
@@ -988,6 +1378,7 @@ function PaneWorkbenchActions({
       {onClose && (
         <button
           type="button"
+          onPointerDown={stopPaneHeaderPointerDown}
           onClick={(event) => {
             event.stopPropagation();
             onClose();
@@ -1000,6 +1391,10 @@ function PaneWorkbenchActions({
       )}
     </div>
   );
+}
+
+function stopPaneHeaderPointerDown(event: ReactPointerEvent<HTMLElement>) {
+  event.stopPropagation();
 }
 
 function DisconnectedPane({
@@ -1023,6 +1418,7 @@ function DisconnectedPane({
   return (
     <div
       data-testid={slotId ? `tiled-slot-${slotId}` : `tiled-grid-disconnected-${sessionId}`}
+      data-tiled-slot-id={slotId}
       className={`
         flex h-full min-h-0 flex-col overflow-hidden rounded-lg border transition-all
         ${isDragging ? 'opacity-50 shadow-2xl ring-2 ring-[#A8A29E]/40' : ''}
@@ -1121,6 +1517,7 @@ function DisconnectedPane({
 interface EmptyPaneProps {
   slotId: string;
   isFocused: boolean;
+  isTreeDragTarget?: boolean;
   onFocus: () => void;
   onOpen?: () => void;
   slotState?: TiledSlotState | null;
@@ -1134,6 +1531,7 @@ interface EmptyPaneProps {
 function EmptyPane({
   slotId,
   isFocused,
+  isTreeDragTarget = false,
   onFocus,
   onOpen,
   slotState,
@@ -1146,8 +1544,12 @@ function EmptyPane({
   return (
     <div
       data-testid={`tiled-slot-${slotId}`}
+      data-tiled-slot-id={slotId}
+      data-tree-drag-hovered={isTreeDragTarget ? 'true' : undefined}
       className={`flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-dashed transition-colors ${
-        isFocused
+        isTreeDragTarget
+          ? 'border-[#C75B3A] bg-[#FFF1E8] shadow-[0_0_0_1px_rgba(199,91,58,0.22)] dark:border-[#C75B3A] dark:bg-[#1C1917]'
+          : isFocused
           ? 'border-[#C75B3A]/50 bg-[#FFF7ED] dark:bg-[#1C1917]'
           : 'border-[#D6D3D1] bg-[#FAFAF9] dark:border-[#44403C] dark:bg-[#0C0A09]'
       }`}
@@ -1237,9 +1639,11 @@ interface SessionPaneProps {
   isFocused: boolean;
   isExpanded: boolean;
   isDragging: boolean;
+  isTreeDragTarget?: boolean;
   onDoubleClick: () => void;
   onFocus: () => void;
   onClick?: () => void;
+  onHeaderBackgroundPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
   dragListeners?: Record<string, Function>;
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
@@ -1261,9 +1665,11 @@ function SessionPane({
   isFocused,
   isExpanded,
   isDragging,
+  isTreeDragTarget = false,
   onDoubleClick,
   onFocus,
   onClick,
+  onHeaderBackgroundPointerDown,
   dragListeners,
   onQuickAction,
   onMarkWaiting,
@@ -1382,11 +1788,14 @@ function SessionPane({
   return (
     <div
       data-testid={slotId ? `tiled-slot-${slotId}` : undefined}
+      data-tiled-slot-id={slotId}
+      data-tree-drag-hovered={isTreeDragTarget ? 'true' : undefined}
       data-session-id={session.id}
       data-pty-id={session.pty_id ?? ""}
       className={`
         flex h-full min-h-0 flex-col overflow-hidden rounded-lg border transition-all
         ${isDragging ? 'opacity-50 shadow-2xl ring-2 ring-[#C75B3A]/40' : ''}
+        ${isTreeDragTarget ? 'ring-2 ring-inset ring-[#C75B3A]/70 shadow-[0_0_0_1px_rgba(199,91,58,0.28)]' : ''}
         ${needsAttention
           ? 'border-yellow-400/60 shadow-[0_0_0_1px_rgba(234,179,8,0.3)] dark:border-yellow-500/40'
           : isFocused
@@ -1402,8 +1811,11 @@ function SessionPane({
     >
       {/* Pane header (36-40px, double-row as per designer review) */}
       <div
+        data-testid={slotId ? `tiled-slot-header-${slotId}` : undefined}
         className="flex flex-col gap-0 border-b border-[#E7E5E4] bg-[#F5F0ED] px-2 py-1 dark:border-[#292524] dark:bg-[#1C1917]"
         onDoubleClick={onDoubleClick}
+        onPointerDown={onHeaderBackgroundPointerDown}
+        style={onHeaderBackgroundPointerDown ? { touchAction: 'none' } : undefined}
       >
         {/* Row 1: Drag handle + Status + Role + Agent + Time + Expand button */}
         <div className="flex items-center justify-between gap-1">
@@ -1424,12 +1836,16 @@ function SessionPane({
               size={9}
               className="h-4 w-4"
             />
-            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+            <span
+              className="min-w-0 flex-1 truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
+              onPointerDown={stopPaneHeaderPointerDown}
+            >
               {session.role || '未命名'}
             </span>
             <div
               data-testid={`tiled-grid-pane-meta-${session.id}`}
               className="flex shrink-0 items-center gap-1 text-[10px]"
+              onPointerDown={stopPaneHeaderPointerDown}
             >
               <span
                 className="font-medium"
@@ -1452,6 +1868,7 @@ function SessionPane({
             />
             <button
               type="button"
+              onPointerDown={stopPaneHeaderPointerDown}
               onClick={(e) => {
                 e.stopPropagation();
                 onDoubleClick();
@@ -1467,7 +1884,10 @@ function SessionPane({
         {/* Row 2: Branch + Issue badges */}
         <div className="flex items-center gap-1 overflow-hidden">
           {session.context.git_branch && (
-            <span className="truncate rounded bg-[#E7E5E4] px-1 py-0 text-[9px] text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
+            <span
+              className="truncate rounded bg-[#E7E5E4] px-1 py-0 text-[9px] text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]"
+              onPointerDown={stopPaneHeaderPointerDown}
+            >
               {session.context.git_branch}
             </span>
           )}
@@ -1475,12 +1895,16 @@ function SessionPane({
             <span
               key={ref}
               className="flex-shrink-0 rounded bg-[#E7E5E4] px-1 py-0 text-[9px] text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]"
+              onPointerDown={stopPaneHeaderPointerDown}
             >
               {ref}
             </span>
           ))}
           {session.context.pr_ref && (
-            <span className="flex-shrink-0 rounded bg-[#DBEAFE] px-1 py-0 text-[9px] text-[#1E40AF] dark:bg-[#1E3A5F] dark:text-[#93C5FD]">
+            <span
+              className="flex-shrink-0 rounded bg-[#DBEAFE] px-1 py-0 text-[9px] text-[#1E40AF] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
+              onPointerDown={stopPaneHeaderPointerDown}
+            >
               PR {session.context.pr_ref}
             </span>
           )}

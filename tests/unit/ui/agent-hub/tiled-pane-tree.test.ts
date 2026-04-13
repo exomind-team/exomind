@@ -88,6 +88,98 @@ describe('tiled pane tree workbench helpers（平铺窗格树工作台辅助函�
     ]);
   });
 
+  it('swaps two occupied slots instead of overwriting the target binding（occupied -> occupied 应换位而不是静默覆盖）', async () => {
+    type MoveOrSwapBinding = (
+      tree: ReturnType<typeof createTemplatePaneTree>,
+      slots: Array<{
+        slotId: string;
+        sessionId?: string;
+        terminalRecovery?: {
+          sessionId: string;
+          sourceHostId: string;
+          agentType: string;
+          innerSessionId: string;
+          role: string;
+          workdir: string;
+          projectPathKey: string;
+        };
+      }>,
+      sourceSlotId: string,
+      targetSlotId: string,
+    ) => unknown;
+
+    const tree = createTemplatePaneTree('1x2');
+    const module = await import('@/ui/app/pages/agents/tiled-pane-tree');
+    const moveOrSwapTiledPaneSlotBinding = (
+      module as Record<string, unknown>
+    ).moveOrSwapTiledPaneSlotBinding as MoveOrSwapBinding | undefined;
+
+    expect(moveOrSwapTiledPaneSlotBinding).toBeTypeOf('function');
+
+    const nextSlots = moveOrSwapTiledPaneSlotBinding?.(
+      tree,
+      [
+        {
+          slotId: 'slot-1',
+          sessionId: 'session-a',
+          terminalRecovery: {
+            sessionId: 'session-a',
+            sourceHostId: 'runtime-host-a',
+            agentType: 'codex',
+            innerSessionId: 'codex-thread-a',
+            role: 'Codex A',
+            workdir: 'D:/project/exomind',
+            projectPathKey: 'd:/project/exomind',
+          },
+        },
+        {
+          slotId: 'slot-2',
+          sessionId: 'session-b',
+          terminalRecovery: {
+            sessionId: 'session-b',
+            sourceHostId: 'runtime-host-b',
+            agentType: 'claude',
+            innerSessionId: 'claude-thread-b',
+            role: 'Claude B',
+            workdir: 'D:/project/exomind',
+            projectPathKey: 'd:/project/exomind',
+          },
+        },
+      ],
+      'slot-1',
+      'slot-2',
+    );
+
+    expect(nextSlots).toEqual([
+      {
+        slotId: 'slot-1',
+        sessionId: 'session-b',
+        terminalRecovery: {
+          sessionId: 'session-b',
+          sourceHostId: 'runtime-host-b',
+          agentType: 'claude',
+          innerSessionId: 'claude-thread-b',
+          role: 'Claude B',
+          workdir: 'D:/project/exomind',
+          projectPathKey: 'd:/project/exomind',
+        },
+      },
+      {
+        slotId: 'slot-2',
+        sessionId: 'session-a',
+        terminalRecovery: {
+          sessionId: 'session-a',
+          sourceHostId: 'runtime-host-a',
+          agentType: 'codex',
+          innerSessionId: 'codex-thread-a',
+          role: 'Codex A',
+          workdir: 'D:/project/exomind',
+          projectPathKey: 'd:/project/exomind',
+        },
+      },
+    ]);
+  });
+
   it('clearing a slot removes both the live binding and recoverable snapshot（清空窗格时应同时移除绑定与恢复快照）', () => {
     const tree = createTemplatePaneTree('1x1');
 

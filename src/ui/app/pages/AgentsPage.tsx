@@ -190,6 +190,7 @@ import {
   createTemplatePaneSlotBindings,
   createTemplatePaneTree,
   flattenTiledPaneTreeSlotIds,
+  moveOrSwapTiledPaneSlotBinding,
   removeTiledPaneTreeSlot,
   resolveLegacyPaneOrderFromTree,
   splitTiledPaneTreeSlot,
@@ -3459,6 +3460,60 @@ export function AgentsPage() {
       tiledPaneSlots,
       tiledPaneTree,
       tiledSessionById,
+    ],
+  );
+  const moveSessionBetweenTiledSlots = useCallback(
+    (sourceSlotId: string, targetSlotId: string) => {
+      if (
+        sourceSlotId === targetSlotId ||
+        !tiledSlotIds.includes(sourceSlotId) ||
+        !tiledSlotIds.includes(targetSlotId) ||
+        activeTiledSlotStates[targetSlotId]?.status === "creating"
+      ) {
+        return;
+      }
+
+      const sourceSlot = tiledPaneSlots.find((slot) => slot.slotId === sourceSlotId);
+      const targetSlot = tiledPaneSlots.find((slot) => slot.slotId === targetSlotId);
+      const sourceSessionId = sourceSlot?.sessionId?.trim();
+      const targetSessionId = targetSlot?.sessionId?.trim();
+
+      if (
+        !sourceSessionId ||
+        !activeTiledSessions.some((session) => session.id === sourceSessionId)
+      ) {
+        return;
+      }
+
+      const targetHasLiveSession = !!targetSessionId
+        && activeTiledSessions.some((session) => session.id === targetSessionId);
+      const targetIsEmpty = !targetSessionId && !targetSlot?.terminalRecovery;
+
+      if (!targetIsEmpty && !targetHasLiveSession) {
+        return;
+      }
+
+      clearPendingTiledSlotState(tiledActiveLayoutId, targetSlotId);
+      removePendingSpawnedPtyBindingsForTarget(tiledActiveLayoutId, targetSlotId);
+      setTiledPaneSlots((prev) =>
+        moveOrSwapTiledPaneSlotBinding(
+          tiledPaneTree,
+          prev,
+          sourceSlotId,
+          targetSlotId,
+        ),
+      );
+      setTiledFocusedSlotId(targetSlotId);
+    },
+    [
+      activeTiledSessions,
+      activeTiledSlotStates,
+      clearPendingTiledSlotState,
+      removePendingSpawnedPtyBindingsForTarget,
+      tiledActiveLayoutId,
+      tiledPaneSlots,
+      tiledPaneTree,
+      tiledSlotIds,
     ],
   );
   const applySessionToNamedTiledWorkbenchLayout = useCallback(
@@ -8787,6 +8842,7 @@ export function AgentsPage() {
               unassignedPoolCollapsed={tiledUnassignedPoolCollapsed}
               onToggleUnassignedPool={toggleTiledUnassignedPool}
               onAssignSessionToSlot={bindSessionToTiledSlot}
+              onMoveSessionBetweenSlots={moveSessionBetweenTiledSlots}
             />
           </div>
         </div>

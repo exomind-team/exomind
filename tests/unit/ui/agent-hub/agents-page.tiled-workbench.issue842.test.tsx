@@ -238,6 +238,43 @@ function buildRuntimeSnapshot() {
   };
 }
 
+function dragFromSourceToTarget(source: HTMLElement, target: HTMLElement) {
+  fireEvent.pointerDown(source, {
+    pointerId: 21,
+    pointerType: 'mouse',
+    clientX: 120,
+    clientY: 80,
+    isPrimary: true,
+    button: 0,
+  });
+
+  fireEvent.pointerMove(window, {
+    pointerId: 21,
+    pointerType: 'mouse',
+    clientX: 146,
+    clientY: 108,
+    isPrimary: true,
+    buttons: 1,
+  });
+
+  fireEvent.pointerMove(target, {
+    pointerId: 21,
+    pointerType: 'mouse',
+    clientX: 192,
+    clientY: 140,
+    isPrimary: true,
+    buttons: 1,
+  });
+
+  fireEvent.pointerUp(target, {
+    pointerId: 21,
+    pointerType: 'mouse',
+    clientX: 192,
+    clientY: 140,
+    isPrimary: true,
+  });
+}
+
 describe('agents page issue-842（平铺窗格树工作台骨架）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -522,6 +559,142 @@ describe('agents page issue-842（平铺窗格树工作台骨架）', () => {
       within(slot).getByTestId('tiled-slot-bind-slot-3-session-api-897'),
     ).toBeInTheDocument();
     expect(within(slot).getByText('绑定 API Session 897')).toBeInTheDocument();
+  });
+
+  it('moves a live tiled session into an empty slot without returning it to the unassigned pool（拖到空窗格应移动绑定而不是回池）', async () => {
+    const liveSession = buildSession({
+      id: 'session-live-871-move',
+      role: 'Move Session 871',
+      pty_id: 'pty-live-871-move',
+    });
+    sessionStreamState.sessions = [liveSession];
+
+    writeAgentsTiledPersistState({
+      version: 2,
+      layout: '1x2',
+      paneOrder: [liveSession.id],
+      tree: createTemplatePaneTree('1x2'),
+      slots: [
+        {
+          slotId: 'slot-1',
+          sessionId: liveSession.id,
+          terminalRecovery: {
+            sessionId: liveSession.id,
+            sourceHostId: 'runtime-host-523',
+            agentType: 'codex',
+            innerSessionId: 'codex-thread-871-move',
+            role: 'Move Session 871',
+            workdir: 'D:/project/exomind',
+            projectPathKey: 'd:/project/exomind',
+          },
+        },
+        {
+          slotId: 'slot-2',
+        },
+      ],
+      focusedSlotId: 'slot-1',
+      unassignedSessionIds: [],
+      unassignedPoolCollapsed: false,
+      immersive: false,
+    });
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-live-871-move')).toBeInTheDocument();
+      expect(screen.getByTestId('tiled-slot-slot-2')).toBeInTheDocument();
+    });
+
+    dragFromSourceToTarget(
+      screen.getByTestId('tiled-slot-header-slot-1'),
+      screen.getByTestId('tiled-slot-slot-2'),
+    );
+
+    await waitFor(() => {
+      const sourceSlot = screen.getByTestId('tiled-slot-slot-1');
+      const targetSlot = screen.getByTestId('tiled-slot-slot-2');
+
+      expect(within(targetSlot).getByTestId('mock-pty-terminal-pty-live-871-move')).toBeInTheDocument();
+      expect(within(sourceSlot).getByText('空窗格')).toBeInTheDocument();
+      expect(within(sourceSlot).queryByRole('button', { name: '绑定 Move Session 871' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('swaps two occupied tiled slots when dragging onto another live session（拖到已占用窗格应换位）', async () => {
+    const sessionA = buildSession({
+      id: 'session-live-871-a',
+      role: 'Swap Session A',
+      pty_id: 'pty-live-871-a',
+      inner_session_id: 'codex-thread-871-a',
+    });
+    const sessionB = buildSession({
+      id: 'session-live-871-b',
+      role: 'Swap Session B',
+      pty_id: 'pty-live-871-b',
+      inner_session_id: 'codex-thread-871-b',
+    });
+    sessionStreamState.sessions = [sessionA, sessionB];
+
+    writeAgentsTiledPersistState({
+      version: 2,
+      layout: '1x2',
+      paneOrder: [sessionA.id, sessionB.id],
+      tree: createTemplatePaneTree('1x2'),
+      slots: [
+        {
+          slotId: 'slot-1',
+          sessionId: sessionA.id,
+          terminalRecovery: {
+            sessionId: sessionA.id,
+            sourceHostId: 'runtime-host-523',
+            agentType: 'codex',
+            innerSessionId: 'codex-thread-871-a',
+            role: 'Swap Session A',
+            workdir: 'D:/project/exomind',
+            projectPathKey: 'd:/project/exomind',
+          },
+        },
+        {
+          slotId: 'slot-2',
+          sessionId: sessionB.id,
+          terminalRecovery: {
+            sessionId: sessionB.id,
+            sourceHostId: 'runtime-host-523',
+            agentType: 'codex',
+            innerSessionId: 'codex-thread-871-b',
+            role: 'Swap Session B',
+            workdir: 'D:/project/exomind',
+            projectPathKey: 'd:/project/exomind',
+          },
+        },
+      ],
+      focusedSlotId: 'slot-1',
+      unassignedSessionIds: [],
+      unassignedPoolCollapsed: false,
+      immersive: false,
+    });
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-live-871-a')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-pty-terminal-pty-live-871-b')).toBeInTheDocument();
+    });
+
+    dragFromSourceToTarget(
+      screen.getByTestId('tiled-slot-header-slot-1'),
+      screen.getByTestId('tiled-slot-slot-2'),
+    );
+
+    await waitFor(() => {
+      const slot1 = screen.getByTestId('tiled-slot-slot-1');
+      const slot2 = screen.getByTestId('tiled-slot-slot-2');
+
+      expect(slot1).toHaveAttribute('data-session-id', sessionB.id);
+      expect(slot2).toHaveAttribute('data-session-id', sessionA.id);
+      expect(within(slot1).getByTestId('mock-pty-terminal-pty-live-871-b')).toBeInTheDocument();
+      expect(within(slot2).getByTestId('mock-pty-terminal-pty-live-871-a')).toBeInTheDocument();
+    });
   });
 
   it('splits the focused tiled slot from keyboard shortcuts（键盘快捷键可直接分割当前聚焦窗格）', async () => {
