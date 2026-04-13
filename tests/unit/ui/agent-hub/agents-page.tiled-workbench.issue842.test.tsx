@@ -697,6 +697,76 @@ describe('agents page issue-842（平铺窗格树工作台骨架）', () => {
     });
   });
 
+  it('moves a recoverable tiled pane into a live slot by swapping the full binding payload（可恢复终端拖到已占用窗格时应整体换位）', async () => {
+    const liveSession = buildSession({
+      id: 'session-live-871-recoverable',
+      role: 'Live Session Recoverable',
+      pty_id: 'pty-live-871-recoverable',
+      inner_session_id: 'codex-thread-871-recoverable',
+    });
+    sessionStreamState.sessions = [liveSession];
+
+    writeAgentsTiledPersistState({
+      version: 2,
+      layout: '1x2',
+      paneOrder: [liveSession.id],
+      tree: createTemplatePaneTree('1x2'),
+      slots: [
+        {
+          slotId: 'slot-1',
+          sessionId: liveSession.id,
+          terminalRecovery: {
+            sessionId: liveSession.id,
+            sourceHostId: 'runtime-host-523',
+            agentType: 'codex',
+            innerSessionId: 'codex-thread-871-recoverable',
+            role: 'Live Session Recoverable',
+            workdir: 'D:/project/exomind',
+            projectPathKey: 'd:/project/exomind',
+          },
+        },
+        {
+          slotId: 'slot-2',
+          terminalRecovery: {
+            sessionId: 'recoverable-only-session',
+            sourceHostId: 'runtime-host-999',
+            agentType: 'claude',
+            innerSessionId: 'claude-thread-871-recoverable-only',
+            role: 'Recoverable Only Slot',
+            workdir: 'D:/project/exomind',
+            projectPathKey: 'd:/project/exomind',
+          },
+        },
+      ],
+      focusedSlotId: 'slot-2',
+      unassignedSessionIds: [],
+      unassignedPoolCollapsed: false,
+      immersive: false,
+    });
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-pty-terminal-pty-live-871-recoverable')).toBeInTheDocument();
+      expect(within(screen.getByTestId('tiled-slot-header-slot-2')).getByText('可恢复终端')).toBeInTheDocument();
+    });
+
+    dragFromSourceToTarget(
+      screen.getByTestId('tiled-slot-header-slot-2'),
+      screen.getByTestId('tiled-slot-slot-1'),
+    );
+
+    await waitFor(() => {
+      const slot1 = screen.getByTestId('tiled-slot-slot-1');
+      const slot2 = screen.getByTestId('tiled-slot-slot-2');
+
+      expect(within(screen.getByTestId('tiled-slot-header-slot-1')).getByText('可恢复终端')).toBeInTheDocument();
+      expect(slot1).not.toHaveAttribute('data-session-id', liveSession.id);
+      expect(slot2).toHaveAttribute('data-session-id', liveSession.id);
+      expect(within(slot2).getByTestId('mock-pty-terminal-pty-live-871-recoverable')).toBeInTheDocument();
+    });
+  });
+
   it('splits the focused tiled slot from keyboard shortcuts（键盘快捷键可直接分割当前聚焦窗格）', async () => {
     const liveSession = buildSession({
       id: 'session-live-840',

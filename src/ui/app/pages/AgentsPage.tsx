@@ -3476,20 +3476,9 @@ export function AgentsPage() {
       const sourceSlot = tiledPaneSlots.find((slot) => slot.slotId === sourceSlotId);
       const targetSlot = tiledPaneSlots.find((slot) => slot.slotId === targetSlotId);
       const sourceSessionId = sourceSlot?.sessionId?.trim();
-      const targetSessionId = targetSlot?.sessionId?.trim();
+      const sourceHasBinding = !!sourceSessionId || !!sourceSlot?.terminalRecovery;
 
-      if (
-        !sourceSessionId ||
-        !activeTiledSessions.some((session) => session.id === sourceSessionId)
-      ) {
-        return;
-      }
-
-      const targetHasLiveSession = !!targetSessionId
-        && activeTiledSessions.some((session) => session.id === targetSessionId);
-      const targetIsEmpty = !targetSessionId && !targetSlot?.terminalRecovery;
-
-      if (!targetIsEmpty && !targetHasLiveSession) {
+      if (!sourceHasBinding || !targetSlot) {
         return;
       }
 
@@ -3506,7 +3495,6 @@ export function AgentsPage() {
       setTiledFocusedSlotId(targetSlotId);
     },
     [
-      activeTiledSessions,
       activeTiledSlotStates,
       clearPendingTiledSlotState,
       removePendingSpawnedPtyBindingsForTarget,

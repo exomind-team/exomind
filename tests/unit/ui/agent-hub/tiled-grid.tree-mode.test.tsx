@@ -333,6 +333,52 @@ describe('tiled grid tree mode（平铺树模式）', () => {
     expect(within(slot).queryByRole('button', { name: '拖拽会话窗格' })).not.toBeInTheDocument();
   });
 
+  it('shows grab affordance on draggable header background while keeping title text out of the drag cursor hint（可拖头栏背景应显示拖拽暗示，但文本区域不应伪装成拖拽把手）', () => {
+    render(
+      <TiledGrid
+        sessions={[
+          buildSession({
+            id: 'session-live',
+            role: 'Live Session',
+            pty_id: 'pty-live',
+          }),
+        ]}
+        layout="1x2"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+        paneTree={createTemplatePaneTree('1x2')}
+        paneSlots={[
+          { slotId: 'slot-1', sessionId: 'session-live' },
+          {
+            slotId: 'slot-2',
+            terminalRecovery: {
+              sessionId: 'recoverable-session',
+              sourceHostId: 'runtime-host-1',
+              agentType: 'claude',
+              innerSessionId: 'recoverable-inner',
+              role: 'Recoverable Terminal',
+              workdir: 'D:/project/exomind',
+              projectPathKey: 'd:/project/exomind',
+            },
+          },
+        ]}
+        focusedSlotId="slot-1"
+        onFocusSlot={vi.fn()}
+        onMoveSessionBetweenSlots={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('tiled-slot-header-slot-1')).toHaveAttribute('title', '拖动以移动/换位此窗格');
+    expect(screen.getByTestId('tiled-slot-header-slot-1').className).toContain('cursor-grab');
+    expect(screen.getByTestId('tiled-slot-header-slot-2')).toHaveAttribute('title', '拖动以移动/换位此窗格');
+    expect(screen.getByTestId('tiled-slot-header-slot-2').className).toContain('cursor-grab');
+    expect(within(screen.getByTestId('tiled-slot-slot-1')).getByText('Live Session').className).toContain('cursor-text');
+    expect(within(screen.getByTestId('tiled-slot-header-slot-2')).getByText('可恢复终端').className).toContain('cursor-text');
+  });
+
   it('reports a tree-mode move when dragging from the PTY titlebar background into an empty slot（树模式从 PTY 顶栏文本外背景区域拖到空窗格应上报 slot-to-slot move）', async () => {
     const onMoveSessionBetweenSlots = vi.fn();
     const props: any = {
@@ -367,6 +413,100 @@ describe('tiled grid tree mode（平铺树模式）', () => {
 
     dragFromSourceToTarget(
       headerChrome!,
+      screen.getByTestId('tiled-slot-slot-2'),
+    );
+
+    await waitFor(() => {
+      expect(onMoveSessionBetweenSlots).toHaveBeenCalledWith('slot-1', 'slot-2');
+    });
+  });
+
+  it('reports a tree-mode move when dragging a recoverable pane from its header background into an empty slot（可恢复终端也应能从头栏背景拖到空窗格）', async () => {
+    const onMoveSessionBetweenSlots = vi.fn();
+
+    render(
+      <TiledGrid
+        sessions={[]}
+        layout="1x2"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+        paneTree={createTemplatePaneTree('1x2')}
+        paneSlots={[
+          {
+            slotId: 'slot-1',
+            terminalRecovery: {
+              sessionId: 'recoverable-session',
+              sourceHostId: 'runtime-host-1',
+              agentType: 'claude',
+              innerSessionId: 'recoverable-inner',
+              role: 'Recoverable Terminal',
+              workdir: 'D:/project/exomind',
+              projectPathKey: 'd:/project/exomind',
+            },
+          },
+          { slotId: 'slot-2' },
+        ]}
+        focusedSlotId="slot-1"
+        onFocusSlot={vi.fn()}
+        onMoveSessionBetweenSlots={onMoveSessionBetweenSlots}
+      />,
+    );
+
+    dragFromSourceToTarget(
+      screen.getByTestId('tiled-slot-header-slot-1'),
+      screen.getByTestId('tiled-slot-slot-2'),
+    );
+
+    await waitFor(() => {
+      expect(onMoveSessionBetweenSlots).toHaveBeenCalledWith('slot-1', 'slot-2');
+    });
+  });
+
+  it('treats recoverable panes as valid swap targets for tree-mode dragging（可恢复终端应能作为换位目标）', async () => {
+    const onMoveSessionBetweenSlots = vi.fn();
+
+    render(
+      <TiledGrid
+        sessions={[
+          buildSession({
+            id: 'session-drag-source',
+            role: 'Drag Source Session',
+            pty_id: 'pty-drag-source',
+          }),
+        ]}
+        layout="1x2"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+        paneTree={createTemplatePaneTree('1x2')}
+        paneSlots={[
+          { slotId: 'slot-1', sessionId: 'session-drag-source' },
+          {
+            slotId: 'slot-2',
+            terminalRecovery: {
+              sessionId: 'recoverable-session',
+              sourceHostId: 'runtime-host-1',
+              agentType: 'claude',
+              innerSessionId: 'recoverable-inner',
+              role: 'Recoverable Terminal',
+              workdir: 'D:/project/exomind',
+              projectPathKey: 'd:/project/exomind',
+            },
+          },
+        ]}
+        focusedSlotId="slot-1"
+        onFocusSlot={vi.fn()}
+        onMoveSessionBetweenSlots={onMoveSessionBetweenSlots}
+      />,
+    );
+
+    dragFromSourceToTarget(
+      screen.getByTestId('tiled-slot-header-slot-1'),
       screen.getByTestId('tiled-slot-slot-2'),
     );
 

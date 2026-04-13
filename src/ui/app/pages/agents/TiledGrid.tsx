@@ -137,6 +137,10 @@ type TreePaneEntry =
     kind: 'empty';
   };
 
+type TreeModeDraggableEntry =
+  | Extract<TreePaneEntry, { kind: 'session' }>
+  | Extract<TreePaneEntry, { kind: 'disconnected' }>;
+
 // ── Layout config ──────────────────────────────────────────────
 
 const LAYOUT_CONFIG: Record<TiledLayout, { cols: number; rows: number; maxPanes: number }> = {
@@ -148,6 +152,9 @@ const LAYOUT_CONFIG: Record<TiledLayout, { cols: number; rows: number; maxPanes:
 
 const TREE_MODE_DRAG_ACTIVATION_DISTANCE = 8;
 const TREE_MODE_DRAGGING_BODY_CLASS = 'exomind-tree-pane-dragging';
+const TREE_MODE_DRAGGABLE_HEADER_CLASSES = 'cursor-grab active:cursor-grabbing';
+const TREE_MODE_NON_DRAG_TEXT_CLASSES = 'cursor-text';
+const TREE_MODE_NON_DRAG_CHROME_CLASSES = 'cursor-default';
 
 interface TreeModeDragPreviewState {
   sourceSlotId: string;
@@ -174,6 +181,10 @@ interface TreeModeDragState {
   };
   dragging: boolean;
   hoverSlotId: string | null;
+}
+
+function treeEntrySupportsTreeModeDrag(entry: TreePaneEntry): boolean {
+  return entry.kind !== 'empty';
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -686,6 +697,10 @@ function PaneTreeGrid({
       return targetSlotId;
     }
 
+    if (targetEntry.kind === 'disconnected') {
+      return targetSlotId;
+    }
+
     if (targetEntry.kind === 'empty' && slotStates?.[targetSlotId]?.status !== 'creating') {
       return targetSlotId;
     }
@@ -902,9 +917,15 @@ function PaneTreeGrid({
           sessionId={entry.sessionId ?? slotId}
           isFocused={isFocused}
           isExpanded={expandedSlotId === slotId}
-          isDragging={false}
+          isDragging={dragSourceSlotId === slotId}
+          isTreeDragTarget={dragHoverSlotId === slotId}
           onDoubleClick={() => handleToggleExpanded(slotId)}
           onFocus={() => handleFocusSlot(slotId)}
+          onHeaderBackgroundPointerDown={
+            onMoveSessionBetweenSlots && treeEntrySupportsTreeModeDrag(entry)
+              ? (event) => handleTreeModeHeaderPointerDown(slotId, event)
+              : undefined
+          }
           onClose={commonSlotActions.onClose}
           onClear={commonSlotActions.onClear}
           {...(entry.recoverable
@@ -947,11 +968,11 @@ function PaneTreeGrid({
     isSessionAutoResuming,
     isSessionDisconnected,
     isSessionStopping,
+    onMoveSessionBetweenSlots,
     onArchiveSession,
     onClearSlot,
     onCloseSlot,
     onMarkWaiting,
-    onMoveSessionBetweenSlots,
     onOpenEmptySlot,
     onAssignSessionToSlot,
     onQuickAction,
@@ -1000,10 +1021,12 @@ function PaneTreeGrid({
 
   const expandedEntry = expandedSlotId ? treeEntries.get(expandedSlotId) : null;
   const canAssignToFocusedSlot = !!resolvedFocusedSlotId && !!onAssignSessionToSlot;
-  const treeDragPreviewSession = treeDragPreview
+  const treeDragPreviewEntry = treeDragPreview
     ? (() => {
         const previewEntry = treeEntries.get(treeDragPreview.sourceSlotId);
-        return previewEntry?.kind === 'session' ? previewEntry.session : null;
+        return previewEntry && treeEntrySupportsTreeModeDrag(previewEntry)
+          ? previewEntry as TreeModeDraggableEntry
+          : null;
       })()
     : null;
 
@@ -1054,9 +1077,9 @@ function PaneTreeGrid({
           renderTree(tree)
         )}
       </div>
-      {treeDragPreview && treeDragPreviewSession ? (
+      {treeDragPreview && treeDragPreviewEntry ? (
         <TreeModeDragPreview
-          session={treeDragPreviewSession}
+          entry={treeDragPreviewEntry}
           preview={treeDragPreview}
         />
       ) : null}
@@ -1065,13 +1088,64 @@ function PaneTreeGrid({
 }
 
 interface TreeModeDragPreviewProps {
-  session: SessionInfo;
+  entry: TreeModeDraggableEntry;
   preview: TreeModeDragPreviewState;
 }
 
-function TreeModeDragPreview({ session, preview }: TreeModeDragPreviewProps) {
-  const agentColor = AGENT_KIND_COLORS[session.agent_kind];
-  const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
+function TreeModeDragPreview({ entry, preview }: TreeModeDragPreviewProps) {
+  const header = entry.kind === 'session'
+    ? {
+        title: entry.session.role || '未命名',
+        meta: (
+          <div className="flex shrink-0 items-center gap-1 text-[10px]">
+            <span
+              className="font-medium"
+              style={{ color: AGENT_KIND_COLORS[entry.session.agent_kind] }}
+            >
+              {AGENT_KIND_LABELS[entry.session.agent_kind]}
+            </span>
+            <span className="text-[#A8A29E]">·</span>
+            <span className="text-[#A8A29E]">
+              {formatRelativeTime(entry.session.last_active_at)}
+            </span>
+          </div>
+        ),
+        marker: (
+          <SessionStatusMark
+            status={entry.session.status}
+            size={9}
+            className="h-4 w-4"
+          />
+        ),
+        badgeLabel: SESSION_STATUS_INDICATORS[entry.session.status].label,
+        badgeStyle: {
+          color: SESSION_STATUS_INDICATORS[entry.session.status].color,
+          backgroundColor: `${SESSION_STATUS_INDICATORS[entry.session.status].color}20`,
+        },
+      }
+    : {
+        title: entry.recoverable ? '可恢复终端' : '已断开',
+        meta: (
+          <div className="flex shrink-0 items-center gap-1 text-[10px] text-[#A8A29E]">
+            <span>{entry.recoverable ? '历史终端' : '断开槽位'}</span>
+            {entry.sessionId ? (
+              <>
+                <span>·</span>
+                <span className="max-w-32 truncate">{entry.sessionId}</span>
+              </>
+            ) : null}
+          </div>
+        ),
+        marker: (
+          <span className="text-xs text-[#78716C] dark:text-[#D6D3D1]">
+            {entry.recoverable ? '↺' : '✕'}
+          </span>
+        ),
+        badgeLabel: entry.recoverable ? '可恢复' : '已断开',
+        badgeStyle: entry.recoverable
+          ? { color: '#0F766E', backgroundColor: '#99F6E420' }
+          : { color: '#A16207', backgroundColor: '#FDE68A20' },
+      };
 
   return (
     <div
@@ -1088,35 +1162,17 @@ function TreeModeDragPreview({ session, preview }: TreeModeDragPreviewProps) {
         <div className="flex flex-col gap-0 border-b border-[#E7E5E4]/20 bg-[#F5F0ED] px-2 py-1 dark:border-[#292524] dark:bg-[#1C1917]">
           <div className="flex items-center justify-between gap-1">
             <div className="flex min-w-0 items-center gap-1.5">
-              <SessionStatusMark
-                status={session.status}
-                size={9}
-                className="h-4 w-4"
-              />
+              {header.marker}
               <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
-                {session.role || '未命名'}
+                {header.title}
               </span>
-              <div className="flex shrink-0 items-center gap-1 text-[10px]">
-                <span
-                  className="font-medium"
-                  style={{ color: agentColor }}
-                >
-                  {AGENT_KIND_LABELS[session.agent_kind]}
-                </span>
-                <span className="text-[#A8A29E]">·</span>
-                <span className="text-[#A8A29E]">
-                  {formatRelativeTime(session.last_active_at)}
-                </span>
-              </div>
+              {header.meta}
             </div>
             <span
               className="shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium"
-              style={{
-                color: statusIndicator.color,
-                backgroundColor: `${statusIndicator.color}20`,
-              }}
+              style={header.badgeStyle}
             >
-              {statusIndicator.label}
+              {header.badgeLabel}
             </span>
           </div>
         </div>
@@ -1303,9 +1359,11 @@ interface DisconnectedPaneProps {
   isFocused: boolean;
   isExpanded: boolean;
   isDragging: boolean;
+  isTreeDragTarget?: boolean;
   onDoubleClick: () => void;
   onFocus: () => void;
   onClose?: () => void;
+  onHeaderBackgroundPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
   dragListeners?: Record<string, Function>;
   title?: string;
   description?: string;
@@ -1341,7 +1399,7 @@ function PaneWorkbenchActions({
             event.stopPropagation();
             onSplitHorizontal();
           }}
-          className="rounded px-1 py-0.5 text-[10px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+          className="cursor-pointer rounded px-1 py-0.5 text-[10px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
           title="水平分割"
         >
           横分
@@ -1355,7 +1413,7 @@ function PaneWorkbenchActions({
             event.stopPropagation();
             onSplitVertical();
           }}
-          className="rounded px-1 py-0.5 text-[10px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+          className="cursor-pointer rounded px-1 py-0.5 text-[10px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
           title="垂直分割"
         >
           纵分
@@ -1369,7 +1427,7 @@ function PaneWorkbenchActions({
             event.stopPropagation();
             onClear();
           }}
-          className="rounded px-1 py-0.5 text-[10px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+          className="cursor-pointer rounded px-1 py-0.5 text-[10px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
           title="清空窗格"
         >
           清空
@@ -1383,7 +1441,7 @@ function PaneWorkbenchActions({
             event.stopPropagation();
             onClose();
           }}
-          className="rounded px-1 py-0.5 text-[10px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+          className="cursor-pointer rounded px-1 py-0.5 text-[10px] text-[#78716C] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
           title="关闭窗格"
         >
           关闭
@@ -1403,9 +1461,11 @@ function DisconnectedPane({
   isFocused,
   isExpanded,
   isDragging,
+  isTreeDragTarget = false,
   onDoubleClick,
   onFocus,
   onClose,
+  onHeaderBackgroundPointerDown,
   dragListeners,
   title = '已断开',
   description = 'RT 可能已重启，此窗格保留原位置，关闭后会从布局中移除。',
@@ -1419,9 +1479,11 @@ function DisconnectedPane({
     <div
       data-testid={slotId ? `tiled-slot-${slotId}` : `tiled-grid-disconnected-${sessionId}`}
       data-tiled-slot-id={slotId}
+      data-tree-drag-hovered={isTreeDragTarget ? 'true' : undefined}
       className={`
         flex h-full min-h-0 flex-col overflow-hidden rounded-lg border transition-all
         ${isDragging ? 'opacity-50 shadow-2xl ring-2 ring-[#A8A29E]/40' : ''}
+        ${isTreeDragTarget ? 'ring-2 ring-inset ring-[#C75B3A]/70 shadow-[0_0_0_1px_rgba(199,91,58,0.28)]' : ''}
         ${isFocused
           ? 'border-[#78716C]/60 shadow-[0_0_0_1px_rgba(120,113,108,0.2)]'
           : 'border-[#D6D3D1] bg-[#F5F5F4] dark:border-[#44403C] dark:bg-[#1C1917]'
@@ -1430,8 +1492,14 @@ function DisconnectedPane({
       onClick={onFocus}
     >
       <div
-        className="flex items-center justify-between gap-2 border-b border-[#D6D3D1] bg-[#F5F5F4] px-2 py-1 dark:border-[#44403C] dark:bg-[#1C1917]"
+        data-testid={slotId ? `tiled-slot-header-${slotId}` : undefined}
+        className={`flex items-center justify-between gap-2 border-b border-[#D6D3D1] bg-[#F5F5F4] px-2 py-1 dark:border-[#44403C] dark:bg-[#1C1917] ${
+          onHeaderBackgroundPointerDown ? TREE_MODE_DRAGGABLE_HEADER_CLASSES : ''
+        }`}
         onDoubleClick={onDoubleClick}
+        onPointerDown={onHeaderBackgroundPointerDown}
+        style={onHeaderBackgroundPointerDown ? { touchAction: 'none' } : undefined}
+        title={onHeaderBackgroundPointerDown ? '拖动以移动/换位此窗格' : undefined}
       >
         <div className="flex min-w-0 items-center gap-1.5">
           {dragListeners && (
@@ -1439,17 +1507,28 @@ function DisconnectedPane({
               type="button"
               className="flex-shrink-0 cursor-grab text-[#A8A29E] hover:text-[#78716C] active:cursor-grabbing dark:hover:text-[#D6D3D1]"
               {...dragListeners}
+              onPointerDown={stopPaneHeaderPointerDown}
               onClick={(event) => event.stopPropagation()}
             >
               <GripVertical size={10} />
             </button>
           )}
-          <span className="text-xs text-[#78716C]">✕</span>
-          <span className="truncate text-xs font-semibold text-[#57534E] dark:text-[#D6D3D1]">
+          <span className={`text-xs text-[#78716C] ${TREE_MODE_NON_DRAG_CHROME_CLASSES}`}>✕</span>
+          <span
+            className={`truncate text-xs font-semibold text-[#57534E] dark:text-[#D6D3D1] ${
+              onHeaderBackgroundPointerDown ? TREE_MODE_NON_DRAG_TEXT_CLASSES : ''
+            }`}
+            onPointerDown={stopPaneHeaderPointerDown}
+          >
             {title}
           </span>
           {!isExpanded && (
-            <span className="truncate text-[9px] text-[#A8A29E]">
+            <span
+              className={`truncate text-[9px] text-[#A8A29E] ${
+                onHeaderBackgroundPointerDown ? TREE_MODE_NON_DRAG_TEXT_CLASSES : ''
+              }`}
+              onPointerDown={stopPaneHeaderPointerDown}
+            >
               {sessionId}
             </span>
           )}
@@ -1463,11 +1542,12 @@ function DisconnectedPane({
           {onPrimaryAction && primaryActionLabel && (
             <button
               type="button"
+              onPointerDown={stopPaneHeaderPointerDown}
               onClick={(event) => {
                 event.stopPropagation();
                 onPrimaryAction();
               }}
-              className="rounded px-1 py-0.5 text-[10px] text-[#0F766E] hover:text-[#115E59]"
+              className="cursor-pointer rounded px-1 py-0.5 text-[10px] text-[#0F766E] hover:text-[#115E59]"
               title={primaryActionLabel}
             >
               {primaryActionLabel}
@@ -1475,11 +1555,12 @@ function DisconnectedPane({
           )}
           <button
             type="button"
+            onPointerDown={stopPaneHeaderPointerDown}
             onClick={(event) => {
               event.stopPropagation();
               onDoubleClick();
             }}
-            className="flex h-5 w-5 items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
             title={isExpanded ? '还原' : '全屏'}
           >
             {isExpanded ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
@@ -1487,11 +1568,12 @@ function DisconnectedPane({
           <button
             type="button"
             data-testid={`tiled-grid-disconnected-close-${sessionId}`}
+            onPointerDown={stopPaneHeaderPointerDown}
             onClick={(event) => {
               event.stopPropagation();
               onClose?.();
             }}
-            className="flex h-5 w-5 items-center justify-center rounded text-[#78716C] hover:text-[#57534E] disabled:opacity-50 dark:hover:text-[#D6D3D1]"
+            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-[#78716C] hover:text-[#57534E] disabled:opacity-50 dark:hover:text-[#D6D3D1]"
             title="关闭"
             aria-label="关闭断开的会话窗格"
             disabled={!onClose}
@@ -1812,10 +1894,13 @@ function SessionPane({
       {/* Pane header (36-40px, double-row as per designer review) */}
       <div
         data-testid={slotId ? `tiled-slot-header-${slotId}` : undefined}
-        className="flex flex-col gap-0 border-b border-[#E7E5E4] bg-[#F5F0ED] px-2 py-1 dark:border-[#292524] dark:bg-[#1C1917]"
+        className={`flex flex-col gap-0 border-b border-[#E7E5E4] bg-[#F5F0ED] px-2 py-1 dark:border-[#292524] dark:bg-[#1C1917] ${
+          onHeaderBackgroundPointerDown ? TREE_MODE_DRAGGABLE_HEADER_CLASSES : ''
+        }`}
         onDoubleClick={onDoubleClick}
         onPointerDown={onHeaderBackgroundPointerDown}
         style={onHeaderBackgroundPointerDown ? { touchAction: 'none' } : undefined}
+        title={onHeaderBackgroundPointerDown ? '拖动以移动/换位此窗格' : undefined}
       >
         {/* Row 1: Drag handle + Status + Role + Agent + Time + Expand button */}
         <div className="flex items-center justify-between gap-1">
@@ -1837,14 +1922,18 @@ function SessionPane({
               className="h-4 w-4"
             />
             <span
-              className="min-w-0 flex-1 truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
+              className={`min-w-0 flex-1 truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9] ${
+                onHeaderBackgroundPointerDown ? TREE_MODE_NON_DRAG_TEXT_CLASSES : ''
+              }`}
               onPointerDown={stopPaneHeaderPointerDown}
             >
               {session.role || '未命名'}
             </span>
             <div
               data-testid={`tiled-grid-pane-meta-${session.id}`}
-              className="flex shrink-0 items-center gap-1 text-[10px]"
+              className={`flex shrink-0 items-center gap-1 text-[10px] ${
+                onHeaderBackgroundPointerDown ? TREE_MODE_NON_DRAG_CHROME_CLASSES : ''
+              }`}
               onPointerDown={stopPaneHeaderPointerDown}
             >
               <span
@@ -1873,7 +1962,7 @@ function SessionPane({
                 e.stopPropagation();
                 onDoubleClick();
               }}
-              className="flex h-5 w-5 items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
               title={isExpanded ? '还原' : '全屏'}
             >
               {isExpanded ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
@@ -1885,7 +1974,9 @@ function SessionPane({
         <div className="flex items-center gap-1 overflow-hidden">
           {session.context.git_branch && (
             <span
-              className="truncate rounded bg-[#E7E5E4] px-1 py-0 text-[9px] text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]"
+              className={`truncate rounded bg-[#E7E5E4] px-1 py-0 text-[9px] text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E] ${
+                onHeaderBackgroundPointerDown ? TREE_MODE_NON_DRAG_CHROME_CLASSES : ''
+              }`}
               onPointerDown={stopPaneHeaderPointerDown}
             >
               {session.context.git_branch}
@@ -1894,7 +1985,9 @@ function SessionPane({
           {session.context.issue_refs.map((ref) => (
             <span
               key={ref}
-              className="flex-shrink-0 rounded bg-[#E7E5E4] px-1 py-0 text-[9px] text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]"
+              className={`flex-shrink-0 rounded bg-[#E7E5E4] px-1 py-0 text-[9px] text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E] ${
+                onHeaderBackgroundPointerDown ? TREE_MODE_NON_DRAG_CHROME_CLASSES : ''
+              }`}
               onPointerDown={stopPaneHeaderPointerDown}
             >
               {ref}
@@ -1902,7 +1995,9 @@ function SessionPane({
           ))}
           {session.context.pr_ref && (
             <span
-              className="flex-shrink-0 rounded bg-[#DBEAFE] px-1 py-0 text-[9px] text-[#1E40AF] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
+              className={`flex-shrink-0 rounded bg-[#DBEAFE] px-1 py-0 text-[9px] text-[#1E40AF] dark:bg-[#1E3A5F] dark:text-[#93C5FD] ${
+                onHeaderBackgroundPointerDown ? TREE_MODE_NON_DRAG_CHROME_CLASSES : ''
+              }`}
               onPointerDown={stopPaneHeaderPointerDown}
             >
               PR {session.context.pr_ref}

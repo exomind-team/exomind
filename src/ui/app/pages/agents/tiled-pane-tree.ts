@@ -676,11 +676,9 @@ export function moveOrSwapTiledPaneSlotBinding(
   const source = normalized.find((slot) => slot.slotId === sourceSlotId);
   const target = normalized.find((slot) => slot.slotId === targetSlotId);
 
-  if (!source?.sessionId || !target) {
-    return clonedNormalized;
-  }
+  const sourceHasBinding = !!source?.sessionId || !!source?.terminalRecovery;
 
-  if (!target.sessionId && target.terminalRecovery) {
+  if (!sourceHasBinding || !target) {
     return clonedNormalized;
   }
 
@@ -696,7 +694,7 @@ export function moveOrSwapTiledPaneSlotBinding(
     if (slot.slotId === targetSlotId) {
       return {
         slotId: targetSlotId,
-        sessionId: source.sessionId,
+        ...(source.sessionId ? { sessionId: source.sessionId } : {}),
         ...(source.terminalRecovery ? { terminalRecovery: source.terminalRecovery } : {}),
       };
     }
