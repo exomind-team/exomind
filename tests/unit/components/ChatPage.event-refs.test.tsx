@@ -140,18 +140,22 @@ describe('ChatPage event refs', () => {
 
     fireEvent.click(toggle);
 
-    const panel = await screen.findByTestId('event-forward-refs-panel-reply-1');
-    expect(panel).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId('event-forward-refs-reply-1')).not.toBeInTheDocument();
+    });
     expect(screen.getByTestId('event-forward-ref-item-reply-1-src-1')).toHaveTextContent('第一条源消息');
     expect(screen.getByTestId('event-forward-ref-item-reply-1-src-1')).toHaveTextContent('第一条补充说明');
     expect(screen.getByTestId('event-forward-ref-item-reply-1-src-2')).toHaveTextContent('第二条源消息');
+    expect(screen.getByTestId('event-forward-ref-item-reply-1-src-2')).toHaveTextContent('第二条补充说明');
     expect(screen.getByTestId('event-forward-ref-item-reply-1-src-3')).toHaveTextContent('第三条源消息');
+    expect(screen.getByTestId('event-forward-ref-item-reply-1-src-3')).toHaveTextContent('第三条补充说明');
 
     fireEvent.click(screen.getByTestId('event-forward-ref-item-reply-1-src-2'));
 
     await waitFor(() => {
-      expect(screen.queryByTestId('event-forward-refs-panel-reply-1')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('event-forward-ref-item-reply-1-src-2')).not.toBeInTheDocument();
     });
+    expect(await screen.findByTestId('event-forward-refs-reply-1')).toBeInTheDocument();
     expect(navigateMock).toHaveBeenCalled();
   });
 });

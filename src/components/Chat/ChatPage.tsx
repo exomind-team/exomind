@@ -795,19 +795,20 @@ export function ChatPage({
     const primaryRef = event.refs[0];
     const isExpandable = event.refs.length > 1;
     const isExpanded = expandedForwardRefsEventId === event.id;
+    const buttonClassName = 'mt-2 flex max-w-full flex-col items-start rounded-xl border border-[#E7E5E4] bg-white/80 px-3 py-2 text-left text-[11px] text-stone-500 hover:bg-stone-50 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#292524]';
 
-    return (
-      <div className="mt-2 flex max-w-full flex-col gap-2">
+    if (!isExpandable || !isExpanded) {
+      return (
         <button
           type="button"
-          className="flex max-w-full flex-col items-start rounded-xl border border-[#E7E5E4] bg-white/80 px-3 py-2 text-left text-[11px] text-stone-500 hover:bg-stone-50 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+          className={buttonClassName}
           onClick={() => {
             if (!isExpandable) {
               locateEventInRecord(primaryRef.eventId, true);
               return;
             }
 
-            setExpandedForwardRefsEventId((current) => (current === event.id ? null : event.id));
+            setExpandedForwardRefsEventId(event.id);
           }}
           aria-expanded={isExpandable ? isExpanded : undefined}
           data-testid={`event-forward-refs-${event.id}`}
@@ -821,44 +822,33 @@ export function ChatPage({
             </span>
           ) : null}
         </button>
-        {isExpandable && isExpanded ? (
-          <div
-            className="flex flex-col gap-2 rounded-2xl border border-[#E7E5E4] bg-white/70 p-2 dark:border-[#292524] dark:bg-[#1C1917]/80"
-            data-testid={`event-forward-refs-panel-${event.id}`}
-          >
-            {event.refs.map((ref) => {
-              const targetEvent = allEventsRef.current.find((item) => item.id === ref.eventId);
-              const title = ref.summary ?? (targetEvent ? summarizeEventRefContent(targetEvent.content) : ref.eventId);
-              const excerpt = targetEvent ? summarizeEventRefExcerpt(targetEvent.content) : undefined;
+      );
+    }
 
-              return (
-                <button
-                  key={`${event.id}:${ref.eventId}`}
-                  type="button"
-                  className="flex items-start gap-2 rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-left hover:bg-stone-50 dark:border-[#292524] dark:bg-[#1C1917] dark:hover:bg-[#292524]"
-                  onClick={() => locateEventInRecord(ref.eventId, true)}
-                  data-testid={`event-forward-ref-item-${event.id}-${ref.eventId}`}
-                >
-                  <span className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#C75B3A] dark:text-[#FDBA74]">
-                    引用
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[11px] font-medium text-stone-700 dark:text-stone-100">
-                      {title}
-                    </span>
-                    {excerpt ? (
-                      <span className="mt-0.5 block truncate text-[10px] text-stone-400 dark:text-[#78716C]">
-                        {excerpt}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
-    );
+    return event.refs.map((ref) => {
+      const targetEvent = allEventsRef.current.find((item) => item.id === ref.eventId);
+      const title = ref.summary ?? (targetEvent ? summarizeEventRefContent(targetEvent.content) : ref.eventId);
+      const excerpt = targetEvent ? summarizeEventRefExcerpt(targetEvent.content) : undefined;
+
+      return (
+        <button
+          key={`${event.id}:${ref.eventId}`}
+          type="button"
+          className={buttonClassName}
+          onClick={() => locateEventInRecord(ref.eventId, true)}
+          data-testid={`event-forward-ref-item-${event.id}-${ref.eventId}`}
+        >
+          <span className="truncate">
+            引用：{title}
+          </span>
+          {excerpt ? (
+            <span className="mt-0.5 text-[10px] text-stone-400 dark:text-[#78716C]">
+              {excerpt}
+            </span>
+          ) : null}
+        </button>
+      );
+    });
   }, [expandedForwardRefsEventId, locateEventInRecord]);
 
   const isSystemEvent = (event: Event) => (
