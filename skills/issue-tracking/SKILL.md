@@ -5,30 +5,30 @@ description: Track ExoMind issues from natural-language user reports by deduplic
 
 # Issue Tracking
 
-This skill is the project-local skill entry extracted into [`references/`](references/).
+本技能是从 `references/` 提取出来的项目本地 skill 入口文档。
 
 ## When To Use
 
-Use this skill when the user asks to:
+当用户提出以下请求时使用本技能：
 
 - 追踪一个问题、需求或回归
-- create or update a GitHub issue from a natural-language report
-- deduplicate an issue against existing open or closed issues
-- attach current dev-state evidence and dependency links to an issue
+- 根据自然语言报告创建或更新 GitHub issue
+- 对比现有 open/closed issues 进行查重
+- 在 issue 中附上当前 dev 实现状态的证据和依赖链接
 
 ## Load Order
 
-1. Read `references/charter.md` for the full tracking charter, SOP, template, and validation rules.
-2. Read `references/boot-prompt.md` when you need the standard issue-tracking prompt contract.
-3. Read `references/portable-charter.md` and `references/portable-boot-prompt.md` only when you need the portable variants.
+1. 阅读 `references/charter.md`，获取完整追踪章程、SOP、模板和验证规则。
+2. 需要标准 issue-tracking 提示词契约时，阅读 `references/boot-prompt.md`。
+3. 仅在需要便携版时阅读 `references/portable-charter.md` 和 `references/portable-boot-prompt.md`。
 
 ## Core Rules
 
-- Start from the user's natural-language description; do not ask for form-style structured inputs.
-- Always deduplicate before deciding to create or update an issue.
-- Always inspect current `dev` implementation state and record file-path evidence.
-- Use dependency links and bidirectional references when the charter requires them.
-- Normalize issue/comment link formatting before publishing: avoid bare URLs, avoid local absolute paths, and turn repository references into short-named Markdown links.
+- 从用户的自然语言描述出发；不要求用户提供结构化表单信息。
+- 在决定创建还是更新 issue 前，必须先查重。
+- 必须核查当前 `dev` 实现状态，并记录文件路径证据。
+- 按章程要求使用依赖链接和双向引用。
+- 发布前规范化 issue/comment 的链接格式：避免裸 URL、避免本地绝对路径，将仓库引用转为简短命名的 Markdown 链接。
 
 ## Utility Scripts
 
