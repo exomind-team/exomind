@@ -997,6 +997,7 @@ fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo>
     let mut sessions = Vec::new();
     let mut stack = vec![sessions_dir.to_path_buf()];
     let history_meta = read_codex_history_meta(sessions_dir);
+    let session_index = read_codex_session_index(sessions_dir);
 
     while let Some(dir) = stack.pop() {
         let entries = match std::fs::read_dir(&dir) {
@@ -1022,10 +1023,14 @@ fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo>
                 .get(&session_meta.session_id)
                 .cloned()
                 .unwrap_or_default();
+            let index_display_title = session_index
+                .get(&session_meta.session_id)
+                .cloned();
             let display_meta = HistoricalSessionDisplayMeta {
                 display_title: session_meta
                     .display_title
-                    .or(history_display_meta.display_title),
+                    .or(history_display_meta.display_title)
+                    .or(index_display_title),
                 fallback_title: history_display_meta.fallback_title,
                 display_path: history_display_meta.display_path,
                 last_modified: history_display_meta.last_modified,
@@ -1221,6 +1226,38 @@ fn read_claude_session_display_meta(path: &Path) -> HistoricalSessionDisplayMeta
         last_user_message,
         ..Default::default()
     }
+}
+
+/// 读取 ~/.codex/session_index.jsonl，构建 session_id → thread_name 的映射。
+/// 这是 Codex 会话重命名（/rename）名称的最权威来源。
+/// 格式：{"id":"019d6ab6-...","thread_name":"日报","updated_at":"..."}
+fn read_codex_session_index(sessions_dir: &Path) -> HashMap<String, String> {
+    let Some(index_path) = sessions_dir.parent().map(|p| p.join("session_index.jsonl")) else {
+        return HashMap::new();
+    };
+    let file = File::open(index_path).ok();
+    let Some(file) = file else {
+        return HashMap::new();
+    };
+
+    let reader = BufReader::new(file);
+    let mut map = HashMap::new();
+
+    for line in reader.lines().flatten() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let Some(id) = value.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(name) = value.get("thread_name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !name.is_empty() {
+            map.insert(id.to_string(), name.to_string());
+        }
+    }
+    map
 }
 
 fn read_codex_history_meta(sessions_dir: &Path) -> HashMap<String, HistoricalSessionDisplayMeta> {
@@ -1848,6 +1885,92 @@ mod tests {
         assert_eq!(
             sessions[0].last_user_message.as_deref(),
             Some("Verify fullscreen empty pane layout")
+        );
+    }
+
+    /// Tests that session_index.jsonl is used as a fallback for display_title
+    /// when the session file itself has no thread_name event.
+    #[test]
+    fn discover_codex_sessions_reads_session_index_thread_name() {
+        let dir = tempdir().unwrap();
+        let codex_root = dir.path().join(".codex");
+        let sessions_dir = codex_root.join("sessions");
+        let day_dir = sessions_dir.join("2026").join("04").join("13");
+        fs::create_dir_all(&day_dir).unwrap();
+        let session_path =
+            day_dir.join("rollout-2026-04-13T10-20-30-019d8888-aaaa-bbbb-cccc-1234567890ab.jsonl");
+        // Session file has no thread_name event — only session_meta
+        fs::write(
+            &session_path,
+            concat!(
+                "{\"timestamp\":\"2026-04-13T02:20:32.696Z\",\"type\":\"session_meta\",",
+                "\"payload\":{\"id\":\"019d8888-aaaa-bbbb-cccc-1234567890ab\",",
+                "\"cwd\":\"D:\\\\project\\\\exomind\",\"originator\":\"codex_cli_rs\"}}\n",
+                "{\"timestamp\":\"2026-04-13T02:20:33.000Z\",\"type\":\"event\",",
+                "\"payload\":{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",",
+                "\"text\":\"Some user prompt\"}]}}\n"
+            ),
+        )
+        .unwrap();
+        // session_index.jsonl has the thread_name
+        fs::write(
+            codex_root.join("session_index.jsonl"),
+            concat!(
+                "{\"id\":\"019d8888-aaaa-bbbb-cccc-1234567890ab\",",
+                "\"thread_name\":\"issue跟踪\",\"updated_at\":\"2026-04-13T02:06:02.19584Z\"}\n"
+            ),
+        )
+        .unwrap();
+
+        let sessions = discover_codex_sessions(&sessions_dir);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].session_id,
+            "019d8888-aaaa-bbbb-cccc-1234567890ab"
+        );
+        assert_eq!(
+            sessions[0].display_title.as_deref(),
+            Some("issue跟踪")
+        );
+    }
+
+    /// Tests that session file's thread_name takes priority over session_index.jsonl.
+    #[test]
+    fn discover_codex_sessions_prefers_session_file_over_index() {
+        let dir = tempdir().unwrap();
+        let codex_root = dir.path().join(".codex");
+        let sessions_dir = codex_root.join("sessions");
+        let day_dir = sessions_dir.join("2026").join("04").join("13");
+        fs::create_dir_all(&day_dir).unwrap();
+        let session_path =
+            day_dir.join("rollout-2026-04-13T10-20-30-019d9999-aaaa-bbbb-cccc-1234567890ab.jsonl");
+        // Session file has thread_name "Session file title"
+        fs::write(
+            &session_path,
+            concat!(
+                "{\"timestamp\":\"2026-04-13T02:20:32.696Z\",\"type\":\"session_meta\",",
+                "\"payload\":{\"id\":\"019d9999-aaaa-bbbb-cccc-1234567890ab\",",
+                "\"cwd\":\"D:\\\\project\\\\exomind\"}}\n",
+                "{\"timestamp\":\"2026-04-13T02:20:35.000Z\",\"type\":\"event\",",
+                "\"payload\":{\"thread_name\":\"Session file title\"}}\n"
+            ),
+        )
+        .unwrap();
+        // session_index.jsonl has "Index title" — should NOT be used
+        fs::write(
+            codex_root.join("session_index.jsonl"),
+            concat!(
+                "{\"id\":\"019d9999-aaaa-bbbb-cccc-1234567890ab\",",
+                "\"thread_name\":\"Index title\",\"updated_at\":\"2026-04-13T03:00:00.00000Z\"}\n"
+            ),
+        )
+        .unwrap();
+
+        let sessions = discover_codex_sessions(&sessions_dir);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].display_title.as_deref(),
+            Some("Session file title")
         );
     }
 
