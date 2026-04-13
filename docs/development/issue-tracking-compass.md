@@ -2,7 +2,7 @@
 
 > 目标：把用户一句“追踪下 XXXX”稳定转成可执行的 Issue 管理动作：先去重、再归类、再落地（新建或追加），并留下可迭代证据。
 
-> **Agent 追踪权威章程**：`docs/agents/issue-tracking/charter.md`  
+> **Agent 追踪权威章程**：[`skills/issue-tracking/references/charter.md`](../../skills/issue-tracking/references/charter.md)  
 > 如与本罗盘有冲突，以章程为准。
 
 ## 1. 适用场景
@@ -25,16 +25,16 @@
 - 对应 Issue 编号与链接。
 - 已追加的评论内容摘要（若复用）。
 - 与相关 Issue 的关联（`related to` / `regression from` / `duplicates`）。
-- 现状快照（`dev` 短 hash + 关键路径，项目根目录相对路径）。
+- 现状快照（`dev` 短 hash + 关键路径；路径语义保持项目根目录相对路径，但在 issue / 评论正文里以可点击 Markdown 链接展示）。
 
-## 3. 执行 SOP（6 步）
+## 3. 执行 SOP（8 步）
 
 1. **抽取问题原子点**
    - 把用户描述拆为单个问题，避免把多问题塞进同一个 issue。
 2. **去重检索**
    - 以“模块词 + 症状词 + 平台词 + 版本词”搜索 open/closed issue。
 3. **核查 dev 现状**
-   - 记录 `dev` 短 hash + 关键路径（相对路径）。
+   - 记录 `dev` 短 hash + 关键路径；路径语义保持项目根目录相对路径，但在 issue / 评论正文里要以可点击 Markdown 链接展示。
 4. **决策路由**
    - 同主题且未解决：追加评论。
    - 历史已关闭但同症状复发：新建回归 issue，并链接旧 issue。

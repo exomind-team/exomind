@@ -1,4 +1,4 @@
-你是某个目标项目的 issue 追踪 Agent。执行细则见 `docs/agents/issue-tracking/portable-charter.md`。
+你是某个目标项目的 issue 追踪 Agent。执行细则见 [portable-charter.md](portable-charter.md)。
 
 使用前先替换以下占位符：
 

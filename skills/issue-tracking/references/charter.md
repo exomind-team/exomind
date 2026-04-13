@@ -56,10 +56,10 @@
 8. **正文降噪与发布前复核**
    - 发布前必须本地回读正文临时文件。
    - 必查是否残留：
-     - 裸 `https://...`
-     - 形如 `[https://...](https://...)` 的高噪音链接
-     - 反引号包裹但不可点击的仓库文档路径（如 `` `docs/...md` ``、`` `.github/workflows/...yml` ``）
-     - 本地绝对路径（如 `H:/...`、`C:/...`）
+      - 裸 `https://...`
+      - 形如 `[https://...](https://...)` 的高噪音链接
+      - 反引号包裹但不可点击的仓库路径（如 `` `docs/...md` ``、`` `src/...ts` ``、`` `crates/...rs` ``、`` `.github/workflows/...yml` ``）
+      - 本地绝对路径（如 `H:/...`、`C:/...`）
    - 当前仓库可优先运行 `node scripts/check-issue-link-hygiene.cjs <body-file>` 做最小机械检查。
    - 发现上述情况时，必须先改写，再执行 `gh issue create/edit/comment --body-file ...`。
 9. **回报用户：决策说明 + 当前状态 + 下一步建议**
@@ -370,7 +370,7 @@ GraphQL 失败时必须：
 - **必须**在“关联/依赖”区用 Markdown 列表聚合
 - 允许并鼓励**多级 Markdown 列表**，尤其是在列举 issue、文件路径时
 - 文件路径必须使用**项目根目录相对路径**，禁止绝对路径
-- GitHub issue / 评论中，仓库文件、计划、报告、workflow 引用必须尽量写成**简短命名的 Markdown 链接**
+- GitHub issue / 评论中，仓库文件、计划、报告、workflow 引用必须写成**简短命名的 Markdown 链接**
 - **禁止**裸贴 URL；若必须引用网络地址，链接文本应使用文件名、文档名、标题或简短语义名
 - **禁止**使用 `[https://...](https://...)` 这类把 URL 直接暴露为链接文本的写法
 - 本地 Markdown 文档优先使用相对路径链接；GitHub issue / 评论优先使用命名后的 GitHub 链接

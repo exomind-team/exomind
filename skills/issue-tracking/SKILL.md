@@ -5,7 +5,7 @@ description: Track ExoMind issues from natural-language user reports by deduplic
 
 # Issue Tracking
 
-This skill is the project-local skill entry extracted from `docs/agents/issue-tracking/`.
+This skill is the project-local skill entry extracted into [`references/`](references/).
 
 ## When To Use
 

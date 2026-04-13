@@ -18,6 +18,25 @@ if (!fs.existsSync(bodyPath)) {
 }
 
 const text = fs.readFileSync(bodyPath, "utf8");
+const repoPathPrefixes = [
+  "src",
+  "scripts",
+  "crates",
+  "docs",
+  "tests",
+  "website",
+  "src-tauri",
+  "server",
+  "apps",
+  "packages",
+  "lib",
+  "\\.github/workflows",
+];
+const repoPathPattern =
+  `(?:${repoPathPrefixes.join("|")})\\/` +
+  String.raw`[^\s\])` +
+  "`" +
+  String.raw`]+?\.[A-Za-z0-9._-]+`;
 
 const checks = [
   {
@@ -36,9 +55,9 @@ const checks = [
     message: "Found local absolute path.",
   },
   {
-    name: "backticked_repo_doc_path",
-    pattern: /`((?:docs\/[^`]+\.(?:md|html)|\.github\/workflows\/[^`]+\.(?:ya?ml)))`/g,
-    message: "Found backticked repository doc/workflow path without link.",
+    name: "backticked_repo_path",
+    pattern: new RegExp(String.raw`\`(${repoPathPattern})\``, "g"),
+    message: "Found backticked repository path without link.",
   },
 ];
 
@@ -54,6 +73,35 @@ for (const check of checks) {
   }
   if (matches.length > 10) {
     console.error(`- ... and ${matches.length - 10} more`);
+  }
+}
+
+const plainRepoPathMatches = [];
+for (const line of text.split(/\r?\n/)) {
+  const sanitized = line
+    .replace(/\[[^\]]+\]\([^)]+\)/g, "")
+    .replace(/`[^`]+`/g, "");
+  const regex = new RegExp(
+    String.raw`(?:^|[\s:：-])(${repoPathPattern})(?=$|[\s,.;:：)])`,
+    "g",
+  );
+  for (const match of sanitized.matchAll(regex)) {
+    if (match[1]) {
+      plainRepoPathMatches.push(match[1]);
+    }
+  }
+}
+
+if (plainRepoPathMatches.length > 0) {
+  hasError = true;
+  console.error(
+    "\n[plain_repo_path] Found repository path written as plain text instead of Markdown link.",
+  );
+  for (const match of plainRepoPathMatches.slice(0, 10)) {
+    console.error(`- ${match}`);
+  }
+  if (plainRepoPathMatches.length > 10) {
+    console.error(`- ... and ${plainRepoPathMatches.length - 10} more`);
   }
 }
 

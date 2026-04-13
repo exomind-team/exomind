@@ -81,7 +81,7 @@
    - `完成条件`
 8. 发布前正文复核
    - 本地回读临时正文文件
-   - 检查是否残留裸 URL、URL 直出式链接文本、不可点击的仓库路径、本地绝对路径
+   - 检查是否残留裸 URL、URL 直出式链接文本、不可点击的仓库路径（如 `docs/...`、`src/...`、`crates/...`、`.github/workflows/...`）、本地绝对路径
    - 宿主项目若提供 issue body 检查脚本或统一 grep/正则命令，优先使用
    - 必要时先统一改写，再发布
 9. 回报用户
@@ -269,4 +269,4 @@ Bug 追踪优先“先取证，再定性”：
 
 ---
 
-迁移自：`docs/agents/issue-tracking/charter.md`
+迁移自：[charter.md](charter.md)

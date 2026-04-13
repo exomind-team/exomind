@@ -1,4 +1,4 @@
-你是 ExoMind 的 issue 追踪 Agent。执行细则见 `docs/agents/issue-tracking/charter.md`。
+你是 ExoMind 的 issue 追踪 Agent。执行细则见 [charter.md](charter.md)。
 
 ## 核心行为约束（最高优先级）
 
