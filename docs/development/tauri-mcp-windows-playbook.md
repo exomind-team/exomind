@@ -10,6 +10,91 @@
 - 记录“当前 app 实际状态”和“持久化配置状态”不一致时的判定方法。
 - 记录哪些目标可以直接依赖 Tauri MCP，哪些场景需要退回到 RT HTTP、日志、SQLite 与本地文件。
 
+### 阶段补记：事件引用 / 事件唯一链接真窗验收（2026-04-13）
+
+#### 本轮阶段目标
+
+- 在真实 Tauri 桌面窗口里确认事件引用与唯一链接链路已经真正闭环，而不是只停留在单测：
+  - `引用` 按钮能把目标事件插入输入区引用 banner，并同步首行 permalink
+  - 发送后的新事件会把被引用事件写入 `refs`
+  - 已发送事件上的前向引用摘要可回跳到被引用事件，并落到 `?event=<id>&locate=1`
+  - `链接` 按钮在窗口真正获得前台焦点后可给出成功反馈
+
+#### 本轮现场真值
+
+- 隔离实例：
+  - `eventlog-mcp-verify`
+  - Web `1620`
+  - RT `9324`
+  - raw bridge `9423`
+- 本轮继续直接使用 raw bridge `ws://127.0.0.1:9423` + RT HTTP `http://127.0.0.1:9324`。
+- 本轮验收 marker：
+  - source event id：`tmcp-src-1776068436514`
+  - source marker：`TMCP_ACCEPT_SOURCE_1776068436514`
+  - reply marker：`TMCP_ACCEPT_REPLY_1776068436514`
+  - permalink：`http://localhost:1620/eventlog/record?event=tmcp-src-1776068436514&locate=1`
+
+#### 本轮观察结果
+
+- 通过 RT `POST /eventlog` 预埋 source event 后，真实记录页能出现对应事件行，且行内存在：
+  - `msg-quote-btn`
+  - `msg-link-btn`
+- 点击 `msg-quote-btn` 后，真实窗口里出现：
+  - `new-now-quote-banner`
+  - 文案：`引用TMCP_ACCEPT_SOURCE_1776068436514`
+  - 输入框首行自动同步为：
+    - `> 引用：[TMCP_ACCEPT_SOURCE_1776068436514](http://localhost:1620/eventlog/record?event=tmcp-src-1776068436514&locate=1)`
+- 发送 reply 后，真实窗口日志出现：
+  - `[ChatPage] handleSend done {"totalMs":179}`
+- 同轮 RT `/eventlog?limit=200` 回读确认 reply 已落库，且 `refs` 真值为：
+  - `eventId = tmcp-src-1776068436514`
+  - `summary = TMCP_ACCEPT_SOURCE_1776068436514`
+- reply 行上的前向引用按钮文本为：
+  - `引用：TMCP_ACCEPT_SOURCE_1776068436514`
+- 点击该前向引用按钮后，真实窗口 URL 变为：
+  - `http://localhost:1620/eventlog/record?event=tmcp-src-1776068436514&locate=1`
+- 被引用 source 行在真实窗口里拿到高亮 class：
+  - `ring-2 ring-[#F59E0B]/70 ...`
+- 针对 `msg-link-btn`：
+  - 当 `document.hasFocus() === true` 时，按钮文案可从 `链接` 变为 `已复制链接`
+  - 说明真实产品路径已经返回复制成功，而不是只做了假反馈
+
+#### 本轮结论
+
+- 事件引用链路已经在真实 Tauri 桌面窗口中通过：
+  - 引用插入
+  - `refs` 落库
+  - 前向引用摘要渲染
+  - permalink 回跳与 locate 高亮
+- 事件唯一链接的复制按钮也已在真实窗口里得到成功反馈，但必须先拿到真正的前台焦点。
+- 本轮早些时候出现过两类“看起来像产品失败”的现象：
+  - `Document is not focused`
+  - `The native clipboard is not accessible due to being held by another party.`
+- 同一 Windows 会话下，PowerShell `Set-Clipboard` 也会直接失败；因此不能把这类早期报错简单归因到 permalink 功能本身。
+- 对 `msg-link-btn` 的判断准则应改为：
+  - 先确认真实窗口 `document.hasFocus() === true`
+  - 再点击按钮
+  - 以按钮进入 `已复制链接` 作为桌面验收通过信号
+
+#### 可复用操作套路
+
+1. 先用 RT `POST /eventlog` 注入唯一 marker 的 source event，避免在脏数据里盲点历史消息。
+2. raw bridge 脚本保持短小：
+   - 导航
+   - 轮询 source row 出现
+   - 单步点击 `msg-quote-btn`
+   - 单步读取 `new-now-quote-banner` 与 textarea
+   - 单步发送
+   - 单步点击 `event-forward-refs-*`
+3. `refs` 是否真的落库，不要只看 UI；必须同时回读 RT `/eventlog`。
+4. permalink locate 是否真通过，不要只看按钮点击；必须同时检查：
+   - URL 已变成 `?event=<id>&locate=1`
+   - source row 出现高亮 class
+5. 如果 `msg-link-btn` 再次报复制失败，先判断：
+   - `document.hasFocus()` 是否为 `true`
+   - 当前 Windows 会话的系统剪贴板是否整体可用
+   - 不要在窗口未真正激活时就把失败归因到产品逻辑
+
 ## 当前阶段：#806 / #810 终端生命周期联调
 
 更新时间：`2026-04-02`
@@ -2532,3 +2617,119 @@
    - 先看 `data-testid`
    - 先看 button 顺序
    - 当前环境里，部分按钮文本会被字体或隐藏字符干扰，直接按 `data-testid` 或索引更稳
+
+### 阶段补记：#828 / #896 残留进程现场收敛（2026-04-13）
+
+#### 本轮抓到的真实残留
+
+- `#896` 的桌面自动化验证结束后，`tauri:manager` 记录已清掉，但现场仍残留：
+  - raw bridge：`0.0.0.0:9293`
+  - embedded RT 实际端口：`0.0.0.0:65072`
+- 当时对应的 Web 端口 `1490` 已经不通，说明不是一个“完整可用实例”，而是一条半死不活的残留链。
+- 连接表显示两个监听都属于 `PID 4920`，但：
+  - `tasklist`
+  - `Get-Process`
+  - `wmic process`
+    都查不到 `4920` 本体。
+- 继续顺着进程树查，能找到两个仍存活的子进程：
+  - `bun run packages/ts-agent-cli/agents/reviewer/index.ts`
+  - `bun run packages/ts-agent-cli/agents/classifier/index.ts`
+- 把这两个 `bun` 子进程及其 `conhost` 一起 `taskkill /T /F` 后：
+  - `9293` 释放
+  - `65072` 释放
+  - 两个端口都能重新绑定
+
+#### 根因收敛
+
+- 当前桌面主窗口关闭链路在 [src-tauri/src/lib.rs](../../src-tauri/src/lib.rs) 里仍存在：
+  - `WindowEvent::Destroyed`
+  - 直接 `std::process::exit(0)`
+- 这条路径会绕开 `runtime_service_stop -> ensure_runtime_stopped -> runtime.stop().await` 的正常停机链路。
+- embedded runtime 的正常停机链路在 [src-tauri/src/commands/runtime_commands.rs](../../src-tauri/src/commands/runtime_commands.rs) 与 [crates/exomind-runtime/src/lib.rs](../../crates/exomind-runtime/src/lib.rs) 里会显式：
+  - 停 server task
+  - 停 tick / actor task
+  - kill 并 wait 默认 TS agents
+  - 关闭 PTY / mDNS / mesh relay
+- 但窗口销毁时直接 `process::exit(0)`，就容易把：
+  - embedded RT
+  - raw bridge
+  - 默认 TS agents
+    留在后台。
+- `tauri:manager` 当前健康探测与清理重点仍是：
+  - root pid
+  - web port
+  - hmr port
+  - app pid
+- 它还没有把下面这些也当作实例真值的一部分：
+  - actual runtime port
+  - raw bridge port
+  - 默认 TS agent 子进程
+- 所以会出现“manager 看起来停了，但现场其实没停干净”的假象。
+
+#### 防范经验
+
+1. 在修复落地前，不要把点主窗口 `X` 当成正常收尾。
+2. 结束受管实例时，优先使用：
+   - `bun tauri:manager stop --name <instance>`
+3. 对 `9124` 这类默认 RT 端口，不要先假设“被占用就是产品 bug”：
+   - 先判断是不是健康 ExoMind 实例
+   - 再判断是不是残留 runtime / bridge / agent
+4. 对 Windows Tauri 现场，必须把：
+   - manager 真值
+   - socket 真值
+   - 协议真值
+   三层交叉验证，不要只看其中一层。
+
+#### 检测经验
+
+1. 先看 manager 视角：
+   - `bun tauri:manager list`
+2. 再看 socket 视角：
+   - `Get-NetTCPConnection -State Listen`
+   - 不要只查 Web / HMR；还要同时看：
+     - actual RT port
+     - raw bridge port
+3. 再看协议真值：
+   - runtime：`Invoke-WebRequest http://127.0.0.1:<rt-port>/health`
+   - raw bridge：不要只看 TCP 能否建立；至少还要跑一条最小命令
+     - `list_windows`
+     - 或 `execute_js`
+4. 若出现下面这种组合，要优先怀疑“孤儿监听 / 半死实例”：
+   - TCP 能连
+   - 但 raw bridge 指令超时
+   - Web 已经不通
+   - `/health` 也不健康
+5. 若连接表里还能看到 owner pid，但系统查不到该 pid 本体：
+   - 继续查 `ParentProcessId = <ownerPid>` 的存活子进程
+   - 特别关注：
+     - `packages/ts-agent-cli/agents/reviewer/index.ts`
+     - `packages/ts-agent-cli/agents/classifier/index.ts`
+
+#### 清理顺序
+
+1. 先走正常链路：
+   - `bun tauri:manager stop --name <instance>`
+2. 复核端口是否真的释放：
+   - Web
+   - HMR
+   - actual RT
+   - raw bridge
+3. 如果还有监听，再做协议探测：
+   - runtime `/health`
+   - raw bridge 最小命令
+4. 如果 owner pid 已不可枚举，但能找到残留子进程：
+   - 对残留子进程执行 `taskkill /PID <pid> /T /F`
+5. 最后用“可重新绑定”做终态验证，而不是只看 `Get-NetTCPConnection` 一次输出。
+
+#### 这轮明确收住的判断框架
+
+- 不要只问“端口还在不在”。
+- 要同时问三件事：
+  - 这个实例是否还被 manager 正确认知
+  - 这个 socket 是否还真的被占用
+  - 这个协议端点是否还真能正常响应
+- 只看其中一层，很容易把：
+  - bridge 半死
+  - runtime 假活
+  - 孤儿 agent 子进程
+    误判成“产品逻辑回归”。
