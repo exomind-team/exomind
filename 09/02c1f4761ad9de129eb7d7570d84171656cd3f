@@ -1,0 +1,50 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0902c1f4761ad9de129eb7d7570d84171656cd3f",
+  "prompts": {
+    "0e77f94d514915f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d7127-aed2-7992-b0db-24ac258ee08b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 1168,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/ed85f77c5236c2d7c3d46830dbce8bcb13ed2dc904f68b7d348c0bfbe8fbe4fe"
+    },
+    "6558a224ab86cb89": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8456-7c08-72c2-b72c-c8815ac16d04",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/57e19a53ae635c522ab0b8067590c05a40735f9e7bc868b4d2b34c020232c9ba"
+    },
+    "7784653ca20f559c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "09a17f8c-9cab-4ef2-97cf-1e6d5b81dd96",
+        "model": "MiniMax-M2.7"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 575,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/695a74c2a26276c5511dbca25fe40873fa5af355ceabdacdcbc4a979c07e95dc"
+    }
+  }
+}
