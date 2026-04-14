@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0e4a0dd77e3d448d485509492589dd67fb0febf4",
+  "prompts": {
+    "53407a172a3de98a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d86b6-a3e2-7591-bb77-df25adcd3c19",
+        "model": "unknown"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 27,
+      "total_deletions": 21,
+      "accepted_lines": 27,
+      "overriden_lines": 0
+    }
+  }
+}
