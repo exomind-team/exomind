@@ -1,0 +1,119 @@
+scripts/dev/tauri-full-domain-bulk-sync.ts
+  9efc308be9b03499 227-232,1086-1089,1098-1099,1103,1105,1108-1112,1322-1333,1335-1339,1341-1355,1357-1363,1365-1367,1370-1376,1378-1385,1894-1895,1897-1902,2010-2019,2021,2025,2161
+  72f5bdbad6bbb8f2 255,895-902,909,913,939-951,962-995,998,1000-1001,1003-1005,1024-1029,1032,1034,1334,1340,1356,1364,1368-1369,1377,1810,1833,1943,1960-1971,2020,2022-2023,2090-2104,2106-2108,2110,2112-2113,2115,2117-2118,2120,2122-2123,2125,2128-2129,2131-2135,2137,2140
+  9ece876c991b9afe 1-226,233-254,256-894,903-908,910-912,914-938,952-961,996-997,999,1002,1006-1023,1030-1031,1033,1035-1085,1090-1097,1100-1102,1104,1106-1107,1113-1321,1386-1809,1811-1832,1834-1893,1896,1903-1942,1944-1959,1972-2009,2024,2026-2089,2105,2109,2111,2114,2116,2119,2121,2124,2126-2127,2130,2136,2138-2139,2141-2160,2162-2205
+crates/exomind-runtime/src/routes/tasks.rs
+  9ece876c991b9afe 1,6,8-9,12,82,102-156,171,529-646,649-662,665-681,691-718,721-913,1255-1256,1258-1276,1293,1297,1299-1300,1374-1619
+src/lib/services/task-reconciliation.service.ts
+  9ece876c991b9afe 1-242
+src/lib/services/eventlog-backup.service.ts
+  9ece876c991b9afe 37-41,55-57,135-149
+src/lib/services/index.ts
+  9ece876c991b9afe 18,36,52-55,57-65
+src/lib/services/task-backup.service.test.ts
+  9ece876c991b9afe 1-195
+crates/exomind-runtime/src/routes/timeblocks.rs
+  9ece876c991b9afe 1,6,8,11,18-19,48,77-80,1112-1127,1214-1252,1284-1287,1525-1646,1672-1683,1689,1693,1696,1698-1699,1772-2065,2968-2975,3059-3066
+docs/verification/2026-04-14-two-client-full-domain-sync-validation-charter.md
+  72f5bdbad6bbb8f2 487-531
+  9ece876c991b9afe 1-383
+  53407a172a3de98a 384-436
+  d33d64f647d22619 437-486
+src/lib/services/timeblock-backup.service.ts
+  9ece876c991b9afe 40-44,59-61,141-155
+crates/exomind-runtime/src/auth.rs
+  9ece876c991b9afe 9-24,27-33,46-52,54,161,164-170,174-177,214-218,223-235,238-479
+crates/exomind-runtime/src/routes/proposals.rs
+  9ece876c991b9afe 234-238
+src/lib/services/rt-domain-backfill.service.test.ts
+  9ece876c991b9afe 1-419
+src/lib/services/task-backup.service.ts
+  9ece876c991b9afe 7,37-65,78-106,141-161,205-268
+src/lib/services/eventlog-backup.service.test.ts
+  9ece876c991b9afe 1-64
+crates/exomind-runtime/src/mesh/mod.rs
+  9ece876c991b9afe 8,87-107,112-113,147,161,170-180,189,216-222,227-228,230-233,235-242,256,301-306,326-460,681-683,686-690,960-966,1193-1371
+  72f5bdbad6bbb8f2 52,67
+src/lib/services/rt-domain-backfill.service.ts
+  9ece876c991b9afe 5,7,9-11,15,27-37,42,44-45,74-75,78-89,93,95-96,101,111,114-117,119,121-157,159-177,182,198,212-216,219-236
+src/lib/adapters/task-rt-adapter.ts
+  9ece876c991b9afe 13,18,62,131,147,156,172,187,203
+crates/exomind-runtime/src/routes/eventlog.rs
+  9ece876c991b9afe 5,11,19,25,75,106-109,526-575,592-603,738-854,862,867,871,873-874,930-953,956-1007,1026-1184
+src/lib/services/timeblock-backup.service.test.ts
+  9ece876c991b9afe 1-66
+src/lib/services/task-reconciliation.service.test.ts
+  9ece876c991b9afe 1-385
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "1311ef7fb3a8633238b194dfe4912e0dad25038a",
+  "prompts": {
+    "53407a172a3de98a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d86b6-a3e2-7591-bb77-df25adcd3c19",
+        "model": "unknown"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 53,
+      "overriden_lines": 0
+    },
+    "72f5bdbad6bbb8f2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8ac5-174b-7c73-8c2d-281e12fda47d",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 100,
+      "total_deletions": 11,
+      "accepted_lines": 183,
+      "overriden_lines": 0
+    },
+    "9ece876c991b9afe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d831a-54de-7402-a37d-7638b1f9d97b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 13102,
+      "overriden_lines": 0
+    },
+    "9efc308be9b03499": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8316-4e8d-7e90-8e2d-a8afb50a2efa",
+        "model": "unknown"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 97,
+      "overriden_lines": 0
+    },
+    "d33d64f647d22619": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8aa7-3ae6-7f51-bdd1-c1c01f9728df",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 50,
+      "overriden_lines": 0
+    }
+  }
+}
