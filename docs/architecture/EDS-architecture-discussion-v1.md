@@ -295,10 +295,22 @@ static EDS_SCHEMA: Schema = Schema {
                 FieldDecl { name: "comments",        ty: FieldType::Array,  resolution: FieldResolution::RecursiveOr },
             ],
         },
-        // ── Reminder ───────────────────────────────────────────────────────
+        // ── Reminder（功能迁移，非存储迁移）──────────────────────────────
+        // ⚠ Reminder 域的存储架构（Pouch 残留 + 前端 scheduler 依赖）尚未成熟，
+        // 不应作为新 EDS 的参考。Reminder 在新架构中的定位是：
+        // 「只迁移功能与逻辑，不迁移其特有存储架构」。
+        //
+        // 实现路径：
+        // 1. 将 Reminder 的触发逻辑与 TimeBlock 域或 EventLog 域整合
+        //    （Reminder 本质是「在 trigger_at 触发一个事件」，天然落在 EventLog）
+        // 2. DSON schema 中 Reminder 仅作为 minimal schema（用于历史数据迁移入口）
+        //    而非独立域的存储模型
+        // 3. ReminderService 变为一个无状态调度层，触发结果写入 EventLog/TimeBlock
         DocSchema {
             doc_id_prefix: "reminder:",
             fields: vec![
+                // minimal schema：仅用于历史数据一次性迁移，不定义复杂冲突策略
+                // 触发结果直接落入 EventLog（作为一条 event），Reminder 本身不留副本
                 FieldDecl { name: "trigger_at",   ty: FieldType::Number, resolution: FieldResolution::Lww("trigger_at") },
                 FieldDecl { name: "triggered_at",  ty: FieldType::Number, resolution: FieldResolution::Lww("triggered_at") },
                 FieldDecl { name: "repeat",        ty: FieldType::Object, resolution: FieldResolution::RecursiveOr },
@@ -984,7 +996,7 @@ pub trait ConflictResolver: Send + Sync {
 | **Phase 2/3 共存策略** | 切换条件和回退路径未定义 | **Phase 3 内部任务，非前置阻断** | ⚠️ |
 | **Proposal 域的 sync 归属未明确** | 代码中 `proposal.replication.*` handler 完全缺失 | **Phase 2 缺口，非 Phase 3 阻断** | ⚠️ |
 | **EventLog / TimeBlock Reconciliation Adapter** | 无摘要比较，无漂移检测 | #868 | 待 Phase 2 |
-| **Reminder 域的 sync 归属未明确** | 仍依赖前端 scheduler，UI 断开时不完整（#893），未进入 RT 同步体系 | #893 | 待 Phase 2 |
+| **Reminder 域的 sync 归属** | Reminder 存储架构（Pouch 残留）不成熟，不作为新 EDS 参考。新架构中触发结果落入 EventLog，DSON schema 仅作历史迁移入口 | **已解决（v3）** | ✅ |
 | **Projection Layer 薄弱** | 只有 notifyChanged，无细粒度投影刷新 | #910 | 待 Phase 3 |
 | **Conflict object 持久化方案** | #869 要求 losing branch 证据，CRL 接口未定义 conflict metadata schema | #869 | 待 Phase 3 |
 | **mesh relay 文档/实现状态不符** | ECS-3 标注"未实现"但代码生产级 | #910 | 待文档更新 |
@@ -998,11 +1010,11 @@ pub trait ConflictResolver: Send + Sync {
     Live signal + Reconciliation + PeerScopeGrant
     注："已闭环"描述过于乐观，应为"核心路径已通"
 
-  Phase 2 📋 Reconciliation Adapter 补全
-    · 抽象 DomainReconciliationAdapter 接口
-    · 实现 EventLog Reconciliation Adapter（含摘要比较）
-    · 实现 TimeBlock Reconciliation Adapter（含摘要比较）
-    · 实现 Proposal Reconciliation Adapter  ← Phase 2 范围（来自阻断性 B1 重新定级）
+  Phase 2 📋 历史遗留迁移工具（一次性使用）
+    · 实现 DSON store + Storage Adapter 持久层
+    · 实现 EventLog / TimeBlock / Proposal / Reminder 的 Schema 声明
+    · 一次性快照迁移：RT SQLite → DSON store
+    · 迁移完成后 Phase 2 reconciliation 代码废弃，不再运行
     · 补摘要比较和漂移检测
     · 补 peer-auth 路由（/mesh/eventlog/*, /mesh/timeblocks/*）
     · Reminder RT backend 改造（脱离前端 scheduler）
@@ -1025,7 +1037,7 @@ pub trait ConflictResolver: Send + Sync {
 - [x] **Schema 嵌套声明（已解决）**：`Nested`、`RecursiveOr`、`MergeAll` 三种粒度覆盖嵌套/大原子/动态结构三种模式。
 - [x] **B2（已解决）**：Phase 2 reconciliation 是历史遗留迁移工具，DSON 从第一天起是唯一同步路径。详见第十二节。
 - [ ] **B1**：Proposal 域 sync 归属（Phase 2 缺口，非 Phase 3 阻断）
-- [ ] Reminder 域的 Phase 1/2/3 归属（与 #893 联动）
+- [x] **Reminder 域归属（已解决）**：Reminder 的存储架构（Pouch 残留 + 前端 scheduler 依赖）不成熟，不能作为新 EDS 参考。新架构中 Reminder 只迁移功能与逻辑（触发结果落入 EventLog），DSON schema 仅作为历史数据一次性迁移入口，不作为独立域的存储模型。详见 Schema 示例注释。
 - [ ] Conflict object 持久化 schema（与 #869 联动）
 - [ ] ECS 网络层选择（iroh vs libp2p vs 定制协议）
 - [ ] DSON / CDS 的最小接口边界与命名
