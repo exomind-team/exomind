@@ -1,7 +1,8 @@
 # SQLite JSON Bridge — 技术调研与设计方案
 
 > 日期：2026-04-14
-> 状态：调研中 / 草稿
+> 状态：调研完成，实验验证通过
+> 实验分支：`experiment/sqlite-json-each`（已合并到 dev）
 
 ---
 
@@ -203,24 +204,34 @@ async fn delete_json(&self, table: &str, id: &str) -> Result<bool, BridgeError>;
 - 未注册字段 → 放入 `_ext_json`，通过 `json_extract` 查询
 - **不拆子表**：所有嵌套数组/对象在一层内处理，通过 SQLite JSON 函数补充查询
 
+**✅ 实验验证**：`json_each` + `json_extract` 模式已验证可靠，可实现跨表关联（无需拆子表）：
+
+```sql
+-- 找所有依赖 task-001 的任务（无需拆子表）
+SELECT t.id, t.title, json_extract(je.value, '$.relation_type')
+FROM tasks t, json_each(t.depends_on_json, '$') je
+WHERE json_extract(je.value, '$.task_id') = 'task-001'
+
+-- 找所有引用 task-001 的事件
+SELECT e.id, e.content, json_extract(je.value, '$.summary')
+FROM eventlog_events e, json_each(e.refs_json, '$') je
+WHERE json_extract(je.value, '$.event_id') = 'task-001'
+```
+
 **优点**：
 - 实现最小，改动最浅
 - 上层读写整个 JSON 对象，无需关心展开逻辑
-- 未来可演进到子表，不影响 API
-
-**缺点**：
-- 固定嵌套结构（如 `EventRef[]`）无法跨表 JOIN
-- 深层嵌套查询仍受 SQLite JSON 函数限制
+- **实验验证**：`json_each` + `json_extract` 已能支持跨表关联，无需拆子表
 
 ---
 
 ### 阶段 2：增强 JSON 列查询
 
-在阶段 1 基础上，引入 SQLite 内置 JSON 虚拟表：
+在阶段 1 基础上，引入 SQLite 内置 JSON 虚拟表。**实验验证：Phase 2 核心工作调整为表达式索引人肉补充 JSON 函数查询能力**：
 
 ```sql
 -- 查询 tags_json 数组内的标签
-SELECT id, json_extract(title, '$') as title, je.value as tag
+SELECT id, je.value as tag
 FROM tasks, json_each(tasks.tags_json, '$') je
 WHERE je.value LIKE '%urgent%';
 
@@ -228,6 +239,16 @@ WHERE je.value LIKE '%urgent%';
 SELECT id, json_extract(meta_json, '$.source') as src
 FROM tasks
 WHERE json_extract(meta_json, '$.priority') = 'high';
+
+-- 数组长度过滤
+SELECT id
+FROM tasks
+WHERE json_array_length(tags_json) > 2;
+
+-- 深层字段 GROUP BY
+SELECT json_extract(meta_json, '$.source') as src, COUNT(*) as cnt
+FROM tasks
+GROUP BY json_extract(meta_json, '$.source');
 ```
 
 **关键**：JSON 列上的索引需要表达式索引：
@@ -236,6 +257,8 @@ WHERE json_extract(meta_json, '$.priority') = 'high';
 CREATE INDEX idx_tasks_meta_source
 ON tasks(json_extract(meta_json, '$.source'));
 ```
+
+**⚠️ 注意**：`json_tree` 在 SQLite 3.42.0 中有 bug（表列引用时无法用列别名访问虚拟列），使用 `json_each` + `json_extract` 作为替代方案即可，无需研究 `json_tree`。
 
 ---
 
@@ -256,10 +279,10 @@ tasks (主表)
 + rhythm_presets (新子表)
 ```
 
-**判断是否拆子表的标准**（同时满足才拆）：
+**判断是否拆子表的标准**（同时满足才拆，**实验后门槛收紧**）：
 1. 嵌套对象是否有独立 ID？
 2. 是否会在独立上下文中被查询（不通过父表）？
-3. 是否需要和其他表做 JOIN？
+3. **独立查询频率极高**（因为 `json_each` + `json_extract` 已能处理大部分场景，拆子表只带来 JOIN 性能收益，代价是 schema 复杂度上升）
 
 ---
 
@@ -284,15 +307,16 @@ tasks (主表)
 
 ## 6. 建议下一步
 
-1. **先熟悉 SQLite JSON 函数**：在现有 store 上用 `json_each`/`json_tree` 做一次查询实验
+1. **✅ 实验已完成**：SQLite JSON 函数验证通过，详见 [实验报告](./research/SQLite-JSON-Functions-实验报告-2026-04-14.md)
 2. **确定 crate 边界**：独立 crate 还是现有模块增强？路径在哪？
 3. **设计 Phase 1 详细 API**：确定 JSON CRUD 接口的输入输出格式
-4. **原型验证**：最小实现跑通后再扩展
+4. **原型验证**：SchemaRegistry 最小实现跑通后再扩展
 
 ---
 
 ## 7. 参考资料
 
 - [SQLite JSON Functions 文档](https://www.sqlite.org/json1.html)
+- [实验报告（含完整脚本）](./research/SQLite-JSON-Functions-实验报告-2026-04-14.md)
 - [rusqlite JSON 存储模式（现有代码）](./crates/exomind-runtime/src/task/sqlite_store.rs)
 - [schema-on-read 迁移模式（现有代码）](./crates/exomind-runtime/src/agent/session.rs#L320-L336)
