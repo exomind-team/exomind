@@ -196,6 +196,75 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
     }));
   });
 
+  it('prefers mesh host_id over peer.id when binding confirmed hosts（mesh 返回独立 host_id 时仍绑定到正确 runtime host）', async () => {
+    const existingHost: RuntimeHostRecord = {
+      id: 'runtime-host-desktop',
+      name: 'Desktop Node',
+      host: '192.168.1.20',
+      port: 9124,
+      status: 'unknown',
+      createdAt: '2026-03-30T10:00:00.000Z',
+      updatedAt: '2026-03-30T10:00:00.000Z',
+      hostId: 'rt-desktop',
+      trustState: 'discovered_candidate',
+    };
+    const addHost = vi.fn();
+    const removeHost = vi.fn();
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch) => ({
+      ...existingHost,
+      name: patch.name ?? existingHost.name,
+      host: patch.host ?? existingHost.host,
+      port: patch.port ?? existingHost.port,
+      updatedAt: '2026-03-30T10:05:00.000Z',
+      hostId: patch.hostId ?? existingHost.hostId,
+      trustState: patch.trustState ?? existingHost.trustState,
+      advertisedListenAddress: patch.advertisedListenAddress,
+      manualOverride: patch.manualOverride,
+      authToken: patch.authToken,
+    }));
+    const service = new RuntimeMeshHostSyncService({
+      hostService: {
+        listHosts: vi.fn(async () => [existingHost]),
+        addHost,
+        mergeHostMetadata,
+        removeHost,
+      },
+      meshService: {
+        listDiscoveredPeers: vi.fn(async () => []),
+        listMeshPeers: vi.fn(async () => [{
+          id: 'mesh-peer-desktop',
+          host_id: 'rt-desktop',
+          base_url: 'http://192.168.1.20:9124',
+          enabled: true,
+        }]),
+        setPeerEnabled: vi.fn(async () => undefined),
+      },
+      runtimeControlService: {
+        getPeerDialAddress: vi.fn(async () => ({
+          host: '192.168.1.20',
+          port: 9124,
+        })),
+      },
+    });
+
+    const hosts = await service.syncLocalRuntimeMeshState('http://127.0.0.1:31308', 'shared-secret');
+
+    expect(addHost).not.toHaveBeenCalled();
+    expect(mergeHostMetadata).toHaveBeenCalledWith(
+      'runtime-host-desktop',
+      expect.objectContaining({
+        hostId: 'rt-desktop',
+        trustState: 'confirmed_peer',
+      }),
+    );
+    expect(removeHost).not.toHaveBeenCalled();
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0]).toEqual(expect.objectContaining({
+      hostId: 'rt-desktop',
+      trustState: 'confirmed_peer',
+    }));
+  });
+
   it('does not overwrite an explicit remote control token when confirmed peer sync runs（mesh sync 不覆盖显式远端控制面 token）', async () => {
     const existingConfirmedHost: RuntimeHostRecord = {
       id: 'runtime-host-desktop',

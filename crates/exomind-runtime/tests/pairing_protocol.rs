@@ -64,6 +64,7 @@ async fn pairing_full_flow_correct_pin() {
         .expect("device-b should be registered as peer");
     assert_eq!(peer["enabled"], json!(true));
     assert_eq!(peer["base_url"], "http://192.168.1.100:1949");
+    assert_eq!(peer["host_id"], "device-b");
     // Secrets must NOT be leaked in list responses (PeerInfoPublic).
     assert!(
         peer.get("auth_token").is_none() || peer["auth_token"].is_null(),

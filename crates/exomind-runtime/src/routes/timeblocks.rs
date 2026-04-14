@@ -1,16 +1,21 @@
-use axum::extract::{Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 use crate::AppState;
+use crate::auth::AuthenticatedPeerIdentity;
 use crate::signal::types::SignalEvent;
 use crate::timeblock::{
     ActiveBlockData, BlockTaskAssociationEvent, BlockTransition, BlockTransitionType,
     TimeBlockData, TimeBlockStore,
 };
+
+const TIMEBLOCK_SCOPE_GRANT_DOMAIN: &str = "timeblocks";
 
 #[derive(Debug, Deserialize)]
 struct ImportQuery {
@@ -40,7 +45,7 @@ struct TimeBlockBackupJsonPayload {
     active_block: Option<ActiveBlockData>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TimeBlockBackupSqlitePayload {
     version: u32,
     file_name: String,
@@ -67,6 +72,12 @@ struct TimeBlockBackendStatusResponse {
     backend: &'static str,
     supports_json_backup: bool,
     supports_sqlite_snapshot: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TimeBlockScopeGrantReconcileResponse {
+    scope_key: String,
+    granted_peers: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -1098,6 +1109,24 @@ async fn timeblock_backend_status(
     })
 }
 
+async fn reconcile_timeblock_scope_grants(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<TimeBlockScopeGrantReconcileResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = require_named_scope_key(scope_query_key(&query))?;
+    let granted_scope_key = scope_key.to_string();
+    let grants = state.mesh.reconcile_scope_grants_for_enabled_peers(
+        TIMEBLOCK_SCOPE_GRANT_DOMAIN,
+        &granted_scope_key,
+        "http:mesh/timeblocks/grants/reconcile",
+    );
+
+    Ok(Json(TimeBlockScopeGrantReconcileResponse {
+        scope_key: granted_scope_key,
+        granted_peers: grants.len(),
+    }))
+}
+
 async fn export_timeblocks_json(
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
@@ -1182,6 +1211,47 @@ async fn import_timeblocks_sqlite(
     Ok(Json(result))
 }
 
+async fn mesh_export_timeblocks_sqlite(
+    State(state): State<AppState>,
+    Extension(identity): Extension<AuthenticatedPeerIdentity>,
+) -> Result<Json<TimeBlockBackupSqlitePayload>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = resolve_peer_scope_key(&state, &identity)?;
+    let time_blocks = state
+        .timeblock_store
+        .list_completed_scoped(Some(scope_key.as_str()))
+        .map_err(|error| internal_error(error.to_string()))?;
+    let bytes =
+        build_timeblocks_sqlite_snapshot_bytes(&state, Some(scope_key.as_str()), &time_blocks)
+            .map_err(|error| internal_error(error.to_string()))?;
+    let active_block_present = state
+        .timeblock_store
+        .get_active_scoped(Some(scope_key.as_str()))
+        .map_err(|error| internal_error(error.to_string()))?
+        .is_some();
+
+    Ok(Json(TimeBlockBackupSqlitePayload {
+        version: 1,
+        file_name: "exomind-timeblocks.sqlite".to_string(),
+        content_base64: STANDARD.encode(bytes),
+        timeblock_count: time_blocks.len(),
+        active_block_present,
+    }))
+}
+
+async fn proxy_peer_timeblocks_sqlite_snapshot(
+    Path(peer_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<TimeBlockBackupSqlitePayload>, (StatusCode, Json<ErrorResponse>)> {
+    let payload = proxy_peer_json::<TimeBlockBackupSqlitePayload>(
+        &state,
+        &peer_id,
+        "/mesh/timeblocks/snapshot/sqlite",
+        None,
+    )
+    .await?;
+    Ok(Json(payload))
+}
+
 fn parse_import_strategy(
     raw: Option<&str>,
 ) -> Result<TimeBlockImportStrategy, (StatusCode, Json<ErrorResponse>)> {
@@ -1211,7 +1281,10 @@ fn active_block_order_time(block: &ActiveBlockData) -> u64 {
         .unwrap_or(block.updated_at.unwrap_or(block.resolve_start_time()))
 }
 
-fn should_accept_imported_active_block(existing: &ActiveBlockData, incoming: &ActiveBlockData) -> bool {
+fn should_accept_imported_active_block(
+    existing: &ActiveBlockData,
+    incoming: &ActiveBlockData,
+) -> bool {
     if existing.start_id != incoming.start_id {
         let incoming_start = incoming.resolve_start_time();
         let existing_start = existing.resolve_start_time();
@@ -1449,6 +1522,130 @@ fn read_timeblocks_from_sqlite_snapshot(
     Ok((time_blocks, active_block))
 }
 
+fn scope_query_key(query: &ScopeQuery) -> Option<&str> {
+    query.profile_id.as_deref().or(query.user_id.as_deref())
+}
+
+fn require_named_scope_key(
+    scope_key: Option<&str>,
+) -> Result<&str, (StatusCode, Json<ErrorResponse>)> {
+    scope_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "timeblock scope grant reconciliation requires profile_id/user_id"
+                    .to_string(),
+            }),
+        ))
+}
+
+fn resolve_peer_scope_key(
+    state: &AppState,
+    identity: &AuthenticatedPeerIdentity,
+) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    state
+        .mesh
+        .resolve_scope_key_for_peer_domain(&identity.peer_id, TIMEBLOCK_SCOPE_GRANT_DOMAIN)
+        .map_err(|error| {
+            internal_error(format!("timeblock peer scope grant lookup failed: {error}"))
+        })?
+        .ok_or((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: format!(
+                    "peer scope grant missing: peer_id={} domain={}",
+                    identity.peer_id, TIMEBLOCK_SCOPE_GRANT_DOMAIN
+                ),
+            }),
+        ))
+}
+
+async fn proxy_peer_json<T: DeserializeOwned>(
+    state: &AppState,
+    peer_id: &str,
+    remote_path: &str,
+    query: Option<Vec<(&str, String)>>,
+) -> Result<T, (StatusCode, Json<ErrorResponse>)> {
+    let peer = state.mesh.get_peer(peer_id).ok_or((
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: format!("mesh peer not found: {peer_id}"),
+        }),
+    ))?;
+    if !peer.enabled {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: format!("mesh peer disabled: {peer_id}"),
+            }),
+        ));
+    }
+    let auth_token = peer.auth_token.ok_or((
+        StatusCode::CONFLICT,
+        Json(ErrorResponse {
+            error: format!("mesh peer missing outbound auth token: {peer_id}"),
+        }),
+    ))?;
+    let url = build_peer_proxy_url(&peer.base_url, remote_path, query)?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let response = client
+        .get(url)
+        .header("Authorization", format!("Bearer {auth_token}"))
+        .send()
+        .await
+        .map_err(|error| internal_error(format!("peer timeblock proxy request failed: {error}")))?;
+
+    if !response.status().is_success() {
+        return Err((
+            response.status(),
+            Json(ErrorResponse {
+                error: format!(
+                    "peer timeblock proxy request returned status {} for peer {}",
+                    response.status(),
+                    peer_id
+                ),
+            }),
+        ));
+    }
+
+    response.json::<T>().await.map_err(|error| {
+        internal_error(format!(
+            "peer timeblock proxy response decode failed: {error}"
+        ))
+    })
+}
+
+fn build_peer_proxy_url(
+    base_url: &str,
+    remote_path: &str,
+    query: Option<Vec<(&str, String)>>,
+) -> Result<reqwest::Url, (StatusCode, Json<ErrorResponse>)> {
+    let mut url = reqwest::Url::parse(&format!(
+        "{}{}",
+        base_url.trim_end_matches('/'),
+        remote_path
+    ))
+    .map_err(|error| internal_error(format!("invalid mesh peer base url: {error}")))?;
+
+    if let Some(query) = query {
+        {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in query {
+                pairs.append_pair(key, &value);
+            }
+        }
+    }
+
+    Ok(url)
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/timeblocks", get(list_timeblocks))
@@ -1472,19 +1669,34 @@ pub fn router() -> Router<AppState> {
         .route("/timeblocks/backup/sqlite", get(export_timeblocks_sqlite))
         .route("/timeblocks/import/json", post(import_timeblocks_json))
         .route("/timeblocks/import/sqlite", post(import_timeblocks_sqlite))
+        .route(
+            "/mesh/timeblocks/grants/reconcile",
+            post(reconcile_timeblock_scope_grants),
+        )
+        .route(
+            "/mesh/timeblocks/snapshot/sqlite",
+            get(mesh_export_timeblocks_sqlite),
+        )
+        .route(
+            "/mesh/peers/:peer_id/timeblocks/snapshot/sqlite",
+            get(proxy_peer_timeblocks_sqlite_snapshot),
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthenticatedPeerIdentity;
     use crate::signal::SignalPool;
     use crate::timeblock::{ActiveBlockData, BlockTransition, BlockTransitionType};
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{HeaderMap, Request};
     use http_body_util::BodyExt;
     use serde_json::Value;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
     use tower::util::ServiceExt;
 
     fn test_state_with_timeblock_store(
@@ -1555,6 +1767,302 @@ mod tests {
 
     fn test_router(state: AppState) -> Router {
         router().with_state(state)
+    }
+
+    fn make_test_peer(id: &str, base_url: &str) -> crate::mesh::PeerInfo {
+        crate::mesh::PeerInfo {
+            id: id.to_string(),
+            base_url: base_url.to_string(),
+            enabled: true,
+            capabilities: vec![],
+            status: crate::mesh::PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            auth_token: None,
+            inbound_secret: None,
+        }
+    }
+
+    fn make_scope_grant(peer_id: &str, scope_key: &str) -> crate::mesh::PeerScopeGrant {
+        crate::mesh::PeerScopeGrant {
+            peer_id: peer_id.to_string(),
+            domain: TIMEBLOCK_SCOPE_GRANT_DOMAIN.to_string(),
+            scope_key: scope_key.to_string(),
+            granted_at: chrono::Utc::now().to_rfc3339(),
+            granted_by: "test".to_string(),
+        }
+    }
+
+    #[derive(Clone)]
+    struct FakePeerSnapshotState {
+        payload: TimeBlockBackupSqlitePayload,
+        captured_auth: Arc<Mutex<Option<String>>>,
+    }
+
+    async fn fake_peer_timeblocks_snapshot_handler(
+        axum::extract::State(state): axum::extract::State<FakePeerSnapshotState>,
+        headers: HeaderMap,
+    ) -> Json<TimeBlockBackupSqlitePayload> {
+        let auth = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
+        *state.captured_auth.lock().unwrap() = auth;
+        Json(TimeBlockBackupSqlitePayload {
+            version: state.payload.version,
+            file_name: state.payload.file_name.clone(),
+            content_base64: state.payload.content_base64.clone(),
+            timeblock_count: state.payload.timeblock_count,
+            active_block_present: state.payload.active_block_present,
+        })
+    }
+
+    async fn spawn_fake_peer_timeblocks_snapshot_server(
+        payload: TimeBlockBackupSqlitePayload,
+        captured_auth: Arc<Mutex<Option<String>>>,
+    ) -> (String, oneshot::Sender<()>) {
+        let app = Router::new()
+            .route(
+                "/mesh/timeblocks/snapshot/sqlite",
+                get(fake_peer_timeblocks_snapshot_handler),
+            )
+            .with_state(FakePeerSnapshotState {
+                payload,
+                captured_auth,
+            });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        (format!("http://{addr}"), shutdown_tx)
+    }
+
+    #[tokio::test]
+    async fn mesh_timeblocks_snapshot_route_uses_granted_scope_only() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("timeblocks-mesh-peer-scope.sqlite");
+        let timeblock_store =
+            Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
+        timeblock_store
+            .replace_completed_scoped(
+                Some("profile-a"),
+                &[TimeBlockData {
+                    id: "tb-a-1".to_string(),
+                    name: "Granted scope block".to_string(),
+                    start_id: "start-a-1".to_string(),
+                    end_id: "end-a-1".to_string(),
+                    note: None,
+                    tags: vec!["focus".to_string()],
+                    start_time: 1000,
+                    end_time: 2000,
+                    task_ids: vec![],
+                    task_status_outcomes: None,
+                    task_association_log: vec![],
+                    source_planned_block_id: None,
+                    block_type: Some("active".to_string()),
+                    transitions: vec![],
+                }],
+            )
+            .unwrap();
+        timeblock_store
+            .replace_completed_scoped(
+                Some("profile-b"),
+                &[TimeBlockData {
+                    id: "tb-b-1".to_string(),
+                    name: "Other scope block".to_string(),
+                    start_id: "start-b-1".to_string(),
+                    end_id: "end-b-1".to_string(),
+                    note: None,
+                    tags: vec!["focus".to_string()],
+                    start_time: 3000,
+                    end_time: 4000,
+                    task_ids: vec![],
+                    task_status_outcomes: None,
+                    task_association_log: vec![],
+                    source_planned_block_id: None,
+                    block_type: Some("active".to_string()),
+                    transitions: vec![],
+                }],
+            )
+            .unwrap();
+        timeblock_store
+            .put_active_scoped(
+                Some("profile-a"),
+                ActiveBlockData {
+                    start_id: "active-a-1".to_string(),
+                    name: "Granted active".to_string(),
+                    mode: "countup".to_string(),
+                    target_minutes: None,
+                    elapsed: 0,
+                    updated_at: Some(2100),
+                    phase: Some("running".to_string()),
+                    version: Some(1),
+                    actor_id: Some("actor-a".to_string()),
+                    last_transition_at: Some(2100),
+                    last_resumed_at: Some(2000),
+                    accumulated_run_ms: Some(100),
+                    start_time: 2000,
+                    action_ended_at: None,
+                    feedback_started_at: None,
+                    feedback_submitted_at: None,
+                    pause_accumulated_ms: Some(0),
+                    paused: false,
+                    paused_at: None,
+                    task_ids: vec![],
+                    task_association_log: vec![],
+                    source_planned_block_id: None,
+                    block_type: Some("active".to_string()),
+                    transitions: vec![],
+                    task_id: None,
+                },
+            )
+            .unwrap();
+        let state = test_state_with_timeblock_store(timeblock_store);
+        state
+            .mesh
+            .upsert_peer(make_test_peer("peer-phone", "http://peer-phone.local:1949"));
+        state
+            .mesh
+            .upsert_scope_grant(make_scope_grant("peer-phone", "profile-a"));
+        let app = test_router(state);
+
+        let mut request = Request::builder()
+            .uri("/mesh/timeblocks/snapshot/sqlite?user_id=profile-b")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(AuthenticatedPeerIdentity {
+            peer_id: "peer-phone".to_string(),
+        });
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: TimeBlockBackupSqlitePayload = serde_json::from_slice(&body).unwrap();
+        let bytes = STANDARD.decode(payload.content_base64).unwrap();
+        let (granted_blocks, granted_active) =
+            read_timeblocks_from_sqlite_snapshot(&bytes, Some("profile-a")).unwrap();
+        let (other_blocks, other_active) =
+            read_timeblocks_from_sqlite_snapshot(&bytes, Some("profile-b")).unwrap();
+
+        assert_eq!(payload.timeblock_count, 1);
+        assert!(payload.active_block_present);
+        assert_eq!(granted_blocks.len(), 1);
+        assert_eq!(granted_blocks[0].id, "tb-a-1");
+        assert_eq!(
+            granted_active.expect("granted active block").start_id,
+            "active-a-1"
+        );
+        assert!(other_blocks.is_empty());
+        assert!(other_active.is_none());
+    }
+
+    #[tokio::test]
+    async fn reconcile_timeblock_scope_grants_grants_only_enabled_peers() {
+        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::new());
+        let state = test_state_with_timeblock_store(timeblock_store);
+        let mut enabled_peer = make_test_peer("peer-enabled", "http://peer-enabled.local:1949");
+        enabled_peer.auth_token = Some("enabled-token".to_string());
+        let mut disabled_peer = make_test_peer("peer-disabled", "http://peer-disabled.local:1949");
+        disabled_peer.enabled = false;
+
+        state.mesh.upsert_peer(enabled_peer);
+        state.mesh.upsert_peer(disabled_peer);
+
+        let app = test_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mesh/timeblocks/grants/reconcile?user_id=profile-reconcile")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["scope_key"], "profile-reconcile");
+        assert_eq!(payload["granted_peers"], 1);
+        assert_eq!(
+            state
+                .mesh
+                .resolve_scope_key_for_peer_domain("peer-enabled", TIMEBLOCK_SCOPE_GRANT_DOMAIN)
+                .unwrap(),
+            Some("profile-reconcile".to_string())
+        );
+        assert_eq!(
+            state
+                .mesh
+                .resolve_scope_key_for_peer_domain("peer-disabled", TIMEBLOCK_SCOPE_GRANT_DOMAIN)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_peer_timeblocks_snapshot_uses_mesh_outbound_auth_token() {
+        let captured_auth = Arc::new(Mutex::new(None));
+        let payload = TimeBlockBackupSqlitePayload {
+            version: 1,
+            file_name: "peer-timeblocks.sqlite".to_string(),
+            content_base64: STANDARD.encode([4u8, 5, 6]),
+            timeblock_count: 3,
+            active_block_present: true,
+        };
+        let (base_url, shutdown_tx) = spawn_fake_peer_timeblocks_snapshot_server(
+            TimeBlockBackupSqlitePayload {
+                version: payload.version,
+                file_name: payload.file_name.clone(),
+                content_base64: payload.content_base64.clone(),
+                timeblock_count: payload.timeblock_count,
+                active_block_present: payload.active_block_present,
+            },
+            Arc::clone(&captured_auth),
+        )
+        .await;
+
+        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::new());
+        let state = test_state_with_timeblock_store(timeblock_store);
+        let mut peer = make_test_peer("peer-proxy", &base_url);
+        peer.auth_token = Some("peer-outbound-secret".to_string());
+        state.mesh.upsert_peer(peer);
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/peers/peer-proxy/timeblocks/snapshot/sqlite")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let _ = shutdown_tx.send(());
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let proxied: TimeBlockBackupSqlitePayload = serde_json::from_slice(&body).unwrap();
+        assert_eq!(proxied.file_name, "peer-timeblocks.sqlite");
+        assert_eq!(proxied.timeblock_count, 3);
+        assert!(proxied.active_block_present);
+        assert_eq!(
+            *captured_auth.lock().unwrap(),
+            Some("Bearer peer-outbound-secret".to_string())
+        );
     }
 
     #[tokio::test]
@@ -2457,9 +2965,14 @@ mod tests {
         timeblock_store.put_active(existing.clone()).unwrap();
         let state = test_state_with_timeblock_store(timeblock_store.clone());
 
-        let result =
-            apply_timeblock_import(&state, None, vec![], Some(imported), TimeBlockImportStrategy::Merge)
-                .unwrap();
+        let result = apply_timeblock_import(
+            &state,
+            None,
+            vec![],
+            Some(imported),
+            TimeBlockImportStrategy::Merge,
+        )
+        .unwrap();
 
         assert!(!result.active_block_updated);
         let active = timeblock_store.get_active().unwrap().expect("active block");
@@ -2543,9 +3056,14 @@ mod tests {
         timeblock_store.put_active(existing).unwrap();
         let state = test_state_with_timeblock_store(timeblock_store.clone());
 
-        let result =
-            apply_timeblock_import(&state, None, vec![], Some(imported.clone()), TimeBlockImportStrategy::Merge)
-                .unwrap();
+        let result = apply_timeblock_import(
+            &state,
+            None,
+            vec![],
+            Some(imported.clone()),
+            TimeBlockImportStrategy::Merge,
+        )
+        .unwrap();
 
         assert!(result.active_block_updated);
         let active = timeblock_store.get_active().unwrap().expect("active block");

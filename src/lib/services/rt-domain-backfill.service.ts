@@ -2,14 +2,17 @@ import { parseRuntimeAddress, type RuntimeTarget } from '@/config/runtime-target
 import {
   EventLogBackupServiceImpl,
   type EventLogImportResult,
+  type EventLogScopeGrantReconcileResult,
 } from '@/lib/services/eventlog-backup.service';
+import { type TaskImportResult } from '@/lib/services/task-backup.service';
 import {
-  TaskBackupServiceImpl,
-  type TaskImportResult,
-} from '@/lib/services/task-backup.service';
+  TaskReconciliationService,
+  getTaskReconciliationService,
+} from '@/lib/services/task-reconciliation.service';
 import {
   TimeBlockBackupServiceImpl,
   type TimeBlockImportResult,
+  type TimeBlockScopeGrantReconcileResult,
 } from '@/lib/services/timeblock-backup.service';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { notifyTaskDataChanged } from '@/lib/services/task.service';
@@ -21,21 +24,25 @@ import {
 } from '@/lib/utils/runtime-host-address';
 import { log } from '@/lib/logger';
 
-type EventLogBackupLike = Pick<EventLogBackupServiceImpl, 'exportEventsAsSqliteSnapshot'>;
-type LocalEventLogBackupLike = Pick<EventLogBackupServiceImpl, 'importEventsFromSqliteSnapshot'>;
-type TaskBackupLike = Pick<TaskBackupServiceImpl, 'exportTasksAsSqliteSnapshot'>;
-type LocalTaskBackupLike = Pick<TaskBackupServiceImpl, 'importTasksFromSqliteSnapshot'>;
-type TimeBlockBackupLike = Pick<TimeBlockBackupServiceImpl, 'exportTimeBlocksAsSqliteSnapshot'>;
-type LocalTimeBlockBackupLike = Pick<TimeBlockBackupServiceImpl, 'importTimeBlocksFromSqliteSnapshot'>;
+type LegacyPeerEventLogBackupLike = Pick<EventLogBackupServiceImpl, 'exportEventsAsSqliteSnapshot'>;
+type LocalEventLogBackupLike = Pick<
+  EventLogBackupServiceImpl,
+  'exportPeerEventsAsSqliteSnapshot' | 'importEventsFromSqliteSnapshot' | 'reconcileEventLogScopeGrants'
+>;
+type TaskReconciliationLike = Pick<TaskReconciliationService, 'reconcileScopeGrants' | 'reconcilePeer'>;
+type LegacyPeerTimeBlockBackupLike = Pick<TimeBlockBackupServiceImpl, 'exportTimeBlocksAsSqliteSnapshot'>;
+type LocalTimeBlockBackupLike = Pick<
+  TimeBlockBackupServiceImpl,
+  'exportPeerTimeBlocksAsSqliteSnapshot' | 'importTimeBlocksFromSqliteSnapshot' | 'reconcileTimeBlockScopeGrants'
+>;
 
 export interface RtDomainBackfillServiceOptions {
   hostService?: Pick<ReturnType<typeof getRuntimeHostService>, 'listHosts'>;
   localEventLogBackupService?: LocalEventLogBackupLike;
-  localTaskBackupService?: LocalTaskBackupLike;
+  taskReconciliationService?: TaskReconciliationLike;
   localTimeBlockBackupService?: LocalTimeBlockBackupLike;
-  createPeerEventLogBackupService?: (target: RuntimeTarget) => EventLogBackupLike;
-  createPeerTaskBackupService?: (target: RuntimeTarget) => TaskBackupLike;
-  createPeerTimeBlockBackupService?: (target: RuntimeTarget) => TimeBlockBackupLike;
+  createPeerEventLogBackupService?: (target: RuntimeTarget) => LegacyPeerEventLogBackupLike;
+  createPeerTimeBlockBackupService?: (target: RuntimeTarget) => LegacyPeerTimeBlockBackupLike;
 }
 
 export interface RtDomainBackfillSummary {
@@ -64,51 +71,120 @@ function createEmptySummary(): RtDomainBackfillSummary {
   };
 }
 
+function hostReconciliationKey(host: Pick<RuntimeHostRecord, 'id' | 'hostId'>): string {
+  return host.hostId ?? `record:${host.id}`;
+}
+
+function dedupeHostsByReconciliationKey(hosts: RuntimeHostRecord[]): RuntimeHostRecord[] {
+  const seen = new Set<string>();
+  return hosts.filter((host) => {
+    const key = hostReconciliationKey(host);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 export class RtDomainBackfillService {
   private readonly hostService: Pick<ReturnType<typeof getRuntimeHostService>, 'listHosts'>;
   private readonly localEventLogBackupService: LocalEventLogBackupLike;
-  private readonly localTaskBackupService: LocalTaskBackupLike;
+  private readonly taskReconciliationService: TaskReconciliationLike;
   private readonly localTimeBlockBackupService: LocalTimeBlockBackupLike;
-  private readonly createPeerEventLogBackupService: (target: RuntimeTarget) => EventLogBackupLike;
-  private readonly createPeerTaskBackupService: (target: RuntimeTarget) => TaskBackupLike;
-  private readonly createPeerTimeBlockBackupService: (target: RuntimeTarget) => TimeBlockBackupLike;
+  private readonly createPeerEventLogBackupService: (target: RuntimeTarget) => LegacyPeerEventLogBackupLike;
+  private readonly createPeerTimeBlockBackupService: (target: RuntimeTarget) => LegacyPeerTimeBlockBackupLike;
 
   constructor(options: RtDomainBackfillServiceOptions = {}) {
     this.hostService = options.hostService ?? getRuntimeHostService();
     this.localEventLogBackupService = options.localEventLogBackupService ?? new EventLogBackupServiceImpl();
-    this.localTaskBackupService = options.localTaskBackupService ?? new TaskBackupServiceImpl();
+    this.taskReconciliationService = options.taskReconciliationService ?? getTaskReconciliationService();
     this.localTimeBlockBackupService = options.localTimeBlockBackupService ?? new TimeBlockBackupServiceImpl();
     this.createPeerEventLogBackupService = options.createPeerEventLogBackupService
       ?? ((target) => new EventLogBackupServiceImpl({ resolveTarget: () => target }));
-    this.createPeerTaskBackupService = options.createPeerTaskBackupService
-      ?? ((target) => new TaskBackupServiceImpl({ resolveTarget: () => target }));
     this.createPeerTimeBlockBackupService = options.createPeerTimeBlockBackupService
       ?? ((target) => new TimeBlockBackupServiceImpl({ resolveTarget: () => target }));
   }
 
   async backfillConfirmedPeers(): Promise<RtDomainBackfillSummary> {
     const hosts = await this.hostService.listHosts();
-    const confirmedPeers = hosts.filter((host) => (
+    const meshPeers = dedupeHostsByReconciliationKey(hosts.filter((host) => (
       host.trustState === 'confirmed_peer'
       && host.hostId
+    )));
+    const legacySnapshotPeers = dedupeHostsByReconciliationKey(hosts.filter((host) => (
+      host.trustState === 'confirmed_peer'
+      && !host.hostId
       && hasRuntimeControlAuth(host)
-    ));
+    )));
     const summary = createEmptySummary();
+    const processedPeerIds = new Set<string>();
+    let taskChanged = false;
+    let timeblockChanged = false;
 
-    for (const peer of confirmedPeers) {
+    if (meshPeers.length > 0) {
+      try {
+        await this.taskReconciliationService.reconcileScopeGrants();
+      } catch (error) {
+        log.warn(`[RtDomainBackfill] task scope grant reconcile failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      await this.tryReconcileEventLogScopeGrants();
+      await this.tryReconcileTimeBlockScopeGrants();
+    }
+
+    for (const peer of meshPeers) {
+      processedPeerIds.add(hostReconciliationKey(peer));
+
+      try {
+        const taskResult = await this.taskReconciliationService.reconcilePeer(peer.hostId!);
+        summary.tasks.imported += taskResult.imported;
+        summary.tasks.skipped += taskResult.skipped;
+        summary.tasks.total += taskResult.total;
+        taskChanged = taskChanged || taskResult.changed;
+      } catch (error) {
+        log.warn(`[RtDomainBackfill] peer task reconcile failed: ${peer.hostId} ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      try {
+        const eventlogSnapshot = await this.localEventLogBackupService.exportPeerEventsAsSqliteSnapshot(peer.hostId!);
+        const eventlogImport = await this.localEventLogBackupService.importEventsFromSqliteSnapshot(eventlogSnapshot.bytes, 'merge');
+        summary.eventlog.imported += eventlogImport.imported;
+        summary.eventlog.skipped += eventlogImport.skipped;
+        summary.eventlog.total += eventlogImport.total;
+      } catch (error) {
+        log.warn(`[RtDomainBackfill] peer eventlog snapshot via mesh failed: ${peer.hostId} ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      try {
+        const timeblockSnapshot = await this.localTimeBlockBackupService.exportPeerTimeBlocksAsSqliteSnapshot(peer.hostId!);
+        const timeblockImport = await this.localTimeBlockBackupService.importTimeBlocksFromSqliteSnapshot(timeblockSnapshot.bytes, 'merge');
+        summary.timeblocks.imported += timeblockImport.imported;
+        summary.timeblocks.skipped += timeblockImport.skipped;
+        summary.timeblocks.total += timeblockImport.total;
+        summary.timeblocks.activeBlockUpdated = summary.timeblocks.activeBlockUpdated || timeblockImport.activeBlockUpdated;
+        timeblockChanged = timeblockChanged || timeblockImport.imported > 0 || timeblockImport.activeBlockUpdated;
+      } catch (error) {
+        log.warn(`[RtDomainBackfill] peer timeblock snapshot via mesh failed: ${peer.hostId} ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (taskChanged) {
+      notifyTaskDataChanged();
+    }
+
+    for (const peer of legacySnapshotPeers) {
+      processedPeerIds.add(hostReconciliationKey(peer));
       const target = buildPeerRuntimeTarget(peer);
       const peerEventLogBackupService = this.createPeerEventLogBackupService(target);
-      const peerTaskBackupService = this.createPeerTaskBackupService(target);
       const peerTimeBlockBackupService = this.createPeerTimeBlockBackupService(target);
 
-      const [eventlogSnapshotResult, taskSnapshotResult, timeblockSnapshotResult] = await Promise.allSettled([
+      const [eventlogSnapshotResult, timeblockSnapshotResult] = await Promise.allSettled([
         peerEventLogBackupService.exportEventsAsSqliteSnapshot(),
-        peerTaskBackupService.exportTasksAsSqliteSnapshot(),
         peerTimeBlockBackupService.exportTimeBlocksAsSqliteSnapshot(),
       ]);
 
       let eventlogImport: EventLogImportResult = { imported: 0, skipped: 0, total: 0 };
-      let taskImport: TaskImportResult = { imported: 0, skipped: 0, total: 0 };
       let timeblockImport: TimeBlockImportResult = { imported: 0, skipped: 0, total: 0, activeBlockUpdated: false };
 
       if (eventlogSnapshotResult.status === 'fulfilled') {
@@ -117,34 +193,46 @@ export class RtDomainBackfillService {
         log.warn(`[RtDomainBackfill] peer eventlog export failed: ${peer.id} ${eventlogSnapshotResult.reason instanceof Error ? eventlogSnapshotResult.reason.message : String(eventlogSnapshotResult.reason)}`);
       }
 
-      if (taskSnapshotResult.status === 'fulfilled') {
-        taskImport = await this.localTaskBackupService.importTasksFromSqliteSnapshot(taskSnapshotResult.value.bytes, 'merge');
-        notifyTaskDataChanged();
-      } else {
-        log.warn(`[RtDomainBackfill] peer task export failed: ${peer.id} ${taskSnapshotResult.reason instanceof Error ? taskSnapshotResult.reason.message : String(taskSnapshotResult.reason)}`);
-      }
-
       if (timeblockSnapshotResult.status === 'fulfilled') {
         timeblockImport = await this.localTimeBlockBackupService.importTimeBlocksFromSqliteSnapshot(timeblockSnapshotResult.value.bytes, 'merge');
-        notifyTimeBlockDataChanged();
+        timeblockChanged = timeblockChanged || timeblockImport.imported > 0 || timeblockImport.activeBlockUpdated;
       } else {
         log.warn(`[RtDomainBackfill] peer timeblock export failed: ${peer.id} ${timeblockSnapshotResult.reason instanceof Error ? timeblockSnapshotResult.reason.message : String(timeblockSnapshotResult.reason)}`);
       }
 
-      summary.peers += 1;
       summary.eventlog.imported += eventlogImport.imported;
       summary.eventlog.skipped += eventlogImport.skipped;
       summary.eventlog.total += eventlogImport.total;
-      summary.tasks.imported += taskImport.imported;
-      summary.tasks.skipped += taskImport.skipped;
-      summary.tasks.total += taskImport.total;
       summary.timeblocks.imported += timeblockImport.imported;
       summary.timeblocks.skipped += timeblockImport.skipped;
       summary.timeblocks.total += timeblockImport.total;
       summary.timeblocks.activeBlockUpdated = summary.timeblocks.activeBlockUpdated || timeblockImport.activeBlockUpdated;
     }
 
+    if (timeblockChanged) {
+      notifyTimeBlockDataChanged();
+    }
+
+    summary.peers = processedPeerIds.size;
     return summary;
+  }
+
+  private async tryReconcileEventLogScopeGrants(): Promise<EventLogScopeGrantReconcileResult | null> {
+    try {
+      return await this.localEventLogBackupService.reconcileEventLogScopeGrants();
+    } catch (error) {
+      log.warn(`[RtDomainBackfill] eventlog scope grant reconcile failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  private async tryReconcileTimeBlockScopeGrants(): Promise<TimeBlockScopeGrantReconcileResult | null> {
+    try {
+      return await this.localTimeBlockBackupService.reconcileTimeBlockScopeGrants();
+    } catch (error) {
+      log.warn(`[RtDomainBackfill] timeblock scope grant reconcile failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
   }
 }
 

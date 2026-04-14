@@ -231,7 +231,11 @@ fn scope_key_from_query<'a>(
     profile_id.or(user_id)
 }
 
-fn publish_proposal_replication_signal(state: &AppState, scope_key: Option<&str>, proposal: &Proposal) {
+fn publish_proposal_replication_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+) {
     let signal = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),

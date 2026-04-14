@@ -15,6 +15,7 @@ export type {
   EventLogExportSqliteResult,
   EventLogImportResult,
   EventLogImportStrategy,
+  EventLogScopeGrantReconcileResult,
 } from './eventlog-backup.service';
 
 export { TimeBlockServiceImpl, getTimeBlockService } from './timeblock.service';
@@ -32,6 +33,7 @@ export type {
   TimeBlockExportSqliteResult,
   TimeBlockImportResult,
   TimeBlockImportStrategy,
+  TimeBlockScopeGrantReconcileResult,
 } from './timeblock-backup.service';
 
 export { TaskServiceImpl, getTaskService } from './task.service';
@@ -47,7 +49,20 @@ export type {
   TaskExportSqliteResult,
   TaskImportResult,
   TaskImportStrategy,
+  TaskReplicationPullCursor,
+  TaskReplicationPullResult,
+  TaskReplicationSummary,
+  TaskScopeGrantReconcileResult,
 } from './task-backup.service';
+export {
+  TaskReconciliationService,
+  getTaskReconciliationService,
+  resetTaskReconciliationServiceForTests,
+} from './task-reconciliation.service';
+export type {
+  TaskPeerReconciliationResult,
+  TaskReconciliationServiceOptions,
+} from './task-reconciliation.service';
 
 export { TaskTimerServiceImpl, getTaskTimerService } from './task-timer.service';
 export type { TaskTimerService } from './task-timer.service';

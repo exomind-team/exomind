@@ -10,12 +10,12 @@ import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
 
-interface RuntimeTaskDependencyPayload {
+export interface RuntimeTaskDependencyPayload {
   task_id: string;
   type: 'soft' | 'hard';
 }
 
-interface RuntimeTaskPayload {
+export interface RuntimeTaskPayload {
   id: string;
   title: string;
   description?: string | null;
@@ -59,7 +59,7 @@ function toRuntimeDependency(dependency: Dependency): RuntimeTaskDependencyPaylo
   };
 }
 
-function toRuntimeTaskNode(task: RuntimeTaskPayload): TaskNode {
+export function runtimeTaskPayloadToTaskNode(task: RuntimeTaskPayload): TaskNode {
   return normalizeTaskNode({
     id: task.id,
     title: task.title,
@@ -128,7 +128,7 @@ export class TaskRtAdapter implements ITaskPort {
 
   async listTasks(includeCancelled = false): Promise<TaskNode[]> {
     const tasks = await this.requestJson<RuntimeTaskPayload[]>('/tasks');
-    const mapped = tasks.map(toRuntimeTaskNode);
+    const mapped = tasks.map(runtimeTaskPayloadToTaskNode);
     return includeCancelled ? mapped : mapped.filter((task) => task.status !== 'cancelled');
   }
 
@@ -144,7 +144,7 @@ export class TaskRtAdapter implements ITaskPort {
     if (!response.ok) {
       throw new Error(`RT get task failed: ${response.status}`);
     }
-    return toRuntimeTaskNode(await response.json() as RuntimeTaskPayload);
+    return runtimeTaskPayloadToTaskNode(await response.json() as RuntimeTaskPayload);
   }
 
   async createTask(input: CreateTaskInput): Promise<TaskNode> {
@@ -153,7 +153,7 @@ export class TaskRtAdapter implements ITaskPort {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(toRuntimeCreatePayload(input)),
     });
-    return toRuntimeTaskNode(task);
+    return runtimeTaskPayloadToTaskNode(task);
   }
 
   async updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null> {
@@ -169,7 +169,7 @@ export class TaskRtAdapter implements ITaskPort {
     if (!response.ok) {
       throw new Error(`RT update task failed: ${response.status}`);
     }
-    return toRuntimeTaskNode(await response.json() as RuntimeTaskPayload);
+    return runtimeTaskPayloadToTaskNode(await response.json() as RuntimeTaskPayload);
   }
 
   async cancelTask(id: string): Promise<TaskNode | null> {
@@ -184,7 +184,7 @@ export class TaskRtAdapter implements ITaskPort {
     if (!response.ok) {
       throw new Error(`RT cancel task failed: ${response.status}`);
     }
-    return toRuntimeTaskNode(await response.json() as RuntimeTaskPayload);
+    return runtimeTaskPayloadToTaskNode(await response.json() as RuntimeTaskPayload);
   }
 
   async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {
@@ -200,7 +200,7 @@ export class TaskRtAdapter implements ITaskPort {
     if (!response.ok) {
       throw new Error(`RT transition task failed: ${response.status}`);
     }
-    return toRuntimeTaskNode(await response.json() as RuntimeTaskPayload);
+    return runtimeTaskPayloadToTaskNode(await response.json() as RuntimeTaskPayload);
   }
 
   async getAvailableTransitions(id: string): Promise<TaskStatus[]> {

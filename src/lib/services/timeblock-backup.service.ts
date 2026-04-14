@@ -37,6 +37,11 @@ export interface TimeBlockImportResult {
   activeBlockUpdated: boolean;
 }
 
+export interface TimeBlockScopeGrantReconcileResult {
+  scopeKey: string;
+  grantedPeers: number;
+}
+
 interface TimeBlockBackupJsonPayload {
   version: number;
   time_blocks: TimeBlockData[];
@@ -49,6 +54,11 @@ interface TimeBlockBackupSqlitePayload {
   content_base64: string;
   timeblock_count: number;
   active_block_present: boolean;
+}
+
+interface RuntimeTimeBlockScopeGrantReconcilePayload {
+  scope_key: string;
+  granted_peers: number;
 }
 
 export interface TimeBlockBackupServiceOptions {
@@ -120,6 +130,29 @@ export class TimeBlockBackupServiceImpl {
 
   async exportTimeBlocksAsSqliteSnapshot(): Promise<TimeBlockExportSqliteResult> {
     const payload = await this.requestJson<TimeBlockBackupSqlitePayload>('/timeblocks/backup/sqlite');
+    return {
+      fileName: payload.file_name,
+      bytes: base64ToBytes(payload.content_base64),
+      timeBlockCount: payload.timeblock_count,
+      activeBlockPresent: payload.active_block_present,
+    };
+  }
+
+  async reconcileTimeBlockScopeGrants(): Promise<TimeBlockScopeGrantReconcileResult> {
+    const payload = await this.requestJson<RuntimeTimeBlockScopeGrantReconcilePayload>(
+      '/mesh/timeblocks/grants/reconcile',
+      { method: 'POST' },
+    );
+    return {
+      scopeKey: payload.scope_key,
+      grantedPeers: payload.granted_peers,
+    };
+  }
+
+  async exportPeerTimeBlocksAsSqliteSnapshot(peerId: string): Promise<TimeBlockExportSqliteResult> {
+    const payload = await this.requestJson<TimeBlockBackupSqlitePayload>(
+      `/mesh/peers/${encodeURIComponent(peerId)}/timeblocks/snapshot/sqlite`,
+    );
     return {
       fileName: payload.file_name,
       bytes: base64ToBytes(payload.content_base64),

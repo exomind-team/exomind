@@ -6,14 +6,30 @@ use std::net::{IpAddr, SocketAddr};
 
 use crate::AppState;
 
-/// Data-plane mesh paths that peer tokens are allowed to access.
-/// Control-plane paths (/mesh/peers*, /mesh/pairing/initiate) require admin secret.
-const PEER_ALLOWED_PREFIXES: &[&str] = &[
-    "/mesh/events",
-    "/mesh/stream",
-    "/mesh/interests/",
-    "/mesh/discovered",
+/// Request identity injected for peer-auth data-plane calls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedPeerIdentity {
+    pub peer_id: String,
+}
+
+/// Peer-compatible mesh paths: peer token is allowed, admin token may also access.
+const PEER_COMPATIBLE_PATHS: &[&str] = &["/mesh/events", "/mesh/stream", "/mesh/discovered"];
+
+/// Peer-only mesh paths: only peer token is allowed.
+const PEER_ONLY_PATHS: &[&str] = &[
+    "/mesh/eventlog/snapshot/sqlite",
+    "/mesh/tasks/summary",
+    "/mesh/tasks/pull",
+    "/mesh/tasks/snapshot/sqlite",
+    "/mesh/timeblocks/snapshot/sqlite",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PeerPathAccess {
+    Denied,
+    Compatible,
+    PeerOnly,
+}
 
 /// Constant-time byte comparison to prevent timing attacks.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -27,10 +43,15 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-fn is_peer_allowed_path(path: &str) -> bool {
-    PEER_ALLOWED_PREFIXES
-        .iter()
-        .any(|prefix| path.starts_with(prefix))
+fn peer_path_access(path: &str) -> PeerPathAccess {
+    if PEER_ONLY_PATHS.contains(&path) {
+        return PeerPathAccess::PeerOnly;
+    }
+    if PEER_COMPATIBLE_PATHS.contains(&path) || path.starts_with("/mesh/interests/") {
+        return PeerPathAccess::Compatible;
+    }
+
+    PeerPathAccess::Denied
 }
 
 fn is_loopback_request(request: &Request) -> bool {
@@ -137,14 +158,23 @@ fn has_trusted_loopback_origin(request: &Request) -> bool {
 /// Returns 401 if no valid token, 403 if peer token hits a non-mesh route.
 pub async fn require_auth(
     State(state): State<AppState>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if is_loopback_request(&request) && has_trusted_loopback_origin(&request) {
+    let path = request.uri().path().to_string();
+    let peer_path_access = peer_path_access(&path);
+
+    if peer_path_access != PeerPathAccess::PeerOnly
+        && is_loopback_request(&request)
+        && has_trusted_loopback_origin(&request)
+    {
         return Ok(next.run(request).await);
     }
 
-    if state.allow_lan_without_auth && is_local_or_private_network_request(&request) {
+    if peer_path_access != PeerPathAccess::PeerOnly
+        && state.allow_lan_without_auth
+        && is_local_or_private_network_request(&request)
+    {
         return Ok(next.run(request).await);
     }
 
@@ -178,24 +208,274 @@ pub async fn require_auth(
 
     let provided_token = token_from_header.or(token_from_query);
 
-    // Check the request path before consuming the request.
-    let path = request.uri().path().to_string();
-
     match provided_token {
         // 1. Global admin secret — full access to all protected routes.
         Some(ref token) if constant_time_eq(token.as_bytes(), expected_secret.as_bytes()) => {
-            Ok(next.run(request).await)
+            if peer_path_access == PeerPathAccess::PeerOnly {
+                Err(StatusCode::FORBIDDEN)
+            } else {
+                Ok(next.run(request).await)
+            }
         }
         // 2. Per-peer inbound secret — data-plane mesh routes only.
         //    Peers can relay events and stream signals, but cannot manage peers
         //    or initiate pairing (those are admin/control-plane operations).
-        Some(ref token) if state.mesh.has_peer_with_inbound_secret(token) => {
-            if is_peer_allowed_path(&path) {
-                Ok(next.run(request).await)
-            } else {
-                Err(StatusCode::FORBIDDEN)
+        Some(ref token) => {
+            if peer_path_access == PeerPathAccess::Denied {
+                return Err(StatusCode::FORBIDDEN);
+            }
+
+            match state.mesh.peer_id_by_inbound_secret(token) {
+                Ok(Some(peer_id)) => {
+                    request
+                        .extensions_mut()
+                        .insert(AuthenticatedPeerIdentity { peer_id });
+                    Ok(next.run(request).await)
+                }
+                Ok(None) | Err(_) => Err(StatusCode::UNAUTHORIZED),
             }
         }
-        _ => Err(StatusCode::UNAUTHORIZED),
+        None => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::extract::Extension;
+    use axum::routing::get;
+    use axum::{Json, Router};
+    use http_body_util::BodyExt;
+    use serde_json::Value;
+    use tower::util::ServiceExt;
+
+    use crate::mesh::{PeerInfo, PeerStatus};
+
+    fn test_state() -> AppState {
+        let mut state = AppState::new(0);
+        state.auth_secret = Some("admin-secret".to_string());
+        state.mesh.upsert_peer(PeerInfo {
+            id: "peer-phone".to_string(),
+            base_url: "http://peer-phone.local:1949".to_string(),
+            enabled: true,
+            capabilities: vec![],
+            status: PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: "2026-04-13T00:00:00Z".to_string(),
+            updated_at: "2026-04-13T00:00:00Z".to_string(),
+            auth_token: None,
+            inbound_secret: Some("peer-secret".to_string()),
+        });
+        state
+    }
+
+    fn auth_test_router(state: AppState) -> Router {
+        Router::new()
+            .route(
+                "/mesh/eventlog/snapshot/sqlite",
+                get(
+                    |Extension(identity): Extension<AuthenticatedPeerIdentity>| async move {
+                        Json(serde_json::json!({ "peer_id": identity.peer_id }))
+                    },
+                ),
+            )
+            .route(
+                "/mesh/tasks/summary",
+                get(
+                    |Extension(identity): Extension<AuthenticatedPeerIdentity>| async move {
+                        Json(serde_json::json!({ "peer_id": identity.peer_id }))
+                    },
+                ),
+            )
+            .route(
+                "/mesh/tasks/pull",
+                get(
+                    |Extension(identity): Extension<AuthenticatedPeerIdentity>| async move {
+                        Json(serde_json::json!({ "peer_id": identity.peer_id }))
+                    },
+                ),
+            )
+            .route(
+                "/mesh/timeblocks/snapshot/sqlite",
+                get(
+                    |Extension(identity): Extension<AuthenticatedPeerIdentity>| async move {
+                        Json(serde_json::json!({ "peer_id": identity.peer_id }))
+                    },
+                ),
+            )
+            .route(
+                "/mesh/tasks/grants/reconcile",
+                get(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route("/mesh/peers", get(|| async { StatusCode::NO_CONTENT }))
+            .route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                require_auth,
+            ))
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn peer_token_injects_peer_identity_on_peer_only_route() {
+        let response = auth_test_router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/tasks/summary")
+                    .header("authorization", "Bearer peer-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["peer_id"], serde_json::json!("peer-phone"));
+    }
+
+    #[tokio::test]
+    async fn admin_token_is_forbidden_on_peer_only_route() {
+        let response = auth_test_router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/tasks/summary")
+                    .header("authorization", "Bearer admin-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn peer_token_cannot_access_control_plane_routes() {
+        let response = auth_test_router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/peers")
+                    .header("authorization", "Bearer peer-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn peer_token_injects_peer_identity_on_task_pull_route() {
+        let response = auth_test_router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/tasks/pull")
+                    .header("authorization", "Bearer peer-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["peer_id"], serde_json::json!("peer-phone"));
+    }
+
+    #[tokio::test]
+    async fn peer_token_injects_peer_identity_on_eventlog_and_timeblock_snapshot_routes() {
+        for path in [
+            "/mesh/eventlog/snapshot/sqlite",
+            "/mesh/timeblocks/snapshot/sqlite",
+        ] {
+            let response = auth_test_router(test_state())
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("authorization", "Bearer peer-secret")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK, "path={path}");
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let payload: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(payload["peer_id"], serde_json::json!("peer-phone"));
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_token_is_forbidden_on_eventlog_and_timeblock_snapshot_routes() {
+        for path in [
+            "/mesh/eventlog/snapshot/sqlite",
+            "/mesh/timeblocks/snapshot/sqlite",
+        ] {
+            let response = auth_test_router(test_state())
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("authorization", "Bearer admin-secret")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "path={path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_inbound_secret_is_rejected_for_peer_only_route() {
+        let state = test_state();
+        state.mesh.upsert_peer(PeerInfo {
+            id: "peer-tablet".to_string(),
+            base_url: "http://peer-tablet.local:1949".to_string(),
+            enabled: true,
+            capabilities: vec![],
+            status: PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: "2026-04-13T00:00:00Z".to_string(),
+            updated_at: "2026-04-13T00:00:00Z".to_string(),
+            auth_token: None,
+            inbound_secret: Some("peer-secret".to_string()),
+        });
+
+        let response = auth_test_router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/tasks/summary")
+                    .header("authorization", "Bearer peer-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn peer_token_cannot_access_task_scope_grant_route() {
+        let response = auth_test_router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/tasks/grants/reconcile")
+                    .header("authorization", "Bearer peer-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }

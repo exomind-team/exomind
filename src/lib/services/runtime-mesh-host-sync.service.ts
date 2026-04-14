@@ -24,6 +24,7 @@ type RuntimeDiscoveredPeer = {
 
 type RuntimeMeshPeer = {
   id: string;
+  host_id?: string;
   base_url: string;
   enabled: boolean;
   status?: string;
@@ -146,6 +147,11 @@ function buildHostSyncKey(input: {
   return 'unknown';
 }
 
+function resolveMeshPeerHostId<T extends { id: string; host_id?: string | null }>(peer: T): string {
+  const hostId = peer.host_id?.trim();
+  return hostId && hostId.length > 0 ? hostId : peer.id;
+}
+
 export class RuntimeMeshHostSyncService {
   private readonly hostService: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'mergeHostMetadata' | 'removeHost'>;
   private readonly meshService: Pick<RuntimeMeshSyncService, 'listDiscoveredPeers' | 'listMeshPeers' | 'setPeerEnabled'>;
@@ -235,9 +241,10 @@ export class RuntimeMeshHostSyncService {
       }
 
       const [preferredPeer, ...stalePeers] = [...peers].sort(compareMeshPeerFreshness);
+      const preferredPeerHostId = resolveMeshPeerHostId(preferredPeer);
       stalePeers.forEach((peer) => {
         stalePeerIds.add(peer.id);
-        replacedPeerIds.set(peer.id, preferredPeer.id);
+        replacedPeerIds.set(resolveMeshPeerHostId(peer), preferredPeerHostId);
       });
       stalePeerIds.delete(preferredPeer.id);
     }
@@ -391,8 +398,9 @@ export class RuntimeMeshHostSyncService {
       return hosts;
     }
 
+    const peerHostId = resolveMeshPeerHostId(peer);
     const existingHost = findExistingHost(hosts, {
-      hostId: peer.id,
+      hostId: peerHostId,
       host: parsed.host,
       port: parsed.port,
       advertisedListenAddress: formatRuntimeTargetAddress(parsed),
@@ -422,10 +430,10 @@ export class RuntimeMeshHostSyncService {
 
     if (!existingHost) {
       const created = await this.hostService.addHost({
-        name: buildPeerName(peer.id, parsed.host, parsed.port),
+        name: buildPeerName(peerHostId, parsed.host, parsed.port),
         host: parsed.host,
         port: parsed.port,
-        hostId: peer.id,
+        hostId: peerHostId,
         trustState: 'confirmed_peer',
         advertisedListenAddress,
         manualOverride,
@@ -433,14 +441,14 @@ export class RuntimeMeshHostSyncService {
       return [...hosts, created];
     }
 
-    const refreshedName = shouldRefreshPeerName(existingHost, peer.id)
-      ? buildPeerName(peer.id, hostAddress.host, hostAddress.port)
+    const refreshedName = shouldRefreshPeerName(existingHost, peerHostId)
+      ? buildPeerName(peerHostId, hostAddress.host, hostAddress.port)
       : undefined;
     const patch: RuntimeHostMetadataPatch = {
       name: refreshedName,
       host: hostAddress.host,
       port: hostAddress.port,
-      hostId: peer.id,
+      hostId: peerHostId,
       trustState: 'confirmed_peer',
       advertisedListenAddress,
       manualOverride,
@@ -479,7 +487,7 @@ export class RuntimeMeshHostSyncService {
     );
     const activeConfirmedHostIds = new Set(
       meshPeers
-        .map((peer) => peer.id)
+        .map((peer) => resolveMeshPeerHostId(peer))
         .filter((peerId): peerId is string => typeof peerId === 'string' && peerId.length > 0),
     );
     const removableHosts = hosts.filter((host) => {

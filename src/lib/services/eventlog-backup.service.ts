@@ -34,6 +34,11 @@ export interface EventLogImportResult {
   total: number;
 }
 
+export interface EventLogScopeGrantReconcileResult {
+  scopeKey: string;
+  grantedPeers: number;
+}
+
 interface EventLogBackupJsonPayload {
   version: number;
   exportedAt: string;
@@ -45,6 +50,11 @@ interface EventLogBackupSqlitePayload {
   file_name: string;
   content_base64: string;
   event_count: number;
+}
+
+interface RuntimeEventLogScopeGrantReconcilePayload {
+  scope_key: string;
+  granted_peers: number;
 }
 
 export interface EventLogBackupServiceOptions {
@@ -115,6 +125,28 @@ export class EventLogBackupServiceImpl {
 
   async exportEventsAsSqliteSnapshot(): Promise<EventLogExportSqliteResult> {
     const payload = await this.requestJson<EventLogBackupSqlitePayload>('/eventlog/backup/sqlite');
+    return {
+      fileName: payload.file_name,
+      bytes: base64ToBytes(payload.content_base64),
+      eventCount: payload.event_count,
+    };
+  }
+
+  async reconcileEventLogScopeGrants(): Promise<EventLogScopeGrantReconcileResult> {
+    const payload = await this.requestJson<RuntimeEventLogScopeGrantReconcilePayload>(
+      '/mesh/eventlog/grants/reconcile',
+      { method: 'POST' },
+    );
+    return {
+      scopeKey: payload.scope_key,
+      grantedPeers: payload.granted_peers,
+    };
+  }
+
+  async exportPeerEventsAsSqliteSnapshot(peerId: string): Promise<EventLogExportSqliteResult> {
+    const payload = await this.requestJson<EventLogBackupSqlitePayload>(
+      `/mesh/peers/${encodeURIComponent(peerId)}/eventlog/snapshot/sqlite`,
+    );
     return {
       fileName: payload.file_name,
       bytes: base64ToBytes(payload.content_base64),

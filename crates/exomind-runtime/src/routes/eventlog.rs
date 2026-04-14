@@ -2,12 +2,13 @@
 //!
 //! Mirrors the Tauri commands from `eventlog_commands.rs` as REST endpoints.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{TimeZone, Utc};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -15,11 +16,13 @@ use tokio::sync::broadcast;
 use tokio::time::{Duration, Instant};
 
 use crate::AppState;
+use crate::auth::AuthenticatedPeerIdentity;
 use crate::eventlog::{EventListFilter, EventRecord, EventRef, sanitize_user_id};
 use crate::signal::types::SignalEvent;
 
 const EVENTLOG_REVISION_HEADER: &str = "x-exomind-eventlog-revision";
 const EVENTLOG_LIST_SEMANTICS_HEADER: &str = "x-exomind-eventlog-list-semantics";
+const EVENTLOG_SCOPE_GRANT_DOMAIN: &str = "eventlog";
 
 // ── Request / query types ───────────────────────────────────────
 
@@ -69,7 +72,7 @@ struct EventLogBackupJsonPayload {
     events: Vec<EventRecord>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct EventLogBackupSqlitePayload {
     version: u32,
     file_name: String,
@@ -98,6 +101,12 @@ struct EventLogBackendStatusResponse {
     backend: &'static str,
     supports_json_backup: bool,
     supports_sqlite_snapshot: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct EventLogScopeGrantReconcileResponse {
+    scope_key: String,
+    granted_peers: usize,
 }
 
 enum EventLogImportStrategy {
@@ -514,6 +523,58 @@ async fn eventlog_backend_status(
     })
 }
 
+async fn reconcile_eventlog_scope_grants(
+    State(state): State<AppState>,
+    Query(query): Query<EventLogQuery>,
+) -> Result<Json<EventLogScopeGrantReconcileResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = require_named_eventlog_scope_key(query.user_id.as_deref())?;
+    let granted_scope_key = sanitize_user_id(Some(scope_key));
+    let grants = state.mesh.reconcile_scope_grants_for_enabled_peers(
+        EVENTLOG_SCOPE_GRANT_DOMAIN,
+        &granted_scope_key,
+        "http:mesh/eventlog/grants/reconcile",
+    );
+
+    Ok(Json(EventLogScopeGrantReconcileResponse {
+        scope_key: granted_scope_key,
+        granted_peers: grants.len(),
+    }))
+}
+
+async fn mesh_export_eventlog_sqlite(
+    State(state): State<AppState>,
+    Extension(identity): Extension<AuthenticatedPeerIdentity>,
+) -> Result<Json<EventLogBackupSqlitePayload>, (StatusCode, Json<ErrorResponse>)> {
+    let scope_key = resolve_peer_scope_key(&state, &identity)?;
+    let events = state
+        .eventlog_store
+        .list_events(Some(scope_key.as_str()))
+        .map_err(internal_error)?;
+    let bytes = build_eventlog_sqlite_snapshot_bytes(&state, Some(scope_key.as_str()), &events)
+        .map_err(internal_error)?;
+
+    Ok(Json(EventLogBackupSqlitePayload {
+        version: 1,
+        file_name: "exomind-eventlog.sqlite".to_string(),
+        content_base64: STANDARD.encode(bytes),
+        event_count: events.len(),
+    }))
+}
+
+async fn proxy_peer_eventlog_sqlite_snapshot(
+    Path(peer_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<EventLogBackupSqlitePayload>, (StatusCode, Json<ErrorResponse>)> {
+    let payload = proxy_peer_json::<EventLogBackupSqlitePayload>(
+        &state,
+        &peer_id,
+        "/mesh/eventlog/snapshot/sqlite",
+        None,
+    )
+    .await?;
+    Ok(Json(payload))
+}
+
 // ── Router assembly ─────────────────────────────────────────────
 
 pub fn router() -> Router<AppState> {
@@ -528,6 +589,18 @@ pub fn router() -> Router<AppState> {
         .route("/eventlog/backup/sqlite", get(export_eventlog_sqlite))
         .route("/eventlog/import/json", post(import_eventlog_json))
         .route("/eventlog/import/sqlite", post(import_eventlog_sqlite))
+        .route(
+            "/mesh/eventlog/grants/reconcile",
+            post(reconcile_eventlog_scope_grants),
+        )
+        .route(
+            "/mesh/eventlog/snapshot/sqlite",
+            get(mesh_export_eventlog_sqlite),
+        )
+        .route(
+            "/mesh/peers/:peer_id/eventlog/snapshot/sqlite",
+            get(proxy_peer_eventlog_sqlite_snapshot),
+        )
         .route("/eventlog/:id", get(get_event))
 }
 
@@ -662,21 +735,143 @@ fn read_events_from_sqlite_snapshot(
     Ok(events)
 }
 
+fn require_named_eventlog_scope_key(
+    user_id: Option<&str>,
+) -> Result<&str, (StatusCode, Json<ErrorResponse>)> {
+    user_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "eventlog scope grant reconciliation requires user_id".to_string(),
+            }),
+        ))
+}
+
+fn resolve_peer_scope_key(
+    state: &AppState,
+    identity: &AuthenticatedPeerIdentity,
+) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    state
+        .mesh
+        .resolve_scope_key_for_peer_domain(&identity.peer_id, EVENTLOG_SCOPE_GRANT_DOMAIN)
+        .map_err(|error| {
+            internal_error(format!("eventlog peer scope grant lookup failed: {error}"))
+        })?
+        .ok_or((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: format!(
+                    "peer scope grant missing: peer_id={} domain={}",
+                    identity.peer_id, EVENTLOG_SCOPE_GRANT_DOMAIN
+                ),
+            }),
+        ))
+}
+
+async fn proxy_peer_json<T: DeserializeOwned>(
+    state: &AppState,
+    peer_id: &str,
+    remote_path: &str,
+    query: Option<Vec<(&str, String)>>,
+) -> Result<T, (StatusCode, Json<ErrorResponse>)> {
+    let peer = state.mesh.get_peer(peer_id).ok_or((
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: format!("mesh peer not found: {peer_id}"),
+        }),
+    ))?;
+    if !peer.enabled {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: format!("mesh peer disabled: {peer_id}"),
+            }),
+        ));
+    }
+    let auth_token = peer.auth_token.ok_or((
+        StatusCode::CONFLICT,
+        Json(ErrorResponse {
+            error: format!("mesh peer missing outbound auth token: {peer_id}"),
+        }),
+    ))?;
+    let url = build_peer_proxy_url(&peer.base_url, remote_path, query)?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let response = client
+        .get(url)
+        .header("Authorization", format!("Bearer {auth_token}"))
+        .send()
+        .await
+        .map_err(|error| internal_error(format!("peer eventlog proxy request failed: {error}")))?;
+
+    if !response.status().is_success() {
+        return Err((
+            response.status(),
+            Json(ErrorResponse {
+                error: format!(
+                    "peer eventlog proxy request returned status {} for peer {}",
+                    response.status(),
+                    peer_id
+                ),
+            }),
+        ));
+    }
+
+    response.json::<T>().await.map_err(|error| {
+        internal_error(format!(
+            "peer eventlog proxy response decode failed: {error}"
+        ))
+    })
+}
+
+fn build_peer_proxy_url(
+    base_url: &str,
+    remote_path: &str,
+    query: Option<Vec<(&str, String)>>,
+) -> Result<reqwest::Url, (StatusCode, Json<ErrorResponse>)> {
+    let mut url = reqwest::Url::parse(&format!(
+        "{}{}",
+        base_url.trim_end_matches('/'),
+        remote_path
+    ))
+    .map_err(|error| internal_error(format!("invalid mesh peer base url: {error}")))?;
+
+    if let Some(query) = query {
+        {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in query {
+                pairs.append_pair(key, &value);
+            }
+        }
+    }
+
+    Ok(url)
+}
+
 // ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthenticatedPeerIdentity;
     use crate::eventlog::EventLogStore;
     use crate::mesh::MeshState;
     use crate::signal::SignalPool;
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{HeaderMap, Request};
     use base64::engine::general_purpose::STANDARD;
     use http_body_util::BodyExt;
     use serde_json::Value;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
     use tower::util::ServiceExt;
 
     fn test_state_with_eventlog(store: Arc<EventLogStore>) -> AppState {
@@ -732,6 +927,84 @@ mod tests {
         router().with_state(state)
     }
 
+    fn make_test_peer(id: &str, base_url: &str) -> crate::mesh::PeerInfo {
+        crate::mesh::PeerInfo {
+            id: id.to_string(),
+            base_url: base_url.to_string(),
+            enabled: true,
+            capabilities: vec![],
+            status: crate::mesh::PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            auth_token: None,
+            inbound_secret: None,
+        }
+    }
+
+    fn make_scope_grant(peer_id: &str, scope_key: &str) -> crate::mesh::PeerScopeGrant {
+        crate::mesh::PeerScopeGrant {
+            peer_id: peer_id.to_string(),
+            domain: EVENTLOG_SCOPE_GRANT_DOMAIN.to_string(),
+            scope_key: scope_key.to_string(),
+            granted_at: chrono::Utc::now().to_rfc3339(),
+            granted_by: "test".to_string(),
+        }
+    }
+
+    #[derive(Clone)]
+    struct FakePeerSnapshotState {
+        payload: EventLogBackupSqlitePayload,
+        captured_auth: Arc<Mutex<Option<String>>>,
+    }
+
+    async fn fake_peer_eventlog_snapshot_handler(
+        axum::extract::State(state): axum::extract::State<FakePeerSnapshotState>,
+        headers: HeaderMap,
+    ) -> Json<EventLogBackupSqlitePayload> {
+        let auth = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
+        *state.captured_auth.lock().unwrap() = auth;
+        Json(EventLogBackupSqlitePayload {
+            version: state.payload.version,
+            file_name: state.payload.file_name.clone(),
+            content_base64: state.payload.content_base64.clone(),
+            event_count: state.payload.event_count,
+        })
+    }
+
+    async fn spawn_fake_peer_eventlog_snapshot_server(
+        payload: EventLogBackupSqlitePayload,
+        captured_auth: Arc<Mutex<Option<String>>>,
+    ) -> (String, oneshot::Sender<()>) {
+        let app = Router::new()
+            .route(
+                "/mesh/eventlog/snapshot/sqlite",
+                get(fake_peer_eventlog_snapshot_handler),
+            )
+            .with_state(FakePeerSnapshotState {
+                payload,
+                captured_auth,
+            });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        (format!("http://{addr}"), shutdown_tx)
+    }
+
     async fn append_event_via_api(app: &Router, body: &str, uri: &str) -> Value {
         let response = app
             .clone()
@@ -748,6 +1021,167 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn mesh_eventlog_snapshot_route_uses_granted_scope_only() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog-mesh-peer-scope.sqlite");
+        let store = Arc::new(
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap(),
+        );
+        store
+            .append_event(
+                Some("profile-a"),
+                EventRecord {
+                    id: "event-a-1".to_string(),
+                    timestamp: 1000,
+                    content: "Granted scope event".to_string(),
+                    tags: vec!["note".to_string()],
+                    refs: Vec::new(),
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        store
+            .append_event(
+                Some("profile-b"),
+                EventRecord {
+                    id: "event-b-1".to_string(),
+                    timestamp: 2000,
+                    content: "Other scope event".to_string(),
+                    tags: vec!["note".to_string()],
+                    refs: Vec::new(),
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        let state = test_state_with_eventlog(store);
+        state
+            .mesh
+            .upsert_peer(make_test_peer("peer-phone", "http://peer-phone.local:1949"));
+        state
+            .mesh
+            .upsert_scope_grant(make_scope_grant("peer-phone", "profile-a"));
+        let app = test_router(state);
+
+        let mut request = Request::builder()
+            .uri("/mesh/eventlog/snapshot/sqlite?user_id=profile-b")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(AuthenticatedPeerIdentity {
+            peer_id: "peer-phone".to_string(),
+        });
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: EventLogBackupSqlitePayload = serde_json::from_slice(&body).unwrap();
+        let bytes = STANDARD.decode(payload.content_base64).unwrap();
+        let granted_events = read_events_from_sqlite_snapshot(&bytes, Some("profile-a")).unwrap();
+        let other_events = read_events_from_sqlite_snapshot(&bytes, Some("profile-b")).unwrap();
+
+        assert_eq!(payload.event_count, 1);
+        assert_eq!(granted_events.len(), 1);
+        assert_eq!(granted_events[0].id, "event-a-1");
+        assert!(other_events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconcile_eventlog_scope_grants_grants_only_enabled_peers() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let state = test_state_with_eventlog(store);
+        let mut enabled_peer = make_test_peer("peer-enabled", "http://peer-enabled.local:1949");
+        enabled_peer.auth_token = Some("enabled-token".to_string());
+        let mut disabled_peer = make_test_peer("peer-disabled", "http://peer-disabled.local:1949");
+        disabled_peer.enabled = false;
+
+        state.mesh.upsert_peer(enabled_peer);
+        state.mesh.upsert_peer(disabled_peer);
+
+        let app = test_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mesh/eventlog/grants/reconcile?user_id=profile-reconcile")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["scope_key"], "profile-reconcile");
+        assert_eq!(payload["granted_peers"], 1);
+        assert_eq!(
+            state
+                .mesh
+                .resolve_scope_key_for_peer_domain("peer-enabled", EVENTLOG_SCOPE_GRANT_DOMAIN)
+                .unwrap(),
+            Some("profile-reconcile".to_string())
+        );
+        assert_eq!(
+            state
+                .mesh
+                .resolve_scope_key_for_peer_domain("peer-disabled", EVENTLOG_SCOPE_GRANT_DOMAIN)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_peer_eventlog_snapshot_uses_mesh_outbound_auth_token() {
+        let captured_auth = Arc::new(Mutex::new(None));
+        let payload = EventLogBackupSqlitePayload {
+            version: 1,
+            file_name: "peer-eventlog.sqlite".to_string(),
+            content_base64: STANDARD.encode([1u8, 2, 3]),
+            event_count: 2,
+        };
+        let (base_url, shutdown_tx) = spawn_fake_peer_eventlog_snapshot_server(
+            EventLogBackupSqlitePayload {
+                version: payload.version,
+                file_name: payload.file_name.clone(),
+                content_base64: payload.content_base64.clone(),
+                event_count: payload.event_count,
+            },
+            Arc::clone(&captured_auth),
+        )
+        .await;
+
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let state = test_state_with_eventlog(store);
+        let mut peer = make_test_peer("peer-proxy", &base_url);
+        peer.auth_token = Some("peer-outbound-secret".to_string());
+        state.mesh.upsert_peer(peer);
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/peers/peer-proxy/eventlog/snapshot/sqlite")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let _ = shutdown_tx.send(());
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let proxied: EventLogBackupSqlitePayload = serde_json::from_slice(&body).unwrap();
+        assert_eq!(proxied.file_name, "peer-eventlog.sqlite");
+        assert_eq!(proxied.event_count, 2);
+        assert_eq!(
+            *captured_auth.lock().unwrap(),
+            Some("Bearer peer-outbound-secret".to_string())
+        );
     }
 
     #[tokio::test]

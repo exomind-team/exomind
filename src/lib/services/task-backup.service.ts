@@ -4,6 +4,7 @@ import {
   type RuntimeTarget,
 } from '@/config/runtime-target';
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
+import type { RuntimeTaskPayload } from '@/lib/adapters/task-rt-adapter';
 import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
@@ -33,6 +34,35 @@ export interface TaskImportResult {
   total: number;
 }
 
+export interface TaskReplicationSummary {
+  schemaVersion: 1;
+  scopeKey: string;
+  taskCount: number;
+  maxUpdatedAt: number;
+  revisionHash: string;
+  generatedAt: number;
+}
+
+export interface TaskReplicationPullCursor {
+  kind: 'task_watermark';
+  updatedAt: number;
+  taskId: string;
+}
+
+export interface TaskReplicationPullResult {
+  schemaVersion: 1;
+  scopeKey: string;
+  items: RuntimeTaskPayload[];
+  nextCursor?: TaskReplicationPullCursor;
+  hasMore: boolean;
+  summary: TaskReplicationSummary;
+}
+
+export interface TaskScopeGrantReconcileResult {
+  scopeKey: string;
+  grantedPeers: number;
+}
+
 interface TaskBackupJsonPayload {
   version: number;
   tasks: unknown[];
@@ -43,6 +73,35 @@ interface TaskBackupSqlitePayload {
   file_name: string;
   content_base64: string;
   task_count: number;
+}
+
+interface RuntimeTaskReplicationSummaryPayload {
+  schema_version: 1;
+  scope_key: string;
+  task_count: number;
+  max_updated_at: number;
+  revision_hash: string;
+  generated_at: number;
+}
+
+interface RuntimeTaskReplicationPullCursorPayload {
+  kind: 'task_watermark';
+  updated_at: number;
+  task_id: string;
+}
+
+interface RuntimeTaskReplicationPullPayload {
+  schema_version: 1;
+  scope_key: string;
+  items: RuntimeTaskPayload[];
+  next_cursor?: RuntimeTaskReplicationPullCursorPayload | null;
+  has_more: boolean;
+  summary: RuntimeTaskReplicationSummaryPayload;
+}
+
+interface RuntimeTaskScopeGrantReconcilePayload {
+  scope_key: string;
+  granted_peers: number;
 }
 
 export interface TaskBackupServiceOptions {
@@ -79,6 +138,29 @@ function buildTaskJsonFileName(): string {
   return `exomind-tasks-${day}.json`;
 }
 
+function mapTaskReplicationSummary(
+  payload: RuntimeTaskReplicationSummaryPayload,
+): TaskReplicationSummary {
+  return {
+    schemaVersion: payload.schema_version,
+    scopeKey: payload.scope_key,
+    taskCount: payload.task_count,
+    maxUpdatedAt: payload.max_updated_at,
+    revisionHash: payload.revision_hash,
+    generatedAt: payload.generated_at,
+  };
+}
+
+function mapTaskReplicationPullCursor(
+  payload: RuntimeTaskReplicationPullCursorPayload,
+): TaskReplicationPullCursor {
+  return {
+    kind: payload.kind,
+    updatedAt: payload.updated_at,
+    taskId: payload.task_id,
+  };
+}
+
 export class TaskBackupServiceImpl {
   private readonly fetchImpl: RuntimeFetch;
   private readonly resolveTarget: () => RuntimeTarget;
@@ -113,6 +195,70 @@ export class TaskBackupServiceImpl {
 
   async exportTasksAsSqliteSnapshot(): Promise<TaskExportSqliteResult> {
     const payload = await this.requestJson<TaskBackupSqlitePayload>('/tasks/backup/sqlite');
+    return {
+      fileName: payload.file_name,
+      bytes: base64ToBytes(payload.content_base64),
+      taskCount: payload.task_count,
+    };
+  }
+
+  async getTaskReplicationSummary(): Promise<TaskReplicationSummary> {
+    const payload = await this.requestJson<RuntimeTaskReplicationSummaryPayload>(
+      '/tasks/replication/summary',
+    );
+    return mapTaskReplicationSummary(payload);
+  }
+
+  async reconcileTaskScopeGrants(): Promise<TaskScopeGrantReconcileResult> {
+    const payload = await this.requestJson<RuntimeTaskScopeGrantReconcilePayload>(
+      '/mesh/tasks/grants/reconcile',
+      { method: 'POST' },
+    );
+    return {
+      scopeKey: payload.scope_key,
+      grantedPeers: payload.granted_peers,
+    };
+  }
+
+  async getPeerTaskReplicationSummary(peerId: string): Promise<TaskReplicationSummary> {
+    const payload = await this.requestJson<RuntimeTaskReplicationSummaryPayload>(
+      `/mesh/peers/${encodeURIComponent(peerId)}/tasks/summary`,
+    );
+    return mapTaskReplicationSummary(payload);
+  }
+
+  async pullPeerTaskReplicationBatch(
+    peerId: string,
+    cursor?: TaskReplicationPullCursor,
+    limit = 200,
+  ): Promise<TaskReplicationPullResult> {
+    const path = new URL(
+      `/mesh/peers/${encodeURIComponent(peerId)}/tasks/pull`,
+      'http://runtime.local',
+    );
+    path.searchParams.set('limit', String(limit));
+    if (cursor) {
+      path.searchParams.set('after_updated_at', String(cursor.updatedAt));
+      path.searchParams.set('after_task_id', cursor.taskId);
+    }
+
+    const payload = await this.requestJson<RuntimeTaskReplicationPullPayload>(
+      `${path.pathname}${path.search}`,
+    );
+    return {
+      schemaVersion: payload.schema_version,
+      scopeKey: payload.scope_key,
+      items: payload.items,
+      nextCursor: payload.next_cursor ? mapTaskReplicationPullCursor(payload.next_cursor) : undefined,
+      hasMore: payload.has_more,
+      summary: mapTaskReplicationSummary(payload.summary),
+    };
+  }
+
+  async exportPeerTasksAsSqliteSnapshot(peerId: string): Promise<TaskExportSqliteResult> {
+    const payload = await this.requestJson<TaskBackupSqlitePayload>(
+      `/mesh/peers/${encodeURIComponent(peerId)}/tasks/snapshot/sqlite`,
+    );
     return {
       fileName: payload.file_name,
       bytes: base64ToBytes(payload.content_base64),

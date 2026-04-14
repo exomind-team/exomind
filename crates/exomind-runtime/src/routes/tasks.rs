@@ -1,11 +1,15 @@
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::time::Duration;
 
 use crate::AppState;
+use crate::auth::AuthenticatedPeerIdentity;
 use crate::signal::types::SignalEvent;
 use crate::task::store::TaskStoreError;
 use crate::task::{
@@ -75,7 +79,7 @@ struct TaskBackupJsonPayload {
     tasks: Vec<Task>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TaskBackupSqlitePayload {
     version: u32,
     file_name: String,
@@ -95,6 +99,63 @@ struct TaskImportResult {
     total: usize,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+struct TaskReplicationSummary {
+    schema_version: u32,
+    scope_key: String,
+    task_count: usize,
+    max_updated_at: u64,
+    revision_hash: String,
+    generated_at: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+struct TaskReplicationPullCursor {
+    kind: String,
+    updated_at: u64,
+    task_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskReplicationPullQuery {
+    #[serde(default)]
+    after_updated_at: Option<u64>,
+    #[serde(default)]
+    after_task_id: Option<String>,
+    #[serde(default = "default_task_replication_pull_limit")]
+    limit: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScopedTaskReplicationPullQuery {
+    #[serde(default)]
+    after_updated_at: Option<u64>,
+    #[serde(default)]
+    after_task_id: Option<String>,
+    #[serde(default = "default_task_replication_pull_limit")]
+    limit: usize,
+    #[serde(default)]
+    profile_id: Option<String>,
+    #[serde(default)]
+    user_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TaskReplicationPullResponse {
+    schema_version: u32,
+    scope_key: String,
+    items: Vec<Task>,
+    next_cursor: Option<TaskReplicationPullCursor>,
+    has_more: bool,
+    summary: TaskReplicationSummary,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskScopeGrantReconcileResponse {
+    scope_key: String,
+    granted_peers: usize,
+}
+
 #[derive(Debug, Serialize)]
 struct TaskBackendStatusResponse {
     backend: &'static str,
@@ -106,6 +167,8 @@ enum TaskImportStrategy {
     Merge,
     Overwrite,
 }
+
+const TASK_SCOPE_GRANT_DOMAIN: &str = "tasks";
 
 // ── Handlers ────────────────────────────────────────────────────
 
@@ -463,7 +526,159 @@ async fn task_backend_status(State(state): State<AppState>) -> Json<TaskBackendS
     })
 }
 
+async fn replication_summary_tasks(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Json<TaskReplicationSummary> {
+    let scope_key = scope_query_key(&query);
+    Json(build_task_replication_summary(
+        scope_key,
+        &state.task_store.list_scoped(scope_key),
+    ))
+}
+
+async fn replication_pull_tasks(
+    State(state): State<AppState>,
+    Query(query): Query<ScopedTaskReplicationPullQuery>,
+) -> Json<TaskReplicationPullResponse> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    Json(build_task_replication_pull_response(
+        scope_key,
+        &state.task_store.list_scoped(scope_key),
+        TaskReplicationPullQuery {
+            after_updated_at: query.after_updated_at,
+            after_task_id: query.after_task_id,
+            limit: query.limit,
+        },
+    ))
+}
+
+async fn reconcile_task_scope_grants(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<TaskScopeGrantReconcileResponse>, (StatusCode, String)> {
+    let scope_key = require_named_scope_key(scope_query_key(&query))?;
+    let grants = state.mesh.reconcile_scope_grants_for_enabled_peers(
+        TASK_SCOPE_GRANT_DOMAIN,
+        scope_key,
+        "http:mesh/tasks/grants/reconcile",
+    );
+
+    Ok(Json(TaskScopeGrantReconcileResponse {
+        scope_key: scope_key.to_string(),
+        granted_peers: grants.len(),
+    }))
+}
+
+async fn mesh_task_replication_summary(
+    State(state): State<AppState>,
+    Extension(identity): Extension<AuthenticatedPeerIdentity>,
+) -> Result<Json<TaskReplicationSummary>, (StatusCode, String)> {
+    let scope_key = resolve_peer_scope_key(&state, &identity)?;
+    let tasks = state.task_store.list_scoped(Some(scope_key.as_str()));
+    Ok(Json(build_task_replication_summary(
+        Some(scope_key.as_str()),
+        &tasks,
+    )))
+}
+
+async fn mesh_task_replication_pull(
+    State(state): State<AppState>,
+    Extension(identity): Extension<AuthenticatedPeerIdentity>,
+    Query(query): Query<TaskReplicationPullQuery>,
+) -> Result<Json<TaskReplicationPullResponse>, (StatusCode, String)> {
+    let scope_key = resolve_peer_scope_key(&state, &identity)?;
+    let tasks = state.task_store.list_scoped(Some(scope_key.as_str()));
+    Ok(Json(build_task_replication_pull_response(
+        Some(scope_key.as_str()),
+        &tasks,
+        query,
+    )))
+}
+
+async fn mesh_export_tasks_sqlite(
+    State(state): State<AppState>,
+    Extension(identity): Extension<AuthenticatedPeerIdentity>,
+) -> Result<Json<TaskBackupSqlitePayload>, (StatusCode, String)> {
+    let scope_key = resolve_peer_scope_key(&state, &identity)?;
+    let tasks = state.task_store.list_scoped(Some(scope_key.as_str()));
+    let bytes = build_task_sqlite_snapshot_bytes(Some(scope_key.as_str()), &tasks)?;
+
+    Ok(Json(TaskBackupSqlitePayload {
+        version: 1,
+        file_name: "exomind-tasks.sqlite".to_string(),
+        content_base64: STANDARD.encode(bytes),
+        task_count: tasks.len(),
+    }))
+}
+
+async fn proxy_peer_task_replication_summary(
+    Path(peer_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<TaskReplicationSummary>, (StatusCode, String)> {
+    let summary =
+        proxy_peer_json::<TaskReplicationSummary>(&state, &peer_id, "/mesh/tasks/summary", None)
+            .await?;
+    Ok(Json(summary))
+}
+
+async fn proxy_peer_task_replication_pull(
+    Path(peer_id): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<TaskReplicationPullQuery>,
+) -> Result<Json<TaskReplicationPullResponse>, (StatusCode, String)> {
+    let mut params = Vec::new();
+    if let Some(after_updated_at) = query.after_updated_at {
+        params.push(("after_updated_at", after_updated_at.to_string()));
+    }
+    if let Some(after_task_id) = query.after_task_id {
+        params.push(("after_task_id", after_task_id));
+    }
+    params.push(("limit", query.limit.to_string()));
+
+    let response = proxy_peer_json::<TaskReplicationPullResponse>(
+        &state,
+        &peer_id,
+        "/mesh/tasks/pull",
+        Some(params),
+    )
+    .await?;
+    Ok(Json(response))
+}
+
+async fn proxy_peer_tasks_sqlite_snapshot(
+    Path(peer_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<TaskBackupSqlitePayload>, (StatusCode, String)> {
+    let payload = proxy_peer_json::<TaskBackupSqlitePayload>(
+        &state,
+        &peer_id,
+        "/mesh/tasks/snapshot/sqlite",
+        None,
+    )
+    .await?;
+    Ok(Json(payload))
+}
+
 // ── Helpers ─────────────────────────────────────────────────────
+
+fn default_task_replication_pull_limit() -> usize {
+    200
+}
+
+fn scope_query_key(query: &ScopeQuery) -> Option<&str> {
+    query.profile_id.as_deref().or(query.user_id.as_deref())
+}
+
+fn require_named_scope_key(scope_key: Option<&str>) -> Result<&str, (StatusCode, String)> {
+    scope_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            "task scope grant reconciliation requires profile_id/user_id".to_string(),
+        ))
+}
 
 fn normalize_scope_key(scope_key: Option<&str>) -> String {
     scope_key
@@ -471,6 +686,229 @@ fn normalize_scope_key(scope_key: Option<&str>) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("anonymous")
         .to_string()
+}
+
+fn build_task_replication_summary(
+    scope_key: Option<&str>,
+    tasks: &[Task],
+) -> TaskReplicationSummary {
+    let mut canonical = tasks.to_vec();
+    canonical.sort_by(|left, right| left.id.cmp(&right.id));
+    let canonical_json = canonical
+        .iter()
+        .map(task_revision_projection)
+        .collect::<Vec<_>>();
+    let revision_hash = serde_json::to_vec(&canonical_json)
+        .map(|bytes| {
+            let digest = Sha256::digest(bytes);
+            digest
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        })
+        .unwrap_or_else(|_| "task-summary-hash-error".to_string());
+
+    TaskReplicationSummary {
+        schema_version: 1,
+        scope_key: normalize_scope_key(scope_key),
+        task_count: tasks.len(),
+        max_updated_at: tasks.iter().map(|task| task.updated_at).max().unwrap_or(0),
+        revision_hash,
+        generated_at: chrono::Utc::now().timestamp_millis().max(0) as u64,
+    }
+}
+
+fn task_revision_projection(task: &Task) -> serde_json::Value {
+    let mut tags = task.tags.clone();
+    tags.sort();
+
+    let mut depends_on = task.depends_on.clone();
+    depends_on.sort_by(|left, right| {
+        left.task_id.cmp(&right.task_id).then_with(|| {
+            task_dependency_type_sort_key(&left.relation_type)
+                .cmp(task_dependency_type_sort_key(&right.relation_type))
+        })
+    });
+
+    let mut time_block_ids = task.time_block_ids.clone();
+    time_block_ids.sort();
+
+    serde_json::json!({
+        "id": task.id,
+        "updated_at": task.updated_at,
+        "status": task.status,
+        "completed_at": task.completed_at,
+        "title": task.title,
+        "description": task.description,
+        "done_condition": task.done_condition,
+        "priority": task.priority,
+        "tags": tags,
+        "source": task.source,
+        "parent_id": task.parent_id,
+        "depends_on": depends_on,
+        "due_at": task.due_at,
+        "estimated_minutes": task.estimated_minutes,
+        "time_block_ids": time_block_ids,
+    })
+}
+
+fn task_dependency_type_sort_key(relation_type: &crate::task::TaskDependencyType) -> &'static str {
+    match relation_type {
+        crate::task::TaskDependencyType::Soft => "soft",
+        crate::task::TaskDependencyType::Hard => "hard",
+    }
+}
+
+fn build_task_replication_pull_response(
+    scope_key: Option<&str>,
+    tasks: &[Task],
+    query: TaskReplicationPullQuery,
+) -> TaskReplicationPullResponse {
+    let limit = query.limit.clamp(1, 500);
+    let after_task_id = query.after_task_id.unwrap_or_default();
+
+    let mut filtered = tasks.to_vec();
+    filtered.sort_by(|left, right| {
+        left.updated_at
+            .cmp(&right.updated_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    filtered.retain(|task| {
+        query.after_updated_at.map_or(true, |after_updated_at| {
+            task.updated_at > after_updated_at
+                || (task.updated_at == after_updated_at
+                    && task.id.as_str() > after_task_id.as_str())
+        })
+    });
+
+    let has_more = filtered.len() > limit;
+    let items = filtered.into_iter().take(limit).collect::<Vec<_>>();
+    let next_cursor = if has_more {
+        items.last().map(task_replication_pull_cursor_from_task)
+    } else {
+        None
+    };
+
+    TaskReplicationPullResponse {
+        schema_version: 1,
+        scope_key: normalize_scope_key(scope_key),
+        items,
+        next_cursor,
+        has_more,
+        summary: build_task_replication_summary(scope_key, tasks),
+    }
+}
+
+fn task_replication_pull_cursor_from_task(task: &Task) -> TaskReplicationPullCursor {
+    TaskReplicationPullCursor {
+        kind: "task_watermark".to_string(),
+        updated_at: task.updated_at,
+        task_id: task.id.clone(),
+    }
+}
+
+fn resolve_peer_scope_key(
+    state: &AppState,
+    identity: &AuthenticatedPeerIdentity,
+) -> Result<String, (StatusCode, String)> {
+    state
+        .mesh
+        .resolve_scope_key_for_peer_domain(&identity.peer_id, TASK_SCOPE_GRANT_DOMAIN)
+        .map_err(|error| (StatusCode::FORBIDDEN, error.to_string()))?
+        .ok_or((
+            StatusCode::FORBIDDEN,
+            format!(
+                "peer scope grant missing: peer_id={} domain={}",
+                identity.peer_id, TASK_SCOPE_GRANT_DOMAIN
+            ),
+        ))
+}
+
+async fn proxy_peer_json<T: DeserializeOwned>(
+    state: &AppState,
+    peer_id: &str,
+    remote_path: &str,
+    query: Option<Vec<(&str, String)>>,
+) -> Result<T, (StatusCode, String)> {
+    let peer = state.mesh.get_peer(peer_id).ok_or((
+        StatusCode::NOT_FOUND,
+        format!("mesh peer not found: {peer_id}"),
+    ))?;
+    if !peer.enabled {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("mesh peer disabled: {peer_id}"),
+        ));
+    }
+    let auth_token = peer.auth_token.ok_or((
+        StatusCode::CONFLICT,
+        format!("mesh peer missing outbound auth token: {peer_id}"),
+    ))?;
+    let url = build_peer_proxy_url(&peer.base_url, remote_path, query)?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let response = client
+        .get(url)
+        .header("Authorization", format!("Bearer {auth_token}"))
+        .send()
+        .await
+        .map_err(|error| {
+            (
+                StatusCode::BAD_GATEWAY,
+                format!("peer task proxy request failed: {error}"),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        return Err((
+            response.status(),
+            format!(
+                "peer task proxy request returned status {} for peer {}",
+                response.status(),
+                peer_id
+            ),
+        ));
+    }
+
+    response.json::<T>().await.map_err(|error| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("peer task proxy response decode failed: {error}"),
+        )
+    })
+}
+
+fn build_peer_proxy_url(
+    base_url: &str,
+    remote_path: &str,
+    query: Option<Vec<(&str, String)>>,
+) -> Result<reqwest::Url, (StatusCode, String)> {
+    let mut url = reqwest::Url::parse(&format!(
+        "{}{}",
+        base_url.trim_end_matches('/'),
+        remote_path
+    ))
+    .map_err(|error| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("invalid mesh peer base url: {error}"),
+        )
+    })?;
+
+    if let Some(query) = query {
+        {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in query {
+                pairs.append_pair(key, &value);
+            }
+        }
+    }
+
+    Ok(url)
 }
 
 fn build_task_replication_payload(
@@ -814,7 +1252,28 @@ pub fn router() -> Router<AppState> {
         .route("/tasks/backup/sqlite", get(export_tasks_sqlite))
         .route("/tasks/import/json", post(import_tasks_json))
         .route("/tasks/import/sqlite", post(import_tasks_sqlite))
+        .route("/tasks/replication/summary", get(replication_summary_tasks))
+        .route("/tasks/replication/pull", get(replication_pull_tasks))
         .route("/tasks/replication/upsert", post(replication_upsert_task))
+        .route(
+            "/mesh/tasks/grants/reconcile",
+            post(reconcile_task_scope_grants),
+        )
+        .route("/mesh/tasks/summary", get(mesh_task_replication_summary))
+        .route("/mesh/tasks/pull", get(mesh_task_replication_pull))
+        .route("/mesh/tasks/snapshot/sqlite", get(mesh_export_tasks_sqlite))
+        .route(
+            "/mesh/peers/:peer_id/tasks/summary",
+            get(proxy_peer_task_replication_summary),
+        )
+        .route(
+            "/mesh/peers/:peer_id/tasks/pull",
+            get(proxy_peer_task_replication_pull),
+        )
+        .route(
+            "/mesh/peers/:peer_id/tasks/snapshot/sqlite",
+            get(proxy_peer_tasks_sqlite_snapshot),
+        )
         .route("/tasks/:id/cancel", post(cancel_task))
         .route(
             "/tasks/:id",
@@ -831,12 +1290,14 @@ mod tests {
     use crate::signal::SignalPool;
     use crate::task::TaskPriority;
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{HeaderMap, Request};
     use base64::engine::general_purpose::STANDARD;
     use http_body_util::BodyExt;
     use serde_json::Value;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
     use tower::util::ServiceExt;
 
     fn test_state() -> AppState {
@@ -908,6 +1369,254 @@ mod tests {
 
     fn test_router(state: AppState) -> Router {
         router().with_state(state)
+    }
+
+    fn create_task_input(title: &str) -> CreateTaskInput {
+        CreateTaskInput {
+            title: title.to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        }
+    }
+
+    fn update_title_input(title: &str) -> UpdateTaskInput {
+        UpdateTaskInput {
+            title: Some(title.to_string()),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: None,
+            depends_on: None,
+            due_at: None,
+            estimated_minutes: None,
+            parent_id: None,
+            time_block_ids: None,
+        }
+    }
+
+    fn make_test_peer(peer_id: &str, base_url: &str) -> crate::mesh::PeerInfo {
+        crate::mesh::PeerInfo {
+            id: peer_id.to_string(),
+            base_url: base_url.to_string(),
+            enabled: true,
+            capabilities: vec![],
+            status: crate::mesh::PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            auth_token: None,
+            inbound_secret: None,
+        }
+    }
+
+    fn make_scope_grant(peer_id: &str, scope_key: &str) -> crate::mesh::PeerScopeGrant {
+        crate::mesh::PeerScopeGrant {
+            peer_id: peer_id.to_string(),
+            domain: TASK_SCOPE_GRANT_DOMAIN.to_string(),
+            scope_key: scope_key.to_string(),
+            granted_at: chrono::Utc::now().to_rfc3339(),
+            granted_by: "test".to_string(),
+        }
+    }
+
+    #[derive(Clone)]
+    struct FakePeerSummaryState {
+        summary: TaskReplicationSummary,
+        captured_auth: Arc<Mutex<Option<String>>>,
+    }
+
+    async fn fake_peer_summary_handler(
+        axum::extract::State(state): axum::extract::State<FakePeerSummaryState>,
+        headers: HeaderMap,
+    ) -> Json<TaskReplicationSummary> {
+        let auth = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
+        *state.captured_auth.lock().unwrap() = auth;
+        Json(state.summary)
+    }
+
+    async fn spawn_fake_peer_summary_server(
+        summary: TaskReplicationSummary,
+        captured_auth: Arc<Mutex<Option<String>>>,
+    ) -> (String, oneshot::Sender<()>) {
+        let app = Router::new()
+            .route("/mesh/tasks/summary", get(fake_peer_summary_handler))
+            .with_state(FakePeerSummaryState {
+                summary,
+                captured_auth,
+            });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        (format!("http://{addr}"), shutdown_tx)
+    }
+
+    #[test]
+    fn task_replication_summary_hash_is_order_stable_and_content_sensitive() {
+        let store = crate::task::TaskStore::new();
+        let original = store.create(create_task_input("Hash me"));
+        let summary = build_task_replication_summary(None, &store.list());
+
+        let mut reversed = store.list();
+        reversed.reverse();
+        let reordered_summary = build_task_replication_summary(None, &reversed);
+        assert_eq!(
+            summary.revision_hash, reordered_summary.revision_hash,
+            "summary hash should not depend on task list ordering"
+        );
+
+        store
+            .update_scoped(None, &original.id, update_title_input("Hash me updated"))
+            .unwrap();
+        let changed_summary = build_task_replication_summary(None, &store.list());
+        assert_ne!(
+            summary.revision_hash, changed_summary.revision_hash,
+            "summary hash should change when task content changes"
+        );
+    }
+
+    #[tokio::test]
+    async fn mesh_task_replication_routes_use_granted_scope_only() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-mesh-peer-scope.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let state = test_state_with_task_store(task_store.clone());
+
+        state
+            .mesh
+            .upsert_peer(make_test_peer("peer-phone", "http://peer-phone.local:1949"));
+        state
+            .mesh
+            .upsert_scope_grant(make_scope_grant("peer-phone", "profile-a"));
+
+        task_store.create_scoped(Some("profile-a"), create_task_input("Granted scope task"));
+        task_store.create_scoped(Some("profile-b"), create_task_input("Other scope task"));
+
+        let app = test_router(state);
+        let mut request = Request::builder()
+            .uri("/mesh/tasks/pull?profile_id=profile-b&limit=10")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(AuthenticatedPeerIdentity {
+            peer_id: "peer-phone".to_string(),
+        });
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: TaskReplicationPullResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload.scope_key, "profile-a");
+        assert_eq!(payload.items.len(), 1);
+        assert_eq!(payload.items[0].title, "Granted scope task");
+        assert_eq!(payload.summary.task_count, 1);
+    }
+
+    #[tokio::test]
+    async fn reconcile_task_scope_grants_grants_only_enabled_peers() {
+        let state = test_state();
+        let mut enabled_peer = make_test_peer("peer-enabled", "http://peer-enabled.local:1949");
+        enabled_peer.auth_token = Some("enabled-token".to_string());
+        let mut disabled_peer = make_test_peer("peer-disabled", "http://peer-disabled.local:1949");
+        disabled_peer.enabled = false;
+
+        state.mesh.upsert_peer(enabled_peer);
+        state.mesh.upsert_peer(disabled_peer);
+
+        let app = test_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mesh/tasks/grants/reconcile?profile_id=profile-reconcile")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["scope_key"], "profile-reconcile");
+        assert_eq!(payload["granted_peers"], 1);
+        assert_eq!(
+            state
+                .mesh
+                .resolve_scope_key_for_peer_domain("peer-enabled", TASK_SCOPE_GRANT_DOMAIN)
+                .unwrap(),
+            Some("profile-reconcile".to_string())
+        );
+        assert_eq!(
+            state
+                .mesh
+                .resolve_scope_key_for_peer_domain("peer-disabled", TASK_SCOPE_GRANT_DOMAIN)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_peer_task_summary_uses_mesh_outbound_auth_token() {
+        let captured_auth = Arc::new(Mutex::new(None));
+        let summary = TaskReplicationSummary {
+            schema_version: 1,
+            scope_key: "profile-proxy".to_string(),
+            task_count: 2,
+            max_updated_at: 42,
+            revision_hash: "hash-proxy".to_string(),
+            generated_at: 99,
+        };
+        let (base_url, shutdown_tx) =
+            spawn_fake_peer_summary_server(summary.clone(), Arc::clone(&captured_auth)).await;
+
+        let state = test_state();
+        let mut peer = make_test_peer("peer-proxy", &base_url);
+        peer.auth_token = Some("peer-outbound-secret".to_string());
+        state.mesh.upsert_peer(peer);
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/peers/peer-proxy/tasks/summary")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let _ = shutdown_tx.send(());
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: TaskReplicationSummary = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload, summary);
+        assert_eq!(
+            captured_auth.lock().unwrap().clone(),
+            Some("Bearer peer-outbound-secret".to_string())
+        );
     }
 
     #[tokio::test]

@@ -267,6 +267,7 @@ async fn auth_pairing_relay() {
         .iter()
         .find(|p| p["id"] == "e2e-auth-b")
         .expect("RT-A should have RT-B as a peer after pairing");
+    assert_eq!(peer_b["host_id"], "e2e-auth-b");
     // PeerInfoPublic must not contain auth_token or inbound_secret.
     assert!(
         peer_b.get("auth_token").is_none() || peer_b["auth_token"].is_null(),

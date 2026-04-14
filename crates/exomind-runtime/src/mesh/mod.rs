@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use thiserror::Error;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
@@ -48,6 +49,7 @@ pub struct PeerInfo {
 #[derive(Debug, Clone, Serialize)]
 pub struct PeerInfoPublic {
     pub id: String,
+    pub host_id: String,
     pub base_url: String,
     pub enabled: bool,
     pub capabilities: Vec<String>,
@@ -62,6 +64,7 @@ impl From<&PeerInfo> for PeerInfoPublic {
     fn from(p: &PeerInfo) -> Self {
         Self {
             id: p.id.clone(),
+            host_id: p.id.clone(),
             base_url: p.base_url.clone(),
             enabled: p.enabled,
             capabilities: p.capabilities.clone(),
@@ -81,10 +84,33 @@ pub struct PeerInterestSnapshot {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PeerScopeGrant {
+    pub peer_id: String,
+    pub domain: String,
+    pub scope_key: String,
+    pub granted_at: String,
+    pub granted_by: String,
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ScopeGrantLookupError {
+    #[error("multiple active grants for peer `{peer_id}` domain `{domain}`")]
+    MultipleActiveGrants { peer_id: String, domain: String },
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum InboundSecretLookupError {
+    #[error("multiple enabled peers share the same inbound secret")]
+    MultipleEnabledPeers,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct MeshPersistedState {
     peers: Vec<PeerInfo>,
     interests: Vec<PeerInterestSnapshot>,
+    #[serde(default)]
+    scope_grants: Vec<PeerScopeGrant>,
 }
 
 #[derive(Debug, Default)]
@@ -118,6 +144,7 @@ pub struct MeshState {
     persist_path: Option<PathBuf>,
     peers: RwLock<HashMap<String, PeerInfo>>,
     interests: RwLock<HashMap<String, PeerInterestSnapshot>>,
+    scope_grants: RwLock<Vec<PeerScopeGrant>>,
     dedupe: RwLock<DedupeWindow>,
 }
 
@@ -131,6 +158,7 @@ impl MeshState {
 
         let mut peers = HashMap::new();
         let mut interests = HashMap::new();
+        let mut scope_grants = Vec::new();
 
         if let Some(state) = persisted {
             for peer in state.peers {
@@ -139,6 +167,17 @@ impl MeshState {
             for snapshot in state.interests {
                 interests.insert(snapshot.peer_id.clone(), snapshot);
             }
+            scope_grants = state
+                .scope_grants
+                .into_iter()
+                .filter(|grant| {
+                    peers
+                        .get(&grant.peer_id)
+                        .map(|peer| peer.enabled)
+                        .unwrap_or(false)
+                })
+                .collect::<Vec<_>>();
+            sort_scope_grants(&mut scope_grants);
         }
 
         Self {
@@ -147,6 +186,7 @@ impl MeshState {
             persist_path,
             peers: RwLock::new(peers),
             interests: RwLock::new(interests),
+            scope_grants: RwLock::new(scope_grants),
             dedupe: RwLock::new(DedupeWindow::default()),
         }
     }
@@ -173,13 +213,33 @@ impl MeshState {
     /// Check if any **enabled** peer has the given inbound_secret.
     /// Disabled peers are excluded so that disabling a peer immediately revokes its token.
     pub fn has_peer_with_inbound_secret(&self, secret: &str) -> bool {
+        matches!(self.peer_id_by_inbound_secret(secret), Ok(Some(_)))
+    }
+
+    pub fn peer_id_by_inbound_secret(
+        &self,
+        secret: &str,
+    ) -> Result<Option<String>, InboundSecretLookupError> {
         let peers = match self.peers.read() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        peers
+
+        let matches = peers
             .values()
-            .any(|p| p.enabled && p.inbound_secret.as_deref() == Some(secret))
+            .find(|p| p.enabled && p.inbound_secret.as_deref() == Some(secret))
+            .map(|peer| peer.id.clone());
+
+        let duplicate_count = peers
+            .values()
+            .filter(|p| p.enabled && p.inbound_secret.as_deref() == Some(secret))
+            .count();
+
+        match duplicate_count {
+            0 => Ok(None),
+            1 => Ok(matches),
+            _ => Err(InboundSecretLookupError::MultipleEnabledPeers),
+        }
     }
 
     pub fn get_peer(&self, peer_id: &str) -> Option<PeerInfo> {
@@ -193,6 +253,7 @@ impl MeshState {
     pub fn upsert_peer(&self, mut peer: PeerInfo) -> PeerInfo {
         normalize_peer(&mut peer);
         let now = now_rfc3339();
+        let had_existing = self.get_peer(&peer.id).is_some();
 
         {
             let mut peers = match self.peers.write() {
@@ -237,6 +298,12 @@ impl MeshState {
         }
 
         self.persist();
+        if !had_existing {
+            self.revoke_all_scope_grants_for_peer(&peer.id);
+        }
+        if !peer.enabled {
+            self.revoke_all_scope_grants_for_peer(&peer.id);
+        }
         peer
     }
 
@@ -256,6 +323,141 @@ impl MeshState {
             };
             interests.remove(peer_id);
             drop(interests);
+            self.revoke_all_scope_grants_for_peer(peer_id);
+            self.persist();
+        }
+
+        removed
+    }
+
+    pub fn upsert_scope_grant(&self, mut grant: PeerScopeGrant) -> PeerScopeGrant {
+        grant.domain = grant.domain.trim().to_string();
+        grant.scope_key = grant.scope_key.trim().to_string();
+        grant.granted_by = grant.granted_by.trim().to_string();
+
+        {
+            let mut grants = match self.scope_grants.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            grants.retain(|existing| {
+                !(existing.peer_id == grant.peer_id && existing.domain == grant.domain)
+            });
+            grants.push(grant.clone());
+            sort_scope_grants(&mut grants);
+        }
+
+        self.persist();
+        grant
+    }
+
+    pub fn reconcile_scope_grants_for_enabled_peers(
+        &self,
+        domain: &str,
+        scope_key: &str,
+        granted_by: &str,
+    ) -> Vec<PeerScopeGrant> {
+        let enabled_peer_ids = self
+            .list_peers()
+            .into_iter()
+            .filter(|peer| peer.enabled)
+            .map(|peer| peer.id)
+            .collect::<Vec<_>>();
+        let granted_at = now_rfc3339();
+        let domain = domain.trim().to_string();
+        let scope_key = scope_key.trim().to_string();
+        let granted_by = granted_by.trim().to_string();
+
+        let next_grants = {
+            let mut grants = match self.scope_grants.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            grants.retain(|grant| grant.domain != domain);
+
+            let mut next = Vec::with_capacity(enabled_peer_ids.len());
+            for peer_id in enabled_peer_ids {
+                let grant = PeerScopeGrant {
+                    peer_id,
+                    domain: domain.clone(),
+                    scope_key: scope_key.clone(),
+                    granted_at: granted_at.clone(),
+                    granted_by: granted_by.clone(),
+                };
+                grants.push(grant.clone());
+                next.push(grant);
+            }
+
+            sort_scope_grants(&mut grants);
+            next
+        };
+
+        self.persist();
+        next_grants
+    }
+
+    pub fn resolve_scope_key_for_peer_domain(
+        &self,
+        peer_id: &str,
+        domain: &str,
+    ) -> Result<Option<String>, ScopeGrantLookupError> {
+        let grants = match self.scope_grants.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let peers = match self.peers.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if !peers.get(peer_id).map(|peer| peer.enabled).unwrap_or(false) {
+            return Ok(None);
+        }
+        let matches = grants
+            .iter()
+            .filter(|grant| grant.peer_id == peer_id && grant.domain == domain)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        match matches.as_slice() {
+            [] => Ok(None),
+            [grant] => Ok(Some(grant.scope_key.clone())),
+            _ => Err(ScopeGrantLookupError::MultipleActiveGrants {
+                peer_id: peer_id.to_string(),
+                domain: domain.to_string(),
+            }),
+        }
+    }
+
+    pub fn revoke_scope_grant(&self, peer_id: &str, domain: &str) -> bool {
+        let removed = {
+            let mut grants = match self.scope_grants.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let before = grants.len();
+            grants.retain(|grant| !(grant.peer_id == peer_id && grant.domain == domain));
+            before != grants.len()
+        };
+
+        if removed {
+            self.persist();
+        }
+
+        removed
+    }
+
+    pub fn revoke_all_scope_grants_for_peer(&self, peer_id: &str) -> bool {
+        let removed = {
+            let mut grants = match self.scope_grants.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let before = grants.len();
+            grants.retain(|grant| grant.peer_id != peer_id);
+            before != grants.len()
+        };
+
+        if removed {
             self.persist();
         }
 
@@ -476,8 +678,16 @@ impl MeshState {
             Ok(guard) => guard.values().cloned().collect::<Vec<_>>(),
             Err(poisoned) => poisoned.into_inner().values().cloned().collect::<Vec<_>>(),
         };
+        let scope_grants = match self.scope_grants.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
 
-        if let Ok(json) = serde_json::to_string_pretty(&MeshPersistedState { peers, interests }) {
+        if let Ok(json) = serde_json::to_string_pretty(&MeshPersistedState {
+            peers,
+            interests,
+            scope_grants,
+        }) {
             let _ = std::fs::write(path, json);
         }
     }
@@ -747,6 +957,15 @@ fn normalize_topics(mut topics: Vec<String>) -> Vec<String> {
     topics
 }
 
+fn sort_scope_grants(grants: &mut Vec<PeerScopeGrant>) {
+    grants.sort_by(|left, right| {
+        left.domain
+            .cmp(&right.domain)
+            .then_with(|| left.peer_id.cmp(&right.peer_id))
+            .then_with(|| left.scope_key.cmp(&right.scope_key))
+    });
+}
+
 fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -969,6 +1188,185 @@ mod tests {
         assert_eq!(
             interests.topics,
             vec!["eventlog.replication.appended".to_string()]
+        );
+    }
+
+    #[test]
+    fn persists_and_reloads_peer_scope_grants() {
+        let temp_dir = tempdir().unwrap();
+        let persist_path = temp_dir.path().join("mesh-state.json");
+        let pool = Arc::new(SignalPool::new(None));
+
+        let original = MeshState::new(
+            "host-local".to_string(),
+            Arc::clone(&pool),
+            Some(persist_path.clone()),
+        );
+        original.upsert_peer(make_peer("host-phone"));
+        original.upsert_scope_grant(PeerScopeGrant {
+            peer_id: "host-phone".to_string(),
+            domain: "tasks".to_string(),
+            scope_key: "profile-a".to_string(),
+            granted_at: "2026-04-13T00:00:00Z".to_string(),
+            granted_by: "test".to_string(),
+        });
+
+        let reopened = MeshState::new(
+            "host-local".to_string(),
+            Arc::clone(&pool),
+            Some(persist_path),
+        );
+
+        let scope_key = reopened
+            .resolve_scope_key_for_peer_domain("host-phone", "tasks")
+            .expect("scope grant lookup should succeed");
+        assert_eq!(scope_key.as_deref(), Some("profile-a"));
+    }
+
+    #[test]
+    fn duplicate_peer_scope_grants_fail_closed() {
+        let temp_dir = tempdir().unwrap();
+        let persist_path = temp_dir.path().join("mesh-state.json");
+        std::fs::write(
+            &persist_path,
+            serde_json::json!({
+                "peers": [
+                    {
+                        "id": "host-phone",
+                        "base_url": "http://host-phone.local:1949",
+                        "enabled": true,
+                        "capabilities": [],
+                        "status": "unknown",
+                        "last_seen": null,
+                        "last_error": null,
+                        "created_at": "2026-04-13T00:00:00Z",
+                        "updated_at": "2026-04-13T00:00:00Z",
+                        "auth_token": null,
+                        "inbound_secret": "peer-secret"
+                    }
+                ],
+                "interests": [],
+                "scope_grants": [
+                    {
+                        "peer_id": "host-phone",
+                        "domain": "tasks",
+                        "scope_key": "profile-a",
+                        "granted_at": "2026-04-13T00:00:00Z",
+                        "granted_by": "test"
+                    },
+                    {
+                        "peer_id": "host-phone",
+                        "domain": "tasks",
+                        "scope_key": "profile-b",
+                        "granted_at": "2026-04-13T00:01:00Z",
+                        "granted_by": "test"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let pool = Arc::new(SignalPool::new(None));
+        let reopened = MeshState::new(
+            "host-local".to_string(),
+            Arc::clone(&pool),
+            Some(persist_path),
+        );
+
+        let error = reopened
+            .resolve_scope_key_for_peer_domain("host-phone", "tasks")
+            .expect_err("multiple grants must fail closed");
+        assert_eq!(
+            error,
+            ScopeGrantLookupError::MultipleActiveGrants {
+                peer_id: "host-phone".to_string(),
+                domain: "tasks".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn duplicate_inbound_secrets_fail_closed() {
+        let pool = Arc::new(SignalPool::new(None));
+        let mesh = MeshState::new("host-local".to_string(), Arc::clone(&pool), None);
+        mesh.upsert_peer(PeerInfo {
+            id: "host-phone".to_string(),
+            base_url: "http://host-phone.local:1949".to_string(),
+            enabled: true,
+            capabilities: vec![],
+            status: PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: "2026-04-13T00:00:00Z".to_string(),
+            updated_at: "2026-04-13T00:00:00Z".to_string(),
+            auth_token: None,
+            inbound_secret: Some("shared-secret".to_string()),
+        });
+        mesh.upsert_peer(PeerInfo {
+            id: "host-tablet".to_string(),
+            base_url: "http://host-tablet.local:1949".to_string(),
+            enabled: true,
+            capabilities: vec![],
+            status: PeerStatus::Unknown,
+            last_seen: None,
+            last_error: None,
+            created_at: "2026-04-13T00:00:00Z".to_string(),
+            updated_at: "2026-04-13T00:00:00Z".to_string(),
+            auth_token: None,
+            inbound_secret: Some("shared-secret".to_string()),
+        });
+
+        assert_eq!(
+            mesh.peer_id_by_inbound_secret("shared-secret"),
+            Err(InboundSecretLookupError::MultipleEnabledPeers)
+        );
+        assert!(!mesh.has_peer_with_inbound_secret("shared-secret"));
+    }
+
+    #[test]
+    fn stale_scope_grants_for_missing_peers_are_filtered_on_load() {
+        let temp_dir = tempdir().unwrap();
+        let persist_path = temp_dir.path().join("mesh-state.json");
+        std::fs::write(
+            &persist_path,
+            serde_json::json!({
+                "peers": [],
+                "interests": [],
+                "scope_grants": [
+                    {
+                        "peer_id": "host-phone",
+                        "domain": "tasks",
+                        "scope_key": "profile-a",
+                        "granted_at": "2026-04-13T00:00:00Z",
+                        "granted_by": "test"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let pool = Arc::new(SignalPool::new(None));
+        let reopened = MeshState::new(
+            "host-local".to_string(),
+            Arc::clone(&pool),
+            Some(persist_path),
+        );
+
+        assert_eq!(
+            reopened
+                .resolve_scope_key_for_peer_domain("host-phone", "tasks")
+                .unwrap(),
+            None
+        );
+
+        reopened.upsert_peer(make_peer("host-phone"));
+        assert_eq!(
+            reopened
+                .resolve_scope_key_for_peer_domain("host-phone", "tasks")
+                .unwrap(),
+            None
         );
     }
 }

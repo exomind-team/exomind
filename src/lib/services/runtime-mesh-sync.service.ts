@@ -57,6 +57,7 @@ export interface EnsurePeerPairOptions {
 
 export interface RuntimeMeshPeerRecord {
   id: string;
+  host_id?: string;
   base_url: string;
   enabled: boolean;
   status?: string;
