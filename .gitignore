@@ -68,6 +68,9 @@ Thumbs.db
 coverage/
 *.lcov
 *.html
+# Allow concept-viz and academic analysis HTML reports
+!docs/architecture/pinned-unpinned-visualization.html
+!docs/architecture/pinned-unpinned-academic-analysis.html
 htmlcov/
 
 # === Vite Entry (required) ===
