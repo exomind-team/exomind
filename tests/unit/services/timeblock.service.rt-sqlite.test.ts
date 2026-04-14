@@ -443,6 +443,144 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     expect(types).not.toContain('block_resume');
   });
 
+  it('normalizes rt countdown payload before notifying listeners after pause', async () => {
+    const env = createMemoryEnv();
+    const now = Date.UTC(2026, 3, 15, 2, 0, 0);
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      let activeBlock: ActiveBlockData | null = {
+        startId: 'rt-countdown-1',
+        name: 'Pause repro',
+        mode: 'countdown',
+        targetMinutes: 25,
+        elapsed: 25 * 60 * 1000,
+        paused: false,
+        startTime: now - 5 * 60 * 1000,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: now - 5 * 60 * 1000,
+        lastResumedAt: now - 5 * 60 * 1000,
+        accumulatedRunMs: 0,
+        pauseAccumulatedMs: 0,
+        blockType: 'active',
+        taskIds: [],
+        taskAssociationLog: [],
+        transitions: [
+          { type: 'start', at: now - 5 * 60 * 1000, actorId: 'rt:newblock' },
+        ],
+      };
+      const rtAdapter: TimeBlockRtAdapterLike = {
+        listCompletedBlocks: vi.fn(async () => []),
+        getActiveBlock: vi.fn(async () => activeBlock),
+        rtBackfillGapBlocks: vi.fn(async () => ({ inserted: 0 })),
+        rtStartBlock: vi.fn(async () => ({ completed: null, active: activeBlock! })),
+        rtStopBlock: vi.fn(async () => ({ status: 'ok' })),
+        rtEndBlock: vi.fn(async () => ({ completed: null, active: activeBlock! })),
+        rtPauseBlock: vi.fn(async () => {
+          activeBlock = {
+            ...activeBlock!,
+            paused: true,
+            pausedAt: now,
+            phase: 'paused',
+            accumulatedRunMs: 5 * 60 * 1000,
+            lastTransitionAt: now,
+            transitions: [
+              ...(activeBlock?.transitions ?? []),
+              { type: 'pause', at: now, actorId: 'rt:pause' },
+            ],
+          };
+          return { status: 'ok' };
+        }),
+        rtResumeBlock: vi.fn(async () => ({ status: 'ok' })),
+        rtPatchActiveBlockTasks: vi.fn(async () => activeBlock),
+      };
+      const service = new TimeBlockServiceImpl(env as never, {
+        backendMode: 'rt-sqlite',
+        rtAdapter,
+      });
+      const listener = vi.fn();
+      service.onBlockChange(listener);
+
+      await service.pauseBlock();
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
+        startId: 'rt-countdown-1',
+        paused: true,
+        phase: 'paused',
+        elapsed: 20 * 60 * 1000,
+        accumulatedRunMs: 5 * 60 * 1000,
+      }));
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+
+  it('uses operation timestamp when normalizing rt countdown payload after start', async () => {
+    const env = createMemoryEnv();
+    const operationNow = Date.UTC(2026, 3, 15, 2, 0, 0);
+    const startedAt = operationNow - 5 * 60 * 1000;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(operationNow);
+      const activeBlock: ActiveBlockData = {
+        startId: 'rt-countdown-start-1',
+        name: 'Start repro',
+        mode: 'countdown',
+        targetMinutes: 25,
+        elapsed: 25 * 60 * 1000,
+        paused: false,
+        startTime: startedAt,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: startedAt,
+        lastResumedAt: startedAt,
+        accumulatedRunMs: 0,
+        pauseAccumulatedMs: 0,
+        blockType: 'active',
+        taskIds: [],
+        taskAssociationLog: [],
+        transitions: [
+          { type: 'start', at: startedAt, actorId: 'rt:newblock' },
+        ],
+      };
+      const rtStartBlock = vi.fn(async () => {
+        vi.setSystemTime(operationNow + 2_000);
+        return { completed: null, active: activeBlock };
+      });
+      const rtAdapter: TimeBlockRtAdapterLike = {
+        listCompletedBlocks: vi.fn(async () => []),
+        getActiveBlock: vi.fn(async () => null),
+        rtBackfillGapBlocks: vi.fn(async () => ({ inserted: 0 })),
+        rtStartBlock,
+        rtStopBlock: vi.fn(async () => ({ status: 'ok' })),
+        rtEndBlock: vi.fn(async () => ({ completed: null, active: activeBlock })),
+        rtPauseBlock: vi.fn(async () => ({ status: 'ok' })),
+        rtResumeBlock: vi.fn(async () => ({ status: 'ok' })),
+        rtPatchActiveBlockTasks: vi.fn(async () => activeBlock),
+      };
+      const service = new TimeBlockServiceImpl(env as never, {
+        backendMode: 'rt-sqlite',
+        rtAdapter,
+      });
+      const listener = vi.fn();
+      service.onBlockChange(listener);
+
+      const result = await service.startBlock('Start repro', { mode: 'countdown', minutes: 25 });
+
+      expect(rtStartBlock).toHaveBeenCalledTimes(1);
+      expect(result.elapsed).toBe(20 * 60 * 1000);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
+        startId: 'rt-countdown-start-1',
+        elapsed: 20 * 60 * 1000,
+        phase: 'running',
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not duplicate block_end eventlog write in rt-sqlite mode', async () => {
     const env = createMemoryEnv();
     const rtAdapter = createRtAdapter();

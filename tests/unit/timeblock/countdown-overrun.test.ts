@@ -47,6 +47,23 @@ describe('resolveCountdownOverrunMs', () => {
     expect(resolveCountdownOverrunMs(block, now)).toBe(30_000);
   });
 
+  it('freezes overtime during paused state when transitions are the source of truth', () => {
+    const now = 1_700_000_000_000;
+    const block = createCountdownBlock({
+      paused: true,
+      phase: 'paused',
+      pausedAt: now - 15_000,
+      accumulatedRunMs: 0,
+      lastResumedAt: undefined,
+      transitions: [
+        { type: 'start', at: now - 105_000, actorId: 'rt:newblock' },
+        { type: 'pause', at: now - 15_000, actorId: 'rt:pause' },
+      ],
+    });
+
+    expect(resolveCountdownOverrunMs(block, now)).toBe(30_000);
+  });
+
   it('freezes overtime at actionEndedAt during feedback stage', () => {
     const now = 1_700_000_000_000;
     const block = createCountdownBlock({

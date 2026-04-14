@@ -1,7 +1,6 @@
 import type { TimeBlockData } from '@/lib/types/event';
 import {
   deriveAccumulatedRunMsFromBlock,
-  deriveLastResumedAt,
   derivePhaseFromBlock,
   derivePauseAccumulatedMsFromBlock,
 } from '@/lib/timeblock/derive';
@@ -40,12 +39,15 @@ function resolveEffectiveNow(block: TimeBlockData, now: number): number {
 
 function resolveWorkDurationMs(block: TimeBlockData, effectiveNow: number): number {
   const phase = derivePhaseFromBlock(block);
-  const accumulatedRunMs = deriveAccumulatedRunMsFromBlock(block, effectiveNow);
-  if (typeof block.accumulatedRunMs === 'number' || (block.transitions?.length ?? 0) > 0) {
+  if ((block.transitions?.length ?? 0) > 0) {
+    return Math.max(0, deriveAccumulatedRunMsFromBlock(block, effectiveNow));
+  }
+
+  if (typeof block.accumulatedRunMs === 'number') {
     const runningSliceMs = (phase === 'running')
-      ? Math.max(0, effectiveNow - (block.lastResumedAt ?? deriveLastResumedAt(block.transitions ?? []) ?? effectiveNow))
+      ? Math.max(0, effectiveNow - (block.lastResumedAt ?? effectiveNow))
       : 0;
-    return Math.max(0, accumulatedRunMs + runningSliceMs);
+    return Math.max(0, block.accumulatedRunMs + runningSliceMs);
   }
 
   const basePausedMs = derivePauseAccumulatedMsFromBlock(block, effectiveNow);

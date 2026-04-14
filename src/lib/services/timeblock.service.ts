@@ -243,9 +243,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       if (!updated) {
         return null;
       }
-      this.rememberAcceptedBlock(updated);
-      this.notifyChange(updated);
-      return updated;
+      const normalizedUpdated = this.normalizeActiveBlock(updated, now);
+      this.rememberAcceptedBlock(normalizedUpdated);
+      this.notifyChange(normalizedUpdated);
+      return normalizedUpdated;
     }
 
     const updated = this.normalizeActiveBlock({
@@ -319,6 +320,8 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       }
     }
 
+    const now = Date.now();
+
     // #780: rt-sqlite 模式走新路由，RT 处理状态转换、事件写入、gap 截断
     if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
       const resolvedTaskIds = typeof taskBinding === 'string'
@@ -330,13 +333,13 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         targetMinutes: config.mode === 'countdown' ? config.minutes : undefined,
         taskIds: resolvedTaskIds,
       });
-      this.rememberAcceptedBlock(result.active);
-      this.notifyChange(result.active);
-      return result.active;
+      const normalizedActive = this.normalizeActiveBlock(result.active, now);
+      this.rememberAcceptedBlock(normalizedActive);
+      this.notifyChange(normalizedActive);
+      return normalizedActive;
     }
 
     const startId = createUuidV4();
-    const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
       ? (config.minutes ?? 25) * 60 * 1000
       : 0;
@@ -414,8 +417,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       await this.rtAdapter.rtPauseBlock();
       const updated = await this.rtAdapter.getActiveBlock();
       if (updated) {
-        this.rememberAcceptedBlock(updated);
-        this.notifyChange(updated);
+        const normalizedUpdated = this.normalizeActiveBlock(updated, now);
+        this.rememberAcceptedBlock(normalizedUpdated);
+        this.notifyChange(normalizedUpdated);
       }
       return;
     }
@@ -469,8 +473,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       await this.rtAdapter.rtResumeBlock();
       const updated = await this.rtAdapter.getActiveBlock();
       if (updated) {
-        this.rememberAcceptedBlock(updated);
-        this.notifyChange(updated);
+        const normalizedUpdated = this.normalizeActiveBlock(updated, now);
+        this.rememberAcceptedBlock(normalizedUpdated);
+        this.notifyChange(normalizedUpdated);
       }
       return;
     }
@@ -527,8 +532,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       await this.rtAdapter.rtStopBlock();
       const updated = await this.rtAdapter.getActiveBlock();
       if (updated) {
-        this.rememberAcceptedBlock(updated);
-        this.notifyChange(updated);
+        const normalizedUpdated = this.normalizeActiveBlock(updated, now);
+        this.rememberAcceptedBlock(normalizedUpdated);
+        this.notifyChange(normalizedUpdated);
       }
       return;
     }
@@ -592,6 +598,8 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return null;
     }
 
+    const now = Date.now();
+
     // #780: rt-sqlite 模式走新路由，RT 处理 completed 保存、gap 创建、EventLog 写入
     if (this.backendMode === 'rt-sqlite' && this.rtAdapter) {
       const result = await this.rtAdapter.rtEndBlock({
@@ -600,8 +608,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       });
       // RT 已处理：completed 块保存、gap 块创建、EventLog 写入
       // TS 只需更新本地状态
-      this.rememberAcceptedBlock(result.active);
-      this.notifyChange(result.active);
+      const normalizedActive = this.normalizeActiveBlock(result.active, now);
+      this.rememberAcceptedBlock(normalizedActive);
+      this.notifyChange(normalizedActive);
 
       if (result.completed) {
         const completed = normalizeTimeBlockData(result.completed);
@@ -1149,14 +1158,20 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const taskAssociationLog = normalizedBlock.taskAssociationLog ?? [];
     const phase = this.resolvePhase(normalizedBlock);
     const effectiveNow = this.getPhaseEffectiveNow(normalizedBlock, phase, now);
-    const accumulatedRunMs = this.resolveAccumulatedRunMs(normalizedBlock, effectiveNow);
+    const totalRunMs = this.resolveAccumulatedRunMs(normalizedBlock, effectiveNow);
+    const hasTransitions = (normalizedBlock.transitions?.length ?? 0) > 0;
     const transitionLastResumedAt = deriveLastResumedAt(normalizedBlock.transitions ?? []);
     const runningStartedAt = phase === 'running'
-      ? (transitionLastResumedAt ?? normalizedBlock.lastResumedAt ?? this.resolveLegacyRunningStart(normalizedBlock, accumulatedRunMs, effectiveNow))
+      ? (hasTransitions
+        ? (transitionLastResumedAt ?? normalizedBlock.lastResumedAt)
+        : (normalizedBlock.lastResumedAt ?? this.resolveLegacyRunningStart(normalizedBlock, totalRunMs, effectiveNow)))
       : undefined;
     const runningSliceMs = phase === 'running' && runningStartedAt
       ? Math.max(0, effectiveNow - runningStartedAt)
       : 0;
+    const accumulatedRunMs = hasTransitions
+      ? Math.max(0, totalRunMs - runningSliceMs)
+      : totalRunMs;
     const runDurationMs = Math.max(0, accumulatedRunMs + runningSliceMs);
     const elapsed = normalizedBlock.mode === 'countdown'
       ? Math.max(0, this.getExpectedDurationMs(normalizedBlock) - runDurationMs)
