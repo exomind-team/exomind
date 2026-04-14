@@ -1023,7 +1023,7 @@ pub trait ConflictResolver: Send + Sync {
 - [x] **B3（已解决）**：DSON snapshots 是同步用投影缓存，Storage Adapter 持久层是唯一真相源。RT SQLite 是另一层投影缓存。
 - [x] **B4（已解决）**：语义原子裁决通过 `AtomicGroup` 策略解决，`status + completed_at` 等字段组必须同时采纳。
 - [x] **Schema 嵌套声明（已解决）**：`Nested`、`RecursiveOr`、`MergeAll` 三种粒度覆盖嵌套/大原子/动态结构三种模式。
-- [ ] **B2（已讨论，待定选型）**：Phase 2 reconciliation 与 Phase 3 DSON 的共存策略。倾向：模型 C（分工分层）+ DSON 权威 + 按域渐进切换。详见第十二节。
+- [x] **B2（已解决）**：Phase 2 reconciliation 是历史遗留迁移工具，DSON 从第一天起是唯一同步路径。详见第十二节。
 - [ ] **B1**：Proposal 域 sync 归属（Phase 2 缺口，非 Phase 3 阻断）
 - [ ] Reminder 域的 Phase 1/2/3 归属（与 #893 联动）
 - [ ] Conflict object 持久化 schema（与 #869 联动）
@@ -1034,93 +1034,58 @@ pub trait ConflictResolver: Send + Sync {
 
 ## 十二、Phase 2 与 Phase 3 共存策略
 
-> 本节记录 Phase 2（现有 reconciliation 体系）与 Phase 3（DSON 接入）之间的共存形态、权威归属与切换机制。
-> 以下为开放讨论稿，选型决策待定。
+> **已定决策（2026-04-14）**：新架构从第一天起直接使用 DSON，不存在 Phase 2/3 共存模型。Phase 2 reconciliation 是历史遗留迁移工具，不是新架构的一部分。
+>
+> 文档保留模型 A/B/C 的分析，作为"为什么我们不选它们"的历史对照。
 
-### 12.1 三种共存模型
+### 12.1 已定决策
 
-#### 模型 A：冷切换（完全替换）
-
-```
-Phase 2 reconciliation ← 一直跑，直到 DSON 激活
-
-DSON 激活时间点 T
-  ├── T 之前：Phase 2 reconciliation 100% 负责同步
-  ├── T 时刻：快照导出，导入 DSON store
-  └── T 之后：Phase 2 reconciliation 完全停用，DSON 100% 接管
-```
-
-- **优点**：简单，不存在两条路径打架的问题
-- **缺点**：切换瞬间有数据丢失窗口；遗留数据需要一次性迁移脚本
-- **适合**：文档集较小、用户可接受短暂不可用
-
-#### 模型 B：热共存（双轨并行 + 渐进迁移）
-
-```
-Phase 2 reconciliation ← 一直跑
-Phase 3 DSON ← DSON 激活后也跑
-  ├── 新文档：直接写入 DSON，由 DSON 负责同步
-  ├── 遗留文档（Phase 2 已有）：继续由 Phase 2 reconciliation 处理
-  └── 遗留文档迁移：逐域、逐文档地从 Phase 2 迁移到 DSON
-```
-
-- **优点**：用户体验无断点；遗留数据可渐进迁移
-- **缺点**：两套系统同时存在，排障复杂度加倍；边界条件多
-- **适合**：用户数据量大、不接受停机窗口
-
-#### 模型 C：分工分层（DSON 处理增量，Phase 2 作为 fallback）
-
-```
-Phase 3 DSON ← 默认处理所有增量同步
-Phase 2 reconciliation ← 作为 fallback，只在以下情况触发：
-  ├── DSON 首次激活时：做一次完整快照导入
-  ├── DSON delta 序列断裂时（如设备长期离线后重连）：用 Phase 2 兜底
-  └── DSON 无法处理的域（如 Reminder）：Phase 2 永久接管
-```
-
-- **优点**：Phase 2 的 summary/drift 检测能力被保留为安全网；Phase 3 不需要处理所有边界情况
-- **缺点**：Phase 2 reconciliation 仍然存在，不是真正的"删除"；fallback 触发条件的边界需要精确界定
-- **适合**：需要强健 fallback 的生产环境
-
-### 12.2 关键决策点
-
-#### 决策 1：权威归属（Authority Model）
-
-无论哪种共存模型，首先要回答：**两条路径产生冲突时，谁赢？**
-
-| 选项 | 说明 | 风险 |
-|------|------|------|
-| **DSON 是权威（推荐）** | Phase 2 reconciliation 的 repair 结果写入 DSON store，DSON merge 后的状态为最终状态。Phase 2 只负责"搬运"，不自己做裁决。 | 需要 Phase 2 输出格式与 DSON delta 格式兼容 |
-| **Phase 2 是权威** | Phase 2 reconciliation 的 import 结果直接覆盖 DSON store。DSON 变成"只读展示层"。 | 放弃 CRDT 数学保证，等于放弃 Phase 3 核心价值 |
-| **时间戳决定权威** | 更晚的写入胜出，无论来自 Phase 2 还是 Phase 3。 | DSON 的 causal_context 和 Phase 2 的 `updated_at` 可能不同步 |
-
-> **推荐**：DSON 是权威，Phase 2 reconciliation 是迁移工具和 fallback。因为 Phase 3 DSON 的核心价值在于 CRDT 的数学保证，放弃这个保证让 Phase 2 reconciliation 做裁决，就等于放弃了 Phase 3 最大的优势。
-
-#### 决策 2：切换触发机制
-
-| 选项 | 说明 | 风险 |
-|------|------|------|
-| **管理员手动触发** | 用户或运维在配置中开启 "DSON sync mode"。遗留数据通过一次性 reconciliation-to-DSON 迁移脚本导入。 | 需要迁移向导和用户教育 |
-| **按域渐进切换** | 先在 EventLog 域激活 DSON，Task、TimeBlock 继续 Phase 2。逐域验证后逐步迁移。 | 同一设备上两套系统同时存在 |
-| **按设备切换** | 新设备激活时直接 DSON，老设备通过 migration wizard 引导迁移。 | 两台设备用不同同步机制时如何互操作 |
-
-#### 决策 3：遗留数据迁移路径
-
-Phase 3 激活时，RT SQLite 中已有数据需要进入 DSON store：
-
-| 选项 | 说明 | 适合模型 |
-|------|------|---------|
-| **一次性快照迁移** | reconciliation pull 当前所有数据，打包成 DSON snapshot，写入 DSON store | 模型 A |
-| **渐进式迁移** | DSON store 初始化为空，Phase 2 继续处理遗留数据，同时逐步写入 DSON store，直到所有文档完成迁移 | 模型 B/C |
-
-### 12.3 当前倾向
-
-| 决策点 | 倾向 | 理由 |
+| 决策点 | 结论 | 理由 |
 |--------|------|------|
-| 共存模型 | **模型 C（分工分层）** | 保留 Phase 2 作为安全网，避免 Phase 3 独自承担所有边界情况 |
-| 权威归属 | **DSON 是权威** | 不放弃 CRDT 数学保证，Phase 2 只做搬运和 fallback |
-| 切换机制 | **按域渐进切换** | 风险可控，先在 EventLog（最简单）验证，再扩展到 Task/TimeBlock |
-| 遗留数据迁移 | **一次性快照迁移 + DSON 激活后渐进验证** | 切换时点清晰，后续靠 DSON delta 处理增量 |
+| 同步机制 | **DSON 从第一天起就是唯一路径** | DSON 的 CRDT 数学保证是核心价值；任何双轨共存都会引入权威归属的灰色地带 |
+| Phase 2 角色 | **历史遗留迁移工具** | 仅用于一次性快照迁移（legacy RT SQLite → DSON store），迁移完成后 Phase 2 代码不再运行 |
+| 权威归属 | **DSON 是唯一权威** | 不存在"两条路径打架"的情况；Phase 2 输出在迁移期间单向流入 DSON，之后废弃 |
+| 遗留数据迁移 | **一次性快照迁移** | RT SQLite 当前状态导出为 DSON snapshot，写入 DSON store，迁移完成 |
+
+### 12.2 历史分析（为什么不选模型 A/B/C）
+
+#### 模型 A（冷切换）：不选
+
+- DSON 从第一天就接管，不存在"激活时间点 T"前后的双轨状态
+- 一次性迁移是纯工具步骤，不是架构共存策略
+
+#### 模型 B（热共存）：不选
+
+- 双轨并行意味着权威归属必须额外定义（DSON 权威还是 Phase 2 权威？）
+- 排障复杂度加倍，两套系统的边界条件需要持续维护
+- 与"DSON 从第一天就是唯一路径"矛盾
+
+#### 模型 C（分工分层）：不选
+
+- Phase 2 作为 fallback 的触发条件（delta 序列断裂、无法处理的域）需要精确定义
+- fallback 触发时仍然面临权威归属问题
+- 这实际上是把 Phase 2 保留为永久依赖，而不是真正的迁移完成
+
+### 12.3 迁移路径（非共存策略）
+
+```
+遗留 RT SQLite（Phase 2 体系）
+  └── 一次性快照导出
+        └── 写入 DSON store
+              └── DSON 从此成为唯一同步路径
+                    └── Phase 2 代码保留为只读迁移工具（可删除）
+```
+
+迁移是**一次性事件**，不是持续运行的状态。
+
+### 12.4 迁移前提
+
+以下条件满足后，才能执行快照迁移：
+
+1. DSON store 支持所有四个域（Task、EventLog、TimeBlock、Proposal）的 schema 声明
+2. Storage Adapter 持久端（SQLite）能正确序列化 DSON state
+3. 每个域的 `Nested`/`MergeAll`/`RecursiveOr` 字段声明完成
+4. 存在可运行的迁移验证流程（迁移前后 RT SQLite 与 DSON store 数据一致）
 
 ---
 
