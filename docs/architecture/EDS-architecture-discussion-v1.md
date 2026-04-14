@@ -1,8 +1,8 @@
-# EDS 架构讨论稿 v3
+# EDS 架构讨论稿 v4
 
 > 日期：2026-04-14
-> 状态：v3，新增存储适配层定位、嵌套 JSON 三层边界、Schema 三种声明模式
-> 参与方：DSON 研究 + ECS 研究 + 跨设备同步计划交叉综合 + #906 搬迁决策 + 架构审阅
+> 状态：v4，新增投影层定义、CRL × AtomicGroup 协作、ConflictObject 表、Validation Layer 位置、TimeBlock 数据融合、迁移触发时机与顺序
+> 参与方：DSON 研究 + ECS 研究 + 跨设备同步计划交叉综合 + #906 搬迁决策 + 架构审阅 + 超级提问确认
 > 蓝图性质：本文档是 #906 新架构的完整蓝图，面向满血版 EDS 的最终形态。
 > 当前源码实现状态不影响本文档的架构决策；蓝图优先于现状。
 
@@ -264,21 +264,24 @@ static EDS_SCHEMA: Schema = Schema {
                 },
             ],
         },
-        // ── TimeBlock：active（模式 B）+ completed（模式 A）─────────────────
+        // ── TimeBlock：数据融合（active + completed 统一）────────────────────
+        // v4 决策：不再区分 active 和 completed 两种独立数据结构。
+        // 「活跃时间块」仅作为「最新开放时间块」存在（end_time = null）。
+        // 历史 completed blocks 在同一 blocks 数组中保留，不迁移到独立表。
         DocSchema {
             doc_id_prefix: "timeblock:",
             fields: vec![
-                // active block 整体当一个大原子，phase/version 驱动的状态机不展开
-                FieldDecl { name: "active",    ty: FieldType::Object, resolution: FieldResolution::MergeAll },
-                // completed blocks 每个元素内部字段级策略
+                // blocks：OrArray + 字段级 LWW
+                // 每个 block 内字段独立 LWW（description 递归 OR）
                 FieldDecl {
-                    name: "completed",
+                    name: "blocks",
                     ty: FieldType::Array,
                     resolution: FieldResolution::Nested(vec![
                         NestedField { path: vec!["block_type"],   resolution: FieldResolution::MergeAll },
-                        NestedField { path: vec!["start_time"],  resolution: FieldResolution::Lww("end_time") },
-                        NestedField { path: vec!["end_time"],    resolution: FieldResolution::Lww("end_time") },
+                        NestedField { path: vec!["start_time"],  resolution: FieldResolution::Lww("updated_at") },
+                        NestedField { path: vec!["end_time"],    resolution: FieldResolution::Lww("updated_at") },
                         NestedField { path: vec!["description"], resolution: FieldResolution::RecursiveOr },
+                        NestedField { path: vec!["tags"],         resolution: FieldResolution::MergeAll },
                     ]),
                 },
             ],
@@ -890,9 +893,12 @@ CREATE INDEX idx_deltas_doc_seq ON dson_deltas(doc_id, seq);
 
 ### 7.2 Conflict Resolution Layer 接口
 
+> **v4 更新**：CRL 只处理叶子节点冲突。`AtomicGroup` 跨字段协调在 CRL 层实现（见 8.4 协作流程）。
+
 ```rust
 pub enum Resolution {
     Auto(serde_json::Value),     // 自动裁决，直接使用该值
+    AtomicGroup(Vec<(&'static str, serde_json::Value)>), // 字段组原子裁决，同时采纳或同时拒绝
     UserRequired {
         field: String,
         options: Vec<serde_json::Value>,  // 并发值列表
@@ -911,6 +917,34 @@ pub trait ConflictResolver: Send + Sync {
     fn resolve_all(&self, doc: &serde_json::Value) -> ResolutionResult;
 }
 ```
+
+### 7.3 ConflictObject 表（冲突结果持久化）
+
+> **v4 确认**：CRL 裁决结果需要持久化到 ConflictObject 表，供 UI 展示和人工复核。
+
+```sql
+CREATE TABLE conflict_objects (
+    id           TEXT PRIMARY KEY,       -- conflict UUID
+    doc_id       TEXT NOT NULL,         -- e.g. "task:t1"
+    field        TEXT NOT NULL,         -- 冲突字段名
+    winning_value TEXT NOT NULL,        -- 裁决后胜出的值
+    losing_values TEXT NOT NULL,        -- 落败的并发值（JSON array）
+    resolution   TEXT NOT NULL,         -- "lww" | "terminal" | "atomic_group" | "user_choice"
+    reason       TEXT,                  -- 裁决原因描述
+    doc_version  INTEGER NOT NULL,      -- 冲突发生时的 doc 版本
+    created_at   INTEGER NOT NULL,
+    resolved_at  INTEGER,               -- null = 未解决
+    resolved_by  TEXT,                 -- "user" | "system"
+    resolved_value TEXT,                -- 用户最终选择的值
+);
+
+CREATE INDEX idx_conflicts_unresolved ON conflict_objects(doc_id) WHERE resolved_at IS NULL;
+CREATE INDEX idx_conflicts_doc ON conflict_objects(doc_id, created_at);
+```
+
+**写入时机**：CRL 裁决时，对于 `UserRequired` 和 `Escalate` 情况，立即写入 ConflictObject 表。对于 `Auto(AtomicGroup)` 情况，可选写入（取决于实现策略）。
+
+**读取引擎**：Projection Layer 查询 ConflictObject 表，将未解决冲突注入 UI 视图。用户解决冲突后，`resolved_at`、`resolved_by`、`resolved_value` 字段更新。
 
 ---
 
@@ -971,6 +1005,53 @@ pub trait ConflictResolver: Send + Sync {
     RT SQLite → TaskStore → 前端 UI
 ```
 
+### 8.2 Projection Layer
+
+> **v4 确认**：Projection Layer 是必需的，不可用 DSON JSON 直接替代。
+
+CRL 裁决完成后，DSON merge 结果是结构化的 JSON（含 MvReg 标记），不能直接暴露给 UI。Projection Layer 负责：
+
+1. **叶子节点展开**：将 MvReg 并发值替换为 CRL 裁决后的最终值
+2. **默认值填充**：Schema 声明的字段默认值在投影时填入
+3. **UI 专用字段构造**：如 `display_name`、`is_overdue` 等计算字段
+4. **ConflictObject 持久化**：CRL 的 `has_conflict = true` 结果写入 ConflictObject 表（见 7.3）
+
+Projection Layer 是按域实现的，每个域有自己的 projector。不存在跨域统一 projector。
+
+### 8.3 Validation Layer（Write Gate）
+
+> **v4 确认**：Validation Layer 位于 Domain Service 和 DSON Store 之间，所有写入经过同一套跨域 Write Gate。
+
+Validation Layer 在 DSON write 之前执行，职责：
+
+- **字段存在性**：必填字段不能缺失
+- **类型检查**：字段值类型与 Schema 声明一致
+- **值域约束**：如 `status` 必须在 `Terminal` 声明的范围内
+- **跨域统一**：同一套 Validation 规则适用于所有域，不按域单独实现
+
+验证失败 → 拒绝写入 → 返回错误，不进入 DSON Store。
+
+### 8.4 CRL × AtomicGroup 协作
+
+> **v4 确认**：CRL 只处理叶子节点冲突。`AtomicGroup` 的跨字段原子协调在 CRL 层实现。
+
+```
+Schema 声明：
+  status: Terminal(["completed", "cancelled"]) + AtomicGroup(["status", "completed_at"])
+
+CRL 处理流程：
+  1. 收到 status 和 completed_at 两个叶子节点并发值
+  2. 检测到它们属于同一个 AtomicGroup
+  3. 作为一组同时裁决：
+     - 情况A：status=completed + completed_at=非空 → ✅ 采纳整组
+     - 情况B：status=cancelled + completed_at=非空 → ✅ 采纳整组
+     - 情况C：status=completed + completed_at=null → ❌ 拒绝（非法中间态）→ 裁决为 cancelled
+     - 情况D：两端都发 status=completed + completed_at=非空 → ✅ LWW 裁决
+  4. 输出：AtomicGroup 裁决结果 → Projection Layer
+```
+
+CRL 对 AtomicGroup 的输出是一个结构化的 `GroupResolution`，不是两个独立字段结果的简单拼接。
+
 ---
 
 ## 九、与现状的差距
@@ -984,63 +1065,84 @@ pub trait ConflictResolver: Send + Sync {
 - PeerScopeGrant 鉴权
 - **Storage Adapter 持久层为真相源**（v3 新增原则）
 
-### 9.2 当前缺口（v3 更新：B3/B4 已解决，B1/B2 重新定级）
+### 9.2 当前缺口（v4 更新：B3/B4/B2/Reminder/EventLog+TimeBlock 已解决；新增 Projection Layer、CRL AtomicGroup、ConflictObject 表）
 
 | 缺口 | 说明 | 关联 | 状态 |
 |------|------|------|------|
-| **DSON 未落地** | 当前 reconciliation 使用"盲跑 snapshot"，无 delta / causal_context | #905、#910 | 待 Phase 3 |
-| **DsonStorageAdapter 未抽象** | TS 层无统一存储接口，存储层不感知 JSON 结构 | #910 | 待 Phase 3 |
-| **DSON snapshots 是投影缓存，不是真相源** | Storage Adapter 持久层是唯一真相源，DSON snapshots 和 RT SQLite 都是缓存 | **已解决 B3（v3）** | ✅ |
-| **语义原子裁决原则未定义** | `AtomicGroup` 策略声明 `status + completed_at` 字段组必须原子裁决 | **已解决 B4（v3）** | ✅ |
+| **DSON 未落地** | 当前 reconciliation 使用"盲跑 snapshot"，无 delta / causal_context | #905、#910 | 待实现 |
+| **DsonStorageAdapter 未抽象** | TS 层无统一存储接口，存储层不感知 JSON 结构 | #910 | 待实现 |
 | **Schema 不支持嵌套字段声明** | 需要 `Nested` / `RecursiveOr` / `MergeAll` 三种粒度模式 | **已解决（v3）** | ✅ |
-| **Phase 2/3 共存策略** | 切换条件和回退路径未定义 | **Phase 3 内部任务，非前置阻断** | ⚠️ |
-| **Proposal 域的 sync 归属未明确** | 代码中 `proposal.replication.*` handler 完全缺失 | **Phase 2 缺口，非 Phase 3 阻断** | ⚠️ |
-| **EventLog / TimeBlock Reconciliation Adapter** | 无摘要比较，无漂移检测 | #868 | 待 Phase 2 |
-| **Reminder 域的 sync 归属** | Reminder 存储架构（Pouch 残留）不成熟，不作为新 EDS 参考。新架构中触发结果落入 EventLog，DSON schema 仅作历史迁移入口 | **已解决（v3）** | ✅ |
-| **Projection Layer 薄弱** | 只有 notifyChanged，无细粒度投影刷新 | #910 | 待 Phase 3 |
-| **Conflict object 持久化方案** | #869 要求 losing branch 证据，CRL 接口未定义 conflict metadata schema | #869 | 待 Phase 3 |
+| **Storage Adapter 持久端为真相源** | DSON snapshots 和 RT SQLite 都是投影缓存 | **已解决 B3（v3）** | ✅ |
+| **语义原子裁决原则未定义** | `AtomicGroup` + CRL 层协调 | **已解决（v3/v4）** | ✅ |
+| **Phase 2/3 共存策略** | DSON 从第一天就是唯一路径，Phase 2 是历史迁移工具 | **已解决 B2（v4）** | ✅ |
+| **Reminder 域存储归属** | 触发结果落入 EventLog，DSON schema 仅作迁移入口 | **已解决（v4）** | ✅ |
+| **EventLog / TimeBlock Reconciliation Adapter** | EventLog 纯追加不需要；TimeBlock 数据融合（active+completed 统一 blocks 数组） | **已解决（v4）** | ✅ |
+| **TimeBlock 数据结构** | 不再区分 active/completed，blocks 数组统一管理 | **已解决（v4）** | ✅ |
+| **Proposal 域 replication handlers 缺失** | 代码中 `proposal.replication.*` 完全缺失；需要完整 DSON Schema（含 Terminal approved/rejected） | Phase 2 缺口 | ⚠️ |
+| **Projection Layer 未定义** | CRL 裁决后需要 projector 将 DSON JSON 转为 UI 视图 | #910 | 待实现 |
+| **CRL AtomicGroup 实现** | CRL 层需要协调 `status + completed_at` 等字段组原子裁决 | #910 | 待实现 |
+| **ConflictObject 表未定义** | 冲突结果持久化 schema（winning/losing/reason） | #869 | 待实现 |
+| **Validation Layer 未实现** | Write Gate（所有域统一验证，在 DSON write 之前） | #910 | 待实现 |
 | **mesh relay 文档/实现状态不符** | ECS-3 标注"未实现"但代码生产级 | #910 | 待文档更新 |
+| **ECS 网络层选型** | 短期用 iroh 做暂时实现，长期在专门 issue 中跟踪 | **已决策（延期）** | ⏳ |
+| **DSON/CDS 命名** | 确认使用 DSON（Delta-State Object Notation） | **已解决（v4）** | ✅ |
 
 ---
 
-## 十、实施路线
+## 十、实施路线（v4 更新）
 
 ```
   Phase 1 ✅  Task 域核心路径（部分成型）
     Live signal + Reconciliation + PeerScopeGrant
     注："已闭环"描述过于乐观，应为"核心路径已通"
 
-  Phase 2 📋 历史遗留迁移工具（一次性使用）
+  Phase 2 📋 历史遗留迁移（一次性，用户主动触发）
     · 实现 DSON store + Storage Adapter 持久层
-    · 实现 EventLog / TimeBlock / Proposal / Reminder 的 Schema 声明
+    · 实现 EventLog / Proposal / TimeBlock / Reminder 的 DSON Schema 声明
+    · 实现 Validation Layer（跨域统一 Write Gate，在 DSON write 之前）
     · 一次性快照迁移：RT SQLite → DSON store
-    · 迁移完成后 Phase 2 reconciliation 代码废弃，不再运行
-    · 补摘要比较和漂移检测
+      迁移顺序：EventLog → Proposal → TimeBlock → Reminder
+      迁移触发：用户主动触发 migration wizard
     · 补 peer-auth 路由（/mesh/eventlog/*, /mesh/timeblocks/*）
-    · Reminder RT backend 改造（脱离前端 scheduler）
+    · Reminder RT backend 改造（脱离前端 scheduler，触发结果入 EventLog）
+    迁移完成后 Phase 2 reconciliation 代码废弃，不再运行
 
-  Phase 3 🎯 DSON 接入（greenfield）
+  Phase 3 🎯 DSON 完整实现（greenfield）
     · 接入 helsing-ai/dson
     · 实现 DsonStorageAdapter（以持久层为真相源，DSON snapshots 为投影缓存）
-    · 抽象 Projection Layer
-    · 完善 Conflict Resolution Layer（含 conflict metadata 持久化，含 AtomicGroup 裁决）
-    · Schema 驱动的 DSON 层实现（Nested / RecursiveOr / MergeAll / AtomicGroup 全量落地）
-    · 定义 Phase 2 → Phase 3 切换条件和共存策略（Phase 3 内部任务）
+    · 抽象 Projection Layer（每个域有自己的 projector）
+    · 完善 CRL（含 AtomicGroup 协调 + ConflictObject 持久化）
+    · 实现 ConflictObject 表（冲突结果持久化）
+    · Schema 驱动的 DSON 层（Nested / RecursiveOr / MergeAll / AtomicGroup 全量落地）
 ```
 
 ---
 
-## 十一、待明确问题（v3 更新）
+## 十一、待明确问题（v4 更新）
+
+以下问题已通过超级提问确认或决策：
 
 - [x] **B3（已解决）**：DSON snapshots 是同步用投影缓存，Storage Adapter 持久层是唯一真相源。RT SQLite 是另一层投影缓存。
-- [x] **B4（已解决）**：语义原子裁决通过 `AtomicGroup` 策略解决，`status + completed_at` 等字段组必须同时采纳。
+- [x] **B4（已解决）**：语义原子裁决通过 `AtomicGroup` 策略 + CRL 层协调解决。
 - [x] **Schema 嵌套声明（已解决）**：`Nested`、`RecursiveOr`、`MergeAll` 三种粒度覆盖嵌套/大原子/动态结构三种模式。
 - [x] **B2（已解决）**：Phase 2 reconciliation 是历史遗留迁移工具，DSON 从第一天起是唯一同步路径。详见第十二节。
-- [ ] **B1**：Proposal 域 sync 归属（Phase 2 缺口，非 Phase 3 阻断）
-- [x] **Reminder 域归属（已解决）**：Reminder 的存储架构（Pouch 残留 + 前端 scheduler 依赖）不成熟，不能作为新 EDS 参考。新架构中 Reminder 只迁移功能与逻辑（触发结果落入 EventLog），DSON schema 仅作为历史数据一次性迁移入口，不作为独立域的存储模型。详见 Schema 示例注释。
-- [ ] Conflict object 持久化 schema（与 #869 联动）
-- [ ] ECS 网络层选择（iroh vs libp2p vs 定制协议）
-- [ ] DSON / CDS 的最小接口边界与命名
+- [x] **B1 Proposal 域归属（已解决）**：需要完整 DSON Schema（含 Terminal approved/rejected 和 AtomicGroup），不是最小 Schema。
+- [x] **Reminder 域归属（已解决）**：只迁移功能与逻辑，触发结果落入 EventLog，DSON schema 仅作迁移入口。详见 Schema 示例注释。
+- [x] **EventLog Reconciliation Adapter（已解决）**：不需要，EventLog 纯追加，一次性迁移后完全废弃。
+- [x] **TimeBlock 数据结构（已解决）**：active + completed 统一为 blocks 数组，active = "最新开放时间块"。
+- [x] **Projection Layer（已确认）**：需要，每个域有自己的 projector，将 DSON JSON 转为 UI 视图。
+- [x] **CRL 范围（已确认）**：只处理叶子节点冲突，AtomicGroup 跨字段协调在 CRL 层实现。
+- [x] **Conflict object 持久化（已确认）**：需要独立 ConflictObject 表（详见 7.3 节 SQL schema）。
+- [x] **Validation Layer 位置（已确认）**：在 Domain Service 和 DSON Store 之间，所有写入经过跨域统一 Write Gate。
+- [x] **迁移触发时机（已确认）**：用户主动触发 migration wizard，不在 RT 启动时自动触发。
+- [x] **迁移顺序（已确认）**：EventLog → Proposal → TimeBlock → Reminder。
+- [x] **ECS 网络层（已决策）**：短期用 iroh 做暂时实现，长期在专门 issue 中跟踪选型。
+- [x] **DSON/CDS 命名（已确认）**：使用 DSON（Delta-State Object Notation）。
+
+**剩余开放问题（需要专门 issue 跟踪）**：
+- [ ] Conflict object 持久化 schema 完整实现细节（依赖 #869）
+- [ ] ECS 网络层长期选型（iroh / libp2p / 定制协议）
+- [ ] DSON/CDS 最小接口边界（类型定义、Rust trait 设计）
 
 ---
 
@@ -1058,6 +1160,8 @@ pub trait ConflictResolver: Send + Sync {
 | Phase 2 角色 | **历史遗留迁移工具** | 仅用于一次性快照迁移（legacy RT SQLite → DSON store），迁移完成后 Phase 2 代码不再运行 |
 | 权威归属 | **DSON 是唯一权威** | 不存在"两条路径打架"的情况；Phase 2 输出在迁移期间单向流入 DSON，之后废弃 |
 | 遗留数据迁移 | **一次性快照迁移** | RT SQLite 当前状态导出为 DSON snapshot，写入 DSON store，迁移完成 |
+| 迁移触发时机 | **用户主动触发（migration wizard）** | 不在 RT 启动时自动触发；用户在设置页面主动选择升级，wizard 引导完成迁移 |
+| 迁移顺序 | **EventLog → Proposal → TimeBlock → Reminder** | EventLog 最简单（纯追加），Proposal 次之（有终态约束），TimeBlock 需数据融合，Reminder 最后 |
 
 ### 12.2 历史分析（为什么不选模型 A/B/C）
 
@@ -1081,23 +1185,27 @@ pub trait ConflictResolver: Send + Sync {
 ### 12.3 迁移路径（非共存策略）
 
 ```
-遗留 RT SQLite（Phase 2 体系）
-  └── 一次性快照导出
-        └── 写入 DSON store
+用户在设置页面点击「升级到新同步引擎」
+  └── migration wizard 引导
+        ├── 步骤1：迁移 EventLog（纯追加，最简单）
+        ├── 步骤2：迁移 Proposal（含 Terminal approved/rejected）
+        ├── 步骤3：迁移 TimeBlock（融合 active+completed 为 blocks 数组）
+        └── 步骤4：迁移 Reminder（触发结果入 EventLog）
               └── DSON 从此成为唯一同步路径
-                    └── Phase 2 代码保留为只读迁移工具（可删除）
+                    └── Phase 2 reconciliation 代码废弃（可删除）
 ```
 
-迁移是**一次性事件**，不是持续运行的状态。
+迁移是**一次性事件**，用户主动触发，migration wizard 引导，不是 RT 启动时自动运行。
 
 ### 12.4 迁移前提
 
 以下条件满足后，才能执行快照迁移：
 
-1. DSON store 支持所有四个域（Task、EventLog、TimeBlock、Proposal）的 schema 声明
-2. Storage Adapter 持久端（SQLite）能正确序列化 DSON state
-3. 每个域的 `Nested`/`MergeAll`/`RecursiveOr` 字段声明完成
-4. 存在可运行的迁移验证流程（迁移前后 RT SQLite 与 DSON store 数据一致）
+1. DSON store 支持 EventLog / Proposal / TimeBlock / Reminder 的 schema 声明
+2. Storage Adapter 持久端（SQLite）能正确序列化 DSON state（含 blocks 数组统一结构）
+3. 每个域的 `Nested`/`MergeAll`/`RecursiveOr`/`AtomicGroup` 字段声明完成
+4. Validation Layer（Write Gate）在 DSON write 之前实现
+5. 存在可运行的迁移验证流程（迁移前后 RT SQLite 与 DSON store 数据一致）
 
 ---
 
