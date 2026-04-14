@@ -92,7 +92,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile::tempdir;
 
-    fn build_test_registry() -> ToolRegistry {
+    fn build_test_registry() -> (tempfile::TempDir, ToolRegistry) {
         let dir = tempdir().unwrap();
         let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
         store
@@ -126,12 +126,12 @@ mod tests {
         let (def, tool_fn) =
             eventlog::get_recent_events_tool(Arc::clone(&store), Some("profile-alpha".to_string()));
         registry.register(def, tool_fn);
-        registry
+        (dir, registry)
     }
 
     #[tokio::test]
     async fn get_recent_events_tool_formats_event_lines() {
-        let registry = build_test_registry();
+        let (_dir, registry) = build_test_registry();
         let result = registry
             .dispatch(&ToolUse {
                 id: "call_1".to_string(),

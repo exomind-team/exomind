@@ -1,4 +1,5 @@
 pub mod actor;
+pub(crate) mod bridge_prototype;
 pub mod sqlite_store;
 pub mod store;
 pub mod types;

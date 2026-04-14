@@ -33,6 +33,7 @@ pub mod routes;
 pub mod session;
 pub mod signal;
 pub mod task;
+mod sqlite_json_bridge;
 pub mod tick;
 pub mod timeblock;
 pub mod timeblock_sqlite;
