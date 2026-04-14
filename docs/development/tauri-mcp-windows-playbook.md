@@ -2733,3 +2733,101 @@
   - runtime 假活
   - 孤儿 agent 子进程
     误判成“产品逻辑回归”。
+
+### 阶段补记：受管健康实例的干净关闭方法（2026-04-14）
+
+#### 适用前提
+
+- 当前实例仍是 `tauri:manager` 能正常识别的健康实例，不是上一节那种“manager 已丢、只剩孤儿监听”的半死链。
+- 目标是把一轮真实桌面验收用到的 ExoMind app 实例完整收口，而不是只把窗口点掉。
+
+#### 本轮收敛出的判断
+
+- 对健康实例，优先走：
+  - `bun run tauri:manager stop --name <instance>`
+  - 或等价的：
+    - `bun scripts/dev/tauri-dev-manager.ts stop --name <instance>`
+- 但不能因为命令返回了 `stopped:` 就直接判定“已经关干净”。
+- 必须把下面四层一起验证通过，才算实例真的停了：
+  - manager 视角：实例不再出现在 `list`
+  - socket 视角：`Web / HMR / RT / bridge` 端口都不再监听
+  - 进程视角：`exomind.exe` 与该实例目录下派生的 `msedgewebview2.exe` 子进程都不存在
+  - 连通性视角：`Web`、`RT /health`、`bridge TCP` 都不可达
+
+#### 推荐关停顺序
+
+1. 先列出当前受管实例，不要凭窗口标题或历史记忆下手：
+   - `bun run tauri:manager list`
+2. 记下这轮目标实例真值：
+   - `name`
+   - `web`
+   - `hmr`
+   - `rt`
+   - `bridge`
+3. 对目标实例逐个执行：
+   - `bun run tauri:manager stop --name <instance>`
+4. 关闭后立刻做四重复核：
+   - `bun run tauri:manager list`
+   - `Get-NetTCPConnection -State Listen`
+   - `Get-CimInstance Win32_Process`
+   - `Invoke-WebRequest` / TCP connect
+5. 只有四层都收敛到“不可用”后，才把这套实例记为已关闭。
+
+#### 四重复核的最小命令模板
+
+```powershell
+# 1) manager 视角
+bun run tauri:manager list
+
+# 2) socket 视角
+Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+  Where-Object { $_.LocalPort -in @(<web>, <hmr>, <rt>, <bridge>) }
+
+# 3) 进程视角
+Get-CimInstance Win32_Process |
+  Where-Object {
+    ($_.Name -eq 'exomind.exe') -or
+    ($_.CommandLine -match '<instance>|\\.tmp\\\\tauri-dev-state\\\\<instance>')
+  } |
+  Select-Object ProcessId, Name, CommandLine
+
+# 4a) Web / RT 连通性
+Invoke-WebRequest http://127.0.0.1:<web>/ -TimeoutSec 2 -UseBasicParsing
+Invoke-WebRequest http://127.0.0.1:<rt>/health -TimeoutSec 2 -UseBasicParsing
+
+# 4b) bridge / HMR TCP 连通性
+# PowerShell 用 TcpClient 做 1s 左右的 connect 探测即可
+```
+
+#### 验收口径
+
+- “窗口没了”不等于实例停了。
+- “`stop --name` 返回成功”不等于实例停了。
+- 只有当下面四条同时成立时，才可下结论说“关干净了”：
+  - `list` 里不再有该实例
+  - `Web / HMR / RT / bridge` 对应端口全部释放
+  - 对应 `exomind.exe` 与实例目录下的 WebView 子进程全部消失
+  - `Web`、`RT /health`、`bridge TCP` 全部不可达
+
+#### 明确不要这样做
+
+- 不要直接：
+  - `taskkill /IM exomind.exe /F`
+  - `taskkill /IM msedgewebview2.exe /F`
+- 这类全局杀法会把别的桌面实例、别的验证现场，甚至别的非 ExoMind WebView 一起带掉。
+- 只有当：
+  - manager 已失真
+  - 正常 `stop --name` 已经失效
+  - 且已确认存在孤儿监听 / 残留子进程
+    时，才退回上一节的残留清理路径。
+
+#### 与上一节的边界
+
+- 本节解决的是：
+  - “健康、受管实例如何正常收口”
+- 上一节解决的是：
+  - “manager 已经丢实例，但现场还残留半死链时怎么追杀”
+- 现场判断时，先走本节；只有发现：
+  - manager 视角为空
+  - 但 socket / 协议仍活着
+    才切回上一节的孤儿清理流程。
