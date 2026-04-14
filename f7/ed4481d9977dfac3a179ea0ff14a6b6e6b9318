@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "f7ed4481d9977dfac3a179ea0ff14a6b6e6b9318",
+  "prompts": {
+    "9ece876c991b9afe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d831a-54de-7402-a37d-7638b1f9d97b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 10931,
+      "total_deletions": 116,
+      "accepted_lines": 10923,
+      "overriden_lines": 5
+    }
+  }
+}
