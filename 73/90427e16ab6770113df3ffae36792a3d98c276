@@ -1,0 +1,73 @@
+docs/README.md
+  0a3fbcf3d4a9b7bc 60
+docs/development/exomind-runtime-agents-api.md
+  e2926dc1666c54c3 6
+  0a3fbcf3d4a9b7bc 7
+docs/development/lan-single-rt-guide.md
+  0a3fbcf3d4a9b7bc 281
+  e2926dc1666c54c3 282
+skills/exomind-rt-agent-access/SKILL.md
+  23c4fbb34d07600b 3,11,13,16-20,23,60,62,64-66,68,70-72,74,76,78-79,81-84,87,89-91,93,95,97-104,106,108,110-115,134,136,141,152-156,165,176,182,185-186,188,190,192,194-197,199,201,203-206,208,219-224
+  0a3fbcf3d4a9b7bc 6,10,15,22,37-44,46-47,119,146,174,184
+  cd2d2dea1984fd87 14,24-25,49,51-56,58,80,85,210,212-213,217-218
+  e2926dc1666c54c3 9,12,21,29-36,125,131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "7390427e16ab6770113df3ffae36792a3d98c276",
+  "prompts": {
+    "0a3fbcf3d4a9b7bc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8bb8-8b2a-7e21-a2cb-229d0bc32a23",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 718,
+      "total_deletions": 110,
+      "accepted_lines": 51,
+      "overriden_lines": 0
+    },
+    "23c4fbb34d07600b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d9481-6569-72a3-803d-e936d082cdf2",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 88,
+      "total_deletions": 822,
+      "accepted_lines": 82,
+      "overriden_lines": 0
+    },
+    "cd2d2dea1984fd87": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d948f-b145-7703-b2db-a9ae88ab7784",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 19,
+      "total_deletions": 21,
+      "accepted_lines": 18,
+      "overriden_lines": 0
+    },
+    "e2926dc1666c54c3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d8bed-b50f-7111-b7e8-00dcbceccd2c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 843,
+      "total_deletions": 79,
+      "accepted_lines": 805,
+      "overriden_lines": 0
+    }
+  }
+}
