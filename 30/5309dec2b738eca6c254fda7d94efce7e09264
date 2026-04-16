@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "305309dec2b738eca6c254fda7d94efce7e09264",
+  "prompts": {
+    "4f51fc9677d79835": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b48f6a9e-7f71-4bc4-afbe-61fab70f8284",
+        "model": "MiniMax-M2.7-highspeed"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 360,
+      "total_deletions": 0,
+      "accepted_lines": 360,
+      "overriden_lines": 0
+    }
+  }
+}
