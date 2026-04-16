@@ -98,15 +98,17 @@ fn delete_json(&self, table: &str, id: &str) -> Result<bool, BridgeError>;
 
 ### 高优先级（阻塞下一步）
 
-1. **crate 命名和路径**：`crates/sqlite-json-bridge/` 还是其他？
-2. **API 风格**：async (tokio) 还是同步？（现有 store 是同步的）
-3. **schema 变更策略**：参考现有的 `add_column_if_not_exists` 模式
+> 原高优先级 1-3 已在下文“基于当前仓库的续接裁决”中落定；以下是当前真正阻塞原型的事项。
+
+1. **复合主键 API 定稿**：把 `scope_key/user_key + id` 这类 key 形态落实到具体 Rust 类型和 helper 上
+2. **SchemaRegistry 最小原型**：先跑通表创建、JSON 往返、`_ext_json` 兜底
+3. **首个接入表选择**：`tasks` 或 `eventlog_events`，二选一先打通真实 store 集成
 
 ### 中优先级
 
 4. **ext 兜底字段的 schema 演进**：未注册字段积累后如何清理/迁移
 5. **索引策略**：哪些字段默认建索引？
-6. **Phase 1 详细 API 设计**：确定 JSON CRUD 接口的输入输出格式
+6. **Phase 1 详细 API 设计**：确定 JSON CRUD 接口的输入输出格式（已知需支持复合主键）
 
 ### 低优先级（后续）
 
@@ -124,6 +126,74 @@ fn delete_json(&self, table: &str, id: &str) -> Result<bool, BridgeError>;
 | `crates/exomind-runtime/src/task/sqlite_store.rs` | 现有 TEXT-as-JSON 实现参考 |
 | `crates/exomind-runtime/src/agent/session.rs` | `add_column_if_not_exists` 迁移模式参考 |
 | `crates/exomind-runtime/src/eventlog_sqlite.rs` | eventlog store 参考 |
+
+---
+
+## 基于当前仓库的续接裁决（2026-04-14）
+
+> 下面不是抽象建议，而是基于当前 `dev` 分支代码现状得出的落地判断。
+
+### 已可直接裁决的高优先级问题
+
+1. **crate 边界**
+   - Phase 1 **不要**先新建 workspace 级独立 crate。
+   - 先落在 `crates/exomind-runtime/src/sqlite_json_bridge/` 作为 internal module。
+   - 理由：当前 workspace 只有 `src-tauri`、`crates/exomind-runtime`、`crates/exomind-cli`；所有 SQLite store 也都直接内聚在 `exomind-runtime` 内部，尚未形成跨 crate 复用压力。
+
+2. **API 风格**
+   - Phase 1 **用同步 API**，不要先做 tokio/async 包装。
+   - 理由：现有 `task` / `eventlog` / `timeblock` / `session` / `proposal` 的 SQLite store 全部是 `rusqlite + Mutex<Connection>` 的同步模式；异步边界在更外层的 Axum / Tauri / runtime 调用处。
+
+3. **schema 变更策略**
+   - 复用现有 `PRAGMA table_info(...)` + 条件 `ALTER TABLE ... ADD COLUMN ...` 的迁移模式。
+   - 只有在 **主键形态变化** 或必须重建旧表兼容时，才走 rename/rebuild。
+   - 参考实现：`crates/exomind-runtime/src/agent/session.rs`、`crates/exomind-runtime/src/session/sqlite_store.rs`、`crates/exomind-runtime/src/eventlog_sqlite.rs`、`crates/exomind-runtime/src/timeblock_sqlite.rs`。
+
+### 新发现的关键约束：Phase 1 不能只支持单一 `id`
+
+handoff 原始 API 用 `get_json(table, id)` / `delete_json(table, id)` 表达单主键模型，但这和当前仓库主流 SQLite schema **不一致**：
+
+- `tasks`：`PRIMARY KEY (scope_key, id)`
+- `eventlog_events`：`PRIMARY KEY (user_key, id)`
+- `timeblocks` / `planned_timeblocks` / `planner_windows`：`PRIMARY KEY (scope_key, id)`
+
+这意味着如果桥接层只支持单一 `id`，它在 runtime 的第一批真实落点上就会失配。  
+**结论**：Phase 1 API 需要从一开始支持“复合主键 / 作用域键”。单主键只是它的特例。
+
+建议把核心接口收紧为：
+
+```rust
+type JsonKey = serde_json::Map<String, serde_json::Value>;
+
+fn upsert_json(&self, table: &str, doc: serde_json::Value) -> Result<JsonKey, BridgeError>;
+fn get_json(&self, table: &str, key: &JsonKey) -> Result<Option<serde_json::Value>, BridgeError>;
+fn query_json(
+    &self,
+    table: &str,
+    sql_where: &str,
+    params: &[serde_json::Value],
+) -> Result<Vec<serde_json::Value>, BridgeError>;
+fn delete_json(&self, table: &str, key: &JsonKey) -> Result<bool, BridgeError>;
+```
+
+单主键表仍可传 `{ "id": "..." }`；作用域表则传 `{ "scope_key": "...", "id": "..." }` 或 `{ "user_key": "...", "id": "..." }`。
+
+### 原型阶段的直接落点
+
+- **模块位置**：`crates/exomind-runtime/src/sqlite_json_bridge/`
+- **首批验证对象**：`tasks` 与 `eventlog_events`
+- **首批目标**：
+  - SchemaRegistry 最小实现
+  - 表创建 / 条件加列
+  - JSON → 行、行 → JSON 往返
+  - `_ext_json` 兜底
+  - 基于 `json_each` / `json_extract` 的查询测试
+
+### 仍待后续细化但不再阻塞原型的事项
+
+1. `_ext_json` 的清理策略：建议先做“注册字段后迁移脚本显式搬运”，不要在 Phase 1 自动做隐式清洗。
+2. 表达式索引策略：先做 **schema 显式声明 opt-in**，不要默认给所有 JSON path 建索引。
+3. Phase 1 集成顺序：先做模块级内存 SQLite 测试，再决定接 `tasks` 还是 `eventlog` 的真实 store。
 
 ---
 
@@ -149,5 +219,7 @@ fn delete_json(&self, table: &str, id: &str) -> Result<bool, BridgeError>;
 
 1. **先读设计文档**：`docs/plans/2026-04-14-sqlite-json-bridge-research.md`，理解完整设计
 2. **跑通实验脚本**：`experiment/sqlite-json-each/sqlite_json_exp.py`，熟悉 JSON 函数行为
-3. **确定 crate 边界**：命名、路径、API 风格、迁移策略
-4. **原型验证**：SchemaRegistry 最小实现跑通后再扩展
+3. **按已裁决边界起原型**：在 `crates/exomind-runtime/src/sqlite_json_bridge/` 内部模块落同步版本
+4. **先支持复合主键**：优先把 `scope_key/user_key + id` 的 key helper 设计正确
+5. **模块级测试先行**：用内存 SQLite 跑通 SchemaRegistry + JSON 往返 + `json_each/json_extract`
+6. **再接真实 store**：`tasks` 或 `eventlog_events` 二选一完成首个集成验证
