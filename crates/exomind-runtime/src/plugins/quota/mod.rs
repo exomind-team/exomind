@@ -20,11 +20,11 @@ mod config_keys;
 mod http_client;
 mod signals;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc as StdArc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
@@ -264,28 +264,25 @@ impl QuotaMonitor {
         }
     }
 
-    fn publish_heartbeat(
-        pool: &StdArc<SignalPool>,
-        payload: signals::QuotaHeartbeatPayload,
-    ) {
-        let evt =
-            Self::make_event("quota.heartbeat", serde_json::to_value(payload).unwrap_or_default());
+    fn publish_heartbeat(pool: &StdArc<SignalPool>, payload: signals::QuotaHeartbeatPayload) {
+        let evt = Self::make_event(
+            "quota.heartbeat",
+            serde_json::to_value(payload).unwrap_or_default(),
+        );
         pool.publish(evt);
     }
 
-    fn publish_warning(
-        pool: &StdArc<SignalPool>,
-        model: &signals::ModelQuota,
-        threshold: u32,
-    ) {
+    fn publish_warning(pool: &StdArc<SignalPool>, model: &signals::ModelQuota, threshold: u32) {
         let payload = signals::QuotaWarningPayload {
             model_name: model.model_name.clone(),
             remains: model.interval_remains,
             threshold,
             interval_reset_in_ms: model.interval_reset_in_ms,
         };
-        let evt =
-            Self::make_event("quota.warning", serde_json::to_value(payload).unwrap_or_default());
+        let evt = Self::make_event(
+            "quota.warning",
+            serde_json::to_value(payload).unwrap_or_default(),
+        );
         pool.publish(evt);
     }
 
@@ -301,25 +298,25 @@ impl QuotaMonitor {
         pool.publish(evt);
     }
 
-    fn publish_checked(
-        pool: &StdArc<SignalPool>,
-        model: &signals::ModelQuota,
-        query_time_ms: u64,
-    ) {
+    fn publish_checked(pool: &StdArc<SignalPool>, model: &signals::ModelQuota, query_time_ms: u64) {
         let payload = signals::QuotaCheckedPayload {
             model_name: model.model_name.clone(),
             remains: model.interval_remains,
             query_time_ms,
         };
-        let evt =
-            Self::make_event("quota.checked", serde_json::to_value(payload).unwrap_or_default());
+        let evt = Self::make_event(
+            "quota.checked",
+            serde_json::to_value(payload).unwrap_or_default(),
+        );
         pool.publish(evt);
     }
 
     fn publish_error(pool: &StdArc<SignalPool>, model_name: Option<String>, error: String) {
         let payload = signals::QuotaErrorPayload { model_name, error };
-        let evt =
-            Self::make_event("quota.error", serde_json::to_value(payload).unwrap_or_default());
+        let evt = Self::make_event(
+            "quota.error",
+            serde_json::to_value(payload).unwrap_or_default(),
+        );
         pool.publish(evt);
     }
 
@@ -335,9 +332,7 @@ impl QuotaMonitor {
                 let start = Instant::now();
                 let key = api_key.as_ref().clone();
 
-                match tokio::runtime::Handle::current()
-                    .block_on(http_client::check_remains(&key))
-                {
+                match tokio::runtime::Handle::current().block_on(http_client::check_remains(&key)) {
                     Ok(models) => {
                         let elapsed_ms = start.elapsed().as_millis() as u64;
                         for model in &models {

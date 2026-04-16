@@ -1023,9 +1023,7 @@ fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo>
                 .get(&session_meta.session_id)
                 .cloned()
                 .unwrap_or_default();
-            let index_display_title = session_index
-                .get(&session_meta.session_id)
-                .cloned();
+            let index_display_title = session_index.get(&session_meta.session_id).cloned();
             let display_meta = HistoricalSessionDisplayMeta {
                 display_title: session_meta
                     .display_title
@@ -1928,10 +1926,7 @@ mod tests {
             sessions[0].session_id,
             "019d8888-aaaa-bbbb-cccc-1234567890ab"
         );
-        assert_eq!(
-            sessions[0].display_title.as_deref(),
-            Some("issue跟踪")
-        );
+        assert_eq!(sessions[0].display_title.as_deref(), Some("issue跟踪"));
     }
 
     /// Tests that session file's thread_name takes priority over session_index.jsonl.
@@ -1982,8 +1977,7 @@ mod tests {
         let day_dir = sessions_dir.join("2026").join("04").join("13");
         fs::create_dir_all(&day_dir).unwrap();
         let session_id = "019d7777-aaaa-bbbb-cccc-1234567890ab";
-        let session_path =
-            day_dir.join(format!("rollout-2026-04-13T10-20-30-{session_id}.jsonl"));
+        let session_path = day_dir.join(format!("rollout-2026-04-13T10-20-30-{session_id}.jsonl"));
         fs::write(
             &session_path,
             format!(
@@ -2048,8 +2042,7 @@ mod tests {
         let day_dir = sessions_dir.join("2026").join("04").join("13");
         fs::create_dir_all(&day_dir).unwrap();
         let session_id = "019d7778-aaaa-bbbb-cccc-1234567890ab";
-        let session_path =
-            day_dir.join(format!("rollout-2026-04-13T10-20-30-{session_id}.jsonl"));
+        let session_path = day_dir.join(format!("rollout-2026-04-13T10-20-30-{session_id}.jsonl"));
         fs::write(
             &session_path,
             format!(

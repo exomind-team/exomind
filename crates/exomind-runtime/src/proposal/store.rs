@@ -279,11 +279,7 @@ impl ProposalStore {
         Ok(proposal)
     }
 
-    pub fn add_comment(
-        &self,
-        id: &str,
-        comment: Comment,
-    ) -> Result<Proposal, ProposalStoreError> {
+    pub fn add_comment(&self, id: &str, comment: Comment) -> Result<Proposal, ProposalStoreError> {
         self.add_comment_scoped(None, id, comment)
     }
 
@@ -425,7 +421,11 @@ impl SqliteProposalStore {
             .map_err(ProposalStoreError::from)
     }
 
-    fn get_scoped(&self, scope_key: &str, id: &str) -> Result<Option<Proposal>, ProposalStoreError> {
+    fn get_scoped(
+        &self,
+        scope_key: &str,
+        id: &str,
+    ) -> Result<Option<Proposal>, ProposalStoreError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT id, title, body, action_type, action_params_json, references_json, status,
@@ -983,7 +983,12 @@ mod tests {
         );
 
         store
-            .update_status_scoped(Some("profile-a"), &scoped.id, ProposalStatus::Approved, None)
+            .update_status_scoped(
+                Some("profile-a"),
+                &scoped.id,
+                ProposalStatus::Approved,
+                None,
+            )
             .unwrap();
         let conflict = store.update_action_params_scoped(
             Some("profile-a"),

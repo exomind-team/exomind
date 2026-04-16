@@ -7,8 +7,7 @@ use serde::Deserialize;
 
 use super::signals::ModelQuota;
 
-const API_URL: &str =
-    "https://www.minimax.io/v1/api/openplatform/coding_plan/remains";
+const API_URL: &str = "https://www.minimax.io/v1/api/openplatform/coding_plan/remains";
 
 /// Convert raw MiniMax model name to a human-readable display name.
 pub fn resolve_display_name(model_name: &str) -> String {
