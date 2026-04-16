@@ -1,4 +1,11 @@
-# RT Mesh + RT SQLite Cross-Device Sync Replacement Plan
+# [已归档] RT Mesh + RT SQLite Cross-Device Sync Replacement Plan
+
+> **状态**：历史计划，自 2026-04-13 起不再作为现行实现规范。
+> **现行规范**：
+> - [sync.md](../specs/sync.md)
+> - [2026-04-13-multi-domain-reconciliation-design.md](2026-04-13-multi-domain-reconciliation-design.md)
+> - [2026-04-13-task-sync-reconciliation-solution-plan.md](2026-04-13-task-sync-reconciliation-solution-plan.md)
+> **使用方式**：本文仅用于追溯从 `Pouch` 主链路迁出的历史背景；若与上述文档冲突，一律以上述文档为准。
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
