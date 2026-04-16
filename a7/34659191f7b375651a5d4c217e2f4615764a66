@@ -1,0 +1,68 @@
+src/ui/app/components/FocusTimerWidget.tsx
+  adfbc700d88d7509 44-48,73,158,1092-1114
+src/ui/app/components/FocusKeepAwakeController.tsx
+  adfbc700d88d7509 1-8,10-26,28-37,43-46,49-58,65-88,94,98-152,154-179,181-190,192-199
+  4f51fc9677d79835 62-64,180,191
+src-tauri/src/commands/mod.rs
+  adfbc700d88d7509 10
+src-tauri/src/commands/keep_awake_commands.rs
+  adfbc700d88d7509 2-19
+src-tauri/src/lib.rs
+  adfbc700d88d7509 26,53-57,296,298,476
+src/ui/app/components/FocusKeepAwakeButton.tsx
+  adfbc700d88d7509 1-23,25-31
+src/ui/app/pages/NowPage.tsx
+  adfbc700d88d7509 4,53-55,95
+src/config/focus-keep-awake.ts
+  adfbc700d88d7509 1-6,8-12,14-15,17-35
+src-tauri/Cargo.toml
+  adfbc700d88d7509 49
+src/services/focus-keep-awake.service.ts
+  adfbc700d88d7509 1-53,55,64-65,67-69,73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "a734659191f7b375651a5d4c217e2f4615764a66",
+  "prompts": {
+    "3e1440ccb0c4f675": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d94c0-b794-74a1-8cd5-afe1adaa4a1f",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 7,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    },
+    "4f51fc9677d79835": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b48f6a9e-7f71-4bc4-afbe-61fab70f8284",
+        "model": "MiniMax-M2.7-highspeed"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 3,
+      "accepted_lines": 5,
+      "overriden_lines": 3
+    },
+    "adfbc700d88d7509": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019d94ea-dacf-7c61-8f3e-dca79bbefdca",
+        "model": "gpt-5.4"
+      },
+      "human_author": "ARCJ137442",
+      "messages": [],
+      "total_additions": 350,
+      "total_deletions": 18,
+      "accepted_lines": 325,
+      "overriden_lines": 22
+    }
+  }
+}
