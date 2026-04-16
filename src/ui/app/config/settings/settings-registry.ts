@@ -41,6 +41,7 @@ import {
   getEmbeddedRuntimeNetworkMode,
   getRuntimeExternalAddress,
   getRuntimeTargetMode,
+  isTauriWindow,
   isDesktopOperatingSystem,
   parseRuntimeAddress,
   subscribeEmbeddedRuntimeAllowLanWithoutAuthChanges,
@@ -330,6 +331,11 @@ import {
   updateTimerPreferences,
   type CountdownEndMode,
 } from '@/config/timer-preferences';
+import {
+  getTimeblockEndAutoOpenFocusEnabled,
+  setTimeblockEndAutoOpenFocusEnabled,
+  subscribeTimeblockEndAutoOpenFocusChanges,
+} from '@/config/timeblock-end-alert';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
@@ -533,6 +539,13 @@ function voiceRuntimeOmniRealtimeOnly(ctx: SettingsContext): boolean {
 
 function desktopOperatingSystemOnly(): boolean {
   return isDesktopOperatingSystem();
+}
+
+function androidTauriOnly(): boolean {
+  if (!isTauriWindow() || isDesktopOperatingSystem() || typeof navigator === 'undefined') {
+    return false;
+  }
+  return /android/i.test(navigator.userAgent ?? '');
 }
 
 function tauriWindowOnly(ctx: SettingsContext): boolean {
@@ -1569,6 +1582,20 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'timer',
     type: 'custom',
     component: FocusBgmSetting,
+  },
+  {
+    id: 'timeblock-end-auto-open-focus',
+    label: '后台结束自动回到专注',
+    icon: Activity,
+    category: 'timer',
+    rowTestId: 'new-settings-timeblock-end-auto-open-focus-row',
+    controlTestId: 'new-settings-timeblock-end-auto-open-focus-switch',
+    type: 'boolean',
+    description: '仅 Android。倒计时在后台结束时，尝试自动拉起 App 并定位到当下/专注；系统不允许时会自动退回普通通知。',
+    visible: androidTauriOnly,
+    get: getTimeblockEndAutoOpenFocusEnabled,
+    set: setTimeblockEndAutoOpenFocusEnabled,
+    subscribe: subscribeTimeblockEndAutoOpenFocusChanges,
   },
   {
     id: 'feedback-content',

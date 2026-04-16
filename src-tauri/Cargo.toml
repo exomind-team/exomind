@@ -46,6 +46,8 @@ tauri-plugin-mcp-bridge = "0.9"
 thiserror = "1"
 exomind-runtime = { path = "../crates/exomind-runtime" }
 exomind-android-keepalive = { path = "../crates/exomind-android-keepalive" }
+exomind-android-keep-awake = { path = "../crates/exomind-android-keep-awake" }
+exomind-android-timeblock-end-alert = { path = "../crates/exomind-android-timeblock-end-alert" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tauri-plugin-global-shortcut = "2"
 enigo = { version = "0.3", features = ["serde"] }

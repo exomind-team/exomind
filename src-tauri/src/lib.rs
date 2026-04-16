@@ -23,6 +23,7 @@ use commands::file_commands::{
     list_files, pick_audio_files, pick_json_file, read_file, read_file_binary, save_binary_file,
     save_json_file, write_file,
 };
+use commands::keep_awake_commands::focus_keep_awake_set;
 use commands::now_workbench_overlay_commands::{
     ensure_now_workbench_overlay_window, now_workbench_overlay_ensure,
     now_workbench_overlay_focus_main, now_workbench_overlay_hide, now_workbench_overlay_restore,
@@ -48,6 +49,11 @@ use commands::shortcut_commands::{
     voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, MainWindowShortcutState,
     VoiceShortcutState,
+};
+use commands::timeblock_end_alert_commands::{
+    timeblock_end_alert_cancel, timeblock_end_alert_notification_permission_request,
+    timeblock_end_alert_notification_permission_state, timeblock_end_alert_schedule,
+    timeblock_end_alert_take_pending_handoff,
 };
 use commands::workspace_commands::{
     get_agent_workspace_actions, get_agent_workspace_knowledge, get_agent_workspace_knowledge_list,
@@ -287,7 +293,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(exomind_android_keep_awake::init())
         .plugin(exomind_android_keepalive::init())
+        .plugin(exomind_android_timeblock_end_alert::init())
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
         .manage(voice_shortcut_state)
@@ -465,6 +473,7 @@ pub fn run() {
             save_json_file,
             pick_json_file,
             pick_audio_files,
+            focus_keep_awake_set,
             dev_instance_runtime_info,
             get_device_id,
             eventlog_list,
@@ -507,6 +516,11 @@ pub fn run() {
             main_window_shortcut_take_pending_activation,
             voice_recording_set_active,
             foreground_window_get,
+            timeblock_end_alert_schedule,
+            timeblock_end_alert_cancel,
+            timeblock_end_alert_take_pending_handoff,
+            timeblock_end_alert_notification_permission_state,
+            timeblock_end_alert_notification_permission_request,
             // ASR 语音识别命令
             volcano_asr_recognize,
             volcano_asr_check_config,

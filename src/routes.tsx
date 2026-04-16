@@ -26,6 +26,7 @@ import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ProposalNotificationBadge } from '@/ui/app/components/ProposalNotificationBadge';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
+import { TimeblockEndAlertCoordinator } from '@/ui/app/components/TimeblockEndAlertCoordinator';
 import { UpdateToast } from '@/ui/components/UpdateToast';
 import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
@@ -675,6 +676,7 @@ function NewLayout() {
           onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
         />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
+        <TimeblockEndAlertCoordinator />
         <ReminderNotifier />
         <UpdateToast />
       </>
@@ -690,6 +692,7 @@ function NewLayout() {
         commandPaletteActive={commandPaletteActive}
         commandContext={commandContext}
       />
+      <TimeblockEndAlertCoordinator />
       <ReminderNotifier />
       <UpdateToast />
     </>

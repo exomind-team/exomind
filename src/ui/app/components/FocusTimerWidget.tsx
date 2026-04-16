@@ -41,6 +41,12 @@ import {
   type TaskStatusChoice,
 } from '@/ui/app/components/TaskStatusSelector';
 import {
+  FocusKeepAwakeButton,
+} from '@/ui/app/components/FocusKeepAwakeButton';
+import type {
+  FocusKeepAwakeControl,
+} from '@/ui/app/components/FocusKeepAwakeController';
+import {
   resolveFeedbackSubmitLabel,
   useFeedbackSubmitControls,
 } from '@/ui/app/components/useFeedbackSubmitControls';
@@ -64,6 +70,7 @@ interface FocusTimerWidgetProps {
   prestartSelectedTaskIds?: string[];
   onPrestartSelectedTaskIdsChange?: (taskIds: string[]) => void;
   showRunningLinkedTasks?: boolean;
+  keepAwakeControl?: FocusKeepAwakeControl;
 }
 
 export interface FocusTimerWidgetHandle {
@@ -148,6 +155,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     prestartSelectedTaskIds,
     onPrestartSelectedTaskIdsChange,
     showRunningLinkedTasks = true,
+    keepAwakeControl,
   },
   ref,
 ) {
@@ -614,6 +622,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
   const hasFocusBgmConfigured = focusBgmPreferences.enabled
     && (focusBgmPreferences.sourceType === 'preset' || focusBgmPreferences.customTracks.length > 0);
+  const showKeepAwakeButton = surface !== 'overlay' && Boolean(keepAwakeControl?.visible);
   const focusBgmToggleAriaLabel = '背景音设置（Background audio settings）';
   const focusBgmToggleIcon = <Music4 size={16} />;
 
@@ -1080,24 +1089,29 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
                     </div>
                     <p className={`truncate text-[20px] font-semibold leading-[1.4] ${isOverlaySurface ? 'text-[#F5EDE7]' : 'text-[#1C1917] dark:text-[#FAFAF9]'}`}>{taskName || '未命名任务'}</p>
                   </div>
-                  {hasFocusBgmConfigured ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      data-testid="new-focus-bgm-toggle-button"
-                      aria-label={focusBgmToggleAriaLabel}
-                      className={`h-9 w-9 rounded-[10px] p-0 ${
-                        isOverlaySurface
-                          ? 'border border-white/10 bg-white/8 text-[#E7D7CF] hover:bg-white/15'
-                          : 'border border-[#E7E5E4] bg-white/50 text-[#C75B3A] hover:bg-white/70 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF10] dark:text-[#E8734E]'
-                      }`}
-                      onClick={() => {
-                        setFocusBgmDialogOpen(true);
-                      }}
-                    >
-                      {focusBgmToggleIcon}
-                    </Button>
-                  ) : null}
+                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                    {showKeepAwakeButton && keepAwakeControl ? (
+                      <FocusKeepAwakeButton control={keepAwakeControl} />
+                    ) : null}
+                    {hasFocusBgmConfigured ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        data-testid="new-focus-bgm-toggle-button"
+                        aria-label={focusBgmToggleAriaLabel}
+                        className={`h-9 w-9 rounded-[10px] p-0 ${
+                          isOverlaySurface
+                            ? 'border border-white/10 bg-white/8 text-[#E7D7CF] hover:bg-white/15'
+                            : 'border border-[#E7E5E4] bg-white/50 text-[#C75B3A] hover:bg-white/70 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF10] dark:text-[#E8734E]'
+                        }`}
+                        onClick={() => {
+                          setFocusBgmDialogOpen(true);
+                        }}
+                      >
+                        {focusBgmToggleIcon}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
               )}
               <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />

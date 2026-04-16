@@ -1407,7 +1407,9 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "enigo",
+ "exomind-android-keep-awake",
  "exomind-android-keepalive",
+ "exomind-android-timeblock-end-alert",
  "exomind-runtime",
  "flate2",
  "futures",
@@ -1434,7 +1436,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "exomind-android-keep-awake"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "exomind-android-keepalive"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "exomind-android-timeblock-end-alert"
 version = "0.1.0"
 dependencies = [
  "serde",

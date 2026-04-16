@@ -1,6 +1,7 @@
 import { ListTodo, NotebookPen, Target } from 'lucide-react';
 import { ChatPage } from '@/components/Chat/ChatPage';
 import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
+import { useFocusKeepAwakeController } from '@/ui/app/components/FocusKeepAwakeController';
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 import { PageHeaderNav } from '@/ui/app/components/PageHeaderNav';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
@@ -49,6 +50,9 @@ export function NowPage() {
   const navigate = useNavigate();
   const [prestartSelectedTaskIds, setPrestartSelectedTaskIds] = useState<string[]>([]);
   const activeTab = resolveEventlogTabFromLocation(location.pathname, location.searchStr ?? '');
+  const focusKeepAwakeControl = useFocusKeepAwakeController(
+    location.pathname.startsWith('/eventlog') && activeTab === 'focus',
+  );
 
   useEffect(() => {
     if (!location.pathname.startsWith('/eventlog')) {
@@ -88,6 +92,7 @@ export function NowPage() {
                 prestartSelectedTaskIds={prestartSelectedTaskIds}
                 onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
                 showRunningLinkedTasks={false}
+                keepAwakeControl={focusKeepAwakeControl}
               />
               <BlockTaskAssociationList
                 prestartSelectedTaskIds={prestartSelectedTaskIds}
