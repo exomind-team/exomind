@@ -25,6 +25,7 @@ pub mod eventlog;
 pub mod eventlog_sqlite;
 pub mod mesh;
 pub mod pairing;
+pub mod plugins;
 pub mod proposal;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
@@ -32,8 +33,8 @@ pub mod reminder;
 pub mod routes;
 pub mod session;
 pub mod signal;
-pub mod task;
 mod sqlite_json_bridge;
+pub mod task;
 pub mod tick;
 pub mod timeblock;
 pub mod timeblock_sqlite;
