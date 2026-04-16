@@ -108,7 +108,7 @@ function normalizeTaskDagIntervalCollapseState(
   state: Partial<TaskDagIntervalCollapseState> | TaskDagIntervalCollapseState | undefined,
 ): TaskDagIntervalCollapseState {
   const seenKeys = new Set<string>();
-  const intervals = Array.isArray(state?.intervals) ? state.intervals : [];
+  const intervals = Array.isArray(state?.intervals) ? (state?.intervals ?? []) : [];
   return {
     intervals: intervals.flatMap((interval) => {
       const startId = typeof interval?.startId === 'string' ? interval.startId.trim() : '';

@@ -307,7 +307,8 @@ function normalizeTaskDagIntervalCollapseState(
   normalizedState: TaskDagIntervalCollapseState
   resolvedIntervals: ResolvedTaskDagIntervalItem[]
 } {
-  const intervals = Array.isArray(state?.intervals) ? state?.intervals : []
+  const rawIntervals = state?.intervals
+  const intervals = Array.isArray(rawIntervals) ? rawIntervals : []
   const seenKeys = new Set<string>()
   const normalizedIntervals: TaskDagIntervalCollapseItem[] = []
   const resolvedIntervals: ResolvedTaskDagIntervalItem[] = []
