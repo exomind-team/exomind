@@ -145,9 +145,15 @@ Copy-Item `
 ### 4. 直接组包并跳过 `rustBuild*`
 
 ```powershell
+$androidSdkRoot = '<android-sdk-root>'
+$javaHome = '<android-studio-jbr>'
 $repoRoot = '<repo-root>'
 $gradleAssembleTask = '<gradle-assemble-task>'
 $gradleRustBuildTask = '<gradle-rust-build-task>'
+
+$env:ANDROID_HOME = $androidSdkRoot
+$env:ANDROID_SDK_ROOT = $androidSdkRoot
+$env:JAVA_HOME = $javaHome
 
 Set-Location (Join-Path $repoRoot 'src-tauri\\gen\\android')
 .\gradlew.bat $gradleAssembleTask -x $gradleRustBuildTask
@@ -156,6 +162,7 @@ Set-Location (Join-Path $repoRoot 'src-tauri\\gen\\android')
 复用规则：
 
 - 这条命令里的 ABI task 名称需要与当前目标 ABI 对齐。
+- 不要假设前一步 `tauri android build` 注入过的环境变量会自动保留到新的 shell；若直接运行 `gradlew` 报 `SDK location not found`，优先检查 `ANDROID_HOME / ANDROID_SDK_ROOT / JAVA_HOME` 是否在当前 shell 里重新设置。
 - 目标不是“让 Gradle 重新替你跑 Rust”，而是复用上一步已经确定正确的 `.so` 与前端资源。
 
 ### 5. 覆盖安装 APK
@@ -212,6 +219,10 @@ driver_session start --host 127.0.0.1 --port <bridge-port>
 
 - 确认当前路由、页面状态、Android-only 控件是否真的出现在运行包里。
 - 确认“设置页看到的版本文案”这类前端展示态，而不是只看 APK 包信息。
+- 若 `webview_dom_snapshot` 或 `webview_find_element` 在 Android 上超时或报 bridge 兼容性错误，优先退回 `webview_execute_js`：
+  - 直接读取 `window.location.href`
+  - 直接读取 `document.body.innerText`
+  - 必要时截取目标关键词附近的上下文片段
 
 ### 2. Android 系统真值
 
@@ -251,7 +262,7 @@ $adb='...\\platform-tools\\adb.exe'
 | 专注页保持亮屏 | 通过 | WebView 中出现 `new-focus-keep-awake-button`；`dumpsys window` 出现 `KEEP_SCREEN_ON` | 已确认进入真实窗口 flags |
 | 后台结束提醒 | 通过 | `scheduleEndAlert` 日志、`dumpsys alarm`、`dumpsys notification` | 通知链路已真实触发 |
 | 后台结束自动回前台 | 部分通过 | `ACTION_TIMEBLOCK_END_ALERT_OPEN_FOCUS` 日志存在，但系统给出 `BAL_BLOCK` | 原生链已执行，最终行为被 OS 拒绝 |
-| 设置页版本展示 | 未闭环 | backend state 已是 `0.4.10`，设置页仍显示 `0.3.6` | 更像前端 fallback 问题，不应继续当成旧 APK 证据 |
+| 设置页版本展示 | 初次验证未闭环，后续已关闭 | 初次验证时 backend state 已是 `0.4.10`，设置页仍显示 `0.3.6`；后续复测已显示 `0.4.10` | 初次问题来自前端 fallback，不应误判成旧 APK |
 
 ## 常见误判
 
@@ -288,9 +299,82 @@ $adb='...\\platform-tools\\adb.exe'
 - 原生链已执行
 - 最终行为被 Android 系统策略拦截
 
+### 误判 5：重新安装同版本 APK 后，只看 `versionName` 就断言没装进新包
+
+当这轮改动没有 bump 版本号时，`versionName` 可能保持不变。
+
+更稳的判断应该至少同时看：
+
+- `adb install -r` 是否成功
+- `dumpsys package com.exomind.app` 中 `lastUpdateTime` 是否刷新
+- 目标前端或原生行为是否真的变化
+
+## 阶段补记：关于页版本 fallback 修复复测（2026-04-16 晚间）
+
+### 本轮目标
+
+- 验证设置页“关于 > 版本”不再错误显示旧的 `0.3.6` fallback。
+- 把这轮实测里新增的构建、验证与收尾经验沉淀成可复用规则。
+
+### 本轮观察结果
+
+- AVD 可直接复用：
+  - `adb devices -l` 仍能看到 `emulator-5554`
+  - `getprop sys.boot_completed=1`
+- `bun run tauri android build --debug --target x86_64` 仍会在 Windows symlink 限制处失败，但在此之前：
+  - 前端 `dist/` 已完成更新
+  - Android Rust `.so` 已完成编译
+- 手工 `gradlew :app:assembleX86_64Debug -x rustBuildX86_64Debug` 第一次在新 shell 中失败，报：
+  - `SDK location not found`
+- 同一命令在补上以下环境变量后恢复成功：
+  - `ANDROID_HOME`
+  - `ANDROID_SDK_ROOT`
+  - `JAVA_HOME`
+- `adb install -r` 覆盖安装成功后，`dumpsys package com.exomind.app` 显示：
+  - `versionName=0.4.10`
+  - `lastUpdateTime` 已刷新
+- Android 上的 Tauri MCP `driver_session status` 可正常连上，但：
+  - `webview_dom_snapshot` 这轮出现脚本超时
+  - `webview_find_element` 这轮出现 bridge 解析错误
+- 更稳的验证路径是直接用 `webview_execute_js`：
+  - 读取 `window.location.href`
+  - 读取 `document.body.innerText`
+  - 截取 `版本` / `构建` 附近上下文
+- 通过这条路径，在真实 AVD 里确认设置页“关于”文案已变为：
+  - `版本 0.4.10`
+  - `构建 dev`
+- 收尾时，先关闭 Tauri MCP session，再执行：
+  - `adb -s emulator-5554 emu kill`
+- AVD 关闭的更稳判据不是只看其中一层，而是同时确认：
+  - `adb devices -l` 已为空
+  - Windows 上已无 `emulator.exe` 进程
+
+### 本轮结论
+
+- 设置页“关于”显示旧版本号的问题已经通过真实 Android AVD 复测关闭。
+- 之前的 `0.3.6` 不是“APK 还是旧包”的证据，而是前端 fallback 过期；修复后，真实 APK 中的设置页文案已与当前版本对齐。
+- 对 Android 上的 Tauri MCP，不要把 `DOM snapshot` 当唯一入口：
+  - `execute_js + innerText/context` 在这轮更稳定，也足以完成设置页类验收。
+- 对“同版本号重装 debug APK”的验证，不要只看 `versionName`：
+  - 更应看 `lastUpdateTime`
+  - 更应看目标行为是否变化
+
+### 可复用操作套路
+
+1. `tauri android build` 与 `gradlew assemble` 视为两条独立命令链。
+   - 换 shell 后，重新显式设置 `ANDROID_HOME / ANDROID_SDK_ROOT / JAVA_HOME`。
+2. 若 `adb install -r` 装的是同版本号 debug 包，安装后立刻回读：
+   - `dumpsys package com.exomind.app`
+   - 重点记录 `lastUpdateTime`
+3. 若 Android 上 `webview_dom_snapshot` 不稳，不要卡住：
+   - 直接切 `webview_execute_js`
+   - 用 `body.innerText` 和关键词上下文做 UI 真值判定
+4. 做 AVD 收尾时，至少同时确认两层：
+   - `adb devices -l` 为空
+   - `Get-Process emulator` 不再返回任何进程
+
 ## 后续跟进
 
-- 修掉 [settings-registry.ts](../../src/ui/app/config/settings/settings-registry.ts) 中 `resolveVersionText()` / `resolveBuildText()` 的旧版本 fallback。
 - 把“同步 `.so` + 覆盖 `assets/tauri.conf.json` + `gradlew -x rustBuild*`”固化成脚本，而不是只留在人工命令里。
 - 若产品仍要求后台结束自动回前台，需要专门研究 Android 14 / `targetSdk=36` 的 BAL 约束，不要继续把问题归到 emulator、bridge 或 APK 脏态。
 
