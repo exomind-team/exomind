@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import packageJson from '../../../../../package.json';
 import {
   Activity,
   Bot,
@@ -591,16 +592,18 @@ function setUseMockDataAndReload(enabled: boolean): void {
   }
 }
 
+const SETTINGS_APP_BASE_VERSION = packageJson.version ?? '0.0.0';
+
 function resolveVersionText(): string {
-  if (typeof import.meta === 'undefined') return '0.3.6';
+  if (typeof import.meta === 'undefined') return SETTINGS_APP_BASE_VERSION;
   const envMap = import.meta.env as Record<string, string | undefined>;
-  return resolveVersionBuildInfo(envMap, '0.3.6').appVersion;
+  return resolveVersionBuildInfo(envMap, SETTINGS_APP_BASE_VERSION).appVersion;
 }
 
 function resolveBuildText(): string {
   if (typeof import.meta === 'undefined') return 'dev';
   const envMap = import.meta.env as Record<string, string | undefined>;
-  return resolveVersionBuildInfo(envMap, '0.3.6').buildHash || 'dev';
+  return resolveVersionBuildInfo(envMap, SETTINGS_APP_BASE_VERSION).buildHash || 'dev';
 }
 
 const VOICE_SHORTCUT_ENABLED_ITEM: SettingsItem = {
