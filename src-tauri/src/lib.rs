@@ -322,6 +322,17 @@ pub fn run() {
                         .build()?;
                 }
             }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            if let Some(main_window) = app.get_webview_window("main") {
+                let title = if cfg!(debug_assertions) {
+                    "ExoMind (dev)".to_string()
+                } else {
+                    format!("ExoMind v{}", env!("CARGO_PKG_VERSION"))
+                };
+                if let Err(error) = main_window.set_title(&title) {
+                    log::warn!("failed to set main window title: {error}");
+                }
+            }
 
             // Register global voice shortcut (toggle, 按一次开始再按一次结束) and prewarm overlay window（预热悬浮窗）.
             let voice_shortcut_state = app.state::<VoiceShortcutState>();

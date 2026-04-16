@@ -268,6 +268,7 @@ function MobileShell({
         <main
           className={cn(
             'absolute inset-x-0 overflow-y-auto',
+            fullscreenRoute && 'scrollbar-none',
             fullscreenRoute
               ? (previewFrame ? 'top-0 bottom-0' : 'top-[env(safe-area-inset-top,0px)] bottom-0')
               : cn(

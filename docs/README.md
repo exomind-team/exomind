@@ -56,6 +56,7 @@
 - [快速上手](development/quickstart.md) -- 开发环境搭建指南
 - [前端设计规范](development/ui-spec.md) -- ExoMind 前端 UI 统一规范，含 token、页面分类、例外边界与评审清单
 - [设备配对流程](development/device-pairing-flow.md) -- node-first 配对、地址解析、Android 模拟器特殊规则
+- [Tauri Android Windows Playbook](development/tauri-android-windows-playbook.md) -- Windows 宿主机下的 AVD / APK / adb / Tauri MCP / 系统层验收经验
 - [ExoMind CLI](development/exomind-cli.md) -- RT client shell（RT 客户端外壳）使用说明，含 connect-first 规则与命令样例
 - [RT curl / Agent 接入 Skill](../skills/exomind-rt-agent-access/SKILL.md) -- raw RT curl/HTTP 联调唯一真源
 - [Git 规范](development/git-spec.md) -- Git 工作流规范（权威版）
@@ -187,5 +188,5 @@
 
 ---
 
-> 最后更新: 2026-04-10
-> 导航版本: v4.3
+> 最后更新: 2026-04-16
+> 导航版本: v4.4

@@ -596,6 +596,7 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
       ([event]) => (event as { type?: string }).type,
     );
     expect(types).not.toContain('block_end');
+    expect(types).not.toContain('block_feedback');
   });
 
   it('preserves sourcePlannedBlockId when finishing a planned block in rt-sqlite mode', async () => {

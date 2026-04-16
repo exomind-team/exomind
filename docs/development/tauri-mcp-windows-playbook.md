@@ -2,6 +2,8 @@
 
 > 持续更新。用于沉淀在 Windows 环境下，使用 Tauri MCP 调试 ExoMind 外心桌面应用的实践经验、坑点与验证套路。
 
+> Windows 宿主机下的 Android AVD / APK / adb / Tauri MCP 调试经验，见 [Tauri Android Windows Playbook](tauri-android-windows-playbook.md)。
+
 > 本文中的实例名、端口、窗口标题、route、SQLite 路径、报告路径、session/anchor id 等，除非明确写成“通用规则”，否则都只表示对应阶段的现场样例，复用时必须替换为当前实例真值。
 
 ## 目的

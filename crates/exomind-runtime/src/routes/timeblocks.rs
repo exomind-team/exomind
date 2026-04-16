@@ -3,6 +3,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use chrono::TimeZone;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -589,18 +590,10 @@ async fn end_block(
         },
     )?;
 
-    // Transition → EventLog linkage: write block_feedback for the completed active block
+    // Transition → EventLog linkage: RT owns the full feedback report generation.
     // Gap block creation does NOT write EventLog (per #759 design)
     if let Some(ref completed) = result.completed {
-        write_timeblock_eventlog(
-            &state,
-            scope_key,
-            "block_feedback",
-            &completed.name,
-            &completed.start_id,
-            &completed.task_ids,
-        )
-        .await;
+        write_timeblock_feedback_eventlog(&state, scope_key, &current, completed).await;
         publish_completed_timeblock_replication_signal(&state, scope_key, completed).await;
     }
     publish_active_timeblock_replication_signal(&state, scope_key, &result.active).await;
@@ -1470,6 +1463,297 @@ async fn write_timeblock_eventlog(
 
     if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
         tracing::warn!(error = %error, "failed to write timeblock eventlog");
+        return;
+    }
+
+    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
+}
+
+fn format_feedback_duration(ms: u64) -> String {
+    let total_seconds = (ms.saturating_add(500)) / 1000;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        return format!("{hours}:{minutes:02}:{seconds:02}");
+    }
+
+    format!("{minutes:02}:{seconds:02}")
+}
+
+fn format_feedback_clock(ts: u64) -> String {
+    chrono::Local
+        .timestamp_millis_opt(ts as i64)
+        .single()
+        .map(|dt| dt.format("%H:%M:%S").to_string())
+        .unwrap_or_else(|| "--:--:--".to_string())
+}
+
+fn resolve_transition_at(
+    transitions: &[BlockTransition],
+    kind: BlockTransitionType,
+) -> Option<u64> {
+    transitions
+        .iter()
+        .rev()
+        .find(|transition| transition.transition_type == kind)
+        .map(|transition| transition.at)
+}
+
+fn build_timeblock_feedback_report(
+    current: &ActiveBlockData,
+    completed: &TimeBlockData,
+    task_titles: &std::collections::HashMap<String, String>,
+) -> String {
+    let submitted_at = completed.resolve_end_time();
+    let action_start_at = current.resolve_start_time();
+    let action_ended_at = current
+        .action_ended_at
+        .or_else(|| resolve_transition_at(&current.transitions, BlockTransitionType::FeedbackStart))
+        .unwrap_or(submitted_at);
+    let feedback_started_at = current
+        .feedback_started_at
+        .or_else(|| resolve_transition_at(&current.transitions, BlockTransitionType::FeedbackStart))
+        .unwrap_or(action_ended_at);
+
+    let paused_duration_ms = current.pause_accumulated_ms.unwrap_or(0);
+    let action_duration_ms = action_ended_at.saturating_sub(action_start_at);
+    let feedback_duration_ms = submitted_at.saturating_sub(feedback_started_at);
+    let total_duration_ms = submitted_at.saturating_sub(action_start_at);
+    let work_duration_ms = action_duration_ms.saturating_sub(paused_duration_ms);
+    let expected_duration_ms = if current.mode == "countdown" {
+        Some(current.target_minutes.unwrap_or(25) * 60 * 1000)
+    } else {
+        None
+    };
+    let expected_end_at =
+        expected_duration_ms.map(|duration| action_start_at.saturating_add(duration));
+
+    let has_expected_duration = expected_duration_ms.is_some();
+    let expected_duration_value = expected_duration_ms.unwrap_or(0);
+    let expected_end_value = expected_end_at.unwrap_or(0);
+    let expected_diff = if !has_expected_duration {
+        "无预期（正计时）".to_string()
+    } else if action_ended_at < expected_end_value {
+        format!(
+            "🚀提前{}完成",
+            format_feedback_duration(expected_end_value - action_ended_at)
+        )
+    } else if action_ended_at > expected_end_value && work_duration_ms < expected_duration_value {
+        format!(
+            "✨时间块已完成，超出预期结束时间{}",
+            format_feedback_duration(action_ended_at - expected_end_value)
+        )
+    } else if work_duration_ms > expected_duration_value {
+        format!(
+            "🕒工作超时{}",
+            format_feedback_duration(work_duration_ms - expected_duration_value)
+        )
+    } else {
+        "与预期一致".to_string()
+    };
+    let focus_rhythm = if paused_duration_ms > 0 {
+        format!("有暂停 {}", format_feedback_duration(paused_duration_ms))
+    } else {
+        "连续专注".to_string()
+    };
+    let feedback_text = completed.note.as_deref().unwrap_or("").trim();
+    let has_feedback = !feedback_text.is_empty();
+    let feedback_status = if has_feedback {
+        "已填写"
+    } else {
+        "未填写"
+    };
+
+    let mut result = String::new();
+    let mut print = |line: &str| {
+        result.push_str(line);
+        result.push('\n');
+    };
+
+    print(&format!("## {}", completed.name));
+    print("");
+    print("### 时刻信息");
+    print("");
+    print(&format!(
+        "- 时间开始于：`{}`",
+        format_feedback_clock(action_start_at)
+    ));
+    print(&format!(
+        "- 预期结束于：`{}`",
+        expected_end_at
+            .map(format_feedback_clock)
+            .unwrap_or_else(|| "∞".to_string())
+    ));
+    print(&format!(
+        "- 时间结束于：`{}`",
+        format_feedback_clock(action_ended_at)
+    ));
+    print(&format!(
+        "- 反馈提交于：`{}`",
+        format_feedback_clock(submitted_at)
+    ));
+    print("");
+
+    print("### 统计信息");
+    print("");
+    print(&format!(
+        "- 总共时长：**`{}`**",
+        format_feedback_duration(total_duration_ms)
+    ));
+    if let Some(expected_duration_ms) = expected_duration_ms {
+        print(&format!(
+            "- 预期时长：**`{}`**",
+            format_feedback_duration(expected_duration_ms)
+        ));
+    } else {
+        print("- 预期时长：**`∞`**");
+    }
+    if work_duration_ms > 0 {
+        print(&format!(
+            "- 实际工作：**`{}`**",
+            format_feedback_duration(work_duration_ms)
+        ));
+    }
+    if paused_duration_ms > 0 {
+        print(&format!(
+            "- 暂停时长：**`{}`**",
+            format_feedback_duration(paused_duration_ms)
+        ));
+    }
+    if feedback_duration_ms > 0 {
+        print(&format!(
+            "- 反馈用时：**`{}`**",
+            format_feedback_duration(feedback_duration_ms)
+        ));
+    }
+    if let Some(expected_duration_ms) = expected_duration_ms {
+        let overtime_ms = work_duration_ms.saturating_sub(expected_duration_ms);
+        if overtime_ms > 0 {
+            print(&format!(
+                "- 超时投入：**`{}`**",
+                format_feedback_duration(overtime_ms)
+            ));
+        }
+    }
+    print("");
+
+    print("### 快速反馈");
+    print("");
+    print(&format!("- 预期差异：**`{expected_diff}`**"));
+    print(&format!("- 专注节奏：**`{focus_rhythm}`**"));
+    print(&format!("- 反馈状态：**`{feedback_status}`**"));
+
+    if has_feedback {
+        print("");
+        print("---");
+        print("");
+        print(feedback_text);
+    }
+
+    if let Some(task_status_outcomes) = completed.task_status_outcomes.as_ref() {
+        if !task_status_outcomes.is_empty() {
+            print("");
+            print("### 任务状态");
+            for (task_id, status) in task_status_outcomes {
+                let title = task_titles
+                    .get(task_id)
+                    .map(String::as_str)
+                    .unwrap_or(task_id);
+                let label = match status.as_str() {
+                    "continue" => "将继续",
+                    "suspended" => "已挂起",
+                    "completed" => "已完成",
+                    "cancelled" => "已取消",
+                    _ => status.as_str(),
+                };
+                print(&format!("- {title}：{label}"));
+            }
+        }
+    }
+
+    result.trim_end().to_string()
+}
+
+async fn write_timeblock_feedback_eventlog(
+    state: &AppState,
+    scope_key: Option<&str>,
+    current: &ActiveBlockData,
+    completed: &TimeBlockData,
+) {
+    let submitted_at = completed.resolve_end_time();
+    let action_start_at = current.resolve_start_time();
+    let action_ended_at = current
+        .action_ended_at
+        .or_else(|| resolve_transition_at(&current.transitions, BlockTransitionType::FeedbackStart))
+        .unwrap_or(submitted_at);
+    let feedback_started_at = current
+        .feedback_started_at
+        .or_else(|| resolve_transition_at(&current.transitions, BlockTransitionType::FeedbackStart))
+        .unwrap_or(action_ended_at);
+    let paused_duration_ms = current.pause_accumulated_ms.unwrap_or(0);
+    let action_duration_ms = action_ended_at.saturating_sub(action_start_at);
+    let feedback_duration_ms = submitted_at.saturating_sub(feedback_started_at);
+    let total_duration_ms = submitted_at.saturating_sub(action_start_at);
+    let work_duration_ms = action_duration_ms.saturating_sub(paused_duration_ms);
+    let expected_duration_ms = if current.mode == "countdown" {
+        Some(current.target_minutes.unwrap_or(25) * 60 * 1000)
+    } else {
+        None
+    };
+    let expected_end_at =
+        expected_duration_ms.map(|duration| action_start_at.saturating_add(duration));
+
+    let task_titles = completed
+        .task_status_outcomes
+        .as_ref()
+        .map(|outcomes| outcomes.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_else(|| completed.task_ids.clone())
+        .into_iter()
+        .map(|task_id| {
+            let title = state
+                .task_store
+                .get_scoped(scope_key, &task_id)
+                .map(|task| task.title)
+                .unwrap_or_else(|| task_id.clone());
+            (task_id, title)
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let content = build_timeblock_feedback_report(current, completed, &task_titles);
+    let event = crate::eventlog::EventRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp: submitted_at as i64,
+        content,
+        tags: vec!["block_feedback".to_string()],
+        refs: vec![],
+        metadata: Some(serde_json::json!({
+            "block_name": completed.name,
+            "start_id": completed.start_id,
+            "task_ids": completed.task_ids,
+            "task_titles": task_titles,
+            "task_status_outcomes": completed.task_status_outcomes,
+            "action_start_at": action_start_at,
+            "action_ended_at": action_ended_at,
+            "feedback_started_at": feedback_started_at,
+            "submitted_at": submitted_at,
+            "action_duration_ms": action_duration_ms,
+            "feedback_duration_ms": feedback_duration_ms,
+            "paused_duration_ms": paused_duration_ms,
+            "work_duration_ms": work_duration_ms,
+            "total_duration_ms": total_duration_ms,
+            "expected_duration_ms": expected_duration_ms,
+            "expected_end_at": expected_end_at,
+            "source": {
+                "app": "exomind-runtime",
+                "trigger": "http:timeblocks/block_feedback",
+                "report_template": "rt-default-v1",
+            }
+        })),
+    };
+
+    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+        tracing::warn!(error = %error, "failed to write timeblock feedback eventlog");
         return;
     }
 
@@ -2418,6 +2702,19 @@ mod tests {
             Arc::new(crate::timeblock::TimeBlockStore::new()),
             eventlog_store.clone(),
         );
+        let task = state.task_store.create(crate::task::CreateTaskInput {
+            title: "写周报".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
         let app = test_router(state);
 
         let start_response = app
@@ -2432,7 +2729,7 @@ mod tests {
                             "name": "Morning focus",
                             "mode": "countdown",
                             "targetMinutes": 25,
-                            "taskIds": ["task-a"],
+                            "taskIds": [task.id],
                         })
                         .to_string(),
                     ))
@@ -2455,6 +2752,8 @@ mod tests {
             .unwrap();
         assert_eq!(stop_response.status(), StatusCode::OK);
 
+        let task_status_outcomes =
+            std::collections::HashMap::from([(task.id.clone(), "completed".to_string())]);
         let end_response = app
             .oneshot(
                 Request::builder()
@@ -2464,9 +2763,7 @@ mod tests {
                     .body(Body::from(
                         serde_json::json!({
                             "feedback": "done",
-                            "taskStatusOutcomes": {
-                                "task-a": "completed"
-                            }
+                            "taskStatusOutcomes": task_status_outcomes,
                         })
                         .to_string(),
                     ))
@@ -2484,6 +2781,25 @@ mod tests {
                 .count(),
             1
         );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.tags == vec!["block_feedback".to_string()])
+                .count(),
+            1
+        );
+        let feedback_event = events
+            .iter()
+            .find(|event| event.tags == vec!["block_feedback".to_string()])
+            .expect("completed block should write block_feedback");
+        assert!(feedback_event.content.contains("## Morning focus"));
+        assert!(feedback_event.content.contains("### 时刻信息"));
+        assert!(feedback_event.content.contains("### 统计信息"));
+        assert!(feedback_event.content.contains("### 快速反馈"));
+        assert!(feedback_event.content.contains("done"));
+        assert!(feedback_event.content.contains("### 任务状态"));
+        assert!(feedback_event.content.contains("写周报：已完成"));
+        assert!(!feedback_event.content.contains("时间块事件:"));
     }
 
     #[tokio::test]
