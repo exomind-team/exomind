@@ -1,319 +1,224 @@
 ---
 name: exomind-rt-agent-access
-description: Teach an AI Agent to connect to ExoMind Runtime via curl, read/write event logs under a user profile, and assist humans with life management. Use when the user mentions ExoMind, event log, RT access, or when you need to interact with the ExoMind system.
+description: Teach an AI Agent to connect to ExoMind Runtime via curl, read/write event logs under a user profile, and assist humans with life management. Use when the user mentions ExoMind, event log, RT access, raw HTTP endpoints, curl, profiles, tasks, or timeblocks in ExoMind.
 ---
 
-# ExoMind Runtime Agent 接入指南
+# ExoMind Runtime Agent / curl 接入指南
 
 > **核心约束**：Agent 接入外心的目标是**辅助人类、引导人类成长**，不是替代人类做决策。
+>
+> **定位**：
+> - 本 skill 是 raw RT curl/HTTP 联调的唯一真源。
+> - 历史上的独立 curl 手册内容已收口到本 skill，不再保留第二份真源。
+> - 具体端点细节按渐进披露拆到 `references/`，主 `SKILL.md` 只保留入口层规则、核心流程与风险边界。
+> - 若任务是维护本 skill，或刚执行完一次 curl 实测需要回写经验，先读 `references/maintenance.md`，不要只盯主文档。
+>
+> **渐进披露规则**：
+> - 不要默认一次性把全部 references 读入上下文。
+> - 先用本文件确定任务类型，再按需加载 1-2 份最相关的 reference。
+> - 如果任务只涉及 `eventlog`，不要顺手加载 `tasks` 或 `timeblocks` 细节。
+>
+> **同步维护约束**：
+> - 若在实际使用 curl 时发现经验与本 skill 内容冲突，不得直接凭印象修改，必须先结合当前 RT live 版本信息、当前工作区代码、GitHub 对应 issue / PR / 文档信息核验该差异是否已证实为“本文过时”。
+> - 一旦证实过时，则在完成本次 curl 使用后，必须持续回写本 skill 的对应章节或 reference，不能只把经验留在对话、issue 评论或临时笔记里。
+> - 进入维护环节时，必须先反思“本次执行过程相对参考章节出现了哪些新变化或差异”，再定位需要维护的 skill 文档，而不是直接修改主 `SKILL.md`。
+> - 每次对本 skill 的主文件或 reference 做增删改，都必须同步更新该文件顶部维护元数据，并在 `references/maintenance.md` 追加维护记录。
 
 ## 版本与时效性
 
-- 最后更新日期：`2026-03-22`
-- 基线提交：`0b771fc` `feat(skill): add ExoMind RT Agent access skill (#666)`
+- 最后更新日期：`2026-04-16`
+- 更新者：`Codex`
+- 更新内容概要：`移除已删除旧手册路径名残留，确认本 skill 继续作为唯一真源，并维持“主 SKILL + references/”结构。`
+- 核验依据：
+  - `GET /version` 等 live 版本信息
+  - 当前工作区代码与相关路由实现
+  - GitHub 对应 issue / PR / 文档信息
+- 基线提交：`a83404ad`
+- 真相源：
+  - `../../crates/exomind-runtime/src/lib.rs`
+  - `../../crates/exomind-runtime/src/routes/eventlog.rs`
+  - `../../crates/exomind-runtime/src/routes/tasks.rs`
+  - `../../crates/exomind-runtime/src/routes/timeblocks.rs`
+  - `../../crates/exomind-runtime/src/routes/profiles.rs`
+  - `../../crates/exomind-runtime/src/routes/signals.rs`
+  - `../../crates/exomind-runtime/src/routes/topology.rs`
 - 当前覆盖范围：
-  - 已覆盖：当前 raw RT 接入方式、eventlog 写入、`profile-<slug>` scope 规则、现阶段零认证现状
-  - 设计前瞻：per-agent token、watch/长轮询、`/act` feature API、bootstrap/discovery
-- 相关追踪：
-  - `#666` identity / profile scope / session / permission scopes
-  - `#676` `/act` feature API 与 bootstrap/discovery
-  - `docs/development/curl-access-exomind-runtime.md`
+  - 已覆盖：当前 raw RT curl/HTTP 接入、eventlog 写入、`profile-<slug>` scope 规则、当前鉴权现状、tasks/timeblocks/eventlog 的排障要点
+  - 不覆盖：`/agents/*` SSE 会话细节、`/act/today-planner/*` 的完整 feature 语义、mesh peer token / grant 的完整运维流程
 
-如果你发现下列任一情况，应优先怀疑本 skill 可能已部分过时，并回看相关 issue / 文档，而不是继续机械照抄：
+## 读取顺序
 
-- RT 已引入 `/act/*` 或 `bootstrap`，但本 skill 仍主要在教 raw 路由
-- token / session / profile discovery 字段与这里描述不一致
-- `eventlog`、`tasks`、`timeblocks` 的写入契约或认证方式发生变化
-- 用户明确说明“最新 API”“刚改过契约”“请按最新实现处理”
+- 运行态：
+  - 先读本文件，确认任务域、风险等级与真相源优先级
+  - 再读 `references/index.md` 或直接按任务域加载 1-2 份 reference
+- 维护态：
+  - 如果任务是整理 skill 本身，或你刚执行过一次 raw RT curl 任务准备回写经验，先读 `references/maintenance.md`
+  - 维护时先做“执行后差异反思”，再决定更新 `SKILL.md` 还是某个具体 reference
 
-判断原则：
+维护记录与维护检查清单统一放在 `references/maintenance.md`，避免主入口重新膨胀。
 
-- 这份 skill 是 Agent-facing 快速上手材料，不是最终真相源
-- 真相源优先级应为：最新代码 / 当前 issue 决策 / 开发文档 / 本 skill
+## 什么时候用这个 skill
 
-## 章节索引
+以下场景直接触发：
 
-1. [最小接入三步](#最小接入三步) — 连接 RT、确认档案、发送消息
-2. [身份规范](#身份规范) — 如何让系统识别你是谁
-3. [行为分级](#行为分级) — 哪些操作可直接执行，哪些需要人类确认
-4. [读取上下文](#读取上下文) — 如何理解事件日志中的消息
-5. [API 速查](#api-速查) — RT 端点列表与稳定性标注
-6. [名称概念辨析](#名称概念辨析) — 不要混淆的四个标识符
-7. [实时性](#实时性) — 轮询与未来的 watch/SSE
-8. [认证现状与方向](#认证现状与方向) — 当前零认证，未来 per-agent token
-9. [环境踩坑](#环境踩坑) — 不同终端环境的差异
+- 用户提到 ExoMind RT、eventlog、profiles、tasks、timeblocks、signals、curl、raw HTTP 端点
+- 需要绕过 UI，直接对 RT 做联调、排障、回读或实测
+- 需要判断某个 RT 行为究竟是代码真相、live 真相，还是旧文档残留
 
----
+以下场景不要把本 skill 当唯一资料：
+
+- `/agents/*` 的 SSE / session 语义
+- `/act/today-planner/*` 的 feature 级业务动作
+- mesh peer token / pairing / grant 的完整运维流程
+
+## 先读哪份 reference
+
+按任务类型只读需要的那份：
+
+| 场景 | 读取文件 |
+|------|----------|
+| 先确认 references 目录地图、关键词和跨域组合方式 | `references/index.md` |
+| 健康检查、版本、拓扑、profiles、signals、PowerShell curl 约定、鉴权边界 | `references/discovery-and-diagnostics.md` |
+| eventlog 读写、watch、备份、导入、清空 | `references/eventlog.md` |
+| tasks 列表、创建、更新、迁移、取消、导入导出 | `references/tasks.md` |
+| timeblocks 活动块、start/stop/end、pause/resume、describe、import/export | `references/timeblocks.md` |
+| 执行后差异反思、维护记录、更新路由 | `references/maintenance.md` |
+
+如果任务跨域：
+
+- `eventlog + tasks`：先读 `eventlog.md`，再读 `tasks.md`
+- `timeblocks + tasks`：先读 `timeblocks.md`，再读 `tasks.md`
+- 只需要确认档案和端口：只读 `discovery-and-diagnostics.md`
+
+## 核心流程
+
+执行 raw RT curl 任务时，默认按这条流程：
+
+1. 先确认目标 RT 可访问：`/health`、`/version`
+2. 确认档案 scope：优先回读 `/profiles`
+3. 识别任务域：`eventlog`、`tasks`、`timeblocks`、`signals`、`topology`
+4. 只加载对应 reference，不要一口气读全套
+5. 如涉及写操作，先套用“行为分级”
+6. 写入后必须回读验证
+7. 如果实测与本文不一致，做 live / 代码 / GitHub 三重核验
+8. 若确认本文过时，回写本 skill 或对应 reference，并补维护记录
+
+## 先记住这几个差异
+
+如果你看过更早的 skill / 手册，先用这组差异校正心智：
+
+1. `GET /health` 现在只返回 `{"status":"ok"}`，版本信息已经拆到 `GET /version`。
+2. 清空事件日志的真端点是 `DELETE /eventlog`，不是 `/eventlog/clear`。
+3. `eventlog` 的档案作用域参数是 `user_id`；`tasks` / `timeblocks` 接受 `profile_id` 或 `user_id`，如果两者同时传入则 `profile_id` 优先。
+4. `GET /eventlog/watch` 默认是 watch from now；只有显式给 `since_id` 或 `since_timestamp` 才会先补 backlog。
+5. 时间块的结束流程不是单步“直接结束”，而是 `start -> stop -> end`。
+6. raw RT 目前仍然是主调试面；feature API 里已经上线的是 `/act/today-planner/*`，但时间块等主要工作流仍以 raw 路由为主。
 
 ## 最小接入三步
 
-用户会给你两个信息：**RT 地址**和**档案名**。
+用户通常会给你两个信息：**RT 地址**和**档案名**。
 
 ### Step 1：确认连接
 
 ```bash
 curl -sS http://<RT地址>:<端口>/health
-# 期望返回 {"status":"ok","version":"..."}
+curl -sS http://<RT地址>:<端口>/version
 ```
-
-**端口不固定**，取决于部署方式：
-
-| 场景 | 默认端口 | 配置方式 |
-|------|---------|---------|
-| Tauri 桌面应用嵌入式 RT | `9124` | `EXOMIND_RT_PORT` 环境变量 |
-| 独立运行的 RT 进程 | `1949` | `EXOMIND_RT_PORT` 环境变量 |
-| 用户自定义 | 任意 | 用户告知或查看设置页实例诊断 |
-
-如果不确定端口，先问用户，或者对常见候选（9124、1949）逐个探测 `/health`。
 
 ### Step 2：确认档案作用域
 
-用户给的是显示名（如 `Argon`），实际 RT 作用域键是 `profile-<slug>`：
-
 ```bash
-curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon"
-# 返回事件数组即成功
+curl -sS "http://<RT地址>:<端口>/profiles"
 ```
 
-**slug 规则**：小写，非字母数字替换为 `-`。
-例如：显示名 `My Profile` → slug `my-profile` → scope key `profile-my-profile`
+用户给的是显示名，例如 `Argon`，真正用于 raw RT 的 scope 通常是 `profile-argon`。
 
-> **红线**：前端页面路由（如 `/profile-argon/...`）**不等于** RT HTTP 资源路由。档案作用域统一通过 `?user_id=profile-argon` 查询参数进入，不要把 profile 路径拼到 RT URL 前缀上。
-
-### Step 3：发送消息
+### Step 3：写入后必须回读
 
 ```bash
 curl -sS -X POST "http://<RT地址>:<端口>/eventlog?user_id=profile-argon" \
   -H 'Content-Type: application/json' \
-  -d '{
-    "id": "<uuid>",
-    "timestamp": <毫秒时间戳>,
-    "content": "消息内容（支持 Markdown）",
-    "tags": ["agent_feedback", "note"],
-    "metadata": {
-      "source": {
-        "app": "<你的工具名>",
-        "platform": "<你的模型/平台>",
-        "deviceName": "<你的身份标识>"
-      }
-    }
-  }'
-```
+  -d '{"timestamp":<毫秒时间戳>,"content":"消息内容","tags":["agent_feedback","note"]}'
 
-> **注意**：`id` 字段当前需要客户端提供 UUID，后续将改为 RT 统一生成。
-> `timestamp` 是毫秒级 Unix 时间戳。
-
-### Step 4：回读验证
-
-写入后必须回读确认事件已落库：
-
-```bash
 curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=1"
-# 确认最新事件的 id、deviceName、content 与你刚写入的一致
 ```
 
-不要假设写入一定成功——网络中断、格式错误、RT 重启都可能导致丢失。
-
----
+不要假设写入一定成功。网络中断、格式错误、RT 重启都可能导致丢失。
 
 ## 身份规范
 
 `metadata.source` 是你在外心中的身份标识：
 
-| 字段 | 含义 | 你应该填什么 |
-|------|------|-------------|
-| `app` | 运行环境 | 如 `"Claude Code"`, `"Codex CLI"`, `"Termux"` |
-| `platform` | 模型/平台 | 如 `"Opus 4.6"`, `"GPT-4o"`, `"o3"` |
-| `deviceName` | 身份名 | **唯一标识你的名字**，会显示在事件流中 |
+| 字段 | 含义 | 建议 |
+|------|------|------|
+| `app` | 运行环境 | 如 `"Claude Code"`、`"Codex CLI"`、`"Termux"` |
+| `platform` | 模型/平台 | 如 `"GPT-5"`、`"o3"` |
+| `deviceName` | 身份名 | 用于区分不同 Agent / 设备 |
 | `deviceId` | 可选设备 ID | 如 `"codex-curl"` |
 
 **辨识度靠 `deviceName`**。选一个能区分你和其他 Agent 的名字。
-
----
 
 ## 行为分级
 
 | 风险等级 | 操作 | 要求 |
 |---------|------|------|
-| **低** | 读取事件日志、任务、时间块 | 直接执行 |
+| **低** | 读取事件日志、任务、时间块、signals、topology | 直接执行 |
 | **低** | 向事件日志写入消息 | 直接执行 |
 | **中** | 创建新任务 | 至少告知人类一轮 |
 | **高** | 完成/取消任务（状态迁移） | **必须主动询问人类确认** |
 | **高** | 启动/结束时间块 | **必须主动询问人类确认** |
 | **高** | 清空事件日志 | **必须主动询问人类确认** |
 
-**确认方式**：在你所在的终端（如 Claude Code 会话）中明确询问用户，得到确认后再执行。RT 不会拦截你的操作，但会记录审计日志。
-
 **核心原则**：你是人类的助手。任何改变人类数据状态的操作，至少要有一轮主动询问。
 
----
+## 读取上下文与信号归属
 
-## 读取上下文
+如果只是理解上下文，默认先看：
 
 ```bash
-# 读取最近事件
 curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=20"
-
-# 查看其他 Agent 的消息（按 deviceName 识别）
-# 已知在线的身份：Windows Device / Android Device / argon / Codex curl / Termux Agent / Claude Planner
-# 通过 metadata.source.deviceName 字段区分
-
-# 支持的查询参数
-#   user_id=<scope_key>    档案作用域（必须）
-#   limit=<数字>           限制返回条数
-#   since_id=<event_id>    只返回该 ID 之后的事件
 ```
 
-### 识别消息来源
+识别消息来源时，优先看结构化字段：
 
-按结构化字段判断，不要靠文本猜：
+- `tags`
+- `metadata.source.deviceName`
+- `metadata.replyToEventId`
 
-| 条件 | 含义 |
-|------|------|
-| `tags` 含 `"agent_feedback"` | Agent 发的消息 |
-| `tags` 含 `"note"` | 人类笔记 |
-| `tags` 含 `"voice"` | 语音输入 |
-| `tags` 含 `"block_start"` / `"block_end"` | 时间块开始/结束 |
-| `tags` 含 `"block_feedback"` | 时间块结束反馈 |
-| `metadata.source.deviceName` | 具体是哪个设备/Agent |
+不要在 `/signals/history` 看到一条消息就假设它属于当前档案。具体归属必须回到 `/eventlog?user_id=...` 复核。
 
-### 回复特定消息
+## 快速外部边界
 
-通过 `metadata.replyToEventId` 建立回复链：
+以下内容不在本 skill 详述：
 
-```json
-{
-  "metadata": {
-    "replyToEventId": "<目标事件的 id>",
-    "source": { ... }
-  }
-}
-```
-
----
-
-## API 速查
-
-| 端点 | 方法 | 说明 | 稳定性 |
-|------|------|------|--------|
-| `/health` | GET | 健康检查 | 稳定 |
-| `/topology` | GET | 本机信息 | 稳定 |
-| `/eventlog` | GET | 事件日志列表 | 稳定 |
-| `/eventlog` | POST | 追加事件 | 稳定（ID 字段即将改为 RT 生成） |
-| `/eventlog/watch` | GET | 事件长轮询；默认只看调用后的新事件 | 稳定 |
-| `/eventlog/:id` | GET | 单条事件 | 稳定 |
-| `/eventlog/clear` | POST | 清空事件 | 稳定（高风险操作） |
-| `/tasks` | GET | 任务列表 | 稳定 |
-| `/tasks/:id` | GET/PUT | 任务详情/更新 | 稳定 |
-| `/tasks/:id/transition` | POST | 任务状态迁移 | 稳定 |
-| `/timeblocks` | GET | 时间块列表 | 稳定 |
-| `/signals/history` | GET | 信号历史 | 稳定 |
-| `/agents` | GET | Agent 列表 | 实验性 |
-| `/energy` | GET | 能量池状态 | 实验性 |
-| `/sessions` | GET | 会话列表 | 实验性 |
-| `/mesh/peers` | GET | 组网对等节点 | 实验性 |
-| `/eventlog/backup/json` | GET | 导出 JSON 备份 | 稳定 |
-| `/eventlog/backup/sqlite` | GET | 导出 SQLite 快照 | 稳定 |
-
-> 标注"实验性"的端点可能在未来版本中变更，使用前请先测试。
-
-### 任务操作注意
-
-- 资料更新用 `PUT /tasks/:id`，状态迁移用 `POST /tasks/:id/transition`，不要混用
-- 任务状态机有约束：`pending → cancelled` 不能直跳，需先到 `in_progress`
-- 依赖字段格式：`"depends_on": [{"task_id": "...", "type": "hard"}]`
-
----
-
-## 名称概念辨析
-
-四个标识符不是同一个东西，不要混用：
-
-| 概念 | 示例 | 说明 |
-|------|------|------|
-| **显示名** (displayName) | `Argon` | UI 展示用，可修改 |
-| **slug** | `argon` | 归一化标识 |
-| **profileId** | `profile-argon` | 存储键 |
-| **RT scope key** (user_id) | `profile-argon` | API 参数，当前等于 profileId |
-
-> 目前 profileId 和 RT scope key 相同，但这是实现巧合，不是契约保证。
-
----
-
-## 信号与事件日志的归属区别
-
-RT 有两个数据源容易混淆：
-
-| 端点 | 作用域 | 说明 |
-|------|--------|------|
-| `/signals/history` | **全局**，无档案隔离 | 看"RT 最近发生了什么"，但不区分属于哪个档案 |
-| `/eventlog?user_id=...` | **档案级**，按 user_id 隔离 | 看"某个档案下的事件"，这才是你的工作目标 |
-
-> **规则**：在 `signals/history` 看到某条消息后，不要假设它属于你正在操作的档案。必须回到 `/eventlog?user_id=profile-xxx` 复核归属。
-
----
-
-## 实时性
-
-当前已支持两种方式：
-
-- 轮询：定期 GET `/eventlog` 检查新消息
-- 长轮询：GET `/eventlog/watch`
-
-`GET /eventlog/watch` 的默认语义是：
-
-- 未提供 `since_id` / `since_timestamp`：从调用时刻开始观察未来新事件，不回放旧 backlog
-- 提供 `since_id` / `since_timestamp`：允许先返回 cursor 之后已存在的 backlog；若没有，再继续等
-
-示例：
-
-```bash
-# 默认 watch from now：只等后续新事件
-curl -sS "http://<RT地址>:<端口>/eventlog/watch?user_id=profile-argon&timeout=30"
-
-# 从某个已知事件之后 catch up
-curl -sS "http://<RT地址>:<端口>/eventlog/watch?user_id=profile-argon&since_id=<event_id>&timeout=30"
-```
-
-未来方向：
-- SSE 端点：通过后台命令订阅实时事件流
-
----
-
-## 认证现状与方向
-
-**当前**：零认证。知道 RT 地址即可读写。适用于局域网场景。
-
-**未来方向**（设计中，见 [#666](https://github.com/exomind-team/exomind/issues/666)）：
-- Per-agent token：RT 为每个 Agent 签发独立 token
-- 类似 GitHub Personal Access Token 的模式
-- 结合档案密码签发
-- Agent 在 Header 中携带 token：`Authorization: Bearer <token>`
-
----
+- `/agents/*`：看 [`../../docs/development/exomind-runtime-agents-api.md`](../../docs/development/exomind-runtime-agents-api.md)
+- `/act/today-planner/*`：看 [`../../docs/development/today-planner-api.md`](../../docs/development/today-planner-api.md)
+- RT 对外能力长期契约：看 [`../../docs/development/runtime-external-access-contract.md`](../../docs/development/runtime-external-access-contract.md)
+- CLI 用法：看 [`../../docs/development/exomind-cli.md`](../../docs/development/exomind-cli.md)
 
 ## 环境踩坑
 
-| 环境 | 问题 | 解法 |
-|------|------|------|
-| Termux (Android) | `ip route` 权限受限 | 用 `ifconfig` 获取 IP |
-| Termux | 不确定 RT 端口 | 固定从 9124 探测 |
-| PowerShell | JSON 引号转义出错 | 写临时文件 + `curl.exe --data-binary @file` |
-| PowerShell | `curl` 是 `Invoke-WebRequest` 别名 | 明确用 `curl.exe` |
-| Cygwin/Git Bash | `!` 被 shell 展开 | 用单引号包裹 |
-| Cygwin/Git Bash | `curl ... \| python -c ...` 管道断流 | 先 `curl -o /tmp/resp.json` 再读文件 |
-| Termux | `/tmp` 可能不可写或路径不一致 | 用当前工作目录或 `$TMPDIR` 代替 `/tmp` |
-| 所有环境 | `id` 必须是 UUID，`timestamp` 必须是毫秒 | 用语言内置 UUID + 时间戳函数 |
-| 所有环境 | 长 JSON body 在 bash 中转义极其痛苦 | **推荐写临时 JSON 文件再 `curl --data-binary @file.json`**，避免内联 `-d` |
-| 所有环境 | RT 字段名用 `snake_case`（如 `depends_on`），前端可能用 `camelCase` | **以 RT 返回为准**，不要猜 |
+主入口层只保留最常踩的几条：
 
----
+- PowerShell 下优先用 `curl.exe`，不要依赖 `curl` 别名
+- 长 JSON body 优先写临时文件，再 `--data-binary @file.json`
+- `eventlog / tasks` 多数 body 用 `snake_case`，多个 `timeblocks` body 用 `camelCase`
+- 涉及具体端点字段时，不要猜；去读对应 reference
+
+更完整的环境与命令细节，读 `references/discovery-and-diagnostics.md`。
+
+## 维护提醒
+
+- 更新或使用本 skill 时，除了核对 RT 行为本身，还要核对 references 分流是否仍然合理。
+- 详细维护闭环、差异反思问题单、文件路由表与维护记录，见 `references/maintenance.md`。
 
 ## 参考
 
-- [#666](https://github.com/exomind-team/exomind/issues/666) — RT 外部接入的身份/作用域/会话/权限契约
-- [#667](https://github.com/exomind-team/exomind/issues/667) — 档案列表接口（#666 子 issue）
-- `docs/development/curl-access-exomind-runtime.md` — 完整经验记录（含设计讨论）
-- `docs/development/exomind-runtime-agents-api.md` — RT Agent API 说明
-- `src/lib/profile/profile-storage.ts` — 档案 slug 规则
-- `crates/exomind-runtime/src/routes/` — RT 路由源码
+- [`references/index.md`](references/index.md)
+- [`references/maintenance.md`](references/maintenance.md)
+- [`references/discovery-and-diagnostics.md`](references/discovery-and-diagnostics.md)
+- [`references/eventlog.md`](references/eventlog.md)
+- [`references/tasks.md`](references/tasks.md)
+- [`references/timeblocks.md`](references/timeblocks.md)
+- [#666](https://github.com/exomind-team/exomind/issues/666)
+- [#667](https://github.com/exomind-team/exomind/issues/667)

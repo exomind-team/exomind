@@ -278,6 +278,8 @@ curl.exe -sS http://192.168.1.204:9124/health
 
 无论你走主路径还是兼容路径，本质上最终仍然是访问某个 RT 的 HTTP API。
 
+原始 RT curl / HTTP 联调内容请直接看 [`../../skills/exomind-rt-agent-access/SKILL.md`](../../skills/exomind-rt-agent-access/SKILL.md)。本节只保留入口级说明，不再重复维护完整端点契约。
+
 ### 快速健康检查
 
 ```powershell

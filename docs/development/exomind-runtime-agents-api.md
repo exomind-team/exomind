@@ -3,6 +3,8 @@
 > 适用范围（Scope，范围）: `crates/exomind-runtime`
 >  
 > 目标（Goal，目标）: 基于当前代码，给出可直接联调的接口说明。
+>
+> 边界：非 `/agents/*` 的 raw RT 端点，请看 [`../../skills/exomind-rt-agent-access/SKILL.md`](../../skills/exomind-rt-agent-access/SKILL.md)。
 
 ---
 
@@ -330,4 +332,3 @@ curl -sS -X POST "http://127.0.0.1:9124/eventlog?user_id=profile-argon" \
 - 需要历史上下文时，先调 `GET /eventlog`
 - 需要“从现在开始等变化”时，直接调 `GET /eventlog/watch`
 - 需要“从某个已知位置补齐并继续等”时，给 `watch` 传 `since_id` 或 `since_timestamp`
-
