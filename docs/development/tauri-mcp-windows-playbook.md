@@ -12,6 +12,85 @@
 - 记录“当前 app 实际状态”和“持久化配置状态”不一致时的判定方法。
 - 记录哪些目标可以直接依赖 Tauri MCP，哪些场景需要退回到 RT HTTP、日志、SQLite 与本地文件。
 
+### 阶段补记：桌面标题 / 设置版本真窗验收（2026-04-16）
+
+#### 本轮阶段目标
+
+- 在真实 Tauri 桌面窗口里确认两件事，而不是停留在代码阅读：
+  - 主窗口标题当前到底显示什么，以及它的真实覆盖链路来自哪里
+  - 设置页 `关于 > 版本` 是否已经摆脱前端旧 fallback，显示当前包版本
+
+#### 本轮现场真值
+
+- 受 `tauri:manager` 管理的实例：
+  - `desktop-tmcp-0416`
+  - Web `1480`
+  - RT `9124`
+  - MCP bridge `9283`
+- 官方 MCP 在这一轮可直接使用：
+  - `driver_session start --host 127.0.0.1 --port 9283`
+  - `driver_session status = connected:true`
+- `9124` 与 `9283` 由同一个 `exomind.exe` 持有，主窗口 URL 为：
+  - `http://localhost:1480/settings`
+
+#### 本轮观察结果
+
+- 这轮第一次拉起受管实例时，`tauri:manager list` 长时间只显示：
+  - `starting`
+  - active listeners 只有 `web=1480, hmr=1481`
+- 问题不在 MCP bridge，也不在 RT，而在构建环境：
+  - 实例日志里直接出现：
+    - `failed to write ...Temp\\rustc...\\lib.rmeta: 磁盘空间不足 (os error 112)`
+- 后续 manager session 再次尝试后，同一实例才真正进入可接管状态。
+- 真实主窗口标题并不是 `src-tauri/src/lib.rs` 里设置的：
+  - `ExoMind (dev)`
+- 真窗里读到的原生窗口标题与 `document.title` 都是：
+  - `ExoMind [dev] [Web:1480 RT:9124]`
+- 这条标题并非 Rust 侧最终真值，而是前端开发态标题同步覆盖：
+  - `src/ui/app/components/DevInstanceTitleSync.tsx`
+  - `src/config/dev-instance-diagnostics.ts`
+- 设置页真窗验收到的 `关于` 区内容：
+  - `版本 0.4.10`
+  - `构建 dev`
+- `package.json.version` 当前真值也是：
+  - `0.4.10`
+- 因而设置页“关于 > 版本”已不再停留在旧前端 fallback `0.3.6`。
+
+#### 本轮结论
+
+- 对“受管实例一直 `starting`、只有 `web/hmr` 活着”的现场，不要先怀疑 bridge：
+  - 先看实例日志里有没有 `rustc` 向 `%LOCALAPPDATA%\\Temp` 写中间文件失败
+  - 即使 Cargo target 已经放到别的盘，`rustc` 临时文件仍可能打爆系统盘
+- 对“标题栏版本号是否生效”的判断，不能只看 `src-tauri/src/lib.rs`：
+  - 开发态下还要同时检查 `DevInstanceTitleSync`
+  - 否则会把 Rust 默认标题和真窗最终标题混为一谈
+- 对设置页版本文案的验收，本轮真窗结果表明：
+  - 当前显示已经与 `package.json.version` 对齐
+  - 旧的 `0.3.6` 前端 fallback 已被清掉
+
+#### 可复用操作套路
+
+1. 先用 `bun run tauri:manager -- start --name <name> --web-port <port> --hmr-port <port>` 拉起受管实例。
+2. 如果 `list` 长时间只有 `web/hmr`，不要立刻判 bridge 挂掉：
+   - 先读 `.tmp/tauri-dev-instances/<name>.log`
+   - 搜 `os error 112`、`failed to write ...Temp\\rustc...`
+3. 若日志命中系统盘临时目录写满：
+   - 优先清理 `%LOCALAPPDATA%\\Temp` 下明显过期的大目录
+   - 再重启该受管实例
+4. 实例跑起来后固定执行：
+   - `driver_session start --host 127.0.0.1 --port <bridge-port>`
+   - `manage_window list`
+   - `webview_execute_js(() => ({ href: location.href, title: document.title }))`
+5. 验收桌面标题时：
+   - 同时记录原生窗口标题和 `document.title`
+   - 若在 dev 环境里看到 `ExoMind [<branch>] [Web:<port> RT:<port>]`，优先回看：
+     - `src/ui/app/components/DevInstanceTitleSync.tsx`
+     - `src/config/dev-instance-diagnostics.ts`
+6. 验收设置页版本时：
+   - 直接导航 `/settings`
+   - 在桌面关于区 `new-settings-desktop-vc-section-about` 内读取可见文本
+   - 当前 `about-version` 行没有单独 `rowTestId`，用可见文本 `版本` + 右侧值做断言更稳
+
 ### 阶段补记：事件引用 / 事件唯一链接真窗验收（2026-04-13）
 
 #### 本轮阶段目标
