@@ -221,12 +221,11 @@ pub async fn require_auth(
         //    Peers can relay events and stream signals, but cannot manage peers
         //    or initiate pairing (those are admin/control-plane operations).
         Some(ref token) => {
-            if peer_path_access == PeerPathAccess::Denied {
-                return Err(StatusCode::FORBIDDEN);
-            }
-
             match state.mesh.peer_id_by_inbound_secret(token) {
                 Ok(Some(peer_id)) => {
+                    if peer_path_access == PeerPathAccess::Denied {
+                        return Err(StatusCode::FORBIDDEN);
+                    }
                     request
                         .extensions_mut()
                         .insert(AuthenticatedPeerIdentity { peer_id });
