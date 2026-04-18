@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { SignalStreamService } from '@/lib/services/signal-stream.service';
+import { toProposal } from '@/lib/adapters/proposal-rt-payload';
 import {
   startSignalHandlers,
   type EventLogAppendedPayload,
@@ -259,19 +260,28 @@ export function useSignalStream(): void {
       onProposalCreated: async (payload) => {
         emitProposalLifecycle({
           topic: 'proposal.created',
-          payload,
+          payload: {
+            ...payload,
+            proposal: toProposal(payload.proposal),
+          },
         });
       },
       onProposalStatusChanged: async (payload) => {
         emitProposalLifecycle({
           topic: 'proposal.status_changed',
-          payload,
+          payload: {
+            ...payload,
+            proposal: toProposal(payload.proposal),
+          },
         });
       },
       onProposalExecutionFailed: async (payload) => {
         emitProposalLifecycle({
           topic: 'proposal.execution_failed',
-          payload,
+          payload: {
+            ...payload,
+            proposal: toProposal(payload.proposal),
+          },
         });
       },
       onEventLogAppended: async (payload: EventLogAppendedPayload) => {

@@ -190,7 +190,7 @@ describe('ProposalNotificationCoordinator', () => {
     });
 
     expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
-      title: '批准后执行失败',
+      title: '批准后执行失败，需要人工处理',
       variant: 'destructive',
     }));
   });

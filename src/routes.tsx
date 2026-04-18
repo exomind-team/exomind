@@ -456,6 +456,9 @@ function DesktopSidebar({
             >
               <Icon size={16} />
               {collapsed ? <span className="sr-only">{item.title}</span> : <span>{item.title}</span>}
+              {item.key === 'tasks' ? (
+                <ProposalNotificationBadge placement={collapsed ? 'desktop-compact' : 'desktop'} />
+              ) : null}
             </Link>
           );
         })}

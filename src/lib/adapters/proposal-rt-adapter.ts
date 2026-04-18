@@ -8,48 +8,19 @@ import type {
   CreateProposalInput,
   Proposal,
   ProposalActionType,
-  ProposalComment,
   ProposalPublisher,
-  ProposalReference,
   ProposalStatus,
   UpdateProposalInput,
 } from '@/lib/types/proposal';
+import {
+  toProposal,
+  type RuntimeProposalPayload,
+  type RuntimeProposalPublisherPayload,
+  type RuntimeProposalReferencePayload,
+} from './proposal-rt-payload';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
-
-interface RuntimeProposalReferencePayload {
-  ref_type: ProposalReference['refType'];
-  id: string;
-  display_text: string;
-}
-
-interface RuntimeProposalPublisherPayload {
-  publisher_type: ProposalPublisher['publisherType'];
-  id: string;
-  name: string;
-}
-
-interface RuntimeProposalCommentPayload {
-  author: RuntimeProposalPublisherPayload;
-  content: string;
-  created_at: string;
-}
-
-interface RuntimeProposalPayload {
-  id: string;
-  title: string;
-  body?: string | null;
-  action_type: ProposalActionType;
-  action_params?: Record<string, unknown> | null;
-  references?: RuntimeProposalReferencePayload[] | null;
-  status: ProposalStatus;
-  publisher: RuntimeProposalPublisherPayload;
-  comments?: RuntimeProposalCommentPayload[] | null;
-  created_at: string;
-  updated_at: string;
-  snooze_until?: string | null;
-}
 
 const PROPOSAL_API_BASE_PATH = '/api/proposals';
 const DEFAULT_PROPOSAL_RT_TIMEOUT_MS = 3_500;
@@ -77,53 +48,8 @@ export class ProposalRtError extends Error {
   }
 }
 
-function toProposalReference(
-  payload: RuntimeProposalReferencePayload,
-): ProposalReference {
-  return {
-    refType: payload.ref_type,
-    id: payload.id,
-    displayText: payload.display_text,
-  };
-}
-
-function toProposalPublisher(
-  payload: RuntimeProposalPublisherPayload,
-): ProposalPublisher {
-  return {
-    publisherType: payload.publisher_type,
-    id: payload.id,
-    name: payload.name,
-  };
-}
-
-function toProposalComment(payload: RuntimeProposalCommentPayload): ProposalComment {
-  return {
-    author: toProposalPublisher(payload.author),
-    content: payload.content,
-    createdAt: payload.created_at,
-  };
-}
-
-function toProposal(payload: RuntimeProposalPayload): Proposal {
-  return {
-    id: payload.id,
-    title: payload.title,
-    body: payload.body ?? '',
-    actionType: payload.action_type,
-    actionParams: payload.action_params ?? {},
-    references: (payload.references ?? []).map(toProposalReference),
-    status: payload.status,
-    publisher: toProposalPublisher(payload.publisher),
-    comments: (payload.comments ?? []).map(toProposalComment),
-    createdAt: payload.created_at,
-    updatedAt: payload.updated_at,
-    ...(payload.snooze_until ? { snoozeUntil: payload.snooze_until } : {}),
-  };
-}
-
 function toRuntimeReference(
-  reference: ProposalReference,
+  reference: Proposal['references'][number],
 ): RuntimeProposalReferencePayload {
   return {
     ref_type: reference.refType,

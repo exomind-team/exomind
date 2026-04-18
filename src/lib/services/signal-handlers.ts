@@ -10,9 +10,10 @@
  */
 
 import type { SignalEvent } from '../types/signal-pool';
+import type { RuntimeProposalPayload } from '../adapters/proposal-rt-payload';
 import type { Event as StorageEvent } from '../storage/event-storage';
 import type { EventData, TimeBlockData } from '../types/event';
-import type { Proposal, ProposalStatus } from '../types/proposal';
+import type { ProposalStatus } from '../types/proposal';
 import type { Reminder } from '../types/reminder';
 import type { TaskNode } from '../types/task';
 
@@ -76,7 +77,7 @@ export interface ProposalReplicationUpsertedPayload {
     updatedAt: string;
     originHostId?: string;
   };
-  proposal: Proposal;
+  proposal: RuntimeProposalPayload;
 }
 
 type ProposalLifecycleCursorKind =
@@ -95,7 +96,7 @@ interface ProposalLifecycleBasePayload<K extends ProposalLifecycleCursorKind> {
   schemaVersion: 1;
   scopeKey?: string;
   cursor: ProposalLifecycleCursor<K>;
-  proposal: Proposal;
+  proposal: RuntimeProposalPayload;
 }
 
 /** Payload shape for proposal.created signals. */

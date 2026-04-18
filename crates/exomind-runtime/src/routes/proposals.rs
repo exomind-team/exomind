@@ -172,8 +172,7 @@ async fn update_proposal(
             .map_err(map_store_error)?;
     }
 
-    let status_changed = (before.status != proposal.status)
-        .then_some((before.status, proposal.status, proposal.clone()));
+    let status_changed = (before.status != proposal.status).then_some((before.status, proposal.status));
     let mut execution_failure_message: Option<String> = None;
 
     if before.status != ProposalStatus::Approved && proposal.status == ProposalStatus::Approved {
@@ -194,30 +193,19 @@ async fn update_proposal(
                 content: format!("批准后执行失败：{failure_message}"),
                 created_at: Utc::now(),
             };
-            match state
+            proposal = state
                 .proposal_store
                 .add_comment_scoped(scope_key, &id, comment)
-            {
-                Ok(updated) => {
-                    proposal = updated;
-                    execution_failure_message = Some(failure_message);
-                }
-                Err(store_error) => {
-                    tracing::error!(
-                        proposal_id = %proposal.id,
-                        error = %store_error,
-                        "proposal execution failed comment could not be persisted"
-                    );
-                }
-            }
+                .map_err(map_store_error)?;
+            execution_failure_message = Some(failure_message);
         }
     }
 
-    if let Some((from_status, to_status, status_changed_snapshot)) = status_changed {
+    if let Some((from_status, to_status)) = status_changed {
         publish_proposal_status_changed_signal(
             &state,
             scope_key,
-            &status_changed_snapshot,
+            &proposal,
             from_status,
             to_status,
         );
@@ -924,6 +912,13 @@ mod tests {
         assert_eq!(
             signals[0].payload["transition"]["toStatus"],
             serde_json::json!("approved")
+        );
+        assert_eq!(
+            signals[0].payload["proposal"]["comments"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
         );
         assert_eq!(signals[1].payload["proposal"]["status"], serde_json::json!("approved"));
         assert_eq!(

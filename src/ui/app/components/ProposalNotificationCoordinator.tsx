@@ -45,7 +45,7 @@ function emitProposalToast(event: ProposalLifecycleEvent): void {
 
     case 'proposal.execution_failed':
       toast({
-        title: '批准后执行失败',
+        title: '批准后执行失败，需要人工处理',
         description: `${event.payload.proposal.title} · ${event.payload.execution.failureMessage}`,
         variant: 'destructive',
       });

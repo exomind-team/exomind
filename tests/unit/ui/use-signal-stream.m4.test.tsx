@@ -720,18 +720,18 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
         id: 'proposal-created-1',
         title: 'Created proposal',
         body: 'needs review',
-        actionType: 'create_task',
-        actionParams: { title: 'Created task' },
+        action_type: 'create_task',
+        action_params: { title: 'Created task' },
         references: [],
         status: 'pending',
         publisher: {
-          publisherType: 'agent',
+          publisher_type: 'agent',
           id: 'agent-a',
           name: 'Agent A',
         },
         comments: [],
-        createdAt: '2026-04-19T09:00:00.000Z',
-        updatedAt: '2026-04-19T10:00:00.000Z',
+        created_at: '2026-04-19T09:00:00.000Z',
+        updated_at: '2026-04-19T10:00:00.000Z',
       },
     });
     await signalHandlerOptions[0].onProposalStatusChanged?.({
@@ -747,18 +747,18 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
         id: 'proposal-created-1',
         title: 'Created proposal',
         body: 'needs review',
-        actionType: 'create_task',
-        actionParams: { title: 'Created task' },
+        action_type: 'create_task',
+        action_params: { title: 'Created task' },
         references: [],
         status: 'approved',
         publisher: {
-          publisherType: 'agent',
+          publisher_type: 'agent',
           id: 'agent-a',
           name: 'Agent A',
         },
         comments: [],
-        createdAt: '2026-04-19T09:00:00.000Z',
-        updatedAt: '2026-04-19T10:02:00.000Z',
+        created_at: '2026-04-19T09:00:00.000Z',
+        updated_at: '2026-04-19T10:02:00.000Z',
       },
       transition: {
         fromStatus: 'pending',
@@ -778,26 +778,26 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
         id: 'proposal-created-1',
         title: 'Created proposal',
         body: 'needs review',
-        actionType: 'create_task',
-        actionParams: { title: 'Created task' },
+        action_type: 'create_task',
+        action_params: { title: 'Created task' },
         references: [],
         status: 'approved',
         publisher: {
-          publisherType: 'agent',
+          publisher_type: 'agent',
           id: 'agent-a',
           name: 'Agent A',
         },
         comments: [{
           author: {
-            publisherType: 'agent',
+            publisher_type: 'agent',
             id: 'runtime-executor',
             name: 'Runtime Executor',
           },
           content: '批准后执行失败：not implemented',
-          createdAt: '2026-04-19T10:03:00.000Z',
+          created_at: '2026-04-19T10:03:00.000Z',
         }],
-        createdAt: '2026-04-19T09:00:00.000Z',
-        updatedAt: '2026-04-19T10:03:00.000Z',
+        created_at: '2026-04-19T09:00:00.000Z',
+        updated_at: '2026-04-19T10:03:00.000Z',
       },
       execution: {
         failureMessage: 'not implemented',
@@ -807,12 +807,31 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     expect(emitProposalLifecycleMock).toHaveBeenCalledTimes(3);
     expect(emitProposalLifecycleMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
       topic: 'proposal.created',
+      payload: expect.objectContaining({
+        proposal: expect.objectContaining({
+          actionType: 'create_task',
+          createdAt: '2026-04-19T09:00:00.000Z',
+        }),
+      }),
     }));
     expect(emitProposalLifecycleMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
       topic: 'proposal.status_changed',
+      payload: expect.objectContaining({
+        proposal: expect.objectContaining({
+          actionType: 'create_task',
+          status: 'approved',
+        }),
+      }),
     }));
     expect(emitProposalLifecycleMock).toHaveBeenNthCalledWith(3, expect.objectContaining({
       topic: 'proposal.execution_failed',
+      payload: expect.objectContaining({
+        proposal: expect.objectContaining({
+          comments: [expect.objectContaining({
+            createdAt: '2026-04-19T10:03:00.000Z',
+          })],
+        }),
+      }),
     }));
   });
 

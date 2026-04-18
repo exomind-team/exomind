@@ -1,6 +1,6 @@
 # 2026-04-18 Proposal 生命周期事件与实时通知计划
 
-> 状态：待实现
+> 状态：已实现（2026-04-19，`401c4e2a`；后续回归修正进行中）
 >
 > 用途：把当前围绕 proposal 实时同步、生命周期事件、角标刷新与应用内提醒的已定决策沉淀为一份可直接实现的本地计划文档。
 >
@@ -161,7 +161,7 @@ proposal 本轮明确拆成两类信号：
   - 订阅 `subscribeProposalDataChanges()`，收到事件立即刷新
 
 - `ProposalNotificationCoordinator`（新）
-  - 挂在 `App.tsx`
+  - 挂在根路由壳层（当前为 `src/routes.tsx`，因为需要 router context）
   - 订阅 `subscribeProposalLifecycle()`
   - 统一决定是否 toast、toast 文案和抑制策略
 
@@ -280,7 +280,7 @@ proposal 接入实时流后：
    - 只负责事件派发，不做 UI 决策
 
 3. `ProposalNotificationCoordinator`
-   - 挂在 `App.tsx`
+   - 挂在根路由壳层（当前为 `src/routes.tsx`，因为需要 router context）
    - 使用当前路由判断是否抑制普通 toast
    - 统一处理 toast 文案与失败提示
 
