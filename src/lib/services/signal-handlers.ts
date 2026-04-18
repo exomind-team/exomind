@@ -12,6 +12,7 @@
 import type { SignalEvent } from '../types/signal-pool';
 import type { Event as StorageEvent } from '../storage/event-storage';
 import type { EventData, TimeBlockData } from '../types/event';
+import type { Proposal, ProposalStatus } from '../types/proposal';
 import type { Reminder } from '../types/reminder';
 import type { TaskNode } from '../types/task';
 
@@ -63,6 +64,59 @@ export interface ReminderReplicationUpsertedPayload {
     originHostId?: string;
   };
   reminder: Reminder;
+}
+
+/** Payload shape for proposal.replication.upserted signals. */
+export interface ProposalReplicationUpsertedPayload {
+  schemaVersion: 1;
+  scopeKey?: string;
+  cursor: {
+    kind: 'proposal_snapshot';
+    proposalId: string;
+    updatedAt: string;
+    originHostId?: string;
+  };
+  proposal: Proposal;
+}
+
+type ProposalLifecycleCursorKind =
+  | 'proposal_created'
+  | 'proposal_status_changed'
+  | 'proposal_execution_failed';
+
+interface ProposalLifecycleCursor<K extends ProposalLifecycleCursorKind> {
+  kind: K;
+  proposalId: string;
+  updatedAt: string;
+  originHostId?: string;
+}
+
+interface ProposalLifecycleBasePayload<K extends ProposalLifecycleCursorKind> {
+  schemaVersion: 1;
+  scopeKey?: string;
+  cursor: ProposalLifecycleCursor<K>;
+  proposal: Proposal;
+}
+
+/** Payload shape for proposal.created signals. */
+export interface ProposalCreatedPayload
+  extends ProposalLifecycleBasePayload<'proposal_created'> {}
+
+/** Payload shape for proposal.status_changed signals. */
+export interface ProposalStatusChangedPayload
+  extends ProposalLifecycleBasePayload<'proposal_status_changed'> {
+  transition: {
+    fromStatus: ProposalStatus;
+    toStatus: ProposalStatus;
+  };
+}
+
+/** Payload shape for proposal.execution_failed signals. */
+export interface ProposalExecutionFailedPayload
+  extends ProposalLifecycleBasePayload<'proposal_execution_failed'> {
+  execution: {
+    failureMessage: string;
+  };
 }
 
 /** Payload shape for eventlog.appended signals. */
@@ -151,6 +205,10 @@ export interface SignalHandlerOptions {
   onTaskCancelled?: (payload: TaskCancelledPayload) => Promise<void>;
   onTaskReplicationUpserted?: (payload: TaskReplicationUpsertedPayload) => Promise<void>;
   onReminderReplicationUpserted?: (payload: ReminderReplicationUpsertedPayload) => Promise<void>;
+  onProposalReplicationUpserted?: (payload: ProposalReplicationUpsertedPayload) => Promise<void>;
+  onProposalCreated?: (payload: ProposalCreatedPayload) => Promise<void>;
+  onProposalStatusChanged?: (payload: ProposalStatusChangedPayload) => Promise<void>;
+  onProposalExecutionFailed?: (payload: ProposalExecutionFailedPayload) => Promise<void>;
   onEventLogAppended?: (payload: EventLogAppendedPayload) => Promise<void>;
   onEventLogReplicationAppended?: (payload: EventLogReplicationAppendedPayload) => Promise<void>;
   onActiveBlockReplicationSnapshot?: (payload: ActiveBlockReplicationSnapshotPayload) => Promise<void>;
@@ -220,6 +278,30 @@ export function startSignalHandlers(
       case 'reminder.replication.upserted':
         if (options.onReminderReplicationUpserted) {
           await options.onReminderReplicationUpserted(event.payload as ReminderReplicationUpsertedPayload);
+        }
+        break;
+
+      case 'proposal.replication.upserted':
+        if (options.onProposalReplicationUpserted) {
+          await options.onProposalReplicationUpserted(event.payload as ProposalReplicationUpsertedPayload);
+        }
+        break;
+
+      case 'proposal.created':
+        if (options.onProposalCreated) {
+          await options.onProposalCreated(event.payload as ProposalCreatedPayload);
+        }
+        break;
+
+      case 'proposal.status_changed':
+        if (options.onProposalStatusChanged) {
+          await options.onProposalStatusChanged(event.payload as ProposalStatusChangedPayload);
+        }
+        break;
+
+      case 'proposal.execution_failed':
+        if (options.onProposalExecutionFailed) {
+          await options.onProposalExecutionFailed(event.payload as ProposalExecutionFailedPayload);
         }
         break;
 

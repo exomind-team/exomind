@@ -44,6 +44,8 @@ import { getEventLogService, notifyEventLogChanged } from '@/lib/services/eventl
 import { notifyReminderDataChanged } from '@/lib/services/reminder.service';
 import { notifyTaskDataChanged } from '@/lib/services/task.service';
 import { notifyTimeBlockDataChanged } from '@/lib/services/timeblock.service';
+import { notifyProposalDataChanged } from '@/lib/services/proposal-data-change.service';
+import { emitProposalLifecycle } from '@/lib/services/proposal-lifecycle.service';
 import { log } from '@/lib/logger';
 
 const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
@@ -250,6 +252,27 @@ export function useSignalStream(): void {
         if (result !== 'ignored') {
           notifyReminderDataChanged();
         }
+      },
+      onProposalReplicationUpserted: async () => {
+        notifyProposalDataChanged();
+      },
+      onProposalCreated: async (payload) => {
+        emitProposalLifecycle({
+          topic: 'proposal.created',
+          payload,
+        });
+      },
+      onProposalStatusChanged: async (payload) => {
+        emitProposalLifecycle({
+          topic: 'proposal.status_changed',
+          payload,
+        });
+      },
+      onProposalExecutionFailed: async (payload) => {
+        emitProposalLifecycle({
+          topic: 'proposal.execution_failed',
+          payload,
+        });
       },
       onEventLogAppended: async (payload: EventLogAppendedPayload) => {
         const isExternalInput = payload.inputMode === 'external';

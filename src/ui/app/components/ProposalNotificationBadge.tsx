@@ -7,6 +7,7 @@ import {
 } from '@/config/runtime-target';
 import { getProposalInboxEnabled, subscribeProposalInboxEnabledChanges } from '@/config/proposal-inbox-enabled';
 import { getProposalRtAdapter } from '@/lib/adapters/proposal-rt-adapter';
+import { subscribeProposalDataChanges } from '@/lib/services/proposal-data-change.service';
 
 type ProposalNotificationBadgePlacement =
   | 'desktop'
@@ -62,12 +63,18 @@ export function ProposalNotificationBadge({
     };
 
     void refresh();
+    const unsubscribe = subscribeProposalDataChanges(() => {
+      if (!disposed) {
+        void refresh();
+      }
+    });
     const intervalId = window.setInterval(() => {
       void refresh();
     }, POLL_INTERVAL_MS);
 
     return () => {
       disposed = true;
+      unsubscribe();
       window.clearInterval(intervalId);
     };
   }, [placement, proposalInboxEnabled]);

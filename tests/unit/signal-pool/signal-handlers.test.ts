@@ -14,6 +14,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   startSignalHandlers,
   type ActiveBlockReplicationSnapshotPayload,
+  type ProposalCreatedPayload,
+  type ProposalExecutionFailedPayload,
+  type ProposalReplicationUpsertedPayload,
+  type ProposalStatusChangedPayload,
   type ReminderReplicationUpsertedPayload,
   type TimeBlockCompletedReplicationPayload,
   type TaskChangedPayload,
@@ -405,6 +409,187 @@ describe('signal-handlers: reminder.replication.upserted', () => {
 
     expect(onReminderReplicationUpserted).toHaveBeenCalledTimes(1);
     expect(onReminderReplicationUpserted).toHaveBeenCalledWith(payload);
+  });
+});
+
+describe('signal-handlers: proposal.replication.upserted', () => {
+  it('calls onProposalReplicationUpserted when topic is proposal.replication.upserted', async () => {
+    const onProposalReplicationUpserted = vi
+      .fn<[ProposalReplicationUpsertedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onProposalReplicationUpserted });
+    const payload: ProposalReplicationUpsertedPayload = {
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'proposal_snapshot',
+        proposalId: 'proposal-rep-1',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+        originHostId: 'desktop-host',
+      },
+      proposal: {
+        id: 'proposal-rep-1',
+        title: 'Replicated proposal',
+        body: 'from peer',
+        actionType: 'append_event',
+        actionParams: { content: 'from peer' },
+        references: [],
+        status: 'pending',
+        publisher: {
+          publisherType: 'agent',
+          id: 'agent-a',
+          name: 'Agent A',
+        },
+        comments: [],
+        createdAt: '2026-04-19T09:00:00.000Z',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+      },
+    };
+
+    await handler(makeSignalEvent('proposal.replication.upserted', payload));
+
+    expect(onProposalReplicationUpserted).toHaveBeenCalledTimes(1);
+    expect(onProposalReplicationUpserted).toHaveBeenCalledWith(payload);
+  });
+});
+
+describe('signal-handlers: proposal lifecycle topics', () => {
+  it('calls onProposalCreated when topic is proposal.created', async () => {
+    const onProposalCreated = vi
+      .fn<[ProposalCreatedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onProposalCreated });
+    const payload: ProposalCreatedPayload = {
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'proposal_created',
+        proposalId: 'proposal-created-1',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+        originHostId: 'desktop-host',
+      },
+      proposal: {
+        id: 'proposal-created-1',
+        title: 'Created proposal',
+        body: 'needs review',
+        actionType: 'create_task',
+        actionParams: { title: 'Created task' },
+        references: [],
+        status: 'pending',
+        publisher: {
+          publisherType: 'agent',
+          id: 'agent-a',
+          name: 'Agent A',
+        },
+        comments: [],
+        createdAt: '2026-04-19T09:00:00.000Z',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+      },
+    };
+
+    await handler(makeSignalEvent('proposal.created', payload));
+
+    expect(onProposalCreated).toHaveBeenCalledTimes(1);
+    expect(onProposalCreated).toHaveBeenCalledWith(payload);
+  });
+
+  it('calls onProposalStatusChanged when topic is proposal.status_changed', async () => {
+    const onProposalStatusChanged = vi
+      .fn<[ProposalStatusChangedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onProposalStatusChanged });
+    const payload: ProposalStatusChangedPayload = {
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'proposal_status_changed',
+        proposalId: 'proposal-status-1',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+        originHostId: 'desktop-host',
+      },
+      proposal: {
+        id: 'proposal-status-1',
+        title: 'Status changed proposal',
+        body: 'needs review',
+        actionType: 'append_event',
+        actionParams: { content: 'append this' },
+        references: [],
+        status: 'approved',
+        publisher: {
+          publisherType: 'agent',
+          id: 'agent-a',
+          name: 'Agent A',
+        },
+        comments: [],
+        createdAt: '2026-04-19T09:00:00.000Z',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+      },
+      transition: {
+        fromStatus: 'pending',
+        toStatus: 'approved',
+      },
+    };
+
+    await handler(makeSignalEvent('proposal.status_changed', payload));
+
+    expect(onProposalStatusChanged).toHaveBeenCalledTimes(1);
+    expect(onProposalStatusChanged).toHaveBeenCalledWith(payload);
+  });
+
+  it('calls onProposalExecutionFailed when topic is proposal.execution_failed', async () => {
+    const onProposalExecutionFailed = vi
+      .fn<[ProposalExecutionFailedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onProposalExecutionFailed });
+    const payload: ProposalExecutionFailedPayload = {
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'proposal_execution_failed',
+        proposalId: 'proposal-failed-1',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+        originHostId: 'desktop-host',
+      },
+      proposal: {
+        id: 'proposal-failed-1',
+        title: 'Failed proposal',
+        body: 'needs manual intervention',
+        actionType: 'approve_agent_access',
+        actionParams: {
+          agentId: 'agent-b',
+        },
+        references: [],
+        status: 'approved',
+        publisher: {
+          publisherType: 'agent',
+          id: 'agent-a',
+          name: 'Agent A',
+        },
+        comments: [{
+          author: {
+            publisherType: 'agent',
+            id: 'runtime-executor',
+            name: 'Runtime Executor',
+          },
+          content: '批准后执行失败：not implemented',
+          createdAt: '2026-04-19T10:00:00.000Z',
+        }],
+        createdAt: '2026-04-19T09:00:00.000Z',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+      },
+      execution: {
+        failureMessage: 'not implemented',
+      },
+    };
+
+    await handler(makeSignalEvent('proposal.execution_failed', payload));
+
+    expect(onProposalExecutionFailed).toHaveBeenCalledTimes(1);
+    expect(onProposalExecutionFailed).toHaveBeenCalledWith(payload);
   });
 });
 

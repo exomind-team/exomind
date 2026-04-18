@@ -13,8 +13,10 @@ const {
   appendEventDataMock,
   notifyEventLogChangedMock,
   notifyTaskDataChangedMock,
+  notifyProposalDataChangedMock,
   notifyReminderDataChangedMock,
   notifyTimeBlockDataChangedMock,
+  emitProposalLifecycleMock,
   projectActiveBlockSnapshotMock,
   projectReminderReplicationUpsertMock,
   projectTaskReplicationUpsertMock,
@@ -41,8 +43,10 @@ const {
   const queuedAppendEventDataMock = vi.fn(async () => undefined);
   const queuedNotifyEventLogChangedMock = vi.fn();
   const queuedNotifyTaskDataChangedMock = vi.fn();
+  const queuedNotifyProposalDataChangedMock = vi.fn();
   const queuedNotifyReminderDataChangedMock = vi.fn();
   const queuedNotifyTimeBlockDataChangedMock = vi.fn();
+  const queuedEmitProposalLifecycleMock = vi.fn();
   const queuedProjectActiveBlockSnapshotMock = vi.fn(async () => undefined);
   const queuedProjectReminderReplicationUpsertMock = vi.fn(async () => 'inserted');
   const queuedProjectTaskReplicationUpsertMock = vi.fn(async () => 'inserted');
@@ -69,8 +73,10 @@ const {
     appendEventDataMock: queuedAppendEventDataMock,
     notifyEventLogChangedMock: queuedNotifyEventLogChangedMock,
     notifyTaskDataChangedMock: queuedNotifyTaskDataChangedMock,
+    notifyProposalDataChangedMock: queuedNotifyProposalDataChangedMock,
     notifyReminderDataChangedMock: queuedNotifyReminderDataChangedMock,
     notifyTimeBlockDataChangedMock: queuedNotifyTimeBlockDataChangedMock,
+    emitProposalLifecycleMock: queuedEmitProposalLifecycleMock,
     projectActiveBlockSnapshotMock: queuedProjectActiveBlockSnapshotMock,
     projectReminderReplicationUpsertMock: queuedProjectReminderReplicationUpsertMock,
     projectTaskReplicationUpsertMock: queuedProjectTaskReplicationUpsertMock,
@@ -115,6 +121,14 @@ vi.mock('@/lib/services/eventlog.service', () => ({
 
 vi.mock('@/lib/services/task.service', () => ({
   notifyTaskDataChanged: notifyTaskDataChangedMock,
+}));
+
+vi.mock('@/lib/services/proposal-data-change.service', () => ({
+  notifyProposalDataChanged: notifyProposalDataChangedMock,
+}));
+
+vi.mock('@/lib/services/proposal-lifecycle.service', () => ({
+  emitProposalLifecycle: emitProposalLifecycleMock,
 }));
 
 vi.mock('@/lib/services/reminder.service', () => ({
@@ -188,8 +202,10 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     appendEventDataMock.mockClear();
     notifyEventLogChangedMock.mockClear();
     notifyTaskDataChangedMock.mockClear();
+    notifyProposalDataChangedMock.mockClear();
     notifyReminderDataChangedMock.mockClear();
     notifyTimeBlockDataChangedMock.mockClear();
+    emitProposalLifecycleMock.mockClear();
     projectActiveBlockSnapshotMock.mockClear();
     projectReminderReplicationUpsertMock.mockClear();
     projectTaskReplicationUpsertMock.mockClear();
@@ -634,6 +650,170 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
 
     expect(projectTaskReplicationUpsertMock).toHaveBeenCalledTimes(1);
     expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('bridges proposal replication into proposal data refresh notifications（proposal replication 直接触发请求箱数据刷新）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    await signalHandlerOptions[0].onProposalReplicationUpserted?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'proposal_snapshot',
+        proposalId: 'proposal-rep-1',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+        originHostId: 'desktop-host',
+      },
+      proposal: {
+        id: 'proposal-rep-1',
+        title: 'Replicated proposal',
+        body: 'from peer',
+        actionType: 'append_event',
+        actionParams: { content: 'from peer' },
+        references: [],
+        status: 'pending',
+        publisher: {
+          publisherType: 'agent',
+          id: 'agent-a',
+          name: 'Agent A',
+        },
+        comments: [],
+        createdAt: '2026-04-19T09:00:00.000Z',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+      },
+    });
+
+    expect(notifyProposalDataChangedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('bridges proposal lifecycle topics into the proposal lifecycle event bus（proposal lifecycle topic 派发给提醒层）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    await signalHandlerOptions[0].onProposalCreated?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'proposal_created',
+        proposalId: 'proposal-created-1',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+        originHostId: 'desktop-host',
+      },
+      proposal: {
+        id: 'proposal-created-1',
+        title: 'Created proposal',
+        body: 'needs review',
+        actionType: 'create_task',
+        actionParams: { title: 'Created task' },
+        references: [],
+        status: 'pending',
+        publisher: {
+          publisherType: 'agent',
+          id: 'agent-a',
+          name: 'Agent A',
+        },
+        comments: [],
+        createdAt: '2026-04-19T09:00:00.000Z',
+        updatedAt: '2026-04-19T10:00:00.000Z',
+      },
+    });
+    await signalHandlerOptions[0].onProposalStatusChanged?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'proposal_status_changed',
+        proposalId: 'proposal-created-1',
+        updatedAt: '2026-04-19T10:02:00.000Z',
+        originHostId: 'desktop-host',
+      },
+      proposal: {
+        id: 'proposal-created-1',
+        title: 'Created proposal',
+        body: 'needs review',
+        actionType: 'create_task',
+        actionParams: { title: 'Created task' },
+        references: [],
+        status: 'approved',
+        publisher: {
+          publisherType: 'agent',
+          id: 'agent-a',
+          name: 'Agent A',
+        },
+        comments: [],
+        createdAt: '2026-04-19T09:00:00.000Z',
+        updatedAt: '2026-04-19T10:02:00.000Z',
+      },
+      transition: {
+        fromStatus: 'pending',
+        toStatus: 'approved',
+      },
+    });
+    await signalHandlerOptions[0].onProposalExecutionFailed?.({
+      schemaVersion: 1,
+      scopeKey: 'profile-local',
+      cursor: {
+        kind: 'proposal_execution_failed',
+        proposalId: 'proposal-created-1',
+        updatedAt: '2026-04-19T10:03:00.000Z',
+        originHostId: 'desktop-host',
+      },
+      proposal: {
+        id: 'proposal-created-1',
+        title: 'Created proposal',
+        body: 'needs review',
+        actionType: 'create_task',
+        actionParams: { title: 'Created task' },
+        references: [],
+        status: 'approved',
+        publisher: {
+          publisherType: 'agent',
+          id: 'agent-a',
+          name: 'Agent A',
+        },
+        comments: [{
+          author: {
+            publisherType: 'agent',
+            id: 'runtime-executor',
+            name: 'Runtime Executor',
+          },
+          content: '批准后执行失败：not implemented',
+          createdAt: '2026-04-19T10:03:00.000Z',
+        }],
+        createdAt: '2026-04-19T09:00:00.000Z',
+        updatedAt: '2026-04-19T10:03:00.000Z',
+      },
+      execution: {
+        failureMessage: 'not implemented',
+      },
+    });
+
+    expect(emitProposalLifecycleMock).toHaveBeenCalledTimes(3);
+    expect(emitProposalLifecycleMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      topic: 'proposal.created',
+    }));
+    expect(emitProposalLifecycleMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      topic: 'proposal.status_changed',
+    }));
+    expect(emitProposalLifecycleMock).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      topic: 'proposal.execution_failed',
+    }));
   });
 
   it('notifies task listeners when remote replication was already applied by runtime actor（远端任务已被运行时先落地时也要刷新 UI）', async () => {

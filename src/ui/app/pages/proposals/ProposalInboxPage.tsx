@@ -11,6 +11,7 @@ import {
   ProposalRtError,
   getProposalRtAdapter,
 } from '@/lib/adapters/proposal-rt-adapter';
+import { subscribeProposalDataChanges } from '@/lib/services/proposal-data-change.service';
 import type {
   Proposal,
   ProposalPublisher,
@@ -246,6 +247,11 @@ export function ProposalInboxPage() {
     };
 
     void initialLoad();
+    const unsubscribe = subscribeProposalDataChanges(() => {
+      if (!disposed) {
+        void loadProposals({ silent: true });
+      }
+    });
     const intervalId = window.setInterval(() => {
       if (!disposed) {
         void loadProposals({ silent: true });
@@ -254,6 +260,7 @@ export function ProposalInboxPage() {
 
     return () => {
       disposed = true;
+      unsubscribe();
       window.clearInterval(intervalId);
     };
   }, [loadProposals]);

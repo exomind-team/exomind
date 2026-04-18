@@ -116,6 +116,7 @@ async fn create_proposal(
             },
         )
         .map_err(map_store_error)?;
+    publish_proposal_created_signal(&state, scope_key, &proposal);
     publish_proposal_replication_signal(&state, scope_key, &proposal);
     Ok((StatusCode::CREATED, Json(proposal)))
 }
@@ -171,6 +172,10 @@ async fn update_proposal(
             .map_err(map_store_error)?;
     }
 
+    let status_changed = (before.status != proposal.status)
+        .then_some((before.status, proposal.status, proposal.clone()));
+    let mut execution_failure_message: Option<String> = None;
+
     if before.status != ProposalStatus::Approved && proposal.status == ProposalStatus::Approved {
         let executor = ProposalExecutor::new(
             state.task_store.clone(),
@@ -178,25 +183,48 @@ async fn update_proposal(
             state.timeblock_store.clone(),
         );
         if let Err(error) = executor.execute_scoped(scope_key, &proposal) {
-            tracing::error!(proposal_id = %proposal.id, error = %error, "proposal execution failed after approval");
+            let failure_message = error.to_string();
+            tracing::error!(proposal_id = %proposal.id, error = %failure_message, "proposal execution failed after approval");
             let comment = Comment {
                 author: Publisher {
                     publisher_type: PublisherType::Agent,
                     id: "runtime-executor".to_string(),
                     name: "Runtime Executor".to_string(),
                 },
-                content: format!("批准后执行失败：{error}"),
+                content: format!("批准后执行失败：{failure_message}"),
                 created_at: Utc::now(),
             };
-            if let Ok(updated) = state
+            match state
                 .proposal_store
                 .add_comment_scoped(scope_key, &id, comment)
             {
-                proposal = updated;
+                Ok(updated) => {
+                    proposal = updated;
+                    execution_failure_message = Some(failure_message);
+                }
+                Err(store_error) => {
+                    tracing::error!(
+                        proposal_id = %proposal.id,
+                        error = %store_error,
+                        "proposal execution failed comment could not be persisted"
+                    );
+                }
             }
         }
     }
 
+    if let Some((from_status, to_status, status_changed_snapshot)) = status_changed {
+        publish_proposal_status_changed_signal(
+            &state,
+            scope_key,
+            &status_changed_snapshot,
+            from_status,
+            to_status,
+        );
+    }
+    if let Some(failure_message) = execution_failure_message.as_deref() {
+        publish_proposal_execution_failed_signal(&state, scope_key, &proposal, failure_message);
+    }
     publish_proposal_replication_signal(&state, scope_key, &proposal);
     Ok(Json(proposal))
 }
@@ -231,31 +259,112 @@ fn scope_key_from_query<'a>(
     profile_id.or(user_id)
 }
 
-fn publish_proposal_replication_signal(
+fn normalize_scope_key(scope_key: Option<&str>) -> String {
+    scope_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("anonymous")
+        .to_string()
+}
+
+fn build_proposal_replication_payload(
     state: &AppState,
     scope_key: Option<&str>,
     proposal: &Proposal,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "proposal_snapshot",
+            "proposalId": proposal.id,
+            "updatedAt": proposal.updated_at,
+            "originHostId": state.host_id,
+        },
+        "proposal": proposal,
+    })
+}
+
+fn build_proposal_created_payload(
+    state: &AppState,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "proposal_created",
+            "proposalId": proposal.id,
+            "updatedAt": proposal.updated_at,
+            "originHostId": state.host_id,
+        },
+        "proposal": proposal,
+    })
+}
+
+fn build_proposal_status_changed_payload(
+    state: &AppState,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+    from_status: ProposalStatus,
+    to_status: ProposalStatus,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "proposal_status_changed",
+            "proposalId": proposal.id,
+            "updatedAt": proposal.updated_at,
+            "originHostId": state.host_id,
+        },
+        "proposal": proposal,
+        "transition": {
+            "fromStatus": from_status,
+            "toStatus": to_status,
+        },
+    })
+}
+
+fn build_proposal_execution_failed_payload(
+    state: &AppState,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+    failure_message: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "proposal_execution_failed",
+            "proposalId": proposal.id,
+            "updatedAt": proposal.updated_at,
+            "originHostId": state.host_id,
+        },
+        "proposal": proposal,
+        "execution": {
+            "failureMessage": failure_message,
+        },
+    })
+}
+
+fn publish_proposal_signal(
+    state: &AppState,
+    topic: &str,
+    proposal: &Proposal,
+    payload: serde_json::Value,
 ) {
     let signal = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
-        topic: "proposal.replication.upserted".to_string(),
+        topic: topic.to_string(),
         ts: Utc::now().timestamp_millis() as u64,
         source: "http:proposals".to_string(),
         origin_host_id: state.host_id.clone(),
         hop: 0,
         trace_id: Some(format!("proposal:{}", proposal.id)),
-        payload: serde_json::json!({
-            "schemaVersion": 1,
-            "scopeKey": scope_key.unwrap_or("anonymous"),
-            "cursor": {
-                "kind": "proposal_snapshot",
-                "proposalId": proposal.id,
-                "updatedAt": proposal.updated_at,
-                "originHostId": state.host_id.clone(),
-            },
-            "proposal": proposal,
-        }),
+        payload,
     };
 
     state.signal_pool.publish(signal.clone());
@@ -265,6 +374,57 @@ fn publish_proposal_replication_signal(
             relay.forward_event_to_peers(signal).await;
         });
     }
+}
+
+fn publish_proposal_replication_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+) {
+    publish_proposal_signal(
+        state,
+        "proposal.replication.upserted",
+        proposal,
+        build_proposal_replication_payload(state, scope_key, proposal),
+    );
+}
+
+fn publish_proposal_created_signal(state: &AppState, scope_key: Option<&str>, proposal: &Proposal) {
+    publish_proposal_signal(
+        state,
+        "proposal.created",
+        proposal,
+        build_proposal_created_payload(state, scope_key, proposal),
+    );
+}
+
+fn publish_proposal_status_changed_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+    from_status: ProposalStatus,
+    to_status: ProposalStatus,
+) {
+    publish_proposal_signal(
+        state,
+        "proposal.status_changed",
+        proposal,
+        build_proposal_status_changed_payload(state, scope_key, proposal, from_status, to_status),
+    );
+}
+
+fn publish_proposal_execution_failed_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+    failure_message: &str,
+) {
+    publish_proposal_signal(
+        state,
+        "proposal.execution_failed",
+        proposal,
+        build_proposal_execution_failed_payload(state, scope_key, proposal, failure_message),
+    );
 }
 
 fn map_store_error(error: ProposalStoreError) -> (StatusCode, Json<ErrorResponse>) {
@@ -390,6 +550,16 @@ mod tests {
 
     fn test_router(state: AppState) -> Router {
         router().with_state(state)
+    }
+
+    fn signals_since(state: &AppState, previous_len: usize) -> Vec<SignalEvent> {
+        state
+            .signal_pool
+            .window()
+            .recent(state.signal_pool.window().len())
+            .into_iter()
+            .skip(previous_len)
+            .collect()
     }
 
     #[tokio::test]
@@ -550,6 +720,232 @@ mod tests {
         assert!(
             state.task_store.list().is_empty(),
             "anonymous task scope should stay isolated"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_proposal_publishes_created_and_replication_signals() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+        let app = test_router(state.clone());
+
+        let before_signal_len = state.signal_pool.window().len();
+
+        let create_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/proposals?profile_id=profile-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "title":"整理迁移备注",
+                            "action_type":"append_event",
+                            "action_params":{"content":"把迁移备注补进日志"},
+                            "publisher":{"publisher_type":"agent","id":"agent-a","name":"Agent A"}
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+        let body = create_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let created: Value = serde_json::from_slice(&body).unwrap();
+
+        let signals = signals_since(&state, before_signal_len);
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].topic, "proposal.created");
+        assert_eq!(signals[1].topic, "proposal.replication.upserted");
+        assert_eq!(signals[0].payload["scopeKey"], serde_json::json!("profile-a"));
+        assert_eq!(signals[0].payload["cursor"]["kind"], serde_json::json!("proposal_created"));
+        assert_eq!(signals[0].payload["proposal"]["id"], created["id"]);
+        assert_eq!(
+            signals[1].payload["cursor"]["kind"],
+            serde_json::json!("proposal_snapshot")
+        );
+        assert_eq!(signals[1].payload["proposal"]["id"], created["id"]);
+    }
+
+    #[tokio::test]
+    async fn status_change_publishes_status_changed_then_replication() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+        let app = test_router(state.clone());
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/proposals")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "title":"整理迁移计划",
+                            "action_type":"append_event",
+                            "action_params":{"content":"补记迁移计划"},
+                            "publisher":{"publisher_type":"agent","id":"agent-a","name":"Agent A"}
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+        let body = create_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let created: Value = serde_json::from_slice(&body).unwrap();
+        let proposal_id = created["id"].as_str().unwrap();
+
+        let before_signal_len = state.signal_pool.window().len();
+
+        let update_response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/proposals/{proposal_id}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"status":"in_review"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(update_response.status(), StatusCode::OK);
+
+        let signals = signals_since(&state, before_signal_len);
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].topic, "proposal.status_changed");
+        assert_eq!(signals[1].topic, "proposal.replication.upserted");
+        assert_eq!(
+            signals[0].payload["transition"]["fromStatus"],
+            serde_json::json!("pending")
+        );
+        assert_eq!(
+            signals[0].payload["transition"]["toStatus"],
+            serde_json::json!("in_review")
+        );
+        assert_eq!(signals[0].payload["proposal"]["status"], serde_json::json!("in_review"));
+        assert_eq!(signals[1].payload["proposal"]["status"], serde_json::json!("in_review"));
+    }
+
+    #[tokio::test]
+    async fn approval_failure_publishes_execution_failed_before_final_replication() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+        let app = test_router(state.clone());
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/proposals?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "title":"授权新 Agent",
+                            "body":"请求批准一个新的 Agent 访问 profile",
+                            "action_type":"approve_agent_access",
+                            "action_params":{
+                              "agent_id":"agent-b",
+                              "agent_name":"Agent B",
+                              "profile_id":"user-a",
+                              "scopes":["events:read"]
+                            },
+                            "publisher":{"publisher_type":"agent","id":"agent-a","name":"Agent A"}
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+        let body = create_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let created: Value = serde_json::from_slice(&body).unwrap();
+        let proposal_id = created["id"].as_str().unwrap();
+
+        let before_signal_len = state.signal_pool.window().len();
+
+        let approve_response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/proposals/{proposal_id}?user_id=user-a"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"status":"approved"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(approve_response.status(), StatusCode::OK);
+        let body = approve_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let approved: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(approved["status"], "approved");
+        assert_eq!(approved["comments"].as_array().unwrap().len(), 1);
+        assert!(
+            approved["comments"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("批准后执行失败")
+        );
+
+        let signals = signals_since(&state, before_signal_len);
+        assert_eq!(signals.len(), 3);
+        assert_eq!(signals[0].topic, "proposal.status_changed");
+        assert_eq!(signals[1].topic, "proposal.execution_failed");
+        assert_eq!(signals[2].topic, "proposal.replication.upserted");
+        assert_eq!(
+            signals[0].payload["transition"]["fromStatus"],
+            serde_json::json!("pending")
+        );
+        assert_eq!(
+            signals[0].payload["transition"]["toStatus"],
+            serde_json::json!("approved")
+        );
+        assert_eq!(signals[1].payload["proposal"]["status"], serde_json::json!("approved"));
+        assert_eq!(
+            signals[1].payload["proposal"]["comments"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            signals[1].payload["execution"]["failureMessage"]
+                .as_str()
+                .unwrap()
+                .contains("approve_agent_access")
+        );
+        assert_eq!(signals[2].payload["scopeKey"], serde_json::json!("user-a"));
+        assert_eq!(
+            signals[2].payload["proposal"]["comments"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
         );
     }
 

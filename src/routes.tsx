@@ -25,6 +25,7 @@ import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ProposalNotificationBadge } from '@/ui/app/components/ProposalNotificationBadge';
+import { ProposalNotificationCoordinator } from '@/ui/app/components/ProposalNotificationCoordinator';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
 import { TimeblockEndAlertCoordinator } from '@/ui/app/components/TimeblockEndAlertCoordinator';
 import { UpdateToast } from '@/ui/components/UpdateToast';
@@ -678,6 +679,7 @@ function NewLayout() {
         />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
         <TimeblockEndAlertCoordinator />
+        <ProposalNotificationCoordinator />
         <ReminderNotifier />
         <UpdateToast />
       </>
@@ -694,6 +696,7 @@ function NewLayout() {
         commandContext={commandContext}
       />
       <TimeblockEndAlertCoordinator />
+      <ProposalNotificationCoordinator />
       <ReminderNotifier />
       <UpdateToast />
     </>
