@@ -12,6 +12,7 @@ import {
   getProposalRtAdapter,
 } from '@/lib/adapters/proposal-rt-adapter';
 import { subscribeProposalDataChanges } from '@/lib/services/proposal-data-change.service';
+import { subscribeProposalLifecycle } from '@/lib/services/proposal-lifecycle.service';
 import type {
   Proposal,
   ProposalPublisher,
@@ -31,7 +32,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getEventlogPathForTab } from '@/ui/app/pages/eventlog-route-memory';
 import {
   formatProposalShortId,
@@ -48,6 +49,7 @@ import {
 type ProposalFilterKey = 'all' | ProposalStatus;
 
 const POLL_INTERVAL_MS = 30_000;
+const APPROVAL_FEEDBACK_SETTLE_MS = 600;
 
 const FILTER_OPTIONS: Array<{ key: ProposalFilterKey; label: string }> = [
   { key: 'all', label: '全部' },
@@ -87,6 +89,8 @@ const DEFAULT_COMMENT_AUTHOR: ProposalPublisher = {
   name: 'UI Reviewer',
 };
 
+type ProposalToastOptions = Parameters<typeof toast>[0];
+
 function resolveSelection(
   proposals: Proposal[],
   currentId: string | null,
@@ -108,6 +112,17 @@ function replaceProposalInList(
       ))
       : [...proposals, nextProposal],
   );
+}
+
+function hasProposalExecutionFailureComment(proposal: Proposal): boolean {
+  return proposal.comments.some((comment) => (
+    comment.author.id === 'runtime-executor'
+    && comment.content.startsWith('批准后执行失败：')
+  ));
+}
+
+function isProposalDecisionActionable(status: ProposalStatus): boolean {
+  return status === 'pending' || status === 'in_review';
 }
 
 function ProposalStatusPill({ status }: { status: ProposalStatus }) {
@@ -189,6 +204,8 @@ function ProposalReferenceAction({
 export function ProposalInboxPage() {
   const isDesktop = useIsDesktop();
   const adapter = getProposalRtAdapter();
+  const approvalFeedbackTimerIdsRef = useRef(new Map<string, number>());
+  const proposalsRef = useRef<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -210,6 +227,7 @@ export function ProposalInboxPage() {
 
     try {
       const next = sortProposals(await adapter.listProposals());
+      proposalsRef.current = next;
       setProposals(next);
       setSelectedProposalId((current) => resolveSelection(next, current));
       setErrorMessage(null);
@@ -228,6 +246,7 @@ export function ProposalInboxPage() {
       setErrorMessage(message);
       setEndpointMissing(missingEndpoint);
       if (missingEndpoint) {
+        proposalsRef.current = [];
         setProposals([]);
         setSelectedProposalId(null);
       }
@@ -265,6 +284,46 @@ export function ProposalInboxPage() {
     };
   }, [loadProposals]);
 
+  useEffect(() => {
+    const unsubscribe = subscribeProposalLifecycle((event) => {
+      if (event.topic !== 'proposal.execution_failed') {
+        return;
+      }
+
+      const timerId = approvalFeedbackTimerIdsRef.current.get(event.payload.proposal.id);
+      if (timerId === undefined) {
+        return;
+      }
+
+      window.clearTimeout(timerId);
+      approvalFeedbackTimerIdsRef.current.delete(event.payload.proposal.id);
+    });
+
+    return () => {
+      unsubscribe();
+      approvalFeedbackTimerIdsRef.current.forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+      approvalFeedbackTimerIdsRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    proposals.forEach((proposal) => {
+      if (!approvalFeedbackTimerIdsRef.current.has(proposal.id)) {
+        return;
+      }
+
+      if (hasProposalExecutionFailureComment(proposal)) {
+        const timerId = approvalFeedbackTimerIdsRef.current.get(proposal.id);
+        if (timerId !== undefined) {
+          window.clearTimeout(timerId);
+        }
+        approvalFeedbackTimerIdsRef.current.delete(proposal.id);
+      }
+    });
+  }, [proposals]);
+
   const counts = useMemo(() => ({
     pending: proposals.filter((proposal) => proposal.status === 'pending').length,
     in_review: proposals.filter((proposal) => proposal.status === 'in_review').length,
@@ -293,6 +352,14 @@ export function ProposalInboxPage() {
     () => proposals.find((proposal) => proposal.id === selectedProposalId) ?? null,
     [proposals, selectedProposalId],
   );
+
+  const sortedSelectedProposalComments = useMemo(() => (
+    selectedProposal
+      ? [...selectedProposal.comments].sort((left, right) => (
+        Date.parse(left.createdAt) - Date.parse(right.createdAt)
+      ))
+      : []
+  ), [selectedProposal]);
 
   useEffect(() => {
     if (!selectedProposal) {
@@ -336,21 +403,59 @@ export function ProposalInboxPage() {
     }));
   };
 
+  const scheduleApproveSuccessToast = useCallback((proposal: Proposal) => {
+    const existingTimerId = approvalFeedbackTimerIdsRef.current.get(proposal.id);
+    if (existingTimerId !== undefined) {
+      window.clearTimeout(existingTimerId);
+    }
+
+    if (!approvalFeedbackTimerIdsRef.current.has(proposal.id)) {
+      return;
+    }
+
+    if (hasProposalExecutionFailureComment(proposal)) {
+      approvalFeedbackTimerIdsRef.current.delete(proposal.id);
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      approvalFeedbackTimerIdsRef.current.delete(proposal.id);
+      const currentProposal = proposalsRef.current.find((candidate) => candidate.id === proposal.id);
+      if (currentProposal && hasProposalExecutionFailureComment(currentProposal)) {
+        return;
+      }
+
+      toast({ title: '提案已批准，RT 将尝试立即执行' });
+    }, APPROVAL_FEEDBACK_SETTLE_MS);
+
+    approvalFeedbackTimerIdsRef.current.set(proposal.id, timerId);
+  }, []);
+
   const mutateSelectedProposal = async (
     key: string,
     fn: () => Promise<Proposal | null>,
-    successTitle: string,
+    resolveSuccessToast: ProposalToastOptions | ((proposal: Proposal) => ProposalToastOptions | null) | null,
     failureTitle: string,
-  ) => {
+  ): Promise<Proposal | null> => {
     setSubmittingKey(key);
     try {
       const nextProposal = await fn();
       if (!nextProposal) {
         throw new Error('提案已不存在或已被移除');
       }
-      setProposals((current) => replaceProposalInList(current, nextProposal));
+      setProposals((current) => {
+        const next = replaceProposalInList(current, nextProposal);
+        proposalsRef.current = next;
+        return next;
+      });
       setSelectedProposalId(nextProposal.id);
-      toast({ title: successTitle });
+      const successToast = typeof resolveSuccessToast === 'function'
+        ? resolveSuccessToast(nextProposal)
+        : resolveSuccessToast;
+      if (successToast) {
+        toast(successToast);
+      }
+      return nextProposal;
     } catch (error) {
       const message = error instanceof Error ? error.message : '请求失败';
       toast({
@@ -361,16 +466,19 @@ export function ProposalInboxPage() {
       if (error instanceof ProposalRtError && error.status === 404) {
         setEndpointMissing(true);
       }
+      return null;
     } finally {
       setSubmittingKey(null);
     }
   };
 
   const saveDraft = async () => {
-    if (!selectedProposal || parsedActionParams.error || !parsedActionParams.parsed) {
+    if (!selectedProposal || !selectedProposalActionable || parsedActionParams.error || !parsedActionParams.parsed) {
       toast({
         title: '保存草稿失败',
-        description: parsedActionParams.error ?? '未选中提案',
+        description: !selectedProposalActionable
+          ? '已处理提案为只读，不能再修改参数'
+          : parsedActionParams.error ?? '未选中提案',
         variant: 'destructive',
       });
       return;
@@ -381,7 +489,7 @@ export function ProposalInboxPage() {
       () => adapter.updateProposal(selectedProposal.id, {
         actionParams: parsedActionParams.parsed ?? {},
       }),
-      '已保存提案参数',
+      { title: '已保存提案参数' },
       '保存草稿失败',
     );
   };
@@ -396,7 +504,9 @@ export function ProposalInboxPage() {
       return;
     }
 
-    await mutateSelectedProposal(
+    approvalFeedbackTimerIdsRef.current.set(selectedProposal.id, -1);
+
+    const approvedProposal = await mutateSelectedProposal(
       'approve',
       async () => {
         const updated = actionParamsDirty
@@ -411,9 +521,16 @@ export function ProposalInboxPage() {
 
         return adapter.updateProposal(updated.id, { status: 'approved' });
       },
-      '提案已批准，RT 将尝试立即执行',
+      (proposal) => {
+        scheduleApproveSuccessToast(proposal);
+        return null;
+      },
       '批准提案失败',
     );
+
+    if (!approvedProposal) {
+      approvalFeedbackTimerIdsRef.current.delete(selectedProposal.id);
+    }
   };
 
   const rejectProposal = async () => {
@@ -424,7 +541,7 @@ export function ProposalInboxPage() {
     await mutateSelectedProposal(
       'reject',
       () => adapter.updateProposal(selectedProposal.id, { status: 'rejected' }),
-      '提案已拒绝',
+      { title: '提案已拒绝' },
       '拒绝提案失败',
     );
   };
@@ -437,7 +554,7 @@ export function ProposalInboxPage() {
     await mutateSelectedProposal(
       'snooze',
       () => adapter.updateProposal(selectedProposal.id, { status: 'snoozed' }),
-      '提案已暂缓',
+      { title: '提案已暂缓' },
       '暂缓提案失败',
     );
   };
@@ -459,7 +576,11 @@ export function ProposalInboxPage() {
         content,
         DEFAULT_COMMENT_AUTHOR,
       );
-      setProposals((current) => replaceProposalInList(current, nextProposal));
+      setProposals((current) => {
+        const next = replaceProposalInList(current, nextProposal);
+        proposalsRef.current = next;
+        return next;
+      });
       setSelectedProposalId(nextProposal.id);
       setCommentDraft('');
       toast({ title: '评论已添加' });
@@ -484,6 +605,10 @@ export function ProposalInboxPage() {
       </div>
     );
   }
+
+  const selectedProposalActionable = selectedProposal
+    ? isProposalDecisionActionable(selectedProposal.status)
+    : false;
 
   return (
     <PageShell
@@ -660,7 +785,7 @@ export function ProposalInboxPage() {
                           onClick={() => {
                             void saveDraft();
                           }}
-                          disabled={submittingKey !== null || !actionParamsDirty || parsedActionParams.error !== null}
+                          disabled={submittingKey !== null || !selectedProposalActionable || !actionParamsDirty || parsedActionParams.error !== null}
                           className="rounded-full"
                         >
                           <ShieldCheck size={14} />
@@ -672,7 +797,7 @@ export function ProposalInboxPage() {
                           onClick={() => {
                             void approveProposal();
                           }}
-                          disabled={submittingKey !== null}
+                          disabled={submittingKey !== null || !selectedProposalActionable}
                           className="rounded-full bg-[#15803D] text-white hover:bg-[#166534]"
                         >
                           <Send size={14} />
@@ -685,7 +810,7 @@ export function ProposalInboxPage() {
                           onClick={() => {
                             void snoozeProposal();
                           }}
-                          disabled={submittingKey !== null}
+                          disabled={submittingKey !== null || !selectedProposalActionable}
                           className="rounded-full"
                         >
                           <TimerReset size={14} />
@@ -698,7 +823,7 @@ export function ProposalInboxPage() {
                           onClick={() => {
                             void rejectProposal();
                           }}
-                          disabled={submittingKey !== null}
+                          disabled={submittingKey !== null || !selectedProposalActionable}
                           className="rounded-full"
                         >
                           <XCircle size={14} />
@@ -756,6 +881,7 @@ export function ProposalInboxPage() {
                           value={editableTaskTitle}
                           onChange={(event) => updateEditableTaskTitle(event.target.value)}
                           placeholder="任务标题"
+                          disabled={!selectedProposalActionable}
                           className="rounded-2xl"
                         />
                       </div>
@@ -769,6 +895,7 @@ export function ProposalInboxPage() {
                         value={actionParamsText}
                         onChange={(event) => setActionParamsText(event.target.value)}
                         rows={12}
+                        disabled={!selectedProposalActionable}
                         className="font-mono text-xs"
                       />
                       {parsedActionParams.error ? (
@@ -777,7 +904,11 @@ export function ProposalInboxPage() {
                         </p>
                       ) : (
                         <p className="text-xs text-[#A8A29E]">
-                          {actionParamsDirty ? '参数已修改，保存或批准时会提交新版本。' : '参数与当前提案保持一致。'}
+                          {!selectedProposalActionable
+                            ? '已处理提案为只读；若需调整，请新增提案或追加评论说明。'
+                            : actionParamsDirty
+                              ? '参数已修改，保存或批准时会提交新版本。'
+                              : '参数与当前提案保持一致。'}
                         </p>
                       )}
                     </div>
@@ -790,10 +921,10 @@ export function ProposalInboxPage() {
                     </div>
 
                     <div className="mt-4 space-y-3">
-                      {selectedProposal.comments.length === 0 ? (
+                      {sortedSelectedProposalComments.length === 0 ? (
                         <p className="text-sm text-[#A8A29E] dark:text-[#78716C]">还没有评论。</p>
                       ) : (
-                        selectedProposal.comments.map((comment) => (
+                        sortedSelectedProposalComments.map((comment) => (
                           <article
                             key={`${comment.author.id}-${comment.createdAt}-${comment.content.slice(0, 12)}`}
                             className="rounded-2xl border border-[#E7E5E4] bg-[#FCFBFA] px-4 py-3 dark:border-[#292524] dark:bg-[#120F0D]"
