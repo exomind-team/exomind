@@ -17,6 +17,7 @@ use mesh::{MeshRelayManager, MeshState};
 use signal::SignalPool;
 
 pub mod agent;
+pub mod agent_await;
 pub mod auth;
 pub mod config;
 pub mod discovery;

@@ -2,6 +2,7 @@ use axum::{Router, routing::get};
 
 use crate::AppState;
 
+pub mod agent_await;
 pub mod agent_sessions;
 pub mod agents;
 pub mod config;
@@ -25,6 +26,7 @@ pub mod workspace;
 pub fn router() -> Router<AppState> {
     let r = Router::new()
         .route("/topology", get(topology::get_topology))
+        .merge(agent_await::router())
         .merge(agents::router())
         .merge(agent_sessions::router())
         .merge(config::router())
