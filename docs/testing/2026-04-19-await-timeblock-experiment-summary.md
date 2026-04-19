@@ -1,4 +1,4 @@
-# 2026-04-19 await 时间块与任务监听实验总结
+# 2026-04-19 await 时间块、任务与提案评论监听实验总结
 
 ## 背景
 
@@ -9,6 +9,7 @@
 - 时间块状态变化 `timeblock_state_changed`
 - 专注结束 `timeblock_stopped`
 - 反馈完成后的时间块完成 `timeblock_ended`
+- 提案新增评论 `proposal_comment_added`
 
 本轮还顺带确认了一条重要前提：
 
@@ -361,6 +362,95 @@ tb-a5c2f68f-6934-404b-8f9d-5f33dcdceb1e
    - `note/task_completed`
 5. fulfilled 内嵌的 `task.time_block_ids` 在本轮命中时还没带上最终完成块 `tb-a5c2...`，但随后回读 `/tasks/:id` 已补齐，说明 fulfilled 快照与持久化最终态之间存在轻微时序差。
 
+## 追加实验：匿名域 `proposal_comment_added` 人机闭环
+
+### 实验前提
+
+这轮追加实验仍发生在同一台重启后的受管实例上：
+
+- `await-anon-0419`
+- `Web 1630`
+- `RT 27078`
+- `bridge 9433`
+
+监听仍然使用匿名域、全程不传 `user_id`。
+
+这轮一开始曾按旧心智尝试把目标提案当作 `profile-argon` 域对象处理，但在这台 RT 上并没有命中对应提案；修正后回到匿名域读取，才确认真实目标是：
+
+- `proposalId`: `prp-b1cdeded-9e5a-4a4a-92ec-7e16cde1747f`
+- `title`: `TMCP proposal created rerun 1776598607`
+- `status`: `pending`
+
+监听开始前，这个提案已经存在 `2` 条评论；本轮目标是验证 await 能否等待后续新增的人类评论并一次 fulfill。
+
+### await 请求与 SSE 过程
+
+请求体：
+
+```json
+{
+  "condition": {
+    "type": "proposal_comment_added",
+    "proposalId": "prp-b1cdeded-9e5a-4a4a-92ec-7e16cde1747f"
+  }
+}
+```
+
+SSE 过程摘要：
+
+- 连接建立后先收到 `ready`
+- 等待期间共收到 `3` 次 `heartbeat`
+- 命中后收到 `fulfilled`
+- 本轮未出现 `timeout`
+- 本轮未出现 SSE `error`
+
+### 命中的评论与 fulfilled 载荷
+
+fulfilled 命中的结构化结果：
+
+- fulfilled 类型：`proposal_comment_added`
+- `proposalId`: `prp-b1cdeded-9e5a-4a4a-92ec-7e16cde1747f`
+- 评论作者：`UI Reviewer`
+- 评论时间：`2026-04-19T16:04:00.399360600Z`
+
+命中的人类评论原文是：
+
+```text
+现在我们应该会追加一个记录。如果你是Agent，请你务必回看事件日志，看一下提案的执行方式是否有效，以及用show简单汇报一下这个await监听情况；如果你是subAgent，向调用你的Agent汇报一下你是怎么监听到这条评论的
+```
+
+这次 fulfilled 载荷额外证明了两点：
+
+1. 顶层会返回正确的 `proposalId`
+2. `data` 里不仅有新增的 `comment`，还有该提案的最新 `proposal` 快照
+
+也就是说，`proposal_comment_added` 的 fulfill 真相并不是只把某条内部 signal 原样暴露出来，而是把“命中的评论 + 当前提案快照”一起带回给外部 Agent。
+
+### 回读验证与子代理现象
+
+fulfilled 返回之后，再次回读：
+
+```text
+GET /api/proposals/prp-b1cdeded-9e5a-4a4a-92ec-7e16cde1747f
+```
+
+可以确认：
+
+- 目标提案确实仍是 `pending`
+- 新评论已经真实持久化到该提案上
+- 评论总数已从监听前的 `2` 条变为 `3` 条
+
+因此，这轮实验已经形成了“人类追加评论 -> await fulfill -> proposal readback 确认”的完整闭环。
+
+另外，本轮还顺带暴露了一个现象：Codex 后台子代理长时间挂起等待时，没有像前台手工 await 那样自然返回。但这更像是子代理编排 / 长任务稳定性问题，不应反向判定为 RT `proposal_comment_added` await 失败，因为前台直接 await 与后续 proposal 回读都已经给出正证据。
+
+### 这轮提案评论监听说明了什么
+
+1. 匿名域 `proposal_comment_added` await 已经能命中真实的人类追加评论。
+2. fulfilled payload 会返回 `proposalId + comment + proposal`，足以让外部 Agent 直接拿到命中的评论和提案最新快照。
+3. 若要做最终归属校验，最稳的口径仍然是 fulfill 后再回读一次 `/api/proposals/:id`。
+4. 子代理长等待未回收是编排层现象，不构成 RT await 合同失效证据。
+
 ## 本轮 await 联测结论
 
 ### 1. 无 scope 监听是正确前提
@@ -416,6 +506,19 @@ tb-a5c2f68f-6934-404b-8f9d-5f33dcdceb1e
 2. 命中后读取任务详情
 3. 通过 `related_time_block_id` / `time_block_ids` 找到最终完成块
 4. 从 `block_feedback` 与 `note/task_completed` 回读反馈原文
+
+### 7. `proposal_comment_added` 已具备人机闭环
+
+这轮追加实测说明：
+
+- `proposal_comment_added` await 已经能在匿名域命中真实的人类追加评论
+- fulfilled payload 当前会返回 `proposalId + comment + proposal`，而不只是某条底层 topic
+- 对 Agent 而言，更稳的执行口径是：
+
+1. 按 `proposalId` 监听 `proposal_comment_added`
+2. 命中后优先使用 fulfilled 内的 `comment` 与 `proposal` 快照
+3. 如需确认评论确实落在目标提案上，再回读 `/api/proposals/:id`
+4. 不要把子代理长等待未回收直接当作 RT `await` 失败；应先用前台直连结果与资源回读做真相判断
 
 ## 对后续联测流程的直接要求
 
