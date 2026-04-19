@@ -168,10 +168,10 @@ impl SqliteTaskStore {
             task.title = title;
         }
         if let Some(description) = input.description {
-            task.description = Some(description);
+            task.description = description;
         }
         if let Some(done_condition) = input.done_condition {
-            task.done_condition = Some(done_condition);
+            task.done_condition = done_condition;
         }
         if let Some(priority) = input.priority {
             task.priority = priority;
@@ -183,7 +183,7 @@ impl SqliteTaskStore {
             task.depends_on = depends_on;
         }
         if let Some(due_at) = input.due_at {
-            task.due_at = Some(due_at);
+            task.due_at = due_at;
         }
         if let Some(estimated_minutes) = input.estimated_minutes {
             task.estimated_minutes = estimated_minutes;

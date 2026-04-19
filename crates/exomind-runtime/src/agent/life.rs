@@ -1032,7 +1032,7 @@ mod tests {
             trigger.scope_key.clone(),
         )
         .unwrap();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
         assert!(tools.iter().any(|tool| tool.name == ADD_TASK_PROPOSAL_TOOL));
 
         let executed = execute_internal_tool_calls(
@@ -1060,7 +1060,7 @@ mod tests {
                 .0
                 .output
                 .as_deref()
-                .is_some_and(|output| output.contains("\"actionType\":\"create_task\""))
+                .is_some_and(|output| output.contains("\"actionType\":\"task.create\""))
         );
 
         let proposals = proposal_store

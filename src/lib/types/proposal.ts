@@ -1,3 +1,5 @@
+import type { TaskPriority } from './task';
+
 export type ProposalStatus =
   | 'pending'
   | 'in_review'
@@ -6,10 +8,49 @@ export type ProposalStatus =
   | 'snoozed';
 
 export type ProposalActionType =
-  | 'create_task'
+  | 'task.create'
+  | 'task.update'
   | 'append_event'
   | 'start_timeblock'
   | 'approve_agent_access';
+
+export type ProposalDependencyType = 'soft' | 'hard';
+
+export interface ProposalTaskDependency {
+  taskId: string;
+  type: ProposalDependencyType;
+}
+
+export interface TaskCreateProposalFields {
+  title: string;
+  description?: string;
+  doneCondition?: string;
+  priority?: TaskPriority;
+  tags?: string[];
+  estimatedMinutes?: number;
+  dueAt?: string;
+  dependsOn?: ProposalTaskDependency[];
+}
+
+export interface TaskCreateProposalActionParams {
+  fields: TaskCreateProposalFields;
+}
+
+export interface TaskUpdateProposalPatch {
+  title?: string;
+  description?: string | null;
+  doneCondition?: string | null;
+  priority?: TaskPriority;
+  tags?: string[];
+  estimatedMinutes?: number | null;
+  dueAt?: string | null;
+  dependsOn?: ProposalTaskDependency[];
+}
+
+export interface TaskUpdateProposalActionParams {
+  taskId: string;
+  patch: TaskUpdateProposalPatch;
+}
 
 export type ProposalReferenceType = 'event' | 'timeblock' | 'task';
 export type ProposalPublisherType = 'agent' | 'human';

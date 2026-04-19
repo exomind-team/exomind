@@ -28,10 +28,12 @@ const sampleProposal: Proposal = {
   id: 'proposal-7',
   title: '整理会议记录',
   body: '根据上午的会话记录生成任务。',
-  actionType: 'create_task',
+  actionType: 'task.create',
   actionParams: {
-    title: '整理会议记录',
-    priority: 'medium',
+    fields: {
+      title: '整理会议记录',
+      priority: 'medium',
+    },
   },
   references: sampleReferences,
   status: 'pending',
@@ -104,7 +106,14 @@ describe('ProposalRtAdapter', () => {
 
   it('lists proposals via runtime target + auth headers + user scope', async () => {
     fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify([
-      toRuntimeProposal(sampleProposal),
+      {
+        ...toRuntimeProposal(sampleProposal),
+        action_type: 'create_task',
+        action_params: {
+          title: '整理会议记录',
+          priority: 'medium',
+        },
+      },
     ]), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -112,13 +121,13 @@ describe('ProposalRtAdapter', () => {
 
     const result = await adapter.listProposals({
       status: 'pending',
-      actionType: 'create_task',
+      actionType: 'task.create',
     });
 
     expect(result).toEqual([sampleProposal]);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [input, init] = fetchImpl.mock.calls[0] ?? [];
-    expect(input).toBe('http://127.0.0.1:9124/api/proposals?status=pending&action_type=create_task&user_id=anonymous');
+    expect(input).toBe('http://127.0.0.1:9124/api/proposals?status=pending&action_type=task.create&user_id=anonymous');
     const headers = new Headers(init?.headers);
     expect(headers.get('Accept')).toBe('application/json');
     expect(headers.get('Authorization')).toBe('Bearer secret-token');
@@ -135,9 +144,11 @@ describe('ProposalRtAdapter', () => {
     const payload: CreateProposalInput = {
       title: '整理会议记录',
       body: '根据上午的会话记录生成任务。',
-      actionType: 'create_task',
+      actionType: 'task.create',
       actionParams: {
-        title: '整理会议记录',
+        fields: {
+          title: '整理会议记录',
+        },
       },
       references: sampleReferences,
       publisher: {
@@ -154,9 +165,11 @@ describe('ProposalRtAdapter', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       title: '整理会议记录',
       body: '根据上午的会话记录生成任务。',
-      action_type: 'create_task',
+      action_type: 'task.create',
       action_params: {
-        title: '整理会议记录',
+        fields: {
+          title: '整理会议记录',
+        },
       },
       references: [
         {

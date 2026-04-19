@@ -9,8 +9,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::proposal::{
-    ActionType, AppendEventParams, ApproveAgentAccessParams, Comment, CreateTaskParams, Proposal,
-    ProposalRef, ProposalStatus, Publisher, StartTimeblockParams,
+    ActionType, AppendEventParams, ApproveAgentAccessParams, Comment, CreateTaskParams,
+    LegacyCreateTaskParams, Proposal, ProposalRef, ProposalStatus, Publisher,
+    StartTimeblockParams, TaskProposalFields, UpdateTaskParams,
 };
 
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
@@ -106,8 +107,11 @@ impl ProposalStore {
     pub fn create_scoped(
         &self,
         scope_key: Option<&str>,
-        input: CreateProposalInput,
+        mut input: CreateProposalInput,
     ) -> Result<Proposal, ProposalStoreError> {
+        input.action_params = normalize_action_params(input.action_type, input.action_params)?;
+        input.references =
+            merge_action_references(input.action_type, &input.action_params, input.references)?;
         validate_title(&input.title)?;
         validate_publisher(&input.publisher)?;
         validate_action_params(input.action_type, &input.action_params)?;
@@ -272,8 +276,14 @@ impl ProposalStore {
             });
         }
 
-        validate_action_params(proposal.action_type, &action_params)?;
-        proposal.action_params = action_params;
+        let normalized_action_params = normalize_action_params(proposal.action_type, action_params)?;
+        validate_action_params(proposal.action_type, &normalized_action_params)?;
+        proposal.references = merge_action_references(
+            proposal.action_type,
+            &normalized_action_params,
+            proposal.references,
+        )?;
+        proposal.action_params = normalized_action_params;
         proposal.updated_at = Utc::now();
         self.save_scoped(normalized_scope, &proposal)?;
         Ok(proposal)
@@ -304,8 +314,15 @@ impl ProposalStore {
     pub fn save_replica_scoped(
         &self,
         scope_key: Option<&str>,
-        proposal: Proposal,
+        mut proposal: Proposal,
     ) -> Result<Proposal, ProposalStoreError> {
+        proposal.action_params = normalize_action_params(proposal.action_type, proposal.action_params)?;
+        proposal.references = merge_action_references(
+            proposal.action_type,
+            &proposal.action_params,
+            proposal.references,
+        )?;
+        validate_action_params(proposal.action_type, &proposal.action_params)?;
         let normalized_scope = normalize_scope_key(scope_key);
         match &self.backend {
             ProposalStoreBackend::Memory(state) => {
@@ -671,14 +688,27 @@ fn map_proposal_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proposal> {
     let created_at: String = row.get(10)?;
     let updated_at: String = row.get(11)?;
 
+    let parsed_action_type = parse_action_type(&action_type)?;
+    let action_params = normalize_action_params(
+        parsed_action_type,
+        serde_json::from_str::<Value>(&row.get::<_, String>(4)?)
+            .map_err(to_sqlite_conversion_error)?,
+    )
+    .map_err(to_sqlite_conversion_error)?;
+    let references = merge_action_references(
+        parsed_action_type,
+        &action_params,
+        serde_json::from_str(&references_json).map_err(to_sqlite_conversion_error)?,
+    )
+    .map_err(to_sqlite_conversion_error)?;
+
     Ok(Proposal {
         id: row.get(0)?,
         title: row.get(1)?,
         body: row.get(2)?,
-        action_type: parse_action_type(&action_type)?,
-        action_params: serde_json::from_str::<Value>(&row.get::<_, String>(4)?)
-            .map_err(to_sqlite_conversion_error)?,
-        references: serde_json::from_str(&references_json).map_err(to_sqlite_conversion_error)?,
+        action_type: parsed_action_type,
+        action_params,
+        references,
         status: parse_proposal_status(&status)?,
         publisher: serde_json::from_str(&publisher_json).map_err(to_sqlite_conversion_error)?,
         comments: serde_json::from_str(&comments_json).map_err(to_sqlite_conversion_error)?,
@@ -747,12 +777,46 @@ fn validate_action_params(
                         reason: error.to_string(),
                     }
                 })?;
-            if params.title.trim().is_empty() {
+            if params.fields.title.trim().is_empty() {
                 return Err(ProposalStoreError::InvalidActionParams {
                     action_type,
-                    reason: "title must not be empty".to_string(),
+                    reason: "fields.title must not be empty".to_string(),
                 });
             }
+            validate_task_dependency_params(action_type, params.fields.depends_on.as_deref())?;
+        }
+        ActionType::UpdateTask => {
+            let params: UpdateTaskParams =
+                serde_json::from_value(action_params.clone()).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+            if params.task_id.trim().is_empty() {
+                return Err(ProposalStoreError::InvalidActionParams {
+                    action_type,
+                    reason: "taskId must not be empty".to_string(),
+                });
+            }
+            if params.patch.is_empty() {
+                return Err(ProposalStoreError::InvalidActionParams {
+                    action_type,
+                    reason: "patch must include at least one field".to_string(),
+                });
+            }
+            if params
+                .patch
+                .title
+                .as_deref()
+                .is_some_and(|value| value.trim().is_empty())
+            {
+                return Err(ProposalStoreError::InvalidActionParams {
+                    action_type,
+                    reason: "patch.title must not be empty".to_string(),
+                });
+            }
+            validate_task_dependency_params(action_type, params.patch.depends_on.as_deref())?;
         }
         ActionType::AppendEvent => {
             let params: AppendEventParams =
@@ -794,6 +858,190 @@ fn validate_action_params(
                     reason: "agent_id and profile_id must not be empty".to_string(),
                 });
             }
+        }
+    }
+    Ok(())
+}
+
+fn normalize_action_params(
+    action_type: ActionType,
+    action_params: Value,
+) -> Result<Value, ProposalStoreError> {
+    match action_type {
+        ActionType::CreateTask => {
+            if action_params
+                .as_object()
+                .is_some_and(|value| value.contains_key("fields"))
+            {
+                let params: CreateTaskParams = serde_json::from_value(action_params).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+                return serde_json::to_value(params).map_err(ProposalStoreError::from);
+            }
+
+            let legacy: LegacyCreateTaskParams =
+                serde_json::from_value(action_params).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+            serde_json::to_value(CreateTaskParams {
+                fields: TaskProposalFields {
+                    title: legacy.title,
+                    description: legacy.description,
+                    done_condition: legacy.done_condition,
+                    tags: legacy.tags,
+                    priority: legacy.priority,
+                    estimated_minutes: legacy.estimated_minutes,
+                    due_at: legacy.due_at,
+                    depends_on: legacy.depends_on,
+                },
+            })
+            .map_err(ProposalStoreError::from)
+        }
+        ActionType::UpdateTask => {
+            let params: UpdateTaskParams =
+                serde_json::from_value(action_params).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+            serde_json::to_value(params).map_err(ProposalStoreError::from)
+        }
+        ActionType::AppendEvent => {
+            let params: AppendEventParams =
+                serde_json::from_value(action_params).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+            serde_json::to_value(params).map_err(ProposalStoreError::from)
+        }
+        ActionType::StartTimeblock => {
+            let params: StartTimeblockParams =
+                serde_json::from_value(action_params).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+            serde_json::to_value(params).map_err(ProposalStoreError::from)
+        }
+        ActionType::ApproveAgentAccess => {
+            let params: ApproveAgentAccessParams =
+                serde_json::from_value(action_params).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+            serde_json::to_value(params).map_err(ProposalStoreError::from)
+        }
+    }
+}
+
+fn merge_action_references(
+    action_type: ActionType,
+    action_params: &Value,
+    existing: Vec<ProposalRef>,
+) -> Result<Vec<ProposalRef>, ProposalStoreError> {
+    let derived = derive_action_references(action_type, action_params)?;
+    let candidates = match action_type {
+        ActionType::CreateTask | ActionType::UpdateTask => existing
+            .into_iter()
+            .filter(|reference| reference.ref_type != crate::proposal::RefType::Task)
+            .chain(derived)
+            .collect::<Vec<_>>(),
+        _ => existing.into_iter().chain(derived).collect::<Vec<_>>(),
+    };
+
+    Ok(dedup_references(candidates))
+}
+
+fn dedup_references(references: Vec<ProposalRef>) -> Vec<ProposalRef> {
+    let mut seen = std::collections::HashSet::new();
+    references
+        .into_iter()
+        .filter(|reference| {
+            seen.insert(format!("{:?}:{}", reference.ref_type, reference.id))
+        })
+        .collect()
+}
+
+fn derive_action_references(
+    action_type: ActionType,
+    action_params: &Value,
+) -> Result<Vec<ProposalRef>, ProposalStoreError> {
+    match action_type {
+        ActionType::CreateTask => {
+            let params: CreateTaskParams =
+                serde_json::from_value(action_params.clone()).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+            Ok(params
+                .fields
+                .depends_on
+                .unwrap_or_default()
+                .into_iter()
+                .map(task_reference_from_dependency)
+                .collect())
+        }
+        ActionType::UpdateTask => {
+            let params: UpdateTaskParams =
+                serde_json::from_value(action_params.clone()).map_err(|error| {
+                    ProposalStoreError::InvalidActionParams {
+                        action_type,
+                        reason: error.to_string(),
+                    }
+                })?;
+            let mut references = vec![task_reference(&params.task_id)];
+            references.extend(
+                params
+                    .patch
+                    .depends_on
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(task_reference_from_dependency),
+            );
+            Ok(references)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn task_reference(task_id: &str) -> ProposalRef {
+    ProposalRef {
+        ref_type: crate::proposal::RefType::Task,
+        id: task_id.to_string(),
+        display_text: format!("任务 {task_id}"),
+    }
+}
+
+fn task_reference_from_dependency(
+    dependency: crate::proposal::ProposalTaskDependency,
+) -> ProposalRef {
+    task_reference(&dependency.task_id)
+}
+
+fn validate_task_dependency_params(
+    action_type: ActionType,
+    dependencies: Option<&[crate::proposal::ProposalTaskDependency]>,
+) -> Result<(), ProposalStoreError> {
+    for dependency in dependencies.unwrap_or_default() {
+        if dependency.task_id.trim().is_empty() {
+            return Err(ProposalStoreError::InvalidActionParams {
+                action_type,
+                reason: "dependsOn[].taskId must not be empty".to_string(),
+            });
         }
     }
     Ok(())
@@ -849,28 +1097,19 @@ fn validate_status_transition(
 }
 
 fn action_type_to_str(value: ActionType) -> &'static str {
-    match value {
-        ActionType::CreateTask => "create_task",
-        ActionType::AppendEvent => "append_event",
-        ActionType::StartTimeblock => "start_timeblock",
-        ActionType::ApproveAgentAccess => "approve_agent_access",
-    }
+    value.canonical_name()
 }
 
 fn parse_action_type(value: &str) -> rusqlite::Result<ActionType> {
-    match value {
-        "create_task" => Ok(ActionType::CreateTask),
-        "append_event" => Ok(ActionType::AppendEvent),
-        "start_timeblock" => Ok(ActionType::StartTimeblock),
-        "approve_agent_access" => Ok(ActionType::ApproveAgentAccess),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
+    ActionType::parse_compatible(value).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
             3,
             rusqlite::types::Type::Text,
             Box::new(std::io::Error::other(format!(
-                "invalid action_type value: {other}"
+                "invalid action_type value: {value}"
             ))),
-        )),
-    }
+        )
+    })
 }
 
 fn proposal_status_to_str(value: ProposalStatus) -> &'static str {
@@ -922,7 +1161,7 @@ mod tests {
             title: title.to_string(),
             body: "reason".to_string(),
             action_type: ActionType::CreateTask,
-            action_params: serde_json::json!({ "title": title }),
+            action_params: serde_json::json!({ "fields": { "title": title } }),
             references: vec![],
             publisher: Publisher {
                 publisher_type: PublisherType::Agent,
@@ -1053,6 +1292,161 @@ mod tests {
         );
         assert!(titles.contains(&local.title.as_str()));
         assert!(titles.contains(&remote.title.as_str()));
+    }
+
+    #[test]
+    fn update_task_references_are_derived_and_refreshed_from_action_params() {
+        let store = ProposalStore::new();
+        let proposal = store
+            .create(CreateProposalInput {
+                title: "Refresh task refs".to_string(),
+                body: "reason".to_string(),
+                action_type: ActionType::UpdateTask,
+                action_params: serde_json::json!({
+                    "taskId": "task-target",
+                    "patch": {
+                        "dependsOn": [
+                            { "taskId": "task-a", "type": "hard" }
+                        ]
+                    }
+                }),
+                references: vec![crate::proposal::ProposalRef {
+                    ref_type: crate::proposal::RefType::Event,
+                    id: "evt-1".to_string(),
+                    display_text: "Event 1".to_string(),
+                }],
+                publisher: Publisher {
+                    publisher_type: PublisherType::Agent,
+                    id: "agent-test".to_string(),
+                    name: "Agent Test".to_string(),
+                },
+            })
+            .unwrap();
+
+        assert_eq!(
+            proposal
+                .references
+                .iter()
+                .map(|reference| (reference.ref_type, reference.id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (crate::proposal::RefType::Event, "evt-1"),
+                (crate::proposal::RefType::Task, "task-target"),
+                (crate::proposal::RefType::Task, "task-a"),
+            ],
+        );
+
+        let updated = store
+            .update_action_params(
+                &proposal.id,
+                serde_json::json!({
+                    "taskId": "task-target",
+                    "patch": {
+                        "dependsOn": [
+                            { "taskId": "task-b", "type": "soft" }
+                        ]
+                    }
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            updated
+                .references
+                .iter()
+                .map(|reference| (reference.ref_type, reference.id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (crate::proposal::RefType::Event, "evt-1"),
+                (crate::proposal::RefType::Task, "task-target"),
+                (crate::proposal::RefType::Task, "task-b"),
+            ],
+        );
+    }
+
+    #[test]
+    fn sqlite_rows_with_legacy_create_task_action_are_normalized_on_read() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-action-name.sqlite");
+        let connection = Connection::open(&sqlite_path).unwrap();
+        let now = Utc::now().to_rfc3339();
+        connection
+            .execute_batch(
+                "CREATE TABLE proposals (
+                    id                 TEXT PRIMARY KEY,
+                    scope_key          TEXT NOT NULL DEFAULT 'anonymous',
+                    title              TEXT NOT NULL,
+                    body               TEXT NOT NULL DEFAULT '',
+                    action_type        TEXT NOT NULL,
+                    action_params_json TEXT NOT NULL DEFAULT '{}',
+                    references_json    TEXT NOT NULL DEFAULT '[]',
+                    status             TEXT NOT NULL DEFAULT 'pending',
+                    publisher_json     TEXT NOT NULL DEFAULT '{}',
+                    comments_json      TEXT NOT NULL DEFAULT '[]',
+                    snooze_until       TEXT NULL,
+                    created_at         TEXT NOT NULL,
+                    updated_at         TEXT NOT NULL
+                );
+                CREATE INDEX idx_proposals_scope_created
+                    ON proposals(scope_key, created_at DESC, id DESC);
+                CREATE INDEX idx_proposals_scope_status
+                    ON proposals(scope_key, status);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO proposals (
+                    id, scope_key, title, body, action_type, action_params_json, references_json,
+                    status, publisher_json, comments_json, snooze_until, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?12)",
+                params![
+                    "prp-legacy-action",
+                    "profile-a",
+                    "Legacy create task",
+                    "legacy row",
+                    "create_task",
+                    r#"{"title":"Legacy task","dependsOn":[{"taskId":"task-dep","type":"hard"}]}"#,
+                    "[]",
+                    "pending",
+                    r#"{"publisher_type":"agent","id":"legacy-agent","name":"Legacy Agent"}"#,
+                    "[]",
+                    &now,
+                    &now,
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = ProposalStore::with_sqlite_path(&sqlite_path).unwrap();
+        let proposals = store
+            .list_scoped(
+                Some("profile-a"),
+                &ProposalFilter {
+                    status: Some(ProposalStatus::Pending),
+                    action_type: Some(ActionType::CreateTask),
+                },
+            )
+            .unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].action_type, ActionType::CreateTask);
+        assert_eq!(
+            proposals[0].action_params,
+            serde_json::json!({
+                "fields": {
+                    "title": "Legacy task",
+                    "dependsOn": [
+                        { "taskId": "task-dep", "type": "hard" }
+                    ]
+                }
+            }),
+        );
+        assert_eq!(
+            proposals[0]
+                .references
+                .iter()
+                .map(|reference| (reference.ref_type, reference.id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(crate::proposal::RefType::Task, "task-dep")],
+        );
     }
 
     #[test]

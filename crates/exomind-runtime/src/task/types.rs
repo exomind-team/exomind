@@ -241,18 +241,18 @@ pub struct CreateTaskInput {
 pub struct UpdateTaskInput {
     #[serde(default)]
     pub title: Option<String>,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub done_condition: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    pub description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    pub done_condition: Option<Option<String>>,
     #[serde(default)]
     pub priority: Option<TaskPriority>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub depends_on: Option<Vec<TaskDependency>>,
-    #[serde(default)]
-    pub due_at: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    pub due_at: Option<Option<u64>>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     pub estimated_minutes: Option<Option<u32>>,
     #[serde(default)]

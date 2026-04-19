@@ -14,15 +14,15 @@ export interface CreateTaskInput {
 
 export interface UpdateTaskInput {
   title?: string
-  description?: string
-  doneCondition?: string
+  description?: string | null
+  doneCondition?: string | null
   priority?: 'low' | 'medium' | 'high'
-  dueAt?: number
+  dueAt?: number | null
   source?: string
   parentId?: string
   dependsOn?: Dependency[]
   tags?: string[]
-  estimatedMinutes?: number
+  estimatedMinutes?: number | null
   timeBlockIds?: string[]
 }
 

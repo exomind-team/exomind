@@ -78,7 +78,26 @@ export class TaskPouchAdapter implements ITaskPort {
     id: string,
     input: UpdateTaskInput,
   ): Promise<TaskNode | null> {
-    const result = await this.storage.updateTask(id, input);
+    const normalizedUpdates: Partial<TaskNode> = {
+      ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description ?? undefined }
+        : {}),
+      ...(input.doneCondition !== undefined
+        ? { doneCondition: input.doneCondition ?? undefined }
+        : {}),
+      ...(input.priority !== undefined ? { priority: input.priority } : {}),
+      ...(input.dueAt !== undefined ? { dueAt: input.dueAt ?? undefined } : {}),
+      ...(input.source !== undefined ? { source: input.source } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(input.dependsOn !== undefined ? { dependsOn: input.dependsOn } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      ...(input.estimatedMinutes !== undefined
+        ? { estimatedMinutes: input.estimatedMinutes ?? undefined }
+        : {}),
+      ...(input.timeBlockIds !== undefined ? { timeBlockIds: input.timeBlockIds } : {}),
+    };
+    const result = await this.storage.updateTask(id, normalizedUpdates);
     return result ?? null;
   }
 

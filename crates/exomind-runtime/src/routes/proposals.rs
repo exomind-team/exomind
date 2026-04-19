@@ -24,6 +24,12 @@ async fn publish_execution_outcome_signals(
             crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
                 .await;
         }
+        ExecutionOutcome::TaskUpdated { task, event } => {
+            crate::routes::tasks::publish_task_signal(state, "task.updated", task);
+            crate::routes::tasks::publish_task_replication_signal(state, scope_key, task);
+            crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
+                .await;
+        }
         ExecutionOutcome::EventAppended { event } => {
             crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
                 .await;
@@ -618,12 +624,22 @@ mod tests {
         let created: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(created["title"], "整理会议记录");
         assert_eq!(created["status"], "pending");
+        assert_eq!(created["action_type"], "task.create");
+        assert_eq!(
+            created["action_params"],
+            serde_json::json!({
+                "fields": {
+                    "title": "整理会议记录",
+                    "tags": ["work"]
+                }
+            }),
+        );
 
         let list_response = app
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/proposals?status=pending&action_type=create_task")
+                    .uri("/api/proposals?status=pending&action_type=task.create")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -640,6 +656,7 @@ mod tests {
         let proposals: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0]["id"], created["id"]);
+        assert_eq!(proposals[0]["action_type"], "task.create");
         assert_eq!(proposals[0]["references"][0]["id"], "evt-1");
 
         let get_response = app
@@ -673,8 +690,8 @@ mod tests {
                         r#"{
                             "title":"建议：整理今日会议记录",
                             "body":"检测到今天有会议记录待整理",
-                            "action_type":"create_task",
-                            "action_params":{"title":"整理会议记录","tags":["工作"],"priority":"high"},
+                            "action_type":"task.create",
+                            "action_params":{"fields":{"title":"整理会议记录","tags":["工作"],"priority":"high"}},
                             "publisher":{"publisher_type":"agent","id":"test-agent","name":"测试 Agent"}
                         }"#,
                     ))

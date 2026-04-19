@@ -1,23 +1,29 @@
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use thiserror::Error;
 
 use super::broker::{ToolCall, ToolDef};
 use crate::proposal::{
-    ActionType, CreateProposalInput, ProposalStore, ProposalStoreError, Publisher,
+    ActionType, CreateProposalInput, CreateTaskParams, ProposalStore, ProposalStoreError,
+    ProposalTaskDependency, Publisher, TaskProposalFields, UpdateTaskParams, UpdateTaskPatch,
 };
 use crate::task::TaskPriority;
 
 pub const ADD_TASK_PROPOSAL_TOOL: &str = "add_task_proposal";
+pub const UPDATE_TASK_PROPOSAL_TOOL: &str = "update_task_proposal";
 pub const ADD_TIMEBLOCK_PROPOSAL_TOOL: &str = "add_timeblock_proposal";
 pub const ADD_EVENT_PROPOSAL_TOOL: &str = "add_event_proposal";
 
 pub fn is_proposal_tool_name(name: &str) -> bool {
     matches!(
         name,
-        ADD_TASK_PROPOSAL_TOOL | ADD_TIMEBLOCK_PROPOSAL_TOOL | ADD_EVENT_PROPOSAL_TOOL
+        ADD_TASK_PROPOSAL_TOOL
+            | UPDATE_TASK_PROPOSAL_TOOL
+            | ADD_TIMEBLOCK_PROPOSAL_TOOL
+            | ADD_EVENT_PROPOSAL_TOOL
     )
 }
 
@@ -42,9 +48,26 @@ struct AddTaskProposalInput {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
+    done_condition: Option<String>,
+    #[serde(default)]
     tags: Option<Vec<String>>,
     #[serde(default)]
     priority: Option<TaskPriority>,
+    #[serde(default)]
+    estimated_minutes: Option<u32>,
+    #[serde(default)]
+    due_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    depends_on: Option<Vec<ProposalTaskDependency>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateTaskProposalInput {
+    title: String,
+    body: String,
+    task_id: String,
+    patch: UpdateTaskPatch,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +111,7 @@ pub fn proposal_tool_defs() -> Vec<ToolDef> {
                     "body": { "type": "string" },
                     "taskTitle": { "type": "string" },
                     "description": { "type": "string" },
+                    "doneCondition": { "type": "string" },
                     "tags": {
                         "type": "array",
                         "items": { "type": "string" }
@@ -95,9 +119,87 @@ pub fn proposal_tool_defs() -> Vec<ToolDef> {
                     "priority": {
                         "type": "string",
                         "enum": ["low", "medium", "high"]
+                    },
+                    "estimatedMinutes": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "dueAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "dependsOn": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "taskId": { "type": "string" },
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["soft", "hard"]
+                                }
+                            },
+                            "required": ["taskId", "type"],
+                            "additionalProperties": false
+                        }
                     }
                 },
                 "required": ["title", "body", "taskTitle"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: UPDATE_TASK_PROPOSAL_TOOL.to_string(),
+            description: "添加一个任务修改提案草案。适用于补充依赖、润色描述、调整估时和截止时间。"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "body": { "type": "string" },
+                    "taskId": { "type": "string" },
+                    "patch": {
+                        "type": "object",
+                        "properties": {
+                            "title": { "type": "string" },
+                            "description": { "type": ["string", "null"] },
+                            "doneCondition": { "type": ["string", "null"] },
+                            "priority": {
+                                "type": "string",
+                                "enum": ["low", "medium", "high"]
+                            },
+                            "tags": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "estimatedMinutes": {
+                                "type": ["integer", "null"],
+                                "minimum": 1
+                            },
+                            "dueAt": {
+                                "type": ["string", "null"],
+                                "format": "date-time"
+                            },
+                            "dependsOn": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "taskId": { "type": "string" },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": ["soft", "hard"]
+                                        }
+                                    },
+                                    "required": ["taskId", "type"],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["title", "body", "taskId", "patch"],
                 "additionalProperties": false
             }),
         },
@@ -181,18 +283,36 @@ fn create_input_from_tool_call(
             let title = required_text("title", input.title)?;
             let body = required_text("body", input.body)?;
             let task_title = required_text("taskTitle", input.task_title)?;
-            let description = optional_text(input.description);
-            let tags = normalize_string_list(input.tags);
             Ok(CreateProposalInput {
                 title,
                 body,
                 action_type: ActionType::CreateTask,
-                action_params: json!({
-                    "title": task_title,
-                    "description": description,
-                    "tags": tags,
-                    "priority": input.priority,
-                }),
+                action_params: serde_json::to_value(CreateTaskParams {
+                    fields: TaskProposalFields {
+                        title: task_title,
+                        description: optional_text(input.description),
+                        done_condition: optional_text(input.done_condition),
+                        tags: normalize_string_list(input.tags),
+                        priority: input.priority,
+                        estimated_minutes: input.estimated_minutes,
+                        due_at: input.due_at,
+                        depends_on: normalize_dependencies(input.depends_on)?,
+                    },
+                })?,
+                references: vec![],
+                publisher,
+            })
+        }
+        UPDATE_TASK_PROPOSAL_TOOL => {
+            let input: UpdateTaskProposalInput = serde_json::from_value(tool_call.input.clone())?;
+            Ok(CreateProposalInput {
+                title: required_text("title", input.title)?,
+                body: required_text("body", input.body)?,
+                action_type: ActionType::UpdateTask,
+                action_params: serde_json::to_value(UpdateTaskParams {
+                    task_id: required_text("taskId", input.task_id)?,
+                    patch: normalize_update_patch(input.patch)?,
+                })?,
                 references: vec![],
                 publisher,
             })
@@ -242,12 +362,7 @@ fn create_input_from_tool_call(
 }
 
 fn action_type_name(action_type: ActionType) -> &'static str {
-    match action_type {
-        ActionType::CreateTask => "create_task",
-        ActionType::AppendEvent => "append_event",
-        ActionType::StartTimeblock => "start_timeblock",
-        ActionType::ApproveAgentAccess => "approve_agent_access",
-    }
+    action_type.canonical_name()
 }
 
 fn required_text(field: &str, value: String) -> Result<String, ProposalToolError> {
@@ -291,6 +406,71 @@ fn normalize_string_list(values: Option<Vec<String>>) -> Option<Vec<String>> {
     }
 }
 
+fn normalize_dependencies(
+    values: Option<Vec<ProposalTaskDependency>>,
+) -> Result<Option<Vec<ProposalTaskDependency>>, ProposalToolError> {
+    let Some(values) = values else {
+        return Ok(None);
+    };
+
+    let normalized = values
+        .into_iter()
+        .map(|dependency| {
+            let task_id = dependency.task_id.trim().to_string();
+            if task_id.is_empty() {
+                return Err(ProposalToolError::InvalidInput(
+                    "dependsOn[].taskId must not be empty".to_string(),
+                ));
+            }
+            Ok(ProposalTaskDependency {
+                task_id,
+                relation_type: dependency.relation_type,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(normalized))
+}
+
+fn normalize_update_patch(patch: UpdateTaskPatch) -> Result<UpdateTaskPatch, ProposalToolError> {
+    let normalized_title = patch
+        .title
+        .map(|value| required_text("patch.title", value))
+        .transpose()?;
+    let normalized_description = match patch.description {
+        Some(Some(value)) => Some(optional_text(Some(value))),
+        Some(None) => Some(None),
+        None => None,
+    };
+    let normalized_done_condition = match patch.done_condition {
+        Some(Some(value)) => Some(optional_text(Some(value))),
+        Some(None) => Some(None),
+        None => None,
+    };
+
+    Ok(UpdateTaskPatch {
+        title: normalized_title,
+        description: normalized_description,
+        done_condition: normalized_done_condition,
+        priority: patch.priority,
+        tags: patch.tags.map(|values| {
+            values
+                .into_iter()
+                .filter_map(|item| {
+                    let trimmed = item.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                })
+                .collect()
+        }),
+        estimated_minutes: patch.estimated_minutes,
+        due_at: patch.due_at,
+        depends_on: normalize_dependencies(patch.depends_on)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -301,7 +481,7 @@ mod tests {
 
     use super::{
         ADD_EVENT_PROPOSAL_TOOL, ADD_TASK_PROPOSAL_TOOL, ADD_TIMEBLOCK_PROPOSAL_TOOL,
-        execute_proposal_tool_call, proposal_tool_defs,
+        UPDATE_TASK_PROPOSAL_TOOL, execute_proposal_tool_call, proposal_tool_defs,
     };
 
     fn test_publisher() -> Publisher {
@@ -336,7 +516,7 @@ mod tests {
         .unwrap();
 
         let parsed: Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(parsed["actionType"], "create_task");
+        assert_eq!(parsed["actionType"], "task.create");
 
         let proposals = store
             .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
@@ -347,6 +527,70 @@ mod tests {
             crate::proposal::ActionType::CreateTask
         );
         assert_eq!(proposals[0].status, ProposalStatus::Pending);
+        assert_eq!(
+            proposals[0].action_params,
+            json!({
+                "fields": {
+                    "title": "验收任务依赖图新布局",
+                    "description": "验证 task-dag 新布局",
+                    "tags": ["task-dag", "acceptance"],
+                    "priority": "high"
+                }
+            }),
+        );
+    }
+
+    #[tokio::test]
+    async fn executes_update_task_proposal_tool_and_persists_pending_proposal() {
+        let store = Arc::new(crate::proposal::ProposalStore::new());
+        let output = execute_proposal_tool_call(
+            Arc::clone(&store),
+            Some("profile-alpha".to_string()),
+            test_publisher(),
+            &ToolCall {
+                id: "call-update-1".to_string(),
+                name: UPDATE_TASK_PROPOSAL_TOOL.to_string(),
+                input: json!({
+                    "title": "更新任务提案",
+                    "body": "补充依赖与截止时间",
+                    "taskId": "task-123",
+                    "patch": {
+                        "description": "补充更清晰的执行说明",
+                        "estimatedMinutes": 90,
+                        "dependsOn": [
+                            { "taskId": "task-456", "type": "soft" }
+                        ]
+                    }
+                }),
+            },
+        )
+        .await
+        .unwrap();
+
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["actionType"], "task.update");
+
+        let proposals = store
+            .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
+            .unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(
+            proposals[0].action_type,
+            crate::proposal::ActionType::UpdateTask
+        );
+        assert_eq!(
+            proposals[0].action_params,
+            json!({
+                "taskId": "task-123",
+                "patch": {
+                    "description": "补充更清晰的执行说明",
+                    "estimatedMinutes": 90,
+                    "dependsOn": [
+                        { "taskId": "task-456", "type": "soft" }
+                    ]
+                }
+            }),
+        );
     }
 
     #[tokio::test]
@@ -398,12 +642,13 @@ mod tests {
     }
 
     #[test]
-    fn proposal_tool_defs_expose_all_three_tools() {
+    fn proposal_tool_defs_expose_all_four_tools() {
         let names = proposal_tool_defs()
             .into_iter()
             .map(|tool| tool.name)
             .collect::<Vec<_>>();
         assert!(names.contains(&ADD_TASK_PROPOSAL_TOOL.to_string()));
+        assert!(names.contains(&UPDATE_TASK_PROPOSAL_TOOL.to_string()));
         assert!(names.contains(&ADD_TIMEBLOCK_PROPOSAL_TOOL.to_string()));
         assert!(names.contains(&ADD_EVENT_PROPOSAL_TOOL.to_string()));
     }

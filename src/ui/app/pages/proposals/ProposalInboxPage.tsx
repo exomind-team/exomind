@@ -1,6 +1,5 @@
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
 import {
@@ -11,6 +10,7 @@ import {
   ProposalRtError,
   getProposalRtAdapter,
 } from '@/lib/adapters/proposal-rt-adapter';
+import { getTaskService } from '@/lib/services/task.service';
 import { subscribeProposalDataChanges } from '@/lib/services/proposal-data-change.service';
 import { subscribeProposalLifecycle } from '@/lib/services/proposal-lifecycle.service';
 import type {
@@ -18,7 +18,10 @@ import type {
   ProposalPublisher,
   ProposalReference,
   ProposalStatus,
+  TaskCreateProposalActionParams,
+  TaskUpdateProposalActionParams,
 } from '@/lib/types/proposal';
+import type { TaskNode } from '@/lib/types/task';
 import { cn } from '@/lib/utils';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { TaskDomainTabs } from '@/ui/app/components/TaskDomainTabs';
@@ -39,12 +42,14 @@ import {
   formatProposalAbsoluteTime,
   formatProposalRelativeTime,
   normalizeProposalActionParams,
+  validateProposalActionParams,
   resolveProposalActionLabel,
   resolveProposalReferenceLabel,
   resolveProposalStatusMeta,
   sortProposals,
   tryParseProposalActionParams,
 } from './proposal-inbox-utils';
+import { ProposalTaskActionEditor } from './ProposalTaskActionEditor';
 
 type ProposalFilterKey = 'all' | ProposalStatus;
 
@@ -87,6 +92,14 @@ const DEFAULT_COMMENT_AUTHOR: ProposalPublisher = {
   publisherType: 'human',
   id: 'ui-reviewer',
   name: 'UI Reviewer',
+};
+
+const TASK_STATUS_LABELS: Record<TaskNode['status'], string> = {
+  pending: '待开始',
+  in_progress: '进行中',
+  suspended: '已暂停',
+  completed: '已完成',
+  cancelled: '已取消',
 };
 
 type ProposalToastOptions = Parameters<typeof toast>[0];
@@ -283,6 +296,7 @@ function ProposalReferenceAction({
 export function ProposalInboxPage() {
   const isDesktop = useIsDesktop();
   const adapter = getProposalRtAdapter();
+  const taskService = useMemo(() => getTaskService(), []);
   const approvalFeedbackTimerIdsRef = useRef(new Map<string, number>());
   const proposalsRef = useRef<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -295,9 +309,21 @@ export function ProposalInboxPage() {
   const [submittingKey, setSubmittingKey] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [endpointMissing, setEndpointMissing] = useState(false);
+  const [taskLookup, setTaskLookup] = useState<Map<string, TaskNode>>(new Map());
+  const [draftResetToken, setDraftResetToken] = useState(0);
 
-  const loadProposals = useCallback(async (options?: { silent?: boolean }) => {
+  const loadTaskLookup = useCallback(async () => {
+    try {
+      const tasks = await taskService.listTasks(true);
+      setTaskLookup(new Map(tasks.map((task) => [task.id, task])));
+    } catch (error) {
+      console.warn('[proposal-inbox] failed to load task lookup', error);
+    }
+  }, [taskService]);
+
+  const loadProposals = useCallback(async (options?: { silent?: boolean; resetDraft?: boolean }) => {
     const silent = options?.silent === true;
+    const resetDraft = options?.resetDraft === true;
     if (silent) {
       setRefreshing(true);
     } else {
@@ -311,6 +337,9 @@ export function ProposalInboxPage() {
       setSelectedProposalId((current) => resolveSelection(next, current));
       setErrorMessage(null);
       setEndpointMissing(false);
+      if (resetDraft) {
+        setDraftResetToken((current) => current + 1);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '提案箱加载失败';
       const missingEndpoint = error instanceof ProposalRtError && error.status === 404;
@@ -362,6 +391,13 @@ export function ProposalInboxPage() {
       window.clearInterval(intervalId);
     };
   }, [loadProposals]);
+
+  useEffect(() => {
+    void loadTaskLookup();
+    return taskService.onTaskChange(() => {
+      void loadTaskLookup();
+    });
+  }, [loadTaskLookup, taskService]);
 
   useEffect(() => {
     const unsubscribe = subscribeProposalLifecycle((event) => {
@@ -449,37 +485,58 @@ export function ProposalInboxPage() {
 
     setActionParamsText(normalizeProposalActionParams(selectedProposal.actionParams));
     setCommentDraft('');
-  }, [selectedProposal?.id, selectedProposal?.updatedAt]);
+  }, [draftResetToken, selectedProposal?.id, selectedProposal?.updatedAt]);
 
   const parsedActionParams = useMemo(
     () => tryParseProposalActionParams(actionParamsText),
     [actionParamsText],
   );
 
-  const normalizedSelectedActionParams = selectedProposal
-    ? normalizeProposalActionParams(selectedProposal.actionParams)
-    : '{}';
+  const selectedActionParamsValidation = useMemo(() => {
+    if (!selectedProposal) {
+      return null;
+    }
+    return validateProposalActionParams(
+      selectedProposal.actionType,
+      selectedProposal.actionParams,
+    );
+  }, [selectedProposal]);
+
+  const draftActionParamsValidation = useMemo(() => {
+    if (!selectedProposal || parsedActionParams.error || !parsedActionParams.parsed) {
+      return null;
+    }
+    return validateProposalActionParams(
+      selectedProposal.actionType,
+      parsedActionParams.parsed,
+    );
+  }, [parsedActionParams.error, parsedActionParams.parsed, selectedProposal]);
+
+  const normalizedSelectedActionParams = selectedActionParamsValidation?.normalized
+    ? normalizeProposalActionParams(selectedActionParamsValidation.normalized)
+    : selectedProposal
+      ? normalizeProposalActionParams(selectedProposal.actionParams)
+      : '{}';
+
+  const actionParamsError = parsedActionParams.error
+    ?? draftActionParamsValidation?.error
+    ?? null;
 
   const actionParamsDirty = selectedProposal
-    ? parsedActionParams.error === null
-      ? normalizeProposalActionParams(parsedActionParams.parsed) !== normalizedSelectedActionParams
+    ? actionParamsError === null && draftActionParamsValidation?.normalized
+      ? normalizeProposalActionParams(draftActionParamsValidation.normalized) !== normalizedSelectedActionParams
       : actionParamsText.trim() !== normalizedSelectedActionParams.trim()
     : false;
 
-  const editableTaskTitle = useMemo(() => {
-    if (!selectedProposal || parsedActionParams.error || !parsedActionParams.parsed) {
-      return '';
-    }
-    const title = parsedActionParams.parsed.title;
-    return typeof title === 'string' ? title : '';
-  }, [parsedActionParams.error, parsedActionParams.parsed, selectedProposal]);
+  const taskCreateParams = draftActionParamsValidation?.taskCreateParams ?? null;
+  const taskUpdateParams = draftActionParamsValidation?.taskUpdateParams ?? null;
 
-  const updateEditableTaskTitle = (nextTitle: string) => {
-    const base = parsedActionParams.parsed ?? {};
-    setActionParamsText(normalizeProposalActionParams({
-      ...base,
-      title: nextTitle,
-    }));
+  const updateStructuredTaskCreate = (next: TaskCreateProposalActionParams) => {
+    setActionParamsText(normalizeProposalActionParams(next));
+  };
+
+  const updateStructuredTaskUpdate = (next: TaskUpdateProposalActionParams) => {
+    setActionParamsText(normalizeProposalActionParams(next));
   };
 
   const scheduleApproveSuccessToast = useCallback((proposal: Proposal) => {
@@ -552,12 +609,12 @@ export function ProposalInboxPage() {
   };
 
   const saveDraft = async () => {
-    if (!selectedProposal || !selectedProposalActionable || parsedActionParams.error || !parsedActionParams.parsed) {
+    if (!selectedProposal || !selectedProposalActionable || actionParamsError || !draftActionParamsValidation?.normalized) {
       toast({
         title: '保存草稿失败',
         description: !selectedProposalActionable
           ? '已处理提案为只读，不能再修改参数'
-          : parsedActionParams.error ?? '未选中提案',
+          : actionParamsError ?? '未选中提案',
         variant: 'destructive',
       });
       return;
@@ -566,7 +623,7 @@ export function ProposalInboxPage() {
     await mutateSelectedProposal(
       'save',
       () => adapter.updateProposal(selectedProposal.id, {
-        actionParams: parsedActionParams.parsed ?? {},
+        actionParams: draftActionParamsValidation.normalized ?? {},
       }),
       { title: '已保存提案参数' },
       '保存草稿失败',
@@ -574,10 +631,10 @@ export function ProposalInboxPage() {
   };
 
   const approveProposal = async () => {
-    if (!selectedProposal || parsedActionParams.error || !parsedActionParams.parsed) {
+    if (!selectedProposal || actionParamsError || !draftActionParamsValidation?.normalized) {
       toast({
         title: '批准失败',
-        description: parsedActionParams.error ?? '未选中提案',
+        description: actionParamsError ?? '未选中提案',
         variant: 'destructive',
       });
       return;
@@ -590,7 +647,7 @@ export function ProposalInboxPage() {
       async () => {
         const updated = actionParamsDirty
           ? await adapter.updateProposal(selectedProposal.id, {
-            actionParams: parsedActionParams.parsed ?? {},
+            actionParams: draftActionParamsValidation.normalized ?? {},
           })
           : selectedProposal;
 
@@ -693,7 +750,7 @@ export function ProposalInboxPage() {
           variant="outline"
           size="sm"
           onClick={() => {
-            void loadProposals({ silent: true });
+            void loadProposals({ silent: true, resetDraft: true });
           }}
           disabled={loading || refreshing}
           className="gap-2 rounded-full"
@@ -860,7 +917,7 @@ export function ProposalInboxPage() {
                           onClick={() => {
                             void saveDraft();
                           }}
-                          disabled={submittingKey !== null || !selectedProposalActionable || !actionParamsDirty || parsedActionParams.error !== null}
+                          disabled={submittingKey !== null || !selectedProposalActionable || !actionParamsDirty || actionParamsError !== null}
                           className="rounded-full"
                         >
                           <ShieldCheck size={14} />
@@ -932,6 +989,13 @@ export function ProposalInboxPage() {
                                   {reference.displayText}
                                 </p>
                                 <p className="mt-1 text-xs text-[#A8A29E]">{reference.id}</p>
+                                {reference.refType === 'task' && taskLookup.get(reference.id) ? (
+                                  <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                                    {taskLookup.get(reference.id)?.title}
+                                    {' · '}
+                                    {TASK_STATUS_LABELS[taskLookup.get(reference.id)?.status ?? 'pending']}
+                                  </p>
+                                ) : null}
                               </div>
                               <ProposalReferenceAction reference={reference} />
                             </div>
@@ -943,24 +1007,22 @@ export function ProposalInboxPage() {
 
                   <section className="rounded-3xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">
                     <h3 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">执行参数</h3>
-                    <p className="mt-2 text-sm text-[#78716C] dark:text-[#A8A29E]">
-                      首版统一用 JSON 编辑。若是 `create_task`，可以直接改任务标题，再决定是否批准。
-                    </p>
-
-                    {selectedProposal.actionType === 'create_task' ? (
-                      <div className="mt-4 space-y-2">
-                        <label className="block text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">
-                          任务标题
-                        </label>
-                        <Input
-                          value={editableTaskTitle}
-                          onChange={(event) => updateEditableTaskTitle(event.target.value)}
-                          placeholder="任务标题"
-                          disabled={!selectedProposalActionable}
-                          className="rounded-2xl"
-                        />
-                      </div>
-                    ) : null}
+                    {selectedProposal.actionType === 'task.create' || selectedProposal.actionType === 'task.update' ? (
+                      <ProposalTaskActionEditor
+                        actionType={selectedProposal.actionType}
+                        disabled={!selectedProposalActionable}
+                        validationError={actionParamsError}
+                        taskCreateParams={taskCreateParams}
+                        taskUpdateParams={taskUpdateParams}
+                        taskLookup={taskLookup}
+                        onChangeTaskCreate={updateStructuredTaskCreate}
+                        onChangeTaskUpdate={updateStructuredTaskUpdate}
+                      />
+                    ) : (
+                      <p className="mt-2 text-sm text-[#78716C] dark:text-[#A8A29E]">
+                        非 task proposal 仍使用 JSON 编辑；task proposal 已升级为结构化字段 + JSON 双向同步。
+                      </p>
+                    )}
 
                     <div className="mt-4 space-y-2">
                       <label className="block text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">
@@ -973,9 +1035,9 @@ export function ProposalInboxPage() {
                         disabled={!selectedProposalActionable}
                         className="font-mono text-xs"
                       />
-                      {parsedActionParams.error ? (
+                      {actionParamsError ? (
                         <p className="text-xs text-[#B91C1C] dark:text-[#FCA5A5]">
-                          JSON 无效：{parsedActionParams.error}
+                          参数无效：{actionParamsError}
                         </p>
                       ) : (
                         <p className="text-xs text-[#A8A29E]">

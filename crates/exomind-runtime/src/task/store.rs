@@ -816,10 +816,10 @@ impl TaskStore {
                 task.title = title;
             }
             if let Some(description) = input.description {
-                task.description = Some(description);
+                task.description = description;
             }
             if let Some(done_condition) = input.done_condition {
-                task.done_condition = Some(done_condition);
+                task.done_condition = done_condition;
             }
             if let Some(priority) = input.priority {
                 task.priority = priority;
@@ -831,7 +831,7 @@ impl TaskStore {
                 task.depends_on = depends_on;
             }
             if let Some(due_at) = input.due_at {
-                task.due_at = Some(due_at);
+                task.due_at = due_at;
             }
             if let Some(estimated_minutes) = input.estimated_minutes {
                 task.estimated_minutes = estimated_minutes;
@@ -1357,7 +1357,7 @@ mod tests {
                     due_at: None,
                     estimated_minutes: None,
                     parent_id: None,
-                    done_condition: Some("ship RT sqlite".to_string()),
+                    done_condition: Some(Some("ship RT sqlite".to_string())),
                     depends_on: Some(vec![TaskDependency {
                         task_id: "dep-1".to_string(),
                         relation_type: TaskDependencyType::Hard,
@@ -1689,7 +1689,7 @@ mod tests {
                 &task.id,
                 UpdateTaskInput {
                     title: Some("Updated".to_string()),
-                    description: Some("A description".to_string()),
+                    description: Some(Some("A description".to_string())),
                     done_condition: None,
                     priority: Some(TaskPriority::High),
                     tags: Some(vec!["urgent".to_string()]),
@@ -1742,7 +1742,7 @@ mod tests {
             &task.id,
             UpdateTaskInput {
                 title: None,
-                description: Some("Still editable".to_string()),
+                description: Some(Some("Still editable".to_string())),
                 done_condition: None,
                 priority: None,
                 tags: None,
@@ -2015,7 +2015,7 @@ mod tests {
             &task.id,
             UpdateTaskInput {
                 title: None,
-                description: Some("Still editable".to_string()),
+                description: Some(Some("Still editable".to_string())),
                 done_condition: None,
                 priority: None,
                 tags: None,
