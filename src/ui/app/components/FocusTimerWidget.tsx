@@ -1,6 +1,7 @@
 import {
   forwardRef,
   type KeyboardEvent,
+  type MouseEventHandler,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -82,6 +83,9 @@ interface FocusTimerWidgetProps {
     statusLabel: string;
     onCollapse: () => void;
     onReturnToMain: () => void;
+    onSurfaceMount?: (node: HTMLDivElement | null) => void;
+    onSurfaceMouseDownCapture?: MouseEventHandler<HTMLDivElement>;
+    surfacePressed?: boolean;
   };
   prestartSelectedTaskIds?: string[];
   onPrestartSelectedTaskIdsChange?: (taskIds: string[]) => void;
@@ -1004,7 +1008,7 @@ export const FocusTimerWidget = forwardRef<
   const baseStageHeightClass = useAutoHeightConfigLayout
     ? "min-h-[200px] pb-4 pt-4"
     : hasIntegratedOverlayChrome
-      ? "h-[222px]"
+      ? "h-[192px]"
       : "h-[200px]";
   const baseGlowHeightClass = useAutoHeightConfigLayout
     ? "bottom-4"
@@ -1019,7 +1023,9 @@ export const FocusTimerWidget = forwardRef<
   const runningStageHeightClass = useAutoHeightRunningLayout
     ? useAutoHeightConfigLayout
       ? "min-h-[200px] pb-4 pt-4"
-      : "min-h-[276px] pb-4 pt-4"
+      : hasIntegratedOverlayChrome
+        ? "min-h-[246px]"
+        : "min-h-[276px] pb-4 pt-4"
     : hasRunningLinkedTasks
       ? hasIntegratedOverlayChrome
         ? "h-[276px]"
@@ -1041,6 +1047,13 @@ export const FocusTimerWidget = forwardRef<
         ? "h-[246px]"
         : "h-[221px]"
       : baseCardHeightClass;
+  const showOverlaySurfaceBackdropGlow = !hasIntegratedOverlayChrome;
+  const runningCardLayoutClass = useAutoHeightRunningLayout
+    ? (hasIntegratedOverlayChrome ? "relative w-full" : "relative mx-4")
+    : (hasIntegratedOverlayChrome ? "absolute inset-x-0 top-0" : "absolute left-4 right-4 top-4");
+  const overlaySurfacePressedClass = overlayChrome?.surfacePressed
+    ? "ring-1 ring-inset ring-[#FDE4DE]/60"
+    : "";
 
   return (
     <div
@@ -1272,21 +1285,26 @@ export const FocusTimerWidget = forwardRef<
           <div
             className={`relative mx-auto w-full max-w-[390px] ${runningStageHeightClass}`}
           >
+            {showOverlaySurfaceBackdropGlow ? (
+              <div
+                className={`absolute left-1/2 top-[20px] ${runningGlowHeightClass} w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] blur-[8px] ${
+                  isOverlaySurface
+                    ? "bg-[rgba(12,10,9,0.24)]"
+                    : "bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14]"
+                }`}
+                aria-hidden
+              />
+            ) : null}
             <div
-              className={`absolute left-1/2 top-[20px] ${runningGlowHeightClass} w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] blur-[8px] ${
-                isOverlaySurface
-                  ? "bg-[rgba(12,10,9,0.24)]"
-                  : "bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14]"
-              }`}
-              aria-hidden
-            />
-            <div
+              ref={overlayChrome?.onSurfaceMount}
               data-testid="new-focus-running-task-card"
-              className={`${useAutoHeightRunningLayout ? "relative mx-4" : "absolute left-4 right-4 top-4"} flex ${runningCardHeightClass} flex-col gap-3 rounded-[24px] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()} ${
+              data-overlay-visible-surface={hasIntegratedOverlayChrome ? "true" : undefined}
+              onMouseDownCapture={overlayChrome?.onSurfaceMouseDownCapture}
+              className={`${runningCardLayoutClass} flex ${runningCardHeightClass} flex-col gap-3 rounded-[24px] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()} ${
                 isOverlaySurface
                   ? "border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9]"
                   : "border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:border-[#FFFFFF15] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)]"
-              }`}
+              } ${overlaySurfacePressedClass}`}
             >
               {overlayChrome ? (
                 <div

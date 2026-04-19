@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -19,7 +19,6 @@ import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-ov
 import type { ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
-import { useRef } from 'react';
 import { log } from '@/lib/logger';
 
 interface NowWorkbenchOverlayPageProps {
@@ -60,25 +59,18 @@ interface NowWorkbenchOverlayPageContentProps {
 }
 
 const NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE = { width: 412, height: 490 };
-const NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE = { width: 464, height: 470 };
+const NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE = { width: 390, height: 192 };
 const NOW_WORKBENCH_OVERLAY_MINI_SIZE = { width: 248, height: 120 };
 const NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE = { width: 352, height: 200 };
 const NOW_WORKBENCH_OVERLAY_IDLE_COLLAPSED_SIZE = { width: 276, height: 156 };
 const NOW_WORKBENCH_OVERLAY_IDLE_EXPANDED_SIZE = { width: 428, height: 360 };
-const NOW_WORKBENCH_OVERLAY_SINGLE_CARD_ROOT_PADDING_Y = 24;
+const ACTIVE_VISIBLE_SURFACE_CLASS = 'ring-1 ring-inset ring-[#FDE4DE]/60';
+const VISIBLE_SURFACE_DRAG_GLOW_IDLE_MS = 180;
 
-function resolveRunningSingleCardOverlaySize(measuredShellHeight: number | null): { width: number; height: number } {
-  if (!measuredShellHeight || !Number.isFinite(measuredShellHeight)) {
-    return NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE;
-  }
-
-  return {
-    width: NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE.width,
-    height: Math.max(
-      NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE.height,
-      Math.ceil(measuredShellHeight + NOW_WORKBENCH_OVERLAY_SINGLE_CARD_ROOT_PADDING_Y),
-    ),
-  };
+interface VisibleSurfaceMeasurement {
+  key: string;
+  width: number;
+  height: number;
 }
 
 function formatEventTime(timestamp: number): string {
@@ -355,14 +347,18 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   } = props;
   const now = Date.now();
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
-  const singleCardShellRef = useRef<HTMLDivElement | null>(null);
   const recentEventsRef = useRef<HTMLElement | null>(null);
   const [isMiniCollapsed, setIsMiniCollapsed] = useState(false);
   const [isMiniHovered, setIsMiniHovered] = useState(false);
   const [isIdleHovered, setIsIdleHovered] = useState(false);
   const [isIdleInputFocused, setIsIdleInputFocused] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const [runningSingleCardShellHeight, setRunningSingleCardShellHeight] = useState<number | null>(null);
+  const [visibleSurfaceElement, setVisibleSurfaceElement] = useState<HTMLElement | null>(null);
+  const [visibleSurfaceMeasurement, setVisibleSurfaceMeasurement] = useState<VisibleSurfaceMeasurement | null>(null);
+  const [isVisibleSurfacePressed, setIsVisibleSurfacePressed] = useState(false);
+  const [isVisibleSurfaceDragging, setIsVisibleSurfaceDragging] = useState(false);
+  const visibleSurfaceDragPendingRef = useRef(false);
+  const visibleSurfaceDragGlowTimeoutRef = useRef<number | null>(null);
   const {
     canSubmitFeedback,
     handleFeedbackKeyDown,
@@ -372,37 +368,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     skipFeedbackConfirmState,
     skipFeedbackCountdownSec,
   } = useFeedbackSubmitControls({ submitMode: 'ctrl-enter-only' });
-
-  useEffect(() => {
-    if (!isTauri()) {
-      return;
-    }
-
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-
-    void getCurrentWindow().onMoved((event) => {
-      if (disposed) {
-        return;
-      }
-      const position = event.payload;
-      setNowWorkbenchOverlayPosition({
-        x: position.x,
-        y: position.y,
-      });
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      unlisten = cleanup;
-    });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
 
   useEffect(() => {
     if (model.mode !== 'running') {
@@ -457,15 +422,103 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     && (model.mode === 'idle_with_tasks' || model.mode === 'idle_input_only');
   const isIdleExpanded = isLiveIdleBubbleMode
     && (isIdleHovered || isIdleInputFocused);
+  const shouldMeasureIdleBubbleShell = isLiveIdleBubbleMode && Boolean(model.nudge);
+  const visibleSurfaceMeasurementKey = isLiveRunningMiniPeekMode
+    ? 'running-mini-peek'
+    : isLiveRunningMiniMode
+      ? 'running-mini'
+      : isIdleExpanded
+        ? shouldMeasureIdleBubbleShell
+          ? 'idle-shell-expanded'
+          : 'idle-expanded'
+        : isLiveIdleBubbleMode
+          ? shouldMeasureIdleBubbleShell
+            ? 'idle-shell-collapsed'
+            : 'idle-collapsed'
+          : isLiveRunningSingleCardMode
+            ? 'running-single-card'
+            : 'default';
   const miniClock = resolveRunningClock(model.activeBlock, now);
+
+  const clearVisibleSurfaceDragGlowTimeout = useCallback(() => {
+    if (visibleSurfaceDragGlowTimeoutRef.current !== null) {
+      window.clearTimeout(visibleSurfaceDragGlowTimeoutRef.current);
+      visibleSurfaceDragGlowTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearVisibleSurfaceInteraction = useCallback(() => {
+    visibleSurfaceDragPendingRef.current = false;
+    clearVisibleSurfaceDragGlowTimeout();
+    setIsVisibleSurfacePressed(false);
+    setIsVisibleSurfaceDragging(false);
+  }, [clearVisibleSurfaceDragGlowTimeout]);
+
+  const scheduleVisibleSurfaceDragGlowClear = useCallback(() => {
+    clearVisibleSurfaceDragGlowTimeout();
+    visibleSurfaceDragGlowTimeoutRef.current = window.setTimeout(() => {
+      visibleSurfaceDragGlowTimeoutRef.current = null;
+      visibleSurfaceDragPendingRef.current = false;
+      setIsVisibleSurfacePressed(false);
+      setIsVisibleSurfaceDragging(false);
+    }, VISIBLE_SURFACE_DRAG_GLOW_IDLE_MS);
+  }, [clearVisibleSurfaceDragGlowTimeout]);
+
+  const handleVisibleSurfaceMount = useCallback((node: HTMLElement | null) => {
+    setVisibleSurfaceElement(node);
+  }, []);
+
+  const handleVisibleSurfaceMouseDownCapture = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+    const target = event.target;
+    visibleSurfaceDragPendingRef.current = target instanceof Element
+      && Boolean(target.closest('[data-tauri-drag-region]'));
+    clearVisibleSurfaceDragGlowTimeout();
+    setIsVisibleSurfaceDragging(false);
+    setIsVisibleSurfacePressed(true);
+  }, [clearVisibleSurfaceDragGlowTimeout]);
+
   useEffect(() => {
-    if (!isLiveRunningSingleCardMode) {
-      setRunningSingleCardShellHeight(null);
+    if (!isTauri()) {
       return;
     }
 
-    const shell = singleCardShellRef.current;
-    if (!shell) {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void getCurrentWindow().onMoved((event) => {
+      if (disposed) {
+        return;
+      }
+      const position = event.payload;
+      if (visibleSurfaceDragPendingRef.current) {
+        setIsVisibleSurfaceDragging(true);
+        scheduleVisibleSurfaceDragGlowClear();
+      }
+      setNowWorkbenchOverlayPosition({
+        x: position.x,
+        y: position.y,
+      });
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup();
+        return;
+      }
+      unlisten = cleanup;
+    });
+
+    return () => {
+      disposed = true;
+      clearVisibleSurfaceDragGlowTimeout();
+      unlisten?.();
+    };
+  }, [clearVisibleSurfaceDragGlowTimeout, scheduleVisibleSurfaceDragGlowClear]);
+
+  useEffect(() => {
+    if (!visibleSurfaceElement) {
+      setVisibleSurfaceMeasurement(null);
       return;
     }
 
@@ -473,9 +526,18 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     let observer: ResizeObserver | undefined;
 
     const measure = () => {
-      const nextHeight = Math.ceil(shell.getBoundingClientRect().height);
-      if (nextHeight > 0) {
-        setRunningSingleCardShellHeight((current) => (current === nextHeight ? current : nextHeight));
+      const rect = visibleSurfaceElement.getBoundingClientRect();
+      const nextWidth = Math.ceil(rect.width);
+      const nextHeight = Math.ceil(rect.height);
+      if (nextWidth > 0 && nextHeight > 0) {
+        setVisibleSurfaceMeasurement((current) => (
+          current
+            && current.key === visibleSurfaceMeasurementKey
+            && current.width === nextWidth
+            && current.height === nextHeight
+            ? current
+            : { key: visibleSurfaceMeasurementKey, width: nextWidth, height: nextHeight }
+        ));
       }
     };
 
@@ -494,7 +556,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       observer = new ResizeObserver(() => {
         scheduleMeasure();
       });
-      observer.observe(shell);
+      observer.observe(visibleSurfaceElement);
     }
 
     return () => {
@@ -503,9 +565,52 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       }
       observer?.disconnect();
     };
-  }, [isLiveRunningSingleCardMode]);
+  }, [visibleSurfaceElement, visibleSurfaceMeasurementKey]);
 
-  const targetOverlaySize = isLiveRunningMiniPeekMode
+  useEffect(() => {
+    clearVisibleSurfaceInteraction();
+  }, [clearVisibleSurfaceInteraction, visibleSurfaceElement]);
+
+  useEffect(() => {
+    if (!isVisibleSurfacePressed && !isVisibleSurfaceDragging) {
+      return;
+    }
+
+    const clearInteraction = () => {
+      clearVisibleSurfaceInteraction();
+    };
+
+    const handleWindowBlur = () => {
+      if (visibleSurfaceDragPendingRef.current || isVisibleSurfaceDragging) {
+        setIsVisibleSurfacePressed(false);
+        setIsVisibleSurfaceDragging(true);
+        scheduleVisibleSurfaceDragGlowClear();
+        return;
+      }
+
+      clearVisibleSurfaceInteraction();
+    };
+
+    window.addEventListener('mouseup', clearInteraction);
+    window.addEventListener('dragend', clearInteraction);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('mouseup', clearInteraction);
+      window.removeEventListener('dragend', clearInteraction);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [
+    clearVisibleSurfaceInteraction,
+    isVisibleSurfaceDragging,
+    isVisibleSurfacePressed,
+    scheduleVisibleSurfaceDragGlowClear,
+  ]);
+
+  useEffect(() => clearVisibleSurfaceDragGlowTimeout, [clearVisibleSurfaceDragGlowTimeout]);
+
+  const isVisibleSurfaceActive = isVisibleSurfacePressed || isVisibleSurfaceDragging;
+
+  const fallbackOverlaySize = isLiveRunningMiniPeekMode
     ? NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE
     : isLiveRunningMiniMode
       ? NOW_WORKBENCH_OVERLAY_MINI_SIZE
@@ -514,8 +619,12 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
         : isLiveIdleBubbleMode
           ? NOW_WORKBENCH_OVERLAY_IDLE_COLLAPSED_SIZE
       : isLiveRunningSingleCardMode
-        ? resolveRunningSingleCardOverlaySize(runningSingleCardShellHeight)
+        ? NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE
         : NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE;
+  const targetOverlaySize = !isStaticPreview
+    && visibleSurfaceMeasurement?.key === visibleSurfaceMeasurementKey
+    ? { width: visibleSurfaceMeasurement.width, height: visibleSurfaceMeasurement.height }
+    : fallbackOverlaySize;
 
   useEffect(() => {
     if (!isTauri()) {
@@ -623,11 +732,14 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
             data-testid="now-overlay-collapsed-pill"
             onMouseEnter={() => setIsMiniHovered(true)}
             onMouseLeave={() => setIsMiniHovered(false)}
+            ref={handleVisibleSurfaceMount}
+            data-overlay-visible-surface="true"
+            onMouseDownCapture={handleVisibleSurfaceMouseDownCapture}
             className={`rounded-[22px] border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9] shadow-[0_16px_40px_-24px_rgba(0,0,0,0.55)] backdrop-blur-[20px] ${
               isLiveRunningMiniPeekMode
                 ? 'w-[328px] px-4 py-3'
                 : 'w-[224px] px-3 py-2'
-            }`}
+            } ${isVisibleSurfaceActive ? ACTIVE_VISIBLE_SURFACE_CLASS : ''}`}
           >
             {isLiveRunningMiniPeekMode ? (
               <div className="space-y-3">
@@ -756,7 +868,11 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
 
     return (
       <div className="now-workbench-overlay-root now-workbench-overlay-root--mini">
-        <div className="now-workbench-overlay-shell now-workbench-overlay-shell--mini space-y-3">
+        <div
+          ref={shouldMeasureIdleBubbleShell ? handleVisibleSurfaceMount : undefined}
+          data-overlay-visible-surface={shouldMeasureIdleBubbleShell ? 'true' : undefined}
+          className="now-workbench-overlay-shell now-workbench-overlay-shell--mini space-y-3"
+        >
           {model.nudge ? (
             <section
               data-testid="now-overlay-ritual-nudge"
@@ -787,7 +903,12 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               onMouseLeave={() => setIsIdleHovered(false)}
               onFocusCapture={handleIdleExpandedFocusCapture}
               onBlurCapture={handleIdleExpandedBlurCapture}
-              className="w-[396px] rounded-[24px] border border-white/10 bg-[rgba(33,24,20,0.92)] px-4 py-4 text-[#F5EDE7] shadow-[0_20px_48px_-28px_rgba(0,0,0,0.55)] backdrop-blur-[24px]"
+              ref={shouldMeasureIdleBubbleShell ? undefined : handleVisibleSurfaceMount}
+              data-overlay-visible-surface={shouldMeasureIdleBubbleShell ? undefined : 'true'}
+              onMouseDownCapture={handleVisibleSurfaceMouseDownCapture}
+              className={`w-[396px] rounded-[24px] border border-white/10 bg-[rgba(33,24,20,0.92)] px-4 py-4 text-[#F5EDE7] shadow-[0_20px_48px_-28px_rgba(0,0,0,0.55)] backdrop-blur-[24px] ${
+                isVisibleSurfaceActive ? ACTIVE_VISIBLE_SURFACE_CLASS : ''
+              }`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div
@@ -874,7 +995,12 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
             <div
               data-testid="now-overlay-idle-pill"
               onMouseEnter={() => setIsIdleHovered(true)}
-              className="w-[252px] rounded-[22px] border border-white/10 bg-[rgba(33,24,20,0.88)] px-4 py-3 text-[#F5EDE7] shadow-[0_18px_40px_-28px_rgba(0,0,0,0.55)] backdrop-blur-[22px]"
+              ref={shouldMeasureIdleBubbleShell ? undefined : handleVisibleSurfaceMount}
+              data-overlay-visible-surface={shouldMeasureIdleBubbleShell ? undefined : 'true'}
+              onMouseDownCapture={handleVisibleSurfaceMouseDownCapture}
+              className={`w-[252px] rounded-[22px] border border-white/10 bg-[rgba(33,24,20,0.88)] px-4 py-3 text-[#F5EDE7] shadow-[0_18px_40px_-28px_rgba(0,0,0,0.55)] backdrop-blur-[22px] ${
+                isVisibleSurfaceActive ? ACTIVE_VISIBLE_SURFACE_CLASS : ''
+              }`}
             >
               <div
                 data-testid="now-overlay-drag-handle"
@@ -922,14 +1048,17 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     return (
       <div className="now-workbench-overlay-root now-workbench-overlay-root--single-card">
         <div
-          ref={singleCardShellRef}
           data-testid="now-overlay-single-card-shell"
           className="now-workbench-overlay-shell now-workbench-overlay-shell--single-card"
         >
           <main className="flex min-h-0 flex-1 items-center justify-center">
             <div
               data-testid="now-overlay-single-card-stage"
-              className="w-full max-w-[390px]"
+              className="shrink-0"
+              style={{
+                width: NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE.width,
+                maxWidth: NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE.width,
+              }}
             >
               <FocusTimerWidget
                 ref={focusTimerWidgetRef}
@@ -938,6 +1067,9 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                   statusLabel: model.statusLabel,
                   onCollapse: () => setIsMiniCollapsed(true),
                   onReturnToMain,
+                  onSurfaceMount: handleVisibleSurfaceMount,
+                  onSurfaceMouseDownCapture: handleVisibleSurfaceMouseDownCapture,
+                  surfacePressed: isVisibleSurfaceActive,
                 }}
               />
             </div>
@@ -1163,24 +1295,25 @@ const overlayStyles = /* css */ `
   }
 
   .now-workbench-overlay-root--single-card {
-    padding: 12px;
+    padding: 0;
+    align-items: flex-start;
+    justify-content: flex-start;
   }
 
   .now-workbench-overlay-shell--single-card {
-    position: relative;
-    width: min(440px, calc(100vw - 24px));
+    width: auto;
     height: auto;
     max-height: none;
-    min-height: 240px;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     overflow: visible;
-    padding-top: 44px;
+    padding-top: 0;
   }
 
   .now-workbench-overlay-root--mini {
-    padding: 12px;
+    padding: 0;
     align-items: flex-start;
     justify-content: flex-start;
   }

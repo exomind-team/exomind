@@ -53,6 +53,7 @@ const eventStorageOnChangeMock = vi.fn();
 let blockListener: ((block: unknown) => void) | null = null;
 let taskStorageListener: (() => void) | null = null;
 let eventStorageListener: (() => void) | null = null;
+let movedListener: ((event: { payload: { x: number; y: number } }) => void) | null = null;
 let focusChangedListener: ((event: { payload: boolean }) => void) | null = null;
 const overlayHideMock = vi.fn();
 const focusMainWindowMock = vi.fn();
@@ -99,6 +100,9 @@ vi.mock("@/ui/app/components/FocusTimerWidget", async () => {
           statusLabel: string;
           onCollapse: () => void;
           onReturnToMain: () => void;
+          onSurfaceMount?: (node: HTMLDivElement | null) => void;
+          onSurfaceMouseDownCapture?: React.MouseEventHandler<HTMLDivElement>;
+          surfacePressed?: boolean;
         };
       },
       ref,
@@ -144,28 +148,41 @@ vi.mock("@/ui/app/components/FocusTimerWidget", async () => {
             data-testid="new-focus-timer-widget"
             className={surface === "overlay" ? "bg-transparent" : ""}
           >
-            <div data-testid="new-focus-state-running">
-              {overlayRunningChrome ? (
-                <div data-testid="new-focus-overlay-running-header">
-                  <p>{overlayRunningChrome.statusLabel}</p>
-                  <button
-                    type="button"
-                    onClick={overlayRunningChrome.onCollapse}
-                  >
-                    收起
-                  </button>
-                  <button
-                    type="button"
-                    onClick={overlayRunningChrome.onReturnToMain}
-                  >
-                    显示主程序
-                  </button>
-                </div>
-              ) : null}
-              <p>{activeBlock.name ?? "未命名时间块"}</p>
-              <p data-testid="new-focus-running-clock">
-                {activeBlock.mode === "countdown" ? "20:00" : "00:00"}
-              </p>
+            <div
+              ref={overlayRunningChrome?.onSurfaceMount}
+              data-testid="new-focus-running-task-card"
+              data-overlay-visible-surface={overlayRunningChrome ? "true" : undefined}
+              onMouseDownCapture={overlayRunningChrome?.onSurfaceMouseDownCapture}
+              className={overlayRunningChrome?.surfacePressed ? "ring-1 ring-inset ring-[#FDE4DE]/60" : ""}
+            >
+              <div data-testid="new-focus-state-running">
+                {overlayRunningChrome ? (
+                  <div data-testid="new-focus-overlay-running-header">
+                    <div
+                      data-testid="new-focus-overlay-drag-handle"
+                      data-tauri-drag-region
+                    >
+                      <p>{overlayRunningChrome.statusLabel}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={overlayRunningChrome.onCollapse}
+                    >
+                      收起
+                    </button>
+                    <button
+                      type="button"
+                      onClick={overlayRunningChrome.onReturnToMain}
+                    >
+                      显示主程序
+                    </button>
+                  </div>
+                ) : null}
+                <p>{activeBlock.name ?? "未命名时间块"}</p>
+                <p data-testid="new-focus-running-clock">
+                  {activeBlock.mode === "countdown" ? "20:00" : "00:00"}
+                </p>
+              </div>
             </div>
           </div>
         );
@@ -258,7 +275,12 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     hide: (...args: unknown[]) => overlayHideMock(...args),
     setSize: (...args: unknown[]) => overlaySetSizeMock(...args),
-    onMoved: vi.fn(async () => () => {}),
+    onMoved: vi.fn(async (listener: (event: { payload: { x: number; y: number } }) => void) => {
+      movedListener = listener;
+      return () => {
+        movedListener = null;
+      };
+    }),
     startDragging: vi.fn(async () => undefined),
     onFocusChanged: vi.fn(
       async (listener: (event: { payload: boolean }) => void) => {
@@ -281,6 +303,7 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     blockListener = null;
     taskStorageListener = null;
     eventStorageListener = null;
+    movedListener = null;
     focusChangedListener = null;
     currentUserState.userId = "overlay-test-user";
     runtimeStateByUser["overlay-test-user"] = {
@@ -376,6 +399,7 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     blockListener = null;
     taskStorageListener = null;
     eventStorageListener = null;
+    movedListener = null;
     focusChangedListener = null;
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -521,14 +545,14 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
 
     const stage = screen.getByTestId("now-overlay-single-card-stage");
-    expect(stage.className).toContain("w-full");
-    expect(stage.className).toContain("max-w-[390px]");
+    expect(stage.className).toContain("shrink-0");
+    expect(stage).toHaveStyle({ width: "390px", maxWidth: "390px" });
     expect(stage).toContainElement(
       screen.getByTestId("new-focus-timer-widget"),
     );
   });
 
-  it("grows overlay window height from measured single-card shell when running card becomes taller（运行态单卡片高度变大时悬浮窗会随内容增长）", async () => {
+  it("grows overlay window size from measured visible running card when content becomes taller（运行态单卡片改为按可见卡片表面测量窗口尺寸）", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 2, 11, 9, 5, 0));
     const originalGetBoundingClientRect =
       HTMLElement.prototype.getBoundingClientRect;
@@ -536,16 +560,16 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       function getBoundingClientRectMock() {
         if (
           (this as HTMLElement).getAttribute("data-testid") ===
-          "now-overlay-single-card-shell"
+          "new-focus-running-task-card"
         ) {
           return {
             x: 0,
             y: 0,
             top: 0,
             left: 0,
-            right: 440,
+            right: 390,
             bottom: 560,
-            width: 440,
+            width: 390,
             height: 560,
             toJSON: () => ({}),
           } as DOMRect;
@@ -581,8 +605,74 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       expect(
         overlaySetSizeMock.mock.calls.some(
           ([size]) =>
-            (size as { width?: number; height?: number }).width === 464 &&
-            (size as { width?: number; height?: number }).height === 584,
+            (size as { width?: number; height?: number }).width === 390 &&
+            (size as { width?: number; height?: number }).height === 560,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("falls back to the current mode size immediately when the visible surface switches（可见表面切换时先回退到当前模式尺寸，避免沿用旧表面测量值）", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 2, 11, 9, 5, 0));
+    const originalGetBoundingClientRect =
+      HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function getBoundingClientRectMock() {
+        if (
+          (this as HTMLElement).getAttribute("data-testid") ===
+          "new-focus-running-task-card"
+        ) {
+          return {
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            right: 390,
+            bottom: 560,
+            width: 390,
+            height: 560,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      },
+    );
+    runtimeStateByUser["overlay-test-user"].activeBlock = {
+      startId: "block-collapse",
+      name: "切换到 mini 前先测到运行态大卡片",
+      mode: "countdown",
+      targetMinutes: 25,
+      startTime: Date.UTC(2026, 2, 11, 9, 0, 0),
+      elapsed: 20 * 60 * 1000,
+      paused: false,
+      phase: "running",
+      accumulatedRunMs: 5 * 60 * 1000,
+      lastResumedAt: Date.UTC(2026, 2, 11, 9, 0, 0),
+    };
+
+    const { NowWorkbenchOverlayPage } =
+      await import("@/pages/NowWorkbenchOverlayPage");
+    render(<NowWorkbenchOverlayPage />);
+
+    await waitFor(() => {
+      expect(
+        overlaySetSizeMock.mock.calls.some(
+          ([size]) =>
+            (size as { width?: number; height?: number }).width === 390 &&
+            (size as { width?: number; height?: number }).height === 560,
+        ),
+      ).toBe(true);
+    });
+
+    overlaySetSizeMock.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "收起" }));
+
+    await waitFor(() => {
+      expect(
+        overlaySetSizeMock.mock.calls.some(
+          ([size]) =>
+            (size as { width?: number; height?: number }).width === 248 &&
+            (size as { width?: number; height?: number }).height === 120,
         ),
       ).toBe(true);
     });
@@ -614,6 +704,80 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     expect(screen.getByTestId("new-focus-timer-widget").className).toContain(
       "bg-transparent",
     );
+  });
+
+  it("adds whole-card press feedback on the running visible surface and clears it on mouseup（运行态按下命中时整卡瞬态高亮，抬起后回退）", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 2, 11, 9, 5, 0));
+    runtimeStateByUser["overlay-test-user"].activeBlock = {
+      startId: "block-press",
+      name: "运行态按下反馈",
+      mode: "countdown",
+      targetMinutes: 25,
+      startTime: Date.UTC(2026, 2, 11, 9, 0, 0),
+      elapsed: 20 * 60 * 1000,
+      paused: false,
+      phase: "running",
+      accumulatedRunMs: 5 * 60 * 1000,
+      lastResumedAt: Date.UTC(2026, 2, 11, 9, 0, 0),
+    };
+
+    const { NowWorkbenchOverlayPage } =
+      await import("@/pages/NowWorkbenchOverlayPage");
+    render(<NowWorkbenchOverlayPage />);
+
+    const runningCard = await screen.findByTestId("new-focus-running-task-card");
+    fireEvent.mouseDown(runningCard, { button: 0 });
+
+    expect(runningCard.className).toContain("ring-1");
+    expect(runningCard.className).toContain("ring-inset");
+
+    fireEvent.mouseUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("new-focus-running-task-card").className).not.toContain("ring-1");
+    });
+  });
+
+  it("keeps whole-card glow while the native drag handle is moving the overlay（原生拖拽窗口时整卡高亮会持续到拖动结束）", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 2, 11, 9, 5, 0));
+    runtimeStateByUser["overlay-test-user"].activeBlock = {
+      startId: "block-drag",
+      name: "运行态拖动反馈",
+      mode: "countdown",
+      targetMinutes: 25,
+      startTime: Date.UTC(2026, 2, 11, 9, 0, 0),
+      elapsed: 20 * 60 * 1000,
+      paused: false,
+      phase: "running",
+      accumulatedRunMs: 5 * 60 * 1000,
+      lastResumedAt: Date.UTC(2026, 2, 11, 9, 0, 0),
+    };
+
+    const { NowWorkbenchOverlayPage } =
+      await import("@/pages/NowWorkbenchOverlayPage");
+    render(<NowWorkbenchOverlayPage />);
+
+    const dragHandle = await screen.findByTestId("new-focus-overlay-drag-handle");
+    const runningCard = screen.getByTestId("new-focus-running-task-card");
+
+    fireEvent.mouseDown(dragHandle, { button: 0 });
+    fireEvent.blur(window);
+
+    expect(runningCard.className).toContain("ring-1");
+
+    act(() => {
+      movedListener?.({ payload: { x: 48, y: 72 } });
+    });
+
+    expect(screen.getByTestId("new-focus-running-task-card").className).toContain("ring-1");
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 260));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("new-focus-running-task-card").className).not.toContain("ring-1");
+    });
   });
 
   it("collapses live running overlay into a mini pill and can restore it（运行态隐藏浮窗改为折叠小窗并可恢复）", async () => {
@@ -770,6 +934,37 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       ).toBeInTheDocument();
     });
     expect(overlaySetSizeMock).toHaveBeenCalled();
+  });
+
+  it("adds whole-card press feedback on the idle bubble only while mouse is down（待办气泡按下时整卡瞬态高亮，抬起后回退）", async () => {
+    runtimeStateByUser["overlay-test-user"].tasks = [
+      {
+        id: "task-1",
+        title: "按下待办气泡",
+        status: "pending",
+        priority: "high",
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 8, 0, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 8, 10, 0),
+      },
+    ];
+
+    const { NowWorkbenchOverlayPage } =
+      await import("@/pages/NowWorkbenchOverlayPage");
+    render(<NowWorkbenchOverlayPage />);
+
+    const idlePill = await screen.findByTestId("now-overlay-idle-pill");
+    fireEvent.mouseDown(idlePill, { button: 0 });
+
+    expect(idlePill.className).toContain("ring-1");
+    expect(idlePill.className).toContain("ring-inset");
+
+    fireEvent.mouseUp(window);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("now-overlay-idle-pill").className).not.toContain("ring-1");
+    });
   });
 
   it("shows task count and ellipsis in collapsed idle bubble when there are more than three tasks（最小待办窗在任务过多时显示总数与省略提示）", async () => {

@@ -8,9 +8,9 @@ use tauri::{Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowB
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const NOW_WORKBENCH_OVERLAY_WINDOW_LABEL: &str = "now-workbench-overlay";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const NOW_WORKBENCH_OVERLAY_WIDTH: f64 = 392.0;
+const NOW_WORKBENCH_OVERLAY_WIDTH: f64 = 412.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const NOW_WORKBENCH_OVERLAY_HEIGHT: f64 = 470.0;
+const NOW_WORKBENCH_OVERLAY_HEIGHT: f64 = 490.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const NOW_WORKBENCH_OVERLAY_MARGIN: i32 = 24;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -79,9 +79,11 @@ fn calculate_now_workbench_overlay_position(
     work_area_y: i32,
     work_area_width: u32,
     work_area_height: u32,
+    overlay_width: u32,
+    overlay_height: u32,
 ) -> (i32, i32) {
-    let width = NOW_WORKBENCH_OVERLAY_WIDTH.round() as i32;
-    let height = NOW_WORKBENCH_OVERLAY_HEIGHT.round() as i32;
+    let width = overlay_width as i32;
+    let height = overlay_height as i32;
     let horizontal_offset = (work_area_width as i32 - width - NOW_WORKBENCH_OVERLAY_MARGIN).max(0);
     let vertical_offset = (work_area_height as i32 - height - NOW_WORKBENCH_OVERLAY_MARGIN).max(0);
 
@@ -89,6 +91,12 @@ fn calculate_now_workbench_overlay_position(
         work_area_x + horizontal_offset,
         work_area_y + vertical_offset,
     )
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn resolve_now_workbench_overlay_window_size(window: &WebviewWindow) -> Result<(u32, u32), String> {
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    Ok((size.width.max(1), size.height.max(1)))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -124,6 +132,8 @@ fn overlay_position_is_visible_on_any_monitor(
     app: &AppHandle,
     x: i32,
     y: i32,
+    overlay_width: u32,
+    overlay_height: u32,
 ) -> Result<bool, String> {
     if is_windows_hidden_window_position(x, y) {
         return Ok(false);
@@ -135,9 +145,6 @@ fn overlay_position_is_visible_on_any_monitor(
     if monitors.is_empty() {
         return Ok(true);
     }
-
-    let overlay_width = NOW_WORKBENCH_OVERLAY_WIDTH.round() as u32;
-    let overlay_height = NOW_WORKBENCH_OVERLAY_HEIGHT.round() as u32;
 
     for monitor in monitors {
         let position = monitor.position();
@@ -169,11 +176,14 @@ fn position_now_workbench_overlay_default(
     };
 
     let work_area = monitor.work_area();
+    let (overlay_width, overlay_height) = resolve_now_workbench_overlay_window_size(window)?;
     let (x, y) = calculate_now_workbench_overlay_position(
         work_area.position.x,
         work_area.position.y,
         work_area.size.width,
         work_area.size.height,
+        overlay_width,
+        overlay_height,
     );
 
     window
@@ -186,7 +196,14 @@ fn now_workbench_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
     ensure_now_workbench_overlay_window(app)?;
     if let Some(window) = app.get_webview_window(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL) {
         let current_position = window.outer_position().map_err(|error| error.to_string())?;
-        if !overlay_position_is_visible_on_any_monitor(app, current_position.x, current_position.y)?
+        let (overlay_width, overlay_height) = resolve_now_workbench_overlay_window_size(&window)?;
+        if !overlay_position_is_visible_on_any_monitor(
+            app,
+            current_position.x,
+            current_position.y,
+            overlay_width,
+            overlay_height,
+        )?
         {
             position_now_workbench_overlay_default(app, &window)?;
         }
@@ -292,7 +309,8 @@ pub async fn now_workbench_overlay_set_position(
 ) -> Result<(), String> {
     ensure_now_workbench_overlay_window(&app)?;
     if let Some(window) = app.get_webview_window(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL) {
-        if !overlay_position_is_visible_on_any_monitor(&app, x, y)? {
+        let (overlay_width, overlay_height) = resolve_now_workbench_overlay_window_size(&window)?;
+        if !overlay_position_is_visible_on_any_monitor(&app, x, y, overlay_width, overlay_height)? {
             position_now_workbench_overlay_default(&app, &window)?;
         } else {
             window
@@ -317,21 +335,36 @@ pub async fn now_workbench_overlay_set_position(
 mod tests {
     use super::{
         calculate_now_workbench_overlay_position, is_windows_hidden_window_position,
-        overlay_rect_intersects_monitor,
+        overlay_rect_intersects_monitor, NOW_WORKBENCH_OVERLAY_HEIGHT,
+        NOW_WORKBENCH_OVERLAY_WIDTH,
     };
 
     #[test]
     fn calculate_now_workbench_overlay_position_anchors_bottom_right() {
-        let (x, y) = calculate_now_workbench_overlay_position(0, 0, 1920, 1080);
-        assert_eq!(x, 1504);
-        assert_eq!(y, 586);
+        let (x, y) = calculate_now_workbench_overlay_position(
+            0,
+            0,
+            1920,
+            1080,
+            NOW_WORKBENCH_OVERLAY_WIDTH.round() as u32,
+            NOW_WORKBENCH_OVERLAY_HEIGHT.round() as u32,
+        );
+        assert_eq!(x, 1484);
+        assert_eq!(y, 566);
     }
 
     #[test]
     fn calculate_now_workbench_overlay_position_respects_monitor_offset() {
-        let (x, y) = calculate_now_workbench_overlay_position(1920, 40, 1920, 1040);
-        assert_eq!(x, 3424);
-        assert_eq!(y, 586);
+        let (x, y) = calculate_now_workbench_overlay_position(
+            1920,
+            40,
+            1920,
+            1040,
+            NOW_WORKBENCH_OVERLAY_WIDTH.round() as u32,
+            NOW_WORKBENCH_OVERLAY_HEIGHT.round() as u32,
+        );
+        assert_eq!(x, 3404);
+        assert_eq!(y, 566);
     }
 
     #[test]
@@ -344,20 +377,48 @@ mod tests {
     #[test]
     fn overlay_rect_intersects_visible_monitor_area_on_multi_screen_layout() {
         assert!(overlay_rect_intersects_monitor(
-            2500, 120, 392, 470, 1920, 0, 1920, 1080
+            2500,
+            120,
+            NOW_WORKBENCH_OVERLAY_WIDTH.round() as u32,
+            NOW_WORKBENCH_OVERLAY_HEIGHT.round() as u32,
+            1920,
+            0,
+            1920,
+            1080
         ));
         assert!(overlay_rect_intersects_monitor(
-            -1600, 120, 392, 470, -1920, 0, 1920, 1080
+            -1600,
+            120,
+            NOW_WORKBENCH_OVERLAY_WIDTH.round() as u32,
+            NOW_WORKBENCH_OVERLAY_HEIGHT.round() as u32,
+            -1920,
+            0,
+            1920,
+            1080
         ));
     }
 
     #[test]
     fn overlay_rect_detects_positions_fully_outside_all_monitors() {
         assert!(!overlay_rect_intersects_monitor(
-            4000, 1200, 392, 470, 0, 0, 1920, 1080
+            4000,
+            1200,
+            NOW_WORKBENCH_OVERLAY_WIDTH.round() as u32,
+            NOW_WORKBENCH_OVERLAY_HEIGHT.round() as u32,
+            0,
+            0,
+            1920,
+            1080
         ));
         assert!(!overlay_rect_intersects_monitor(
-            -5000, -2000, 392, 470, -1920, 0, 1920, 1080
+            -5000,
+            -2000,
+            NOW_WORKBENCH_OVERLAY_WIDTH.round() as u32,
+            NOW_WORKBENCH_OVERLAY_HEIGHT.round() as u32,
+            -1920,
+            0,
+            1920,
+            1080
         ));
     }
 }
