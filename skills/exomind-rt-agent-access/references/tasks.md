@@ -1,4 +1,4 @@
-> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`补充 tasks raw fallback 语义，并明确等待类 task 条件默认走 /act/await。`
+> 最后更新：`2026-04-20` | 更新者：`Codex` | 更新内容概要：`补充任务 await 的自然语言映射，覆盖具体任务、任意任务、1 小时超时与完成反馈回读口径。`
 
 # Tasks
 
@@ -10,6 +10,95 @@
 - 但这不代表 raw `/tasks*` 是一切 task 相关动作的默认入口；如果某个 feature 已有 `/act/*` 契约，就先走 `/act/*`
 - 如果 Agent 要等待任务被创建、状态变化或完成，默认优先 `POST /act/await` 的 `task_created` / `task_status_changed` / `task_completed`
 - 本文只描述 task 的 raw fallback / debug 路径
+
+## Task await 速记
+
+如果任务是“等待未来某个任务条件成立一次后返回”，默认先走：
+
+```bash
+POST /act/await
+```
+
+或：
+
+```bash
+POST /act/await?user_id=profile-argon
+```
+
+自然语言可直接这样翻：
+
+- 等“任务完成”
+  - 若上下文里已有明确 `taskId`：
+
+```json
+{
+  "condition": {
+    "type": "task_completed",
+    "taskId": "<task-id>"
+  }
+}
+```
+
+  - 若用户意思是“等任意一个未来任务完成”：
+
+```json
+{
+  "condition": {
+    "type": "task_completed"
+  }
+}
+```
+
+- 等“任务状态变化”
+
+```json
+{
+  "condition": {
+    "type": "task_status_changed",
+    "taskId": "<task-id>",
+    "fromStatus": "in_progress",
+    "toStatus": "completed"
+  }
+}
+```
+
+- 等“任务新增”
+
+```json
+{
+  "condition": {
+    "type": "task_created"
+  }
+}
+```
+
+- 等“超时 1 小时”
+
+```json
+{
+  "condition": {
+    "type": "task_completed"
+  },
+  "timeoutSecs": 3600
+}
+```
+
+两条硬区别：
+
+- `task_completed + taskId` = 等指定任务完成
+- 省略 `taskId` = 等当前 scope 下从现在开始命中的任意 future 任务
+
+如果监听的是匿名 / 无 scope 事件流：
+
+- 直接请求 `POST /act/await`
+- 不要传 `user_id`
+
+如果要拿“任务完成时的人类反馈原文”，当前更稳的口径不是假设 fulfilled 顶层直接内联反馈文本，而是：
+
+1. 先监听 `task_completed`
+2. 命中后回读 `/tasks/:id`
+3. 继续回读关联 completed timeblock
+4. 再读 `block_feedback` 与 `note/task_completed`
 
 ## 查询参数与状态机
 

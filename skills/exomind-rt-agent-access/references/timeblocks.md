@@ -1,4 +1,4 @@
-> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`补充 timeblocks raw fallback 语义，并明确 timeblock_stopped / block_end / timeblock_ended 的分层。`
+> 最后更新：`2026-04-20` | 更新者：`Codex` | 更新内容概要：`补充当前块与任意块的 await 区别，明确 startId 语义、匿名域监听与 1 小时超时写法。`
 
 # TimeBlocks
 
@@ -10,6 +10,106 @@
 - 当前最明确的现成例子是：启动 today planner 片段应优先 `POST /act/today-planner/segments/:segment_id/start`，不要回退到 raw `/timeblocks/start`
 - 如果 Agent 要等待时间块被创建、状态变化、stop 或 end，默认优先 `POST /act/await`
 - 本文只覆盖 timeblock 的 raw fallback / debug 路径
+
+## 当前块与任意块的 await 区别
+
+如果任务是“等待未来某个时间块条件成立一次后返回”，默认先走：
+
+```bash
+POST /act/await
+```
+
+或：
+
+```bash
+POST /act/await?user_id=profile-argon
+```
+
+自然语言速记：
+
+- 等“当前时间块完成”
+  - 先读当前 active block：
+
+```bash
+curl -sS "http://127.0.0.1:9124/timeblocks/active?user_id=profile-argon"
+```
+
+  - 取返回里的 `startId`
+  - 再等待：
+
+```json
+{
+  "condition": {
+    "type": "timeblock_ended",
+    "startId": "<active-start-id>"
+  }
+}
+```
+
+- 等“当前时间块专注结束 / 当前时间块结束”
+  - 同样先读 active block 的 `startId`
+  - 再等待：
+
+```json
+{
+  "condition": {
+    "type": "timeblock_stopped",
+    "startId": "<active-start-id>"
+  }
+}
+```
+
+- 等“任意一个时间块完成”
+
+```json
+{
+  "condition": {
+    "type": "timeblock_ended"
+  }
+}
+```
+
+- 等“任意一个时间块状态变化”
+
+```json
+{
+  "condition": {
+    "type": "timeblock_state_changed"
+  }
+}
+```
+
+- 等“任意一个时间块新增”
+
+```json
+{
+  "condition": {
+    "type": "timeblock_created"
+  }
+}
+```
+
+- 等“超时 1 小时”
+
+```json
+{
+  "condition": {
+    "type": "timeblock_ended",
+    "startId": "<active-start-id>"
+  },
+  "timeoutSecs": 3600
+}
+```
+
+两条硬区别：
+
+- “当前时间块” = 指向一个已经存在的 active block，不能省略 `startId`
+- 省略 `startId` = 等这个 scope 下从现在开始命中的任意 future 时间块
+
+如果监听的是匿名 / 无 scope 事件流：
+
+- 直接请求 `POST /act/await`
+- 不要传 `user_id`
 
 ## 作用域与字段风格
 

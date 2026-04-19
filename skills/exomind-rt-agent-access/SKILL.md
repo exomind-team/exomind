@@ -28,9 +28,9 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 
 ## 版本与时效性
 
-- 最后更新日期：`2026-04-19`
+- 最后更新日期：`2026-04-20`
 - 更新者：`Codex`
-- 更新内容概要：`明确 /act 优先、raw 回退 的入口规则，并补充时间块 await 语义：timeblock_stopped=专注结束，timeblock_ended=反馈完成后的时间块完成。`
+- 更新内容概要：`补充常见 await 自然语言意图到 `/act/await` 参数的映射，覆盖当前时间块完成、任务完成、匿名域监听与 1 小时超时。`
 - 核验依据：
   - `GET /version` 等 live 版本信息
   - 当前工作区代码与相关路由实现
@@ -47,7 +47,7 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
   - `../../crates/exomind-runtime/src/routes/signals.rs`
   - `../../crates/exomind-runtime/src/routes/topology.rs`
 - 当前覆盖范围：
-  - 已覆盖：当前 ExoMind Runtime HTTP/curl 接入分层、`/act/*` 优先规则、raw RT 直读/排障、`profile-<slug>` scope 规则、当前鉴权现状、tasks/timeblocks/eventlog 的排障要点
+  - 已覆盖：当前 ExoMind Runtime HTTP/curl 接入分层、`/act/*` 优先规则、raw RT 直读/排障、`profile-<slug>` scope 规则、当前鉴权现状、tasks/timeblocks/eventlog 的排障要点、常见 `/act/await` 自然语言意图映射
   - 不覆盖：`/agents/*` SSE 会话细节、`/act/today-planner/*` 的完整 feature 语义、`/act/await` 全量 condition / fulfilled payload 细节、mesh peer token / grant 的完整运维流程
 
 ## 读取顺序
@@ -197,6 +197,63 @@ curl -N -X POST "http://<RT地址>:<端口>/act/await?user_id=profile-argon" \
 - 当前默认 `timeoutSecs=1800`，默认 `heartbeatSecs=15`
 - 等待 `task_completed`、`timeblock_stopped`、`timeblock_ended`、`proposal_*` 等 feature 条件时，也优先走 `/act/await`
 - 只有在你需要 raw event arrival / cursor / catch-up 语义，或需要排查 `/act/await` 内部到底等到了哪条底层事件时，才回去读 `references/eventlog.md`
+
+### 常见自然语言 -> `/act/await` 参数速记
+
+把用户常说的话直接翻成下面这组参数：
+
+- 等“下一条事件”
+  - `{"condition":{"type":"next_event"}}`
+- 等“任务完成”
+  - 若上下文里已经有明确 `taskId`：`{"condition":{"type":"task_completed","taskId":"<task-id>"}}`
+  - 若用户说的是“等任意一个任务完成”：`{"condition":{"type":"task_completed"}}`
+- 等“当前时间块完成”
+  - 先在同一 scope 读取 `GET /timeblocks/active`
+  - 取返回里的 `startId`
+  - 再等待：`{"condition":{"type":"timeblock_ended","startId":"<active-start-id>"}}`
+- 等“当前时间块专注结束 / 当前时间块结束”
+  - 先读当前 active block 的 `startId`
+  - 再等待：`{"condition":{"type":"timeblock_stopped","startId":"<active-start-id>"}}`
+- 等“任意一个时间块完成”
+  - `{"condition":{"type":"timeblock_ended"}}`
+- 等“超时 1 小时”
+  - 在 body 里显式传：`"timeoutSecs": 3600`
+
+注意两条硬区别：
+
+- “当前时间块” = 指向一个**已经存在的 active block**，不要省略 `startId`
+- 省略 `taskId` / `startId` = 等**这个 scope 下从现在开始命中的任意 future 资源**
+
+### 当前块、任意块、匿名域三件事不要混
+
+- 如果监听的是匿名 / 无 scope 事件流：
+  - 直接请求 `POST /act/await`
+  - **不要传 `user_id`**
+- 如果监听的是具体档案：
+  - 用 `POST /act/await?user_id=profile-argon`
+- 如果用户说“等待当前时间块完成”：
+  - 先读当前 active block，再把它的 `startId` 放进 `timeblock_ended`
+  - 不要偷懒写成不带 `startId` 的 `timeblock_ended`，否则语义会变成“等任意未来时间块完成”
+- 如果用户说“等待任务完成并告诉我反馈”：
+  - 先监听 `task_completed`
+  - 命中后回读任务详情
+  - 如果需要反馈原文，继续回读关联 completed timeblock、`block_feedback` 与 `note/task_completed`
+
+两个高频例子：
+
+```bash
+curl.exe -N -X POST "http://127.0.0.1:9124/act/await" \
+  -H "Content-Type: application/json" \
+  --data-binary "{\"condition\":{\"type\":\"task_completed\"},\"timeoutSecs\":3600}"
+```
+
+```bash
+curl.exe -sS "http://127.0.0.1:9124/timeblocks/active?user_id=profile-argon"
+# 取出 startId 后：
+curl.exe -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" \
+  -H "Content-Type: application/json" \
+  --data-binary "{\"condition\":{\"type\":\"timeblock_ended\",\"startId\":\"<active-start-id>\"},\"timeoutSecs\":3600}"
+```
 
 ### 时间块 await 语义速记
 
