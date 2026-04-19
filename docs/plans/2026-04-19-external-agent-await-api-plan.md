@@ -37,6 +37,44 @@
 - 在命中条件时返回一次结果并关闭连接
 - 把内部 `eventlog watch`、`SignalPool`、资源回读等细节藏在服务端内
 
+### Rust 内部边界
+
+本轮对 `/act/await` 增加一个硬约束：
+
+- `crates/exomind-runtime/src/routes/agent_await.rs` 只能充当 **HTTP / SSE 适配层**
+- 真正的 await 业务逻辑必须下沉到 **非 route 的 Rust 通用 API 模块**
+
+推荐形态：
+
+```text
+HTTP request
+  -> routes/agent_await.rs 解析 query/body
+  -> 调用 crate::agent_await::* 通用函数
+  -> Rust 通用 await API 完成条件检查 / 唤醒 / 真相回读
+  -> routes/agent_await.rs 仅把内部结果编码成 SSE
+```
+
+其中 `routes/agent_await.rs` 只负责：
+
+- 解析 HTTP query / body
+- 建立 SSE stream
+- 映射 `ready / heartbeat / fulfilled / timeout / error`
+- 映射 `400 / 404 / 200` 等 HTTP 状态码
+
+其中 Rust 通用 await API 负责：
+
+- condition 的即时检查
+- signal / event 唤醒
+- 真相源回读复核
+- timeout / heartbeat 驱动
+- fulfill / timeout / error 的内部结果构造
+
+这条边界的目的不是“多包一层”，而是明确：
+
+1. transport 层不承载业务逻辑
+2. 后续 CLI / MCP / 其他非 HTTP 入口可以复用同一套 Rust await 能力
+3. route handler 保持薄壳，测试和演进成本更低
+
 ### 统一等待模型
 
 本轮等待模型固定为：
@@ -50,6 +88,30 @@
   -> 被唤醒后重新回读真相源复核
   -> fulfilled / timeout / error 后关闭连接
 ```
+
+### 非阻塞原则
+
+`await` 请求必须是 **被动观察者**，不能变成正常外心使用的阻塞门。
+
+硬约束：
+
+- 正常 UI 使用不应被 await 阻塞
+- RT 内部状态推进不应被 await 阻塞
+- 一个 await 请求不能为了“等结果”长期持有 store lock / 写事务 / 独占 lease
+- `await` 只能订阅、短读、复核，不能反向接管任务完成、时间块 stop/end、EventLog 写入这些正常业务路径
+
+本轮期望的单向时序是：
+
+```text
+RT 正常运行
+  -> 内部状态推进 / 事件写入 / signal 发布
+  -> Rust await API 被动收到唤醒
+  -> 重新回读真相源
+  -> HTTP SSE 回传 fulfilled / timeout / error
+  -> await 连接结束
+```
+
+也就是说，`await` 的存在不应改变“正常业务动作如何发生”，它只是旁路观察并在条件成立后回传一次结果。
 
 ### 本轮 condition 类型
 
@@ -87,6 +149,15 @@ v1 采用 **single-shot await**：
 - 命中后发一次 `fulfilled` 并关闭
 - 不做持续订阅流
 - 断线后由客户端重发，不做服务端 waiter 恢复
+
+### 未来扩展命名
+
+本轮只实现 `await`，语义固定为：
+
+- **等待一个条件成立一次**
+- **命中后返回一次结果并关闭**
+
+如果未来需要“持续订阅 / 持久监听”，可以另开 `watch` 能力，但它不属于本轮实现，也不能混入当前 `/act/await` 合同。
 
 ---
 
@@ -351,32 +422,41 @@ data: {"code":"task_not_found","message":"task not found: task-123","retryable":
 
 **文件：**
 
+- Create：`crates/exomind-runtime/src/agent_await.rs`
 - Create：`crates/exomind-runtime/src/routes/agent_await.rs`
 - Modify：`crates/exomind-runtime/src/routes/mod.rs`
+- Modify：`crates/exomind-runtime/src/lib.rs`
 
 **实现：**
 
-1. 新建 `agent_await.rs`
-2. 定义：
+1. 新建 `crates/exomind-runtime/src/agent_await.rs`
+   - 承载通用 Rust await API
+   - 不感知 HTTP route / axum extractor
+2. 新建 `crates/exomind-runtime/src/routes/agent_await.rs`
+   - 只承载 HTTP / SSE 适配壳层
+   - 调用 `crate::agent_await::*`
+3. 定义：
    - `AwaitRequest`
    - `AwaitCondition`
    - `AwaitReadyPayload`
    - `AwaitFulfilledPayload`
    - `AwaitErrorPayload`
-3. 提供统一 `router()`：
+4. 在 route 模块提供统一 `router()`：
 
 ```text
 POST /act/await
 ```
 
-4. 使用 `axum::response::sse::Sse`
-5. 固定输出 `ready/heartbeat/fulfilled/timeout/error`
+5. 使用 `axum::response::sse::Sse`
+6. 固定输出 `ready/heartbeat/fulfilled/timeout/error`
 
 **约束：**
 
 - 模块名不用 `await.rs`，避免与 Rust 关键字冲突
 - body 用 `camelCase`
 - 不引入服务端 waiter 恢复 ID
+- 不把 condition 判断、唤醒循环、真相回读写进 HTTP handler
+- route handler 只做代理，不承载业务逻辑
 
 ---
 
@@ -384,7 +464,7 @@ POST /act/await
 
 **文件：**
 
-- Modify：`crates/exomind-runtime/src/routes/agent_await.rs`
+- Modify：`crates/exomind-runtime/src/agent_await.rs`
 - Reuse：`crates/exomind-runtime/src/routes/eventlog.rs`
 - Reuse：`crates/exomind-runtime/src/eventlog.rs`
 
@@ -403,6 +483,7 @@ POST /act/await
 
 - 不从路由内部“调 HTTP 自己的 `/eventlog/watch`”
 - 直接复用现有 store/broadcast/filter 原语
+- 这部分逻辑放在 Rust 通用 await API，不放在 route handler
 - 结果返回单条 `EventRecord`
 
 ---
@@ -411,7 +492,7 @@ POST /act/await
 
 **文件：**
 
-- Modify：`crates/exomind-runtime/src/routes/agent_await.rs`
+- Modify：`crates/exomind-runtime/src/agent_await.rs`
 - Reuse：`crates/exomind-runtime/src/routes/tasks.rs`
 
 **实现：**
@@ -431,6 +512,7 @@ POST /act/await
 
 - `task.transitioned` 只做唤醒线索，不直接做 fulfill 真相
 - 真相始终回到 task store
+- route handler 不直接做 task store 轮询 / 唤醒循环
 
 ---
 
@@ -438,7 +520,7 @@ POST /act/await
 
 **文件：**
 
-- Modify：`crates/exomind-runtime/src/routes/agent_await.rs`
+- Modify：`crates/exomind-runtime/src/agent_await.rs`
 - Reuse：`crates/exomind-runtime/src/routes/timeblocks.rs`
 
 **实现：**
@@ -466,6 +548,7 @@ POST /act/await
 
 - 不依赖 `block_end` / `block_feedback` eventlog 作为主真相
 - 时间块 eventlog 仅作次级痕迹，不作 await fulfill 依据
+- await 逻辑不能阻塞正常 `stop / end` 路径
 
 ---
 
@@ -473,6 +556,7 @@ POST /act/await
 
 **文件：**
 
+- Modify：`crates/exomind-runtime/src/agent_await.rs`
 - Modify：`crates/exomind-runtime/src/routes/agent_await.rs`
 
 **实现：**
@@ -490,6 +574,7 @@ POST /act/await
 - 能在开流前发现的错误，直接 HTTP `400/404`
 - 等待过程中的异常，用 SSE `error` 表达
 - `error.message` 必须写成外部 Agent 可理解的文本，不只给内部枚举名
+- 等待过程不得长时间占用共享锁或阻塞正常 RT 写路径
 
 ---
 
@@ -519,11 +604,14 @@ POST /act/await
 - 不新增 `/signals/await`
 - 不新增 `/eventlog/await`
 - 不把 `/signals/stream` 暴露成外部默认 await 合同
+- 不把 await 业务逻辑直接写进 `routes/agent_await.rs`
+- 不把未来的持久监听 `watch` 混入当前 `await`
 - 不做持续订阅流
 - 不做 topology wait
 - 不做服务端 waiter 恢复
 - 不把 `cancelled` 视为 `task_completed`
 - 不把 `stop` 混写成“时间块完成”
+- 不让 await 请求阻塞 UI 正常使用或 RT 正常推进
 
 ---
 
@@ -651,3 +739,5 @@ v1 不做 waiter 恢复，断线时可能丢失一次等待上下文。
 3. fulfill 结果来自资源真相，而不是仅来自内部 signal/eventlog 痕迹
 4. 中文术语“专注结束 / 时间块完成”在接口文档与 skill 中同步固定
 5. `/act/await` 不要求外部 Agent 理解 route table、`agent_id=ui`、Signal topic 订阅细节
+6. HTTP route 只作 transport adapter，通用 await 逻辑位于非 route Rust 模块
+7. await 请求不会阻塞正常 UI 使用或 RT 正常状态推进

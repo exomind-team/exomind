@@ -77,6 +77,12 @@ ExoMind RT 的长期定位不是“只服务 UI 的后端”。
 - 由 RT 自己保证联动副作用
 - 外部客户端不需要自己拼底层状态机
 
+补充实现原则：
+
+- HTTP 路由只负责 transport adapter：收请求、做协议映射、回响应
+- 真正的 feature 编排应落在 RT 内部可复用的 Rust API / domain service，而不是直接塞进 route handler
+- 同一套内部能力应能被 HTTP / CLI / MCP / 未来其他入口复用，而不是每个入口各带一份业务逻辑
+
 #### B. raw resource API
 
 这是兼容/内部/调试层。
@@ -228,6 +234,19 @@ POST /act/timeblocks/end
 - 外部客户端不再直接改 active timeblock 原始结构来拼语义
 - `prepare-end` 对应当前 UI 内部的“开始填写反馈”语义
 
+### 关于等待类能力的补充原则
+
+若后续在 `/act/*` 下引入等待类 feature API，应额外满足：
+
+- 等待能力默认优先做 **single-shot await**，表示“等待条件成立一次后返回并结束”
+- 若未来需要持续订阅 / 持久监听，可另行使用 `watch` 命名，但不应与 `await` 混用
+- 等待请求必须是**被动观察者**，不能阻塞 UI 正常使用或 RT 正常状态推进
+- 合理的时序应是：
+  - RT 正常运行
+  - 事件 / signal / 状态变化自然发生
+  - 内部 await 能力被动收到唤醒并复核真相
+  - transport 层返回结果并结束本次等待
+
 ## 7. Agent 请求箱（长期模型）
 
 “Agent 请求箱”不只是一个页面，而是一种更高层的人机审批模型。
@@ -271,6 +290,8 @@ POST /act/timeblocks/end
 - 外部客户端不读源码，也能通过 RT 自描述入口知道下一步怎么接入
 - `identity`、`profile scope`、`grant`、`session`、`permission scopes` 五层术语不再混用
 - `/act` 与 raw API 的职责边界清晰
+- `/act` 路由保持 thin adapter，内部编排逻辑不直接写在 HTTP handler 中
 - 时间块 feature 样板能覆盖“完整工作流而非裸状态改写”
+- 长连接 / 等待型 feature API 不会阻塞正常 RT 状态推进或 UI 使用
 - profile discovery 的权限边界可解释
 - 请求箱与登录审批模型被明确挂到后续 issue，而不是停留在聊天描述
