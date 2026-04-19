@@ -968,7 +968,7 @@ function MobileTimeblockDetail({
     }
 
     anchors.push(
-      { id: "root", label: "未阻塞节点" },
+      { id: "root", label: "可执行任务" },
       { id: "linked", label: "关联时间块" },
       { id: "timeline", label: "事件时间线" },
       { id: "ai-summary", label: "AI 总结" },

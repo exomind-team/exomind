@@ -14,7 +14,7 @@ const TASK_DOMAIN_ITEMS: Array<{
   to: string;
   search?: Record<string, string>;
 }> = [
-  { id: 'list', label: '任务', icon: ListTodo, to: '/tasks', search: buildTasksMainSearch() },
+  { id: 'list', label: '列表', icon: ListTodo, to: '/tasks', search: buildTasksMainSearch() },
   { id: 'timeline', label: '时间线', icon: Clock3, to: '/tasks/timeline' },
   { id: 'dag', label: '依赖图', icon: Waypoints, to: '/tasks/dag' },
   { id: 'proposals', label: '提案箱', icon: Inbox, to: '/proposals' },

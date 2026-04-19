@@ -43,13 +43,14 @@ describe('PageHeaderNav（共享头部导航）', () => {
         navLabel="任务域导航"
         activeId="timeline"
         items={[
-          { id: 'list', label: '任务', to: '/tasks', testId: 'task-domain-tab-list' },
+          { id: 'list', label: '列表', to: '/tasks', testId: 'task-domain-tab-list' },
           { id: 'timeline', label: '时间线', to: '/tasks/timeline', testId: 'task-domain-tab-timeline' },
         ]}
       />,
     );
 
     expect(screen.getByRole('navigation', { name: '任务域导航' })).toBeInTheDocument();
+    expect(screen.getByTestId('task-domain-tab-list')).toHaveTextContent('列表');
     expect(screen.getByTestId('task-domain-tab-list')).toHaveAttribute('to', '/tasks');
     expect(screen.getByTestId('task-domain-tab-list')).toHaveAttribute('preload', 'render');
     expect(screen.getByTestId('task-domain-tab-timeline')).toHaveAttribute('aria-current', 'page');

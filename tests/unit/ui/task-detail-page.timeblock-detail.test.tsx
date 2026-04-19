@@ -209,6 +209,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     expect(screen.getByText('概览')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '信息面板' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '计时控制' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '可执行任务' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '事件时间线' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '依赖关系' })).toBeInTheDocument();
     expect(screen.getAllByText('AI 总结').length).toBeGreaterThan(0);

@@ -21,6 +21,7 @@ describe('TaskDomainTabs（任务域顶部导航）', () => {
     render(<TaskDomainTabs active="proposals" />);
 
     expect(screen.getByRole('navigation', { name: '任务域导航' })).toBeInTheDocument();
+    expect(screen.getByTestId('task-domain-tab-list')).toHaveTextContent('列表');
     expect(screen.getByTestId('task-domain-tab-list')).toHaveAttribute('to', '/tasks');
     expect(screen.getByTestId('task-domain-tab-timeline')).toHaveAttribute('to', '/tasks/timeline');
     expect(screen.getByTestId('task-domain-tab-dag')).toHaveAttribute('to', '/tasks/dag');

@@ -38,7 +38,7 @@ function renderCard(tasks: TaskNode[], searchQuery = ''): void {
 }
 
 describe('TaskCurrentRootCard issue-546 filter and collapse', () => {
-  it('filters unblocked tasks by the same fuzzy title rule', () => {
+  it('filters executable tasks by the same fuzzy title rule', () => {
     renderCard([
       makeTask({ id: 'task-1', title: 'aba', updatedAt: 10 }),
       makeTask({ id: 'task-2', title: 'baaab', updatedAt: 20 }),
@@ -46,7 +46,7 @@ describe('TaskCurrentRootCard issue-546 filter and collapse', () => {
       makeTask({ id: 'task-4', title: 'abacus', updatedAt: 40 }),
     ], 'ab');
 
-    expect(screen.getByTestId('task-current-root-card')).toHaveTextContent('未阻塞节点 · 3');
+    expect(screen.getByTestId('task-current-root-card')).toHaveTextContent('可执行任务 · 3');
     expect(screen.getByTestId('task-current-root-card-link-task-2')).toBeInTheDocument();
     expect(screen.getByTestId('task-current-root-card-link-task-1')).toBeInTheDocument();
     expect(screen.getByTestId('task-current-root-card-link-task-4')).toBeInTheDocument();

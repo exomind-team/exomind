@@ -40,12 +40,12 @@ export function TaskCurrentRootCard({
   collapsedVisibleCount?: number;
 }) {
   const [collapsed, setCollapsed] = useState(true);
-  const unblockedTasks = useMemo(() => graph.currentRootCandidateNodeIds
+  const executableTasks = useMemo(() => graph.currentRootCandidateNodeIds
     .map((id) => taskById.get(id))
     .filter((task): task is TaskNode => task != null), [graph.currentRootCandidateNodeIds, taskById]);
   const filteredTasks = useMemo(
-    () => filterTasksByTitleFuzzySearch(unblockedTasks, searchQuery ?? ''),
-    [searchQuery, unblockedTasks],
+    () => filterTasksByTitleFuzzySearch(executableTasks, searchQuery ?? ''),
+    [executableTasks, searchQuery],
   );
   const shouldCollapse = collapsible && filteredTasks.length > collapsedVisibleCount;
   const visibleTasks = shouldCollapse && collapsed
@@ -66,7 +66,7 @@ export function TaskCurrentRootCard({
     >
       <div className="flex items-start justify-between gap-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">
-          未阻塞节点 · {filteredTasks.length}
+          可执行任务 · {filteredTasks.length}
         </p>
         {shouldCollapse ? (
           <button
@@ -106,11 +106,11 @@ export function TaskCurrentRootCard({
         </ul>
       ) : searchQuery ? (
         <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-          没有匹配标题的未阻塞节点
+          没有匹配标题的可执行任务
         </p>
       ) : (
         <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-          所有未终态节点都被依赖关系阻塞
+          所有未终态任务都被依赖关系阻塞
         </p>
       )}
     </section>

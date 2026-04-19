@@ -31,8 +31,8 @@ function renderCurrentRootCard(tasks: TaskNode[]) {
   return { graph };
 }
 
-describe('TaskCurrentRootCard issue-411（当前根节点按未阻塞判定）', () => {
-  it('shows downstream unblocked node instead of empty state when structural roots are terminal', () => {
+describe('TaskCurrentRootCard issue-411（当前根节点按可执行任务判定）', () => {
+  it('shows downstream executable task instead of empty state when structural roots are terminal', () => {
     const completedRoot = makeTask({
       id: 'done-root',
       title: '已完成根节点',
@@ -54,8 +54,8 @@ describe('TaskCurrentRootCard issue-411（当前根节点按未阻塞判定）',
     expect(graph.currentRootCandidateNodeIds).toEqual(['downstream-open']);
     expect(graph.currentRootNodeId).toBe('downstream-open');
     expect(screen.getByTestId('task-current-root-card')).toHaveTextContent('下游可执行节点');
-    expect(screen.queryByText('暂无未阻塞节点')).not.toBeInTheDocument();
-    expect(screen.getByTestId('task-current-root-card')).toHaveTextContent('未阻塞节点 · 1');
+    expect(screen.queryByText('暂无可执行任务')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-current-root-card')).toHaveTextContent('可执行任务 · 1');
   });
 
   it('does not pick a node whose hard dependency is unfinished', () => {

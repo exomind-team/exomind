@@ -175,6 +175,7 @@ export function TasksPage() {
   return (
     <PageShell
       title="任务"
+      subtitle="列表视图：以列表方式呈现当前任务。"
       headerBottom={<TaskDomainTabs active="list" />}
       contentClassName="min-h-0 flex flex-1 flex-col overflow-hidden"
       headerAction={(
