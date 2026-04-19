@@ -246,6 +246,12 @@ Accept: text/event-stream
 - **TypeScript 类型**：负责表达字段结构、判别联合与可选字段
 - **JSON 样例**：负责表达真实请求/响应实例
 
+默认排版也固定为：
+
+- 一个 TypeScript 子类型代码块，紧跟一个 JSON 样例
+- 颗粒度以“task 相关请求条件”“timeblock 相关 fulfilled 数据”这类成组结构为宜
+- 避免先贴一整块内联对象联合类型，再把样例散落到后文
+
 后续同类文档也建议沿用这套写法，而不是主要依赖 prose 逐条解释“哪些字段可选”。
 
 ### 请求体
@@ -262,12 +268,38 @@ type AwaitRequest = {
 };
 
 type AwaitCondition =
-  | {
-      type: 'next_event';
-      sinceId?: string;
-      sinceTimestamp?: number;
-      tags?: string[];
-    }
+  | NextEventAwaitCondition
+  | TaskAwaitCondition
+  | TimeblockAwaitCondition
+  | ProposalAwaitCondition;
+```
+
+#### `next_event` 请求条件
+
+```ts
+type NextEventAwaitCondition = {
+  type: 'next_event';
+  sinceId?: string;
+  sinceTimestamp?: number;
+  tags?: string[];
+};
+```
+
+```json
+{
+  "condition": {
+    "type": "next_event",
+    "tags": ["note"]
+  },
+  "timeoutSecs": 30,
+  "heartbeatSecs": 10
+}
+```
+
+#### task 相关请求条件
+
+```ts
+type TaskAwaitCondition =
   | {
       type: 'task_created';
       taskId?: string;
@@ -281,7 +313,24 @@ type AwaitCondition =
   | {
       type: 'task_completed';
       taskId?: string;
-    }
+    };
+```
+
+```json
+{
+  "condition": {
+    "type": "task_status_changed",
+    "taskId": "task-123",
+    "toStatus": "completed"
+  },
+  "timeoutSecs": 300
+}
+```
+
+#### timeblock 相关请求条件
+
+```ts
+type TimeblockAwaitCondition =
   | {
       type: 'timeblock_created';
       startId?: string;
@@ -299,7 +348,23 @@ type AwaitCondition =
   | {
       type: 'timeblock_ended';
       startId?: string;
-    }
+    };
+```
+
+```json
+{
+  "condition": {
+    "type": "timeblock_state_changed",
+    "toState": "stopped"
+  },
+  "timeoutSecs": 1800
+}
+```
+
+#### proposal 相关请求条件
+
+```ts
+type ProposalAwaitCondition =
   | {
       type: 'proposal_created';
       proposalId?: string;
@@ -324,63 +389,10 @@ type AwaitCondition =
     };
 ```
 
-JSON 样例：
-
-等待任意任务完成：
-
-```json
-{
-  "condition": {
-    "type": "task_completed"
-  },
-  "timeoutSecs": 1800,
-  "heartbeatSecs": 15
-}
-```
-
-等待指定任务状态变化：
-
-```json
-{
-  "condition": {
-    "type": "task_status_changed",
-    "taskId": "task-123",
-    "toStatus": "completed"
-  },
-  "timeoutSecs": 300
-}
-```
-
-等待任意时间块状态变化：
-
-```json
-{
-  "condition": {
-    "type": "timeblock_state_changed",
-    "toState": "stopped"
-  },
-  "timeoutSecs": 1800
-}
-```
-
-等待任意提案新增评论：
-
 ```json
 {
   "condition": {
     "type": "proposal_comment_added"
-  },
-  "timeoutSecs": 1800
-}
-```
-
-等待指定提案修订：
-
-```json
-{
-  "condition": {
-    "type": "proposal_revised",
-    "proposalId": "proposal-77"
   },
   "timeoutSecs": 1800
 }
@@ -396,6 +408,13 @@ JSON 样例：
 - `heartbeatSecs`
   - 默认 `15`
   - clamp 到 `5..60`
+
+#### 补充约束：timeblock 请求过滤与响应命名
+
+- `startId` 在 v1 中继续作为 timeblock 相关请求条件的过滤字段，保持与当前 raw RT 时间块结构对齐
+- fulfilled / SSE `data` 对外统一返回 `timeblockId`
+- 当前实现里，`timeblockId` 的值对应内部 timeblock 的 `startId`
+- 若同时返回 `activeBlock` / `completedBlock` snapshot，第一版允许其保留当前 raw 字段形态，因此内层仍可能出现 `startId`
 
 ### condition 详细合同
 
@@ -468,7 +487,7 @@ JSON 样例：
   - 只有 completed block 落入历史后才满足
   - 不把 `stop` 视为满足
   - 可视为 `timeblock_state_changed(toState=ended)` 的语义化特化
-- 所有 timeblock 条件 fulfilled 都必须返回实际命中的 `startId`
+- 所有 timeblock 条件 fulfilled 都必须返回实际命中的 `timeblockId`
 
 #### 4. proposal 条件
 
@@ -515,87 +534,6 @@ type TaskSnapshot = Record<string, unknown>;
 type TimeBlockSnapshot = Record<string, unknown>;
 type ProposalSnapshot = Record<string, unknown>;
 type ProposalCommentSnapshot = Record<string, unknown>;
-
-type AwaitReadyPayload = {
-  condition: AwaitCondition;
-  timeoutSecs: number;
-  heartbeatSecs: number;
-};
-
-type AwaitHeartbeatPayload = {
-  ts: number;
-};
-
-type AwaitFulfilledPayload =
-  | {
-      type: 'next_event';
-      matchedAt: number;
-      eventId: string;
-      event: EventRecord;
-    }
-  | {
-      type: 'task_created' | 'task_status_changed' | 'task_completed';
-      matchedAt: number;
-      taskId: string;
-      task: TaskSnapshot;
-      transition?: {
-        fromStatus?: string;
-        toStatus?: string;
-      };
-    }
-  | {
-      type:
-        | 'timeblock_created'
-        | 'timeblock_state_changed'
-        | 'timeblock_stopped'
-        | 'timeblock_ended';
-      matchedAt: number;
-      startId: string;
-      state?: AwaitTimeblockState;
-      transition?: {
-        fromState?: AwaitTimeblockState;
-        toState?: AwaitTimeblockState;
-      };
-      activeBlock?: TimeBlockSnapshot;
-      completedBlock?: TimeBlockSnapshot;
-    }
-  | {
-      type:
-        | 'proposal_created'
-        | 'proposal_revised'
-        | 'proposal_status_changed'
-        | 'proposal_comment_added'
-        | 'proposal_execution_failed';
-      matchedAt: number;
-      proposalId: string;
-      proposal: ProposalSnapshot;
-      transition?: {
-        fromStatus?: string;
-        toStatus?: string;
-      };
-      comment?: ProposalCommentSnapshot;
-      execution?: {
-        failureMessage: string;
-      };
-    };
-
-type AwaitTimeoutPayload = {
-  condition: AwaitCondition;
-  timeoutSecs: number;
-};
-
-type AwaitErrorPayload = {
-  code: string;
-  message: string;
-  retryable: boolean;
-};
-
-type AwaitSseEvent =
-  | { event: 'ready'; data: AwaitReadyPayload }
-  | { event: 'heartbeat'; data: AwaitHeartbeatPayload }
-  | { event: 'fulfilled'; data: AwaitFulfilledPayload }
-  | { event: 'timeout'; data: AwaitTimeoutPayload }
-  | { event: 'error'; data: AwaitErrorPayload };
 ```
 
 实际 SSE wire format 仍然是：
@@ -611,6 +549,19 @@ data: <json>
 
 连接建立后立即发送，表示服务端已接受该等待请求：
 
+```ts
+type AwaitReadyPayload = {
+  condition: AwaitCondition;
+  timeoutSecs: number;
+  heartbeatSecs: number;
+};
+
+type AwaitReadyEvent = {
+  event: 'ready';
+  data: AwaitReadyPayload;
+};
+```
+
 ```json
 {
   "condition": {
@@ -625,6 +576,17 @@ data: <json>
 
 仅用于保活：
 
+```ts
+type AwaitHeartbeatPayload = {
+  ts: number;
+};
+
+type AwaitHeartbeatEvent = {
+  event: 'heartbeat';
+  data: AwaitHeartbeatPayload;
+};
+```
+
 ```json
 {
   "ts": 1777000000000
@@ -635,21 +597,29 @@ data: <json>
 
 命中条件后发送一次，并关闭连接。
 
-`task_completed` 示例：
+```ts
+type AwaitFulfilledPayload =
+  | NextEventFulfilledPayload
+  | TaskFulfilledPayload
+  | TimeblockFulfilledPayload
+  | ProposalFulfilledPayload;
 
-```json
-{
-  "type": "task_completed",
-  "matchedAt": 1777000000000,
-  "taskId": "task-123",
-  "task": {
-    "id": "task-123",
-    "status": "completed"
-  }
-}
+type AwaitFulfilledEvent = {
+  event: 'fulfilled';
+  data: AwaitFulfilledPayload;
+};
 ```
 
-`next_event` 示例：
+#### `fulfilled` / `next_event`
+
+```ts
+type NextEventFulfilledPayload = {
+  type: 'next_event';
+  matchedAt: number;
+  eventId: string;
+  event: EventRecord;
+};
+```
 
 ```json
 {
@@ -663,13 +633,59 @@ data: <json>
 }
 ```
 
-`timeblock_state_changed` 示例：
+#### `fulfilled` / task 相关数据
+
+```ts
+type TaskFulfilledPayload = {
+  type: 'task_created' | 'task_status_changed' | 'task_completed';
+  matchedAt: number;
+  taskId: string;
+  task: TaskSnapshot;
+  transition?: {
+    fromStatus?: string;
+    toStatus?: string;
+  };
+};
+```
+
+```json
+{
+  "type": "task_completed",
+  "matchedAt": 1777000000000,
+  "taskId": "task-123",
+  "task": {
+    "id": "task-123",
+    "status": "completed"
+  }
+}
+```
+
+#### `fulfilled` / timeblock 相关数据
+
+```ts
+type TimeblockFulfilledPayload = {
+  type:
+    | 'timeblock_created'
+    | 'timeblock_state_changed'
+    | 'timeblock_stopped'
+    | 'timeblock_ended';
+  matchedAt: number;
+  timeblockId: string;
+  state?: AwaitTimeblockState;
+  transition?: {
+    fromState?: AwaitTimeblockState;
+    toState?: AwaitTimeblockState;
+  };
+  activeBlock?: TimeBlockSnapshot;
+  completedBlock?: TimeBlockSnapshot;
+};
+```
 
 ```json
 {
   "type": "timeblock_state_changed",
   "matchedAt": 1777000000000,
-  "startId": "tb-123",
+  "timeblockId": "tb-123",
   "state": "stopped",
   "transition": {
     "fromState": "running",
@@ -682,7 +698,29 @@ data: <json>
 }
 ```
 
-`proposal_comment_added` 示例：
+#### `fulfilled` / proposal 相关数据
+
+```ts
+type ProposalFulfilledPayload = {
+  type:
+    | 'proposal_created'
+    | 'proposal_revised'
+    | 'proposal_status_changed'
+    | 'proposal_comment_added'
+    | 'proposal_execution_failed';
+  matchedAt: number;
+  proposalId: string;
+  proposal: ProposalSnapshot;
+  transition?: {
+    fromStatus?: string;
+    toStatus?: string;
+  };
+  comment?: ProposalCommentSnapshot;
+  execution?: {
+    failureMessage: string;
+  };
+};
+```
 
 ```json
 {
@@ -704,6 +742,18 @@ data: <json>
 
 #### `timeout`
 
+```ts
+type AwaitTimeoutPayload = {
+  condition: AwaitCondition;
+  timeoutSecs: number;
+};
+
+type AwaitTimeoutEvent = {
+  event: 'timeout';
+  data: AwaitTimeoutPayload;
+};
+```
+
 ```json
 {
   "condition": {
@@ -715,12 +765,36 @@ data: <json>
 
 #### `error`
 
+```ts
+type AwaitErrorPayload = {
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+
+type AwaitErrorEvent = {
+  event: 'error';
+  data: AwaitErrorPayload;
+};
+```
+
 ```json
 {
   "code": "task_not_found",
   "message": "task not found: task-123",
   "retryable": false
 }
+```
+
+#### SSE 类型总览
+
+```ts
+type AwaitSseEvent =
+  | AwaitReadyEvent
+  | AwaitHeartbeatEvent
+  | AwaitFulfilledEvent
+  | AwaitTimeoutEvent
+  | AwaitErrorEvent;
 ```
 
 ### HTTP 状态码规则
@@ -925,7 +999,7 @@ POST /act/await
    - `timeblock.replication.active_upserted`
    - `timeblock.replication.completed`
 3. 被唤醒后回读 active block + completed history
-4. 若出现新的 `startId`，则 fulfilled，并返回该 `startId`
+4. 若出现新的 `startId`，则 fulfilled，并返回该 `timeblockId`
 5. 显式 `startId` 时，它表示“等待未来该块出现”，不是当前存在断言
 
 ### 4.3 `timeblock_state_changed`
@@ -936,7 +1010,7 @@ POST /act/await
    - `timeblock.replication.completed`
 3. 被唤醒后重新回读并派生 `running | paused | stopped | ended`
 4. `fromState` / `toState` 作为可选过滤器
-5. fulfilled 必须返回实际命中的 `startId`
+5. fulfilled 必须返回实际命中的 `timeblockId`
 
 ### 4.4 `timeblock_stopped`
 
@@ -952,7 +1026,7 @@ POST /act/await
 4. 等待时使用 signal 唤醒：
    - `timeblock.replication.active_upserted`
    - `timeblock.replication.completed`
-5. 若是 wait-any 模式，fulfilled 必须返回实际命中的 `startId`
+5. 若是 wait-any 模式，fulfilled 必须返回实际命中的 `timeblockId`
 
 ### 4.5 `timeblock_ended`
 
@@ -963,7 +1037,7 @@ POST /act/await
 3. 若未满足，则订阅：
    - `timeblock.replication.completed`
 4. 每次被唤醒后回读 completed history 复核
-5. 若是 wait-any 模式，fulfilled 必须返回实际命中的 `startId`
+5. 若是 wait-any 模式，fulfilled 必须返回实际命中的 `timeblockId`
 
 **关键决策：**
 
@@ -1090,7 +1164,7 @@ POST /act/await
 
 1. 新增 await API 文档
 2. 在外部接入契约里把 `/act/await` 列为新的 feature API 样板
-3. 对请求体、SSE payload、示例事件统一采用“TypeScript 类型 + JSON 样例”表达
+3. 对请求体、SSE payload、示例事件统一采用“一个 TypeScript 子类型代码块紧跟一个 JSON 样例”的表达
 4. 在新 await API 文档中补最小 curl 示例
 5. 在 `#930` / `#931` 中同步约束边界、非阻塞原则、route-thin-adapter 规则与未来 `watch` 边界
 6. 在 await 功能验证完成、curl / 测试证据齐备之后，再回写 `skills/exomind-rt-agent-access/SKILL.md`，补最小术语映射与新文档跳转：
@@ -1226,7 +1300,7 @@ curl.exe -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" `
 预期：
 
 - 任意时间块在等待建立后发生匹配的外部派生状态变化时 fulfill
-- 响应里必须带实际命中的 `startId`
+- 响应里必须带实际命中的 `timeblockId`
 - `state` / `transition` 必须使用外部状态语义，而不是直接泄露内部 phase 枚举
 
 #### 6. 等专注结束
@@ -1241,7 +1315,7 @@ curl.exe -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" `
 
 - 任意时间块在等待建立后 stop 时 fulfill
 - 若等待期间该块直接进入 completed，也应 fulfill，且 `state=ended`
-- 响应里必须带实际命中的 `startId`
+- 响应里必须带实际命中的 `timeblockId`
 
 #### 7. 等时间块完成
 
@@ -1254,7 +1328,7 @@ curl.exe -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" `
 预期：
 
 - 任意时间块在等待建立后完成并落成 completed block 时 fulfill
-- 响应里必须带实际命中的 `startId`
+- 响应里必须带实际命中的 `timeblockId`
 
 #### 8. 等任意提案新增评论
 
@@ -1360,8 +1434,8 @@ v1 不做 waiter 恢复，断线时可能丢失一次等待上下文。
 
 1. 外部 Agent 可通过 `POST /act/await` 等待 `next_event`、task 条件族、timeblock 条件族、proposal 条件族
 2. SSE 具备 `ready + heartbeat + fulfilled|timeout|error` 基本合同
-3. 请求体与 SSE `data` 载荷在文档中统一采用“TypeScript 类型 + JSON 样例”表达
-4. 资源型 condition 在省略具体 ID 时可等待任意未来命中的对象，且 fulfilled 必须返回实际命中的资源标识
+3. 请求体与 SSE `data` 载荷在文档中统一采用“一个 TypeScript 子类型代码块紧跟一个 JSON 样例”的表达
+4. 资源型 condition 在省略具体 ID 时可等待任意未来命中的对象，且 fulfilled 必须返回实际命中的资源标识；timeblock 相关 fulfilled 字段统一命名为 `timeblockId`
 5. fulfill 结果来自资源真相，而不是仅来自内部 signal/eventlog 痕迹
 6. 中文术语“专注结束 / 时间块完成”在接口文档与 skill 中同步固定
 7. `/act/await` 不要求外部 Agent 理解 route table、`agent_id=ui`、Signal topic 订阅细节

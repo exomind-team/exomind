@@ -7,7 +7,7 @@
 这份计划不处理 Proposal 全量通用化，也不把系统通知、移动端后台提醒、提示音等后续能力一次性打包进来。第一版只收口当前最直接影响 `#921 / #922 / #906 / #677` 的缺口：
 
 - Proposal 已有 RT replication signal，但前端主信号流还没接入 Proposal。
-- `请求箱` 页面与角标当前仍以 30 秒 polling 为主。
+- `提案箱` 页面与角标当前仍以 30 秒 polling 为主。
 - Proposal 还没有与治理语义对应的 lifecycle 事件表面，无法明确表达“新提案到来”“状态已变化”“批准后执行失败”。
 
 ## 当前现状
@@ -64,7 +64,7 @@
 
 ### 3. 前端主路径切到 signal-driven，polling 只保留兜底
 
-- `请求箱` 页面和 Proposal 角标的主刷新路径改为：
+- `提案箱` 页面和 Proposal 角标的主刷新路径改为：
   - 收到 Proposal replication
   - 触发前端 Proposal 数据变化通知
   - 页面 / 角标立即刷新
@@ -165,9 +165,9 @@
 第一版 toast 规则固定如下：
 
 - `proposal.created`
-  - 文案聚焦“有新的待处理请求”
+  - 文案聚焦“有新的待处理提案”
 - `proposal.status_changed`
-  - 文案聚焦“请求状态已变化”
+  - 文案聚焦“提案状态已变化”
 - `proposal.execution_failed`
   - 文案聚焦“批准后执行失败，需要人工处理”
 
@@ -218,7 +218,7 @@
 1. 创建一条新的 pending Proposal
    - 角标即时变化
    - 非 `/proposals` 页面看到 toast
-2. 在请求箱中批准 / 拒绝 / 暂缓 Proposal
+2. 在提案箱中批准 / 拒绝 / 暂缓 Proposal
    - 页面即时刷新
    - 非 `/proposals` 页面看到状态变化 toast
 3. 让 Proposal executor 进入失败路径
@@ -230,7 +230,7 @@
 ## 关联
 
 - [#677](https://github.com/exomind-team/exomind/issues/677)
-  Proposal 系统总入口与现有请求箱表面
+  Proposal 系统总入口与现有提案箱表面
 - [#921](https://github.com/exomind-team/exomind/issues/921)
   当前系列 pilot：`edit_task` 不再只是补动作类型，也要验证治理事件表面
 - [#922](https://github.com/exomind-team/exomind/issues/922)

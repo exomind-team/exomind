@@ -122,7 +122,7 @@
 - Modify: `tests/unit/ui/task-domain-tabs.phase1.test.tsx`
 - Modify: `tests/unit/ui/tasks-page-today-view.test.tsx`
 
-- [ ] 明确“请求箱属于任务域视图”的产品语义，保留 `/proposals` 路由，但在普通用户视角中把它视为任务域顶部视图之一。
+- [ ] 明确“提案箱属于任务域视图”的产品语义，保留 `/proposals` 路由，但在普通用户视角中把它视为任务域顶部视图之一。
 - [ ] 锁住 `Tasks / Timeline / DAG / Proposal Inbox` 的顶部导航一致性，不允许再出现某个子页失去域内切换条。
 - [ ] 检查任务域返回路径与 `TASKS_LAST_PATH_KEY` 行为，确保不会把用户从任务域导航踢回错误页面。
 - [ ] 统一任务域子视图的返回设计：

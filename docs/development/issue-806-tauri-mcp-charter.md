@@ -105,7 +105,7 @@ UI 统计规则必须与 `SessionsView.tsx` 完全一致：
 
 - 导航到 `/proposals`
 - 等待 `proposal-inbox-page`
-- 断言页面不再停在 `请求箱加载中...`
+- 断言页面不再停在 `提案箱加载中...`
 
 允许的通过结果：
 
@@ -148,7 +148,7 @@ bun run tauri:charter:issue806 -- --name issue806-g
   - 右侧进入断开历史视图
   - UI 显示 `Terminal 已断开，无法恢复；下方将展示关闭前历史，可结束后归档。`
   - console 出现 `[agent-hub][pty][open] ...` trace
-- `/proposals` 成功进入请求箱页面，未卡在 loading
+- `/proposals` 成功进入提案箱页面，未卡在 loading
 
 ## 使用建议
 
@@ -157,5 +157,5 @@ bun run tauri:charter:issue806 -- --name issue806-g
   - 实例未启动 / raw bridge 不通
   - UI 与 SQLite 真值不一致
   - 会话卡片点击无反馈或无 trace
-  - 请求箱卡 loading
+  - 提案箱卡 loading
 - 如果 `driver_session` 再次恢复可用，可以在本章程外层换回官方 MCP；当前脚本的断言结构仍然可以复用。

@@ -5,7 +5,7 @@
 > 目的：
 > - 收敛外心 RT 的对外功能定位
 > - 统一 UI / curl / CLI / MCP / Agent 的接入语义
-> - 为后续 `/act`、bootstrap、token、profile discovery 与请求箱追踪提供共同术语
+> - 为后续 `/act`、bootstrap、token、profile discovery 与提案箱追踪提供共同术语
 >
 > 相关 issue：
 > - [#569](https://github.com/exomind-team/exomind/issues/569)
@@ -104,6 +104,12 @@ ExoMind RT 的长期定位不是“只服务 UI 的后端”。
 
 - **TypeScript 类型**：负责描述结构、判别联合、可选字段与命名形态
 - **JSON 样例**：负责描述真实请求、响应或 SSE `data` 载荷实例
+
+默认排版要求也一并固定：
+
+- 采用“**一个 TypeScript 子类型代码块，紧跟一个 JSON 样例**”的局部配对写法
+- 颗粒度以“任务相关请求体”“时间块相关 SSE fulfilled 数据”这类成组结构为宜
+- 避免先把所有对象类型内联堆成一个大联合，再把样例散落到后文
 
 目标是减少“主要靠 prose 逐条解释字段是否可选”的写法，让请求体、响应体、SSE 事件载荷都能用同一种描述语言被复用到 issue、计划文档与实现文档中。
 
@@ -257,17 +263,17 @@ POST /act/timeblocks/end
   - 内部 await 能力被动收到唤醒并复核真相
   - transport 层返回结果并结束本次等待
 
-## 7. Agent 请求箱（长期模型）
+## 7. Agent 提案箱（长期模型）
 
-“Agent 请求箱”不只是一个页面，而是一种更高层的人机审批模型。
+“Agent 提案箱”不只是一个页面，而是一种更高层的人机审批模型。
 
 相关追踪：
 
 - [#677](https://github.com/exomind-team/exomind/issues/677)
 
-第一类请求建议是：
+第一类提案建议是：
 
-- 外部 Agent 请求登录某个档案
+- 外部 Agent 提交登录某个档案的提案
 
 未来可扩展为：
 
@@ -290,7 +296,7 @@ POST /act/timeblocks/end
 
 - 立即迁移现有 UI 全量改走 `/act`
 - 立即废弃 raw `/eventlog`、`/tasks`、`/timeblocks`
-- 立即完成完整请求箱 UI 与审批流程
+- 立即完成完整提案箱 UI 与审批流程
 - 立即把 Agent 消息工作流升级成第一批样板
 
 ## 9. 设计验收标准
@@ -304,4 +310,4 @@ POST /act/timeblocks/end
 - 时间块 feature 样板能覆盖“完整工作流而非裸状态改写”
 - 长连接 / 等待型 feature API 不会阻塞正常 RT 状态推进或 UI 使用
 - profile discovery 的权限边界可解释
-- 请求箱与登录审批模型被明确挂到后续 issue，而不是停留在聊天描述
+- 提案箱与登录审批模型被明确挂到后续 issue，而不是停留在聊天描述

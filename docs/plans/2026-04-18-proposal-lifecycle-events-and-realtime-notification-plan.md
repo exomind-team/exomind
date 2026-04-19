@@ -21,7 +21,7 @@
 但 proposal 的“同步”和“提醒”目前仍处于割裂状态：
 
 1. RT 已经会发 `proposal.replication.upserted`，但前端主信号流还没有接 proposal。
-2. 请求箱页面与角标当前主要依赖轮询，不是 signal-driven。
+2. 提案箱页面与角标当前主要依赖轮询，不是 signal-driven。
 3. proposal 目前缺少专门的生命周期事件；“新建提案”“状态变化”“批准后执行失败”无法用独立 topic 表达。
 4. proposal badge 已存在，但它只是轮询结果的 UI 表面，不代表 proposal 已经进入前端实时事件流。
 
@@ -38,7 +38,7 @@
 
 1. **状态传播层**
    - proposal 进入前端实时信号流
-   - 请求箱页面与角标不再以 polling 作为主路径
+   - 提案箱页面与角标不再以 polling 作为主路径
 2. **用户提醒层**
    - proposal 新建、状态变化、执行失败通过专门 lifecycle events 进入应用内提醒
 
@@ -126,7 +126,7 @@ proposal 本轮明确拆成两类信号：
 前端不引入完整 proposal store，而是新增两层轻量能力：
 
 1. **proposal 数据变更通知器**
-   - 作用：供请求箱页面和角标订阅“proposal 数据需要刷新”
+   - 作用：供提案箱页面和角标订阅“proposal 数据需要刷新”
    - 形式：对齐现有 `notifyTaskDataChanged()` / `notifyReminderDataChanged()` 风格
    - 第一版接口固定为：
      - `subscribeProposalDataChanges(listener: () => void): () => void`
@@ -173,7 +173,7 @@ proposal 本轮明确拆成两类信号：
 
 1. `proposal.created`
    - 在 proposal 创建成功后提醒
-   - 目标是让“新待处理请求”不被静默错过
+   - 目标是让“新待处理提案”不被静默错过
 
 2. `proposal.status_changed`
    - 对所有状态变化都派发事件
@@ -200,7 +200,7 @@ proposal 本轮明确拆成两类信号：
 
 proposal 接入实时流后：
 
-- 请求箱页面保留当前 30 秒轮询
+- 提案箱页面保留当前 30 秒轮询
 - 角标保留当前 30 秒轮询
 - polling 的职责降级为：
   - 断线恢复兜底
@@ -284,7 +284,7 @@ proposal 接入实时流后：
    - 使用当前路由判断是否抑制普通 toast
    - 统一处理 toast 文案与失败提示
 
-### 4.4 UI：请求箱与角标改为“signal 优先，polling 兜底”
+### 4.4 UI：提案箱与角标改为“signal 优先，polling 兜底”
 
 关键入口：
 
@@ -323,7 +323,7 @@ proposal 接入实时流后：
 ### 5.2 Frontend 验收
 
 - 收到 `proposal.replication.upserted` 后：
-  - 请求箱无需等 30 秒即可刷新
+  - 提案箱无需等 30 秒即可刷新
   - 角标无需等 30 秒即可刷新
 - 收到 `proposal.created` 后：
   - 非 `/proposals` 路由出现新提案 toast
@@ -350,9 +350,9 @@ proposal 接入实时流后：
 
 1. 创建一条 `pending` proposal
    - badge 立即增加
-   - 非 `/proposals` 页面出现新请求提示
+   - 非 `/proposals` 页面出现新提案提示
 2. 将 proposal 变为 `in_review / approved / rejected / snoozed`
-   - 请求箱立即刷新
+   - 提案箱立即刷新
    - 非 `/proposals` 页面收到状态变化提示
 3. 批准一条会执行失败的 proposal
    - proposal 中出现失败评论

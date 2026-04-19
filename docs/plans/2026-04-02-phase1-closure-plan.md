@@ -4,7 +4,7 @@
 
 **Goal:** 完成 UI System Phase 1 的共享层收口，重点收尾页面顶栏统一、任务域导航统一、剩余高频原生 `select` 迁移。
 
-**Architecture:** 这轮不再扩大战线，不重做业务页面骨架。核心做法是增强 `PageShell` 与共享顶部导航组件，让 `Now / Tasks / Proposal Inbox` 走同一类头部模型；任务域内部通过统一 header tabs 连接 `任务 / 时间线 / 依赖图 / 请求箱`。剩余 native select 只处理高频配置入口，不碰 graph / topology / workbench 内核交互。
+**Architecture:** 这轮不再扩大战线，不重做业务页面骨架。核心做法是增强 `PageShell` 与共享顶部导航组件，让 `Now / Tasks / Proposal Inbox` 走同一类头部模型；任务域内部通过统一 header tabs 连接 `任务 / 时间线 / 依赖图 / 提案箱`。剩余 native select 只处理高频配置入口，不碰 graph / topology / workbench 内核交互。
 
 **Tech Stack:** React 18、TypeScript、TanStack Router、Tailwind CSS、Radix/shadcn Select、Vitest
 
@@ -24,7 +24,7 @@
 - Test: `tests/unit/ui/task-domain-tabs.phase1.test.tsx`
 
 - [x] 补一个共享 `TaskDomainTabs`，风格对齐 `AgentsPage` 顶部 tab bar。
-- [x] 让 `TasksPage` 顶部出现 `任务 / 时间线 / 依赖图 / 请求箱` 的统一切换。
+- [x] 让 `TasksPage` 顶部出现 `任务 / 时间线 / 依赖图 / 提案箱` 的统一切换。
 - [x] 让 `ProposalInboxPage` 作为任务域视图之一，使用相同切换条。
 - [x] 给 `TaskTimelinePage` / `TaskDagPage` 补相同任务域切换条，避免进入子视图后丢失域内导航。
 - [x] 跑相关 UI 测试与类型检查。

@@ -163,7 +163,7 @@ RT 回读结果：
 
 ## 额外澄清
 
-侧边栏“任务”项旁边显示的 `2` 不是任务数量，而是请求箱紧凑 badge：
+侧边栏“任务”项旁边显示的 `2` 不是任务数量，而是提案箱紧凑 badge：
 
 - selector：`proposal-desktop-compact-badge`
 - 含义：待处理 proposal 数量
