@@ -12,8 +12,8 @@ pub fn focus_keep_awake_set(app: AppHandle, enabled: bool) -> Result<(), String>
 
     #[cfg(target_os = "android")]
     {
-    app.android_keep_awake()
-        .set_enabled(enabled)
-        .map_err(|error| format!("failed to set focus keep awake: {error}"))
+        app.android_keep_awake()
+            .set_enabled(enabled)
+            .map_err(|error| format!("failed to set focus keep awake: {error}"))
     }
 }

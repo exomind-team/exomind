@@ -220,20 +220,18 @@ pub async fn require_auth(
         // 2. Per-peer inbound secret — data-plane mesh routes only.
         //    Peers can relay events and stream signals, but cannot manage peers
         //    or initiate pairing (those are admin/control-plane operations).
-        Some(ref token) => {
-            match state.mesh.peer_id_by_inbound_secret(token) {
-                Ok(Some(peer_id)) => {
-                    if peer_path_access == PeerPathAccess::Denied {
-                        return Err(StatusCode::FORBIDDEN);
-                    }
-                    request
-                        .extensions_mut()
-                        .insert(AuthenticatedPeerIdentity { peer_id });
-                    Ok(next.run(request).await)
+        Some(ref token) => match state.mesh.peer_id_by_inbound_secret(token) {
+            Ok(Some(peer_id)) => {
+                if peer_path_access == PeerPathAccess::Denied {
+                    return Err(StatusCode::FORBIDDEN);
                 }
-                Ok(None) | Err(_) => Err(StatusCode::UNAUTHORIZED),
+                request
+                    .extensions_mut()
+                    .insert(AuthenticatedPeerIdentity { peer_id });
+                Ok(next.run(request).await)
             }
-        }
+            Ok(None) | Err(_) => Err(StatusCode::UNAUTHORIZED),
+        },
         None => Err(StatusCode::UNAUTHORIZED),
     }
 }

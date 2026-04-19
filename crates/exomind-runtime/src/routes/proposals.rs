@@ -172,7 +172,8 @@ async fn update_proposal(
             .map_err(map_store_error)?;
     }
 
-    let status_changed = (before.status != proposal.status).then_some((before.status, proposal.status));
+    let status_changed =
+        (before.status != proposal.status).then_some((before.status, proposal.status));
     let mut execution_failure_message: Option<String> = None;
 
     if before.status != ProposalStatus::Approved && proposal.status == ProposalStatus::Approved {
@@ -751,8 +752,14 @@ mod tests {
         assert_eq!(signals.len(), 2);
         assert_eq!(signals[0].topic, "proposal.created");
         assert_eq!(signals[1].topic, "proposal.replication.upserted");
-        assert_eq!(signals[0].payload["scopeKey"], serde_json::json!("profile-a"));
-        assert_eq!(signals[0].payload["cursor"]["kind"], serde_json::json!("proposal_created"));
+        assert_eq!(
+            signals[0].payload["scopeKey"],
+            serde_json::json!("profile-a")
+        );
+        assert_eq!(
+            signals[0].payload["cursor"]["kind"],
+            serde_json::json!("proposal_created")
+        );
         assert_eq!(signals[0].payload["proposal"]["id"], created["id"]);
         assert_eq!(
             signals[1].payload["cursor"]["kind"],
@@ -824,8 +831,14 @@ mod tests {
             signals[0].payload["transition"]["toStatus"],
             serde_json::json!("in_review")
         );
-        assert_eq!(signals[0].payload["proposal"]["status"], serde_json::json!("in_review"));
-        assert_eq!(signals[1].payload["proposal"]["status"], serde_json::json!("in_review"));
+        assert_eq!(
+            signals[0].payload["proposal"]["status"],
+            serde_json::json!("in_review")
+        );
+        assert_eq!(
+            signals[1].payload["proposal"]["status"],
+            serde_json::json!("in_review")
+        );
     }
 
     #[tokio::test]
@@ -920,7 +933,10 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(signals[1].payload["proposal"]["status"], serde_json::json!("approved"));
+        assert_eq!(
+            signals[1].payload["proposal"]["status"],
+            serde_json::json!("approved")
+        );
         assert_eq!(
             signals[1].payload["proposal"]["comments"]
                 .as_array()

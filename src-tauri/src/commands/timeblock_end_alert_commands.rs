@@ -1,8 +1,8 @@
+#[cfg(target_os = "android")]
+use exomind_android_timeblock_end_alert::AndroidTimeblockEndAlertExt;
 use exomind_android_timeblock_end_alert::{
     NotificationPermissionStatus, PendingTimeblockEndHandoff, ScheduleTimeblockEndAlertRequest,
 };
-#[cfg(target_os = "android")]
-use exomind_android_timeblock_end_alert::AndroidTimeblockEndAlertExt;
 use serde::Serialize;
 use tauri::AppHandle;
 

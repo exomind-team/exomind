@@ -204,18 +204,12 @@ fn apply_task_replication(
 
             if should_accept {
                 store
-                    .upsert_scoped(
-                        scope_key,
-                        merge_task_snapshot(&existing, &incoming, true),
-                    )
+                    .upsert_scoped(scope_key, merge_task_snapshot(&existing, &incoming, true))
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             } else if history_changed {
                 store
-                    .upsert_scoped(
-                        scope_key,
-                        merge_task_snapshot(&existing, &incoming, false),
-                    )
+                    .upsert_scoped(scope_key, merge_task_snapshot(&existing, &incoming, false))
                     .map(|_| ())
                     .map_err(|error| error.to_string())
             } else {
@@ -1015,9 +1009,11 @@ mod tests {
 
         yield_for_actor().await;
 
-        assert!(proposal_store
-            .get_scoped(Some("profile-sync"), "proposal-7")
-            .expect("proposal query")
-            .is_none());
+        assert!(
+            proposal_store
+                .get_scoped(Some("profile-sync"), "proposal-7")
+                .expect("proposal query")
+                .is_none()
+        );
     }
 }

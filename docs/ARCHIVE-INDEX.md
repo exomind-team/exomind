@@ -4,71 +4,71 @@
 
 ## 计划文档（已完成）
 
-| 原路径 | 摘要 | 关联 Issue/PR | 删除提交 |
-|--------|------|---------------|----------|
-| docs/plans/2026-03-14-unified-logger-logpanel-redesign.md | 双写日志接口 + LogPanel 新 UI 重设计。**关键决策**: 双写模式（内存 listener + console + Tauri plugin-log），LogPanel 迁移到暖石色系设计 token | #525, PR #526 | 3998871b |
-| docs/plans/2026-03-14-legacy-data-migration-design.md | PouchDB/IndexedDB → RT SQLite 一次性迁移 Modal 设计。**关键决策**: Bootstrap 层一次性迁移（不留 fallback）、Modal 对话框提示（弹一次）、失败保守回退 legacy 模式、旧数据保留不删除、三域统一迁移（EventLog+Task+TimeBlock）、merge 策略幂等安全 | PR #524 | 3998871b |
-| docs/plans/2026-03-13-issue-514-instance-diagnostics-plan.md | Issue #514 实例诊断功能实现计划 | #514 | (本次提交) |
-| docs/plans/2026-03-13-pr-506-closeout-plan.md | PR #506 收尾验收实现计划 | PR #506 | (本次提交) |
-| docs/plans/2026-03-12-settings-inline-enum-alignment-plan.md | Settings 内联枚举对齐实现计划 | - | (本次提交) |
-| docs/plans/2026-03-12-settings-group-overlay-plan.md | Settings 分组覆盖层对齐实现计划 | - | (本次提交) |
-| docs/plans/2026-03-12-settings-dialog-alignment-plan.md | Settings 对话框对齐实现计划 | - | (本次提交) |
-| docs/plans/2026-03-12-settings-danger-action-plan.md | Settings 危险操作按钮实现计划 | - | (本次提交) |
-| docs/plans/2026-03-11-settings-registry-implementation-plan.md | Settings Registry 模块实现计划 | - | (本次提交) |
-| docs/plans/2026-03-11-pr499-review-regressions.md | PR #499 Review 回归问题修复计划 | PR #499 | (本次提交) |
-| docs/plans/2026-03-11-review-agent-b1-implementation.md | Review Agent Phase B1 实现计划 | - | (本次提交) |
-| docs/plans/2026-03-11-issue-481-rt-task-sqlite-plan.md | RT Task SQLite 迁移实现计划 | #481 | (本次提交) |
-| docs/plans/2026-03-10-review-agent-unified-entry-plan.md | Review Agent 统一入口实现计划 | - | (本次提交) |
-| docs/plans/2026-03-10-voice-overlay-live-preview-design.md | 语音悬浮窗实时预览设计 | - | (本次提交) |
-| docs/plans/2026-03-09-review-agent-prompts-and-loop-plan.md | Review Agent 提示词 + 执行循环实现计划 | - | (本次提交) |
-| docs/plans/2026-03-09-review-agent-discovery-plan.md | Review Agent 服务发现实现计划 | - | (本次提交) |
-| docs/plans/2026-03-09-review-agent-bootstrap-plan.md | Review Agent 启动恢复实现计划 | - | (本次提交) |
-| docs/plans/2026-03-09-phase1-agent-body-plan.md | Phase 1 Agent 身体骨架执行计划 | #438 | (本次提交) |
-| docs/plans/2026-03-08-life-demo-energy-tick.md | 认知生命 Demo 能量系统 + Tick 心跳实现计划 | - | (本次提交) |
-| docs/plans/2026-03-07-embedded-runtime-agent-host-sync-plan.md | 内嵌 Runtime Agent Host 同步实现计划 | - | (本次提交) |
-| docs/plans/2026-03-07-ecs-381-acceptance-report.md | ECS #381 验收报告 | #381 | (本次提交) |
-| docs/plans/2026-03-07-ecs-381-remaining-work-plan.md | ECS #381 剩余工作实现计划 | #381 | (本次提交) |
-| docs/plans/2026-03-06-ecs-data-sync-mvp-plan.md | ECS 数据同步 MVP 实现计划 | - | (本次提交) |
-| docs/plans/2026-03-06-ecs-phase3-test-baseline-plan.md | ECS Phase 3 测试基线实现计划 | - | (本次提交) |
-| docs/plans/2026-03-06-release-v0.3.5-finalization-plan.md | ExoMind v0.3.5 发版收尾计划 | - | (本次提交) |
-| docs/plans/2026-03-06-agent-hub-voice-signal-integration.md | Agent Hub 语音信号集成实现计划 | - | (本次提交) |
-| docs/plans/2026-03-06-ecs-phase2-mesh-relay-plan.md | ECS Phase 2 Mesh 中继实现计划 | - | (本次提交) |
-| docs/plans/2026-03-06-ecs-phase1-transport-plan.md | ECS Phase 1 传输层实现计划 | - | (本次提交) |
-| docs/plans/2026-03-05-m4-agent-soft-skills-evaluation-pr-comment.md | M4 Agent 软技能（Classifier + Reviewer）评选 PR 评论 | - | (本次提交) |
-| docs/plans/2026-03-04-m4-rt-agent-hub-review-comment.md | M4 RT Agent Hub 最终评审结果（自检） | - | (本次提交) |
-| docs/plans/2026-03-04-m4-rt-agent-hub-progress-comment.md | M4 RT Agent Hub 阶段 2 整合进展更新 | - | (本次提交) |
-| docs/plans/2026-03-04-m4-rt-agent-hub-pr-body.md | M4 RT 内嵌 + Agent Hub 整合 PR 描述 | - | (本次提交) |
-| docs/plans/2026-03-04-m4-rt-agent-hub-plan-comment.md | M4 方案与验收链路审批版 PR 评论 | - | (本次提交) |
-| docs/plans/2026-03-04-m4-rt-agent-hub-integration-plan.md | M4 RT 内嵌 + Agent Hub 整合实现计划 | - | (本次提交) |
-| docs/plans/2026-03-04-ci-bun-install-selfhosted-stabilization.md | Self-Hosted Bun Install CI 稳定化实现计划 | - | (本次提交) |
-| docs/plans/2026-03-04-m1-review-followup-comment.md | M1 评审闭环补充（子代理 Review Follow-up） | - | (本次提交) |
-| docs/plans/2026-03-04-m1-final-pr-comment.md | M1 完成汇报：exomind-runtime 内嵌 Tauri | - | (本次提交) |
-| docs/plans/2026-03-04-m1-embedded-runtime-tauri-plan.md | M1 Tauri 内嵌 Runtime 实现计划 | - | (本次提交) |
-| docs/plans/2026-03-04-m1-embedded-runtime-pr-comment.md | M1 exomind-runtime 内嵌 Tauri 方案确认 PR 评论 | - | (本次提交) |
-| docs/plans/2026-03-04-issue-245f-m2-agent-hub-signal-routes-plan.md | Agent Hub 信号路由 + React Flow 拓扑实现计划 | #245 | (本次提交) |
-| docs/plans/2026-03-04-issue-245f-m2-agent-hub-followup-fix-plan.md | Agent Hub 信号路由 / 拓扑 Follow-up 修复计划 | #245 | (本次提交) |
-| docs/plans/2026-03-04-v034-milestone-plan.md | v0.3.4 里程碑计划 | - | (本次提交) |
-| docs/plans/2026-03-01-issue-104-timeblock-multi-device-sync-plan.md | Issue #104 多设备时间块同步行动方案 | #104 | (本次提交) |
-| docs/plans/2026-03-01-signal-pool-sse-runtimehost-mvp-mlp-plan.md | SignalPool SSE RuntimeHost Relay MVP/MLP 实现计划 | - | (本次提交) |
-| docs/plans/2026-02-27-issue-205-p0-runtimehost-acceptance-plan.md | Issue #205 P0 RuntimeHost 验收实现计划 | #205 | (本次提交) |
-| docs/plans/2026-02-27-build-artifact-r2-update-system.md | 构建产物 R2 存储 + 全链路自动更新系统设计 | #262 | (本次提交) |
-| docs/plans/2026-02-26-issue-198-desktop-settings-plan.md | Issue #198 桌面端 Settings 实现计划 | #198 | (本次提交) |
-| docs/plans/2026-02-23-settings-iteration.md | Settings 页 More/Legal Section + 测试数据开关迭代计划 | - | (本次提交) |
-| docs/plans/2026-02-23-issue-213-task-ui-mock-plan.md | Issue #213 Task UI + Mock 架构实现计划 | #213 | (本次提交) |
-| docs/plans/2026-02-23-issue-204-agent-hub-implementation-plan.md | GH #204 Agent Hub 全视图实现计划 | #204 | (本次提交) |
-| docs/plans/2026-02-19-semver-beta-versioning-proposal.md | ExoMind 版本治理方案（SemVer + Beta + Hash） | - | (本次提交) |
-| docs/plans/2026-02-18-android-asr-minimal-diff-plan.md | Android ASR 权限最小 Diff 实现计划 | - | (本次提交) |
-| docs/plans/2026-02-12-issue-65-eventlog-lazy-loading.md | Issue #65 EventLog 懒加载方案 B 实现计划 | #65 | (本次提交) |
-| docs/plans/2026-02-11-issue-79-port-env-config.md | Issue #79 端口环境变量配置实现计划 | #79 | (本次提交) |
-| docs/plans/2026-02-11-issue-77-import-export-plan.md | Issue #77 导入/导出功能实现计划 | #77 | (本次提交) |
-| docs/plans/2026-02-11-issue-27-eventlog-sync-mvp-plan.md | Issue #27 EventLog 多设备同步 MVP 实现计划 | #27 | (本次提交) |
-| docs/plans/2026-02-10-multi-device-sync-fix.md | 多设备同步修复实现计划 | - | (本次提交) |
-| docs/plans/2026-02-09-event-log-scroll-direction.md | 事件日志消息刷新方式调整（滚动方向） | - | (本次提交) |
-| docs/plans/2026-02-05-event-log-lan-mvp-plan.md | Event Log LAN MVP 实现计划 | - | (本次提交) |
-| docs/plans/2026-02-04-multi-device-e2e-testing.md | 多端消息同步系统构建与 E2E 测试计划 | - | (本次提交) |
-| docs/plans/2026-02-04-chat-ui-integration.md | 聊天 UI 集成计划 | - | (本次提交) |
-| docs/plans/460-eventlog-http-prompt.md | RT 新增 EventLog HTTP 端点 + MCP 迁移 | #460 | (本次提交) |
-| docs/plans/304-voice-global-shortcut-spec.md | 语音输入全局快捷键 + EventLog 双写实现规范 | #304 | (本次提交) |
+| 原路径                                                                 | 摘要                                                                                                                                                                           | 关联 Issue/PR   | 删除提交     |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | -------- |
+| docs/plans/2026-03-14-unified-logger-logpanel-redesign.md           | 双写日志接口 + LogPanel 新 UI 重设计。**关键决策**: 双写模式（内存 listener + console + Tauri plugin-log），LogPanel 迁移到暖石色系设计 token                                                                 | #525, PR #526 | 3998871b |
+| docs/plans/2026-03-14-legacy-data-migration-design.md               | PouchDB/IndexedDB → RT SQLite 一次性迁移 Modal 设计。**关键决策**: Bootstrap 层一次性迁移（不留 fallback）、Modal 对话框提示（弹一次）、失败保守回退 legacy 模式、旧数据保留不删除、三域统一迁移（EventLog+Task+TimeBlock）、merge 策略幂等安全 | PR #524       | 3998871b |
+| docs/plans/2026-03-13-issue-514-instance-diagnostics-plan.md        | Issue #514 实例诊断功能实现计划                                                                                                                                                        | #514          | (本次提交)   |
+| docs/plans/2026-03-13-pr-506-closeout-plan.md                       | PR #506 收尾验收实现计划                                                                                                                                                             | PR #506       | (本次提交)   |
+| docs/plans/2026-03-12-settings-inline-enum-alignment-plan.md        | Settings 内联枚举对齐实现计划                                                                                                                                                          | -             | (本次提交)   |
+| docs/plans/2026-03-12-settings-group-overlay-plan.md                | Settings 分组覆盖层对齐实现计划                                                                                                                                                         | -             | (本次提交)   |
+| docs/plans/2026-03-12-settings-dialog-alignment-plan.md             | Settings 对话框对齐实现计划                                                                                                                                                           | -             | (本次提交)   |
+| docs/plans/2026-03-12-settings-danger-action-plan.md                | Settings 危险操作按钮实现计划                                                                                                                                                          | -             | (本次提交)   |
+| docs/plans/2026-03-11-settings-registry-implementation-plan.md      | Settings Registry 模块实现计划                                                                                                                                                     | -             | (本次提交)   |
+| docs/plans/2026-03-11-pr499-review-regressions.md                   | PR #499 Review 回归问题修复计划                                                                                                                                                      | PR #499       | (本次提交)   |
+| docs/plans/2026-03-11-review-agent-b1-implementation.md             | Review Agent Phase B1 实现计划                                                                                                                                                   | -             | (本次提交)   |
+| docs/plans/2026-03-11-issue-481-rt-task-sqlite-plan.md              | RT Task SQLite 迁移实现计划                                                                                                                                                        | #481          | (本次提交)   |
+| docs/plans/2026-03-10-review-agent-unified-entry-plan.md            | Review Agent 统一入口实现计划                                                                                                                                                        | -             | (本次提交)   |
+| docs/plans/2026-03-10-voice-overlay-live-preview-design.md          | 语音悬浮窗实时预览设计                                                                                                                                                                  | -             | (本次提交)   |
+| docs/plans/2026-03-09-review-agent-prompts-and-loop-plan.md         | Review Agent 提示词 + 执行循环实现计划                                                                                                                                                  | -             | (本次提交)   |
+| docs/plans/2026-03-09-review-agent-discovery-plan.md                | Review Agent 服务发现实现计划                                                                                                                                                        | -             | (本次提交)   |
+| docs/plans/2026-03-09-review-agent-bootstrap-plan.md                | Review Agent 启动恢复实现计划                                                                                                                                                        | -             | (本次提交)   |
+| docs/plans/2026-03-09-phase1-agent-body-plan.md                     | Phase 1 Agent 身体骨架执行计划                                                                                                                                                       | #438          | (本次提交)   |
+| docs/plans/2026-03-08-life-demo-energy-tick.md                      | 认知生命 Demo 能量系统 + Tick 心跳实现计划                                                                                                                                                 | -             | (本次提交)   |
+| docs/plans/2026-03-07-embedded-runtime-agent-host-sync-plan.md      | 内嵌 Runtime Agent Host 同步实现计划                                                                                                                                                 | -             | (本次提交)   |
+| docs/plans/2026-03-07-ecs-381-acceptance-report.md                  | ECS #381 验收报告                                                                                                                                                                | #381          | (本次提交)   |
+| docs/plans/2026-03-07-ecs-381-remaining-work-plan.md                | ECS #381 剩余工作实现计划                                                                                                                                                            | #381          | (本次提交)   |
+| docs/plans/2026-03-06-ecs-data-sync-mvp-plan.md                     | ECS 数据同步 MVP 实现计划                                                                                                                                                            | -             | (本次提交)   |
+| docs/plans/2026-03-06-ecs-phase3-test-baseline-plan.md              | ECS Phase 3 测试基线实现计划                                                                                                                                                         | -             | (本次提交)   |
+| docs/plans/2026-03-06-release-v0.3.5-finalization-plan.md           | ExoMind v0.3.5 发版收尾计划                                                                                                                                                        | -             | (本次提交)   |
+| docs/plans/2026-03-06-agent-hub-voice-signal-integration.md         | Agent Hub 语音信号集成实现计划                                                                                                                                                         | -             | (本次提交)   |
+| docs/plans/2026-03-06-ecs-phase2-mesh-relay-plan.md                 | ECS Phase 2 Mesh 中继实现计划                                                                                                                                                      | -             | (本次提交)   |
+| docs/plans/2026-03-06-ecs-phase1-transport-plan.md                  | ECS Phase 1 传输层实现计划                                                                                                                                                          | -             | (本次提交)   |
+| docs/plans/2026-03-05-m4-agent-soft-skills-evaluation-pr-comment.md | M4 Agent 软技能（Classifier + Reviewer）评选 PR 评论                                                                                                                                  | -             | (本次提交)   |
+| docs/plans/2026-03-04-m4-rt-agent-hub-review-comment.md             | M4 RT Agent Hub 最终评审结果（自检）                                                                                                                                                   | -             | (本次提交)   |
+| docs/plans/2026-03-04-m4-rt-agent-hub-progress-comment.md           | M4 RT Agent Hub 阶段 2 整合进展更新                                                                                                                                                  | -             | (本次提交)   |
+| docs/plans/2026-03-04-m4-rt-agent-hub-pr-body.md                    | M4 RT 内嵌 + Agent Hub 整合 PR 描述                                                                                                                                                | -             | (本次提交)   |
+| docs/plans/2026-03-04-m4-rt-agent-hub-plan-comment.md               | M4 方案与验收链路审批版 PR 评论                                                                                                                                                          | -             | (本次提交)   |
+| docs/plans/2026-03-04-m4-rt-agent-hub-integration-plan.md           | M4 RT 内嵌 + Agent Hub 整合实现计划                                                                                                                                                  | -             | (本次提交)   |
+| docs/plans/2026-03-04-ci-bun-install-selfhosted-stabilization.md    | Self-Hosted Bun Install CI 稳定化实现计划                                                                                                                                           | -             | (本次提交)   |
+| docs/plans/2026-03-04-m1-review-followup-comment.md                 | M1 评审闭环补充（子代理 Review Follow-up）                                                                                                                                              | -             | (本次提交)   |
+| docs/plans/2026-03-04-m1-final-pr-comment.md                        | M1 完成汇报：exomind-runtime 内嵌 Tauri                                                                                                                                             | -             | (本次提交)   |
+| docs/plans/2026-03-04-m1-embedded-runtime-tauri-plan.md             | M1 Tauri 内嵌 Runtime 实现计划                                                                                                                                                     | -             | (本次提交)   |
+| docs/plans/2026-03-04-m1-embedded-runtime-pr-comment.md             | M1 exomind-runtime 内嵌 Tauri 方案确认 PR 评论                                                                                                                                       | -             | (本次提交)   |
+| docs/plans/2026-03-04-issue-245f-m2-agent-hub-signal-routes-plan.md | Agent Hub 信号路由 + React Flow 拓扑实现计划                                                                                                                                           | #245          | (本次提交)   |
+| docs/plans/2026-03-04-issue-245f-m2-agent-hub-followup-fix-plan.md  | Agent Hub 信号路由 / 拓扑 Follow-up 修复计划                                                                                                                                           | #245          | (本次提交)   |
+| docs/plans/2026-03-04-v034-milestone-plan.md                        | v0.3.4 里程碑计划                                                                                                                                                                 | -             | (本次提交)   |
+| docs/plans/2026-03-01-issue-104-timeblock-multi-device-sync-plan.md | Issue #104 多设备时间块同步行动方案                                                                                                                                                      | #104          | (本次提交)   |
+| docs/plans/2026-03-01-signal-pool-sse-runtimehost-mvp-mlp-plan.md   | SignalPool SSE RuntimeHost Relay MVP/MLP 实现计划                                                                                                                                | -             | (本次提交)   |
+| docs/plans/2026-02-27-issue-205-p0-runtimehost-acceptance-plan.md   | Issue #205 P0 RuntimeHost 验收实现计划                                                                                                                                             | #205          | (本次提交)   |
+| docs/plans/2026-02-27-build-artifact-r2-update-system.md            | 构建产物 R2 存储 + 全链路自动更新系统设计                                                                                                                                                     | #262          | (本次提交)   |
+| docs/plans/2026-02-26-issue-198-desktop-settings-plan.md            | Issue #198 桌面端 Settings 实现计划                                                                                                                                                 | #198          | (本次提交)   |
+| docs/plans/2026-02-23-settings-iteration.md                         | Settings 页 More/Legal Section + 测试数据开关迭代计划                                                                                                                                   | -             | (本次提交)   |
+| docs/plans/2026-02-23-issue-213-task-ui-mock-plan.md                | Issue #213 Task UI + Mock 架构实现计划                                                                                                                                             | #213          | (本次提交)   |
+| docs/plans/2026-02-23-issue-204-agent-hub-implementation-plan.md    | GH #204 Agent Hub 全视图实现计划                                                                                                                                                    | #204          | (本次提交)   |
+| docs/plans/2026-02-19-semver-beta-versioning-proposal.md            | ExoMind 版本治理方案（SemVer + Beta + Hash）                                                                                                                                         | -             | (本次提交)   |
+| docs/plans/2026-02-18-android-asr-minimal-diff-plan.md              | Android ASR 权限最小 Diff 实现计划                                                                                                                                                   | -             | (本次提交)   |
+| docs/plans/2026-02-12-issue-65-eventlog-lazy-loading.md             | Issue #65 EventLog 懒加载方案 B 实现计划                                                                                                                                              | #65           | (本次提交)   |
+| docs/plans/2026-02-11-issue-79-port-env-config.md                   | Issue #79 端口环境变量配置实现计划                                                                                                                                                       | #79           | (本次提交)   |
+| docs/plans/2026-02-11-issue-77-import-export-plan.md                | Issue #77 导入/导出功能实现计划                                                                                                                                                        | #77           | (本次提交)   |
+| docs/plans/2026-02-11-issue-27-eventlog-sync-mvp-plan.md            | Issue #27 EventLog 多设备同步 MVP 实现计划                                                                                                                                            | #27           | (本次提交)   |
+| docs/plans/2026-02-10-multi-device-sync-fix.md                      | 多设备同步修复实现计划                                                                                                                                                                  | -             | (本次提交)   |
+| docs/plans/2026-02-09-event-log-scroll-direction.md                 | 事件日志消息刷新方式调整（滚动方向）                                                                                                                                                           | -             | (本次提交)   |
+| docs/plans/2026-02-05-event-log-lan-mvp-plan.md                     | Event Log LAN MVP 实现计划                                                                                                                                                       | -             | (本次提交)   |
+| docs/plans/2026-02-04-multi-device-e2e-testing.md                   | 多端消息同步系统构建与 E2E 测试计划                                                                                                                                                         | -             | (本次提交)   |
+| docs/plans/2026-02-04-chat-ui-integration.md                        | 聊天 UI 集成计划                                                                                                                                                                   | -             | (本次提交)   |
+| docs/plans/460-eventlog-http-prompt.md                              | RT 新增 EventLog HTTP 端点 + MCP 迁移                                                                                                                                              | #460          | (本次提交)   |
+| docs/plans/304-voice-global-shortcut-spec.md                        | 语音输入全局快捷键 + EventLog 双写实现规范                                                                                                                                                  | #304          | (本次提交)   |
 
 ## 计划文档（已废弃）
 
