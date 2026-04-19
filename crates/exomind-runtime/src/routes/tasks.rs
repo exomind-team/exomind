@@ -2,24 +2,25 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 
+use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
 use crate::signal::types::SignalEvent;
 use crate::task::store::{
+    TaskStoreError, append_task_status_transition, build_initial_task_status_transition,
     compare_task_replication_preference, merge_task_snapshot, merge_task_status_history,
-    normalize_task_status_history, task_replication_revision_projection,
-    validate_partial_task_status_history, TaskStoreError,
+    normalize_task_status_history, prepare_task_for_storage, task_replication_revision_projection,
+    validate_partial_task_status_history,
 };
 use crate::task::{
     BatchTransitionInput, BatchTransitionResponse, BatchTransitionResult, CreateTaskInput, Task,
     TaskStatus, TaskTransitionContext, TaskTransitionReason, TransitionInput, UpdateTaskInput,
 };
-use crate::AppState;
 
 // ── Query types ─────────────────────────────────────────────────
 
@@ -183,6 +184,7 @@ async fn list_tasks(
     Query(query): Query<ListQuery>,
 ) -> Json<Vec<Task>> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let mut tasks = match &query.status {
         Some(status) => state.task_store.list_by_status_scoped(scope_key, status),
         None => state.task_store.list_scoped(scope_key),
@@ -206,6 +208,7 @@ async fn get_task(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, StatusCode> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     state
         .task_store
         .get_scoped(scope_key, &id)
@@ -236,6 +239,7 @@ async fn update_task(
     Json(input): Json<UpdateTaskInput>,
 ) -> Result<Json<Task>, StatusCode> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let task = state
         .task_store
         .update_scoped(scope_key, &id, input)
@@ -258,6 +262,7 @@ async fn transition_task(
     Json(input): Json<TransitionInput>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let steps = transition_task_in_scope_with_context(
         &state,
         scope_key,
@@ -287,6 +292,7 @@ async fn batch_transition_tasks(
     Json(input): Json<BatchTransitionInput>,
 ) -> Json<BatchTransitionResponse> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let use_shortcut = input.shortcut.unwrap_or(false);
     let mut results = Vec::with_capacity(input.tasks.len());
     let mut succeeded = 0usize;
@@ -366,10 +372,12 @@ pub(crate) async fn transition_task_in_scope_with_context(
             .transition_with_shortcut_scoped_with_context(scope_key, id, target_status, context)
             .map_err(map_task_store_error)?
     } else {
-        vec![state
-            .task_store
-            .transition_scoped_with_context(scope_key, id, target_status, context)
-            .map_err(map_task_store_error)?]
+        vec![
+            state
+                .task_store
+                .transition_scoped_with_context(scope_key, id, target_status, context)
+                .map_err(map_task_store_error)?,
+        ]
     };
 
     for (old_status, task) in &steps {
@@ -407,6 +415,7 @@ async fn cancel_task(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let (old_status, task) = cancel_task_in_scope_with_context(
         &state,
         scope_key,
@@ -434,6 +443,7 @@ async fn delete_task(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let (old_status, task) = cancel_task_in_scope_with_context(
         &state,
         scope_key,
@@ -459,6 +469,7 @@ async fn export_tasks_json(
     Query(query): Query<ScopeQuery>,
 ) -> Json<TaskBackupJsonPayload> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     Json(TaskBackupJsonPayload {
         version: 1,
         tasks: state.task_store.list_scoped(scope_key),
@@ -470,6 +481,7 @@ async fn export_tasks_sqlite(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<TaskBackupSqlitePayload>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let tasks = state.task_store.list_scoped(scope_key);
     let bytes = build_task_sqlite_snapshot_bytes(scope_key, &tasks)?;
 
@@ -488,6 +500,7 @@ async fn import_tasks_json(
 ) -> Result<Json<TaskImportResult>, (StatusCode, String)> {
     let strategy = parse_import_strategy(query.strategy.as_deref())?;
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let result = apply_task_import(&state, scope_key, payload.tasks, strategy)?;
     Ok(Json(result))
 }
@@ -505,6 +518,7 @@ async fn import_tasks_sqlite(
         )
     })?;
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     let imported_tasks = read_tasks_from_sqlite_snapshot(&bytes, scope_key)?;
     let result = apply_task_import(&state, scope_key, imported_tasks, strategy)?;
     Ok(Json(result))
@@ -531,6 +545,7 @@ async fn replication_summary_tasks(
     Query(query): Query<ScopeQuery>,
 ) -> Json<TaskReplicationSummary> {
     let scope_key = scope_query_key(&query);
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     Json(build_task_replication_summary(
         scope_key,
         &state.task_store.list_scoped(scope_key),
@@ -542,6 +557,7 @@ async fn replication_pull_tasks(
     Query(query): Query<ScopedTaskReplicationPullQuery>,
 ) -> Json<TaskReplicationPullResponse> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    ensure_legacy_task_status_history_repaired(&state, scope_key);
     Json(build_task_replication_pull_response(
         scope_key,
         &state.task_store.list_scoped(scope_key),
@@ -575,6 +591,7 @@ async fn mesh_task_replication_summary(
     Extension(identity): Extension<AuthenticatedPeerIdentity>,
 ) -> Result<Json<TaskReplicationSummary>, (StatusCode, String)> {
     let scope_key = resolve_peer_scope_key(&state, &identity)?;
+    ensure_legacy_task_status_history_repaired(&state, Some(scope_key.as_str()));
     let tasks = state.task_store.list_scoped(Some(scope_key.as_str()));
     Ok(Json(build_task_replication_summary(
         Some(scope_key.as_str()),
@@ -588,6 +605,7 @@ async fn mesh_task_replication_pull(
     Query(query): Query<TaskReplicationPullQuery>,
 ) -> Result<Json<TaskReplicationPullResponse>, (StatusCode, String)> {
     let scope_key = resolve_peer_scope_key(&state, &identity)?;
+    ensure_legacy_task_status_history_repaired(&state, Some(scope_key.as_str()));
     let tasks = state.task_store.list_scoped(Some(scope_key.as_str()));
     Ok(Json(build_task_replication_pull_response(
         Some(scope_key.as_str()),
@@ -601,6 +619,7 @@ async fn mesh_export_tasks_sqlite(
     Extension(identity): Extension<AuthenticatedPeerIdentity>,
 ) -> Result<Json<TaskBackupSqlitePayload>, (StatusCode, String)> {
     let scope_key = resolve_peer_scope_key(&state, &identity)?;
+    ensure_legacy_task_status_history_repaired(&state, Some(scope_key.as_str()));
     let tasks = state.task_store.list_scoped(Some(scope_key.as_str()));
     let bytes = build_task_sqlite_snapshot_bytes(Some(scope_key.as_str()), &tasks)?;
 
@@ -686,6 +705,391 @@ fn normalize_scope_key(scope_key: Option<&str>) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("anonymous")
         .to_string()
+}
+
+const LEGACY_STATUS_HISTORY_REPAIR_META_KEY: &str = "legacy_status_history_repair";
+const LEGACY_STATUS_HISTORY_REPAIR_VERSION: &str = "v1";
+const LEGACY_STATUS_HISTORY_REPAIR_ACTOR_ID: &str = "system:legacy-status-history-repair";
+const LEGACY_STATUS_HISTORY_REPAIR_OPERATION_PREFIX: &str = "legacy-status-history-repair:v1";
+
+#[derive(Debug, Clone)]
+enum LegacyTaskEventKind {
+    Transition {
+        old_status: Option<TaskStatus>,
+        new_status: TaskStatus,
+        reason: TaskTransitionReason,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct LegacyTaskEvent {
+    event_id: String,
+    at: u64,
+    source_host_id: Option<String>,
+    related_time_block_id: Option<String>,
+    related_time_block_transition_ref: Option<String>,
+    kind: LegacyTaskEventKind,
+}
+
+fn ensure_legacy_task_status_history_repaired(state: &AppState, scope_key: Option<&str>) {
+    let already_repaired = match state
+        .task_store
+        .get_meta_scoped(scope_key, LEGACY_STATUS_HISTORY_REPAIR_META_KEY)
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                scope_key = %normalize_scope_key(scope_key),
+                "failed to read legacy task status history repair marker"
+            );
+            return;
+        }
+    };
+    if already_repaired.as_deref() == Some(LEGACY_STATUS_HISTORY_REPAIR_VERSION) {
+        return;
+    }
+
+    let tasks = state.task_store.list_scoped(scope_key);
+    let candidates = tasks
+        .into_iter()
+        .filter(|task| task.status_transitions.is_empty())
+        .collect::<Vec<_>>();
+
+    let mut can_mark_complete = true;
+    let mut repaired_count = 0usize;
+
+    if !candidates.is_empty() {
+        let mut events = match state.eventlog_store.list_events(scope_key) {
+            Ok(events) => events,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    scope_key = %normalize_scope_key(scope_key),
+                    "failed to load eventlog for legacy task status history repair"
+                );
+                return;
+            }
+        };
+        events.sort_by(|left, right| {
+            left.timestamp
+                .cmp(&right.timestamp)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        for task in candidates {
+            let Some(repaired) =
+                build_repaired_task_from_eventlog(state, scope_key, &task, &events)
+            else {
+                continue;
+            };
+
+            match state.task_store.upsert_scoped(scope_key, repaired.clone()) {
+                Ok(stored) => {
+                    repaired_count += 1;
+                    publish_task_replication_signal(state, scope_key, &stored);
+                }
+                Err(error) => {
+                    can_mark_complete = false;
+                    tracing::warn!(
+                        error = %error,
+                        task_id = %task.id,
+                        scope_key = %normalize_scope_key(scope_key),
+                        "failed to persist repaired legacy task status history"
+                    );
+                }
+            }
+        }
+    }
+
+    if !can_mark_complete {
+        return;
+    }
+
+    if state
+        .task_store
+        .list_scoped(scope_key)
+        .iter()
+        .any(|task| task.status_transitions.is_empty())
+    {
+        return;
+    }
+
+    if let Err(error) = state.task_store.set_meta_scoped(
+        scope_key,
+        LEGACY_STATUS_HISTORY_REPAIR_META_KEY,
+        LEGACY_STATUS_HISTORY_REPAIR_VERSION,
+    ) {
+        tracing::warn!(
+            error = %error,
+            scope_key = %normalize_scope_key(scope_key),
+            "failed to persist legacy task status history repair marker"
+        );
+        return;
+    }
+
+    if repaired_count > 0 {
+        tracing::info!(
+            repaired_count,
+            scope_key = %normalize_scope_key(scope_key),
+            "repaired legacy task status history from eventlog"
+        );
+    }
+}
+
+fn build_repaired_task_from_eventlog(
+    state: &AppState,
+    scope_key: Option<&str>,
+    task: &Task,
+    events: &[crate::eventlog::EventRecord],
+) -> Option<Task> {
+    let task_events = events
+        .iter()
+        .filter_map(|event| parse_legacy_task_event(&task.id, event))
+        .collect::<Vec<_>>();
+    if task.status != TaskStatus::Pending && task_events.is_empty() {
+        return None;
+    }
+
+    let mut task_events = task_events;
+    task_events.sort_by(|left, right| {
+        left.at
+            .cmp(&right.at)
+            .then_with(|| left.event_id.cmp(&right.event_id))
+    });
+
+    let mut repaired = task.clone();
+    repaired.status = TaskStatus::Pending;
+    repaired.completed_at = None;
+    repaired.status_transitions.clear();
+    let create_at = task_events
+        .first()
+        .map(|first_event| task.created_at.min(first_event.at.saturating_sub(1)))
+        .unwrap_or(task.created_at);
+    repaired
+        .status_transitions
+        .push(build_repaired_create_transition(
+            &task.id,
+            scope_key,
+            create_at,
+            &state.host_id,
+        ));
+
+    let mut previous_status = TaskStatus::Pending;
+    for event in task_events {
+        let LegacyTaskEventKind::Transition {
+            old_status,
+            new_status,
+            reason,
+        } = event.kind;
+
+        if old_status.is_some() && old_status != Some(previous_status) {
+            return None;
+        }
+        if !previous_status.can_transition_to(&new_status) {
+            return None;
+        }
+
+        let actual_at = append_task_status_transition(
+            &mut repaired,
+            previous_status,
+            new_status,
+            &crate::task::TaskTransitionContext {
+                at: Some(event.at),
+                reason: Some(reason),
+                actor_id: Some(LEGACY_STATUS_HISTORY_REPAIR_ACTOR_ID.to_string()),
+                source_host_id: Some(
+                    event
+                        .source_host_id
+                        .unwrap_or_else(|| state.host_id.clone()),
+                ),
+                operation_id: Some(format!(
+                    "{}:event:{}",
+                    legacy_status_history_repair_operation_base(scope_key, &task.id),
+                    event.event_id
+                )),
+                related_time_block_id: event.related_time_block_id,
+                related_time_block_transition_ref: event.related_time_block_transition_ref,
+                auto_generated: Some(true),
+            },
+        );
+        if actual_at != event.at {
+            return None;
+        }
+
+        repaired.status = new_status;
+        repaired.completed_at = new_status.is_terminal().then_some(actual_at);
+        previous_status = new_status;
+    }
+
+    repaired.updated_at = legacy_status_history_repair_updated_at(task.updated_at);
+    prepare_task_for_storage(&mut repaired).ok()?;
+
+    if repaired.status != task.status || repaired.completed_at != task.completed_at {
+        return None;
+    }
+
+    Some(repaired)
+}
+
+fn build_repaired_create_transition(
+    task_id: &str,
+    scope_key: Option<&str>,
+    at: u64,
+    repair_host_id: &str,
+) -> crate::task::TaskStatusTransition {
+    let mut transition = build_initial_task_status_transition(task_id, at);
+    transition.actor_id = Some(LEGACY_STATUS_HISTORY_REPAIR_ACTOR_ID.to_string());
+    transition.source_host_id = Some(repair_host_id.to_string());
+    transition.operation_id = Some(format!(
+        "{}:bootstrap",
+        legacy_status_history_repair_operation_base(scope_key, task_id)
+    ));
+    transition.auto_generated = Some(true);
+    transition
+}
+
+fn legacy_status_history_repair_operation_base(scope_key: Option<&str>, task_id: &str) -> String {
+    format!(
+        "{LEGACY_STATUS_HISTORY_REPAIR_OPERATION_PREFIX}:{}:{task_id}",
+        normalize_scope_key(scope_key)
+    )
+}
+
+fn legacy_status_history_repair_updated_at(previous_updated_at: u64) -> u64 {
+    previous_updated_at.saturating_add(1)
+}
+
+fn parse_legacy_task_event(
+    task_id: &str,
+    event: &crate::eventlog::EventRecord,
+) -> Option<LegacyTaskEvent> {
+    let metadata = event.metadata.as_ref()?;
+    if metadata_string(metadata, &["record_type", "recordType"])
+        == Some("task_status_change_description")
+    {
+        return None;
+    }
+    let metadata_task_id = metadata_string(metadata, &["task_id", "taskId"])?;
+    if metadata_task_id != task_id {
+        return None;
+    }
+
+    let tag = task_event_tag(event)?;
+    let at = u64::try_from(event.timestamp).ok()?;
+
+    if tag == "task_created" {
+        return None;
+    }
+
+    let old_status = metadata_value(
+        metadata,
+        &["old_status", "oldStatus", "from_status", "fromStatus"],
+    )
+    .and_then(parse_task_status_value);
+    let new_status = metadata_value(
+        metadata,
+        &["new_status", "newStatus", "to_status", "toStatus"],
+    )
+    .and_then(parse_task_status_value)
+    .or_else(|| infer_task_status_from_tag(tag))?;
+    let reason = metadata_value(metadata, &["transition_reason", "transitionReason"])
+        .and_then(parse_task_transition_reason_value)
+        .unwrap_or(TaskTransitionReason::TaskTransition);
+
+    let kind = LegacyTaskEventKind::Transition {
+        old_status,
+        new_status,
+        reason,
+    };
+
+    Some(LegacyTaskEvent {
+        event_id: event.id.clone(),
+        at,
+        source_host_id: metadata_string(metadata, &["source_host_id", "sourceHostId"])
+            .map(str::to_string),
+        related_time_block_id: metadata_string(
+            metadata,
+            &["related_time_block_id", "relatedTimeBlockId"],
+        )
+        .map(str::to_string),
+        related_time_block_transition_ref: metadata_string(
+            metadata,
+            &[
+                "related_time_block_transition_ref",
+                "relatedTimeBlockTransitionRef",
+            ],
+        )
+        .map(str::to_string),
+        kind,
+    })
+}
+
+fn task_event_tag(event: &crate::eventlog::EventRecord) -> Option<&str> {
+    const TASK_EVENT_TAGS: [&str; 7] = [
+        "task_created",
+        "task_started",
+        "task_resumed",
+        "task_suspended",
+        "task_completed",
+        "task_cancelled",
+        "task_transition",
+    ];
+
+    event.tags.iter().find_map(|tag| {
+        TASK_EVENT_TAGS
+            .contains(&tag.as_str())
+            .then_some(tag.as_str())
+    })
+}
+
+fn infer_task_status_from_tag(tag: &str) -> Option<TaskStatus> {
+    match tag {
+        "task_started" | "task_resumed" => Some(TaskStatus::InProgress),
+        "task_suspended" => Some(TaskStatus::Suspended),
+        "task_completed" => Some(TaskStatus::Completed),
+        "task_cancelled" => Some(TaskStatus::Cancelled),
+        _ => None,
+    }
+}
+
+fn metadata_value<'a>(
+    metadata: &'a serde_json::Value,
+    keys: &[&str],
+) -> Option<&'a serde_json::Value> {
+    let object = metadata.as_object()?;
+    for key in keys {
+        if let Some(value) = object.get(*key) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn metadata_string<'a>(metadata: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    metadata_value(metadata, keys)?.as_str()
+}
+
+fn parse_task_status_value(value: &serde_json::Value) -> Option<TaskStatus> {
+    match value.as_str()? {
+        "pending" | "not_started" => Some(TaskStatus::Pending),
+        "in_progress" => Some(TaskStatus::InProgress),
+        "suspended" => Some(TaskStatus::Suspended),
+        "completed" => Some(TaskStatus::Completed),
+        "cancelled" | "abandoned" => Some(TaskStatus::Cancelled),
+        _ => None,
+    }
+}
+
+fn parse_task_transition_reason_value(value: &serde_json::Value) -> Option<TaskTransitionReason> {
+    match value.as_str()? {
+        "task.create" => Some(TaskTransitionReason::TaskCreate),
+        "task.transition" => Some(TaskTransitionReason::TaskTransition),
+        "timeblock.pause" => Some(TaskTransitionReason::TimeblockPause),
+        "timeblock.resume" => Some(TaskTransitionReason::TimeblockResume),
+        "timeblock.end" => Some(TaskTransitionReason::TimeblockEnd),
+        _ => None,
+    }
 }
 
 fn build_task_replication_summary(
@@ -954,19 +1358,13 @@ async fn replication_upsert_task(
             if should_accept {
                 state
                     .task_store
-                    .upsert_scoped(
-                        scope_key,
-                        merge_task_snapshot(&current, &incoming, true),
-                    )
+                    .upsert_scoped(scope_key, merge_task_snapshot(&current, &incoming, true))
                     .map_err(map_task_store_error)?;
                 "updated"
             } else if history_changed {
                 state
                     .task_store
-                    .upsert_scoped(
-                        scope_key,
-                        merge_task_snapshot(&current, &incoming, false),
-                    )
+                    .upsert_scoped(scope_key, merge_task_snapshot(&current, &incoming, false))
                     .map_err(map_task_store_error)?;
                 "updated"
             } else {
@@ -1383,6 +1781,56 @@ mod tests {
             estimated_minutes: None,
             parent_id: None,
             time_block_ids: None,
+        }
+    }
+
+    fn insert_legacy_empty_history_task(
+        sqlite_path: &std::path::Path,
+        scope_key: &str,
+        task_id: &str,
+        title: &str,
+        status: &str,
+        created_at: u64,
+        updated_at: u64,
+        completed_at: Option<u64>,
+    ) {
+        let connection = rusqlite::Connection::open(sqlite_path).unwrap();
+        connection
+            .execute(
+                "UPDATE tasks
+                 SET title = ?1,
+                     status = ?2,
+                     status_transitions_json = '[]',
+                     created_at = ?3,
+                     updated_at = ?4,
+                     completed_at = ?5
+                 WHERE scope_key = ?6 AND id = ?7",
+                rusqlite::params![
+                    title,
+                    status,
+                    created_at,
+                    updated_at,
+                    completed_at,
+                    scope_key,
+                    task_id
+                ],
+            )
+            .unwrap();
+    }
+
+    fn make_task_eventlog_record(
+        event_id: &str,
+        timestamp: u64,
+        tag: &str,
+        metadata: serde_json::Value,
+    ) -> crate::eventlog::EventRecord {
+        crate::eventlog::EventRecord {
+            id: event_id.to_string(),
+            timestamp: timestamp as i64,
+            content: format!("test event {event_id}"),
+            tags: vec![tag.to_string()],
+            refs: vec![],
+            metadata: Some(metadata),
         }
     }
 
@@ -2227,9 +2675,11 @@ mod tests {
             events[0].metadata.as_ref().unwrap()["transition_reason"],
             "task.transition"
         );
-        assert!(events[0].metadata.as_ref().unwrap()["operation_id"]
-            .as_str()
-            .is_some());
+        assert!(
+            events[0].metadata.as_ref().unwrap()["operation_id"]
+                .as_str()
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -2283,6 +2733,434 @@ mod tests {
         assert_eq!(
             events[0].metadata.as_ref().unwrap()["new_status"],
             "cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_tasks_repairs_legacy_empty_history_from_runtime_eventlog_once() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-task-repair.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            dir.path().join("eventlog-repair-runtime"),
+        ));
+        let created = task_store.create_in_scope(Some("user-a"), create_task_input("Legacy task"));
+        let transition_at = created.created_at.saturating_add(2_000);
+        insert_legacy_empty_history_task(
+            &sqlite_path,
+            "user-a",
+            &created.id,
+            "Legacy task",
+            "in_progress",
+            created.created_at,
+            transition_at,
+            None,
+        );
+        eventlog_store
+            .append_event(
+                Some("user-a"),
+                make_task_eventlog_record(
+                    "evt-runtime-start",
+                    transition_at,
+                    "task_started",
+                    serde_json::json!({
+                        "task_id": created.id,
+                        "task_title": "Legacy task",
+                        "old_status": "pending",
+                        "new_status": "in_progress",
+                        "transition_reason": "task.transition"
+                    }),
+                ),
+            )
+            .unwrap();
+        let app = test_router(test_state_with_task_store_and_eventlog(
+            task_store.clone(),
+            eventlog_store,
+        ));
+
+        let first_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/tasks?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(first_response.status(), StatusCode::OK);
+        let first_body = first_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let first_tasks: Vec<Task> = serde_json::from_slice(&first_body).unwrap();
+        assert_eq!(first_tasks.len(), 1);
+        assert_eq!(first_tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(first_tasks[0].status_transitions.len(), 2);
+        assert_eq!(
+            first_tasks[0].status_transitions[0].reason,
+            TaskTransitionReason::TaskCreate
+        );
+        assert_eq!(
+            first_tasks[0].status_transitions[1].reason,
+            TaskTransitionReason::TaskTransition
+        );
+
+        let stored_after_first = task_store
+            .get_scoped(Some("user-a"), &created.id)
+            .expect("legacy task should remain readable");
+        assert_eq!(stored_after_first.status_transitions.len(), 2);
+        assert_eq!(
+            stored_after_first.updated_at,
+            transition_at.saturating_add(1)
+        );
+        assert_eq!(
+            task_store
+                .get_meta_scoped(Some("user-a"), LEGACY_STATUS_HISTORY_REPAIR_META_KEY)
+                .unwrap()
+                .as_deref(),
+            Some(LEGACY_STATUS_HISTORY_REPAIR_VERSION)
+        );
+
+        let second_response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/tasks?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(second_response.status(), StatusCode::OK);
+        let stored_after_second = task_store
+            .get_scoped(Some("user-a"), &created.id)
+            .expect("legacy task should still exist");
+        assert_eq!(stored_after_second.status_transitions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_tasks_repairs_legacy_pending_task_without_eventlog_transition() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-task-repair-pending.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            dir.path().join("eventlog-repair-pending"),
+        ));
+        let created =
+            task_store.create_in_scope(Some("user-a"), create_task_input("Legacy pending"));
+        insert_legacy_empty_history_task(
+            &sqlite_path,
+            "user-a",
+            &created.id,
+            "Legacy pending",
+            "pending",
+            created.created_at,
+            created.updated_at,
+            None,
+        );
+        let app = test_router(test_state_with_task_store_and_eventlog(
+            task_store.clone(),
+            eventlog_store.clone(),
+        ));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/tasks?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let tasks: Vec<Task> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(tasks[0].status_transitions.len(), 1);
+        assert_eq!(
+            tasks[0].status_transitions[0].reason,
+            TaskTransitionReason::TaskCreate
+        );
+        assert_eq!(
+            task_store
+                .get_meta_scoped(Some("user-a"), LEGACY_STATUS_HISTORY_REPAIR_META_KEY)
+                .unwrap()
+                .as_deref(),
+            Some(LEGACY_STATUS_HISTORY_REPAIR_VERSION)
+        );
+    }
+
+    #[tokio::test]
+    async fn get_task_repairs_legacy_empty_history_from_camel_case_eventlog() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-task-repair-camel.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            dir.path().join("eventlog-repair-camel"),
+        ));
+        let created = task_store.create_in_scope(Some("user-a"), create_task_input("Legacy camel"));
+        let transition_at = created.created_at.saturating_add(1_500);
+        insert_legacy_empty_history_task(
+            &sqlite_path,
+            "user-a",
+            &created.id,
+            "Legacy camel",
+            "in_progress",
+            created.created_at,
+            transition_at,
+            None,
+        );
+        eventlog_store
+            .append_event(
+                Some("user-a"),
+                make_task_eventlog_record(
+                    "evt-camel-start",
+                    transition_at,
+                    "task_started",
+                    serde_json::json!({
+                        "taskId": created.id,
+                        "taskTitle": "Legacy camel",
+                        "fromStatus": "pending",
+                        "toStatus": "in_progress"
+                    }),
+                ),
+            )
+            .unwrap();
+        let app = test_router(test_state_with_task_store_and_eventlog(
+            task_store.clone(),
+            eventlog_store.clone(),
+        ));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/tasks/{}?user_id=user-a", created.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let task: Task = serde_json::from_slice(&body).unwrap();
+        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status_transitions.len(), 2);
+        assert_eq!(
+            task.status_transitions[1].reason,
+            TaskTransitionReason::TaskTransition
+        );
+    }
+
+    #[tokio::test]
+    async fn get_task_repairs_when_first_transition_matches_created_at() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-task-repair-same-ms.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            dir.path().join("eventlog-repair-same-ms"),
+        ));
+        let created =
+            task_store.create_in_scope(Some("user-a"), create_task_input("Legacy same ms"));
+        let transition_at = created.created_at;
+        insert_legacy_empty_history_task(
+            &sqlite_path,
+            "user-a",
+            &created.id,
+            "Legacy same ms",
+            "in_progress",
+            created.created_at,
+            transition_at,
+            None,
+        );
+        eventlog_store
+            .append_event(
+                Some("user-a"),
+                make_task_eventlog_record(
+                    "evt-same-ms-create",
+                    transition_at,
+                    "task_created",
+                    serde_json::json!({
+                        "taskId": created.id,
+                        "taskTitle": "Legacy same ms"
+                    }),
+                ),
+            )
+            .unwrap();
+        eventlog_store
+            .append_event(
+                Some("user-a"),
+                make_task_eventlog_record(
+                    "evt-same-ms-start",
+                    transition_at,
+                    "task_started",
+                    serde_json::json!({
+                        "taskId": created.id,
+                        "taskTitle": "Legacy same ms",
+                        "fromStatus": "pending",
+                        "toStatus": "in_progress"
+                    }),
+                ),
+            )
+            .unwrap();
+        let app = test_router(test_state_with_task_store_and_eventlog(
+            task_store,
+            eventlog_store,
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/tasks/{}?user_id=user-a", created.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let task: Task = serde_json::from_slice(&body).unwrap();
+        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status_transitions.len(), 2);
+        assert_eq!(
+            task.status_transitions[0].reason,
+            TaskTransitionReason::TaskCreate
+        );
+        assert_eq!(
+            task.status_transitions[1].reason,
+            TaskTransitionReason::TaskTransition
+        );
+        assert!(task.status_transitions[0].at < task.status_transitions[1].at);
+        assert_eq!(task.status_transitions[1].at, transition_at);
+    }
+
+    #[tokio::test]
+    async fn list_tasks_leaves_scope_unmarked_until_repairable_history_exists() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-task-repair-note.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let eventlog_store = Arc::new(crate::eventlog::EventLogStore::new(
+            dir.path().join("eventlog-repair-note"),
+        ));
+        let created = task_store.create_in_scope(Some("user-a"), create_task_input("Legacy note"));
+        let transition_at = created.created_at.saturating_add(1_000);
+        insert_legacy_empty_history_task(
+            &sqlite_path,
+            "user-a",
+            &created.id,
+            "Legacy note",
+            "in_progress",
+            created.created_at,
+            transition_at,
+            None,
+        );
+        eventlog_store
+            .append_event(
+                Some("user-a"),
+                make_task_eventlog_record(
+                    "evt-note-start",
+                    transition_at,
+                    "task_started",
+                    serde_json::json!({
+                        "taskId": created.id,
+                        "taskTitle": "Legacy note",
+                        "fromStatus": "pending",
+                        "toStatus": "in_progress",
+                        "recordType": "task_status_change_description",
+                        "description": "这只是说明文本"
+                    }),
+                ),
+            )
+            .unwrap();
+        let app = test_router(test_state_with_task_store_and_eventlog(
+            task_store.clone(),
+            eventlog_store.clone(),
+        ));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/tasks?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let tasks: Vec<Task> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert!(tasks[0].status_transitions.is_empty());
+        assert_eq!(
+            task_store
+                .get_meta_scoped(Some("user-a"), LEGACY_STATUS_HISTORY_REPAIR_META_KEY)
+                .unwrap()
+                .as_deref(),
+            None
+        );
+
+        eventlog_store
+            .append_event(
+                Some("user-a"),
+                make_task_eventlog_record(
+                    "evt-note-start-real",
+                    transition_at.saturating_add(50),
+                    "task_started",
+                    serde_json::json!({
+                        "taskId": created.id,
+                        "taskTitle": "Legacy note",
+                        "fromStatus": "pending",
+                        "toStatus": "in_progress"
+                    }),
+                ),
+            )
+            .unwrap();
+
+        let second_response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/tasks?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(second_response.status(), StatusCode::OK);
+        let second_body = second_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let repaired_tasks: Vec<Task> = serde_json::from_slice(&second_body).unwrap();
+        assert_eq!(repaired_tasks.len(), 1);
+        assert_eq!(repaired_tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(repaired_tasks[0].status_transitions.len(), 2);
+        assert_eq!(
+            task_store
+                .get_meta_scoped(Some("user-a"), LEGACY_STATUS_HISTORY_REPAIR_META_KEY)
+                .unwrap()
+                .as_deref(),
+            Some(LEGACY_STATUS_HISTORY_REPAIR_VERSION)
         );
     }
 

@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use super::store::{
-    append_task_status_transition, build_initial_task_status_transition,
+    TaskStoreError, append_task_status_transition, build_initial_task_status_transition,
     normalize_task_status_history, prepare_task_for_storage, validate_dependency_update,
-    validate_terminal_task_update, TaskStoreError,
+    validate_terminal_task_update,
 };
 use super::types::{
     CreateTaskInput, Task, TaskDependency, TaskPriority, TaskStatus, TaskTransitionContext,
@@ -380,6 +380,39 @@ impl SqliteTaskStore {
         Ok(())
     }
 
+    pub fn get_meta_scoped(
+        &self,
+        scope_key: &str,
+        key: &str,
+    ) -> Result<Option<String>, TaskStoreError> {
+        let connection = self.connection();
+        connection
+            .query_row(
+                "SELECT value FROM task_meta WHERE scope_key = ?1 AND key = ?2",
+                params![normalize_scope_key(scope_key), key],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(TaskStoreError::from)
+    }
+
+    pub fn set_meta_scoped(
+        &self,
+        scope_key: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<(), TaskStoreError> {
+        let connection = self.connection();
+        connection.execute(
+            "INSERT INTO task_meta (scope_key, key, value)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(scope_key, key) DO UPDATE SET
+                value = excluded.value",
+            params![normalize_scope_key(scope_key), key, value],
+        )?;
+        Ok(())
+    }
+
     pub fn replace_all(&self, tasks: &[Task]) -> Result<(), TaskStoreError> {
         self.replace_all_scoped(DEFAULT_SCOPE_KEY, tasks)
     }
@@ -489,6 +522,12 @@ impl SqliteTaskStore {
                 updated_at INTEGER NOT NULL,
                 completed_at INTEGER NULL,
                 PRIMARY KEY (scope_key, id)
+            );
+             CREATE TABLE IF NOT EXISTS task_meta (
+                scope_key TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                PRIMARY KEY (scope_key, key)
             );",
         )?;
 

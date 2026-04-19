@@ -43,8 +43,14 @@ pub enum TaskStoreError {
 }
 
 enum TaskStoreBackend {
-    Memory(RwLock<HashMap<String, HashMap<String, Task>>>),
+    Memory(MemoryTaskStore),
     Sqlite(SqliteTaskStore),
+}
+
+#[derive(Default)]
+struct MemoryTaskStore {
+    tasks: RwLock<HashMap<String, HashMap<String, Task>>>,
+    meta: RwLock<HashMap<String, HashMap<String, String>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,7 +341,11 @@ pub(crate) fn validate_partial_task_status_history(task: &Task) -> Result<(), Ta
             });
         }
 
-        if previous_transition.to_status.path_to(&from_status).is_none() {
+        if previous_transition
+            .to_status
+            .path_to(&from_status)
+            .is_none()
+        {
             return Err(TaskStoreError::InvalidStatusHistory {
                 task_id: task.id.clone(),
                 reason: format!(
@@ -663,7 +673,7 @@ fn dependency_reaches_task(
 impl TaskStore {
     pub fn new() -> Self {
         Self {
-            backend: TaskStoreBackend::Memory(RwLock::new(HashMap::new())),
+            backend: TaskStoreBackend::Memory(MemoryTaskStore::default()),
         }
     }
 
@@ -1116,10 +1126,52 @@ impl TaskStore {
         }
     }
 
+    pub fn get_meta_scoped(
+        &self,
+        scope_key: Option<&str>,
+        key: &str,
+    ) -> Result<Option<String>, TaskStoreError> {
+        match &self.backend {
+            TaskStoreBackend::Memory(memory) => Ok(memory
+                .meta
+                .read()
+                .unwrap()
+                .get(normalize_scope_key(scope_key))
+                .and_then(|scope_meta| scope_meta.get(key))
+                .cloned()),
+            TaskStoreBackend::Sqlite(store) => {
+                store.get_meta_scoped(normalize_scope_key(scope_key), key)
+            }
+        }
+    }
+
+    pub fn set_meta_scoped(
+        &self,
+        scope_key: Option<&str>,
+        key: &str,
+        value: &str,
+    ) -> Result<(), TaskStoreError> {
+        match &self.backend {
+            TaskStoreBackend::Memory(memory) => {
+                let normalized_scope = normalize_scope_key(scope_key).to_string();
+                let mut guard = memory.meta.write().unwrap();
+                guard
+                    .entry(normalized_scope)
+                    .or_default()
+                    .insert(key.to_string(), value.to_string());
+                Ok(())
+            }
+            TaskStoreBackend::Sqlite(store) => {
+                store.set_meta_scoped(normalize_scope_key(scope_key), key, value)
+            }
+        }
+    }
+
     fn memory_scope(&self, scope_key: Option<&str>) -> HashMap<String, Task> {
         let normalized_scope = normalize_scope_key(scope_key);
         match &self.backend {
-            TaskStoreBackend::Memory(tasks) => tasks
+            TaskStoreBackend::Memory(memory) => memory
+                .tasks
                 .read()
                 .unwrap()
                 .get(normalized_scope)
@@ -1138,8 +1190,8 @@ impl TaskStore {
     ) -> R {
         let normalized_scope = normalize_scope_key(scope_key).to_string();
         match &self.backend {
-            TaskStoreBackend::Memory(tasks) => {
-                let mut guard = tasks.write().unwrap();
+            TaskStoreBackend::Memory(memory) => {
+                let mut guard = memory.tasks.write().unwrap();
                 let scope_tasks = guard.entry(normalized_scope).or_default();
                 f(scope_tasks)
             }
@@ -1490,6 +1542,63 @@ mod tests {
         assert_eq!(task.status, TaskStatus::InProgress);
         assert_eq!(task.completed_at, None);
         assert!(task.status_transitions.is_empty());
+    }
+
+    #[test]
+    fn scope_meta_roundtrip_in_memory_store() {
+        let store = make_store();
+
+        assert_eq!(
+            store
+                .get_meta_scoped(Some("user-a"), "legacy_status_history_repair")
+                .unwrap(),
+            None
+        );
+
+        store
+            .set_meta_scoped(Some("user-a"), "legacy_status_history_repair", "v1")
+            .unwrap();
+
+        assert_eq!(
+            store
+                .get_meta_scoped(Some("user-a"), "legacy_status_history_repair")
+                .unwrap()
+                .as_deref(),
+            Some("v1")
+        );
+        assert_eq!(
+            store
+                .get_meta_scoped(Some("user-b"), "legacy_status_history_repair")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn scope_meta_roundtrip_in_sqlite_store() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-meta.sqlite");
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+
+        store
+            .set_meta_scoped(Some("user-a"), "legacy_status_history_repair", "v1")
+            .unwrap();
+        drop(store);
+
+        let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        assert_eq!(
+            reopened
+                .get_meta_scoped(Some("user-a"), "legacy_status_history_repair")
+                .unwrap()
+                .as_deref(),
+            Some("v1")
+        );
+        assert_eq!(
+            reopened
+                .get_meta_scoped(Some("user-b"), "legacy_status_history_repair")
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
