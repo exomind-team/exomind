@@ -1,6 +1,28 @@
-> 最后更新：`2026-04-16` | 更新者：`Codex` | 更新内容概要：`拆分 eventlog 读写、watch、备份导入与清空端点细节。`
+> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`补充 /act/await 与 raw eventlog watch 的职责分层，并保留 raw watch 的 cursor / catch-up 语义说明。`
 
 # EventLog
+
+## 与 `/act/await` 的分工
+
+默认边界先记住：
+
+- 如果 Agent 的目标是“等待一个未来条件成立一次后返回”，默认优先用 `POST /act/await`
+- `GET /eventlog/watch` 是 raw EventLog long-poll；它保留给底层事件到达观察、cursor / catch-up 语义、排障与低层调试
+- 只有在 `/act/*` 没有对应动作，或你明确需要 raw event arrival 细节时，才默认回到本文件的 watch 端点
+
+等待“下一条事件”时，默认最小例子是：
+
+```bash
+curl -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" \
+  -H "Content-Type: application/json" \
+  --data-binary '{"condition":{"type":"next_event"}}'
+```
+
+当前代码默认值：
+
+- `/act/await` 默认 `timeoutSecs=1800`
+- `/act/await` 默认 `heartbeatSecs=15`
+- `GET /eventlog/watch` 默认 `timeout=60`，最大 `300`
 
 ## 查询参数与请求体
 
@@ -70,7 +92,7 @@ curl -sS "http://127.0.0.1:9124/eventlog/<event-id>?user_id=profile-argon"
 - 响应头 `x-exomind-eventlog-list-semantics` 可能是 `full_snapshot` 或 `incremental_batch`
 - 如果你传了 `since_id` 但 cursor 不存在，结果仍会返回数据，但语义会退回 `full_snapshot`
 
-## watch 语义
+## raw watch 语义
 
 ```bash
 curl -sS "http://127.0.0.1:9124/eventlog/watch?user_id=profile-argon&timeout=30"
@@ -83,6 +105,11 @@ curl -sS "http://127.0.0.1:9124/eventlog/watch?user_id=profile-argon&since_times
 - 不给 `since_id / since_timestamp`：只等未来，不回放历史 backlog
 - 给了 cursor：先补 cursor 之后已有事件，没有再继续等
 - `timeout` 默认 `60` 秒，最大 `300` 秒
+
+这表示：
+
+- 默认 Agent 等待动作不应先想到这里，而应先想到 `/act/await`
+- 这里更适合做 raw cursor 续接、backlog catch-up、底层事件到达排障
 
 ## 追加事件
 

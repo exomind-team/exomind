@@ -1,6 +1,15 @@
-> 最后更新：`2026-04-16` | 更新者：`Codex` | 更新内容概要：`拆分 tasks 查询、状态迁移、备份导入与复制端点细节。`
+> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`补充 tasks raw fallback 语义，并明确等待类 task 条件默认走 /act/await。`
 
 # Tasks
+
+## `/act/*` 与 raw `/tasks*` 的分层
+
+先记住当前边界：
+
+- 目前没有已注册的通用 `/act/tasks/*` 外部动作族，因此任务列表、创建、更新、迁移等操作仍经常需要回退到 raw `/tasks*`
+- 但这不代表 raw `/tasks*` 是一切 task 相关动作的默认入口；如果某个 feature 已有 `/act/*` 契约，就先走 `/act/*`
+- 如果 Agent 要等待任务被创建、状态变化或完成，默认优先 `POST /act/await` 的 `task_created` / `task_status_changed` / `task_completed`
+- 本文只描述 task 的 raw fallback / debug 路径
 
 ## 查询参数与状态机
 

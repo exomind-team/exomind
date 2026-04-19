@@ -1,6 +1,15 @@
-> 最后更新：`2026-04-16` | 更新者：`Codex` | 更新内容概要：`拆分 timeblocks 生命周期、guard、导入导出与复制端点细节。`
+> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`补充 timeblocks raw fallback 语义，并明确与 /act/today-planner 和 /act/await 的入口分层。`
 
 # TimeBlocks
+
+## `/act/*` 与 raw `/timeblocks*` 的分层
+
+先判断入口，再决定是否读本文：
+
+- 如果动作已经有对应 `/act/*` 契约，优先走 `/act/*`
+- 当前最明确的现成例子是：启动 today planner 片段应优先 `POST /act/today-planner/segments/:segment_id/start`，不要回退到 raw `/timeblocks/start`
+- 如果 Agent 要等待时间块被创建、状态变化、stop 或 end，默认优先 `POST /act/await`
+- 本文只覆盖 timeblock 的 raw fallback / debug 路径
 
 ## 作用域与字段风格
 
@@ -48,6 +57,8 @@ curl -sS "http://127.0.0.1:9124/timeblocks/active?user_id=profile-argon"
 ```
 
 ## 开始时间块
+
+这是 raw fallback 的 start 路由；若动作来自 today planner 已规划 segment，优先 `/act/today-planner/segments/:segment_id/start`。
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:9124/timeblocks/start?user_id=profile-argon" \
@@ -137,7 +148,7 @@ curl -sS -X POST "http://127.0.0.1:9124/timeblocks/<block-id>/describe?user_id=p
 
 ## `/timeblocks/new`
 
-这是低层原语接口，适合脚本或测试，普通调用优先用 `start / stop / end / pause / resume`。
+这是低层原语接口，适合脚本或测试；在 raw fallback 语境下，优先用 `start / stop / end / pause / resume`，不要把它当成 `/act/*` feature 动作的替代品。
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:9124/timeblocks/new?user_id=profile-argon" \

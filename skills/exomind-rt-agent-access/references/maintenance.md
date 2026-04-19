@@ -1,11 +1,11 @@
-> 最后更新：`2026-04-16` | 更新者：`Codex` | 更新内容概要：`补充清理旧手册路径名残留的维护记录，并维持执行后差异反思闭环。`
+> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`记录 /act 优先、raw 回退 及各 reference fallback 路由护栏的维护。`
 
 # Maintenance
 
 ## 何时读取
 
 - 任务明确是“更新这个 skill”
-- 你刚执行完一次 raw RT curl / HTTP 联调，准备把新经验回写进 skill
+- 你刚执行完一次 RT HTTP/curl 联调（无论走 `/act/*` 还是 raw fallback），准备把新经验回写进 skill
 - 你怀疑某段 reference 已经过时，需要确认应该改主 `SKILL.md` 还是某个细分文档
 
 ## 执行后维护闭环
@@ -27,7 +27,7 @@
 |----------|-------------|
 | 主流程、风险边界、真相源优先级、什么时候触发 skill | `../SKILL.md` |
 | 健康检查、版本、拓扑、profiles、signals、鉴权、PowerShell curl 约定 | `discovery-and-diagnostics.md` |
-| eventlog 读写、watch、backup/import、清空、header 语义 | `eventlog.md` |
+| eventlog 读写、raw watch、backup/import、清空、header 语义 | `eventlog.md` |
 | tasks 查询、状态机、字段命名、取消/批量迁移、复制接口 | `tasks.md` |
 | timeblocks 生命周期、guard、camelCase body、复制/导入行为 | `timeblocks.md` |
 | references 装配方式、维护流程、维护记录 | `index.md` / `maintenance.md` |
@@ -69,6 +69,9 @@
 - `tasks` / `timeblocks` 是否仍接受 `profile_id` 与 `user_id` 双别名
 - `timeblocks/end` 是否仍要求先 `stop`
 - `/act/*` 是否新增新的默认外部入口，导致 raw 路由描述需要降级
+- 当前已存在的 `/act/*` 默认入口列表是否仍准确；若新增动作，相关 raw reference 是否已经降级为 fallback 并补了跳转
+- 当 `/act/*` 已存在对应动作时，主 `SKILL.md` 是否仍错误引导 Agent 默认去打 raw 路由
+- 等待/监听默认是否已经切换到 `/act/await`，而不是误导到 raw `GET /eventlog/watch`
 - 主 `SKILL.md` 是否仍保持入口层，而维护细节留在 references
 
 ## 维护记录格式
@@ -80,6 +83,8 @@
 
 ## 最近维护记录
 
+- `2026-04-19` | 更新者：`Codex` | 更新内容概要：`收口“Agent 默认优先 /act/*，只有无对应动作时才回退 raw API”的入口规则，并把 index / tasks / timeblocks / eventlog references 全部标注为 raw fallback 或 act-first 跳转。` | 核验依据：`#676 + #930 + #931 + runtime-external-access-contract.md + today_planner.rs + agent_await.rs + routes/agent_await.rs + routes/eventlog.rs`
+- `2026-04-19` | 更新者：`Codex` | 更新内容概要：`将独立 curl 手册剩余增量信息并入主 SKILL 的外部边界章节，补充当前 `/agents/*` 与 `/act/today-planner/*` 的精确端点列表，并删除 docs/development 下的重复 standalone 文档。` | 核验依据：`仓库全文搜索无反向引用 + 当前 skill references 结构 + 基线 e79ab61b`
 - `2026-04-16` | 更新者：`Codex` | 更新内容概要：`移除 skill 文档中对已删除 curl 手册文件名的残留提及，确认 skill 内只保留单一真源表述。` | 核验依据：`skill 目录全文搜索 + 当前工作区 skill 结构`
 - `2026-04-16` | 更新者：`Codex` | 更新内容概要：`将原 curl 手册内容重构到本 skill 的 references/ 中，主 SKILL 收口为入口层。` | 核验依据：`当前工作区文档结构 + 基线 a83404ad`
 - `2026-04-16` | 更新者：`Codex` | 更新内容概要：`建立“curl 实测偏差 -> 核验 -> 回写本 skill”的同步维护机制。` | 核验依据：`当前工作区文档结构`
