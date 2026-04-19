@@ -7,10 +7,36 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::proposal::{
-    ActionType, Comment, CreateProposalInput, Proposal, ProposalExecutor, ProposalFilter,
-    ProposalRef, ProposalStatus, ProposalStoreError, Publisher, PublisherType,
+    ActionType, Comment, CreateProposalInput, ExecutionOutcome, Proposal, ProposalExecutor,
+    ProposalFilter, ProposalRef, ProposalStatus, ProposalStoreError, Publisher, PublisherType,
 };
 use crate::signal::types::SignalEvent;
+
+async fn publish_execution_outcome_signals(
+    state: &AppState,
+    scope_key: Option<&str>,
+    outcome: &ExecutionOutcome,
+) {
+    match outcome {
+        ExecutionOutcome::TaskCreated { task, event } => {
+            crate::routes::tasks::publish_task_signal(state, "task.created", task);
+            crate::routes::tasks::publish_task_replication_signal(state, scope_key, task);
+            crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
+                .await;
+        }
+        ExecutionOutcome::EventAppended { event } => {
+            crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
+                .await;
+        }
+        ExecutionOutcome::TimeblockStarted { result, event } => {
+            crate::routes::timeblocks::publish_new_block_replication_signals(
+                state, scope_key, result,
+            );
+            crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
+                .await;
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct ProposalQuery {
@@ -182,23 +208,28 @@ async fn update_proposal(
             state.eventlog_store.clone(),
             state.timeblock_store.clone(),
         );
-        if let Err(error) = executor.execute_scoped(scope_key, &proposal) {
-            let failure_message = error.to_string();
-            tracing::error!(proposal_id = %proposal.id, error = %failure_message, "proposal execution failed after approval");
-            let comment = Comment {
-                author: Publisher {
-                    publisher_type: PublisherType::Agent,
-                    id: "runtime-executor".to_string(),
-                    name: "Runtime Executor".to_string(),
-                },
-                content: format!("批准后执行失败：{failure_message}"),
-                created_at: Utc::now(),
-            };
-            proposal = state
-                .proposal_store
-                .add_comment_scoped(scope_key, &id, comment)
-                .map_err(map_store_error)?;
-            execution_failure_message = Some(failure_message);
+        match executor.execute_scoped(scope_key, &proposal) {
+            Ok(outcome) => {
+                publish_execution_outcome_signals(&state, scope_key, &outcome).await;
+            }
+            Err(error) => {
+                let failure_message = error.to_string();
+                tracing::error!(proposal_id = %proposal.id, error = %failure_message, "proposal execution failed after approval");
+                let comment = Comment {
+                    author: Publisher {
+                        publisher_type: PublisherType::Agent,
+                        id: "runtime-executor".to_string(),
+                        name: "Runtime Executor".to_string(),
+                    },
+                    content: format!("批准后执行失败：{failure_message}"),
+                    created_at: Utc::now(),
+                };
+                proposal = state
+                    .proposal_store
+                    .add_comment_scoped(scope_key, &id, comment)
+                    .map_err(map_store_error)?;
+                execution_failure_message = Some(failure_message);
+            }
         }
     }
 
@@ -709,6 +740,99 @@ mod tests {
         assert!(
             state.task_store.list().is_empty(),
             "anonymous task scope should stay isolated"
+        );
+        let topics: Vec<String> = state
+            .signal_pool
+            .window()
+            .recent(32)
+            .iter()
+            .map(|event| event.topic.clone())
+            .collect();
+        assert!(topics.iter().any(|topic| topic == "task.created"));
+        assert!(
+            topics
+                .iter()
+                .any(|topic| topic == "task.replication.upserted")
+        );
+        assert!(
+            topics
+                .iter()
+                .any(|topic| topic == "eventlog.replication.appended")
+        );
+    }
+
+    #[tokio::test]
+    async fn approving_start_timeblock_publishes_timeblock_and_eventlog_replication() {
+        let state = test_state();
+        let app = test_router(state.clone());
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/proposals?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "title":"建议：开始专注块",
+                            "body":"现在进入专注时间",
+                            "action_type":"start_timeblock",
+                            "action_params":{"name":"写实现","mode":"countdown","target_minutes":25,"tags":["focus"]},
+                            "publisher":{"publisher_type":"agent","id":"test-agent","name":"测试 Agent"}
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+        let body = create_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let created: Value = serde_json::from_slice(&body).unwrap();
+        let proposal_id = created["id"].as_str().unwrap().to_string();
+
+        let approve_response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/proposals/{proposal_id}?user_id=user-a"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"status":"approved"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(approve_response.status(), StatusCode::OK);
+        let active = state
+            .timeblock_store
+            .get_active_scoped(Some("user-a"))
+            .unwrap()
+            .expect("approved proposal should create active timeblock");
+        assert_eq!(active.name, "写实现");
+
+        let topics: Vec<String> = state
+            .signal_pool
+            .window()
+            .recent(32)
+            .iter()
+            .map(|event| event.topic.clone())
+            .collect();
+        assert!(
+            topics
+                .iter()
+                .any(|topic| topic == "timeblock.replication.active_upserted")
+        );
+        assert!(
+            topics
+                .iter()
+                .any(|topic| topic == "eventlog.replication.appended")
         );
     }
 

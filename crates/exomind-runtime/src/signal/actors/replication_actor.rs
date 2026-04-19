@@ -102,33 +102,76 @@ pub fn spawn_replication_actor(
                             }
                         }
                         TASK_REPLICATION_TOPIC => {
-                            if let Err(error) =
-                                apply_task_replication(&task_store, &local_host_id, &event)
-                            {
-                                warn!(event_id = %event.id, error = %error, "replication_actor: task apply failed");
+                            match apply_task_replication(&task_store, &local_host_id, &event) {
+                                Ok(Some(payload)) => {
+                                    publish_local_replication_apply_signal(
+                                        &pool,
+                                        &local_host_id,
+                                        &event,
+                                        payload,
+                                    );
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    warn!(event_id = %event.id, error = %error, "replication_actor: task apply failed");
+                                }
                             }
                         }
                         TIMEBLOCK_ACTIVE_REPLICATION_TOPIC => {
-                            if let Err(error) = apply_timeblock_active_replication(
+                            match apply_timeblock_active_replication(
                                 &timeblock_store,
                                 &local_host_id,
                                 &event,
                             ) {
-                                warn!(event_id = %event.id, error = %error, "replication_actor: active timeblock apply failed");
+                                Ok(Some(payload)) => {
+                                    publish_local_replication_apply_signal(
+                                        &pool,
+                                        &local_host_id,
+                                        &event,
+                                        payload,
+                                    );
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    warn!(event_id = %event.id, error = %error, "replication_actor: active timeblock apply failed");
+                                }
                             }
                         }
                         TIMEBLOCK_COMPLETED_REPLICATION_TOPIC => {
-                            if let Err(error) =
-                                apply_timeblock_completed_replication(&timeblock_store, &event)
-                            {
-                                warn!(event_id = %event.id, error = %error, "replication_actor: completed timeblock apply failed");
+                            match apply_timeblock_completed_replication(
+                                &timeblock_store,
+                                &local_host_id,
+                                &event,
+                            ) {
+                                Ok(Some(payload)) => {
+                                    publish_local_replication_apply_signal(
+                                        &pool,
+                                        &local_host_id,
+                                        &event,
+                                        payload,
+                                    );
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    warn!(event_id = %event.id, error = %error, "replication_actor: completed timeblock apply failed");
+                                }
                             }
                         }
                         PROPOSAL_REPLICATION_TOPIC => {
-                            if let Err(error) =
-                                apply_proposal_replication(&proposal_store, &local_host_id, &event)
+                            match apply_proposal_replication(&proposal_store, &local_host_id, &event)
                             {
-                                warn!(event_id = %event.id, error = %error, "replication_actor: proposal apply failed");
+                                Ok(Some(payload)) => {
+                                    publish_local_replication_apply_signal(
+                                        &pool,
+                                        &local_host_id,
+                                        &event,
+                                        payload,
+                                    );
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    warn!(event_id = %event.id, error = %error, "replication_actor: proposal apply failed");
+                                }
                             }
                         }
                         _ => {}
@@ -160,6 +203,25 @@ fn apply_eventlog_replication(store: &EventLogStore, event: &SignalEvent) -> Res
     store.append_event(scope_key, record)
 }
 
+fn publish_local_replication_apply_signal(
+    pool: &SignalPool,
+    local_host_id: &str,
+    event: &SignalEvent,
+    payload: serde_json::Value,
+) {
+    pool.publish(SignalEvent {
+        schema_version: event.schema_version,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: event.topic.clone(),
+        ts: Utc::now().timestamp_millis() as u64,
+        source: "actor:replication_actor".to_string(),
+        origin_host_id: local_host_id.to_string(),
+        hop: event.hop.saturating_add(1),
+        trace_id: event.trace_id.clone(),
+        payload,
+    });
+}
+
 fn legacy_event_to_record(record: EventlogLegacyRecord) -> Option<EventRecord> {
     let timestamp = record
         .created_at
@@ -178,15 +240,98 @@ fn legacy_event_to_record(record: EventlogLegacyRecord) -> Option<EventRecord> {
     })
 }
 
+fn normalize_scope_key(scope_key: Option<&str>) -> String {
+    scope_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("anonymous")
+        .to_string()
+}
+
+fn build_task_replication_payload(
+    local_host_id: &str,
+    scope_key: Option<&str>,
+    task: &Task,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "task_snapshot",
+            "taskId": task.id,
+            "updatedAt": task.updated_at,
+            "originHostId": local_host_id,
+        },
+        "task": task,
+    })
+}
+
+fn build_active_timeblock_replication_payload(
+    local_host_id: &str,
+    scope_key: Option<&str>,
+    active: &ActiveBlockData,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "timeblock_active",
+            "startId": active.start_id,
+            "updatedAt": active
+                .resolve_last_transition_at()
+                .unwrap_or(active.updated_at.unwrap_or(active.resolve_start_time())),
+            "originHostId": local_host_id,
+        },
+        "active": active,
+    })
+}
+
+fn build_completed_timeblock_replication_payload(
+    local_host_id: &str,
+    scope_key: Option<&str>,
+    block: &TimeBlockData,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "timeblock_completed",
+            "blockId": block.start_id,
+            "completedAt": block.end_time,
+            "originHostId": local_host_id,
+        },
+        "block": block,
+    })
+}
+
+fn build_proposal_replication_payload(
+    local_host_id: &str,
+    scope_key: Option<&str>,
+    proposal: &Proposal,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "scopeKey": normalize_scope_key(scope_key),
+        "cursor": {
+            "kind": "proposal_snapshot",
+            "proposalId": proposal.id,
+            "updatedAt": proposal.updated_at,
+            "originHostId": local_host_id,
+        },
+        "proposal": proposal,
+    })
+}
+
 fn apply_task_replication(
     store: &TaskStore,
-    _local_host_id: &str,
+    local_host_id: &str,
     event: &SignalEvent,
-) -> Result<(), String> {
+) -> Result<Option<serde_json::Value>, String> {
     let payload: TaskReplicationPayload =
         serde_json::from_value(event.payload.clone()).map_err(|error| error.to_string())?;
     let scope_key = payload.scope_key.as_deref();
     let mut incoming = payload.task;
+    let incoming_id = incoming.id.clone();
     incoming
         .status_transitions
         .sort_by(|left, right| left.at.cmp(&right.at));
@@ -205,29 +350,37 @@ fn apply_task_replication(
             if should_accept {
                 store
                     .upsert_scoped(scope_key, merge_task_snapshot(&existing, &incoming, true))
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| error.to_string())?;
             } else if history_changed {
                 store
                     .upsert_scoped(scope_key, merge_task_snapshot(&existing, &incoming, false))
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| error.to_string())?;
             } else {
-                Ok(())
+                return Ok(None);
             }
         }
-        None => store
-            .upsert_scoped(scope_key, incoming)
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
+        None => {
+            store
+                .upsert_scoped(scope_key, incoming)
+                .map_err(|error| error.to_string())?;
+        }
     }
+
+    let stored = store
+        .get_scoped(scope_key, &incoming_id)
+        .ok_or_else(|| "replicated task was applied but is unreadable".to_string())?;
+    Ok(Some(build_task_replication_payload(
+        local_host_id,
+        scope_key,
+        &stored,
+    )))
 }
 
 fn apply_timeblock_active_replication(
     store: &TimeBlockStore,
     local_host_id: &str,
     event: &SignalEvent,
-) -> Result<(), String> {
+) -> Result<Option<serde_json::Value>, String> {
     let payload: TimeblockActiveReplicationPayload =
         serde_json::from_value(event.payload.clone()).map_err(|error| error.to_string())?;
     let scope_key = payload.scope_key.as_deref();
@@ -245,18 +398,29 @@ fn apply_timeblock_active_replication(
     };
 
     if !should_apply {
-        return Ok(());
+        return Ok(None);
     }
 
     store
         .put_active_scoped(scope_key, incoming)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    let stored = store
+        .get_active_scoped(scope_key)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "replicated active timeblock was applied but is unreadable".to_string())?;
+    Ok(Some(build_active_timeblock_replication_payload(
+        local_host_id,
+        scope_key,
+        &stored,
+    )))
 }
 
 fn apply_timeblock_completed_replication(
     store: &TimeBlockStore,
+    local_host_id: &str,
     event: &SignalEvent,
-) -> Result<(), String> {
+) -> Result<Option<serde_json::Value>, String> {
     let payload: TimeblockCompletedReplicationPayload =
         serde_json::from_value(event.payload.clone()).map_err(|error| error.to_string())?;
     let scope_key = payload.scope_key.as_deref();
@@ -268,23 +432,37 @@ fn apply_timeblock_completed_replication(
         .iter()
         .any(|existing| existing.start_id == payload.block.start_id)
     {
-        return Ok(());
+        return Ok(None);
     }
 
+    let start_id = payload.block.start_id.clone();
     completed.push(payload.block);
     store
         .replace_completed_scoped(scope_key, &completed)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    let stored = store
+        .list_completed_scoped(scope_key)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|block| block.start_id == start_id)
+        .ok_or_else(|| "replicated completed timeblock was applied but is unreadable".to_string())?;
+    Ok(Some(build_completed_timeblock_replication_payload(
+        local_host_id,
+        scope_key,
+        &stored,
+    )))
 }
 
 fn apply_proposal_replication(
     store: &ProposalStore,
     local_host_id: &str,
     event: &SignalEvent,
-) -> Result<(), String> {
+) -> Result<Option<serde_json::Value>, String> {
     let payload: ProposalReplicationPayload =
         serde_json::from_value(event.payload.clone()).map_err(|error| error.to_string())?;
     let scope_key = payload.scope_key.as_deref();
+    let proposal_id = payload.proposal.id.clone();
 
     let should_apply = match store
         .get_scoped(scope_key, &payload.proposal.id)
@@ -300,13 +478,22 @@ fn apply_proposal_replication(
     };
 
     if !should_apply {
-        return Ok(());
+        return Ok(None);
     }
 
     store
         .save_replica_scoped(scope_key, payload.proposal)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    let stored = store
+        .get_scoped(scope_key, &proposal_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "replicated proposal was applied but is unreadable".to_string())?;
+    Ok(Some(build_proposal_replication_payload(
+        local_host_id,
+        scope_key,
+        &stored,
+    )))
 }
 
 fn parse_rfc3339_to_timestamp(input: &str) -> Option<i64> {
@@ -591,6 +778,7 @@ mod tests {
             &proposal_store,
         );
         yield_for_actor().await;
+        let mut rx = pool.subscribe();
 
         pool.publish(make_remote_event(
             TASK_REPLICATION_TOPIC,
@@ -631,6 +819,25 @@ mod tests {
         assert_eq!(task.title, "replicated task");
         assert_eq!(task.priority, TaskPriority::Medium);
         assert_eq!(task.status, TaskStatus::Pending);
+
+        let mut saw_local_apply = false;
+        for _ in 0..3 {
+            let event = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
+                .await
+                .expect("replication wake should be published")
+                .expect("signal should be readable");
+            if event.topic == TASK_REPLICATION_TOPIC
+                && event.origin_host_id == "host-local"
+                && event.source == "actor:replication_actor"
+            {
+                saw_local_apply = true;
+                break;
+            }
+        }
+        assert!(
+            saw_local_apply,
+            "replication actor should publish a local apply wake after storing the remote snapshot"
+        );
     }
 
     #[tokio::test]
@@ -762,6 +969,7 @@ mod tests {
             &proposal_store,
         );
         yield_for_actor().await;
+        let mut rx = pool.subscribe();
 
         pool.publish(make_remote_event(
             TASK_REPLICATION_TOPIC,
@@ -813,6 +1021,32 @@ mod tests {
                 .iter()
                 .any(|transition| transition.id == completion_transition.id),
             "merged history should include remote completion transition"
+        );
+
+        let mut saw_local_apply = false;
+        for _ in 0..3 {
+            let event = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
+                .await
+                .expect("local merge wake should be published")
+                .expect("signal should be readable");
+            if event.topic == TASK_REPLICATION_TOPIC
+                && event.origin_host_id == "host-local"
+                && event.source == "actor:replication_actor"
+            {
+                assert_eq!(event.payload["cursor"]["originHostId"], "host-local");
+                assert_eq!(
+                    event.payload["task"]["status_transitions"]
+                        .as_array()
+                        .map(Vec::len),
+                    Some(3)
+                );
+                saw_local_apply = true;
+                break;
+            }
+        }
+        assert!(
+            saw_local_apply,
+            "replication actor should republish merged stored truth after applying task history"
         );
     }
 

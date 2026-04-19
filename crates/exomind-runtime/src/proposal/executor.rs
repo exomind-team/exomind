@@ -7,8 +7,8 @@ use crate::eventlog::{EventLogStore, EventRecord};
 use crate::proposal::{
     ActionType, AppendEventParams, CreateTaskParams, Proposal, StartTimeblockParams,
 };
-use crate::routes::timeblocks::{NewBlockRequest, do_new_block};
-use crate::task::{CreateTaskInput, TaskStore};
+use crate::routes::timeblocks::{NewBlockRequest, NewBlockResponse, do_new_block};
+use crate::task::{CreateTaskInput, Task, TaskStore};
 use crate::timeblock::TimeBlockStore;
 
 #[derive(Debug, Error)]
@@ -21,6 +21,12 @@ pub enum ExecutionError {
     Timeblock(String),
     #[error("proposal action is not implemented yet: {0}")]
     NotYetImplemented(&'static str),
+}
+
+pub enum ExecutionOutcome {
+    TaskCreated { task: Task, event: EventRecord },
+    EventAppended { event: EventRecord },
+    TimeblockStarted { result: NewBlockResponse, event: EventRecord },
 }
 
 pub struct ProposalExecutor {
@@ -46,7 +52,7 @@ impl ProposalExecutor {
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<ExecutionOutcome, ExecutionError> {
         match proposal.action_type {
             ActionType::CreateTask => self.execute_create_task(scope_key, proposal),
             ActionType::AppendEvent => self.execute_append_event(scope_key, proposal),
@@ -61,7 +67,7 @@ impl ProposalExecutor {
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<ExecutionOutcome, ExecutionError> {
         let params: CreateTaskParams = serde_json::from_value(proposal.action_params.clone())?;
         let task = self.task_store.create_scoped(
             scope_key,
@@ -80,66 +86,62 @@ impl ProposalExecutor {
             },
         );
 
+        let event = EventRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: Utc::now().timestamp_millis(),
+            content: format!("提案 #{} 已批准并创建任务：{}", proposal.id, task.title),
+            tags: vec![
+                "agent-action".to_string(),
+                "proposal-approved".to_string(),
+                "create_task".to_string(),
+            ],
+            refs: vec![],
+            metadata: Some(serde_json::json!({
+                "proposal_id": proposal.id,
+                "action_type": "create_task",
+                "task_id": task.id,
+                "publisher": proposal.publisher.clone(),
+            })),
+        };
         self.eventlog_store
-            .append_event(
-                scope_key,
-                EventRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: Utc::now().timestamp_millis(),
-                    content: format!("提案 #{} 已批准并创建任务：{}", proposal.id, task.title),
-                    tags: vec![
-                        "agent-action".to_string(),
-                        "proposal-approved".to_string(),
-                        "create_task".to_string(),
-                    ],
-                    refs: vec![],
-                    metadata: Some(serde_json::json!({
-                        "proposal_id": proposal.id,
-                        "action_type": "create_task",
-                        "task_id": task.id,
-                        "publisher": proposal.publisher.clone(),
-                    })),
-                },
-            )
+            .append_event(scope_key, event.clone())
             .map_err(ExecutionError::EventLog)?;
-        Ok(())
+        Ok(ExecutionOutcome::TaskCreated { task, event })
     }
 
     fn execute_append_event(
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<ExecutionOutcome, ExecutionError> {
         let params: AppendEventParams = serde_json::from_value(proposal.action_params.clone())?;
         let mut tags = params.tags.unwrap_or_default();
         push_unique_tag(&mut tags, "agent-action");
         push_unique_tag(&mut tags, "proposal-approved");
 
+        let event = EventRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: Utc::now().timestamp_millis(),
+            content: params.content,
+            tags,
+            refs: vec![],
+            metadata: Some(serde_json::json!({
+                "proposal_id": proposal.id,
+                "action_type": "append_event",
+                "publisher": proposal.publisher.clone(),
+            })),
+        };
         self.eventlog_store
-            .append_event(
-                scope_key,
-                EventRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: Utc::now().timestamp_millis(),
-                    content: params.content,
-                    tags,
-                    refs: vec![],
-                    metadata: Some(serde_json::json!({
-                        "proposal_id": proposal.id,
-                        "action_type": "append_event",
-                        "publisher": proposal.publisher.clone(),
-                    })),
-                },
-            )
+            .append_event(scope_key, event.clone())
             .map_err(ExecutionError::EventLog)?;
-        Ok(())
+        Ok(ExecutionOutcome::EventAppended { event })
     }
 
     fn execute_start_timeblock(
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<ExecutionOutcome, ExecutionError> {
         let params: StartTimeblockParams = serde_json::from_value(proposal.action_params.clone())?;
         let result = do_new_block(
             &self.timeblock_store,
@@ -168,27 +170,25 @@ impl ProposalExecutor {
         push_unique_tag(&mut tags, "agent-action");
         push_unique_tag(&mut tags, "proposal-approved");
 
+        let event = EventRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: Utc::now().timestamp_millis(),
+            content: format!("时间块开始: {}", result.active.name),
+            tags,
+            refs: vec![],
+            metadata: Some(serde_json::json!({
+                "proposal_id": proposal.id,
+                "action_type": "start_timeblock",
+                "start_id": result.active.start_id,
+                "task_ids": result.active.task_ids,
+                "description": params.description,
+                "publisher": proposal.publisher.clone(),
+            })),
+        };
         self.eventlog_store
-            .append_event(
-                scope_key,
-                EventRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: Utc::now().timestamp_millis(),
-                    content: format!("时间块开始: {}", result.active.name),
-                    tags,
-                    refs: vec![],
-                    metadata: Some(serde_json::json!({
-                        "proposal_id": proposal.id,
-                        "action_type": "start_timeblock",
-                        "start_id": result.active.start_id,
-                        "task_ids": result.active.task_ids,
-                        "description": params.description,
-                        "publisher": proposal.publisher.clone(),
-                    })),
-                },
-            )
+            .append_event(scope_key, event.clone())
             .map_err(ExecutionError::EventLog)?;
-        Ok(())
+        Ok(ExecutionOutcome::TimeblockStarted { result, event })
     }
 }
 
@@ -207,7 +207,7 @@ mod tests {
     use crate::task::TaskStore;
     use crate::timeblock::TimeBlockStore;
 
-    use super::ProposalExecutor;
+    use super::{ExecutionOutcome, ProposalExecutor};
 
     fn sample_proposal(action_type: ActionType, action_params: serde_json::Value) -> Proposal {
         let now = chrono::Utc::now();
@@ -241,7 +241,7 @@ mod tests {
         let executor =
             ProposalExecutor::new(task_store.clone(), eventlog_store.clone(), timeblock_store);
 
-        executor
+        let outcome = executor
             .execute_scoped(
                 None,
                 &sample_proposal(
@@ -257,5 +257,12 @@ mod tests {
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 1);
         assert!(events[0].tags.iter().any(|tag| tag == "agent-action"));
+        match outcome {
+            ExecutionOutcome::TaskCreated { task, event } => {
+                assert_eq!(task.id, tasks[0].id);
+                assert_eq!(event.id, events[0].id);
+            }
+            _ => panic!("expected task-created outcome"),
+        }
     }
 }

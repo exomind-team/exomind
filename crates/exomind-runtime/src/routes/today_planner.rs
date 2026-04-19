@@ -542,6 +542,7 @@ async fn start_segment(
         (status, Json(err))
     })?;
 
+    super::timeblocks::publish_new_block_replication_signals(&state, scope_key, &result);
     write_timeblock_eventlog(
         &state,
         scope_key,
@@ -549,7 +550,8 @@ async fn start_segment(
         &result.active.name,
         &result.active.start_id,
         &result.active.task_ids,
-    );
+    )
+    .await;
 
     Ok(Json(result.active))
 }
@@ -616,7 +618,7 @@ async fn reflow_window(
     )))
 }
 
-fn write_timeblock_eventlog(
+async fn write_timeblock_eventlog(
     state: &AppState,
     scope_key: Option<&str>,
     event_type: &str,
@@ -648,9 +650,12 @@ fn write_timeblock_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event) {
+    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
         tracing::warn!(error = %error, "failed to write today planner eventlog");
+        return;
     }
+
+    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 pub fn router() -> Router<AppState> {

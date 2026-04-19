@@ -205,12 +205,22 @@ fn build_completed_timeblock_replication_payload(
     })
 }
 
-async fn publish_completed_timeblock_replication_signal(
+fn publish_timeblock_replication_signal(state: &AppState, signal: SignalEvent) {
+    state.signal_pool.publish(signal.clone());
+    if let Some(mesh_relay) = &state.mesh_relay {
+        let relay = std::sync::Arc::clone(mesh_relay);
+        tokio::spawn(async move {
+            relay.forward_event_to_peers(signal).await;
+        });
+    }
+}
+
+fn build_completed_timeblock_replication_signal(
     state: &AppState,
     scope_key: Option<&str>,
     block: &TimeBlockData,
-) {
-    let signal = SignalEvent {
+) -> SignalEvent {
+    SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
         topic: "timeblock.replication.completed".to_string(),
@@ -223,20 +233,36 @@ async fn publish_completed_timeblock_replication_signal(
         hop: 0,
         trace_id: Some(format!("timeblock:{}", block.start_id)),
         payload: build_completed_timeblock_replication_payload(state, scope_key, block),
-    };
-
-    state.signal_pool.publish(signal.clone());
-    if let Some(mesh_relay) = &state.mesh_relay {
-        mesh_relay.forward_event_to_peers(signal).await;
     }
 }
 
-async fn publish_active_timeblock_replication_signal(
+fn notify_local_completed_timeblock_replication_applied(
+    state: &AppState,
+    scope_key: Option<&str>,
+    block: &TimeBlockData,
+) {
+    state.signal_pool.publish(SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "timeblock.replication.completed".to_string(),
+        ts: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock error")
+            .as_millis() as u64,
+        source: "http:timeblocks/replication".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 0,
+        trace_id: Some(format!("timeblock:{}", block.start_id)),
+        payload: build_completed_timeblock_replication_payload(state, scope_key, block),
+    });
+}
+
+fn build_active_timeblock_replication_signal(
     state: &AppState,
     scope_key: Option<&str>,
     active: &ActiveBlockData,
-) {
-    let signal = SignalEvent {
+) -> SignalEvent {
+    SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
         topic: "timeblock.replication.active_upserted".to_string(),
@@ -261,12 +287,105 @@ async fn publish_active_timeblock_replication_signal(
             },
             "active": active,
         }),
+    }
+}
+
+fn publish_active_timeblock_replication_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    active: &ActiveBlockData,
+) {
+    publish_timeblock_replication_signal(
+        state,
+        build_active_timeblock_replication_signal(state, scope_key, active),
+    );
+}
+
+pub(crate) fn publish_new_block_replication_signals(
+    state: &AppState,
+    scope_key: Option<&str>,
+    result: &NewBlockResponse,
+) {
+    let completed_signal = result
+        .completed
+        .as_ref()
+        .map(|completed| build_completed_timeblock_replication_signal(state, scope_key, completed));
+    let active_signal = build_active_timeblock_replication_signal(state, scope_key, &result.active);
+
+    if let Some(signal) = &completed_signal {
+        state.signal_pool.publish(signal.clone());
+    }
+    state.signal_pool.publish(active_signal.clone());
+
+    if let Some(mesh_relay) = &state.mesh_relay {
+        let relay = std::sync::Arc::clone(mesh_relay);
+        tokio::spawn(async move {
+            if let Some(signal) = completed_signal {
+                relay.forward_event_to_peers(signal).await;
+            }
+            relay.forward_event_to_peers(active_signal).await;
+        });
+    }
+}
+
+async fn apply_task_status_outcomes_for_block_end(
+    state: &AppState,
+    scope_key: Option<&str>,
+    current: &ActiveBlockData,
+    task_status_outcomes: Option<&std::collections::HashMap<String, String>>,
+    now: u64,
+    actor_id: &str,
+    trigger: &str,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let Some(task_status_outcomes) = task_status_outcomes else {
+        return Ok(());
     };
 
-    state.signal_pool.publish(signal.clone());
-    if let Some(mesh_relay) = &state.mesh_relay {
-        mesh_relay.forward_event_to_peers(signal).await;
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let end_transition_ref = build_timeblock_transition_ref(
+        &current.start_id,
+        BlockTransitionType::End,
+        now,
+        Some(actor_id),
+    );
+
+    for (task_id, outcome) in task_status_outcomes {
+        let Some(target_status) = parse_task_status_outcome(outcome)? else {
+            continue;
+        };
+
+        let task = state
+            .task_store
+            .get_scoped(scope_key, task_id)
+            .ok_or_else(|| conflict(format!("cannot end: task not found: {task_id}")))?;
+
+        if task.status == target_status {
+            continue;
+        }
+
+        transition_task_in_scope_with_context(
+            state,
+            scope_key,
+            task_id,
+            target_status,
+            false,
+            TaskTransitionContext {
+                at: Some(now),
+                reason: Some(TaskTransitionReason::TimeblockEnd),
+                actor_id: Some(actor_id.to_string()),
+                source_host_id: Some(state.host_id.clone()),
+                operation_id: Some(operation_id.clone()),
+                related_time_block_id: Some(current.start_id.clone()),
+                related_time_block_transition_ref: Some(end_transition_ref.clone()),
+                auto_generated: Some(true),
+            },
+            trigger,
+        )
+        .await
+        .map_err(map_task_route_error_to_timeblock)?;
     }
+
+    Ok(())
 }
 
 // ── #759 newBlock primitive ─────────────────────────────────────────
@@ -558,7 +677,26 @@ async fn new_block(
     Json(payload): Json<NewBlockRequest>,
 ) -> Result<Json<NewBlockResponse>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    do_new_block(&state.timeblock_store, scope_key, &payload).map(Json)
+    let current = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|error| internal_error(error.to_string()))?;
+    let now = current_timestamp_millis();
+    if let Some(ref current) = current {
+        apply_task_status_outcomes_for_block_end(
+            &state,
+            scope_key,
+            current,
+            payload.task_status_outcomes.as_ref(),
+            now,
+            "rt:newblock",
+            "http:timeblocks/new",
+        )
+        .await?;
+    }
+    let result = do_new_block_at(&state.timeblock_store, scope_key, &payload, now)?;
+    publish_new_block_replication_signals(&state, scope_key, &result);
+    Ok(Json(result))
 }
 
 /// POST /timeblocks/start — guard: current must be gap (or empty). Creates active.
@@ -595,6 +733,7 @@ async fn start_block(
         },
     )?;
 
+    publish_new_block_replication_signals(&state, scope_key, &result);
     // Transition → EventLog linkage (active blocks only, gap skipped)
     write_timeblock_eventlog(
         &state,
@@ -605,10 +744,6 @@ async fn start_block(
         &result.active.task_ids,
     )
     .await;
-    if let Some(ref completed) = result.completed {
-        publish_completed_timeblock_replication_signal(&state, scope_key, completed).await;
-    }
-    publish_active_timeblock_replication_signal(&state, scope_key, &result.active).await;
 
     Ok(Json(result))
 }
@@ -643,52 +778,16 @@ async fn end_block(
     }
 
     let now = current_timestamp_millis();
-    let operation_id = uuid::Uuid::new_v4().to_string();
-    let actor_id = "rt:end";
-    let end_transition_ref = build_timeblock_transition_ref(
-        &current.start_id,
-        BlockTransitionType::End,
+    apply_task_status_outcomes_for_block_end(
+        &state,
+        scope_key,
+        &current,
+        payload.task_status_outcomes.as_ref(),
         now,
-        Some(actor_id),
-    );
-
-    if let Some(task_status_outcomes) = payload.task_status_outcomes.as_ref() {
-        for (task_id, outcome) in task_status_outcomes {
-            let Some(target_status) = parse_task_status_outcome(outcome)? else {
-                continue;
-            };
-
-            let task = state
-                .task_store
-                .get_scoped(scope_key, task_id)
-                .ok_or_else(|| conflict(format!("cannot end: task not found: {task_id}")))?;
-
-            if task.status == target_status {
-                continue;
-            }
-
-            transition_task_in_scope_with_context(
-                &state,
-                scope_key,
-                task_id,
-                target_status,
-                false,
-                TaskTransitionContext {
-                    at: Some(now),
-                    reason: Some(TaskTransitionReason::TimeblockEnd),
-                    actor_id: Some(actor_id.to_string()),
-                    source_host_id: Some(state.host_id.clone()),
-                    operation_id: Some(operation_id.clone()),
-                    related_time_block_id: Some(current.start_id.clone()),
-                    related_time_block_transition_ref: Some(end_transition_ref.clone()),
-                    auto_generated: Some(true),
-                },
-                "http:timeblocks/end",
-            )
-            .await
-            .map_err(map_task_route_error_to_timeblock)?;
-        }
-    }
+        "rt:end",
+        "http:timeblocks/end",
+    )
+    .await?;
 
     let result = do_new_block_at(
         &state.timeblock_store,
@@ -708,11 +807,10 @@ async fn end_block(
 
     // Transition → EventLog linkage: RT owns the full feedback report generation.
     // Gap block creation does NOT write EventLog (per #759 design)
+    publish_new_block_replication_signals(&state, scope_key, &result);
     if let Some(ref completed) = result.completed {
         write_timeblock_feedback_eventlog(&state, scope_key, &current, completed).await;
-        publish_completed_timeblock_replication_signal(&state, scope_key, completed).await;
     }
-    publish_active_timeblock_replication_signal(&state, scope_key, &result.active).await;
 
     Ok(Json(result))
 }
@@ -769,6 +867,11 @@ async fn replication_completed_block(
         .timeblock_store
         .replace_completed_scoped(scope_key, &blocks)
         .map_err(|e| internal_error(e.to_string()))?;
+    let stored = blocks
+        .last()
+        .cloned()
+        .ok_or_else(|| internal_error("replicated timeblock missing after insert".to_string()))?;
+    notify_local_completed_timeblock_replication_applied(&state, scope_key, &stored);
 
     Ok(Json(CompletedReplicationResponse { status: "inserted" }))
 }
@@ -822,14 +925,14 @@ async fn stop_block(
         .put_active_scoped(scope_key, updated)
         .map_err(|e| internal_error(e.to_string()))?;
 
-    write_timeblock_eventlog(&state, scope_key, "block_end", &name, &start_id, &task_ids).await;
     if let Some(active) = state
         .timeblock_store
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
     {
-        publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
+        publish_active_timeblock_replication_signal(&state, scope_key, &active);
     }
+    write_timeblock_eventlog(&state, scope_key, "block_end", &name, &start_id, &task_ids).await;
 
     Ok(Json(
         serde_json::json!({ "status": "stopped", "phase": "feedback_in_progress" }),
@@ -929,6 +1032,13 @@ async fn pause_block(
         .put_active_scoped(scope_key, updated)
         .map_err(|e| internal_error(e.to_string()))?;
 
+    if let Some(active) = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+    {
+        publish_active_timeblock_replication_signal(&state, scope_key, &active);
+    }
     write_timeblock_eventlog(
         &state,
         scope_key,
@@ -938,13 +1048,6 @@ async fn pause_block(
         &task_ids,
     )
     .await;
-    if let Some(active) = state
-        .timeblock_store
-        .get_active_scoped(scope_key)
-        .map_err(|e| internal_error(e.to_string()))?
-    {
-        publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
-    }
 
     Ok(Json(serde_json::json!({ "status": "paused" })))
 }
@@ -1075,6 +1178,13 @@ async fn resume_block(
         .put_active_scoped(scope_key, updated)
         .map_err(|e| internal_error(e.to_string()))?;
 
+    if let Some(active) = state
+        .timeblock_store
+        .get_active_scoped(scope_key)
+        .map_err(|e| internal_error(e.to_string()))?
+    {
+        publish_active_timeblock_replication_signal(&state, scope_key, &active);
+    }
     write_timeblock_eventlog(
         &state,
         scope_key,
@@ -1084,13 +1194,6 @@ async fn resume_block(
         &task_ids,
     )
     .await;
-    if let Some(active) = state
-        .timeblock_store
-        .get_active_scoped(scope_key)
-        .map_err(|e| internal_error(e.to_string()))?
-    {
-        publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
-    }
 
     Ok(Json(serde_json::json!({ "status": "resumed" })))
 }
@@ -1130,7 +1233,7 @@ async fn patch_active_block_tasks(
         .timeblock_store
         .put_active_scoped(scope_key, updated.clone())
         .map_err(|error| internal_error(error.to_string()))?;
-    publish_active_timeblock_replication_signal(&state, scope_key, &updated).await;
+    publish_active_timeblock_replication_signal(&state, scope_key, &updated);
 
     Ok(Json(updated))
 }
@@ -1172,7 +1275,7 @@ async fn describe_current_block(
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
     {
-        publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
+        publish_active_timeblock_replication_signal(&state, scope_key, &active);
     }
 
     Ok(Json(
@@ -1224,7 +1327,7 @@ async fn describe_block(
                 .timeblock_store
                 .put_active_scoped(scope_key, active.clone())
                 .map_err(|e| internal_error(e.to_string()))?;
-            publish_active_timeblock_replication_signal(&state, scope_key, &active).await;
+            publish_active_timeblock_replication_signal(&state, scope_key, &active);
             return Ok(Json(
                 serde_json::json!({ "updated": "active", "blockId": block_id }),
             ));
@@ -3443,7 +3546,8 @@ mod tests {
         let sqlite_path = dir.path().join("timeblocks-replication.sqlite");
         let timeblock_store =
             Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
-        let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
+        let state = test_state_with_timeblock_store(timeblock_store.clone());
+        let app = test_router(state.clone());
 
         let payload = serde_json::json!({
             "block": {
@@ -3473,10 +3577,23 @@ mod tests {
                     .header("content-type", "application/json")
                     .body(Body::from(payload.clone()))
                     .unwrap(),
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| {
+                event.topic == "timeblock.replication.completed"
+                    && event.source == "http:timeblocks/replication"
+            })
+            .expect("completed replication upsert should publish a local wake");
+        assert_eq!(replication.payload["scopeKey"], serde_json::json!("user-a"));
+        assert_eq!(replication.payload["block"]["startId"], serde_json::json!("tb-rep-1"));
 
         let response = app
             .oneshot(
@@ -3503,6 +3620,132 @@ mod tests {
             timeblock_store.list_completed().unwrap().is_empty(),
             "anonymous scope should remain isolated from replicated scoped timeblocks"
         );
+    }
+
+    #[tokio::test]
+    async fn new_route_publishes_timeblock_replication_signals() {
+        let state =
+            test_state_with_timeblock_store(Arc::new(crate::timeblock::TimeBlockStore::new()));
+        let app = test_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/new?user_id=profile-argon")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"blockType":"active","name":"Raw block","mode":"countup"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| {
+                event.topic == "timeblock.replication.active_upserted"
+                    && event.source == "http:timeblocks"
+            })
+            .expect("raw new route should publish active replication wake");
+        assert_eq!(
+            replication.payload["scopeKey"],
+            serde_json::json!("profile-argon")
+        );
+        assert_eq!(
+            replication.payload["active"]["name"],
+            serde_json::json!("Raw block")
+        );
+    }
+
+    #[tokio::test]
+    async fn new_route_applies_task_status_outcomes_when_ending_current_block() {
+        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::new());
+        let state = test_state_with_timeblock_store(timeblock_store.clone());
+        let task = state.task_store.create_scoped(
+            Some("profile-argon"),
+            crate::task::CreateTaskInput {
+                title: "block task".to_string(),
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: vec![],
+                source: None,
+                parent_id: None,
+                depends_on: vec![],
+                due_at: None,
+                estimated_minutes: None,
+                time_block_ids: vec![],
+            },
+        );
+        state
+            .task_store
+            .transition_scoped(Some("profile-argon"), &task.id, crate::task::TaskStatus::InProgress)
+            .unwrap();
+        timeblock_store
+            .put_active_scoped(
+                Some("profile-argon"),
+                ActiveBlockData {
+                    start_id: "tb-live-1".to_string(),
+                    name: "Live block".to_string(),
+                    mode: "countup".to_string(),
+                    target_minutes: None,
+                    block_type: Some("active".to_string()),
+                    elapsed: 0,
+                    updated_at: Some(100),
+                    phase: Some("running".to_string()),
+                    version: Some(1),
+                    actor_id: Some("actor-a".to_string()),
+                    last_transition_at: Some(100),
+                    last_resumed_at: Some(100),
+                    accumulated_run_ms: Some(0),
+                    start_time: 100,
+                    action_ended_at: None,
+                    feedback_started_at: None,
+                    feedback_submitted_at: None,
+                    pause_accumulated_ms: Some(0),
+                    paused: false,
+                    paused_at: None,
+                    task_ids: vec![task.id.clone()],
+                    task_association_log: vec![],
+                    source_planned_block_id: None,
+                    transitions: vec![BlockTransition {
+                        transition_type: BlockTransitionType::Start,
+                        at: 100,
+                        actor_id: Some("actor-a".to_string()),
+                    }],
+                    task_id: None,
+                },
+            )
+            .unwrap();
+        let app = test_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/new?user_id=profile-argon")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"blockType":"gap","taskStatusOutcomes":{{"{}":"completed"}}}}"#,
+                        task.id
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let stored = state
+            .task_store
+            .get_scoped(Some("profile-argon"), &task.id)
+            .expect("task should exist");
+        assert_eq!(stored.status, crate::task::TaskStatus::Completed);
     }
 
     #[tokio::test]

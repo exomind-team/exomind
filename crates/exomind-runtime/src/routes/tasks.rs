@@ -429,6 +429,7 @@ async fn cancel_task(
         },
     )?;
 
+    publish_task_transition_signal(&state, old_status, &task);
     publish_task_signal(&state, "task.cancelled", &task);
     publish_task_replication_signal(&state, scope_key, &task);
     write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/cancel").await;
@@ -457,6 +458,7 @@ async fn delete_task(
         },
     )?;
 
+    publish_task_transition_signal(&state, old_status, &task);
     publish_task_signal(&state, "task.cancelled", &task);
     publish_task_replication_signal(&state, scope_key, &task);
     write_task_transition_eventlog(&state, scope_key, &task, old_status, "http:tasks/delete").await;
@@ -1292,7 +1294,11 @@ fn build_task_replication_payload(
     })
 }
 
-fn publish_task_replication_signal(state: &AppState, scope_key: Option<&str>, task: &Task) {
+pub(crate) fn publish_task_replication_signal(
+    state: &AppState,
+    scope_key: Option<&str>,
+    task: &Task,
+) {
     let event = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
@@ -1314,7 +1320,21 @@ fn publish_task_replication_signal(state: &AppState, scope_key: Option<&str>, ta
     }
 }
 
-fn publish_task_signal(state: &AppState, topic: &str, task: &Task) {
+fn notify_local_task_replication_applied(state: &AppState, scope_key: Option<&str>, task: &Task) {
+    state.signal_pool.publish(SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "task.replication.upserted".to_string(),
+        ts: chrono::Utc::now().timestamp_millis() as u64,
+        source: "http:tasks/replication".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 0,
+        trace_id: Some(format!("task:{}", task.id)),
+        payload: build_task_replication_payload(state, scope_key, task),
+    });
+}
+
+pub(crate) fn publish_task_signal(state: &AppState, topic: &str, task: &Task) {
     let event = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
@@ -1340,6 +1360,7 @@ async fn replication_upsert_task(
 ) -> Result<Json<TaskReplicationUpsertResponse>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let incoming = normalize_incoming_task_snapshot(payload.task)?;
+    let incoming_id = incoming.id.clone();
     let existing = state.task_store.get_scoped(scope_key, &incoming.id);
 
     let status = match existing {
@@ -1348,6 +1369,14 @@ async fn replication_upsert_task(
                 .task_store
                 .upsert_scoped(scope_key, incoming)
                 .map_err(map_task_store_error)?;
+            let stored = state
+                .task_store
+                .get_scoped(scope_key, &incoming_id)
+                .ok_or((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "task replication insert succeeded but task is unreadable".to_string(),
+                ))?;
+            notify_local_task_replication_applied(&state, scope_key, &stored);
             "inserted"
         }
         Some(current) => {
@@ -1360,12 +1389,28 @@ async fn replication_upsert_task(
                     .task_store
                     .upsert_scoped(scope_key, merge_task_snapshot(&current, &incoming, true))
                     .map_err(map_task_store_error)?;
+                let stored = state
+                    .task_store
+                    .get_scoped(scope_key, &incoming_id)
+                    .ok_or((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "task replication update succeeded but task is unreadable".to_string(),
+                    ))?;
+                notify_local_task_replication_applied(&state, scope_key, &stored);
                 "updated"
             } else if history_changed {
                 state
                     .task_store
                     .upsert_scoped(scope_key, merge_task_snapshot(&current, &incoming, false))
                     .map_err(map_task_store_error)?;
+                let stored = state
+                    .task_store
+                    .get_scoped(scope_key, &incoming_id)
+                    .ok_or((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "task replication merge succeeded but task is unreadable".to_string(),
+                    ))?;
+                notify_local_task_replication_applied(&state, scope_key, &stored);
                 "updated"
             } else {
                 "ignored"
@@ -4343,7 +4388,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("tasks-replication.sqlite");
         let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
-        let app = test_router(test_state_with_task_store(task_store.clone()));
+        let state = test_state_with_task_store(task_store.clone());
+        let app = test_router(state.clone());
 
         let response = app
             .clone()
@@ -4382,10 +4428,23 @@ mod tests {
                     }"#,
                     ))
                     .unwrap(),
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| {
+                event.topic == "task.replication.upserted"
+                    && event.source == "http:tasks/replication"
+            })
+            .expect("replication upsert should publish a local task.replication.upserted wake");
+        assert_eq!(replication.payload["scopeKey"], serde_json::json!("user-a"));
+        assert_eq!(replication.payload["task"]["id"], serde_json::json!("task-rep-1"));
 
         let response = app
             .oneshot(

@@ -6,7 +6,7 @@ use crate::task::TaskPriority;
 pub mod executor;
 pub mod store;
 
-pub use executor::{ExecutionError, ProposalExecutor};
+pub use executor::{ExecutionError, ExecutionOutcome, ProposalExecutor};
 pub use store::{CreateProposalInput, ProposalFilter, ProposalStore, ProposalStoreError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
