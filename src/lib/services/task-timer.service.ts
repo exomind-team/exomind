@@ -75,30 +75,36 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     const normalizedTaskIds = Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)))
     if (normalizedTaskIds.length === 0) return null
     const existingBlock = await this.tbSvc.loadActiveBlock()
-    if (existingBlock) return existingBlock
+    if (existingBlock) {
+      const existingTaskIds = resolveActiveBlockTaskIds(existingBlock)
+      const retryTaskIds = normalizedTaskIds.filter((taskId) => existingTaskIds.includes(taskId))
+      await this.reconcileAssociatedTaskProgress(retryTaskIds)
+      return existingBlock
+    }
 
     const tasks = await this.loadTasks(normalizedTaskIds)
     if (!tasks) return null
-
-    for (const task of tasks) {
-      const nextStatus = this.resolveAutoProgressStatus(task.status)
-      if (nextStatus) {
-        await this.taskSvc.transitionTask(task.id, nextStatus)
-      }
-    }
+    const autoProgressCandidates = await this.resolveAutoProgressCandidates(tasks)
 
     const [primaryTask] = tasks
     if (!primaryTask) return null
 
     const block = await this.tbSvc.startBlock(primaryTask.title, config, undefined, { taskIds: normalizedTaskIds })
-    await this.tbSvc.updateActiveBlock({
+    const requiredTaskAssociationLog = this.ensureStartAssociationLog(
+      block.taskAssociationLog ?? [],
+      block.startId,
+      normalizedTaskIds,
+    )
+    const updatedBlock = await this.tbSvc.updateActiveBlock({
       taskIds: normalizedTaskIds,
-      taskAssociationLog: this.ensureStartAssociationLog(
-        block.taskAssociationLog ?? [],
-        block.startId,
-        normalizedTaskIds,
-      ),
+      taskAssociationLog: requiredTaskAssociationLog,
     })
+    if (!updatedBlock) {
+      throw new Error('Failed to persist active block association')
+    }
+    for (const candidate of autoProgressCandidates) {
+      await this.taskSvc.transitionTask(candidate.task.id, candidate.nextStatus)
+    }
     for (const task of tasks) {
       emitTaskLinked(task.id, task.title, block.startId, block.name)
     }
@@ -118,7 +124,10 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     if (task.status === 'completed' || task.status === 'cancelled') return
 
     const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
-    if (existingTaskIds.includes(normalizedTaskId)) return
+    if (existingTaskIds.includes(normalizedTaskId)) {
+      await this.reconcileAssociatedTaskProgress([normalizedTaskId])
+      return
+    }
     const dependencyCheck = await this.taskSvc.checkDependenciesMet(normalizedTaskId)
     const hardBlocking = dependencyCheck.blocking.filter((dependency) => dependency.type === 'hard')
     if (hardBlocking.length > 0) {
@@ -126,12 +135,7 @@ export class TaskTimerServiceImpl implements TaskTimerService {
       throw new Error(`Cannot associate task to active block: hard dependencies not met [${blockingIds}]`)
     }
 
-    const nextStatus = this.resolveAutoProgressStatus(task.status)
-    if (nextStatus) {
-      await this.taskSvc.transitionTask(task.id, nextStatus)
-    }
-
-    await this.tbSvc.updateActiveBlock({
+    const updatedBlock = await this.tbSvc.updateActiveBlock({
       taskIds: [...existingTaskIds, normalizedTaskId],
       taskAssociationLog: this.appendAssociationEvent(
         activeBlock.taskAssociationLog ?? [],
@@ -140,6 +144,13 @@ export class TaskTimerServiceImpl implements TaskTimerService {
         'associated',
       ),
     })
+    if (!updatedBlock) {
+      throw new Error('Failed to persist active block association')
+    }
+    const nextStatus = this.resolveAutoProgressStatus(task.status)
+    if (nextStatus) {
+      await this.taskSvc.transitionTask(task.id, nextStatus)
+    }
     emitTaskLinked(normalizedTaskId, task.title, activeBlock.startId, activeBlock.name)
   }
 
@@ -177,6 +188,7 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     const normalizedTaskIds = Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)))
     const allBlocks = await this.tbSvc.loadTimeBlocks()
     const completedBlock = allBlocks.find((block) => block.id === blockId || block.startId === blockId) ?? null
+    const persistedBlockId = completedBlock?.startId ?? blockId
     const relatedTaskIds = completedBlock
       ? resolveTimeBlockRelatedTaskIds(completedBlock)
       : normalizedTaskIds
@@ -186,9 +198,24 @@ export class TaskTimerServiceImpl implements TaskTimerService {
       if (!task) continue
 
       const existingIds = task.timeBlockIds ?? []
-      if (!existingIds.includes(blockId)) {
+      const equivalentBlockIds = new Set(
+        [blockId, persistedBlockId, completedBlock?.id]
+          .filter((candidate): candidate is string => Boolean(candidate)),
+      )
+      const normalizedExistingIds = Array.from(
+        new Set(
+          existingIds.map((existingId) => equivalentBlockIds.has(existingId) ? persistedBlockId : existingId),
+        ),
+      )
+      if (!normalizedExistingIds.includes(persistedBlockId)) {
+        normalizedExistingIds.push(persistedBlockId)
+      }
+      if (
+        normalizedExistingIds.length !== existingIds.length
+        || normalizedExistingIds.some((existingId, index) => existingId !== existingIds[index])
+      ) {
         await this.taskSvc.updateTask(taskId, {
-          timeBlockIds: [...existingIds, blockId],
+          timeBlockIds: normalizedExistingIds,
         })
       }
     }
@@ -239,6 +266,49 @@ export class TaskTimerServiceImpl implements TaskTimerService {
       return 'in_progress'
     }
     return null
+  }
+
+  private async resolveAutoProgressCandidates(
+    tasks: TaskNode[],
+  ): Promise<Array<{ task: TaskNode; nextStatus: TaskStatus }>> {
+    const candidates: Array<{ task: TaskNode; nextStatus: TaskStatus }> = []
+
+    for (const task of tasks) {
+      const nextStatus = this.resolveAutoProgressStatus(task.status)
+      if (!nextStatus) {
+        continue
+      }
+
+      const dependencyCheck = await this.taskSvc.checkDependenciesMet(task.id)
+      const hardBlocking = dependencyCheck.blocking.filter((dependency) => dependency.type === 'hard')
+      if (hardBlocking.length > 0) {
+        const blockingIds = hardBlocking.map((dependency) => dependency.taskId).join(', ')
+        throw new Error(`Cannot transition to in_progress: hard dependencies not met [${blockingIds}]`)
+      }
+
+      candidates.push({ task, nextStatus })
+    }
+
+    return candidates
+  }
+
+  private async reconcileAssociatedTaskProgress(taskIds: string[]): Promise<void> {
+    const normalizedTaskIds = Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)))
+    if (normalizedTaskIds.length === 0) {
+      return
+    }
+
+    for (const taskId of normalizedTaskIds) {
+      const task = await this.taskSvc.getTask(taskId)
+      if (!task || task.status === 'completed' || task.status === 'cancelled') {
+        continue
+      }
+
+      const [candidate] = await this.resolveAutoProgressCandidates([task])
+      if (candidate) {
+        await this.taskSvc.transitionTask(candidate.task.id, candidate.nextStatus)
+      }
+    }
   }
 
   private appendAssociationEvent(

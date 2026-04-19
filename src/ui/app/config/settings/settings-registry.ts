@@ -338,7 +338,11 @@ import {
   subscribeTimeblockEndAutoOpenFocusChanges,
 } from '@/config/timeblock-end-alert';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
-import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
+import {
+  clearMigrationSkipped,
+  isMigrationCompleted,
+  isMigrationSkipped,
+} from '@/lib/migration/legacy-migration-flags';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import { openExternalUrl } from '@/lib/utils/open-external';
 import { setPersistedEmbeddedRuntimeNetworkMode } from '@/config/runtime-open-mode';
@@ -366,10 +370,6 @@ import { VoiceAssistantProviderSettings } from '@/ui/app/components/settings/voi
 import {
   getEventlogBackendMode,
   setEventlogBackendMode,
-  getTaskBackendMode,
-  setTaskBackendMode,
-  getTimeblockBackendMode,
-  setTimeblockBackendMode,
 } from '@/config/domain-backend-mode';
 import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-window-shortcut-runtime';
 
@@ -2001,40 +2001,6 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     set: (value: string) => { setEventlogBackendMode(value as 'legacy' | 'rt-sqlite'); window.location.reload(); },
   },
   {
-    id: 'task-backend-mode',
-    label: '任务后端',
-    icon: DatabaseZap,
-    category: 'data',
-    type: 'enum',
-    enumStyle: 'dialog',
-    dialogTitle: '任务后端',
-    dialogDescription: '切换后页面将自动刷新',
-    visible: tauriDevOnly,
-    options: [
-      { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
-      { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
-    ],
-    get: getTaskBackendMode,
-    set: (value: string) => { setTaskBackendMode(value as 'legacy' | 'rt-sqlite'); window.location.reload(); },
-  },
-  {
-    id: 'timeblock-backend-mode',
-    label: '时间块后端',
-    icon: DatabaseZap,
-    category: 'data',
-    type: 'enum',
-    enumStyle: 'dialog',
-    dialogTitle: '时间块后端',
-    dialogDescription: '切换后页面将自动刷新',
-    visible: tauriDevOnly,
-    options: [
-      { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
-      { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
-    ],
-    get: getTimeblockBackendMode,
-    set: (value: string) => { setTimeblockBackendMode(value as 'legacy' | 'rt-sqlite'); window.location.reload(); },
-  },
-  {
     id: 'data-transfer',
     label: '数据迁移',
     category: 'data',
@@ -2049,16 +2015,16 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     type: 'action',
     icon: DatabaseZap,
     visible: (ctx) => {
-      if (!ctx.isDesktop) return false;
+      if (!ctx.isDesktop || !ctx.isTauriWindow) return false;
       try {
-        return !isMigrationCompleted();
+        return !isMigrationCompleted() && isMigrationSkipped();
       } catch {
         return false;
       }
     },
     onAction: () => {
       try {
-        clearMigrationFlags();
+        clearMigrationSkipped();
         window.location.reload();
       } catch {
         // ignore

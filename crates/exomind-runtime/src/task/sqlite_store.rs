@@ -1,11 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 
-use super::store::{TaskStoreError, validate_dependency_update, validate_terminal_task_update};
+use super::store::{
+    append_task_status_transition, build_initial_task_status_transition,
+    normalize_task_status_history, prepare_task_for_storage, validate_dependency_update,
+    validate_terminal_task_update, TaskStoreError,
+};
 use super::types::{
-    CreateTaskInput, Task, TaskDependency, TaskPriority, TaskStatus, UpdateTaskInput,
+    CreateTaskInput, Task, TaskDependency, TaskPriority, TaskStatus, TaskTransitionContext,
+    UpdateTaskInput,
 };
 
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
@@ -44,8 +49,9 @@ impl SqliteTaskStore {
         input: CreateTaskInput,
     ) -> Result<Task, TaskStoreError> {
         let now = chrono::Utc::now().timestamp_millis() as u64;
+        let task_id = uuid::Uuid::new_v4().to_string();
         let task = Task {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: task_id.clone(),
             title: input.title,
             description: input.description,
             done_condition: input.done_condition,
@@ -58,10 +64,13 @@ impl SqliteTaskStore {
             due_at: input.due_at,
             estimated_minutes: input.estimated_minutes,
             time_block_ids: input.time_block_ids,
+            status_transitions: vec![build_initial_task_status_transition(&task_id, now)],
             created_at: now,
             updated_at: now,
             completed_at: None,
         };
+        let mut task = task;
+        prepare_task_for_storage(&mut task)?;
 
         self.insert_task(scope_key, &task)?;
         Ok(task)
@@ -76,7 +85,7 @@ impl SqliteTaskStore {
         let mut statement = connection.prepare(
             "SELECT
                 id, title, description, done_condition, status, priority, tags_json, source,
-                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
              FROM tasks
              WHERE scope_key = ?1 AND id = ?2",
@@ -97,7 +106,7 @@ impl SqliteTaskStore {
         let mut statement = connection.prepare(
             "SELECT
                 id, title, description, done_condition, status, priority, tags_json, source,
-                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
              FROM tasks
              WHERE scope_key = ?1
@@ -121,7 +130,7 @@ impl SqliteTaskStore {
         let mut statement = connection.prepare(
             "SELECT
                 id, title, description, done_condition, status, priority, tags_json, source,
-                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
              FROM tasks
              WHERE scope_key = ?1 AND status = ?2
@@ -186,6 +195,7 @@ impl SqliteTaskStore {
             task.time_block_ids = time_block_ids;
         }
         task.updated_at = chrono::Utc::now().timestamp_millis() as u64;
+        prepare_task_for_storage(&mut task)?;
 
         self.persist_task(scope_key, &task)?;
         Ok(task)
@@ -205,10 +215,26 @@ impl SqliteTaskStore {
         id: &str,
         new_status: TaskStatus,
     ) -> Result<(TaskStatus, Task), TaskStoreError> {
+        self.transition_scoped_with_context(
+            scope_key,
+            id,
+            new_status,
+            TaskTransitionContext::default(),
+        )
+    }
+
+    pub fn transition_scoped_with_context(
+        &self,
+        scope_key: &str,
+        id: &str,
+        new_status: TaskStatus,
+        context: TaskTransitionContext,
+    ) -> Result<(TaskStatus, Task), TaskStoreError> {
         let mut task = self
             .get_scoped(scope_key, id)?
             .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
+        prepare_task_for_storage(&mut task)?;
         if !task.status.can_transition_to(&new_status) {
             return Err(TaskStoreError::InvalidTransition {
                 from: task.status,
@@ -217,11 +243,11 @@ impl SqliteTaskStore {
         }
 
         let old_status = task.status;
-        let now = chrono::Utc::now().timestamp_millis() as u64;
+        let now = append_task_status_transition(&mut task, old_status, new_status, &context);
         task.status = new_status;
         task.updated_at = now;
         task.completed_at = task.status.is_terminal().then_some(now);
-
+        prepare_task_for_storage(&mut task)?;
         self.persist_task(scope_key, &task)?;
         Ok((old_status, task))
     }
@@ -231,10 +257,20 @@ impl SqliteTaskStore {
     }
 
     pub fn cancel_scoped(&self, scope_key: &str, id: &str) -> Result<Task, TaskStoreError> {
+        self.cancel_scoped_with_context(scope_key, id, TaskTransitionContext::default())
+    }
+
+    pub fn cancel_scoped_with_context(
+        &self,
+        scope_key: &str,
+        id: &str,
+        context: TaskTransitionContext,
+    ) -> Result<Task, TaskStoreError> {
         let mut task = self
             .get_scoped(scope_key, id)?
             .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
+        prepare_task_for_storage(&mut task)?;
         if task.status.is_terminal() {
             return Err(TaskStoreError::InvalidTransition {
                 from: task.status,
@@ -242,11 +278,13 @@ impl SqliteTaskStore {
             });
         }
 
-        let now = chrono::Utc::now().timestamp_millis() as u64;
+        let old_status = task.status;
+        let now =
+            append_task_status_transition(&mut task, old_status, TaskStatus::Cancelled, &context);
         task.status = TaskStatus::Cancelled;
         task.updated_at = now;
         task.completed_at = Some(now);
-
+        prepare_task_for_storage(&mut task)?;
         self.persist_task(scope_key, &task)?;
         Ok(task)
     }
@@ -292,13 +330,15 @@ impl SqliteTaskStore {
     }
 
     pub fn upsert_scoped(&self, scope_key: &str, task: &Task) -> Result<(), TaskStoreError> {
+        let mut task = task.clone();
+        prepare_task_for_storage(&mut task)?;
         let connection = self.connection();
         connection.execute(
             "INSERT INTO tasks (
                 scope_key, id, title, description, done_condition, status, priority, tags_json, source,
-                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
             ON CONFLICT(scope_key, id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
@@ -312,6 +352,7 @@ impl SqliteTaskStore {
                 due_at = excluded.due_at,
                 estimated_minutes = excluded.estimated_minutes,
                 time_block_ids_json = excluded.time_block_ids_json,
+                status_transitions_json = excluded.status_transitions_json,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at,
                 completed_at = excluded.completed_at",
@@ -330,6 +371,7 @@ impl SqliteTaskStore {
                 task.due_at,
                 task.estimated_minutes,
                 serde_json::to_string(&task.time_block_ids)?,
+                serde_json::to_string(&task.status_transitions)?,
                 task.created_at,
                 task.updated_at,
                 task.completed_at,
@@ -377,8 +419,12 @@ impl SqliteTaskStore {
             let columns = statement
                 .query_map([], |row| row.get::<_, String>(1))?
                 .collect::<Result<Vec<_>, _>>()?;
+            let has_scope_key = columns.iter().any(|column| column == "scope_key");
+            let has_status_transitions = columns
+                .iter()
+                .any(|column| column == "status_transitions_json");
 
-            if !columns.iter().any(|column| column == "scope_key") {
+            if !has_scope_key {
                 connection.execute_batch(
                     "ALTER TABLE tasks RENAME TO tasks_legacy;
                      CREATE TABLE tasks (
@@ -396,6 +442,7 @@ impl SqliteTaskStore {
                         due_at INTEGER NULL,
                         estimated_minutes INTEGER NULL,
                         time_block_ids_json TEXT NOT NULL,
+                        status_transitions_json TEXT NOT NULL DEFAULT '[]',
                         created_at INTEGER NOT NULL,
                         updated_at INTEGER NOT NULL,
                         completed_at INTEGER NULL,
@@ -403,15 +450,20 @@ impl SqliteTaskStore {
                      );
                      INSERT INTO tasks (
                         scope_key, id, title, description, done_condition, status, priority, tags_json, source,
-                        parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                        parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                         created_at, updated_at, completed_at
                      )
                      SELECT
                         'anonymous', id, title, description, done_condition, status, priority, tags_json, source,
-                        parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                        parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, '[]',
                         created_at, updated_at, completed_at
                      FROM tasks_legacy;
                      DROP TABLE tasks_legacy;",
+                )?;
+            } else if !has_status_transitions {
+                connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN status_transitions_json TEXT NOT NULL DEFAULT '[]'",
+                    [],
                 )?;
             }
         }
@@ -432,6 +484,7 @@ impl SqliteTaskStore {
                 due_at INTEGER NULL,
                 estimated_minutes INTEGER NULL,
                 time_block_ids_json TEXT NOT NULL,
+                status_transitions_json TEXT NOT NULL DEFAULT '[]',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 completed_at INTEGER NULL,
@@ -464,13 +517,15 @@ impl SqliteTaskStore {
     }
 
     fn insert_task(&self, scope_key: &str, task: &Task) -> Result<(), TaskStoreError> {
+        let mut task = task.clone();
+        prepare_task_for_storage(&mut task)?;
         let connection = self.connection();
         connection.execute(
             "INSERT INTO tasks (
                 scope_key, id, title, description, done_condition, status, priority, tags_json, source,
-                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 normalize_scope_key(scope_key),
                 task.id,
@@ -486,6 +541,7 @@ impl SqliteTaskStore {
                 task.due_at,
                 task.estimated_minutes,
                 serde_json::to_string(&task.time_block_ids)?,
+                serde_json::to_string(&task.status_transitions)?,
                 task.created_at,
                 task.updated_at,
                 task.completed_at,
@@ -501,13 +557,16 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let tags_json: String = row.get(6)?;
     let depends_on_json: String = row.get(9)?;
     let time_block_ids_json: String = row.get(12)?;
+    let status_transitions_json: String = row.get(13)?;
     let tags: Vec<String> = serde_json::from_str(&tags_json).map_err(map_json_error)?;
     let depends_on: Vec<TaskDependency> =
         serde_json::from_str(&depends_on_json).map_err(map_json_error)?;
     let time_block_ids: Vec<String> =
         serde_json::from_str(&time_block_ids_json).map_err(map_json_error)?;
+    let status_transitions =
+        serde_json::from_str(&status_transitions_json).map_err(map_json_error)?;
 
-    Ok(Task {
+    let mut task = Task {
         id: row.get(0)?,
         title: row.get(1)?,
         description: row.get(2)?,
@@ -521,10 +580,13 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         due_at: row.get(10)?,
         estimated_minutes: row.get(11)?,
         time_block_ids,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
-        completed_at: row.get(15)?,
-    })
+        status_transitions,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+        completed_at: row.get(16)?,
+    };
+    normalize_task_status_history(&mut task);
+    Ok(task)
 }
 
 fn task_status_to_db(status: &TaskStatus) -> &'static str {
@@ -582,12 +644,14 @@ fn insert_task_in_transaction(
     scope_key: &str,
     task: &Task,
 ) -> Result<(), TaskStoreError> {
+    let mut task = task.clone();
+    prepare_task_for_storage(&mut task)?;
     tx.execute(
         "INSERT INTO tasks (
             scope_key, id, title, description, done_condition, status, priority, tags_json, source,
-            parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+            parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
             created_at, updated_at, completed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             normalize_scope_key(scope_key),
             task.id,
@@ -603,6 +667,7 @@ fn insert_task_in_transaction(
             task.due_at,
             task.estimated_minutes,
             serde_json::to_string(&task.time_block_ids)?,
+            serde_json::to_string(&task.status_transitions)?,
             task.created_at,
             task.updated_at,
             task.completed_at,

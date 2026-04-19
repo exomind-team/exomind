@@ -1,5 +1,5 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment'
-import { getTaskBackendMode, type DomainBackendMode } from '@/config/domain-backend-mode'
+import type { DomainBackendMode } from '@/config/domain-backend-mode'
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
 import { emitTaskCreated, emitTaskTransition } from './task-event-emitter'
@@ -210,7 +210,7 @@ export class TaskServiceImpl implements TaskService {
       return 'legacy'
     }
 
-    return this.env.runtime === 'tauri' ? getTaskBackendMode() : 'rt-sqlite'
+    return 'rt-sqlite'
   }
 
   private shouldEmitTransitionEvents(): boolean {

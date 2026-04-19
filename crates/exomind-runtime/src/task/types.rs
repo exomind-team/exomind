@@ -93,6 +93,66 @@ impl TaskStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TaskTransitionReason {
+    #[serde(rename = "task.create")]
+    TaskCreate,
+    #[serde(rename = "task.transition")]
+    TaskTransition,
+    #[serde(rename = "timeblock.pause")]
+    TimeblockPause,
+    #[serde(rename = "timeblock.resume")]
+    TimeblockResume,
+    #[serde(rename = "timeblock.end")]
+    TimeblockEnd,
+}
+
+impl TaskTransitionReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TaskTransitionReason::TaskCreate => "task.create",
+            TaskTransitionReason::TaskTransition => "task.transition",
+            TaskTransitionReason::TimeblockPause => "timeblock.pause",
+            TaskTransitionReason::TimeblockResume => "timeblock.resume",
+            TaskTransitionReason::TimeblockEnd => "timeblock.end",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskStatusTransition {
+    pub id: String,
+    pub at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_status: Option<TaskStatus>,
+    pub to_status: TaskStatus,
+    pub reason: TaskTransitionReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_host_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_time_block_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_time_block_transition_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_generated: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TaskTransitionContext {
+    pub at: Option<u64>,
+    pub reason: Option<TaskTransitionReason>,
+    pub actor_id: Option<String>,
+    pub source_host_id: Option<String>,
+    pub operation_id: Option<String>,
+    pub related_time_block_id: Option<String>,
+    pub related_time_block_transition_ref: Option<String>,
+    pub auto_generated: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskPriority {
@@ -141,6 +201,8 @@ pub struct Task {
     pub estimated_minutes: Option<u32>,
     #[serde(default)]
     pub time_block_ids: Vec<String>,
+    #[serde(default)]
+    pub status_transitions: Vec<TaskStatusTransition>,
     pub created_at: u64,
     pub updated_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,6 +374,19 @@ mod tests {
             due_at: None,
             estimated_minutes: Some(30),
             time_block_ids: vec!["block-1".to_string()],
+            status_transitions: vec![TaskStatusTransition {
+                id: "t-1:init".to_string(),
+                at: 1000,
+                from_status: None,
+                to_status: TaskStatus::Pending,
+                reason: TaskTransitionReason::TaskCreate,
+                actor_id: None,
+                source_host_id: None,
+                operation_id: None,
+                related_time_block_id: None,
+                related_time_block_transition_ref: None,
+                auto_generated: None,
+            }],
             created_at: 1000,
             updated_at: 1000,
             completed_at: None,
@@ -327,6 +402,7 @@ mod tests {
         assert_eq!(back.done_condition.as_deref(), Some("Definition of done"));
         assert_eq!(back.depends_on.len(), 1);
         assert_eq!(back.time_block_ids, vec!["block-1".to_string()]);
+        assert_eq!(back.status_transitions.len(), 1);
     }
 
     #[test]

@@ -11,8 +11,8 @@ describe('settings registry import/export entries', () => {
 
     expect(ids).toContain('data-transfer');
     expect(ids).toContain('eventlog-backend-mode');
-    expect(ids).toContain('task-backend-mode');
-    expect(ids).toContain('timeblock-backend-mode');
+    expect(ids).not.toContain('task-backend-mode');
+    expect(ids).not.toContain('timeblock-backend-mode');
   });
 
   it('defines sync server control in the registry', () => {

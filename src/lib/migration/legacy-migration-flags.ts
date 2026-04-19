@@ -1,5 +1,6 @@
 const MIGRATION_COMPLETED_KEY = 'exomind:migrationCompleted';
 const MIGRATION_SKIPPED_KEY = 'exomind:migrationSkipped';
+const MIGRATION_PENDING_KEY = 'exomind:migrationPending';
 
 function getStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
   if (typeof window === 'undefined') return null;
@@ -22,6 +23,7 @@ export function markMigrationCompleted(): void {
   if (!storage) return;
   storage.setItem(MIGRATION_COMPLETED_KEY, 'true');
   storage.removeItem(MIGRATION_SKIPPED_KEY);
+  storage.removeItem(MIGRATION_PENDING_KEY);
 }
 
 export function isMigrationSkipped(): boolean {
@@ -36,9 +38,28 @@ export function markMigrationSkipped(): void {
   storage.setItem(MIGRATION_SKIPPED_KEY, 'true');
 }
 
+export function clearMigrationSkipped(): void {
+  const storage = getStorage();
+  if (!storage) return;
+  storage.removeItem(MIGRATION_SKIPPED_KEY);
+}
+
+export function isMigrationPending(): boolean {
+  const storage = getStorage();
+  if (!storage) return false;
+  return storage.getItem(MIGRATION_PENDING_KEY) === 'true';
+}
+
+export function markMigrationPending(): void {
+  const storage = getStorage();
+  if (!storage) return;
+  storage.setItem(MIGRATION_PENDING_KEY, 'true');
+}
+
 export function clearMigrationFlags(): void {
   const storage = getStorage();
   if (!storage) return;
   storage.removeItem(MIGRATION_COMPLETED_KEY);
   storage.removeItem(MIGRATION_SKIPPED_KEY);
+  storage.removeItem(MIGRATION_PENDING_KEY);
 }

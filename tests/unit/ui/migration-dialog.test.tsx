@@ -137,7 +137,7 @@ describe('MigrationDialog（旧数据迁移弹窗）', () => {
     expect(screen.queryByRole('button', { name: '立即迁移' })).toBeNull();
   });
 
-  it('shows error state with fallback button（错误状态显示错误信息和后备按钮）', () => {
+  it('shows error state with retry-later button（错误状态显示错误信息和稍后重试按钮）', () => {
     render(
       <MigrationDialog
         open
@@ -151,10 +151,10 @@ describe('MigrationDialog（旧数据迁移弹窗）', () => {
     expect(screen.getByText('迁移失败')).toBeInTheDocument();
     expect(screen.getByText(/RT connection refused/)).toBeInTheDocument();
     expect(screen.getByText('RT connection refused').tagName).toBe('PRE');
-    expect(screen.getByRole('button', { name: '继续使用旧版存储' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '关闭并稍后重试' })).toBeInTheDocument();
   });
 
-  it('calls onSkip when fallback button clicked in error state（错误状态点击后备按钮时调用 onSkip）', () => {
+  it('calls onSkip when retry-later button clicked in error state（错误状态点击稍后重试按钮时调用 onSkip）', () => {
     const onSkip = vi.fn();
     render(
       <MigrationDialog
@@ -166,7 +166,7 @@ describe('MigrationDialog（旧数据迁移弹窗）', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '继续使用旧版存储' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭并稍后重试' }));
     expect(onSkip).toHaveBeenCalledTimes(1);
   });
 

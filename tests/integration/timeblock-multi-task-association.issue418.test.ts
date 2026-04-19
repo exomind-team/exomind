@@ -3,7 +3,12 @@ import { TaskServiceImpl } from '@/lib/services/task.service';
 import { TaskTimerServiceImpl } from '@/lib/services/task-timer.service';
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 import type { ITaskPort, UpdateTaskInput } from '@/lib/environment/interfaces/task.port';
-import type { TaskNode, TaskStatus } from '@/lib/types/task';
+import {
+  buildInitialTaskStatusTransition,
+  transition as transitionTaskNode,
+  type TaskNode,
+  type TaskStatus,
+} from '@/lib/types/task';
 
 const {
   getEventStorageMock,
@@ -69,16 +74,52 @@ function createStorage(addEventImpl = addEventMock) {
   };
 }
 
+function buildStatusHistory(
+  taskId: string,
+  createdAt: number,
+  status: TaskStatus,
+) {
+  const baseTask: TaskNode = {
+    id: taskId,
+    title: 'history-seed',
+    status: 'pending',
+    priority: 'medium',
+    dependsOn: [],
+    tags: [],
+    createdAt,
+    updatedAt: createdAt,
+    statusTransitions: [buildInitialTaskStatusTransition(taskId, createdAt)],
+  };
+
+  if (status === 'pending') {
+    return baseTask.statusTransitions;
+  }
+
+  const progressed = transitionTaskNode(baseTask, 'in_progress', { at: createdAt + 1 });
+  if (status === 'in_progress') {
+    return progressed.statusTransitions;
+  }
+
+  if (status === 'suspended') {
+    return transitionTaskNode(progressed, 'suspended', { at: createdAt + 2 }).statusTransitions;
+  }
+
+  return transitionTaskNode(progressed, status, { at: createdAt + 2 }).statusTransitions;
+}
+
 function makeTask(overrides: Partial<TaskNode>): TaskNode {
   const now = Date.now();
+  const id = overrides.id ?? `task-${now}`;
+  const status = overrides.status ?? 'pending';
+  const createdAt = overrides.createdAt ?? now;
   return {
-    id: overrides.id ?? `task-${now}`,
+    id,
     title: overrides.title ?? '测试任务',
-    status: overrides.status ?? 'pending',
+    status,
     priority: overrides.priority ?? 'medium',
     dependsOn: overrides.dependsOn ?? [],
     tags: overrides.tags ?? [],
-    createdAt: overrides.createdAt ?? now,
+    createdAt,
     updatedAt: overrides.updatedAt ?? now,
     description: overrides.description,
     doneCondition: overrides.doneCondition,
@@ -87,6 +128,9 @@ function makeTask(overrides: Partial<TaskNode>): TaskNode {
     parentId: overrides.parentId,
     estimatedMinutes: overrides.estimatedMinutes,
     timeBlockIds: overrides.timeBlockIds,
+    statusTransitions:
+      overrides.statusTransitions ??
+      buildStatusHistory(id, createdAt, status),
     completedAt: overrides.completedAt,
   };
 }
@@ -131,24 +175,14 @@ function createMemoryTaskPort(tasks: TaskNode[]): ITaskPort {
     cancelTask: vi.fn(async (id: string) => {
       const existing = store.get(id);
       if (!existing) return null;
-      const cancelled = {
-        ...existing,
-        status: 'cancelled' as const,
-        updatedAt: Date.now(),
-        completedAt: Date.now(),
-      };
+      const cancelled = transitionTaskNode(existing, 'cancelled');
       store.set(id, cancelled);
       return cancelled;
     }),
     transitionTask: vi.fn(async (id: string, to: TaskStatus) => {
       const existing = store.get(id);
       if (!existing) return null;
-      const transitioned = {
-        ...existing,
-        status: to,
-        updatedAt: Date.now(),
-        completedAt: to === 'completed' || to === 'cancelled' ? Date.now() : existing.completedAt,
-      };
+      const transitioned = transitionTaskNode(existing, to);
       store.set(id, transitioned);
       return transitioned;
     }),
@@ -236,6 +270,8 @@ describe('TimeBlock multi-task association integration（#418 多任务时间块
     ]));
 
     await taskTimerService.onBlockEndForTasks(['task-1', 'task-3'], block!.startId);
+    // 注入式 legacy timeblock service 只覆盖 #418 的关联持久化语义；
+    // 生产链路中的任务状态联动由 rt-sqlite runtime 负责。
     await taskService.transitionTask('task-1', 'completed');
     await taskService.transitionTask('task-3', 'suspended');
 
@@ -245,5 +281,15 @@ describe('TimeBlock multi-task association integration（#418 多任务时间块
     expect((await taskService.getTask('task-1'))?.status).toBe('completed');
     expect((await taskService.getTask('task-3'))?.status).toBe('suspended');
     expect((await taskService.getTask('task-2'))?.status).toBe('in_progress');
+    expect((await taskService.getTask('task-1'))?.statusTransitions?.map((transition) => transition.toStatus)).toEqual([
+      'pending',
+      'in_progress',
+      'completed',
+    ]);
+    expect((await taskService.getTask('task-3'))?.statusTransitions?.map((transition) => transition.toStatus)).toEqual([
+      'pending',
+      'in_progress',
+      'suspended',
+    ]);
   });
 });

@@ -19,6 +19,40 @@
 - [x] 完成双盲可行性审阅，并按审阅结果修订计划
 - [ ] 后续按本计划拆实现 issue、改代码、补测试、做人测
 
+## 阶段进展补记（2026-04-19）
+
+### 已完成的主链实现
+
+当前代码已完成以下主链收口：
+
+- 任务时间线 reader 改为只读任务域 `statusTransitions`
+- 删除任务时间线对 EventLog 与旧时间块索引的运行期回退
+- runtime / import / replication 对空 `status_transitions` 不再做静默 materialize
+- 任务状态历史 schema、RT wire contract、前端类型与 timeline model 已统一到 `statusTransitions / status_transitions`
+
+### 已完成的关键验证
+
+此前实现阶段已通过以下验证：
+
+- `tsc --noEmit`
+- 前端相关 `vitest`
+- `cargo test -p exomind-runtime task::store`
+- `cargo test -p exomind-runtime routes::tasks`
+- `cargo test -p exomind-runtime signal::actors::replication_actor`
+- `cargo test -p exomind-runtime --test task_runtime_sqlite_persistence --test timeblock_runtime_sqlite_persistence`
+
+### 新增的真实 Tauri MCP 人测
+
+已在真实 Tauri 桌面窗口中补完“未打开档案 / anonymous scope”任务时间线验收，记录见：
+
+- [2026-04-19-anonymous-task-timeline-tauri-mcp-validation.md](../verification/2026-04-19-anonymous-task-timeline-tauri-mcp-validation.md)
+
+这轮真窗补证确认了三件关键事实：
+
+1. 未打开档案状态下，任务域确实按 `anonymous` scope 运行。
+2. 新创建且带完整 `statusTransitions` 的任务，时间线可真实渲染 segment / terminal / detail panel。
+3. 旧的空历史任务会继续被忽略，而不是再通过运行期回退补历史。
+
 ## 上下文
 
 本计划建立在两份已有分析之上：

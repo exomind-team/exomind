@@ -188,6 +188,63 @@ describe('TaskTimerService: startBlockForTask', () => {
     expect(taskSvc.transitionTask).toHaveBeenCalledWith('t1', 'in_progress')
   })
 
+  it('does not auto-transition tasks when block creation fails', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'pending' })]])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    ;(tbSvc.startBlock as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('rt unavailable'))
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.startBlockForTask('t1')).rejects.toThrow('rt unavailable')
+    expect(taskSvc.transitionTask).not.toHaveBeenCalled()
+  })
+
+  it('does not auto-transition tasks when active block association patch fails', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'pending' })]])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    ;(tbSvc.updateActiveBlock as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('patch failed'))
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.startBlockForTask('t1')).rejects.toThrow('patch failed')
+    expect(taskSvc.transitionTask).not.toHaveBeenCalled()
+  })
+
+  it('does not auto-transition tasks when active block association patch returns null', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'pending' })]])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    ;(tbSvc.updateActiveBlock as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null)
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.startBlockForTask('t1')).rejects.toThrow('Failed to persist active block association')
+    expect(taskSvc.transitionTask).not.toHaveBeenCalled()
+  })
+
+  it('retries auto-transition when the first transition fails after block association is already persisted', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'pending' })]])
+    const taskSvc = createMockTaskService(tasks)
+    ;(taskSvc.transitionTask as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('transition failed'))
+      .mockImplementation(async (id: string, to) => {
+        const task = tasks.get(id)
+        if (!task) return null
+        task.status = to
+        task.updatedAt = Date.now()
+        return task
+      })
+    const tbSvc = createMockTBService()
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.startBlockForTask('t1')).rejects.toThrow('transition failed')
+
+    const block = await svc.startBlockForTask('t1')
+
+    expect(block).not.toBeNull()
+    expect(taskSvc.transitionTask).toHaveBeenCalledTimes(2)
+    expect(tasks.get('t1')?.status).toBe('in_progress')
+  })
+
   it('auto-transitions suspended to in_progress', async () => {
     const tasks = new Map([['t1', makeTask({ id: 't1', status: 'suspended' })]])
     const taskSvc = createMockTaskService(tasks)
@@ -238,21 +295,20 @@ describe('TaskTimerService: startBlockForTask', () => {
   })
 
   it('does not duplicate blockId in existing timeBlockIds', async () => {
-    const tbSvc = createMockTBService()
-    // Pre-set startBlock to return a known startId
-    ;(tbSvc.startBlock as ReturnType<typeof vi.fn>).mockResolvedValue(makeActiveBlock({ startId: 'existing-block' }))
-
     const tasks = new Map([['t1', makeTask({
       id: 't1',
       status: 'in_progress',
       timeBlockIds: ['existing-block'],
     })]])
     const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService(makeActiveBlock({
+      startId: 'existing-block',
+      taskIds: ['t1'],
+    }))
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
     await svc.startBlockForTask('t1')
 
-    // Should NOT call updateTask since blockId already exists
     expect(taskSvc.updateTask).not.toHaveBeenCalled()
   })
 })
@@ -433,6 +489,75 @@ describe('#418 multi-task association', () => {
     expect(emitTaskLinked).toHaveBeenCalledWith('task-2', 'Test Task', 'block-live', 'Test Task')
   })
 
+  it('addTaskToBlock does not auto-transition when active block patch fails', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],
+      ['task-2', makeTask({ id: 'task-2', status: 'pending' })],
+    ])
+    const activeBlock = makeActiveBlock({
+      startId: 'block-live',
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    })
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService(activeBlock)
+    ;(tbSvc.updateActiveBlock as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('patch failed'))
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.addTaskToBlock('task-2')).rejects.toThrow('patch failed')
+    expect(taskSvc.transitionTask).not.toHaveBeenCalledWith('task-2', 'in_progress')
+  })
+
+  it('addTaskToBlock does not auto-transition when active block patch returns null', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],
+      ['task-2', makeTask({ id: 'task-2', status: 'pending' })],
+    ])
+    const activeBlock = makeActiveBlock({
+      startId: 'block-live',
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    })
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService(activeBlock)
+    ;(tbSvc.updateActiveBlock as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null)
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.addTaskToBlock('task-2')).rejects.toThrow('Failed to persist active block association')
+    expect(taskSvc.transitionTask).not.toHaveBeenCalledWith('task-2', 'in_progress')
+  })
+
+  it('addTaskToBlock retries auto-transition when the first transition fails after association succeeded', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],
+      ['task-2', makeTask({ id: 'task-2', status: 'pending' })],
+    ])
+    const activeBlock = makeActiveBlock({
+      startId: 'block-live',
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    })
+    const taskSvc = createMockTaskService(tasks)
+    ;(taskSvc.transitionTask as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('transition failed'))
+      .mockImplementation(async (id: string, to) => {
+        const task = tasks.get(id)
+        if (!task) return null
+        task.status = to
+        task.updatedAt = Date.now()
+        return task
+      })
+    const tbSvc = createMockTBService(activeBlock)
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.addTaskToBlock('task-2')).rejects.toThrow('transition failed')
+
+    await svc.addTaskToBlock('task-2')
+
+    expect(taskSvc.transitionTask).toHaveBeenCalledTimes(2)
+    expect(tasks.get('task-2')?.status).toBe('in_progress')
+  })
+
   it('addTaskToBlock preserves existing associated tasks reconstructed from log-only active block', async () => {
     const tasks = new Map([
       ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],
@@ -575,6 +700,68 @@ describe('#418 multi-task association', () => {
       timeBlockIds: ['block-1'],
     })
     expect(taskSvc.updateTask).toHaveBeenCalledWith('task-2', {
+      timeBlockIds: ['block-1'],
+    })
+  })
+
+  it('onBlockEndForTasks normalizes persisted ids to completed block startId', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', timeBlockIds: ['block-1-end'] })],
+    ])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    ;(tbSvc.loadTimeBlocks as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 'block-1-end',
+        startId: 'block-1',
+        endId: 'block-1-end',
+        name: 'Test Block',
+        note: undefined,
+        tags: new Set(['block_feedback']),
+        startTime: 0,
+        endTime: 60_000,
+        taskIds: ['task-1'],
+        taskAssociationLog: [
+          { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 0, source: 'block_start' },
+        ],
+      },
+    ])
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await svc.onBlockEndForTasks(['task-1'], 'block-1-end')
+
+    expect(taskSvc.updateTask).toHaveBeenCalledWith('task-1', {
+      timeBlockIds: ['block-1'],
+    })
+  })
+
+  it('onBlockEndForTasks normalizes stored completed ids even when callback already uses startId', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', timeBlockIds: ['block-1-end'] })],
+    ])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    ;(tbSvc.loadTimeBlocks as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: 'block-1-end',
+        startId: 'block-1',
+        endId: 'block-1-end',
+        name: 'Test Block',
+        note: undefined,
+        tags: new Set(['block_feedback']),
+        startTime: 0,
+        endTime: 60_000,
+        taskIds: ['task-1'],
+        taskAssociationLog: [
+          { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 0, source: 'block_start' },
+        ],
+      },
+    ])
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await svc.onBlockEndForTasks(['task-1'], 'block-1')
+
+    expect(taskSvc.updateTask).toHaveBeenCalledWith('task-1', {
       timeBlockIds: ['block-1'],
     })
   })

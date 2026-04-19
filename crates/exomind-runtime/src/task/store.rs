@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::RwLock;
@@ -35,6 +36,10 @@ pub enum TaskStoreError {
     InvalidStoredStatus(String),
     #[error("invalid stored task priority: {0}")]
     InvalidStoredPriority(String),
+    #[error("missing task status history: {task_id}")]
+    MissingStatusHistory { task_id: String },
+    #[error("invalid task status history for `{task_id}`: {reason}")]
+    InvalidStatusHistory { task_id: String, reason: String },
 }
 
 enum TaskStoreBackend {
@@ -69,6 +74,496 @@ fn normalize_scope_key(scope_key: Option<&str>) -> &str {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(DEFAULT_SCOPE_KEY)
+}
+
+fn task_status_storage_key(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Pending => "pending",
+        TaskStatus::InProgress => "in_progress",
+        TaskStatus::Suspended => "suspended",
+        TaskStatus::Completed => "completed",
+        TaskStatus::Cancelled => "cancelled",
+    }
+}
+
+fn build_task_status_transition_id(
+    task_id: &str,
+    to_status: TaskStatus,
+    reason: TaskTransitionReason,
+    at: u64,
+    operation_id: Option<&str>,
+) -> String {
+    let status_key = task_status_storage_key(to_status);
+    match operation_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(operation_id) => format!("{task_id}:{operation_id}:{status_key}"),
+        None => format!(
+            "{task_id}:{}:{at}:{status_key}",
+            reason.as_str().replace('.', "_")
+        ),
+    }
+}
+
+pub(crate) fn build_initial_task_status_transition(
+    task_id: &str,
+    created_at: u64,
+) -> TaskStatusTransition {
+    TaskStatusTransition {
+        id: build_task_status_transition_id(
+            task_id,
+            TaskStatus::Pending,
+            TaskTransitionReason::TaskCreate,
+            created_at,
+            None,
+        ),
+        at: created_at,
+        from_status: None,
+        to_status: TaskStatus::Pending,
+        reason: TaskTransitionReason::TaskCreate,
+        actor_id: None,
+        source_host_id: None,
+        operation_id: None,
+        related_time_block_id: None,
+        related_time_block_transition_ref: None,
+        auto_generated: Some(false),
+    }
+}
+
+fn sort_task_status_transitions(transitions: &mut [TaskStatusTransition]) {
+    transitions.sort_by(|left, right| left.at.cmp(&right.at));
+}
+
+fn task_dependency_type_sort_key(relation_type: &TaskDependencyType) -> &'static str {
+    match relation_type {
+        TaskDependencyType::Soft => "soft",
+        TaskDependencyType::Hard => "hard",
+    }
+}
+
+pub(crate) fn task_replication_revision_projection(task: &Task) -> serde_json::Value {
+    let mut tags = task.tags.clone();
+    tags.sort();
+
+    let mut depends_on = task.depends_on.clone();
+    depends_on.sort_by(|left, right| {
+        left.task_id.cmp(&right.task_id).then_with(|| {
+            task_dependency_type_sort_key(&left.relation_type)
+                .cmp(task_dependency_type_sort_key(&right.relation_type))
+        })
+    });
+
+    let mut time_block_ids = task.time_block_ids.clone();
+    time_block_ids.sort();
+
+    let mut status_transitions = task.status_transitions.clone();
+    sort_task_status_transitions(&mut status_transitions);
+
+    serde_json::json!({
+        "id": task.id,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "status": task.status,
+        "completed_at": task.completed_at,
+        "title": task.title,
+        "description": task.description,
+        "done_condition": task.done_condition,
+        "priority": task.priority,
+        "tags": tags,
+        "source": task.source,
+        "parent_id": task.parent_id,
+        "depends_on": depends_on,
+        "due_at": task.due_at,
+        "estimated_minutes": task.estimated_minutes,
+        "time_block_ids": time_block_ids,
+        "status_transitions": status_transitions,
+    })
+}
+
+fn task_replication_preference_key(task: &Task) -> Vec<u8> {
+    serde_json::to_vec(&task_replication_revision_projection(task)).unwrap_or_default()
+}
+
+fn validate_task_history_head(task: &Task) -> Result<&TaskStatusTransition, TaskStoreError> {
+    let Some(first_transition) = task.status_transitions.first() else {
+        return Err(TaskStoreError::MissingStatusHistory {
+            task_id: task.id.clone(),
+        });
+    };
+
+    if first_transition.from_status.is_some() {
+        return Err(TaskStoreError::InvalidStatusHistory {
+            task_id: task.id.clone(),
+            reason: "first transition must start from null".to_string(),
+        });
+    }
+
+    if first_transition.to_status != TaskStatus::Pending {
+        return Err(TaskStoreError::InvalidStatusHistory {
+            task_id: task.id.clone(),
+            reason: "first transition must enter pending".to_string(),
+        });
+    }
+
+    if first_transition.reason != TaskTransitionReason::TaskCreate {
+        return Err(TaskStoreError::InvalidStatusHistory {
+            task_id: task.id.clone(),
+            reason: "first transition must use task.create".to_string(),
+        });
+    }
+
+    Ok(first_transition)
+}
+
+pub(crate) fn normalize_task_status_history(task: &mut Task) {
+    if task.status_transitions.is_empty() {
+        return;
+    }
+
+    sort_task_status_transitions(&mut task.status_transitions);
+
+    if let Some(current_transition) = task.status_transitions.last() {
+        task.status = current_transition.to_status;
+        task.completed_at = current_transition
+            .to_status
+            .is_terminal()
+            .then_some(current_transition.at);
+        if task.updated_at < current_transition.at {
+            task.updated_at = current_transition.at;
+        }
+    }
+}
+
+pub(crate) fn validate_task_status_history(task: &Task) -> Result<(), TaskStoreError> {
+    let first_transition = validate_task_history_head(task)?;
+
+    let mut seen_transition_ids = HashSet::new();
+    if !seen_transition_ids.insert(first_transition.id.clone()) {
+        return Err(TaskStoreError::InvalidStatusHistory {
+            task_id: task.id.clone(),
+            reason: "duplicate transition id in history".to_string(),
+        });
+    }
+
+    let mut previous_transition = first_transition;
+    for transition in task.status_transitions.iter().skip(1) {
+        if !seen_transition_ids.insert(transition.id.clone()) {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: "duplicate transition id in history".to_string(),
+            });
+        }
+
+        if transition.at <= previous_transition.at {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: "transition timestamps must be strictly increasing".to_string(),
+            });
+        }
+
+        if transition.from_status != Some(previous_transition.to_status) {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: format!(
+                    "transition chain is broken between {:?} and {:?}",
+                    previous_transition.to_status, transition.to_status
+                ),
+            });
+        }
+
+        if !previous_transition
+            .to_status
+            .can_transition_to(&transition.to_status)
+        {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: format!(
+                    "invalid transition from {:?} to {:?}",
+                    previous_transition.to_status, transition.to_status
+                ),
+            });
+        }
+
+        previous_transition = transition;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn validate_partial_task_status_history(task: &Task) -> Result<(), TaskStoreError> {
+    let first_transition = validate_task_history_head(task)?;
+
+    let mut seen_transition_ids = HashSet::new();
+    if !seen_transition_ids.insert(first_transition.id.clone()) {
+        return Err(TaskStoreError::InvalidStatusHistory {
+            task_id: task.id.clone(),
+            reason: "duplicate transition id in history".to_string(),
+        });
+    }
+
+    let mut previous_transition = first_transition;
+    for transition in task.status_transitions.iter().skip(1) {
+        if !seen_transition_ids.insert(transition.id.clone()) {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: "duplicate transition id in history".to_string(),
+            });
+        }
+
+        if transition.at <= previous_transition.at {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: "transition timestamps must be strictly increasing".to_string(),
+            });
+        }
+
+        let Some(from_status) = transition.from_status else {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: "non-initial transition must include from_status".to_string(),
+            });
+        };
+
+        if !from_status.can_transition_to(&transition.to_status) {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: format!(
+                    "invalid transition from {:?} to {:?}",
+                    from_status, transition.to_status
+                ),
+            });
+        }
+
+        if previous_transition.to_status.path_to(&from_status).is_none() {
+            return Err(TaskStoreError::InvalidStatusHistory {
+                task_id: task.id.clone(),
+                reason: format!(
+                    "transition fragment is unreachable from {:?} to {:?}",
+                    previous_transition.to_status, from_status
+                ),
+            });
+        }
+
+        previous_transition = transition;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn prepare_task_for_storage(task: &mut Task) -> Result<(), TaskStoreError> {
+    sort_task_status_transitions(&mut task.status_transitions);
+    validate_task_status_history(task)?;
+    if let Some(first_transition) = task.status_transitions.first() {
+        task.created_at = first_transition.at;
+    }
+    normalize_task_status_history(task);
+    Ok(())
+}
+
+pub(crate) fn compare_task_replication_preference(existing: &Task, incoming: &Task) -> Ordering {
+    if let Some(ordering) = compare_task_status_history(existing, incoming) {
+        match ordering {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+
+    match incoming.updated_at.cmp(&existing.updated_at) {
+        Ordering::Equal => {}
+        other => return other,
+    }
+
+    match incoming
+        .status
+        .is_terminal()
+        .cmp(&existing.status.is_terminal())
+    {
+        Ordering::Equal => {}
+        other => return other,
+    }
+
+    match incoming
+        .completed_at
+        .unwrap_or(0)
+        .cmp(&existing.completed_at.unwrap_or(0))
+    {
+        Ordering::Equal => {}
+        other => return other,
+    }
+
+    task_replication_preference_key(incoming).cmp(&task_replication_preference_key(existing))
+}
+
+pub(crate) fn compare_task_status_history(existing: &Task, incoming: &Task) -> Option<Ordering> {
+    let mut existing_transitions = existing.status_transitions.clone();
+    let mut incoming_transitions = incoming.status_transitions.clone();
+
+    sort_task_status_transitions(&mut existing_transitions);
+    sort_task_status_transitions(&mut incoming_transitions);
+
+    match (existing_transitions.last(), incoming_transitions.last()) {
+        (None, None) => Some(Ordering::Equal),
+        (None, Some(_)) => None,
+        (Some(_), None) => Some(Ordering::Less),
+        (Some(existing_last), Some(incoming_last)) => {
+            match incoming_last.at.cmp(&existing_last.at) {
+                Ordering::Greater => return Some(Ordering::Greater),
+                Ordering::Less => return Some(Ordering::Less),
+                Ordering::Equal => {}
+            }
+
+            if incoming_transitions == existing_transitions {
+                return Some(Ordering::Equal);
+            }
+
+            let shorter_len = existing_transitions.len().min(incoming_transitions.len());
+            if existing_transitions[..shorter_len] == incoming_transitions[..shorter_len] {
+                return Some(incoming_transitions.len().cmp(&existing_transitions.len()));
+            }
+
+            None
+        }
+    }
+}
+
+fn transition_fits_between(
+    previous: Option<&TaskStatusTransition>,
+    candidate: &TaskStatusTransition,
+    next: Option<&TaskStatusTransition>,
+) -> bool {
+    match previous {
+        Some(previous) if candidate.from_status != Some(previous.to_status) => return false,
+        None if candidate.from_status.is_some() => return false,
+        _ => {}
+    }
+
+    match next {
+        Some(next) => match next.from_status {
+            Some(next_from_status) => next_from_status == candidate.to_status,
+            None => false,
+        },
+        None => true,
+    }
+}
+
+fn merge_task_status_history_with_preference(
+    existing: &Task,
+    incoming: &Task,
+    prefer_incoming: bool,
+) -> Vec<TaskStatusTransition> {
+    let (preferred, secondary) = if prefer_incoming {
+        (incoming, existing)
+    } else {
+        (existing, incoming)
+    };
+    let mut merged = preferred.status_transitions.clone();
+    sort_task_status_transitions(&mut merged);
+    let mut seen = merged
+        .iter()
+        .map(|transition| transition.id.clone())
+        .collect::<HashSet<_>>();
+
+    let mut secondary_transitions = secondary.status_transitions.clone();
+    sort_task_status_transitions(&mut secondary_transitions);
+
+    if merged.is_empty() {
+        for transition in secondary_transitions {
+            if seen.insert(transition.id.clone()) {
+                merged.push(transition);
+            }
+        }
+        return merged;
+    }
+
+    for transition in secondary_transitions {
+        if !seen.insert(transition.id.clone()) {
+            continue;
+        }
+
+        let insert_at = merged.partition_point(|current| {
+            current.at < transition.at
+                || (current.at == transition.at && current.id < transition.id)
+        });
+        let previous = insert_at.checked_sub(1).and_then(|index| merged.get(index));
+        let next = merged.get(insert_at);
+        if transition_fits_between(previous, &transition, next) {
+            merged.insert(insert_at, transition);
+        }
+    }
+
+    merged
+}
+
+pub(crate) fn merge_task_status_history(
+    existing: &Task,
+    incoming: &Task,
+) -> Vec<TaskStatusTransition> {
+    merge_task_status_history_with_preference(existing, incoming, false)
+}
+
+pub(crate) fn merge_task_snapshot(existing: &Task, incoming: &Task, prefer_incoming: bool) -> Task {
+    let mut merged = if prefer_incoming {
+        incoming.clone()
+    } else {
+        existing.clone()
+    };
+    let existing_revision = task_replication_revision_projection(existing);
+    merged.status_transitions =
+        merge_task_status_history_with_preference(existing, incoming, prefer_incoming);
+    if let Some(first_transition) = merged.status_transitions.first() {
+        merged.created_at = merged.created_at.min(first_transition.at);
+    }
+    normalize_task_status_history(&mut merged);
+    if task_replication_revision_projection(&merged) != existing_revision
+        && merged.updated_at <= existing.updated_at
+    {
+        merged.updated_at = existing.updated_at.saturating_add(1);
+    }
+    merged
+}
+
+pub(crate) fn append_task_status_transition(
+    task: &mut Task,
+    old_status: TaskStatus,
+    new_status: TaskStatus,
+    context: &TaskTransitionContext,
+) -> u64 {
+    normalize_task_status_history(task);
+
+    let requested_at = context
+        .at
+        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis() as u64);
+    let at = task
+        .status_transitions
+        .last()
+        .map(|transition| requested_at.max(transition.at.saturating_add(1)))
+        .unwrap_or(requested_at.max(task.created_at));
+    let reason = context
+        .reason
+        .unwrap_or(TaskTransitionReason::TaskTransition);
+
+    task.status_transitions.push(TaskStatusTransition {
+        id: build_task_status_transition_id(
+            &task.id,
+            new_status,
+            reason,
+            at,
+            context.operation_id.as_deref(),
+        ),
+        at,
+        from_status: Some(old_status),
+        to_status: new_status,
+        reason,
+        actor_id: context.actor_id.clone(),
+        source_host_id: context.source_host_id.clone(),
+        operation_id: context.operation_id.clone(),
+        related_time_block_id: context.related_time_block_id.clone(),
+        related_time_block_transition_ref: context.related_time_block_transition_ref.clone(),
+        auto_generated: context.auto_generated,
+    });
+
+    at
 }
 
 pub(crate) fn validate_terminal_task_update(
@@ -190,8 +685,9 @@ impl TaskStore {
         }
 
         let now = chrono::Utc::now().timestamp_millis() as u64;
+        let task_id = uuid::Uuid::new_v4().to_string();
         let task = Task {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: task_id.clone(),
             title: input.title,
             description: input.description,
             done_condition: input.done_condition,
@@ -204,10 +700,13 @@ impl TaskStore {
             due_at: input.due_at,
             estimated_minutes: input.estimated_minutes,
             time_block_ids: input.time_block_ids,
+            status_transitions: vec![build_initial_task_status_transition(&task_id, now)],
             created_at: now,
             updated_at: now,
             completed_at: None,
         };
+        let mut task = task;
+        prepare_task_for_storage(&mut task).expect("new task history should be valid");
 
         let result = task.clone();
         self.with_memory_scope_mut(scope_key, |tasks| {
@@ -345,7 +844,7 @@ impl TaskStore {
         id: &str,
         new_status: TaskStatus,
     ) -> Result<(TaskStatus, Task), TaskStoreError> {
-        self.transition_scoped(None, id, new_status)
+        self.transition_scoped_with_context(None, id, new_status, TaskTransitionContext::default())
     }
 
     pub fn transition_with_shortcut(
@@ -353,7 +852,12 @@ impl TaskStore {
         id: &str,
         target_status: TaskStatus,
     ) -> Result<Vec<(TaskStatus, Task)>, TaskStoreError> {
-        self.transition_with_shortcut_scoped(None, id, target_status)
+        self.transition_with_shortcut_scoped_with_context(
+            None,
+            id,
+            target_status,
+            TaskTransitionContext::default(),
+        )
     }
 
     pub fn transition_with_shortcut_scoped(
@@ -361,6 +865,21 @@ impl TaskStore {
         scope_key: Option<&str>,
         id: &str,
         target_status: TaskStatus,
+    ) -> Result<Vec<(TaskStatus, Task)>, TaskStoreError> {
+        self.transition_with_shortcut_scoped_with_context(
+            scope_key,
+            id,
+            target_status,
+            TaskTransitionContext::default(),
+        )
+    }
+
+    pub fn transition_with_shortcut_scoped_with_context(
+        &self,
+        scope_key: Option<&str>,
+        id: &str,
+        target_status: TaskStatus,
+        context: TaskTransitionContext,
     ) -> Result<Vec<(TaskStatus, Task)>, TaskStoreError> {
         let task = self
             .get_scoped(scope_key, id)
@@ -385,8 +904,15 @@ impl TaskStore {
         };
 
         let mut results = Vec::with_capacity(steps.len());
-        for step in steps {
-            results.push(self.transition_scoped(scope_key, id, step)?);
+        for (index, step) in steps.into_iter().enumerate() {
+            let mut step_context = context.clone();
+            if let Some(operation_id) = context.operation_id.as_deref() {
+                step_context.operation_id = Some(format!("{operation_id}:step:{index:04}"));
+            }
+            if let Some(at) = context.at {
+                step_context.at = Some(at.saturating_add(index as u64));
+            }
+            results.push(self.transition_scoped_with_context(scope_key, id, step, step_context)?);
         }
 
         Ok(results)
@@ -398,8 +924,28 @@ impl TaskStore {
         id: &str,
         new_status: TaskStatus,
     ) -> Result<(TaskStatus, Task), TaskStoreError> {
+        self.transition_scoped_with_context(
+            scope_key,
+            id,
+            new_status,
+            TaskTransitionContext::default(),
+        )
+    }
+
+    pub fn transition_scoped_with_context(
+        &self,
+        scope_key: Option<&str>,
+        id: &str,
+        new_status: TaskStatus,
+        context: TaskTransitionContext,
+    ) -> Result<(TaskStatus, Task), TaskStoreError> {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
-            return store.transition_scoped(normalize_scope_key(scope_key), id, new_status);
+            return store.transition_scoped_with_context(
+                normalize_scope_key(scope_key),
+                id,
+                new_status,
+                context,
+            );
         }
 
         self.with_memory_scope_mut(scope_key, |tasks| {
@@ -407,6 +953,7 @@ impl TaskStore {
                 .get_mut(id)
                 .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
+            prepare_task_for_storage(task)?;
             if !task.status.can_transition_to(&new_status) {
                 return Err(TaskStoreError::InvalidTransition {
                     from: task.status,
@@ -415,13 +962,10 @@ impl TaskStore {
             }
 
             let old_status = task.status;
-            let now = chrono::Utc::now().timestamp_millis() as u64;
+            let now = append_task_status_transition(task, old_status, new_status, &context);
             task.status = new_status;
             task.updated_at = now;
-
-            if new_status.is_terminal() {
-                task.completed_at = Some(now);
-            }
+            task.completed_at = new_status.is_terminal().then_some(now);
 
             Ok((old_status, task.clone()))
         })
@@ -429,18 +973,28 @@ impl TaskStore {
 
     /// Cancel a task (set status to Cancelled). Used by the HTTP cancel endpoint.
     pub fn cancel(&self, id: &str) -> Result<Task, TaskStoreError> {
-        self.cancel_scoped(None, id)
+        self.cancel_scoped_with_context(None, id, TaskTransitionContext::default())
     }
 
     pub fn cancel_scoped(&self, scope_key: Option<&str>, id: &str) -> Result<Task, TaskStoreError> {
+        self.cancel_scoped_with_context(scope_key, id, TaskTransitionContext::default())
+    }
+
+    pub fn cancel_scoped_with_context(
+        &self,
+        scope_key: Option<&str>,
+        id: &str,
+        context: TaskTransitionContext,
+    ) -> Result<Task, TaskStoreError> {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
-            return store.cancel_scoped(normalize_scope_key(scope_key), id);
+            return store.cancel_scoped_with_context(normalize_scope_key(scope_key), id, context);
         }
         self.with_memory_scope_mut(scope_key, |tasks| {
             let task = tasks
                 .get_mut(id)
                 .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
+            prepare_task_for_storage(task)?;
             if task.status.is_terminal() {
                 return Err(TaskStoreError::InvalidTransition {
                     from: task.status,
@@ -448,7 +1002,9 @@ impl TaskStore {
                 });
             }
 
-            let now = chrono::Utc::now().timestamp_millis() as u64;
+            let old_status = task.status;
+            let now =
+                append_task_status_transition(task, old_status, TaskStatus::Cancelled, &context);
             task.status = TaskStatus::Cancelled;
             task.updated_at = now;
             task.completed_at = Some(now);
@@ -501,8 +1057,9 @@ impl TaskStore {
     pub fn upsert_scoped(
         &self,
         scope_key: Option<&str>,
-        task: Task,
+        mut task: Task,
     ) -> Result<Task, TaskStoreError> {
+        prepare_task_for_storage(&mut task)?;
         match &self.backend {
             TaskStoreBackend::Memory(_) => {
                 self.with_memory_scope_mut(scope_key, |tasks| {
@@ -528,12 +1085,15 @@ impl TaskStore {
     ) -> Result<(), TaskStoreError> {
         match &self.backend {
             TaskStoreBackend::Memory(_) => {
-                self.with_memory_scope_mut(scope_key, |guard| {
+                self.with_memory_scope_mut(scope_key, |guard| -> Result<(), TaskStoreError> {
                     guard.clear();
                     for task in tasks {
-                        guard.insert(task.id.clone(), task.clone());
+                        let mut normalized = task.clone();
+                        prepare_task_for_storage(&mut normalized)?;
+                        guard.insert(normalized.id.clone(), normalized);
                     }
-                });
+                    Ok(())
+                })?;
                 Ok(())
             }
             TaskStoreBackend::Sqlite(store) => {
@@ -778,9 +1338,206 @@ mod tests {
         assert_eq!(task.title, "Buy milk");
         assert_eq!(task.status, TaskStatus::Pending);
         assert_eq!(task.priority, TaskPriority::Medium);
+        assert_eq!(task.status_transitions.len(), 1);
+        assert_eq!(task.status_transitions[0].from_status, None);
+        assert_eq!(task.status_transitions[0].to_status, TaskStatus::Pending);
+        assert_eq!(
+            task.status_transitions[0].reason,
+            TaskTransitionReason::TaskCreate
+        );
 
         let fetched = store.get(&task.id).unwrap();
         assert_eq!(fetched.id, task.id);
+        assert_eq!(fetched.status_transitions.len(), 1);
+    }
+
+    #[test]
+    fn sqlite_replace_all_roundtrips_status_transition_history() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let created = store.create(create_input("Replace me"));
+        let transitioned = store
+            .transition(&created.id, TaskStatus::InProgress)
+            .unwrap()
+            .1;
+
+        store.replace_all(&[transitioned.clone()]).unwrap();
+        drop(store);
+
+        let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let loaded = reopened.get(&created.id).expect("task should persist");
+        assert_eq!(loaded.status, TaskStatus::InProgress);
+        assert_eq!(loaded.status_transitions, transitioned.status_transitions);
+    }
+
+    #[test]
+    fn sqlite_init_preserves_empty_status_history_from_legacy_schema() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-tasks.sqlite");
+        let connection = rusqlite::Connection::open(&sqlite_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NULL,
+                    done_condition TEXT NULL,
+                    status TEXT NOT NULL,
+                    priority TEXT NOT NULL,
+                    tags_json TEXT NOT NULL,
+                    source TEXT NULL,
+                    parent_id TEXT NULL,
+                    depends_on_json TEXT NOT NULL,
+                    due_at INTEGER NULL,
+                    estimated_minutes INTEGER NULL,
+                    time_block_ids_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    completed_at INTEGER NULL
+                );
+                INSERT INTO tasks (
+                    id, title, description, done_condition, status, priority, tags_json, source,
+                    parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                    created_at, updated_at, completed_at
+                ) VALUES (
+                    'legacy-task',
+                    'Legacy task',
+                    null,
+                    null,
+                    'completed',
+                    'medium',
+                    '[]',
+                    null,
+                    null,
+                    '[]',
+                    null,
+                    null,
+                    '[]',
+                    1000,
+                    5000,
+                    5000
+                );",
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let task = store
+            .get("legacy-task")
+            .expect("legacy task should remain readable");
+        assert_eq!(task.status, TaskStatus::Completed);
+        assert_eq!(task.completed_at, Some(5000));
+        assert!(task.status_transitions.is_empty());
+    }
+
+    #[test]
+    fn sqlite_init_preserves_empty_in_progress_history_from_legacy_schema() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("legacy-tasks-in-progress.sqlite");
+        let connection = rusqlite::Connection::open(&sqlite_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NULL,
+                    done_condition TEXT NULL,
+                    status TEXT NOT NULL,
+                    priority TEXT NOT NULL,
+                    tags_json TEXT NOT NULL,
+                    source TEXT NULL,
+                    parent_id TEXT NULL,
+                    depends_on_json TEXT NOT NULL,
+                    due_at INTEGER NULL,
+                    estimated_minutes INTEGER NULL,
+                    time_block_ids_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    completed_at INTEGER NULL
+                );
+                INSERT INTO tasks (
+                    id, title, description, done_condition, status, priority, tags_json, source,
+                    parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                    created_at, updated_at, completed_at
+                ) VALUES (
+                    'legacy-task-active',
+                    'Legacy active task',
+                    null,
+                    null,
+                    'in_progress',
+                    'medium',
+                    '[]',
+                    null,
+                    null,
+                    '[]',
+                    null,
+                    null,
+                    '[]',
+                    1000,
+                    5000,
+                    null
+                );",
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let task = store
+            .get("legacy-task-active")
+            .expect("legacy active task should remain readable");
+        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.completed_at, None);
+        assert!(task.status_transitions.is_empty());
+    }
+
+    #[test]
+    fn upsert_rejects_empty_status_history_snapshot() {
+        let store = make_store();
+        let created = store.create(create_input("Missing history"));
+        let invalid = Task {
+            status_transitions: vec![],
+            ..created
+        };
+
+        assert!(matches!(
+            store.upsert(invalid),
+            Err(TaskStoreError::MissingStatusHistory { .. })
+        ));
+    }
+
+    #[test]
+    fn upsert_rejects_malformed_status_history_snapshot() {
+        let store = make_store();
+        let created = store.create(create_input("Malformed history"));
+        let invalid = Task {
+            status: TaskStatus::Completed,
+            updated_at: created.updated_at.saturating_add(10),
+            completed_at: Some(created.updated_at.saturating_add(10)),
+            status_transitions: vec![
+                build_initial_task_status_transition(&created.id, created.created_at),
+                TaskStatusTransition {
+                    id: format!("{}:broken-terminal", created.id),
+                    at: created.updated_at.saturating_add(10),
+                    from_status: Some(TaskStatus::Suspended),
+                    to_status: TaskStatus::Completed,
+                    reason: TaskTransitionReason::TaskTransition,
+                    actor_id: None,
+                    source_host_id: None,
+                    operation_id: Some("broken-terminal".to_string()),
+                    related_time_block_id: None,
+                    related_time_block_transition_ref: None,
+                    auto_generated: Some(false),
+                },
+            ],
+            ..created
+        };
+
+        assert!(matches!(
+            store.upsert(invalid),
+            Err(TaskStoreError::InvalidStatusHistory { .. })
+        ));
     }
 
     #[test]
@@ -1341,6 +2098,231 @@ mod tests {
 
         let final_task = store.get(&task.id).unwrap();
         assert_eq!(final_task.status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn transition_with_shortcut_sqlite_keeps_final_status_with_shared_operation_id() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("shortcut.sqlite");
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let task = store.create(create_input("Shortcut sqlite task"));
+        let base_at = task.created_at.saturating_add(1_000);
+
+        let steps = store
+            .transition_with_shortcut_scoped_with_context(
+                None,
+                &task.id,
+                TaskStatus::Completed,
+                TaskTransitionContext {
+                    at: Some(base_at),
+                    reason: Some(TaskTransitionReason::TaskTransition),
+                    operation_id: Some("shortcut-op".to_string()),
+                    ..TaskTransitionContext::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(steps.len(), 2);
+        drop(store);
+
+        let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let final_task = reopened.get(&task.id).unwrap();
+        assert_eq!(final_task.status, TaskStatus::Completed);
+        assert_eq!(
+            final_task
+                .status_transitions
+                .last()
+                .map(|transition| transition.to_status),
+            Some(TaskStatus::Completed)
+        );
+        assert_eq!(
+            final_task.status_transitions[1].operation_id.as_deref(),
+            Some("shortcut-op:step:0000")
+        );
+        assert_eq!(
+            final_task.status_transitions[2].operation_id.as_deref(),
+            Some("shortcut-op:step:0001")
+        );
+    }
+
+    #[test]
+    fn merge_task_snapshot_prefers_winning_terminal_branch() {
+        let store = make_store();
+        let task = store.create(create_input("Conflict task"));
+        let in_progress = store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap()
+            .1;
+        let completed = store.transition(&task.id, TaskStatus::Completed).unwrap().1;
+
+        let cancelled_at = completed.updated_at.saturating_add(10);
+        let mut cancelled = in_progress.clone();
+        cancelled.status = TaskStatus::Cancelled;
+        cancelled.updated_at = cancelled_at;
+        cancelled.completed_at = Some(cancelled_at);
+        cancelled.status_transitions.push(TaskStatusTransition {
+            id: format!("{}:remote-cancelled", task.id),
+            at: cancelled_at,
+            from_status: Some(TaskStatus::InProgress),
+            to_status: TaskStatus::Cancelled,
+            reason: TaskTransitionReason::TaskTransition,
+            actor_id: Some("remote".to_string()),
+            source_host_id: Some("remote-host".to_string()),
+            operation_id: Some("remote-cancelled".to_string()),
+            related_time_block_id: None,
+            related_time_block_transition_ref: None,
+            auto_generated: Some(false),
+        });
+
+        let merged = merge_task_snapshot(&completed, &cancelled, true);
+        assert_eq!(merged.status, TaskStatus::Cancelled);
+        assert_eq!(merged.completed_at, Some(cancelled_at));
+        assert_eq!(
+            merged
+                .status_transitions
+                .iter()
+                .filter(|transition| transition.to_status == TaskStatus::Completed)
+                .count(),
+            0
+        );
+        assert_eq!(
+            merged
+                .status_transitions
+                .last()
+                .map(|transition| transition.to_status),
+            Some(TaskStatus::Cancelled)
+        );
+    }
+
+    #[test]
+    fn compare_task_replication_preference_uses_deterministic_snapshot_order() {
+        let store = make_store();
+        let task = store.create(create_input("Conflict task"));
+        let mut alpha = task.clone();
+        alpha.title = "Alpha".to_string();
+        let mut beta = task.clone();
+        beta.title = "Beta".to_string();
+
+        assert_eq!(
+            compare_task_replication_preference(&alpha, &beta),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_task_replication_preference(&beta, &alpha),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn merge_task_snapshot_bumps_updated_at_when_revision_changes_at_same_watermark() {
+        let store = make_store();
+        let task = store.create(create_input("Watermark task"));
+        let mut existing = store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap()
+            .1;
+        existing.updated_at = existing.updated_at.saturating_add(10);
+
+        let completion_at = existing.updated_at;
+        let mut incoming = existing.clone();
+        incoming.status = TaskStatus::Completed;
+        incoming.completed_at = Some(completion_at);
+        incoming.status_transitions.push(TaskStatusTransition {
+            id: format!("{}:remote-completed", task.id),
+            at: completion_at,
+            from_status: Some(TaskStatus::InProgress),
+            to_status: TaskStatus::Completed,
+            reason: TaskTransitionReason::TaskTransition,
+            actor_id: Some("remote".to_string()),
+            source_host_id: Some("remote-host".to_string()),
+            operation_id: Some("remote-completed".to_string()),
+            related_time_block_id: None,
+            related_time_block_transition_ref: None,
+            auto_generated: Some(false),
+        });
+
+        let merged = merge_task_snapshot(&existing, &incoming, true);
+        assert_eq!(merged.status, TaskStatus::Completed);
+        assert_eq!(merged.completed_at, Some(completion_at));
+        assert_eq!(merged.updated_at, existing.updated_at.saturating_add(1));
+    }
+
+    #[test]
+    fn transition_with_context_clamps_at_after_last_history_in_memory_store() {
+        let store = make_store();
+        let task = store.create(create_input("Clamp memory"));
+        let in_progress = store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap()
+            .1;
+
+        let (_, suspended) = store
+            .transition_scoped_with_context(
+                None,
+                &task.id,
+                TaskStatus::Suspended,
+                TaskTransitionContext {
+                    at: Some(task.created_at),
+                    ..TaskTransitionContext::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(suspended.status, TaskStatus::Suspended);
+        assert_eq!(
+            suspended
+                .status_transitions
+                .last()
+                .map(|transition| transition.to_status),
+            Some(TaskStatus::Suspended)
+        );
+        assert!(suspended.updated_at > in_progress.updated_at);
+    }
+
+    #[test]
+    fn transition_with_context_clamps_at_after_last_history_in_sqlite_store() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("clamp-context.sqlite");
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let task = store.create(create_input("Clamp sqlite"));
+        let in_progress = store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap()
+            .1;
+
+        let (_, suspended) = store
+            .transition_scoped_with_context(
+                None,
+                &task.id,
+                TaskStatus::Suspended,
+                TaskTransitionContext {
+                    at: Some(task.created_at),
+                    ..TaskTransitionContext::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(suspended.status, TaskStatus::Suspended);
+        assert_eq!(
+            suspended
+                .status_transitions
+                .last()
+                .map(|transition| transition.to_status),
+            Some(TaskStatus::Suspended)
+        );
+        assert!(suspended.updated_at > in_progress.updated_at);
+
+        let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let persisted = reopened.get(&task.id).expect("sqlite task should persist");
+        assert_eq!(persisted.status, TaskStatus::Suspended);
+        assert_eq!(
+            persisted
+                .status_transitions
+                .last()
+                .map(|transition| transition.to_status),
+            Some(TaskStatus::Suspended)
+        );
+        assert_eq!(persisted.updated_at, suspended.updated_at);
     }
 
     #[test]

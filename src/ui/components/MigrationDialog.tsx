@@ -68,7 +68,7 @@ export function MigrationDialog({
             <DialogHeader>
               <DialogTitle>迁移失败</DialogTitle>
               <DialogDescription>
-                迁移过程中遇到问题，将继续使用旧版存储。
+                迁移过程中遇到问题。当前不会回退到旧版存储，你可以稍后重新尝试迁移。
               </DialogDescription>
             </DialogHeader>
 
@@ -82,7 +82,7 @@ export function MigrationDialog({
                 onClick={dismissErrorState}
                 className="w-full rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
               >
-                继续使用旧版存储
+                关闭并稍后重试
               </button>
             </DialogFooter>
           </>
@@ -151,6 +151,7 @@ export function MigrationDialog({
 
             <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
               迁移后，数据将统一存储在本地 SQLite 数据库中，原始数据将保留作为备份。
+              当前已不再支持运行时回退到旧版存储；如果暂不迁移，本次只会关闭弹窗，稍后仍可重新发起迁移。
             </p>
 
             <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2">

@@ -1,17 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getTaskBackendModeMock, getInstanceMock } = vi.hoisted(() => ({
-  getTaskBackendModeMock: vi.fn(() => 'legacy'),
+const { getInstanceMock } = vi.hoisted(() => ({
   getInstanceMock: vi.fn(),
 }));
 
 vi.mock('@/lib/services/task-event-emitter', () => ({
   emitTaskCreated: vi.fn(),
   emitTaskTransition: vi.fn(),
-}));
-
-vi.mock('@/config/domain-backend-mode', () => ({
-  getTaskBackendMode: getTaskBackendModeMock,
 }));
 
 vi.mock('@/lib/environment/environment', () => ({
@@ -70,8 +65,6 @@ function createMockPort(task: TaskNode): ITaskPort {
 
 describe('TaskService runtime backend mode resolution', () => {
   beforeEach(() => {
-    getTaskBackendModeMock.mockReset();
-    getTaskBackendModeMock.mockReturnValue('legacy');
     getInstanceMock.mockReset();
     vi.mocked(emitTaskTransition).mockClear();
   });
@@ -86,11 +79,10 @@ describe('TaskService runtime backend mode resolution', () => {
     const service = new TaskServiceImpl();
     await service.transitionTask('task-1', 'in_progress');
 
-    expect(getTaskBackendModeMock).not.toHaveBeenCalled();
     expect(emitTaskTransition).not.toHaveBeenCalled();
   });
 
-  it('keeps reading task backend mode on tauri for legacy compatibility paths', async () => {
+  it('does not emit legacy transition events on tauri because runtime task flow is RT-only', async () => {
     const port = createMockPort(makeTask({ status: 'in_progress' }));
     getInstanceMock.mockReturnValue({
       runtime: 'tauri',
@@ -100,7 +92,6 @@ describe('TaskService runtime backend mode resolution', () => {
     const service = new TaskServiceImpl();
     await service.cancelTask('task-1');
 
-    expect(getTaskBackendModeMock).toHaveBeenCalledTimes(1);
-    expect(emitTaskTransition).toHaveBeenCalledWith('task-1', '测试任务', 'in_progress', 'cancelled');
+    expect(emitTaskTransition).not.toHaveBeenCalled();
   });
 });

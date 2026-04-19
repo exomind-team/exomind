@@ -8,5 +8,6 @@ pub use store::{TaskStore, TaskStoreBackendKind};
 pub use types::{
     BatchTransitionInput, BatchTransitionItem, BatchTransitionResponse, BatchTransitionResult,
     CreateTaskInput, Task, TaskDependency, TaskDependencyType, TaskPriority, TaskStatus,
-    TransitionInput, UpdateTaskInput,
+    TaskStatusTransition, TaskTransitionContext, TaskTransitionReason, TransitionInput,
+    UpdateTaskInput,
 };

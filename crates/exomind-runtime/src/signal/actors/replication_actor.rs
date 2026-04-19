@@ -7,6 +7,10 @@ use tracing::warn;
 use crate::eventlog::{EventLogStore, EventRecord};
 use crate::proposal::{Proposal, ProposalStore};
 use crate::signal::{SignalEvent, SignalPool};
+use crate::task::store::{
+    compare_task_replication_preference, merge_task_snapshot, merge_task_status_history,
+    normalize_task_status_history, validate_partial_task_status_history,
+};
 use crate::task::{Task, TaskStore};
 use crate::timeblock::{ActiveBlockData, TimeBlockData, TimeBlockStore};
 
@@ -176,26 +180,50 @@ fn legacy_event_to_record(record: EventlogLegacyRecord) -> Option<EventRecord> {
 
 fn apply_task_replication(
     store: &TaskStore,
-    local_host_id: &str,
+    _local_host_id: &str,
     event: &SignalEvent,
 ) -> Result<(), String> {
     let payload: TaskReplicationPayload =
         serde_json::from_value(event.payload.clone()).map_err(|error| error.to_string())?;
     let scope_key = payload.scope_key.as_deref();
+    let mut incoming = payload.task;
+    incoming
+        .status_transitions
+        .sort_by(|left, right| left.at.cmp(&right.at));
+    validate_partial_task_status_history(&incoming).map_err(|error| error.to_string())?;
+    if let Some(first_transition) = incoming.status_transitions.first() {
+        incoming.created_at = first_transition.at;
+    }
+    normalize_task_status_history(&mut incoming);
 
-    match store.get_scoped(scope_key, &payload.task.id) {
-        Some(existing)
-            if !should_accept_replicated_task(
-                &existing,
-                &payload.task,
-                Some(event.origin_host_id.as_str()),
-                local_host_id,
-            ) =>
-        {
-            Ok(())
+    match store.get_scoped(scope_key, &incoming.id) {
+        Some(existing) => {
+            let should_accept = should_accept_replicated_task(&existing, &incoming);
+            let history_changed =
+                merge_task_status_history(&existing, &incoming) != existing.status_transitions;
+
+            if should_accept {
+                store
+                    .upsert_scoped(
+                        scope_key,
+                        merge_task_snapshot(&existing, &incoming, true),
+                    )
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            } else if history_changed {
+                store
+                    .upsert_scoped(
+                        scope_key,
+                        merge_task_snapshot(&existing, &incoming, false),
+                    )
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            } else {
+                Ok(())
+            }
         }
-        _ => store
-            .upsert_scoped(scope_key, payload.task)
+        None => store
+            .upsert_scoped(scope_key, incoming)
             .map(|_| ())
             .map_err(|error| error.to_string()),
     }
@@ -293,34 +321,8 @@ fn parse_rfc3339_to_timestamp(input: &str) -> Option<i64> {
         .map(|value| value.with_timezone(&Utc).timestamp_millis())
 }
 
-fn should_accept_replicated_task(
-    existing: &Task,
-    incoming: &Task,
-    source_host_id: Option<&str>,
-    local_host_id: &str,
-) -> bool {
-    if incoming.updated_at > existing.updated_at {
-        return true;
-    }
-    if incoming.updated_at < existing.updated_at {
-        return false;
-    }
-
-    if incoming.status.is_terminal() != existing.status.is_terminal() {
-        return incoming.status.is_terminal();
-    }
-
-    if incoming.completed_at.unwrap_or(0) > existing.completed_at.unwrap_or(0) {
-        return true;
-    }
-
-    if incoming.completed_at.unwrap_or(0) == existing.completed_at.unwrap_or(0) {
-        if let Some(source_host_id) = source_host_id {
-            return source_host_id > local_host_id;
-        }
-    }
-
-    false
+fn should_accept_replicated_task(existing: &Task, incoming: &Task) -> bool {
+    compare_task_replication_preference(existing, incoming) == std::cmp::Ordering::Greater
 }
 
 fn should_accept_replicated_active(
@@ -614,6 +616,12 @@ mod tests {
                     "due_at": null,
                     "estimated_minutes": 25,
                     "time_block_ids": [],
+                    "status_transitions": [{
+                        "id": "task-1:task.create:1710000000000",
+                        "at": 1710000000000u64,
+                        "to_status": "pending",
+                        "reason": "task.create"
+                    }],
                     "created_at": 1710000000000u64,
                     "updated_at": 1710000001000u64,
                     "completed_at": null
@@ -629,6 +637,189 @@ mod tests {
         assert_eq!(task.title, "replicated task");
         assert_eq!(task.priority, TaskPriority::Medium);
         assert_eq!(task.status, TaskStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn remote_task_replication_ignores_newer_snapshot_without_status_history() {
+        let pool = Arc::new(SignalPool::new(None));
+        let eventlog_store = Arc::new(EventLogStore::new(std::env::temp_dir().join(format!(
+            "replication-actor-task-history-eventlog-{}",
+            uuid::Uuid::new_v4()
+        ))));
+        let task_store = Arc::new(TaskStore::new());
+        let timeblock_store = Arc::new(TimeBlockStore::new());
+        let proposal_store = Arc::new(ProposalStore::new());
+        let existing = task_store.create_scoped(
+            Some("profile-sync"),
+            crate::task::CreateTaskInput {
+                title: "rich history".to_string(),
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: vec![],
+                source: None,
+                parent_id: None,
+                depends_on: vec![],
+                due_at: None,
+                estimated_minutes: None,
+                time_block_ids: vec![],
+            },
+        );
+        task_store
+            .transition_scoped(Some("profile-sync"), &existing.id, TaskStatus::InProgress)
+            .unwrap();
+        let existing = task_store
+            .get_scoped(Some("profile-sync"), &existing.id)
+            .expect("task should exist");
+        spawn_actor(
+            &pool,
+            &eventlog_store,
+            &task_store,
+            &timeblock_store,
+            &proposal_store,
+        );
+        yield_for_actor().await;
+
+        pool.publish(make_remote_event(
+            TASK_REPLICATION_TOPIC,
+            serde_json::json!({
+                "scopeKey": "profile-sync",
+                "task": {
+                    "id": existing.id,
+                    "title": "history lost remote snapshot",
+                    "description": null,
+                    "done_condition": null,
+                    "status": "completed",
+                    "priority": "medium",
+                    "tags": [],
+                    "source": null,
+                    "parent_id": null,
+                    "depends_on": [],
+                    "due_at": null,
+                    "estimated_minutes": null,
+                    "time_block_ids": [],
+                    "created_at": 1710000000000u64,
+                    "updated_at": existing.updated_at + 5_000,
+                    "completed_at": existing.updated_at + 5_000,
+                }
+            }),
+        ));
+
+        yield_for_actor().await;
+
+        let task = task_store
+            .get_scoped(Some("profile-sync"), &existing.id)
+            .expect("rich history task should remain");
+        assert_eq!(task.title, "rich history");
+        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status_transitions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn remote_task_replication_merges_sparse_newer_remote_history() {
+        let pool = Arc::new(SignalPool::new(None));
+        let eventlog_store = Arc::new(EventLogStore::new(std::env::temp_dir().join(format!(
+            "replication-actor-task-history-merge-eventlog-{}",
+            uuid::Uuid::new_v4()
+        ))));
+        let task_store = Arc::new(TaskStore::new());
+        let timeblock_store = Arc::new(TimeBlockStore::new());
+        let proposal_store = Arc::new(ProposalStore::new());
+        let existing = task_store.create_scoped(
+            Some("profile-sync"),
+            crate::task::CreateTaskInput {
+                title: "rich history".to_string(),
+                description: Some("local".to_string()),
+                done_condition: None,
+                priority: None,
+                tags: vec![],
+                source: None,
+                parent_id: None,
+                depends_on: vec![],
+                due_at: None,
+                estimated_minutes: None,
+                time_block_ids: vec![],
+            },
+        );
+        task_store
+            .transition_scoped(Some("profile-sync"), &existing.id, TaskStatus::InProgress)
+            .unwrap();
+        let existing = task_store
+            .get_scoped(Some("profile-sync"), &existing.id)
+            .expect("task should exist");
+        let completion_transition = crate::task::TaskStatusTransition {
+            id: format!("{}:remote-completed", existing.id),
+            at: existing.updated_at + 5_000,
+            from_status: Some(TaskStatus::InProgress),
+            to_status: TaskStatus::Completed,
+            reason: crate::task::TaskTransitionReason::TaskTransition,
+            actor_id: Some("remote".to_string()),
+            source_host_id: Some("mobile-host".to_string()),
+            operation_id: Some("remote-completed".to_string()),
+            related_time_block_id: None,
+            related_time_block_transition_ref: None,
+            auto_generated: Some(false),
+        };
+        spawn_actor(
+            &pool,
+            &eventlog_store,
+            &task_store,
+            &timeblock_store,
+            &proposal_store,
+        );
+        yield_for_actor().await;
+
+        pool.publish(make_remote_event(
+            TASK_REPLICATION_TOPIC,
+            serde_json::json!({
+                "scopeKey": "profile-sync",
+                "task": {
+                    "id": existing.id,
+                    "title": "sparse remote completion",
+                    "description": "remote wins fields",
+                    "done_condition": null,
+                    "status": "completed",
+                    "priority": "medium",
+                    "tags": [],
+                    "source": null,
+                    "parent_id": null,
+                    "depends_on": [],
+                    "due_at": null,
+                    "estimated_minutes": null,
+                    "time_block_ids": [],
+                    "status_transitions": [
+                        existing.status_transitions[0].clone(),
+                        completion_transition.clone()
+                    ],
+                    "created_at": existing.created_at,
+                    "updated_at": completion_transition.at,
+                    "completed_at": completion_transition.at,
+                }
+            }),
+        ));
+
+        yield_for_actor().await;
+
+        let task = task_store
+            .get_scoped(Some("profile-sync"), &existing.id)
+            .expect("rich history task should remain");
+        assert_eq!(task.title, "sparse remote completion");
+        assert_eq!(task.description.as_deref(), Some("remote wins fields"));
+        assert_eq!(task.status, TaskStatus::Completed);
+        assert_eq!(task.completed_at, Some(completion_transition.at));
+        assert_eq!(task.status_transitions.len(), 3);
+        assert!(
+            task.status_transitions
+                .iter()
+                .any(|transition| transition.to_status == TaskStatus::InProgress),
+            "merged history should retain local intermediate transition"
+        );
+        assert!(
+            task.status_transitions
+                .iter()
+                .any(|transition| transition.id == completion_transition.id),
+            "merged history should include remote completion transition"
+        );
     }
 
     #[tokio::test]
@@ -824,11 +1015,9 @@ mod tests {
 
         yield_for_actor().await;
 
-        assert!(
-            proposal_store
-                .get_scoped(Some("profile-sync"), "proposal-7")
-                .expect("proposal query")
-                .is_none()
-        );
+        assert!(proposal_store
+            .get_scoped(Some("profile-sync"), "proposal-7")
+            .expect("proposal query")
+            .is_none());
     }
 }

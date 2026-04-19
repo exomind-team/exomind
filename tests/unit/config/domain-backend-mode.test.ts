@@ -50,12 +50,11 @@ describe('domain backend mode（领域后端模式）', () => {
     expect(window.localStorage.getItem('exomind:timeblockBackendMode')).toBe('legacy');
   });
 
-  it('persists bulk setter to eventlog and task; timeblock is always rt-sqlite（批量设置写入 eventlog/task，timeblock 始终为 rt-sqlite）', () => {
+  it('keeps task/timeblock pinned to rt-sqlite even after bulk legacy writes（批量 legacy 写入后 task/timeblock 仍固定为 rt-sqlite）', () => {
     setAllBackendModes('legacy');
 
     expect(getEventlogBackendMode()).toBe('legacy');
-    expect(getTaskBackendMode()).toBe('legacy');
-    // getTimeblockBackendMode() is pinned to 'rt-sqlite' regardless of setAllBackendModes.
+    expect(getTaskBackendMode()).toBe('rt-sqlite');
     expect(getTimeblockBackendMode()).toBe('rt-sqlite');
   });
 });

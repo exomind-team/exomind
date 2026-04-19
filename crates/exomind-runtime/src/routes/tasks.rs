@@ -2,20 +2,24 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 
-use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
 use crate::signal::types::SignalEvent;
-use crate::task::store::TaskStoreError;
+use crate::task::store::{
+    compare_task_replication_preference, merge_task_snapshot, merge_task_status_history,
+    normalize_task_status_history, task_replication_revision_projection,
+    validate_partial_task_status_history, TaskStoreError,
+};
 use crate::task::{
     BatchTransitionInput, BatchTransitionResponse, BatchTransitionResult, CreateTaskInput, Task,
-    TaskStatus, TransitionInput, UpdateTaskInput,
+    TaskStatus, TaskTransitionContext, TaskTransitionReason, TransitionInput, UpdateTaskInput,
 };
+use crate::AppState;
 
 // ── Query types ─────────────────────────────────────────────────
 
@@ -54,8 +58,9 @@ struct ScopeQuery {
 #[derive(Debug, Deserialize)]
 struct TaskReplicationUpsertRequest {
     task: Task,
+    #[serde(rename = "source_host_id")]
     #[serde(default)]
-    source_host_id: Option<String>,
+    _source_host_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -253,49 +258,27 @@ async fn transition_task(
     Json(input): Json<TransitionInput>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    if query.shortcut.unwrap_or(false) {
-        let steps = state
-            .task_store
-            .transition_with_shortcut_scoped(scope_key, &id, input.status)
-            .map_err(map_task_store_error)?;
-        let (_, final_task) = steps.last().cloned().ok_or((
-            StatusCode::CONFLICT,
-            "task already at target status".to_string(),
-        ))?;
-
-        for (old_status, task) in &steps {
-            publish_task_transition_signal(&state, *old_status, task);
-            publish_task_replication_signal(&state, scope_key, task);
-            write_task_transition_eventlog(
-                &state,
-                scope_key,
-                task,
-                *old_status,
-                "http:tasks/transition",
-            )
-            .await;
-        }
-
-        return Ok(Json(final_task));
-    }
-
-    let (old_status, task) = state
-        .task_store
-        .transition_scoped(scope_key, &id, input.status)
-        .map_err(map_task_store_error)?;
-
-    publish_task_transition_signal(&state, old_status, &task);
-    publish_task_replication_signal(&state, scope_key, &task);
-    write_task_transition_eventlog(
+    let steps = transition_task_in_scope_with_context(
         &state,
         scope_key,
-        &task,
-        old_status,
+        &id,
+        input.status,
+        query.shortcut.unwrap_or(false),
+        TaskTransitionContext {
+            reason: Some(TaskTransitionReason::TaskTransition),
+            actor_id: Some("rt:tasks/transition".to_string()),
+            source_host_id: Some(state.host_id.clone()),
+            operation_id: Some(uuid::Uuid::new_v4().to_string()),
+            ..TaskTransitionContext::default()
+        },
         "http:tasks/transition",
     )
     .await;
-
-    Ok(Json(task))
+    let (_, final_task) = steps?.last().cloned().ok_or((
+        StatusCode::CONFLICT,
+        "task already at target status".to_string(),
+    ))?;
+    Ok(Json(final_task))
 }
 
 async fn batch_transition_tasks(
@@ -310,71 +293,35 @@ async fn batch_transition_tasks(
     let mut failed = 0usize;
 
     for item in input.tasks {
-        if use_shortcut {
-            match state
-                .task_store
-                .transition_with_shortcut_scoped(scope_key, &item.id, item.status)
-                .and_then(|steps| {
-                    steps
-                        .last()
-                        .cloned()
-                        .ok_or(TaskStoreError::InvalidTransition {
-                            from: item.status,
-                            to: item.status,
-                        })
-                        .map(|last| (steps, last))
-                }) {
-                Ok((steps, (old_status, task))) => {
-                    for (step_old_status, step_task) in &steps {
-                        publish_task_transition_signal(&state, *step_old_status, step_task);
-                        publish_task_replication_signal(&state, scope_key, step_task);
-                        write_task_transition_eventlog(
-                            &state,
-                            scope_key,
-                            step_task,
-                            *step_old_status,
-                            "http:tasks/batch-transition",
-                        )
-                        .await;
-                    }
-                    succeeded += 1;
-                    results.push(BatchTransitionResult {
-                        id: item.id,
-                        success: true,
-                        old_status: Some(old_status),
-                        new_status: Some(task.status),
-                        error: None,
-                    });
-                }
-                Err(error) => {
+        match transition_task_in_scope_with_context(
+            &state,
+            scope_key,
+            &item.id,
+            item.status,
+            use_shortcut,
+            TaskTransitionContext {
+                reason: Some(TaskTransitionReason::TaskTransition),
+                actor_id: Some("rt:tasks/batch-transition".to_string()),
+                source_host_id: Some(state.host_id.clone()),
+                operation_id: Some(uuid::Uuid::new_v4().to_string()),
+                ..TaskTransitionContext::default()
+            },
+            "http:tasks/batch-transition",
+        )
+        .await
+        {
+            Ok(steps) => {
+                let Some((old_status, task)) = steps.last().cloned() else {
                     failed += 1;
                     results.push(BatchTransitionResult {
                         id: item.id,
                         success: false,
                         old_status: None,
                         new_status: None,
-                        error: Some(error.to_string()),
+                        error: Some("task already at target status".to_string()),
                     });
-                }
-            }
-            continue;
-        }
-
-        match state
-            .task_store
-            .transition_scoped(scope_key, &item.id, item.status)
-        {
-            Ok((old_status, task)) => {
-                publish_task_transition_signal(&state, old_status, &task);
-                publish_task_replication_signal(&state, scope_key, &task);
-                write_task_transition_eventlog(
-                    &state,
-                    scope_key,
-                    &task,
-                    old_status,
-                    "http:tasks/batch-transition",
-                )
-                .await;
+                    continue;
+                };
                 succeeded += 1;
                 results.push(BatchTransitionResult {
                     id: item.id,
@@ -384,7 +331,7 @@ async fn batch_transition_tasks(
                     error: None,
                 });
             }
-            Err(error) => {
+            Err((_, error)) => {
                 failed += 1;
                 results.push(BatchTransitionResult {
                     id: item.id,
@@ -404,10 +351,41 @@ async fn batch_transition_tasks(
     })
 }
 
-fn cancel_task_in_scope(
+pub(crate) async fn transition_task_in_scope_with_context(
     state: &AppState,
     scope_key: Option<&str>,
     id: &str,
+    target_status: TaskStatus,
+    shortcut: bool,
+    context: TaskTransitionContext,
+    trigger: &str,
+) -> Result<Vec<(TaskStatus, Task)>, (StatusCode, String)> {
+    let steps = if shortcut {
+        state
+            .task_store
+            .transition_with_shortcut_scoped_with_context(scope_key, id, target_status, context)
+            .map_err(map_task_store_error)?
+    } else {
+        vec![state
+            .task_store
+            .transition_scoped_with_context(scope_key, id, target_status, context)
+            .map_err(map_task_store_error)?]
+    };
+
+    for (old_status, task) in &steps {
+        publish_task_transition_signal(state, *old_status, task);
+        publish_task_replication_signal(state, scope_key, task);
+        write_task_transition_eventlog(state, scope_key, task, *old_status, trigger).await;
+    }
+
+    Ok(steps)
+}
+
+fn cancel_task_in_scope_with_context(
+    state: &AppState,
+    scope_key: Option<&str>,
+    id: &str,
+    context: TaskTransitionContext,
 ) -> Result<(TaskStatus, Task), (StatusCode, String)> {
     let old_status = state
         .task_store
@@ -416,7 +394,7 @@ fn cancel_task_in_scope(
         .ok_or((StatusCode::NOT_FOUND, format!("task not found: {id}")))?;
     let task = state
         .task_store
-        .cancel_scoped(scope_key, id)
+        .cancel_scoped_with_context(scope_key, id, context)
         .map_err(map_task_store_error)?;
 
     Ok((old_status, task))
@@ -429,7 +407,18 @@ async fn cancel_task(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
+    let (old_status, task) = cancel_task_in_scope_with_context(
+        &state,
+        scope_key,
+        &id,
+        TaskTransitionContext {
+            reason: Some(TaskTransitionReason::TaskTransition),
+            actor_id: Some("rt:tasks/cancel".to_string()),
+            source_host_id: Some(state.host_id.clone()),
+            operation_id: Some(uuid::Uuid::new_v4().to_string()),
+            ..TaskTransitionContext::default()
+        },
+    )?;
 
     publish_task_signal(&state, "task.cancelled", &task);
     publish_task_replication_signal(&state, scope_key, &task);
@@ -445,7 +434,18 @@ async fn delete_task(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let (old_status, task) = cancel_task_in_scope(&state, scope_key, &id)?;
+    let (old_status, task) = cancel_task_in_scope_with_context(
+        &state,
+        scope_key,
+        &id,
+        TaskTransitionContext {
+            reason: Some(TaskTransitionReason::TaskTransition),
+            actor_id: Some("rt:tasks/delete".to_string()),
+            source_host_id: Some(state.host_id.clone()),
+            operation_id: Some(uuid::Uuid::new_v4().to_string()),
+            ..TaskTransitionContext::default()
+        },
+    )?;
 
     publish_task_signal(&state, "task.cancelled", &task);
     publish_task_replication_signal(&state, scope_key, &task);
@@ -696,7 +696,7 @@ fn build_task_replication_summary(
     canonical.sort_by(|left, right| left.id.cmp(&right.id));
     let canonical_json = canonical
         .iter()
-        .map(task_revision_projection)
+        .map(task_replication_revision_projection)
         .collect::<Vec<_>>();
     let revision_hash = serde_json::to_vec(&canonical_json)
         .map(|bytes| {
@@ -715,47 +715,6 @@ fn build_task_replication_summary(
         max_updated_at: tasks.iter().map(|task| task.updated_at).max().unwrap_or(0),
         revision_hash,
         generated_at: chrono::Utc::now().timestamp_millis().max(0) as u64,
-    }
-}
-
-fn task_revision_projection(task: &Task) -> serde_json::Value {
-    let mut tags = task.tags.clone();
-    tags.sort();
-
-    let mut depends_on = task.depends_on.clone();
-    depends_on.sort_by(|left, right| {
-        left.task_id.cmp(&right.task_id).then_with(|| {
-            task_dependency_type_sort_key(&left.relation_type)
-                .cmp(task_dependency_type_sort_key(&right.relation_type))
-        })
-    });
-
-    let mut time_block_ids = task.time_block_ids.clone();
-    time_block_ids.sort();
-
-    serde_json::json!({
-        "id": task.id,
-        "updated_at": task.updated_at,
-        "status": task.status,
-        "completed_at": task.completed_at,
-        "title": task.title,
-        "description": task.description,
-        "done_condition": task.done_condition,
-        "priority": task.priority,
-        "tags": tags,
-        "source": task.source,
-        "parent_id": task.parent_id,
-        "depends_on": depends_on,
-        "due_at": task.due_at,
-        "estimated_minutes": task.estimated_minutes,
-        "time_block_ids": time_block_ids,
-    })
-}
-
-fn task_dependency_type_sort_key(relation_type: &crate::task::TaskDependencyType) -> &'static str {
-    match relation_type {
-        crate::task::TaskDependencyType::Soft => "soft",
-        crate::task::TaskDependencyType::Hard => "hard",
     }
 }
 
@@ -966,34 +925,8 @@ fn publish_task_signal(state: &AppState, topic: &str, task: &Task) {
     state.signal_pool.publish(event);
 }
 
-fn should_accept_replicated_task(
-    existing: &Task,
-    incoming: &Task,
-    source_host_id: Option<&str>,
-    local_host_id: &str,
-) -> bool {
-    if incoming.updated_at > existing.updated_at {
-        return true;
-    }
-    if incoming.updated_at < existing.updated_at {
-        return false;
-    }
-
-    if incoming.status.is_terminal() != existing.status.is_terminal() {
-        return incoming.status.is_terminal();
-    }
-
-    if incoming.completed_at.unwrap_or(0) > existing.completed_at.unwrap_or(0) {
-        return true;
-    }
-
-    if incoming.completed_at.unwrap_or(0) == existing.completed_at.unwrap_or(0) {
-        if let Some(source_host_id) = source_host_id {
-            return source_host_id > local_host_id;
-        }
-    }
-
-    false
+fn should_accept_replicated_task(existing: &Task, incoming: &Task) -> bool {
+    compare_task_replication_preference(existing, incoming) == std::cmp::Ordering::Greater
 }
 
 async fn replication_upsert_task(
@@ -1002,31 +935,44 @@ async fn replication_upsert_task(
     Json(payload): Json<TaskReplicationUpsertRequest>,
 ) -> Result<Json<TaskReplicationUpsertResponse>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let existing = state.task_store.get_scoped(scope_key, &payload.task.id);
+    let incoming = normalize_incoming_task_snapshot(payload.task)?;
+    let existing = state.task_store.get_scoped(scope_key, &incoming.id);
 
     let status = match existing {
         None => {
             state
                 .task_store
-                .upsert_scoped(scope_key, payload.task)
+                .upsert_scoped(scope_key, incoming)
                 .map_err(map_task_store_error)?;
             "inserted"
         }
-        Some(current)
-            if should_accept_replicated_task(
-                &current,
-                &payload.task,
-                payload.source_host_id.as_deref(),
-                &state.host_id,
-            ) =>
-        {
-            state
-                .task_store
-                .upsert_scoped(scope_key, payload.task)
-                .map_err(map_task_store_error)?;
-            "updated"
+        Some(current) => {
+            let should_accept = should_accept_replicated_task(&current, &incoming);
+            let history_changed =
+                merge_task_status_history(&current, &incoming) != current.status_transitions;
+
+            if should_accept {
+                state
+                    .task_store
+                    .upsert_scoped(
+                        scope_key,
+                        merge_task_snapshot(&current, &incoming, true),
+                    )
+                    .map_err(map_task_store_error)?;
+                "updated"
+            } else if history_changed {
+                state
+                    .task_store
+                    .upsert_scoped(
+                        scope_key,
+                        merge_task_snapshot(&current, &incoming, false),
+                    )
+                    .map_err(map_task_store_error)?;
+                "updated"
+            } else {
+                "ignored"
+            }
         }
-        Some(_) => "ignored",
     };
 
     Ok(Json(TaskReplicationUpsertResponse { status }))
@@ -1058,10 +1004,17 @@ async fn write_task_transition_eventlog(
     old_status: TaskStatus,
     trigger: &str,
 ) {
+    let latest_transition = task
+        .status_transitions
+        .iter()
+        .rev()
+        .find(|transition| transition.to_status == task.status);
     let tag = task_transition_event_tag(old_status, task.status);
     let event = crate::eventlog::EventRecord {
         id: uuid::Uuid::new_v4().to_string(),
-        timestamp: chrono::Utc::now().timestamp_millis(),
+        timestamp: latest_transition
+            .map(|transition| transition.at as i64)
+            .unwrap_or(task.updated_at as i64),
         content: format!("{}：{}", task_transition_event_content(tag), task.title),
         tags: vec![tag.to_string()],
         refs: vec![],
@@ -1070,6 +1023,14 @@ async fn write_task_transition_eventlog(
             "task_title": task.title,
             "old_status": old_status,
             "new_status": task.status,
+            "transition_id": latest_transition.map(|transition| transition.id.clone()),
+            "transition_reason": latest_transition.map(|transition| transition.reason.as_str()),
+            "operation_id": latest_transition.and_then(|transition| transition.operation_id.clone()),
+            "source_host_id": latest_transition.and_then(|transition| transition.source_host_id.clone()),
+            "related_time_block_id": latest_transition.and_then(|transition| transition.related_time_block_id.clone()),
+            "related_time_block_transition_ref": latest_transition
+                .and_then(|transition| transition.related_time_block_transition_ref.clone()),
+            "auto_generated": latest_transition.and_then(|transition| transition.auto_generated),
             "source": {
                 "app": "exomind-runtime",
                 "trigger": trigger,
@@ -1111,9 +1072,22 @@ fn task_transition_event_tag(old_status: TaskStatus, new_status: TaskStatus) -> 
 fn map_task_store_error(error: TaskStoreError) -> (StatusCode, String) {
     let code = match error {
         TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+        TaskStoreError::MissingStatusHistory { .. }
+        | TaskStoreError::InvalidStatusHistory { .. } => StatusCode::BAD_REQUEST,
         _ => StatusCode::CONFLICT,
     };
     (code, error.to_string())
+}
+
+fn normalize_incoming_task_snapshot(mut task: Task) -> Result<Task, (StatusCode, String)> {
+    task.status_transitions
+        .sort_by(|left, right| left.at.cmp(&right.at));
+    validate_partial_task_status_history(&task).map_err(map_task_store_error)?;
+    if let Some(first_transition) = task.status_transitions.first() {
+        task.created_at = first_transition.at;
+    }
+    normalize_task_status_history(&mut task);
+    Ok(task)
 }
 
 fn parse_import_strategy(raw: Option<&str>) -> Result<TaskImportStrategy, (StatusCode, String)> {
@@ -1133,13 +1107,17 @@ fn apply_task_import(
     incoming: Vec<Task>,
     strategy: TaskImportStrategy,
 ) -> Result<TaskImportResult, (StatusCode, String)> {
+    let incoming = incoming
+        .into_iter()
+        .map(normalize_incoming_task_snapshot)
+        .collect::<Result<Vec<_>, _>>()?;
     let existing = state.task_store.list_scoped(scope_key);
     let result = match strategy {
         TaskImportStrategy::Overwrite => {
             state
                 .task_store
                 .replace_all_scoped(scope_key, &incoming)
-                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+                .map_err(map_task_store_error)?;
             TaskImportResult {
                 imported: incoming.len(),
                 skipped: 0,
@@ -1156,14 +1134,20 @@ fn apply_task_import(
             let mut skipped = 0usize;
             for task in incoming {
                 match merged.get(&task.id) {
-                    Some(current)
-                        if should_accept_replicated_task(current, &task, None, &state.host_id) =>
-                    {
+                    Some(current) => {
+                        let should_accept = should_accept_replicated_task(current, &task);
+                        let history_changed =
+                            merge_task_status_history(current, &task) != current.status_transitions;
                         skipped += 1;
-                        merged.insert(task.id.clone(), task);
-                    }
-                    Some(_) => {
-                        skipped += 1;
+                        if should_accept {
+                            merged
+                                .insert(task.id.clone(), merge_task_snapshot(current, &task, true));
+                        } else if history_changed {
+                            merged.insert(
+                                task.id.clone(),
+                                merge_task_snapshot(current, &task, false),
+                            );
+                        }
                     }
                     None => {
                         imported += 1;
@@ -1176,7 +1160,7 @@ fn apply_task_import(
             state
                 .task_store
                 .replace_all_scoped(scope_key, &next)
-                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+                .map_err(map_task_store_error)?;
 
             TaskImportResult {
                 imported,
@@ -1493,6 +1477,14 @@ mod tests {
         assert_ne!(
             summary.revision_hash, changed_summary.revision_hash,
             "summary hash should change when task content changes"
+        );
+
+        let mut created_at_changed = store.list();
+        created_at_changed[0].created_at = created_at_changed[0].created_at.saturating_add(1);
+        let created_at_changed_summary = build_task_replication_summary(None, &created_at_changed);
+        assert_ne!(
+            changed_summary.revision_hash, created_at_changed_summary.revision_hash,
+            "summary hash should change when created_at changes"
         );
     }
 
@@ -2084,6 +2076,14 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let transitioned: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(transitioned["status"], "in_progress");
+        assert_eq!(
+            transitioned["status_transitions"].as_array().unwrap().len(),
+            2
+        );
+        assert_eq!(
+            transitioned["status_transitions"][1]["reason"],
+            "task.transition"
+        );
     }
 
     #[tokio::test]
@@ -2223,6 +2223,13 @@ mod tests {
             events[0].metadata.as_ref().unwrap()["new_status"],
             "in_progress"
         );
+        assert_eq!(
+            events[0].metadata.as_ref().unwrap()["transition_reason"],
+            "task.transition"
+        );
+        assert!(events[0].metadata.as_ref().unwrap()["operation_id"]
+            .as_str()
+            .is_some());
     }
 
     #[tokio::test]
@@ -2809,6 +2816,53 @@ mod tests {
         });
         let newer_updated_at = existing.updated_at + 1_000;
         let app = test_router(state.clone());
+        let payload = serde_json::json!({
+            "version": 1,
+            "tasks": [
+                {
+                    "id": existing.id,
+                    "title": "Existing replaced",
+                    "description": null,
+                    "done_condition": null,
+                    "status": "pending",
+                    "priority": "medium",
+                    "tags": [],
+                    "source": null,
+                    "parent_id": null,
+                    "depends_on": [],
+                    "due_at": null,
+                    "estimated_minutes": null,
+                    "time_block_ids": [],
+                    "status_transitions": [
+                        crate::task::store::build_initial_task_status_transition(&existing.id, 1000)
+                    ],
+                    "created_at": 1000,
+                    "updated_at": newer_updated_at,
+                    "completed_at": null
+                },
+                {
+                    "id": "task-import-2",
+                    "title": "Imported task",
+                    "description": null,
+                    "done_condition": "ship",
+                    "status": "pending",
+                    "priority": "high",
+                    "tags": ["rt"],
+                    "source": "backup",
+                    "parent_id": null,
+                    "depends_on": [],
+                    "due_at": null,
+                    "estimated_minutes": 30,
+                    "time_block_ids": ["block-9"],
+                    "status_transitions": [
+                        crate::task::store::build_initial_task_status_transition("task-import-2", 3000)
+                    ],
+                    "created_at": 3000,
+                    "updated_at": 4000,
+                    "completed_at": null
+                }
+            ]
+        });
 
         let response = app
             .oneshot(
@@ -2816,50 +2870,7 @@ mod tests {
                     .method("POST")
                     .uri("/tasks/import/json?strategy=merge")
                     .header("content-type", "application/json")
-                    .body(Body::from(format!(
-                        r#"{{
-                            "version": 1,
-                            "tasks": [
-                                {{
-                                    "id": "{}",
-                                    "title": "Existing replaced",
-                                    "description": null,
-                                    "done_condition": null,
-                                    "status": "pending",
-                                    "priority": "medium",
-                                    "tags": [],
-                                    "source": null,
-                                    "parent_id": null,
-                                    "depends_on": [],
-                                    "due_at": null,
-                                    "estimated_minutes": null,
-                                    "time_block_ids": [],
-                                    "created_at": 1000,
-                                    "updated_at": {},
-                                    "completed_at": null
-                                }},
-                                {{
-                                    "id": "task-import-2",
-                                    "title": "Imported task",
-                                    "description": null,
-                                    "done_condition": "ship",
-                                    "status": "not_started",
-                                    "priority": "high",
-                                    "tags": ["rt"],
-                                    "source": "backup",
-                                    "parent_id": null,
-                                    "depends_on": [],
-                                    "due_at": null,
-                                    "estimated_minutes": 30,
-                                    "time_block_ids": ["block-9"],
-                                    "created_at": 3000,
-                                    "updated_at": 4000,
-                                    "completed_at": null
-                                }}
-                            ]
-                        }}"#,
-                        existing.id, newer_updated_at
-                    )))
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
                     .unwrap(),
             )
             .await
@@ -2875,7 +2886,7 @@ mod tests {
         let tasks = state.task_store.list();
         assert_eq!(tasks.len(), 2);
         assert!(tasks.iter().any(|task| task.title == "Imported task"));
-        assert!(tasks.iter().any(|task| task.title == "Existing replaced"));
+        assert!(tasks.iter().any(|task| task.title == "Existing"));
     }
 
     #[tokio::test]
@@ -2922,13 +2933,19 @@ mod tests {
                                     "due_at": null,
                                     "estimated_minutes": null,
                                     "time_block_ids": [],
+                                    "status_transitions": [{{
+                                        "id": "{}:task.create:1000",
+                                        "at": 1000,
+                                        "to_status": "pending",
+                                        "reason": "task.create"
+                                    }}],
                                     "created_at": 1000,
                                     "updated_at": {},
                                     "completed_at": null
                                 }}
                             ]
                         }}"#,
-                        existing.id, older_updated_at
+                        existing.id, existing.id, older_updated_at
                     )))
                     .unwrap(),
             )
@@ -2949,6 +2966,237 @@ mod tests {
         assert_eq!(merged.title, "Existing");
         assert_eq!(merged.description.as_deref(), Some("newer local"));
         assert_eq!(merged.updated_at, existing_updated_at);
+    }
+
+    #[tokio::test]
+    async fn merge_import_rejects_newer_snapshot_without_status_history() {
+        let state = test_state();
+        let existing = state.task_store.create(CreateTaskInput {
+            title: "History authoritative".to_string(),
+            description: Some("keep rich history".to_string()),
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&existing.id, TaskStatus::InProgress)
+            .unwrap();
+        let existing = state
+            .task_store
+            .get(&existing.id)
+            .expect("existing task should still exist");
+        let app = test_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/import/json?strategy=merge")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{
+                            "version": 1,
+                            "tasks": [
+                                {{
+                                    "id": "{}",
+                                    "title": "History lost remote snapshot",
+                                    "description": "should be ignored",
+                                    "done_condition": null,
+                                    "status": "completed",
+                                    "priority": "medium",
+                                    "tags": [],
+                                    "source": null,
+                                    "parent_id": null,
+                                    "depends_on": [],
+                                    "due_at": null,
+                                    "estimated_minutes": null,
+                                    "time_block_ids": [],
+                                    "created_at": 1000,
+                                    "updated_at": {},
+                                    "completed_at": {}
+                                }}
+                            ]
+                        }}"#,
+                        existing.id,
+                        existing.updated_at + 5_000,
+                        existing.updated_at + 5_000,
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let merged = state
+            .task_store
+            .get(&existing.id)
+            .expect("existing task should remain after merge");
+        assert_eq!(merged.title, "History authoritative");
+        assert_eq!(merged.status, TaskStatus::InProgress);
+        assert_eq!(merged.status_transitions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn merge_import_preserves_richer_local_history_when_newer_remote_history_is_sparse() {
+        let state = test_state();
+        let existing = state.task_store.create(CreateTaskInput {
+            title: "Rich local history".to_string(),
+            description: Some("local".to_string()),
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&existing.id, TaskStatus::InProgress)
+            .unwrap();
+        let existing = state
+            .task_store
+            .get(&existing.id)
+            .expect("existing task should still exist");
+        let completion_transition = crate::task::TaskStatusTransition {
+            id: format!("{}:remote-completed", existing.id),
+            at: existing.updated_at + 5_000,
+            from_status: Some(TaskStatus::InProgress),
+            to_status: TaskStatus::Completed,
+            reason: TaskTransitionReason::TaskTransition,
+            actor_id: Some("remote".to_string()),
+            source_host_id: Some("mobile-host".to_string()),
+            operation_id: Some("remote-completed".to_string()),
+            related_time_block_id: None,
+            related_time_block_transition_ref: None,
+            auto_generated: Some(false),
+        };
+        let payload = serde_json::json!({
+            "version": 1,
+            "tasks": [{
+                "id": existing.id,
+                "title": "Sparse remote completion",
+                "description": "remote wins fields",
+                "done_condition": null,
+                "status": "completed",
+                "priority": "medium",
+                "tags": [],
+                "source": null,
+                "parent_id": null,
+                "depends_on": [],
+                "due_at": null,
+                "estimated_minutes": null,
+                "time_block_ids": [],
+                "status_transitions": [
+                    existing.status_transitions[0].clone(),
+                    completion_transition.clone()
+                ],
+                "created_at": existing.created_at,
+                "updated_at": completion_transition.at,
+                "completed_at": completion_transition.at
+            }]
+        });
+        let app = test_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/import/json?strategy=merge")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["imported"], 0);
+        assert_eq!(result["skipped"], 1);
+
+        let merged = state
+            .task_store
+            .get(&existing.id)
+            .expect("existing task should remain after merge");
+        assert_eq!(merged.title, "Sparse remote completion");
+        assert_eq!(merged.description.as_deref(), Some("remote wins fields"));
+        assert_eq!(merged.status, TaskStatus::Completed);
+        assert_eq!(merged.completed_at, Some(completion_transition.at));
+        assert_eq!(merged.status_transitions.len(), 3);
+        assert!(
+            merged
+                .status_transitions
+                .iter()
+                .any(|transition| transition.to_status == TaskStatus::InProgress),
+            "merged history should retain local intermediate transition"
+        );
+        assert!(
+            merged
+                .status_transitions
+                .iter()
+                .any(|transition| transition.id == completion_transition.id),
+            "merged history should include remote completion transition"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_import_rejects_new_task_without_status_history() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-import-empty-history.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+        let payload = serde_json::json!({
+            "version": 1,
+            "tasks": [{
+                "id": "import-empty-history",
+                "title": "Imported legacy snapshot",
+                "description": null,
+                "done_condition": null,
+                "status": "completed",
+                "priority": "medium",
+                "tags": [],
+                "source": null,
+                "parent_id": null,
+                "depends_on": [],
+                "due_at": null,
+                "estimated_minutes": null,
+                "time_block_ids": [],
+                "status_transitions": [],
+                "created_at": 1_000,
+                "updated_at": 5_000,
+                "completed_at": 5_000
+            }]
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/import/json?strategy=merge")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            task_store.get("import-empty-history").is_none(),
+            "invalid legacy snapshot should not be imported"
+        );
     }
 
     #[tokio::test]
@@ -3242,6 +3490,12 @@ mod tests {
                             "due_at": null,
                             "estimated_minutes": null,
                             "time_block_ids": [],
+                            "status_transitions": [{
+                                "id": "task-rep-1:task.create:1000",
+                                "at": 1000,
+                                "to_status": "pending",
+                                "reason": "task.create"
+                            }],
                             "created_at": 1000,
                             "updated_at": 2000,
                             "completed_at": null
@@ -3277,6 +3531,12 @@ mod tests {
                             "due_at": null,
                             "estimated_minutes": null,
                             "time_block_ids": [],
+                            "status_transitions": [{
+                                "id": "task-rep-1:task.create:1000",
+                                "at": 1000,
+                                "to_status": "pending",
+                                "reason": "task.create"
+                            }],
                             "created_at": 1000,
                             "updated_at": 1500,
                             "completed_at": null
@@ -3300,6 +3560,349 @@ mod tests {
         assert!(
             task_store.list().is_empty(),
             "anonymous scope should remain isolated from replicated scoped data"
+        );
+    }
+
+    #[tokio::test]
+    async fn replication_upsert_rejects_newer_snapshot_without_status_history() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-replication-history.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let existing = task_store.create_in_scope(
+            Some("user-a"),
+            CreateTaskInput {
+                title: "Rich history task".to_string(),
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: vec![],
+                source: None,
+                parent_id: None,
+                depends_on: vec![],
+                due_at: None,
+                estimated_minutes: None,
+                time_block_ids: vec![],
+            },
+        );
+        task_store
+            .transition_scoped(Some("user-a"), &existing.id, TaskStatus::InProgress)
+            .unwrap();
+        let existing = task_store
+            .get_scoped(Some("user-a"), &existing.id)
+            .expect("existing task should exist");
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/replication/upsert?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{
+                        "task": {{
+                            "id": "{}",
+                            "title": "History lost remote snapshot",
+                            "description": null,
+                            "done_condition": null,
+                            "status": "completed",
+                            "priority": "medium",
+                            "tags": [],
+                            "source": null,
+                            "parent_id": null,
+                            "depends_on": [],
+                            "due_at": null,
+                            "estimated_minutes": null,
+                            "time_block_ids": [],
+                            "created_at": 1000,
+                            "updated_at": {},
+                            "completed_at": {}
+                        }},
+                        "source_host_id": "mobile-host"
+                    }}"#,
+                        existing.id,
+                        existing.updated_at + 5_000,
+                        existing.updated_at + 5_000,
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let stored = task_store
+            .get_scoped(Some("user-a"), &existing.id)
+            .expect("task should remain in scoped store");
+        assert_eq!(stored.title, "Rich history task");
+        assert_eq!(stored.status, TaskStatus::InProgress);
+        assert_eq!(stored.status_transitions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn replication_upsert_rejects_new_task_without_status_history() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-replication-empty-history.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let payload = serde_json::json!({
+            "task": {
+                "id": "task-empty-history",
+                "title": "Missing history task",
+                "description": "should be rejected",
+                "done_condition": null,
+                "status": "pending",
+                "priority": "medium",
+                "tags": [],
+                "source": null,
+                "parent_id": null,
+                "depends_on": [],
+                "due_at": null,
+                "estimated_minutes": null,
+                "time_block_ids": [],
+                "status_transitions": [],
+                "created_at": 1_000,
+                "updated_at": 5_000,
+                "completed_at": null
+            },
+            "source_host_id": "mobile-host"
+        });
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/replication/upsert?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            task_store
+                .get_scoped(Some("user-a"), "task-empty-history")
+                .is_none(),
+            "invalid replication payload should not insert a task"
+        );
+    }
+
+    #[tokio::test]
+    async fn replication_upsert_bumps_updated_at_when_equal_watermark_changes_revision() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-replication-watermark-bump.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let local_task = Task {
+            id: "task-watermark-bump".to_string(),
+            title: "Local active snapshot".to_string(),
+            description: Some("local".to_string()),
+            done_condition: None,
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::Medium,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+            status_transitions: vec![
+                crate::task::store::build_initial_task_status_transition(
+                    "task-watermark-bump",
+                    1_000,
+                ),
+                crate::task::TaskStatusTransition {
+                    id: "task-watermark-bump:local-in-progress".to_string(),
+                    at: 4_000,
+                    from_status: Some(TaskStatus::Pending),
+                    to_status: TaskStatus::InProgress,
+                    reason: TaskTransitionReason::TaskTransition,
+                    actor_id: Some("local".to_string()),
+                    source_host_id: Some("desktop-host".to_string()),
+                    operation_id: Some("local-in-progress".to_string()),
+                    related_time_block_id: None,
+                    related_time_block_transition_ref: None,
+                    auto_generated: Some(false),
+                },
+            ],
+            created_at: 1_000,
+            updated_at: 5_000,
+            completed_at: None,
+        };
+        task_store
+            .upsert_scoped(Some("user-a"), local_task)
+            .expect("local task should be stored");
+        let payload = serde_json::json!({
+            "task": {
+                "id": "task-watermark-bump",
+                "title": "Remote completed snapshot",
+                "description": "remote",
+                "done_condition": null,
+                "status": "completed",
+                "priority": "medium",
+                "tags": [],
+                "source": null,
+                "parent_id": null,
+                "depends_on": [],
+                "due_at": null,
+                "estimated_minutes": null,
+                "time_block_ids": [],
+                "status_transitions": [
+                    crate::task::store::build_initial_task_status_transition("task-watermark-bump", 1_000),
+                    {
+                        "id": "task-watermark-bump:remote-completed",
+                        "at": 5_000,
+                        "from_status": "in_progress",
+                        "to_status": "completed",
+                        "reason": "task.transition",
+                        "actor_id": "remote",
+                        "source_host_id": "mobile-host",
+                        "operation_id": "remote-completed",
+                        "related_time_block_id": null,
+                        "related_time_block_transition_ref": null,
+                        "auto_generated": false
+                    }
+                ],
+                "created_at": 1_000,
+                "updated_at": 5_000,
+                "completed_at": 5_000
+            },
+            "source_host_id": "mobile-host"
+        });
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/replication/upsert?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["status"], "updated");
+
+        let stored = task_store
+            .get_scoped(Some("user-a"), "task-watermark-bump")
+            .expect("task should remain in scoped store");
+        assert_eq!(stored.status, TaskStatus::Completed);
+        assert_eq!(stored.completed_at, Some(5_000));
+        assert_eq!(stored.updated_at, 5_001);
+    }
+
+    #[tokio::test]
+    async fn replication_upsert_merges_sparse_newer_remote_history() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-replication-history-merge.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let existing = task_store.create_in_scope(
+            Some("user-a"),
+            CreateTaskInput {
+                title: "Rich history task".to_string(),
+                description: Some("local".to_string()),
+                done_condition: None,
+                priority: None,
+                tags: vec![],
+                source: None,
+                parent_id: None,
+                depends_on: vec![],
+                due_at: None,
+                estimated_minutes: None,
+                time_block_ids: vec![],
+            },
+        );
+        task_store
+            .transition_scoped(Some("user-a"), &existing.id, TaskStatus::InProgress)
+            .unwrap();
+        let existing = task_store
+            .get_scoped(Some("user-a"), &existing.id)
+            .expect("existing task should exist");
+        let completion_transition = crate::task::TaskStatusTransition {
+            id: format!("{}:remote-completed", existing.id),
+            at: existing.updated_at + 5_000,
+            from_status: Some(TaskStatus::InProgress),
+            to_status: TaskStatus::Completed,
+            reason: TaskTransitionReason::TaskTransition,
+            actor_id: Some("remote".to_string()),
+            source_host_id: Some("mobile-host".to_string()),
+            operation_id: Some("remote-completed".to_string()),
+            related_time_block_id: None,
+            related_time_block_transition_ref: None,
+            auto_generated: Some(false),
+        };
+        let payload = serde_json::json!({
+            "task": {
+                "id": existing.id,
+                "title": "Sparse remote completion",
+                "description": "remote wins fields",
+                "done_condition": null,
+                "status": "completed",
+                "priority": "medium",
+                "tags": [],
+                "source": null,
+                "parent_id": null,
+                "depends_on": [],
+                "due_at": null,
+                "estimated_minutes": null,
+                "time_block_ids": [],
+                "status_transitions": [
+                    existing.status_transitions[0].clone(),
+                    completion_transition.clone()
+                ],
+                "created_at": existing.created_at,
+                "updated_at": completion_transition.at,
+                "completed_at": completion_transition.at
+            },
+            "source_host_id": "mobile-host"
+        });
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/replication/upsert?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["status"], "updated");
+
+        let stored = task_store
+            .get_scoped(Some("user-a"), &existing.id)
+            .expect("task should remain in scoped store");
+        assert_eq!(stored.title, "Sparse remote completion");
+        assert_eq!(stored.description.as_deref(), Some("remote wins fields"));
+        assert_eq!(stored.status, TaskStatus::Completed);
+        assert_eq!(stored.completed_at, Some(completion_transition.at));
+        assert_eq!(stored.status_transitions.len(), 3);
+        assert!(
+            stored
+                .status_transitions
+                .iter()
+                .any(|transition| transition.to_status == TaskStatus::InProgress),
+            "stored history should retain local intermediate transition"
+        );
+        assert!(
+            stored
+                .status_transitions
+                .iter()
+                .any(|transition| transition.id == completion_transition.id),
+            "stored history should include remote completion transition"
         );
     }
 }

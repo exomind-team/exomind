@@ -52,6 +52,7 @@ vi.mock('@/lib/services/eventlog.service', async (importOriginal) => {
 
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
+import { resolveLocalServiceHost } from '@/config/local-service-host';
 
 type MemoryEnv = {
   storage: {
@@ -500,8 +501,9 @@ describe('TimeBlockServiceImpl', () => {
     }
 
     const embeddedPort = DEFAULT_EMBEDDED_RUNTIME_PORT;
+    const embeddedHost = resolveLocalServiceHost(window.location.hostname || 'localhost');
     expect(networkMocks.fetch).toHaveBeenCalledWith(
-      `http://${window.location.hostname || 'localhost'}:${embeddedPort}/signals/publish`,
+      `http://${embeddedHost}:${embeddedPort}/signals/publish`,
       expect.objectContaining({ method: 'POST' }),
     );
   });
@@ -534,8 +536,9 @@ describe('TimeBlockServiceImpl', () => {
 
     expect(networkMocks.fetch).toHaveBeenCalled();
     const embeddedPort = DEFAULT_EMBEDDED_RUNTIME_PORT;
+    const embeddedHost = resolveLocalServiceHost(window.location.hostname || 'localhost');
     expect(networkMocks.fetch).toHaveBeenCalledWith(
-      `http://${window.location.hostname || 'localhost'}:${embeddedPort}/signals/publish`,
+      `http://${embeddedHost}:${embeddedPort}/signals/publish`,
       expect.objectContaining({ method: 'POST' }),
     );
   });

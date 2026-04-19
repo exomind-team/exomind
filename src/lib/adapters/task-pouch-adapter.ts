@@ -8,14 +8,28 @@
  * 旧版迁移/兼容路径使用，后续迁移完成后应整体移除。
  */
 
-import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port';
-import type { TaskNode, TaskStatus } from '@/lib/types/task';
-import { canTransition, transition } from '@/lib/types/task';
-import { getTaskStorage } from '@/lib/storage/task-storage';
-import { getCurrentUserId } from '@/lib/storage/event-storage';
-import { createUuidV4 } from '@/lib/utils/uuid';
+import type {
+  ITaskPort,
+  CreateTaskInput,
+  UpdateTaskInput,
+} from "@/lib/environment/interfaces/task.port";
+import type { TaskNode, TaskStatus } from "@/lib/types/task";
+import {
+  buildInitialTaskStatusTransition,
+  canTransition,
+  transition,
+} from "@/lib/types/task";
+import { getTaskStorage } from "@/lib/storage/task-storage";
+import { getCurrentUserId } from "@/lib/storage/event-storage";
+import { createUuidV4 } from "@/lib/utils/uuid";
 
-const ALL_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'suspended', 'completed', 'cancelled'];
+const ALL_STATUSES: TaskStatus[] = [
+  "pending",
+  "in_progress",
+  "suspended",
+  "completed",
+  "cancelled",
+];
 
 export class TaskPouchAdapter implements ITaskPort {
   constructor(private readonly userId?: string) {}
@@ -26,7 +40,9 @@ export class TaskPouchAdapter implements ITaskPort {
 
   async listTasks(includeCancelled = false): Promise<TaskNode[]> {
     const tasks = await this.storage.getTasks();
-    return includeCancelled ? tasks : tasks.filter((t) => t.status !== 'cancelled');
+    return includeCancelled
+      ? tasks
+      : tasks.filter((t) => t.status !== "cancelled");
   }
 
   async getTaskById(id: string): Promise<TaskNode | null> {
@@ -41,22 +57,27 @@ export class TaskPouchAdapter implements ITaskPort {
       title: input.title.trim(),
       description: input.description,
       doneCondition: input.doneCondition,
-      status: 'pending',
-      priority: input.priority ?? 'medium',
+      status: "pending",
+      priority: input.priority ?? "medium",
       dueAt: input.dueAt,
       source: input.source,
       parentId: input.parentId,
       dependsOn: [],
       tags: input.tags ?? [],
       estimatedMinutes: input.estimatedMinutes,
+      statusTransitions: [],
       createdAt: now,
       updatedAt: now,
     };
+    task.statusTransitions = [buildInitialTaskStatusTransition(task.id, now)];
     await this.storage.addTask(task);
     return task;
   }
 
-  async updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null> {
+  async updateTask(
+    id: string,
+    input: UpdateTaskInput,
+  ): Promise<TaskNode | null> {
     const result = await this.storage.updateTask(id, input);
     return result ?? null;
   }
@@ -64,9 +85,10 @@ export class TaskPouchAdapter implements ITaskPort {
   async cancelTask(id: string): Promise<TaskNode | null> {
     const task = await this.storage.getTask(id);
     if (!task) return null;
-    const cancelled = transition(task, 'cancelled');
+    const cancelled = transition(task, "cancelled");
     await this.storage.updateTask(id, {
       status: cancelled.status,
+      statusTransitions: cancelled.statusTransitions,
       updatedAt: cancelled.updatedAt,
       completedAt: cancelled.completedAt,
     });
@@ -79,6 +101,7 @@ export class TaskPouchAdapter implements ITaskPort {
     const transitioned = transition(task, to);
     await this.storage.updateTask(id, {
       status: transitioned.status,
+      statusTransitions: transitioned.statusTransitions,
       updatedAt: transitioned.updatedAt,
       completedAt: transitioned.completedAt,
     });

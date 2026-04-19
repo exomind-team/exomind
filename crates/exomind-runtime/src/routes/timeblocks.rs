@@ -8,9 +8,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+use super::tasks::transition_task_in_scope_with_context;
 use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
 use crate::signal::types::SignalEvent;
+use crate::task::{TaskStatus, TaskTransitionContext, TaskTransitionReason};
 use crate::timeblock::{
     ActiveBlockData, BlockTaskAssociationEvent, BlockTransition, BlockTransitionType,
     TimeBlockData, TimeBlockStore,
@@ -122,6 +124,67 @@ fn normalize_scope_key(scope_key: Option<&str>) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("anonymous")
         .to_string()
+}
+
+fn current_timestamp_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock error")
+        .as_millis() as u64
+}
+
+fn block_transition_type_key(transition_type: BlockTransitionType) -> &'static str {
+    match transition_type {
+        BlockTransitionType::Start => "start",
+        BlockTransitionType::Pause => "pause",
+        BlockTransitionType::Resume => "resume",
+        BlockTransitionType::FeedbackStart => "feedback_start",
+        BlockTransitionType::FeedbackSubmit => "feedback_submit",
+        BlockTransitionType::End => "end",
+    }
+}
+
+fn build_timeblock_transition_ref(
+    block_start_id: &str,
+    transition_type: BlockTransitionType,
+    at: u64,
+    actor_id: Option<&str>,
+) -> String {
+    let actor = actor_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("system");
+    format!(
+        "{}:{}:{}:{}",
+        block_start_id,
+        block_transition_type_key(transition_type),
+        at,
+        actor
+    )
+}
+
+fn map_task_route_error_to_timeblock(
+    error: (StatusCode, String),
+) -> (StatusCode, Json<ErrorResponse>) {
+    let (status, message) = error;
+    (status, Json(ErrorResponse { error: message }))
+}
+
+fn parse_task_status_outcome(
+    outcome: &str,
+) -> Result<Option<TaskStatus>, (StatusCode, Json<ErrorResponse>)> {
+    match outcome {
+        "continue" => Ok(None),
+        "suspended" => Ok(Some(TaskStatus::Suspended)),
+        "completed" => Ok(Some(TaskStatus::Completed)),
+        "cancelled" => Ok(Some(TaskStatus::Cancelled)),
+        value => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("unsupported task outcome: {value}"),
+            }),
+        )),
+    }
 }
 
 fn build_completed_timeblock_replication_payload(
@@ -287,11 +350,15 @@ pub fn do_new_block(
     scope_key: Option<&str>,
     req: &NewBlockRequest,
 ) -> Result<NewBlockResponse, (StatusCode, Json<ErrorResponse>)> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock error")
-        .as_millis() as u64;
+    do_new_block_at(store, scope_key, req, current_timestamp_millis())
+}
 
+fn do_new_block_at(
+    store: &TimeBlockStore,
+    scope_key: Option<&str>,
+    req: &NewBlockRequest,
+    now: u64,
+) -> Result<NewBlockResponse, (StatusCode, Json<ErrorResponse>)> {
     let current = store
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?;
@@ -575,7 +642,55 @@ async fn end_block(
         ));
     }
 
-    let result = do_new_block(
+    let now = current_timestamp_millis();
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let actor_id = "rt:end";
+    let end_transition_ref = build_timeblock_transition_ref(
+        &current.start_id,
+        BlockTransitionType::End,
+        now,
+        Some(actor_id),
+    );
+
+    if let Some(task_status_outcomes) = payload.task_status_outcomes.as_ref() {
+        for (task_id, outcome) in task_status_outcomes {
+            let Some(target_status) = parse_task_status_outcome(outcome)? else {
+                continue;
+            };
+
+            let task = state
+                .task_store
+                .get_scoped(scope_key, task_id)
+                .ok_or_else(|| conflict(format!("cannot end: task not found: {task_id}")))?;
+
+            if task.status == target_status {
+                continue;
+            }
+
+            transition_task_in_scope_with_context(
+                &state,
+                scope_key,
+                task_id,
+                target_status,
+                false,
+                TaskTransitionContext {
+                    at: Some(now),
+                    reason: Some(TaskTransitionReason::TimeblockEnd),
+                    actor_id: Some(actor_id.to_string()),
+                    source_host_id: Some(state.host_id.clone()),
+                    operation_id: Some(operation_id.clone()),
+                    related_time_block_id: Some(current.start_id.clone()),
+                    related_time_block_transition_ref: Some(end_transition_ref.clone()),
+                    auto_generated: Some(true),
+                },
+                "http:timeblocks/end",
+            )
+            .await
+            .map_err(map_task_route_error_to_timeblock)?;
+        }
+    }
+
+    let result = do_new_block_at(
         &state.timeblock_store,
         scope_key,
         &NewBlockRequest {
@@ -588,6 +703,7 @@ async fn end_block(
             feedback: payload.feedback,
             task_status_outcomes: payload.task_status_outcomes,
         },
+        now,
     )?;
 
     // Transition → EventLog linkage: RT owns the full feedback report generation.
@@ -726,10 +842,7 @@ async fn pause_block(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock error")
-        .as_millis() as u64;
+    let now = current_timestamp_millis();
 
     let current = state
         .timeblock_store
@@ -745,6 +858,45 @@ async fn pause_block(
     }
     if current.is_feedback_in_progress() || current.is_completed() {
         return Err(conflict("cannot pause: block is in feedback phase"));
+    }
+
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let actor_id = "rt:pause";
+    let pause_transition_ref = build_timeblock_transition_ref(
+        &current.start_id,
+        BlockTransitionType::Pause,
+        now,
+        Some(actor_id),
+    );
+
+    for task_id in &current.task_ids {
+        let Some(task) = state.task_store.get_scoped(scope_key, task_id) else {
+            continue;
+        };
+        if task.status != TaskStatus::InProgress {
+            continue;
+        }
+
+        transition_task_in_scope_with_context(
+            &state,
+            scope_key,
+            task_id,
+            TaskStatus::Suspended,
+            false,
+            TaskTransitionContext {
+                at: Some(now),
+                reason: Some(TaskTransitionReason::TimeblockPause),
+                actor_id: Some(actor_id.to_string()),
+                source_host_id: Some(state.host_id.clone()),
+                operation_id: Some(operation_id.clone()),
+                related_time_block_id: Some(current.start_id.clone()),
+                related_time_block_transition_ref: Some(pause_transition_ref.clone()),
+                auto_generated: Some(true),
+            },
+            "http:timeblocks/pause",
+        )
+        .await
+        .map_err(map_task_route_error_to_timeblock)?;
     }
 
     // Calculate accumulated run time
@@ -803,10 +955,7 @@ async fn resume_block(
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock error")
-        .as_millis() as u64;
+    let now = current_timestamp_millis();
 
     let current = state
         .timeblock_store
@@ -819,6 +968,79 @@ async fn resume_block(
     }
     if !current.is_paused_state() {
         return Err(conflict("cannot resume: not paused"));
+    }
+
+    let Some(last_pause_transition_ref) = current
+        .transitions
+        .iter()
+        .rev()
+        .find(|transition| transition.transition_type == BlockTransitionType::Pause)
+        .map(|transition| {
+            build_timeblock_transition_ref(
+                &current.start_id,
+                BlockTransitionType::Pause,
+                transition.at,
+                transition.actor_id.as_deref(),
+            )
+        })
+        .or_else(|| {
+            current.paused_at.map(|paused_at| {
+                build_timeblock_transition_ref(
+                    &current.start_id,
+                    BlockTransitionType::Pause,
+                    paused_at,
+                    Some("rt:pause"),
+                )
+            })
+        })
+    else {
+        return Err(conflict(
+            "cannot resume: pause transition reference missing",
+        ));
+    };
+
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let actor_id = "rt:resume";
+
+    for task_id in &current.task_ids {
+        let Some(task) = state.task_store.get_scoped(scope_key, task_id) else {
+            continue;
+        };
+        if task.status != TaskStatus::Suspended {
+            continue;
+        }
+        let Some(last_transition) = task.status_transitions.last() else {
+            continue;
+        };
+        if last_transition.reason != TaskTransitionReason::TimeblockPause {
+            continue;
+        }
+        if last_transition.related_time_block_transition_ref.as_deref()
+            != Some(last_pause_transition_ref.as_str())
+        {
+            continue;
+        }
+
+        transition_task_in_scope_with_context(
+            &state,
+            scope_key,
+            task_id,
+            TaskStatus::InProgress,
+            false,
+            TaskTransitionContext {
+                at: Some(now),
+                reason: Some(TaskTransitionReason::TimeblockResume),
+                actor_id: Some(actor_id.to_string()),
+                source_host_id: Some(state.host_id.clone()),
+                operation_id: Some(operation_id.clone()),
+                related_time_block_id: Some(current.start_id.clone()),
+                related_time_block_transition_ref: Some(last_pause_transition_ref.clone()),
+                auto_generated: Some(true),
+            },
+            "http:timeblocks/resume",
+        )
+        .await
+        .map_err(map_task_route_error_to_timeblock)?;
     }
 
     // Calculate accumulated pause time
@@ -2219,7 +2441,7 @@ mod tests {
         state
             .mesh
             .upsert_scope_grant(make_scope_grant("peer-phone", "profile-a"));
-        let app = test_router(state);
+        let app = test_router(state.clone());
 
         let mut request = Request::builder()
             .uri("/mesh/timeblocks/snapshot/sqlite?user_id=profile-b")
@@ -2324,7 +2546,7 @@ mod tests {
         peer.auth_token = Some("peer-outbound-secret".to_string());
         state.mesh.upsert_peer(peer);
 
-        let app = test_router(state);
+        let app = test_router(state.clone());
         let response = app
             .oneshot(
                 Request::builder()
@@ -2715,7 +2937,11 @@ mod tests {
             estimated_minutes: None,
             time_block_ids: vec![],
         });
-        let app = test_router(state);
+        state
+            .task_store
+            .transition(&task.id, crate::task::TaskStatus::InProgress)
+            .unwrap();
+        let app = test_router(state.clone());
 
         let start_response = app
             .clone()
@@ -2800,6 +3026,30 @@ mod tests {
         assert!(feedback_event.content.contains("### 任务状态"));
         assert!(feedback_event.content.contains("写周报：已完成"));
         assert!(!feedback_event.content.contains("时间块事件:"));
+        let updated_task = state
+            .task_store
+            .get(&task.id)
+            .expect("task should still exist after block end");
+        assert_eq!(updated_task.status, crate::task::TaskStatus::Completed);
+        let latest_transition = updated_task
+            .status_transitions
+            .last()
+            .expect("block end should append task transition");
+        assert_eq!(
+            latest_transition.reason,
+            crate::task::TaskTransitionReason::TimeblockEnd
+        );
+        let completed_block = state
+            .timeblock_store
+            .list_completed()
+            .unwrap()
+            .into_iter()
+            .find(|block| block.task_ids.contains(&task.id))
+            .expect("completed block should be stored");
+        assert_eq!(
+            latest_transition.related_time_block_id.as_deref(),
+            Some(completed_block.start_id.as_str())
+        );
     }
 
     #[tokio::test]
@@ -2814,7 +3064,24 @@ mod tests {
             Arc::new(crate::timeblock::TimeBlockStore::new()),
             eventlog_store.clone(),
         );
-        let app = test_router(state);
+        let task = state.task_store.create(crate::task::CreateTaskInput {
+            title: "暂停中的任务".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&task.id, crate::task::TaskStatus::InProgress)
+            .unwrap();
+        let app = test_router(state.clone());
 
         let start_response = app
             .clone()
@@ -2828,7 +3095,7 @@ mod tests {
                             "name": "Morning focus",
                             "mode": "countdown",
                             "targetMinutes": 25,
-                            "taskIds": ["task-a"],
+                            "taskIds": [task.id],
                         })
                         .to_string(),
                     ))
@@ -2851,11 +3118,174 @@ mod tests {
         assert_eq!(paused_response.status(), StatusCode::OK);
 
         let events = eventlog_store.list_events(None).unwrap();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 3);
         assert!(
             events
                 .iter()
                 .any(|event| event.tags == vec!["block_pause".to_string()])
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.tags == vec!["task_suspended".to_string()])
+        );
+        let paused_task = state
+            .task_store
+            .get(&task.id)
+            .expect("pause should keep linked task");
+        assert_eq!(paused_task.status, crate::task::TaskStatus::Suspended);
+        let latest_transition = paused_task
+            .status_transitions
+            .last()
+            .expect("pause should append task transition");
+        assert_eq!(
+            latest_transition.reason,
+            crate::task::TaskTransitionReason::TimeblockPause
+        );
+        let active_block = state
+            .timeblock_store
+            .get_active()
+            .unwrap()
+            .expect("pause should keep active block");
+        assert_eq!(
+            latest_transition.related_time_block_id.as_deref(),
+            Some(active_block.start_id.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_route_only_restores_tasks_auto_suspended_by_last_pause() {
+        let state =
+            test_state_with_timeblock_store(Arc::new(crate::timeblock::TimeBlockStore::new()));
+        let resume_target = state.task_store.create(crate::task::CreateTaskInput {
+            title: "自动挂起后恢复".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&resume_target.id, crate::task::TaskStatus::InProgress)
+            .unwrap();
+
+        let manual_suspended = state.task_store.create(crate::task::CreateTaskInput {
+            title: "手动挂起".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&manual_suspended.id, crate::task::TaskStatus::InProgress)
+            .unwrap();
+        state
+            .task_store
+            .transition(&manual_suspended.id, crate::task::TaskStatus::Suspended)
+            .unwrap();
+
+        let app = test_router(state.clone());
+        let start_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/start")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "name": "Resume focus",
+                            "mode": "countup",
+                            "taskIds": [resume_target.id, manual_suspended.id],
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_response.status(), StatusCode::OK);
+
+        let pause_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/pause")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pause_response.status(), StatusCode::OK);
+
+        let paused_resume_target = state
+            .task_store
+            .get(&resume_target.id)
+            .expect("pause should update in-progress task");
+        assert_eq!(
+            paused_resume_target.status,
+            crate::task::TaskStatus::Suspended
+        );
+        let pause_ref = paused_resume_target
+            .status_transitions
+            .last()
+            .and_then(|transition| transition.related_time_block_transition_ref.clone())
+            .expect("auto-suspended task should keep pause ref");
+
+        let resume_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/resume")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resume_response.status(), StatusCode::OK);
+
+        let resumed_task = state
+            .task_store
+            .get(&resume_target.id)
+            .expect("resume target should still exist");
+        assert_eq!(resumed_task.status, crate::task::TaskStatus::InProgress);
+        let resumed_transition = resumed_task
+            .status_transitions
+            .last()
+            .expect("resume should append task transition");
+        assert_eq!(
+            resumed_transition.reason,
+            crate::task::TaskTransitionReason::TimeblockResume
+        );
+        assert_eq!(
+            resumed_transition
+                .related_time_block_transition_ref
+                .as_deref(),
+            Some(pause_ref.as_str())
+        );
+
+        let still_manual = state
+            .task_store
+            .get(&manual_suspended.id)
+            .expect("manual suspended task should remain");
+        assert_eq!(still_manual.status, crate::task::TaskStatus::Suspended);
+        assert_eq!(
+            still_manual.status_transitions.last().unwrap().reason,
+            crate::task::TaskTransitionReason::TaskTransition
         );
     }
 

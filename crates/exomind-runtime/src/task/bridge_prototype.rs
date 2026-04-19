@@ -220,6 +220,7 @@ mod tests {
             due_at: Some(created_at + 500),
             estimated_minutes: Some(45),
             time_block_ids: vec!["block-1".to_string()],
+            status_transitions: vec![],
             created_at,
             updated_at: created_at + 1,
             completed_at: status.is_terminal().then_some(created_at + 2),
@@ -227,6 +228,10 @@ mod tests {
     }
 
     fn assert_task_eq(expected: &Task, actual: &Task) {
+        let mut expected = expected.clone();
+        let mut actual = actual.clone();
+        super::super::store::normalize_task_status_history(&mut expected);
+        super::super::store::normalize_task_status_history(&mut actual);
         assert_eq!(
             serde_json::to_value(actual).unwrap(),
             serde_json::to_value(expected).unwrap()

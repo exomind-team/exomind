@@ -361,7 +361,27 @@ async fn timeblock_lifecycle_routes_cover_running_pause_feedback_and_gap() {
     let dir = tempdir().unwrap();
     let store =
         Arc::new(TimeBlockStore::with_sqlite_path(&dir.path().join("timeblocks.sqlite")).unwrap());
-    let app = test_router(test_state_with_timeblock_store(store));
+    let state = test_state_with_timeblock_store(store);
+    let task = state
+        .task_store
+        .create(exomind_runtime::task::CreateTaskInput {
+            title: "Lifecycle task".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+    state
+        .task_store
+        .transition(&task.id, exomind_runtime::task::TaskStatus::InProgress)
+        .unwrap();
+    let app = test_router(state.clone());
 
     let start_response = app
         .clone()
@@ -375,7 +395,7 @@ async fn timeblock_lifecycle_routes_cover_running_pause_feedback_and_gap() {
                         "name": "Lifecycle Focus",
                         "mode": "countdown",
                         "targetMinutes": 25,
-                        "taskIds": ["task-1"],
+                        "taskIds": [task.id],
                         "sourcePlannedBlockId": "plan-1"
                     })
                     .to_string(),
@@ -397,7 +417,7 @@ async fn timeblock_lifecycle_routes_cover_running_pause_feedback_and_gap() {
         .expect("active startId should be present")
         .to_string();
     assert_eq!(start_payload["active"]["phase"], "running");
-    assert_eq!(start_payload["active"]["taskIds"], json!(["task-1"]));
+    assert_eq!(start_payload["active"]["taskIds"], json!([task.id]));
     assert_eq!(start_payload["active"]["sourcePlannedBlockId"], "plan-1");
 
     let pause_response = app
@@ -522,7 +542,7 @@ async fn timeblock_lifecycle_routes_cover_running_pause_feedback_and_gap() {
                     json!({
                         "feedback": "done",
                         "taskStatusOutcomes": {
-                            "task-1": "completed"
+                            task.id.clone(): "completed"
                         }
                     })
                     .to_string(),
@@ -536,10 +556,10 @@ async fn timeblock_lifecycle_routes_cover_running_pause_feedback_and_gap() {
     let end_payload: Value = serde_json::from_slice(&end_body).unwrap();
     assert_eq!(end_payload["completed"]["startId"], start_id);
     assert_eq!(end_payload["completed"]["note"], "done");
-    assert_eq!(end_payload["completed"]["taskIds"], json!(["task-1"]));
+    assert_eq!(end_payload["completed"]["taskIds"], json!([task.id]));
     assert_eq!(
         end_payload["completed"]["taskStatusOutcomes"],
-        json!({ "task-1": "completed" })
+        json!({ task.id.clone(): "completed" })
     );
     assert_eq!(end_payload["completed"]["sourcePlannedBlockId"], "plan-1");
     assert_eq!(end_payload["active"]["blockType"], "gap");

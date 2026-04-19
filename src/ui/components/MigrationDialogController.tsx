@@ -12,9 +12,11 @@ import {
 } from '@/lib/migration/legacy-migration-executor';
 import {
   isMigrationCompleted,
+  isMigrationPending,
   isMigrationSkipped,
-  markMigrationCompleted,
+  markMigrationPending,
   markMigrationSkipped,
+  markMigrationCompleted,
 } from '@/lib/migration/legacy-migration-flags';
 import { setAllBackendModes } from '@/config/domain-backend-mode';
 import { detectRuntime } from '@/lib/environment/bootstrap';
@@ -30,6 +32,21 @@ import { getSelectedRuntimeTarget } from '@/config/runtime-target';
 // Legacy localStorage keys used by TimeBlockService via WebStorageAdapter
 const TIME_BLOCKS_KEY = 'time_blocks';
 const ACTIVE_BLOCK_KEY = 'active_block';
+
+export function buildLegacyEventlogImportPayload(events: unknown[]) {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    events,
+  };
+}
+
+export function buildLegacyTaskImportPayload(tasks: unknown[]) {
+  return {
+    version: 1,
+    tasks,
+  };
+}
 
 function buildRtBaseUrl(): string {
   const target = getSelectedRuntimeTarget();
@@ -51,7 +68,10 @@ export function MigrationDialogController() {
     if (detectRuntime() !== 'tauri') {
       return;
     }
-    if (isMigrationCompleted() || isMigrationSkipped()) {
+    if (isMigrationCompleted()) {
+      return;
+    }
+    if (isMigrationSkipped()) {
       return;
     }
 
@@ -104,7 +124,7 @@ export function MigrationDialogController() {
         };
 
         const rtIsEmpty = await detectRtIsEmpty(rtReaders);
-        if (!rtIsEmpty) {
+        if (!rtIsEmpty && !isMigrationPending()) {
           return;
         }
 
@@ -121,6 +141,7 @@ export function MigrationDialogController() {
 
     setMigrating(true);
     setError(undefined);
+    markMigrationPending();
 
     try {
       const legacyEventLogAdapter = new TauriEventLogStorageAdapter();
@@ -145,7 +166,7 @@ export function MigrationDialogController() {
           const response = await fetch(scopedUrl.toString(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(events),
+            body: JSON.stringify(buildLegacyEventlogImportPayload(events)),
           });
           if (!response.ok) {
             throw new Error(`Import events failed: ${response.status}`);
@@ -160,7 +181,7 @@ export function MigrationDialogController() {
           const response = await fetch(scopedUrl.toString(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(tasks),
+            body: JSON.stringify(buildLegacyTaskImportPayload(tasks)),
           });
           if (!response.ok) {
             throw new Error(`Import tasks failed: ${response.status}`);
@@ -198,11 +219,9 @@ export function MigrationDialogController() {
         setOpen(false);
         window.location.reload();
       } else {
-        setAllBackendModes('legacy');
         setError(result.error ?? '迁移失败，请稍后重试');
       }
     } catch (err) {
-      setAllBackendModes('legacy');
       setError(err instanceof Error ? err.message : '迁移失败，请稍后重试');
     } finally {
       setMigrating(false);
@@ -211,15 +230,11 @@ export function MigrationDialogController() {
 
   const handleSkip = useCallback(() => {
     markMigrationSkipped();
-    setAllBackendModes('legacy');
     setOpen(false);
-    window.location.reload();
   }, []);
 
-  // Error dismiss: don't mark as skipped (user didn't choose to skip, migration failed).
-  // Next launch will re-detect and offer migration again (retry on next startup).
   const handleErrorDismiss = useCallback(() => {
-    setAllBackendModes('legacy');
+    markMigrationSkipped();
     setOpen(false);
   }, []);
 

@@ -70,11 +70,54 @@ describe('Settings Registry Consistency', () => {
       developerMode: true,
     };
 
-    for (const id of ['eventlog-backend-mode', 'task-backend-mode', 'timeblock-backend-mode']) {
+    for (const id of ['eventlog-backend-mode']) {
       const item = SETTINGS_REGISTRY.find((entry) => entry.id === id);
       expect(item).toBeDefined();
       expect(item?.visible?.(webCtx)).toBe(false);
     }
+  });
+
+  it('does not expose task/timeblock backend toggles after RT-only cutover', () => {
+    expect(SETTINGS_REGISTRY.some((entry) => entry.id === 'task-backend-mode')).toBe(false);
+    expect(SETTINGS_REGISTRY.some((entry) => entry.id === 'timeblock-backend-mode')).toBe(false);
+  });
+
+  it('shows legacy migration reopen action only for skipped tauri migrations', () => {
+    const storage: Record<string, string> = {
+      'exomind:migrationSkipped': 'true',
+    };
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => (key in storage ? storage[key] : null),
+        setItem: (key: string, value: string) => {
+          storage[key] = value;
+        },
+        removeItem: (key: string) => {
+          delete storage[key];
+        },
+      },
+    });
+
+    const item = findRegistryItemById(SETTINGS_REGISTRY, 'data-legacy-migration');
+    expect(item).toBeDefined();
+    expect(item?.visible?.({
+      isDesktop: true,
+      isTauriWindow: true,
+      developerMode: false,
+    })).toBe(true);
+    expect(item?.visible?.({
+      isDesktop: true,
+      isTauriWindow: false,
+      developerMode: false,
+    })).toBe(false);
+
+    delete storage['exomind:migrationSkipped'];
+    expect(item?.visible?.({
+      isDesktop: true,
+      isTauriWindow: true,
+      developerMode: false,
+    })).toBe(false);
   });
 
   it('voice-shortcut-hotkey allows await when set returns a promise', async () => {

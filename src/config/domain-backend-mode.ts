@@ -3,13 +3,13 @@ import {
   setRuntimeConfigValue,
 } from './runtime-config-cache';
 /**
- * TODO(#749): Once Tauri desktop migration is complete and MigrationDialog no longer
- * falls back to 'legacy', remove the 'legacy' variant and simplify all consumers
- * to assume 'rt-sqlite'. See also: bootstrap.ts, timeblock.service.ts, task.service.ts.
+ * TODO(#749): Once runtime-config import/export and diagnostics no longer need to
+ * preserve historical values, remove the 'legacy' variant entirely. Runtime task
+ * and timeblock reads are already pinned to 'rt-sqlite'; legacy setters remain
+ * only so old config payloads can still be round-tripped or inspected.
  *
- * Note: getTimeblockBackendMode() is pinned to 'rt-sqlite' as of this change.
- * The timeblock domain no longer runs in legacy mode at runtime.
- * setTimeblockBackendMode() is kept for MigrationDialog migration semantics only.
+ * Note: getTaskBackendMode() / getTimeblockBackendMode() are pinned to
+ * 'rt-sqlite'. These domains no longer run in legacy mode at runtime.
  */
 export type DomainBackendMode = 'legacy' | 'rt-sqlite';
 export type DomainBackendKey = 'eventlog' | 'task' | 'timeblock';
@@ -55,7 +55,10 @@ export function setEventlogBackendMode(mode: DomainBackendMode): DomainBackendMo
 }
 
 export function getTaskBackendMode(): DomainBackendMode {
-  return getMode('task');
+  // Task domain is pinned to rt-sqlite; legacy mode is no longer supported
+  // at runtime. setTaskBackendMode() is kept only for historical config
+  // compatibility and diagnostics. See TODO(#749).
+  return 'rt-sqlite';
 }
 
 export function setTaskBackendMode(mode: DomainBackendMode): DomainBackendMode {
