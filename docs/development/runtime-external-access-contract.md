@@ -271,13 +271,23 @@ POST /act/timeblocks/end
 
 - [#677](https://github.com/exomind-team/exomind/issues/677)
 
-第一类提案建议是：
+按当前代码真相，提案箱首先是 **Agent 行动审批队列**，而不是“档案登录授权队列”。
 
-- 外部 Agent 提交登录某个档案的提案
+当前已经有代码落地、并能形成完整“创建提案 -> 人类批准 -> RT 执行”的动作类型是：
+
+- Agent 推荐创建任务（`create_task`）
+- Agent 推荐追加记录（`append_event`）
+- Agent 推荐启动时间块（`start_timeblock`）
+
+当前仍属于**预留动作类型、尚未执行落地**的是：
+
+- 外部 Agent 请求授权访问某个档案（`approve_agent_access`）
+  - 当前 store / 路由 / UI 标签已接受该动作类型
+  - 但批准后执行仍会进入 `NotYetImplemented("approve_agent_access")`
 
 未来可扩展为：
 
-- Agent 推荐任务
+- 更完整的外部 Agent 档案访问授权提案
 - Agent 请求执行高权限动作
 - Agent 请求绑定新能力
 

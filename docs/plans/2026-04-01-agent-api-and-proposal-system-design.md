@@ -67,7 +67,7 @@ enum ActionType {
     CreateTask,         // 创建任务
     AppendEvent,        // 添加事件日志
     StartTimeblock,     // 启动时间块（含名称与描述）
-    ApproveAgentAccess, // 批准外部 Agent 接入档案（#677）
+    ApproveAgentAccess, // 预留：外部 Agent 接入档案授权（当前已建模，尚未执行落地）
 }
 
 // ActionParams 示例：
@@ -83,6 +83,7 @@ enum ActionType {
 //
 // ApproveAgentAccess:
 //   { agent_id: String, agent_name: String, profile_id: String, scopes: Vec<String> }
+//   注：当前执行器尚未落地，批准后不会真正完成授权接入
 
 struct ProposalRef {
     ref_type: RefType,  // "event" | "timeblock" | "task"
@@ -161,7 +162,7 @@ MVP 阶段：文本 + 跳转按钮，如：
 
 ### 与 #677 的关系
 
-提案系统是 #677 所追踪的 Agent 审批队列能力的具体实现。`ApproveAgentAccess` 是第一类提案，后续 `CreateTask` / `AppendEvent` / `StartTimeblock` 是扩展的行为类提案。
+提案系统是 #677 所追踪的 Agent 审批队列能力的具体实现。按当前代码真相，已经先落地的是 `CreateTask` / `AppendEvent` / `StartTimeblock` 三类行为提案；`ApproveAgentAccess` 仍是已建模但尚未执行落地的预留动作类型。
 
 ---
 
