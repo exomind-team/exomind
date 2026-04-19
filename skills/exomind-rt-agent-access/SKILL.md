@@ -30,7 +30,7 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 
 - 最后更新日期：`2026-04-19`
 - 更新者：`Codex`
-- 更新内容概要：`明确 /act 优先、raw 回退 的入口规则，并补充 /act/await 与 raw watch 的职责分层。`
+- 更新内容概要：`明确 /act 优先、raw 回退 的入口规则，并补充时间块 await 语义：timeblock_stopped=专注结束，timeblock_ended=反馈完成后的时间块完成。`
 - 核验依据：
   - `GET /version` 等 live 版本信息
   - 当前工作区代码与相关路由实现
@@ -141,6 +141,10 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 7. `GET /eventlog/watch` 是 raw EventLog watch / cursor / catch-up / debug 工具；如果只是要“等待下一事件”或“等待任务 / 时间块 / 提案条件成立一次”，默认走 `/act/await`。
 8. raw RT 仍然是重要调试面，但角色是直读真相、低层排障和兼容期补能力；只有 `/act/*` 没有对应动作时才回退。
 9. 目前并非所有能力都已封装到 `/act/*`；例如时间块等多数工作流仍经常需要回退 raw 路由，这正是回退存在的原因。
+10. 时间块 await 语义要分清：
+    - `timeblock_stopped` = 专注结束 = active block 进入 `feedback_in_progress`
+    - raw EventLog 的 `block_end` / 文案“时间块结束”只是 `stop` 痕迹，不表示 feedback 已提交
+    - `timeblock_ended` = 时间块完成 = feedback 提交后进入 completed history
 
 ## 最小 raw fallback 接入三步
 
@@ -191,8 +195,31 @@ curl -N -X POST "http://<RT地址>:<端口>/act/await?user_id=profile-argon" \
 
 - 这是单次 fulfill 的 feature API：通常先收到 `ready`，等待中收到 `heartbeat`，命中后收到 `fulfilled` 并结束连接
 - 当前默认 `timeoutSecs=1800`，默认 `heartbeatSecs=15`
-- 等待 `task_completed`、`timeblock_ended`、`proposal_*` 等 feature 条件时，也优先走 `/act/await`
+- 等待 `task_completed`、`timeblock_stopped`、`timeblock_ended`、`proposal_*` 等 feature 条件时，也优先走 `/act/await`
 - 只有在你需要 raw event arrival / cursor / catch-up 语义，或需要排查 `/act/await` 内部到底等到了哪条底层事件时，才回去读 `references/eventlog.md`
+
+### 时间块 await 语义速记
+
+如果你要监听时间块，不要把 raw EventLog 文案和 feature 条件混在一起：
+
+- `timeblock_stopped`
+  - 含义：**专注结束**
+  - 真相：当前 active block 进入 `feedback_in_progress`
+  - 典型场景：用户刚点了 `stop`，准备填写反馈
+- `block_end`
+  - 含义：raw EventLog 中的“时间块结束: ...”文案
+  - 角色：只是 `POST /timeblocks/stop` 写出的痕迹
+  - 关键点：它不是 feedback 完成，不应替代 `timeblock_ended`
+- `timeblock_ended`
+  - 含义：**时间块完成 / 反馈完成**
+  - 真相：该时间块已经进入 completed history
+  - 典型场景：用户已提交反馈，`POST /timeblocks/end` 完成
+
+实操时可直接这样记：
+
+- 要等“专注结束” -> 监听 `timeblock_stopped`
+- 要等“反馈结束后的时间块完成” -> 监听 `timeblock_ended`
+- 如果只是在 EventLog 里看到了 `block_end`，只能说明块已经 stop 并进入反馈阶段，不能据此断言块已 completed
 
 ## 身份规范
 

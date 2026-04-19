@@ -1,4 +1,4 @@
-> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`补充 timeblocks raw fallback 语义，并明确与 /act/today-planner 和 /act/await 的入口分层。`
+> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`补充 timeblocks raw fallback 语义，并明确 timeblock_stopped / block_end / timeblock_ended 的分层。`
 
 # TimeBlocks
 
@@ -99,6 +99,27 @@ curl -sS -X POST "http://127.0.0.1:9124/timeblocks/end?user_id=profile-argon" \
 - 没有 active block：`409 cannot end: no active block`
 - 当前是 gap：`409 cannot end: current block is a gap`
 - 还没 `stop`：`409 cannot end: must stop first (use POST /timeblocks/stop)`
+
+## 时间块监听语义不要混淆
+
+如果任务是“等待一个未来时间块条件成立一次”，默认优先 `POST /act/await`，并按下面这组语义理解：
+
+- `timeblock_stopped`
+  - 含义：专注结束
+  - 真相：active block 已进入 `feedback_in_progress`
+- raw `block_end`
+  - 含义：EventLog 文案“时间块结束: ...”
+  - 角色：`POST /timeblocks/stop` 写出的痕迹
+  - 关键点：它只表示 stop / 进入反馈阶段，不表示 feedback 已提交
+- `timeblock_ended`
+  - 含义：时间块完成 / 反馈完成
+  - 真相：该块已经进入 completed history
+
+所以：
+
+- 要等“专注结束” -> 监听 `timeblock_stopped`
+- 要等“反馈完成后的时间块完成” -> 监听 `timeblock_ended`
+- 不要把 raw `block_end` 当成 `timeblock_ended` 的替代品
 
 ## 暂停与恢复
 

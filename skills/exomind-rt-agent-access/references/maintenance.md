@@ -1,4 +1,4 @@
-> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`记录 /act 优先、raw 回退 及各 reference fallback 路由护栏的维护。`
+> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`记录 /act 优先、raw 回退 及时间块 await 语义映射的维护。`
 
 # Maintenance
 
@@ -83,6 +83,7 @@
 
 ## 最近维护记录
 
+- `2026-04-19` | 更新者：`Codex` | 更新内容概要：`在主 SKILL 与 timeblocks reference 中明确 timeblock_stopped=专注结束、raw block_end=stop 痕迹、timeblock_ended=反馈完成后的时间块完成，避免 Agent 将“时间块结束”与“时间块完成”混淆。` | 核验依据：`await 联测 live 结果 + crates/exomind-runtime/src/agent_await.rs + crates/exomind-runtime/src/routes/timeblocks.rs + docs/plans/2026-04-19-external-agent-await-api-plan.md`
 - `2026-04-19` | 更新者：`Codex` | 更新内容概要：`收口“Agent 默认优先 /act/*，只有无对应动作时才回退 raw API”的入口规则，并把 index / tasks / timeblocks / eventlog references 全部标注为 raw fallback 或 act-first 跳转。` | 核验依据：`#676 + #930 + #931 + runtime-external-access-contract.md + today_planner.rs + agent_await.rs + routes/agent_await.rs + routes/eventlog.rs`
 - `2026-04-19` | 更新者：`Codex` | 更新内容概要：`将独立 curl 手册剩余增量信息并入主 SKILL 的外部边界章节，补充当前 `/agents/*` 与 `/act/today-planner/*` 的精确端点列表，并删除 docs/development 下的重复 standalone 文档。` | 核验依据：`仓库全文搜索无反向引用 + 当前 skill references 结构 + 基线 e79ab61b`
 - `2026-04-16` | 更新者：`Codex` | 更新内容概要：`移除 skill 文档中对已删除 curl 手册文件名的残留提及，确认 skill 内只保留单一真源表述。` | 核验依据：`skill 目录全文搜索 + 当前工作区 skill 结构`
