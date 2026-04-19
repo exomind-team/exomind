@@ -29,7 +29,7 @@ function emitProposalToast(event: ProposalLifecycleEvent): void {
   switch (event.topic) {
     case 'proposal.created':
       toast({
-        title: '收到新的请求',
+        title: '收到新的提案',
         description: `${resolveProposalActionLabel(event.payload.proposal.actionType)} · ${event.payload.proposal.title}`,
       });
       return;
@@ -37,7 +37,7 @@ function emitProposalToast(event: ProposalLifecycleEvent): void {
     case 'proposal.status_changed': {
       const statusMeta = resolveProposalStatusMeta(event.payload.transition.toStatus);
       toast({
-        title: `请求状态已更新：${statusMeta.label}`,
+        title: `提案状态已更新：${statusMeta.label}`,
         description: event.payload.proposal.title,
       });
       return;

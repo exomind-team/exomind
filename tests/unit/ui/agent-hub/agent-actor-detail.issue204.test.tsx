@@ -80,6 +80,30 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByTestId('actor-detail-page').className).toContain('text-foreground');
   });
 
+  it('keeps agent detail shell visible while loading（Agent 加载中也应保留页面骨架）', () => {
+    serviceMocks.getAgentDetail.mockImplementationOnce(() => new Promise(() => {}));
+
+    render(<AgentDetailPage agentId="agent-daily" />);
+
+    expect(screen.getByTestId('agent-detail-page')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-header')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-back-button')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-loading')).toBeInTheDocument();
+    expect(screen.getByText('Agent 详情加载中...')).toBeInTheDocument();
+  });
+
+  it('keeps actor detail shell visible while loading（Actor 加载中也应保留页面骨架）', () => {
+    serviceMocks.getActorDetail.mockImplementationOnce(() => new Promise(() => {}));
+
+    render(<ActorDetailPage actorId="actor-timer" />);
+
+    expect(screen.getByTestId('actor-detail-page')).toBeInTheDocument();
+    expect(screen.getByTestId('actor-detail-header')).toBeInTheDocument();
+    expect(screen.getByTestId('actor-detail-back-button')).toBeInTheDocument();
+    expect(screen.getByTestId('actor-detail-loading')).toBeInTheDocument();
+    expect(screen.getByText('Actor 详情加载中...')).toBeInTheDocument();
+  });
+
   it('renders agent empty state when detail is missing（Agent 空详情应展示空态）', async () => {
     serviceMocks.getAgentDetail.mockResolvedValueOnce(null);
     render(<AgentDetailPage agentId="agent-summary" />);

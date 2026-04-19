@@ -192,7 +192,7 @@ describe('ProposalRtAdapter', () => {
     });
   });
 
-  it('times out runtime proposal requests instead of hanging forever（RT 不可达时请求箱请求会超时返回）', async () => {
+  it('times out runtime proposal requests instead of hanging forever（RT 不可达时提案箱请求会超时返回）', async () => {
     vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {

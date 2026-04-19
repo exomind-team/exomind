@@ -15,6 +15,7 @@ type PageHeaderNavButtonItem<T extends string> = PageHeaderNavBaseItem<T>;
 type PageHeaderNavLinkItem<T extends string> = PageHeaderNavBaseItem<T> & {
   to: string;
   search?: unknown;
+  preload?: false | 'intent' | 'viewport' | 'render';
 };
 
 type PageHeaderNavButtonsProps<T extends string> = {
@@ -103,6 +104,7 @@ export function PageHeaderNav<T extends string>(props: PageHeaderNavProps<T>) {
             key={item.id}
             to={item.to}
             search={item.search as never}
+            preload={item.preload ?? 'render'}
             data-testid={item.testId}
             aria-current={isActive ? 'page' : undefined}
             className={resolveItemClassName(isActive)}

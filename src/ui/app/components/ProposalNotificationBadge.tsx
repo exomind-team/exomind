@@ -95,7 +95,7 @@ export function ProposalNotificationBadge({
         className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+74px)] right-4 z-40 inline-flex items-center gap-2 rounded-full border border-[#F5C7B8] bg-[#FFF7ED]/95 px-3 py-2 text-xs font-semibold text-[#9A3412] shadow-[0_18px_38px_-24px_rgba(154,52,18,0.6)] backdrop-blur dark:border-[#7C2D12] dark:bg-[#2A140D]/95 dark:text-[#FDBA74]"
       >
         <Inbox size={16} />
-        <span>请求箱</span>
+        <span>提案箱</span>
         <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[#C75B3A] px-1.5 py-0.5 text-[10px] leading-none text-white">
           {formatCount(pendingCount)}
         </span>

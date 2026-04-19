@@ -17,7 +17,7 @@ const TASK_DOMAIN_ITEMS: Array<{
   { id: 'list', label: '任务', icon: ListTodo, to: '/tasks', search: buildTasksMainSearch() },
   { id: 'timeline', label: '时间线', icon: Clock3, to: '/tasks/timeline' },
   { id: 'dag', label: '依赖图', icon: Waypoints, to: '/tasks/dag' },
-  { id: 'proposals', label: '请求箱', icon: Inbox, to: '/proposals' },
+  { id: 'proposals', label: '提案箱', icon: Inbox, to: '/proposals' },
 ];
 
 export function TaskDomainTabs({ active }: { active: TaskDomainTabId }) {

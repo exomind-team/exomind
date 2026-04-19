@@ -39,12 +39,23 @@ vi.mock('@/lib/services/proposal-data-change.service', () => ({
   },
 }));
 
-describe('ProposalInboxPage loading fallback（请求箱加载失败反馈）', () => {
+describe('ProposalInboxPage loading fallback（提案箱加载失败反馈）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     adapterMocks.updateProposal.mockResolvedValue(null);
     adapterMocks.addComment.mockResolvedValue(null);
     proposalDataChangeState.listeners.clear();
+  });
+
+  it('keeps the shared task shell visible while proposal data is loading（加载期间仍保留任务域壳层）', () => {
+    adapterMocks.listProposals.mockImplementation(() => new Promise(() => {}));
+
+    render(<ProposalInboxPage />);
+
+    expect(screen.getByRole('heading', { name: '任务' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '任务域导航' })).toBeInTheDocument();
+    expect(screen.getByTestId('proposal-inbox-loading')).toBeInTheDocument();
+    expect(screen.getByText('提案箱加载中...')).toBeInTheDocument();
   });
 
   it('shows an error instead of staying on the loading state when the RT request times out（RT 超时时不再一直卡在加载中）', async () => {
@@ -56,7 +67,7 @@ describe('ProposalInboxPage loading fallback（请求箱加载失败反馈）', 
     render(<ProposalInboxPage />);
 
     await waitFor(() => {
-      expect(screen.queryByText('请求箱加载中...')).not.toBeInTheDocument();
+      expect(screen.queryByText('提案箱加载中...')).not.toBeInTheDocument();
     });
 
     expect(screen.getByText('RT proposal request timed out（请求超时）')).toBeInTheDocument();
@@ -72,7 +83,7 @@ describe('ProposalInboxPage loading fallback（请求箱加载失败反馈）', 
     warnSpy.mockRestore();
   });
 
-  it('refreshes immediately when proposal data changes are notified（收到 proposal 数据变更时立即刷新请求箱）', async () => {
+  it('refreshes immediately when proposal data changes are notified（收到 proposal 数据变更时立即刷新提案箱）', async () => {
     adapterMocks.listProposals
       .mockResolvedValueOnce([{
         id: 'proposal-1',

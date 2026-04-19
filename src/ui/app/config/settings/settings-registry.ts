@@ -1489,7 +1489,7 @@ export const FEATURE_TOGGLE_SETTINGS = [
   },
   {
     id: 'proposal-inbox-enabled',
-    label: '请求箱（任务域）',
+    label: '提案箱（任务域）',
     icon: Inbox,
     rowTestId: 'feature-toggle-proposal-inbox-row',
     controlTestId: 'feature-toggle-proposal-inbox-switch',

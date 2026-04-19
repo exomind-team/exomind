@@ -25,7 +25,7 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     expect(screen.getByText('Me 页面')).toBeInTheDocument();
     expect(screen.getByText('网络页面')).toBeInTheDocument();
     expect(screen.getByText('API Agent Tab')).toBeInTheDocument();
-    expect(screen.getByText('请求箱（任务域）')).toBeInTheDocument();
+    expect(screen.getByText('提案箱（任务域）')).toBeInTheDocument();
     expect(screen.getByText('桌面端适配')).toBeInTheDocument();
     expect(screen.getByText('命令面板')).toBeInTheDocument();
   });
@@ -72,7 +72,7 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     expect(vi.mocked(setMePageEnabled)).toHaveBeenCalledWith(true);
   });
 
-  it('updates proposal inbox state inline（直接更新请求箱任务域开关）', () => {
+  it('updates proposal inbox state inline（直接更新提案箱任务域开关）', () => {
     render(<SettingsPage />);
     const toggle = screen.getByTestId('feature-toggle-proposal-inbox-switch');
     fireEvent.click(toggle);

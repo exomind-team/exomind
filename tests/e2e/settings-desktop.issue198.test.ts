@@ -276,7 +276,7 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
   });
 
-  test('desktop proposals route uses desktop shell（桌面端请求箱走桌面壳层）', async ({ page }) => {
+  test('desktop proposals route uses desktop shell（桌面端提案箱走桌面壳层）', async ({ page }) => {
     await page.goto('/proposals');
     await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();

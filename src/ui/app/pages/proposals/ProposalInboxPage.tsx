@@ -155,6 +155,85 @@ function SummaryStat({
   );
 }
 
+function ProposalInboxLoadingState({ isDesktop }: { isDesktop: boolean }) {
+  return (
+    <section
+      data-testid="proposal-inbox-loading"
+      aria-live="polite"
+      className="space-y-4"
+    >
+      <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">提案箱加载中...</p>
+      <div className={cn(isDesktop ? 'grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]' : 'space-y-4')}>
+        <aside className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <article
+                key={`loading-stat-${index}`}
+                aria-hidden="true"
+                className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 animate-pulse dark:border-[#292524] dark:bg-[#1C1917]"
+              >
+                <div className="h-3 w-16 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+                <div className="mt-3 h-8 w-12 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+                <div className="mt-2 h-3 w-24 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+              </article>
+            ))}
+          </div>
+
+          <section className="rounded-3xl border border-[#E7E5E4] bg-white p-3 dark:border-[#292524] dark:bg-[#1C1917]">
+            <div className="flex flex-wrap gap-2 px-1 pb-3">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={`loading-filter-${index}`}
+                  aria-hidden="true"
+                  className="h-8 rounded-full bg-[#F5F0ED] animate-pulse dark:bg-[#292524]"
+                  style={{ width: `${56 + index * 10}px` }}
+                />
+              ))}
+            </div>
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <article
+                  key={`loading-item-${index}`}
+                  aria-hidden="true"
+                  className="rounded-2xl border border-[#E7E5E4] bg-[#FCFBFA] px-4 py-3 animate-pulse dark:border-[#292524] dark:bg-[#141210]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="h-4 w-3/4 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+                      <div className="h-3 w-1/2 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+                      <div className="h-3 w-full rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+                    </div>
+                    <div className="h-3 w-12 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </aside>
+
+        <section className="rounded-3xl border border-[#E7E5E4] bg-white p-5 animate-pulse dark:border-[#292524] dark:bg-[#1C1917]">
+          <div className="h-6 w-2/5 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+          <div className="mt-3 h-4 w-3/5 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+          <div className="mt-6 grid gap-3 md:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div
+                key={`loading-detail-${index}`}
+                aria-hidden="true"
+                className="rounded-2xl border border-[#F0ECE8] bg-[#FCFBFA] p-4 dark:border-[#292524] dark:bg-[#141210]"
+              >
+                <div className="h-3 w-20 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+                <div className="mt-3 h-4 w-full rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+                <div className="mt-2 h-4 w-4/5 rounded-full bg-[#F5F0ED] dark:bg-[#292524]" />
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 h-28 rounded-3xl bg-[#F5F0ED] dark:bg-[#292524]" aria-hidden="true" />
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function ProposalReferenceAction({
   reference,
 }: {
@@ -233,7 +312,7 @@ export function ProposalInboxPage() {
       setErrorMessage(null);
       setEndpointMissing(false);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '请求箱加载失败';
+      const message = error instanceof Error ? error.message : '提案箱加载失败';
       const missingEndpoint = error instanceof ProposalRtError && error.status === 404;
       const target = getSelectedRuntimeTarget();
       console.warn('[proposal-inbox] failed to load proposals', {
@@ -457,7 +536,7 @@ export function ProposalInboxPage() {
       }
       return nextProposal;
     } catch (error) {
-      const message = error instanceof Error ? error.message : '请求失败';
+      const message = error instanceof Error ? error.message : '提案操作失败';
       toast({
         title: failureTitle,
         description: message,
@@ -598,23 +677,15 @@ export function ProposalInboxPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="px-6 py-6 text-sm text-[#78716C] dark:text-[#A8A29E]">
-        请求箱加载中...
-      </div>
-    );
-  }
-
   const selectedProposalActionable = selectedProposal
     ? isProposalDecisionActionable(selectedProposal.status)
     : false;
+  const showInitialLoadingState = loading && proposals.length === 0;
 
   return (
     <PageShell
       title="任务"
-      eyebrow="Proposal Inbox"
-      subtitle="请求箱视图：Agent 的操作先进入请求箱，再由你决定批准、拒绝还是暂缓。"
+      subtitle="提案箱视图：Agent 的操作先进入提案箱，再由你决定批准、拒绝还是暂缓。"
       headerBottom={<TaskDomainTabs active="proposals" />}
       headerAction={(
         <Button
@@ -624,7 +695,7 @@ export function ProposalInboxPage() {
           onClick={() => {
             void loadProposals({ silent: true });
           }}
-          disabled={refreshing}
+          disabled={loading || refreshing}
           className="gap-2 rounded-full"
         >
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />
@@ -635,6 +706,10 @@ export function ProposalInboxPage() {
       contentClassName="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+96px)] pt-4 md:px-8 md:pb-24 lg:px-10"
     >
       <div data-testid="proposal-inbox-page" className="mx-auto max-w-7xl space-y-4">
+          {showInitialLoadingState ? (
+            <ProposalInboxLoadingState isDesktop={isDesktop} />
+          ) : (
+            <>
           {endpointMissing ? (
             <section className="rounded-3xl border border-dashed border-[#F5C7B8] bg-[#FFF7ED] px-5 py-5 dark:border-[#7C2D12] dark:bg-[#1C1917]">
               <h2 className="text-base font-semibold text-[#9A3412] dark:text-[#FDBA74]">
@@ -670,7 +745,7 @@ export function ProposalInboxPage() {
           <div className={cn(isDesktop ? 'grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]' : 'space-y-4')}>
             <aside className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-                <SummaryStat label="待处理" value={counts.pending} hint="还没决定的请求" />
+                <SummaryStat label="待处理" value={counts.pending} hint="还没决定的提案" />
                 <SummaryStat label="审议中" value={counts.in_review} hint="需要继续讨论的提案" />
                 <SummaryStat label="已处理" value={counts.handled} hint="已批准 / 拒绝 / 暂缓" />
               </div>
@@ -970,7 +1045,9 @@ export function ProposalInboxPage() {
               )}
             </section>
           </div>
-        </div>
+            </>
+          )}
+      </div>
     </PageShell>
   );
 }

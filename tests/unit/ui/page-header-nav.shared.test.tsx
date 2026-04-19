@@ -51,6 +51,7 @@ describe('PageHeaderNav（共享头部导航）', () => {
 
     expect(screen.getByRole('navigation', { name: '任务域导航' })).toBeInTheDocument();
     expect(screen.getByTestId('task-domain-tab-list')).toHaveAttribute('to', '/tasks');
+    expect(screen.getByTestId('task-domain-tab-list')).toHaveAttribute('preload', 'render');
     expect(screen.getByTestId('task-domain-tab-timeline')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('task-domain-tab-timeline')).not.toHaveAttribute('role', 'tab');
   });

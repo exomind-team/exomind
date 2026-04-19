@@ -9,7 +9,7 @@ import {
   __resetRuntimeConfigCacheForTests,
 } from '@/config/runtime-config-cache';
 
-describe('proposal inbox flag（请求箱开关）', () => {
+describe('proposal inbox flag（提案箱开关）', () => {
   let storage: Record<string, string>;
 
   beforeEach(() => {
@@ -41,7 +41,7 @@ describe('proposal inbox flag（请求箱开关）', () => {
     unsubscribe();
   });
 
-  it('reads runtime-backed value before localStorage（优先读取 Runtime 中的请求箱开关）', () => {
+  it('reads runtime-backed value before localStorage（优先读取 Runtime 中的提案箱开关）', () => {
     storage['exomind:proposalInboxEnabled'] = 'true';
     __primeRuntimeConfigForTests({ 'exomind:proposalInboxEnabled': 'false' });
 

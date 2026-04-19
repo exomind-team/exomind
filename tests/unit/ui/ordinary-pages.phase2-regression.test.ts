@@ -25,13 +25,13 @@ describe('ordinary pages phase 2 regression（普通页面阶段二回归）', (
     expect(source).toContain('<NowInputRow');
   });
 
-  it('keeps ProposalInboxPage inside shared shell and task domain tabs（请求箱继续挂在共享壳层和任务域导航下）', () => {
+  it('keeps ProposalInboxPage inside shared shell and task domain tabs（提案箱继续挂在共享壳层和任务域导航下）', () => {
     const source = readSource('src/ui/app/pages/proposals/ProposalInboxPage.tsx');
 
     expect(source).toContain('<PageShell');
     expect(source).not.toContain('TaskBreadcrumb');
     expect(source).toContain('title="任务"');
-    expect(source).toContain('eyebrow="Proposal Inbox"');
+    expect(source).not.toContain('eyebrow=');
     expect(source).toContain('headerBottom={<TaskDomainTabs active="proposals" />}');
   });
 

@@ -122,7 +122,7 @@ async function waitForToastDelay(): Promise<void> {
   });
 }
 
-describe('ProposalInboxPage approval toast（请求箱批准反馈）', () => {
+describe('ProposalInboxPage approval toast（提案箱批准反馈）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     proposalDataChangeState.listeners.clear();

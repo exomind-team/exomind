@@ -86,7 +86,7 @@ describe('ProposalNotificationCoordinator', () => {
     proposalLifecycleState.listeners.clear();
   });
 
-  it('shows created toast outside the proposals route（离开请求箱页时显示新提案提示）', () => {
+  it('shows created toast outside the proposals route（离开提案箱页时显示新提案提示）', () => {
     render(<ProposalNotificationCoordinator />);
 
     emitLifecycle({
@@ -105,12 +105,12 @@ describe('ProposalNotificationCoordinator', () => {
     });
 
     expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
-      title: '收到新的请求',
+      title: '收到新的提案',
       description: '创建任务 · Proposal title',
     }));
   });
 
-  it('suppresses ordinary proposal toasts on the proposals route（请求箱页内抑制 created/status_changed toast）', () => {
+  it('suppresses ordinary proposal toasts on the proposals route（提案箱页内抑制 created/status_changed toast）', () => {
     locationState.pathname = '/proposals';
 
     render(<ProposalNotificationCoordinator />);
@@ -154,7 +154,7 @@ describe('ProposalNotificationCoordinator', () => {
     expect(toastMock).not.toHaveBeenCalled();
   });
 
-  it('does not suppress execution failure toast on the proposals route（请求箱页内仍显示执行失败提示）', () => {
+  it('does not suppress execution failure toast on the proposals route（提案箱页内仍显示执行失败提示）', () => {
     locationState.pathname = '/proposals';
 
     render(<ProposalNotificationCoordinator />);
@@ -195,7 +195,7 @@ describe('ProposalNotificationCoordinator', () => {
     }));
   });
 
-  it('does not toast when proposal inbox feature is disabled（请求箱功能关闭时不再提示）', () => {
+  it('does not toast when proposal inbox feature is disabled（提案箱功能关闭时不再提示）', () => {
     proposalInboxFlagState.enabled = false;
 
     render(<ProposalNotificationCoordinator />);

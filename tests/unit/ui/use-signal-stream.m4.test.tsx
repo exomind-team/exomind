@@ -652,7 +652,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     expect(notifyTaskDataChangedMock).toHaveBeenCalledTimes(1);
   });
 
-  it('bridges proposal replication into proposal data refresh notifications（proposal replication 直接触发请求箱数据刷新）', async () => {
+  it('bridges proposal replication into proposal data refresh notifications（proposal replication 直接触发提案箱数据刷新）', async () => {
     runtimeStatuses.push({
       running: true,
       host: '127.0.0.1',

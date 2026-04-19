@@ -24,6 +24,82 @@ export const PHASE_COLORS: Record<string, string> = {
   dormant: '#6B7280',
 };
 
+function AgentDetailHeader({ title }: { title: string }) {
+  return (
+    <header data-testid="agent-detail-header" className="mb-3 flex items-center justify-between border-b border-border-card pb-3">
+      <button
+        type="button"
+        data-testid="agent-detail-back-button"
+        onClick={() => window.history.back()}
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        aria-label="返回（Back）"
+      >
+        <ArrowLeft size={16} />
+      </button>
+      <h1 className="text-[17px] font-bold text-foreground">{title}</h1>
+      <button
+        type="button"
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        aria-label="更多（More）"
+      >
+        <MoreHorizontal size={16} />
+      </button>
+    </header>
+  );
+}
+
+function AgentDetailLoadingState({ isDesktop }: { isDesktop: boolean }) {
+  return (
+    <section data-testid="agent-detail-loading" aria-live="polite" className="space-y-4">
+      <p className="text-sm text-muted-foreground">Agent 详情加载中...</p>
+
+      <section className="rounded-[18px] border border-border-card bg-card p-4 animate-pulse">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-[#C75B3A20]" aria-hidden="true" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-4 w-32 rounded-full bg-muted" aria-hidden="true" />
+            <div className="h-3 w-20 rounded-full bg-muted" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="mt-3 h-4 w-full rounded-full bg-muted" aria-hidden="true" />
+        <div className="mt-2 h-4 w-4/5 rounded-full bg-muted" aria-hidden="true" />
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={`agent-loading-stat-${index}`} className="rounded-lg bg-background py-2">
+              <div className="mx-auto h-3 w-12 rounded-full bg-muted" aria-hidden="true" />
+              <div className="mx-auto mt-2 h-4 w-10 rounded-full bg-muted" aria-hidden="true" />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {Array.from({ length: 3 }).map((_, index) => (
+        <section key={`agent-loading-section-${index}`} className="animate-pulse">
+          <div className="h-4 w-20 rounded-full bg-muted" aria-hidden="true" />
+          <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+            {Array.from({ length: index === 2 ? 3 : 2 }).map((__, itemIndex) => (
+              <div key={`agent-loading-row-${index}-${itemIndex}`}>
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-3 w-24 rounded-full bg-muted" aria-hidden="true" />
+                    <div className="h-4 w-3/5 rounded-full bg-muted" aria-hidden="true" />
+                  </div>
+                  <div className="h-4 w-12 rounded-full bg-muted" aria-hidden="true" />
+                </div>
+                {itemIndex !== (index === 2 ? 3 : 2) - 1 ? <div className="h-px bg-border" /> : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <div className={`pt-4 ${isDesktop ? 'pb-6' : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'}`}>
+        <div className="h-12 w-full rounded-[14px] bg-[#C75B3A1A] animate-pulse" aria-hidden="true" />
+      </div>
+    </section>
+  );
+}
+
 export function EnergyBar({
   energy,
   onRefill,
@@ -189,17 +265,11 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
     }
   };
 
-  if (loading) {
-    return (
-      <div data-testid="agent-detail-page" className="min-h-full bg-surface px-5 py-4 text-sm text-muted-foreground md:px-8 lg:px-10">
-        Agent 详情加载中...
-      </div>
-    );
-  }
+  return (
+    <div data-testid="agent-detail-page" className="min-h-full bg-surface px-5 py-3 text-foreground md:px-8 lg:px-10">
+      <AgentDetailHeader title={detail?.title ?? 'Agent 详情'} />
 
-  if (!detail) {
-    return (
-      <div data-testid="agent-detail-page" className="min-h-full bg-surface px-5 py-3 text-foreground md:px-8 lg:px-10">
+      {loading ? <AgentDetailLoadingState isDesktop={isDesktop} /> : !detail ? (
         <section
           data-testid="agent-detail-empty-state"
           className="mt-6 rounded-2xl border border-border-card bg-card px-4 py-6 text-center"
@@ -214,137 +284,115 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
             返回上一页
           </button>
         </section>
-      </div>
-    );
-  }
+      ) : (
+        <>
+          <section className="rounded-[18px] border border-border-card bg-card p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#C75B3A20] text-[#C75B3A]">
+                <Sparkles size={18} />
+              </div>
+              <div>
+                <p className="text-[16px] font-bold text-foreground">{detail.title}</p>
+                <p className="text-xs text-[#22C55E]">● 运行中</p>
+              </div>
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">{detail.description}</p>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {detail.stats.map((stat) => (
+                <div key={stat.label} className="rounded-lg bg-background py-2 text-center">
+                  <span className="text-[11px] text-muted-foreground">{stat.label}</span>
+                  <p className="text-sm font-semibold text-foreground">{stat.value}</p>
+                </div>
+              ))}
+            </div>
+          </section>
 
-  return (
-    <div data-testid="agent-detail-page" className="min-h-full bg-surface px-5 py-3 text-foreground md:px-8 lg:px-10">
-      <header data-testid="agent-detail-header" className="mb-3 flex items-center justify-between border-b border-border-card pb-3">
-        <button
-          type="button"
-          data-testid="agent-detail-back-button"
-          onClick={() => window.history.back()}
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
-          aria-label="返回（Back）"
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <h1 className="text-[17px] font-bold text-foreground">{detail.title}</h1>
-        <button
-          type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
-          aria-label="更多（More）"
-        >
-          <MoreHorizontal size={16} />
-        </button>
-      </header>
+          {energy && <EnergyBar energy={energy} onRefill={handleRefillEnergy} isRefilling={isRefilling} />}
 
-      <section className="rounded-[18px] border border-border-card bg-card p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#C75B3A20] text-[#C75B3A]">
-            <Sparkles size={18} />
+          {/* Workspace tabs — shown for life agents (those with workspace) */}
+          <WorkspaceTabs agentId={targetId} />
+
+          <section className="mt-4">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">触发规则</h3>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+              {detail.triggerRules.map((item, index) => (
+                <div key={`${item.key}-${item.value}`}>
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <span className="text-sm text-muted-foreground">{item.key}</span>
+                    <span className={`text-sm ${item.highlight ? 'font-semibold text-[#C75B3A]' : 'text-foreground'}`}>
+                      {item.value}
+                    </span>
+                  </div>
+                  {index !== detail.triggerRules.length - 1 && <div className="h-px bg-border" />}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-4">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">输出目标</h3>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+              {detail.targets.map((item, index) => {
+                const Icon = getTargetIcon(item);
+                return (
+                  <div key={item.id}>
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                        <Icon size={14} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">{item.description}</p>
+                      </div>
+                    </div>
+                    {index !== detail.targets.length - 1 && <div className="h-px bg-border" />}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="mt-4">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">最近执行</h3>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+              {detail.recentLogs.map((item, index) => (
+                <div key={item.id}>
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <div className="flex items-start gap-2">
+                      <div className="mt-0.5 rounded-full bg-[#22C55E15] p-1 text-[#22C55E]">
+                        <CheckCheck size={12} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">{item.time}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock3 size={11} />
+                      {item.duration ?? '--'}
+                    </div>
+                  </div>
+                  {index !== detail.recentLogs.length - 1 && <div className="h-px bg-border" />}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className={`pt-4 ${isDesktop ? 'pb-6' : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'}`}>
+            <button
+              type="button"
+              data-testid="agent-detail-chat-button"
+              onClick={() => {
+                if (!targetId) return;
+                window.location.href = `/agents/chat/${targetId}`;
+              }}
+              className="w-full rounded-[14px] bg-[#C75B3A] px-4 py-3 text-sm font-semibold text-white"
+            >
+              与 Agent 对话
+            </button>
           </div>
-          <div>
-            <p className="text-[16px] font-bold text-foreground">{detail.title}</p>
-            <p className="text-xs text-[#22C55E]">● 运行中</p>
-          </div>
-        </div>
-        <p className="mt-2 text-sm text-muted-foreground">{detail.description}</p>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {detail.stats.map((stat) => (
-            <div key={stat.label} className="rounded-lg bg-background py-2 text-center">
-              <span className="text-[11px] text-muted-foreground">{stat.label}</span>
-              <p className="text-sm font-semibold text-foreground">{stat.value}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {energy && <EnergyBar energy={energy} onRefill={handleRefillEnergy} isRefilling={isRefilling} />}
-
-      {/* Workspace tabs — shown for life agents (those with workspace) */}
-      <WorkspaceTabs agentId={targetId} />
-
-      <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-muted-foreground">触发规则</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
-          {detail.triggerRules.map((item, index) => (
-            <div key={`${item.key}-${item.value}`}>
-              <div className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm text-muted-foreground">{item.key}</span>
-                <span className={`text-sm ${item.highlight ? 'font-semibold text-[#C75B3A]' : 'text-foreground'}`}>
-                  {item.value}
-                </span>
-              </div>
-              {index !== detail.triggerRules.length - 1 && <div className="h-px bg-border" />}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-muted-foreground">输出目标</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
-          {detail.targets.map((item, index) => {
-            const Icon = getTargetIcon(item);
-            return (
-              <div key={item.id}>
-                <div className="flex items-center gap-3 px-4 py-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                    <Icon size={14} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground">{item.name}</p>
-                    <p className="text-xs text-muted-foreground">{item.description}</p>
-                  </div>
-                </div>
-                {index !== detail.targets.length - 1 && <div className="h-px bg-border" />}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-muted-foreground">最近执行</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
-          {detail.recentLogs.map((item, index) => (
-            <div key={item.id}>
-              <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-start gap-2">
-                  <div className="mt-0.5 rounded-full bg-[#22C55E15] p-1 text-[#22C55E]">
-                    <CheckCheck size={12} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{item.title}</p>
-                    <p className="text-xs text-muted-foreground">{item.time}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Clock3 size={11} />
-                  {item.duration ?? '--'}
-                </div>
-              </div>
-              {index !== detail.recentLogs.length - 1 && <div className="h-px bg-border" />}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <div className={`pt-4 ${isDesktop ? 'pb-6' : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'}`}>
-        <button
-          type="button"
-          data-testid="agent-detail-chat-button"
-          onClick={() => {
-            if (!targetId) return;
-            window.location.href = `/agents/chat/${targetId}`;
-          }}
-          className="w-full rounded-[14px] bg-[#C75B3A] px-4 py-3 text-sm font-semibold text-white"
-        >
-          与 Agent 对话
-        </button>
-      </div>
+        </>
+      )}
     </div>
   );
 }

@@ -29,7 +29,7 @@ describe('TaskDomainTabs（任务域顶部导航）', () => {
     expect(screen.getByTestId('task-domain-tab-proposals')).not.toHaveAttribute('role', 'tab');
   });
 
-  it('hides proposals tab outside the proposals page when proposal inbox flag is off（请求箱开关关闭时在非请求箱页隐藏任务域入口）', () => {
+  it('hides proposals tab outside the proposals page when proposal inbox flag is off（提案箱开关关闭时在非提案箱页隐藏任务域入口）', () => {
     getProposalInboxEnabledMock.mockReturnValue(false);
 
     render(<TaskDomainTabs active="list" />);

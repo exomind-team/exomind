@@ -19,7 +19,7 @@ describe('PageShell（统一页面壳层）', () => {
   it('supports eyebrow, subtitle, header action, and header bottom（支持统一页面头部结构）', () => {
     render(
       <PageShell
-        title="请求箱"
+        title="提案箱"
         headerTop={<div data-testid="page-shell-header-top">面包屑</div>}
         eyebrow="Proposal Inbox"
         subtitle="统一的页面头部结构"
@@ -32,7 +32,7 @@ describe('PageShell（统一页面壳层）', () => {
 
     expect(screen.getByTestId('page-shell-header-top')).toHaveTextContent('面包屑');
     expect(screen.getByText('Proposal Inbox')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '请求箱' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '提案箱' })).toBeInTheDocument();
     expect(screen.getByText('统一的页面头部结构')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument();
     expect(screen.getByTestId('page-shell-header-bottom')).toHaveTextContent('切换条');

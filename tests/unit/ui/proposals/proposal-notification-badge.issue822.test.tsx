@@ -52,7 +52,7 @@ vi.mock('@/lib/services/proposal-data-change.service', () => ({
   },
 }));
 
-describe('ProposalNotificationBadge observability（请求箱角标失败日志）', () => {
+describe('ProposalNotificationBadge observability（提案箱角标失败日志）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     proposalInboxFlagState.enabled = true;
@@ -83,7 +83,7 @@ describe('ProposalNotificationBadge observability（请求箱角标失败日志�
     warnSpy.mockRestore();
   });
 
-  it('does not poll the RT when proposal inbox entry is disabled（请求箱入口关闭时不再轮询 RT）', () => {
+  it('does not poll the RT when proposal inbox entry is disabled（提案箱入口关闭时不再轮询 RT）', () => {
     proposalInboxFlagState.enabled = false;
 
     render(<ProposalNotificationBadge placement="desktop" />);

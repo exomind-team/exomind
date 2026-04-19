@@ -145,6 +145,21 @@ describe('TimeBlockDetailPage issue #583 domain routing', () => {
     expect(screen.getAllByText('任务').length).toBeGreaterThan(0)
   })
 
+  it('keeps timeblock detail shell visible while loading（加载中也应保留时间块详情页壳层）', () => {
+    useIsDesktopMock.mockReturnValue(true)
+    getDesktopAdaptiveEnabledMock.mockReturnValue(true)
+    loadTimeBlocksMock.mockImplementationOnce(() => new Promise(() => {}))
+    window.history.replaceState({}, '', '/eventlog/timeblocks/block-1')
+
+    render(<TimeBlockDetailPage />)
+
+    expect(screen.getByTestId('timeblock-detail-page')).toBeInTheDocument()
+    expect(screen.getByTestId('timeblock-detail-header')).toBeInTheDocument()
+    expect(screen.getByTestId('timeblock-detail-loading')).toBeInTheDocument()
+    expect(screen.getByText('加载时间块详情...')).toBeInTheDocument()
+    expect(screen.getByText('当下').closest('a')).toHaveAttribute('href', '/eventlog')
+  })
+
   it('builds related-task detail and dag links with timeblock return context', async () => {
     loadTimeBlocksMock.mockResolvedValue([
       makeBlock({
