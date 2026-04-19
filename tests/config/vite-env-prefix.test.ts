@@ -8,7 +8,7 @@ describe('vite env prefix config', () => {
       : viteConfig;
   }
 
-  it('should expose EXOMIND_ env vars to import.meta.env', async () => {
+  it('should expose EXOMIND_ and TAURI_ENV_ vars to import.meta.env', async () => {
     const resolved = await resolveConfig();
 
     const envPrefix = Array.isArray(resolved.envPrefix)
@@ -17,6 +17,7 @@ describe('vite env prefix config', () => {
 
     expect(envPrefix).toContain('VITE_');
     expect(envPrefix).toContain('EXOMIND_');
+    expect(envPrefix).toContain('TAURI_ENV_');
   });
 
   it('should not advertise 0.0.0.0 as the HMR client host（HMR 客户端不应连接到 0.0.0.0）', async () => {
@@ -67,4 +68,3 @@ describe('vite env prefix config', () => {
     expect(Object.prototype.hasOwnProperty.call(define, 'globalThis.__EXOMIND_DEV_INSTANCE_META__')).toBe(false);
   });
 });
-

@@ -97,16 +97,16 @@ function WorkbenchPaneCard({ pane }: { pane: WorkbenchPaneState }) {
         </div>
         <div className="mt-4 space-y-2 text-xs leading-5 text-[#78716C] dark:text-[#A8A29E]">
           <p>
-            View kind（视图类型）: <code>{pane.viewKind}</code>
+            View kind（视图类型）: <code className="exomind-selectable">{pane.viewKind}</code>
           </p>
           <p>
-            Binding type（绑定类型）: <code>{pane.bindingType}</code>
+            Binding type（绑定类型）: <code className="exomind-selectable">{pane.bindingType}</code>
           </p>
           <p>
-            Session id（会话 ID）: <code>{pane.sessionId ?? 'fallback-pane'}</code>
+            Session id（会话 ID）: <code className="exomind-selectable">{pane.sessionId ?? 'fallback-pane'}</code>
           </p>
           <p>
-            Destination（目标页）: <code>{pane.openPath ?? 'not available / 暂不可跳转'}</code>
+            Destination（目标页）: <code className="exomind-selectable">{pane.openPath ?? 'not available / 暂不可跳转'}</code>
           </p>
         </div>
       </div>
@@ -222,7 +222,7 @@ export function WorkbenchPage() {
             data-testid="workbench-legacy-entry"
             className="rounded-[20px] border border-[#E9D5FF] bg-[#FAF5FF] px-4 py-3 text-sm text-[#6B21A8] shadow-[0_12px_36px_-30px_rgba(109,40,217,0.45)] dark:border-[#4C1D95] dark:bg-[#1E1433] dark:text-[#E9D5FF]"
           >
-            Legacy route handoff / 旧入口接力：<code>{legacyIntent.route}</code>
+            Legacy route handoff / 旧入口接力：<code className="exomind-selectable">{legacyIntent.route}</code>
           </section>
         ) : null}
 

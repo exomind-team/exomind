@@ -341,7 +341,7 @@ function EventList({ events }: { events: VoiceRuntimeLabState['rawEvents'] }) {
               {new Date(event.capturedAt).toLocaleTimeString('zh-CN', { hour12: false })}
             </div>
           </div>
-          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-all rounded-2xl border border-border-card bg-card px-3 py-3 text-xs leading-6 text-secondary">
+          <pre className="exomind-selectable mt-3 overflow-x-auto whitespace-pre-wrap break-all rounded-2xl border border-border-card bg-card px-3 py-3 text-xs leading-6 text-secondary">
             {JSON.stringify(event.payload, null, 2)}
           </pre>
         </div>
@@ -360,7 +360,7 @@ function TranscriptBlock({
   return (
     <div className="space-y-2 rounded-2xl border border-border-card bg-background p-4">
       <div className="text-xs font-medium text-secondary">{label}</div>
-      <div className="min-h-16 whitespace-pre-wrap text-sm leading-6 text-strong">
+      <div className="exomind-selectable min-h-16 whitespace-pre-wrap text-sm leading-6 text-strong">
         {value || '暂无内容'}
       </div>
     </div>
@@ -1038,7 +1038,7 @@ export function VoiceRuntimeLabPage() {
                 <TranscriptBlock label="语音播报状态" value={`${state.ttsPlaybackStatus} / ${state.ttsAudioBytes} bytes`} />
                 <div className="space-y-2 rounded-2xl border border-border-card bg-background p-4">
                   <div className="text-xs font-medium text-secondary">标准化感知</div>
-                  <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-2xl border border-border-card bg-card px-3 py-3 text-xs leading-6 text-secondary">
+                  <pre className="exomind-selectable overflow-x-auto whitespace-pre-wrap break-all rounded-2xl border border-border-card bg-card px-3 py-3 text-xs leading-6 text-secondary">
                     {state.lastNormalizedPerception
                       ? JSON.stringify(state.lastNormalizedPerception, null, 2)
                       : '暂无标准化感知结果'}

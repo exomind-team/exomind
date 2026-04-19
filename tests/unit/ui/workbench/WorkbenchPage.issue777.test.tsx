@@ -6,11 +6,12 @@ import { WorkbenchPage } from '@/ui/app/pages/workbench/WorkbenchPage';
 
 const useSessionStreamMock = vi.fn();
 const useIsDesktopMock = vi.fn();
+let locationSearchStr = '';
 
 vi.mock('@tanstack/react-router', () => ({
   useLocation: () => ({
     pathname: '/workbench',
-    searchStr: '',
+    searchStr: locationSearchStr,
   }),
 }));
 
@@ -58,6 +59,7 @@ describe('Issue #777 workbench pane click-through（工作台 pane 点击跳转�
   beforeEach(() => {
     window.localStorage.clear();
     window.history.replaceState({}, '', '/workbench');
+    locationSearchStr = '';
     useIsDesktopMock.mockReturnValue(true);
     useSessionStreamMock.mockReturnValue({
       sessions: [
@@ -116,5 +118,18 @@ describe('Issue #777 workbench pane click-through（工作台 pane 点击跳转�
       '',
       '/agents?workbenchBypass=true&focusSession=session-terminal',
     );
+  });
+
+  it('marks legacy handoff route value as selectable code（旧入口接力 route 值应进入可选白名单）', () => {
+    locationSearchStr = '?legacySource=agent-chat&agentId=agent-review';
+
+    render(<WorkbenchPage />);
+
+    const legacyEntry = screen.getByTestId('workbench-legacy-entry');
+    const routeCode = legacyEntry.querySelector('code');
+
+    expect(routeCode).not.toBeNull();
+    expect(routeCode).toHaveClass('exomind-selectable');
+    expect(routeCode).toHaveTextContent('/agents/chat/agent-review');
   });
 });

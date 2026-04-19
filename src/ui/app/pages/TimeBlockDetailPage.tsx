@@ -321,7 +321,7 @@ export function TimeBlockDetailPage() {
               </div>
             </div>
             {view.summary.feedback ? (
-              <p className="mt-4 rounded-xl bg-[#F5F0ED] px-3 py-3 text-sm text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]">
+              <p className="exomind-selectable mt-4 rounded-xl bg-[#F5F0ED] px-3 py-3 text-sm text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]">
                 {view.summary.feedback}
               </p>
             ) : null}
@@ -396,7 +396,7 @@ export function TimeBlockDetailPage() {
                   ) : (
                     <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
                   )}
-                  <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                  <div className="exomind-selectable mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm, remarkBreaks]}
                       components={{

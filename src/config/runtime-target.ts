@@ -30,6 +30,28 @@ export interface EmbeddedRuntimeStatusSnapshot {
   hostId?: string;
 }
 
+export interface UiInteractionPolicy {
+  runtime: 'web' | 'tauri';
+  isDevBuild: boolean;
+  useAppLikeTextSelection: boolean;
+  suppressDefaultBrowserContextMenu: boolean;
+}
+
+function parseTauriDebugFlag(rawValue: string | boolean | undefined): boolean | undefined {
+  if (typeof rawValue === 'boolean') {
+    return rawValue;
+  }
+
+  if (typeof rawValue !== 'string') {
+    return undefined;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return undefined;
+}
+
 function resolveEmbeddedRuntimePort(rawValue: string | undefined): number {
   if (!rawValue) return 9124;
   const parsed = Number.parseInt(rawValue, 10);
@@ -149,6 +171,26 @@ export function isDesktopOperatingSystem(): boolean {
   ).toLowerCase();
 
   return /(win|mac|linux|x11)/i.test(platform);
+}
+
+export function resolveUiInteractionPolicy(options?: {
+  isTauri?: boolean;
+  isDevBuild?: boolean;
+  tauriEnvDebug?: string | boolean;
+}): UiInteractionPolicy {
+  const runtime = (options?.isTauri ?? isTauriWindow()) ? 'tauri' : 'web';
+  const tauriEnvDebug = parseTauriDebugFlag(
+    options?.tauriEnvDebug ?? import.meta.env.TAURI_ENV_DEBUG,
+  );
+  const isDevBuild = options?.isDevBuild ?? tauriEnvDebug ?? import.meta.env.DEV;
+  const isTauriRuntime = runtime === 'tauri';
+
+  return {
+    runtime,
+    isDevBuild,
+    useAppLikeTextSelection: isTauriRuntime,
+    suppressDefaultBrowserContextMenu: isTauriRuntime && !isDevBuild,
+  };
 }
 
 function resolveEmbeddedHost(): string {

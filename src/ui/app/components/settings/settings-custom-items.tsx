@@ -158,7 +158,7 @@ function DiagnosticsValue({
   return (
     <div className="flex items-start justify-between gap-3 rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-4 py-3 dark:border-[#FFFFFF15] dark:bg-[#1C1917]">
       <span className="shrink-0 text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">{label}</span>
-      <span className="min-w-0 flex-1 break-all text-right text-sm text-[#1C1917] dark:text-[#FAFAF9]">{value}</span>
+      <span className="exomind-selectable min-w-0 flex-1 break-all text-right text-sm text-[#1C1917] dark:text-[#FAFAF9]">{value}</span>
     </div>
   );
 }

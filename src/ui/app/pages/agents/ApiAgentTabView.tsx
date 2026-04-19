@@ -563,7 +563,7 @@ export function ApiAgentTabView() {
                   <div className="text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">
                     assistantTurn.content
                   </div>
-                  <pre className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-[#1C1917] dark:text-[#FAFAF9]">
+                  <pre className="exomind-selectable mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-[#1C1917] dark:text-[#FAFAF9]">
                     {currentRecord.assistantTurn.content || '(empty)'}
                   </pre>
                 </div>
@@ -573,7 +573,7 @@ export function ApiAgentTabView() {
                     <div className="text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">toolCalls</div>
                     <Badge variant="outline">{pendingToolCalls.length} pending</Badge>
                   </div>
-                  <pre className="mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+                  <pre className="exomind-selectable mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
                     {formatJson(currentRecord.assistantTurn.toolCalls)}
                   </pre>
                 </div>
@@ -601,9 +601,9 @@ export function ApiAgentTabView() {
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{toolCall.name}</Badge>
-                      <span className="font-mono text-[11px] text-[#A8A29E]">{toolCall.id}</span>
+                      <span className="exomind-selectable font-mono text-[11px] text-[#A8A29E]">{toolCall.id}</span>
                     </div>
-                    <pre className="mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+                    <pre className="exomind-selectable mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
                       {formatJson(toolCall.input)}
                     </pre>
                     <Textarea
@@ -674,21 +674,21 @@ export function ApiAgentTabView() {
             <div className="space-y-3">
               <div className="rounded-2xl border border-[#F0ECE8] bg-[#FCFBFA] p-4 dark:border-[#292524] dark:bg-[#120F0D]">
                 <div className="text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">history draft</div>
-                <pre className="mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+                <pre className="exomind-selectable mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
                   {formatJson(historyDraft)}
                 </pre>
               </div>
 
               <div className="rounded-2xl border border-[#F0ECE8] bg-[#FCFBFA] p-4 dark:border-[#292524] dark:bg-[#120F0D]">
                 <div className="text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">last request</div>
-                <pre className="mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+                <pre className="exomind-selectable mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
                   {lastRequestJson || '(empty)'}
                 </pre>
               </div>
 
               <div className="rounded-2xl border border-[#F0ECE8] bg-[#FCFBFA] p-4 dark:border-[#292524] dark:bg-[#120F0D]">
                 <div className="text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">last response</div>
-                <pre className="mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+                <pre className="exomind-selectable mt-3 overflow-x-auto rounded-2xl bg-[#FAF7F5] p-3 text-[11px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
                   {lastResponseJson || '(empty)'}
                 </pre>
               </div>

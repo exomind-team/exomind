@@ -144,7 +144,7 @@ export function SignalHistoryTabView({
                 <summary className="cursor-pointer text-[11px] text-[#78716C] dark:text-[#A8A29E]">
                   展开 payload
                 </summary>
-                <pre className="mt-2 overflow-x-auto rounded-lg bg-[#FAF7F5] p-3 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+                <pre className="exomind-selectable mt-2 overflow-x-auto rounded-lg bg-[#FAF7F5] p-3 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
                   {`Payload:\n${payloadDetailsText}`}
                 </pre>
               </details>

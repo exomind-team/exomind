@@ -73,7 +73,7 @@ export function MigrationDialog({
             </DialogHeader>
 
             <div className="max-h-[40vh] overflow-y-auto rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400">
-              <pre className="whitespace-pre-wrap break-all font-mono">{error}</pre>
+              <pre className="exomind-selectable whitespace-pre-wrap break-all font-mono">{error}</pre>
             </div>
 
             <DialogFooter className="mt-4 flex-shrink-0">

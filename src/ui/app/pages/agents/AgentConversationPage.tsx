@@ -391,7 +391,7 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
                     {message.title}
                   </p>
                 )}
-                <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                <p className="exomind-selectable whitespace-pre-wrap break-words">{message.content}</p>
               </div>
               {isUser && (
                 <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">

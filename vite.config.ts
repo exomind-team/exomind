@@ -127,7 +127,7 @@ export default defineConfig(({ mode }) => {
       : {}),
 
     envDir: ".",
-    envPrefix: ["VITE_", "EXOMIND_"],
+    envPrefix: ["VITE_", "EXOMIND_", "TAURI_ENV_"],
 
     optimizeDeps: {
       include: ["spark-md5", "vuvuzela"],

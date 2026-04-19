@@ -39,6 +39,7 @@ export function EventMarkdown({ content }: { content: string }) {
 
   return (
     <div className="
+      exomind-selectable
       text-xs sm:text-sm break-words leading-relaxed
       prose prose-xs dark:prose-invert max-w-none
       prose-p:my-0 prose-p:leading-normal

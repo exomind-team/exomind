@@ -1231,7 +1231,7 @@ function MobileTimeblockDetail({
                     <p className="mt-1 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
                       {item.title}
                     </p>
-                    <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                    <div className="exomind-selectable mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkBreaks]}
                         components={{
@@ -1270,18 +1270,21 @@ function MobileTimeblockDetail({
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
             AI 总结
           </h3>
-          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">
+          <p className="exomind-selectable mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">
             {model.aiSummary.summaryText}
           </p>
           <div className="mt-3 space-y-2 rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
             <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
-              关键产出：{model.aiSummary.keyOutput}
+              <span>关键产出：</span>
+              <span className="exomind-selectable">{model.aiSummary.keyOutput}</span>
             </p>
             <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
-              阻塞点：{model.aiSummary.blocker}
+              <span>阻塞点：</span>
+              <span className="exomind-selectable">{model.aiSummary.blocker}</span>
             </p>
             <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
-              建议：{model.aiSummary.suggestion}
+              <span>建议：</span>
+              <span className="exomind-selectable">{model.aiSummary.suggestion}</span>
             </p>
           </div>
         </section>
@@ -1293,13 +1296,13 @@ function MobileTimeblockDetail({
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
             计划 vs 实际
           </h3>
-          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">
+          <p className="exomind-selectable mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">
             {model.planActual.planContent}
           </p>
-          <p className="mt-1 text-sm text-[#44403C] dark:text-[#E7E5E4]">
+          <p className="exomind-selectable mt-1 text-sm text-[#44403C] dark:text-[#E7E5E4]">
             {model.planActual.actualContent}
           </p>
-          <p className="mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">
+          <p className="exomind-selectable mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">
             {model.planActual.diffReason}
           </p>
         </section>
@@ -1588,7 +1591,7 @@ function DesktopTimeblockDetail({
                           {item.timeLabel}
                         </p>
                       </div>
-                      <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                      <div className="exomind-selectable mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm, remarkBreaks]}
                           components={{
@@ -1650,13 +1653,13 @@ function DesktopTimeblockDetail({
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
               计划 vs 实际
             </h3>
-            <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+            <p className="exomind-selectable mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
               {model.planActual.planContent}
             </p>
-            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+            <p className="exomind-selectable mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
               {model.planActual.actualContent}
             </p>
-            <p className="mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">
+            <p className="exomind-selectable mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">
               {model.planActual.diffReason}
             </p>
           </section>
@@ -1665,17 +1668,20 @@ function DesktopTimeblockDetail({
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
               AI 总结
             </h3>
-            <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+            <p className="exomind-selectable mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
               {model.aiSummary.summaryText}
             </p>
             <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-              关键产出：{model.aiSummary.keyOutput}
+              <span>关键产出：</span>
+              <span className="exomind-selectable">{model.aiSummary.keyOutput}</span>
             </p>
             <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-              阻塞点：{model.aiSummary.blocker}
+              <span>阻塞点：</span>
+              <span className="exomind-selectable">{model.aiSummary.blocker}</span>
             </p>
             <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-              建议：{model.aiSummary.suggestion}
+              <span>建议：</span>
+              <span className="exomind-selectable">{model.aiSummary.suggestion}</span>
             </p>
           </section>
 
@@ -2392,7 +2398,7 @@ export function TaskDetailPage() {
         </div>
       ) : task.description ? (
         <div className="mt-3 flex items-start justify-between gap-3">
-          <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-[#78716C] dark:text-[#A8A29E] prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-1 prose-headings:text-[#44403C] dark:prose-headings:text-[#D6D3D1] prose-a:text-[#C75B3A] prose-code:text-[#78716C] dark:prose-code:text-[#A8A29E] prose-pre:bg-[#F5F0ED] dark:prose-pre:bg-[#292524]">
+          <div className="exomind-selectable prose prose-sm dark:prose-invert max-w-none text-sm text-[#78716C] dark:text-[#A8A29E] prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-1 prose-headings:text-[#44403C] dark:prose-headings:text-[#D6D3D1] prose-a:text-[#C75B3A] prose-code:text-[#78716C] dark:prose-code:text-[#A8A29E] prose-pre:bg-[#F5F0ED] dark:prose-pre:bg-[#292524]">
             <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
               {task.description}
             </ReactMarkdown>

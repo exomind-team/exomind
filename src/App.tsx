@@ -8,6 +8,7 @@ import { TimeBlockSyncCoordinator } from "@/ui/app/components/TimeBlockSyncCoord
 import { RtDomainBackfillCoordinator } from "@/ui/app/components/RtDomainBackfillCoordinator";
 import { FocusBgmCoordinator } from "@/ui/app/components/FocusBgmCoordinator";
 import { MigrationDialogController } from "@/ui/components/MigrationDialogController";
+import { RuntimeInteractionPolicyController } from "@/ui/app/components/RuntimeInteractionPolicyController";
 import {
   initUpdateChecker,
   destroyUpdateChecker,
@@ -49,6 +50,7 @@ function App() {
 
   return (
     <>
+      <RuntimeInteractionPolicyController />
       <DevInstanceTitleSync />
       <ThemeController />
       <TimeBlockSyncCoordinator />

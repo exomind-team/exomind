@@ -98,7 +98,7 @@ export function LogPanel() {
         </button>
       </div>
       <div
-        className="flex-1 overflow-y-auto font-mono text-xs rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] p-3 space-y-0.5 dark:border-[#292524] dark:bg-[#0C0A09]"
+        className="exomind-selectable flex-1 overflow-y-auto rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] p-3 font-mono text-xs space-y-0.5 dark:border-[#292524] dark:bg-[#0C0A09]"
         onScroll={handleScroll}
       >
         {filtered.length === 0 ? (

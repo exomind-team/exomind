@@ -1246,7 +1246,7 @@ export function PtyTerminal({
 
   return (
     <div
-      className="relative h-full w-full min-h-0"
+      className="exomind-terminal-selectable relative h-full w-full min-h-0"
       style={{ backgroundColor: "#1C1917" }}
     >
       {isStreamConnecting ? (

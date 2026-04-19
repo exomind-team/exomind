@@ -256,7 +256,7 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
               </button>
               {selectedFile === file.name && fileContent !== null && (
                 <div className="border-t border-border-subtle bg-background px-4 py-3">
-                  <pre className="whitespace-pre-wrap text-xs leading-5 text-secondary">{fileContent}</pre>
+                  <pre className="exomind-selectable whitespace-pre-wrap text-xs leading-5 text-secondary">{fileContent}</pre>
                 </div>
               )}
               {idx !== data.files.length - 1 && <div className="h-px bg-border-subtle" />}
@@ -360,7 +360,7 @@ function ActionsTab({ agentId }: { agentId: string }) {
                         )}
                       </div>
                     </div>
-                    <p className="mt-1 text-xs leading-5 text-secondary">{entry.description}</p>
+                    <p className="exomind-selectable mt-1 text-xs leading-5 text-secondary">{entry.description}</p>
                   </div>
                 </div>
               </div>
@@ -490,7 +490,7 @@ function IdentityTab({ agentId }: { agentId: string }) {
         </CardHeader>
         <CardContent className="p-4 pt-0">
           {soul ? (
-            <pre className="rounded-lg border border-border-subtle bg-background px-3 py-3 whitespace-pre-wrap text-xs leading-6 text-secondary">
+            <pre className="exomind-selectable rounded-lg border border-border-subtle bg-background px-3 py-3 whitespace-pre-wrap text-xs leading-6 text-secondary">
               {soul}
             </pre>
           ) : (

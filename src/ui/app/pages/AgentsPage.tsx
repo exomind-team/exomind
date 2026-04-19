@@ -9667,7 +9667,7 @@ export function AgentsPage() {
                               <p className="text-xs font-medium text-muted-foreground">
                                 {historyEvent ? "信号 ID" : "节点 ID"}
                               </p>
-                              <p className="font-mono text-sm text-foreground">
+                              <p className="exomind-selectable font-mono text-sm text-foreground">
                                 {nodeId ?? "—"}
                               </p>
                             </div>
@@ -9683,7 +9683,7 @@ export function AgentsPage() {
                                       ),
                                     }}
                                   />
-                                  <p className="font-mono text-xs text-foreground">
+                                  <p className="exomind-selectable font-mono text-xs text-foreground">
                                     {historyEvent.topic}
                                   </p>
                                 </div>
@@ -9692,7 +9692,7 @@ export function AgentsPage() {
                                     <p className="text-[10px] text-muted-foreground">
                                       来源
                                     </p>
-                                    <p className="text-xs text-foreground">
+                                    <p className="exomind-selectable text-xs text-foreground">
                                       {historyEvent.source}
                                     </p>
                                   </div>
@@ -9700,7 +9700,7 @@ export function AgentsPage() {
                                     <p className="text-[10px] text-muted-foreground">
                                       时间
                                     </p>
-                                    <p className="text-xs text-foreground">
+                                    <p className="exomind-selectable text-xs text-foreground">
                                       {formatSignalTime(historyEvent.ts)}
                                     </p>
                                   </div>
@@ -9708,7 +9708,7 @@ export function AgentsPage() {
                                     <p className="text-[10px] text-muted-foreground">
                                       主机
                                     </p>
-                                    <p className="text-xs text-foreground">
+                                    <p className="exomind-selectable text-xs text-foreground">
                                       {historyEvent.origin_host_id}
                                     </p>
                                   </div>
@@ -9716,7 +9716,7 @@ export function AgentsPage() {
                                     <p className="text-[10px] text-muted-foreground">
                                       跳数
                                     </p>
-                                    <p className="text-xs text-foreground">
+                                    <p className="exomind-selectable text-xs text-foreground">
                                       {historyEvent.hop}
                                     </p>
                                   </div>
@@ -9725,7 +9725,7 @@ export function AgentsPage() {
                                   <p className="text-[10px] text-muted-foreground">
                                     Payload
                                   </p>
-                                  <pre className="overflow-x-auto rounded-lg bg-background p-3 text-[10px] text-foreground">
+                                  <pre className="exomind-selectable overflow-x-auto rounded-lg bg-background p-3 text-[10px] text-foreground">
                                     {formatSignalPayloadDetails(
                                       historyEvent.payload,
                                     )}
@@ -9843,7 +9843,7 @@ export function AgentsPage() {
                                   {message.title}
                                 </p>
                               )}
-                              <p className="whitespace-pre-wrap break-words">
+                              <p className="exomind-selectable whitespace-pre-wrap break-words">
                                 {message.content}
                               </p>
                             </div>

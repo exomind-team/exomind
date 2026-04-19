@@ -142,9 +142,32 @@
   body.exomind-tree-pane-dragging {
     cursor: grabbing;
   }
+
+  body.exomind-app-like-selection,
+  body.exomind-app-like-selection * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body.exomind-app-like-selection input,
+  body.exomind-app-like-selection textarea,
+  body.exomind-app-like-selection [contenteditable]:not([contenteditable="false"]),
+  body.exomind-app-like-selection .exomind-selectable,
+  body.exomind-app-like-selection .exomind-selectable *,
+  body.exomind-app-like-selection .exomind-terminal-selectable,
+  body.exomind-app-like-selection .exomind-terminal-selectable * {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
 }
 
 @layer utilities {
+  .exomind-selectable,
+  .exomind-selectable * {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
   .settings-tone-border {
     border-color: var(--settings-tone-color, var(--settings-tone-default));
   }

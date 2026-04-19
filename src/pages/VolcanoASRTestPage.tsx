@@ -601,7 +601,7 @@ export function VolcanoASRTestPage() {
             <CardTitle className="text-sm text-green-700 dark:text-green-400">识别结果</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 pt-0">
-            <p className="text-lg font-medium">{result.text || '（无识别结果）'}</p>
+            <p className="exomind-selectable text-lg font-medium">{result.text || '（无识别结果）'}</p>
             <div className="text-xs text-muted-foreground">
               {result.confidence && `置信度: ${(result.confidence * 100).toFixed(1)}%`}
               {result.duration != null && ` | 时长: ${result.duration.toFixed(2)}ms`}
@@ -629,7 +629,7 @@ export function VolcanoASRTestPage() {
             清空
           </Button>
         </CardHeader>
-        <CardContent className="space-y-2 pt-0 font-mono text-xs">
+        <CardContent className="exomind-selectable space-y-2 pt-0 font-mono text-xs">
           {logs.map((log, index) => (
             <div key={`${log.time}-${index}`} className="leading-relaxed">
               <span className="text-muted-foreground">[{log.time}]</span>{' '}
