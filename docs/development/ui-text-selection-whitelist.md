@@ -36,14 +36,21 @@
 ### 2.3 运行时分流：文本选中与默认右键菜单是两条独立策略
 
 - 文本选中策略与默认右键菜单策略必须独立表达，不能共用一个布尔开关。
-- `runtime = tauri` 时，目标是更像 App：
+- `runtime = tauri` 且 **release / production** 时，目标是更像 App：
   - 默认禁选，按白名单显式放开正文、日志、终端、payload、文件内容
   - 默认抑制浏览器原生右键菜单
   - 但不禁用 `contextmenu` 事件本身，产品自定义右键能力必须继续工作
+- `runtime = tauri` 且 **debug / dev** 时，目标是保留调试效率：
+  - 不抑制浏览器默认右键菜单
+  - 保留“返回 / 刷新 / 另存为 / 打印 / 检查”等浏览器调试入口
+  - 文本选中仍按白名单与 Tauri UI 语义处理，不因为保留右键菜单而回退成 Web 全放开
 - `runtime = web` 时，目标是保持浏览器友好：
   - 不落全局“app-like”右键抑制
   - 保留浏览器默认右键菜单
   - 文本选中继续按 Web 端的浏览器友好策略处理
+- 因此默认右键菜单的最终策略至少取决于两个维度：
+  - 运行时：`web` / `tauri`
+  - 构建形态：`debug` / `release`
 - “禁止默认右键菜单”不等于“全局禁止右键”：
   - 不可通过全局 `stopPropagation()` 或移除 `contextmenu` 事件来实现
   - 只能拦截浏览器默认菜单本身，保留自定义菜单和其他右键交互 affordance
@@ -132,9 +139,10 @@
 
 这部分描述的是“默认浏览器右键菜单”本身，不是文本选中白名单。
 
-| 运行时 | 默认菜单策略 | 必须保留的能力 | 证据锚点 |
+| 运行时 / 构建形态 | 默认菜单策略 | 必须保留的能力 | 证据锚点 |
 | --- | --- | --- | --- |
-| Tauri | 抑制浏览器默认右键菜单 | 任务依赖图、Goals 边、Now 引用条目的自定义右键继续可用；后续若接入 Tauri `Menu.popup()`，也应在同一策略下工作 | `src/config/runtime-target.ts:123`, `src/lib/environment/bootstrap.ts:54`, `src/routes.tsx:227`, `src-tauri/tauri.conf.json:13`, `src/ui/app/pages/TaskDagPage.tsx:4157`, `src/ui/app/pages/goals/components/TaskFlowEdge.tsx:301`, `src/ui/app/components/NowInputRow.tsx:565`, `node_modules/@tauri-apps/api/menu/menu.d.ts:69` |
+| Tauri release | 抑制浏览器默认右键菜单 | 任务依赖图、Goals 边、Now 引用条目的自定义右键继续可用；后续若接入 Tauri `Menu.popup()`，也应在同一策略下工作 | `src/config/runtime-target.ts:123`, `src/lib/environment/bootstrap.ts:54`, `src/routes.tsx:227`, `src-tauri/tauri.conf.json:13`, `src/ui/app/pages/TaskDagPage.tsx:4157`, `src/ui/app/pages/goals/components/TaskFlowEdge.tsx:301`, `src/ui/app/components/NowInputRow.tsx:565`, `node_modules/@tauri-apps/api/menu/menu.d.ts:69` |
+| Tauri debug | 保留浏览器默认右键菜单 | 保留浏览器调试入口，同时不破坏现有产品自定义右键 | `src/config/runtime-target.ts:123`, `src/lib/environment/bootstrap.ts:54`, `src/routes.tsx:227`, `src-tauri/tauri.conf.json:13`, `src/ui/app/pages/TaskDagPage.tsx:4157`, `src/ui/app/pages/goals/components/TaskFlowEdge.tsx:301`, `src/ui/app/components/NowInputRow.tsx:565` |
 | Web | 保留浏览器默认右键菜单 | 不额外压制浏览器的复制、检查、打开链接等熟悉行为 | `src/routes.tsx:227`, `src/routes.tsx:258` |
 
 明确排除：
@@ -175,6 +183,7 @@
 - `PtyTerminal` 属于特殊组件。它的选择复制逻辑不是普通 prose 规则，不能被全局基线误伤。
 - 默认右键菜单策略优先落在 App 根部或统一 runtime controller，不要在各页面散补。
 - 不要再新增第三套 Tauri/Web 判定方式；后续实现应统一收口到现有 runtime helper。
+- 右键菜单策略除了运行时外，还需要引入 debug / release 维度；不要把 “是不是 Tauri” 错当成唯一判断条件。
 - Tauri 端抑制默认右键菜单后，`input` / `textarea` / 终端类区域的原生剪贴板菜单也会一起消失；若后续确实需要保留，必须显式设计豁免口，而不是回退全局策略。
 - 全局默认菜单抑制只能 `preventDefault()`，不能顺手 `stopPropagation()`；否则会直接打断任务依赖图等自定义右键流程。
 
@@ -185,5 +194,6 @@
 - 在终端、日志、payload、JSON、`SOUL.md`、工作区文件预览、ASR 测试页输出、迁移失败错误详情中都能拖选文字。
 - 在输入框和多行文本框中仍能正常选中、编辑、复制。
 - `版本` / `构建` copy-row、`Signal History` 行、`Routes / Nodes` 技术列表行、按钮、Tab、Badge、Dialog/Drawer 标题不可拖选。
-- Tauri 端右键时不再弹浏览器默认菜单，但任务依赖图、Goals 边等现有自定义右键仍能正常打开。
+- Tauri release 端右键时不再弹浏览器默认菜单，但任务依赖图、Goals 边等现有自定义右键仍能正常打开。
+- Tauri debug 端继续保留浏览器默认右键菜单，便于使用“刷新 / 检查”等调试入口。
 - Web 端继续保留浏览器默认右键菜单，不强行切成 App-like 行为。
