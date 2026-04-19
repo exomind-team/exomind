@@ -55,6 +55,7 @@
 - [Repo Agent Workflow](development/repo-agent-workflow.md) -- 源码工作目录 Agent 的技术操作细节、评论/验证/jj/发布规则
 - [快速上手](development/quickstart.md) -- 开发环境搭建指南
 - [前端设计规范](development/ui-spec.md) -- ExoMind 前端 UI 统一规范，含 token、页面分类、例外边界与评审清单
+- [UI 文本选中白名单](development/ui-text-selection-whitelist.md) -- 落地 #503 时必须显式恢复可选中的正文、日志、终端、JSON 与技术内容面，并定义 Tauri/Web 默认右键菜单分流
 - [设备配对流程](development/device-pairing-flow.md) -- node-first 配对、地址解析、Android 模拟器特殊规则
 - [Tauri Android Windows Playbook](development/tauri-android-windows-playbook.md) -- Windows 宿主机下的 AVD / APK / adb / Tauri MCP / 系统层验收经验
 - [ExoMind CLI](development/exomind-cli.md) -- RT client shell（RT 客户端外壳）使用说明，含 connect-first 规则与命令样例
@@ -188,5 +189,5 @@
 
 ---
 
-> 最后更新: 2026-04-16
-> 导航版本: v4.4
+> 最后更新: 2026-04-19
+> 导航版本: v4.5
