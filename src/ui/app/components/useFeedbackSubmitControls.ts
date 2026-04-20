@@ -6,6 +6,7 @@ import {
   type InputSendMode,
   shouldSubmitOnEnter,
 } from '@/config/input-send-mode';
+import { runActionOnPrimaryModifierEnter } from '@/ui/app/components/dialog-submit-shortcuts';
 
 export type FeedbackSkipConfirmState = 'idle' | 'cooldown' | 'armed';
 export type FeedbackSubmitMode = 'respect-user-preference' | 'ctrl-enter-only';
@@ -136,10 +137,9 @@ export function useFeedbackSubmitControls(options: { submitMode?: FeedbackSubmit
   ) => {
     if (event.nativeEvent.isComposing) return;
     if (submitMode === 'ctrl-enter-only') {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') {
-        event.preventDefault();
+      runActionOnPrimaryModifierEnter(event, () => {
         void onSubmit();
-      }
+      });
       return;
     }
 

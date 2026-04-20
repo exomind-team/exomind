@@ -4170,7 +4170,7 @@ describe("TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）", () =>
     expect(restoredNode?.position).toEqual({ x: 512, y: 288 });
   });
 
-  it("supports keyboard quick-create shortcuts and Ctrl+Enter submission in connect mode", async () => {
+  it("supports keyboard quick-create shortcuts and primary-modifier Enter submission in connect mode", async () => {
     createTaskMock
       .mockResolvedValueOnce(
         makeTask({ id: "task-keyboard-downstream", title: "键盘下游任务" }),
@@ -4225,7 +4225,7 @@ describe("TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）", () =>
     });
     fireEvent.keyDown(screen.getByTestId("task-quick-create-title"), {
       key: "Enter",
-      ctrlKey: true,
+      metaKey: true,
     });
 
     await waitFor(() => {
@@ -4894,6 +4894,61 @@ describe("TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）", () =>
       screen.getByTestId("task-dag-disassociate-status-completed"),
     );
     fireEvent.click(screen.getByTestId("task-dag-disassociate-submit"));
+
+    await waitFor(() => {
+      expect(removeTaskFromBlockMock).toHaveBeenCalledWith("task-a");
+    });
+    expect(transitionTaskMock).toHaveBeenCalledWith("task-a", "completed");
+  });
+
+  it("submits the disassociate dialog with primary-modifier Enter from the description textarea", async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: "task-a",
+        title: "进行中的任务 A",
+        status: "in_progress",
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+      makeTask({
+        id: "task-b",
+        title: "进行中的任务 B",
+        status: "in_progress",
+        createdAt: 20,
+        updatedAt: 20,
+      }),
+    ]);
+    loadActiveBlockMock.mockResolvedValue({
+      startId: "block-2",
+      name: "多任务时间块",
+      mode: "countup",
+      elapsed: 0,
+      startTime: Date.now(),
+      paused: false,
+      phase: "running",
+      taskIds: ["task-a", "task-b"],
+      taskAssociationLog: [],
+    });
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-a"),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("task-dag-mode-execute"));
+    fireEvent.click(screen.getByTestId("mock-react-flow-node-task-a"));
+
+    const description = await screen.findByTestId(
+      "task-dag-disassociate-description",
+    );
+    fireEvent.click(screen.getByTestId("task-dag-disassociate-status-completed"));
+    fireEvent.keyDown(description, { key: "Enter" });
+    expect(removeTaskFromBlockMock).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(description, { key: "Enter", metaKey: true });
 
     await waitFor(() => {
       expect(removeTaskFromBlockMock).toHaveBeenCalledWith("task-a");

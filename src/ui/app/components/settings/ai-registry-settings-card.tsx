@@ -34,6 +34,7 @@ import {
   getDefaultLLMRegistryDraft,
   saveDefaultLLMRegistryDraft,
 } from "@/lib/ai-registry/compat";
+import { runActionOnPrimaryModifierEnter } from "@/ui/app/components/dialog-submit-shortcuts";
 import { SettingRow } from "@/ui/app/components/settings-shared";
 import type { SettingsContext } from "@/ui/app/config/settings/settings-types";
 
@@ -756,6 +757,9 @@ export function AIRegistrySetting(_props: { ctx: SettingsContext }) {
                             notes: event.target.value,
                           }))
                         }
+                        onKeyDown={(event) => {
+                          runActionOnPrimaryModifierEnter(event, handleSave);
+                        }}
                         placeholder="记录质量、价格、额度、代理稳定性等备注"
                         className={`${TEXT_INPUT_CLASS} min-h-[88px] resize-y`}
                       />

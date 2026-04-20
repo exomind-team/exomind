@@ -96,6 +96,7 @@ import {
   listProviderProfiles,
   resolveProviderProfile,
 } from '@/lib/agent-provider/provider-profile-storage';
+import { runActionOnPrimaryModifierEnter } from '@/ui/app/components/dialog-submit-shortcuts';
 
 function useSettingValue<T>(
   getValue: () => T,
@@ -298,6 +299,19 @@ export function QwenOmniPromptDocsSetting(_props: { ctx: SettingsContext }) {
     }));
   };
 
+  const handleSavePromptDocs = () => {
+    try {
+      const nextDocs = setVoiceOmniPromptDocs(draft);
+      setDocs(nextDocs);
+      setDraft(nextDocs);
+      setNotice('Qwen Omni 提示词已保存');
+      setError(null);
+      setOpen(false);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    }
+  };
+
   return (
     <div>
       <SettingRow
@@ -335,6 +349,9 @@ export function QwenOmniPromptDocsSetting(_props: { ctx: SettingsContext }) {
                   data-testid={`new-settings-voice-omni-prompts-${field}`}
                   value={draft[field]}
                   onChange={handleDraftChange(field)}
+                  onKeyDown={(event) => {
+                    runActionOnPrimaryModifierEnter(event, handleSavePromptDocs);
+                  }}
                   className="min-h-[120px] w-full rounded-xl border border-[#F0ECE8] bg-white px-3 py-2 text-sm text-[#1C1917] focus:border-[#C75B3A] focus:outline-none focus:ring-1 focus:ring-[#C75B3A] dark:border-[#FFFFFF15] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
                 />
               </label>
@@ -366,18 +383,7 @@ export function QwenOmniPromptDocsSetting(_props: { ctx: SettingsContext }) {
                 type="button"
                 data-testid="new-settings-voice-omni-prompts-save"
                 className="settings-dialog-primary-button flex-1"
-                onClick={() => {
-                  try {
-                    const nextDocs = setVoiceOmniPromptDocs(draft);
-                    setDocs(nextDocs);
-                    setDraft(nextDocs);
-                    setNotice('Qwen Omni 提示词已保存');
-                    setError(null);
-                    setOpen(false);
-                  } catch (nextError) {
-                    setError(nextError instanceof Error ? nextError.message : String(nextError));
-                  }
-                }}
+                onClick={handleSavePromptDocs}
               >
                 保存
               </button>

@@ -90,6 +90,7 @@ import {
   TASK_STATUS_SELECTOR_END_OPTIONS,
   type TaskStatusChoice,
 } from "@/ui/app/components/TaskStatusSelector";
+import { useFeedbackSubmitControls } from "@/ui/app/components/useFeedbackSubmitControls";
 import {
   getTaskDagPanSpeed,
   getTaskDagZoomSpeed,
@@ -1595,6 +1596,9 @@ export function TaskDagPage() {
   const [zoomSpeed, setZoomSpeed] = useState(() => getTaskDagZoomSpeed());
   const [manualTouchNodeDragActive, setManualTouchNodeDragActive] =
     useState(false);
+  const { handleFeedbackKeyDown } = useFeedbackSubmitControls({
+    submitMode: "ctrl-enter-only",
+  });
   const flowInstanceRef = useRef<ReactFlowInstance<
     TaskDagFlowNode,
     TaskDagFlowEdge
@@ -4637,6 +4641,13 @@ export function TaskDagPage() {
                 onChange={(event) =>
                   setDisassociateDescription(event.target.value)
                 }
+                onKeyDown={(event) => {
+                  handleFeedbackKeyDown(
+                    event,
+                    handleDisassociateSubmit,
+                    setDisassociateDescription,
+                  );
+                }}
                 placeholder="补充状态变化说明（可选）..."
                 className="min-h-[88px] resize-none rounded-xl border border-[#E7E5E4] bg-transparent px-3 py-2 text-sm text-[#1C1917] outline-none focus:border-[#C75B3A] dark:border-[#292524] dark:text-[#FAFAF9]"
               />

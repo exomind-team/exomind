@@ -163,4 +163,49 @@ test.describe("AI Registry agent flow（AI 注册中心到 Agent 创建链路）
       )
       .toBeGreaterThan(initialScrollTop);
   });
+
+  test("submits notes from the textarea with ControlOrMeta+Enter（备注框支持主修饰键回车提交）", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    await page.goto("/settings");
+    await expect(page.getByText("AI Registry")).toBeVisible();
+
+    await page.getByText("AI Registry").click();
+    await expect(
+      page.getByRole("heading", { name: "AI Registry" }),
+    ).toBeVisible();
+
+    const channelName = `AI Registry Shortcut ${Date.now()}`;
+    const successMessage = `AI Registry 已保存：${channelName} / llm.chat`;
+
+    await page.getByPlaceholder("Primary LLM Channel").fill(channelName);
+    await page
+      .getByPlaceholder("https://api.openai.com/v1")
+      .fill("https://shortcut-gateway.example/v1");
+    await page.getByPlaceholder("gpt-4o").fill("gpt-5.4-shortcut");
+    await page.getByPlaceholder("sk-...").fill("sk-registry-e2e-shortcut");
+
+    const notesTextarea = page.getByPlaceholder(
+      "记录质量、价格、额度、代理稳定性等备注",
+    );
+    await notesTextarea.scrollIntoViewIfNeeded();
+    await notesTextarea.fill("通过 Playwright 验证主修饰键回车提交");
+
+    await notesTextarea.press("Enter");
+    let submittedOnPlainEnter = false;
+    try {
+      await page.getByText(successMessage).waitFor({
+        state: "visible",
+        timeout: 800,
+      });
+      submittedOnPlainEnter = true;
+    } catch {
+      submittedOnPlainEnter = false;
+    }
+    expect(submittedOnPlainEnter).toBe(false);
+
+    await notesTextarea.press("ControlOrMeta+Enter");
+    await expect(page.getByText(successMessage)).toBeVisible();
+  });
 });

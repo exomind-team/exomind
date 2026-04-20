@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getReminderService } from '@/lib/services/reminder.service';
 import type { Reminder } from '@/lib/types/reminder';
+import { runActionOnPrimaryModifierEnter } from '@/ui/app/components/dialog-submit-shortcuts';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { PageTabs } from '@/ui/app/components/PageTabs';
 import { useReminderUiStore } from '@/ui/stores/reminder-ui-store';
@@ -400,6 +401,13 @@ export function RemindersPage() {
               <Textarea
                 value={formContent}
                 onChange={(event) => setFormContent(event.target.value)}
+                onKeyDown={(event) => {
+                  runActionOnPrimaryModifierEnter(event, () => {
+                    if (!submitting) {
+                      void handleSubmit();
+                    }
+                  });
+                }}
                 placeholder="写下提醒详情，例如待办清单、链接、备注..."
                 rows={6}
                 className="resize-none"
