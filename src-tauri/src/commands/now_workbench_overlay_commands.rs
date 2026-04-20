@@ -203,8 +203,7 @@ fn now_workbench_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
             current_position.y,
             overlay_width,
             overlay_height,
-        )?
-        {
+        )? {
             position_now_workbench_overlay_default(app, &window)?;
         }
         window.show().map_err(|error| error.to_string())?;
@@ -335,8 +334,7 @@ pub async fn now_workbench_overlay_set_position(
 mod tests {
     use super::{
         calculate_now_workbench_overlay_position, is_windows_hidden_window_position,
-        overlay_rect_intersects_monitor, NOW_WORKBENCH_OVERLAY_HEIGHT,
-        NOW_WORKBENCH_OVERLAY_WIDTH,
+        overlay_rect_intersects_monitor, NOW_WORKBENCH_OVERLAY_HEIGHT, NOW_WORKBENCH_OVERLAY_WIDTH,
     };
 
     #[test]

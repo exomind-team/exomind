@@ -158,8 +158,11 @@ pub fn spawn_replication_actor(
                             }
                         }
                         PROPOSAL_REPLICATION_TOPIC => {
-                            match apply_proposal_replication(&proposal_store, &local_host_id, &event)
-                            {
+                            match apply_proposal_replication(
+                                &proposal_store,
+                                &local_host_id,
+                                &event,
+                            ) {
                                 Ok(Some(payload)) => {
                                     publish_local_replication_apply_signal(
                                         &pool,
@@ -446,7 +449,9 @@ fn apply_timeblock_completed_replication(
         .map_err(|error| error.to_string())?
         .into_iter()
         .find(|block| block.start_id == start_id)
-        .ok_or_else(|| "replicated completed timeblock was applied but is unreadable".to_string())?;
+        .ok_or_else(|| {
+            "replicated completed timeblock was applied but is unreadable".to_string()
+        })?;
     Ok(Some(build_completed_timeblock_replication_payload(
         local_host_id,
         scope_key,

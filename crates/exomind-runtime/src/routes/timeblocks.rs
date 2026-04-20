@@ -3577,9 +3577,9 @@ mod tests {
                     .header("content-type", "application/json")
                     .body(Body::from(payload.clone()))
                     .unwrap(),
-        )
-        .await
-        .unwrap();
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
         let replication = state
@@ -3593,7 +3593,10 @@ mod tests {
             })
             .expect("completed replication upsert should publish a local wake");
         assert_eq!(replication.payload["scopeKey"], serde_json::json!("user-a"));
-        assert_eq!(replication.payload["block"]["startId"], serde_json::json!("tb-rep-1"));
+        assert_eq!(
+            replication.payload["block"]["startId"],
+            serde_json::json!("tb-rep-1")
+        );
 
         let response = app
             .oneshot(
@@ -3685,7 +3688,11 @@ mod tests {
         );
         state
             .task_store
-            .transition_scoped(Some("profile-argon"), &task.id, crate::task::TaskStatus::InProgress)
+            .transition_scoped(
+                Some("profile-argon"),
+                &task.id,
+                crate::task::TaskStatus::InProgress,
+            )
             .unwrap();
         timeblock_store
             .put_active_scoped(

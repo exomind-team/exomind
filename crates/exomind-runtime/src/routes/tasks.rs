@@ -4428,9 +4428,9 @@ mod tests {
                     }"#,
                     ))
                     .unwrap(),
-        )
-        .await
-        .unwrap();
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
         let replication = state
@@ -4444,7 +4444,10 @@ mod tests {
             })
             .expect("replication upsert should publish a local task.replication.upserted wake");
         assert_eq!(replication.payload["scopeKey"], serde_json::json!("user-a"));
-        assert_eq!(replication.payload["task"]["id"], serde_json::json!("task-rep-1"));
+        assert_eq!(
+            replication.payload["task"]["id"],
+            serde_json::json!("task-rep-1")
+        );
 
         let response = app
             .oneshot(
