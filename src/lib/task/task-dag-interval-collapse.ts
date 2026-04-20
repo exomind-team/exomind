@@ -1,127 +1,389 @@
-import type { TaskGraph, TaskGraphEdge } from '@/lib/task/task-dag-graph';
-import type { VisibleTaskGraph, VisibleTaskGraphNode } from '@/lib/task/task-dag-visibility';
+import type { TaskGraph, TaskGraphEdge } from "@/lib/task/task-dag-graph";
+import type {
+  VisibleTaskGraph,
+  VisibleTaskGraphNode,
+} from "@/lib/task/task-dag-visibility";
 
-export interface TaskDagIntervalCollapseItem {
-  startId: string
-  endId: string
-  collapsed: boolean
+export interface TaskDagIntervalCollapseTerminalItem {
+  startId: string;
+  collapsed: boolean;
 }
 
 export interface TaskDagIntervalCollapseState {
-  intervals: TaskDagIntervalCollapseItem[]
+  terminals: Record<string, TaskDagIntervalCollapseTerminalItem[]>;
+}
+
+export interface TaskDagIntervalCollapseDefinition {
+  startId: string;
+  endId: string;
+  collapsed: boolean;
+}
+
+interface LegacyTaskDagIntervalCollapseState {
+  intervals: TaskDagIntervalCollapseDefinition[];
+}
+
+interface TransitionalTaskDagIntervalCollapseState {
+  byTerminalId?: Record<string, TaskDagIntervalCollapseTerminalItem[]>;
+}
+
+type TaskDagIntervalCollapseStateLike =
+  | TaskDagIntervalCollapseState
+  | Partial<TaskDagIntervalCollapseState>
+  | LegacyTaskDagIntervalCollapseState
+  | TransitionalTaskDagIntervalCollapseState
+  | undefined;
+
+function appendFlattenedIntervalCollapseItems(
+  flattenedItems: TaskDagIntervalCollapseDefinition[],
+  seenKeys: Set<string>,
+  terminalRecord:
+    | Record<string, TaskDagIntervalCollapseTerminalItem[]>
+    | undefined,
+): void {
+  if (!terminalRecord || typeof terminalRecord !== "object") {
+    return;
+  }
+
+  for (const [rawEndId, terminalItems] of Object.entries(terminalRecord)) {
+    const endId = rawEndId.trim();
+    if (!endId || !Array.isArray(terminalItems)) {
+      continue;
+    }
+
+    for (const terminalItem of terminalItems) {
+      const startId =
+        typeof terminalItem?.startId === "string"
+          ? terminalItem.startId.trim()
+          : "";
+      if (!startId) {
+        continue;
+      }
+
+      const key = `${startId}\0${endId}`;
+      if (seenKeys.has(key)) {
+        continue;
+      }
+
+      seenKeys.add(key);
+      flattenedItems.push({
+        startId,
+        endId,
+        collapsed: terminalItem.collapsed !== false,
+      });
+    }
+  }
 }
 
 export interface ResolvedTaskDagInterval {
-  startId: string
-  endId: string
-  nodeIds: string[]
-  hiddenNodeIds: string[]
-  memberCount: number
+  startId: string;
+  endId: string;
+  nodeIds: string[];
+  hiddenNodeIds: string[];
+  memberCount: number;
 }
 
 export type TaskDagIntervalResolveErrorReason =
-  | 'same-node'
-  | 'not-connected'
-  | 'external-incoming'
-  | 'external-outgoing'
+  | "same-node"
+  | "not-connected"
+  | "external-incoming"
+  | "external-outgoing";
 
 export type TaskDagIntervalResolveResult =
   | ({
-    ok: true
-  } & ResolvedTaskDagInterval)
+      ok: true;
+    } & ResolvedTaskDagInterval)
   | {
-    ok: false
-    reason: TaskDagIntervalResolveErrorReason
-    message: string
-  }
+      ok: false;
+      reason: TaskDagIntervalResolveErrorReason;
+      message: string;
+    };
 
 export type TaskDagIntervalValidationResult =
   | { ok: true }
-  | { ok: false; reason: 'partial-overlap'; message: string }
+  | { ok: false; reason: "partial-overlap"; message: string };
 
 export interface ResolvedTaskDagIntervalItem extends ResolvedTaskDagInterval {
-  collapsed: boolean
+  collapsed: boolean;
 }
 
 export interface ProjectedTaskDagIntervalGraph {
-  normalizedState: TaskDagIntervalCollapseState
-  visibleGraph: VisibleTaskGraph
-  intervalsByTerminalId: Map<string, ResolvedTaskDagIntervalItem[]>
-  collapsedIntervalsByTerminalId: Map<string, ResolvedTaskDagIntervalItem[]>
+  normalizedState: TaskDagIntervalCollapseState;
+  visibleGraph: VisibleTaskGraph;
+  intervalsByTerminalId: Map<string, ResolvedTaskDagIntervalItem[]>;
+  collapsedIntervalsByTerminalId: Map<string, ResolvedTaskDagIntervalItem[]>;
 }
 
-export const EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE: TaskDagIntervalCollapseState = {
-  intervals: [],
+export const EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE: TaskDagIntervalCollapseState =
+  {
+    terminals: {},
+  };
+
+function flattenTaskDagIntervalCollapseState(
+  state: TaskDagIntervalCollapseStateLike,
+): TaskDagIntervalCollapseDefinition[] {
+  const flattenedItems: TaskDagIntervalCollapseDefinition[] = [];
+  const seenKeys = new Set<string>();
+
+  appendFlattenedIntervalCollapseItems(
+    flattenedItems,
+    seenKeys,
+    (state as Partial<TaskDagIntervalCollapseState> | undefined)?.terminals,
+  );
+  appendFlattenedIntervalCollapseItems(
+    flattenedItems,
+    seenKeys,
+    (state as TransitionalTaskDagIntervalCollapseState | undefined)
+      ?.byTerminalId,
+  );
+
+  const legacyIntervals = Array.isArray(
+    (state as LegacyTaskDagIntervalCollapseState | undefined)?.intervals,
+  )
+    ? (state as LegacyTaskDagIntervalCollapseState).intervals
+    : [];
+  for (const interval of legacyIntervals) {
+    const startId =
+      typeof interval?.startId === "string" ? interval.startId.trim() : "";
+    const endId =
+      typeof interval?.endId === "string" ? interval.endId.trim() : "";
+    if (!startId || !endId) {
+      continue;
+    }
+
+    const key = `${startId}\0${endId}`;
+    if (seenKeys.has(key)) {
+      continue;
+    }
+
+    seenKeys.add(key);
+    flattenedItems.push({
+      startId,
+      endId,
+      collapsed: interval.collapsed !== false,
+    });
+  }
+
+  return flattenedItems;
 }
 
-function buildIncomingEdgesByTarget(graph: TaskGraph): Map<string, TaskGraphEdge[]> {
-  const map = new Map<string, TaskGraphEdge[]>()
-  for (const edge of graph.edges) {
-    const list = map.get(edge.target)
-    if (list) {
-      list.push(edge)
+export function normalizeTaskDagIntervalCollapseState(
+  state: TaskDagIntervalCollapseStateLike,
+): TaskDagIntervalCollapseState {
+  const terminals: Record<string, TaskDagIntervalCollapseTerminalItem[]> = {};
+
+  for (const interval of flattenTaskDagIntervalCollapseState(state)) {
+    const terminalItems = terminals[interval.endId];
+    const normalizedItem = {
+      startId: interval.startId,
+      collapsed: interval.collapsed,
+    };
+    if (terminalItems) {
+      terminalItems.push(normalizedItem);
     } else {
-      map.set(edge.target, [edge])
+      terminals[interval.endId] = [normalizedItem];
     }
   }
-  return map
+
+  return {
+    terminals,
+  };
 }
 
-function buildOutgoingEdgesBySource(graph: TaskGraph): Map<string, TaskGraphEdge[]> {
-  const map = new Map<string, TaskGraphEdge[]>()
+export function listTaskDagIntervalCollapseDefinitions(
+  state: TaskDagIntervalCollapseStateLike,
+): TaskDagIntervalCollapseDefinition[] {
+  return flattenTaskDagIntervalCollapseState(state);
+}
+
+export function countCollapsedTaskDagIntervals(
+  state: TaskDagIntervalCollapseStateLike,
+): number {
+  return flattenTaskDagIntervalCollapseState(state).filter(
+    (interval) => interval.collapsed,
+  ).length;
+}
+
+export function setTaskDagIntervalCollapsed(
+  state: TaskDagIntervalCollapseStateLike,
+  startId: string,
+  endId: string,
+  nextCollapsed: boolean,
+): TaskDagIntervalCollapseState {
+  const normalizedState = normalizeTaskDagIntervalCollapseState(state);
+  const currentTerminalItems = normalizedState.terminals[endId] ?? [];
+  const existingIndex = currentTerminalItems.findIndex(
+    (item) => item.startId === startId,
+  );
+
+  if (existingIndex === -1) {
+    return {
+      terminals: {
+        ...normalizedState.terminals,
+        [endId]: [
+          ...currentTerminalItems,
+          { startId, collapsed: nextCollapsed },
+        ],
+      },
+    };
+  }
+
+  const existingItem = currentTerminalItems[existingIndex];
+  if (existingItem?.collapsed === nextCollapsed) {
+    return normalizedState;
+  }
+
+  return {
+    terminals: {
+      ...normalizedState.terminals,
+      [endId]: currentTerminalItems.map((item, index) =>
+        index === existingIndex ? { ...item, collapsed: nextCollapsed } : item,
+      ),
+    },
+  };
+}
+
+export function setTaskDagIntervalsCollapsedForTerminal(
+  state: TaskDagIntervalCollapseStateLike,
+  terminalId: string,
+  nextCollapsed: boolean,
+): TaskDagIntervalCollapseState {
+  const normalizedState = normalizeTaskDagIntervalCollapseState(state);
+  const currentTerminalItems = normalizedState.terminals[terminalId] ?? [];
+  if (currentTerminalItems.length === 0) {
+    return normalizedState;
+  }
+
+  let changed = false;
+  const nextTerminalItems = currentTerminalItems.map((item) => {
+    if (item.collapsed === nextCollapsed) {
+      return item;
+    }
+    changed = true;
+    return {
+      ...item,
+      collapsed: nextCollapsed,
+    };
+  });
+
+  if (!changed) {
+    return normalizedState;
+  }
+
+  return {
+    terminals: {
+      ...normalizedState.terminals,
+      [terminalId]: nextTerminalItems,
+    },
+  };
+}
+
+export function expandAllTaskDagIntervals(
+  state: TaskDagIntervalCollapseStateLike,
+): TaskDagIntervalCollapseState {
+  const normalizedState = normalizeTaskDagIntervalCollapseState(state);
+  let changed = false;
+
+  const terminals = Object.fromEntries(
+    Object.entries(normalizedState.terminals).map(
+      ([terminalId, terminalItems]) => {
+        const nextTerminalItems = terminalItems.map((item) => {
+          if (!item.collapsed) {
+            return item;
+          }
+          changed = true;
+          return {
+            ...item,
+            collapsed: false,
+          };
+        });
+
+        return [terminalId, nextTerminalItems];
+      },
+    ),
+  );
+
+  if (!changed) {
+    return normalizedState;
+  }
+
+  return {
+    terminals,
+  };
+}
+
+function buildIncomingEdgesByTarget(
+  graph: TaskGraph,
+): Map<string, TaskGraphEdge[]> {
+  const map = new Map<string, TaskGraphEdge[]>();
   for (const edge of graph.edges) {
-    const list = map.get(edge.source)
+    const list = map.get(edge.target);
     if (list) {
-      list.push(edge)
+      list.push(edge);
     } else {
-      map.set(edge.source, [edge])
+      map.set(edge.target, [edge]);
     }
   }
-  return map
+  return map;
+}
+
+function buildOutgoingEdgesBySource(
+  graph: TaskGraph,
+): Map<string, TaskGraphEdge[]> {
+  const map = new Map<string, TaskGraphEdge[]>();
+  for (const edge of graph.edges) {
+    const list = map.get(edge.source);
+    if (list) {
+      list.push(edge);
+    } else {
+      map.set(edge.source, [edge]);
+    }
+  }
+  return map;
 }
 
 function collectReachableNodeIds(
   startId: string,
   outgoingEdgesBySource: Map<string, TaskGraphEdge[]>,
 ): Set<string> {
-  const visited = new Set<string>([startId])
-  const queue = [startId]
+  const visited = new Set<string>([startId]);
+  const queue = [startId];
 
   while (queue.length > 0) {
-    const current = queue.shift()
-    if (!current) continue
+    const current = queue.shift();
+    if (!current) continue;
     for (const edge of outgoingEdgesBySource.get(current) ?? []) {
       if (visited.has(edge.target)) {
-        continue
+        continue;
       }
-      visited.add(edge.target)
-      queue.push(edge.target)
+      visited.add(edge.target);
+      queue.push(edge.target);
     }
   }
 
-  return visited
+  return visited;
 }
 
 function collectAncestorNodeIds(
   endId: string,
   incomingEdgesByTarget: Map<string, TaskGraphEdge[]>,
 ): Set<string> {
-  const visited = new Set<string>([endId])
-  const queue = [endId]
+  const visited = new Set<string>([endId]);
+  const queue = [endId];
 
   while (queue.length > 0) {
-    const current = queue.shift()
-    if (!current) continue
+    const current = queue.shift();
+    if (!current) continue;
     for (const edge of incomingEdgesByTarget.get(current) ?? []) {
       if (visited.has(edge.source)) {
-        continue
+        continue;
       }
-      visited.add(edge.source)
-      queue.push(edge.source)
+      visited.add(edge.source);
+      queue.push(edge.source);
     }
   }
 
-  return visited
+  return visited;
 }
 
 function buildIntervalNodeIds(
@@ -131,12 +393,15 @@ function buildIntervalNodeIds(
   incomingEdgesByTarget: Map<string, TaskGraphEdge[]>,
   outgoingEdgesBySource: Map<string, TaskGraphEdge[]>,
 ): string[] {
-  const reachableFromStart = collectReachableNodeIds(startId, outgoingEdgesBySource)
-  const ancestorsOfEnd = collectAncestorNodeIds(endId, incomingEdgesByTarget)
+  const reachableFromStart = collectReachableNodeIds(
+    startId,
+    outgoingEdgesBySource,
+  );
+  const ancestorsOfEnd = collectAncestorNodeIds(endId, incomingEdgesByTarget);
 
-  return graph.topologicalOrder.filter((nodeId) => (
-    reachableFromStart.has(nodeId) && ancestorsOfEnd.has(nodeId)
-  ))
+  return graph.topologicalOrder.filter(
+    (nodeId) => reachableFromStart.has(nodeId) && ancestorsOfEnd.has(nodeId),
+  );
 }
 
 function determineOrderedEndpoints(
@@ -145,43 +410,48 @@ function determineOrderedEndpoints(
   rightId: string,
   outgoingEdgesBySource: Map<string, TaskGraphEdge[]>,
 ): {
-  startId: string
-  endId: string
+  startId: string;
+  endId: string;
 } | null {
   if (leftId === rightId) {
-    return null
+    return null;
   }
 
-  const leftReachable = collectReachableNodeIds(leftId, outgoingEdgesBySource)
+  const leftReachable = collectReachableNodeIds(leftId, outgoingEdgesBySource);
   if (leftReachable.has(rightId)) {
-    return { startId: leftId, endId: rightId }
+    return { startId: leftId, endId: rightId };
   }
 
-  const rightReachable = collectReachableNodeIds(rightId, outgoingEdgesBySource)
+  const rightReachable = collectReachableNodeIds(
+    rightId,
+    outgoingEdgesBySource,
+  );
   if (rightReachable.has(leftId)) {
-    return { startId: rightId, endId: leftId }
+    return { startId: rightId, endId: leftId };
   }
 
-  const nodeIdSet = new Set(graph.topologicalOrder)
+  const nodeIdSet = new Set(graph.topologicalOrder);
   if (!nodeIdSet.has(leftId) || !nodeIdSet.has(rightId)) {
-    return null
+    return null;
   }
 
-  return null
+  return null;
 }
 
-function resolveIntervalErrorMessage(reason: TaskDagIntervalResolveErrorReason): string {
+function resolveIntervalErrorMessage(
+  reason: TaskDagIntervalResolveErrorReason,
+): string {
   switch (reason) {
-    case 'same-node':
-      return '区间收缩需要两个不同的端点。'
-    case 'not-connected':
-      return '所选两个节点之间不存在可收缩的上下游区间。'
-    case 'external-incoming':
-      return '区间内部存在边界外上游依赖，当前不能收缩。'
-    case 'external-outgoing':
-      return '区间内部存在边界外下游依赖，当前不能收缩。'
+    case "same-node":
+      return "区间收缩需要两个不同的端点。";
+    case "not-connected":
+      return "所选两个节点之间不存在可收缩的上下游区间。";
+    case "external-incoming":
+      return "区间内部存在边界外上游依赖，当前不能收缩。";
+    case "external-outgoing":
+      return "区间内部存在边界外下游依赖，当前不能收缩。";
     default:
-      return '当前区间不满足收缩条件。'
+      return "当前区间不满足收缩条件。";
   }
 }
 
@@ -193,37 +463,42 @@ export function resolveTaskDagIntervalDefinition(
   if (leftId === rightId) {
     return {
       ok: false,
-      reason: 'same-node',
-      message: resolveIntervalErrorMessage('same-node'),
-    }
+      reason: "same-node",
+      message: resolveIntervalErrorMessage("same-node"),
+    };
   }
 
-  const incomingEdgesByTarget = buildIncomingEdgesByTarget(graph)
-  const outgoingEdgesBySource = buildOutgoingEdgesBySource(graph)
-  const orderedEndpoints = determineOrderedEndpoints(graph, leftId, rightId, outgoingEdgesBySource)
+  const incomingEdgesByTarget = buildIncomingEdgesByTarget(graph);
+  const outgoingEdgesBySource = buildOutgoingEdgesBySource(graph);
+  const orderedEndpoints = determineOrderedEndpoints(
+    graph,
+    leftId,
+    rightId,
+    outgoingEdgesBySource,
+  );
   if (!orderedEndpoints) {
     return {
       ok: false,
-      reason: 'not-connected',
-      message: resolveIntervalErrorMessage('not-connected'),
-    }
+      reason: "not-connected",
+      message: resolveIntervalErrorMessage("not-connected"),
+    };
   }
 
-  const { startId, endId } = orderedEndpoints
+  const { startId, endId } = orderedEndpoints;
   const nodeIds = buildIntervalNodeIds(
     graph,
     startId,
     endId,
     incomingEdgesByTarget,
     outgoingEdgesBySource,
-  )
-  const nodeIdSet = new Set(nodeIds)
+  );
+  const nodeIdSet = new Set(nodeIds);
   if (!nodeIdSet.has(startId) || !nodeIdSet.has(endId) || nodeIds.length < 2) {
     return {
       ok: false,
-      reason: 'not-connected',
-      message: resolveIntervalErrorMessage('not-connected'),
-    }
+      reason: "not-connected",
+      message: resolveIntervalErrorMessage("not-connected"),
+    };
   }
 
   for (const nodeId of nodeIds) {
@@ -231,9 +506,9 @@ export function resolveTaskDagIntervalDefinition(
       if (!nodeIdSet.has(edge.source) && nodeId !== startId) {
         return {
           ok: false,
-          reason: 'external-incoming',
-          message: resolveIntervalErrorMessage('external-incoming'),
-        }
+          reason: "external-incoming",
+          message: resolveIntervalErrorMessage("external-incoming"),
+        };
       }
     }
 
@@ -241,9 +516,9 @@ export function resolveTaskDagIntervalDefinition(
       if (!nodeIdSet.has(edge.target) && nodeId !== endId) {
         return {
           ok: false,
-          reason: 'external-outgoing',
-          message: resolveIntervalErrorMessage('external-outgoing'),
-        }
+          reason: "external-outgoing",
+          message: resolveIntervalErrorMessage("external-outgoing"),
+        };
       }
     }
   }
@@ -255,17 +530,20 @@ export function resolveTaskDagIntervalDefinition(
     nodeIds,
     hiddenNodeIds: nodeIds.filter((nodeId) => nodeId !== endId),
     memberCount: nodeIds.length,
-  }
+  };
 }
 
-function countSetIntersection(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
-  let count = 0
+function countSetIntersection(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): number {
+  let count = 0;
   for (const value of left) {
     if (right.has(value)) {
-      count += 1
+      count += 1;
     }
   }
-  return count
+  return count;
 }
 
 export function validateTaskDagIntervalAgainstExisting(
@@ -273,87 +551,102 @@ export function validateTaskDagIntervalAgainstExisting(
   existingDefinitions: ResolvedTaskDagInterval[],
 ): TaskDagIntervalValidationResult {
   if (!definition) {
-    return { ok: true }
+    return { ok: true };
   }
 
-  const definitionSet = new Set(definition.nodeIds)
+  const definitionSet = new Set(definition.nodeIds);
   for (const existingDefinition of existingDefinitions) {
-    const existingSet = new Set(existingDefinition.nodeIds)
-    const intersectionCount = countSetIntersection(definitionSet, existingSet)
+    const existingSet = new Set(existingDefinition.nodeIds);
+    const intersectionCount = countSetIntersection(definitionSet, existingSet);
     if (intersectionCount === 0) {
-      continue
+      continue;
     }
 
-    const definitionContainsExisting = existingDefinition.nodeIds.every((nodeId) => definitionSet.has(nodeId))
-    const existingContainsDefinition = definition.nodeIds.every((nodeId) => existingSet.has(nodeId))
+    const definitionContainsExisting = existingDefinition.nodeIds.every(
+      (nodeId) => definitionSet.has(nodeId),
+    );
+    const existingContainsDefinition = definition.nodeIds.every((nodeId) =>
+      existingSet.has(nodeId),
+    );
     if (definitionContainsExisting || existingContainsDefinition) {
-      continue
+      continue;
     }
 
     return {
       ok: false,
-      reason: 'partial-overlap',
-      message: '区间收缩允许嵌套，但不允许部分重叠。',
-    }
+      reason: "partial-overlap",
+      message: "区间收缩允许嵌套，但不允许部分重叠。",
+    };
   }
 
-  return { ok: true }
+  return { ok: true };
 }
 
-function normalizeTaskDagIntervalCollapseState(
+function normalizeTaskDagIntervalCollapseStateForGraph(
   graph: TaskGraph,
   state: TaskDagIntervalCollapseState | undefined,
 ): {
-  normalizedState: TaskDagIntervalCollapseState
-  resolvedIntervals: ResolvedTaskDagIntervalItem[]
+  normalizedState: TaskDagIntervalCollapseState;
+  resolvedIntervals: ResolvedTaskDagIntervalItem[];
 } {
-  const rawIntervals = state?.intervals
-  const intervals = Array.isArray(rawIntervals) ? rawIntervals : []
-  const seenKeys = new Set<string>()
-  const normalizedIntervals: TaskDagIntervalCollapseItem[] = []
-  const resolvedIntervals: ResolvedTaskDagIntervalItem[] = []
+  const intervals = flattenTaskDagIntervalCollapseState(
+    normalizeTaskDagIntervalCollapseState(state),
+  );
+  const seenKeys = new Set<string>();
+  const normalizedTerminals: Record<
+    string,
+    TaskDagIntervalCollapseTerminalItem[]
+  > = {};
+  const resolvedIntervals: ResolvedTaskDagIntervalItem[] = [];
 
   for (const interval of intervals) {
-    const startId = typeof interval?.startId === 'string' ? interval.startId.trim() : ''
-    const endId = typeof interval?.endId === 'string' ? interval.endId.trim() : ''
-    if (!startId || !endId) {
-      continue
-    }
+    const { startId, endId } = interval;
 
-    const key = `${startId}\0${endId}`
+    const key = `${startId}\0${endId}`;
     if (seenKeys.has(key)) {
-      continue
+      continue;
     }
 
-    const resolvedInterval = resolveTaskDagIntervalDefinition(graph, startId, endId)
-    if (!resolvedInterval.ok) {
-      continue
-    }
-
-    const overlapValidation = validateTaskDagIntervalAgainstExisting(resolvedInterval, resolvedIntervals)
-    if (!overlapValidation.ok) {
-      continue
-    }
-
-    seenKeys.add(key)
-    const normalizedInterval = {
+    const resolvedInterval = resolveTaskDagIntervalDefinition(
+      graph,
       startId,
       endId,
-      collapsed: interval.collapsed !== false,
+    );
+    if (!resolvedInterval.ok) {
+      continue;
     }
-    normalizedIntervals.push(normalizedInterval)
+
+    const overlapValidation = validateTaskDagIntervalAgainstExisting(
+      resolvedInterval,
+      resolvedIntervals,
+    );
+    if (!overlapValidation.ok) {
+      continue;
+    }
+
+    seenKeys.add(key);
+    const normalizedItem = {
+      startId,
+      collapsed: interval.collapsed,
+    };
+    const terminalItems = normalizedTerminals[endId];
+    if (terminalItems) {
+      terminalItems.push(normalizedItem);
+    } else {
+      normalizedTerminals[endId] = [normalizedItem];
+    }
     resolvedIntervals.push({
       ...resolvedInterval,
-      collapsed: normalizedInterval.collapsed,
-    })
+      collapsed: interval.collapsed,
+    });
   }
 
   return {
     normalizedState: {
-      intervals: normalizedIntervals,
+      terminals: normalizedTerminals,
     },
     resolvedIntervals,
-  }
+  };
 }
 
 function rebuildVisibleGraph(
@@ -362,22 +655,22 @@ function rebuildVisibleGraph(
   visibleEdges: TaskGraphEdge[],
   hiddenNodeIds: string[],
 ): VisibleTaskGraph {
-  const incomingCount = new Map(visibleNodes.map((node) => [node.id, 0]))
+  const incomingCount = new Map(visibleNodes.map((node) => [node.id, 0]));
   for (const edge of visibleEdges) {
-    incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1)
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1);
   }
 
   const visibleRootNodeIds = visibleNodes
     .map((node) => node.id)
-    .filter((nodeId) => (incomingCount.get(nodeId) ?? 0) === 0)
+    .filter((nodeId) => (incomingCount.get(nodeId) ?? 0) === 0);
 
-  let visibleCurrentRootNodeId: string | null = null
+  let visibleCurrentRootNodeId: string | null = null;
   if (baseVisibleGraph.sourceCurrentRootNodeId !== null) {
     for (const nodeId of visibleRootNodeIds) {
-      const node = visibleNodes.find((candidate) => candidate.id === nodeId)
-      if (node && node.status !== 'completed' && node.status !== 'cancelled') {
-        visibleCurrentRootNodeId = nodeId
-        break
+      const node = visibleNodes.find((candidate) => candidate.id === nodeId);
+      if (node && node.status !== "completed" && node.status !== "cancelled") {
+        visibleCurrentRootNodeId = nodeId;
+        break;
       }
     }
   }
@@ -389,7 +682,7 @@ function rebuildVisibleGraph(
     hiddenNodeIds,
     visibleRootNodeIds,
     visibleCurrentRootNodeId,
-  }
+  };
 }
 
 export function projectVisibleTaskGraphWithIntervalCollapses(
@@ -397,62 +690,81 @@ export function projectVisibleTaskGraphWithIntervalCollapses(
   baseVisibleGraph: VisibleTaskGraph,
   state: TaskDagIntervalCollapseState = EMPTY_TASK_DAG_INTERVAL_COLLAPSE_STATE,
 ): ProjectedTaskDagIntervalGraph {
-  const { normalizedState, resolvedIntervals } = normalizeTaskDagIntervalCollapseState(graph, state)
-  const baseVisibleNodeIds = new Set(baseVisibleGraph.nodes.map((node) => node.id))
-  const applicableIntervals = resolvedIntervals.filter((interval) => (
-    interval.nodeIds.every((nodeId) => baseVisibleNodeIds.has(nodeId))
-  ))
-  const hiddenNodeIdSet = new Set(baseVisibleGraph.hiddenNodeIds)
-  const visibleNodeIdSet = new Set(baseVisibleNodeIds)
-  const collapsedIntervalsByTerminalId = new Map<string, ResolvedTaskDagIntervalItem[]>()
-  const intervalsByTerminalId = new Map<string, ResolvedTaskDagIntervalItem[]>()
+  const { normalizedState, resolvedIntervals } =
+    normalizeTaskDagIntervalCollapseStateForGraph(graph, state);
+  const baseVisibleNodeIds = new Set(
+    baseVisibleGraph.nodes.map((node) => node.id),
+  );
+  const applicableIntervals = resolvedIntervals.filter((interval) =>
+    interval.nodeIds.every((nodeId) => baseVisibleNodeIds.has(nodeId)),
+  );
+  const hiddenNodeIdSet = new Set(baseVisibleGraph.hiddenNodeIds);
+  const visibleNodeIdSet = new Set(baseVisibleNodeIds);
+  const collapsedIntervalsByTerminalId = new Map<
+    string,
+    ResolvedTaskDagIntervalItem[]
+  >();
+  const intervalsByTerminalId = new Map<
+    string,
+    ResolvedTaskDagIntervalItem[]
+  >();
 
   for (const interval of applicableIntervals) {
-    const terminalIntervals = intervalsByTerminalId.get(interval.endId)
+    const terminalIntervals = intervalsByTerminalId.get(interval.endId);
     if (terminalIntervals) {
-      terminalIntervals.push(interval)
+      terminalIntervals.push(interval);
     } else {
-      intervalsByTerminalId.set(interval.endId, [interval])
+      intervalsByTerminalId.set(interval.endId, [interval]);
     }
 
     if (!interval.collapsed) {
-      continue
+      continue;
     }
 
     for (const hiddenNodeId of interval.hiddenNodeIds) {
-      hiddenNodeIdSet.add(hiddenNodeId)
-      visibleNodeIdSet.delete(hiddenNodeId)
+      hiddenNodeIdSet.add(hiddenNodeId);
+      visibleNodeIdSet.delete(hiddenNodeId);
     }
 
-    const collapsedIntervals = collapsedIntervalsByTerminalId.get(interval.endId)
+    const collapsedIntervals = collapsedIntervalsByTerminalId.get(
+      interval.endId,
+    );
     if (collapsedIntervals) {
-      collapsedIntervals.push(interval)
+      collapsedIntervals.push(interval);
     } else {
-      collapsedIntervalsByTerminalId.set(interval.endId, [interval])
+      collapsedIntervalsByTerminalId.set(interval.endId, [interval]);
     }
   }
 
-  const visibleEdgeByKey = new Map<string, TaskGraphEdge>()
+  const visibleEdgeByKey = new Map<string, TaskGraphEdge>();
   const addVisibleEdge = (edge: TaskGraphEdge) => {
-    if (!visibleNodeIdSet.has(edge.source) || !visibleNodeIdSet.has(edge.target)) {
-      return
+    if (
+      !visibleNodeIdSet.has(edge.source) ||
+      !visibleNodeIdSet.has(edge.target)
+    ) {
+      return;
     }
 
-    const key = `${edge.source}|${edge.target}|${edge.type}`
+    const key = `${edge.source}|${edge.target}|${edge.type}`;
     if (!visibleEdgeByKey.has(key)) {
-      visibleEdgeByKey.set(key, edge)
+      visibleEdgeByKey.set(key, edge);
     }
-  }
+  };
 
   for (const edge of baseVisibleGraph.edges) {
-    addVisibleEdge(edge)
+    addVisibleEdge(edge);
   }
 
-  for (const interval of applicableIntervals.filter((candidate) => candidate.collapsed)) {
-    const intervalNodeIdSet = new Set(interval.nodeIds)
+  for (const interval of applicableIntervals.filter(
+    (candidate) => candidate.collapsed,
+  )) {
+    const intervalNodeIdSet = new Set(interval.nodeIds);
     for (const edge of baseVisibleGraph.edges) {
-      if (edge.target !== interval.startId || intervalNodeIdSet.has(edge.source)) {
-        continue
+      if (
+        edge.target !== interval.startId ||
+        intervalNodeIdSet.has(edge.source)
+      ) {
+        continue;
       }
 
       addVisibleEdge({
@@ -460,20 +772,29 @@ export function projectVisibleTaskGraphWithIntervalCollapses(
         source: edge.source,
         target: interval.endId,
         type: edge.type,
-      })
+      });
     }
   }
 
-  const visibleNodes = baseVisibleGraph.nodes.filter((node) => visibleNodeIdSet.has(node.id))
-  const hiddenNodeIds = graph.topologicalOrder.filter((nodeId) => hiddenNodeIdSet.has(nodeId))
-  const visibleEdges = graph.topologicalOrder.flatMap((sourceId) => (
-    [...visibleEdgeByKey.values()].filter((edge) => edge.source === sourceId)
-  ))
+  const visibleNodes = baseVisibleGraph.nodes.filter((node) =>
+    visibleNodeIdSet.has(node.id),
+  );
+  const hiddenNodeIds = graph.topologicalOrder.filter((nodeId) =>
+    hiddenNodeIdSet.has(nodeId),
+  );
+  const visibleEdges = graph.topologicalOrder.flatMap((sourceId) =>
+    [...visibleEdgeByKey.values()].filter((edge) => edge.source === sourceId),
+  );
 
   return {
     normalizedState,
-    visibleGraph: rebuildVisibleGraph(baseVisibleGraph, visibleNodes, visibleEdges, hiddenNodeIds),
+    visibleGraph: rebuildVisibleGraph(
+      baseVisibleGraph,
+      visibleNodes,
+      visibleEdges,
+      hiddenNodeIds,
+    ),
     intervalsByTerminalId,
     collapsedIntervalsByTerminalId,
-  }
+  };
 }
