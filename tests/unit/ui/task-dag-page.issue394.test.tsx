@@ -3805,6 +3805,621 @@ describe("TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）", () =>
     });
   });
 
+  it("shows fold summary counts and preserves node anchor badges for upstream/downstream collapses", async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: "task-b",
+        title: "B",
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: "task-a", type: "hard" }],
+      }),
+      makeTask({ id: "task-x", title: "X", createdAt: 30, updatedAt: 30 }),
+      makeTask({
+        id: "task-y",
+        title: "Y",
+        createdAt: 40,
+        updatedAt: 40,
+        dependsOn: [{ taskId: "task-x", type: "hard" }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-y"),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByTestId("mock-react-flow-node-task-b"));
+    fireEvent.click(await screen.findByText("折叠上游"));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-a"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("task-dag-hidden-upstream-badge-task-b"),
+      ).toHaveTextContent("+1 已折叠");
+    });
+
+    fireEvent.contextMenu(screen.getByTestId("mock-react-flow-node-task-x"));
+    fireEvent.click(await screen.findByText("折叠下游"));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-y"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("task-dag-hidden-downstream-badge-task-x"),
+      ).toHaveTextContent("+1 下游已折叠");
+    });
+
+    expect(
+      screen.getByTestId("task-dag-fold-summary-panel"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("task-dag-fold-summary-upstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-downstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-interval"),
+    ).toHaveTextContent("0");
+    expect(
+      screen.getByTestId("task-dag-clear-all-folded-state"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a global fold reset entry accessible in the detail panel when selection hides the main control panel", async () => {
+    window.localStorage.setItem(
+      "exomind:dag-visibility",
+      JSON.stringify({
+        collapsedUpstreamOf: ["task-b"],
+        collapsedDownstreamOf: [],
+      }),
+    );
+    window.localStorage.setItem(
+      "exomind:dag-interval-collapse",
+      JSON.stringify({
+        terminals: {
+          "task-d": [{ startId: "task-b", collapsed: true }],
+        },
+      }),
+    );
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: "task-b",
+        title: "B",
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: "task-a", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-c",
+        title: "C",
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: "task-b", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-d",
+        title: "D",
+        createdAt: 40,
+        updatedAt: 40,
+        dependsOn: [{ taskId: "task-c", type: "hard" }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-a"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-b"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-c"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-d"),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("mock-react-flow-node-task-d"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("task-dag-detail-panel-desktop"),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByTestId("task-dag-fold-summary-panel"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("task-dag-detail-fold-summary-upstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-detail-fold-summary-downstream"),
+    ).toHaveTextContent("0");
+    expect(
+      screen.getByTestId("task-dag-detail-fold-summary-interval"),
+    ).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByTestId("task-dag-detail-fold-clear"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-a"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-b"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-c"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-d"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("task-dag-detail-fold-summary"),
+      ).not.toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId("task-dag-detail-interval-section"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("task-dag-detail-interval-toggle-0"),
+    ).toHaveTextContent("收起区间");
+    expect(
+      screen.getByTestId("task-dag-detail-interval-member-list"),
+    ).toHaveTextContent("B");
+    expect(
+      screen.getByTestId("task-dag-detail-interval-member-list"),
+    ).toHaveTextContent("C");
+    expect(
+      screen.getByTestId("task-dag-detail-interval-member-list"),
+    ).toHaveTextContent("D");
+
+    expect(
+      JSON.parse(window.localStorage.getItem("exomind:dag-visibility") ?? "{}"),
+    ).toEqual({
+      collapsedUpstreamOf: [],
+      collapsedDownstreamOf: [],
+    });
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("exomind:dag-interval-collapse") ?? "{}",
+      ),
+    ).toEqual({
+      terminals: {
+        "task-d": [{ startId: "task-b", collapsed: false }],
+      },
+    });
+  });
+
+  it("keeps the mirrored fold reset entry available in the mobile detail drawer", async () => {
+    isDesktopMock.mockReturnValue(false);
+    window.localStorage.setItem(
+      "exomind:dag-visibility",
+      JSON.stringify({
+        collapsedUpstreamOf: ["task-b"],
+        collapsedDownstreamOf: [],
+      }),
+    );
+    window.localStorage.setItem(
+      "exomind:dag-interval-collapse",
+      JSON.stringify({
+        terminals: {
+          "task-d": [{ startId: "task-b", collapsed: true }],
+        },
+      }),
+    );
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: "task-b",
+        title: "B",
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: "task-a", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-c",
+        title: "C",
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: "task-b", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-d",
+        title: "D",
+        createdAt: 40,
+        updatedAt: 40,
+        dependsOn: [{ taskId: "task-c", type: "hard" }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-d"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-a"),
+      ).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("mock-react-flow-node-task-d"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("task-dag-detail-panel-mobile"),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTestId("task-dag-detail-fold-summary-upstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-detail-fold-summary-interval"),
+    ).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByTestId("task-dag-detail-fold-clear"));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("task-dag-detail-fold-summary"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-a"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("task-dag-detail-panel-mobile"),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTestId("task-dag-detail-interval-toggle-0"),
+    ).toHaveTextContent("收起区间");
+    expect(
+      JSON.parse(window.localStorage.getItem("exomind:dag-visibility") ?? "{}"),
+    ).toEqual({
+      collapsedUpstreamOf: [],
+      collapsedDownstreamOf: [],
+    });
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("exomind:dag-interval-collapse") ?? "{}",
+      ),
+    ).toEqual({
+      terminals: {
+        "task-d": [{ startId: "task-b", collapsed: false }],
+      },
+    });
+  });
+
+  it("keeps fold-count badges visible even when dense titles suppress low-priority labels", async () => {
+    window.localStorage.setItem(
+      "exomind:dag-visibility",
+      JSON.stringify({
+        collapsedUpstreamOf: ["task-b"],
+        collapsedDownstreamOf: [],
+      }),
+    );
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: "task-b",
+        title:
+          "这是一个用于验证长标题情况下折叠锚点节点个数 badge 依然必须可见而不是被低优先级标签折叠逻辑吞掉的超长标题节点",
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: "task-a", type: "hard" }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-a"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-b"),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTestId("task-dag-hidden-upstream-badge-task-b"),
+    ).toHaveTextContent("+1 已折叠");
+    expect(screen.queryByText("已折叠上游")).not.toBeInTheDocument();
+  });
+
+  it("keeps fold summary based on persisted truth even when search filtering hides the folded anchor", async () => {
+    window.localStorage.setItem(
+      "exomind:dag-visibility",
+      JSON.stringify({
+        collapsedUpstreamOf: ["task-b"],
+        collapsedDownstreamOf: [],
+      }),
+    );
+    window.localStorage.setItem("exomind:dag-search-draft", "D");
+    window.localStorage.setItem(
+      "exomind:dag-search-options",
+      JSON.stringify({
+        includeDescription: false,
+        fuzzy: false,
+        filterMode: true,
+      }),
+    );
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: "task-b",
+        title: "B",
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: "task-a", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-c",
+        title: "C",
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: "task-b", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-d",
+        title: "D",
+        createdAt: 40,
+        updatedAt: 40,
+        dependsOn: [{ taskId: "task-c", type: "hard" }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-b"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-d"),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTestId("task-dag-fold-summary-panel"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("task-dag-fold-summary-upstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-downstream"),
+    ).toHaveTextContent("0");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-interval"),
+    ).toHaveTextContent("0");
+  });
+
+  it("normalizes stale visibility anchors before computing fold summary counts", async () => {
+    window.localStorage.setItem(
+      "exomind:dag-visibility",
+      JSON.stringify({
+        collapsedUpstreamOf: ["task-b", "task-b", "task-missing"],
+        collapsedDownstreamOf: ["task-missing-downstream"],
+      }),
+    );
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: "task-b",
+        title: "B",
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: "task-a", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-c",
+        title: "C",
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: "task-b", type: "hard" }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-dag-fold-summary-panel")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTestId("task-dag-fold-summary-upstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-downstream"),
+    ).toHaveTextContent("0");
+
+    await waitFor(() => {
+      expect(
+        JSON.parse(window.localStorage.getItem("exomind:dag-visibility") ?? "null"),
+      ).toEqual({
+        collapsedUpstreamOf: ["task-b"],
+        collapsedDownstreamOf: [],
+      });
+    });
+  });
+
+  it("drops stale persisted interval state before computing the fold summary", async () => {
+    window.localStorage.setItem(
+      "exomind:dag-interval-collapse",
+      JSON.stringify({
+        terminals: {
+          "task-z": [{ startId: "task-b", collapsed: true }],
+        },
+      }),
+    );
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: "task-b",
+        title: "B",
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: "task-a", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-c",
+        title: "C",
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: "task-b", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-d",
+        title: "D",
+        createdAt: 40,
+        updatedAt: 40,
+        dependsOn: [{ taskId: "task-c", type: "hard" }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-react-flow-node-task-d")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(
+        JSON.parse(
+          window.localStorage.getItem("exomind:dag-interval-collapse") ?? "null",
+        ),
+      ).toEqual({ terminals: {} });
+    });
+
+    expect(screen.queryByTestId("task-dag-fold-summary-panel")).not.toBeInTheDocument();
+  });
+
+  it("does not wipe persisted fold state when the first task load is empty before the real graph arrives", async () => {
+    let taskChangeCallback: (() => void) | null = null;
+
+    onTaskChangeMock.mockImplementation((callback) => {
+      taskChangeCallback = callback;
+      return () => {};
+    });
+
+    window.localStorage.setItem(
+      "exomind:dag-visibility",
+      JSON.stringify({
+        collapsedUpstreamOf: ["task-b"],
+        collapsedDownstreamOf: ["task-x"],
+      }),
+    );
+    window.localStorage.setItem(
+      "exomind:dag-interval-collapse",
+      JSON.stringify({
+        terminals: {
+          "task-o": [{ startId: "task-m", collapsed: true }],
+        },
+      }),
+    );
+
+    listTasksMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+        makeTask({
+          id: "task-b",
+          title: "B",
+          createdAt: 20,
+          updatedAt: 20,
+          dependsOn: [{ taskId: "task-a", type: "hard" }],
+        }),
+        makeTask({ id: "task-x", title: "X", createdAt: 30, updatedAt: 30 }),
+        makeTask({
+          id: "task-y",
+          title: "Y",
+          createdAt: 40,
+          updatedAt: 40,
+          dependsOn: [{ taskId: "task-x", type: "hard" }],
+        }),
+        makeTask({ id: "task-m", title: "M", createdAt: 50, updatedAt: 50 }),
+        makeTask({
+          id: "task-n",
+          title: "N",
+          createdAt: 60,
+          updatedAt: 60,
+          dependsOn: [{ taskId: "task-m", type: "hard" }],
+        }),
+        makeTask({
+          id: "task-o",
+          title: "O",
+          createdAt: 70,
+          updatedAt: 70,
+          dependsOn: [{ taskId: "task-n", type: "hard" }],
+        }),
+      ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(screen.queryByTestId("task-dag-fold-summary-panel")).not.toBeInTheDocument();
+    expect(
+      JSON.parse(window.localStorage.getItem("exomind:dag-visibility") ?? "{}"),
+    ).toEqual({
+      collapsedUpstreamOf: ["task-b"],
+      collapsedDownstreamOf: ["task-x"],
+    });
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("exomind:dag-interval-collapse") ?? "{}",
+      ),
+    ).toEqual({
+      terminals: {
+        "task-o": [{ startId: "task-m", collapsed: true }],
+      },
+    });
+
+    await act(async () => {
+      taskChangeCallback?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-dag-fold-summary-panel")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTestId("task-dag-fold-summary-upstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-downstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-interval"),
+    ).toHaveTextContent("1");
+    expect(screen.queryByTestId("mock-react-flow-node-task-a")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mock-react-flow-node-task-y")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mock-react-flow-node-task-m")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mock-react-flow-node-task-n")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-react-flow-node-task-b")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-react-flow-node-task-x")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-react-flow-node-task-o")).toBeInTheDocument();
+  });
+
   it("updates selected node mode-specific data immediately when switching modes", async () => {
     render(<TaskDagPage />);
 
@@ -4944,7 +5559,9 @@ describe("TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）", () =>
     const description = await screen.findByTestId(
       "task-dag-disassociate-description",
     );
-    fireEvent.click(screen.getByTestId("task-dag-disassociate-status-completed"));
+    fireEvent.click(
+      screen.getByTestId("task-dag-disassociate-status-completed"),
+    );
     fireEvent.keyDown(description, { key: "Enter" });
     expect(removeTaskFromBlockMock).not.toHaveBeenCalled();
 
@@ -5162,7 +5779,9 @@ describe("TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）", () =>
         window.localStorage.getItem("exomind:dag-interval-collapse") ?? "{}",
       ),
     ).toEqual({
-      intervals: [{ startId: "task-b", endId: "task-d", collapsed: true }],
+      terminals: {
+        "task-d": [{ startId: "task-b", collapsed: true }],
+      },
     });
   });
 
@@ -5244,7 +5863,127 @@ describe("TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）", () =>
         window.localStorage.getItem("exomind:dag-interval-collapse") ?? "{}",
       ),
     ).toEqual({
-      intervals: [{ startId: "task-b", endId: "task-d", collapsed: false }],
+      terminals: {
+        "task-d": [{ startId: "task-b", collapsed: false }],
+      },
+    });
+  });
+
+  it("clears all folded state by expanding intervals without deleting their definitions", async () => {
+    window.localStorage.setItem(
+      "exomind:dag-visibility",
+      JSON.stringify({
+        collapsedUpstreamOf: ["task-b"],
+        collapsedDownstreamOf: ["task-d"],
+      }),
+    );
+    window.localStorage.setItem(
+      "exomind:dag-interval-collapse",
+      JSON.stringify({
+        terminals: {
+          "task-d": [{ startId: "task-b", collapsed: true }],
+        },
+      }),
+    );
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: "task-a", title: "A", createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: "task-b",
+        title: "B",
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: "task-a", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-c",
+        title: "C",
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: "task-b", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-d",
+        title: "D",
+        createdAt: 40,
+        updatedAt: 40,
+        dependsOn: [{ taskId: "task-c", type: "hard" }],
+      }),
+      makeTask({
+        id: "task-e",
+        title: "E",
+        createdAt: 50,
+        updatedAt: 50,
+        dependsOn: [{ taskId: "task-d", type: "hard" }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-a"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-b"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-c"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("mock-react-flow-node-task-e"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-d"),
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTestId("task-dag-fold-summary-upstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-downstream"),
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("task-dag-fold-summary-interval"),
+    ).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByTestId("task-dag-clear-all-folded-state"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-a"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-b"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-c"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-d"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("mock-react-flow-node-task-e"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("task-dag-fold-summary-panel"),
+      ).not.toBeInTheDocument();
+    });
+
+    expect(
+      JSON.parse(window.localStorage.getItem("exomind:dag-visibility") ?? "{}"),
+    ).toEqual({
+      collapsedUpstreamOf: [],
+      collapsedDownstreamOf: [],
+    });
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("exomind:dag-interval-collapse") ?? "{}",
+      ),
+    ).toEqual({
+      terminals: {
+        "task-d": [{ startId: "task-b", collapsed: false }],
+      },
     });
   });
 
