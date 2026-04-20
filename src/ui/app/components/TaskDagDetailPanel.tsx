@@ -21,13 +21,21 @@ export interface TaskDagIntervalDetailItem {
   memberTitles: string[];
 }
 
+export interface TaskDagFoldSummary {
+  collapsedUpstreamAnchorCount: number;
+  collapsedDownstreamAnchorCount: number;
+  collapsedIntervalCount: number;
+}
+
 interface TaskDagDetailPanelProps {
   task: TaskNode | null;
   executionHint: string;
   upstreamDependencies: TaskDagDependencyItem[];
   downstreamDependencies: TaskDagDependencyItem[];
   intervalDetails?: TaskDagIntervalDetailItem[];
+  foldSummary?: TaskDagFoldSummary | null;
   onToggleIntervalCollapse?: (startId: string, endId: string, nextCollapsed: boolean) => void;
+  onClearAllFoldedState?: () => void;
   onClose: () => void;
   onOpenDetail: () => void;
 }
@@ -79,11 +87,21 @@ export function TaskDagDetailPanel({
   upstreamDependencies,
   downstreamDependencies,
   intervalDetails = [],
+  foldSummary = null,
   onToggleIntervalCollapse,
+  onClearAllFoldedState,
   onClose,
   onOpenDetail,
 }: TaskDagDetailPanelProps) {
   const isDesktop = useIsDesktop();
+  const hasFoldSummary = Boolean(
+    foldSummary
+    && (
+      foldSummary.collapsedUpstreamAnchorCount > 0
+      || foldSummary.collapsedDownstreamAnchorCount > 0
+      || foldSummary.collapsedIntervalCount > 0
+    ),
+  );
 
   if (!task) {
     return null;
@@ -151,6 +169,47 @@ export function TaskDagDetailPanel({
               )}
             </div>
           </section>
+
+          {hasFoldSummary ? (
+            <section
+              data-testid="task-dag-detail-fold-summary"
+              className="rounded-2xl border border-[#E7E5E4] bg-[#FAF7F5] px-4 py-3 dark:border-[#3F3F46] dark:bg-[#120F0D]"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">全局折叠状态</h3>
+                {onClearAllFoldedState ? (
+                  <button
+                    type="button"
+                    data-testid="task-dag-detail-fold-clear"
+                    onClick={onClearAllFoldedState}
+                    className="inline-flex shrink-0 items-center rounded-full border border-[#E7E5E4] px-3 py-1.5 text-xs font-semibold text-[#57534E] hover:bg-white dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#1C1917]"
+                  >
+                    取消折叠所有
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span
+                  data-testid="task-dag-detail-fold-summary-upstream"
+                  className="rounded-full bg-[#DBEAFE] px-2 py-1 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
+                >
+                  上游 {foldSummary?.collapsedUpstreamAnchorCount ?? 0}
+                </span>
+                <span
+                  data-testid="task-dag-detail-fold-summary-downstream"
+                  className="rounded-full bg-[#DCFCE7] px-2 py-1 text-[10px] font-medium text-[#15803D] dark:bg-[#14532D] dark:text-[#BBF7D0]"
+                >
+                  下游 {foldSummary?.collapsedDownstreamAnchorCount ?? 0}
+                </span>
+                <span
+                  data-testid="task-dag-detail-fold-summary-interval"
+                  className="rounded-full bg-[#F3F4F6] px-2 py-1 text-[10px] font-medium text-[#4B5563] dark:bg-[#292524] dark:text-[#D6D3D1]"
+                >
+                  区间 {foldSummary?.collapsedIntervalCount ?? 0}
+                </span>
+              </div>
+            </section>
+          ) : null}
 
           <section>
             <div className="flex items-center justify-between gap-3">
