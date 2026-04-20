@@ -27,10 +27,21 @@ pub enum ExecutionError {
 }
 
 pub enum ExecutionOutcome {
-    TaskCreated { task: Task, event: EventRecord },
-    TaskUpdated { task: Task, event: EventRecord },
-    EventAppended { event: EventRecord },
-    TimeblockStarted { result: NewBlockResponse, event: EventRecord },
+    TaskCreated {
+        task: Task,
+        event: EventRecord,
+    },
+    TaskUpdated {
+        task: Task,
+        event: EventRecord,
+    },
+    EventAppended {
+        event: EventRecord,
+    },
+    TimeblockStarted {
+        result: NewBlockResponse,
+        event: EventRecord,
+    },
 }
 
 pub struct ProposalExecutor {
@@ -88,9 +99,7 @@ impl ProposalExecutor {
                 source: Some(format!("proposal:{}", proposal.id)),
                 parent_id: None,
                 depends_on,
-                due_at: fields
-                    .due_at
-                    .map(|value| value.timestamp_millis() as u64),
+                due_at: fields.due_at.map(|value| value.timestamp_millis() as u64),
                 estimated_minutes: fields.estimated_minutes,
                 time_block_ids: vec![],
             },
@@ -137,26 +146,29 @@ impl ProposalExecutor {
             ensure_dependencies_exist(&self.task_store, scope_key, dependencies)?;
         }
 
-        let task = self.task_store.update_scoped(
-            scope_key,
-            &task_id,
-            UpdateTaskInput {
-                title: params.patch.title.clone(),
-                description: params.patch.description.clone(),
-                done_condition: params.patch.done_condition.clone(),
-                priority: params.patch.priority,
-                tags: params.patch.tags.clone(),
-                depends_on,
-                due_at: params
-                    .patch
-                    .due_at
-                    .clone()
-                    .map(|value| value.map(|item| item.timestamp_millis() as u64)),
-                estimated_minutes: params.patch.estimated_minutes,
-                parent_id: None,
-                time_block_ids: None,
-            },
-        ).map_err(|error| ExecutionError::Task(format!("status=409 error={error}")))?;
+        let task = self
+            .task_store
+            .update_scoped(
+                scope_key,
+                &task_id,
+                UpdateTaskInput {
+                    title: params.patch.title.clone(),
+                    description: params.patch.description.clone(),
+                    done_condition: params.patch.done_condition.clone(),
+                    priority: params.patch.priority,
+                    tags: params.patch.tags.clone(),
+                    depends_on,
+                    due_at: params
+                        .patch
+                        .due_at
+                        .clone()
+                        .map(|value| value.map(|item| item.timestamp_millis() as u64)),
+                    estimated_minutes: params.patch.estimated_minutes,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .map_err(|error| ExecutionError::Task(format!("status=409 error={error}")))?;
 
         let event = EventRecord {
             id: uuid::Uuid::new_v4().to_string(),

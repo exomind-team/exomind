@@ -10,8 +10,8 @@ use thiserror::Error;
 
 use crate::proposal::{
     ActionType, AppendEventParams, ApproveAgentAccessParams, Comment, CreateTaskParams,
-    LegacyCreateTaskParams, Proposal, ProposalRef, ProposalStatus, Publisher,
-    StartTimeblockParams, TaskProposalFields, UpdateTaskParams,
+    LegacyCreateTaskParams, Proposal, ProposalRef, ProposalStatus, Publisher, StartTimeblockParams,
+    TaskProposalFields, UpdateTaskParams,
 };
 
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
@@ -276,7 +276,8 @@ impl ProposalStore {
             });
         }
 
-        let normalized_action_params = normalize_action_params(proposal.action_type, action_params)?;
+        let normalized_action_params =
+            normalize_action_params(proposal.action_type, action_params)?;
         validate_action_params(proposal.action_type, &normalized_action_params)?;
         proposal.references = merge_action_references(
             proposal.action_type,
@@ -316,7 +317,8 @@ impl ProposalStore {
         scope_key: Option<&str>,
         mut proposal: Proposal,
     ) -> Result<Proposal, ProposalStoreError> {
-        proposal.action_params = normalize_action_params(proposal.action_type, proposal.action_params)?;
+        proposal.action_params =
+            normalize_action_params(proposal.action_type, proposal.action_params)?;
         proposal.references = merge_action_references(
             proposal.action_type,
             &proposal.action_params,
@@ -873,12 +875,13 @@ fn normalize_action_params(
                 .as_object()
                 .is_some_and(|value| value.contains_key("fields"))
             {
-                let params: CreateTaskParams = serde_json::from_value(action_params).map_err(|error| {
-                    ProposalStoreError::InvalidActionParams {
-                        action_type,
-                        reason: error.to_string(),
-                    }
-                })?;
+                let params: CreateTaskParams =
+                    serde_json::from_value(action_params).map_err(|error| {
+                        ProposalStoreError::InvalidActionParams {
+                            action_type,
+                            reason: error.to_string(),
+                        }
+                    })?;
                 return serde_json::to_value(params).map_err(ProposalStoreError::from);
             }
 
@@ -968,9 +971,7 @@ fn dedup_references(references: Vec<ProposalRef>) -> Vec<ProposalRef> {
     let mut seen = std::collections::HashSet::new();
     references
         .into_iter()
-        .filter(|reference| {
-            seen.insert(format!("{:?}:{}", reference.ref_type, reference.id))
-        })
+        .filter(|reference| seen.insert(format!("{:?}:{}", reference.ref_type, reference.id)))
         .collect()
 }
 
@@ -1148,11 +1149,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use rusqlite::{Connection, params};
     use tempfile::tempdir;
 
-    use crate::proposal::{ActionType, ProposalStatus, Publisher, PublisherType};
+    use crate::proposal::{
+        ActionType, CreateTaskParams, ProposalStatus, Publisher, PublisherType, TaskProposalFields,
+    };
 
     use super::{CreateProposalInput, ProposalFilter, ProposalStore};
 
@@ -1369,6 +1372,10 @@ mod tests {
         let sqlite_path = dir.path().join("legacy-action-name.sqlite");
         let connection = Connection::open(&sqlite_path).unwrap();
         let now = Utc::now().to_rfc3339();
+        let due_at = Utc
+            .timestamp_millis_opt(1_776_201_600_000)
+            .single()
+            .unwrap();
         connection
             .execute_batch(
                 "CREATE TABLE proposals (
@@ -1404,7 +1411,7 @@ mod tests {
                     "Legacy create task",
                     "legacy row",
                     "create_task",
-                    r#"{"title":"Legacy task","dependsOn":[{"taskId":"task-dep","type":"hard"}]}"#,
+                    r#"{"title":"Legacy task","due_at":1776201600000,"dependsOn":[{"taskId":"task-dep","type":"hard"}]}"#,
                     "[]",
                     "pending",
                     r#"{"publisher_type":"agent","id":"legacy-agent","name":"Legacy Agent"}"#,
@@ -1428,17 +1435,118 @@ mod tests {
             .unwrap();
         assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0].action_type, ActionType::CreateTask);
+        let expected_action_params = serde_json::to_value(CreateTaskParams {
+            fields: TaskProposalFields {
+                title: "Legacy task".to_string(),
+                description: None,
+                done_condition: None,
+                tags: None,
+                priority: None,
+                estimated_minutes: None,
+                due_at: Some(due_at),
+                depends_on: Some(vec![crate::proposal::ProposalTaskDependency {
+                    task_id: "task-dep".to_string(),
+                    relation_type: crate::task::TaskDependencyType::Hard,
+                }]),
+            },
+        })
+        .unwrap();
+        assert_eq!(proposals[0].action_params, expected_action_params,);
         assert_eq!(
-            proposals[0].action_params,
-            serde_json::json!({
-                "fields": {
-                    "title": "Legacy task",
-                    "dependsOn": [
-                        { "taskId": "task-dep", "type": "hard" }
-                    ]
-                }
-            }),
+            proposals[0]
+                .references
+                .iter()
+                .map(|reference| (reference.ref_type, reference.id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(crate::proposal::RefType::Task, "task-dep")],
         );
+    }
+
+    #[test]
+    fn sqlite_rows_with_task_create_snake_case_fields_are_normalized_on_read() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("task-create-snake-case.sqlite");
+        let connection = Connection::open(&sqlite_path).unwrap();
+        let now = Utc::now().to_rfc3339();
+        let due_at = Utc
+            .timestamp_millis_opt(1_776_633_600_000)
+            .single()
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE proposals (
+                    id                 TEXT PRIMARY KEY,
+                    scope_key          TEXT NOT NULL DEFAULT 'anonymous',
+                    title              TEXT NOT NULL,
+                    body               TEXT NOT NULL DEFAULT '',
+                    action_type        TEXT NOT NULL,
+                    action_params_json TEXT NOT NULL DEFAULT '{}',
+                    references_json    TEXT NOT NULL DEFAULT '[]',
+                    status             TEXT NOT NULL DEFAULT 'pending',
+                    publisher_json     TEXT NOT NULL DEFAULT '{}',
+                    comments_json      TEXT NOT NULL DEFAULT '[]',
+                    snooze_until       TEXT NULL,
+                    created_at         TEXT NOT NULL,
+                    updated_at         TEXT NOT NULL
+                );
+                CREATE INDEX idx_proposals_scope_created
+                    ON proposals(scope_key, created_at DESC, id DESC);
+                CREATE INDEX idx_proposals_scope_status
+                    ON proposals(scope_key, status);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO proposals (
+                    id, scope_key, title, body, action_type, action_params_json, references_json,
+                    status, publisher_json, comments_json, snooze_until, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?12)",
+                params![
+                    "prp-task-create-snake-case",
+                    "profile-a",
+                    "Task.create snake_case fields",
+                    "legacy row",
+                    "task.create",
+                    r#"{"fields":{"title":"Task.create legacy row","due_at":1776633600000,"depends_on":[{"task_id":"task-dep","type":"soft"}]}}"#,
+                    "[]",
+                    "pending",
+                    r#"{"publisher_type":"agent","id":"legacy-agent","name":"Legacy Agent"}"#,
+                    "[]",
+                    &now,
+                    &now,
+                ],
+            )
+            .unwrap();
+        drop(connection);
+
+        let store = ProposalStore::with_sqlite_path(&sqlite_path).unwrap();
+        let proposals = store
+            .list_scoped(
+                Some("profile-a"),
+                &ProposalFilter {
+                    status: Some(ProposalStatus::Pending),
+                    action_type: Some(ActionType::CreateTask),
+                },
+            )
+            .unwrap();
+        assert_eq!(proposals.len(), 1);
+        let expected_action_params = serde_json::to_value(CreateTaskParams {
+            fields: TaskProposalFields {
+                title: "Task.create legacy row".to_string(),
+                description: None,
+                done_condition: None,
+                tags: None,
+                priority: None,
+                estimated_minutes: None,
+                due_at: Some(due_at),
+                depends_on: Some(vec![crate::proposal::ProposalTaskDependency {
+                    task_id: "task-dep".to_string(),
+                    relation_type: crate::task::TaskDependencyType::Soft,
+                }]),
+            },
+        })
+        .unwrap();
+        assert_eq!(proposals[0].action_params, expected_action_params,);
         assert_eq!(
             proposals[0]
                 .references

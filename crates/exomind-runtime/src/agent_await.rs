@@ -325,9 +325,9 @@ async fn run_await_loop(
 ) {
     if tx
         .send(AwaitStreamEvent::Ready(AwaitReadyPayload {
-        condition: request.condition.clone(),
-        timeout_secs: request.timeout_secs,
-        heartbeat_secs: request.heartbeat_secs,
+            condition: request.condition.clone(),
+            timeout_secs: request.timeout_secs,
+            heartbeat_secs: request.heartbeat_secs,
         }))
         .is_err()
     {
@@ -524,7 +524,8 @@ impl AwaitTracker {
                 to_state,
             } => {
                 let observed_after_ms = current_timestamp_millis();
-                let records = timeblock_records(state, scope_key).map_err(AwaitSetupError::internal)?;
+                let records =
+                    timeblock_records(state, scope_key).map_err(AwaitSetupError::internal)?;
                 Ok(Self::TimeblockStateChanged(TimeblockStateChangedTracker {
                     start_id: start_id.clone(),
                     from_state: from_state.clone(),
@@ -984,7 +985,12 @@ impl TaskStatusChangedTracker {
                 ) {
                     continue;
                 }
-                candidates.push((task.clone(), task.updated_at, TaskStatus::Pending, task.status));
+                candidates.push((
+                    task.clone(),
+                    task.updated_at,
+                    TaskStatus::Pending,
+                    task.status,
+                ));
                 continue;
             };
             if previous_status == task.status {
@@ -1098,8 +1104,12 @@ impl TimeblockStateChangedTracker {
             .iter()
             .map(|(id, record)| (id.clone(), record.state.clone()))
             .collect::<HashMap<_, _>>();
-        let mut candidates: Vec<(TimeblockRecord, u64, AwaitTimeblockState, AwaitTimeblockState)> =
-            Vec::new();
+        let mut candidates: Vec<(
+            TimeblockRecord,
+            u64,
+            AwaitTimeblockState,
+            AwaitTimeblockState,
+        )> = Vec::new();
 
         for record in records.values() {
             if self
@@ -1145,7 +1155,9 @@ impl TimeblockStateChangedTracker {
                     candidates.push((
                         record.clone(),
                         view.at,
-                        view.from_state.clone().unwrap_or(AwaitTimeblockState::Running),
+                        view.from_state
+                            .clone()
+                            .unwrap_or(AwaitTimeblockState::Running),
                         view.to_state.clone(),
                     ));
                     matched_transition = true;
@@ -1193,8 +1205,8 @@ impl TimeblockStateChangedTracker {
             ) {
                 continue;
             }
-            let candidate_at =
-                timeblock_state_reached_at(record, &record.state).unwrap_or_else(|| record.sort_key().0);
+            let candidate_at = timeblock_state_reached_at(record, &record.state)
+                .unwrap_or_else(|| record.sort_key().0);
             if candidate_at < self.observed_after_ms {
                 continue;
             }
@@ -2072,7 +2084,9 @@ fn timeblock_state_transition_views(
 
     for transition in transitions {
         let to_state = match transition.transition_type {
-            BlockTransitionType::Start | BlockTransitionType::Resume => AwaitTimeblockState::Running,
+            BlockTransitionType::Start | BlockTransitionType::Resume => {
+                AwaitTimeblockState::Running
+            }
             BlockTransitionType::Pause => AwaitTimeblockState::Paused,
             BlockTransitionType::FeedbackStart | BlockTransitionType::FeedbackSubmit => {
                 AwaitTimeblockState::Stopped
@@ -2150,26 +2164,24 @@ fn timeblock_target_reached_at(
     }
 
     match target_state {
-        AwaitTimeblockState::Stopped => timeblock_state_reached_at(
-            record,
-            &AwaitTimeblockState::Stopped,
-        )
-        .or_else(|| {
-            if record.state == AwaitTimeblockState::Ended {
-                record
-                    .completed_block
-                    .as_ref()
-                    .map(TimeBlockData::resolve_end_time)
-                    .or_else(|| {
-                        record
-                            .active_block
-                            .as_ref()
-                            .and_then(ActiveBlockData::resolve_end_time)
-                    })
-            } else {
-                None
-            }
-        }),
+        AwaitTimeblockState::Stopped => {
+            timeblock_state_reached_at(record, &AwaitTimeblockState::Stopped).or_else(|| {
+                if record.state == AwaitTimeblockState::Ended {
+                    record
+                        .completed_block
+                        .as_ref()
+                        .map(TimeBlockData::resolve_end_time)
+                        .or_else(|| {
+                            record
+                                .active_block
+                                .as_ref()
+                                .and_then(ActiveBlockData::resolve_end_time)
+                        })
+                } else {
+                    None
+                }
+            })
+        }
         _ => timeblock_state_reached_at(record, target_state),
     }
 }
@@ -2238,8 +2250,18 @@ fn earliest_timeblock_record(candidates: &mut [TimeblockRecord]) -> Option<Timeb
 }
 
 fn earliest_timeblock_transition_candidate(
-    candidates: &mut [(TimeblockRecord, u64, AwaitTimeblockState, AwaitTimeblockState)],
-) -> Option<(TimeblockRecord, u64, AwaitTimeblockState, AwaitTimeblockState)> {
+    candidates: &mut [(
+        TimeblockRecord,
+        u64,
+        AwaitTimeblockState,
+        AwaitTimeblockState,
+    )],
+) -> Option<(
+    TimeblockRecord,
+    u64,
+    AwaitTimeblockState,
+    AwaitTimeblockState,
+)> {
     candidates.sort_by(|left, right| {
         left.1
             .cmp(&right.1)
@@ -2251,7 +2273,11 @@ fn earliest_timeblock_transition_candidate(
 fn earliest_timeblock_target_candidate(
     candidates: &mut [(TimeblockRecord, u64)],
 ) -> Option<(TimeblockRecord, u64)> {
-    candidates.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.timeblock_id.cmp(&right.0.timeblock_id)));
+    candidates.sort_by(|left, right| {
+        left.1
+            .cmp(&right.1)
+            .then_with(|| left.0.timeblock_id.cmp(&right.0.timeblock_id))
+    });
     candidates.first().cloned()
 }
 
@@ -2855,32 +2881,36 @@ mod tests {
             .task_store
             .get_scoped(Some("profile-argon"), &task.id)
             .expect("task should exist");
-        replicated.status_transitions.push(crate::task::TaskStatusTransition {
-            id: format!("{}:remote-in-progress", task.id),
-            at: replicated.updated_at + 10,
-            from_status: Some(TaskStatus::Pending),
-            to_status: TaskStatus::InProgress,
-            reason: crate::task::TaskTransitionReason::TaskTransition,
-            actor_id: Some("remote-agent".to_string()),
-            source_host_id: Some("host-remote".to_string()),
-            operation_id: Some("remote-in-progress".to_string()),
-            related_time_block_id: None,
-            related_time_block_transition_ref: None,
-            auto_generated: Some(false),
-        });
-        replicated.status_transitions.push(crate::task::TaskStatusTransition {
-            id: format!("{}:remote-completed", task.id),
-            at: replicated.updated_at + 20,
-            from_status: Some(TaskStatus::InProgress),
-            to_status: TaskStatus::Completed,
-            reason: crate::task::TaskTransitionReason::TaskTransition,
-            actor_id: Some("remote-agent".to_string()),
-            source_host_id: Some("host-remote".to_string()),
-            operation_id: Some("remote-completed".to_string()),
-            related_time_block_id: None,
-            related_time_block_transition_ref: None,
-            auto_generated: Some(false),
-        });
+        replicated
+            .status_transitions
+            .push(crate::task::TaskStatusTransition {
+                id: format!("{}:remote-in-progress", task.id),
+                at: replicated.updated_at + 10,
+                from_status: Some(TaskStatus::Pending),
+                to_status: TaskStatus::InProgress,
+                reason: crate::task::TaskTransitionReason::TaskTransition,
+                actor_id: Some("remote-agent".to_string()),
+                source_host_id: Some("host-remote".to_string()),
+                operation_id: Some("remote-in-progress".to_string()),
+                related_time_block_id: None,
+                related_time_block_transition_ref: None,
+                auto_generated: Some(false),
+            });
+        replicated
+            .status_transitions
+            .push(crate::task::TaskStatusTransition {
+                id: format!("{}:remote-completed", task.id),
+                at: replicated.updated_at + 20,
+                from_status: Some(TaskStatus::InProgress),
+                to_status: TaskStatus::Completed,
+                reason: crate::task::TaskTransitionReason::TaskTransition,
+                actor_id: Some("remote-agent".to_string()),
+                source_host_id: Some("host-remote".to_string()),
+                operation_id: Some("remote-completed".to_string()),
+                related_time_block_id: None,
+                related_time_block_transition_ref: None,
+                auto_generated: Some(false),
+            });
         crate::task::store::normalize_task_status_history(&mut replicated);
         state
             .task_store

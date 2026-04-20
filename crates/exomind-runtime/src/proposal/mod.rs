@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -33,6 +33,58 @@ where
     T: Deserialize<'de>,
 {
     Ok(Some(Option::deserialize(deserializer)?))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum CompatibleDateTimeInput {
+    Iso(String),
+    Millis(i64),
+    UnsignedMillis(u64),
+}
+
+fn parse_compatible_datetime(value: CompatibleDateTimeInput) -> Result<DateTime<Utc>, String> {
+    match value {
+        CompatibleDateTimeInput::Iso(value) => DateTime::parse_from_rfc3339(&value)
+            .map(|parsed| parsed.with_timezone(&Utc))
+            .map_err(|error| error.to_string()),
+        CompatibleDateTimeInput::Millis(value) => Utc
+            .timestamp_millis_opt(value)
+            .single()
+            .ok_or_else(|| format!("invalid timestamp millis: {value}")),
+        CompatibleDateTimeInput::UnsignedMillis(value) => {
+            let value = i64::try_from(value)
+                .map_err(|_| format!("timestamp millis out of range: {value}"))?;
+            Utc.timestamp_millis_opt(value)
+                .single()
+                .ok_or_else(|| format!("invalid timestamp millis: {value}"))
+        }
+    }
+}
+
+fn deserialize_optional_datetime_compat<'de, D>(
+    deserializer: D,
+) -> Result<Option<DateTime<Utc>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<CompatibleDateTimeInput>::deserialize(deserializer)?
+        .map(parse_compatible_datetime)
+        .transpose()
+        .map_err(D::Error::custom)
+}
+
+fn deserialize_nullable_datetime_compat<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<DateTime<Utc>>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<CompatibleDateTimeInput>::deserialize(deserializer)?
+        .map(parse_compatible_datetime)
+        .transpose()
+        .map_err(D::Error::custom)?;
+    Ok(Some(value))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +142,7 @@ impl<'de> Deserialize<'de> for ActionType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProposalTaskDependency {
+    #[serde(alias = "task_id")]
     pub task_id: String,
     #[serde(rename = "type")]
     pub relation_type: TaskDependencyType,
@@ -101,17 +154,30 @@ pub struct TaskProposalFields {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "done_condition",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub done_condition: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<TaskPriority>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "estimated_minutes",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub estimated_minutes: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "due_at",
+        deserialize_with = "deserialize_optional_datetime_compat",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub due_at: Option<DateTime<Utc>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "depends_on", skip_serializing_if = "Option::is_none")]
     pub depends_on: Option<Vec<ProposalTaskDependency>>,
 }
 
@@ -127,17 +193,21 @@ pub struct LegacyCreateTaskParams {
     pub title: String,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "done_condition")]
     pub done_condition: Option<String>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub priority: Option<TaskPriority>,
-    #[serde(default)]
+    #[serde(default, alias = "estimated_minutes")]
     pub estimated_minutes: Option<u32>,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "due_at",
+        deserialize_with = "deserialize_optional_datetime_compat"
+    )]
     pub due_at: Option<DateTime<Utc>>,
-    #[serde(default)]
+    #[serde(default, alias = "depends_on")]
     pub depends_on: Option<Vec<ProposalTaskDependency>>,
 }
 
@@ -154,6 +224,7 @@ pub struct UpdateTaskPatch {
     pub description: Option<Option<String>>,
     #[serde(
         default,
+        alias = "done_condition",
         deserialize_with = "deserialize_nullable",
         skip_serializing_if = "Option::is_none"
     )]
@@ -164,17 +235,19 @@ pub struct UpdateTaskPatch {
     pub tags: Option<Vec<String>>,
     #[serde(
         default,
+        alias = "estimated_minutes",
         deserialize_with = "deserialize_nullable",
         skip_serializing_if = "Option::is_none"
     )]
     pub estimated_minutes: Option<Option<u32>>,
     #[serde(
         default,
-        deserialize_with = "deserialize_nullable",
+        alias = "due_at",
+        deserialize_with = "deserialize_nullable_datetime_compat",
         skip_serializing_if = "Option::is_none"
     )]
     pub due_at: Option<Option<DateTime<Utc>>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "depends_on", skip_serializing_if = "Option::is_none")]
     pub depends_on: Option<Vec<ProposalTaskDependency>>,
 }
 
@@ -194,6 +267,7 @@ impl UpdateTaskPatch {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateTaskParams {
+    #[serde(alias = "task_id")]
     pub task_id: String,
     pub patch: UpdateTaskPatch,
 }
