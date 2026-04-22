@@ -1,10 +1,25 @@
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Event } from '@/lib/types/event';
-import { ChatPage } from '@/components/Chat/ChatPage';
+import { ChatPage, type ChatPageKeepAliveState } from '@/components/Chat/ChatPage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { log } from '@/lib/logger';
+import { setPerfLoggingEnabled } from '@/config/perf-logging-enabled';
+
+const navigateMock = vi.fn();
+
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
+  return {
+    ...actual,
+    useLocation: () => ({
+      pathname: '/eventlog/record',
+      searchStr: '',
+    }),
+    useNavigate: () => navigateMock,
+  };
+});
 
 vi.mock('@/ui/stores/sync-store', () => ({
   useSyncStore: vi.fn(),
@@ -70,6 +85,7 @@ const initialEvent: Event = {
   timestamp: new Date('2026-03-30T10:00:00.000Z').getTime(),
   content: '初始事件',
   tags: new Set<string>(),
+  refs: [],
   metadata: {
     source: {
       deviceId: 'device-1',
@@ -93,6 +109,7 @@ const sameTimestampLowerIdEvent: Event = {
   timestamp: sameTimestampBase,
   content: '同时间戳 A',
   tags: new Set<string>(),
+  refs: [],
 };
 
 const sameTimestampHigherIdEvent: Event = {
@@ -100,6 +117,7 @@ const sameTimestampHigherIdEvent: Event = {
   timestamp: sameTimestampBase,
   content: '同时间戳 B',
   tags: new Set<string>(),
+  refs: [],
 };
 
 const refreshOnlySignalEvent: Event = {
@@ -107,6 +125,7 @@ const refreshOnlySignalEvent: Event = {
   timestamp: new Date('2026-03-30T10:10:01.000Z').getTime(),
   content: '',
   tags: new Set<string>(['note']),
+  refs: [],
   metadata: {
     refreshOnly: true,
     source: {
@@ -122,12 +141,14 @@ describe('ChatPage incremental refresh issue 769', () => {
   const unsubscribe = vi.fn();
   const loadEventsDetailed = vi.fn<() => Promise<MockLoadEventsDetailedResult>>();
   let onEventCallback: ((event: Event) => void) | null = null;
+  let keepAliveState: ChatPageKeepAliveState | null = null;
 
   const lateHistoricalEvent: Event = {
     id: 'evt-late-history',
     timestamp: new Date('2026-03-29T08:00:00.000Z').getTime(),
     content: '补导入的历史事件',
     tags: new Set<string>(),
+    refs: [],
     metadata: {
       source: {
         deviceId: 'device-2',
@@ -142,7 +163,10 @@ describe('ChatPage incremental refresh issue 769', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-30T10:10:00.000Z'));
     vi.clearAllMocks();
+    setPerfLoggingEnabled(true);
+    navigateMock.mockReset();
     onEventCallback = null;
+    keepAliveState = null;
 
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0);
@@ -184,6 +208,7 @@ describe('ChatPage incremental refresh issue 769', () => {
   });
 
   afterEach(() => {
+    setPerfLoggingEnabled(false);
     vi.useRealTimers();
     vi.unstubAllGlobals();
     HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -243,6 +268,115 @@ describe('ChatPage incremental refresh issue 769', () => {
     });
   });
 
+  it('hydrates from keep-alive state and resumes with incremental refresh on remount（回切记录页应先复用缓存再走增量刷新）', async () => {
+    const { unmount } = render(
+      <ChatPage
+        variant="new-mobile"
+        showTimerWidget={false}
+        onKeepAliveStateChange={(state) => {
+          keepAliveState = state;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
+    expect(keepAliveState?.eventsAsc.map((event) => event.id)).toEqual(['evt-initial']);
+
+    unmount();
+    loadEventsDetailed.mockClear();
+    loadEventsDetailed.mockResolvedValueOnce({
+      events: [],
+      semantics: 'incremental_batch',
+      snapshotRevision: 'rev-1',
+    });
+
+    render(
+      <ChatPage
+        variant="new-mobile"
+        showTimerWidget={false}
+        initialKeepAliveState={keepAliveState}
+        onKeepAliveStateChange={(state) => {
+          keepAliveState = state;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(1, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+  });
+
+  it('skips keep-alive hydration when active profile changes（切换 profile 后不应复用旧记录页缓存）', async () => {
+    const bobEvent: Event = {
+      id: 'evt-bob',
+      timestamp: new Date('2026-03-30T11:00:00.000Z').getTime(),
+      content: 'Bob 的新事件',
+      tags: new Set<string>(),
+      refs: [],
+    };
+
+    const { unmount } = render(
+      <ChatPage
+        variant="new-mobile"
+        showTimerWidget={false}
+        onKeepAliveStateChange={(state) => {
+          keepAliveState = state;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(keepAliveState?.profileId).toBe('profile-alice');
+
+    unmount();
+    loadEventsDetailed.mockReset();
+    mockUseSyncStore.mockReturnValue({
+      currentUser: 'Bob',
+      isLoggedIn: true,
+      activeProfileId: 'profile-bob',
+    } as never);
+    loadEventsDetailed.mockResolvedValueOnce({
+      events: [bobEvent],
+      semantics: 'full_snapshot',
+      snapshotRevision: 'rev-bob-1',
+    });
+
+    const secondRender = render(
+      <ChatPage
+        variant="new-mobile"
+        showTimerWidget={false}
+        initialKeepAliveState={keepAliveState}
+        onKeepAliveStateChange={(state) => {
+          keepAliveState = state;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(1);
+    expect(secondRender.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(secondRender.getByText('Bob 的新事件')).toBeInTheDocument();
+    expect(keepAliveState?.profileId).toBe('profile-bob');
+  });
+
   it('reconciles full state immediately for refresh-only signals（仅刷新信号应立即走全量对账）', async () => {
     loadEventsDetailed.mockReset();
     loadEventsDetailed
@@ -284,6 +418,7 @@ describe('ChatPage incremental refresh issue 769', () => {
       timestamp: new Date('2026-03-30T10:12:00.000Z').getTime(),
       content: '外部同步带来的新尾事件',
       tags: new Set<string>(),
+      refs: [],
     };
 
     loadEventsDetailed.mockReset();
@@ -398,6 +533,7 @@ describe('ChatPage incremental refresh issue 769', () => {
       timestamp: new Date('2026-03-30T10:12:30.000Z').getTime(),
       content: '轮询先看到的新尾事件',
       tags: new Set<string>(),
+      refs: [],
     };
 
     loadEventsDetailed.mockReset();
@@ -447,12 +583,14 @@ describe('ChatPage incremental refresh issue 769', () => {
       timestamp: new Date('2026-03-30T10:06:00.000Z').getTime(),
       content: '应被移除的旧事件',
       tags: new Set<string>(),
+      refs: [],
     };
     const rewrittenLatestEvent: Event = {
       id: 'evt-rewritten-latest',
       timestamp: new Date('2026-03-30T10:08:00.000Z').getTime(),
       content: '重写后的新尾事件',
       tags: new Set<string>(),
+      refs: [],
     };
 
     loadEventsDetailed.mockReset();

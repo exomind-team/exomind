@@ -8,6 +8,7 @@ use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
@@ -17,6 +18,7 @@ use crate::eventlog_sqlite::SqliteEventLogStore;
 
 const EVENTLOG_DIR_NAME: &str = "eventlog";
 const MIRROR_HEADER: &str = "# EventLog Mirror\n\n";
+pub const PERF_LOGGING_ENABLED_CONFIG_KEY: &str = "exomind:perfLoggingEnabled";
 pub const EVENTLOG_MARKDOWN_MIRROR_ENABLED_CONFIG_KEY: &str =
     "exomind:eventlogMarkdownMirrorEnabled";
 
@@ -49,6 +51,7 @@ pub struct EventListFilter {
     pub since_timestamp: Option<i64>,
     pub until_timestamp: Option<i64>,
     pub tags: Vec<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,7 +145,7 @@ impl EventLogStore {
 
     fn is_markdown_mirror_enabled(&self) -> bool {
         let Some(config_store) = self.config_store.lock().unwrap().clone() else {
-            return true;
+            return false;
         };
 
         match config_store.get(
@@ -150,8 +153,20 @@ impl EventLogStore {
             EVENTLOG_MARKDOWN_MIRROR_ENABLED_CONFIG_KEY,
         ) {
             Ok(Some(entry)) => normalize_markdown_mirror_enabled(Some(entry.value.as_str())),
-            Ok(None) => true,
-            Err(_) => true,
+            Ok(None) => false,
+            Err(_) => false,
+        }
+    }
+
+    fn is_perf_logging_enabled(&self) -> bool {
+        let Some(config_store) = self.config_store.lock().unwrap().clone() else {
+            return false;
+        };
+
+        match config_store.get(USER_CONFIG_SCOPE, PERF_LOGGING_ENABLED_CONFIG_KEY) {
+            Ok(Some(entry)) => entry.value.trim() == "true",
+            Ok(None) => false,
+            Err(_) => false,
         }
     }
 
@@ -179,6 +194,69 @@ impl EventLogStore {
         }
     }
 
+    pub fn list_events_after_cursor_filtered(
+        &self,
+        user_id: Option<&str>,
+        since_id: &str,
+        filter: &EventListFilter,
+        limit: Option<usize>,
+    ) -> Result<(Vec<EventRecord>, bool), String> {
+        let Some(cursor_event) = self.get_event(user_id, since_id)? else {
+            return self.list_cursor_fallback_snapshot(user_id, filter, limit, "cursor_missing");
+        };
+
+        if !event_matches_filter(&cursor_event, filter) {
+            return self.list_cursor_fallback_snapshot(
+                user_id,
+                filter,
+                limit,
+                "cursor_outside_filter",
+            );
+        }
+
+        let normalized_user = sanitize_user_id(user_id);
+        match &self.backend {
+            EventLogBackend::JsonFiles => {
+                let mut events = self.list_events_filtered(user_id, filter)?;
+                events.retain(|event| {
+                    event.timestamp > cursor_event.timestamp
+                        || (event.timestamp == cursor_event.timestamp && event.id > cursor_event.id)
+                });
+                if let Some(limit) = limit {
+                    events.truncate(limit);
+                }
+                Ok((events, true))
+            }
+            EventLogBackend::Sqlite(store) => store
+                .list_events_after_cursor_filtered(&normalized_user, &cursor_event, filter, limit)
+                .map(|events| (events, true)),
+        }
+    }
+
+    fn list_cursor_fallback_snapshot(
+        &self,
+        user_id: Option<&str>,
+        filter: &EventListFilter,
+        limit: Option<usize>,
+        reason: &'static str,
+    ) -> Result<(Vec<EventRecord>, bool), String> {
+        let started_at = Instant::now();
+        let fallback_filter = build_fallback_snapshot_filter(filter, limit);
+        let events = self.list_events_filtered(user_id, &fallback_filter)?;
+        if self.is_perf_logging_enabled() {
+            tracing::info!(
+                scope_key = %sanitize_user_id(user_id),
+                reason,
+                requested_limit = ?limit,
+                effective_limit = ?fallback_filter.limit,
+                result_count = events.len(),
+                "[PERF] ({}ms) runtime.eventlog.cursor_fallback_full_snapshot",
+                started_at.elapsed().as_millis()
+            );
+        }
+        Ok((events, false))
+    }
+
     pub fn append_event(&self, user_id: Option<&str>, event: EventRecord) -> Result<(), String> {
         let normalized_user = sanitize_user_id(user_id);
         let result = match &self.backend {
@@ -197,7 +275,7 @@ impl EventLogStore {
                 if self.is_markdown_mirror_enabled() {
                     sync_markdown_mirror(&paths, &events)
                 } else {
-                    Ok(())
+                    write_checkpoint(&paths.checkpoint, latest_event_id(&events))
                 }
             }
             EventLogBackend::Sqlite(store) => {
@@ -207,7 +285,7 @@ impl EventLogStore {
                     let events = store.list_events(&normalized_user)?;
                     sync_markdown_mirror(&paths, &events)
                 } else {
-                    Ok(())
+                    write_checkpoint(&paths.checkpoint, Some(event.id.clone()))
                 }
             }
         };
@@ -242,7 +320,7 @@ impl EventLogStore {
                 if self.is_markdown_mirror_enabled() {
                     sync_markdown_mirror(&paths, &[])
                 } else {
-                    Ok(())
+                    write_checkpoint(&paths.checkpoint, None)
                 }
             }
             EventLogBackend::Sqlite(store) => {
@@ -251,7 +329,7 @@ impl EventLogStore {
                 if self.is_markdown_mirror_enabled() {
                     sync_markdown_mirror(&paths, &[])
                 } else {
-                    Ok(())
+                    write_checkpoint(&paths.checkpoint, None)
                 }
             }
         };
@@ -312,7 +390,7 @@ impl EventLogStore {
                 if self.is_markdown_mirror_enabled() {
                     sync_markdown_mirror(&paths, &ordered)
                 } else {
-                    Ok(())
+                    write_checkpoint(&paths.checkpoint, latest_event_id(&ordered))
                 }
             }
             EventLogBackend::Sqlite(store) => {
@@ -322,7 +400,7 @@ impl EventLogStore {
                     let current = store.list_events(&normalized_user)?;
                     sync_markdown_mirror(&paths, &current)
                 } else {
-                    Ok(())
+                    write_checkpoint(&paths.checkpoint, latest_event_id(events))
                 }
             }
         };
@@ -437,6 +515,47 @@ fn apply_event_filters(events: &mut Vec<EventRecord>, filter: &EventListFilter) 
                 .all(|tag| event.tags.iter().any(|event_tag| event_tag == tag))
         });
     }
+
+    if let Some(limit) = filter.limit {
+        events.truncate(limit);
+    }
+}
+
+fn build_fallback_snapshot_filter(
+    filter: &EventListFilter,
+    requested_limit: Option<usize>,
+) -> EventListFilter {
+    let mut fallback_filter = filter.clone();
+    fallback_filter.limit = merge_event_list_limits(filter.limit, requested_limit);
+    fallback_filter
+}
+
+fn merge_event_list_limits(existing: Option<usize>, requested: Option<usize>) -> Option<usize> {
+    match (existing, requested) {
+        (Some(existing), Some(requested)) => Some(existing.min(requested)),
+        (Some(existing), None) => Some(existing),
+        (None, Some(requested)) => Some(requested),
+        (None, None) => None,
+    }
+}
+
+fn event_matches_filter(event: &EventRecord, filter: &EventListFilter) -> bool {
+    if let Some(since_timestamp) = filter.since_timestamp {
+        if event.timestamp < since_timestamp {
+            return false;
+        }
+    }
+
+    if let Some(until_timestamp) = filter.until_timestamp {
+        if event.timestamp > until_timestamp {
+            return false;
+        }
+    }
+
+    filter
+        .tags
+        .iter()
+        .all(|tag| event.tags.iter().any(|event_tag| event_tag == tag))
 }
 
 fn read_events(path: &Path) -> Result<Vec<EventRecord>, String> {
@@ -515,7 +634,7 @@ fn latest_event_id(events: &[EventRecord]) -> Option<String> {
 }
 
 fn normalize_markdown_mirror_enabled(raw_value: Option<&str>) -> bool {
-    !matches!(raw_value.map(str::trim), Some("false"))
+    matches!(raw_value.map(str::trim), Some("true"))
 }
 
 fn format_event_time_iso(timestamp: i64) -> String {
@@ -577,6 +696,17 @@ mod tests {
     use crate::config::{ConfigStore, PutConfigEntryInput};
     use tempfile::tempdir;
 
+    fn make_event(id: &str, timestamp: i64) -> EventRecord {
+        EventRecord {
+            id: id.to_string(),
+            timestamp,
+            content: format!("event-{id}"),
+            tags: vec!["note".to_string()],
+            refs: Vec::new(),
+            metadata: None,
+        }
+    }
+
     #[test]
     fn sanitize_user_id_defaults() {
         assert_eq!(sanitize_user_id(None), "anonymous");
@@ -588,6 +718,35 @@ mod tests {
     fn sanitize_user_id_replaces_special_chars() {
         assert_eq!(sanitize_user_id(Some("user@host.com")), "user_host_com");
         assert_eq!(sanitize_user_id(Some("hello-world_1")), "hello-world_1");
+    }
+
+    #[test]
+    fn build_fallback_snapshot_filter_applies_requested_limit() {
+        let filter = EventListFilter {
+            since_timestamp: Some(1_700_000_000_000),
+            until_timestamp: Some(1_700_000_000_999),
+            tags: vec!["note".to_string()],
+            limit: None,
+        };
+
+        let fallback = build_fallback_snapshot_filter(&filter, Some(2));
+
+        assert_eq!(fallback.since_timestamp, filter.since_timestamp);
+        assert_eq!(fallback.until_timestamp, filter.until_timestamp);
+        assert_eq!(fallback.tags, filter.tags);
+        assert_eq!(fallback.limit, Some(2));
+    }
+
+    #[test]
+    fn build_fallback_snapshot_filter_keeps_smallest_limit() {
+        let filter = EventListFilter {
+            limit: Some(1),
+            ..EventListFilter::default()
+        };
+
+        let fallback = build_fallback_snapshot_filter(&filter, Some(3));
+
+        assert_eq!(fallback.limit, Some(1));
     }
 
     #[test]
@@ -635,6 +794,70 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].id, "evt-sql-1");
         assert_eq!(events[0].content, "persist me");
+    }
+
+    #[test]
+    fn sqlite_cursor_missing_fallback_applies_limit() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store =
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
+
+        for index in 0..5 {
+            let event = make_event(
+                format!("sql-{index}").as_str(),
+                1_700_000_000_000_i64 + index,
+            );
+            store.append_event(None, event).unwrap();
+        }
+
+        let (events, cursor_found) = store
+            .list_events_after_cursor_filtered(
+                None,
+                "missing-cursor",
+                &EventListFilter::default(),
+                Some(2),
+            )
+            .unwrap();
+
+        assert!(!cursor_found);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, "sql-4");
+        assert_eq!(events[1].id, "sql-3");
+    }
+
+    #[test]
+    fn sqlite_cursor_outside_filter_fallback_applies_limit() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store =
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
+
+        store
+            .append_event(None, make_event("sql-old", 1_700_000_000_000))
+            .unwrap();
+        store
+            .append_event(None, make_event("sql-mid", 1_700_000_000_100))
+            .unwrap();
+        store
+            .append_event(None, make_event("sql-new", 1_700_000_000_200))
+            .unwrap();
+
+        let (events, cursor_found) = store
+            .list_events_after_cursor_filtered(
+                None,
+                "sql-old",
+                &EventListFilter {
+                    since_timestamp: Some(1_700_000_000_050),
+                    ..EventListFilter::default()
+                },
+                Some(1),
+            )
+            .unwrap();
+
+        assert!(!cursor_found);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, "sql-new");
     }
 
     #[test]
@@ -743,11 +966,40 @@ mod tests {
 
         let status = store.mirror_status(None).unwrap();
         assert_eq!(status.total_events, 1);
-        assert!(!status.needs_rebuild);
+        assert!(status.needs_rebuild);
 
         let rebuilt = store.rebuild_markdown(None).unwrap();
         assert_eq!(rebuilt.total_events, 1);
         assert!(!rebuilt.needs_rebuild);
+    }
+
+    #[test]
+    fn sqlite_append_skips_automatic_markdown_sync_by_default() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store =
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
+
+        store
+            .append_event(
+                None,
+                EventRecord {
+                    id: "sql-default-no-mirror".to_string(),
+                    timestamp: 1700000000000,
+                    content: "persist without mirror by default".to_string(),
+                    tags: vec!["note".to_string()],
+                    refs: Vec::new(),
+                    metadata: None,
+                },
+            )
+            .unwrap();
+
+        let paths = store.resolve_paths(None).unwrap();
+        assert!(!paths.mirror.exists());
+        assert_eq!(store.list_events(None).unwrap().len(), 1);
+        let status = store.mirror_status(None).unwrap();
+        assert!(status.needs_rebuild);
+        assert_eq!(status.mirrored_events, 0);
     }
 
     #[test]

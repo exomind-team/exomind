@@ -1,3 +1,4 @@
+import { getPerfLoggingEnabled } from '@/config/perf-logging-enabled';
 import { log } from '@/lib/logger';
 
 export function perfNow(): number {
@@ -17,6 +18,17 @@ type PerfFields = Record<string, unknown>;
 
 function formatPerfPrefix(scope: string, totalMs: number): string {
   return `[PERF] (${totalMs}ms) ${scope}`;
+}
+
+export function isPerfLoggingEnabled(): boolean {
+  return getPerfLoggingEnabled();
+}
+
+export function logPerfInfo(message: string): void {
+  if (!isPerfLoggingEnabled()) {
+    return;
+  }
+  log.info(message);
 }
 
 export class PerfTrace {
@@ -53,7 +65,9 @@ export class PerfTrace {
 
   finish(fields: PerfFields = {}): void {
     const totalMs = this.totalMs();
-    log.info(`${formatPerfPrefix(this.scope, totalMs)} ${JSON.stringify(this.buildPayload(fields, totalMs))}`);
+    logPerfInfo(
+      `${formatPerfPrefix(this.scope, totalMs)} ${JSON.stringify(this.buildPayload(fields, totalMs))}`,
+    );
   }
 
   fail(error: unknown, fields: PerfFields = {}): void {

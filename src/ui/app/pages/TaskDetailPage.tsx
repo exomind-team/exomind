@@ -26,6 +26,7 @@ import {
   getTaskTimerService,
   getTimeBlockService,
 } from "@/lib/services";
+import type { EventLogListOptions } from "@/lib/environment/interfaces/eventlog.port";
 import {
   buildInitialTaskStatusTransition,
   isTerminalTaskStatus,
@@ -56,6 +57,7 @@ import {
   type TimeblockBadge,
   type LinkedBlockItem,
 } from "./task-timeblock-detail-view";
+import { PerfTrace } from "@/lib/utils/perf-trace";
 import {
   buildTaskDependencyView,
   formatDependencyActionError,
@@ -353,6 +355,52 @@ function isTaskLinkedToActiveBlock(
 ): boolean {
   if (!block || !taskId) return false;
   return resolveActiveBlockTaskIds(block).includes(taskId);
+}
+
+function buildTaskEventLogQuery(
+  task: TaskNode,
+  blocks: TimeBlock[],
+  activeBlock: ActiveBlockData | null,
+  preferredBlockId?: string,
+): EventLogListOptions | null {
+  let sinceTimestamp = Number.POSITIVE_INFINITY;
+  let untilTimestamp = Number.NEGATIVE_INFINITY;
+  const taskBlockIds = new Set(
+    (task.timeBlockIds ?? []).map((value) => value.trim()).filter(Boolean),
+  );
+
+  for (const block of blocks) {
+    if (!taskBlockIds.has(block.startId) && !taskBlockIds.has(block.id)) {
+      continue;
+    }
+    sinceTimestamp = Math.min(sinceTimestamp, block.startTime);
+    untilTimestamp = Math.max(untilTimestamp, block.endTime);
+  }
+
+  if (preferredBlockId) {
+    const preferredBlock = blocks.find(
+      (block) =>
+        block.id === preferredBlockId || block.startId === preferredBlockId,
+    );
+    if (preferredBlock) {
+      sinceTimestamp = Math.min(sinceTimestamp, preferredBlock.startTime);
+      untilTimestamp = Math.max(untilTimestamp, preferredBlock.endTime);
+    }
+  }
+
+  if (activeBlock && isTaskLinkedToActiveBlock(activeBlock, task.id)) {
+    sinceTimestamp = Math.min(sinceTimestamp, activeBlock.startTime);
+    untilTimestamp = Math.max(untilTimestamp, Date.now());
+  }
+
+  if (!Number.isFinite(sinceTimestamp) || !Number.isFinite(untilTimestamp)) {
+    return null;
+  }
+
+  return {
+    sinceTimestamp,
+    untilTimestamp,
+  };
 }
 
 function DetailActionsCard({
@@ -1276,15 +1324,21 @@ function MobileTimeblockDetail({
           <div className="mt-3 space-y-2 rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
             <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
               <span>关键产出：</span>
-              <span className="exomind-selectable">{model.aiSummary.keyOutput}</span>
+              <span className="exomind-selectable">
+                {model.aiSummary.keyOutput}
+              </span>
             </p>
             <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
               <span>阻塞点：</span>
-              <span className="exomind-selectable">{model.aiSummary.blocker}</span>
+              <span className="exomind-selectable">
+                {model.aiSummary.blocker}
+              </span>
             </p>
             <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
               <span>建议：</span>
-              <span className="exomind-selectable">{model.aiSummary.suggestion}</span>
+              <span className="exomind-selectable">
+                {model.aiSummary.suggestion}
+              </span>
             </p>
           </div>
         </section>
@@ -1673,15 +1727,21 @@ function DesktopTimeblockDetail({
             </p>
             <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
               <span>关键产出：</span>
-              <span className="exomind-selectable">{model.aiSummary.keyOutput}</span>
+              <span className="exomind-selectable">
+                {model.aiSummary.keyOutput}
+              </span>
             </p>
             <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
               <span>阻塞点：</span>
-              <span className="exomind-selectable">{model.aiSummary.blocker}</span>
+              <span className="exomind-selectable">
+                {model.aiSummary.blocker}
+              </span>
             </p>
             <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
               <span>建议：</span>
-              <span className="exomind-selectable">{model.aiSummary.suggestion}</span>
+              <span className="exomind-selectable">
+                {model.aiSummary.suggestion}
+              </span>
             </p>
           </section>
 
@@ -1836,10 +1896,18 @@ export function TaskDetailPage() {
     const taskService = getTaskService();
     const timeBlockService = getTimeBlockService();
     const load = async () => {
+      const trace = new PerfTrace("TaskDetailPage loadDetail", {
+        dependencyReloadKey,
+        preferredBlockId: preferredBlockId ?? null,
+        taskId: taskId ?? null,
+      });
       if (!taskId && !preferredBlockId) {
         setAllTasks([]);
         setDependencyLoadError(null);
         setIsLoading(false);
+        trace.finish({
+          outcome: "no-target",
+        });
         return;
       }
 
@@ -1847,11 +1915,15 @@ export function TaskDetailPage() {
         .listTasks(true)
         .then((tasks) => {
           if (!disposed) setDependencyLoadError(null);
+          trace.step("list-tasks", {
+            taskCount: tasks.length,
+          });
           return tasks;
         })
         .catch((error) => {
           if (!disposed)
             setDependencyLoadError(formatDependencyActionError(error, "load"));
+          trace.step("list-tasks-failed");
           return [] as TaskNode[];
         });
 
@@ -1863,6 +1935,11 @@ export function TaskDetailPage() {
           listedTasksPromise,
         ],
       );
+      trace.step("load-core-snapshots", {
+        completedBlockCount: blocks.length,
+        hasActiveBlock: Boolean(currentBlock),
+        listedTaskCount: listedTasks.length,
+      });
       let nextTask = loadedTask;
       if (!nextTask && preferredBlockId) {
         const matchedBlock = blocks.find(
@@ -1896,14 +1973,42 @@ export function TaskDetailPage() {
           !isTaskLinkedToActiveBlock(currentBlock, nextTask.id),
         ),
       );
+      trace.step("resolve-target-task", {
+        hasTask: Boolean(nextTask),
+        taskId: nextTask?.id ?? null,
+      });
+
+      let loadedEventCount = 0;
 
       if (nextTask) {
+        const eventQuery = buildTaskEventLogQuery(
+          nextTask,
+          blocks,
+          currentBlock,
+          preferredBlockId,
+        );
         const [events, calculatedSpentMinutes] = await Promise.all([
-          getEventLogService().loadEvents(),
+          eventQuery
+            ? getEventLogService().loadEvents(eventQuery)
+            : Promise.resolve(
+                [] as Array<{
+                  id: string;
+                  content: string;
+                  timestamp: number;
+                  tags: Set<string>;
+                }>,
+              ),
           getTaskTimerService()
             .calculateSpentMinutes(nextTask.id)
             .catch(() => 0),
         ]);
+        loadedEventCount = events.length;
+        trace.step("load-task-detail-side-data", {
+          eventCount: events.length,
+          sinceTimestamp: eventQuery?.sinceTimestamp ?? null,
+          taskId: nextTask.id,
+          untilTimestamp: eventQuery?.untilTimestamp ?? null,
+        });
         const matchedBlockName = preferredBlockId
           ? blocks.find(
               (block) =>
@@ -1933,7 +2038,14 @@ export function TaskDetailPage() {
         setEventLogs([]);
         setReviewMarkdown("");
       }
-      if (!disposed) setIsLoading(false);
+      if (!disposed) {
+        setIsLoading(false);
+        trace.finish({
+          eventCount: loadedEventCount,
+          outcome: "applied",
+          resolvedTaskId: nextTask?.id ?? null,
+        });
+      }
     };
 
     void load();

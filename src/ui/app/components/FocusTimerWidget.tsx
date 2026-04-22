@@ -40,7 +40,7 @@ import {
 } from "@/config/focus-bgm-preferences";
 import { getTimerEndSoundPresetById } from "@/lib/media/timer-end-sounds";
 import { log } from "@/lib/logger";
-import { PerfTrace, perfNow, waitForNextPaint } from "@/lib/utils/perf-trace";
+import { PerfTrace, logPerfInfo, perfNow, waitForNextPaint } from "@/lib/utils/perf-trace";
 import {
   getTaskService,
   getTaskTimerService,
@@ -781,11 +781,11 @@ export const FocusTimerWidget = forwardRef<
 
     if (runningSubState === "running") {
       const t0 = perfNow();
-      log.info("[TB-UI] click pause -> pauseBlock start");
+      logPerfInfo("[TB-UI] click pause -> pauseBlock start");
       setRunningSubState("paused");
       enqueueServiceMutation("pauseBlock", async () => {
         await timeBlockServiceRef.current.pauseBlock();
-        log.info(
+        logPerfInfo(
           `[TB-UI] click pause -> pauseBlock done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`,
         );
       });
@@ -793,11 +793,11 @@ export const FocusTimerWidget = forwardRef<
     }
 
     const t0 = perfNow();
-    log.info("[TB-UI] click resume -> resumeBlock start");
+    logPerfInfo("[TB-UI] click resume -> resumeBlock start");
     setRunningSubState("running");
     enqueueServiceMutation("resumeBlock", async () => {
       await timeBlockServiceRef.current.resumeBlock();
-      log.info(
+      logPerfInfo(
         `[TB-UI] click resume -> resumeBlock done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`,
       );
     });
@@ -815,12 +815,12 @@ export const FocusTimerWidget = forwardRef<
       return;
     }
     const t0 = perfNow();
-    log.info("[TB-UI] click end -> markEnding start");
+    logPerfInfo("[TB-UI] click end -> markEnding start");
     setRunningSubState("paused");
     setFeedbackInProgress(true);
     enqueueServiceMutation("markEnding", async () => {
       await timeBlockServiceRef.current.markEnding();
-      log.info(
+      logPerfInfo(
         `[TB-UI] click end -> markEnding done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`,
       );
     });
@@ -871,7 +871,7 @@ export const FocusTimerWidget = forwardRef<
         taskCount: taskIdsSnapshot.length,
         hasFeedback: trimmedFeedback.length > 0,
       });
-      log.info("[TB-UI] click submit-end -> endBlock start");
+      logPerfInfo("[TB-UI] click submit-end -> endBlock start");
       trace.step("prepare-submit", {
         feedbackLength: trimmedFeedback.length,
         taskCount: taskIdsSnapshot.length,
@@ -981,7 +981,7 @@ export const FocusTimerWidget = forwardRef<
       trace.finish({
         endBlockClickToDoneMs: trace.totalMs(),
       });
-      log.info(
+      logPerfInfo(
         `[TB-UI] click submit-end -> endBlock done ${JSON.stringify({ traceId: trace.traceId, elapsedMs: trace.totalMs() })}`,
       );
     },

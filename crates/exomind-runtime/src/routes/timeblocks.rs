@@ -6,11 +6,13 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::TimeZone;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::tasks::transition_task_in_scope_with_context;
 use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
+use crate::config::types::USER_CONFIG_SCOPE;
+use crate::eventlog::PERF_LOGGING_ENABLED_CONFIG_KEY;
 use crate::signal::types::SignalEvent;
 use crate::task::{TaskStatus, TaskTransitionContext, TaskTransitionReason};
 use crate::timeblock::{
@@ -19,6 +21,17 @@ use crate::timeblock::{
 };
 
 const TIMEBLOCK_SCOPE_GRANT_DOMAIN: &str = "timeblocks";
+
+fn is_perf_logging_enabled(state: &AppState) -> bool {
+    match state
+        .config_store
+        .get(USER_CONFIG_SCOPE, PERF_LOGGING_ENABLED_CONFIG_KEY)
+    {
+        Ok(Some(entry)) => entry.value.trim() == "true",
+        Ok(None) => false,
+        Err(_) => false,
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct ImportQuery {
@@ -469,7 +482,22 @@ pub fn do_new_block(
     scope_key: Option<&str>,
     req: &NewBlockRequest,
 ) -> Result<NewBlockResponse, (StatusCode, Json<ErrorResponse>)> {
-    do_new_block_at(store, scope_key, req, current_timestamp_millis())
+    do_new_block_at(store, scope_key, req, current_timestamp_millis(), false)
+}
+
+pub fn do_new_block_with_perf_logging(
+    store: &TimeBlockStore,
+    scope_key: Option<&str>,
+    req: &NewBlockRequest,
+    perf_logging_enabled: bool,
+) -> Result<NewBlockResponse, (StatusCode, Json<ErrorResponse>)> {
+    do_new_block_at(
+        store,
+        scope_key,
+        req,
+        current_timestamp_millis(),
+        perf_logging_enabled,
+    )
 }
 
 fn do_new_block_at(
@@ -477,6 +505,7 @@ fn do_new_block_at(
     scope_key: Option<&str>,
     req: &NewBlockRequest,
     now: u64,
+    perf_logging_enabled: bool,
 ) -> Result<NewBlockResponse, (StatusCode, Json<ErrorResponse>)> {
     let current = store
         .get_active_scoped(scope_key)
@@ -520,13 +549,20 @@ fn do_new_block_at(
             },
         };
 
-        let mut blocks = store
-            .list_completed_scoped(scope_key)
-            .map_err(|e| internal_error(e.to_string()))?;
-        blocks.push(completed_block.clone());
+        let completed_write_started_at = Instant::now();
         store
-            .replace_completed_scoped(scope_key, &blocks)
+            .put_completed_scoped(scope_key, completed_block.clone())
             .map_err(|e| internal_error(e.to_string()))?;
+        let completed_write_ms = completed_write_started_at.elapsed().as_millis();
+        if perf_logging_enabled {
+            tracing::info!(
+                scope_key = %normalize_scope_key(scope_key),
+                block_id = %completed_block.id,
+                start_id = %completed_block.start_id,
+                "[PERF] ({}ms) runtime.timeblocks.completed_upsert",
+                completed_write_ms
+            );
+        }
 
         Some(completed_block)
     } else {
@@ -694,7 +730,13 @@ async fn new_block(
         )
         .await?;
     }
-    let result = do_new_block_at(&state.timeblock_store, scope_key, &payload, now)?;
+    let result = do_new_block_at(
+        &state.timeblock_store,
+        scope_key,
+        &payload,
+        now,
+        is_perf_logging_enabled(&state),
+    )?;
     publish_new_block_replication_signals(&state, scope_key, &result);
     Ok(Json(result))
 }
@@ -718,7 +760,7 @@ async fn start_block(
         }
     }
 
-    let result = do_new_block(
+    let result = do_new_block_with_perf_logging(
         &state.timeblock_store,
         scope_key,
         &NewBlockRequest {
@@ -731,6 +773,7 @@ async fn start_block(
             feedback: None,
             task_status_outcomes: None,
         },
+        is_perf_logging_enabled(&state),
     )?;
 
     publish_new_block_replication_signals(&state, scope_key, &result);
@@ -803,6 +846,7 @@ async fn end_block(
             task_status_outcomes: payload.task_status_outcomes,
         },
         now,
+        is_perf_logging_enabled(&state),
     )?;
 
     // Transition → EventLog linkage: RT owns the full feedback report generation.
@@ -830,14 +874,12 @@ async fn backfill_gap_blocks(
         return Ok(Json(BackfillGapBlocksResponse { inserted: 0 }));
     }
 
-    let mut merged = blocks;
-    merged.extend(gaps.iter().cloned());
-    merged.sort_by_key(|block| block.start_time);
-
-    state
-        .timeblock_store
-        .replace_completed_scoped(scope_key, &merged)
-        .map_err(|error| internal_error(error.to_string()))?;
+    for gap in &gaps {
+        state
+            .timeblock_store
+            .put_completed_scoped(scope_key, gap.clone())
+            .map_err(|error| internal_error(error.to_string()))?;
+    }
 
     Ok(Json(BackfillGapBlocksResponse {
         inserted: gaps.len(),
@@ -850,28 +892,32 @@ async fn replication_completed_block(
     Json(payload): Json<CompletedReplicationRequest>,
 ) -> Result<Json<CompletedReplicationResponse>, (StatusCode, Json<ErrorResponse>)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let mut blocks = state
+    let existing = state
         .timeblock_store
-        .list_completed_scoped(scope_key)
+        .get_completed_by_start_id_scoped(scope_key, &payload.block.start_id)
         .map_err(|e| internal_error(e.to_string()))?;
 
-    if blocks
-        .iter()
-        .any(|existing| existing.start_id == payload.block.start_id)
-    {
+    if existing.is_some() {
         return Ok(Json(CompletedReplicationResponse { status: "ignored" }));
     }
 
-    blocks.push(payload.block);
+    let block = payload.block;
+    let completed_write_started_at = Instant::now();
     state
         .timeblock_store
-        .replace_completed_scoped(scope_key, &blocks)
+        .put_completed_scoped(scope_key, block.clone())
         .map_err(|e| internal_error(e.to_string()))?;
-    let stored = blocks
-        .last()
-        .cloned()
-        .ok_or_else(|| internal_error("replicated timeblock missing after insert".to_string()))?;
-    notify_local_completed_timeblock_replication_applied(&state, scope_key, &stored);
+    let completed_write_ms = completed_write_started_at.elapsed().as_millis();
+    if is_perf_logging_enabled(&state) {
+        tracing::info!(
+            scope_key = %normalize_scope_key(scope_key),
+            block_id = %block.id,
+            start_id = %block.start_id,
+            "[PERF] ({}ms) runtime.timeblocks.replication_completed_upsert",
+            completed_write_ms
+        );
+    }
+    notify_local_completed_timeblock_replication_applied(&state, scope_key, &block);
 
     Ok(Json(CompletedReplicationResponse { status: "inserted" }))
 }
@@ -1334,39 +1380,43 @@ async fn describe_block(
         }
     }
 
-    // Try completed blocks
-    let mut blocks = state
+    let Some(mut block) = state
         .timeblock_store
-        .list_completed_scoped(scope_key)
-        .map_err(|e| internal_error(e.to_string()))?;
+        .get_completed_scoped(scope_key, block_id)
+        .map_err(|e| internal_error(e.to_string()))?
+    else {
+        return Err(conflict(format!("block not found: {block_id}")));
+    };
 
-    let idx = blocks.iter().position(|b| b.id == *block_id);
-    match idx {
-        None => Err(conflict(format!("block not found: {block_id}"))),
-        Some(i) => {
-            let block = &blocks[i];
-            // Immutability: completed active blocks cannot be modified
-            if block.block_type.as_deref() != Some("gap") {
-                return Err(conflict(
-                    "cannot describe: completed active blocks are immutable",
-                ));
-            }
-            // Gap block: allow describe (retroactive naming)
-            if let Some(name) = payload.name {
-                blocks[i].name = name;
-            }
-            if let Some(note) = payload.note {
-                blocks[i].note = Some(note);
-            }
-            state
-                .timeblock_store
-                .replace_completed_scoped(scope_key, &blocks)
-                .map_err(|e| internal_error(e.to_string()))?;
-            Ok(Json(
-                serde_json::json!({ "updated": "completed_gap", "blockId": block_id }),
-            ))
-        }
+    if block.block_type.as_deref() != Some("gap") {
+        return Err(conflict(
+            "cannot describe: completed active blocks are immutable",
+        ));
     }
+
+    if let Some(name) = payload.name {
+        block.name = name;
+    }
+    if let Some(note) = payload.note {
+        block.note = Some(note);
+    }
+    let completed_write_started_at = Instant::now();
+    state
+        .timeblock_store
+        .put_completed_scoped(scope_key, block)
+        .map_err(|e| internal_error(e.to_string()))?;
+    let completed_write_ms = completed_write_started_at.elapsed().as_millis();
+    if is_perf_logging_enabled(&state) {
+        tracing::info!(
+            scope_key = %normalize_scope_key(scope_key),
+            block_id = %block_id,
+            "[PERF] ({}ms) runtime.timeblocks.describe_completed_gap_upsert",
+            completed_write_ms
+        );
+    }
+    Ok(Json(
+        serde_json::json!({ "updated": "completed_gap", "blockId": block_id }),
+    ))
 }
 
 async fn list_timeblocks(
@@ -3734,6 +3784,85 @@ mod tests {
             timeblock_store.list_completed().unwrap().is_empty(),
             "anonymous scope should remain isolated from replicated scoped timeblocks"
         );
+    }
+
+    #[tokio::test]
+    async fn describe_route_updates_completed_gap_without_replacing_other_scoped_blocks() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("timeblocks-describe-gap.sqlite");
+        let timeblock_store =
+            Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
+        let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
+
+        timeblock_store
+            .replace_completed_scoped(
+                Some("user-a"),
+                &[
+                    TimeBlockData {
+                        id: "gap-1".to_string(),
+                        name: String::new(),
+                        start_id: "gap-1".to_string(),
+                        end_id: "gap-1-end".to_string(),
+                        note: None,
+                        tags: vec![],
+                        start_time: 100,
+                        end_time: 200,
+                        task_ids: vec![],
+                        task_status_outcomes: None,
+                        task_association_log: vec![],
+                        source_planned_block_id: None,
+                        block_type: Some("gap".to_string()),
+                        transitions: vec![],
+                    },
+                    TimeBlockData {
+                        id: "tb-1".to_string(),
+                        name: "Existing".to_string(),
+                        start_id: "tb-1".to_string(),
+                        end_id: "tb-1-end".to_string(),
+                        note: Some("keep".to_string()),
+                        tags: vec!["focus".to_string()],
+                        start_time: 300,
+                        end_time: 400,
+                        task_ids: vec![],
+                        task_status_outcomes: None,
+                        task_association_log: vec![],
+                        source_planned_block_id: None,
+                        block_type: Some("active".to_string()),
+                        transitions: vec![],
+                    },
+                ],
+            )
+            .unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/timeblocks/gap-1/describe?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"name":"Recovered gap","note":"retro note"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let updated_gap = timeblock_store
+            .get_completed_scoped(Some("user-a"), "gap-1")
+            .unwrap()
+            .expect("updated gap should exist");
+        assert_eq!(updated_gap.name, "Recovered gap");
+        assert_eq!(updated_gap.note.as_deref(), Some("retro note"));
+
+        let untouched = timeblock_store
+            .get_completed_scoped(Some("user-a"), "tb-1")
+            .unwrap()
+            .expect("existing completed block should remain");
+        assert_eq!(untouched.name, "Existing");
+        assert_eq!(untouched.note.as_deref(), Some("keep"));
     }
 
     #[tokio::test]

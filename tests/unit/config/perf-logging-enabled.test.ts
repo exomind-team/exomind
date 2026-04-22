@@ -24,7 +24,7 @@ function installStorageStub(storage: Record<string, string>): void {
   });
 }
 
-describe('eventlog markdown mirror enabled（事件日志 Markdown 镜像开关）', () => {
+describe('perf logging enabled（性能跟踪日志开关）', () => {
   let storage: Record<string, string>;
 
   beforeEach(async () => {
@@ -37,29 +37,29 @@ describe('eventlog markdown mirror enabled（事件日志 Markdown 镜像开关�
   });
 
   it('defaults to disabled when no value exists（无配置时默认关闭）', async () => {
-    const module = await import('@/config/eventlog-markdown-mirror-enabled');
+    const module = await import('@/config/perf-logging-enabled');
 
-    expect(module.getEventlogMarkdownMirrorEnabled()).toBe(false);
+    expect(module.getPerfLoggingEnabled()).toBe(false);
   });
 
   it('prefers runtime-backed value over local storage（优先读取 Runtime 值）', async () => {
-    storage['exomind:eventlogMarkdownMirrorEnabled'] = 'true';
+    storage['exomind:perfLoggingEnabled'] = 'true';
 
     const cacheModule = await import('@/config/runtime-config-cache');
     cacheModule.__primeRuntimeConfigForTests({
-      'exomind:eventlogMarkdownMirrorEnabled': 'false',
+      'exomind:perfLoggingEnabled': 'false',
     });
 
-    const module = await import('@/config/eventlog-markdown-mirror-enabled');
+    const module = await import('@/config/perf-logging-enabled');
 
-    expect(module.getEventlogMarkdownMirrorEnabled()).toBe(false);
+    expect(module.getPerfLoggingEnabled()).toBe(false);
   });
 
   it('writes through runtime-preferred storage（通过 Runtime 优先存储写入）', async () => {
-    const module = await import('@/config/eventlog-markdown-mirror-enabled');
+    const module = await import('@/config/perf-logging-enabled');
 
-    expect(module.setEventlogMarkdownMirrorEnabled(false)).toBeUndefined();
-    expect(storage[module.EVENTLOG_MARKDOWN_MIRROR_ENABLED_STORAGE_KEY]).toBe('false');
-    expect(module.getEventlogMarkdownMirrorEnabled()).toBe(false);
+    expect(module.setPerfLoggingEnabled(true)).toBeUndefined();
+    expect(storage[module.PERF_LOGGING_ENABLED_STORAGE_KEY]).toBe('true');
+    expect(module.getPerfLoggingEnabled()).toBe(true);
   });
 });

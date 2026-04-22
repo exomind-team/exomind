@@ -3,16 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
+import { loadTaskDependencySnapshot } from '@/lib/services/task.service';
 import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
-import { PrestartTaskSelectionList, usePrestartSelectableTasks } from '@/ui/app/components/prestart-task-selection';
+import { PrestartTaskSelectionList, isPrestartSelectableTask } from '@/ui/app/components/prestart-task-selection';
 import { PerfTrace } from '@/lib/utils/perf-trace';
-
-function hasHardBlockingDependency(
-  dependencyCheck: { blocking: Array<{ type: 'soft' | 'hard' }> },
-): boolean {
-  return dependencyCheck.blocking.some((dependency) => dependency.type === 'hard');
-}
 
 function formatAssociationError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -34,7 +29,6 @@ export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = 
   const [selectedTaskId, setSelectedTaskId] = useState('');
   const [associationError, setAssociationError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
-  const prestartSelectableTasks = usePrestartSelectableTasks();
 
   useEffect(() => {
     let disposed = false;
@@ -50,43 +44,36 @@ export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = 
       });
 
       try {
-        const [nextBlock, tasks] = await Promise.all([
+        const [nextBlock, snapshot] = await Promise.all([
           timeBlockService.loadActiveBlock(),
-          taskService.listTasks(true),
+          loadTaskDependencySnapshot(taskService, true, {
+            candidateTaskFilter: (task) => (
+              task.status !== 'completed' && task.status !== 'cancelled'
+            ),
+          }),
         ]);
         trace.step('load-active-block-and-tasks', {
           hasActiveBlock: Boolean(nextBlock),
           linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
-          taskCount: tasks.length,
+          taskCount: snapshot.tasks.length,
         });
-        const dependencyChecks = await Promise.all(tasks.map(async (task) => {
-          try {
-            const result = await taskService.checkDependenciesMet(task.id);
-            return [task.id, hasHardBlockingDependency(result)] as const;
-          } catch {
-            return [task.id, true] as const;
-          }
-        }));
-        const hardBlockedTaskIds = dependencyChecks
-          .filter(([, isBlocked]) => isBlocked)
-          .map(([taskId]) => taskId);
         trace.step('check-task-dependencies', {
-          taskCount: tasks.length,
-          hardBlockedCount: hardBlockedTaskIds.length,
+          taskCount: snapshot.tasks.length,
+          hardBlockedCount: snapshot.hardBlockedTaskIds.size,
         });
         if (disposed || requestId !== loadRequestIdRef.current) {
           trace.finish({
             outcome: 'stale',
             hasActiveBlock: Boolean(nextBlock),
             linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
-            taskCount: tasks.length,
-            hardBlockedCount: hardBlockedTaskIds.length,
+            taskCount: snapshot.tasks.length,
+            hardBlockedCount: snapshot.hardBlockedTaskIds.size,
           });
           return;
         }
         setActiveBlock(nextBlock);
-        setTasksById(new Map(tasks.map((task) => [task.id, task])));
-        setHardBlockedTaskIds(new Set(hardBlockedTaskIds));
+        setTasksById(new Map(snapshot.tasks.map((task) => [task.id, task])));
+        setHardBlockedTaskIds(new Set(snapshot.hardBlockedTaskIds));
         trace.step('apply-state', {
           linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
         });
@@ -94,65 +81,8 @@ export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = 
           outcome: 'applied',
           hasActiveBlock: Boolean(nextBlock),
           linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
-          taskCount: tasks.length,
-          hardBlockedCount: hardBlockedTaskIds.length,
-        });
-      } catch (error) {
-        trace.fail(error);
-        throw error;
-      }
-    };
-
-    const loadTasksOnly = async (nextBlock: ActiveBlockData | null) => {
-      const requestId = loadRequestIdRef.current + 1;
-      loadRequestIdRef.current = requestId;
-      const trace = new PerfTrace('BlockTaskAssociationList loadTasksOnly', {
-        incomingLinkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
-        incomingStartId: nextBlock?.startId ?? null,
-        requestId,
-        trigger: 'block-change',
-      });
-
-      try {
-        const tasks = await taskService.listTasks(true);
-        trace.step('list-tasks', {
-          taskCount: tasks.length,
-        });
-        const dependencyChecks = await Promise.all(tasks.map(async (task) => {
-          try {
-            const result = await taskService.checkDependenciesMet(task.id);
-            return [task.id, hasHardBlockingDependency(result)] as const;
-          } catch {
-            return [task.id, true] as const;
-          }
-        }));
-        const hardBlockedTaskIds = dependencyChecks
-          .filter(([, isBlocked]) => isBlocked)
-          .map(([taskId]) => taskId);
-        trace.step('check-task-dependencies', {
-          taskCount: tasks.length,
-          hardBlockedCount: hardBlockedTaskIds.length,
-        });
-        if (disposed || requestId !== loadRequestIdRef.current) {
-          trace.finish({
-            outcome: 'stale',
-            incomingLinkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
-            taskCount: tasks.length,
-            hardBlockedCount: hardBlockedTaskIds.length,
-          });
-          return;
-        }
-        setActiveBlock(nextBlock);
-        setTasksById(new Map(tasks.map((task) => [task.id, task])));
-        setHardBlockedTaskIds(new Set(hardBlockedTaskIds));
-        trace.step('apply-state', {
-          linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
-        });
-        trace.finish({
-          outcome: 'applied',
-          incomingLinkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
-          taskCount: tasks.length,
-          hardBlockedCount: hardBlockedTaskIds.length,
+          taskCount: snapshot.tasks.length,
+          hardBlockedCount: snapshot.hardBlockedTaskIds.size,
         });
       } catch (error) {
         trace.fail(error);
@@ -165,7 +95,8 @@ export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = 
       void loadSnapshot();
     });
     const unsubscribeBlocks = timeBlockService.onBlockChange((block) => {
-      void loadTasksOnly(block);
+      loadRequestIdRef.current += 1;
+      setActiveBlock(block);
     });
 
     return () => {
@@ -176,6 +107,7 @@ export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = 
   }, []);
 
   const activeTaskIds = resolveActiveBlockTaskIds(activeBlock);
+  const activeTaskIdSet = useMemo(() => new Set(activeTaskIds), [activeTaskIds]);
   const linkedTasks = activeTaskIds
     .map((taskId) => tasksById.get(taskId))
     .filter((task): task is TaskNode => Boolean(task));
@@ -185,9 +117,16 @@ export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = 
       task.status !== 'completed'
       && task.status !== 'cancelled'
       && !hardBlockedTaskIds.has(task.id)
-      && !activeTaskIds.includes(task.id)
+      && !activeTaskIdSet.has(task.id)
     ))
-  ), [activeTaskIds, hardBlockedTaskIds, tasksById]);
+  ), [activeTaskIdSet, hardBlockedTaskIds, tasksById]);
+
+  const prestartSelectableTasks = useMemo(() => (
+    [...tasksById.values()].filter((task) => (
+      isPrestartSelectableTask(task)
+      && !hardBlockedTaskIds.has(task.id)
+    ))
+  ), [hardBlockedTaskIds, tasksById]);
 
   useEffect(() => {
     if (!selectedTaskId && availableTasks[0]) {

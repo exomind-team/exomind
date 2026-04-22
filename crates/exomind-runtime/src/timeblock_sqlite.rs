@@ -50,35 +50,60 @@ impl SqliteTimeBlockStore {
              ORDER BY end_time DESC, id DESC",
         )?;
 
-        let rows = statement.query_map(params![normalize_scope_key(scope_key)], |row| {
-            Ok(TimeBlockData {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                start_id: row.get(2)?,
-                end_id: row.get(3)?,
-                note: row.get(4)?,
-                tags: serde_json::from_str::<Vec<String>>(&row.get::<_, String>(5)?)
-                    .map_err(to_sqlite_conversion_error)?,
-                start_time: row.get(6)?,
-                end_time: row.get(7)?,
-                task_ids: serde_json::from_str::<Vec<String>>(&row.get::<_, String>(8)?)
-                    .map_err(to_sqlite_conversion_error)?,
-                task_status_outcomes: row
-                    .get::<_, Option<String>>(9)?
-                    .map(|value| serde_json::from_str(&value).map_err(to_sqlite_conversion_error))
-                    .transpose()?,
-                task_association_log: serde_json::from_str(&row.get::<_, String>(10)?)
-                    .map_err(to_sqlite_conversion_error)?,
-                source_planned_block_id: row.get(11)?,
-                block_type: row.get(12)?,
-                transitions: row
-                    .get::<_, Option<String>>(13)?
-                    .map(|v| serde_json::from_str(&v).unwrap_or_default())
-                    .unwrap_or_default(),
-            })
-        })?;
+        let rows =
+            statement.query_map(params![normalize_scope_key(scope_key)], map_completed_row)?;
 
         rows.collect::<Result<Vec<_>, _>>()
+            .map_err(TimeBlockStoreError::from)
+    }
+
+    pub fn get_completed_scoped(
+        &self,
+        scope_key: &str,
+        block_id: &str,
+    ) -> Result<Option<TimeBlockData>, TimeBlockStoreError> {
+        if block_id.trim().is_empty() {
+            return Ok(None);
+        }
+
+        let connection = self.connection();
+        connection
+            .query_row(
+                "SELECT id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                        task_ids_json, task_status_outcomes_json, task_association_log_json,
+                        source_planned_block_id, block_type, transitions_json
+                 FROM timeblocks
+                 WHERE scope_key = ?1 AND id = ?2 AND end_time IS NOT NULL",
+                params![normalize_scope_key(scope_key), block_id.trim()],
+                map_completed_row,
+            )
+            .optional()
+            .map_err(TimeBlockStoreError::from)
+    }
+
+    pub fn get_completed_by_start_id_scoped(
+        &self,
+        scope_key: &str,
+        start_id: &str,
+    ) -> Result<Option<TimeBlockData>, TimeBlockStoreError> {
+        if start_id.trim().is_empty() {
+            return Ok(None);
+        }
+
+        let connection = self.connection();
+        connection
+            .query_row(
+                "SELECT id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                        task_ids_json, task_status_outcomes_json, task_association_log_json,
+                        source_planned_block_id, block_type, transitions_json
+                 FROM timeblocks
+                 WHERE scope_key = ?1 AND start_id = ?2 AND end_time IS NOT NULL
+                 ORDER BY end_time DESC, id DESC
+                 LIMIT 1",
+                params![normalize_scope_key(scope_key), start_id.trim()],
+                map_completed_row,
+            )
+            .optional()
             .map_err(TimeBlockStoreError::from)
     }
 
@@ -98,37 +123,19 @@ impl SqliteTimeBlockStore {
             params![normalize_scope_key(scope_key)],
         )?;
         for block in blocks {
-            tx.execute(
-                "INSERT OR REPLACE INTO timeblocks (
-                    scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
-                    task_ids_json, task_status_outcomes_json, task_association_log_json,
-                    source_planned_block_id, block_type, transitions_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                params![
-                    normalize_scope_key(scope_key),
-                    block.id,
-                    block.name,
-                    block.start_id,
-                    block.end_id,
-                    block.note,
-                    serde_json::to_string(&block.tags)?,
-                    block.start_time,
-                    block.end_time,
-                    serde_json::to_string(&block.task_ids)?,
-                    block
-                        .task_status_outcomes
-                        .as_ref()
-                        .map(serde_json::to_string)
-                        .transpose()?,
-                    serde_json::to_string(&block.task_association_log)?,
-                    block.source_planned_block_id,
-                    block.block_type,
-                    serde_json::to_string(&block.transitions)?,
-                ],
-            )?;
+            insert_or_replace_completed_block(&tx, scope_key, block)?;
         }
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn put_completed_scoped(
+        &self,
+        scope_key: &str,
+        block: &TimeBlockData,
+    ) -> Result<(), TimeBlockStoreError> {
+        let connection = self.connection();
+        insert_or_replace_completed_block(&connection, scope_key, block)
     }
 
     // ── Planned blocks ───────────────────────────────────────────────
@@ -430,7 +437,16 @@ impl SqliteTimeBlockStore {
                 source_planned_block_id    TEXT    NULL,
                 payload_json               TEXT    NULL,
                 PRIMARY KEY (scope_key, id)
-            );",
+            );
+            CREATE INDEX IF NOT EXISTS idx_timeblocks_completed_scope_end
+                ON timeblocks(scope_key, end_time DESC, id DESC)
+                WHERE end_time IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_timeblocks_completed_scope_start_id
+                ON timeblocks(scope_key, start_id)
+                WHERE end_time IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_timeblocks_active_scope_start_time
+                ON timeblocks(scope_key, start_time DESC)
+                WHERE end_time IS NULL;",
         )?;
 
         // ── Step 2: Migrate data from legacy tables ──────────────────
@@ -635,6 +651,85 @@ fn table_columns(
         .map_err(TimeBlockStoreError::from)
 }
 
+fn map_completed_row(row: &rusqlite::Row<'_>) -> Result<TimeBlockData, rusqlite::Error> {
+    Ok(TimeBlockData {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        start_id: row.get(2)?,
+        end_id: row.get(3)?,
+        note: row.get(4)?,
+        tags: serde_json::from_str::<Vec<String>>(&row.get::<_, String>(5)?)
+            .map_err(to_sqlite_conversion_error)?,
+        start_time: row.get(6)?,
+        end_time: row.get(7)?,
+        task_ids: serde_json::from_str::<Vec<String>>(&row.get::<_, String>(8)?)
+            .map_err(to_sqlite_conversion_error)?,
+        task_status_outcomes: row
+            .get::<_, Option<String>>(9)?
+            .map(|value| serde_json::from_str(&value).map_err(to_sqlite_conversion_error))
+            .transpose()?,
+        task_association_log: serde_json::from_str(&row.get::<_, String>(10)?)
+            .map_err(to_sqlite_conversion_error)?,
+        source_planned_block_id: row.get(11)?,
+        block_type: row.get(12)?,
+        transitions: row
+            .get::<_, Option<String>>(13)?
+            .map(|value| serde_json::from_str(&value).unwrap_or_default())
+            .unwrap_or_default(),
+    })
+}
+
+fn insert_or_replace_completed_block(
+    connection: &Connection,
+    scope_key: &str,
+    block: &TimeBlockData,
+) -> Result<(), TimeBlockStoreError> {
+    connection.execute(
+        "INSERT INTO timeblocks (
+            scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
+            task_ids_json, task_status_outcomes_json, task_association_log_json,
+            source_planned_block_id, block_type, transitions_json, payload_json
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, NULL)
+         ON CONFLICT(scope_key, id) DO UPDATE SET
+            name = excluded.name,
+            start_id = excluded.start_id,
+            end_id = excluded.end_id,
+            note = excluded.note,
+            tags_json = excluded.tags_json,
+            start_time = excluded.start_time,
+            end_time = excluded.end_time,
+            task_ids_json = excluded.task_ids_json,
+            task_status_outcomes_json = excluded.task_status_outcomes_json,
+            task_association_log_json = excluded.task_association_log_json,
+            source_planned_block_id = excluded.source_planned_block_id,
+            block_type = excluded.block_type,
+            transitions_json = excluded.transitions_json,
+            payload_json = excluded.payload_json",
+        params![
+            normalize_scope_key(scope_key),
+            block.id,
+            block.name,
+            block.start_id,
+            block.end_id,
+            block.note,
+            serde_json::to_string(&block.tags)?,
+            block.start_time,
+            block.end_time,
+            serde_json::to_string(&block.task_ids)?,
+            block
+                .task_status_outcomes
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+            serde_json::to_string(&block.task_association_log)?,
+            block.source_planned_block_id,
+            block.block_type.as_deref(),
+            serde_json::to_string(&block.transitions)?,
+        ],
+    )?;
+    Ok(())
+}
+
 fn insert_or_replace_planned_block(
     connection: &Connection,
     scope_key: &str,
@@ -731,4 +826,90 @@ fn parse_planned_block_type(value: &str) -> Result<PlannedTimeBlockType, rusqlit
 
 fn to_sqlite_conversion_error(error: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::SqliteTimeBlockStore;
+    use crate::timeblock::TimeBlockData;
+
+    fn sample_completed_block(id: &str, end_time: u64) -> TimeBlockData {
+        TimeBlockData {
+            id: id.to_string(),
+            name: format!("block-{id}"),
+            start_id: id.to_string(),
+            end_id: format!("end-{id}"),
+            note: None,
+            tags: vec!["focus".to_string()],
+            start_time: end_time.saturating_sub(100),
+            end_time,
+            task_ids: vec![],
+            task_status_outcomes: None,
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            block_type: Some("active".to_string()),
+            transitions: vec![],
+        }
+    }
+
+    #[test]
+    fn put_completed_scoped_updates_single_block_without_clearing_scope() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("timeblocks.sqlite");
+        let store = SqliteTimeBlockStore::open(&sqlite_path).unwrap();
+
+        let existing = sample_completed_block("tb-existing", 200);
+        let updating = sample_completed_block("tb-upsert", 400);
+        store
+            .replace_completed_scoped("profile-argon", &[existing.clone(), updating.clone()])
+            .unwrap();
+
+        store
+            .put_completed_scoped(
+                "profile-argon",
+                &TimeBlockData {
+                    name: "updated".to_string(),
+                    note: Some("patched".to_string()),
+                    end_time: 450,
+                    ..updating
+                },
+            )
+            .unwrap();
+
+        let blocks = store.list_completed_scoped("profile-argon").unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks.iter().any(|block| block.id == existing.id));
+        let updated = blocks
+            .into_iter()
+            .find(|block| block.id == "tb-upsert")
+            .expect("updated block should exist");
+        assert_eq!(updated.name, "updated");
+        assert_eq!(updated.note.as_deref(), Some("patched"));
+        assert_eq!(updated.end_time, 450);
+    }
+
+    #[test]
+    fn get_completed_by_start_id_scoped_reads_single_completed_block() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("timeblocks.sqlite");
+        let store = SqliteTimeBlockStore::open(&sqlite_path).unwrap();
+
+        store
+            .put_completed_scoped("profile-argon", &sample_completed_block("tb-find", 300))
+            .unwrap();
+
+        let found = store
+            .get_completed_by_start_id_scoped("profile-argon", "tb-find")
+            .unwrap()
+            .expect("block should be found by start_id");
+        assert_eq!(found.id, "tb-find");
+        assert_eq!(
+            store
+                .get_completed_by_start_id_scoped("profile-argon", "missing")
+                .unwrap(),
+            None
+        );
+    }
 }

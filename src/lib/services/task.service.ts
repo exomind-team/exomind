@@ -3,6 +3,7 @@ import type { DomainBackendMode } from '@/config/domain-backend-mode'
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
 import { emitTaskCreated, emitTaskTransition } from './task-event-emitter'
+import { PerfTrace } from '@/lib/utils/perf-trace'
 
 type TaskEnvironmentLike = {
   task: ITaskPort
@@ -18,8 +19,21 @@ export interface DependencyCheckResult {
   blocking: Array<{ taskId: string; type: 'soft' | 'hard'; status: TaskStatus }>
 }
 
+export interface TaskDependencySnapshot {
+  tasks: TaskNode[]
+  hardBlockedTaskIds: Set<string>
+}
+
+export interface TaskDependencySnapshotOptions {
+  candidateTaskFilter?: (task: TaskNode) => boolean
+}
+
 export interface TaskService {
   listTasks(includeCancelled?: boolean): Promise<TaskNode[]>
+  listTasksWithDependencyStatus?(
+    includeCancelled?: boolean,
+    options?: TaskDependencySnapshotOptions,
+  ): Promise<TaskDependencySnapshot>
   getTask(id: string): Promise<TaskNode | null>
   createTask(input: CreateTaskInput): Promise<TaskNode>
   updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null>
@@ -53,6 +67,43 @@ export class TaskServiceImpl implements TaskService {
 
   listTasks(includeCancelled = false) {
     return this.env.task.listTasks(includeCancelled)
+  }
+
+  async listTasksWithDependencyStatus(
+    includeCancelled = false,
+    options: TaskDependencySnapshotOptions = {},
+  ): Promise<TaskDependencySnapshot> {
+    const trace = new PerfTrace('TaskService listTasksWithDependencyStatus', {
+      includeCancelled,
+    })
+    const tasks = await this.env.task.listTasks(includeCancelled)
+    const candidateTasks = options.candidateTaskFilter
+      ? tasks.filter(options.candidateTaskFilter)
+      : tasks
+    trace.step('list-tasks', {
+      candidateCount: candidateTasks.length,
+      taskCount: tasks.length,
+    })
+
+    const tasksById = new Map(tasks.map((task) => [task.id, task]))
+    const hardBlockedTaskIds = new Set<string>()
+
+    for (const task of candidateTasks) {
+      if (hasHardBlockingDependency(this.checkDependenciesMetFromTaskMap(task, tasksById))) {
+        hardBlockedTaskIds.add(task.id)
+      }
+    }
+
+    trace.finish({
+      candidateCount: candidateTasks.length,
+      hardBlockedCount: hardBlockedTaskIds.size,
+      taskCount: tasks.length,
+    })
+
+    return {
+      tasks,
+      hardBlockedTaskIds,
+    }
   }
 
   getTask(id: string) {
@@ -217,6 +268,30 @@ export class TaskServiceImpl implements TaskService {
     return this.backendMode !== 'rt-sqlite'
   }
 
+  private checkDependenciesMetFromTaskMap(
+    task: TaskNode | null | undefined,
+    tasksById: ReadonlyMap<string, TaskNode>,
+  ): DependencyCheckResult {
+    if (!task) {
+      return { met: true, blocking: [] }
+    }
+
+    const blocking: DependencyCheckResult['blocking'] = []
+
+    for (const dep of task.dependsOn) {
+      const depTask = tasksById.get(dep.taskId)
+      if (!depTask) continue
+
+      if (dep.type === 'hard' && depTask.status !== 'completed') {
+        blocking.push({ taskId: dep.taskId, type: dep.type, status: depTask.status })
+      } else if (dep.type === 'soft' && depTask.status === 'pending') {
+        blocking.push({ taskId: dep.taskId, type: dep.type, status: depTask.status })
+      }
+    }
+
+    return { met: blocking.length === 0, blocking }
+  }
+
   /**
    * BFS 环检测：添加 taskId → depTaskId 后，
    * 是否能从 depTaskId 沿 dependsOn 到达 taskId。
@@ -241,6 +316,42 @@ export class TaskServiceImpl implements TaskService {
     }
 
     return false
+  }
+}
+
+function hasHardBlockingDependency(dependencyCheck: DependencyCheckResult): boolean {
+  return dependencyCheck.blocking.some((dependency) => dependency.type === 'hard')
+}
+
+export async function loadTaskDependencySnapshot(
+  taskService: Pick<TaskService, 'listTasks' | 'checkDependenciesMet'> & Partial<Pick<TaskService, 'listTasksWithDependencyStatus'>>,
+  includeCancelled = false,
+  options: TaskDependencySnapshotOptions = {},
+): Promise<TaskDependencySnapshot> {
+  if (typeof taskService.listTasksWithDependencyStatus === 'function') {
+    return taskService.listTasksWithDependencyStatus(includeCancelled, options)
+  }
+
+  const tasks = await taskService.listTasks(includeCancelled)
+  const candidateTasks = options.candidateTaskFilter
+    ? tasks.filter(options.candidateTaskFilter)
+    : tasks
+  const hardBlockedTaskIds = new Set<string>()
+
+  await Promise.all(candidateTasks.map(async (task) => {
+    try {
+      const dependencyCheck = await taskService.checkDependenciesMet(task.id)
+      if (hasHardBlockingDependency(dependencyCheck)) {
+        hardBlockedTaskIds.add(task.id)
+      }
+    } catch {
+      hardBlockedTaskIds.add(task.id)
+    }
+  }))
+
+  return {
+    tasks,
+    hardBlockedTaskIds,
   }
 }
 

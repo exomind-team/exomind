@@ -6,13 +6,13 @@ export const EVENTLOG_MARKDOWN_MIRROR_ENABLED_CHANGED_EVENT =
   'exomind:eventlog-markdown-mirror-enabled-changed';
 
 function normalizeBoolean(rawValue: string | null | undefined): boolean {
-  return rawValue !== 'false';
+  return rawValue === 'true';
 }
 
 const _module = createConfigModule<boolean>({
   storageKey: EVENTLOG_MARKDOWN_MIRROR_ENABLED_STORAGE_KEY,
   eventName: EVENTLOG_MARKDOWN_MIRROR_ENABLED_CHANGED_EVENT,
-  defaultValue: true,
+  defaultValue: false,
   normalize: normalizeBoolean,
   persistMode: 'runtime-preferred',
 });

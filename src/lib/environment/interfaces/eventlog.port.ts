@@ -1,12 +1,13 @@
-import type { EventData } from '../../types/event';
+import type { EventData } from "../../types/event";
 
 export interface EventLogListOptions {
   limit?: number;
   sinceId?: string;
   sinceTimestamp?: number;
+  untilTimestamp?: number;
 }
 
-export type EventLogListSemantics = 'full_snapshot' | 'incremental_batch';
+export type EventLogListSemantics = "full_snapshot" | "incremental_batch";
 
 export interface EventLogListResult {
   events: EventData[];
@@ -29,7 +30,9 @@ export interface IEventLogPort {
   /**
    * 列出事件并显式返回结果语义（快照 / 增量）
    */
-  listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult>;
+  listEventsDetailed(
+    options?: EventLogListOptions,
+  ): Promise<EventLogListResult>;
 
   /**
    * 追加一条事件

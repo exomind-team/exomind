@@ -1,28 +1,33 @@
-import type { EventData, EventMetadata, Tag } from '../types/event';
+import type { EventData, EventMetadata, Tag } from "../types/event";
 import type {
   EventLogListOptions,
   EventLogListResult,
   EventLogListSemantics,
   IEventLogPort,
-} from '../environment/interfaces/eventlog.port';
+} from "../environment/interfaces/eventlog.port";
 import {
   mergeMetadataWithEventRefs,
   normalizeEventRefs,
   readEventRefsFromMetadata,
   stripEventRefsFromMetadata,
-} from '../eventlog/event-refs';
-import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
-import { appendEventWithEcsReplication } from '../services/ecs-eventlog-replication.service';
+} from "../eventlog/event-refs";
+import {
+  getEventStorage,
+  type Event as StorageEvent,
+} from "../storage/event-storage";
+import { appendEventWithEcsReplication } from "../services/ecs-eventlog-replication.service";
 
-const NOTE_TAG: Tag = 'note';
-const TAGS_METADATA_KEY = 'tags';
+const NOTE_TAG: Tag = "note";
+const TAGS_METADATA_KEY = "tags";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function resolveEventLogListSemantics(_options?: EventLogListOptions): EventLogListSemantics {
-  return 'full_snapshot';
+export function resolveEventLogListSemantics(
+  _options?: EventLogListOptions,
+): EventLogListSemantics {
+  return "full_snapshot";
 }
 
 export function applyEventLogListOptions(
@@ -34,8 +39,9 @@ export function applyEventLogListOptions(
   }
 
   const hasIncrementalCursor =
-    (typeof options.sinceId === 'string' && options.sinceId.length > 0)
-    || typeof options.sinceTimestamp === 'number';
+    (typeof options.sinceId === "string" && options.sinceId.length > 0) ||
+    (typeof options.sinceTimestamp === "number" &&
+      typeof options.untilTimestamp !== "number");
 
   // Legacy PouchDB / Tauri JSON backends are ordered by event timestamp（事件时间）, not arrival order（到达顺序）.
   // Applying local since* filters here can permanently hide late-arriving historical events（晚到旧事件）.
@@ -45,7 +51,15 @@ export function applyEventLogListOptions(
 
   let next = events;
 
-  if (typeof options.limit === 'number') {
+  if (typeof options.sinceTimestamp === "number") {
+    next = next.filter((event) => event.timestamp >= options.sinceTimestamp!);
+  }
+
+  if (typeof options.untilTimestamp === "number") {
+    next = next.filter((event) => event.timestamp <= options.untilTimestamp!);
+  }
+
+  if (typeof options.limit === "number") {
     next = next.slice(0, Math.max(0, options.limit));
   }
 
@@ -72,7 +86,9 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     return result.events;
   }
 
-  async listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult> {
+  async listEventsDetailed(
+    options?: EventLogListOptions,
+  ): Promise<EventLogListResult> {
     const events = await this.storage.getEvents();
     return {
       events: applyEventLogListOptions(
@@ -84,7 +100,10 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
   }
 
   async appendEvent(event: EventData): Promise<EventData> {
-    const persisted = await appendEventWithEcsReplication(this.toStorageEvent(event), this.userId);
+    const persisted = await appendEventWithEcsReplication(
+      this.toStorageEvent(event),
+      this.userId,
+    );
     return this.fromStorageEvent(persisted);
   }
 
@@ -101,7 +120,11 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
   }
 
   private toStorageEvent(event: EventData): StorageEvent {
-    const metadata = this.mergeMetadataWithTags(event.metadata, event.tags, event.refs);
+    const metadata = this.mergeMetadataWithTags(
+      event.metadata,
+      event.tags,
+      event.refs,
+    );
     return {
       id: event.id,
       content: event.content,
@@ -114,7 +137,10 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
   private fromStorageEvent(event: StorageEvent): EventData {
     const parsedTimestamp = Date.parse(event.createdAt);
     const metadataRecord = this.toMetadataRecord(event.metadata);
-    const tags = this.normalizeTags(metadataRecord?.[TAGS_METADATA_KEY], event.type);
+    const tags = this.normalizeTags(
+      metadataRecord?.[TAGS_METADATA_KEY],
+      event.type,
+    );
     const refs = readEventRefsFromMetadata(metadataRecord);
     const metadata = this.stripTagsFromMetadata(metadataRecord);
 
@@ -131,23 +157,30 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
   private mergeMetadataWithTags(
     metadata: EventMetadata | undefined,
     tags: Tag[],
-    refs: EventData['refs'],
+    refs: EventData["refs"],
   ): Record<string, unknown> {
-    const baseMetadata = mergeMetadataWithEventRefs(metadata, normalizeEventRefs(refs));
+    const baseMetadata = mergeMetadataWithEventRefs(
+      metadata,
+      normalizeEventRefs(refs),
+    );
     return {
       ...baseMetadata,
       [TAGS_METADATA_KEY]: [...tags],
     };
   }
 
-  private toMetadataRecord(rawMetadata: unknown): Record<string, unknown> | null {
+  private toMetadataRecord(
+    rawMetadata: unknown,
+  ): Record<string, unknown> | null {
     if (!isRecord(rawMetadata)) {
       return null;
     }
     return { ...rawMetadata };
   }
 
-  private stripTagsFromMetadata(metadata: Record<string, unknown> | null): EventMetadata | undefined {
+  private stripTagsFromMetadata(
+    metadata: Record<string, unknown> | null,
+  ): EventMetadata | undefined {
     if (!metadata) {
       return undefined;
     }
@@ -158,13 +191,15 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
 
   private normalizeTags(rawTags: unknown, fallbackType?: string): Tag[] {
     if (Array.isArray(rawTags)) {
-      const tags = rawTags.filter((tag): tag is Tag => typeof tag === 'string' && tag.length > 0);
+      const tags = rawTags.filter(
+        (tag): tag is Tag => typeof tag === "string" && tag.length > 0,
+      );
       if (tags.length > 0) {
         return tags;
       }
     }
 
-    if (typeof fallbackType === 'string' && fallbackType.length > 0) {
+    if (typeof fallbackType === "string" && fallbackType.length > 0) {
       return [fallbackType];
     }
 

@@ -721,6 +721,63 @@ impl TimeBlockStore {
         self.list_completed_scoped(scope_key)
     }
 
+    pub fn get_completed_scoped(
+        &self,
+        scope_key: Option<&str>,
+        block_id: &str,
+    ) -> Result<Option<TimeBlockData>, TimeBlockStoreError> {
+        let normalized_block_id = block_id.trim();
+        if normalized_block_id.is_empty() {
+            return Ok(None);
+        }
+
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => Ok(state
+                .read()
+                .unwrap()
+                .get(normalize_scope_key(scope_key))
+                .and_then(|scope| {
+                    scope
+                        .completed
+                        .iter()
+                        .find(|block| block.id == normalized_block_id)
+                        .cloned()
+                })),
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.get_completed_scoped(normalize_scope_key(scope_key), normalized_block_id)
+            }
+        }
+    }
+
+    pub fn get_completed_by_start_id_scoped(
+        &self,
+        scope_key: Option<&str>,
+        start_id: &str,
+    ) -> Result<Option<TimeBlockData>, TimeBlockStoreError> {
+        let normalized_start_id = start_id.trim();
+        if normalized_start_id.is_empty() {
+            return Ok(None);
+        }
+
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => Ok(state
+                .read()
+                .unwrap()
+                .get(normalize_scope_key(scope_key))
+                .and_then(|scope| {
+                    scope
+                        .completed
+                        .iter()
+                        .find(|block| block.start_id == normalized_start_id)
+                        .cloned()
+                })),
+            TimeBlockStoreBackend::Sqlite(store) => store.get_completed_by_start_id_scoped(
+                normalize_scope_key(scope_key),
+                normalized_start_id,
+            ),
+        }
+    }
+
     pub fn replace_completed(&self, blocks: &[TimeBlockData]) -> Result<(), TimeBlockStoreError> {
         self.replace_completed_scoped(None, blocks)
     }
@@ -752,6 +809,42 @@ impl TimeBlockStore {
         blocks: &[TimeBlockData],
     ) -> Result<(), TimeBlockStoreError> {
         self.replace_completed_scoped(scope_key, blocks)
+    }
+
+    pub fn put_completed(&self, block: TimeBlockData) -> Result<(), TimeBlockStoreError> {
+        self.put_completed_scoped(None, block)
+    }
+
+    pub fn put_completed_scoped(
+        &self,
+        scope_key: Option<&str>,
+        block: TimeBlockData,
+    ) -> Result<(), TimeBlockStoreError> {
+        match &self.backend {
+            TimeBlockStoreBackend::Memory(state) => {
+                let mut guard = state.write().unwrap();
+                let scope = guard
+                    .entry(normalize_scope_key(scope_key).to_string())
+                    .or_default();
+                if scope
+                    .active
+                    .as_ref()
+                    .map(|active| active.start_id == block.start_id)
+                    .unwrap_or(false)
+                {
+                    scope.active = None;
+                }
+                if let Some(index) = scope.completed.iter().position(|item| item.id == block.id) {
+                    scope.completed[index] = block;
+                } else {
+                    scope.completed.push(block);
+                }
+                Ok(())
+            }
+            TimeBlockStoreBackend::Sqlite(store) => {
+                store.put_completed_scoped(normalize_scope_key(scope_key), &block)
+            }
+        }
     }
 
     pub fn get_active(&self) -> Result<Option<ActiveBlockData>, TimeBlockStoreError> {
@@ -1134,6 +1227,114 @@ mod tests {
             Some(vec!["task-a".to_string()])
         );
         assert!(active_b.is_none());
+    }
+
+    #[test]
+    fn sqlite_put_completed_promotes_active_row_without_replacing_other_completed_rows() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("timeblocks-upsert.sqlite");
+        let store = TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap();
+
+        let existing_completed = TimeBlockData {
+            id: "tb-existing".to_string(),
+            name: "Existing".to_string(),
+            start_id: "tb-existing".to_string(),
+            end_id: "tb-existing-end".to_string(),
+            note: None,
+            tags: vec!["focus".to_string()],
+            start_time: 10,
+            end_time: 20,
+            task_ids: vec![],
+            task_status_outcomes: None,
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            block_type: Some("active".to_string()),
+            transitions: vec![],
+        };
+        store
+            .replace_completed_scoped(None, std::slice::from_ref(&existing_completed))
+            .unwrap();
+
+        store
+            .put_active(ActiveBlockData {
+                start_id: "tb-active".to_string(),
+                name: "Active".to_string(),
+                mode: "countdown".to_string(),
+                target_minutes: Some(25),
+                block_type: Some("active".to_string()),
+                elapsed: 0,
+                updated_at: Some(100),
+                phase: Some("running".to_string()),
+                version: Some(1),
+                actor_id: Some("rt:test".to_string()),
+                last_transition_at: Some(100),
+                last_resumed_at: Some(100),
+                accumulated_run_ms: Some(0),
+                start_time: 100,
+                action_ended_at: None,
+                feedback_started_at: None,
+                feedback_submitted_at: None,
+                pause_accumulated_ms: Some(0),
+                paused: false,
+                paused_at: None,
+                task_ids: vec!["task-a".to_string()],
+                task_association_log: vec![],
+                source_planned_block_id: None,
+                transitions: vec![BlockTransition {
+                    transition_type: BlockTransitionType::Start,
+                    at: 100,
+                    actor_id: Some("rt:test".to_string()),
+                }],
+                task_id: None,
+            })
+            .unwrap();
+
+        store
+            .put_completed(TimeBlockData {
+                id: "tb-active".to_string(),
+                name: "Active".to_string(),
+                start_id: "tb-active".to_string(),
+                end_id: "tb-active-end".to_string(),
+                note: Some("done".to_string()),
+                tags: vec!["block_feedback".to_string()],
+                start_time: 100,
+                end_time: 200,
+                task_ids: vec!["task-a".to_string()],
+                task_status_outcomes: Some(HashMap::from([(
+                    "task-a".to_string(),
+                    "completed".to_string(),
+                )])),
+                task_association_log: vec![],
+                source_planned_block_id: None,
+                block_type: Some("active".to_string()),
+                transitions: vec![
+                    BlockTransition {
+                        transition_type: BlockTransitionType::Start,
+                        at: 100,
+                        actor_id: Some("rt:test".to_string()),
+                    },
+                    BlockTransition {
+                        transition_type: BlockTransitionType::End,
+                        at: 200,
+                        actor_id: Some("rt:test".to_string()),
+                    },
+                ],
+            })
+            .unwrap();
+
+        assert!(store.get_active().unwrap().is_none());
+
+        let completed = store.list_completed().unwrap();
+        assert_eq!(completed.len(), 2);
+        assert_eq!(completed[0].id, "tb-active");
+        assert_eq!(completed[1].id, "tb-existing");
+        assert_eq!(
+            store
+                .get_completed_by_start_id_scoped(None, "tb-active")
+                .unwrap()
+                .map(|block| block.end_time),
+            Some(200)
+        );
     }
 
     #[test]

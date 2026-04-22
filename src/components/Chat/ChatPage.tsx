@@ -27,7 +27,7 @@ import type { Event, EventRef } from '@/lib/types/event';
 import { getEventLogService, type EventLogLoadResult } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { log } from '@/lib/logger';
-import { PerfTrace, perfNow, waitForNextPaint } from '@/lib/utils/perf-trace';
+import { PerfTrace, logPerfInfo, perfNow, waitForNextPaint } from '@/lib/utils/perf-trace';
 import { registerMainWindowFocusTarget } from '@/services/main-window-focus-targets';
 import { MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT } from '@/services/main-window-shortcut.service';
 import { mergeLatestEventsAscending } from './chat-event-pagination';
@@ -96,9 +96,19 @@ interface ChatPageProps {
   variant?: 'default' | 'new-mobile'; // new-mobile（新移动端外观）用于 v0.3.0 UI 重构
   hideHeader?: boolean;
   showTimerWidget?: boolean;
+  initialKeepAliveState?: ChatPageKeepAliveState | null;
+  onKeepAliveStateChange?: (state: ChatPageKeepAliveState) => void;
 }
 
 type RefreshTrigger = 'poll' | 'event' | 'external-refresh';
+
+export interface ChatPageKeepAliveState {
+  profileId: string | null;
+  eventsAsc: Event[];
+  visibleCount: number;
+  snapshotRevision?: string | null;
+  lastFullRefreshAt: number;
+}
 
 const UNKNOWN_DEVICE_LABEL = '未知设备';
 const UNKNOWN_PLATFORM_LABEL = '未知平台';
@@ -220,6 +230,8 @@ export function ChatPage({
   variant = 'default',
   hideHeader = false,
   showTimerWidget = true,
+  initialKeepAliveState = null,
+  onKeepAliveStateChange,
 }: ChatPageProps = {}) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -255,6 +267,10 @@ export function ChatPage({
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
   const userDisplayName = useMemo(() => resolveEventLogUserDisplayName(currentUser), [currentUser]);
   const userAvatarInitial = useMemo(() => resolveAvatarInitial(userDisplayName), [userDisplayName]);
+  const keepAliveProfileId = useMemo(() => {
+    const normalized = activeProfileId?.trim();
+    return normalized && normalized.length > 0 ? normalized : null;
+  }, [activeProfileId]);
   const locateTarget = useMemo(
     () => location.pathname === '/eventlog/record' ? parseEventlogLocateSearch(location.searchStr ?? '') : { eventId: null, shouldLocate: false },
     [location.pathname, location.searchStr],
@@ -343,6 +359,20 @@ export function ChatPage({
     return distanceToBottom <= NEAR_BOTTOM_THRESHOLD;
   }, []);
 
+  const persistKeepAliveState = useCallback((eventsAsc: Event[], visibleCount = visibleCountRef.current) => {
+    if (!onKeepAliveStateChange) {
+      return;
+    }
+
+    onKeepAliveStateChange({
+      profileId: keepAliveProfileId,
+      eventsAsc: [...eventsAsc],
+      visibleCount,
+      snapshotRevision: lastAppliedSnapshotRevisionRef.current ?? null,
+      lastFullRefreshAt: lastFullRefreshAtRef.current,
+    });
+  }, [keepAliveProfileId, onKeepAliveStateChange]);
+
   const applyVisibleWindow = useCallback((eventsAsc: Event[], requestedVisibleCount = visibleCountRef.current) => {
     allEventsRef.current = eventsAsc;
     const safeVisibleCount = Math.max(PAGE_SIZE, requestedVisibleCount);
@@ -351,7 +381,44 @@ export function ChatPage({
     nextStartIndexRef.current = nextStartIndex;
     setEvents(eventsAsc.slice(nextStartIndex));
     setHasMore(nextStartIndex > 0);
-  }, []);
+    persistKeepAliveState(eventsAsc, safeVisibleCount);
+  }, [persistKeepAliveState]);
+
+  const hydrateFromKeepAliveState = useCallback(() => {
+    if (!initialKeepAliveState) {
+      return false;
+    }
+
+    if (initialKeepAliveState.profileId !== keepAliveProfileId) {
+      return false;
+    }
+
+    const trace = new PerfTrace('ChatPage hydrateKeepAlive', {
+      page: 'eventlog-record',
+      cached: initialKeepAliveState.eventsAsc.length,
+    });
+    shouldStickToBottomRef.current = true;
+    lastAppliedSnapshotRevisionRef.current = initialKeepAliveState.snapshotRevision ?? null;
+    lastFullRefreshAtRef.current = initialKeepAliveState.lastFullRefreshAt;
+    applyVisibleWindow(initialKeepAliveState.eventsAsc, initialKeepAliveState.visibleCount);
+    trace.step('apply-visible-window', {
+      visibleCount: Math.min(initialKeepAliveState.eventsAsc.length, Math.max(PAGE_SIZE, initialKeepAliveState.visibleCount)),
+    });
+    setIsInitialLoading(false);
+    void (async () => {
+      await waitForNextPaint();
+      trace.step('paint-visible-window', {
+        visibleCount: Math.min(initialKeepAliveState.eventsAsc.length, Math.max(PAGE_SIZE, initialKeepAliveState.visibleCount)),
+      });
+      scrollToBottom('auto');
+      trace.step('scroll-to-bottom');
+      trace.finish({
+        cached: initialKeepAliveState.eventsAsc.length,
+        visibleCount: Math.min(initialKeepAliveState.eventsAsc.length, Math.max(PAGE_SIZE, initialKeepAliveState.visibleCount)),
+      });
+    })();
+    return true;
+  }, [applyVisibleWindow, initialKeepAliveState, keepAliveProfileId, scrollToBottom]);
 
   const loadInitialEvents = useCallback(async () => {
     const trace = new PerfTrace('ChatPage loadInitialEvents', {
@@ -370,6 +437,7 @@ export function ChatPage({
       lastAppliedSnapshotRevisionRef.current = initialResult.snapshotRevision ?? null;
       applyVisibleWindow(loadedEvents, PAGE_SIZE);
       lastFullRefreshAtRef.current = Date.now();
+      persistKeepAliveState(loadedEvents, PAGE_SIZE);
       trace.step('apply-visible-window', {
         visibleCount: Math.min(loadedEvents.length, PAGE_SIZE),
       });
@@ -389,7 +457,7 @@ export function ChatPage({
     } finally {
       setIsInitialLoading(false);
     }
-  }, [applyVisibleWindow, scrollToBottom]);
+  }, [applyVisibleWindow, persistKeepAliveState, scrollToBottom]);
 
   const refreshLatestEvents = useCallback(async (
     behavior: ScrollBehavior = 'smooth',
@@ -455,6 +523,7 @@ export function ChatPage({
         lastFullRefreshAtRef.current = Date.now();
         lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? null;
         applyVisibleWindow(loadedEvents);
+        persistKeepAliveState(loadedEvents);
         trace.step('apply-full-window', { fetched: loadedEvents.length });
         await waitForNextPaint();
         trace.step('paint-full-window', { fetched: loadedEvents.length });
@@ -469,6 +538,7 @@ export function ChatPage({
       if (loadedEvents.length === 0) {
         if (loadedResult.snapshotRevision !== undefined) {
           lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision;
+          persistKeepAliveState(allEventsRef.current);
         }
         trace.finish({ mode, fetched: 0 });
         return;
@@ -481,6 +551,7 @@ export function ChatPage({
       });
       lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? lastAppliedSnapshotRevisionRef.current ?? null;
       applyVisibleWindow(mergedEvents);
+      persistKeepAliveState(mergedEvents);
       trace.step('apply-merged-window', { merged: mergedEvents.length });
       await waitForNextPaint();
       trace.step('paint-merged-window', { merged: mergedEvents.length });
@@ -493,7 +564,7 @@ export function ChatPage({
       trace.fail(error);
       throw error;
     }
-  }, [applyVisibleWindow, scrollToBottom]);
+  }, [applyVisibleWindow, persistKeepAliveState, scrollToBottom]);
 
   const scheduleLatestRefresh = useCallback((trigger: RefreshTrigger): void => {
     if (refreshInFlightRef.current) {
@@ -605,7 +676,11 @@ export function ChatPage({
   useEffect(() => {
     visibleCountRef.current = PAGE_SIZE;
     lastAppliedSnapshotRevisionRef.current = undefined;
-    void loadInitialEvents();
+    if (hydrateFromKeepAliveState()) {
+      scheduleLatestRefresh('poll');
+    } else {
+      void loadInitialEvents();
+    }
 
     const unsubscribe = eventLogService.current.onEvent((event) => {
       shouldStickToBottomRef.current = true;
@@ -622,6 +697,7 @@ export function ChatPage({
     };
   }, [
     activeProfileId,
+    hydrateFromKeepAliveState,
     isNearBottom,
     loadInitialEvents,
     scheduleLatestRefresh,
@@ -642,7 +718,9 @@ export function ChatPage({
         resolvedRefs,
       );
       setQuotedRefs([]);
-      log.info(`[ChatPage] handleSend done ${JSON.stringify({ totalMs: Math.round(perfNow() - t0) })}`);
+      logPerfInfo(
+        `[ChatPage] handleSend done ${JSON.stringify({ totalMs: Math.round(perfNow() - t0) })}`,
+      );
     } catch (error) {
       log.error(`[ChatPage] handleSend failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;

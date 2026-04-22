@@ -66,6 +66,10 @@ impl SqliteEventLogStore {
         }
 
         sql.push_str(" ORDER BY timestamp DESC, id DESC");
+        if let Some(limit) = filter.limit {
+            sql.push_str(" LIMIT ?");
+            query_params.push(SqlValue::Integer(limit as i64));
+        }
 
         let mut statement = connection
             .prepare(&sql)
@@ -77,6 +81,60 @@ impl SqliteEventLogStore {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| format!("failed to collect event list: {error}"))
+    }
+
+    pub fn list_events_after_cursor_filtered(
+        &self,
+        user_key: &str,
+        cursor_event: &EventRecord,
+        filter: &EventListFilter,
+        limit: Option<usize>,
+    ) -> Result<Vec<EventRecord>, String> {
+        let connection = self.connection();
+        let mut sql = String::from(
+            "SELECT id, timestamp, content, tags_json, refs_json, metadata_json
+             FROM eventlog_events
+             WHERE user_key = ?
+               AND (timestamp > ? OR (timestamp = ? AND id > ?))",
+        );
+        let mut query_params = vec![
+            SqlValue::Text(user_key.to_string()),
+            SqlValue::Integer(cursor_event.timestamp),
+            SqlValue::Integer(cursor_event.timestamp),
+            SqlValue::Text(cursor_event.id.clone()),
+        ];
+
+        if let Some(since_timestamp) = filter.since_timestamp {
+            sql.push_str(" AND timestamp >= ?");
+            query_params.push(SqlValue::Integer(since_timestamp));
+        }
+
+        if let Some(until_timestamp) = filter.until_timestamp {
+            sql.push_str(" AND timestamp <= ?");
+            query_params.push(SqlValue::Integer(until_timestamp));
+        }
+
+        for tag in &filter.tags {
+            sql.push_str(" AND tags_json LIKE ? ESCAPE '\\'");
+            query_params.push(SqlValue::Text(build_tag_like_pattern(tag)?));
+        }
+
+        sql.push_str(" ORDER BY timestamp DESC, id DESC");
+        if let Some(limit) = limit {
+            sql.push_str(" LIMIT ?");
+            query_params.push(SqlValue::Integer(limit as i64));
+        }
+
+        let mut statement = connection
+            .prepare(&sql)
+            .map_err(|error| format!("failed to prepare cursor event list: {error}"))?;
+
+        let rows = statement
+            .query_map(params_from_iter(query_params.iter()), map_event_row)
+            .map_err(|error| format!("failed to query cursor event list: {error}"))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to collect cursor event list: {error}"))
     }
 
     pub fn append_event(&self, user_key: &str, event: &EventRecord) -> Result<(), String> {
@@ -218,7 +276,9 @@ impl SqliteEventLogStore {
                     refs_json TEXT NOT NULL DEFAULT '[]',
                     metadata_json TEXT NULL,
                     PRIMARY KEY (user_key, id)
-                );",
+                );
+                CREATE INDEX IF NOT EXISTS idx_eventlog_user_timestamp_id
+                    ON eventlog_events(user_key, timestamp DESC, id DESC);",
             )
             .map_err(|error| format!("failed to init eventlog sqlite schema: {error}"))?;
         ensure_refs_json_column(&connection)?;
@@ -296,4 +356,88 @@ fn escape_like_pattern(value: &str) -> String {
         .replace('\\', r"\\")
         .replace('%', r"\%")
         .replace('_', r"\_")
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::SqliteEventLogStore;
+    use crate::eventlog::{EventListFilter, EventRecord};
+
+    fn make_event(id: &str, timestamp: i64) -> EventRecord {
+        EventRecord {
+            id: id.to_string(),
+            timestamp,
+            content: format!("event-{id}"),
+            tags: vec!["note".to_string()],
+            refs: Vec::new(),
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn list_events_filtered_applies_limit_in_sqlite_query() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store = SqliteEventLogStore::open(&sqlite_path).unwrap();
+
+        for index in 0..5 {
+            let id = format!("event-{index}");
+            store
+                .append_event(
+                    "profile-argon",
+                    &make_event(id.as_str(), 1_700_000_000_000 + index),
+                )
+                .unwrap();
+        }
+
+        let events = store
+            .list_events_filtered(
+                "profile-argon",
+                &EventListFilter {
+                    limit: Some(2),
+                    ..EventListFilter::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, "event-4");
+        assert_eq!(events[1].id, "event-3");
+    }
+
+    #[test]
+    fn list_events_after_cursor_filtered_applies_cursor_and_limit() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store = SqliteEventLogStore::open(&sqlite_path).unwrap();
+
+        for index in 0..5 {
+            let id = format!("event-{index}");
+            store
+                .append_event(
+                    "profile-argon",
+                    &make_event(id.as_str(), 1_700_000_000_000 + index),
+                )
+                .unwrap();
+        }
+
+        let cursor_event = store
+            .get_event("profile-argon", "event-2")
+            .unwrap()
+            .unwrap();
+        let events = store
+            .list_events_after_cursor_filtered(
+                "profile-argon",
+                &cursor_event,
+                &EventListFilter::default(),
+                Some(2),
+            )
+            .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, "event-4");
+        assert_eq!(events[1].id, "event-3");
+    }
 }

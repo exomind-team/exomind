@@ -143,33 +143,14 @@ fn build_event_list_filter(
     since_timestamp: Option<i64>,
     until_timestamp: Option<i64>,
     tags: Option<&str>,
+    limit: Option<usize>,
 ) -> EventListFilter {
     EventListFilter {
         since_timestamp,
         until_timestamp,
         tags: parse_tag_filter(tags),
+        limit,
     }
-}
-
-fn apply_since_id_and_limit(
-    mut events: Vec<EventRecord>,
-    since_id: Option<&str>,
-    limit: Option<usize>,
-) -> (Vec<EventRecord>, bool) {
-    let mut cursor_found = since_id.is_none();
-
-    if let Some(since_id) = since_id {
-        if let Some(pos) = events.iter().position(|event| event.id == since_id) {
-            events.truncate(pos);
-            cursor_found = true;
-        }
-    }
-
-    if let Some(limit) = limit {
-        events.truncate(limit);
-    }
-
-    (events, cursor_found)
 }
 
 fn load_events_for_query(
@@ -181,11 +162,21 @@ fn load_events_for_query(
     until_timestamp: Option<i64>,
     tags: Option<&str>,
 ) -> Result<(Vec<EventRecord>, bool), String> {
-    let filter = build_event_list_filter(since_timestamp, until_timestamp, tags);
-    let events = state
+    let base_filter = build_event_list_filter(since_timestamp, until_timestamp, tags, None);
+    if let Some(since_id) = since_id {
+        return state.eventlog_store.list_events_after_cursor_filtered(
+            user_id,
+            since_id,
+            &base_filter,
+            limit,
+        );
+    }
+
+    let filter = build_event_list_filter(since_timestamp, until_timestamp, tags, limit);
+    state
         .eventlog_store
-        .list_events_filtered(user_id, &filter)?;
-    Ok(apply_since_id_and_limit(events, since_id, limit))
+        .list_events_filtered(user_id, &filter)
+        .map(|events| (events, true))
 }
 
 fn resolve_watch_since_id(
@@ -1904,6 +1895,110 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let events: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(events.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_with_since_id_and_limit_uses_incremental_batch_on_sqlite() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store = Arc::new(
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap(),
+        );
+        let app = test_router(test_state_with_eventlog(store));
+
+        for i in 0..5 {
+            let _ = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/eventlog")
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(
+                            r#"{{"id":"sql-{i}","timestamp":{ts},"content":"event {i}","tags":["note"]}}"#,
+                            ts = 1_700_000_000_000_i64 + i
+                        )))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog?since_id=sql-2&limit=2")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(EVENTLOG_LIST_SEMANTICS_HEADER)
+                .expect("semantics header should exist")
+                .to_str()
+                .unwrap(),
+            "incremental_batch"
+        );
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let events: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["id"], "sql-4");
+        assert_eq!(events[1]["id"], "sql-3");
+    }
+
+    #[tokio::test]
+    async fn list_with_since_id_outside_filter_stays_full_snapshot_on_sqlite() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store = Arc::new(
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap(),
+        );
+        let app = test_router(test_state_with_eventlog(store));
+
+        let _ = append_event_via_api(
+            &app,
+            r#"{"id":"sql-old","timestamp":1700000000000,"content":"old","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+        let _ = append_event_via_api(
+            &app,
+            r#"{"id":"sql-new","timestamp":1700000002000,"content":"new","tags":["note"]}"#,
+            "/eventlog",
+        )
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog?since_id=sql-old&since_timestamp=1700000001000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(EVENTLOG_LIST_SEMANTICS_HEADER)
+                .expect("semantics header should exist")
+                .to_str()
+                .unwrap(),
+            "full_snapshot"
+        );
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let events: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["id"], "sql-new");
     }
 
     #[tokio::test]

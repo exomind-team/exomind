@@ -102,6 +102,11 @@ import {
   setDevtoolsEnabled,
   subscribeDevtoolsChanges,
 } from '@/config/devtools-mode';
+import {
+  getPerfLoggingEnabled,
+  setPerfLoggingEnabled,
+  subscribePerfLoggingEnabledChanges,
+} from '@/config/perf-logging-enabled';
 import { getLLMApiKey } from '@/config/llm-settings';
 import {
   getCommandPaletteEnabled,
@@ -2177,7 +2182,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'eventlog-markdown-mirror-enabled',
     label: '事件日志 Markdown 镜像',
-    description: '实验性。关闭后 RT 不再在每次事件写入后自动重建 Markdown 镜像，可减少常态高频写入的整量回读与镜像重建开销；不影响 SQLite 真相源。',
+    description: '实验性，默认关闭。关闭后 RT 不再在每次事件写入后自动重建 Markdown 镜像，可减少常态高频写入的整量回读与镜像重建开销；不影响 SQLite 真相源。',
     icon: ScrollText,
     category: 'developer',
     controlTestId: 'new-settings-eventlog-markdown-mirror-switch',
@@ -2186,6 +2191,19 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getEventlogMarkdownMirrorEnabled(),
     set: setEventlogMarkdownMirrorEnabled,
     subscribe: subscribeEventlogMarkdownMirrorEnabledChanges,
+  },
+  {
+    id: 'perf-logging-enabled',
+    label: '性能跟踪日志',
+    description: '实验性，默认关闭。关闭后不再输出前端 PERF 追踪与高频 click-to-done 性能日志，避免控制台泛洪；开启后统一输出 `[PERF] (xxms) ...` 与相关性能步骤日志。',
+    icon: Activity,
+    category: 'developer',
+    controlTestId: 'new-settings-perf-logging-switch',
+    type: 'boolean',
+    visible: devOnly,
+    get: () => getPerfLoggingEnabled(),
+    set: setPerfLoggingEnabled,
+    subscribe: subscribePerfLoggingEnabledChanges,
   },
   {
     id: 'api-agent-tab-enabled',

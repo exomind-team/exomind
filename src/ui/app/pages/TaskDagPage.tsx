@@ -183,6 +183,7 @@ import {
   type TaskDagSearchOptions,
 } from "./task-title-fuzzy-search";
 import { TASKS_LAST_PATH_KEY } from "./task-route-memory";
+import { PerfTrace, logPerfInfo, perfNow } from "@/lib/utils/perf-trace";
 
 type DagConnectType = "hard" | "soft";
 type DagConnectState = { sourceId: string; type: DagConnectType } | null;
@@ -349,6 +350,35 @@ const TASK_DAG_BACKGROUND_LINE_COLOR_LIGHT = "rgba(168,162,158,0.24)";
 const TASK_DAG_BACKGROUND_DOT_COLOR_DARK = "rgba(68,64,60,0.8)";
 const TASK_DAG_BACKGROUND_LINE_COLOR_DARK = "rgba(68,64,60,0.45)";
 const TASK_DAG_MANUAL_TOUCH_CLICK_SUPPRESS_MS = 250;
+
+type TaskDagMeasuredComputation<T> = {
+  totalMs: number;
+  value: T;
+};
+
+function measureTaskDagComputation<T>(
+  compute: () => T,
+): TaskDagMeasuredComputation<T> {
+  const startedAt = perfNow();
+  const value = compute();
+  return {
+    value,
+    totalMs: Math.round(perfNow() - startedAt),
+  };
+}
+
+function logTaskDagPerf(
+  scope: string,
+  totalMs: number,
+  fields: Record<string, unknown>,
+): void {
+  logPerfInfo(
+    `[PERF] (${totalMs}ms) ${scope} ${JSON.stringify({
+      ...fields,
+      totalMs,
+    })}`,
+  );
+}
 
 export function getNextTaskDagMode(
   current: TaskDagMode,
@@ -2018,7 +2048,11 @@ export function TaskDagPage() {
     () => new Map(tasks.map((task) => [task.id, task])),
     [tasks],
   );
-  const graph = useMemo(() => buildTaskGraph(tasks), [tasks]);
+  const graphMeasurement = useMemo(
+    () => measureTaskDagComputation(() => buildTaskGraph(tasks)),
+    [tasks],
+  );
+  const graph = graphMeasurement.value;
   const graphNodeById = useMemo(
     () => new Map(graph.nodes.map((node) => [node.id, node])),
     [graph.nodes],
@@ -2063,10 +2097,14 @@ export function TaskDagPage() {
         : graph,
     [graph, terminalFilterMode, tasks],
   );
-  const visibleGraph = useMemo(
-    () => projectVisibleTaskGraph(graph, dagVisibility),
+  const visibleGraphMeasurement = useMemo(
+    () =>
+      measureTaskDagComputation(() =>
+        projectVisibleTaskGraph(graph, dagVisibility),
+      ),
     [graph, dagVisibility],
   );
+  const visibleGraph = visibleGraphMeasurement.value;
   const normalizedVisibilityState = visibleGraph.state;
   const visibilityStateSignature = JSON.stringify(dagVisibility);
   const normalizedVisibilityStateSignature = JSON.stringify(
@@ -2086,15 +2124,19 @@ export function TaskDagPage() {
       ),
     [graph, intervalCollapseState],
   );
-  const intervalCollapseProjection = useMemo(
+  const intervalCollapseProjectionMeasurement = useMemo(
     () =>
-      projectVisibleTaskGraphWithIntervalCollapses(
-        graph,
-        visibleGraph,
-        intervalCollapseState,
+      measureTaskDagComputation(() =>
+        projectVisibleTaskGraphWithIntervalCollapses(
+          graph,
+          visibleGraph,
+          intervalCollapseState,
+        ),
       ),
     [graph, intervalCollapseState, visibleGraph],
   );
+  const intervalCollapseProjection =
+    intervalCollapseProjectionMeasurement.value;
   const intervalVisibleGraph = intervalCollapseProjection.visibleGraph;
   const intervalStateSignature = JSON.stringify(intervalCollapseState);
   const normalizedIntervalStateSignature = JSON.stringify(
@@ -2366,6 +2408,72 @@ export function TaskDagPage() {
   ]);
 
   useEffect(() => {
+    logTaskDagPerf("TaskDagPage buildTaskGraph", graphMeasurement.totalMs, {
+      taskCount: tasks.length,
+      nodeCount: graph.nodes.length,
+      edgeCount: graph.edges.length,
+    });
+  }, [
+    graph.edges.length,
+    graph.nodes.length,
+    graphMeasurement.totalMs,
+    tasks.length,
+  ]);
+
+  useEffect(() => {
+    logTaskDagPerf(
+      "TaskDagPage computeVisibleGraph",
+      visibleGraphMeasurement.totalMs,
+      {
+        graphNodeCount: graph.nodes.length,
+        graphEdgeCount: graph.edges.length,
+        visibleNodeCount: visibleGraph.nodes.length,
+        visibleEdgeCount: visibleGraph.edges.length,
+        hiddenNodeCount: visibleGraph.hiddenNodeIds.length,
+        collapsedUpstreamCount: visibleGraph.state.collapsedUpstreamOf.length,
+        collapsedDownstreamCount:
+          visibleGraph.state.collapsedDownstreamOf.length,
+      },
+    );
+  }, [
+    graph.edges.length,
+    graph.nodes.length,
+    visibleGraph.edges.length,
+    visibleGraph.hiddenNodeIds.length,
+    visibleGraph.nodes.length,
+    visibleGraph.state.collapsedDownstreamOf.length,
+    visibleGraph.state.collapsedUpstreamOf.length,
+    visibleGraphMeasurement.totalMs,
+  ]);
+
+  useEffect(() => {
+    logTaskDagPerf(
+      "TaskDagPage computeIntervalProjection",
+      intervalCollapseProjectionMeasurement.totalMs,
+      {
+        inputVisibleNodeCount: visibleGraph.nodes.length,
+        inputVisibleEdgeCount: visibleGraph.edges.length,
+        outputVisibleNodeCount: intervalVisibleGraph.nodes.length,
+        outputVisibleEdgeCount: intervalVisibleGraph.edges.length,
+        configuredIntervalCount: listTaskDagIntervalCollapseDefinitions(
+          intervalCollapseState,
+        ).length,
+        resolvedIntervalCount: resolvedExistingIntervals.length,
+        hiddenNodeCount: intervalVisibleGraph.hiddenNodeIds.length,
+      },
+    );
+  }, [
+    intervalCollapseProjectionMeasurement.totalMs,
+    intervalCollapseState,
+    intervalVisibleGraph.edges.length,
+    intervalVisibleGraph.hiddenNodeIds.length,
+    intervalVisibleGraph.nodes.length,
+    resolvedExistingIntervals.length,
+    visibleGraph.edges.length,
+    visibleGraph.nodes.length,
+  ]);
+
+  useEffect(() => {
     if (selectedTaskId && !visibleNodeIdSet.has(selectedTaskId)) {
       setSelectedTaskId(null);
     }
@@ -2401,44 +2509,64 @@ export function TaskDagPage() {
     [renderedVisibleGraph.edges, renderedVisibleGraph.nodes, resolvedDirection],
   );
 
-  const manualPositionSource =
-    layoutMode === "manual"
-      ? {
-          ...(manualLayoutSnapshot?.manualBaselinePositions ?? {}),
-          ...(manualLayoutSnapshot?.manualPositions ?? {}),
-        }
-      : undefined;
-  const renderedAutoLayoutFlowGraph = useMemo(
+  const manualPositionSource = useMemo(
     () =>
-      buildVisibleTaskDagFlow(renderedVisibleGraph, {
-        direction: resolvedDirection,
-      }),
+      layoutMode === "manual"
+        ? {
+            ...(manualLayoutSnapshot?.manualBaselinePositions ?? {}),
+            ...(manualLayoutSnapshot?.manualPositions ?? {}),
+          }
+        : undefined,
+    [
+      layoutMode,
+      manualLayoutSnapshot?.manualBaselinePositions,
+      manualLayoutSnapshot?.manualPositions,
+    ],
+  );
+  const manualPositionCount = useMemo(
+    () => (manualPositionSource ? Object.keys(manualPositionSource).length : 0),
+    [manualPositionSource],
+  );
+  const renderedAutoLayoutFlowGraphMeasurement = useMemo(
+    () =>
+      measureTaskDagComputation(() =>
+        buildVisibleTaskDagFlow(renderedVisibleGraph, {
+          direction: resolvedDirection,
+        }),
+      ),
     [layoutSignature, renderedVisibleGraph, resolvedDirection],
   );
+  const renderedAutoLayoutFlowGraph =
+    renderedAutoLayoutFlowGraphMeasurement.value;
   const renderedAutoLayoutPositionMap = useMemo(
     () => buildPositionMapFromFlowNodes(renderedAutoLayoutFlowGraph.nodes),
     [renderedAutoLayoutFlowGraph.nodes],
   );
-  const manualBaselineFlowGraph = useMemo(
+  const manualBaselineFlowGraphMeasurement = useMemo(
     () =>
-      buildVisibleTaskDagFlow(intervalVisibleGraph, {
-        direction: resolvedDirection,
-      }),
+      measureTaskDagComputation(() =>
+        buildVisibleTaskDagFlow(intervalVisibleGraph, {
+          direction: resolvedDirection,
+        }),
+      ),
     [intervalVisibleGraph.edges, intervalVisibleGraph.nodes, resolvedDirection],
   );
+  const manualBaselineFlowGraph = manualBaselineFlowGraphMeasurement.value;
   const manualBaselinePositionMap = useMemo(
     () => buildPositionMapFromFlowNodes(manualBaselineFlowGraph.nodes),
     [manualBaselineFlowGraph.nodes],
   );
 
-  const layoutFlowGraph = useMemo(
+  const layoutFlowGraphMeasurement = useMemo(
     () =>
-      buildVisibleTaskDagFlow(renderedVisibleGraph, {
-        direction: resolvedDirection,
-        focusedSeriesNodeIds: visibleFocusedSeriesNodeIds,
-        manualPositions: manualPositionSource,
-        secondaryNodeIds,
-      }),
+      measureTaskDagComputation(() =>
+        buildVisibleTaskDagFlow(renderedVisibleGraph, {
+          direction: resolvedDirection,
+          focusedSeriesNodeIds: visibleFocusedSeriesNodeIds,
+          manualPositions: manualPositionSource,
+          secondaryNodeIds,
+        }),
+      ),
     [
       layoutSignature,
       manualPositionSource,
@@ -2448,6 +2576,73 @@ export function TaskDagPage() {
       visibleFocusedSeriesNodeIds,
     ],
   );
+  const layoutFlowGraph = layoutFlowGraphMeasurement.value;
+
+  useEffect(() => {
+    logTaskDagPerf(
+      "TaskDagPage computeLayoutFlow",
+      renderedAutoLayoutFlowGraphMeasurement.totalMs,
+      {
+        variant: "rendered-auto",
+        layoutMode,
+        direction: resolvedDirection,
+        nodeCount: renderedAutoLayoutFlowGraph.nodes.length,
+        edgeCount: renderedAutoLayoutFlowGraph.edges.length,
+      },
+    );
+  }, [
+    layoutMode,
+    renderedAutoLayoutFlowGraph.edges.length,
+    renderedAutoLayoutFlowGraph.nodes.length,
+    renderedAutoLayoutFlowGraphMeasurement.totalMs,
+    resolvedDirection,
+  ]);
+
+  useEffect(() => {
+    logTaskDagPerf(
+      "TaskDagPage computeLayoutFlow",
+      manualBaselineFlowGraphMeasurement.totalMs,
+      {
+        variant: "manual-baseline",
+        layoutMode,
+        direction: resolvedDirection,
+        nodeCount: manualBaselineFlowGraph.nodes.length,
+        edgeCount: manualBaselineFlowGraph.edges.length,
+      },
+    );
+  }, [
+    layoutMode,
+    manualBaselineFlowGraph.edges.length,
+    manualBaselineFlowGraph.nodes.length,
+    manualBaselineFlowGraphMeasurement.totalMs,
+    resolvedDirection,
+  ]);
+
+  useEffect(() => {
+    logTaskDagPerf(
+      "TaskDagPage computeLayoutFlow",
+      layoutFlowGraphMeasurement.totalMs,
+      {
+        variant: "final-layout",
+        layoutMode,
+        direction: resolvedDirection,
+        nodeCount: layoutFlowGraph.nodes.length,
+        edgeCount: layoutFlowGraph.edges.length,
+        focusedSeriesNodeCount: visibleFocusedSeriesNodeIds.size,
+        secondaryNodeCount: secondaryNodeIds.size,
+        manualPositionCount,
+      },
+    );
+  }, [
+    layoutFlowGraph.edges.length,
+    layoutFlowGraph.nodes.length,
+    layoutFlowGraphMeasurement.totalMs,
+    layoutMode,
+    manualPositionCount,
+    resolvedDirection,
+    secondaryNodeIds.size,
+    visibleFocusedSeriesNodeIds.size,
+  ]);
 
   const handleManualLayoutNodesChange = useCallback(
     (changes: NodeChange<TaskDagFlowNode>[]) => {
@@ -3642,12 +3837,25 @@ export function TaskDagPage() {
   };
 
   const handleQuickCreateTask = async (title: string, description: string) => {
+    const trace = new PerfTrace("TaskDagPage quickCreateTask", {
+      titleLength: title.trim().length,
+      descriptionLength: description.trim().length,
+      hasQuickCreateDirection: Boolean(
+        quickCreateDirection && quickCreateFromNodeId,
+      ),
+      hasQuickCreateDependency: Boolean(quickCreateDependency),
+      hasDropPosition: Boolean(
+        quickCreateDropPositionRef.current ?? quickCreateDropPosition,
+      ),
+      layoutMode,
+    });
     try {
       const created = await getTaskService().createTask({
         title,
         description: description || undefined,
       });
       const createdTaskId = created?.id;
+      trace.step("create-task", { createdTaskId: createdTaskId ?? null });
       const persistedDropPosition =
         quickCreateDropPositionRef.current ?? quickCreateDropPosition;
 
@@ -3665,6 +3873,10 @@ export function TaskDagPage() {
             "hard",
           );
         }
+        trace.step("add-directional-dependency", {
+          direction: quickCreateDirection,
+          anchorTaskId: quickCreateFromNodeId,
+        });
         setPendingFocusTaskId(created.id);
         setQuickCreateDirection(null);
         setQuickCreateFromNodeId(null);
@@ -3684,6 +3896,11 @@ export function TaskDagPage() {
             quickCreateDependency.type,
           );
         }
+        trace.step("add-context-dependency", {
+          direction: quickCreateDependency.direction,
+          sourceTaskId: quickCreateDependency.sourceTaskId,
+          dependencyType: quickCreateDependency.type,
+        });
         setPendingFocusTaskId(created.id);
         setConnectState(null);
         setQuickCreateDependency(null);
@@ -3703,18 +3920,30 @@ export function TaskDagPage() {
           ),
         );
         setPendingFocusTaskId(createdTaskId);
+        trace.step("apply-manual-layout-snapshot", {
+          createdTaskId,
+          x: persistedDropPosition.x,
+          y: persistedDropPosition.y,
+        });
       }
 
       setQuickCreateDirection(null);
       setQuickCreateFromNodeId(null);
       quickCreateDropPositionRef.current = null;
       setQuickCreateDropPosition(null);
+      trace.step("reset-quick-create-state");
 
       toast({
         title: "任务已创建",
         description: title,
       });
+      trace.step("toast-success");
+      trace.finish({
+        result: "created",
+        createdTaskId,
+      });
     } catch (error) {
+      trace.fail(error, { result: "failed" });
       toast({
         title: "创建任务失败",
         description: error instanceof Error ? error.message : String(error),
@@ -3764,12 +3993,19 @@ export function TaskDagPage() {
     targetId: string,
     dependencyType: DagConnectType,
   ) => {
+    const trace = new PerfTrace("TaskDagPage applyDependencyMutation", {
+      sourceId,
+      targetId,
+      dependencyType,
+    });
     if (!sourceId || !targetId || sourceId === targetId) {
+      trace.finish({ result: "invalid-input" });
       return;
     }
 
     const targetTask = taskById.get(targetId);
     if (!targetTask) {
+      trace.finish({ result: "target-missing" });
       return;
     }
 
@@ -3779,11 +4015,29 @@ export function TaskDagPage() {
     try {
       if (existingDependency?.type === dependencyType) {
         await getTaskService().removeDependency(targetId, sourceId);
+        trace.step("remove-dependency", {
+          previousType: existingDependency.type,
+        });
+        trace.finish({
+          result: "removed",
+          previousType: existingDependency.type,
+        });
         return;
       }
 
       await getTaskService().addDependency(targetId, sourceId, dependencyType);
+      trace.step("add-dependency", {
+        previousType: existingDependency?.type ?? null,
+      });
+      trace.finish({
+        result: "added",
+        previousType: existingDependency?.type ?? null,
+      });
     } catch (error) {
+      trace.fail(error, {
+        result: "failed",
+        previousType: existingDependency?.type ?? null,
+      });
       toast({
         title: "依赖更新失败",
         description: formatDependencyMutationError(error),
@@ -3856,7 +4110,16 @@ export function TaskDagPage() {
 
     const task = taskById.get(nodeId);
     const graphNode = graphNodeById.get(nodeId);
+    const trace = new PerfTrace("TaskDagPage executeNodeClick", {
+      nodeId,
+      taskStatus: task?.status ?? null,
+      isBlocked: graphNode?.isBlocked ?? null,
+      hasActiveBlock: Boolean(activeBlock),
+      activeBlockPhase: activeBlock?.phase ?? null,
+      activeTaskCount: activeTaskIds.length,
+    });
     if (!task || !graphNode) {
+      trace.finish({ result: "task-or-graph-missing" });
       return;
     }
 
@@ -3865,14 +4128,20 @@ export function TaskDagPage() {
         current.length > 0 ? current : activeTaskIds,
       );
       setEndingDialogOpen(true);
+      trace.step("open-ending-dialog", {
+        reason: "feedback-in-progress",
+      });
+      trace.finish({ result: "feedback-ending-dialog" });
       return;
     }
 
     if (isTerminalStatus(task.status)) {
+      trace.finish({ result: "terminal-task-noop" });
       return;
     }
 
     if (graphNode.isBlocked && !activeTaskIdSet.has(nodeId)) {
+      trace.finish({ result: "blocked-task-noop" });
       return;
     }
 
@@ -3882,28 +4151,47 @@ export function TaskDagPage() {
       if (activeTaskIdSet.has(nodeId)) {
         if (activeTaskIds.length <= 1) {
           await handleOpenEndDialog(activeTaskIds);
+          trace.step("open-end-dialog", {
+            reason: "single-active-task",
+          });
+          trace.finish({ result: "open-end-dialog" });
           return;
         }
 
         setDisassociateTargetTaskId(nodeId);
         setDisassociateChoice("suspended");
         setDisassociateDialogOpen(true);
+        trace.step("open-disassociate-dialog", {
+          activeTaskCount: activeTaskIds.length,
+        });
+        trace.finish({ result: "open-disassociate-dialog" });
         return;
       }
 
       if (activeBlock) {
         await taskTimerService.addTaskToBlock(nodeId);
+        trace.step("add-task-to-block");
+        trace.finish({ result: "added-task-to-block" });
         return;
       }
 
       const spentMinutes = task.estimatedMinutes
         ? await taskTimerService.calculateSpentMinutes(nodeId)
         : 0;
+      trace.step("resolve-spent-minutes", {
+        spentMinutes,
+        usedEstimate: Boolean(task.estimatedMinutes),
+      });
       await taskTimerService.startBlockForTask(
         nodeId,
         buildExecuteTimerConfig(task, spentMinutes),
       );
+      trace.step("start-block-for-task", {
+        spentMinutes,
+      });
+      trace.finish({ result: "started-block" });
     } catch (error) {
+      trace.fail(error, { result: "failed" });
       toast({
         title: "执行模式操作失败",
         description: formatExecuteActionError(error),

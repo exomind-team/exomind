@@ -1,13 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getTaskService } from '@/lib/services';
+import { loadTaskDependencySnapshot } from '@/lib/services/task.service';
 import type { TaskNode } from '@/lib/types/task';
-
-function hasHardBlockingDependency(
-  dependencyCheck: { blocking: Array<{ type: 'soft' | 'hard' }> },
-): boolean {
-  return dependencyCheck.blocking.some((dependency) => dependency.type === 'hard');
-}
+import { PerfTrace } from '@/lib/utils/perf-trace';
 
 export function isPrestartSelectableTask(task: TaskNode): boolean {
   return task.status === 'pending' || task.status === 'in_progress' || task.status === 'suspended';
@@ -15,31 +11,65 @@ export function isPrestartSelectableTask(task: TaskNode): boolean {
 
 export function usePrestartSelectableTasks(): TaskNode[] {
   const [selectableTasks, setSelectableTasks] = useState<TaskNode[]>([]);
+  const loadRequestIdRef = useRef(0);
 
   useEffect(() => {
     let disposed = false;
     const taskService = getTaskService();
 
-    const loadSelectableTasks = async () => {
-      const tasks = await taskService.listTasks(true);
-      const candidates = tasks.filter(isPrestartSelectableTask);
-      const dependencyChecks = await Promise.all(candidates.map(async (task) => {
-        try {
-          const result = await taskService.checkDependenciesMet(task.id);
-          return !hasHardBlockingDependency(result);
-        } catch {
-          return false;
+    const loadSelectableTasks = async (trigger: 'mount' | 'task-change') => {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
+      const trace = new PerfTrace('usePrestartSelectableTasks loadSelectableTasks', {
+        requestId,
+        trigger,
+      });
+      try {
+        const snapshot = await loadTaskDependencySnapshot(taskService, true, {
+          candidateTaskFilter: isPrestartSelectableTask,
+        });
+        trace.step('load-task-dependency-snapshot', {
+          hardBlockedCount: snapshot.hardBlockedTaskIds.size,
+          taskCount: snapshot.tasks.length,
+        });
+        const candidates = snapshot.tasks.filter(isPrestartSelectableTask);
+        const selectableTaskIds = new Set(
+          candidates
+            .filter((task) => !snapshot.hardBlockedTaskIds.has(task.id))
+            .map((task) => task.id),
+        );
+        trace.step('filter-selectable-candidates', {
+          candidateCount: candidates.length,
+          selectableCount: selectableTaskIds.size,
+        });
+        if (disposed || requestId !== loadRequestIdRef.current) {
+          trace.finish({
+            candidateCount: candidates.length,
+            outcome: 'stale',
+            requestId,
+            selectableCount: selectableTaskIds.size,
+          });
+          return;
         }
-      }));
-      if (disposed) {
-        return;
+        setSelectableTasks(candidates.filter((task) => selectableTaskIds.has(task.id)));
+        trace.step('apply-state', {
+          selectableCount: selectableTaskIds.size,
+        });
+        trace.finish({
+          candidateCount: candidates.length,
+          outcome: 'applied',
+          requestId,
+          selectableCount: selectableTaskIds.size,
+        });
+      } catch (error) {
+        trace.fail(error, { requestId });
+        throw error;
       }
-      setSelectableTasks(candidates.filter((_, index) => dependencyChecks[index]));
     };
 
-    void loadSelectableTasks();
+    void loadSelectableTasks('mount');
     const unsubscribe = taskService.onTaskChange(() => {
-      void loadSelectableTasks();
+      void loadSelectableTasks('task-change');
     });
 
     return () => {

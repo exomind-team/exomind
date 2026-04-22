@@ -2,20 +2,20 @@ import {
   buildRuntimeAuthHeaders,
   getSelectedRuntimeTarget,
   type RuntimeTarget,
-} from '@/config/runtime-target';
+} from "@/config/runtime-target";
 import type {
   EventLogListOptions,
   EventLogListResult,
   EventLogListSemantics,
   IEventLogPort,
-} from '@/lib/environment/interfaces/eventlog.port';
-import { normalizeEventRefs } from '@/lib/eventlog/event-refs';
-import type { EventData, EventRef } from '@/lib/types/event';
-import { appendRuntimeProfileScope } from './runtime-profile-scope';
+} from "@/lib/environment/interfaces/eventlog.port";
+import { normalizeEventRefs } from "@/lib/eventlog/event-refs";
+import type { EventData, EventRef } from "@/lib/types/event";
+import { appendRuntimeProfileScope } from "./runtime-profile-scope";
 
 type RuntimeFetch = typeof fetch;
-const EVENTLOG_REVISION_HEADER = 'x-exomind-eventlog-revision';
-const EVENTLOG_LIST_SEMANTICS_HEADER = 'x-exomind-eventlog-list-semantics';
+const EVENTLOG_REVISION_HEADER = "x-exomind-eventlog-revision";
+const EVENTLOG_LIST_SEMANTICS_HEADER = "x-exomind-eventlog-list-semantics";
 
 interface RuntimeEventPayload {
   id: string;
@@ -41,7 +41,7 @@ export interface EventLogRtAdapterOptions {
 }
 
 function formatHostForUrl(host: string): string {
-  if (host.includes(':') && !host.startsWith('[')) {
+  if (host.includes(":") && !host.startsWith("[")) {
     return `[${host}]`;
   }
   return host;
@@ -67,8 +67,10 @@ export class EventLogRtAdapter implements IEventLogPort {
   private readonly resolveTarget: () => RuntimeTarget;
 
   constructor(options: EventLogRtAdapterOptions = {}) {
-    this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
-    this.resolveTarget = options.resolveTarget ?? (() => getSelectedRuntimeTarget());
+    this.fetchImpl =
+      options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
+    this.resolveTarget =
+      options.resolveTarget ?? (() => getSelectedRuntimeTarget());
   }
 
   async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
@@ -76,20 +78,28 @@ export class EventLogRtAdapter implements IEventLogPort {
     return result.events;
   }
 
-  async listEventsDetailed(options?: EventLogListOptions): Promise<EventLogListResult> {
+  async listEventsDetailed(
+    options?: EventLogListOptions,
+  ): Promise<EventLogListResult> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(this.buildListPath(options), target), {
-      method: 'GET',
-      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
-    });
+    const response = await this.fetchImpl(
+      this.url(this.buildListPath(options), target),
+      {
+        method: "GET",
+        headers: buildRuntimeAuthHeaders(target, {
+          Accept: "application/json",
+        }),
+      },
+    );
     if (!response.ok) {
       throw new Error(`RT eventlog list failed: ${response.status}`);
     }
-    const payload = await response.json() as RuntimeEventPayload[];
+    const payload = (await response.json()) as RuntimeEventPayload[];
     return {
       events: payload.map(toEventData),
       semantics: this.resolveListSemantics(options, response.headers),
-      snapshotRevision: response.headers?.get(EVENTLOG_REVISION_HEADER) ?? undefined,
+      snapshotRevision:
+        response.headers?.get(EVENTLOG_REVISION_HEADER) ?? undefined,
     };
   }
 
@@ -101,42 +111,49 @@ export class EventLogRtAdapter implements IEventLogPort {
       content: event.content,
       tags: event.tags,
       ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
-      ...(normalizeEventRefs(event.refs).length > 0 ? { refs: normalizeEventRefs(event.refs) } : {}),
+      ...(normalizeEventRefs(event.refs).length > 0
+        ? { refs: normalizeEventRefs(event.refs) }
+        : {}),
     };
-    const response = await this.fetchImpl(this.url('/eventlog', target), {
-      method: 'POST',
+    const response = await this.fetchImpl(this.url("/eventlog", target), {
+      method: "POST",
       headers: buildRuntimeAuthHeaders(target, {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
+        "Content-Type": "application/json",
+        Accept: "application/json",
       }),
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
       throw new Error(`RT eventlog append failed: ${response.status}`);
     }
-    return toEventData(await response.json() as RuntimeEventPayload);
+    return toEventData((await response.json()) as RuntimeEventPayload);
   }
 
   async getEvent(id: string): Promise<EventData | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(`/eventlog/${encodeURIComponent(id)}`, target), {
-      method: 'GET',
-      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
-    });
+    const response = await this.fetchImpl(
+      this.url(`/eventlog/${encodeURIComponent(id)}`, target),
+      {
+        method: "GET",
+        headers: buildRuntimeAuthHeaders(target, {
+          Accept: "application/json",
+        }),
+      },
+    );
     if (response.status === 404) {
       return null;
     }
     if (!response.ok) {
       throw new Error(`RT eventlog get failed: ${response.status}`);
     }
-    return toEventData(await response.json() as RuntimeEventPayload);
+    return toEventData((await response.json()) as RuntimeEventPayload);
   }
 
   async clearEvents(): Promise<void> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url('/eventlog', target), {
-      method: 'DELETE',
-      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
+    const response = await this.fetchImpl(this.url("/eventlog", target), {
+      method: "DELETE",
+      headers: buildRuntimeAuthHeaders(target, { Accept: "application/json" }),
     });
     if (!response.ok && response.status !== 204) {
       throw new Error(`RT eventlog clear failed: ${response.status}`);
@@ -148,16 +165,19 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   private buildListPath(options?: EventLogListOptions): string {
-    const url = new URL('/eventlog', 'http://runtime.local');
+    const url = new URL("/eventlog", "http://runtime.local");
 
-    if (typeof options?.sinceId === 'string' && options.sinceId.length > 0) {
-      url.searchParams.set('since_id', options.sinceId);
+    if (typeof options?.sinceId === "string" && options.sinceId.length > 0) {
+      url.searchParams.set("since_id", options.sinceId);
     }
-    if (typeof options?.sinceTimestamp === 'number') {
-      url.searchParams.set('since_timestamp', String(options.sinceTimestamp));
+    if (typeof options?.sinceTimestamp === "number") {
+      url.searchParams.set("since_timestamp", String(options.sinceTimestamp));
     }
-    if (typeof options?.limit === 'number') {
-      url.searchParams.set('limit', String(options.limit));
+    if (typeof options?.untilTimestamp === "number") {
+      url.searchParams.set("until_timestamp", String(options.untilTimestamp));
+    }
+    if (typeof options?.limit === "number") {
+      url.searchParams.set("limit", String(options.limit));
     }
 
     return `${url.pathname}${url.search}`;
@@ -168,14 +188,17 @@ export class EventLogRtAdapter implements IEventLogPort {
     headers?: Headers,
   ): EventLogListSemantics {
     const headerValue = headers?.get(EVENTLOG_LIST_SEMANTICS_HEADER);
-    if (headerValue === 'full_snapshot' || headerValue === 'incremental_batch') {
+    if (
+      headerValue === "full_snapshot" ||
+      headerValue === "incremental_batch"
+    ) {
       return headerValue;
     }
 
     const hasIncrementalCursor =
-      (typeof options?.sinceId === 'string' && options.sinceId.length > 0)
-      || typeof options?.sinceTimestamp === 'number';
-    return hasIncrementalCursor ? 'incremental_batch' : 'full_snapshot';
+      (typeof options?.sinceId === "string" && options.sinceId.length > 0) ||
+      typeof options?.sinceTimestamp === "number";
+    return hasIncrementalCursor ? "incremental_batch" : "full_snapshot";
   }
 
   private url(path: string, target = this.resolveTarget()): string {

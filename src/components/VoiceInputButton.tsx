@@ -13,21 +13,32 @@
  * └─────────────────────────────────────────┘
  */
 
-import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
-import { Check, LoaderCircle, Mic, MicOff, Unlock } from 'lucide-react';
-import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
-import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
-import { cn } from '../lib/utils';
-import { toast } from '@/components/ui/toast-hook';
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useImperativeHandle,
+} from "react";
+import { Check, LoaderCircle, Mic, MicOff, Unlock } from "lucide-react";
+import type { IASRPort, IASRConfig } from "../lib/ports/asr-port";
+import { MOSSASRAdapter } from "../lib/adapters/asr/moss-asr";
+import { cn } from "../lib/utils";
+import { toast } from "@/components/ui/toast-hook";
 import {
   createCompatibleMediaRecorder,
   DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
   getUserMediaWithConstraintFallback,
-} from '../lib/media/microphone-capture';
-import { log } from '@/lib/logger';
+} from "../lib/media/microphone-capture";
+import { log } from "@/lib/logger";
+import { PerfTrace } from "@/lib/utils/perf-trace";
 
 // 按钮状态
-export type VoiceButtonState = 'idle' | 'recording' | 'recognizing' | 'completed';
+export type VoiceButtonState =
+  | "idle"
+  | "recording"
+  | "recognizing"
+  | "completed";
 
 // Props
 export interface VoiceInputButtonProps {
@@ -85,41 +96,53 @@ interface RecordingState {
 // 使用 ref 来存储动画帧 ID，避免触发重渲染
 let animationFrameId: number | null = null;
 
-export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceInputButtonProps>(function VoiceInputButton({
-  onResult,
-  onError,
-  onStateChange,
-  adapter,
-  adapterConfig,
-  showWaveform = true,
-  showTimer = true,
-  showPermissionUnlockButton = true,
-  enableShortcut = true,
-  size = 64,
-  className,
-  style,
-  waveformColorVar = '--destructive',
-  buttonClassName,
-  idleButtonClassName,
-  buttonStyle,
-  idleButtonStyle,
-  icons,
-}, ref) {
+export const VoiceInputButton = React.forwardRef<
+  VoiceInputButtonHandle,
+  VoiceInputButtonProps
+>(function VoiceInputButton(
+  {
+    onResult,
+    onError,
+    onStateChange,
+    adapter,
+    adapterConfig,
+    showWaveform = true,
+    showTimer = true,
+    showPermissionUnlockButton = true,
+    enableShortcut = true,
+    size = 64,
+    className,
+    style,
+    waveformColorVar = "--destructive",
+    buttonClassName,
+    idleButtonClassName,
+    buttonStyle,
+    idleButtonStyle,
+    icons,
+  },
+  ref,
+) {
   // 权限状态类型
-  type PermissionState = 'checking' | 'granted' | 'denied' | 'prompt' | 'unavailable';
+  type PermissionState =
+    | "checking"
+    | "granted"
+    | "denied"
+    | "prompt"
+    | "unavailable";
 
   // 主状态（只包含必要的渲染状态）
   const [state, setState] = useState<RecordingState>({
-    state: 'idle',
+    state: "idle",
     duration: 0,
     startTime: 0,
   });
 
   // 麦克风权限状态
-  const [permissionState, setPermissionState] = useState<PermissionState>('checking');
+  const [permissionState, setPermissionState] =
+    useState<PermissionState>("checking");
 
   // 上一次状态（用于检测变化）
-  const prevStateRef = useRef<VoiceButtonState>('idle');
+  const prevStateRef = useRef<VoiceButtonState>("idle");
 
   // 适配器 ref
   const adapterRef = useRef<IASRPort | null>(null);
@@ -157,7 +180,9 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   // 初始化适配器
   useEffect(() => {
     log.info(`[VoiceInput] 初始化, isSecureContext: ${window.isSecureContext}`);
-    log.info(`[VoiceInput] location: ${window.location.href} protocol: ${window.location.protocol}`);
+    log.info(
+      `[VoiceInput] location: ${window.location.href} protocol: ${window.location.protocol}`,
+    );
     if (adapter) {
       adapterRef.current = adapter;
     } else {
@@ -178,33 +203,35 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     const checkPermission = async () => {
       // 检查 mediaDevices API 是否可用
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setPermissionState('unavailable');
+        setPermissionState("unavailable");
         return;
       }
 
       // 尝试查询权限状态
       if (navigator.permissions?.query) {
         try {
-          const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-          if (permissionStatus.state === 'granted') {
-            setPermissionState('granted');
-          } else if (permissionStatus.state === 'denied') {
-            setPermissionState('denied');
+          const permissionStatus = await navigator.permissions.query({
+            name: "microphone" as PermissionName,
+          });
+          if (permissionStatus.state === "granted") {
+            setPermissionState("granted");
+          } else if (permissionStatus.state === "denied") {
+            setPermissionState("denied");
           } else {
-            setPermissionState('prompt');
+            setPermissionState("prompt");
           }
         } catch {
           // 无法查询权限，假设需要提示用户
-          setPermissionState('prompt');
+          setPermissionState("prompt");
         }
       } else {
         // 权限 API 不可用，需要提示用户
-        setPermissionState('prompt');
+        setPermissionState("prompt");
       }
     };
 
     checkPermission();
-  }, []);
+  }, [permissionState]);
 
   // canvas ref
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -212,38 +239,67 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // 请求麦克风权限
   const requestPermission = useCallback(async () => {
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const trace = new PerfTrace("VoiceInputButton requestPermission", {
+      permissionStateBefore: permissionState,
+      isAndroid,
+    });
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const error = new Error('您的浏览器不支持语音录制功能');
-      (error as Error & { code: string; userTip: string }).code = 'API_NOT_SUPPORTED';
-      (error as Error & { userTip: string }).userTip = '请使用最新版本的 Chrome、Edge 或 Safari 浏览器';
+      const error = new Error("您的浏览器不支持语音录制功能");
+      (error as Error & { code: string; userTip: string }).code =
+        "API_NOT_SUPPORTED";
+      (error as Error & { userTip: string }).userTip =
+        "请使用最新版本的 Chrome、Edge 或 Safari 浏览器";
       const extError = error as Error & { userTip: string };
-      callbacksRef.current.onError?.(`${error.message}\n提示: ${extError.userTip}`);
-      setPermissionState('unavailable');
+      trace.fail(error, { result: "unsupported-api" });
+      callbacksRef.current.onError?.(
+        `${error.message}\n提示: ${extError.userTip}`,
+      );
+      setPermissionState("unavailable");
       return false;
     }
 
     try {
+      trace.step("query-media-devices-support");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      trace.step("get-user-media");
       // 释放刚获取的 stream
-      stream.getTracks().forEach(track => track.stop());
-      setPermissionState('granted');
+      stream.getTracks().forEach((track) => track.stop());
+      trace.step("release-probe-stream");
+      setPermissionState("granted");
+      trace.step("apply-permission-state", { result: "granted" });
+      trace.finish({ result: "granted" });
       return true;
     } catch (error) {
       const errorName = (error as DOMException).name;
       // Android runtime guidance（Android 端引导文案）
       const permissionGuide = /Android/i.test(navigator.userAgent)
-        ? '请在系统设置 > 应用 > ExoMind > 权限中允许麦克风访问'
-        : '请在浏览器设置中允许麦克风访问';
-      if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
-        setPermissionState('denied');
-        callbacksRef.current.onError?.(`麦克风权限被拒绝\n提示: ${permissionGuide}`);
-      } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
-        setPermissionState('denied');
-        callbacksRef.current.onError?.('未检测到麦克风设备\n提示: 请确保电脑已连接麦克风');
+        ? "请在系统设置 > 应用 > ExoMind > 权限中允许麦克风访问"
+        : "请在浏览器设置中允许麦克风访问";
+      if (
+        errorName === "NotAllowedError" ||
+        errorName === "PermissionDeniedError"
+      ) {
+        setPermissionState("denied");
+        callbacksRef.current.onError?.(
+          `麦克风权限被拒绝\n提示: ${permissionGuide}`,
+        );
+      } else if (
+        errorName === "NotFoundError" ||
+        errorName === "DevicesNotFoundError"
+      ) {
+        setPermissionState("denied");
+        callbacksRef.current.onError?.(
+          "未检测到麦克风设备\n提示: 请确保电脑已连接麦克风",
+        );
       } else {
-        setPermissionState('denied');
+        setPermissionState("denied");
         callbacksRef.current.onError?.(`麦克风访问失败: ${errorName || error}`);
       }
+      trace.fail(error, {
+        result: "denied",
+        errorName: errorName || null,
+      });
       return false;
     }
   }, []);
@@ -251,12 +307,18 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   // 释放资源
   const releaseRecordingResources = useCallback(() => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
 
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch((e: unknown) => log.error(`[VoiceInput] audioContext.close failed: ${e instanceof Error ? e.message : String(e)}`));
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current
+        .close()
+        .catch((e: unknown) =>
+          log.error(
+            `[VoiceInput] audioContext.close failed: ${e instanceof Error ? e.message : String(e)}`,
+          ),
+        );
       audioContextRef.current = null;
     }
 
@@ -268,7 +330,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // WebM 转 WAV（与 moss-test 页面相同）
   const webmToWav = async (webmBlob: Blob): Promise<Uint8Array> => {
-    log.info('[VoiceInput] WebM 转 WAV 中...');
+    log.info("[VoiceInput] WebM 转 WAV 中...");
 
     const arrayBuffer = await webmBlob.arrayBuffer();
     const audioContext = new AudioContext();
@@ -283,14 +345,16 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     const pcmData = new Int16Array(rawData.length);
     for (let i = 0; i < rawData.length; i++) {
       const s = Math.max(-1, Math.min(1, rawData[i]));
-      pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
 
     // 编码为 WAV
     const wavData = encodeWAV(new Uint8Array(pcmData.buffer), sampleRate);
     await audioContext.close();
 
-    log.info(`[VoiceInput] WAV 转换完成: ${(wavData.length / 1024).toFixed(2)} KB`);
+    log.info(
+      `[VoiceInput] WAV 转换完成: ${(wavData.length / 1024).toFixed(2)} KB`,
+    );
     return wavData;
   };
 
@@ -325,51 +389,65 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   // 开始录音（使用原生 MediaRecorder）
   const startRecording = useCallback(async () => {
     const currentToken = ++operationTokenRef.current;
+    const trace = new PerfTrace("VoiceInputButton startRecording", {
+      entryState: state.state,
+      permissionState,
+      showWaveform,
+      token: currentToken,
+    });
 
     try {
-      log.info(`[VoiceInput] 开始录音流程 ${JSON.stringify({ state: state.state, token: currentToken })}`);
+      log.info(
+        `[VoiceInput] 开始录音流程 ${JSON.stringify({ state: state.state, token: currentToken })}`,
+      );
 
       // 1. 检查权限状态
-      if (permissionState === 'unavailable') {
-        log.info('[VoiceInput] mediaDevices API 不可用');
-        throw new Error('您的浏览器不支持语音录制功能');
+      if (permissionState === "unavailable") {
+        log.info("[VoiceInput] mediaDevices API 不可用");
+        throw new Error("您的浏览器不支持语音录制功能");
       }
 
       // 如果权限未授予，先请求权限
-      if (permissionState !== 'granted') {
-        log.info('[VoiceInput] 权限未授予，先请求权限');
+      if (permissionState !== "granted") {
+        log.info("[VoiceInput] 权限未授予，先请求权限");
         const granted = await requestPermission();
+        trace.step("request-permission", { granted });
         if (!granted) {
-          log.info('[VoiceInput] 权限请求失败');
+          log.info("[VoiceInput] 权限请求失败");
+          trace.finish({ result: "permission-not-granted" });
           return;
         }
         if (currentToken !== operationTokenRef.current) {
-          log.info('[VoiceInput] 操作已被取消，跳过录音');
+          log.info("[VoiceInput] 操作已被取消，跳过录音");
+          trace.finish({ result: "cancelled-before-start" });
           return;
         }
       }
 
       // 2. 检测 mediaDevices API 可用性
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        log.info('[VoiceInput] mediaDevices API 不可用');
-        throw new Error('您的浏览器不支持语音录制功能');
+        log.info("[VoiceInput] mediaDevices API 不可用");
+        throw new Error("您的浏览器不支持语音录制功能");
       }
-      log.info('[VoiceInput] mediaDevices API 检查通过');
+      log.info("[VoiceInput] mediaDevices API 检查通过");
 
       // 3. 获取麦克风
-      log.info('[VoiceInput] 获取麦克风...');
+      log.info("[VoiceInput] 获取麦克风...");
       streamRef.current = await getUserMediaWithConstraintFallback(
         (constraints) => navigator.mediaDevices.getUserMedia(constraints),
-        { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS }
+        { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
       );
       startTimeRef.current = Date.now();
-      log.info('[VoiceInput] 麦克风获取成功');
+      log.info("[VoiceInput] 麦克风获取成功");
+      trace.step("get-user-media");
 
       // 4. 创建 MediaRecorder
-      const { recorder: mediaRecorder, mimeType } = createCompatibleMediaRecorder(streamRef.current);
+      const { recorder: mediaRecorder, mimeType } =
+        createCompatibleMediaRecorder(streamRef.current);
       mediaRecorderRef.current = mediaRecorder;
       recordedChunksRef.current = [];
       recordedMimeTypeRef.current = mimeType;
+      trace.step("create-media-recorder", { mimeType });
 
       // 5. 设置数据收集回调
       mediaRecorder.ondataavailable = (event) => {
@@ -384,41 +462,61 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
       // 6. 开始录音
       mediaRecorder.start(100); // 每 100ms 收集一次数据
-      log.info('[VoiceInput] MediaRecorder 已启动');
+      log.info("[VoiceInput] MediaRecorder 已启动");
 
       // 7. 设置波形可视化（使用 analyser）
       if (showWaveform && streamRef.current) {
         audioContextRef.current = new AudioContext();
-        const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+        const source = audioContextRef.current.createMediaStreamSource(
+          streamRef.current,
+        );
         analyserRef.current = audioContextRef.current.createAnalyser();
         analyserRef.current.fftSize = 64;
         source.connect(analyserRef.current);
+        trace.step("init-analyser");
       }
 
       // 8. 更新状态
       if (currentToken === operationTokenRef.current) {
         setState({
-          state: 'recording',
+          state: "recording",
           duration: 0,
           startTime: Date.now(),
         });
+        trace.step("enter-recording-state");
+        trace.finish({ result: "recording", mimeType });
+      } else {
+        trace.finish({ result: "cancelled-after-init", mimeType });
       }
-
     } catch (error) {
-      log.error(`[VoiceInput] 开始录音失败: ${error instanceof Error ? error.message : String(error)}`);
+      log.error(
+        `[VoiceInput] 开始录音失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
       releaseRecordingResources();
 
       if (currentToken === operationTokenRef.current) {
-        setState({ state: 'idle', duration: 0, startTime: 0 });
+        setState({ state: "idle", duration: 0, startTime: 0 });
         callbacksRef.current.onError?.(`录音失败: ${error}`);
       }
+      trace.fail(error, { result: "failed" });
     }
-  }, [requestPermission, permissionState, showWaveform, releaseRecordingResources, state.state]);
+  }, [
+    requestPermission,
+    permissionState,
+    showWaveform,
+    releaseRecordingResources,
+    state.state,
+  ]);
 
   // 停止录音并识别
   const stopRecording = useCallback(async () => {
     const operationToken = ++operationTokenRef.current;
-    log.info(`[VoiceInput] 停止录音... ${JSON.stringify({ token: operationToken })}`);
+    const trace = new PerfTrace("VoiceInputButton stopRecording", {
+      token: operationToken,
+    });
+    log.info(
+      `[VoiceInput] 停止录音... ${JSON.stringify({ token: operationToken })}`,
+    );
 
     // 停止动画
     if (animationFrameId !== null) {
@@ -427,13 +525,14 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     }
 
     const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
+    if (recorder && recorder.state !== "inactive") {
       // 等待 stop 完成
       await new Promise<void>((resolve) => {
-        recorder.addEventListener('stop', () => resolve(), { once: true });
+        recorder.addEventListener("stop", () => resolve(), { once: true });
         recorder.stop();
       });
-      log.info('[VoiceInput] MediaRecorder 已停止');
+      log.info("[VoiceInput] MediaRecorder 已停止");
+      trace.step("await-recorder-stop");
     }
 
     const recDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
@@ -441,89 +540,138 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
     // 检查是否有录音数据
     if (recordedChunksRef.current.length === 0) {
-      log.error('[VoiceInput] 没有录制到音频数据');
+      log.error("[VoiceInput] 没有录制到音频数据");
       releaseRecordingResources();
       if (operationToken === operationTokenRef.current) {
-        setState({ state: 'idle', duration: 0, startTime: 0 });
-        callbacksRef.current.onError?.('没有录制到音频数据');
+        setState({ state: "idle", duration: 0, startTime: 0 });
+        callbacksRef.current.onError?.("没有录制到音频数据");
       }
+      trace.fail(new Error("no-audio-data"), {
+        durationSec: recDuration,
+        chunkCount: 0,
+      });
       return;
     }
 
     // 获取录音 blob
-    const recordedMimeType = recordedMimeTypeRef.current || 'audio/webm';
-    const webmBlob = new Blob(recordedChunksRef.current, { type: recordedMimeType });
-    log.info(`[VoiceInput] 音频文件(${recordedMimeType}): ${(webmBlob.size / 1024).toFixed(2)} KB`);
+    const recordedMimeType = recordedMimeTypeRef.current || "audio/webm";
+    const webmBlob = new Blob(recordedChunksRef.current, {
+      type: recordedMimeType,
+    });
+    log.info(
+      `[VoiceInput] 音频文件(${recordedMimeType}): ${(webmBlob.size / 1024).toFixed(2)} KB`,
+    );
+    trace.step("build-recording-blob", {
+      durationSec: recDuration,
+      chunkCount: recordedChunksRef.current.length,
+      blobSizeKb: Number((webmBlob.size / 1024).toFixed(2)),
+      recordedMimeType,
+    });
 
     // 释放麦克风
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
 
     // 更新状态为识别中
     if (operationToken === operationTokenRef.current) {
-      setState(prev => ({ ...prev, state: 'recognizing' }));
+      setState((prev) => ({ ...prev, state: "recognizing" }));
     }
 
     try {
       // WebM 转 WAV
       const wavData = await webmToWav(webmBlob);
+      trace.step("webm-to-wav", {
+        wavSizeKb: Number((wavData.length / 1024).toFixed(2)),
+      });
 
       if (operationToken !== operationTokenRef.current) {
+        trace.finish({ result: "cancelled-before-transcribe" });
         return;
       }
 
       // 调用 ASR 识别
-      log.info('[VoiceInput] 调用 ASR 识别...');
+      log.info("[VoiceInput] 调用 ASR 识别...");
       const result = await adapterRef.current?.transcribe({
-        lang: 'zh-CN',
+        lang: "zh-CN",
         preRecordedAudio: wavData,
+      });
+      trace.step("asr-transcribe", {
+        transcriptLength: result?.text.length ?? 0,
       });
 
       if (operationToken !== operationTokenRef.current) {
+        trace.finish({ result: "cancelled-after-transcribe" });
         return;
       }
 
       if (result) {
         log.info(`[VoiceInput] 识别完成: "${result.text}"`);
-        setState({ state: 'completed', duration: 0, startTime: 0 });
+        setState({ state: "completed", duration: 0, startTime: 0 });
         callbacksRef.current.onResult(result.text);
+        trace.step("apply-result", {
+          transcriptLength: result.text.length,
+        });
+        trace.finish({
+          result: "completed",
+          durationSec: recDuration,
+          transcriptLength: result.text.length,
+        });
+        return;
       }
+
+      trace.finish({
+        result: "no-result",
+        durationSec: recDuration,
+      });
     } catch (error) {
-      log.error(`[VoiceInput] 识别失败: ${error instanceof Error ? error.message : String(error)}`);
+      log.error(
+        `[VoiceInput] 识别失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
       releaseRecordingResources();
       if (operationToken === operationTokenRef.current) {
-        setState({ state: 'idle', duration: 0, startTime: 0 });
+        setState({ state: "idle", duration: 0, startTime: 0 });
         callbacksRef.current.onError?.(`识别失败: ${error}`);
       }
+      trace.fail(error, {
+        durationSec: recDuration,
+        chunkCount: recordedChunksRef.current.length,
+      });
     }
   }, [releaseRecordingResources]);
 
   // 处理按钮点击
   const handleClick = useCallback(() => {
-    if (permissionState === 'unavailable') {
-      toast({ title: '此设备不支持麦克风', variant: 'destructive' });
+    if (permissionState === "unavailable") {
+      toast({ title: "此设备不支持麦克风", variant: "destructive" });
       return;
     }
-    if (permissionState === 'denied') {
-      toast({ title: '麦克风权限被拒绝，请在浏览器设置中允许', variant: 'destructive' });
+    if (permissionState === "denied") {
+      toast({
+        title: "麦克风权限被拒绝，请在浏览器设置中允许",
+        variant: "destructive",
+      });
       return;
     }
-    if (state.state === 'idle' || state.state === 'completed') {
+    if (state.state === "idle" || state.state === "completed") {
       startRecording();
-    } else if (state.state === 'recording') {
+    } else if (state.state === "recording") {
       stopRecording();
     }
   }, [permissionState, state.state, startRecording, stopRecording]);
 
-  useImperativeHandle(ref, () => ({
-    start: () => {
-      if (state.state === 'idle' || state.state === 'completed') {
-        startRecording();
-      }
-    },
-  }), [startRecording, state.state]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      start: () => {
+        if (state.state === "idle" || state.state === "completed") {
+          startRecording();
+        }
+      },
+    }),
+    [startRecording, state.state],
+  );
 
   // 快捷键处理（仅非输入区域）
   useEffect(() => {
@@ -537,32 +685,30 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       // 排除输入区域
       if (
         targetElement &&
-        (
-          targetElement.tagName === 'INPUT' ||
-          targetElement.tagName === 'TEXTAREA' ||
+        (targetElement.tagName === "INPUT" ||
+          targetElement.tagName === "TEXTAREA" ||
           targetElement.isContentEditable ||
-          targetElement.closest('[contenteditable="true"]')
-        )
+          targetElement.closest('[contenteditable="true"]'))
       ) {
         return; // 不拦截
       }
 
       // 空格键开始/停止录音
-      if (e.key === ' ' || e.code === 'Space') {
+      if (e.key === " " || e.code === "Space") {
         e.preventDefault();
         handleClick();
       }
       // Escape 取消
-      else if (e.key === 'Escape' || e.code === 'Escape') {
-        if (state.state === 'recording' || state.state === 'recognizing') {
+      else if (e.key === "Escape" || e.code === "Escape") {
+        if (state.state === "recording" || state.state === "recognizing") {
           releaseRecordingResources();
-          setState({ state: 'idle', duration: 0, startTime: 0 });
+          setState({ state: "idle", duration: 0, startTime: 0 });
         }
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [enableShortcut, handleClick, state.state, releaseRecordingResources]);
 
   const formatCssVarColor = (triplet: string, alpha: number): string | null => {
@@ -573,7 +719,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // 音量波形动画
   useEffect(() => {
-    if (!showWaveform || state.state !== 'recording' || !canvasRef.current) {
+    if (!showWaveform || state.state !== "recording" || !canvasRef.current) {
       if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
@@ -582,7 +728,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     }
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const analyser = analyserRef.current;
@@ -591,15 +737,16 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    const baseRadius = (size / 2) - 8;
+    const baseRadius = size / 2 - 8;
     const rootStyle = getComputedStyle(document.documentElement);
-    const normalizedWaveformVar = waveformColorVar.startsWith('--')
+    const normalizedWaveformVar = waveformColorVar.startsWith("--")
       ? waveformColorVar
       : `--${waveformColorVar}`;
-    const waveformTriplet = rootStyle.getPropertyValue(normalizedWaveformVar)
-      || rootStyle.getPropertyValue('--destructive');
-    const waveform0 = formatCssVarColor(waveformTriplet, 0.9) ?? '#ff6b6b';
-    const waveform1 = formatCssVarColor(waveformTriplet, 0.6) ?? '#ee5a5a';
+    const waveformTriplet =
+      rootStyle.getPropertyValue(normalizedWaveformVar) ||
+      rootStyle.getPropertyValue("--destructive");
+    const waveform0 = formatCssVarColor(waveformTriplet, 0.9) ?? "#ff6b6b";
+    const waveform1 = formatCssVarColor(waveformTriplet, 0.6) ?? "#ee5a5a";
 
     const draw = () => {
       animationFrameId = requestAnimationFrame(draw);
@@ -631,7 +778,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         ctx.lineTo(x2, y2);
         ctx.strokeStyle = gradient;
         ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
+        ctx.lineCap = "round";
         ctx.stroke();
       }
     };
@@ -648,11 +795,11 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // 计时器
   useEffect(() => {
-    if (state.state !== 'recording') return;
+    if (state.state !== "recording") return;
 
     const interval = setInterval(() => {
       const duration = (Date.now() - state.startTime) / 1000;
-      setState(prev => ({ ...prev, duration }));
+      setState((prev) => ({ ...prev, duration }));
     }, 100);
 
     return () => clearInterval(interval);
@@ -660,9 +807,9 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // 自动重置到 idle
   useEffect(() => {
-    if (state.state === 'completed') {
+    if (state.state === "completed") {
       const timer = setTimeout(() => {
-        setState(prev => ({ ...prev, state: 'idle' }));
+        setState((prev) => ({ ...prev, state: "idle" }));
       }, 2000);
       return () => clearTimeout(timer);
     }
@@ -671,52 +818,52 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   // 获取按钮颜色
   const getButtonColors = () => {
     switch (state.state) {
-      case 'recording':
+      case "recording":
         return {
           background:
-            'linear-gradient(135deg, hsl(var(--destructive)) 0%, hsl(var(--destructive) / 0.85) 100%)',
-          shadow: '0 0 20px hsl(var(--destructive) / 0.6)',
+            "linear-gradient(135deg, hsl(var(--destructive)) 0%, hsl(var(--destructive) / 0.85) 100%)",
+          shadow: "0 0 20px hsl(var(--destructive) / 0.6)",
           icon: <Mic size={Math.max(16, Math.floor(size * 0.34))} />,
-          iconColor: 'hsl(var(--destructive-foreground))',
+          iconColor: "hsl(var(--destructive-foreground))",
         };
-      case 'recognizing':
+      case "recognizing":
         return {
           background:
-            'linear-gradient(135deg, hsl(var(--brand)) 0%, hsl(var(--brand) / 0.85) 100%)',
-          shadow: '0 0 20px hsl(var(--brand) / 0.6)',
+            "linear-gradient(135deg, hsl(var(--brand)) 0%, hsl(var(--brand) / 0.85) 100%)",
+          shadow: "0 0 20px hsl(var(--brand) / 0.6)",
           icon: <LoaderCircle size={Math.max(16, Math.floor(size * 0.34))} />,
-          iconColor: 'hsl(var(--brand-foreground))',
+          iconColor: "hsl(var(--brand-foreground))",
         };
-      case 'completed':
+      case "completed":
         return {
-          background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
-          shadow: '0 0 20px hsl(var(--success) / 0.6)',
+          background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)",
+          shadow: "0 0 20px hsl(var(--success) / 0.6)",
           icon: <Check size={Math.max(16, Math.floor(size * 0.34))} />,
-          iconColor: '#ffffff',
+          iconColor: "#ffffff",
         };
       default: {
-        if (permissionState === 'unavailable') {
+        if (permissionState === "unavailable") {
           return {
-            background: 'hsl(var(--muted-foreground) / 0.2)',
-            shadow: 'none',
+            background: "hsl(var(--muted-foreground) / 0.2)",
+            shadow: "none",
             icon: <MicOff size={Math.max(16, Math.floor(size * 0.34))} />,
-            iconColor: 'hsl(var(--muted-foreground) / 0.5)',
+            iconColor: "hsl(var(--muted-foreground) / 0.5)",
           };
         }
-        if (permissionState === 'prompt' || permissionState === 'denied') {
+        if (permissionState === "prompt" || permissionState === "denied") {
           return {
-            background: 'hsl(var(--warning) / 0.15)',
-            shadow: 'none',
+            background: "hsl(var(--warning) / 0.15)",
+            shadow: "none",
             icon: <MicOff size={Math.max(16, Math.floor(size * 0.34))} />,
-            iconColor: 'hsl(var(--warning))',
+            iconColor: "hsl(var(--warning))",
           };
         }
         return {
           background:
-            'linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--secondary)) 100%)',
-          shadow: '0 4px 12px hsl(var(--ring) / 0.2)',
+            "linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--secondary)) 100%)",
+          shadow: "0 4px 12px hsl(var(--ring) / 0.2)",
           icon: <Mic size={Math.max(16, Math.floor(size * 0.34))} />,
-          iconColor: 'inherit',
+          iconColor: "inherit",
         };
       }
     }
@@ -724,8 +871,11 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   const colors = getButtonColors();
   const iconNode = icons?.[state.state] ?? colors.icon;
-  const isIdle = state.state === 'idle';
-  const useIdleClassVisual = Boolean(idleButtonClassName) && state.state === 'idle' && permissionState === 'granted';
+  const isIdle = state.state === "idle";
+  const useIdleClassVisual =
+    Boolean(idleButtonClassName) &&
+    state.state === "idle" &&
+    permissionState === "granted";
   const buttonSize = size;
 
   // 格式化时间
@@ -733,45 +883,53 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     const ms = Math.floor((seconds % 1) * 10);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms}`;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}.${ms}`;
   };
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block', ...style }} className={className}>
+    <div
+      style={{ position: "relative", display: "inline-block", ...style }}
+      className={className}
+    >
       {/* 录音波形画布 */}
-      {showWaveform && state.state === 'recording' && (
+      {showWaveform && state.state === "recording" && (
         <canvas
           ref={canvasRef}
           width={buttonSize + 24}
           height={buttonSize + 24}
           style={{
-            position: 'absolute',
+            position: "absolute",
             top: -12,
             left: -12,
-            pointerEvents: 'none',
+            pointerEvents: "none",
           }}
         />
       )}
 
       {/* 录音/识别状态文字 */}
-      {showTimer && state.state !== 'idle' && (
-        <div style={{
-          position: 'absolute',
-          top: -28,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          fontSize: 12,
-          fontWeight: 500,
-          color:
-            state.state === 'recording'
-              ? 'hsl(var(--destructive))'
-              : state.state === 'recognizing'
-                ? 'hsl(var(--brand))'
-                : 'hsl(var(--success))',
-          whiteSpace: 'nowrap',
-        }}>
-          {state.state === 'recording' ? formatTime(state.duration) :
-           state.state === 'recognizing' ? '识别中...' : '完成'}
+      {showTimer && state.state !== "idle" && (
+        <div
+          style={{
+            position: "absolute",
+            top: -28,
+            left: "50%",
+            transform: "translateX(-50%)",
+            fontSize: 12,
+            fontWeight: 500,
+            color:
+              state.state === "recording"
+                ? "hsl(var(--destructive))"
+                : state.state === "recognizing"
+                  ? "hsl(var(--brand))"
+                  : "hsl(var(--success))",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {state.state === "recording"
+            ? formatTime(state.duration)
+            : state.state === "recognizing"
+              ? "识别中..."
+              : "完成"}
         </div>
       )}
 
@@ -779,33 +937,37 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       <button
         ref={buttonRef}
         onClick={handleClick}
-        className={cn(buttonClassName, useIdleClassVisual && idleButtonClassName)}
+        className={cn(
+          buttonClassName,
+          useIdleClassVisual && idleButtonClassName,
+        )}
         style={{
           width: buttonSize,
           height: buttonSize,
-          borderRadius: '50%',
-          border: 'none',
+          borderRadius: "50%",
+          border: "none",
           background: useIdleClassVisual ? undefined : colors.background,
           boxShadow: useIdleClassVisual ? undefined : colors.shadow,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           fontSize: buttonSize * 0.4,
           color: useIdleClassVisual ? undefined : colors.iconColor,
-          transition: 'all 0.3s ease',
-          transform: state.state === 'recording' ? 'scale(1.05)' : 'scale(1)',
-          animation: state.state === 'recording'
-            ? 'pulse 1.5s ease-in-out infinite'
-            : 'none',
-          position: 'relative',
-          overflow: 'hidden',
+          transition: "all 0.3s ease",
+          transform: state.state === "recording" ? "scale(1.05)" : "scale(1)",
+          animation:
+            state.state === "recording"
+              ? "pulse 1.5s ease-in-out infinite"
+              : "none",
+          position: "relative",
+          overflow: "hidden",
           ...(isIdle ? idleButtonStyle : undefined),
           ...buttonStyle,
         }}
       >
         {/* 录音时的脉动效果 */}
-        {state.state === 'recording' && (
+        {state.state === "recording" && (
           <style>{`
             @keyframes pulse {
               0%, 100% { transform: scale(1.05); }
@@ -815,7 +977,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         )}
 
         {/* 识别时的旋转效果 */}
-        {state.state === 'recognizing' && (
+        {state.state === "recognizing" && (
           <style>{`
             @keyframes spin {
               from { transform: rotate(0deg); }
@@ -825,7 +987,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         )}
 
         {/* 完成时的闪烁效果 */}
-        {state.state === 'completed' && (
+        {state.state === "completed" && (
           <style>{`
             @keyframes flash {
               0%, 100% { opacity: 1; }
@@ -835,40 +997,50 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         )}
 
         {/* 图标 */}
-        <span style={{
-          transform: state.state === 'recognizing' ? 'scale(0.9)' : 'scale(1)',
-          animation: state.state === 'recognizing' ? 'spin 1s linear infinite' : 'none',
-          display: 'inline-flex',
-        }}>
+        <span
+          style={{
+            transform:
+              state.state === "recognizing" ? "scale(0.9)" : "scale(1)",
+            animation:
+              state.state === "recognizing"
+                ? "spin 1s linear infinite"
+                : "none",
+            display: "inline-flex",
+          }}
+        >
           {iconNode}
         </span>
       </button>
 
       {/* 权限未授予时显示获取权限按钮 */}
-      {showPermissionUnlockButton && permissionState !== 'granted' && permissionState !== 'checking' && (
-        <button
-          onClick={requestPermission}
-          style={{
-            width: buttonSize,
-            height: buttonSize,
-            borderRadius: '50%',
-            border: 'none',
-            background:
-              'linear-gradient(135deg, hsl(var(--warning)) 0%, hsl(var(--warning) / 0.85) 100%)',
-            boxShadow: '0 4px 12px hsl(var(--warning) / 0.4)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: buttonSize * 0.3,
-            transition: 'all 0.3s ease',
-          }}
-          title="点击获取麦克风权限"
-        >
-          <Unlock size={Math.max(14, Math.floor(buttonSize * 0.28))} color="#ffffff" />
-        </button>
-      )}
-
+      {showPermissionUnlockButton &&
+        permissionState !== "granted" &&
+        permissionState !== "checking" && (
+          <button
+            onClick={requestPermission}
+            style={{
+              width: buttonSize,
+              height: buttonSize,
+              borderRadius: "50%",
+              border: "none",
+              background:
+                "linear-gradient(135deg, hsl(var(--warning)) 0%, hsl(var(--warning) / 0.85) 100%)",
+              boxShadow: "0 4px 12px hsl(var(--warning) / 0.4)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: buttonSize * 0.3,
+              transition: "all 0.3s ease",
+            }}
+            title="点击获取麦克风权限"
+          >
+            <Unlock
+              size={Math.max(14, Math.floor(buttonSize * 0.28))}
+              color="#ffffff"
+            />
+          </button>
+        )}
     </div>
   );
 });

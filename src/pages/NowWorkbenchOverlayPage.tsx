@@ -19,7 +19,7 @@ import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-ov
 import type { ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
-import { log } from '@/lib/logger';
+import { PerfTrace } from '@/lib/utils/perf-trace';
 
 interface NowWorkbenchOverlayPageProps {
   model?: NowWorkbenchOverlayModel;
@@ -631,28 +631,87 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       return;
     }
 
+    const usingMeasuredSize = !isStaticPreview
+      && visibleSurfaceMeasurement?.key === visibleSurfaceMeasurementKey;
+    const trace = new PerfTrace('NowWorkbenchOverlay resizeSync', {
+      mode: model.mode,
+      visibleSurfaceMeasurementKey,
+      isStaticPreview,
+      targetWidth: targetOverlaySize.width,
+      targetHeight: targetOverlaySize.height,
+    });
+    trace.step('measure-visible-surface', {
+      measurementKey: visibleSurfaceMeasurement?.key ?? null,
+      measuredWidth: visibleSurfaceMeasurement?.width ?? null,
+      measuredHeight: visibleSurfaceMeasurement?.height ?? null,
+    });
+    trace.step('resolve-target-size', {
+      usingMeasuredSize,
+    });
+
     void getCurrentWindow()
       .setSize(new LogicalSize(targetOverlaySize.width, targetOverlaySize.height))
+      .then(() => {
+        trace.step('set-window-size');
+        trace.finish();
+      })
       .catch((error) => {
-        log.warn(`[NowWorkbenchOverlay] setSize failed: ${error instanceof Error ? error.message : String(error)}`);
+        trace.fail(error);
       });
-  }, [targetOverlaySize.height, targetOverlaySize.width]);
+  }, [
+    isStaticPreview,
+    model.mode,
+    targetOverlaySize.height,
+    targetOverlaySize.width,
+    visibleSurfaceMeasurement?.height,
+    visibleSurfaceMeasurement?.key,
+    visibleSurfaceMeasurement?.width,
+    visibleSurfaceMeasurementKey,
+  ]);
 
   const handleOverlayConfirmEnd = useCallback(async () => {
+    const trace = new PerfTrace('NowWorkbenchOverlay confirmEnd', {
+      feedbackLength: feedback.trim().length,
+      activeBlockTaskCount: activeBlockTasks.length,
+      skipFeedbackConfirmState,
+      submitDisabled: feedbackSubmitting || isSkipFeedbackCoolingDown,
+    });
     if (feedbackSubmitting) {
+      trace.finish({ result: 'skipped', reason: 'already-submitting' });
       return;
     }
-    if (!canSubmitFeedback(feedback)) {
+    const canSubmit = canSubmitFeedback(feedback);
+    trace.step('validate-feedback', { canSubmit });
+    if (!canSubmit) {
+      trace.finish({ result: 'skipped', reason: 'invalid-feedback' });
       return;
     }
 
     setFeedbackSubmitting(true);
+    let submitted = false;
     try {
       await onConfirmEnd();
+      submitted = true;
+      trace.step('invoke-on-confirm-end');
+    } catch (error) {
+      trace.fail(error);
+      throw error;
     } finally {
       setFeedbackSubmitting(false);
+      trace.step('reset-submitting', { submitted });
+      if (submitted) {
+        trace.finish({ result: 'submitted' });
+      }
     }
-  }, [canSubmitFeedback, feedback, feedbackSubmitting, onConfirmEnd]);
+  }, [
+    activeBlockTasks.length,
+    canSubmitFeedback,
+    feedback,
+    feedbackSubmitting,
+    isSkipFeedbackCoolingDown,
+    onConfirmEnd,
+    skipFeedbackConfirmState,
+  ]);
 
   const feedbackDialog = (
     <TimeBlockFeedbackDialog

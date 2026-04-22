@@ -12,6 +12,7 @@ type MockTask = {
 
 const loadActiveBlockMock = vi.fn();
 const listTasksMock = vi.fn();
+const listTasksWithDependencyStatusMock = vi.fn();
 const checkDependenciesMetMock = vi.fn();
 const addTaskToBlockMock = vi.fn();
 const removeTaskFromBlockMock = vi.fn();
@@ -32,6 +33,7 @@ vi.mock('@/lib/services', () => ({
   }),
   getTaskService: () => ({
     listTasks: listTasksMock,
+    listTasksWithDependencyStatus: listTasksWithDependencyStatusMock,
     checkDependenciesMet: checkDependenciesMetMock,
     onTaskChange: (handler: () => void) => {
       taskChangeHandler = handler;
@@ -88,6 +90,24 @@ describe('BlockTaskAssociationList issue-418', () => {
     blockChangeHandler = null;
     taskChangeHandler = null;
     checkDependenciesMetMock.mockResolvedValue({ met: true, blocking: [] });
+    listTasksWithDependencyStatusMock.mockImplementation(async (
+      includeCancelled?: boolean,
+      options?: { candidateTaskFilter?: (task: MockTask) => boolean },
+    ) => {
+      const tasks = await listTasksMock(includeCancelled);
+      const candidates = options?.candidateTaskFilter
+        ? tasks.filter(options.candidateTaskFilter)
+        : tasks;
+      const hardBlockedTaskIds = new Set<string>();
+      for (const task of candidates) {
+        const result = await checkDependenciesMetMock(task.id);
+        const hasHardBlock = result.blocking.some((dependency: { type: 'soft' | 'hard' }) => dependency.type === 'hard');
+        if (hasHardBlock) {
+          hardBlockedTaskIds.add(task.id);
+        }
+      }
+      return { tasks, hardBlockedTaskIds };
+    });
   });
 
   it('renders running association controls and calls add/remove actions', async () => {
@@ -113,6 +133,8 @@ describe('BlockTaskAssociationList issue-418', () => {
     render(<BlockTaskAssociationList />);
 
     await screen.findByText('关联任务');
+    expect(listTasksMock).toHaveBeenCalledTimes(1);
+    expect(listTasksWithDependencyStatusMock).toHaveBeenCalledTimes(1);
     expect(screen.getByText('1 个任务')).toBeInTheDocument();
     expect(screen.getByText('任务一')).toBeInTheDocument();
     expect(screen.queryByText('运行中可追加或移除关联任务。')).toBeNull();
@@ -130,6 +152,40 @@ describe('BlockTaskAssociationList issue-418', () => {
     await waitFor(() => {
       expect(removeTaskFromBlockMock).toHaveBeenCalledWith('task-1');
     });
+  });
+
+  it('applies block-only updates without reloading tasks', async () => {
+    const initialBlock = {
+      startId: 'block-1',
+      name: '进行中时间块',
+      mode: 'countup' as const,
+      elapsed: 0,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running' as const,
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    };
+    loadActiveBlockMock.mockResolvedValue(initialBlock);
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-1', title: '任务一', status: 'in_progress' }),
+      makeTask({ id: 'task-2', title: '任务二', status: 'pending' }),
+    ]);
+
+    render(<BlockTaskAssociationList />);
+
+    await screen.findByText('1 个任务');
+    expect(listTasksMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      blockChangeHandler?.({
+        ...initialBlock,
+        taskIds: ['task-1', 'task-2'],
+      });
+    });
+
+    expect(await screen.findByText('2 个任务')).toBeInTheDocument();
+    expect(listTasksMock).toHaveBeenCalledTimes(1);
   });
 
   it('keeps newly associated tasks when active block falls back to association log', async () => {
@@ -273,6 +329,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     );
 
     expect(await screen.findByText('时间块开始前即可选择可执行任务，开始后会自动关联到本次时间块。')).toBeInTheDocument();
+    expect(listTasksWithDependencyStatusMock).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('task-association-prestart-task-task-1')).toBeInTheDocument();
     expect(screen.getByTestId('task-association-prestart-task-task-2')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByTestId('task-association-prestart-task-task-3')).toBeNull();

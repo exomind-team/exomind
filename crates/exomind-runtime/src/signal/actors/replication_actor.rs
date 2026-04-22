@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -427,35 +428,31 @@ fn apply_timeblock_completed_replication(
     let payload: TimeblockCompletedReplicationPayload =
         serde_json::from_value(event.payload.clone()).map_err(|error| error.to_string())?;
     let scope_key = payload.scope_key.as_deref();
-    let mut completed = store
-        .list_completed_scoped(scope_key)
-        .map_err(|error| error.to_string())?;
-
-    if completed
-        .iter()
-        .any(|existing| existing.start_id == payload.block.start_id)
+    if store
+        .get_completed_by_start_id_scoped(scope_key, &payload.block.start_id)
+        .map_err(|error| error.to_string())?
+        .is_some()
     {
         return Ok(None);
     }
 
-    let start_id = payload.block.start_id.clone();
-    completed.push(payload.block);
+    let block = payload.block;
+    let completed_write_started_at = Instant::now();
     store
-        .replace_completed_scoped(scope_key, &completed)
+        .put_completed_scoped(scope_key, block.clone())
         .map_err(|error| error.to_string())?;
-
-    let stored = store
-        .list_completed_scoped(scope_key)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|block| block.start_id == start_id)
-        .ok_or_else(|| {
-            "replicated completed timeblock was applied but is unreadable".to_string()
-        })?;
+    let completed_write_ms = completed_write_started_at.elapsed().as_millis();
+    tracing::info!(
+        scope_key = %scope_key.unwrap_or("anonymous"),
+        block_id = %block.id,
+        start_id = %block.start_id,
+        "[PERF] ({}ms) runtime.replication_actor.timeblock_completed_upsert",
+        completed_write_ms
+    );
     Ok(Some(build_completed_timeblock_replication_payload(
         local_host_id,
         scope_key,
-        &stored,
+        &block,
     )))
 }
 
@@ -1112,7 +1109,7 @@ mod tests {
             serde_json::json!({
                 "scopeKey": "profile-sync",
                 "block": {
-                    "id": "tb-1",
+                    "id": "tb-start-1",
                     "name": "deep work",
                     "startId": "tb-start-1",
                     "endId": "tb-end-1",
@@ -1129,18 +1126,66 @@ mod tests {
                 }
             }),
         ));
+        pool.publish(make_remote_event(
+            TIMEBLOCK_ACTIVE_REPLICATION_TOPIC,
+            serde_json::json!({
+                "scopeKey": "profile-sync",
+                "active": {
+                    "startId": "gap-start-1",
+                    "name": "",
+                    "mode": "countup",
+                    "targetMinutes": null,
+                    "blockType": "gap",
+                    "elapsed": 0,
+                    "updatedAt": 1710003601000u64,
+                    "phase": null,
+                    "version": 1,
+                    "actorId": "rt:newblock",
+                    "lastTransitionAt": 1710003601000u64,
+                    "lastResumedAt": null,
+                    "accumulatedRunMs": null,
+                    "startTime": 1710003601000u64,
+                    "actionEndedAt": null,
+                    "feedbackStartedAt": null,
+                    "feedbackSubmittedAt": null,
+                    "pauseAccumulatedMs": null,
+                    "paused": false,
+                    "pausedAt": null,
+                    "taskIds": [],
+                    "taskAssociationLog": [],
+                    "sourcePlannedBlockId": null,
+                    "transitions": [
+                        {
+                            "type": "start",
+                            "at": 1710003601000u64,
+                            "actorId": "rt:newblock"
+                        }
+                    ],
+                    "task_id": null
+                }
+            }),
+        ));
 
         yield_for_actor().await;
 
-        let active = timeblock_store
-            .get_active_scoped(Some("profile-sync"))
-            .expect("active query")
-            .expect("active block");
-        assert_eq!(active.start_id, "tb-start-1");
+        let mut active = None;
+        let mut completed = Vec::new();
+        for _ in 0..5 {
+            active = timeblock_store
+                .get_active_scoped(Some("profile-sync"))
+                .expect("active query");
+            completed = timeblock_store
+                .list_completed_scoped(Some("profile-sync"))
+                .expect("completed query");
+            if active.is_some() && !completed.is_empty() {
+                break;
+            }
+            yield_for_actor().await;
+        }
 
-        let completed = timeblock_store
-            .list_completed_scoped(Some("profile-sync"))
-            .expect("completed query");
+        let active = active.expect("active block");
+        assert_eq!(active.start_id, "gap-start-1");
+        assert_eq!(active.block_type.as_deref(), Some("gap"));
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].start_id, "tb-start-1");
     }
