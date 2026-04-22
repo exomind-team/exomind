@@ -6,6 +6,10 @@ import {
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
 import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
 import { notifyEventLogChanged } from '@/lib/services/eventlog.service';
+import {
+  ensureRuntimeResponseOk,
+  fetchRuntimeResponseOrThrow,
+} from '@/lib/utils/runtime-request-error';
 
 type RuntimeFetch = typeof fetch;
 export type EventLogImportStrategy = 'merge' | 'overwrite';
@@ -181,17 +185,15 @@ export class EventLogBackupServiceImpl {
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(path, target), {
+    const url = this.url(path, target);
+    const response = await fetchRuntimeResponseOrThrow(this.fetchImpl, url, {
       ...init,
       headers: buildRuntimeAuthHeaders(target, {
         Accept: 'application/json',
         ...(init?.headers ?? {}),
       }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`EventLog backup request failed: ${response.status}`);
-    }
+    }, 'EventLog backup request');
+    await ensureRuntimeResponseOk(response, url, 'EventLog backup request');
 
     return response.json() as Promise<T>;
   }

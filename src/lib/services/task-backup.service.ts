@@ -6,6 +6,10 @@ import {
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
 import type { RuntimeTaskPayload } from '@/lib/adapters/task-rt-adapter';
 import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
+import {
+  ensureRuntimeResponseOk,
+  fetchRuntimeResponseOrThrow,
+} from '@/lib/utils/runtime-request-error';
 
 type RuntimeFetch = typeof fetch;
 export type TaskImportStrategy = 'merge' | 'overwrite';
@@ -289,17 +293,15 @@ export class TaskBackupServiceImpl {
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(path, target), {
+    const url = this.url(path, target);
+    const response = await fetchRuntimeResponseOrThrow(this.fetchImpl, url, {
       ...init,
       headers: buildRuntimeAuthHeaders(target, {
         Accept: 'application/json',
         ...(init?.headers ?? {}),
       }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Task backup request failed: ${response.status}`);
-    }
+    }, 'Task backup request');
+    await ensureRuntimeResponseOk(response, url, 'Task backup request');
 
     return response.json() as Promise<T>;
   }

@@ -6,6 +6,10 @@ import {
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
 import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
 import type { TimeBlockData } from '@/lib/types/event';
+import {
+  ensureRuntimeResponseOk,
+  fetchRuntimeResponseOrThrow,
+} from '@/lib/utils/runtime-request-error';
 
 type RuntimeFetch = typeof fetch;
 export type TimeBlockImportStrategy = 'merge' | 'overwrite';
@@ -209,17 +213,15 @@ export class TimeBlockBackupServiceImpl {
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(path, target), {
+    const url = this.url(path, target);
+    const response = await fetchRuntimeResponseOrThrow(this.fetchImpl, url, {
       ...init,
       headers: buildRuntimeAuthHeaders(target, {
         Accept: 'application/json',
         ...(init?.headers ?? {}),
       }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`TimeBlock backup request failed: ${response.status}`);
-    }
+    }, 'TimeBlock backup request');
+    await ensureRuntimeResponseOk(response, url, 'TimeBlock backup request');
 
     return response.json() as Promise<T>;
   }

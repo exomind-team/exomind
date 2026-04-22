@@ -18,6 +18,10 @@ import type {
   TaskTransitionReason,
 } from "@/lib/types/task";
 import { canTransition, normalizeTaskNode } from "@/lib/types/task";
+import {
+  ensureRuntimeResponseOk,
+  fetchRuntimeResponseOrThrow,
+} from "@/lib/utils/runtime-request-error";
 import { appendRuntimeProfileScope } from "./runtime-profile-scope";
 
 type RuntimeFetch = typeof fetch;
@@ -226,21 +230,22 @@ export class TaskRtAdapter implements ITaskPort {
 
   async getTaskById(id: string): Promise<TaskNode | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(
-      this.url(`/tasks/${encodeURIComponent(id)}`, target),
+    const url = this.url(`/tasks/${encodeURIComponent(id)}`, target);
+    const response = await fetchRuntimeResponseOrThrow(
+      this.fetchImpl,
+      url,
       {
         method: "GET",
         headers: buildRuntimeAuthHeaders(target, {
           Accept: "application/json",
         }),
       },
+      "RT get task",
     );
     if (response.status === 404) {
       return null;
     }
-    if (!response.ok) {
-      throw new Error(`RT get task failed: ${response.status}`);
-    }
+    await ensureRuntimeResponseOk(response, url, "RT get task");
     return runtimeTaskPayloadToTaskNode(
       (await response.json()) as RuntimeTaskPayload,
     );
@@ -263,8 +268,10 @@ export class TaskRtAdapter implements ITaskPort {
     input: UpdateTaskInput,
   ): Promise<TaskNode | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(
-      this.url(`/tasks/${encodeURIComponent(id)}`, target),
+    const url = this.url(`/tasks/${encodeURIComponent(id)}`, target);
+    const response = await fetchRuntimeResponseOrThrow(
+      this.fetchImpl,
+      url,
       {
         method: "PUT",
         headers: buildRuntimeAuthHeaders(target, {
@@ -273,13 +280,12 @@ export class TaskRtAdapter implements ITaskPort {
         }),
         body: JSON.stringify(toRuntimeUpdatePayload(input)),
       },
+      "RT update task",
     );
     if (response.status === 404) {
       return null;
     }
-    if (!response.ok) {
-      throw new Error(`RT update task failed: ${response.status}`);
-    }
+    await ensureRuntimeResponseOk(response, url, "RT update task");
     return runtimeTaskPayloadToTaskNode(
       (await response.json()) as RuntimeTaskPayload,
     );
@@ -287,21 +293,22 @@ export class TaskRtAdapter implements ITaskPort {
 
   async cancelTask(id: string): Promise<TaskNode | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(
-      this.url(`/tasks/${encodeURIComponent(id)}/cancel`, target),
+    const url = this.url(`/tasks/${encodeURIComponent(id)}/cancel`, target);
+    const response = await fetchRuntimeResponseOrThrow(
+      this.fetchImpl,
+      url,
       {
         method: "POST",
         headers: buildRuntimeAuthHeaders(target, {
           Accept: "application/json",
         }),
       },
+      "RT cancel task",
     );
     if (response.status === 404) {
       return null;
     }
-    if (!response.ok) {
-      throw new Error(`RT cancel task failed: ${response.status}`);
-    }
+    await ensureRuntimeResponseOk(response, url, "RT cancel task");
     return runtimeTaskPayloadToTaskNode(
       (await response.json()) as RuntimeTaskPayload,
     );
@@ -309,8 +316,10 @@ export class TaskRtAdapter implements ITaskPort {
 
   async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(
-      this.url(`/tasks/${encodeURIComponent(id)}/transition`, target),
+    const url = this.url(`/tasks/${encodeURIComponent(id)}/transition`, target);
+    const response = await fetchRuntimeResponseOrThrow(
+      this.fetchImpl,
+      url,
       {
         method: "POST",
         headers: buildRuntimeAuthHeaders(target, {
@@ -319,13 +328,12 @@ export class TaskRtAdapter implements ITaskPort {
         }),
         body: JSON.stringify({ status: to }),
       },
+      "RT transition task",
     );
     if (response.status === 404) {
       return null;
     }
-    if (!response.ok) {
-      throw new Error(`RT transition task failed: ${response.status}`);
-    }
+    await ensureRuntimeResponseOk(response, url, "RT transition task");
     return runtimeTaskPayloadToTaskNode(
       (await response.json()) as RuntimeTaskPayload,
     );
@@ -344,8 +352,10 @@ export class TaskRtAdapter implements ITaskPort {
     sourceHostId?: string,
   ): Promise<"inserted" | "updated" | "ignored"> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(
-      this.url("/tasks/replication/upsert", target),
+    const url = this.url("/tasks/replication/upsert", target);
+    const response = await fetchRuntimeResponseOrThrow(
+      this.fetchImpl,
+      url,
       {
         method: "POST",
         headers: buildRuntimeAuthHeaders(target, {
@@ -377,11 +387,9 @@ export class TaskRtAdapter implements ITaskPort {
           source_host_id: sourceHostId,
         }),
       },
+      "RT task replication upsert",
     );
-
-    if (!response.ok) {
-      throw new Error(`RT task replication upsert failed: ${response.status}`);
-    }
+    await ensureRuntimeResponseOk(response, url, "RT task replication upsert");
 
     const payload = (await response.json()) as {
       status?: "inserted" | "updated" | "ignored";
@@ -391,16 +399,15 @@ export class TaskRtAdapter implements ITaskPort {
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(path, target), {
+    const url = this.url(path, target);
+    const response = await fetchRuntimeResponseOrThrow(this.fetchImpl, url, {
       ...init,
       headers: buildRuntimeAuthHeaders(target, {
         Accept: "application/json",
         ...(init?.headers ?? {}),
       }),
-    });
-    if (!response.ok) {
-      throw new Error(`RT request failed: ${response.status}`);
-    }
+    }, "RT request");
+    await ensureRuntimeResponseOk(response, url, "RT request");
     return response.json() as Promise<T>;
   }
 

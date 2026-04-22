@@ -359,46 +359,85 @@ describe("TaskReconciliationService", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("attempts pull when revision hash differs at the same watermark", async () => {
+  it("keeps unresolved drift when revision differs at the same watermark but remote is not more complete", async () => {
     const localSummary = createSummary({
+      taskCount: 3,
       maxUpdatedAt: 500,
       revisionHash: "hash-local",
     });
     const remoteSummary = createSummary({
+      taskCount: 2,
+      maxUpdatedAt: 500,
+      revisionHash: "hash-remote-same-watermark",
+    });
+
+    taskBackupService.getTaskReplicationSummary.mockResolvedValue(localSummary);
+    taskBackupService.getPeerTaskReplicationSummary.mockResolvedValue(
+      remoteSummary,
+    );
+
+    const result = await service.reconcilePeer("peer-same-watermark");
+
+    expect(result).toMatchObject({
+      peerId: "peer-same-watermark",
+      changed: false,
+      unresolvedDrift: true,
+      strategy: "unresolved",
+      imported: 0,
+      skipped: 0,
+      total: 0,
+    });
+    expect(taskBackupService.pullPeerTaskReplicationBatch).not.toHaveBeenCalled();
+    expect(
+      taskBackupService.exportPeerTasksAsSqliteSnapshot,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("skips pull and goes straight to snapshot when remote has the same watermark but more tasks", async () => {
+    const localSummary = createSummary({
+      taskCount: 2,
+      maxUpdatedAt: 500,
+      revisionHash: "hash-local",
+    });
+    const remoteSummary = createSummary({
+      taskCount: 3,
       maxUpdatedAt: 500,
       revisionHash: "hash-remote-same-watermark",
     });
 
     taskBackupService.getTaskReplicationSummary
       .mockResolvedValueOnce(localSummary)
+      .mockResolvedValueOnce(localSummary)
       .mockResolvedValueOnce(remoteSummary);
     taskBackupService.getPeerTaskReplicationSummary.mockResolvedValue(
       remoteSummary,
     );
-    taskBackupService.pullPeerTaskReplicationBatch.mockResolvedValue(
-      createPullResult({
-        items: [
-          createRuntimeTask({ id: "task-same-watermark", updated_at: 500 }),
-        ],
-        hasMore: false,
-        nextCursor: undefined,
-        summary: remoteSummary,
-      }),
-    );
-    taskRtAdapter.applyReplicationSnapshot.mockResolvedValue("updated");
-
-    const result = await service.reconcilePeer("peer-same-watermark");
-
-    expect(result).toMatchObject({
-      peerId: "peer-same-watermark",
-      changed: true,
-      unresolvedDrift: false,
-      strategy: "pull",
+    taskBackupService.exportPeerTasksAsSqliteSnapshot.mockResolvedValue({
+      fileName: "peer.sqlite",
+      bytes: Uint8Array.from([9, 9, 9]),
+      taskCount: 3,
+    });
+    taskBackupService.importTasksFromSqliteSnapshot.mockResolvedValue({
       imported: 1,
       skipped: 0,
-      total: 1,
+      total: 3,
     });
-    expect(taskBackupService.pullPeerTaskReplicationBatch).toHaveBeenCalled();
+
+    const result = await service.reconcilePeer("peer-same-watermark-snapshot");
+
+    expect(result).toMatchObject({
+      peerId: "peer-same-watermark-snapshot",
+      changed: true,
+      unresolvedDrift: false,
+      strategy: "pull_then_snapshot",
+      imported: 1,
+      skipped: 0,
+      total: 3,
+    });
+    expect(taskBackupService.pullPeerTaskReplicationBatch).not.toHaveBeenCalled();
+    expect(
+      taskBackupService.exportPeerTasksAsSqliteSnapshot,
+    ).toHaveBeenCalledWith("peer-same-watermark-snapshot");
   });
 
   it("keeps unresolved drift when remote is newer but represents deletions we cannot auto-merge", async () => {

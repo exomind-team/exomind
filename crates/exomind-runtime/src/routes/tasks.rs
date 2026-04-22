@@ -1210,6 +1210,7 @@ async fn proxy_peer_json<T: DeserializeOwned>(
         format!("mesh peer missing outbound auth token: {peer_id}"),
     ))?;
     let url = build_peer_proxy_url(&peer.base_url, remote_path, query)?;
+    let url_text = url.to_string();
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(5))
@@ -1224,17 +1225,22 @@ async fn proxy_peer_json<T: DeserializeOwned>(
         .map_err(|error| {
             (
                 StatusCode::BAD_GATEWAY,
-                format!("peer task proxy request failed: {error}"),
+                format!(
+                    "peer task proxy request failed for peer {peer_id} url={url_text}: {error}"
+                ),
             )
         })?;
 
     if !response.status().is_success() {
+        let status = response.status();
+        let detail = read_peer_proxy_error_detail(response).await;
         return Err((
-            response.status(),
+            status,
             format!(
-                "peer task proxy request returned status {} for peer {}",
-                response.status(),
-                peer_id
+                "peer task proxy request returned status {status} for peer {peer_id} url={url_text}{}",
+                detail
+                    .map(|value| format!(" detail={value}"))
+                    .unwrap_or_default()
             ),
         ));
     }
@@ -1245,6 +1251,47 @@ async fn proxy_peer_json<T: DeserializeOwned>(
             format!("peer task proxy response decode failed: {error}"),
         )
     })
+}
+
+const MAX_PEER_PROXY_ERROR_DETAIL_LEN: usize = 320;
+
+fn truncate_peer_proxy_error_detail(value: &str) -> String {
+    let trimmed = value.trim();
+    let mut chars = trimmed.chars();
+    let truncated = chars
+        .by_ref()
+        .take(MAX_PEER_PROXY_ERROR_DETAIL_LEN)
+        .collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+fn summarize_peer_proxy_error_body(raw: &str) -> Option<String> {
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let from_json = serde_json::from_str::<serde_json::Value>(&normalized)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|field| field.as_str())
+                .or_else(|| value.get("message").and_then(|field| field.as_str()))
+                .or_else(|| value.get("detail").and_then(|field| field.as_str()))
+                .map(truncate_peer_proxy_error_detail)
+        });
+
+    from_json.or_else(|| Some(truncate_peer_proxy_error_detail(&normalized)))
+}
+
+async fn read_peer_proxy_error_detail(response: reqwest::Response) -> Option<String> {
+    let body = response.text().await.ok()?;
+    summarize_peer_proxy_error_body(&body)
 }
 
 fn build_peer_proxy_url(
@@ -1949,6 +1996,33 @@ mod tests {
         (format!("http://{addr}"), shutdown_tx)
     }
 
+    async fn fake_peer_error_handler() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "missing task status history: task-bad-1",
+            })),
+        )
+    }
+
+    async fn spawn_fake_peer_error_server(route: &'static str) -> (String, oneshot::Sender<()>) {
+        let app = Router::new().route(route, get(fake_peer_error_handler));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        (format!("http://{addr}"), shutdown_tx)
+    }
+
     #[test]
     fn task_replication_summary_hash_is_order_stable_and_content_sensitive() {
         let store = crate::task::TaskStore::new();
@@ -2102,6 +2176,37 @@ mod tests {
             captured_auth.lock().unwrap().clone(),
             Some("Bearer peer-outbound-secret".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn proxy_peer_task_snapshot_forwards_upstream_error_detail() {
+        let (base_url, shutdown_tx) =
+            spawn_fake_peer_error_server("/mesh/tasks/snapshot/sqlite").await;
+
+        let state = test_state();
+        let mut peer = make_test_peer("peer-proxy-error", &base_url);
+        peer.auth_token = Some("peer-outbound-secret".to_string());
+        state.mesh.upsert_peer(peer);
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/mesh/peers/peer-proxy-error/tasks/snapshot/sqlite")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let _ = shutdown_tx.send(());
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("missing task status history: task-bad-1"));
+        assert!(text.contains("peer-proxy-error"));
+        assert!(text.contains("/mesh/tasks/snapshot/sqlite"));
     }
 
     #[tokio::test]
