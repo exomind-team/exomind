@@ -44,6 +44,7 @@ export const RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS = [
   'exomind:embeddedRuntimeAllowLanNoAuth',
   'exomind:runtimeExternalAddress',
   'exomind:eventlogBackendMode',
+  'exomind:eventlogMarkdownMirrorEnabled',
   'exomind:taskBackendMode',
   'exomind:timeblockBackendMode',
   'exomind:dag-pan-speed',

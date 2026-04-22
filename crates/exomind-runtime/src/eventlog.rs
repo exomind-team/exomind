@@ -9,13 +9,16 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
+use crate::config::types::USER_CONFIG_SCOPE;
 use crate::eventlog_sqlite::SqliteEventLogStore;
 
 const EVENTLOG_DIR_NAME: &str = "eventlog";
 const MIRROR_HEADER: &str = "# EventLog Mirror\n\n";
+pub const EVENTLOG_MARKDOWN_MIRROR_ENABLED_CONFIG_KEY: &str =
+    "exomind:eventlogMarkdownMirrorEnabled";
 
 // ── Public types ────────────────────────────────────────────────
 
@@ -93,6 +96,7 @@ pub struct EventLogStore {
     /// When present, every mutation (append / clear / replace) automatically
     /// notifies watchers so callers never need to do it manually.
     watch_tx: Mutex<Option<broadcast::Sender<String>>>,
+    config_store: Mutex<Option<Arc<crate::config::ConfigStore>>>,
 }
 
 impl EventLogStore {
@@ -101,6 +105,7 @@ impl EventLogStore {
             data_dir,
             backend: EventLogBackend::JsonFiles,
             watch_tx: Mutex::new(None),
+            config_store: Mutex::new(None),
         }
     }
 
@@ -109,6 +114,7 @@ impl EventLogStore {
             data_dir,
             backend: EventLogBackend::Sqlite(SqliteEventLogStore::open(sqlite_path)?),
             watch_tx: Mutex::new(None),
+            config_store: Mutex::new(None),
         })
     }
 
@@ -122,11 +128,30 @@ impl EventLogStore {
         *self.watch_tx.lock().unwrap() = Some(tx);
     }
 
+    pub fn set_config_store(&self, config_store: Arc<crate::config::ConfigStore>) {
+        *self.config_store.lock().unwrap() = Some(config_store);
+    }
+
     /// Fire-and-forget: notify SSE watchers for the given user scope.
     /// Silently ignores send failures (no active receivers).
     fn notify_watchers(&self, user_id: Option<&str>) {
         if let Some(tx) = self.watch_tx.lock().unwrap().as_ref() {
             let _ = tx.send(sanitize_user_id(user_id));
+        }
+    }
+
+    fn is_markdown_mirror_enabled(&self) -> bool {
+        let Some(config_store) = self.config_store.lock().unwrap().clone() else {
+            return true;
+        };
+
+        match config_store.get(
+            USER_CONFIG_SCOPE,
+            EVENTLOG_MARKDOWN_MIRROR_ENABLED_CONFIG_KEY,
+        ) {
+            Ok(Some(entry)) => normalize_markdown_mirror_enabled(Some(entry.value.as_str())),
+            Ok(None) => true,
+            Err(_) => true,
         }
     }
 
@@ -169,13 +194,21 @@ impl EventLogStore {
 
                 sort_events_desc(&mut events);
                 write_events(&paths.events, &events)?;
-                sync_markdown_mirror(&paths, &events)
+                if self.is_markdown_mirror_enabled() {
+                    sync_markdown_mirror(&paths, &events)
+                } else {
+                    Ok(())
+                }
             }
             EventLogBackend::Sqlite(store) => {
                 let paths = self.resolve_paths(user_id)?;
                 store.append_event(&normalized_user, &event)?;
-                let events = store.list_events(&normalized_user)?;
-                sync_markdown_mirror(&paths, &events)
+                if self.is_markdown_mirror_enabled() {
+                    let events = store.list_events(&normalized_user)?;
+                    sync_markdown_mirror(&paths, &events)
+                } else {
+                    Ok(())
+                }
             }
         };
         if result.is_ok() {
@@ -206,12 +239,20 @@ impl EventLogStore {
             EventLogBackend::JsonFiles => {
                 let paths = self.resolve_paths(user_id)?;
                 write_events(&paths.events, &[])?;
-                sync_markdown_mirror(&paths, &[])
+                if self.is_markdown_mirror_enabled() {
+                    sync_markdown_mirror(&paths, &[])
+                } else {
+                    Ok(())
+                }
             }
             EventLogBackend::Sqlite(store) => {
                 let paths = self.resolve_paths(user_id)?;
                 store.clear_events(&normalized_user)?;
-                sync_markdown_mirror(&paths, &[])
+                if self.is_markdown_mirror_enabled() {
+                    sync_markdown_mirror(&paths, &[])
+                } else {
+                    Ok(())
+                }
             }
         };
         if result.is_ok() {
@@ -268,13 +309,21 @@ impl EventLogStore {
                 let mut ordered = events.to_vec();
                 sort_events_desc(&mut ordered);
                 write_events(&paths.events, &ordered)?;
-                sync_markdown_mirror(&paths, &ordered)
+                if self.is_markdown_mirror_enabled() {
+                    sync_markdown_mirror(&paths, &ordered)
+                } else {
+                    Ok(())
+                }
             }
             EventLogBackend::Sqlite(store) => {
                 let paths = self.resolve_paths(user_id)?;
                 store.replace_all(&normalized_user, events)?;
-                let current = store.list_events(&normalized_user)?;
-                sync_markdown_mirror(&paths, &current)
+                if self.is_markdown_mirror_enabled() {
+                    let current = store.list_events(&normalized_user)?;
+                    sync_markdown_mirror(&paths, &current)
+                } else {
+                    Ok(())
+                }
             }
         };
         if result.is_ok() {
@@ -465,6 +514,10 @@ fn latest_event_id(events: &[EventRecord]) -> Option<String> {
         .map(|event| event.id.clone())
 }
 
+fn normalize_markdown_mirror_enabled(raw_value: Option<&str>) -> bool {
+    !matches!(raw_value.map(str::trim), Some("false"))
+}
+
 fn format_event_time_iso(timestamp: i64) -> String {
     Utc.timestamp_millis_opt(timestamp)
         .single()
@@ -521,6 +574,7 @@ fn count_mirrored_events(path: &Path) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{ConfigStore, PutConfigEntryInput};
     use tempfile::tempdir;
 
     #[test]
@@ -693,6 +747,53 @@ mod tests {
 
         let rebuilt = store.rebuild_markdown(None).unwrap();
         assert_eq!(rebuilt.total_events, 1);
+        assert!(!rebuilt.needs_rebuild);
+    }
+
+    #[test]
+    fn sqlite_append_skips_automatic_markdown_sync_when_disabled() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store =
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
+        let config_store = Arc::new(ConfigStore::new());
+        config_store
+            .put(PutConfigEntryInput {
+                scope: USER_CONFIG_SCOPE.to_string(),
+                key: EVENTLOG_MARKDOWN_MIRROR_ENABLED_CONFIG_KEY.to_string(),
+                value: "false".to_string(),
+                sensitive: false,
+                source: Some("test".to_string()),
+                source_origin: None,
+            })
+            .unwrap();
+        store.set_config_store(Arc::clone(&config_store));
+
+        store
+            .append_event(
+                None,
+                EventRecord {
+                    id: "sql-no-mirror".to_string(),
+                    timestamp: 1700000000000,
+                    content: "persist without mirror".to_string(),
+                    tags: vec!["note".to_string()],
+                    refs: Vec::new(),
+                    metadata: None,
+                },
+            )
+            .unwrap();
+
+        let paths = store.resolve_paths(None).unwrap();
+        assert!(!paths.mirror.exists());
+        assert_eq!(store.list_events(None).unwrap().len(), 1);
+
+        let status = store.mirror_status(None).unwrap();
+        assert_eq!(status.total_events, 1);
+        assert!(status.needs_rebuild);
+        assert_eq!(status.mirrored_events, 0);
+
+        let rebuilt = store.rebuild_markdown(None).unwrap();
+        assert!(paths.mirror.exists());
         assert!(!rebuilt.needs_rebuild);
     }
 

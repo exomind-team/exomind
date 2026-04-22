@@ -1146,19 +1146,6 @@ impl AppState {
                 "failed to create runtime data dir (创建运行时数据目录失败)"
             );
         }
-        let eventlog_store = storage_paths
-            .eventlog_sqlite_path
-            .map(|path| {
-                EventLogStore::with_sqlite_path(data_dir.clone(), &path).unwrap_or_else(|error| {
-                    tracing::warn!(
-                        path = %path.display(),
-                        error = %error,
-                        "eventlog sqlite init failed, falling back to json-file store (EventLog SQLite 初始化失败，降级到 JSON 文件存储)"
-                    );
-                    EventLogStore::new(data_dir.clone())
-                })
-            })
-            .unwrap_or_else(|| EventLogStore::new(data_dir));
         let config_store = storage_paths
             .config_sqlite_path
             .map(|path| {
@@ -1172,6 +1159,21 @@ impl AppState {
                 })
             })
             .unwrap_or_default();
+        let config_store = Arc::new(config_store);
+        let eventlog_store = storage_paths
+            .eventlog_sqlite_path
+            .map(|path| {
+                EventLogStore::with_sqlite_path(data_dir.clone(), &path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "eventlog sqlite init failed, falling back to json-file store (EventLog SQLite 初始化失败，降级到 JSON 文件存储)"
+                    );
+                    EventLogStore::new(data_dir.clone())
+                })
+            })
+            .unwrap_or_else(|| EventLogStore::new(data_dir));
+        eventlog_store.set_config_store(Arc::clone(&config_store));
         let reminder_store = storage_paths
             .reminder_sqlite_path
             .map(|path| {
@@ -1275,7 +1277,7 @@ impl AppState {
             allow_lan_without_auth: false,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
-            config_store: Arc::new(config_store),
+            config_store,
             reminder_store: Arc::new(reminder_store),
             task_store: Arc::new(task_store),
             proposal_store: Arc::new(proposal_store),

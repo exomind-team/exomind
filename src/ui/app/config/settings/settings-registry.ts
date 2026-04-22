@@ -371,6 +371,11 @@ import {
   getEventlogBackendMode,
   setEventlogBackendMode,
 } from '@/config/domain-backend-mode';
+import {
+  getEventlogMarkdownMirrorEnabled,
+  setEventlogMarkdownMirrorEnabled,
+  subscribeEventlogMarkdownMirrorEnabledChanges,
+} from '@/config/eventlog-markdown-mirror-enabled';
 import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-window-shortcut-runtime';
 
 /*
@@ -2168,6 +2173,19 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getDevtoolsEnabled(),
     set: setDevtoolsEnabledWithSync,
     subscribe: subscribeDevtoolsChanges,
+  },
+  {
+    id: 'eventlog-markdown-mirror-enabled',
+    label: '事件日志 Markdown 镜像',
+    description: '实验性。关闭后 RT 不再在每次事件写入后自动重建 Markdown 镜像，可减少常态高频写入的整量回读与镜像重建开销；不影响 SQLite 真相源。',
+    icon: ScrollText,
+    category: 'developer',
+    controlTestId: 'new-settings-eventlog-markdown-mirror-switch',
+    type: 'boolean',
+    visible: devOnly,
+    get: () => getEventlogMarkdownMirrorEnabled(),
+    set: setEventlogMarkdownMirrorEnabled,
+    subscribe: subscribeEventlogMarkdownMirrorEnabledChanges,
   },
   {
     id: 'api-agent-tab-enabled',
