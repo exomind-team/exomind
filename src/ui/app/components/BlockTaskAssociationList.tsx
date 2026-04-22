@@ -6,6 +6,7 @@ import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/
 import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 import { PrestartTaskSelectionList, usePrestartSelectableTasks } from '@/ui/app/components/prestart-task-selection';
+import { PerfTrace } from '@/lib/utils/perf-trace';
 
 function hasHardBlockingDependency(
   dependencyCheck: { blocking: Array<{ type: 'soft' | 'hard' }> },
@@ -43,48 +44,120 @@ export function BlockTaskAssociationList(props: BlockTaskAssociationListProps = 
     const loadSnapshot = async () => {
       const requestId = loadRequestIdRef.current + 1;
       loadRequestIdRef.current = requestId;
-      const [nextBlock, tasks] = await Promise.all([
-        timeBlockService.loadActiveBlock(),
-        taskService.listTasks(true),
-      ]);
-      const dependencyChecks = await Promise.all(tasks.map(async (task) => {
-        try {
-          const result = await taskService.checkDependenciesMet(task.id);
-          return [task.id, hasHardBlockingDependency(result)] as const;
-        } catch {
-          return [task.id, true] as const;
-        }
-      }));
-      if (disposed || requestId !== loadRequestIdRef.current) return;
-      setActiveBlock(nextBlock);
-      setTasksById(new Map(tasks.map((task) => [task.id, task])));
-      setHardBlockedTaskIds(new Set(
-        dependencyChecks
+      const trace = new PerfTrace('BlockTaskAssociationList loadSnapshot', {
+        requestId,
+        trigger: 'mount-or-task-change',
+      });
+
+      try {
+        const [nextBlock, tasks] = await Promise.all([
+          timeBlockService.loadActiveBlock(),
+          taskService.listTasks(true),
+        ]);
+        trace.step('load-active-block-and-tasks', {
+          hasActiveBlock: Boolean(nextBlock),
+          linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
+          taskCount: tasks.length,
+        });
+        const dependencyChecks = await Promise.all(tasks.map(async (task) => {
+          try {
+            const result = await taskService.checkDependenciesMet(task.id);
+            return [task.id, hasHardBlockingDependency(result)] as const;
+          } catch {
+            return [task.id, true] as const;
+          }
+        }));
+        const hardBlockedTaskIds = dependencyChecks
           .filter(([, isBlocked]) => isBlocked)
-          .map(([taskId]) => taskId),
-      ));
+          .map(([taskId]) => taskId);
+        trace.step('check-task-dependencies', {
+          taskCount: tasks.length,
+          hardBlockedCount: hardBlockedTaskIds.length,
+        });
+        if (disposed || requestId !== loadRequestIdRef.current) {
+          trace.finish({
+            outcome: 'stale',
+            hasActiveBlock: Boolean(nextBlock),
+            linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
+            taskCount: tasks.length,
+            hardBlockedCount: hardBlockedTaskIds.length,
+          });
+          return;
+        }
+        setActiveBlock(nextBlock);
+        setTasksById(new Map(tasks.map((task) => [task.id, task])));
+        setHardBlockedTaskIds(new Set(hardBlockedTaskIds));
+        trace.step('apply-state', {
+          linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
+        });
+        trace.finish({
+          outcome: 'applied',
+          hasActiveBlock: Boolean(nextBlock),
+          linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
+          taskCount: tasks.length,
+          hardBlockedCount: hardBlockedTaskIds.length,
+        });
+      } catch (error) {
+        trace.fail(error);
+        throw error;
+      }
     };
 
     const loadTasksOnly = async (nextBlock: ActiveBlockData | null) => {
       const requestId = loadRequestIdRef.current + 1;
       loadRequestIdRef.current = requestId;
-      const tasks = await taskService.listTasks(true);
-      const dependencyChecks = await Promise.all(tasks.map(async (task) => {
-        try {
-          const result = await taskService.checkDependenciesMet(task.id);
-          return [task.id, hasHardBlockingDependency(result)] as const;
-        } catch {
-          return [task.id, true] as const;
-        }
-      }));
-      if (disposed || requestId !== loadRequestIdRef.current) return;
-      setActiveBlock(nextBlock);
-      setTasksById(new Map(tasks.map((task) => [task.id, task])));
-      setHardBlockedTaskIds(new Set(
-        dependencyChecks
+      const trace = new PerfTrace('BlockTaskAssociationList loadTasksOnly', {
+        incomingLinkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
+        incomingStartId: nextBlock?.startId ?? null,
+        requestId,
+        trigger: 'block-change',
+      });
+
+      try {
+        const tasks = await taskService.listTasks(true);
+        trace.step('list-tasks', {
+          taskCount: tasks.length,
+        });
+        const dependencyChecks = await Promise.all(tasks.map(async (task) => {
+          try {
+            const result = await taskService.checkDependenciesMet(task.id);
+            return [task.id, hasHardBlockingDependency(result)] as const;
+          } catch {
+            return [task.id, true] as const;
+          }
+        }));
+        const hardBlockedTaskIds = dependencyChecks
           .filter(([, isBlocked]) => isBlocked)
-          .map(([taskId]) => taskId),
-      ));
+          .map(([taskId]) => taskId);
+        trace.step('check-task-dependencies', {
+          taskCount: tasks.length,
+          hardBlockedCount: hardBlockedTaskIds.length,
+        });
+        if (disposed || requestId !== loadRequestIdRef.current) {
+          trace.finish({
+            outcome: 'stale',
+            incomingLinkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
+            taskCount: tasks.length,
+            hardBlockedCount: hardBlockedTaskIds.length,
+          });
+          return;
+        }
+        setActiveBlock(nextBlock);
+        setTasksById(new Map(tasks.map((task) => [task.id, task])));
+        setHardBlockedTaskIds(new Set(hardBlockedTaskIds));
+        trace.step('apply-state', {
+          linkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
+        });
+        trace.finish({
+          outcome: 'applied',
+          incomingLinkedTaskCount: resolveActiveBlockTaskIds(nextBlock).length,
+          taskCount: tasks.length,
+          hardBlockedCount: hardBlockedTaskIds.length,
+        });
+      } catch (error) {
+        trace.fail(error);
+        throw error;
+      }
     };
 
     void loadSnapshot();

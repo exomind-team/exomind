@@ -40,6 +40,7 @@ import {
 } from "@/config/focus-bgm-preferences";
 import { getTimerEndSoundPresetById } from "@/lib/media/timer-end-sounds";
 import { log } from "@/lib/logger";
+import { PerfTrace, perfNow, waitForNextPaint } from "@/lib/utils/perf-trace";
 import {
   getTaskService,
   getTaskTimerService,
@@ -134,10 +135,6 @@ function expectedOptionClass(active: boolean): string {
 
 const PRESET_COUNTDOWN_MINUTES = [15, 25, 45] as const;
 const MAX_CUSTOM_COUNTDOWN_MINUTES = 720;
-
-function perfNow(): number {
-  return typeof performance !== "undefined" ? performance.now() : Date.now();
-}
 
 function isPresetCountdownMinutes(minutes: number): boolean {
   return PRESET_COUNTDOWN_MINUTES.includes(
@@ -594,6 +591,11 @@ export const FocusTimerWidget = forwardRef<
   }, [countdownMinutes, syncIdleElapsedFromMode, timerMode, uiState]);
 
   const handleStart = useCallback(async () => {
+    const trace = new PerfTrace("TB-UI startBlock", {
+      component: "FocusTimerWidget",
+      timerMode,
+      selectedTaskCount: selectedTaskIds.length,
+    });
     const lines = taskNameDraft.split(/\r?\n/);
     const name = (lines[0] ?? "").trim();
     const description = lines.slice(1).join("\n").trim();
@@ -611,6 +613,10 @@ export const FocusTimerWidget = forwardRef<
     countdownOverrunRef.current = false;
     hardEndTriggeredRef.current = false;
     setCountdownOvertimeMs(0);
+    trace.step("prepare-start", {
+      hasDescription: description.length > 0,
+      countdownMinutes: timerMode === "countdown" ? countdownMinutes : null,
+    });
 
     const selectedTasks = selectedTaskIds
       .map((taskId) => selectableTasks.find((task) => task.id === taskId))
@@ -624,32 +630,73 @@ export const FocusTimerWidget = forwardRef<
         `[TB-UI] prestart selection skipped ${JSON.stringify({ skippedTaskIds })}`,
       );
     }
-    for (const task of selectedTasks) {
-      if (task.status === "pending" || task.status === "suspended") {
-        await getTaskService().transitionTask(task.id, "in_progress");
-      }
-    }
+    trace.step("resolve-selected-tasks", {
+      selectedTaskCount: selectedTasks.length,
+      skippedTaskCount: skippedTaskIds.length,
+    });
 
-    const block =
-      selectedIdsForStart.length > 0
-        ? await timeBlockServiceRef.current.startBlock(
-            name,
-            config,
-            description || undefined,
-            { taskIds: selectedIdsForStart },
-          )
-        : await timeBlockServiceRef.current.startBlock(
-            name,
-            config,
-            description || undefined,
-          );
-    activeBlockDataRef.current = block;
-    setTaskName(name);
-    setTaskNameDraft(name);
-    setElapsedMs(Math.max(0, block.elapsed ?? 0));
-    setFeedbackInProgress(false);
-    setRunningSubState("running");
-    setUiState("running");
+    try {
+      let transitionedTaskCount = 0;
+      for (const task of selectedTasks) {
+        if (task.status === "pending" || task.status === "suspended") {
+          await getTaskService().transitionTask(task.id, "in_progress");
+          transitionedTaskCount += 1;
+        }
+      }
+      trace.step("prestart-task-transitions", {
+        transitionedTaskCount,
+      });
+
+      const block =
+        selectedIdsForStart.length > 0
+          ? await timeBlockServiceRef.current.startBlock(
+              name,
+              config,
+              description || undefined,
+              { taskIds: selectedIdsForStart },
+              {
+                traceId: trace.traceId,
+                trigger: "FocusTimerWidget.handleStart",
+                source: "focus-timer",
+              },
+            )
+          : await timeBlockServiceRef.current.startBlock(
+              name,
+              config,
+              description || undefined,
+              undefined,
+              {
+                traceId: trace.traceId,
+                trigger: "FocusTimerWidget.handleStart",
+                source: "focus-timer",
+              },
+            );
+      trace.step("service-start-block", {
+        startId: block.startId,
+      });
+      activeBlockDataRef.current = block;
+      setTaskName(name);
+      setTaskNameDraft(name);
+      setElapsedMs(Math.max(0, block.elapsed ?? 0));
+      setFeedbackInProgress(false);
+      setRunningSubState("running");
+      setUiState("running");
+      trace.step("apply-ui-running-state", {
+        startId: block.startId,
+      });
+      // Measure when the new active-block state is actually visible, not just when service work returns.
+      await waitForNextPaint();
+      trace.step("notify-to-paint", {
+        startId: block.startId,
+      });
+      trace.finish({
+        startId: block.startId,
+        startBlockClickToDoneMs: trace.totalMs(),
+      });
+    } catch (error) {
+      trace.fail(error);
+      throw error;
+    }
   }, [
     countdownMinutes,
     focusTaskInput,
@@ -819,11 +866,20 @@ export const FocusTimerWidget = forwardRef<
       }
       setFeedbackSubmitting(true);
 
-      const t0 = perfNow();
+      const trace = new PerfTrace("TB-UI submitEnd", {
+        component: "FocusTimerWidget",
+        taskCount: taskIdsSnapshot.length,
+        hasFeedback: trimmedFeedback.length > 0,
+      });
       log.info("[TB-UI] click submit-end -> endBlock start");
+      trace.step("prepare-submit", {
+        feedbackLength: trimmedFeedback.length,
+        taskCount: taskIdsSnapshot.length,
+      });
 
       try {
         await mutationQueueRef.current;
+        trace.step("await-mutation-queue");
         if (taskIdsSnapshot.length > 0) {
           await timeBlockServiceRef.current.endBlock(
             trimmedFeedback || undefined,
@@ -835,16 +891,29 @@ export const FocusTimerWidget = forwardRef<
               taskTitles:
                 Object.keys(taskTitles).length > 0 ? taskTitles : undefined,
             },
+            {
+              traceId: trace.traceId,
+              trigger: "FocusTimerWidget.handleSubmitEnd",
+              source: "focus-timer",
+            },
           );
         } else {
           await timeBlockServiceRef.current.endBlock(
             trimmedFeedback || undefined,
+            undefined,
+            {
+              traceId: trace.traceId,
+              trigger: "FocusTimerWidget.handleSubmitEnd",
+              source: "focus-timer",
+            },
           );
         }
+        trace.step("service-end-block");
       } catch (error) {
         log.error(
           `[TB-UI] endBlock failed ${error instanceof Error ? error.message : String(error)}`,
         );
+        trace.fail(error, { phase: "service-end-block" });
         try {
           const block = await timeBlockServiceRef.current.loadActiveBlock();
           applyActiveBlock(block);
@@ -856,10 +925,6 @@ export const FocusTimerWidget = forwardRef<
         setFeedbackSubmitting(false);
         return;
       }
-
-      log.info(
-        `[TB-UI] click submit-end -> endBlock done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`,
-      );
 
       // Record block association and apply task status transition
       if (blockDataSnapshot && taskIdsSnapshot.length > 0) {
@@ -891,6 +956,7 @@ export const FocusTimerWidget = forwardRef<
           );
         }
       }
+      trace.step("task-followups");
 
       setFeedback("");
       setFeedbackOpen(false);
@@ -908,6 +974,16 @@ export const FocusTimerWidget = forwardRef<
       hardEndTriggeredRef.current = false;
       setCountdownOvertimeMs(0);
       syncIdleElapsedFromMode(timerMode, countdownMinutes);
+      trace.step("apply-ui-idle-state");
+      // The feedback flow is only "done" once the idle state is painted back to screen.
+      await waitForNextPaint();
+      trace.step("notify-to-paint");
+      trace.finish({
+        endBlockClickToDoneMs: trace.totalMs(),
+      });
+      log.info(
+        `[TB-UI] click submit-end -> endBlock done ${JSON.stringify({ traceId: trace.traceId, elapsedMs: trace.totalMs() })}`,
+      );
     },
     [
       applyActiveBlock,

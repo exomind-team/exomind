@@ -20,6 +20,7 @@ import type { Event, EventData, EventRef, NoteContent, Tag } from '../types/even
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
 import { normalizeEventRefs } from '../eventlog/event-refs';
+import { PerfTrace } from '@/lib/utils/perf-trace';
 import {
   createTransferPayload,
   parseTransferPayload,
@@ -83,11 +84,29 @@ export class EventLogServiceImpl implements EventLogService {
   }
 
   async loadEventsDetailed(options?: EventLogListOptions): Promise<EventLogLoadResult> {
+    const trace = new PerfTrace('EventLogService loadEventsDetailed', {
+      mode: options?.sinceId || options?.sinceTimestamp ? 'incremental' : 'full',
+      sinceId: options?.sinceId ?? null,
+      sinceTimestamp: options?.sinceTimestamp ?? null,
+      limit: options?.limit ?? null,
+    });
     const result = await this.readEventDataDetailed(options);
+    trace.step('read-event-data-detailed', {
+      fetched: result.events.length,
+      semantics: result.semantics,
+      snapshotRevision: result.snapshotRevision ?? null,
+    });
+    const events = result.events.map((data) => this.deserializeEvent(data));
+    trace.step('deserialize-events', { fetched: events.length });
+    events.sort((a, b) => b.timestamp - a.timestamp);
+    trace.step('sort-events', { fetched: events.length });
+    trace.finish({
+      fetched: events.length,
+      semantics: result.semantics,
+      snapshotRevision: result.snapshotRevision ?? null,
+    });
     return {
-      events: result.events
-        .map((data) => this.deserializeEvent(data))
-        .sort((a, b) => b.timestamp - a.timestamp),
+      events,
       semantics: result.semantics,
       snapshotRevision: result.snapshotRevision,
     };

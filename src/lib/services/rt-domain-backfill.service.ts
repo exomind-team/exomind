@@ -22,6 +22,7 @@ import {
   hasRuntimeControlAuth,
   resolveRuntimeHostDialAddress,
 } from '@/lib/utils/runtime-host-address';
+import { PerfTrace } from '@/lib/utils/perf-trace';
 import { log } from '@/lib/logger';
 
 type LegacyPeerEventLogBackupLike = Pick<EventLogBackupServiceImpl, 'exportEventsAsSqliteSnapshot'>;
@@ -107,7 +108,9 @@ export class RtDomainBackfillService {
   }
 
   async backfillConfirmedPeers(): Promise<RtDomainBackfillSummary> {
+    const trace = new PerfTrace('RtDomainBackfill backfillConfirmedPeers');
     const hosts = await this.hostService.listHosts();
+    trace.step('list-hosts', { hostCount: hosts.length });
     const meshPeers = dedupeHostsByReconciliationKey(hosts.filter((host) => (
       host.trustState === 'confirmed_peer'
       && host.hostId
@@ -125,40 +128,67 @@ export class RtDomainBackfillService {
     if (meshPeers.length > 0) {
       try {
         await this.taskReconciliationService.reconcileScopeGrants();
+        trace.step('reconcile-task-scope-grants', { granted: true });
       } catch (error) {
         log.warn(`[RtDomainBackfill] task scope grant reconcile failed: ${error instanceof Error ? error.message : String(error)}`);
+        trace.step('reconcile-task-scope-grants-failed');
       }
 
       await this.tryReconcileEventLogScopeGrants();
+      trace.step('reconcile-eventlog-scope-grants');
       await this.tryReconcileTimeBlockScopeGrants();
+      trace.step('reconcile-timeblock-scope-grants');
     }
 
     for (const peer of meshPeers) {
+      const peerTrace = new PerfTrace('RtDomainBackfill meshPeer', {
+        peerId: peer.hostId!,
+      });
       processedPeerIds.add(hostReconciliationKey(peer));
 
       try {
         const taskResult = await this.taskReconciliationService.reconcilePeer(peer.hostId!);
+        peerTrace.step('reconcile-tasks', {
+          imported: taskResult.imported,
+          skipped: taskResult.skipped,
+          total: taskResult.total,
+          strategy: taskResult.strategy,
+          unresolvedDrift: taskResult.unresolvedDrift,
+        });
         summary.tasks.imported += taskResult.imported;
         summary.tasks.skipped += taskResult.skipped;
         summary.tasks.total += taskResult.total;
         taskChanged = taskChanged || taskResult.changed;
       } catch (error) {
         log.warn(`[RtDomainBackfill] peer task reconcile failed: ${peer.hostId} ${error instanceof Error ? error.message : String(error)}`);
+        peerTrace.step('reconcile-tasks-failed');
       }
 
       try {
         const eventlogSnapshot = await this.localEventLogBackupService.exportPeerEventsAsSqliteSnapshot(peer.hostId!);
         const eventlogImport = await this.localEventLogBackupService.importEventsFromSqliteSnapshot(eventlogSnapshot.bytes, 'merge');
+        peerTrace.step('sync-eventlog', {
+          imported: eventlogImport.imported,
+          skipped: eventlogImport.skipped,
+          total: eventlogImport.total,
+        });
         summary.eventlog.imported += eventlogImport.imported;
         summary.eventlog.skipped += eventlogImport.skipped;
         summary.eventlog.total += eventlogImport.total;
       } catch (error) {
         log.warn(`[RtDomainBackfill] peer eventlog snapshot via mesh failed: ${peer.hostId} ${error instanceof Error ? error.message : String(error)}`);
+        peerTrace.step('sync-eventlog-failed');
       }
 
       try {
         const timeblockSnapshot = await this.localTimeBlockBackupService.exportPeerTimeBlocksAsSqliteSnapshot(peer.hostId!);
         const timeblockImport = await this.localTimeBlockBackupService.importTimeBlocksFromSqliteSnapshot(timeblockSnapshot.bytes, 'merge');
+        peerTrace.step('sync-timeblocks', {
+          imported: timeblockImport.imported,
+          skipped: timeblockImport.skipped,
+          total: timeblockImport.total,
+          activeBlockUpdated: timeblockImport.activeBlockUpdated,
+        });
         summary.timeblocks.imported += timeblockImport.imported;
         summary.timeblocks.skipped += timeblockImport.skipped;
         summary.timeblocks.total += timeblockImport.total;
@@ -166,7 +196,9 @@ export class RtDomainBackfillService {
         timeblockChanged = timeblockChanged || timeblockImport.imported > 0 || timeblockImport.activeBlockUpdated;
       } catch (error) {
         log.warn(`[RtDomainBackfill] peer timeblock snapshot via mesh failed: ${peer.hostId} ${error instanceof Error ? error.message : String(error)}`);
+        peerTrace.step('sync-timeblocks-failed');
       }
+      peerTrace.finish();
     }
 
     if (taskChanged) {
@@ -214,6 +246,13 @@ export class RtDomainBackfillService {
     }
 
     summary.peers = processedPeerIds.size;
+    trace.finish({
+      peers: summary.peers,
+      taskImported: summary.tasks.imported,
+      eventlogImported: summary.eventlog.imported,
+      timeblockImported: summary.timeblocks.imported,
+      timeblockActiveUpdated: summary.timeblocks.activeBlockUpdated,
+    });
     return summary;
   }
 

@@ -27,6 +27,7 @@ import type { Event, EventRef } from '@/lib/types/event';
 import { getEventLogService, type EventLogLoadResult } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { log } from '@/lib/logger';
+import { PerfTrace, perfNow, waitForNextPaint } from '@/lib/utils/perf-trace';
 import { registerMainWindowFocusTarget } from '@/services/main-window-focus-targets';
 import { MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT } from '@/services/main-window-shortcut.service';
 import { mergeLatestEventsAscending } from './chat-event-pagination';
@@ -69,10 +70,6 @@ const TASK_SYSTEM_EVENT_TAGS = [
   ...TASK_LIFECYCLE_EVENT_TAGS,
   ...TASK_RELATION_EVENT_TAGS,
 ] as const;
-
-function perfNow(): number {
-  return typeof performance !== 'undefined' ? performance.now() : Date.now();
-}
 
 function sortEventsAscending(events: Event[]): Event[] {
   return [...events].sort((a, b) => {
@@ -357,93 +354,145 @@ export function ChatPage({
   }, []);
 
   const loadInitialEvents = useCallback(async () => {
-    setIsInitialLoading(true);
-    const initialResult = await eventLogService.current.loadEventsDetailed();
-    const loadedEvents = sortEventsAscending(initialResult.events);
-    shouldStickToBottomRef.current = true;
-    lastAppliedSnapshotRevisionRef.current = initialResult.snapshotRevision ?? null;
-    applyVisibleWindow(loadedEvents, PAGE_SIZE);
-    lastFullRefreshAtRef.current = Date.now();
-
-    requestAnimationFrame(() => {
-      scrollToBottom('auto');
+    const trace = new PerfTrace('ChatPage loadInitialEvents', {
+      page: 'eventlog-record',
     });
-    setIsInitialLoading(false);
+    setIsInitialLoading(true);
+    try {
+      const initialResult = await eventLogService.current.loadEventsDetailed();
+      const loadedEvents = sortEventsAscending(initialResult.events);
+      trace.step('load-events-detailed', {
+        fetched: loadedEvents.length,
+        semantics: initialResult.semantics,
+        snapshotRevision: initialResult.snapshotRevision ?? null,
+      });
+      shouldStickToBottomRef.current = true;
+      lastAppliedSnapshotRevisionRef.current = initialResult.snapshotRevision ?? null;
+      applyVisibleWindow(loadedEvents, PAGE_SIZE);
+      lastFullRefreshAtRef.current = Date.now();
+      trace.step('apply-visible-window', {
+        visibleCount: Math.min(loadedEvents.length, PAGE_SIZE),
+      });
+      await waitForNextPaint();
+      trace.step('paint-visible-window', {
+        visibleCount: Math.min(loadedEvents.length, PAGE_SIZE),
+      });
+      scrollToBottom('auto');
+      trace.step('scroll-to-bottom');
+      trace.finish({
+        fetched: loadedEvents.length,
+        visibleCount: Math.min(loadedEvents.length, PAGE_SIZE),
+      });
+    } catch (error) {
+      trace.fail(error);
+      throw error;
+    } finally {
+      setIsInitialLoading(false);
+    }
   }, [applyVisibleWindow, scrollToBottom]);
 
   const refreshLatestEvents = useCallback(async (
     behavior: ScrollBehavior = 'smooth',
     trigger: RefreshTrigger = 'poll',
   ) => {
-    const t0 = perfNow();
-    const latestCursor = getLatestEventCursor(allEventsRef.current);
-    const shouldForceFullReconcile = trigger === 'external-refresh'
-      || (
-        latestCursor !== null
-        && (Date.now() - lastFullRefreshAtRef.current) >= RT_FULL_RECONCILE_INTERVAL_MS
+    const trace = new PerfTrace('ChatPage refreshLatestEvents', {
+      page: 'eventlog-record',
+      trigger,
+      behavior,
+    });
+    try {
+      const latestCursor = getLatestEventCursor(allEventsRef.current);
+      const shouldForceFullReconcile = trigger === 'external-refresh'
+        || (
+          latestCursor !== null
+          && (Date.now() - lastFullRefreshAtRef.current) >= RT_FULL_RECONCILE_INTERVAL_MS
+        );
+      let requestedMode: 'full' | 'incremental' = latestCursor && !shouldForceFullReconcile ? 'incremental' : 'full';
+      trace.step('resolve-refresh-mode', {
+        requestedMode,
+        latestCursorId: latestCursor?.id ?? null,
+      });
+      let loadedResult: EventLogLoadResult = await eventLogService.current.loadEventsDetailed(
+        requestedMode === 'incremental'
+          ? {
+              sinceId: latestCursor!.id,
+              sinceTimestamp: latestCursor!.timestamp,
+            }
+          : undefined,
       );
-    let requestedMode: 'full' | 'incremental' = latestCursor && !shouldForceFullReconcile ? 'incremental' : 'full';
-    let loadedResult: EventLogLoadResult = await eventLogService.current.loadEventsDetailed(
-      requestedMode === 'incremental'
-        ? {
-            sinceId: latestCursor!.id,
-            sinceTimestamp: latestCursor!.timestamp,
-          }
-        : undefined,
-    );
-    let mode: 'full' | 'incremental' = requestedMode === 'incremental'
-      && loadedResult.semantics === 'incremental_batch'
-      ? 'incremental'
-      : 'full';
-    let loadedEvents = sortEventsAscending(loadedResult.events);
-    const revisionChanged = loadedResult.snapshotRevision !== undefined
-      && loadedResult.snapshotRevision !== lastAppliedSnapshotRevisionRef.current;
+      let mode: 'full' | 'incremental' = requestedMode === 'incremental'
+        && loadedResult.semantics === 'incremental_batch'
+        ? 'incremental'
+        : 'full';
+      let loadedEvents = sortEventsAscending(loadedResult.events);
+      trace.step('load-events-detailed', {
+        requestedMode,
+        resolvedMode: mode,
+        fetched: loadedEvents.length,
+        semantics: loadedResult.semantics,
+        snapshotRevision: loadedResult.snapshotRevision ?? null,
+      });
+      const revisionChanged = loadedResult.snapshotRevision !== undefined
+        && loadedResult.snapshotRevision !== lastAppliedSnapshotRevisionRef.current;
 
-    const shouldFallbackToFull = mode === 'incremental' && (
-      (trigger === 'poll' && revisionChanged)
-      || (loadedEvents.length === 0 && (trigger === 'event' || revisionChanged))
-    );
+      const shouldFallbackToFull = mode === 'incremental' && (
+        (trigger === 'poll' && revisionChanged)
+        || (loadedEvents.length === 0 && (trigger === 'event' || revisionChanged))
+      );
 
-    if (shouldFallbackToFull) {
-      requestedMode = 'full';
-      mode = 'full';
-      loadedResult = await eventLogService.current.loadEventsDetailed();
-      loadedEvents = sortEventsAscending(loadedResult.events);
-    }
-    const queryMs = Math.round(perfNow() - t0);
+      if (shouldFallbackToFull) {
+        requestedMode = 'full';
+        mode = 'full';
+        loadedResult = await eventLogService.current.loadEventsDetailed();
+        loadedEvents = sortEventsAscending(loadedResult.events);
+        trace.step('fallback-full-refresh', {
+          fetched: loadedEvents.length,
+          snapshotRevision: loadedResult.snapshotRevision ?? null,
+        });
+      }
 
-    if (mode === 'full') {
-      lastFullRefreshAtRef.current = Date.now();
-      lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? null;
-      applyVisibleWindow(loadedEvents);
-
-      requestAnimationFrame(() => {
+      if (mode === 'full') {
+        lastFullRefreshAtRef.current = Date.now();
+        lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? null;
+        applyVisibleWindow(loadedEvents);
+        trace.step('apply-full-window', { fetched: loadedEvents.length });
+        await waitForNextPaint();
+        trace.step('paint-full-window', { fetched: loadedEvents.length });
         if (shouldStickToBottomRef.current) {
           scrollToBottom(behavior);
+          trace.step('scroll-to-bottom');
         }
-      });
-      log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
-      return;
-    }
-
-    if (loadedEvents.length === 0) {
-      if (loadedResult.snapshotRevision !== undefined) {
-        lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision;
+        trace.finish({ mode, fetched: loadedEvents.length });
+        return;
       }
-      log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: 0, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
-      return;
-    }
 
-    const mergedEvents = mergeLatestEventsAscending(allEventsRef.current, loadedEvents);
-    lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? lastAppliedSnapshotRevisionRef.current ?? null;
-    applyVisibleWindow(mergedEvents);
+      if (loadedEvents.length === 0) {
+        if (loadedResult.snapshotRevision !== undefined) {
+          lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision;
+        }
+        trace.finish({ mode, fetched: 0 });
+        return;
+      }
 
-    requestAnimationFrame(() => {
+      const mergedEvents = mergeLatestEventsAscending(allEventsRef.current, loadedEvents);
+      trace.step('merge-incremental-events', {
+        incoming: loadedEvents.length,
+        merged: mergedEvents.length,
+      });
+      lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? lastAppliedSnapshotRevisionRef.current ?? null;
+      applyVisibleWindow(mergedEvents);
+      trace.step('apply-merged-window', { merged: mergedEvents.length });
+      await waitForNextPaint();
+      trace.step('paint-merged-window', { merged: mergedEvents.length });
       if (shouldStickToBottomRef.current) {
         scrollToBottom(behavior);
+        trace.step('scroll-to-bottom');
       }
-    });
-    log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ mode, fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
+      trace.finish({ mode, fetched: loadedEvents.length, merged: mergedEvents.length });
+    } catch (error) {
+      trace.fail(error);
+      throw error;
+    }
   }, [applyVisibleWindow, scrollToBottom]);
 
   const scheduleLatestRefresh = useCallback((trigger: RefreshTrigger): void => {

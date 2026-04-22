@@ -22,6 +22,7 @@ import { getTaskService, type TaskService } from './task.service'
 import { getTimeBlockService, type TimeBlockService } from './timeblock.service'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
 import { emitTaskLinked, emitTaskUnlinked } from './task-event-emitter'
+import { PerfTrace } from '@/lib/utils/perf-trace'
 
 export interface TaskTimerService {
   /** 从任务快速启动一个时间块，自动关联 */
@@ -74,107 +75,279 @@ export class TaskTimerServiceImpl implements TaskTimerService {
   ): Promise<ActiveBlockData | null> {
     const normalizedTaskIds = Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)))
     if (normalizedTaskIds.length === 0) return null
-    const existingBlock = await this.tbSvc.loadActiveBlock()
-    if (existingBlock) {
-      const existingTaskIds = resolveActiveBlockTaskIds(existingBlock)
-      const retryTaskIds = normalizedTaskIds.filter((taskId) => existingTaskIds.includes(taskId))
-      await this.reconcileAssociatedTaskProgress(retryTaskIds)
-      return existingBlock
-    }
-
-    const tasks = await this.loadTasks(normalizedTaskIds)
-    if (!tasks) return null
-    const autoProgressCandidates = await this.resolveAutoProgressCandidates(tasks)
-
-    const [primaryTask] = tasks
-    if (!primaryTask) return null
-
-    const block = await this.tbSvc.startBlock(primaryTask.title, config, undefined, { taskIds: normalizedTaskIds })
-    const requiredTaskAssociationLog = this.ensureStartAssociationLog(
-      block.taskAssociationLog ?? [],
-      block.startId,
-      normalizedTaskIds,
-    )
-    const updatedBlock = await this.tbSvc.updateActiveBlock({
-      taskIds: normalizedTaskIds,
-      taskAssociationLog: requiredTaskAssociationLog,
+    const trace = new PerfTrace('TaskTimerService startBlockForTasks', {
+      mode: config.mode,
+      targetMinutes: config.mode === 'countdown' ? config.minutes ?? null : null,
+      taskCount: normalizedTaskIds.length,
     })
-    if (!updatedBlock) {
-      throw new Error('Failed to persist active block association')
-    }
-    for (const candidate of autoProgressCandidates) {
-      await this.taskSvc.transitionTask(candidate.task.id, candidate.nextStatus)
-    }
-    for (const task of tasks) {
-      emitTaskLinked(task.id, task.title, block.startId, block.name)
-    }
 
-    return await this.tbSvc.loadActiveBlock() ?? block
+    try {
+      const existingBlock = await this.tbSvc.loadActiveBlock()
+      trace.step('load-active-block', {
+        hasExisting: Boolean(existingBlock),
+      })
+      if (existingBlock) {
+        const existingTaskIds = resolveActiveBlockTaskIds(existingBlock)
+        const retryTaskIds = normalizedTaskIds.filter((taskId) => existingTaskIds.includes(taskId))
+        await this.reconcileAssociatedTaskProgress(retryTaskIds)
+        trace.step('reconcile-associated-task-progress', {
+          retryTaskCount: retryTaskIds.length,
+        })
+        trace.finish({
+          outcome: 'reuse-existing',
+          existingTaskCount: existingTaskIds.length,
+          retryTaskCount: retryTaskIds.length,
+          startId: existingBlock.startId,
+        })
+        return existingBlock
+      }
+
+      const tasks = await this.loadTasks(normalizedTaskIds)
+      trace.step('load-tasks', {
+        foundAllTasks: Boolean(tasks),
+        loadedTaskCount: tasks?.length ?? 0,
+      })
+      if (!tasks) {
+        trace.finish({
+          outcome: 'missing-or-terminal-task',
+        })
+        return null
+      }
+      const autoProgressCandidates = await this.resolveAutoProgressCandidates(tasks)
+      trace.step('resolve-auto-progress-candidates', {
+        autoProgressCount: autoProgressCandidates.length,
+      })
+
+      const [primaryTask] = tasks
+      if (!primaryTask) {
+        trace.finish({
+          outcome: 'missing-primary-task',
+        })
+        return null
+      }
+
+      const block = await this.tbSvc.startBlock(
+        primaryTask.title,
+        config,
+        undefined,
+        { taskIds: normalizedTaskIds },
+        {
+          traceId: trace.traceId,
+          trigger: 'TaskTimerService.startBlockForTasks',
+          source: 'TaskTimerService',
+        },
+      )
+      trace.step('tb-start-block', {
+        startId: block.startId,
+        blockTaskCount: resolveActiveBlockTaskIds(block).length,
+      })
+      const requiredTaskAssociationLog = this.ensureStartAssociationLog(
+        block.taskAssociationLog ?? [],
+        block.startId,
+        normalizedTaskIds,
+      )
+      const updatedBlock = await this.tbSvc.updateActiveBlock({
+        taskIds: normalizedTaskIds,
+        taskAssociationLog: requiredTaskAssociationLog,
+      })
+      trace.step('tb-update-active-block', {
+        requiredAssociationCount: requiredTaskAssociationLog.length,
+        updated: Boolean(updatedBlock),
+      })
+      if (!updatedBlock) {
+        throw new Error('Failed to persist active block association')
+      }
+      for (const candidate of autoProgressCandidates) {
+        await this.taskSvc.transitionTask(candidate.task.id, candidate.nextStatus)
+      }
+      trace.step('transition-auto-progress-tasks', {
+        autoProgressCount: autoProgressCandidates.length,
+      })
+      for (const task of tasks) {
+        emitTaskLinked(task.id, task.title, block.startId, block.name)
+      }
+      trace.step('emit-task-linked', {
+        linkedTaskCount: tasks.length,
+      })
+
+      const finalBlock = await this.tbSvc.loadActiveBlock() ?? block
+      trace.step('load-final-active-block', {
+        startId: finalBlock.startId,
+      })
+      trace.finish({
+        outcome: 'started',
+        autoProgressCount: autoProgressCandidates.length,
+        linkedTaskCount: tasks.length,
+        startId: finalBlock.startId,
+      })
+      return finalBlock
+    } catch (error) {
+      trace.fail(error)
+      throw error
+    }
   }
 
   async addTaskToBlock(taskId: string): Promise<void> {
     const normalizedTaskId = taskId.trim()
     if (!normalizedTaskId) return
-
-    const activeBlock = await this.tbSvc.loadActiveBlock()
-    if (!activeBlock) return
-
-    const task = await this.taskSvc.getTask(normalizedTaskId)
-    if (!task) return
-    if (task.status === 'completed' || task.status === 'cancelled') return
-
-    const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
-    if (existingTaskIds.includes(normalizedTaskId)) {
-      await this.reconcileAssociatedTaskProgress([normalizedTaskId])
-      return
-    }
-    const dependencyCheck = await this.taskSvc.checkDependenciesMet(normalizedTaskId)
-    const hardBlocking = dependencyCheck.blocking.filter((dependency) => dependency.type === 'hard')
-    if (hardBlocking.length > 0) {
-      const blockingIds = hardBlocking.map((dependency) => dependency.taskId).join(', ')
-      throw new Error(`Cannot associate task to active block: hard dependencies not met [${blockingIds}]`)
-    }
-
-    const updatedBlock = await this.tbSvc.updateActiveBlock({
-      taskIds: [...existingTaskIds, normalizedTaskId],
-      taskAssociationLog: this.appendAssociationEvent(
-        activeBlock.taskAssociationLog ?? [],
-        activeBlock.startId,
-        normalizedTaskId,
-        'associated',
-      ),
+    const trace = new PerfTrace('TaskTimerService addTaskToBlock', {
+      taskId: normalizedTaskId,
     })
-    if (!updatedBlock) {
-      throw new Error('Failed to persist active block association')
+
+    try {
+      const activeBlock = await this.tbSvc.loadActiveBlock()
+      trace.step('load-active-block', {
+        hasActiveBlock: Boolean(activeBlock),
+      })
+      if (!activeBlock) {
+        trace.finish({
+          outcome: 'no-active-block',
+        })
+        return
+      }
+
+      const task = await this.taskSvc.getTask(normalizedTaskId)
+      trace.step('load-task', {
+        foundTask: Boolean(task),
+        status: task?.status ?? null,
+      })
+      if (!task) {
+        trace.finish({
+          outcome: 'missing-task',
+        })
+        return
+      }
+      if (task.status === 'completed' || task.status === 'cancelled') {
+        trace.finish({
+          outcome: 'terminal-task',
+          status: task.status,
+        })
+        return
+      }
+
+      const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
+      if (existingTaskIds.includes(normalizedTaskId)) {
+        await this.reconcileAssociatedTaskProgress([normalizedTaskId])
+        trace.step('reconcile-associated-task-progress', {
+          existingTaskCount: existingTaskIds.length,
+        })
+        trace.finish({
+          outcome: 'already-associated',
+          existingTaskCount: existingTaskIds.length,
+          startId: activeBlock.startId,
+        })
+        return
+      }
+      const dependencyCheck = await this.taskSvc.checkDependenciesMet(normalizedTaskId)
+      const hardBlocking = dependencyCheck.blocking.filter((dependency) => dependency.type === 'hard')
+      trace.step('check-dependencies', {
+        hardBlockingCount: hardBlocking.length,
+      })
+      if (hardBlocking.length > 0) {
+        const blockingIds = hardBlocking.map((dependency) => dependency.taskId).join(', ')
+        throw new Error(`Cannot associate task to active block: hard dependencies not met [${blockingIds}]`)
+      }
+
+      const updatedBlock = await this.tbSvc.updateActiveBlock({
+        taskIds: [...existingTaskIds, normalizedTaskId],
+        taskAssociationLog: this.appendAssociationEvent(
+          activeBlock.taskAssociationLog ?? [],
+          activeBlock.startId,
+          normalizedTaskId,
+          'associated',
+        ),
+      })
+      trace.step('update-active-block', {
+        existingTaskCount: existingTaskIds.length,
+        updated: Boolean(updatedBlock),
+      })
+      if (!updatedBlock) {
+        throw new Error('Failed to persist active block association')
+      }
+      const nextStatus = this.resolveAutoProgressStatus(task.status)
+      if (nextStatus) {
+        await this.taskSvc.transitionTask(task.id, nextStatus)
+      }
+      trace.step('transition-task', {
+        nextStatus: nextStatus ?? null,
+      })
+      emitTaskLinked(normalizedTaskId, task.title, activeBlock.startId, activeBlock.name)
+      trace.step('emit-task-linked', {
+        startId: activeBlock.startId,
+      })
+      trace.finish({
+        outcome: 'associated',
+        startId: activeBlock.startId,
+        nextStatus: nextStatus ?? null,
+        taskCount: existingTaskIds.length + 1,
+      })
+    } catch (error) {
+      trace.fail(error)
+      throw error
     }
-    const nextStatus = this.resolveAutoProgressStatus(task.status)
-    if (nextStatus) {
-      await this.taskSvc.transitionTask(task.id, nextStatus)
-    }
-    emitTaskLinked(normalizedTaskId, task.title, activeBlock.startId, activeBlock.name)
   }
 
   async removeTaskFromBlock(taskId: string): Promise<void> {
     const normalizedTaskId = taskId.trim()
     if (!normalizedTaskId) return
-
-    const activeBlock = await this.tbSvc.loadActiveBlock()
-    if (!activeBlock) return
-
-    const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
-    if (!existingTaskIds.includes(normalizedTaskId)) return
-    const task = await this.taskSvc.getTask(normalizedTaskId)
-
-    await this.tbSvc.updateActiveBlock({
-      taskIds: existingTaskIds.filter((existingTaskId) => existingTaskId !== normalizedTaskId),
-      taskAssociationLog: this.appendAssociationEvent(
-        activeBlock.taskAssociationLog ?? [],
-        activeBlock.startId,
-        normalizedTaskId,
-        'disassociated',
-      ),
+    const trace = new PerfTrace('TaskTimerService removeTaskFromBlock', {
+      taskId: normalizedTaskId,
     })
-    emitTaskUnlinked(normalizedTaskId, task?.title ?? normalizedTaskId, activeBlock.startId, activeBlock.name)
+
+    try {
+      const activeBlock = await this.tbSvc.loadActiveBlock()
+      trace.step('load-active-block', {
+        hasActiveBlock: Boolean(activeBlock),
+      })
+      if (!activeBlock) {
+        trace.finish({
+          outcome: 'no-active-block',
+        })
+        return
+      }
+
+      const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
+      if (!existingTaskIds.includes(normalizedTaskId)) {
+        trace.finish({
+          outcome: 'task-not-linked',
+          existingTaskCount: existingTaskIds.length,
+          startId: activeBlock.startId,
+        })
+        return
+      }
+      const task = await this.taskSvc.getTask(normalizedTaskId)
+      trace.step('load-task', {
+        foundTask: Boolean(task),
+        status: task?.status ?? null,
+      })
+
+      await this.tbSvc.updateActiveBlock({
+        taskIds: existingTaskIds.filter((existingTaskId) => existingTaskId !== normalizedTaskId),
+        taskAssociationLog: this.appendAssociationEvent(
+          activeBlock.taskAssociationLog ?? [],
+          activeBlock.startId,
+          normalizedTaskId,
+          'disassociated',
+        ),
+      })
+      trace.step('update-active-block', {
+        existingTaskCount: existingTaskIds.length,
+        nextTaskCount: existingTaskIds.length - 1,
+      })
+      emitTaskUnlinked(normalizedTaskId, task?.title ?? normalizedTaskId, activeBlock.startId, activeBlock.name)
+      trace.step('emit-task-unlinked', {
+        startId: activeBlock.startId,
+      })
+      trace.finish({
+        outcome: 'disassociated',
+        existingTaskCount: existingTaskIds.length,
+        nextTaskCount: existingTaskIds.length - 1,
+        startId: activeBlock.startId,
+      })
+    } catch (error) {
+      trace.fail(error)
+      throw error
+    }
   }
 
   async onBlockEndForTask(
