@@ -38,6 +38,7 @@ import {
 } from "@/config/api-agent-tab-enabled";
 import {
   getSyncAutomationEnabled,
+  setSyncAutomationEnabled as persistSyncAutomationEnabled,
   subscribeSyncAutomationEnabledChanges,
 } from "@/config/sync-automation-enabled";
 import { setPersistedEmbeddedRuntimeNetworkMode } from "@/config/runtime-open-mode";
@@ -1433,7 +1434,7 @@ export function AgentsPage() {
     [],
   );
   const [useMockData, setUseMockData] = useState(getUseMockDataEnabled);
-  const [syncAutomationEnabled, setSyncAutomationEnabled] = useState(
+  const [syncAutomationEnabled, setSyncAutomationEnabledState] = useState(
     getSyncAutomationEnabled,
   );
 
@@ -1586,7 +1587,7 @@ export function AgentsPage() {
 
   useEffect(() => subscribeUseMockDataChanges(setUseMockData), []);
   useEffect(
-    () => subscribeSyncAutomationEnabledChanges(setSyncAutomationEnabled),
+    () => subscribeSyncAutomationEnabledChanges(setSyncAutomationEnabledState),
     [],
   );
 
@@ -3170,14 +3171,15 @@ export function AgentsPage() {
 
   const syncLocalMeshHosts = async (
     status: RuntimeServiceStatus | null,
-    options: { force?: boolean } = {},
+    options: { force?: boolean; automationEnabled?: boolean } = {},
   ) => {
     if (!status?.running) {
       confirmedMeshReplayKeyRef.current.clear();
       return;
     }
 
-    if (!options.force && !syncAutomationEnabled) {
+    const automationEnabled = options.automationEnabled ?? syncAutomationEnabled;
+    if (!options.force && !automationEnabled) {
       return;
     }
 
@@ -3191,13 +3193,15 @@ export function AgentsPage() {
   const replayConfirmedMeshPeers = async (
     status: RuntimeServiceStatus | null,
     snapshot: { hosts: RuntimeHostSnapshot[] },
+    options: { automationEnabled?: boolean } = {},
   ) => {
     if (!status?.running) {
       confirmedMeshReplayKeyRef.current.clear();
       return;
     }
 
-    if (!syncAutomationEnabled) {
+    const automationEnabled = options.automationEnabled ?? syncAutomationEnabled;
+    if (!automationEnabled) {
       confirmedMeshReplayKeyRef.current.clear();
       return;
     }
@@ -7544,10 +7548,11 @@ export function AgentsPage() {
   const refreshRuntimeSnapshot = useCallback(
     async (
       statusOverride: RuntimeServiceStatus | null = runtimeServiceStatus,
-      options: { forceMeshSync?: boolean } = {},
+      options: { forceMeshSync?: boolean; automationEnabled?: boolean } = {},
     ) => {
       await syncLocalMeshHosts(statusOverride, {
         force: options.forceMeshSync,
+        automationEnabled: options.automationEnabled,
       });
       const snapshot = await getRuntimeManager().refreshSnapshot();
       const nextPtyConnection = resolvePtySpawnConnectionTarget({
@@ -7555,7 +7560,9 @@ export function AgentsPage() {
         selectedTarget: getSelectedRuntimeTarget(),
         runtimeServiceStatus: statusOverride,
       });
-      await replayConfirmedMeshPeers(statusOverride, snapshot);
+      await replayConfirmedMeshPeers(statusOverride, snapshot, {
+        automationEnabled: options.automationEnabled,
+      });
       applyRuntimeSnapshot(snapshot);
       await refreshSignalRoutesFromSnapshot(snapshot);
       await fetchPtyAgents(nextPtyConnection);
@@ -7742,13 +7749,16 @@ export function AgentsPage() {
 
   const refreshRuntimeHosts = async (
     statusOverride: RuntimeServiceStatus | null = runtimeServiceStatus,
-    options: { forceMeshSync?: boolean } = {},
+    options: { forceMeshSync?: boolean; automationEnabled?: boolean } = {},
   ) => {
     await syncLocalMeshHosts(statusOverride, {
       force: options.forceMeshSync,
+      automationEnabled: options.automationEnabled,
     });
     const nextSnapshot = await getRuntimeManager().refreshSnapshot();
-    await replayConfirmedMeshPeers(statusOverride, nextSnapshot);
+    await replayConfirmedMeshPeers(statusOverride, nextSnapshot, {
+      automationEnabled: options.automationEnabled,
+    });
     applyRuntimeSnapshot(nextSnapshot);
     await refreshSignalRoutesFromSnapshot(nextSnapshot);
   };
@@ -8250,6 +8260,21 @@ export function AgentsPage() {
       );
       await refreshRuntimeHosts(runtimeServiceStatus, {
         forceMeshSync: true,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeHostError(message);
+    }
+  };
+
+  const handleSyncAutomationEnabledChange = async (enabled: boolean) => {
+    try {
+      setRuntimeHostError("");
+      setSyncAutomationEnabledState(enabled);
+      persistSyncAutomationEnabled(enabled);
+      await refreshRuntimeHosts(runtimeServiceStatus, {
+        forceMeshSync: enabled,
+        automationEnabled: enabled,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -8959,6 +8984,7 @@ export function AgentsPage() {
           runtimeDeviceSnapshots={runtimeDeviceSnapshots}
           runtimeHostSnapshots={runtimeHostSnapshots}
           runtimeServiceStatus={runtimeServiceStatus}
+          syncAutomationEnabled={syncAutomationEnabled}
           runtimeHostError={runtimeHostError}
           embeddedRuntimeNetworkMode={effectiveEmbeddedRuntimeNetworkMode}
           embeddedRuntimeBindAddress={desiredEmbeddedRuntimeAddress}
@@ -8968,6 +8994,7 @@ export function AgentsPage() {
           runtimeTargetError={runtimeTargetError}
           runtimeExternalAddressDraft={runtimeExternalAddressDraft}
           runtimeExternalAuthTokenDraft={runtimeExternalAuthTokenDraft}
+          onSyncAutomationEnabledChange={handleSyncAutomationEnabledChange}
           onRuntimeHostProbe={handleProbeRuntimeHost}
           onVerifyPeer={handleVerifyRuntimePeer}
           onTogglePeerConnectivity={handleToggleRuntimePeerConnectivity}

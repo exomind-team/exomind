@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { DeviceView } from '@/ui/app/pages/agents/DeviceView';
 import type { RuntimeDeviceSnapshot, RuntimeHostSnapshot } from '@/services/runtime-manager';
 
@@ -85,6 +85,7 @@ function buildDeviceSnapshot(): RuntimeDeviceSnapshot {
 
 describe('DeviceView runtime topology selectors（设备页拓扑选择器）', () => {
   it('prefers topology.device.name over legacy hostname（优先显示 topology.device.name）', () => {
+    const onSyncAutomationEnabledChange = vi.fn(async () => undefined);
     render(
       <DeviceView
         groups={[]}
@@ -96,6 +97,7 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
           port: 1949,
           hostId: 'desktop-local-host',
         }}
+        syncAutomationEnabled
         runtimeHostError=""
         embeddedRuntimeNetworkMode="local"
         embeddedRuntimeBindAddress="127.0.0.1:1949"
@@ -105,6 +107,7 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
         runtimeTargetError=""
         runtimeExternalAddressDraft=""
         runtimeExternalAuthTokenDraft=""
+        onSyncAutomationEnabledChange={onSyncAutomationEnabledChange}
         onRuntimeHostProbe={vi.fn(async () => undefined)}
         onVerifyPeer={vi.fn(async () => undefined)}
         onTogglePeerConnectivity={vi.fn(async () => undefined)}
@@ -121,6 +124,9 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
     );
 
     expect(screen.getByText('设备网络视图')).toBeInTheDocument();
+    expect(screen.getByTestId('device-sync-automation-switch')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByTestId('device-sync-automation-switch'));
+    expect(onSyncAutomationEnabledChange).toHaveBeenCalledWith(false);
     const discoveredSection = screen.getByTestId('runtime-peer-section-discovered');
     const deviceCard = within(discoveredSection).getByTestId('runtime-host-device-card-runtime-host-device-name');
     expect(within(deviceCard).getAllByText('Galaxy S24')).toHaveLength(2);

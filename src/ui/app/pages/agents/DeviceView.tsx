@@ -1,4 +1,5 @@
 import { ChevronRight, Link2, Monitor, ShieldCheck, Wifi } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import type { AgentDeviceGroup, RuntimeServiceStatus } from '@/lib/types/agent-hub';
 import {
   resolveTopologyDevice,
@@ -25,6 +26,7 @@ export interface DeviceViewProps {
   runtimeDeviceSnapshots: RuntimeDeviceSnapshot[];
   runtimeHostSnapshots: RuntimeHostSnapshot[];
   runtimeServiceStatus: RuntimeServiceStatus | null;
+  syncAutomationEnabled: boolean;
   runtimeHostError: string;
   embeddedRuntimeNetworkMode: EmbeddedRuntimeNetworkMode;
   embeddedRuntimeBindAddress: string;
@@ -34,6 +36,7 @@ export interface DeviceViewProps {
   runtimeTargetError: string;
   runtimeExternalAddressDraft: string;
   runtimeExternalAuthTokenDraft: string;
+  onSyncAutomationEnabledChange: (enabled: boolean) => Promise<void>;
   onRuntimeHostProbe: (hostId: string) => Promise<void>;
   onVerifyPeer: (hostId: string) => Promise<void>;
   onTogglePeerConnectivity: (hostId: string, enabled: boolean) => Promise<void>;
@@ -131,6 +134,7 @@ export function DeviceView({
   runtimeDeviceSnapshots,
   runtimeHostSnapshots,
   runtimeServiceStatus,
+  syncAutomationEnabled,
   runtimeHostError,
   embeddedRuntimeNetworkMode,
   embeddedRuntimeBindAddress,
@@ -140,6 +144,7 @@ export function DeviceView({
   runtimeTargetError,
   runtimeExternalAddressDraft,
   runtimeExternalAuthTokenDraft,
+  onSyncAutomationEnabledChange,
   onRuntimeHostProbe,
   onVerifyPeer,
   onTogglePeerConnectivity,
@@ -285,22 +290,6 @@ export function DeviceView({
             >
               重试
             </button>
-            {mode === 'confirmed' && (
-              <button
-                type="button"
-                data-testid={`runtime-host-peer-toggle-${primaryHost.id}`}
-                onClick={() => {
-                  void onTogglePeerConnectivity(primaryHost.id, isPeerPaused);
-                }}
-                className={`rounded px-2 py-1 text-[10px] ${
-                  isPeerPaused
-                    ? 'bg-[#0D9488] text-white'
-                    : 'bg-[#FDE68A40] text-[#B45309] dark:bg-[#78350F] dark:text-[#FDE68A]'
-                }`}
-              >
-                {isPeerPaused ? '恢复连通' : '暂停连通'}
-              </button>
-            )}
           </div>
         </div>
 
@@ -370,21 +359,35 @@ export function DeviceView({
                     : verificationPresentation.detail}
                 </p>
               </div>
-              <button
-                type="button"
-                data-testid={`runtime-host-verify-${primaryHost.id}`}
-                onClick={() => {
-                  void onVerifyPeer(primaryHost.id);
-                }}
-                disabled={
-                  !canVerifyConfirmedPeer
-                  || verificationPresentation.status === 'running'
-                  || isPeerPaused
-                }
-                className="rounded bg-[#0D9488] px-2 py-1 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {verifyButtonLabel}
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="inline-flex items-center gap-1.5 rounded-md bg-[#FAF7F5] px-2 py-1 dark:bg-[#292524]">
+                  <span className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">连通</span>
+                  <Switch
+                    aria-label={`${item.name} 连通开关`}
+                    checked={!isPeerPaused}
+                    disabled={!canVerifyConfirmedPeer}
+                    data-testid={`runtime-host-peer-toggle-${primaryHost.id}`}
+                    onCheckedChange={(checked: boolean) => {
+                      void onTogglePeerConnectivity(primaryHost.id, checked);
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  data-testid={`runtime-host-verify-${primaryHost.id}`}
+                  onClick={() => {
+                    void onVerifyPeer(primaryHost.id);
+                  }}
+                  disabled={
+                    !canVerifyConfirmedPeer
+                    || verificationPresentation.status === 'running'
+                    || isPeerPaused
+                  }
+                  className="rounded bg-[#0D9488] px-2 py-1 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {verifyButtonLabel}
+                </button>
+              </div>
             </div>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -452,16 +455,31 @@ export function DeviceView({
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">设备网络视图</h3>
             <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">{localNodeSummary}</p>
           </div>
-          <button
-            type="button"
-            data-testid="device-open-peer-pairing"
-            onClick={onOpenPeerPairing}
-            disabled={!canOpenPeerPairing}
-            className="inline-flex items-center gap-1 rounded-lg bg-[#0D9488] px-2.5 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Link2 size={13} />
-            设备配对
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="inline-flex items-center gap-2 rounded-lg border border-[#E7E5E4] bg-[#FAF7F5] px-2.5 py-1 dark:border-[#292524] dark:bg-[#292524]">
+              <span className="text-[11px] font-medium text-[#57534E] dark:text-[#D6D3D1]">
+                自动配对/同步
+              </span>
+              <Switch
+                aria-label="自动配对与自动同步"
+                checked={syncAutomationEnabled}
+                data-testid="device-sync-automation-switch"
+                onCheckedChange={(checked: boolean) => {
+                  void onSyncAutomationEnabledChange(checked);
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              data-testid="device-open-peer-pairing"
+              onClick={onOpenPeerPairing}
+              disabled={!canOpenPeerPairing}
+              className="inline-flex items-center gap-1 rounded-lg bg-[#0D9488] px-2.5 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Link2 size={13} />
+              设备配对
+            </button>
+          </div>
         </div>
 
         <div data-testid="runtime-device-overview-grid" className={overviewGridClassName}>

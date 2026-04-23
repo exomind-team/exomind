@@ -1432,6 +1432,37 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     expect(runtimeMeshSyncMocks.ensurePeerPair).not.toHaveBeenCalled();
   });
 
+  it('toggles sync automation from device view header（设备页头部可切换自动配对与自动同步）', async () => {
+    runtimeControlMocks.getStatus.mockResolvedValue({
+      running: true,
+      host: '0.0.0.0',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      hostId: 'desktop-local-host',
+      authSecret: 'embedded-secret',
+      pid: 9527,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+
+    const syncSwitch = await screen.findByTestId('device-sync-automation-switch');
+    expect(syncSwitch).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(syncSwitch);
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('exomind:syncAutomationEnabled')).toBe('false');
+      expect(syncSwitch).toHaveAttribute('aria-checked', 'false');
+    });
+
+    fireEvent.click(syncSwitch);
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('exomind:syncAutomationEnabled')).toBe('true');
+      expect(syncSwitch).toHaveAttribute('aria-checked', 'true');
+    });
+  });
+
   it('pauses and resumes confirmed peer connectivity from device view（设备页可暂停并恢复单设备连通）', async () => {
     hosts = [
       {
@@ -1473,7 +1504,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       .getByTestId('runtime-host-verify-runtime-host-confirmed');
 
     expect(within(getConfirmedSection()).getByText('已连接')).toBeInTheDocument();
-    expect(getToggleButton()).toHaveTextContent('暂停连通');
+    expect(getToggleButton()).toHaveAttribute('aria-checked', 'true');
 
     fireEvent.click(getToggleButton());
 
@@ -1488,7 +1519,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       expect(
         within(getConfirmedSection()).getByText('当前节点已暂停连通。恢复后再执行测试互联。'),
       ).toBeInTheDocument();
-      expect(getToggleButton()).toHaveTextContent('恢复连通');
+      expect(getToggleButton()).toHaveAttribute('aria-checked', 'false');
       expect(getVerifyButton()).toBeDisabled();
     });
 
@@ -1503,7 +1534,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
         undefined,
       );
       expect(within(getConfirmedSection()).getByText('已连接')).toBeInTheDocument();
-      expect(getToggleButton()).toHaveTextContent('暂停连通');
+      expect(getToggleButton()).toHaveAttribute('aria-checked', 'true');
       expect(getVerifyButton()).not.toBeDisabled();
     });
   });
