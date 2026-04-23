@@ -36,6 +36,7 @@ export interface DeviceViewProps {
   runtimeExternalAuthTokenDraft: string;
   onRuntimeHostProbe: (hostId: string) => Promise<void>;
   onVerifyPeer: (hostId: string) => Promise<void>;
+  onTogglePeerConnectivity: (hostId: string, enabled: boolean) => Promise<void>;
   onEmbeddedRuntimeNetworkModeChange: (mode: EmbeddedRuntimeNetworkMode) => void;
   onRuntimeStart: () => Promise<void>;
   onRuntimeStop: () => Promise<void>;
@@ -141,6 +142,7 @@ export function DeviceView({
   runtimeExternalAuthTokenDraft,
   onRuntimeHostProbe,
   onVerifyPeer,
+  onTogglePeerConnectivity,
   onEmbeddedRuntimeNetworkModeChange,
   onRuntimeStart,
   onRuntimeStop,
@@ -217,8 +219,11 @@ export function DeviceView({
     const addressText = primaryHost.lastSuccessfulDialAddress
       ?? primaryHost.manualOverride
       ?? `${primaryHost.host}:${primaryHost.port}`;
+    const isPeerPaused = mode === 'confirmed' && primaryHost.meshPeerEnabled === false;
     const replicationStatus = mode === 'confirmed'
-      ? item.connectionState === 'online'
+      ? isPeerPaused
+        ? '已暂停'
+        : item.connectionState === 'online'
         ? '已连接'
         : item.connectionState === 'offline'
           ? '离线'
@@ -229,7 +234,11 @@ export function DeviceView({
       : null;
     const verificationTriggerLabel = formatVerificationTriggerLabel(primaryHost.lastVerificationTrigger);
     const verificationTimeLabel = formatVerificationTimeLabel(primaryHost.lastVerifiedAt);
-    const verifyButtonLabel = verificationPresentation?.status === 'running' ? '验证中...' : '测试互联';
+    const verifyButtonLabel = isPeerPaused
+      ? '已暂停'
+      : verificationPresentation?.status === 'running'
+        ? '验证中...'
+        : '测试互联';
     const topologyRuntimeHost = resolveTopologyRuntimeHost(primaryHostSnapshot.topology);
     const topologyHostId = resolveTopologyHostId(primaryHostSnapshot.topology);
 
@@ -276,6 +285,22 @@ export function DeviceView({
             >
               重试
             </button>
+            {mode === 'confirmed' && (
+              <button
+                type="button"
+                data-testid={`runtime-host-peer-toggle-${primaryHost.id}`}
+                onClick={() => {
+                  void onTogglePeerConnectivity(primaryHost.id, isPeerPaused);
+                }}
+                className={`rounded px-2 py-1 text-[10px] ${
+                  isPeerPaused
+                    ? 'bg-[#0D9488] text-white'
+                    : 'bg-[#FDE68A40] text-[#B45309] dark:bg-[#78350F] dark:text-[#FDE68A]'
+                }`}
+              >
+                {isPeerPaused ? '恢复连通' : '暂停连通'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -340,7 +365,9 @@ export function DeviceView({
                   {verificationPresentation.label}
                 </p>
                 <p className="mt-0.5 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
-                  {verificationPresentation.detail}
+                  {isPeerPaused
+                    ? '当前节点已暂停连通。恢复后再执行测试互联。'
+                    : verificationPresentation.detail}
                 </p>
               </div>
               <button
@@ -349,7 +376,11 @@ export function DeviceView({
                 onClick={() => {
                   void onVerifyPeer(primaryHost.id);
                 }}
-                disabled={!canVerifyConfirmedPeer || verificationPresentation.status === 'running'}
+                disabled={
+                  !canVerifyConfirmedPeer
+                  || verificationPresentation.status === 'running'
+                  || isPeerPaused
+                }
                 className="rounded bg-[#0D9488] px-2 py-1 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {verifyButtonLabel}

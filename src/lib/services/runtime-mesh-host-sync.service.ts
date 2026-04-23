@@ -201,7 +201,7 @@ export class RuntimeMeshHostSyncService {
       nextHosts = await this.upsertDiscoveredPeer(nextHosts, peer);
     }
 
-    for (const peer of meshPeers.filter((item) => item.enabled)) {
+    for (const peer of meshPeers) {
       nextHosts = await this.upsertConfirmedPeer(nextHosts, peer);
     }
 
@@ -210,7 +210,7 @@ export class RuntimeMeshHostSyncService {
     nextHosts = await this.pruneStaleRuntimeHosts(
       nextHosts,
       discoveredPeers,
-      meshPeers.filter((item) => item.enabled),
+      meshPeers,
     );
 
     return nextHosts;
@@ -225,6 +225,7 @@ export class RuntimeMeshHostSyncService {
     replacedPeerIds: Map<string, string>;
   }> {
     const enabledPeers = meshPeers.filter((peer) => peer.enabled);
+    const disabledPeers = meshPeers.filter((peer) => !peer.enabled);
     const stalePeerIds = new Set<string>();
     const replacedPeerIds = new Map<string, string>();
 
@@ -287,7 +288,10 @@ export class RuntimeMeshHostSyncService {
     }
 
     return {
-      activePeers: enabledPeers.filter((peer) => !stalePeerIds.has(peer.id)),
+      activePeers: [
+        ...disabledPeers,
+        ...enabledPeers.filter((peer) => !stalePeerIds.has(peer.id)),
+      ],
       replacedPeerIds,
     };
   }
@@ -435,6 +439,7 @@ export class RuntimeMeshHostSyncService {
         port: parsed.port,
         hostId: peerHostId,
         trustState: 'confirmed_peer',
+        meshPeerEnabled: peer.enabled,
         advertisedListenAddress,
         manualOverride,
       } satisfies AddRuntimeHostInput);
@@ -450,6 +455,7 @@ export class RuntimeMeshHostSyncService {
       port: hostAddress.port,
       hostId: peerHostId,
       trustState: 'confirmed_peer',
+      meshPeerEnabled: peer.enabled,
       advertisedListenAddress,
       manualOverride,
     };

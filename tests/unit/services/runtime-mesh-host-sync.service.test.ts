@@ -145,6 +145,7 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
       advertisedListenAddress: patch.advertisedListenAddress,
       manualOverride: patch.manualOverride,
       authToken: patch.authToken,
+      meshPeerEnabled: patch.meshPeerEnabled,
     }));
     const service = new RuntimeMeshHostSyncService({
       hostService: {
@@ -187,13 +188,87 @@ describe('runtime mesh host sync service（mesh 状态映射到 host store）', 
       expect.objectContaining({
         hostId: 'rt-desktop',
         trustState: 'confirmed_peer',
+        meshPeerEnabled: true,
         advertisedListenAddress: '192.168.1.20:9124',
         manualOverride: undefined,
       }),
     );
     expect(hosts[0]).toEqual(expect.objectContaining({
       trustState: 'confirmed_peer',
+      meshPeerEnabled: true,
     }));
+  });
+
+  it('keeps disabled mesh peer mirrored as a paused confirmed host（disabled peer 仍保留为暂停中的 confirmed host）', async () => {
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch) => ({
+      id: 'runtime-host-desktop',
+      name: 'Desktop Node',
+      host: '192.168.1.20',
+      port: 9124,
+      status: 'unknown' as const,
+      createdAt: '2026-03-30T10:00:00.000Z',
+      updatedAt: '2026-03-30T10:00:00.000Z',
+      hostId: patch.hostId,
+      trustState: patch.trustState,
+      advertisedListenAddress: patch.advertisedListenAddress,
+      manualOverride: patch.manualOverride,
+      authToken: patch.authToken,
+      meshPeerEnabled: patch.meshPeerEnabled,
+    }));
+    const removeHost = vi.fn(async () => undefined);
+    const service = new RuntimeMeshHostSyncService({
+      hostService: {
+        listHosts: vi.fn(async () => [{
+          id: 'runtime-host-desktop',
+          name: 'Desktop Node',
+          host: '192.168.1.20',
+          port: 9124,
+          status: 'unknown',
+          createdAt: '2026-03-30T10:00:00.000Z',
+          updatedAt: '2026-03-30T10:00:00.000Z',
+          hostId: 'rt-desktop',
+          trustState: 'discovered_candidate',
+        } satisfies RuntimeHostRecord]),
+        addHost: vi.fn(),
+        mergeHostMetadata,
+        removeHost,
+      },
+      meshService: {
+        listDiscoveredPeers: vi.fn(async () => []),
+        listMeshPeers: vi.fn(async () => [{
+          id: 'rt-desktop',
+          base_url: 'http://192.168.1.20:9124',
+          enabled: false,
+        }]),
+        setPeerEnabled: vi.fn(async () => undefined),
+      },
+      runtimeControlService: {
+        getPeerDialAddress: vi.fn(async () => ({
+          host: '192.168.1.20',
+          port: 9124,
+        })),
+      },
+    });
+
+    const hosts = await service.syncLocalRuntimeMeshState('http://127.0.0.1:31308', 'shared-secret');
+
+    expect(mergeHostMetadata).toHaveBeenCalledWith(
+      'runtime-host-desktop',
+      expect.objectContaining({
+        hostId: 'rt-desktop',
+        trustState: 'confirmed_peer',
+        meshPeerEnabled: false,
+      }),
+    );
+    expect(removeHost).not.toHaveBeenCalled();
+    expect(hosts).toEqual([
+      expect.objectContaining({
+        id: 'runtime-host-desktop',
+        hostId: 'rt-desktop',
+        trustState: 'confirmed_peer',
+        meshPeerEnabled: false,
+      }),
+    ]);
   });
 
   it('prefers mesh host_id over peer.id when binding confirmed hosts（mesh 返回独立 host_id 时仍绑定到正确 runtime host）', async () => {

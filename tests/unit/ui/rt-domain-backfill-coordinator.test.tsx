@@ -1,5 +1,9 @@
 import { render, waitFor, cleanup } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 import { RtDomainBackfillCoordinator } from '@/ui/app/components/RtDomainBackfillCoordinator';
 
 type SyncStoreState = {
@@ -26,6 +30,7 @@ vi.mock('@/lib/services/rt-domain-backfill.service', () => ({
 
 describe('RtDomainBackfillCoordinator', () => {
   beforeEach(() => {
+    __resetRuntimeConfigCacheForTests();
     syncStoreState.isLoggedIn = true;
     syncStoreState.activeProfileId = 'profile-local';
     backfillService.backfillConfirmedPeers.mockClear();
@@ -46,6 +51,16 @@ describe('RtDomainBackfillCoordinator', () => {
 
   it('does not start backfill when no active profile is selected（没有当前档案时不应补拉）', async () => {
     syncStoreState.activeProfileId = null;
+    render(<RtDomainBackfillCoordinator />);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(backfillService.backfillConfirmedPeers).not.toHaveBeenCalled();
+  });
+
+  it('does not start backfill when sync automation is disabled（关闭自动同步时不应补拉）', async () => {
+    __primeRuntimeConfigForTests({
+      'exomind:syncAutomationEnabled': 'false',
+    });
     render(<RtDomainBackfillCoordinator />);
 
     await new Promise((resolve) => setTimeout(resolve, 0));

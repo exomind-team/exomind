@@ -94,6 +94,7 @@ export const settingsPageServiceMocks = {
 
 export const settingsPagePreferenceState = {
   developerMode: false,
+  syncAutomationEnabled: true,
   apiAgentTabEnabled: false,
   agentPageEnabled: false,
   mePageEnabled: false,
@@ -282,6 +283,15 @@ vi.mock('@/config/devtools-mode', () => ({
   getDevtoolsEnabled: vi.fn(() => false),
   setDevtoolsEnabled: vi.fn(),
   subscribeDevtoolsChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/sync-automation-enabled', () => ({
+  getSyncAutomationEnabled: vi.fn(() => settingsPagePreferenceState.syncAutomationEnabled),
+  setSyncAutomationEnabled: vi.fn((value: boolean) => {
+    settingsPagePreferenceState.syncAutomationEnabled = value;
+    return value;
+  }),
+  subscribeSyncAutomationEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/command-palette-enabled', () => ({

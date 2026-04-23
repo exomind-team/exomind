@@ -36,6 +36,10 @@ import {
   getApiAgentTabEnabled,
   subscribeApiAgentTabEnabledChanges,
 } from "@/config/api-agent-tab-enabled";
+import {
+  getSyncAutomationEnabled,
+  subscribeSyncAutomationEnabledChanges,
+} from "@/config/sync-automation-enabled";
 import { setPersistedEmbeddedRuntimeNetworkMode } from "@/config/runtime-open-mode";
 import {
   setPersistedRuntimeExternalAddress,
@@ -1429,6 +1433,9 @@ export function AgentsPage() {
     [],
   );
   const [useMockData, setUseMockData] = useState(getUseMockDataEnabled);
+  const [syncAutomationEnabled, setSyncAutomationEnabled] = useState(
+    getSyncAutomationEnabled,
+  );
 
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>("");
@@ -1578,6 +1585,10 @@ export function AgentsPage() {
   };
 
   useEffect(() => subscribeUseMockDataChanges(setUseMockData), []);
+  useEffect(
+    () => subscribeSyncAutomationEnabledChanges(setSyncAutomationEnabled),
+    [],
+  );
 
   useEffect(() => {
     isAgentsPageDisposedRef.current = false;
@@ -2667,6 +2678,12 @@ export function AgentsPage() {
   );
 
   useEffect(() => {
+    if (!syncAutomationEnabled) {
+      confirmedMeshReplayKeyRef.current.clear();
+    }
+  }, [syncAutomationEnabled]);
+
+  useEffect(() => {
     if (!apiAgentTabEnabled && viewMode === "api-agent") {
       setViewMode("topology");
     }
@@ -3151,9 +3168,16 @@ export function AgentsPage() {
     [localLinkProofSignalService, runtimeHostService],
   );
 
-  const syncLocalMeshHosts = async (status: RuntimeServiceStatus | null) => {
+  const syncLocalMeshHosts = async (
+    status: RuntimeServiceStatus | null,
+    options: { force?: boolean } = {},
+  ) => {
     if (!status?.running) {
       confirmedMeshReplayKeyRef.current.clear();
+      return;
+    }
+
+    if (!options.force && !syncAutomationEnabled) {
       return;
     }
 
@@ -3169,6 +3193,11 @@ export function AgentsPage() {
     snapshot: { hosts: RuntimeHostSnapshot[] },
   ) => {
     if (!status?.running) {
+      confirmedMeshReplayKeyRef.current.clear();
+      return;
+    }
+
+    if (!syncAutomationEnabled) {
       confirmedMeshReplayKeyRef.current.clear();
       return;
     }
@@ -7515,8 +7544,11 @@ export function AgentsPage() {
   const refreshRuntimeSnapshot = useCallback(
     async (
       statusOverride: RuntimeServiceStatus | null = runtimeServiceStatus,
+      options: { forceMeshSync?: boolean } = {},
     ) => {
-      await syncLocalMeshHosts(statusOverride);
+      await syncLocalMeshHosts(statusOverride, {
+        force: options.forceMeshSync,
+      });
       const snapshot = await getRuntimeManager().refreshSnapshot();
       const nextPtyConnection = resolvePtySpawnConnectionTarget({
         runtimeHostSnapshots: snapshot.hosts,
@@ -7534,6 +7566,7 @@ export function AgentsPage() {
       replayConfirmedMeshPeers,
       refreshSignalRoutesFromSnapshot,
       runtimeServiceStatus,
+      syncAutomationEnabled,
       syncLocalMeshHosts,
     ],
   );
@@ -7709,8 +7742,11 @@ export function AgentsPage() {
 
   const refreshRuntimeHosts = async (
     statusOverride: RuntimeServiceStatus | null = runtimeServiceStatus,
+    options: { forceMeshSync?: boolean } = {},
   ) => {
-    await syncLocalMeshHosts(statusOverride);
+    await syncLocalMeshHosts(statusOverride, {
+      force: options.forceMeshSync,
+    });
     const nextSnapshot = await getRuntimeManager().refreshSnapshot();
     await replayConfirmedMeshPeers(statusOverride, nextSnapshot);
     applyRuntimeSnapshot(nextSnapshot);
@@ -8175,6 +8211,49 @@ export function AgentsPage() {
       }
     } finally {
       releaseInFlightLinkProof();
+    }
+  };
+
+  const handleToggleRuntimePeerConnectivity = async (
+    hostId: string,
+    enabled: boolean,
+  ) => {
+    const targetSnapshot = runtimeHostSnapshots.find(
+      (item) => item.host.id === hostId,
+    );
+    if (!targetSnapshot) {
+      setRuntimeHostError(
+        `runtime host not found（未找到目标节点）: ${hostId}`,
+      );
+      return;
+    }
+
+    if (!runtimeServiceStatus?.running) {
+      setRuntimeHostError("请先启动本机内嵌 RT，再调整节点连通性。");
+      return;
+    }
+
+    const targetPeerId = resolveRuntimeSnapshotPeerId(targetSnapshot);
+    if (!targetPeerId) {
+      setRuntimeHostError("目标节点缺少 peer_id，暂时无法调整连通性。");
+      return;
+    }
+
+    try {
+      setRuntimeHostError("");
+      await getRuntimeMeshSyncService().setPeerEnabled(
+        peerPairingRuntimeBaseUrl,
+        targetPeerId,
+        resolveRuntimeHostBaseUrl(targetSnapshot.host),
+        enabled,
+        peerPairingLocalAuthToken,
+      );
+      await refreshRuntimeHosts(runtimeServiceStatus, {
+        forceMeshSync: true,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeHostError(message);
     }
   };
 
@@ -8891,6 +8970,7 @@ export function AgentsPage() {
           runtimeExternalAuthTokenDraft={runtimeExternalAuthTokenDraft}
           onRuntimeHostProbe={handleProbeRuntimeHost}
           onVerifyPeer={handleVerifyRuntimePeer}
+          onTogglePeerConnectivity={handleToggleRuntimePeerConnectivity}
           onEmbeddedRuntimeNetworkModeChange={
             handleEmbeddedRuntimeNetworkModeChange
           }
@@ -10092,7 +10172,8 @@ export function AgentsPage() {
         localHostId={peerPairingLocalHostId}
         localAuthToken={peerPairingLocalAuthToken}
         knownHosts={peerPairingKnownHosts}
-        onPairingSuccess={refreshRuntimeSnapshot}
+        onPairingSuccess={() =>
+          refreshRuntimeSnapshot(runtimeServiceStatus, { forceMeshSync: true })}
       />
     </div>
   );

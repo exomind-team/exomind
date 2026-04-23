@@ -33,6 +33,7 @@ export interface RuntimeHostRecord {
   localInitiatedRttMs?: number; // local_initiated_rtt_ms（本地主动发起 RTT）
   peerInitiatedRttMs?: number; // peer_initiated_rtt_ms（对端主动发起 RTT）
   lastVerificationError?: string; // last_verification_error（最近一次验证错误）
+  meshPeerEnabled?: boolean; // mesh_peer_enabled（当前 RT 记录的 peer enabled 状态）
 }
 
 export interface RuntimeServiceStatus {

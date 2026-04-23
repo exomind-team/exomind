@@ -57,6 +57,7 @@ export interface AddRuntimeHostInput {
   localInitiatedRttMs?: number;
   peerInitiatedRttMs?: number;
   lastVerificationError?: string;
+  meshPeerEnabled?: boolean;
 }
 
 export interface RuntimeHostMetadataPatch {
@@ -77,6 +78,7 @@ export interface RuntimeHostMetadataPatch {
   localInitiatedRttMs?: number | null;
   peerInitiatedRttMs?: number | null;
   lastVerificationError?: string | null;
+  meshPeerEnabled?: boolean | null;
 }
 
 export interface RuntimeHostService {
@@ -170,6 +172,10 @@ function normalizeOptionalNumber(value: number | undefined): number | undefined 
   return value;
 }
 
+function normalizeOptionalBoolean(value: boolean | undefined): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
 function normalizeOptionalTopology(
   value: RuntimeTopologyResponse | undefined,
 ): RuntimeTopologyResponse | undefined {
@@ -203,6 +209,17 @@ function mergeOptionalNumberPatch<T extends object>(
     return current;
   }
   return normalizeOptionalNumber((patch[field] ?? undefined) as number | undefined);
+}
+
+function mergeOptionalBooleanPatch<T extends object>(
+  patch: T,
+  field: keyof T,
+  current: boolean | undefined,
+): boolean | undefined {
+  if (!hasPatchField(patch, field)) {
+    return current;
+  }
+  return normalizeOptionalBoolean((patch[field] ?? undefined) as boolean | undefined);
 }
 
 function mergeOptionalTopologyPatch(
@@ -364,6 +381,7 @@ function normalizeRuntimeHostRecord(
     localInitiatedRttMs: normalizeOptionalNumber(record.localInitiatedRttMs),
     peerInitiatedRttMs: normalizeOptionalNumber(record.peerInitiatedRttMs),
     lastVerificationError: normalizeOptionalText(record.lastVerificationError),
+    meshPeerEnabled: normalizeOptionalBoolean(record.meshPeerEnabled),
   };
 }
 
@@ -537,6 +555,7 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       localInitiatedRttMs: normalizeOptionalNumber(input.localInitiatedRttMs),
       peerInitiatedRttMs: normalizeOptionalNumber(input.peerInitiatedRttMs),
       lastVerificationError: normalizeOptionalText(input.lastVerificationError),
+      meshPeerEnabled: normalizeOptionalBoolean(input.meshPeerEnabled),
     };
 
     const externalAuthContext = readRuntimeExternalAuthContext();
@@ -597,6 +616,11 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
         patch,
         'lastVerificationError',
         current.lastVerificationError,
+      ),
+      meshPeerEnabled: mergeOptionalBooleanPatch(
+        patch,
+        'meshPeerEnabled',
+        current.meshPeerEnabled,
       ),
       updatedAt: toIso(this.now),
     }, externalAuthContext);

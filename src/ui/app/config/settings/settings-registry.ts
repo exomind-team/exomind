@@ -107,6 +107,11 @@ import {
   setPerfLoggingEnabled,
   subscribePerfLoggingEnabledChanges,
 } from '@/config/perf-logging-enabled';
+import {
+  getSyncAutomationEnabled,
+  setSyncAutomationEnabled,
+  subscribeSyncAutomationEnabledChanges,
+} from '@/config/sync-automation-enabled';
 import { getLLMApiKey } from '@/config/llm-settings';
 import {
   getCommandPaletteEnabled,
@@ -1932,6 +1937,19 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
       ? '已切换为允许局域网访问'
       : '已切换为仅本机使用',
     errorMessagePrefix: '开放范围保存失败',
+  },
+  {
+    id: 'sync-automation-enabled',
+    label: '自动配对与自动同步',
+    icon: Wifi,
+    category: 'connection',
+    controlTestId: 'new-settings-sync-automation-switch',
+    type: 'boolean',
+    visible: tauriWindowOnly,
+    description: '实验性，默认开启。关闭后当前 RT 不再自动收敛 mesh 设备、自动回放 confirmed peer，也不再自动触发业务域 backfill；手动配对、手动验证与手动设备控制仍可用。该状态只存当前 RT 本地配置，不跨 RT 同步。',
+    get: () => getSyncAutomationEnabled(),
+    set: setSyncAutomationEnabled,
+    subscribe: subscribeSyncAutomationEnabledChanges,
   },
   {
     id: 'sync-server-url',

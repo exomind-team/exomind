@@ -1,4 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  getSyncAutomationEnabled,
+  subscribeSyncAutomationEnabledChanges,
+} from '@/config/sync-automation-enabled';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { RtDomainBackfillService, getRtDomainBackfillService } from '@/lib/services/rt-domain-backfill.service';
 import { log } from '@/lib/logger';
@@ -9,9 +13,17 @@ export function RtDomainBackfillCoordinator(): null {
   const backfillServiceRef = useRef<RtDomainBackfillService>(getRtDomainBackfillService());
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
   const activeProfileId = useSyncStore((state) => state.activeProfileId);
+  const [syncAutomationEnabled, setSyncAutomationEnabled] = useState(
+    () => getSyncAutomationEnabled(),
+  );
+
+  useEffect(
+    () => subscribeSyncAutomationEnabledChanges(setSyncAutomationEnabled),
+    [],
+  );
 
   useEffect(() => {
-    if (!isLoggedIn || !activeProfileId) {
+    if (!syncAutomationEnabled || !isLoggedIn || !activeProfileId) {
       return;
     }
 
@@ -47,7 +59,7 @@ export function RtDomainBackfillCoordinator(): null {
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('online', handleOnline);
     };
-  }, [activeProfileId, isLoggedIn]);
+  }, [activeProfileId, isLoggedIn, syncAutomationEnabled]);
 
   return null;
 }

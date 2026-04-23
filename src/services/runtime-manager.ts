@@ -9,6 +9,7 @@ import {
   type RuntimeTopologyResponse,
 } from '@/lib/types/runtime-topology';
 import { DEFAULT_EXTERNAL_RUNTIME_PORT } from '@/config/runtime-target';
+import { getSyncAutomationEnabled } from '@/config/sync-automation-enabled';
 import {
   type AddRuntimeHostInput,
   type RuntimeHostMetadataPatch,
@@ -426,6 +427,10 @@ export class RuntimeManager {
   }
 
   private async ensureConfirmedPeerPair(host: RuntimeHostRecord): Promise<void> {
+    if (!getSyncAutomationEnabled()) {
+      return;
+    }
+
     if (host.trustState !== 'confirmed_peer' || !host.hostId) {
       return;
     }

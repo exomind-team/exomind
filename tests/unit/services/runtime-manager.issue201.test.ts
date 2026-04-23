@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import { RuntimeManager, shouldAutoPollRuntimeHost } from '@/services/runtime-manager';
 
@@ -23,6 +27,10 @@ const HOST_B: RuntimeHostRecord = {
 };
 
 describe('runtime manager issue-201（多主机聚合管理）', () => {
+  beforeEach(() => {
+    __resetRuntimeConfigCacheForTests();
+  });
+
   it('aggregates agents from multiple hosts with source labels（聚合多主机 agent 并标注来源）', async () => {
     const hostService = {
       listHosts: vi.fn(async () => [HOST_A, HOST_B]),
@@ -335,6 +343,59 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
       trustState: 'confirmed_peer',
       hostId: 'host-b-logic',
     }));
+  });
+
+  it('does not sync mesh peer pair when sync automation is disabled（关闭自动同步时不触发 mesh 自动配对）', async () => {
+    __primeRuntimeConfigForTests({
+      'exomind:syncAutomationEnabled': 'false',
+    });
+
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch: { hostId?: string; lastSuccessfulDialAddress?: string }) => ({
+      ...HOST_B,
+      hostId: patch.hostId,
+      lastSuccessfulDialAddress: patch.lastSuccessfulDialAddress,
+      manualOverride: '192.168.1.22:2919',
+      trustState: 'confirmed_peer' as const,
+    }));
+    const ensurePeerPair = vi.fn(async () => undefined);
+    const hostService = {
+      listHosts: vi.fn(async () => [HOST_B]),
+      addHost: vi.fn(),
+      removeHost: vi.fn(),
+      mergeHostMetadata,
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(async () => ({
+        ok: true as const,
+        data: [],
+      })),
+      getTopology: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          host_id: 'host-b-logic',
+          hostname: 'peer-b',
+          os: 'android',
+          arch: 'arm64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 2919,
+          capabilities: {
+            agent_kinds: ['api' as const],
+            api_providers: ['openai' as const, 'anthropic' as const],
+          },
+        },
+      })),
+    };
+
+    const manager = new RuntimeManager({
+      hostService,
+      runtimeClient,
+      runtimeMeshSyncService: { ensurePeerPair },
+    });
+    await manager.refreshSnapshot();
+
+    expect(mergeHostMetadata).toHaveBeenCalled();
+    expect(ensurePeerPair).not.toHaveBeenCalled();
   });
 
   it('persists peer hostId from mixed topology when flat host_id is absent（peer mixed topology 缺少 flat host_id 时仍持久化）', async () => {

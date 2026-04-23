@@ -34,6 +34,7 @@ const runtimeMeshSyncMocks = vi.hoisted(() => ({
   ensurePeerPair: vi.fn(),
   listDiscoveredPeers: vi.fn(),
   listMeshPeers: vi.fn(),
+  setPeerEnabled: vi.fn(),
 }));
 
 const runtimeHostServiceMocks = vi.hoisted(() => ({
@@ -167,11 +168,13 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     })),
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     vi.stubGlobal('__TAURI_INTERNALS__', {});
     vi.clearAllMocks();
+    const runtimeConfigCache = await import('@/config/runtime-config-cache');
+    runtimeConfigCache.__resetRuntimeConfigCacheForTests();
     fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => [],
@@ -281,9 +284,21 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
         .map((host) => ({
           id: host.hostId as string,
           base_url: `http://${host.host}:${host.port}`,
-          enabled: true,
+          enabled: host.meshPeerEnabled !== false,
         }))
     ));
+    runtimeMeshSyncMocks.setPeerEnabled.mockImplementation(async (
+      _runtimeBaseUrl: string,
+      peerId: string,
+      _peerBaseUrl: string,
+      enabled: boolean,
+    ) => {
+      hosts = hosts.map((host) => (
+        host.hostId === peerId
+          ? { ...host, meshPeerEnabled: enabled }
+          : host
+      ));
+    });
     runtimeHostServiceMocks.listHosts.mockImplementation(async () => hosts);
     runtimeHostServiceMocks.addHost.mockImplementation(async (input: Record<string, unknown>) => {
       const nextHost: RuntimeHostRecord = {
@@ -1375,6 +1390,121 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
           lastSuccessfulDialAddress: '127.0.0.1:39124',
         }),
       );
+    });
+  });
+
+  it('does not replay confirmed peers when sync automation is disabled（关闭自动同步时不自动回放 confirmed peer）', async () => {
+    window.localStorage.setItem('exomind:syncAutomationEnabled', 'false');
+    hosts = [
+      {
+        id: 'runtime-host-phone',
+        name: 'Paired Phone',
+        host: '10.0.2.15',
+        port: 9124,
+        status: 'unknown',
+        createdAt: '2026-03-30T10:00:00.000Z',
+        updatedAt: '2026-03-30T10:00:00.000Z',
+        trustState: 'confirmed_peer',
+        hostId: 'paired-phone-host',
+        manualOverride: '127.0.0.1:39124',
+        lastSuccessfulDialAddress: '127.0.0.1:39124',
+      },
+    ];
+    hostState = {
+      'runtime-host-phone': 'online',
+    };
+
+    runtimeControlMocks.getStatus.mockResolvedValueOnce({
+      running: true,
+      host: '0.0.0.0',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      hostId: 'desktop-local-host',
+      authSecret: 'embedded-secret',
+      pid: 9527,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
+    });
+    expect(runtimeMeshSyncMocks.ensurePeerPair).not.toHaveBeenCalled();
+  });
+
+  it('pauses and resumes confirmed peer connectivity from device view（设备页可暂停并恢复单设备连通）', async () => {
+    hosts = [
+      {
+        id: 'runtime-host-confirmed',
+        name: 'Paired Laptop',
+        host: '192.168.1.24',
+        port: 9124,
+        status: 'unknown',
+        createdAt: '2026-03-30T10:00:00.000Z',
+        updatedAt: '2026-03-30T10:00:00.000Z',
+        trustState: 'confirmed_peer',
+        hostId: 'paired-laptop-host',
+        lastSuccessfulDialAddress: '192.168.1.24:9124',
+      },
+    ];
+    hostState = {
+      'runtime-host-confirmed': 'online',
+    };
+    runtimeControlMocks.getStatus.mockResolvedValue({
+      running: true,
+      host: '0.0.0.0',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      hostId: 'desktop-local-host',
+      authSecret: 'embedded-secret',
+      pid: 9527,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
+    });
+
+    const getConfirmedSection = () => screen.getByTestId('runtime-peer-section-confirmed');
+    const getToggleButton = () => within(getConfirmedSection())
+      .getByTestId('runtime-host-peer-toggle-runtime-host-confirmed');
+    const getVerifyButton = () => within(getConfirmedSection())
+      .getByTestId('runtime-host-verify-runtime-host-confirmed');
+
+    expect(within(getConfirmedSection()).getByText('已连接')).toBeInTheDocument();
+    expect(getToggleButton()).toHaveTextContent('暂停连通');
+
+    fireEvent.click(getToggleButton());
+
+    await waitFor(() => {
+      expect(runtimeMeshSyncMocks.setPeerEnabled).toHaveBeenCalledWith(
+        `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+        'paired-laptop-host',
+        'http://192.168.1.24:9124',
+        false,
+        undefined,
+      );
+      expect(
+        within(getConfirmedSection()).getByText('当前节点已暂停连通。恢复后再执行测试互联。'),
+      ).toBeInTheDocument();
+      expect(getToggleButton()).toHaveTextContent('恢复连通');
+      expect(getVerifyButton()).toBeDisabled();
+    });
+
+    fireEvent.click(getToggleButton());
+
+    await waitFor(() => {
+      expect(runtimeMeshSyncMocks.setPeerEnabled).toHaveBeenLastCalledWith(
+        `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+        'paired-laptop-host',
+        'http://192.168.1.24:9124',
+        true,
+        undefined,
+      );
+      expect(within(getConfirmedSection()).getByText('已连接')).toBeInTheDocument();
+      expect(getToggleButton()).toHaveTextContent('暂停连通');
+      expect(getVerifyButton()).not.toBeDisabled();
     });
   });
 

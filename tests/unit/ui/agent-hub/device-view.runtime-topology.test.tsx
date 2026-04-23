@@ -107,6 +107,7 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
         runtimeExternalAuthTokenDraft=""
         onRuntimeHostProbe={vi.fn(async () => undefined)}
         onVerifyPeer={vi.fn(async () => undefined)}
+        onTogglePeerConnectivity={vi.fn(async () => undefined)}
         onEmbeddedRuntimeNetworkModeChange={vi.fn()}
         onRuntimeStart={vi.fn(async () => undefined)}
         onRuntimeStop={vi.fn(async () => undefined)}
