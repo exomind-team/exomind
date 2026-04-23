@@ -264,7 +264,11 @@ Phase 1 更合理的收口是：
 1. 解释为什么 paired RT 这条线会从上层功能问题里单独拆出来
 2. 给后续设计 / issue / 实现提供一个现况锚点
 
-它不是最终设计稿，也不是实现计划；真正的实现 contract 应继续沉淀到：
+它不是最终设计稿，也不是实现计划；这份现况总结的配套设计稿见：
+
+1. [docs/plans/2026-04-24-paired-rt-model-phase1-design.md](../plans/2026-04-24-paired-rt-model-phase1-design.md)
+
+真正的实现 contract 应继续沉淀到：
 
 1. [#938](https://github.com/exomind-team/exomind/issues/938)
 2. `#906` 的后续迁移收口
