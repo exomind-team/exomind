@@ -206,6 +206,7 @@ export function DeviceView({
     : '先启动内嵌 RT，再把这台设备加入你的 ExoMind-Net。';
   const localNodeId = runtimeServiceStatus?.hostId ?? 'pending（待登记）';
   const canOpenPeerPairing = Boolean(runtimeServiceStatus?.running);
+  const canUsePeerPairing = canOpenPeerPairing && syncAutomationEnabled;
   const canVerifyConfirmedPeer = Boolean(runtimeServiceStatus?.running);
   const overviewGridClassName = hostCard
     ? 'grid gap-3 lg:grid-cols-2'
@@ -494,7 +495,8 @@ export function DeviceView({
               type="button"
               data-testid="device-open-peer-pairing"
               onClick={onOpenPeerPairing}
-              disabled={!canOpenPeerPairing}
+              disabled={!canUsePeerPairing}
+              title={!syncAutomationEnabled ? '自动配对/同步已关闭，暂不可发起设备配对。' : undefined}
               className="inline-flex items-center gap-1 rounded-lg bg-[#0D9488] px-2.5 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Link2 size={13} />

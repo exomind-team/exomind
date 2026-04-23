@@ -1485,13 +1485,16 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
     const syncSwitch = await screen.findByTestId('device-sync-automation-switch');
+    const pairingButton = await screen.findByTestId('device-open-peer-pairing');
     expect(syncSwitch).toHaveAttribute('aria-checked', 'true');
+    expect(pairingButton).not.toBeDisabled();
 
     fireEvent.click(syncSwitch);
 
     await waitFor(() => {
       expect(window.localStorage.getItem('exomind:syncAutomationEnabled')).toBe('false');
       expect(syncSwitch).toHaveAttribute('aria-checked', 'false');
+      expect(pairingButton).toBeDisabled();
     });
 
     fireEvent.click(syncSwitch);
@@ -1499,6 +1502,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     await waitFor(() => {
       expect(window.localStorage.getItem('exomind:syncAutomationEnabled')).toBe('true');
       expect(syncSwitch).toHaveAttribute('aria-checked', 'true');
+      expect(pairingButton).not.toBeDisabled();
     });
   });
 
