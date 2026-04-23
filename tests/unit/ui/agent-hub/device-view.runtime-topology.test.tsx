@@ -97,6 +97,8 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
           port: 1949,
           hostId: 'desktop-local-host',
         }}
+        peerConnectivityDrafts={{}}
+        peerConnectivityPendingHostIds={[]}
         syncAutomationEnabled
         runtimeHostError=""
         embeddedRuntimeNetworkMode="local"

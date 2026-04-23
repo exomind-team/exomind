@@ -1432,6 +1432,45 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     expect(runtimeMeshSyncMocks.ensurePeerPair).not.toHaveBeenCalled();
   });
 
+  it('does not replay a paused confirmed peer even when sync automation is enabled（已暂停的 confirmed peer 不会被自动回放重新启用）', async () => {
+    hosts = [
+      {
+        id: 'runtime-host-phone',
+        name: 'Paused Phone',
+        host: '10.0.2.15',
+        port: 9124,
+        status: 'unknown',
+        createdAt: '2026-03-30T10:00:00.000Z',
+        updatedAt: '2026-03-30T10:00:00.000Z',
+        trustState: 'confirmed_peer',
+        hostId: 'paused-phone-host',
+        manualOverride: '127.0.0.1:39124',
+        lastSuccessfulDialAddress: '127.0.0.1:39124',
+        meshPeerEnabled: false,
+      },
+    ];
+    hostState = {
+      'runtime-host-phone': 'online',
+    };
+
+    runtimeControlMocks.getStatus.mockResolvedValueOnce({
+      running: true,
+      host: '0.0.0.0',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      hostId: 'desktop-local-host',
+      authSecret: 'embedded-secret',
+      pid: 9527,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
+    });
+    expect(runtimeMeshSyncMocks.ensurePeerPair).not.toHaveBeenCalled();
+  });
+
   it('toggles sync automation from device view header（设备页头部可切换自动配对与自动同步）', async () => {
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: true,
@@ -1536,6 +1575,87 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       expect(within(getConfirmedSection()).getByText('已连接')).toBeInTheDocument();
       expect(getToggleButton()).toHaveAttribute('aria-checked', 'true');
       expect(getVerifyButton()).not.toBeDisabled();
+    });
+  });
+
+  it('updates confirmed peer connectivity switch optimistically while request is in flight（连通开关在请求进行中先给出即时反馈）', async () => {
+    hosts = [
+      {
+        id: 'runtime-host-confirmed',
+        name: 'Paired Laptop',
+        host: '192.168.1.24',
+        port: 9124,
+        status: 'unknown',
+        createdAt: '2026-03-30T10:00:00.000Z',
+        updatedAt: '2026-03-30T10:00:00.000Z',
+        trustState: 'confirmed_peer',
+        hostId: 'paired-laptop-host',
+        lastSuccessfulDialAddress: '192.168.1.24:9124',
+      },
+    ];
+    hostState = {
+      'runtime-host-confirmed': 'online',
+    };
+    runtimeControlMocks.getStatus.mockResolvedValue({
+      running: true,
+      host: '0.0.0.0',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      hostId: 'desktop-local-host',
+      authSecret: 'embedded-secret',
+      pid: 9527,
+    });
+
+    let resolveSetPeerEnabled: (() => void) | null = null;
+    runtimeMeshSyncMocks.setPeerEnabled.mockImplementationOnce(async (
+      _runtimeBaseUrl: string,
+      peerId: string,
+      _peerBaseUrl: string,
+      enabled: boolean,
+    ) => await new Promise<void>((resolve) => {
+      resolveSetPeerEnabled = () => {
+        hosts = hosts.map((host) => (
+          host.hostId === peerId
+            ? { ...host, meshPeerEnabled: enabled }
+            : host
+        ));
+        resolve();
+      };
+    }));
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+
+    const getConfirmedSection = () => screen.getByTestId('runtime-peer-section-confirmed');
+    const getToggleButton = () => within(getConfirmedSection())
+      .getByTestId('runtime-host-peer-toggle-runtime-host-confirmed');
+    const getVerifyButton = () => within(getConfirmedSection())
+      .getByTestId('runtime-host-verify-runtime-host-confirmed');
+
+    await waitFor(() => {
+      expect(getToggleButton()).toHaveAttribute('aria-checked', 'true');
+    });
+
+    fireEvent.click(getToggleButton());
+
+    await waitFor(() => {
+      expect(getToggleButton()).toHaveAttribute('aria-checked', 'false');
+      expect(getToggleButton()).toBeDisabled();
+      expect(getVerifyButton()).toBeDisabled();
+      expect(
+        within(getConfirmedSection()).getByText('正在更新连通状态，请稍候。'),
+      ).toBeInTheDocument();
+      expect(getVerifyButton()).toHaveTextContent('处理中...');
+    });
+
+    expect(resolveSetPeerEnabled).not.toBeNull();
+    await act(async () => {
+      resolveSetPeerEnabled?.();
+    });
+
+    await waitFor(() => {
+      expect(getToggleButton()).toHaveAttribute('aria-checked', 'false');
+      expect(getToggleButton()).not.toBeDisabled();
+      expect(getVerifyButton()).toHaveTextContent('已暂停');
     });
   });
 

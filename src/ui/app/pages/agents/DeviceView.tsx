@@ -26,6 +26,8 @@ export interface DeviceViewProps {
   runtimeDeviceSnapshots: RuntimeDeviceSnapshot[];
   runtimeHostSnapshots: RuntimeHostSnapshot[];
   runtimeServiceStatus: RuntimeServiceStatus | null;
+  peerConnectivityDrafts: Record<string, boolean>;
+  peerConnectivityPendingHostIds: string[];
   syncAutomationEnabled: boolean;
   runtimeHostError: string;
   embeddedRuntimeNetworkMode: EmbeddedRuntimeNetworkMode;
@@ -134,6 +136,8 @@ export function DeviceView({
   runtimeDeviceSnapshots,
   runtimeHostSnapshots,
   runtimeServiceStatus,
+  peerConnectivityDrafts,
+  peerConnectivityPendingHostIds,
   syncAutomationEnabled,
   runtimeHostError,
   embeddedRuntimeNetworkMode,
@@ -224,9 +228,21 @@ export function DeviceView({
     const addressText = primaryHost.lastSuccessfulDialAddress
       ?? primaryHost.manualOverride
       ?? `${primaryHost.host}:${primaryHost.port}`;
-    const isPeerPaused = mode === 'confirmed' && primaryHost.meshPeerEnabled === false;
+    const peerConnectivityDraft = mode === 'confirmed'
+      ? peerConnectivityDrafts[primaryHost.id]
+      : undefined;
+    const effectiveMeshPeerEnabled = typeof peerConnectivityDraft === 'boolean'
+      ? peerConnectivityDraft
+      : primaryHost.meshPeerEnabled;
+    const isPeerPaused = mode === 'confirmed' && effectiveMeshPeerEnabled === false;
+    const isPeerConnectivityPending = mode === 'confirmed'
+      && peerConnectivityPendingHostIds.includes(primaryHost.id);
     const replicationStatus = mode === 'confirmed'
-      ? isPeerPaused
+      ? isPeerConnectivityPending
+        ? isPeerPaused
+          ? '暂停中...'
+          : '恢复中...'
+        : isPeerPaused
         ? '已暂停'
         : item.connectionState === 'online'
         ? '已连接'
@@ -239,7 +255,9 @@ export function DeviceView({
       : null;
     const verificationTriggerLabel = formatVerificationTriggerLabel(primaryHost.lastVerificationTrigger);
     const verificationTimeLabel = formatVerificationTimeLabel(primaryHost.lastVerifiedAt);
-    const verifyButtonLabel = isPeerPaused
+    const verifyButtonLabel = isPeerConnectivityPending
+      ? '处理中...'
+      : isPeerPaused
       ? '已暂停'
       : verificationPresentation?.status === 'running'
         ? '验证中...'
@@ -354,9 +372,11 @@ export function DeviceView({
                   {verificationPresentation.label}
                 </p>
                 <p className="mt-0.5 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
-                  {isPeerPaused
-                    ? '当前节点已暂停连通。恢复后再执行测试互联。'
-                    : verificationPresentation.detail}
+                  {isPeerConnectivityPending
+                    ? '正在更新连通状态，请稍候。'
+                    : isPeerPaused
+                      ? '当前节点已暂停连通。恢复后再执行测试互联。'
+                      : verificationPresentation.detail}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -365,7 +385,7 @@ export function DeviceView({
                   <Switch
                     aria-label={`${item.name} 连通开关`}
                     checked={!isPeerPaused}
-                    disabled={!canVerifyConfirmedPeer}
+                    disabled={!canVerifyConfirmedPeer || isPeerConnectivityPending}
                     data-testid={`runtime-host-peer-toggle-${primaryHost.id}`}
                     onCheckedChange={(checked: boolean) => {
                       void onTogglePeerConnectivity(primaryHost.id, checked);
@@ -380,6 +400,7 @@ export function DeviceView({
                   }}
                   disabled={
                     !canVerifyConfirmedPeer
+                    || isPeerConnectivityPending
                     || verificationPresentation.status === 'running'
                     || isPeerPaused
                   }

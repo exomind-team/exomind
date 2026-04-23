@@ -1452,6 +1452,8 @@ export function AgentsPage() {
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
   const [runtimeDeviceSnapshots, setRuntimeDeviceSnapshots] = useState<RuntimeDeviceSnapshot[]>([]);
   const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
+  const [runtimePeerConnectivityDrafts, setRuntimePeerConnectivityDrafts] = useState<Record<string, boolean>>({});
+  const [runtimePeerConnectivityPendingHostIds, setRuntimePeerConnectivityPendingHostIds] = useState<string[]>([]);
   const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
   const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
   const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState(
@@ -3207,7 +3209,10 @@ export function AgentsPage() {
     }
 
     const confirmedHosts = snapshot.hosts
-      .filter((item) => item.host.trustState === "confirmed_peer")
+      .filter((item) => (
+        item.host.trustState === "confirmed_peer"
+        && item.host.meshPeerEnabled !== false
+      ))
       .map((item) => toLiveRuntimePeerHost(item))
       .filter((host) => host.hostId);
 
@@ -6218,6 +6223,21 @@ export function AgentsPage() {
     agents: RuntimeAggregatedAgent[];
   }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
+    setRuntimePeerConnectivityDrafts((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const hostSnapshot of snapshot.hosts) {
+        const draft = next[hostSnapshot.host.id];
+        if (
+          typeof draft === "boolean"
+          && hostSnapshot.host.meshPeerEnabled === draft
+        ) {
+          delete next[hostSnapshot.host.id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
     setRuntimeDeviceSnapshots(snapshot.devices ?? []);
     setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
   };
@@ -8228,6 +8248,10 @@ export function AgentsPage() {
     hostId: string,
     enabled: boolean,
   ) => {
+    if (runtimePeerConnectivityPendingHostIds.includes(hostId)) {
+      return;
+    }
+
     const targetSnapshot = runtimeHostSnapshots.find(
       (item) => item.host.id === hostId,
     );
@@ -8251,6 +8275,13 @@ export function AgentsPage() {
 
     try {
       setRuntimeHostError("");
+      setRuntimePeerConnectivityDrafts((prev) => ({
+        ...prev,
+        [hostId]: enabled,
+      }));
+      setRuntimePeerConnectivityPendingHostIds((prev) => (
+        prev.includes(hostId) ? prev : [...prev, hostId]
+      ));
       await getRuntimeMeshSyncService().setPeerEnabled(
         peerPairingRuntimeBaseUrl,
         targetPeerId,
@@ -8260,10 +8291,23 @@ export function AgentsPage() {
       );
       await refreshRuntimeHosts(runtimeServiceStatus, {
         forceMeshSync: true,
+        automationEnabled: false,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRuntimeHostError(message);
+      setRuntimePeerConnectivityDrafts((prev) => {
+        if (!(hostId in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[hostId];
+        return next;
+      });
+    } finally {
+      setRuntimePeerConnectivityPendingHostIds((prev) => (
+        prev.filter((item) => item !== hostId)
+      ));
     }
   };
 
@@ -8984,6 +9028,8 @@ export function AgentsPage() {
           runtimeDeviceSnapshots={runtimeDeviceSnapshots}
           runtimeHostSnapshots={runtimeHostSnapshots}
           runtimeServiceStatus={runtimeServiceStatus}
+          peerConnectivityDrafts={runtimePeerConnectivityDrafts}
+          peerConnectivityPendingHostIds={runtimePeerConnectivityPendingHostIds}
           syncAutomationEnabled={syncAutomationEnabled}
           runtimeHostError={runtimeHostError}
           embeddedRuntimeNetworkMode={effectiveEmbeddedRuntimeNetworkMode}
