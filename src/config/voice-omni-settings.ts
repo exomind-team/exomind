@@ -3,6 +3,7 @@ import { createConfigModule } from './config-factory';
 const VOICE_OMNI_PROFILE_ID_KEY = 'exomind:voiceOmniProfileId';
 const VOICE_OMNI_MODEL_ID_KEY = 'exomind:voiceOmniModelId';
 const VOICE_OMNI_OPTIMIZE_ENABLED_KEY = 'exomind:voiceOmniOptimizeEnabled';
+export const DEFAULT_VOICE_OMNI_MODEL_ID = 'qwen3.5-omni-plus';
 
 function normalizeText(value: string | null | undefined): string {
   return value?.trim() || '';
@@ -23,8 +24,8 @@ const profileIdModule = createConfigModule<string>({
 const modelIdModule = createConfigModule<string>({
   storageKey: VOICE_OMNI_MODEL_ID_KEY,
   eventName: 'exomind:voice-omni-model-id-changed',
-  defaultValue: 'qwen3-omni-flash',
-  normalize: (raw) => normalizeText(raw) || 'qwen3-omni-flash',
+  defaultValue: DEFAULT_VOICE_OMNI_MODEL_ID,
+  normalize: (raw) => normalizeText(raw) || DEFAULT_VOICE_OMNI_MODEL_ID,
   persistMode: 'runtime-preferred',
 });
 

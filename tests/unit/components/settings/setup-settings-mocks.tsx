@@ -106,7 +106,7 @@ export const settingsPagePreferenceState = {
   voiceShortcutAsrProvider: 'moss' as string,
   voiceShortcutEnabled: true,
   voiceOmniProfileId: '',
-  voiceOmniModelId: 'qwen3-omni-flash',
+  voiceOmniModelId: 'qwen3.5-omni-plus',
   voiceOmniOptimizeEnabled: false,
   voiceAutoRecordEnabled: true,
   voiceRuntimeEnabled: false,

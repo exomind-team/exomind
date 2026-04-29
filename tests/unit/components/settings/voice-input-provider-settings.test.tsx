@@ -13,7 +13,7 @@ describe('VoiceInputProviderSettings（快捷语音输入 provider 设置）', (
     vi.clearAllMocks();
     settingsPagePreferenceState.voiceShortcutAsrProvider = 'moss';
     settingsPagePreferenceState.voiceOmniProfileId = '';
-    settingsPagePreferenceState.voiceOmniModelId = 'qwen3-omni-flash';
+    settingsPagePreferenceState.voiceOmniModelId = 'qwen3.5-omni-plus';
     settingsPagePreferenceState.voiceOmniOptimizeEnabled = false;
     settingsPageVolcanoState.appKey = '';
     settingsPageVolcanoState.accessKey = '';

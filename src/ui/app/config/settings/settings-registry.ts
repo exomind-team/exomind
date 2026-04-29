@@ -240,6 +240,7 @@ import {
   subscribeNowWorkbenchOverlayEnabledChanges,
 } from '@/config/now-workbench-overlay-preferences';
 import {
+  DEFAULT_VOICE_OMNI_MODEL_ID,
   getVoiceOmniModelId,
   getVoiceOmniOptimizeEnabled,
   subscribeVoiceOmniModelIdChanges,
@@ -1087,9 +1088,9 @@ const VOICE_SHORTCUT_SETTINGS_GROUP: SettingsItem = {
       visible: qwenOmniOnly,
       stringStyle: 'dialog',
       dialogFieldKind: 'plain',
-      placeholder: 'qwen3-omni-flash',
+      placeholder: DEFAULT_VOICE_OMNI_MODEL_ID,
       dialogTitle: 'Qwen Omni 模型 ID',
-      dialogDescription: '默认推荐 qwen3-omni-flash；也可以切换到其他已开通的 Qwen Omni 模型。',
+      dialogDescription: '默认推荐 qwen3.5-omni-plus，用作快捷语音输入的全模态识别模型；也可以切换到其他已开通的 Qwen Omni 模型。',
       get: () => getVoiceOmniModelId(),
       set: (value: string) => setVoiceOmniModelId(value),
       subscribe: subscribeVoiceOmniModelIdChanges,
