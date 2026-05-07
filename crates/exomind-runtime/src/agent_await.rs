@@ -1910,6 +1910,7 @@ fn latest_matching_event_id(
         until_timestamp: None,
         tags: tags.to_vec(),
         limit: None,
+        task_ids: vec![],
     };
     state
         .eventlog_store
@@ -1929,6 +1930,7 @@ fn list_matching_events_after_cursor(
         until_timestamp: None,
         tags: tags.to_vec(),
         limit: None,
+        task_ids: vec![],
     };
     let mut events = state
         .eventlog_store

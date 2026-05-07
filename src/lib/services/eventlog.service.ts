@@ -11,6 +11,8 @@
 
 import { ExoMindEnvironment } from "../environment/environment";
 import type {
+  EventLogAppendInput,
+  EventLogImportResult as PortEventLogImportResult,
   EventLogListOptions,
   EventLogListResult,
   EventLogListSemantics,
@@ -63,6 +65,11 @@ export interface EventLogService {
     content: NoteContent,
     tags?: Set<Tag>,
     refs?: EventRef[],
+  ): Promise<Event>;
+
+  /** 追加普通结构化事件（服务端 / 存储端生成 timestamp） */
+  appendEvent(
+    event: EventLogAppendInput,
   ): Promise<Event>;
 
   /** 追加原始事件数据（保留外部时间戳 / 标签 / 元数据） */
@@ -142,9 +149,8 @@ export class EventLogServiceImpl implements EventLogService {
     tags?: Set<Tag>,
     refs?: EventRef[],
   ): Promise<Event> {
-    const eventData: EventData = {
+    const eventData: EventLogAppendInput = {
       id: createUuidV4(),
-      timestamp: Date.now(),
       content,
       tags: tags ? Array.from(tags) : [NOTE_TAG],
       metadata: {
@@ -162,8 +168,16 @@ export class EventLogServiceImpl implements EventLogService {
     return event;
   }
 
-  async appendEventData(eventData: EventData): Promise<Event> {
+  async appendEvent(eventData: EventLogAppendInput): Promise<Event> {
     const persisted = await this.port.appendEvent(eventData);
+    const event = this.deserializeEvent(persisted);
+    this.listeners.forEach((cb) => cb(event));
+
+    return event;
+  }
+
+  async appendEventData(eventData: EventData): Promise<Event> {
+    const persisted = await this.port.appendRawEvent(eventData);
     const event = this.deserializeEvent(persisted);
     this.listeners.forEach((cb) => cb(event));
 
@@ -180,6 +194,12 @@ export class EventLogServiceImpl implements EventLogService {
     json: string,
     strategy: ImportStrategy,
   ): Promise<ImportEventsResult> {
+    if (typeof this.port.importEventsFromJson === "function") {
+      const result = await this.port.importEventsFromJson(json, strategy);
+      this.notifyExternalChange();
+      return result;
+    }
+
     const payload = parseTransferPayload(json);
     const incoming = mergeEventsById([], payload.events);
     const existing = await this.readEventData();
@@ -265,7 +285,7 @@ export class EventLogServiceImpl implements EventLogService {
 
     const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
     for (const event of sorted) {
-      await this.port.appendEvent(event);
+      await this.port.appendRawEvent(event);
     }
   }
 }

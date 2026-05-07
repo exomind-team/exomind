@@ -1,5 +1,5 @@
 use super::{ToolDef, ToolError, ToolFn};
-use crate::eventlog::EventLogStore;
+use crate::eventlog::{EventListFilter, EventLogStore};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -34,10 +34,14 @@ pub fn get_recent_events_tool(
                 .clamp(1, 100) as usize;
 
             let events = store
-                .list_events(bound_user_id.as_deref())
+                .list_events_filtered(
+                    bound_user_id.as_deref(),
+                    &EventListFilter {
+                        limit: Some(limit),
+                        ..Default::default()
+                    },
+                )
                 .map_err(ToolError::ExecutionFailed)?;
-
-            let events = events.into_iter().take(limit).collect::<Vec<_>>();
             if events.is_empty() {
                 return Ok("（暂无事件记录）".to_string());
             }

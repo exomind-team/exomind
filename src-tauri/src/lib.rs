@@ -15,8 +15,8 @@ use commands::doubao_realtime_commands::{
     doubao_realtime_session_start, DoubaoRealtimeSessionState,
 };
 use commands::eventlog_commands::{
-    eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
-    eventlog_rebuild_markdown,
+    eventlog_append, eventlog_append_raw, eventlog_clear, eventlog_get, eventlog_list,
+    eventlog_mirror_status, eventlog_rebuild_markdown,
 };
 use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
@@ -489,6 +489,7 @@ pub fn run() {
             get_device_id,
             eventlog_list,
             eventlog_append,
+            eventlog_append_raw,
             eventlog_get,
             eventlog_clear,
             eventlog_mirror_status,

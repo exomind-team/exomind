@@ -1,5 +1,6 @@
 import type { EventData } from '../types/event';
 import type {
+  EventLogAppendInput,
   EventLogListOptions,
   EventLogListResult,
   IEventLogPort,
@@ -66,7 +67,7 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
     }
   }
 
-  async appendEvent(event: EventData): Promise<EventData> {
+  async appendEvent(event: EventLogAppendInput): Promise<EventData> {
     const invoke = await getTauriInvoke();
     if (!invoke) {
       return this.fallback.appendEvent(event);
@@ -74,11 +75,25 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
 
     const userId = this.resolveUserId();
     try {
-      await invoke<void>('eventlog_append', { userId, event });
-      return event;
+      return await invoke<EventData>('eventlog_append', { userId, event });
     } catch (error) {
       log.warn(`[TauriEventLogStorageAdapter] eventlog_append failed, fallback to web storage: ${error instanceof Error ? error.message : String(error)}`);
       return this.fallback.appendEvent(event);
+    }
+  }
+
+  async appendRawEvent(event: EventData): Promise<EventData> {
+    const invoke = await getTauriInvoke();
+    if (!invoke) {
+      return this.fallback.appendRawEvent(event);
+    }
+
+    const userId = this.resolveUserId();
+    try {
+      return await invoke<EventData>('eventlog_append_raw', { userId, event });
+    } catch (error) {
+      log.warn(`[TauriEventLogStorageAdapter] eventlog_append_raw failed, fallback to web storage: ${error instanceof Error ? error.message : String(error)}`);
+      return this.fallback.appendRawEvent(event);
     }
   }
 

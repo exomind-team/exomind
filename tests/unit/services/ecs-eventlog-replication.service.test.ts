@@ -8,6 +8,7 @@ const replicationMocks = vi.hoisted(() => ({
   getEventStorageMock: vi.fn(),
   getEventlogBackendModeMock: vi.fn(),
   runtimeModeMock: vi.fn(),
+  appendEventMock: vi.fn(),
   appendEventDataMock: vi.fn(),
   getEventPortMock: vi.fn(),
   getSelectedRuntimeTargetMock: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('@/lib/storage/event-storage', async () => {
 
 vi.mock('@/lib/services/eventlog.service', () => ({
   getEventLogService: () => ({
+    appendEvent: replicationMocks.appendEventMock,
     appendEventData: replicationMocks.appendEventDataMock,
   }),
 }));
@@ -95,12 +97,21 @@ describe('ecs-eventlog-replication.service', () => {
     replicationMocks.addEventStorageMock.mockReset().mockResolvedValue(undefined);
     replicationMocks.projectReplicatedEventMock.mockReset().mockResolvedValue('inserted');
     replicationMocks.getEventPortMock.mockReset().mockResolvedValue(null);
+    replicationMocks.appendEventMock.mockReset().mockResolvedValue({
+      id: sampleEvent.id,
+      timestamp: Date.parse(sampleEvent.createdAt),
+      content: sampleEvent.content,
+      tags: new Set(['note']),
+      metadata: sampleEvent.metadata,
+      refs: [],
+    });
     replicationMocks.appendEventDataMock.mockReset().mockResolvedValue({
       id: sampleEvent.id,
       timestamp: Date.parse(sampleEvent.createdAt),
       content: sampleEvent.content,
       tags: new Set(['note']),
       metadata: sampleEvent.metadata,
+      refs: [],
     });
     replicationMocks.getEventStorageMock.mockReset().mockReturnValue({
       addEvent: replicationMocks.addEventStorageMock,
@@ -199,9 +210,8 @@ describe('ecs-eventlog-replication.service', () => {
     });
 
     expect(replicationMocks.addEventStorageMock).not.toHaveBeenCalled();
-    expect(replicationMocks.appendEventDataMock).toHaveBeenCalledWith({
+    expect(replicationMocks.appendEventMock).toHaveBeenCalledWith({
       id: 'evt-block-start',
-      timestamp: Date.parse('2026-03-12T08:00:00.000Z'),
       content: 'Focus started',
       tags: ['block_start'],
       metadata: {
@@ -213,6 +223,7 @@ describe('ecs-eventlog-replication.service', () => {
         },
       },
     });
+    expect(replicationMocks.appendEventDataMock).not.toHaveBeenCalled();
   });
 
   it('appends to RT eventlog in web runtime when backend is rt-sqlite', async () => {
@@ -227,13 +238,13 @@ describe('ecs-eventlog-replication.service', () => {
     });
 
     expect(replicationMocks.addEventStorageMock).not.toHaveBeenCalled();
-    expect(replicationMocks.appendEventDataMock).toHaveBeenCalledWith({
+    expect(replicationMocks.appendEventMock).toHaveBeenCalledWith({
       id: 'evt-web-rt-001',
-      timestamp: Date.parse('2026-03-26T10:00:00.000Z'),
       content: 'web runtime rt append',
       tags: ['task_created'],
       metadata: undefined,
     });
+    expect(replicationMocks.appendEventDataMock).not.toHaveBeenCalled();
   });
 
   it('projects replicated payload into RT eventlog in web runtime when backend is rt-sqlite', async () => {

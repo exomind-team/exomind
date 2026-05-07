@@ -4,6 +4,8 @@ import {
   type RuntimeTarget,
 } from "@/config/runtime-target";
 import type {
+  EventLogAppendInput,
+  EventLogImportResult,
   EventLogListOptions,
   EventLogListResult,
   EventLogListSemantics,
@@ -28,7 +30,6 @@ interface RuntimeEventPayload {
 
 interface RuntimeAppendEventPayload {
   id: string;
-  timestamp: number;
   content: string;
   tags: string[];
   metadata?: Record<string, unknown>;
@@ -103,11 +104,10 @@ export class EventLogRtAdapter implements IEventLogPort {
     };
   }
 
-  async appendEvent(event: EventData): Promise<EventData> {
+  async appendEvent(event: EventLogAppendInput): Promise<EventData> {
     const target = this.resolveTarget();
     const payload: RuntimeAppendEventPayload = {
       id: event.id,
-      timestamp: event.timestamp,
       content: event.content,
       tags: event.tags,
       ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
@@ -127,6 +127,47 @@ export class EventLogRtAdapter implements IEventLogPort {
       throw new Error(`RT eventlog append failed: ${response.status}`);
     }
     return toEventData((await response.json()) as RuntimeEventPayload);
+  }
+
+  async appendRawEvent(event: EventData): Promise<EventData> {
+    const result = await this.importEventsFromJson(
+      JSON.stringify({
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        events: [event],
+      }),
+      "merge",
+    );
+    if (result.total < 1) {
+      throw new Error("RT eventlog raw append failed: import did not persist event");
+    }
+    const persisted = await this.getEvent(event.id);
+    if (!persisted) {
+      throw new Error(`RT eventlog raw append failed: missing persisted event ${event.id}`);
+    }
+    return persisted;
+  }
+
+  async importEventsFromJson(
+    json: string,
+    strategy: "merge" | "overwrite",
+  ): Promise<EventLogImportResult> {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(
+      this.url(`/eventlog/import/json?strategy=${strategy}`, target),
+      {
+        method: "POST",
+        headers: buildRuntimeAuthHeaders(target, {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        }),
+        body: json,
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`RT eventlog import failed: ${response.status}`);
+    }
+    return (await response.json()) as EventLogImportResult;
   }
 
   async getEvent(id: string): Promise<EventData | null> {
