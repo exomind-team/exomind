@@ -6,7 +6,10 @@
  */
 
 import type { ICursorPort, CursorEvent, CursorStatus } from '@/environment/interfaces/cursor.port';
-import type { IEventLogPort } from '@/lib/environment/interfaces/eventlog.port';
+import type {
+  EventLogAppendInput,
+  IEventLogPort,
+} from '@/lib/environment/interfaces/eventlog.port';
 import type { EventData } from '@/lib/types/event';
 
 interface CursorAgentServiceConfig {
@@ -104,9 +107,8 @@ export class CursorAgentService {
   private async logEvent(event: CursorEvent): Promise<void> {
     if (!this.eventLogPort) return;
 
-    const eventData: EventData = {
+    const eventData: EventLogAppendInput = {
       id: crypto.randomUUID(),
-      timestamp: Date.now(),
       content: JSON.stringify(event),
       tags: [event.type],
       metadata: {

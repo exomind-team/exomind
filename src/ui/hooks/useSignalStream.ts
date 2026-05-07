@@ -299,17 +299,12 @@ export function useSignalStream(): void {
           return;
         }
 
-        const timestamp = Number.isFinite(payload.ts) && payload.ts > 0
-          ? payload.ts
-          : Date.now();
-
-        await getEventLogService().appendEventData({
+        await getEventLogService().appendEvent({
           id: buildSignalEventLogId({
             ...payload,
             text: content,
-            ts: timestamp,
+            ts: Number.isFinite(payload.ts) && payload.ts > 0 ? payload.ts : Date.now(),
           }),
-          timestamp,
           content,
           tags: [isGlobalShortcutVoice ? 'voice' : 'note'],
           metadata: {

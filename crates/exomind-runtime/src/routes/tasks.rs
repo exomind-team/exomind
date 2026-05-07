@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 use crate::AppState;
+use crate::eventlog::EventListFilter;
 use crate::auth::AuthenticatedPeerIdentity;
 use crate::signal::types::SignalEvent;
 use crate::task::store::{
@@ -752,17 +753,20 @@ fn ensure_legacy_task_status_history_repaired(state: &AppState, scope_key: Optio
         return;
     }
 
-    let tasks = state.task_store.list_scoped(scope_key);
-    let candidates = tasks
-        .into_iter()
-        .filter(|task| task.status_transitions.is_empty())
-        .collect::<Vec<_>>();
+    let candidates = state.task_store.list_scoped_empty_transitions(scope_key);
 
     let mut can_mark_complete = true;
     let mut repaired_count = 0usize;
 
     if !candidates.is_empty() {
-        let mut events = match state.eventlog_store.list_events(scope_key) {
+        let candidate_ids: Vec<String> = candidates.iter().map(|t| t.id.clone()).collect();
+        let mut events = match state.eventlog_store.list_events_filtered(
+            scope_key,
+            &EventListFilter {
+                task_ids: candidate_ids,
+                ..Default::default()
+            },
+        ) {
             Ok(events) => events,
             Err(error) => {
                 tracing::warn!(

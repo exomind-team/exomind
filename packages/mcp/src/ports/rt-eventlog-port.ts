@@ -1,4 +1,7 @@
-import type { IEventLogPort } from '../../../../src/lib/environment/interfaces/eventlog.port';
+import type {
+  EventLogAppendInput,
+  IEventLogPort,
+} from '../../../../src/lib/environment/interfaces/eventlog.port';
 import type { EventData } from '../../../../src/lib/types/event';
 
 /**
@@ -38,7 +41,7 @@ export class RtEventLogPort implements IEventLogPort {
     return res.json();
   }
 
-  async appendEvent(event: EventData): Promise<void> {
+  async appendEvent(event: EventLogAppendInput): Promise<EventData> {
     const res = await fetch(
       `${this.baseUrl}/eventlog?user_id=${encodeURIComponent(this.userId)}`,
       {
@@ -52,6 +55,33 @@ export class RtEventLogPort implements IEventLogPort {
         `Failed to append event: ${res.status} ${res.statusText}`,
       );
     }
+    return res.json();
+  }
+
+  async appendRawEvent(event: EventData): Promise<EventData> {
+    const payload = JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      events: [event],
+    });
+    const res = await fetch(
+      `${this.baseUrl}/eventlog/import/json?user_id=${encodeURIComponent(this.userId)}&strategy=merge`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+        body: payload,
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to append raw event: ${res.status} ${res.statusText}`,
+      );
+    }
+    const persisted = await this.getEvent(event.id);
+    if (!persisted) {
+      throw new Error(`Failed to reload raw event: ${event.id}`);
+    }
+    return persisted;
   }
 
   async getEvent(id: string): Promise<EventData | null> {

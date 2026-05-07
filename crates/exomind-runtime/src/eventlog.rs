@@ -4,7 +4,7 @@
 //! JSON format, but no Tauri dependency.  Uses a plain `data_dir: PathBuf`
 //! instead of `AppHandle`.
 
-use chrono::{TimeZone, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,10 +17,7 @@ use crate::config::types::USER_CONFIG_SCOPE;
 use crate::eventlog_sqlite::SqliteEventLogStore;
 
 const EVENTLOG_DIR_NAME: &str = "eventlog";
-const MIRROR_HEADER: &str = "# EventLog Mirror\n\n";
 pub const PERF_LOGGING_ENABLED_CONFIG_KEY: &str = "exomind:perfLoggingEnabled";
-pub const EVENTLOG_MARKDOWN_MIRROR_ENABLED_CONFIG_KEY: &str =
-    "exomind:eventlogMarkdownMirrorEnabled";
 
 // ── Public types ────────────────────────────────────────────────
 
@@ -52,16 +49,8 @@ pub struct EventListFilter {
     pub until_timestamp: Option<i64>,
     pub tags: Vec<String>,
     pub limit: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MirrorStatus {
-    pub mirror_file_path: String,
-    pub checkpoint_event_id: Option<String>,
-    pub total_events: usize,
-    pub mirrored_events: usize,
-    pub needs_rebuild: bool,
+    /// Filter events whose metadata contains any of these task_ids.
+    pub task_ids: Vec<String>,
 }
 
 // ── Internal types ──────────────────────────────────────────────
@@ -75,7 +64,6 @@ struct MirrorCheckpoint {
 
 struct EventLogPaths {
     events: PathBuf,
-    mirror: PathBuf,
     checkpoint: PathBuf,
 }
 
@@ -140,21 +128,6 @@ impl EventLogStore {
     fn notify_watchers(&self, user_id: Option<&str>) {
         if let Some(tx) = self.watch_tx.lock().unwrap().as_ref() {
             let _ = tx.send(sanitize_user_id(user_id));
-        }
-    }
-
-    fn is_markdown_mirror_enabled(&self) -> bool {
-        let Some(config_store) = self.config_store.lock().unwrap().clone() else {
-            return false;
-        };
-
-        match config_store.get(
-            USER_CONFIG_SCOPE,
-            EVENTLOG_MARKDOWN_MIRROR_ENABLED_CONFIG_KEY,
-        ) {
-            Ok(Some(entry)) => normalize_markdown_mirror_enabled(Some(entry.value.as_str())),
-            Ok(None) => false,
-            Err(_) => false,
         }
     }
 
@@ -272,21 +245,12 @@ impl EventLogStore {
 
                 sort_events_desc(&mut events);
                 write_events(&paths.events, &events)?;
-                if self.is_markdown_mirror_enabled() {
-                    sync_markdown_mirror(&paths, &events)
-                } else {
-                    write_checkpoint(&paths.checkpoint, latest_event_id(&events))
-                }
+                write_checkpoint(&paths.checkpoint, latest_event_id(&events))
             }
             EventLogBackend::Sqlite(store) => {
                 let paths = self.resolve_paths(user_id)?;
                 store.append_event(&normalized_user, &event)?;
-                if self.is_markdown_mirror_enabled() {
-                    let events = store.list_events(&normalized_user)?;
-                    sync_markdown_mirror(&paths, &events)
-                } else {
-                    write_checkpoint(&paths.checkpoint, Some(event.id.clone()))
-                }
+                write_checkpoint(&paths.checkpoint, Some(event.id.clone()))
             }
         };
         if result.is_ok() {
@@ -317,20 +281,12 @@ impl EventLogStore {
             EventLogBackend::JsonFiles => {
                 let paths = self.resolve_paths(user_id)?;
                 write_events(&paths.events, &[])?;
-                if self.is_markdown_mirror_enabled() {
-                    sync_markdown_mirror(&paths, &[])
-                } else {
-                    write_checkpoint(&paths.checkpoint, None)
-                }
+                write_checkpoint(&paths.checkpoint, None)
             }
             EventLogBackend::Sqlite(store) => {
                 let paths = self.resolve_paths(user_id)?;
                 store.clear_events(&normalized_user)?;
-                if self.is_markdown_mirror_enabled() {
-                    sync_markdown_mirror(&paths, &[])
-                } else {
-                    write_checkpoint(&paths.checkpoint, None)
-                }
+                write_checkpoint(&paths.checkpoint, None)
             }
         };
         if result.is_ok() {
@@ -339,40 +295,9 @@ impl EventLogStore {
         result
     }
 
-    pub fn mirror_status(&self, user_id: Option<&str>) -> Result<MirrorStatus, String> {
-        let paths = self.resolve_paths(user_id)?;
-        let events = self.list_events(user_id)?;
-        let checkpoint = read_checkpoint(&paths.checkpoint)?;
-        let checkpoint_event_id = checkpoint.and_then(|v| v.last_event_id);
-        let mirrored_events = count_mirrored_events(&paths.mirror)?;
-        let latest = latest_event_id(&events);
-
-        let needs_rebuild = if events.is_empty() {
-            mirrored_events != 0 || checkpoint_event_id.is_some()
-        } else {
-            checkpoint_event_id.clone() != latest || mirrored_events < events.len()
-        };
-
-        Ok(MirrorStatus {
-            mirror_file_path: paths.mirror.to_string_lossy().to_string(),
-            checkpoint_event_id,
-            total_events: events.len(),
-            mirrored_events,
-            needs_rebuild,
-        })
-    }
-
     pub fn current_revision(&self, user_id: Option<&str>) -> Result<Option<i64>, String> {
         let paths = self.resolve_paths(user_id)?;
         Ok(read_checkpoint(&paths.checkpoint)?.map(|checkpoint| checkpoint.updated_at_ms))
-    }
-
-    pub fn rebuild_markdown(&self, user_id: Option<&str>) -> Result<MirrorStatus, String> {
-        let paths = self.resolve_paths(user_id)?;
-        let events = self.list_events(user_id)?;
-        sync_markdown_mirror(&paths, &events)?;
-        // Re-compute status after rebuild.
-        self.mirror_status(user_id)
     }
 
     pub fn replace_all_events(
@@ -387,21 +312,12 @@ impl EventLogStore {
                 let mut ordered = events.to_vec();
                 sort_events_desc(&mut ordered);
                 write_events(&paths.events, &ordered)?;
-                if self.is_markdown_mirror_enabled() {
-                    sync_markdown_mirror(&paths, &ordered)
-                } else {
-                    write_checkpoint(&paths.checkpoint, latest_event_id(&ordered))
-                }
+                write_checkpoint(&paths.checkpoint, latest_event_id(&ordered))
             }
             EventLogBackend::Sqlite(store) => {
                 let paths = self.resolve_paths(user_id)?;
                 store.replace_all(&normalized_user, events)?;
-                if self.is_markdown_mirror_enabled() {
-                    let current = store.list_events(&normalized_user)?;
-                    sync_markdown_mirror(&paths, &current)
-                } else {
-                    write_checkpoint(&paths.checkpoint, latest_event_id(events))
-                }
+                write_checkpoint(&paths.checkpoint, latest_event_id(events))
             }
         };
         if result.is_ok() {
@@ -444,7 +360,6 @@ impl EventLogStore {
 
         Ok(EventLogPaths {
             events: eventlog_dir.join(format!("{normalized_user}.json")),
-            mirror: eventlog_dir.join(format!("{normalized_user}.md")),
             checkpoint: eventlog_dir.join(format!("{normalized_user}.checkpoint.json")),
         })
     }
@@ -518,6 +433,16 @@ fn apply_event_filters(events: &mut Vec<EventRecord>, filter: &EventListFilter) 
 
     if let Some(limit) = filter.limit {
         events.truncate(limit);
+    }
+
+    if !filter.task_ids.is_empty() {
+        let ids: std::collections::HashSet<_> = filter.task_ids.iter().map(|s| s.as_str()).collect();
+        events.retain(|event| {
+            event.metadata.as_ref()
+                .and_then(|m| m.get("taskId").or_else(|| m.get("task_id")))
+                .and_then(|v| v.as_str())
+                .map_or(false, |s| ids.contains(s))
+        });
     }
 }
 
@@ -614,14 +539,6 @@ fn sort_events_desc(events: &mut [EventRecord]) {
     });
 }
 
-fn sort_events_asc(events: &mut [EventRecord]) {
-    events.sort_by(|left, right| {
-        left.timestamp
-            .cmp(&right.timestamp)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-}
-
 fn latest_event_id(events: &[EventRecord]) -> Option<String> {
     events
         .iter()
@@ -631,61 +548,6 @@ fn latest_event_id(events: &[EventRecord]) -> Option<String> {
                 .then_with(|| left.id.cmp(&right.id))
         })
         .map(|event| event.id.clone())
-}
-
-fn normalize_markdown_mirror_enabled(raw_value: Option<&str>) -> bool {
-    matches!(raw_value.map(str::trim), Some("true"))
-}
-
-fn format_event_time_iso(timestamp: i64) -> String {
-    Utc.timestamp_millis_opt(timestamp)
-        .single()
-        .unwrap_or_else(Utc::now)
-        .to_rfc3339()
-}
-
-fn format_event_markdown(event: &EventRecord) -> String {
-    let tags = serde_json::to_string(&event.tags).unwrap_or_else(|_| "[]".to_string());
-    format!(
-        "---\nevent_id: {}\nevent_time_ms: {}\nevent_time_iso: {}\ntags: {}\n---\n{}\n\n",
-        event.id,
-        event.timestamp,
-        format_event_time_iso(event.timestamp),
-        tags,
-        event.content
-    )
-}
-
-fn rebuild_markdown_file(paths: &EventLogPaths, events: &[EventRecord]) -> Result<(), String> {
-    let mut ordered = events.to_vec();
-    sort_events_asc(&mut ordered);
-
-    let mut markdown = String::from(MIRROR_HEADER);
-    for event in &ordered {
-        markdown.push_str(&format_event_markdown(event));
-    }
-
-    fs::write(&paths.mirror, markdown)
-        .map_err(|err| format!("failed to write markdown mirror: {err}"))?;
-    let checkpoint_event = ordered.last().map(|event| event.id.clone());
-    write_checkpoint(&paths.checkpoint, checkpoint_event)
-}
-
-fn sync_markdown_mirror(paths: &EventLogPaths, events: &[EventRecord]) -> Result<(), String> {
-    rebuild_markdown_file(paths, events)
-}
-
-fn count_mirrored_events(path: &Path) -> Result<usize, String> {
-    if !path.exists() {
-        return Ok(0);
-    }
-
-    let raw =
-        fs::read_to_string(path).map_err(|err| format!("failed to read markdown mirror: {err}"))?;
-    Ok(raw
-        .lines()
-        .filter(|line| line.trim_start().starts_with("event_id: "))
-        .count())
 }
 
 // ── Unit tests ──────────────────────────────────────────────────
@@ -727,6 +589,7 @@ mod tests {
             until_timestamp: Some(1_700_000_000_999),
             tags: vec!["note".to_string()],
             limit: None,
+            task_ids: vec![],
         };
 
         let fallback = build_fallback_snapshot_filter(&filter, Some(2));
@@ -943,110 +806,6 @@ mod tests {
         let events = store.list_events(None).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].content, "updated");
-    }
-
-    #[test]
-    fn mirror_status_and_rebuild() {
-        let dir = tempdir().unwrap();
-        let store = EventLogStore::new(dir.path().to_path_buf());
-
-        store
-            .append_event(
-                None,
-                EventRecord {
-                    id: "m1".to_string(),
-                    timestamp: 1000,
-                    content: "mirror test".to_string(),
-                    tags: vec!["note".to_string()],
-                    refs: Vec::new(),
-                    metadata: None,
-                },
-            )
-            .unwrap();
-
-        let status = store.mirror_status(None).unwrap();
-        assert_eq!(status.total_events, 1);
-        assert!(status.needs_rebuild);
-
-        let rebuilt = store.rebuild_markdown(None).unwrap();
-        assert_eq!(rebuilt.total_events, 1);
-        assert!(!rebuilt.needs_rebuild);
-    }
-
-    #[test]
-    fn sqlite_append_skips_automatic_markdown_sync_by_default() {
-        let dir = tempdir().unwrap();
-        let sqlite_path = dir.path().join("eventlog.sqlite");
-        let store =
-            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
-
-        store
-            .append_event(
-                None,
-                EventRecord {
-                    id: "sql-default-no-mirror".to_string(),
-                    timestamp: 1700000000000,
-                    content: "persist without mirror by default".to_string(),
-                    tags: vec!["note".to_string()],
-                    refs: Vec::new(),
-                    metadata: None,
-                },
-            )
-            .unwrap();
-
-        let paths = store.resolve_paths(None).unwrap();
-        assert!(!paths.mirror.exists());
-        assert_eq!(store.list_events(None).unwrap().len(), 1);
-        let status = store.mirror_status(None).unwrap();
-        assert!(status.needs_rebuild);
-        assert_eq!(status.mirrored_events, 0);
-    }
-
-    #[test]
-    fn sqlite_append_skips_automatic_markdown_sync_when_disabled() {
-        let dir = tempdir().unwrap();
-        let sqlite_path = dir.path().join("eventlog.sqlite");
-        let store =
-            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
-        let config_store = Arc::new(ConfigStore::new());
-        config_store
-            .put(PutConfigEntryInput {
-                scope: USER_CONFIG_SCOPE.to_string(),
-                key: EVENTLOG_MARKDOWN_MIRROR_ENABLED_CONFIG_KEY.to_string(),
-                value: "false".to_string(),
-                sensitive: false,
-                source: Some("test".to_string()),
-                source_origin: None,
-            })
-            .unwrap();
-        store.set_config_store(Arc::clone(&config_store));
-
-        store
-            .append_event(
-                None,
-                EventRecord {
-                    id: "sql-no-mirror".to_string(),
-                    timestamp: 1700000000000,
-                    content: "persist without mirror".to_string(),
-                    tags: vec!["note".to_string()],
-                    refs: Vec::new(),
-                    metadata: None,
-                },
-            )
-            .unwrap();
-
-        let paths = store.resolve_paths(None).unwrap();
-        assert!(!paths.mirror.exists());
-        assert_eq!(store.list_events(None).unwrap().len(), 1);
-
-        let status = store.mirror_status(None).unwrap();
-        assert_eq!(status.total_events, 1);
-        assert!(status.needs_rebuild);
-        assert_eq!(status.mirrored_events, 0);
-
-        let rebuilt = store.rebuild_markdown(None).unwrap();
-        assert!(paths.mirror.exists());
-        assert!(!rebuilt.needs_rebuild);
     }
 
     #[test]

@@ -55,6 +55,7 @@ async fn eventlog_add_posts_to_scoped_rt_endpoint() {
     );
     assert_eq!(latest.body["content"], "补记今天的口述");
     assert_eq!(latest.body["tags"], json!(["note", "voice"]));
+    assert!(latest.body.get("timestamp").is_none());
 }
 
 #[tokio::test]
@@ -172,7 +173,7 @@ async fn add_handler(
 
     Json(json!({
         "id": "evt-from-rt",
-        "timestamp": body["timestamp"],
+        "timestamp": 1700000001234_i64,
         "content": body["content"],
         "tags": body["tags"],
     }))

@@ -117,6 +117,28 @@ impl SqliteTaskStore {
             .map_err(TaskStoreError::from)
     }
 
+    /// List tasks where status_transitions is empty.
+    /// Used by legacy repair logic to avoid loading all tasks.
+    pub fn list_scoped_empty_transitions(
+        &self,
+        scope_key: &str,
+    ) -> Result<Vec<Task>, TaskStoreError> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT
+                id, title, description, done_condition, status, priority, tags_json, source,
+                parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
+                created_at, updated_at, completed_at
+             FROM tasks
+             WHERE scope_key = ?1
+               AND json_array_length(status_transitions_json) = 0
+             ORDER BY created_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![normalize_scope_key(scope_key)], map_task_row)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(TaskStoreError::from)
+    }
+
     pub fn list_by_status(&self, status: &TaskStatus) -> Result<Vec<Task>, TaskStoreError> {
         self.list_by_status_scoped(DEFAULT_SCOPE_KEY, status)
     }
