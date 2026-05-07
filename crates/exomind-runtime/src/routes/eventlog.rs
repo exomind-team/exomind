@@ -49,6 +49,10 @@ struct WatchEventsQuery {
 #[derive(Debug, Deserialize)]
 struct AppendEventPayload {
     id: Option<String>,
+    /// Optional client-supplied timestamp (milliseconds since epoch).
+    /// If omitted, the runtime auto-generates one via `Utc::now()`.
+    #[serde(default)]
+    timestamp: Option<i64>,
     content: String,
     #[serde(default)]
     tags: Vec<String>,
@@ -327,7 +331,9 @@ async fn append_event(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let event = EventRecord {
         id: event_id,
-        timestamp: Utc::now().timestamp_millis().max(1),
+        timestamp: payload
+            .timestamp
+            .unwrap_or_else(|| Utc::now().timestamp_millis().max(1)),
         content: payload.content,
         tags: payload.tags,
         refs: payload.refs,
@@ -1459,10 +1465,7 @@ mod tests {
 
         let runtime_id = appended["id"].as_str().unwrap();
         assert_eq!(runtime_id, "client-id");
-        let first_timestamp = appended["timestamp"].as_i64().unwrap();
-        assert_ne!(first_timestamp, 1700000000001);
-
-        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert_eq!(appended["timestamp"].as_i64().unwrap(), 1700000000001);
 
         let updated = append_event_via_api(
             &app,
@@ -1471,15 +1474,13 @@ mod tests {
         )
         .await;
         assert_eq!(updated["id"].as_str().unwrap(), "client-id");
-        let updated_timestamp = updated["timestamp"].as_i64().unwrap();
-        assert_ne!(updated_timestamp, 1700000000002);
-        assert!(updated_timestamp >= first_timestamp);
+        assert_eq!(updated["timestamp"].as_i64().unwrap(), 1700000000002);
 
         let stored = store.list_events(None).unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].id, runtime_id);
         assert_eq!(stored[0].content, "runtime id updated");
-        assert_eq!(stored[0].timestamp, updated_timestamp);
+        assert_eq!(stored[0].timestamp, 1700000000002);
         assert_eq!(stored[0].tags, vec!["voice".to_string()]);
     }
 
