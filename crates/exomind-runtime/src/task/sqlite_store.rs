@@ -84,7 +84,7 @@ impl SqliteTaskStore {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT
-                id, title, description, done_condition, status, priority, tags_json, source,
+                scope_key, id, title, description, done_condition, status, priority, tags_json, source,
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
              FROM tasks
@@ -105,7 +105,7 @@ impl SqliteTaskStore {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT
-                id, title, description, done_condition, status, priority, tags_json, source,
+                scope_key, id, title, description, done_condition, status, priority, tags_json, source,
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
              FROM tasks
@@ -126,7 +126,7 @@ impl SqliteTaskStore {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT
-                id, title, description, done_condition, status, priority, tags_json, source,
+                scope_key, id, title, description, done_condition, status, priority, tags_json, source,
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
              FROM tasks
@@ -151,7 +151,7 @@ impl SqliteTaskStore {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT
-                id, title, description, done_condition, status, priority, tags_json, source,
+                scope_key, id, title, description, done_condition, status, priority, tags_json, source,
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json, status_transitions_json,
                 created_at, updated_at, completed_at
              FROM tasks
@@ -613,12 +613,12 @@ impl SqliteTaskStore {
 }
 
 fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
-    let status: String = row.get(4)?;
-    let priority: String = row.get(5)?;
-    let tags_json: String = row.get(6)?;
-    let depends_on_json: String = row.get(9)?;
-    let time_block_ids_json: String = row.get(12)?;
-    let status_transitions_json: String = row.get(13)?;
+    let status: String = row.get(5)?;
+    let priority: String = row.get(6)?;
+    let tags_json: String = row.get(7)?;
+    let depends_on_json: String = row.get(10)?;
+    let time_block_ids_json: String = row.get(13)?;
+    let status_transitions_json: String = row.get(14)?;
     let tags: Vec<String> = serde_json::from_str(&tags_json).map_err(map_json_error)?;
     let depends_on: Vec<TaskDependency> =
         serde_json::from_str(&depends_on_json).map_err(map_json_error)?;
@@ -628,23 +628,23 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         serde_json::from_str(&status_transitions_json).map_err(map_json_error)?;
 
     let mut task = Task {
-        id: row.get(0)?,
-        title: row.get(1)?,
-        description: row.get(2)?,
-        done_condition: row.get(3)?,
+        id: row.get(1)?,
+        title: row.get(2)?,
+        description: row.get(3)?,
+        done_condition: row.get(4)?,
         status: parse_task_status(&status).map_err(map_task_status_error)?,
         priority: parse_task_priority(&priority).map_err(map_task_priority_error)?,
         tags,
-        source: row.get(7)?,
-        parent_id: row.get(8)?,
+        source: row.get(8)?,
+        parent_id: row.get(9)?,
         depends_on,
-        due_at: row.get(10)?,
-        estimated_minutes: row.get(11)?,
+        due_at: row.get(11)?,
+        estimated_minutes: row.get(12)?,
         time_block_ids,
         status_transitions,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
-        completed_at: row.get(16)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
+        completed_at: row.get(17)?,
     };
     normalize_task_status_history(&mut task);
     Ok(task)
