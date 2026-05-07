@@ -5,7 +5,7 @@ use std::path::Path;
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 
-use super::types::{Task, TaskStatus};
+use super::types::{Task, TaskStatus, TaskStatusTransition, TaskTransitionReason};
 use crate::sqlite_json_bridge::{
     BridgeError, ExtFieldDef, FieldDef, IndexDef, JsonKey, PreservedFieldDef, SchemaRegistry,
     SqliteJsonBridge, TableSchema,
@@ -220,7 +220,19 @@ mod tests {
             due_at: Some(created_at + 500),
             estimated_minutes: Some(45),
             time_block_ids: vec!["block-1".to_string()],
-            status_transitions: vec![],
+            status_transitions: vec![TaskStatusTransition {
+                id: format!("{id}-init"),
+                at: created_at,
+                from_status: None,
+                to_status: TaskStatus::Pending,
+                reason: TaskTransitionReason::TaskCreate,
+                actor_id: None,
+                source_host_id: None,
+                operation_id: None,
+                related_time_block_id: None,
+                related_time_block_transition_ref: None,
+                auto_generated: None,
+            }],
             created_at,
             updated_at: created_at + 1,
             completed_at: status.is_terminal().then_some(created_at + 2),
