@@ -125,28 +125,37 @@ fn task_bridge_registry() -> Result<SchemaRegistry, BridgeError> {
 }
 
 fn task_table_schema() -> TableSchema {
+    // NOTE: Column ordering must match SqliteTaskStore::insert_task exactly,
+    // so that row_to_json positional reads stay aligned with the SQLite table.
+    // SqliteTaskStore creates the table via CREATE TABLE IF NOT EXISTS (store schema).
+    // If SqliteTaskBridgePrototype init runs first, it creates the table with this schema.
     TableSchema::new(TASKS_TABLE)
         .primary_keys(&["scope_key", "id"])
         .expanded_fields(vec![
-            FieldDef::text("scope_key").default_json(json!(DEFAULT_SCOPE_KEY)),
-            FieldDef::text("id"),
-            FieldDef::text("title"),
-            FieldDef::text("description").nullable(),
-            FieldDef::text("done_condition").nullable(),
-            FieldDef::text("status"),
-            FieldDef::text("priority"),
-            FieldDef::text("source").nullable(),
-            FieldDef::text("parent_id").nullable(),
-            FieldDef::integer("due_at").nullable(),
-            FieldDef::integer("estimated_minutes").nullable(),
-            FieldDef::integer("created_at"),
-            FieldDef::integer("updated_at"),
-            FieldDef::integer("completed_at").nullable(),
+            // Positions 0-13: match store's column order (scope_key through completed_at)
+            FieldDef::text("scope_key").default_json(json!(DEFAULT_SCOPE_KEY)), // 0
+            FieldDef::text("id"),                                              // 1
+            FieldDef::text("title"),                                           // 2
+            FieldDef::text("description").nullable(),                           // 3
+            FieldDef::text("done_condition").nullable(),                       // 4
+            FieldDef::text("status"),                                          // 5
+            FieldDef::text("priority"),                                        // 6
+            FieldDef::text("source").nullable(),                               // 7 — matches store's position 8 (after priority)
+            FieldDef::text("parent_id").nullable(),                            // 8 — matches store's position 9
+            // NOTE: tags_json, depends_on_json, time_block_ids_json, status_transitions_json
+            //       are preserved fields (positions 14-17), NOT expanded fields
+            FieldDef::integer("due_at").nullable(),        // 9 — matches store's position 11
+            FieldDef::integer("estimated_minutes").nullable(), // 10 — matches store's position 12
+            FieldDef::integer("created_at"),               // 11 — matches store's position 15
+            FieldDef::integer("updated_at"),               // 12 — matches store's position 16
+            FieldDef::integer("completed_at").nullable(),  // 13 — matches store's position 17
         ])
         .preserved_fields(vec![
-            PreservedFieldDef::json("tags").default_json(json!([])),
-            PreservedFieldDef::json("depends_on").default_json(json!([])),
-            PreservedFieldDef::json("time_block_ids").default_json(json!([])),
+            // Positions 14-17: match store's column order
+            PreservedFieldDef::json("tags").default_json(json!([])),          // 14 → tags_json
+            PreservedFieldDef::json("depends_on").default_json(json!([])),    // 15 → depends_on_json
+            PreservedFieldDef::json("time_block_ids").default_json(json!([])), // 16 → time_block_ids_json
+            PreservedFieldDef::json("status_transitions").default_json(json!([])), // 17 → status_transitions_json
         ])
         .ext_field(ExtFieldDef::new("_ext_json").default_json(json!({})))
         .indexes(vec![
@@ -220,33 +229,108 @@ mod tests {
             due_at: Some(created_at + 500),
             estimated_minutes: Some(45),
             time_block_ids: vec!["block-1".to_string()],
-            status_transitions: vec![TaskStatusTransition {
-                id: format!("{id}-init"),
-                at: created_at,
-                from_status: None,
-                to_status: TaskStatus::Pending,
-                reason: TaskTransitionReason::TaskCreate,
-                actor_id: None,
-                source_host_id: None,
-                operation_id: None,
-                related_time_block_id: None,
-                related_time_block_transition_ref: None,
-                auto_generated: None,
-            }],
+            status_transitions: if status == TaskStatus::Completed {
+                vec![
+                    TaskStatusTransition {
+                        id: format!("{id}-init"),
+                        at: created_at,
+                        from_status: None,
+                        to_status: TaskStatus::Pending,
+                        reason: TaskTransitionReason::TaskCreate,
+                        actor_id: None,
+                        source_host_id: None,
+                        operation_id: None,
+                        related_time_block_id: None,
+                        related_time_block_transition_ref: None,
+                        auto_generated: None,
+                    },
+                    TaskStatusTransition {
+                        id: format!("{id}-progress"),
+                        at: created_at + 1,
+                        from_status: Some(TaskStatus::Pending),
+                        to_status: TaskStatus::InProgress,
+                        reason: TaskTransitionReason::TaskTransition,
+                        actor_id: None,
+                        source_host_id: None,
+                        operation_id: None,
+                        related_time_block_id: None,
+                        related_time_block_transition_ref: None,
+                        auto_generated: None,
+                    },
+                    TaskStatusTransition {
+                        id: format!("{id}-done"),
+                        at: created_at + 2,
+                        from_status: Some(TaskStatus::InProgress),
+                        to_status: TaskStatus::Completed,
+                        reason: TaskTransitionReason::TaskTransition,
+                        actor_id: None,
+                        source_host_id: None,
+                        operation_id: None,
+                        related_time_block_id: None,
+                        related_time_block_transition_ref: None,
+                        auto_generated: None,
+                    },
+                ]
+            } else if status == TaskStatus::InProgress {
+                vec![
+                    TaskStatusTransition {
+                        id: format!("{id}-init"),
+                        at: created_at,
+                        from_status: None,
+                        to_status: TaskStatus::Pending,
+                        reason: TaskTransitionReason::TaskCreate,
+                        actor_id: None,
+                        source_host_id: None,
+                        operation_id: None,
+                        related_time_block_id: None,
+                        related_time_block_transition_ref: None,
+                        auto_generated: None,
+                    },
+                    TaskStatusTransition {
+                        id: format!("{id}-progress"),
+                        at: created_at + 1,
+                        from_status: Some(TaskStatus::Pending),
+                        to_status: TaskStatus::InProgress,
+                        reason: TaskTransitionReason::TaskTransition,
+                        actor_id: None,
+                        source_host_id: None,
+                        operation_id: None,
+                        related_time_block_id: None,
+                        related_time_block_transition_ref: None,
+                        auto_generated: None,
+                    },
+                ]
+            } else {
+                vec![TaskStatusTransition {
+                    id: format!("{id}-init"),
+                    at: created_at,
+                    from_status: None,
+                    to_status: TaskStatus::Pending,
+                    reason: TaskTransitionReason::TaskCreate,
+                    actor_id: None,
+                    source_host_id: None,
+                    operation_id: None,
+                    related_time_block_id: None,
+                    related_time_block_transition_ref: None,
+                    auto_generated: None,
+                }]
+            },
             created_at,
             updated_at: created_at + 1,
             completed_at: status.is_terminal().then_some(created_at + 2),
         }
     }
 
-    fn assert_task_eq(expected: &Task, actual: &Task) {
+    fn assert_task_eq(tag: &str, expected: &Task, actual: &Task) {
         let mut expected = expected.clone();
         let mut actual = actual.clone();
         super::super::store::normalize_task_status_history(&mut expected);
         super::super::store::normalize_task_status_history(&mut actual);
+        let expected_json = serde_json::to_value(&expected).unwrap();
+        let actual_json = serde_json::to_value(&actual).unwrap();
         assert_eq!(
-            serde_json::to_value(actual).unwrap(),
-            serde_json::to_value(expected).unwrap()
+            actual_json, expected_json,
+            "[{tag}] task mismatch",
         );
     }
 
@@ -258,7 +342,7 @@ mod tests {
         prototype.upsert_scoped("alpha", &task).unwrap();
 
         let loaded = prototype.get_scoped("alpha", &task.id).unwrap().unwrap();
-        assert_task_eq(&task, &loaded);
+        assert_task_eq("roundtrip", &task, &loaded);
     }
 
     #[test]
@@ -318,7 +402,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_task_eq(&task, &loaded);
+        assert_task_eq("reopen", &task, &loaded);
     }
 
     #[test]
@@ -333,17 +417,17 @@ mod tests {
         store.upsert_scoped("alpha", &task).unwrap();
 
         let loaded = prototype.get_scoped("alpha", &task.id).unwrap().unwrap();
-        assert_task_eq(&task, &loaded);
+        assert_task_eq("bridge2store-get", &task, &loaded);
 
         let by_status = prototype
             .list_by_status_scoped("alpha", &TaskStatus::InProgress)
             .unwrap();
         assert_eq!(by_status.len(), 1);
-        assert_task_eq(&task, &by_status[0]);
+        assert_task_eq("bridge2store-by-status", &task, &by_status[0]);
 
         let by_tag = prototype.list_by_tag_scoped("alpha", "interop").unwrap();
         assert_eq!(by_tag.len(), 1);
-        assert_task_eq(&task, &by_tag[0]);
+        assert_task_eq("bridge2store-by-tag", &task, &by_tag[0]);
     }
 
     #[test]
@@ -365,7 +449,7 @@ mod tests {
             .unwrap();
 
         let loaded = store.get_scoped("beta", &task.id).unwrap().unwrap();
-        assert_task_eq(&task, &loaded);
+        assert_task_eq("store2bridge-get", &task, &loaded);
 
         let listed = store.list_scoped("beta").unwrap();
         assert_eq!(listed.len(), 2);
@@ -376,7 +460,7 @@ mod tests {
             .list_by_status_scoped("beta", &TaskStatus::Completed)
             .unwrap();
         assert_eq!(completed_only.len(), 1);
-        assert_task_eq(&completed, &completed_only[0]);
+        assert_task_eq("store2bridge-completed", &completed, &completed_only[0]);
         assert!(store.get_scoped("beta", "missing").unwrap().is_none());
     }
 }
