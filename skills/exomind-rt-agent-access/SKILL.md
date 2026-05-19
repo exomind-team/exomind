@@ -28,9 +28,9 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 
 ## 版本与时效性
 
-- 最后更新日期：`2026-04-20`
-- 更新者：`Codex`
-- 更新内容概要：`补充常见 await 自然语言意图到 `/act/await` 参数的映射，覆盖当前时间块完成、任务完成、匿名域监听与 1 小时超时。`
+- 最后更新日期：`2026-05-18`
+- 更新者：`Claude Code`
+- 更新内容概要：`去硬编码：将所有 `http://127.0.0.1:9124` 和 `profile-argon` 替换为 `<RT>` 和 `<PROFILE>` 占位符；新增"设备配置优先"规则，指向 `exomind-monitor` skill 的 `config.json`；禁止凭名字猜测档案`
 - 核验依据：
   - `GET /version` 等 live 版本信息
   - 当前工作区代码与相关路由实现
@@ -148,6 +148,8 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 
 ## 最小 raw fallback 接入三步
 
+> **设备配置优先**：若本机安装了 `exomind-monitor` skill，先从 `~/.claude/skills/exomind-monitor/references/config.json` 读取 `rt.baseUrl` 和 `rt.profile`，不要凭本文示例值猜测端口和档案。本文示例使用 `<RT>` 和 `<PROFILE>` 占位符。
+
 以下示例只适用于当前没有对应 `/act/*` 动作，或你明确需要 raw 直连时。
 
 用户通常会给你两个信息：**RT 地址**和**档案名**。
@@ -155,40 +157,40 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 ### Step 1：确认连接
 
 ```bash
-curl -sS http://<RT地址>:<端口>/health
-curl -sS http://<RT地址>:<端口>/version
+curl -sS http://<RT>/health
+curl -sS http://<RT>/version
 ```
 
 ### Step 2：确认档案作用域
 
 ```bash
-curl -sS "http://<RT地址>:<端口>/profiles"
+curl -sS “http://<RT>/profiles”
 ```
 
-用户给的是显示名，例如 `Argon`，真正用于 raw RT 的 scope 通常是 `profile-argon`。
+返回值中的 `id` 即 raw RT 的 `user_id` 参数（格式通常为 `profile-<slug>`）。**禁止凭名字猜测**，必须以 `/profiles` 实际返回或设备配置文件为准。
 
 ### Step 3：写入后必须回读
 
 ```bash
-curl -sS -X POST "http://<RT地址>:<端口>/eventlog?user_id=profile-argon" \
+curl -sS -X POST “http://<RT>/eventlog?user_id=<PROFILE>” \
   -H 'Content-Type: application/json' \
-  -d '{"timestamp":<毫秒时间戳>,"content":"消息内容","tags":["agent_feedback","note"]}'
+  -d '{“timestamp”:<毫秒时间戳>,”content”:”消息内容”,”tags”:[“agent_feedback”,”note”]}'
 
-curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=1"
+curl -sS “http://<RT>/eventlog?user_id=<PROFILE>&limit=1”
 ```
 
 不要假设写入一定成功。网络中断、格式错误、RT 重启都可能导致丢失。
 
 ## 等待/监听默认走 `/act/await`
 
-如果 Agent 的目标是“等未来条件成立一次后返回”，默认先用 `POST /act/await`，而不是 raw `GET /eventlog/watch`。
+如果 Agent 的目标是”等未来条件成立一次后返回”，默认先用 `POST /act/await`，而不是 raw `GET /eventlog/watch`。
 
 最小例子：
 
 ```bash
-curl -N -X POST "http://<RT地址>:<端口>/act/await?user_id=profile-argon" \
-  -H "Content-Type: application/json" \
-  --data-binary '{"condition":{"type":"next_event"}}'
+curl -N -X POST “http://<RT>/act/await?user_id=<PROFILE>” \
+  -H “Content-Type: application/json” \
+  --data-binary '{“condition”:{“type”:”next_event”}}'
 ```
 
 先记住这几点：
@@ -230,7 +232,7 @@ curl -N -X POST "http://<RT地址>:<端口>/act/await?user_id=profile-argon" \
   - 直接请求 `POST /act/await`
   - **不要传 `user_id`**
 - 如果监听的是具体档案：
-  - 用 `POST /act/await?user_id=profile-argon`
+  - 用 `POST /act/await?user_id=<PROFILE>`（以设备配置或 `/profiles` 返回为准）
 - 如果用户说“等待当前时间块完成”：
   - 先读当前 active block，再把它的 `startId` 放进 `timeblock_ended`
   - 不要偷懒写成不带 `startId` 的 `timeblock_ended`，否则语义会变成“等任意未来时间块完成”
@@ -242,15 +244,15 @@ curl -N -X POST "http://<RT地址>:<端口>/act/await?user_id=profile-argon" \
 两个高频例子：
 
 ```bash
-curl.exe -N -X POST "http://127.0.0.1:9124/act/await" \
+curl.exe -N -X POST "http://<RT>/act/await" \
   -H "Content-Type: application/json" \
   --data-binary "{\"condition\":{\"type\":\"task_completed\"},\"timeoutSecs\":3600}"
 ```
 
 ```bash
-curl.exe -sS "http://127.0.0.1:9124/timeblocks/active?user_id=profile-argon"
+curl.exe -sS "http://<RT>/timeblocks/active?user_id=<PROFILE>"
 # 取出 startId 后：
-curl.exe -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" \
+curl.exe -N -X POST "http://<RT>/act/await?user_id=<PROFILE>" \
   -H "Content-Type: application/json" \
   --data-binary "{\"condition\":{\"type\":\"timeblock_ended\",\"startId\":\"<active-start-id>\"},\"timeoutSecs\":3600}"
 ```
@@ -309,7 +311,7 @@ curl.exe -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" \
 如果只是理解上下文，默认先看：
 
 ```bash
-curl -sS "http://<RT地址>:<端口>/eventlog?user_id=profile-argon&limit=20"
+curl -sS "http://<RT>/eventlog?user_id=<PROFILE>&limit=20"
 ```
 
 识别消息来源时，优先看结构化字段：
