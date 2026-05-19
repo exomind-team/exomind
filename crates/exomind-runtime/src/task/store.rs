@@ -767,6 +767,21 @@ impl TaskStore {
         self.list_scoped(scope_key)
     }
 
+    /// List tasks where status_transitions is empty.
+    pub fn list_scoped_empty_transitions(&self, scope_key: Option<&str>) -> Vec<Task> {
+        match &self.backend {
+            TaskStoreBackend::Memory(_) => self
+                .memory_scope(scope_key)
+                .values()
+                .filter(|t| t.status_transitions.is_empty())
+                .cloned()
+                .collect(),
+            TaskStoreBackend::Sqlite(store) => store
+                .list_scoped_empty_transitions(&normalize_scope_key(scope_key))
+                .expect("sqlite task list should succeed"),
+        }
+    }
+
     pub fn list_by_status(&self, status: &TaskStatus) -> Vec<Task> {
         self.list_by_status_scoped(None, status)
     }

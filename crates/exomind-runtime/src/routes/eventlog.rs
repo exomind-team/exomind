@@ -49,7 +49,10 @@ struct WatchEventsQuery {
 #[derive(Debug, Deserialize)]
 struct AppendEventPayload {
     id: Option<String>,
-    timestamp: i64,
+    /// Optional client-supplied timestamp (milliseconds since epoch).
+    /// If omitted, the runtime auto-generates one via `Utc::now()`.
+    #[serde(default)]
+    timestamp: Option<i64>,
     content: String,
     #[serde(default)]
     tags: Vec<String>,
@@ -150,6 +153,7 @@ fn build_event_list_filter(
         until_timestamp,
         tags: parse_tag_filter(tags),
         limit,
+        task_ids: vec![],
     }
 }
 
@@ -327,7 +331,9 @@ async fn append_event(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let event = EventRecord {
         id: event_id,
-        timestamp: payload.timestamp,
+        timestamp: payload
+            .timestamp
+            .unwrap_or_else(|| Utc::now().timestamp_millis().max(1)),
         content: payload.content,
         tags: payload.tags,
         refs: payload.refs,
@@ -609,7 +615,6 @@ fn apply_event_import(
     incoming: Vec<EventRecord>,
     strategy: EventLogImportStrategy,
 ) -> Result<EventLogImportOutcome, String> {
-    let existing = state.eventlog_store.list_events(user_id)?;
     let outcome = match strategy {
         EventLogImportStrategy::Overwrite => {
             state
@@ -624,6 +629,8 @@ fn apply_event_import(
             }
         }
         EventLogImportStrategy::Merge => {
+            // Only load existing events for Merge (not for Overwrite).
+            let existing = state.eventlog_store.list_events(user_id)?;
             let mut merged = std::collections::BTreeMap::new();
             for event in &existing {
                 merged.insert(event.id.clone(), event.clone());
@@ -1458,6 +1465,7 @@ mod tests {
 
         let runtime_id = appended["id"].as_str().unwrap();
         assert_eq!(runtime_id, "client-id");
+        assert_eq!(appended["timestamp"].as_i64().unwrap(), 1700000000001);
 
         let updated = append_event_via_api(
             &app,
@@ -1466,6 +1474,7 @@ mod tests {
         )
         .await;
         assert_eq!(updated["id"].as_str().unwrap(), "client-id");
+        assert_eq!(updated["timestamp"].as_i64().unwrap(), 1700000000002);
 
         let stored = store.list_events(None).unwrap();
         assert_eq!(stored.len(), 1);
@@ -1508,6 +1517,7 @@ mod tests {
         );
 
         let replication = replication.unwrap();
+        let appended_timestamp = appended["timestamp"].as_i64().unwrap();
         assert_eq!(replication.source, "runtime:eventlog");
         let expected_trace_id = format!("eventlog:{appended_id}");
         assert_eq!(
@@ -1517,7 +1527,7 @@ mod tests {
         assert_eq!(replication.payload["schemaVersion"], serde_json::json!(1));
         assert_eq!(
             replication.payload["replicationSeq"],
-            serde_json::json!(1700000000000i64)
+            serde_json::json!(appended_timestamp)
         );
         assert_eq!(
             replication.payload["cursor"]["kind"],
@@ -1525,7 +1535,7 @@ mod tests {
         );
         assert_eq!(
             replication.payload["cursor"]["value"],
-            serde_json::json!(1700000000000i64)
+            serde_json::json!(appended_timestamp)
         );
         assert_eq!(
             replication.payload["event"]["id"],
@@ -1535,17 +1545,17 @@ mod tests {
             replication.payload["event"]["content"],
             serde_json::json!("hello replication")
         );
-        assert_eq!(
-            replication.payload["event"]["createdAt"],
-            serde_json::json!("2023-11-14T22:13:20+00:00")
-        );
+        let created_at = replication.payload["event"]["createdAt"]
+            .as_str()
+            .expect("replication payload should include createdAt");
+        assert_eq!(eventlog_created_at(appended_timestamp), created_at);
         assert_eq!(
             replication.payload["event"]["type"],
             serde_json::json!("note")
         );
         assert_eq!(
             replication.payload["event"]["replicationSeq"],
-            serde_json::json!(1700000000000i64)
+            serde_json::json!(appended_timestamp)
         );
         assert_eq!(
             replication.payload["event"]["metadata"]["source"]["deviceId"],

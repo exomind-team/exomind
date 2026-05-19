@@ -218,6 +218,14 @@ export function useSignalStream(): void {
       agentId: 'ui',
     });
 
+    // Throttle state for onActiveBlockReplicationSnapshot — lives in effect scope
+    // so cleanup can clear the timer. See #554, #944.
+    let activeBlockThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+    let activeBlockLastProcessedAt = 0;
+    let activeBlockLastSignature: string | null = null;
+    let activeBlockPendingPayload: ActiveBlockReplicationSnapshotPayload | null = null;
+    let activeBlockPendingSignature: string | null = null;
+
     const handler = startSignalHandlers({
       onTaskCreated: async () => {
         notifyTaskDataChanged();
@@ -299,17 +307,12 @@ export function useSignalStream(): void {
           return;
         }
 
-        const timestamp = Number.isFinite(payload.ts) && payload.ts > 0
-          ? payload.ts
-          : Date.now();
-
-        await getEventLogService().appendEventData({
+        await getEventLogService().appendEvent({
           id: buildSignalEventLogId({
             ...payload,
             text: content,
-            ts: timestamp,
+            ts: Number.isFinite(payload.ts) && payload.ts > 0 ? payload.ts : Date.now(),
           }),
-          timestamp,
           content,
           tags: [isGlobalShortcutVoice ? 'voice' : 'note'],
           metadata: {
@@ -338,49 +341,41 @@ export function useSignalStream(): void {
         }
       },
       // Throttle: RT may dispatch active block replication at high frequency,
-      // causing UI state overwrites. Cap at 1s. See #554.
-      onActiveBlockReplicationSnapshot: (() => {
-        let lastProcessedAt = 0;
-        let lastProcessedSignature: string | null = null;
-        let pendingPayload: ActiveBlockReplicationSnapshotPayload | null = null;
-        let pendingSignature: string | null = null;
-        let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+      // causing UI state overwrites. Cap at 1s. See #554, #944.
+      // State variables declared before startSignalHandlers for cleanup access.
+      onActiveBlockReplicationSnapshot: async (payload: ActiveBlockReplicationSnapshotPayload) => {
+        const signature = buildActiveBlockSnapshotSignature(payload);
+        if (signature === activeBlockLastSignature || signature === activeBlockPendingSignature) {
+          return;
+        }
 
-        return async (payload: ActiveBlockReplicationSnapshotPayload) => {
-          const signature = buildActiveBlockSnapshotSignature(payload);
-          if (signature === lastProcessedSignature || signature === pendingSignature) {
-            return;
-          }
+        const now = Date.now();
+        const elapsed = now - activeBlockLastProcessedAt;
 
-          const now = Date.now();
-          const elapsed = now - lastProcessedAt;
+        if (elapsed >= 1000) {
+          activeBlockLastProcessedAt = now;
+          activeBlockLastSignature = signature;
+          await projectActiveBlockSnapshot(payload);
+          return;
+        }
 
-          if (elapsed >= 1000) {
-            lastProcessedAt = now;
-            lastProcessedSignature = signature;
-            await projectActiveBlockSnapshot(payload);
-            return;
-          }
-
-          // Throttle: queue the latest payload and process after cooldown
-          pendingPayload = payload;
-          pendingSignature = signature;
-          if (!pendingTimer) {
-            pendingTimer = setTimeout(async () => {
-              pendingTimer = null;
-              if (pendingPayload) {
-                lastProcessedAt = Date.now();
-                const p = pendingPayload;
-                const queuedSignature = pendingSignature;
-                pendingPayload = null;
-                pendingSignature = null;
-                lastProcessedSignature = queuedSignature;
-                await projectActiveBlockSnapshot(p);
-              }
-            }, 1000 - elapsed);
-          }
-        };
-      })(),
+        activeBlockPendingPayload = payload;
+        activeBlockPendingSignature = signature;
+        if (!activeBlockThrottleTimer) {
+          activeBlockThrottleTimer = setTimeout(async () => {
+            activeBlockThrottleTimer = null;
+            if (activeBlockPendingPayload) {
+              activeBlockLastProcessedAt = Date.now();
+              const p = activeBlockPendingPayload;
+              const queuedSignature = activeBlockPendingSignature;
+              activeBlockPendingPayload = null;
+              activeBlockPendingSignature = null;
+              activeBlockLastSignature = queuedSignature;
+              await projectActiveBlockSnapshot(p);
+            }
+          }, 1000 - elapsed);
+        }
+      },
       onTimeBlockCompletedReplication: async (payload) => {
         const result = await projectTimeBlockCompletedReplication(payload);
         if (result !== 'ignored') {
@@ -406,7 +401,7 @@ export function useSignalStream(): void {
       },
     });
 
-    service.onSignal((event) => {
+    const unsubscribe = service.onSignal((event) => {
       handler(event).catch((err) => {
         log.error(`[SignalStream] handler error: ${err instanceof Error ? err.message : String(err)}`);
       });
@@ -417,6 +412,11 @@ export function useSignalStream(): void {
     log.info(`[SignalStream] SSE connection started (${targetLabel})`);
 
     return () => {
+      if (activeBlockThrottleTimer) {
+        clearTimeout(activeBlockThrottleTimer);
+        activeBlockThrottleTimer = null;
+      }
+      unsubscribe();
       service.stop();
       serviceRef.current = null;
       log.info(`[SignalStream] SSE connection stopped (${targetLabel})`);

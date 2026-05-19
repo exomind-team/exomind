@@ -125,7 +125,14 @@ export async function publishEventLogReplicationAppend(event: StorageEvent): Pro
 
 export async function appendEventWithEcsReplication(event: AppendableStorageEvent, userId?: string): Promise<StorageEvent> {
   if (getEventlogBackendMode() === 'rt-sqlite') {
-    const persisted = await getEventLogService().appendEventData(storageEventToEventData(event));
+    const normalized = ensureStorageEventId(event);
+    const persisted = await getEventLogService().appendEvent({
+      id: normalized.id,
+      content: normalized.content,
+      tags: typeof normalized.type === 'string' && normalized.type.length > 0 ? [normalized.type] : ['note'],
+      metadata: normalized.metadata,
+      refs: readEventRefsFromMetadata(normalized.metadata ?? null),
+    });
     return eventLogEventToStorageEvent(persisted);
   }
 

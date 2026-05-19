@@ -65,6 +65,20 @@ impl SqliteEventLogStore {
             query_params.push(SqlValue::Text(build_tag_like_pattern(tag)?));
         }
 
+        // SQL push-down: filter by task_ids in metadata JSON.
+        if !filter.task_ids.is_empty() {
+            let mut conditions = Vec::with_capacity(filter.task_ids.len() * 2);
+            for task_id in &filter.task_ids {
+                conditions.push("(metadata_json LIKE ? OR metadata_json LIKE ?)");
+                let escaped = task_id.replace('"', "\"\"");
+                query_params.push(SqlValue::Text(format!("%\"taskId\":\"{}\"%", escaped)));
+                query_params.push(SqlValue::Text(format!("%\"task_id\":\"{}\"%", escaped)));
+            }
+            sql.push_str(" AND (");
+            sql.push_str(&conditions.join(" OR "));
+            sql.push(')');
+        }
+
         sql.push_str(" ORDER BY timestamp DESC, id DESC");
         if let Some(limit) = filter.limit {
             sql.push_str(" LIMIT ?");
