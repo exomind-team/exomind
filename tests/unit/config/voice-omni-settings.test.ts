@@ -18,9 +18,9 @@ describe('voice omni settings（Qwen 全模态语音设置）', () => {
     __resetRuntimeConfigCacheForTests();
   });
 
-  it('uses empty profile id, qwen3-omni-flash model and disabled optimize by default（默认值正确）', () => {
+  it('uses empty profile id, qwen3.5-omni-plus model and disabled optimize by default（默认值正确）', () => {
     expect(getVoiceOmniProfileId()).toBe('');
-    expect(getVoiceOmniModelId()).toBe('qwen3-omni-flash');
+    expect(getVoiceOmniModelId()).toBe('qwen3.5-omni-plus');
     expect(getVoiceOmniOptimizeEnabled()).toBe(false);
   });
 
@@ -40,12 +40,12 @@ describe('voice omni settings（Qwen 全模态语音设置）', () => {
     window.localStorage.setItem('exomind:voiceOmniOptimizeEnabled', '0');
     __primeRuntimeConfigForTests({
       'exomind:voiceOmniProfileId': 'registry-runtime',
-      'exomind:voiceOmniModelId': 'qwen3-omni-flash',
+      'exomind:voiceOmniModelId': 'qwen3.5-omni-plus',
       'exomind:voiceOmniOptimizeEnabled': '1',
     });
 
     expect(getVoiceOmniProfileId()).toBe('registry-runtime');
-    expect(getVoiceOmniModelId()).toBe('qwen3-omni-flash');
+    expect(getVoiceOmniModelId()).toBe('qwen3.5-omni-plus');
     expect(getVoiceOmniOptimizeEnabled()).toBe(true);
   });
 });

@@ -76,6 +76,8 @@ export const DEFAULT_QWEN_OMNI_VOCABULARY_PROMPT = `# 专有词汇表 - 语音�
 - PouchDB
 - Tauri
 - Playwright
+- qwen3.5-omni-plus
+- qwen3.5-omni-plus-realtime
 - qwen3-omni-flash
 - qwen-omni-turbo-latest
 
