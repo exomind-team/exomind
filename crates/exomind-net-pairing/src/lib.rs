@@ -97,6 +97,24 @@ impl RetMeshNode {
         }
     }
 
+    /// Add a TCP server interface to the transport so other nodes can connect.
+    pub async fn add_tcp_interface(transport: &Transport, bind_addr: &str) {
+        use reticulum::iface::tcp_server::TcpServer;
+        let iface_mgr = transport.iface_manager();
+        let mut mgr_lock = iface_mgr.lock().await;
+        let server = TcpServer::new(bind_addr.to_string(), iface_mgr.clone());
+        mgr_lock.spawn(server, |ctx| TcpServer::spawn(ctx));
+    }
+
+    /// Add a TCP client interface to connect to a remote TCP server.
+    pub async fn add_tcp_client(transport: &Transport, remote_addr: &str) {
+        use reticulum::iface::tcp_client::TcpClient;
+        let iface_mgr = transport.iface_manager();
+        let mut mgr_lock = iface_mgr.lock().await;
+        let client = TcpClient::new(remote_addr.to_string());
+        mgr_lock.spawn(client, |ctx| TcpClient::spawn(ctx));
+    }
+
     /// Create TransportConfig and Transport.
     pub fn create_transport(
         node_name: &str,

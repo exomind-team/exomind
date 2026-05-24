@@ -1414,6 +1414,12 @@ async fn try_start_ret_mesh(
         config.broadcast_capacity,
     );
 
+    // Add a TCP server interface so other Reticulum nodes can reach this one.
+    let tcp_port = port + 5000;
+    let tcp_addr = format!("127.0.0.1:{}", tcp_port);
+    exomind_net_pairing::RetMeshNode::add_tcp_interface(&transport, &tcp_addr).await;
+    tracing::info!("Reticulum TCP interface listening on {}", tcp_addr);
+
     let mut node = exomind_net_pairing::RetMeshNode::new(config, transport, identity).await;
 
     tracing::info!("Reticulum identity ready, announcing presence...");
