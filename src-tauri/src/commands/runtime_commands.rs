@@ -13,7 +13,7 @@ use std::net::{IpAddr, TcpListener as StdTcpListener, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, timeout, Duration};
 
@@ -369,10 +369,7 @@ pub fn load_persisted_runtime_target_mode(app: &AppHandle) -> Result<RuntimeTarg
 }
 
 pub fn load_persisted_runtime_external_address(app: &AppHandle) -> Result<String, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
     load_runtime_external_address_from_path(&runtime_external_address_path(&app_data_dir))
 }
 
@@ -403,10 +400,7 @@ fn save_persisted_runtime_external_address(
     app: &AppHandle,
     address: &str,
 ) -> Result<String, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("failed to resolve app data dir: {error}"))?;
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
     save_runtime_external_address_to_path(&runtime_external_address_path(&app_data_dir), address)
 }
 

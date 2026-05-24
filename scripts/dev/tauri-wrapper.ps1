@@ -893,10 +893,21 @@ if ($isTauriDev) {
   $env:EXOMIND_DEV_RUNTIME_DATA_DIR = "$($instancePaths.runtimeDataDir)"
   $env:EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR = "$($instancePaths.webviewMainDataDir)"
   $env:EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT = "$($instancePaths.webviewOverlayDataRoot)"
-  $env:EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR = "$($instancePaths.legacySharedAppDataDir)"
-  $env:EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR = "$($instancePaths.legacySharedWebviewMainDataDir)"
-  $env:EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR = "$($instancePaths.legacySharedRuntimeDir)"
   $env:EXOMIND_MCP_BRIDGE_BASE_PORT = "$($instancePaths.mcpBridgeBasePort)"
+
+  # Zero-touch by default: only pass legacy seed roots when the caller
+  # explicitly provides copied fixture paths.
+  foreach ($entry in @(
+    @{ Key = "EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR"; Value = "$($instancePaths.legacySharedAppDataDir)" },
+    @{ Key = "EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR"; Value = "$($instancePaths.legacySharedWebviewMainDataDir)" },
+    @{ Key = "EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR"; Value = "$($instancePaths.legacySharedRuntimeDir)" }
+  )) {
+    if ([string]::IsNullOrWhiteSpace($entry.Value)) {
+      Remove-Item -Path "Env:$($entry.Key)" -ErrorAction SilentlyContinue
+    } else {
+      Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+    }
+  }
 
   foreach ($dir in @(
     $env:EXOMIND_DEV_APP_DATA_DIR,

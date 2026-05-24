@@ -138,7 +138,21 @@ describeWindowsOnly('tauri-wrapper', () => {
           'echo EXOMIND_DEV_RUNTIME_DATA_DIR=%EXOMIND_DEV_RUNTIME_DATA_DIR%',
           'echo EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR=%EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR%',
           'echo EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT=%EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT%',
-          'echo EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=%EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR%',
+          'if defined EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR (',
+          '  echo EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR=%EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR%',
+          ') else (',
+          '  echo EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR=[unset]',
+          ')',
+          'if defined EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR (',
+          '  echo EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR=%EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR%',
+          ') else (',
+          '  echo EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR=[unset]',
+          ')',
+          'if defined EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR (',
+          '  echo EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=%EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR%',
+          ') else (',
+          '  echo EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=[unset]',
+          ')',
           'echo EXOMIND_MCP_BRIDGE_BASE_PORT=%EXOMIND_MCP_BRIDGE_BASE_PORT%',
           'if /I "%3"=="--config" type "%4"',
           'exit /b 0',
@@ -169,9 +183,60 @@ describeWindowsOnly('tauri-wrapper', () => {
       expect(result.stdout).toContain('EXOMIND_DEV_INSTANCE_NAME=desktop');
       expect(result.stdout).toContain('.tmp\\tauri-dev-state\\desktop\\app-data');
       expect(result.stdout).toContain('.tmp\\tauri-dev-state\\desktop\\webview\\main');
-      expect(result.stdout).toContain('EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=C:\\Users\\starlin\\AppData\\Roaming\\com.exomind.app\\runtime');
+      expect(result.stdout).toContain('EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR=[unset]');
+      expect(result.stdout).toContain('EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR=[unset]');
+      expect(result.stdout).toContain('EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=[unset]');
       expect(result.stdout).toContain('EXOMIND_MCP_BRIDGE_BASE_PORT=9323');
       expect(result.stdout).toContain('"devUrl":"http://localhost:1520"');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it('passes through explicit legacy seed dirs only when caller provides them（仅在显式提供时透传 legacy seed 目录）', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-legacy-seed-'));
+    const fakeBinDir = join(tempDir, 'bin');
+    const fakeTauriCmd = join(fakeBinDir, 'tauri.cmd');
+    const wrapperPath = join(process.cwd(), 'Scripts', 'dev', 'tauri-wrapper.ps1');
+
+    try {
+      spawnSync('cmd.exe', ['/c', 'mkdir', fakeBinDir], { stdio: 'ignore' });
+
+      writeFileSync(
+        fakeTauriCmd,
+        [
+          '@echo off',
+          'echo EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR=%EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR%',
+          'echo EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR=%EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR%',
+          'echo EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=%EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR%',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      const result = spawnSync(
+        POWERSHELL_PATH,
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath, 'dev'],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${fakeBinDir};${process.env.PATH ?? ''}`,
+            EXOMIND_WEB_PORT: '1520',
+            EXOMIND_HMR_PORT: '1521',
+            EXOMIND_RT_PORT: '1949',
+            EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR: 'D:\\fixtures\\app-data-copy',
+            EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR: 'D:\\fixtures\\webview-copy',
+            EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR: 'D:\\fixtures\\runtime-copy',
+          },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR=D:\\fixtures\\app-data-copy');
+      expect(result.stdout).toContain('EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR=D:\\fixtures\\webview-copy');
+      expect(result.stdout).toContain('EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR=D:\\fixtures\\runtime-copy');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
