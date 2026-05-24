@@ -251,6 +251,7 @@ async fn pairing_respond(
     State(state): State<AppState>,
     Json(req): Json<PairingRespondRequest>,
 ) -> Result<Json<PairingRespondResponse>, StatusCode> {
+    let responder_base_url = req.responder_base_url.clone();
     // When session_id is empty, look up by the initiator's host_id (this RT).
     let result = if req.session_id.is_empty() {
         state
@@ -290,6 +291,16 @@ async fn pairing_respond(
     // If mesh relay is active, reconcile peers.
     if let Some(relay) = &state.mesh_relay {
         relay.reconcile_all_peers().await;
+    }
+
+    // If Reticulum mesh is active, trigger a TCP connection to the paired peer.
+    if let Some(connect_tx) = &state.ret_mesh_connect_tx {
+        if let Some(port_str) = responder_base_url.rsplit(':').next() {
+            if let Ok(rt_port) = port_str.parse::<u16>() {
+                let tcp_addr = format!("127.0.0.1:{}", rt_port + 5000);
+                let _ = connect_tx.send(tcp_addr);
+            }
+        }
     }
 
     Ok(Json(PairingRespondResponse {

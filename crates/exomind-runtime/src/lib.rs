@@ -651,7 +651,9 @@ pub async fn start_with_options(
                 state.ret_mesh_peers = Some(discovered);
                 let handle = node.event_tx.subscribe();
                 let mdns_clone = state.mdns.clone();
-                tokio::spawn(ret_mesh_background(node, mdns_clone));
+                let (connect_tx, connect_rx) = tokio::sync::broadcast::channel::<String>(64);
+                state.ret_mesh_connect_tx = Some(connect_tx);
+                tokio::spawn(ret_mesh_background(node, mdns_clone, connect_rx));
                 Some(handle)
             }
             Err(e) => {
@@ -978,6 +980,8 @@ pub struct AppState {
     pub ret_mesh_peers: Option<
         Arc<tokio::sync::RwLock<std::collections::HashMap<String, exomind_net_pairing::DiscoveredPeer>>>,
     >,
+    /// Sender to trigger Reticulum TCP connection from the pairing/http layer.
+    pub ret_mesh_connect_tx: Option<tokio::sync::broadcast::Sender<String>>,
     pub pairing: Arc<pairing::PairingManager>,
     pub config_store: Arc<config::ConfigStore>,
     pub reminder_store: Arc<reminder::ReminderStore>,
@@ -1311,6 +1315,7 @@ impl AppState {
             allow_lan_without_auth: false,
             mdns: None,
             ret_mesh_peers: None,
+            ret_mesh_connect_tx: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store,
             reminder_store: Arc::new(reminder_store),
@@ -1446,6 +1451,7 @@ async fn try_start_ret_mesh(
 async fn ret_mesh_background(
     mut node: exomind_net_pairing::RetMeshNode,
     mdns: Option<std::sync::Arc<discovery::MdnsDiscovery>>,
+    mut connect_rx: tokio::sync::broadcast::Receiver<String>,
 ) {
     use std::collections::HashSet;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1459,6 +1465,10 @@ async fn ret_mesh_background(
 
     loop {
         tokio::select! {
+            Ok(addr) = connect_rx.recv() => {
+                tracing::info!("Reticulum connecting to paired peer at {}", addr);
+                exomind_net_pairing::RetMeshNode::add_tcp_client(&node.transport, &addr).await;
+            }
             Ok(announce) = announce_rx.recv() => {
                 let data: &[u8] = announce.app_data.as_slice();
                 if let Some(meta) = exomind_net_pairing::discovery::parse_announce_data(data) {
@@ -1619,6 +1629,7 @@ mod tests {
             allow_lan_without_auth: false,
             mdns: None,
             ret_mesh_peers: None,
+            ret_mesh_connect_tx: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),
