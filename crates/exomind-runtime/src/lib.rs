@@ -1420,7 +1420,17 @@ async fn try_start_ret_mesh(
         config.broadcast_capacity,
     );
 
-    // Add a TCP server interface so other Reticulum nodes can reach this one.
+    // Add a UDP broadcast interface for LAN discovery.
+    // All instances bind the same UDP port (SO_REUSEADDR).
+    // On LAN: forward to 255.255.255.255 for broadcast discovery.
+    // On localhost: forward to 127.0.0.1 so same-machine instances see each other.
+    let udp_port = 5590;
+    let udp_addr = format!("0.0.0.0:{}", udp_port);
+    let udp_fwd = format!("127.0.0.1:{}", udp_port);
+    exomind_net_pairing::RetMeshNode::add_udp_interface(&transport, &udp_addr, &udp_fwd).await;
+    tracing::info!("Reticulum UDP discovery bound to {} (forward {})", udp_addr, udp_fwd);
+
+    // Also add a TCP server interface for remote/seed connections.
     let tcp_port = port + 5000;
     let tcp_addr = format!("127.0.0.1:{}", tcp_port);
     exomind_net_pairing::RetMeshNode::add_tcp_interface(&transport, &tcp_addr).await;

@@ -115,6 +115,19 @@ impl RetMeshNode {
         mgr_lock.spawn(client, |ctx| TcpClient::spawn(ctx));
     }
 
+    /// Add a UDP broadcast interface for LAN discovery.
+    ///
+    /// `forward_addr` is the target for outgoing packets:
+    /// - `127.0.0.1:PORT` for localhost multi-instance testing
+    /// - `255.255.255.255:PORT` for LAN broadcast
+    pub async fn add_udp_interface(transport: &Transport, bind_addr: &str, forward_addr: &str) {
+        use reticulum::iface::udp::UdpInterface;
+        let iface_mgr = transport.iface_manager();
+        let mut mgr_lock = iface_mgr.lock().await;
+        let iface = UdpInterface::new(bind_addr.to_string(), Some(forward_addr.to_string()));
+        mgr_lock.spawn(iface, |ctx| UdpInterface::spawn(ctx));
+    }
+
     /// Create TransportConfig and Transport.
     pub fn create_transport(
         node_name: &str,
