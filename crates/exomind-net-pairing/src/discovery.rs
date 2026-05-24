@@ -10,7 +10,7 @@ pub struct DeviceMetadata {
 }
 
 /// A peer discovered via Reticulum Announce.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveredPeer {
     pub host_id: String,
     pub node_name: String,

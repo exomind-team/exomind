@@ -643,10 +643,12 @@ pub async fn start_with_options(
     };
 
     // Reticulum mesh networking (EXOMIND_RET_MESH=1)
-    let ret_mesh = if options.enable_ret_mesh {
+    let _ret_mesh = if options.enable_ret_mesh {
         tracing::info!("Reticulum mesh networking enabled (EXOMIND_RET_MESH=1)");
         match try_start_ret_mesh(&options, local_addr.port()).await {
             Ok(node) => {
+                let discovered = node.discovered.clone();
+                state.ret_mesh_peers = Some(discovered);
                 let handle = node.event_tx.subscribe();
                 tokio::spawn(ret_mesh_background(node));
                 Some(handle)
@@ -972,6 +974,9 @@ pub struct AppState {
     pub auth_secret: Option<String>,
     pub allow_lan_without_auth: bool,
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
+    pub ret_mesh_peers: Option<
+        Arc<tokio::sync::RwLock<std::collections::HashMap<String, exomind_net_pairing::DiscoveredPeer>>>,
+    >,
     pub pairing: Arc<pairing::PairingManager>,
     pub config_store: Arc<config::ConfigStore>,
     pub reminder_store: Arc<reminder::ReminderStore>,
@@ -1304,6 +1309,7 @@ impl AppState {
             auth_secret,
             allow_lan_without_auth: false,
             mdns: None,
+            ret_mesh_peers: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store,
             reminder_store: Arc::new(reminder_store),
@@ -1419,14 +1425,69 @@ async fn try_start_ret_mesh(
 
 /// Background loop for Reticulum mesh events.
 async fn ret_mesh_background(mut node: exomind_net_pairing::RetMeshNode) {
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::time::{interval, Duration};
+
+    let mut announce_rx = node.transport.recv_announces().await;
     let mut tick = interval(Duration::from_secs(30));
+    let offline_timeout_ms: u64 = 90_000; // 90s without announce → offline
+    let discovered = node.discovered.clone();
 
     loop {
         tokio::select! {
+            Ok(announce) = announce_rx.recv() => {
+                let data: &[u8] = announce.app_data.as_slice();
+                if let Some(meta) = exomind_net_pairing::discovery::parse_announce_data(data) {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+
+                    let peer = exomind_net_pairing::DiscoveredPeer {
+                        host_id: meta.host_id,
+                        node_name: meta.node_name,
+                        app_version: meta.version,
+                        port: meta.port,
+                        identity_hex: String::new(), // extracted from announce
+                        last_seen_ms: now,
+                        online: true,
+                    };
+
+                    // Skip self
+                    if peer.host_id == node.config.host_id {
+                        continue;
+                    }
+
+                    let peer_host_id = peer.host_id.clone();
+                    {
+                        let mut map = discovered.write().await;
+                        let is_new = !map.contains_key(&peer_host_id);
+                        map.insert(peer_host_id.clone(), peer);
+                        if is_new {
+                            tracing::info!("Reticulum discovered new peer: {}", peer_host_id);
+                        }
+                    }
+                }
+            }
             _ = tick.tick() => {
-                // Re-announce periodically (Reticulum transport needs this
-                // to prevent route table entries from expiring).
+                // Evict stale peers and re-announce
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                {
+                    let mut map = discovered.write().await;
+                    let stale: Vec<String> = map.iter()
+                        .filter(|(_, p)| now - p.last_seen_ms > offline_timeout_ms && p.online)
+                        .map(|(id, _)| id.clone())
+                        .collect();
+                    for id in &stale {
+                        if let Some(peer) = map.get_mut(id) {
+                            peer.online = false;
+                            tracing::info!("Reticulum peer offline: {}", id);
+                        }
+                    }
+                }
                 node.announce().await;
                 tracing::debug!("Reticulum periodic announce sent");
             }
@@ -1511,6 +1572,7 @@ mod tests {
             auth_secret: None,
             allow_lan_without_auth: false,
             mdns: None,
+            ret_mesh_peers: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),

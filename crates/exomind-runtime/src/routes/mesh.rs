@@ -308,6 +308,20 @@ async fn list_discovered(State(state): State<AppState>) -> Json<Vec<DiscoveredPe
     Json(peers)
 }
 
+/// List peers discovered via Reticulum mesh (EXOMIND_RET_MESH=1).
+async fn list_ret_discovered(
+    State(state): State<AppState>,
+) -> Json<Vec<exomind_net_pairing::DiscoveredPeer>> {
+    let peers = match state.ret_mesh_peers.as_ref() {
+        Some(peers) => {
+            let map = peers.read().await;
+            map.values().cloned().collect()
+        }
+        None => Vec::new(),
+    };
+    Json(peers)
+}
+
 /// Protected mesh routes (behind auth middleware).
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -317,6 +331,7 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/events", post(ingest_remote_event))
         .route("/mesh/stream", get(stream_handler))
         .route("/mesh/discovered", get(list_discovered))
+        .route("/mesh/ret/discovered", get(list_ret_discovered))
         // Initiate is protected: only the local admin can create pairing sessions.
         // This prevents remote attackers from calling initiate + respond to self-pair.
         .route("/mesh/pairing/initiate", post(pairing_initiate))
