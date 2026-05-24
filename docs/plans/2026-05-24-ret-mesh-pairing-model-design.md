@@ -4,7 +4,7 @@
 > 状态：设计锁定版
 > 性质：这是外心 Reticulum 组网配对的目标态架构设计，不是当前代码现状
 > 关联：
-> - `feat/ret-mesh-prototype` 分支（Phase 1 实现）
+> - `feat/ret-mesh-prototype` 分支（Phase 1 完成，Phase 2 进行中）
 > - #906 搬迁式重构
 > - exomind-net-pairing crate (Phase 1)
 
