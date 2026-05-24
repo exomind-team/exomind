@@ -1506,7 +1506,7 @@ async fn ret_mesh_background(
                         .as_millis() as u64;
 
                     let peer = exomind_net_pairing::DiscoveredPeer {
-                        host_id: meta.host_id,
+                        host_id: meta.host_id.clone(),
                         node_name: meta.node_name,
                         app_version: meta.version,
                         port: meta.port,
@@ -1514,6 +1514,7 @@ async fn ret_mesh_background(
                         last_seen_ms: now,
                         online: true,
                         trust_state: exomind_net_pairing::discovery::TrustState::Discovered,
+                        rtt_ms: None,
                     };
 
                     // Skip self

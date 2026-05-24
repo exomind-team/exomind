@@ -36,6 +36,8 @@ pub struct DiscoveredPeer {
     pub online: bool,
     /// Trust state in the three-layer pairing model.
     pub trust_state: TrustState,
+    /// Round-trip time in milliseconds (from Link measurement, None if not linked).
+    pub rtt_ms: Option<u64>,
 }
 
 /// Discovery-related events emitted by the RetMeshNode.
