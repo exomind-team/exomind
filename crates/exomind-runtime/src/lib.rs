@@ -1459,7 +1459,7 @@ async fn ret_mesh_background(
 
     let mut announce_rx = node.transport.recv_announces().await;
     let mut tick = interval(Duration::from_secs(30));
-    let offline_timeout_ms: u64 = 90_000;
+    let offline_timeout_ms: u64 = 10_000;
     let discovered = node.discovered.clone();
     let mut connected_mdns_peers: HashSet<String> = HashSet::new();
 
