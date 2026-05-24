@@ -1,5 +1,5 @@
 [workspace]
-members = ["src-tauri", "crates/exomind-runtime", "crates/exomind-cli"]
+members = ["src-tauri", "crates/exomind-runtime", "crates/exomind-cli", "crates/exomind-net-pairing"]
 resolver = "2"
 
 [profile.release]

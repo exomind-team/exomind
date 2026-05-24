@@ -264,6 +264,8 @@ pub struct RuntimeStartOptions {
     pub allow_lan_without_auth: bool,
     /// enable mDNS service discovery for LAN peer auto-detection（启用 mDNS 局域网自动发现）.
     pub enable_mdns: bool,
+    /// enable Reticulum mesh networking for device discovery and pairing.
+    pub enable_ret_mesh: bool,
     /// optional data directory for agent workspaces（可选 Agent workspace 数据目录）.
     pub data_dir: Option<PathBuf>,
 }
@@ -277,6 +279,13 @@ impl Default for RuntimeStartOptions {
         let data_dir = env::var("EXOMIND_RT_DATA_DIR").ok().map(PathBuf::from);
 
         let enable_mdns = env::var("EXOMIND_RT_MDNS")
+            .map(|value| {
+                let value = value.to_ascii_lowercase();
+                value == "1" || value == "true"
+            })
+            .unwrap_or(false);
+
+        let enable_ret_mesh = env::var("EXOMIND_RET_MESH")
             .map(|value| {
                 let value = value.to_ascii_lowercase();
                 value == "1" || value == "true"
@@ -300,6 +309,7 @@ impl Default for RuntimeStartOptions {
             auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
             allow_lan_without_auth: false,
             enable_mdns,
+            enable_ret_mesh,
             data_dir,
         }
     }
@@ -631,6 +641,17 @@ pub async fn start_with_options(
     } else {
         None
     };
+
+    // Reticulum mesh networking (EXOMIND_RET_MESH=1)
+    if options.enable_ret_mesh {
+        tracing::info!("Reticulum mesh networking enabled (EXOMIND_RET_MESH=1)");
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                tracing::debug!("Reticulum mesh background tick");
+            }
+        });
+    }
 
     let signal_pool = Arc::clone(&state.signal_pool);
     let mesh = Arc::clone(&state.mesh);
