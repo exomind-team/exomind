@@ -146,10 +146,10 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     const poll = async () => {
       try {
         const res = await fetch(`${runtimeBaseUrl}/mesh/ret/discovered`);
-        if (!res.ok) { if (mountedRef.current) setError(null); return; }
+        if (!res.ok) { if (mountedRef.current) { setPeers([]); setError(null); } return; }
         const data = await res.json();
         if (mountedRef.current) { setPeers(data); setError(null); }
-      } catch { if (mountedRef.current) setError('Reticulum not available'); }
+      } catch { if (mountedRef.current) { setPeers([]); setError('Reticulum not available'); } }
     };
     poll();
     const interval = setInterval(poll, 10_000);
