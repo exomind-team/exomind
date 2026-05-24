@@ -643,15 +643,22 @@ pub async fn start_with_options(
     };
 
     // Reticulum mesh networking (EXOMIND_RET_MESH=1)
-    if options.enable_ret_mesh {
+    let ret_mesh = if options.enable_ret_mesh {
         tracing::info!("Reticulum mesh networking enabled (EXOMIND_RET_MESH=1)");
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                tracing::debug!("Reticulum mesh background tick");
+        match try_start_ret_mesh(&options, local_addr.port()).await {
+            Ok(node) => {
+                let handle = node.event_tx.subscribe();
+                tokio::spawn(ret_mesh_background(node));
+                Some(handle)
             }
-        });
-    }
+            Err(e) => {
+                tracing::warn!("Reticulum mesh startup failed: {e}, continuing without it");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let signal_pool = Arc::clone(&state.signal_pool);
     let mesh = Arc::clone(&state.mesh);
@@ -1377,6 +1384,54 @@ async fn version() -> Json<VersionResponse> {
         git_hash: BUILD_GIT_HASH,
         build_time: BUILD_TIME,
     })
+}
+
+// ── Reticulum mesh networking ──────────────────────────────────────
+
+/// Try to start a Reticulum mesh node for device discovery and pairing.
+async fn try_start_ret_mesh(
+    options: &RuntimeStartOptions,
+    port: u16,
+) -> Result<exomind_net_pairing::RetMeshNode, Box<dyn std::error::Error>> {
+    let config = exomind_net_pairing::RetMeshConfig {
+        host_id: options.host_id.clone(),
+        node_name: options.host_id.clone(),
+        app_version: format!("{}", env!("CARGO_PKG_VERSION")),
+        port,
+        ..Default::default()
+    };
+
+    let identity = exomind_net_pairing::RetMeshNode::load_or_create_identity(None);
+    let transport = exomind_net_pairing::RetMeshNode::create_transport(
+        &config.node_name,
+        &identity,
+        config.broadcast_capacity,
+    );
+
+    let mut node = exomind_net_pairing::RetMeshNode::new(config, transport, identity).await;
+
+    tracing::info!("Reticulum identity ready, announcing presence...");
+    node.announce().await;
+    tracing::info!("Reticulum presence announced");
+
+    Ok(node)
+}
+
+/// Background loop for Reticulum mesh events.
+async fn ret_mesh_background(mut node: exomind_net_pairing::RetMeshNode) {
+    use tokio::time::{interval, Duration};
+    let mut tick = interval(Duration::from_secs(30));
+
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {
+                // Re-announce periodically (Reticulum transport needs this
+                // to prevent route table entries from expiring).
+                node.announce().await;
+                tracing::debug!("Reticulum periodic announce sent");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
