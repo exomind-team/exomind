@@ -136,6 +136,7 @@ function resolveVerificationPresentation(item: RuntimeHostSnapshot): {
 function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const [peers, setPeers] = useState<Array<{
     host_id: string; node_name: string; port: number; online: boolean; last_seen_ms: number;
+    trust_state?: string;
   }>>([]);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -177,6 +178,11 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
         <div className="space-y-2">
           {peers.map((p) => {
             const lastSeen = new Date(p.last_seen_ms).toLocaleTimeString('zh-CN', { hour12: false });
+            const trustLabel = p.trust_state === 'Paired' ? '已配对' :
+              p.trust_state === 'Trusted' ? '可信' :
+              p.trust_state === 'Blocked' ? '已屏蔽' : '已发现';
+            const trustColor = p.trust_state === 'Paired' ? 'text-[#16A34A]' :
+              p.trust_state === 'Trusted' ? 'text-[#2563EB]' : 'text-[#A8A29E]';
             return (
               <div key={p.host_id}
                 className="flex items-center justify-between rounded-xl border border-[#E7E5E4] bg-[#FAFAF9] px-3 py-2 text-sm dark:border-[#292524] dark:bg-[#1C1917]"
@@ -187,8 +193,11 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                     {p.host_id}
                   </span>
                 </div>
-                <span className="shrink-0 text-[11px] text-[#A8A29E] whitespace-nowrap ml-2">
-                  :{p.port} · {p.online ? '在线' : '离线'} · {lastSeen}
+                <span className="shrink-0 text-[11px] whitespace-nowrap ml-2 flex items-center gap-1">
+                  <span className={trustColor}>{trustLabel}</span>
+                  <span className="text-[#A8A29E]">·</span>
+                  <span className="text-[#A8A29E]">{p.online ? '在线' : '离线'}</span>
+                  <span className="text-[#A8A29E]">· {lastSeen}</span>
                 </span>
               </div>
             );

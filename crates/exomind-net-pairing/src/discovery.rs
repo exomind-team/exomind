@@ -9,6 +9,19 @@ pub struct DeviceMetadata {
     pub port: u16,
 }
 
+/// Trust state for a discovered peer.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum TrustState {
+    /// Announce received, visible in network.
+    Discovered,
+    /// PIN pairing completed via Reticulum Link.
+    Paired,
+    /// Multiple successful exchanges, identity cached.
+    Trusted,
+    /// Manual block.
+    Blocked,
+}
+
 /// A peer discovered via Reticulum Announce.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveredPeer {
@@ -21,6 +34,8 @@ pub struct DiscoveredPeer {
     pub last_seen_ms: u64,
     /// Whether the peer is currently considered online.
     pub online: bool,
+    /// Trust state in the three-layer pairing model.
+    pub trust_state: TrustState,
 }
 
 /// Discovery-related events emitted by the RetMeshNode.

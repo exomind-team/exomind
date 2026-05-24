@@ -297,8 +297,9 @@ async fn pairing_respond(
     if let Some(connect_tx) = &state.ret_mesh_connect_tx {
         if let Some(port_str) = responder_base_url.rsplit(':').next() {
             if let Ok(rt_port) = port_str.parse::<u16>() {
+                let peer_host_id = req.responder_host_id.clone();
                 let tcp_addr = format!("127.0.0.1:{}", rt_port + 5000);
-                let _ = connect_tx.send(tcp_addr);
+                let _ = connect_tx.send((peer_host_id, tcp_addr));
             }
         }
     }
