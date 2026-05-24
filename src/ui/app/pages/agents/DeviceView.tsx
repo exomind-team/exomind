@@ -175,21 +175,24 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {peers.map((p) => (
-            <div key={p.host_id}
-              className="flex items-center justify-between rounded-xl border border-[#E7E5E4] bg-[#FAFAF9] px-3 py-2 text-sm dark:border-[#292524] dark:bg-[#1C1917]"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={`h-2 w-2 shrink-0 rounded-full ${p.online ? 'bg-green-500' : 'bg-gray-400'}`} />
-                <span className="truncate text-[13px] text-[#44403C] dark:text-[#D6D3D1]">
-                  {p.host_id.slice(0, 20)}…
+          {peers.map((p) => {
+            const lastSeen = new Date(p.last_seen_ms).toLocaleTimeString('zh-CN', { hour12: false });
+            return (
+              <div key={p.host_id}
+                className="flex items-center justify-between rounded-xl border border-[#E7E5E4] bg-[#FAFAF9] px-3 py-2 text-sm dark:border-[#292524] dark:bg-[#1C1917]"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${p.online ? 'bg-green-500' : 'bg-gray-400'}`} />
+                  <span className="text-[12px] text-[#44403C] dark:text-[#D6D3D1] break-all">
+                    {p.host_id}
+                  </span>
+                </div>
+                <span className="shrink-0 text-[11px] text-[#A8A29E] whitespace-nowrap ml-2">
+                  :{p.port} · {p.online ? '在线' : '离线'} · {lastSeen}
                 </span>
               </div>
-              <span className="shrink-0 text-[11px] text-[#A8A29E]">
-                :{p.port} · {p.online ? '在线' : '离线'}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </article>
