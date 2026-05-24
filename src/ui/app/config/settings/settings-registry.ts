@@ -362,6 +362,7 @@ import {
   DataTransferSetting,
   DevInstanceDiagnosticsSetting,
   DevicePairingSetting,
+  ReticulumPeersSetting,
   FocusBgmSetting,
   SoundPresetSetting,
   MossVoiceTestSetting,
@@ -2248,6 +2249,14 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     type: 'custom',
     visible: devOnly,
     component: DevicePairingSetting,
+  },
+  {
+    id: 'reticulum-peers',
+    label: 'Reticulum 设备',
+    category: 'developer',
+    type: 'custom',
+    visible: devOnly,
+    component: ReticulumPeersSetting,
   },
   {
     id: 'embedded-runtime-lan-no-auth',

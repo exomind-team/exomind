@@ -945,6 +945,66 @@ export function DevicePairingSetting(_props: { ctx: SettingsContext }) {
   );
 }
 
+/** Reticulum mesh networking status (EXOMIND_RET_MESH=1). */
+export function ReticulumPeersSetting(_props: { ctx: SettingsContext }) {
+  const runtimeInfo = readRuntimeInfo();
+  const [peers, setPeers] = useState<Array<{
+    host_id: string;
+    node_name: string;
+    port: number;
+    online: boolean;
+    last_seen_ms: number;
+  }>>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${runtimeInfo.runtimeBaseUrl}/mesh/ret/discovered`);
+        if (!res.ok) {
+          if (!cancelled) setError(`HTTP ${res.status}`);
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setPeers(data);
+          setError(null);
+        }
+      } catch {
+        if (!cancelled) setError('Reticulum not available');
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 10_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [runtimeInfo.runtimeBaseUrl]);
+
+  return (
+    <>
+      <SettingRow
+        icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="Reticulum 设备"
+        right={error
+          ? <span className="text-xs text-[#A8A29E]">{error}</span>
+          : <span className="text-xs text-[#A8A29E]">{peers.length} 台设备</span>}
+      />
+      {peers.length > 0 && (
+        <div className="ml-6 mb-2 space-y-1">
+          {peers.map(p => (
+            <div key={p.host_id} className="flex items-center gap-2 text-sm text-[#A8A29E]">
+              <span className={`h-2 w-2 rounded-full ${p.online ? 'bg-green-500' : 'bg-gray-500'}`} />
+              <span className="truncate max-w-[200px]">{p.host_id.slice(0, 20)}...</span>
+              <span className="text-xs">:{p.port}</span>
+              <span className="text-xs">{p.online ? '在线' : '离线'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function TaskBackendStatusSetting(_props: { ctx: SettingsContext }) {
   const [status, setStatus] = useState<{
     backend: string;
