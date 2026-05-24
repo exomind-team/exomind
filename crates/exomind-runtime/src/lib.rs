@@ -1484,6 +1484,7 @@ async fn ret_mesh_background(
     let offline_timeout_ms: u64 = 30_000;
     let discovered = node.discovered.clone();
     let mut connected_mdns_peers: HashSet<String> = HashSet::new();
+    let mut last_local_announce_ms: u64 = 0;
 
     loop {
         tokio::select! {
@@ -1530,6 +1531,15 @@ async fn ret_mesh_background(
                         if is_new {
                             tracing::info!("Reticulum discovered new peer: {}", peer_host_id);
                         }
+                        // Estimate RTT from last local announce time.
+                        if last_local_announce_ms > 0 {
+                            let elapsed = (now as i64 - last_local_announce_ms as i64).unsigned_abs();
+                            if elapsed < 5000 {
+                                if let Some(p) = map.get_mut(&peer_host_id) {
+                                    p.rtt_ms = Some(elapsed / 2);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1575,7 +1585,12 @@ async fn ret_mesh_background(
                 }
 
                 if announce_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
                     node.announce().await;
+                    last_local_announce_ms = now;
                     tracing::debug!("Reticulum periodic announce sent");
                 }
             }
