@@ -650,7 +650,8 @@ pub async fn start_with_options(
                 let discovered = node.discovered.clone();
                 state.ret_mesh_peers = Some(discovered);
                 let handle = node.event_tx.subscribe();
-                tokio::spawn(ret_mesh_background(node));
+                let mdns_clone = state.mdns.clone();
+                tokio::spawn(ret_mesh_background(node, mdns_clone));
                 Some(handle)
             }
             Err(e) => {
@@ -1442,14 +1443,19 @@ async fn try_start_ret_mesh(
 }
 
 /// Background loop for Reticulum mesh events.
-async fn ret_mesh_background(mut node: exomind_net_pairing::RetMeshNode) {
+async fn ret_mesh_background(
+    mut node: exomind_net_pairing::RetMeshNode,
+    mdns: Option<std::sync::Arc<discovery::MdnsDiscovery>>,
+) {
+    use std::collections::HashSet;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::time::{interval, Duration};
 
     let mut announce_rx = node.transport.recv_announces().await;
     let mut tick = interval(Duration::from_secs(30));
-    let offline_timeout_ms: u64 = 90_000; // 90s without announce → offline
+    let offline_timeout_ms: u64 = 90_000;
     let discovered = node.discovered.clone();
+    let mut connected_mdns_peers: HashSet<String> = HashSet::new();
 
     loop {
         tokio::select! {
@@ -1506,6 +1512,28 @@ async fn ret_mesh_background(mut node: exomind_net_pairing::RetMeshNode) {
                         }
                     }
                 }
+                // Check mDNS for new peers to connect to
+                if let Some(ref mdns) = mdns {
+                    for peer in mdns.discovered_peers() {
+                        // Skip self
+                        if peer.host_id == node.config.host_id {
+                            continue;
+                        }
+                        if connected_mdns_peers.insert(peer.host_id.clone()) {
+                            let peer_tcp = format!("127.0.0.1:{}", peer.port + 5000);
+                            tracing::info!(
+                                "Reticulum connecting to mDNS peer {} at {}",
+                                peer.host_id, peer_tcp
+                            );
+                            exomind_net_pairing::RetMeshNode::add_tcp_client(
+                                &node.transport,
+                                &peer_tcp,
+                            )
+                            .await;
+                        }
+                    }
+                }
+
                 node.announce().await;
                 tracing::debug!("Reticulum periodic announce sent");
             }
