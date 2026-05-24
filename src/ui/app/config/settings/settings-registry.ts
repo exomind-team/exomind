@@ -2253,7 +2253,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'reticulum-peers',
     label: 'Reticulum 设备',
-    category: 'developer',
+    category: 'reticulum',
     type: 'custom',
     visible: devOnly,
     component: ReticulumPeersSetting,

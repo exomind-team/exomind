@@ -653,7 +653,8 @@ pub async fn start_with_options(
                 let mdns_clone = state.mdns.clone();
                 let (connect_tx, connect_rx) = tokio::sync::broadcast::channel::<(String, String)>(64);
                 state.ret_mesh_connect_tx = Some(connect_tx);
-                tokio::spawn(ret_mesh_background(node, mdns_clone, connect_rx));
+                let announce_enabled = state.ret_mesh_announce_enabled.clone();
+                tokio::spawn(ret_mesh_background(node, mdns_clone, connect_rx, announce_enabled));
                 Some(handle)
             }
             Err(e) => {
@@ -983,6 +984,8 @@ pub struct AppState {
     /// Sender to trigger Reticulum TCP connection from the pairing/http layer.
     /// Value is (host_id, tcp_addr).
     pub ret_mesh_connect_tx: Option<tokio::sync::broadcast::Sender<(String, String)>>,
+    /// Controls whether Reticulum periodic Announce is enabled.
+    pub ret_mesh_announce_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub pairing: Arc<pairing::PairingManager>,
     pub config_store: Arc<config::ConfigStore>,
     pub reminder_store: Arc<reminder::ReminderStore>,
@@ -1317,6 +1320,7 @@ impl AppState {
             mdns: None,
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
+            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store,
             reminder_store: Arc::new(reminder_store),
@@ -1469,14 +1473,15 @@ async fn ret_mesh_background(
     mut node: exomind_net_pairing::RetMeshNode,
     mdns: Option<std::sync::Arc<discovery::MdnsDiscovery>>,
     mut connect_rx: tokio::sync::broadcast::Receiver<(String, String)>,
+    announce_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     use std::collections::HashSet;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::time::{interval, Duration};
 
     let mut announce_rx = node.transport.recv_announces().await;
-    let mut tick = interval(Duration::from_secs(30));
-    let offline_timeout_ms: u64 = 10_000;
+    let mut tick = interval(Duration::from_secs(10));
+    let offline_timeout_ms: u64 = 30_000;
     let discovered = node.discovered.clone();
     let mut connected_mdns_peers: HashSet<String> = HashSet::new();
 
@@ -1568,8 +1573,10 @@ async fn ret_mesh_background(
                     }
                 }
 
-                node.announce().await;
-                tracing::debug!("Reticulum periodic announce sent");
+                if announce_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                    node.announce().await;
+                    tracing::debug!("Reticulum periodic announce sent");
+                }
             }
         }
     }
@@ -1654,6 +1661,7 @@ mod tests {
             mdns: None,
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
+            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),

@@ -14,6 +14,7 @@ export const DESKTOP_TAB_CONFIG: Array<{
   { key: 'terminal-agent', label: '终端 Agent', categories: ['terminal-agent'] },
   { key: 'data', label: '数据', categories: ['data'] },
   { key: 'developer', label: '开发者', categories: ['developer'] },
+  { key: 'reticulum', label: 'Reticulum', categories: ['reticulum'] },
   { key: 'more', label: '更多', categories: ['more'] },
   { key: 'about', label: '关于', categories: ['about'] },
   { key: 'danger', label: '危险区域', categories: ['danger'] },

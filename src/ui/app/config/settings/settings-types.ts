@@ -32,7 +32,8 @@ export type Category =
   | 'developer'
   | 'more'
   | 'about'
-  | 'danger';
+  | 'danger'
+  | 'reticulum';
 
 export interface SettingsContext {
   isDesktop: boolean;

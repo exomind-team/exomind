@@ -334,6 +334,21 @@ async fn list_ret_discovered(
     Json(peers)
 }
 
+#[derive(Deserialize)]
+struct AnnounceToggleRequest {
+    enabled: bool,
+}
+
+/// Toggle whether Reticulum sends periodic Announces.
+async fn toggle_ret_announce(
+    State(state): State<AppState>,
+    Json(req): Json<AnnounceToggleRequest>,
+) -> Json<serde_json::Value> {
+    state.ret_mesh_announce_enabled.store(req.enabled, std::sync::atomic::Ordering::Relaxed);
+    tracing::info!("Reticulum announce toggled: {}", req.enabled);
+    Json(serde_json::json!({"announce_enabled": req.enabled}))
+}
+
 /// Protected mesh routes (behind auth middleware).
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -344,6 +359,7 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/stream", get(stream_handler))
         .route("/mesh/discovered", get(list_discovered))
         .route("/mesh/ret/discovered", get(list_ret_discovered))
+        .route("/mesh/ret/announce", post(toggle_ret_announce))
         // Initiate is protected: only the local admin can create pairing sessions.
         // This prevents remote attackers from calling initiate + respond to self-pair.
         .route("/mesh/pairing/initiate", post(pairing_initiate))

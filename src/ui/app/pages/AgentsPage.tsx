@@ -8320,6 +8320,17 @@ export function AgentsPage() {
         forceMeshSync: enabled,
         automationEnabled: enabled,
       });
+      // Tell Reticulum to stop/start periodic Announce.
+      if (runtimeServiceStatus?.running) {
+        const base = runtimeServiceStatus.host === '0.0.0.0'
+          ? `http://127.0.0.1:${runtimeServiceStatus.port}`
+          : `http://${runtimeServiceStatus.host}:${runtimeServiceStatus.port}`;
+        fetch(`${base}/mesh/ret/announce`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        }).catch(() => {});
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRuntimeHostError(message);
