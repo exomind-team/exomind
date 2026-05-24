@@ -1420,12 +1420,18 @@ async fn try_start_ret_mesh(
         config.broadcast_capacity,
     );
 
-    // Add a UDP broadcast interface for LAN discovery.
-    // All instances bind the same UDP port (SO_REUSEADDR).
-    // On LAN: forward to 255.255.255.255 for broadcast discovery.
-    // On localhost: forward to 127.0.0.1 so same-machine instances see each other.
+    // Add a UDP interface for LAN broadcast discovery.
+    // On Unix: all instances share the same UDP port (SO_REUSEADDR).
+    // On Windows: each instance gets a unique UDP port (RT_port + 6000).
+    // On real LAN, forward to 255.255.255.255 for broadcast discovery.
+    #[cfg(unix)]
     let udp_port = 5590;
+    #[cfg(windows)]
+    let udp_port = port + 6000;
     let udp_addr = format!("0.0.0.0:{}", udp_port);
+    #[cfg(unix)]
+    let udp_fwd = format!("255.255.255.255:{}", udp_port);
+    #[cfg(windows)]
     let udp_fwd = format!("127.0.0.1:{}", udp_port);
     exomind_net_pairing::RetMeshNode::add_udp_interface(&transport, &udp_addr, &udp_fwd).await;
     tracing::info!("Reticulum UDP discovery bound to {} (forward {})", udp_addr, udp_fwd);
