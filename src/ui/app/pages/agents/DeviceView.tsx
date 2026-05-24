@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Link2, Monitor, ShieldCheck, Wifi } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import type { AgentDeviceGroup, RuntimeServiceStatus } from '@/lib/types/agent-hub';
@@ -129,6 +130,70 @@ function resolveVerificationPresentation(item: RuntimeHostSnapshot): {
     detail: '在线 ≠ 已验证',
     toneClass: 'text-[#B45309]',
   };
+}
+
+/** Reticulum mesh networking peer section (EXOMIND_RET_MESH=1). */
+function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
+  const [peers, setPeers] = useState<Array<{
+    host_id: string; node_name: string; port: number; online: boolean; last_seen_ms: number;
+  }>>([]);
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    if (!runtimeBaseUrl) return;
+    mountedRef.current = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${runtimeBaseUrl}/mesh/ret/discovered`);
+        if (!res.ok) { if (mountedRef.current) setError(null); return; }
+        const data = await res.json();
+        if (mountedRef.current) { setPeers(data); setError(null); }
+      } catch { if (mountedRef.current) setError('Reticulum not available'); }
+    };
+    poll();
+    const interval = setInterval(poll, 10_000);
+    return () => { mountedRef.current = false; clearInterval(interval); };
+  }, [runtimeBaseUrl]);
+
+  if (error && peers.length === 0) return null;
+
+  return (
+    <article className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]">
+      <div className="flex items-center gap-2">
+        <Wifi size={14} className="text-[#0D9488]" />
+        <div>
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Reticulum 设备</h3>
+          <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
+            {peers.length > 0 ? `${peers.length} 台设备` : '暂无设备'}
+          </p>
+        </div>
+      </div>
+      {peers.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
+          等待 Reticulum 发现的设备...
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {peers.map((p) => (
+            <div key={p.host_id}
+              className="flex items-center justify-between rounded-xl border border-[#E7E5E4] bg-[#FAFAF9] px-3 py-2 text-sm dark:border-[#292524] dark:bg-[#1C1917]"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${p.online ? 'bg-green-500' : 'bg-gray-400'}`} />
+                <span className="truncate text-[13px] text-[#44403C] dark:text-[#D6D3D1]">
+                  {p.host_id.slice(0, 20)}…
+                </span>
+              </div>
+              <span className="shrink-0 text-[11px] text-[#A8A29E]">
+                :{p.port} · {p.online ? '在线' : '离线'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
+  );
 }
 
 export function DeviceView({
@@ -697,6 +762,9 @@ export function DeviceView({
           </div>
         )}
       </article>
+
+      {/* Reticulum mesh peers */}
+      <ReticulumPeerSection runtimeBaseUrl={runtimeServiceStatus?.host ? `http://${runtimeServiceStatus.host}:${runtimeServiceStatus.port}` : undefined} />
 
       <article
         data-testid="runtime-peer-section-confirmed"
