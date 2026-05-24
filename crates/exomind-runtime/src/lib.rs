@@ -1420,8 +1420,20 @@ async fn try_start_ret_mesh(
     exomind_net_pairing::RetMeshNode::add_tcp_interface(&transport, &tcp_addr).await;
     tracing::info!("Reticulum TCP interface listening on {}", tcp_addr);
 
+    // Optionally connect to a seed peer via RET_MESH_SEED env var.
+    if let Ok(seed) = std::env::var("RET_MESH_SEED") {
+        let seed = seed.trim().to_string();
+        if !seed.is_empty() {
+            exomind_net_pairing::RetMeshNode::add_tcp_client(&transport, &seed).await;
+            tracing::info!("Reticulum connecting to seed peer at {}", seed);
+        }
+    }
+
     let mut node = exomind_net_pairing::RetMeshNode::new(config, transport, identity).await;
 
+    // Brief delay to allow seed TCP connections to be established,
+    // then announce so the announce propagates through all interfaces.
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("Reticulum identity ready, announcing presence...");
     node.announce().await;
     tracing::info!("Reticulum presence announced");
