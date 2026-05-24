@@ -1671,15 +1671,14 @@ fn build_task_sqlite_snapshot_bytes(
     scope_key: Option<&str>,
     tasks: &[Task],
 ) -> Result<Vec<u8>, (StatusCode, String)> {
-    let temp_root =
-        std::env::temp_dir().join(format!("exomind-task-export-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_root).map_err(|error| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to create task export temp dir: {error}"),
-        )
-    })?;
-    let sqlite_path = temp_root.join("tasks-export.sqlite");
+    let exomind_temp = std::env::temp_dir().join("exomind");
+    std::fs::create_dir_all(&exomind_temp)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create exomind temp dir: {error}")))?;
+    let temp_dir = tempfile::Builder::new()
+        .prefix("task-export-")
+        .tempdir_in(&exomind_temp)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create task export temp dir: {error}")))?;
+    let sqlite_path = temp_dir.path().join("tasks-export.sqlite");
     let store = crate::task::TaskStore::with_sqlite_path(&sqlite_path)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     store
@@ -1695,8 +1694,9 @@ fn build_task_sqlite_snapshot_bytes(
             )
         })?;
     drop(store);
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    if let Err(e) = temp_dir.close() {
+        tracing::warn!(error = %e, "failed to clean exomind temp dir");
+    }
     Ok(bytes)
 }
 
@@ -1704,18 +1704,24 @@ fn read_tasks_from_sqlite_snapshot(
     bytes: &[u8],
     scope_key: Option<&str>,
 ) -> Result<Vec<Task>, (StatusCode, String)> {
-    let temp_path = std::env::temp_dir().join(format!(
-        "exomind-task-import-{}.sqlite",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::write(&temp_path, bytes)
+    let exomind_temp = std::env::temp_dir().join("exomind");
+    std::fs::create_dir_all(&exomind_temp)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create exomind temp dir: {error}")))?;
+    let temp_dir = tempfile::Builder::new()
+        .prefix("task-import-")
+        .tempdir_in(&exomind_temp)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create task import temp dir: {error}")))?;
+    let sqlite_path = temp_dir.path().join("tasks-import.sqlite");
+    std::fs::write(&sqlite_path, bytes)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
-    let store = crate::task::TaskStore::with_sqlite_path(&temp_path)
+    let store = crate::task::TaskStore::with_sqlite_path(&sqlite_path)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     let tasks = store.list_scoped(scope_key);
-
-    let _ = std::fs::remove_file(&temp_path);
+    drop(store);
+    if let Err(e) = temp_dir.close() {
+        tracing::warn!(error = %e, "failed to clean exomind temp dir");
+    }
     Ok(tasks)
 }
 

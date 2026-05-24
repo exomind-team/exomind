@@ -2140,12 +2140,12 @@ fn build_timeblocks_sqlite_snapshot_bytes(
     scope_key: Option<&str>,
     time_blocks: &[TimeBlockData],
 ) -> Result<Vec<u8>, crate::timeblock::TimeBlockStoreError> {
-    let temp_root = std::env::temp_dir().join(format!(
-        "exomind-timeblocks-export-{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&temp_root)?;
-    let sqlite_path = temp_root.join("timeblocks-export.sqlite");
+    let exomind_temp = std::env::temp_dir().join("exomind");
+    let _ = std::fs::create_dir_all(&exomind_temp);
+    let temp_dir = tempfile::Builder::new()
+        .prefix("timeblocks-export-")
+        .tempdir_in(&exomind_temp)?;
+    let sqlite_path = temp_dir.path().join("timeblocks-export.sqlite");
     let store = crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path)?;
     store.replace_completed_scoped(scope_key, time_blocks)?;
     if let Some(active_block) = state.timeblock_store.get_active_scoped(scope_key)? {
@@ -2157,8 +2157,9 @@ fn build_timeblocks_sqlite_snapshot_bytes(
         ))
     })?;
     drop(store);
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    if let Err(e) = temp_dir.close() {
+        tracing::warn!(error = %e, "failed to clean exomind temp dir");
+    }
     Ok(bytes)
 }
 
@@ -2166,18 +2167,20 @@ fn read_timeblocks_from_sqlite_snapshot(
     bytes: &[u8],
     scope_key: Option<&str>,
 ) -> Result<(Vec<TimeBlockData>, Option<ActiveBlockData>), crate::timeblock::TimeBlockStoreError> {
-    let temp_root = std::env::temp_dir().join(format!(
-        "exomind-timeblocks-import-{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&temp_root)?;
-    let sqlite_path = temp_root.join("timeblocks-import.sqlite");
+    let exomind_temp = std::env::temp_dir().join("exomind");
+    let _ = std::fs::create_dir_all(&exomind_temp);
+    let temp_dir = tempfile::Builder::new()
+        .prefix("timeblocks-import-")
+        .tempdir_in(&exomind_temp)?;
+    let sqlite_path = temp_dir.path().join("timeblocks-import.sqlite");
     std::fs::write(&sqlite_path, bytes)?;
     let store = crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path)?;
     let time_blocks = store.list_completed_scoped(scope_key)?;
     let active_block = store.get_active_scoped(scope_key)?;
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    drop(store);
+    if let Err(e) = temp_dir.close() {
+        tracing::warn!(error = %e, "failed to clean exomind temp dir");
+    }
     Ok((time_blocks, active_block))
 }
 
