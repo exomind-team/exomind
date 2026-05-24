@@ -34,6 +34,11 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         auth_secret: None,
         allow_lan_without_auth: false,
         mdns: None,
+        ret_mesh_peers: None,
+        ret_mesh_connect_tx: None,
+        ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            false,
+        )),
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),
         reminder_store: Arc::new(exomind_runtime::reminder::ReminderStore::new()),

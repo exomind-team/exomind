@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DeviceView } from '@/ui/app/pages/agents/DeviceView';
 import type { RuntimeDeviceSnapshot, RuntimeHostSnapshot } from '@/services/runtime-manager';
 
@@ -84,7 +84,16 @@ function buildDeviceSnapshot(): RuntimeDeviceSnapshot {
 }
 
 describe('DeviceView runtime topology selectors（设备页拓扑选择器）', () => {
-  it('prefers topology.device.name over legacy hostname（优先显示 topology.device.name）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('prefers topology.device.name over legacy hostname（优先显示 topology.device.name）', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
     const onSyncAutomationEnabledChange = vi.fn(async () => undefined);
     render(
       <DeviceView
@@ -137,5 +146,123 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
     expect(within(discoveredSection).getByText('Android')).toBeInTheDocument();
     expect(within(deviceCard).getByText('1 / 1')).toBeInTheDocument();
     expect(within(deviceCard).getByText('links: 1')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:1949/mesh/ret/discovered');
+    });
+  });
+
+  it('pairs a Reticulum discovered peer from the device view（从设备页配对 Reticulum peer）', async () => {
+    const reticulumPeer = {
+      host_id: 'ret-peer-host',
+      node_name: 'ret-peer-node',
+      port: 47388,
+      online: true,
+      last_seen_ms: Date.now(),
+      trust_state: 'Discovered',
+      identity_hex: 'ret-identity-0123456789abcdef',
+      rtt_ms: 12,
+    };
+    const pairedPeer = {
+      ...reticulumPeer,
+      trust_state: 'Paired',
+    };
+    const unpairedPeer = {
+      ...reticulumPeer,
+      trust_state: 'Discovered',
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/mesh/ret/discovered')) {
+        return new Response(JSON.stringify([reticulumPeer]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/mesh/ret/peers/ret-identity-0123456789abcdef/pair') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          paired: true,
+          peer: pairedPeer,
+          mesh_peer: {
+            id: 'ret-identity-0123456789abcdef',
+            host_id: 'ret-identity-0123456789abcdef',
+            base_url: 'http://127.0.0.1:47388',
+            enabled: true,
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/mesh/ret/peers/ret-identity-0123456789abcdef/pair') && init?.method === 'DELETE') {
+        return new Response(JSON.stringify({
+          paired: false,
+          peer: unpairedPeer,
+          mesh_peer: {
+            id: 'ret-identity-0123456789abcdef',
+            host_id: 'ret-identity-0123456789abcdef',
+            base_url: 'http://127.0.0.1:47388',
+            enabled: false,
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <DeviceView
+        groups={[]}
+        runtimeDeviceSnapshots={[]}
+        runtimeHostSnapshots={[]}
+        runtimeServiceStatus={{
+          running: true,
+          host: '127.0.0.1',
+          port: 1949,
+          hostId: 'desktop-local-host',
+        }}
+        peerConnectivityDrafts={{}}
+        peerConnectivityPendingHostIds={[]}
+        syncAutomationEnabled
+        runtimeHostError=""
+        embeddedRuntimeNetworkMode="local"
+        embeddedRuntimeBindAddress="127.0.0.1:1949"
+        runtimeNeedsRebind={false}
+        runtimeTargetMode="embedded"
+        runtimeTargetAddress="127.0.0.1:1949"
+        runtimeTargetError=""
+        runtimeExternalAddressDraft=""
+        runtimeExternalAuthTokenDraft=""
+        onSyncAutomationEnabledChange={vi.fn(async () => undefined)}
+        onRuntimeHostProbe={vi.fn(async () => undefined)}
+        onVerifyPeer={vi.fn(async () => undefined)}
+        onTogglePeerConnectivity={vi.fn(async () => undefined)}
+        onEmbeddedRuntimeNetworkModeChange={vi.fn()}
+        onRuntimeStart={vi.fn(async () => undefined)}
+        onRuntimeStop={vi.fn(async () => undefined)}
+        onRuntimeTargetModeChange={vi.fn()}
+        onRuntimeExternalAddressDraftChange={vi.fn()}
+        onRuntimeExternalAuthTokenDraftChange={vi.fn()}
+        onApplyRuntimeExternalAddress={vi.fn()}
+        onOpenHostManager={vi.fn()}
+        onOpenPeerPairing={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('ret-peer-host')).toBeInTheDocument();
+    expect(screen.getByText('已发现')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('reticulum-peer-pair-ret-identity-0123456789abcdef'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:1949/mesh/ret/peers/ret-identity-0123456789abcdef/pair',
+        { method: 'POST' },
+      );
+    });
+    expect(await screen.findByText('已授权')).toBeInTheDocument();
+    expect(screen.queryByTestId('reticulum-peer-pair-ret-identity-0123456789abcdef')).not.toBeInTheDocument();
   });
 });

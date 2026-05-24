@@ -118,6 +118,11 @@ mod tests {
             auth_secret: None,
             allow_lan_without_auth: false,
             mdns: None,
+            ret_mesh_peers: None,
+            ret_mesh_connect_tx: None,
+            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            )),
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),

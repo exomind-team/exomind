@@ -330,6 +330,35 @@ impl MeshState {
         removed
     }
 
+    pub fn revoke_peer_authorization(&self, peer_id: &str) -> Option<PeerInfo> {
+        let revoked = {
+            let mut peers = match self.peers.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+
+            let peer = peers.get_mut(peer_id)?;
+            peer.enabled = false;
+            peer.status = PeerStatus::Disabled;
+            peer.auth_token = None;
+            peer.inbound_secret = None;
+            peer.updated_at = now_rfc3339();
+            peer.clone()
+        };
+
+        let mut interests = match self.interests.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        interests.remove(peer_id);
+        drop(interests);
+
+        self.revoke_all_scope_grants_for_peer(peer_id);
+        self.persist();
+
+        Some(revoked)
+    }
+
     pub fn upsert_scope_grant(&self, mut grant: PeerScopeGrant) -> PeerScopeGrant {
         grant.domain = grant.domain.trim().to_string();
         grant.scope_key = grant.scope_key.trim().to_string();

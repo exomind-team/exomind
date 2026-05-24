@@ -133,12 +133,23 @@ function resolveVerificationPresentation(item: RuntimeHostSnapshot): {
 }
 
 /** Reticulum mesh networking peer section (EXOMIND_RET_MESH=1). */
+type ReticulumPeer = {
+  host_id: string;
+  node_name: string;
+  port: number;
+  online: boolean;
+  last_seen_ms: number;
+  identity_hex?: string;
+  trust_state?: string;
+  rtt_ms?: number | null;
+};
+
 function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
-  const [peers, setPeers] = useState<Array<{
-    host_id: string; node_name: string; port: number; online: boolean; last_seen_ms: number;
-    trust_state?: string; rtt_ms?: number | null;
-  }>>([]);
+  const [peers, setPeers] = useState<ReticulumPeer[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pairingHostId, setPairingHostId] = useState<string | null>(null);
+  const [unpairingHostId, setUnpairingHostId] = useState<string | null>(null);
+  const [pairingError, setPairingError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -157,6 +168,62 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     return () => { mountedRef.current = false; clearInterval(interval); };
   }, [runtimeBaseUrl]);
 
+  const updatePeerFromResponse = (updatedPeer: ReticulumPeer) => {
+    setPeers((current) => current.map((peer) => peer.host_id === updatedPeer.host_id ? { ...peer, ...updatedPeer } : peer));
+  };
+
+  const handlePairPeer = async (hostId: string) => {
+    if (!runtimeBaseUrl || pairingHostId || unpairingHostId) return;
+    setPairingHostId(hostId);
+    setPairingError(null);
+    try {
+      const res = await fetch(`${runtimeBaseUrl}/mesh/ret/peers/${encodeURIComponent(hostId)}/pair`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        throw new Error(`Reticulum pairing failed (${res.status})`);
+      }
+      const data = await res.json() as { peer?: ReticulumPeer };
+      if (mountedRef.current && data.peer) {
+        updatePeerFromResponse(data.peer);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setPairingError(err instanceof Error ? err.message : 'Reticulum pairing failed');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setPairingHostId(null);
+      }
+    }
+  };
+
+  const handleUnpairPeer = async (hostId: string) => {
+    if (!runtimeBaseUrl || pairingHostId || unpairingHostId) return;
+    setUnpairingHostId(hostId);
+    setPairingError(null);
+    try {
+      const res = await fetch(`${runtimeBaseUrl}/mesh/ret/peers/${encodeURIComponent(hostId)}/pair`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        throw new Error(`Reticulum unpair failed (${res.status})`);
+      }
+      const data = await res.json() as { peer?: ReticulumPeer };
+      if (mountedRef.current && data.peer) {
+        updatePeerFromResponse(data.peer);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setPairingError(err instanceof Error ? err.message : 'Reticulum unpair failed');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setUnpairingHostId(null);
+      }
+    }
+  };
+
   if (error && peers.length === 0) return null;
 
   return (
@@ -164,44 +231,85 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
       <div className="flex items-center gap-2">
         <Wifi size={14} className="text-[#0D9488]" />
         <div>
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Reticulum 设备</h3>
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Reticulum 网络</h3>
           <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
-            {peers.length > 0 ? `${peers.length} 台设备` : '暂无设备'}
+            {peers.length > 0 ? `${peers.length} 个节点` : '等待发现'}
           </p>
         </div>
       </div>
       {peers.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
-          等待 Reticulum 发现的设备...
+          正在等待 Reticulum 发现节点...
         </div>
       ) : (
         <div className="space-y-2">
+          {pairingError && (
+            <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[11px] text-[#DC2626] dark:border-[#7F1D1D] dark:bg-[#2A1515] dark:text-[#FCA5A5]">
+              {pairingError}
+            </div>
+          )}
           {peers.map((p) => {
+            const peerIdentity = p.identity_hex || p.host_id;
             const lastSeen = new Date(p.last_seen_ms).toLocaleTimeString('zh-CN', { hour12: false });
-            const trustLabel = p.trust_state === 'Paired' ? '已配对' :
+            const trustLabel = p.trust_state === 'Paired' ? '已授权' :
               p.trust_state === 'Trusted' ? '可信' :
               p.trust_state === 'Blocked' ? '已屏蔽' : '已发现';
             const trustColor = p.trust_state === 'Paired' ? 'text-[#16A34A]' :
               p.trust_state === 'Trusted' ? 'text-[#2563EB]' : 'text-[#A8A29E]';
+            const canPair = p.online && p.trust_state !== 'Paired' && p.trust_state !== 'Trusted' && p.trust_state !== 'Blocked';
+            const canUnpair = p.trust_state === 'Paired';
+            const isPairing = pairingHostId === peerIdentity;
+            const isUnpairing = unpairingHostId === peerIdentity;
             return (
-              <div key={p.host_id}
-                className="flex items-center justify-between rounded-xl border border-[#E7E5E4] bg-[#FAFAF9] px-3 py-2 text-sm dark:border-[#292524] dark:bg-[#1C1917]"
+              <div key={peerIdentity}
+                className="flex items-center justify-between gap-3 rounded-xl border border-[#E7E5E4] bg-[#FAFAF9] px-3 py-2 text-sm dark:border-[#292524] dark:bg-[#1C1917]"
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${p.online ? 'bg-green-500' : 'bg-gray-400'}`} />
-                  <span className="text-[12px] text-[#44403C] dark:text-[#D6D3D1] break-all">
-                    {p.host_id}
-                  </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${p.online ? 'bg-green-500' : 'bg-gray-400'}`} />
+                    <span className="text-[12px] text-[#44403C] dark:text-[#D6D3D1] break-all">
+                      {p.host_id}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-[#A8A29E]">
+                    <span>{p.node_name || 'ExoMind Runtime'}</span>
+                    <span>·</span>
+                    <span>RT {p.port}</span>
+                  </div>
                 </div>
-                <span className="shrink-0 text-[11px] whitespace-nowrap ml-2 flex items-center gap-1">
-                  <span className={trustColor}>{trustLabel}</span>
-                  <span className="text-[#A8A29E]">·</span>
-                  {p.rtt_ms != null && (
-                    <><span className="text-[#A8A29E]">{p.rtt_ms}ms</span><span className="text-[#A8A29E]">·</span></>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="text-[11px] whitespace-nowrap flex items-center gap-1">
+                    <span className={trustColor}>{trustLabel}</span>
+                    <span className="text-[#A8A29E]">·</span>
+                    {p.rtt_ms != null && (
+                      <><span className="text-[#A8A29E]">{p.rtt_ms}ms</span><span className="text-[#A8A29E]">·</span></>
+                    )}
+                    <span className="text-[#A8A29E]">{p.online ? '在线' : '离线'}</span>
+                    <span className="text-[#A8A29E]">· {lastSeen}</span>
+                  </span>
+                  {canPair && (
+                    <button
+                      type="button"
+                      data-testid={`reticulum-peer-pair-${peerIdentity}`}
+                      onClick={() => void handlePairPeer(peerIdentity)}
+                      disabled={isPairing || pairingHostId !== null || unpairingHostId !== null}
+                      className="rounded-lg bg-[#0D9488] px-2.5 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isPairing ? '授权中' : '授权'}
+                    </button>
                   )}
-                  <span className="text-[#A8A29E]">{p.online ? '在线' : '离线'}</span>
-                  <span className="text-[#A8A29E]">· {lastSeen}</span>
-                </span>
+                  {canUnpair && (
+                    <button
+                      type="button"
+                      data-testid={`reticulum-peer-unpair-${peerIdentity}`}
+                      onClick={() => void handleUnpairPeer(peerIdentity)}
+                      disabled={isUnpairing || pairingHostId !== null || unpairingHostId !== null}
+                      className="rounded-lg border border-[#D6D3D1] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#78716C] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]"
+                    >
+                      {isUnpairing ? '撤销中' : '撤销授权'}
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

@@ -327,11 +327,207 @@ async fn list_ret_discovered(
     let peers = match state.ret_mesh_peers.as_ref() {
         Some(peers) => {
             let map = peers.read().await;
-            map.values().cloned().collect()
+            map.values()
+                .cloned()
+                .map(|peer| ret_peer_with_mesh_authorization_state(&state, peer))
+                .collect()
         }
         None => Vec::new(),
     };
     Json(peers)
+}
+
+fn ret_peer_mesh_peer_id(peer: &exomind_net_pairing::DiscoveredPeer) -> &str {
+    if peer.identity_hex.is_empty() {
+        &peer.host_id
+    } else {
+        &peer.identity_hex
+    }
+}
+
+async fn find_ret_peer_by_selector(
+    state: &AppState,
+    peer_selector: &str,
+) -> Option<exomind_net_pairing::DiscoveredPeer> {
+    let peers = state.ret_mesh_peers.as_ref()?;
+    let map = peers.read().await;
+    map.get(peer_selector)
+        .cloned()
+        .or_else(|| {
+            map.values()
+                .find(|peer| peer.host_id == peer_selector)
+                .cloned()
+        })
+        .or_else(|| {
+            map.values()
+                .find(|peer| peer.identity_hex == peer_selector)
+                .cloned()
+        })
+}
+
+fn ret_peer_with_mesh_authorization_state(
+    state: &AppState,
+    mut peer: exomind_net_pairing::DiscoveredPeer,
+) -> exomind_net_pairing::DiscoveredPeer {
+    let authorized = state
+        .mesh
+        .get_peer(ret_peer_mesh_peer_id(&peer))
+        .map(|mesh_peer| mesh_peer.enabled && mesh_peer.inbound_secret.is_some())
+        .unwrap_or(false);
+
+    match peer.trust_state {
+        exomind_net_pairing::discovery::TrustState::Blocked
+        | exomind_net_pairing::discovery::TrustState::Trusted => {}
+        exomind_net_pairing::discovery::TrustState::Paired if !authorized => {
+            peer.trust_state = exomind_net_pairing::discovery::TrustState::Discovered;
+        }
+        _ if authorized => {
+            peer.trust_state = exomind_net_pairing::discovery::TrustState::Paired;
+        }
+        _ => {}
+    }
+
+    peer
+}
+
+#[derive(Debug, Serialize)]
+struct RetPairResponse {
+    paired: bool,
+    peer: exomind_net_pairing::DiscoveredPeer,
+    mesh_peer: PeerInfoPublic,
+}
+
+/// Pair with a peer discovered via Reticulum mesh.
+///
+/// This is the UI-facing control-plane hook for the Reticulum path: it registers
+/// the peer as an enabled MeshState peer with a persisted inbound token and asks
+/// the background mesh task to open a TCP transport connection. A raw Reticulum
+/// connection alone is only discovery/reachability; Paired means this local RT
+/// now has an authorization record for the peer.
+async fn pair_ret_peer(
+    Path(peer_selector): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<RetPairResponse>, StatusCode> {
+    if state.ret_mesh_peers.is_none() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    let connect_tx = state
+        .ret_mesh_connect_tx
+        .clone()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let peer = find_ret_peer_by_selector(&state, &peer_selector)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let peer_id = ret_peer_mesh_peer_id(&peer).to_string();
+    if peer_id.is_empty() {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let tcp_addr = format!("127.0.0.1:{}", peer.port + 5000);
+    connect_tx
+        .send((peer.host_id.clone(), tcp_addr))
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let legacy_peer = (peer_id != peer.host_id)
+        .then(|| state.mesh.get_peer(&peer.host_id))
+        .flatten();
+    let existing_peer = state.mesh.get_peer(&peer_id).or(legacy_peer);
+    if peer_id != peer.host_id {
+        state.mesh.delete_peer(&peer.host_id);
+    }
+    let inbound_secret = existing_peer
+        .as_ref()
+        .and_then(|peer| peer.inbound_secret.clone())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let mesh_peer = state.mesh.upsert_peer(PeerInfo {
+        id: peer_id.clone(),
+        base_url: format!("http://127.0.0.1:{}", peer.port),
+        enabled: true,
+        capabilities: existing_peer
+            .as_ref()
+            .map(|peer| peer.capabilities.clone())
+            .unwrap_or_default(),
+        status: existing_peer
+            .as_ref()
+            .map(|peer| peer.status.clone())
+            .unwrap_or(PeerStatus::Unknown),
+        last_seen: existing_peer
+            .as_ref()
+            .and_then(|peer| peer.last_seen.clone()),
+        last_error: None,
+        created_at: existing_peer
+            .as_ref()
+            .map(|peer| peer.created_at.clone())
+            .unwrap_or_else(|| now.clone()),
+        updated_at: now,
+        auth_token: existing_peer
+            .as_ref()
+            .and_then(|peer| peer.auth_token.clone()),
+        inbound_secret: Some(inbound_secret),
+    });
+
+    if let Some(relay) = &state.mesh_relay {
+        relay.reconcile_peer(&mesh_peer.id).await;
+        relay.sync_local_interests_to_peer(&mesh_peer.id).await.ok();
+    }
+
+    let peer = ret_peer_with_mesh_authorization_state(&state, peer);
+
+    tracing::info!(
+        "Reticulum peer {} authorized as identity {} from UI pairing request",
+        peer.host_id,
+        mesh_peer.id
+    );
+
+    Ok(Json(RetPairResponse {
+        paired: true,
+        peer,
+        mesh_peer: PeerInfoPublic::from(&mesh_peer),
+    }))
+}
+
+#[derive(Debug, Serialize)]
+struct RetUnpairResponse {
+    paired: bool,
+    peer: Option<exomind_net_pairing::DiscoveredPeer>,
+    mesh_peer: PeerInfoPublic,
+}
+
+/// Revoke local authorization for a Reticulum peer without removing discovery.
+async fn unpair_ret_peer(
+    Path(peer_selector): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<RetUnpairResponse>, StatusCode> {
+    let discovered_peer = find_ret_peer_by_selector(&state, &peer_selector).await;
+    let peer_id = discovered_peer
+        .as_ref()
+        .map(|peer| ret_peer_mesh_peer_id(peer).to_string())
+        .filter(|peer_id| !peer_id.is_empty())
+        .unwrap_or_else(|| peer_selector.clone());
+
+    let mesh_peer = state
+        .mesh
+        .revoke_peer_authorization(&peer_id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    if let Some(relay) = &state.mesh_relay {
+        relay.reconcile_peer(&mesh_peer.id).await;
+    }
+
+    let peer = discovered_peer.map(|peer| ret_peer_with_mesh_authorization_state(&state, peer));
+
+    tracing::info!(
+        "Reticulum peer authorization revoked for identity {} from UI unpair request",
+        mesh_peer.id
+    );
+
+    Ok(Json(RetUnpairResponse {
+        paired: false,
+        peer,
+        mesh_peer: PeerInfoPublic::from(&mesh_peer),
+    }))
 }
 
 #[derive(Deserialize)]
@@ -344,7 +540,9 @@ async fn toggle_ret_announce(
     State(state): State<AppState>,
     Json(req): Json<AnnounceToggleRequest>,
 ) -> Json<serde_json::Value> {
-    state.ret_mesh_announce_enabled.store(req.enabled, std::sync::atomic::Ordering::Relaxed);
+    state
+        .ret_mesh_announce_enabled
+        .store(req.enabled, std::sync::atomic::Ordering::Relaxed);
     tracing::info!("Reticulum announce toggled: {}", req.enabled);
     Json(serde_json::json!({"announce_enabled": req.enabled}))
 }
@@ -359,6 +557,7 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/stream", get(stream_handler))
         .route("/mesh/discovered", get(list_discovered))
         .route("/mesh/ret/discovered", get(list_ret_discovered))
+        .route("/mesh/ret/peers/:peer_id/pair", post(pair_ret_peer).delete(unpair_ret_peer))
         .route("/mesh/ret/announce", post(toggle_ret_announce))
         // Initiate is protected: only the local admin can create pairing sessions.
         // This prevents remote attackers from calling initiate + respond to self-pair.

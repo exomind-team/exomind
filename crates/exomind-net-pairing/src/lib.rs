@@ -5,16 +5,16 @@ pub mod peer_store;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub use discovery::{DeviceMetadata, DiscoveredPeer};
+pub use pairing::{PairedPeer, PairingEvent, PairingResult};
+pub use peer_store::PeerStore;
 use rand::Rng;
 use rand_core::OsRng;
 use reticulum::destination::DestinationName;
 use reticulum::identity::PrivateIdentity;
 use reticulum::transport::{Transport, TransportConfig};
 use sha2::{Digest, Sha256};
-use tokio::sync::{broadcast, RwLock};
-pub use discovery::{DeviceMetadata, DiscoveredPeer};
-pub use pairing::{PairingEvent, PairingResult, PairedPeer};
-pub use peer_store::PeerStore;
+use tokio::sync::{RwLock, broadcast};
 
 /// Events emitted by the RetMeshNode.
 #[derive(Debug, Clone)]
@@ -97,6 +97,21 @@ impl RetMeshNode {
         }
     }
 
+    /// Stable public Reticulum identity hash for authorization and display.
+    pub fn public_identity_hex(identity: &PrivateIdentity) -> String {
+        identity.as_identity().address_hash.to_hex_string()
+    }
+
+    /// Hex-encoded private Reticulum identity seed for local persistence.
+    pub fn private_identity_seed_hex(identity: &PrivateIdentity) -> String {
+        identity.to_hex_string()
+    }
+
+    /// Stable public identity hash for this node.
+    pub fn local_identity_hex(&self) -> String {
+        Self::public_identity_hex(&self.identity)
+    }
+
     /// Add a TCP server interface to the transport so other nodes can connect.
     pub async fn add_tcp_interface(transport: &Transport, bind_addr: &str) {
         use reticulum::iface::tcp_server::TcpServer;
@@ -147,7 +162,10 @@ impl RetMeshNode {
     /// Announce this node's presence with device metadata.
     pub async fn announce(&mut self) {
         let dest_name = DestinationName::new("exomind", "discovery");
-        let dest = self.transport.add_destination(self.identity.clone(), dest_name).await;
+        let dest = self
+            .transport
+            .add_destination(self.identity.clone(), dest_name)
+            .await;
         let meta = DeviceMetadata {
             host_id: self.config.host_id.clone(),
             node_name: self.config.node_name.clone(),

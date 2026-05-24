@@ -1,11 +1,30 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use exomind_net_pairing::DiscoveredPeer;
+use exomind_net_pairing::discovery::TrustState;
+use exomind_runtime::AppState;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tower::util::ServiceExt;
 
 fn test_app() -> axum::Router {
     exomind_runtime::app(0)
+}
+
+fn reticulum_test_peer() -> DiscoveredPeer {
+    DiscoveredPeer {
+        host_id: "ret-peer-host".to_string(),
+        node_name: "ret-peer-node".to_string(),
+        app_version: "0.3.0".to_string(),
+        port: 47388,
+        identity_hex: "ret-identity-0123456789abcdef".to_string(),
+        last_seen_ms: 1_782_000_000_000,
+        online: true,
+        trust_state: TrustState::Discovered,
+        rtt_ms: Some(12),
+    }
 }
 
 #[tokio::test]
@@ -209,6 +228,222 @@ async fn mesh_peers_crud_roundtrip() {
             .iter()
             .any(|peer| peer["id"] == "rt-b")
     );
+}
+
+#[tokio::test]
+async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let mesh_persist_path = tempdir.path().join("mesh-state.json");
+    let mut state = AppState::new_runtime(
+        0,
+        "ret-local-host".to_string(),
+        Some(mesh_persist_path.clone()),
+        None,
+        false,
+        Some("admin-secret".to_string()),
+    );
+    let mesh = state.mesh.clone();
+    let ret_peer = reticulum_test_peer();
+    let peers = Arc::new(tokio::sync::RwLock::new(HashMap::from([(
+        ret_peer.identity_hex.clone(),
+        ret_peer,
+    )])));
+    let (connect_tx, mut connect_rx) = tokio::sync::broadcast::channel::<(String, String)>(4);
+    state.ret_mesh_peers = Some(peers.clone());
+    state.ret_mesh_connect_tx = Some(connect_tx);
+    let app = exomind_runtime::app_with_state(state);
+
+    let discovered_before = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ret/discovered")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(discovered_before.status(), StatusCode::OK);
+    let discovered_before_body = discovered_before
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let discovered_before_payload: Value = serde_json::from_slice(&discovered_before_body).unwrap();
+    assert_eq!(discovered_before_payload[0]["trust_state"], "Discovered");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mesh/ret/peers/ret-identity-0123456789abcdef/pair")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["paired"], json!(true));
+    assert_eq!(payload["peer"]["host_id"], "ret-peer-host");
+    assert_eq!(payload["peer"]["trust_state"], "Paired");
+    assert_eq!(payload["mesh_peer"]["id"], "ret-identity-0123456789abcdef");
+    assert_eq!(payload["mesh_peer"]["base_url"], "http://127.0.0.1:47388");
+    assert_eq!(payload["mesh_peer"]["enabled"], json!(true));
+
+    let (host_id, tcp_addr) = connect_rx.recv().await.unwrap();
+    assert_eq!(host_id, "ret-peer-host");
+    assert_eq!(tcp_addr, "127.0.0.1:52388");
+
+    let map = peers.read().await;
+    assert_eq!(
+        map.get("ret-identity-0123456789abcdef")
+            .unwrap()
+            .trust_state,
+        TrustState::Discovered,
+        "raw Reticulum discovery remains discovery-only; Paired is derived from MeshState authorization",
+    );
+    drop(map);
+
+    let mesh_peer = mesh.get_peer("ret-identity-0123456789abcdef").unwrap();
+    assert!(mesh.get_peer("ret-peer-host").is_none());
+    assert!(mesh_peer.enabled);
+    assert_eq!(mesh_peer.base_url, "http://127.0.0.1:47388");
+    assert!(
+        mesh_peer
+            .inbound_secret
+            .as_deref()
+            .is_some_and(|secret| !secret.is_empty()),
+        "pairing should persist a local inbound token for peer authorization",
+    );
+    let inbound_secret = mesh_peer.inbound_secret.clone().unwrap();
+
+    let peer_token_before_unpair = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/discovered")
+                .header("authorization", format!("Bearer {inbound_secret}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(peer_token_before_unpair.status(), StatusCode::OK);
+
+    let persisted: Value = serde_json::from_str(
+        &std::fs::read_to_string(&mesh_persist_path).expect("mesh state should persist"),
+    )
+    .unwrap();
+    let persisted_peer = persisted["peers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|peer| peer["id"] == "ret-identity-0123456789abcdef")
+        .expect("authorized Reticulum peer should be persisted in MeshState");
+    assert_eq!(persisted_peer["enabled"], json!(true));
+    assert_eq!(
+        persisted_peer["inbound_secret"],
+        json!(inbound_secret.clone())
+    );
+
+    let discovered_after = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ret/discovered")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(discovered_after.status(), StatusCode::OK);
+    let discovered_after_body = discovered_after
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let discovered_after_payload: Value = serde_json::from_slice(&discovered_after_body).unwrap();
+    assert_eq!(discovered_after_payload[0]["trust_state"], "Paired");
+
+    let unpair_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/mesh/ret/peers/ret-identity-0123456789abcdef/pair")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unpair_response.status(), StatusCode::OK);
+    let unpair_body = unpair_response.into_body().collect().await.unwrap().to_bytes();
+    let unpair_payload: Value = serde_json::from_slice(&unpair_body).unwrap();
+    assert_eq!(unpair_payload["paired"], json!(false));
+    assert_eq!(unpair_payload["peer"]["trust_state"], "Discovered");
+    assert_eq!(unpair_payload["mesh_peer"]["enabled"], json!(false));
+
+    let revoked_peer = mesh.get_peer("ret-identity-0123456789abcdef").unwrap();
+    assert!(!revoked_peer.enabled);
+    assert!(revoked_peer.inbound_secret.is_none());
+    assert!(revoked_peer.auth_token.is_none());
+
+    let persisted_after_unpair: Value = serde_json::from_str(
+        &std::fs::read_to_string(&mesh_persist_path).expect("mesh state should persist"),
+    )
+    .unwrap();
+    let persisted_revoked_peer = persisted_after_unpair["peers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|peer| peer["id"] == "ret-identity-0123456789abcdef")
+        .expect("revoked Reticulum peer should remain visible in MeshState");
+    assert_eq!(persisted_revoked_peer["enabled"], json!(false));
+    assert_eq!(persisted_revoked_peer["inbound_secret"], Value::Null);
+    assert_eq!(persisted_revoked_peer["auth_token"], Value::Null);
+
+    let peer_token_after_unpair = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/discovered")
+                .header("authorization", format!("Bearer {inbound_secret}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(peer_token_after_unpair.status(), StatusCode::UNAUTHORIZED);
+
+    let discovered_after_unpair = app
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ret/discovered")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(discovered_after_unpair.status(), StatusCode::OK);
+    let discovered_after_unpair_body = discovered_after_unpair
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let discovered_after_unpair_payload: Value = serde_json::from_slice(&discovered_after_unpair_body).unwrap();
+    assert_eq!(discovered_after_unpair_payload[0]["trust_state"], "Discovered");
 }
 
 #[tokio::test]

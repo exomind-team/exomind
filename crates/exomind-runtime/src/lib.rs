@@ -235,6 +235,70 @@ fn configured_mesh_state_path_from_env(data_dir: Option<&Path>) -> Option<PathBu
         })
 }
 
+fn ret_mesh_identity_path(options: &RuntimeStartOptions) -> PathBuf {
+    env::var("EXOMIND_RET_MESH_IDENTITY_PATH")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            options
+                .data_dir
+                .clone()
+                .unwrap_or_else(resolve_data_dir)
+                .join("reticulum-identity.hex")
+        })
+}
+
+fn load_ret_mesh_identity_seed(options: &RuntimeStartOptions) -> Option<String> {
+    if let Ok(raw) = env::var("EXOMIND_RET_MESH_IDENTITY_SEED") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let path = ret_mesh_identity_path(options);
+    std::fs::read_to_string(&path).ok().and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
+fn persist_ret_mesh_identity_seed(options: &RuntimeStartOptions, seed: &str) {
+    if env::var("EXOMIND_RET_MESH_IDENTITY_SEED").is_ok() {
+        return;
+    }
+
+    let path = ret_mesh_identity_path(options);
+    if let Some(parent) = path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            tracing::warn!(
+                path = %parent.display(),
+                error = %error,
+                "failed to create Reticulum identity seed directory"
+            );
+            return;
+        }
+    }
+
+    if let Err(error) = std::fs::write(&path, seed) {
+        tracing::warn!(
+            path = %path.display(),
+            error = %error,
+            "failed to persist Reticulum identity seed"
+        );
+    }
+}
+
+fn prepare_ret_mesh_identity(options: &RuntimeStartOptions) -> (String, String) {
+    let identity_seed = load_ret_mesh_identity_seed(options);
+    let identity =
+        exomind_net_pairing::RetMeshNode::load_or_create_identity(identity_seed.as_deref());
+    let private_seed = exomind_net_pairing::RetMeshNode::private_identity_seed_hex(&identity);
+    persist_ret_mesh_identity_seed(options, &private_seed);
+    let public_identity_hex = exomind_net_pairing::RetMeshNode::public_identity_hex(&identity);
+    (private_seed, public_identity_hex)
+}
+
 /// Runtime startup options（运行时启动选项）.
 #[derive(Debug, Clone)]
 pub struct RuntimeStartOptions {
@@ -587,6 +651,20 @@ pub async fn start_with_options(
 ) -> Result<RuntimeHandle, RuntimeStartError> {
     let mut options = options;
     ensure_auth_secret_for_bind_host(&mut options);
+    let ret_mesh_identity_seed = if options.enable_ret_mesh {
+        let (identity_seed, public_identity_hex) = prepare_ret_mesh_identity(&options);
+        if options.host_id != public_identity_hex {
+            tracing::info!(
+                legacy_host_id = %options.host_id,
+                reticulum_identity = %public_identity_hex,
+                "using Reticulum identity as runtime host_id"
+            );
+            options.host_id = public_identity_hex;
+        }
+        Some(identity_seed)
+    } else {
+        None
+    };
 
     let bind_addr_raw = format!("{}:{}", options.bind_host, options.port);
     let bind_addr: SocketAddr =
@@ -645,16 +723,28 @@ pub async fn start_with_options(
     // Reticulum mesh networking (EXOMIND_RET_MESH=1)
     let _ret_mesh = if options.enable_ret_mesh {
         tracing::info!("Reticulum mesh networking enabled (EXOMIND_RET_MESH=1)");
-        match try_start_ret_mesh(&options, local_addr.port()).await {
+        match try_start_ret_mesh(
+            &options,
+            local_addr.port(),
+            ret_mesh_identity_seed.as_deref(),
+        )
+        .await
+        {
             Ok(node) => {
                 let discovered = node.discovered.clone();
                 state.ret_mesh_peers = Some(discovered);
                 let handle = node.event_tx.subscribe();
                 let mdns_clone = state.mdns.clone();
-                let (connect_tx, connect_rx) = tokio::sync::broadcast::channel::<(String, String)>(64);
+                let (connect_tx, connect_rx) =
+                    tokio::sync::broadcast::channel::<(String, String)>(64);
                 state.ret_mesh_connect_tx = Some(connect_tx);
                 let announce_enabled = state.ret_mesh_announce_enabled.clone();
-                tokio::spawn(ret_mesh_background(node, mdns_clone, connect_rx, announce_enabled));
+                tokio::spawn(ret_mesh_background(
+                    node,
+                    mdns_clone,
+                    connect_rx,
+                    announce_enabled,
+                ));
                 Some(handle)
             }
             Err(e) => {
@@ -979,7 +1069,11 @@ pub struct AppState {
     pub allow_lan_without_auth: bool,
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub ret_mesh_peers: Option<
-        Arc<tokio::sync::RwLock<std::collections::HashMap<String, exomind_net_pairing::DiscoveredPeer>>>,
+        Arc<
+            tokio::sync::RwLock<
+                std::collections::HashMap<String, exomind_net_pairing::DiscoveredPeer>,
+            >,
+        >,
     >,
     /// Sender to trigger Reticulum TCP connection from the pairing/http layer.
     /// Value is (host_id, tcp_addr).
@@ -1320,7 +1414,9 @@ impl AppState {
             mdns: None,
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
-            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            )),
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store,
             reminder_store: Arc::new(reminder_store),
@@ -1409,20 +1505,26 @@ async fn version() -> Json<VersionResponse> {
 async fn try_start_ret_mesh(
     options: &RuntimeStartOptions,
     port: u16,
+    identity_seed: Option<&str>,
 ) -> Result<exomind_net_pairing::RetMeshNode, Box<dyn std::error::Error>> {
     let config = exomind_net_pairing::RetMeshConfig {
         host_id: options.host_id.clone(),
-        node_name: options.host_id.clone(),
+        node_name: options.device_id.clone(),
         app_version: format!("{}", env!("CARGO_PKG_VERSION")),
         port,
         ..Default::default()
     };
 
-    let identity = exomind_net_pairing::RetMeshNode::load_or_create_identity(None);
+    let identity = exomind_net_pairing::RetMeshNode::load_or_create_identity(identity_seed);
+    let local_identity_hex = exomind_net_pairing::RetMeshNode::public_identity_hex(&identity);
     let transport = exomind_net_pairing::RetMeshNode::create_transport(
         &config.node_name,
         &identity,
         config.broadcast_capacity,
+    );
+    tracing::info!(
+        "Reticulum public identity initialized: {}",
+        local_identity_hex
     );
 
     // Add a UDP interface for LAN broadcast discovery.
@@ -1439,7 +1541,11 @@ async fn try_start_ret_mesh(
     #[cfg(windows)]
     let udp_fwd = format!("127.0.0.1:{}", udp_port);
     exomind_net_pairing::RetMeshNode::add_udp_interface(&transport, &udp_addr, &udp_fwd).await;
-    tracing::info!("Reticulum UDP discovery bound to {} (forward {})", udp_addr, udp_fwd);
+    tracing::info!(
+        "Reticulum UDP discovery bound to {} (forward {})",
+        udp_addr,
+        udp_fwd
+    );
 
     // Also add a TCP server interface for remote/seed connections.
     let tcp_port = port + 5000;
@@ -1477,30 +1583,29 @@ async fn ret_mesh_background(
 ) {
     use std::collections::HashSet;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::time::{interval, Duration};
+    use tokio::time::{Duration, interval};
 
     let mut announce_rx = node.transport.recv_announces().await;
     let mut tick = interval(Duration::from_secs(10));
     let offline_timeout_ms: u64 = 30_000;
     let discovered = node.discovered.clone();
+    let local_identity_hex = node.local_identity_hex();
     let mut connected_mdns_peers: HashSet<String> = HashSet::new();
     let mut last_local_announce_ms: u64 = 0;
 
     loop {
         tokio::select! {
             Ok((host_id, addr)) = connect_rx.recv() => {
-                tracing::info!("Reticulum connecting to paired peer {} at {}", host_id, addr);
+                tracing::info!("Reticulum connecting to peer {} at {}", host_id, addr);
                 exomind_net_pairing::RetMeshNode::add_tcp_client(&node.transport, &addr).await;
-                // Mark peer as Paired in the discovered map.
-                let mut map = discovered.write().await;
-                if let Some(peer) = map.get_mut(&host_id) {
-                    peer.trust_state = exomind_net_pairing::discovery::TrustState::Paired;
-                    tracing::info!("Reticulum peer {} state: Discovered → Paired", host_id);
-                }
             }
             Ok(announce) = announce_rx.recv() => {
                 let data: &[u8] = announce.app_data.as_slice();
                 if let Some(meta) = exomind_net_pairing::discovery::parse_announce_data(data) {
+                    let identity_hex = {
+                        let destination = announce.destination.lock().await;
+                        destination.identity.address_hash.to_hex_string()
+                    };
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
@@ -1511,31 +1616,48 @@ async fn ret_mesh_background(
                         node_name: meta.node_name,
                         app_version: meta.version,
                         port: meta.port,
-                        identity_hex: String::new(),
+                        identity_hex,
                         last_seen_ms: now,
                         online: true,
                         trust_state: exomind_net_pairing::discovery::TrustState::Discovered,
                         rtt_ms: None,
                     };
 
-                    // Skip self
-                    if peer.host_id == node.config.host_id {
+                    // Skip self by either legacy runtime host_id or Reticulum identity.
+                    if peer.host_id == node.config.host_id || peer.identity_hex == local_identity_hex {
                         continue;
                     }
 
                     let peer_host_id = peer.host_id.clone();
+                    let peer_map_id = if peer.identity_hex.is_empty() {
+                        peer_host_id.clone()
+                    } else {
+                        peer.identity_hex.clone()
+                    };
                     {
                         let mut map = discovered.write().await;
-                        let is_new = !map.contains_key(&peer_host_id);
-                        map.insert(peer_host_id.clone(), peer);
+                        let is_new = !map.contains_key(&peer_map_id);
+                        map.entry(peer_map_id.clone())
+                            .and_modify(|existing| {
+                                let trust_state = existing.trust_state;
+                                let rtt_ms = existing.rtt_ms;
+                                *existing = peer.clone();
+                                existing.trust_state = trust_state;
+                                existing.rtt_ms = rtt_ms;
+                            })
+                            .or_insert(peer);
                         if is_new {
-                            tracing::info!("Reticulum discovered new peer: {}", peer_host_id);
+                            tracing::info!(
+                                "Reticulum discovered new peer: {} ({})",
+                                peer_host_id,
+                                peer_map_id
+                            );
                         }
                         // Estimate RTT from last local announce time.
                         if last_local_announce_ms > 0 {
                             let elapsed = (now as i64 - last_local_announce_ms as i64).unsigned_abs();
                             if elapsed < 5000 {
-                                if let Some(p) = map.get_mut(&peer_host_id) {
+                                if let Some(p) = map.get_mut(&peer_map_id) {
                                     p.rtt_ms = Some(elapsed / 2);
                                 }
                             }
@@ -1677,7 +1799,9 @@ mod tests {
             mdns: None,
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
-            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            )),
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),
@@ -2535,6 +2659,34 @@ mod tests {
             "resolved project root must contain classifier agent entry: {}",
             resolved.display()
         );
+    }
+
+    #[test]
+    fn ret_mesh_identity_seed_persists_and_derives_stable_host_id() {
+        let _env_lock = env_lock().lock().expect("env lock");
+        let _seed_guard = EnvVarGuard::remove("EXOMIND_RET_MESH_IDENTITY_SEED");
+        let _path_guard = EnvVarGuard::remove("EXOMIND_RET_MESH_IDENTITY_PATH");
+        let temp_dir = tempfile::tempdir().expect("create ret mesh identity tempdir");
+        let data_dir = temp_dir.path().join("runtime-data");
+        let options = RuntimeStartOptions {
+            enable_ret_mesh: true,
+            data_dir: Some(data_dir.clone()),
+            ..RuntimeStartOptions::default()
+        };
+
+        let (first_seed, first_identity) = prepare_ret_mesh_identity(&options);
+        let persisted_path = data_dir.join("reticulum-identity.hex");
+        assert_eq!(
+            std::fs::read_to_string(&persisted_path)
+                .expect("identity seed should persist")
+                .trim(),
+            first_seed,
+        );
+
+        let (second_seed, second_identity) = prepare_ret_mesh_identity(&options);
+        assert_eq!(first_seed, second_seed);
+        assert_eq!(first_identity, second_identity);
+        assert!(!first_identity.is_empty());
     }
 
     #[test]
