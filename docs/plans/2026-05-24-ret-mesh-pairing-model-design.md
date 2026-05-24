@@ -7,6 +7,7 @@
 > - `feat/ret-mesh-prototype` 分支（Phase 1 完成，Phase 2 进行中）
 > - #906 搬迁式重构
 > - exomind-net-pairing crate (Phase 1)
+> - ExoNet / ENS 命名：理论路线暂名 ExoNet（外心网络），工程实现暂名 ENS（ExoNet Network Stack / 外心网络栈）
 
 ---
 
@@ -23,6 +24,8 @@ Phase 1 已在 `exomind-net-pairing` crate 中实现了 Reticulum Transport 的�
 | 授权层 | PIN + session + per-peer inbound token | 逻辑正确，但与 HTTP 绑定 |
 
 Phase 2 的目标是将传输层和授权层解耦，使外心可以在 Reticulum mesh 之上保留 PIN 验证的安全属性，同时获得介质无关的传输能力。
+
+命名上，当前将这条路线锚定为 **ExoNet / 外心网络**：它是外心 ECS 组网层在吸收 Reticulum 思想后的理论与研究路线。对应工程实现暂名 **ENS / ExoNet Network Stack / 外心网络栈**，仿 Reticulum 的 **RNS / Reticulum Network Stack** 命名；`ENS` 首次出现需写全称，避免与外部同名缩写混淆。
 
 ---
 

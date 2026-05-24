@@ -100,9 +100,12 @@
 | 分支、worktree、Git 命令边界 | `docs/development/git-spec.md` | 这是 Git / worktree 的权威来源 |
 | 多 worktree 端口、局域网联调、实例端口隔离 | `docs/development/port-env-configuration.md` | 端口真值与环境变量以此为准 |
 | Reticulum mesh 组网原型（实验分支） | `feat/ret-mesh-prototype` | 使用 EXOMIND_RET_MESH=1 启用，RET_MESH_SEED 指定 seed peer |
+| Windows 下 Tauri MCP 调试、验证、排障 | `docs/development/tauri-mcp-windows-playbook.md` | 这是当前桌面现场经验库 |
+| Issue 去重、追加、评论模板、审核证据 | `docs/development/issue-tracking-compass.md`、`docs/development/pr-review-evidence-template.md` | 保持 issue / PR 治理与证据格式统一 |
 
 ## Reticulum mesh
 
+- **命名锚点**：理论 / 路线暂名 `ExoNet`（外心网络）；工程实现暂名 `ENS`（ExoNet Network Stack / 外心网络栈）
 - **分支**：`feat/ret-mesh-prototype`，不合并 dev（实验性质）
 - **crate**：`crates/exomind-net-pairing/` — 负责 Reticulum Transport 集成、设备发现、配对
 - **启用**：`EXOMIND_RET_MESH=1`（默认不启用）
@@ -110,8 +113,6 @@
 - **调试路由**：`GET /mesh/ret/discovered` — 查看 Reticulum 发现的 peer
 - **announce 开关**：`POST /mesh/ret/announce {"enabled": true/false}`
 - **关键日志**：grep `Reticulum` 查看 Transport 初始化状态
-| Windows 下 Tauri MCP 调试、验证、排障 | `docs/development/tauri-mcp-windows-playbook.md` | 这是当前桌面现场经验库 |
-| Issue 去重、追加、评论模板、审核证据 | `docs/development/issue-tracking-compass.md`、`docs/development/pr-review-evidence-template.md` | 保持 issue / PR 治理与证据格式统一 |
 
 ## 文档拓扑
 

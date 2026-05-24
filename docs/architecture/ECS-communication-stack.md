@@ -35,8 +35,11 @@ ExoMind RT 当前实现了单进程内的 topic-based pub/sub 信号路由（Sig
 | **正式名称** | ExoMind Communication Stack (**ECS**) |
 | **中文名** | 外心通信栈 |
 | **项目代号** | **Axon**（轴突——神经元传导信号的长突起，负责长距离信号传递） |
+| **组网路线** | **ExoNet / 外心网络**（ECS-1~3 的理论与研究路线） |
+| **组网实现** | **ENS / ExoNet Network Stack / 外心网络栈**（ExoNet 的工程实现名） |
 
-> ECS 是工程架构名称，Axon 是项目代号。文档和代码中统一使用 ECS 层级编号（ECS-1 ~ ECS-7），组网协议模块代号 Axon。
+> ECS 是工程架构名称，Axon 是项目代号。文档和代码中统一使用 ECS 层级编号（ECS-1 ~ ECS-7）。
+> ExoNet 指外心网络理论 / 路线；ENS 指 ExoNet 的工程实现，首次出现必须写全称以避免与 Ethereum Name Service 等外部缩写混淆。
 
 ---
 

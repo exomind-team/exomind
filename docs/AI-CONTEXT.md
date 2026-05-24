@@ -45,6 +45,8 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 Phase 2 完成（SignalPool L3-L5），Phase 3 待启动（资源管控 + 可观测性）。
 
+ECS-1~3 的组网理论 / 路线暂名 **ExoNet / 外心网络**；工程实现暂名 **ENS / ExoNet Network Stack / 外心网络栈**。Reticulum 是当前关键参考对象与实验基座，详见 [Reticulum 组网配对模型设计](plans/2026-05-24-ret-mesh-pairing-model-design.md) 与 [ECS 通信栈](architecture/ECS-communication-stack.md)。
+
 ## 文档索引
 
 -> [docs/README.md](README.md)
