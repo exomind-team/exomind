@@ -262,7 +262,32 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 
 ## 9. 已知问题
 
-### 9.1 mDNS 状态计数更新但节点列表不刷新（需页面重载）
+### 9.1 PIN 配对流程缺少发起方「显示配对码」UI
+
+**现象**：PIN 配对流程是单向非对称的——发起方生成 6 位 PIN，响应方输入该 PIN。但当前 UI 仅实现了输入 PIN（响应方视角，`DeviceView.tsx` 的 `pinDialog`），缺少发起方「屏幕显示 PIN」的展示步骤。
+
+**流程缺口**：
+```
+发起方（设备 A）                 响应方（设备 B）
+  生成 6 位 PIN                    ── 不生成 PIN
+  显示在屏幕上 ──── 人眼读取 ───→   输入 PIN
+  ←── 验证结果（Link）──          发送 PIN 至 Link
+```
+当前 `POST /mesh/ret/peers/:peer_id/pair {"pin":"..."}` 端点的设计是「一端输入 PIN → 另一端验证」，但缺少了「PIN 生成 → 展示 → 另一方输入」的第一步。
+
+**根因**：后端 `PairingManager` 能生成 PIN（`RetMeshNode::generate_pin()`），但没有路由把它返回给前端在屏幕上展示。`POST /mesh/ret/peers/:peer_id/pair` 直接接受 PIN 作为输入，没有先返回一个 session_id 和展示 PIN 的中间状态。
+
+**影响范围**：
+- `crates/exomind-runtime/src/pairing.rs` — `PairingManager` 已有 PIN 生成逻辑
+- `crates/exomind-runtime/src/routes/mesh.rs` — `POST /mesh/ret/peers/:peer_id/pair` 路由
+- `crates/exomind-runtime/src/routes/mesh.rs` — `POST /mesh/pairing/initiate` 旧端点（可复用但需适配）
+- `src/ui/app/pages/agents/DeviceView.tsx` — PIN 输入弹窗（pinDialog）
+
+**解决方向**：增加一个「发起配对」端点（可复用 `POST /mesh/pairing/initiate` 或新增），返回生成的 PIN 和 session_id。前端「授权」按钮点击时先调用该端点 → 展示 PIN → 响应方在另一设备的 UI 输入。确认后再调 `POST /mesh/ret/peers/:peer_id/pair`。
+
+**关联**：Phase 1 迁移计划第 3 条「Reticulum pairing message」——PIN 展示是配对协议的第一步。
+
+### 9.2 mDNS 状态计数更新但节点列表不刷新（需页面重载）
 
 **现象**：mDNS 局域网发现节点时，状态栏「已发现 N」计数正确更新，但下方的节点列表不自动呈现新增节点。需手动刷新页面（F5）后列表才显示。
 
