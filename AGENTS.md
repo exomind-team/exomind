@@ -108,10 +108,10 @@
 - **命名锚点**：理论 / 路线暂名 `ExoNet`（外心网络）；工程实现暂名 `ENS`（ExoNet Network Stack / 外心网络栈）
 - **分支**：`feat/ret-mesh-prototype`，不合并 dev（实验性质）
 - **crate**：`crates/exomind-net-pairing/` — 负责 Reticulum Transport 集成、设备发现、配对
-  - `mdns_bridge.rs` — MdnsBridge：监听 mDNS 事件，动态创建 Reticulum UDP Interface 指向对端 ret_port
+  - `mdns_bridge.rs` — UdpDiscoveryBridge：监听 mDNS 事件，动态创建 Reticulum UDP Interface 指向对端 ret_port
 - **启用**：默认启用（`EXOMIND_RET_MESH=0` 可关闭）
-- **mDNS 发现**：mDNS TXT 记录宣告 `ret_port`（Reticulum UDP 广播端口）。MdnsBridge 收到 mDNS `ServiceResolved` → 调用 `add_udp_interface` 指向对端 IP:ret_port → Reticulum 通过 UDP 互发 Announce。`default_ret_udp_port()`: Unix 5590, Windows HTTP_port+6000
-- **本机发现**：`%TEMP%/exomind-ret-peers/{host_id}.json` 文件注册表。绕过 Windows 回环不转发 255.255.255.255 广播的限制，后台 tick 扫描同名 JSON 文件触发 MdnsBridge
+- **mDNS 发现**：mDNS TXT 记录宣告 `ret_port`（Reticulum UDP 广播端口）。UdpDiscoveryBridge 收到 mDNS `ServiceResolved` → 调用 `add_udp_interface` 指向对端 IP:ret_port → Reticulum 通过 UDP 互发 Announce。`default_ret_udp_port()`: Unix 5590, Windows HTTP_port+6000
+- **本机发现**：`%TEMP%/exomind-ret-peers/{host_id}.json` 文件注册表。绕过 Windows 回环不转发 255.255.255.255 广播的限制，后台 tick 扫描同名 JSON 文件触发 UdpDiscoveryBridge
 - **seed 连接**：`RET_MESH_SEED=127.0.0.1:PORT`（指向目标 RT 的 TCP 端口 = RT_port + 5000）
 - **状态视图**：`GET /mesh/ret/peers` — 统一返回 discovered / connected_unauthorized / connected_authorized / trusted / blocked
 - **兼容视图**：`GET /mesh/ret/discovered` — 旧发现列表（兼容）
