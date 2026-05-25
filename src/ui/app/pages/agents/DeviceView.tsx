@@ -178,22 +178,27 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
       .then((data) => { if (mountedRef.current) { setPeers(data); setError(null); } })
       .catch(() => {});
 
-    // SSE for continuous state updates
-    const evtSource = new EventSource(`${runtimeBaseUrl}/mesh/ret/events`);
-    evtSource.addEventListener('ret_mesh_snapshot', (e) => {
-      if (!mountedRef.current) return;
-      try {
-        const { payload } = JSON.parse(e.data);
-        if (payload.status) setStatus(payload.status);
-        if (payload.peers) setPeers(payload.peers);
-        if (payload.interfaces) setInterfaces(payload.interfaces);
-      } catch { /* ignore malformed events */ }
-    });
-    evtSource.onerror = () => {
-      if (mountedRef.current) setError('Reticulum SSE disconnected');
-    };
+    // SSE for continuous state updates (graceful fallback if unavailable)
+    let evtSource: EventSource | null = null;
+    try {
+      evtSource = new EventSource(`${runtimeBaseUrl}/mesh/ret/events`);
+      evtSource.addEventListener('ret_mesh_snapshot', (e) => {
+        if (!mountedRef.current) return;
+        try {
+          const { payload } = JSON.parse(e.data);
+          if (payload.status) setStatus(payload.status);
+          if (payload.peers) setPeers(payload.peers);
+          if (payload.interfaces) setInterfaces(payload.interfaces);
+        } catch { /* ignore malformed events */ }
+      });
+      evtSource.onerror = () => {
+        if (mountedRef.current) setError('Reticulum SSE disconnected');
+      };
+    } catch {
+      // EventSource not available (test environment, etc.)
+    }
 
-    return () => { mountedRef.current = false; evtSource.close(); };
+    return () => { mountedRef.current = false; evtSource?.close(); };
   }, [runtimeBaseUrl]);
 
   // Local 1s tick for smooth countdown (no extra polling).
