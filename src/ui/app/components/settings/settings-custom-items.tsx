@@ -945,7 +945,7 @@ export function DevicePairingSetting(_props: { ctx: SettingsContext }) {
   );
 }
 
-/** Reticulum mesh networking status (EXOMIND_RET_MESH=1). */
+/** Reticulum mesh networking status (default enabled). */
 export function ReticulumPeersSetting(_props: { ctx: SettingsContext }) {
   const runtimeInfo = readRuntimeInfo();
   const [peers, setPeers] = useState<Array<{

@@ -38,6 +38,8 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
             false,
         )),
+        ret_mesh_pairing_tx: None,
+        ret_mesh_event_tx: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),
         reminder_store: Arc::new(exomind_runtime::reminder::ReminderStore::new()),

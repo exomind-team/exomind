@@ -348,7 +348,7 @@ async fn list_discovered(State(state): State<AppState>) -> Json<Vec<DiscoveredPe
     Json(peers)
 }
 
-/// List peers discovered via Reticulum mesh (EXOMIND_RET_MESH=1).
+/// List peers discovered via Reticulum mesh.
 async fn list_ret_discovered(
     State(state): State<AppState>,
 ) -> Json<Vec<exomind_net_pairing::DiscoveredPeer>> {
@@ -666,6 +666,78 @@ async fn unpair_ret_peer(
     }))
 }
 
+/// SSE stream of Reticulum mesh state snapshots.
+async fn ret_mesh_events(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    use futures_util::stream;
+    let rx = state
+        .ret_mesh_event_tx
+        .clone()
+        .map(|tx| tx.subscribe())
+        .unwrap_or_else(|| {
+            let (tx, _) = tokio::sync::broadcast::channel::<String>(64);
+            tx.subscribe()
+        });
+    let stream = stream::unfold(rx, |mut rx| async {
+        match rx.recv().await {
+            Ok(json) => Some((
+                Ok(Event::default().event("ret_mesh_snapshot").data(json)),
+                rx,
+            )),
+            Err(_) => {
+                // channel closed – stream ends
+                None
+            }
+        }
+    });
+    Sse::new(stream)
+}
+
+/// Reticulum mesh networking status dashboard.
+#[derive(Serialize)]
+struct RetMeshStatus {
+    mesh_enabled: bool,
+    announce_enabled: bool,
+    local_host_id: String,
+    local_port: u16,
+    discovered_count: usize,
+    authorized_count: usize,
+    announce_period_ms: u64,
+}
+
+async fn get_ret_mesh_status(
+    State(state): State<AppState>,
+) -> Json<RetMeshStatus> {
+    let announce_enabled = state
+        .ret_mesh_announce_enabled
+        .load(std::sync::atomic::Ordering::Relaxed);
+
+    let (discovered_count, authorized_count) = if let Some(peers) = &state.ret_mesh_peers {
+        let map = peers.read().await;
+        let auth_count = map
+            .values()
+            .filter(|p| {
+                p.trust_state == exomind_net_pairing::discovery::TrustState::Paired
+                    || p.trust_state == exomind_net_pairing::discovery::TrustState::Trusted
+            })
+            .count();
+        (map.len(), auth_count)
+    } else {
+        (0, 0)
+    };
+
+    Json(RetMeshStatus {
+        mesh_enabled: state.ret_mesh_peers.is_some(),
+        announce_enabled,
+        local_host_id: state.host_id.clone(),
+        local_port: state.port,
+        discovered_count,
+        authorized_count,
+        announce_period_ms: 10_000,
+    })
+}
+
 #[derive(Deserialize)]
 struct AnnounceToggleRequest {
     enabled: bool,
@@ -698,6 +770,8 @@ pub fn router() -> Router<AppState> {
             "/mesh/ret/peers/:peer_id/pair",
             post(pair_ret_peer).delete(unpair_ret_peer),
         )
+        .route("/mesh/ret/status", get(get_ret_mesh_status))
+        .route("/mesh/ret/events", get(ret_mesh_events))
         .route("/mesh/ret/announce", post(toggle_ret_announce))
         // Initiate is protected: only the local admin can create pairing sessions.
         // This prevents remote attackers from calling initiate + respond to self-pair.

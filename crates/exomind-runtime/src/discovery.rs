@@ -266,6 +266,8 @@ pub struct DiscoveredPeer {
     pub host: String,
     /// The port number of the peer's HTTP server.
     pub port: u16,
+    /// The Reticulum UDP broadcast port (from TXT `ret_port`), or 0 if unknown.
+    pub ret_port: u16,
     /// The full mDNS service name.
     pub full_name: String,
 }
@@ -277,6 +279,7 @@ pub struct DiscoveredPeer {
 pub struct MdnsDiscovery {
     host_id: String,
     port: u16,
+    ret_port: u16,
     daemon: ServiceDaemon,
     peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
     browse_handle: RwLock<Option<thread::JoinHandle<()>>>,
@@ -292,13 +295,14 @@ impl MdnsDiscovery {
     ///
     /// Does NOT register or start browsing yet — call `register()` and
     /// `start_browsing()` separately.
-    pub fn new(host_id: String, port: u16) -> Result<Self, String> {
+    pub fn new(host_id: String, port: u16, ret_port: u16) -> Result<Self, String> {
         let daemon =
             ServiceDaemon::new().map_err(|e| format!("failed to create mDNS daemon: {e}"))?;
 
         Ok(Self {
             host_id,
             port,
+            ret_port,
             daemon,
             peers: Arc::new(RwLock::new(HashMap::new())),
             browse_handle: RwLock::new(None),
@@ -313,7 +317,8 @@ impl MdnsDiscovery {
         let instance_name = format!("exomind-{}", self.host_id);
         let host_name = format!("{instance_name}.local.");
 
-        let properties = [("host_id", self.host_id.as_str())];
+        let ret_port_str = self.ret_port.to_string();
+        let properties = [("host_id", self.host_id.as_str()), ("ret_port", &ret_port_str)];
 
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
@@ -379,10 +384,16 @@ impl MdnsDiscovery {
                                 .map(|addr| addr.to_string())
                                 .unwrap_or_default();
 
+                            let ret_port: u16 = info
+                                .get_property_val_str("ret_port")
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or(0);
+
                             let peer = DiscoveredPeer {
                                 host_id: remote_host_id.clone(),
                                 host,
                                 port: info.get_port(),
+                                ret_port,
                                 full_name: info.get_fullname().to_string(),
                             };
 
@@ -390,6 +401,7 @@ impl MdnsDiscovery {
                                 peer_host_id = %peer.host_id,
                                 peer_host = %peer.host,
                                 peer_port = peer.port,
+                                peer_ret_port = ret_port,
                                 "mDNS peer discovered",
                             );
 
@@ -541,12 +553,14 @@ mod tests {
             host_id: "rt-peer".to_string(),
             host: "192.168.237.1".to_string(),
             port: 19045,
+            ret_port: 0,
             full_name: "exomind-rt-peer._exomind._tcp.local.".to_string(),
         };
         let candidate = DiscoveredPeer {
             host_id: "rt-peer".to_string(),
             host: "192.168.101.5".to_string(),
             port: 19045,
+            ret_port: 0,
             full_name: "exomind-rt-peer._exomind._tcp.local.".to_string(),
         };
 

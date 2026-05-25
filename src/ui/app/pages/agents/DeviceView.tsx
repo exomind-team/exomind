@@ -132,7 +132,7 @@ function resolveVerificationPresentation(item: RuntimeHostSnapshot): {
   };
 }
 
-/** Reticulum mesh networking peer section (EXOMIND_RET_MESH=1). */
+/** Reticulum mesh networking peer section. */
 type ReticulumPeer = {
   host_id: string;
   node_name: string;
@@ -155,22 +155,53 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [pinDialogPeerId, setPinDialogPeerId] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState<string>('');
+  const [status, setStatus] = useState<{
+    mesh_enabled: boolean;
+    announce_enabled: boolean;
+    local_host_id: string;
+    local_port: number;
+    discovered_count: number;
+    authorized_count: number;
+    announce_period_ms: number;
+  } | null>(null);
+  const lastAnnounceTsRef = useRef(Date.now());
+  const [interfaces, setInterfaces] = useState<{ name: string; active: boolean }[]>([]);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     if (!runtimeBaseUrl) return;
     mountedRef.current = true;
-    const poll = async () => {
+
+    // Initial fetch for peers list (one-shot)
+    fetch(`${runtimeBaseUrl}/mesh/ret/peers`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => { if (mountedRef.current) { setPeers(data); setError(null); } })
+      .catch(() => {});
+
+    // SSE for continuous state updates
+    const evtSource = new EventSource(`${runtimeBaseUrl}/mesh/ret/events`);
+    evtSource.addEventListener('ret_mesh_snapshot', (e) => {
+      if (!mountedRef.current) return;
       try {
-        const res = await fetch(`${runtimeBaseUrl}/mesh/ret/peers`);
-        if (!res.ok) { if (mountedRef.current) { setPeers([]); setError(null); } return; }
-        const data = await res.json();
-        if (mountedRef.current) { setPeers(data); setError(null); }
-      } catch { if (mountedRef.current) { setPeers([]); setError('Reticulum not available'); } }
+        const { payload } = JSON.parse(e.data);
+        if (payload.status) setStatus(payload.status);
+        if (payload.peers) setPeers(payload.peers);
+        if (payload.interfaces) setInterfaces(payload.interfaces);
+      } catch { /* ignore malformed events */ }
+    });
+    evtSource.onerror = () => {
+      if (mountedRef.current) setError('Reticulum SSE disconnected');
     };
-    poll();
-    const interval = setInterval(poll, 10_000);
-    return () => { mountedRef.current = false; clearInterval(interval); };
+
+    return () => { mountedRef.current = false; evtSource.close(); };
+  }, [runtimeBaseUrl]);
+
+  // Local 1s tick for smooth countdown (no extra polling).
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!runtimeBaseUrl) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1_000);
+    return () => clearInterval(t);
   }, [runtimeBaseUrl]);
 
   const updatePeerFromResponse = (updatedPeer: ReticulumPeer) => {
@@ -239,20 +270,81 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
 
   if (error && peers.length === 0) return null;
 
+  const meshActive = status?.mesh_enabled ?? false;
+  const announcePeriodSec = status ? Math.round(status.announce_period_ms / 1000) : 10;
+  void tick; // trigger re-render every 1s for countdown
+  const elapsedSec = Math.floor((Date.now() - lastAnnounceTsRef.current) / 1000);
+  const nextAnnounceSec = Math.max(0, announcePeriodSec - (elapsedSec % announcePeriodSec));
+
   return (
     <article className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]">
+      {/* ── Header — Status Dashboard ── */}
       <div className="flex items-center gap-2">
-        <Wifi size={14} className="text-[#0D9488]" />
-        <div>
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Reticulum 网络</h3>
-          <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
-            {peers.length > 0 ? `${peers.length} 个节点` : '等待发现'}
-          </p>
+        <Wifi size={14} className={meshActive ? 'text-[#0D9488]' : 'text-[#A8A29E]'} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+              Reticulum 网络
+            </h3>
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+              meshActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+            }`}>
+              {meshActive ? '已启用' : '未启用'}
+            </span>
+            {meshActive && (
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                status?.announce_enabled ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+              }`}>
+                {status?.announce_enabled ? `宣告 ${announcePeriodSec}s` : '宣告已停'}
+              </span>
+            )}
+          </div>
+          {meshActive && status && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+              <span>ID: {status.local_host_id.slice(0, 12)}</span>
+              <span>RT:{status.local_port}</span>
+              <span>已发现 {status.discovered_count}</span>
+              <span>已授权 {status.authorized_count}</span>
+              {status.announce_enabled && (
+                <span>下次宣告 <span className="tabular-nums">{nextAnnounceSec}s</span></span>
+              )}
+            </div>
+          )}
+          {!meshActive && (
+            <p className="text-[10px] text-[#A8A29E]">
+              Reticulum 组网未启动
+            </p>
+          )}
         </div>
       </div>
-      {peers.length === 0 ? (
+
+      {/* ── Interfaces ── */}
+      {(meshActive || interfaces.length > 0) && (
         <div className="rounded-xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
-          正在等待 Reticulum 发现节点...
+          <div className="mb-1.5 flex items-center gap-2">
+            <span className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">下层接口</span>
+            <span className="text-[10px] text-[#A8A29E]">{interfaces.length} 个</span>
+          </div>
+          <div className="space-y-1">
+            {interfaces.length === 0 ? (
+              <div className="text-[10px] text-[#A8A29E]">无接口信息</div>
+            ) : (
+              interfaces.map((iface) => (
+                <div key={iface.name} className="flex items-center gap-2">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${iface.active ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                  <span className="text-[#44403C] dark:text-[#D6D3D1]">{iface.name}</span>
+                  <span className="ml-auto text-[10px] text-[#A8A29E]">{iface.active ? '运行中' : '未连接'}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Peer List ── */}
+      {!meshActive && peers.length === 0 ? null : peers.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
+          等待 Reticulum 发现节点...
         </div>
       ) : (
         <div className="space-y-2">

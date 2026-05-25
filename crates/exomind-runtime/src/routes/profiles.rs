@@ -116,6 +116,8 @@ mod tests {
             ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 true,
             )),
+            ret_mesh_pairing_tx: None,
+            ret_mesh_event_tx: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             config_store: Arc::new(crate::config::ConfigStore::new()),
             reminder_store: Arc::new(crate::reminder::ReminderStore::new()),

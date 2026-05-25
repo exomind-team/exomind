@@ -191,10 +191,10 @@ PIN 不在 Transport 层，不在 Link 层。它在应用层充当**人的在场
 
 ```bash
 # 实例 A
-EXOMIND_RET_MESH=1 bun run tauri:manager -- start --name test-a
+bun run tauri:manager -- start --name test-a
 
 # 实例 B
-EXOMIND_RET_MESH=1 RET_MESH_SEED=127.0.0.1:{A_TCP_PORT} bun run tauri:manager -- start --name test-b
+RET_MESH_SEED=127.0.0.1:{A_TCP_PORT} bun run tauri:manager -- start --name test-b
 
 # 验证发现
 curl http://localhost:{A_RT}/mesh/ret/discovered

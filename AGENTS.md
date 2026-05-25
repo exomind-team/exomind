@@ -99,7 +99,7 @@
 | Issue 修复、PR 评论、`jj`、验证链路、multi-agent、图标刷新、发布 | `docs/development/repo-agent-workflow.md` | 技术操作细节全部外置到这里 |
 | 分支、worktree、Git 命令边界 | `docs/development/git-spec.md` | 这是 Git / worktree 的权威来源 |
 | 多 worktree 端口、局域网联调、实例端口隔离 | `docs/development/port-env-configuration.md` | 端口真值与环境变量以此为准 |
-| Reticulum mesh 组网原型（实验分支） | `feat/ret-mesh-prototype` | 使用 EXOMIND_RET_MESH=1 启用，RET_MESH_SEED 指定 seed peer |
+| Reticulum mesh 组网原型（实验分支） | `feat/ret-mesh-prototype` | 默认启用，RET_MESH_SEED 指定 seed peer |
 | Windows 下 Tauri MCP 调试、验证、排障 | `docs/development/tauri-mcp-windows-playbook.md` | 这是当前桌面现场经验库 |
 | Issue 去重、追加、评论模板、审核证据 | `docs/development/issue-tracking-compass.md`、`docs/development/pr-review-evidence-template.md` | 保持 issue / PR 治理与证据格式统一 |
 
@@ -108,10 +108,12 @@
 - **命名锚点**：理论 / 路线暂名 `ExoNet`（外心网络）；工程实现暂名 `ENS`（ExoNet Network Stack / 外心网络栈）
 - **分支**：`feat/ret-mesh-prototype`，不合并 dev（实验性质）
 - **crate**：`crates/exomind-net-pairing/` — 负责 Reticulum Transport 集成、设备发现、配对
-- **启用**：`EXOMIND_RET_MESH=1`（默认不启用）
+- **启用**：默认启用（`EXOMIND_RET_MESH=0` 可关闭）
 - **seed 连接**：`RET_MESH_SEED=127.0.0.1:PORT`（指向目标 RT 的 TCP 端口 = RT_port + 5000）
 - **状态视图**：`GET /mesh/ret/peers` — 统一返回 discovered / connected_unauthorized / connected_authorized / trusted / blocked
 - **兼容视图**：`GET /mesh/ret/discovered` — 旧发现列表（兼容）
+- **状态仪表盘**：`GET /mesh/ret/status` — 返回 mesh 启用状态、announce 信息、本地身份、节点统计
+- **状态推送**：`GET /mesh/ret/events` — SSE 流，推送 `ret_mesh_snapshot` 事件（含 status + peers + interfaces）
 - **配对授权**：`POST /mesh/ret/peers/:peer_id/pair {"pin":"123456"}` — PIN-over-Reticulum 配对
 - **撤销授权**：`DELETE /mesh/ret/peers/:peer_id/pair`
 - **announce 开关**：`POST /mesh/ret/announce {"enabled": true/false}`
@@ -131,3 +133,24 @@ docs/agents/runtime-agent-contract.md
 docs/development/repo-agent-workflow.md
                                  # 技术操作细节与命令
 ```
+
+## 推荐工具
+
+| 工具 | 用途 | 触发方式 |
+|------|------|----------|
+| **CodeGraph** | 代码智能查询：搜符号、查调用链、追踪数据流、分析改动影响半径 | MCP `codegraph_*` 工具 |
+| **Context7** | 库/框架/API 文档实时查询 | MCP `context7_*` 工具 |
+
+### CodeGraph 使用姿势
+
+调查代码时优先使用 CodeGraph 而非 grep+Read 循环：
+
+1. **`codegraph_context`** — 一次调用获取功能入口、相关符号和源码（首选）
+2. **`codegraph_search`** — 按符号名搜索（已知名字时）
+3. **`codegraph_trace`** — 追踪函数调用路径（A→B 怎么到达）
+4. **`codegraph_impact`** — 分析修改某个符号会波及哪些代码
+5. **`codegraph_callers` / `codegraph_callees`** — 查谁调用我 / 我调用谁
+6. **`codegraph_node`** — 获取单个符号的详细信息 + 源码
+7. **`codegraph_explore`** — 一次查看多个相关符号的源码（替代多次 Read）
+
+**索引覆盖**：1467 文件、22309 符号、56369 边，覆盖 Rust/TSX/TS/Java。

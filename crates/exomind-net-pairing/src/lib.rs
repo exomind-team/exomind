@@ -1,4 +1,5 @@
 pub mod discovery;
+pub mod mdns_bridge;
 pub mod pairing;
 pub mod peer_store;
 
