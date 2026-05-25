@@ -281,7 +281,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: newMode }),
       });
-    } catch { /* let SSE refresh correct the display */ }
+    } catch { /* SSE will correct on next tick */ }
   };
 
   if (error && peers.length === 0) return null;

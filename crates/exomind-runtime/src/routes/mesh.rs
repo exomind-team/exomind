@@ -764,6 +764,44 @@ async fn toggle_ret_announce(
         .ret_mesh_mode
         .store(mode as u8, std::sync::atomic::Ordering::Relaxed);
     tracing::info!("Reticulum announce mode set to: {}", req.mode);
+
+    // Push an immediate SSE snapshot so the UI reflects the change without waiting for the 10s tick.
+    // The frontend SSE handler does incremental merge (if (payload.status) setStatus(...)),
+    // so omitting "interfaces" here won't clear the interface list on the UI.
+    if let Some(tx) = &state.ret_mesh_event_tx {
+        let (discovered_count, authorized_count) = if let Some(peers) = &state.ret_mesh_peers {
+            let map = peers.read().await;
+            let auth = map
+                .values()
+                .filter(|p| {
+                    matches!(
+                        p.trust_state,
+                        exomind_net_pairing::discovery::TrustState::Paired
+                            | exomind_net_pairing::discovery::TrustState::Trusted
+                    )
+                })
+                .count();
+            (map.len(), auth)
+        } else {
+            (0, 0)
+        };
+        let snapshot = serde_json::json!({
+            "type": "ret_mesh_snapshot",
+            "payload": {
+                "status": {
+                    "mesh_enabled": state.ret_mesh_peers.is_some(),
+                    "announce_mode": mode,
+                    "local_host_id": state.host_id,
+                    "local_port": state.port,
+                    "discovered_count": discovered_count,
+                    "authorized_count": authorized_count,
+                    "announce_period_ms": 10_000u64,
+                },
+            },
+        });
+        let _ = tx.send(snapshot.to_string());
+    }
+
     Json(serde_json::json!({"announce_mode": req.mode}))
 }
 
