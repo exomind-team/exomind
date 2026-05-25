@@ -147,7 +147,7 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
     expect(within(deviceCard).getByText('1 / 1')).toBeInTheDocument();
     expect(within(deviceCard).getByText('links: 1')).toBeInTheDocument();
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:1949/mesh/ret/discovered');
+      expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:1949/mesh/ret/peers');
     });
   });
 
@@ -160,19 +160,26 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
       last_seen_ms: Date.now(),
       trust_state: 'Discovered',
       identity_hex: 'ret-identity-0123456789abcdef',
+      peer_id: 'ret-identity-0123456789abcdef',
+      connection_state: 'connected_unauthorized',
+      authorized: false,
       rtt_ms: 12,
     };
     const pairedPeer = {
       ...reticulumPeer,
       trust_state: 'Paired',
+      connection_state: 'connected_authorized',
+      authorized: true,
     };
     const unpairedPeer = {
       ...reticulumPeer,
       trust_state: 'Discovered',
+      connection_state: 'connected_unauthorized',
+      authorized: false,
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/mesh/ret/discovered')) {
+      if (url.endsWith('/mesh/ret/peers')) {
         return new Response(JSON.stringify([reticulumPeer]), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -182,6 +189,7 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
         return new Response(JSON.stringify({
           paired: true,
           peer: pairedPeer,
+          peer_state: pairedPeer,
           mesh_peer: {
             id: 'ret-identity-0123456789abcdef',
             host_id: 'ret-identity-0123456789abcdef',
@@ -197,6 +205,7 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
         return new Response(JSON.stringify({
           paired: false,
           peer: unpairedPeer,
+          peer_state: unpairedPeer,
           mesh_peer: {
             id: 'ret-identity-0123456789abcdef',
             host_id: 'ret-identity-0123456789abcdef',
@@ -252,7 +261,7 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
     );
 
     expect(await screen.findByText('ret-peer-host')).toBeInTheDocument();
-    expect(screen.getByText('已发现')).toBeInTheDocument();
+    expect(screen.getByText('已连接未授权')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('reticulum-peer-pair-ret-identity-0123456789abcdef'));
 

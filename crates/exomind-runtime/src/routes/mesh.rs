@@ -17,6 +17,33 @@ use crate::discovery::DiscoveredPeer;
 use crate::mesh::{PeerInfo, PeerInfoPublic, PeerInterestSnapshot, PeerStatus};
 use serde::Serialize;
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum RetPeerConnectionState {
+    Discovered,
+    ConnectedUnauthorized,
+    ConnectedAuthorized,
+    Trusted,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RetPeerStatePublic {
+    host_id: String,
+    node_name: String,
+    app_version: String,
+    port: u16,
+    identity_hex: String,
+    peer_id: String,
+    last_seen_ms: u64,
+    online: bool,
+    trust_state: exomind_net_pairing::discovery::TrustState,
+    connection_state: RetPeerConnectionState,
+    authorized: bool,
+    rtt_ms: Option<u64>,
+    mesh_peer: Option<PeerInfoPublic>,
+}
+
 #[derive(Debug, Deserialize)]
 struct CreatePeerRequest {
     id: String,
@@ -337,6 +364,25 @@ async fn list_ret_discovered(
     Json(peers)
 }
 
+/// List Reticulum peers as the new state-oriented view.
+///
+/// Unlike `/mesh/ret/discovered`, this endpoint separates Reticulum reachability
+/// from ExoMind authorization. A peer can be visible/connected without being
+/// authorized to access any business data.
+async fn list_ret_peers(State(state): State<AppState>) -> Json<Vec<RetPeerStatePublic>> {
+    let peers = match state.ret_mesh_peers.as_ref() {
+        Some(peers) => {
+            let map = peers.read().await;
+            map.values()
+                .cloned()
+                .map(|peer| ret_peer_state_public(&state, peer))
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    Json(peers)
+}
+
 fn ret_peer_mesh_peer_id(peer: &exomind_net_pairing::DiscoveredPeer) -> &str {
     if peer.identity_hex.is_empty() {
         &peer.host_id
@@ -369,11 +415,7 @@ fn ret_peer_with_mesh_authorization_state(
     state: &AppState,
     mut peer: exomind_net_pairing::DiscoveredPeer,
 ) -> exomind_net_pairing::DiscoveredPeer {
-    let authorized = state
-        .mesh
-        .get_peer(ret_peer_mesh_peer_id(&peer))
-        .map(|mesh_peer| mesh_peer.enabled && mesh_peer.inbound_secret.is_some())
-        .unwrap_or(false);
+    let authorized = ret_peer_authorized_mesh_peer(state, &peer).is_some();
 
     match peer.trust_state {
         exomind_net_pairing::discovery::TrustState::Blocked
@@ -390,10 +432,71 @@ fn ret_peer_with_mesh_authorization_state(
     peer
 }
 
+fn ret_peer_authorized_mesh_peer(
+    state: &AppState,
+    peer: &exomind_net_pairing::DiscoveredPeer,
+) -> Option<PeerInfo> {
+    let peer_id = ret_peer_mesh_peer_id(peer);
+    state
+        .mesh
+        .get_peer(peer_id)
+        .or_else(|| {
+            (peer_id != peer.host_id)
+                .then(|| state.mesh.get_peer(&peer.host_id))
+                .flatten()
+        })
+        .filter(|mesh_peer| mesh_peer.enabled && mesh_peer.inbound_secret.is_some())
+}
+
+fn ret_peer_state_public(
+    state: &AppState,
+    peer: exomind_net_pairing::DiscoveredPeer,
+) -> RetPeerStatePublic {
+    let peer_id = ret_peer_mesh_peer_id(&peer).to_string();
+    let mesh_peer = ret_peer_authorized_mesh_peer(state, &peer);
+    let authorized = mesh_peer.is_some();
+    let connection_state = match peer.trust_state {
+        exomind_net_pairing::discovery::TrustState::Blocked => RetPeerConnectionState::Blocked,
+        exomind_net_pairing::discovery::TrustState::Trusted if authorized => {
+            RetPeerConnectionState::Trusted
+        }
+        _ if authorized => RetPeerConnectionState::ConnectedAuthorized,
+        _ if peer.online => RetPeerConnectionState::ConnectedUnauthorized,
+        _ => RetPeerConnectionState::Discovered,
+    };
+    let trust_state = match connection_state {
+        RetPeerConnectionState::ConnectedAuthorized => {
+            exomind_net_pairing::discovery::TrustState::Paired
+        }
+        RetPeerConnectionState::Trusted => exomind_net_pairing::discovery::TrustState::Trusted,
+        RetPeerConnectionState::Blocked => exomind_net_pairing::discovery::TrustState::Blocked,
+        RetPeerConnectionState::Discovered | RetPeerConnectionState::ConnectedUnauthorized => {
+            exomind_net_pairing::discovery::TrustState::Discovered
+        }
+    };
+
+    RetPeerStatePublic {
+        host_id: peer.host_id,
+        node_name: peer.node_name,
+        app_version: peer.app_version,
+        port: peer.port,
+        identity_hex: peer.identity_hex,
+        peer_id,
+        last_seen_ms: peer.last_seen_ms,
+        online: peer.online,
+        trust_state,
+        connection_state,
+        authorized,
+        rtt_ms: peer.rtt_ms,
+        mesh_peer: mesh_peer.as_ref().map(PeerInfoPublic::from),
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct RetPairResponse {
     paired: bool,
     peer: exomind_net_pairing::DiscoveredPeer,
+    peer_state: RetPeerStatePublic,
     mesh_peer: PeerInfoPublic,
 }
 
@@ -474,6 +577,7 @@ async fn pair_ret_peer(
     }
 
     let peer = ret_peer_with_mesh_authorization_state(&state, peer);
+    let peer_state = ret_peer_state_public(&state, peer.clone());
 
     tracing::info!(
         "Reticulum peer {} authorized as identity {} from UI pairing request",
@@ -484,6 +588,7 @@ async fn pair_ret_peer(
     Ok(Json(RetPairResponse {
         paired: true,
         peer,
+        peer_state,
         mesh_peer: PeerInfoPublic::from(&mesh_peer),
     }))
 }
@@ -492,6 +597,7 @@ async fn pair_ret_peer(
 struct RetUnpairResponse {
     paired: bool,
     peer: Option<exomind_net_pairing::DiscoveredPeer>,
+    peer_state: Option<RetPeerStatePublic>,
     mesh_peer: PeerInfoPublic,
 }
 
@@ -517,6 +623,9 @@ async fn unpair_ret_peer(
     }
 
     let peer = discovered_peer.map(|peer| ret_peer_with_mesh_authorization_state(&state, peer));
+    let peer_state = peer
+        .as_ref()
+        .map(|peer| ret_peer_state_public(&state, peer.clone()));
 
     tracing::info!(
         "Reticulum peer authorization revoked for identity {} from UI unpair request",
@@ -526,6 +635,7 @@ async fn unpair_ret_peer(
     Ok(Json(RetUnpairResponse {
         paired: false,
         peer,
+        peer_state,
         mesh_peer: PeerInfoPublic::from(&mesh_peer),
     }))
 }
@@ -557,7 +667,11 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/stream", get(stream_handler))
         .route("/mesh/discovered", get(list_discovered))
         .route("/mesh/ret/discovered", get(list_ret_discovered))
-        .route("/mesh/ret/peers/:peer_id/pair", post(pair_ret_peer).delete(unpair_ret_peer))
+        .route("/mesh/ret/peers", get(list_ret_peers))
+        .route(
+            "/mesh/ret/peers/:peer_id/pair",
+            post(pair_ret_peer).delete(unpair_ret_peer),
+        )
         .route("/mesh/ret/announce", post(toggle_ret_announce))
         // Initiate is protected: only the local admin can create pairing sessions.
         // This prevents remote attackers from calling initiate + respond to self-pair.

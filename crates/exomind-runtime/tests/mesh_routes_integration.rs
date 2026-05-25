@@ -274,6 +274,36 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
     let discovered_before_payload: Value = serde_json::from_slice(&discovered_before_body).unwrap();
     assert_eq!(discovered_before_payload[0]["trust_state"], "Discovered");
 
+    let ret_peers_before = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ret/peers")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ret_peers_before.status(), StatusCode::OK);
+    let ret_peers_before_body = ret_peers_before
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let ret_peers_before_payload: Value = serde_json::from_slice(&ret_peers_before_body).unwrap();
+    assert_eq!(
+        ret_peers_before_payload[0]["peer_id"],
+        "ret-identity-0123456789abcdef"
+    );
+    assert_eq!(ret_peers_before_payload[0]["trust_state"], "Discovered");
+    assert_eq!(
+        ret_peers_before_payload[0]["connection_state"],
+        "connected_unauthorized"
+    );
+    assert_eq!(ret_peers_before_payload[0]["authorized"], json!(false));
+
     let response = app
         .clone()
         .oneshot(
@@ -293,6 +323,16 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
     assert_eq!(payload["paired"], json!(true));
     assert_eq!(payload["peer"]["host_id"], "ret-peer-host");
     assert_eq!(payload["peer"]["trust_state"], "Paired");
+    assert_eq!(
+        payload["peer_state"]["peer_id"],
+        "ret-identity-0123456789abcdef"
+    );
+    assert_eq!(payload["peer_state"]["trust_state"], "Paired");
+    assert_eq!(
+        payload["peer_state"]["connection_state"],
+        "connected_authorized"
+    );
+    assert_eq!(payload["peer_state"]["authorized"], json!(true));
     assert_eq!(payload["mesh_peer"]["id"], "ret-identity-0123456789abcdef");
     assert_eq!(payload["mesh_peer"]["base_url"], "http://127.0.0.1:47388");
     assert_eq!(payload["mesh_peer"]["enabled"], json!(true));
@@ -374,6 +414,33 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
     let discovered_after_payload: Value = serde_json::from_slice(&discovered_after_body).unwrap();
     assert_eq!(discovered_after_payload[0]["trust_state"], "Paired");
 
+    let ret_peers_after_pair = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ret/peers")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ret_peers_after_pair.status(), StatusCode::OK);
+    let ret_peers_after_pair_body = ret_peers_after_pair
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let ret_peers_after_pair_payload: Value =
+        serde_json::from_slice(&ret_peers_after_pair_body).unwrap();
+    assert_eq!(
+        ret_peers_after_pair_payload[0]["connection_state"],
+        "connected_authorized"
+    );
+    assert_eq!(ret_peers_after_pair_payload[0]["authorized"], json!(true));
+    assert_eq!(ret_peers_after_pair_payload[0]["trust_state"], "Paired");
+
     let unpair_response = app
         .clone()
         .oneshot(
@@ -387,10 +454,20 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
         .await
         .unwrap();
     assert_eq!(unpair_response.status(), StatusCode::OK);
-    let unpair_body = unpair_response.into_body().collect().await.unwrap().to_bytes();
+    let unpair_body = unpair_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let unpair_payload: Value = serde_json::from_slice(&unpair_body).unwrap();
     assert_eq!(unpair_payload["paired"], json!(false));
     assert_eq!(unpair_payload["peer"]["trust_state"], "Discovered");
+    assert_eq!(
+        unpair_payload["peer_state"]["connection_state"],
+        "connected_unauthorized"
+    );
+    assert_eq!(unpair_payload["peer_state"]["authorized"], json!(false));
     assert_eq!(unpair_payload["mesh_peer"]["enabled"], json!(false));
 
     let revoked_peer = mesh.get_peer("ret-identity-0123456789abcdef").unwrap();
@@ -426,6 +503,7 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
     assert_eq!(peer_token_after_unpair.status(), StatusCode::UNAUTHORIZED);
 
     let discovered_after_unpair = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/mesh/ret/discovered")
@@ -442,8 +520,44 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
         .await
         .unwrap()
         .to_bytes();
-    let discovered_after_unpair_payload: Value = serde_json::from_slice(&discovered_after_unpair_body).unwrap();
-    assert_eq!(discovered_after_unpair_payload[0]["trust_state"], "Discovered");
+    let discovered_after_unpair_payload: Value =
+        serde_json::from_slice(&discovered_after_unpair_body).unwrap();
+    assert_eq!(
+        discovered_after_unpair_payload[0]["trust_state"],
+        "Discovered"
+    );
+
+    let ret_peers_after_unpair = app
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ret/peers")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ret_peers_after_unpair.status(), StatusCode::OK);
+    let ret_peers_after_unpair_body = ret_peers_after_unpair
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let ret_peers_after_unpair_payload: Value =
+        serde_json::from_slice(&ret_peers_after_unpair_body).unwrap();
+    assert_eq!(
+        ret_peers_after_unpair_payload[0]["connection_state"],
+        "connected_unauthorized"
+    );
+    assert_eq!(
+        ret_peers_after_unpair_payload[0]["authorized"],
+        json!(false)
+    );
+    assert_eq!(
+        ret_peers_after_unpair_payload[0]["trust_state"],
+        "Discovered"
+    );
 }
 
 #[tokio::test]

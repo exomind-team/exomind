@@ -8,6 +8,7 @@
 > - #906 搬迁式重构
 > - exomind-net-pairing crate (Phase 1)
 > - ExoNet / ENS 命名：理论路线暂名 ExoNet（外心网络），工程实现暂名 ENS（ExoNet Network Stack / 外心网络栈）
+> - 2026-05-25 迁移计划：[Reticulum 授权配对与业务同步迁移计划](2026-05-25-reticulum-authorized-sync-migration-plan.md)
 
 ---
 
@@ -74,6 +75,8 @@ Phase 2 的目标是将传输层和授权层解耦，使外心可以在 Reticulu
 ## 第二层：Reticulum 设备状态模型（状态层）
 
 ### 状态定义
+
+> 2026-05-25 修正：`Discovered` / `Connected` 是 Reticulum transport 事实，`Paired` / `Trusted` 是外心授权事实。不能再把“连上了”直接显示为“已配对”。后续实现路线见 [Reticulum 授权配对与业务同步迁移计划](2026-05-25-reticulum-authorized-sync-migration-plan.md)。
 
 | 状态 | Reticulum 语义 | UI 展示 |
 |------|---------------|--------|
@@ -156,9 +159,21 @@ PIN 不在 Transport 层，不在 Link 层。它在应用层充当**人的在场
 ## 未覆盖的场景（Phase 3+）
 
 - **批量配对**：一台设备与多个设备依次配对的流程
-- **配对撤销**：在已配对后手动取消配对并从对方 peer 列表中移除
+- **配对撤销**：第一刀已具备 `MeshState` 授权撤销入口；后续需要补齐 Reticulum peer store / link 降级 / 双端解绑语义
 - **远程配对**：跨局域网时通过 relay 节点转发配对请求（依赖 ECS 能力）
 - **自动信任**：同一用户的设备自动进入 Trusted 状态（依赖档案身份）
+
+---
+
+## 后续迁移路线（2026-05-25）
+
+后续不再只做“呈现 Reticulum 设备”，而是按三阶段推进：
+
+1. **配对机制与授权对齐**：Reticulum 发现 / 连接只产生未授权 peer；PIN/session/token 通过 Reticulum pairing message 完成后，才创建 / 启用 `MeshState` peer，并持久化授权 token；撤销授权要清理 token、scope grants、interests 和 Reticulum trusted 记录。
+2. **发现 / 确认 API 迁移**：旧“已发现节点 / 已确认节点”从 HTTP/SSE peer 语义迁移为 Reticulum identity 的 `connected_unauthorized` / `connected_authorized` / `trusted` 状态；旧 HTTP API 只保留为兼容桥。
+3. **业务同步迁移**：在授权 peer 基础上，用 Reticulum / ENS data-plane 承载 EventLog、TimeBlock、Task、Proposal 等复制事件和 backfill 请求；领域存储、projector 与 reconciliation 仍沿用现有 RT SQLite 架构。
+
+详细任务切片、风险与验收标准见 [Reticulum 授权配对与业务同步迁移计划](2026-05-25-reticulum-authorized-sync-migration-plan.md)。
 
 ---
 

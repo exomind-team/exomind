@@ -1,0 +1,510 @@
+﻿# Reticulum 授权配对与业务同步迁移计划
+
+> 日期：2026-05-25
+> 状态：调查规划版，后续开发以本文为任务入口
+> 分支：`feat/ret-mesh-prototype`
+> 关联文档：
+> - [Reticulum 组网配对模型设计](2026-05-24-ret-mesh-pairing-model-design.md)
+> - [多设备同步规格（RT-only）](../specs/sync.md)
+> - [Task Sync Reconciliation Solution Plan](2026-04-13-task-sync-reconciliation-solution-plan.md)
+> - [ECS 通信栈](../architecture/ECS-communication-stack.md)
+
+---
+
+## 1. 目标
+
+后续工作按三步推进：
+
+1. **配对机制与授权对齐**：在 Reticulum 发现和连接之上恢复原有 PIN / token / per-peer 授权语义，让“配对”不再只是 UI 标记，而是能创建稳定的 `MeshState` peer、持久化 token、撤销授权，并限制未授权连接只能访问最小功能面。
+2. **发现 / 确认 API 脱离 HTTP/SSE 语义**：把旧的“已发现节点 / 已确认节点”从 HTTP runtime peer 概念迁移为 Reticulum 连接状态与授权状态，即“已连接未授权 / 已连接已授权”。旧 HTTP/SSE peer API 只作为兼容桥，最终不能继续作为组网真相源。
+3. **业务数据传输媒介无关化**：在 1 和 2 稳定后，把 EventLog、TimeBlock、Task、Proposal 等业务同步的传输源从 HTTP/SSE 快路径迁到 Reticulum 承载的 ENS（ExoNet Network Stack / 外心网络栈）data-plane；数据落库、冲突裁决、reconciliation 仍沿用现有 RT SQLite 与领域同步机制。
+
+最终目标不是“UI 上显示 Reticulum 设备”，而是：**Reticulum identity 成为 RT 设备身份，Reticulum 连接成为组网通道，外心授权层决定哪些业务数据可以通过该通道同步。**
+
+---
+
+## 2. 调查结论
+
+### 2.1 当前已具备的基础
+
+#### Reticulum 发现与身份
+
+当前 `crates/exomind-net-pairing/` 已具备实验基座：
+
+- `RetMeshConfig` / `RetMesh`：启动 Reticulum transport、announce、本地 TCP interface 和 seed 连接。
+- `DeviceMetadata` / `DiscoveredPeer`：announce payload 中携带 `host_id`、`node_name`、版本和 runtime port。
+- `identity_hex`：Reticulum identity hash 已进入发现结果，是比旧 `host_id` 更适合作为稳定设备身份的字段。
+- `PeerStore`：已有 `identity_hex` 与 `paired_peers` 的 JSON 持久化雏形，但当前仍偏实验态，还没有成为 runtime 授权表的唯一真相源。
+
+#### Runtime mesh 授权表
+
+当前 `crates/exomind-runtime/src/mesh/mod.rs` 已具备可复用授权结构：
+
+- `PeerInfo`：包含 `id`、`base_url`、`enabled`、`status`、`auth_token`、`inbound_secret`。
+- `MeshState::upsert_peer()`：创建 / 更新 peer 并持久化。
+- `MeshState::revoke_peer_authorization()`：禁用 peer、清空 `auth_token` / `inbound_secret`、撤销 interests 与 scope grants。
+- `PeerScopeGrant`：已具备按 peer + domain 管理领域授权的基础。
+- `MeshRelayManager`：当前仍以 HTTP base URL + Bearer token 转发 `/mesh/stream` 与 `/mesh/events`。
+
+#### Reticulum UI 第一刀
+
+当前 `crates/exomind-runtime/src/routes/mesh.rs` 与 `src/ui/app/pages/agents/DeviceView.tsx` 已完成第一刀：
+
+- `GET /mesh/ret/discovered`：兼容旧发现视图，列出 Reticulum 发现 peers，并把 runtime `MeshState` 授权状态叠加到 `trust_state`。`n- `GET /mesh/ret/peers`：新的状态视图，显式返回 `peer_id`、`connection_state`、`authorized` 与可选 `mesh_peer`，区分“已连接未授权”和“已连接已授权”。
+- `POST /mesh/ret/peers/:peer_id/pair`：从 Reticulum peer 创建 / 启用 `MeshState` peer，并持久化 token。
+- `DELETE /mesh/ret/peers/:peer_id/pair`：撤销授权，清空 token，UI 回到未授权状态。
+- UI 已有“授权 / 撤销授权”，并通过实测验证 `Discovered → Paired → Discovered`。
+
+这一步证明：Reticulum peer 可以成为旧 `MeshState` peer 的创建入口，并且 UI / API 已不再把“发现 / 连接”误当成“已配对”；但目前还不是完整 PIN-over-Reticulum 配对协议。
+
+### 2.2 当前主要错位
+
+#### “连接”被误当成“配对”
+
+Reticulum announce / seed 连接只证明“节点可发现 / 可连通”，不证明用户授权。后续 UI 与 API 必须严格区分：
+
+| 概念 | 含义 | 是否授权 | 可访问能力 |
+|------|------|----------|------------|
+| `discovered` | 收到 announce，知道对方 identity | 否 | 展示、health、发起配对 |
+| `connected_unauthorized` | 已有 Reticulum link/session，但未通过外心授权 | 否 | health、pairing handshake |
+| `connected_authorized` | Reticulum identity 已验证，外心授权 token 已建立 | 是 | scope 允许的数据传输 |
+| `trusted` | 已授权 identity 经持久化信任，可自动重连授权 | 是 | scope 允许的数据传输 |
+| `blocked` | 用户拒绝 / 屏蔽该 identity | 否 | 默认无能力 |
+
+因此，“只要连上就是已配对”是错误语义。连接是 Reticulum transport 事实；配对是外心授权事实。
+
+#### 旧配对流程仍绑定 HTTP
+
+旧配对核心在 `crates/exomind-runtime/src/pairing.rs` 与 `crates/exomind-runtime/src/routes/mesh.rs`：
+
+- `POST /mesh/pairing/initiate`：本地 admin 发起 session，生成 6 位 PIN。
+- `POST /mesh/pairing/respond`：远端经 HTTP 提交 PIN、`responder_host_id`、`responder_base_url` 与 token。
+- 成功后双方写入 `MeshState`，后续通信靠 HTTP Bearer token。
+
+这套安全语义值得保留：PIN 是人的在场证明；session 是 one-shot；错误 PIN 销毁 session；per-peer token 控制访问。但它不应继续依赖 HTTP endpoint 和 `base_url` 才能成立。
+
+#### 同步主路径仍以 HTTP/SSE 作为传输实现
+
+当前 `docs/specs/sync.md` 已明确 RT-only：业务真相源是 RT SQLite，在线增量复制靠 replication topics，离线靠 backfill / reconciliation。但传输实现仍写成：
+
+- `signal SSE` 下行：`src/ui/hooks/useSignalStream.ts` / `SignalStreamService`。
+- `MeshRelayManager` HTTP 转发：`/mesh/interests/:peer_id`、`/mesh/events`、`/mesh/stream`。
+- 领域投影：`eventlog.replication.appended`、`task.replication.upserted`、`timeblock.replication.completed`、`reminder.replication.upserted` 到达后写入本地 RT SQLite。
+
+这说明后续不应重写同步领域逻辑，而应把“复制事件如何抵达对端”抽象出来。HTTP/SSE 是一种 data-plane transport，不应继续等同于 RT mesh 本身。
+
+---
+
+## 3. 设计原则
+
+### 3.1 Reticulum identity 是设备身份主键
+
+后续新机制以 Reticulum `identity_hex` 作为稳定 peer id。旧 `host_id` 保留为 metadata / 兼容字段，但不能再作为跨介质身份真相源。
+
+原因：
+
+1. Reticulum identity hash 来自密码学身份，比旧 RT `host_id` 更适合证明“同一个节点”。
+2. 同一个 peer 经不同介质发现时，identity hash 可用于归并，而不是产生多个“设备”。
+3. 授权与撤销应绑定身份，而不是绑定某个 IP、端口或一次 HTTP base URL。
+
+### 3.2 Transport 只证明可达，授权层决定可信
+
+Reticulum link、TCP interface、announce 都不等价于授权。未授权连接只能访问最小能力：
+
+- `health` / capability probe
+- pairing session discovery
+- pairing handshake
+- 必要的 identity / proof exchange
+
+所有业务同步、scope grant、agent 调用、配置写入都必须在 `connected_authorized` 或 `trusted` 之后才可用。
+
+### 3.3 保留旧配对安全语义，替换承载通道
+
+第一阶段不是重新设计授权，而是把旧 PIN/session/token 机制搬到 Reticulum 连接上：
+
+- 保留 6 位 PIN、TTL、one-shot、错误销毁。
+- 保留 per-peer inbound/outbound token。
+- 保留 `MeshState` 持久化授权结果。
+- 替换 HTTP respond 为 Reticulum pairing message。
+- 后续再把 token 从“HTTP Bearer”推广为“ENS peer credential”。
+
+### 3.4 业务同步只替换传输，不重写领域存储
+
+EventLog、Task、TimeBlock、Reminder、Proposal 的同步迁移应遵守：
+
+- 本地真相源仍是 RT SQLite。
+- 领域 projector / reconciliation / backfill 不因 Reticulum 改写语义。
+- Reticulum data-plane 只负责传输复制事件、pull 请求、pull 响应与确认。
+- 业务域继续通过 scope / domain grant 判断是否允许同步。
+
+---
+
+## 4. 三阶段路线
+
+### Phase 1：Reticulum 配对 = 外心授权
+
+#### 目标
+
+把“授权 / 撤销授权”从当前 UI 快捷按钮推进为真正的 Reticulum pairing 协议：发现只是发现；配对成功才创建 / 启用 `MeshState` peer 并持久化 token；撤销授权会使该 identity 失去业务访问能力。
+
+#### 任务切片
+
+1. **身份统一**
+   - 以 `identity_hex` 作为 Reticulum peer selector 与 `MeshState.peer.id`。
+   - 旧 `host_id` 写入 metadata，用于 UI 显示、日志与兼容。
+   - 对同一 `identity_hex` 的多来源发现结果做归并。
+
+2. **未授权连接能力边界**
+   - 明确 runtime 内部状态：`discovered`、`connected_unauthorized`、`connected_authorized`、`trusted`、`blocked`。
+   - `GET /mesh/ret/discovered` 不再把 connected 误报为 paired。
+   - 未授权 peer 只能执行 health / pairing handshake。
+
+3. **Reticulum pairing message**
+   - 复用 `PairingManager` 生成 session 与 PIN。
+   - 在 Reticulum link / packet 上定义最小消息：`pairing_offer`、`pairing_response`、`pairing_result`。
+   - 成功后双方生成或交换 per-peer credential，并写入 `MeshState`。
+   - 当前 HTTP `/mesh/pairing/*` 保留为兼容路径，但不再是新机制主路径。
+
+4. **撤销与解绑**
+   - `MeshState::revoke_peer_authorization()` 成为授权撤销唯一入口。
+   - 同步撤销 Reticulum peer store 中该 identity 的 trusted/paired 记录。
+   - 撤销后清空 token、scope grants、interests，并断开或降级 Reticulum link。
+
+5. **UI 对齐**
+   - “Reticulum 设备”区分“已发现 / 已连接未授权 / 已授权 / 已信任 / 已屏蔽”。
+   - “授权”按钮进入 PIN 配对流程，而不是直接授权。
+   - “撤销授权”明确表达解绑后业务同步会停止。
+
+#### 验收
+
+- 双 RT 通过 Reticulum 发现后，默认不是“已配对”。
+- 未授权 Reticulum peer 无法触发业务同步，只能 health / pairing。
+- PIN 正确后，双方 `MeshState` 创建 / 启用同一个 `identity_hex` peer，并持久化 token。
+- PIN 错误后 session 销毁，peer 不进入 authorized。
+- 撤销授权后，token / scope grants / interests 被清理，UI 从 authorized 回到 discovered 或 connected_unauthorized。
+- Tauri MCP 双实例实测覆盖 `discover → pairing → authorized → unpair → unauthorized`。
+
+#### 关键文件
+
+- `crates/exomind-net-pairing/src/lib.rs`
+- `crates/exomind-net-pairing/src/pairing.rs`
+- `crates/exomind-net-pairing/src/peer_store.rs`
+- `crates/exomind-runtime/src/pairing.rs`
+- `crates/exomind-runtime/src/mesh/mod.rs`
+- `crates/exomind-runtime/src/routes/mesh.rs`
+- `src/ui/app/pages/agents/DeviceView.tsx`
+- `tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx`
+- `crates/exomind-runtime/tests/mesh_routes_integration.rs`
+
+---
+
+### Phase 2：旧发现 / 确认 API 迁移为 Reticulum peer 状态
+
+#### 目标
+
+把旧“已发现节点 / 已确认节点 / HTTP runtime peer”模型降级为兼容层，使真实状态来自 Reticulum identity + authorization + connection。新 API 不再问“这个 HTTP base URL 是否 confirmed”，而是问“这个 identity 当前是否 connected / authorized / trusted”。
+
+#### 任务切片
+
+1. **Peer 状态模型重构**
+   - 定义 runtime 内部 `ReticulumPeerState`，至少包含：identity、host metadata、transport reachability、authorization、trust、last_seen、capabilities。
+   - `MeshState` 保存授权与 scope，不保存 transient 连接事实。
+   - Reticulum discovery store 保存当前可见 / 已连接事实。
+
+2. **API 分层**
+   - 新增或稳定 `GET /mesh/ret/peers`，返回 connected / authorized / trusted 的统一状态。
+   - 保留 `/mesh/ret/discovered` 作为发现兼容视图，但语义上只代表 announce 可见。
+   - `/mesh/peers` 继续表示授权 peer 表，不再承担发现职责。
+   - `/mesh/discovered` 与旧 mDNS / HTTP discovery 标注 legacy，并逐步从 UI 主路径移除。
+
+3. **旧 HTTP/SSE peer 兼容桥**
+   - 对已授权 Reticulum peer，如存在 HTTP base URL，仍可临时生成 legacy `PeerInfoPublic`。
+   - 兼容桥只服务尚未迁移的 `MeshRelayManager` / tests，不作为 UI 真相源。
+   - 明确删除条件：Reticulum data-plane 能承载 mesh events 与 domain pull 后，兼容桥退出主路径。
+
+4. **权限与 scope 接入**
+   - `PeerScopeGrant` 从“HTTP peer id”迁到 “Reticulum identity peer id”。
+   - 所有 scope grant lookup 以 `identity_hex` 为 key。
+   - 已撤销 / blocked peer 不参与 reconciliation、backfill、event relay。
+
+5. **UI 与测试迁移**
+   - DeviceView 的“待配对节点 / 可信 peer”改由 Reticulum peer state 驱动。
+   - 原 `confirmed_peer` / `discovered_candidate` 只作为 legacy section 或 fallback。
+   - 更新单测与 Tauri MCP 验收脚本，以 identity 状态而非 HTTP base URL 判断配对。
+
+#### 验收
+
+- 同一个 Reticulum identity 通过不同地址 / seed 被发现时，UI 只显示一个 peer。
+- 旧 confirmed peer 语义可由 authorized Reticulum peer 等效表达。
+- 已授权 peer 可被 `PeerScopeGrant` 正确授予 / 撤销领域权限。
+- 未授权 peer 不会出现在业务同步候选列表。
+- 旧 HTTP/SSE routes 的兼容测试仍可通过，但新增测试以 Reticulum state 为主。
+
+#### 关键文件
+
+- `crates/exomind-runtime/src/routes/mesh.rs`
+- `crates/exomind-runtime/src/mesh/mod.rs`
+- `crates/exomind-net-pairing/src/discovery.rs`
+- `crates/exomind-net-pairing/src/peer_store.rs`
+- `src/lib/services/runtime-mesh-sync.service.ts`
+- `src/ui/app/pages/agents/DeviceView.tsx`
+- `src/ui/app/pages/agents/TopologyView.tsx`
+- `src/ui/app/pages/agents-signal-topology.ts`
+
+---
+
+### Phase 3：业务同步迁移到 Reticulum data-plane
+
+#### 目标
+
+让 Reticulum / ENS 成为业务复制事件的承载通道。HTTP/SSE 可以保留为本地 UI、开发调试或兼容 transport，但跨 RT 同步不再依赖 HTTP base URL、EventSource 或 `/mesh/stream`。
+
+#### 任务切片
+
+1. **抽象 mesh data-plane**
+   - 在 runtime 内定义媒介无关 `MeshDataPlane` / `PeerTransport` trait。
+   - 能力至少包括：send event、subscribe events、request pull、respond pull、send ack / error。
+   - HTTP/SSE 实现作为 legacy transport；Reticulum 实现作为新主路径。
+
+2. **Reticulum frame 协议**
+   - 定义 ENS frame envelope：`peer_id`、`channel`、`domain`、`message_id`、`cursor`、`payload`、`ttl/hop`、`signature/proof`（后续硬化）。
+   - 第一版支持 JSON payload，先追求可观测和端到端正确，再做二进制压缩。
+   - frame 类型至少覆盖：`signal_event`、`pull_request`、`pull_response`、`ack`、`error`。
+
+3. **Signal relay 迁移**
+   - `MeshRelayManager::forward_event_to_peers()` 不再直接 `POST /mesh/events`，而是调用 `MeshDataPlane`。
+   - 本地 `SignalBus` 与 `Journal` 保持不变。
+   - Reticulum 收到远端 frame 后复用 `MeshState::ingest_remote_event()`，避免重写领域 projector。
+
+4. **Backfill / reconciliation 迁移**
+   - 现有 Task reconciliation 里的 peer-auth pull 通路改为 data-plane pull。
+   - EventLog / TimeBlock / Reminder / Proposal 的 backfill 也使用同一 request-response frame。
+   - HTTP `/mesh/*/pull` routes 可保留为调试接口，但不是跨 RT 主通道。
+
+5. **Proposal 纳入同步域**
+   - Proposal 的同步与通知不能只停留在本地 UI 或 HTTP API。
+   - 先按事件化路径处理：proposal created / updated / accepted / rejected / executed 进入 replication topic 或 domain pull。
+   - 授权边界沿用 “动作 + 作用域”，不能因为走 Reticulum 就绕过 proposal 审批语义。
+
+6. **传输选择与 fallback**
+   - 默认优先 Reticulum data-plane。
+   - 本地开发可配置 HTTP/SSE fallback。
+   - fallback 不能改变授权语义：peer identity 与 scope grant 仍以 Reticulum identity 为准。
+
+#### 验收
+
+- A 端新增 EventLog / Task / TimeBlock 后，B 端通过 Reticulum data-plane 落库，不依赖 `/mesh/stream`。
+- B 端离线期间漏掉 live frame，重连后通过 Reticulum pull / reconciliation 追平。
+- 已撤销授权 peer 不再收到 replication frame，也无法 pull 数据。
+- Proposal 生命周期事件至少能通过 Reticulum data-plane 被远端观察或补拉。
+- HTTP/SSE transport 可关闭或不配置时，Reticulum 双 RT 仍能完成至少一个业务域的端到端同步。
+- Tauri MCP 或双设备 release 包实测留下证据文件。
+
+#### 关键文件
+
+- `crates/exomind-runtime/src/mesh/mod.rs`
+- `crates/exomind-runtime/src/signal/*`
+- `crates/exomind-runtime/src/routes/eventlog.rs`
+- `crates/exomind-runtime/src/routes/tasks.rs`
+- `crates/exomind-runtime/src/routes/timeblocks.rs`
+- `crates/exomind-runtime/src/proposal/*`
+- `src/ui/hooks/useSignalStream.ts`
+- `src/lib/services/ecs-eventlog-replication.service.ts`
+- `src/lib/services/ecs-task-replication.service.ts`
+- `src/lib/services/ecs-timeblock-completed-replication.service.ts`
+- `src/lib/services/rt-domain-backfill.service.ts`
+
+---
+
+## 5. 推荐执行顺序
+
+### 第一刀：身份与状态语义收口
+
+先做最小但正确的状态模型：Reticulum discovered / connected / authorized 分离，并以 `identity_hex` 作为 peer id。没有这个前提，后续所有同步都会继续混淆“连上了”和“授权了”。
+
+交付物：
+
+- Reticulum peer state 类型与 API。
+- UI 不再把 connected 直接显示为 paired。
+- 现有 `POST /mesh/ret/peers/:peer_id/pair` 改为临时授权入口，并标明后续由 PIN flow 替代。
+
+### 第二刀：Reticulum PIN 配对闭环
+
+把旧 `PairingManager` 的 PIN/session/token 语义搬到 Reticulum message 上，完成真正的授权闭环。
+
+交付物：
+
+- Reticulum pairing offer / response / result。
+- 双方授权 token 持久化。
+- 撤销授权同步清理 runtime 与 Reticulum peer store。
+
+### 第三刀：兼容 API 退居桥接层
+
+把 UI 与同步候选列表切到新 Reticulum state，旧 `/mesh/discovered`、`/mesh/peers`、HTTP base URL 只作为兼容桥。
+
+交付物：
+
+- DeviceView 与 TopologyView 状态源迁移。
+- MeshState scope grant 全面使用 identity peer id。
+- 旧 mDNS / HTTP discovery 不再驱动主 UI。
+
+### 第四刀：Reticulum 承载一个业务域
+
+先选 EventLog 或 Task 中一个域做 Reticulum data-plane 闭环。推荐先选 EventLog：append-only、cursor 明确、冲突少；但若目标是验证 reconciliation，则选 Task 更能暴露真实问题。
+
+交付物：
+
+- `MeshDataPlane` trait。
+- Reticulum frame 最小协议。
+- 一个业务域 live replication + backfill 通过 Reticulum 完成。
+
+### 第五刀：扩展到 TimeBlock / Task / Proposal
+
+在 data-plane 被一个域证明后，按领域复杂度扩展。
+
+交付物：
+
+- TimeBlock completed replication。
+- Task reconciliation Reticulum pull。
+- Proposal lifecycle replication / notification。
+
+---
+
+## 6. API 替换清单
+
+| 旧 API / 行为 | 目标状态 | 迁移阶段 |
+|---------------|----------|----------|
+| `POST /mesh/pairing/initiate` | 兼容保留；主流程由 Reticulum pairing control message 发起 | Phase 1 |
+| `POST /mesh/pairing/respond` | 兼容保留；主流程由 Reticulum link / ENS control frame 提交 PIN | Phase 1 |
+| `GET /mesh/discovered` | legacy projection；真相源来自 Reticulum peer state | Phase 2 |
+| `GET /mesh/peers` | 授权表视图；真相源为 identity-keyed `MeshState` authorization | Phase 2 |
+| `GET /mesh/ret/discovered` | 发现兼容视图；只代表 announce 可见，不代表 paired | Phase 2 |
+| `GET /mesh/ret/peers` | 新主视图；返回 discovered / connected / authorized / trusted / blocked | Phase 2 |
+| `PUT /mesh/interests/:peer_id` | 语义保留；`peer_id` 改为 Reticulum identity-first | Phase 2 |
+| `GET /mesh/stream` | HTTP/SSE transport adapter；不再是跨 RT relay 核心 | Phase 3 |
+| `POST /mesh/events` | HTTP transport adapter ingest；Reticulum adapter 走内部等价入口 | Phase 3 |
+| domain replication HTTP routes | 调试 / fallback / backfill adapter；同步主源迁到 ENS frame | Phase 3 |
+| UI “已确认节点” | 改为 authorized peer projection | Phase 2 |
+| UI “Reticulum 设备” | 主设备网络入口，显示 discovered / connected unauthorized / authorized / trusted / blocked | Phase 1-2 |
+
+---
+
+## 7. 数据迁移策略
+
+### 7.1 identity-first lazy migration
+
+读取现有 mesh 持久化状态时，如果 peer id 是旧 `host_id`，且能从 Reticulum discovered / trusted store 找到对应 `identity_hex`，则迁移为 identity-keyed peer。
+
+迁移要求：
+
+- 原 `host_id` 保留为 alias / metadata，避免旧 UI、日志和测试一次性断裂。
+- 同一 `identity_hex` 下多条旧 host 记录合并为一个 peer。
+- 合并冲突时授权状态 fail-closed：只有明确授权 token / inbound secret 存在且未 revoked 时，才进入 authorized。
+
+### 7.2 token 保留，语义升级
+
+第一阶段继续保留 `inbound_secret` / `auth_token`：
+
+- `inbound_secret` 表示“对方可访问本端业务能力的应用层授权”。
+- `auth_token` 作为 HTTP adapter 的 outbound credential。
+- Reticulum adapter 不必直接使用 Bearer header，但可把 token 作为应用层授权 proof 或迁移期 credential。
+
+长期再把 token 升级为 scope-bound credential、identity proof 或 frame-level signature。
+
+### 7.3 scope grants 跟随授权主键
+
+`PeerScopeGrant.peer_id` 必须跟随 Reticulum identity 主键迁移：
+
+- host_id → identity migration 时同步迁移 grants。
+- revoke 时必须清理该 identity 的全部 grants。
+- blocked / revoked peer 不参与 automatic grant reconciliation。
+
+### 7.4 peer interests 不绑定 base_url
+
+`PeerInterestSnapshot` 后续应绑定 transport-independent peer id：
+
+- interests 只允许 authorized peer 设置。
+- interests 不能绑定 HTTP base URL。
+- 同 identity 多 transport 在线时，interests 代表 peer 意图，不代表某条连接。
+
+---
+
+## 8. 风险与约束
+
+### 8.1 不要提前删除 HTTP/SSE
+
+HTTP/SSE 目前仍承担：
+
+- 本地 UI 订阅 RT signal。
+- 开发调试与 tests。
+- 旧 MeshRelayManager 兼容路径。
+
+迁移目标是把跨 RT 真相源从 HTTP/SSE 移走，而不是一开始删除所有 HTTP/SSE 代码。
+
+### 8.2 不要把 token 当作最终密码学方案
+
+当前 token 是从旧 HTTP Bearer 机制继承来的授权凭证，适合第一阶段复用。长期应转为：
+
+- Reticulum identity proof。
+- link/session 级安全上下文。
+- frame 签名或 HMAC。
+- scope-bound credential。
+
+但第一阶段不应因此阻塞配对迁移。
+
+### 8.3 不要重写领域同步
+
+业务同步已有大量领域规则：Task terminal precedence、EventLog replicationSeq、TimeBlock active/completed 分离、Proposal 授权语义。Reticulum 迁移只替换 transport，不改变这些领域规则。
+
+### 8.4 Release 包跨设备实测要纳入验收
+
+后续每完成一个阶段，至少要保留一种真实运行证据：
+
+- 双 Tauri instance + Tauri MCP。
+- 本机 release 包 + 另一台设备。
+- 记录端口、identity、状态转换、数据落库结果。
+
+---
+
+### 8.5 当前阶段判断
+
+当前处于 **战略相持期**：Reticulum 发现、identity 持久化、UI 状态、pair/unpair 第一刀已经具备；主要矛盾已经从“看得见 Reticulum 节点”转为“授权与业务同步仍由旧 HTTP/SSE 心智支配”。下一阶段局部进攻点是 Phase 1 的真实 PIN pairing over Reticulum：它最小、可测、能直接消除“发现即配对”的语义错误。
+
+---
+
+## 9. 测试矩阵
+
+| 阶段 | Rust 单测 / 集成测试 | TS / UI 测试 | 实测 |
+|------|----------------------|--------------|------|
+| Phase 1 | `mesh_routes_integration`、`pairing.rs` one-shot / wrong PIN / revoke | DeviceView peer states / pair dialog / unpair | 双实例 discover → PIN pair → unpair |
+| Phase 2 | identity merge、scope grant lookup、legacy bridge | DeviceView / TopologyView 状态源迁移 | 同 identity 多地址只显示一个 peer |
+| Phase 3 | data-plane frame encode/decode、ingest、pull response | replication projector 不回归 | 关闭 HTTP peer stream 后，Reticulum 仍能同步一个业务域 |
+
+建议每次开发切片至少运行：
+
+```bash
+cargo test -p exomind-runtime --test mesh_routes_integration
+cargo check -p exomind-net-pairing -p exomind-runtime
+yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
+```
+
+涉及业务域同步时，追加对应 domain tests 与 Tauri MCP 双实例实测。
+
+---
+
+## 10. 完成判据
+
+### 10.1 阶段性完成
+
+- Phase 1 完成：Reticulum peer 的授权 / 撤销授权可替代旧配对的核心安全语义。
+- Phase 2 完成：UI 和 API 的主状态源不再是 HTTP discovered / confirmed，而是 Reticulum identity + authorization。
+- Phase 3 完成：至少 EventLog / Task / TimeBlock / Proposal 中一个真实业务域通过 Reticulum data-plane 完成 live replication + backfill，并证明可扩展到其他域。
+
+### 10.2 总完成
+
+- 未授权 Reticulum 连接不能访问业务数据。
+- 已授权 identity 可跨不同发现介质自动归并并无感授权。
+- 撤销授权后，业务同步立即停止且持久化状态被清理。
+- HTTP/SSE 不再是跨 RT 同步的唯一主路径。
+- 业务同步仍落在现有 RT SQLite / domain projector / reconciliation 架构中。
+

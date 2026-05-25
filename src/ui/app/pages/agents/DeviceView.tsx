@@ -140,7 +140,10 @@ type ReticulumPeer = {
   online: boolean;
   last_seen_ms: number;
   identity_hex?: string;
+  peer_id?: string;
   trust_state?: string;
+  connection_state?: 'discovered' | 'connected_unauthorized' | 'connected_authorized' | 'trusted' | 'blocked';
+  authorized?: boolean;
   rtt_ms?: number | null;
 };
 
@@ -157,7 +160,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     mountedRef.current = true;
     const poll = async () => {
       try {
-        const res = await fetch(`${runtimeBaseUrl}/mesh/ret/discovered`);
+        const res = await fetch(`${runtimeBaseUrl}/mesh/ret/peers`);
         if (!res.ok) { if (mountedRef.current) { setPeers([]); setError(null); } return; }
         const data = await res.json();
         if (mountedRef.current) { setPeers(data); setError(null); }
@@ -169,7 +172,11 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   }, [runtimeBaseUrl]);
 
   const updatePeerFromResponse = (updatedPeer: ReticulumPeer) => {
-    setPeers((current) => current.map((peer) => peer.host_id === updatedPeer.host_id ? { ...peer, ...updatedPeer } : peer));
+    setPeers((current) => current.map((peer) => {
+      const peerIdentity = peer.peer_id || peer.identity_hex || peer.host_id;
+      const updatedIdentity = updatedPeer.peer_id || updatedPeer.identity_hex || updatedPeer.host_id;
+      return peerIdentity === updatedIdentity ? { ...peer, ...updatedPeer } : peer;
+    }));
   };
 
   const handlePairPeer = async (hostId: string) => {
@@ -183,9 +190,10 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
       if (!res.ok) {
         throw new Error(`Reticulum pairing failed (${res.status})`);
       }
-      const data = await res.json() as { peer?: ReticulumPeer };
-      if (mountedRef.current && data.peer) {
-        updatePeerFromResponse(data.peer);
+      const data = await res.json() as { peer_state?: ReticulumPeer; peer?: ReticulumPeer };
+      const updatedPeer = data.peer_state ?? data.peer;
+      if (mountedRef.current && updatedPeer) {
+        updatePeerFromResponse(updatedPeer);
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -209,9 +217,10 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
       if (!res.ok) {
         throw new Error(`Reticulum unpair failed (${res.status})`);
       }
-      const data = await res.json() as { peer?: ReticulumPeer };
-      if (mountedRef.current && data.peer) {
-        updatePeerFromResponse(data.peer);
+      const data = await res.json() as { peer_state?: ReticulumPeer; peer?: ReticulumPeer };
+      const updatedPeer = data.peer_state ?? data.peer;
+      if (mountedRef.current && updatedPeer) {
+        updatePeerFromResponse(updatedPeer);
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -249,15 +258,19 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
             </div>
           )}
           {peers.map((p) => {
-            const peerIdentity = p.identity_hex || p.host_id;
+            const peerIdentity = p.peer_id || p.identity_hex || p.host_id;
             const lastSeen = new Date(p.last_seen_ms).toLocaleTimeString('zh-CN', { hour12: false });
-            const trustLabel = p.trust_state === 'Paired' ? '已授权' :
-              p.trust_state === 'Trusted' ? '可信' :
-              p.trust_state === 'Blocked' ? '已屏蔽' : '已发现';
-            const trustColor = p.trust_state === 'Paired' ? 'text-[#16A34A]' :
-              p.trust_state === 'Trusted' ? 'text-[#2563EB]' : 'text-[#A8A29E]';
-            const canPair = p.online && p.trust_state !== 'Paired' && p.trust_state !== 'Trusted' && p.trust_state !== 'Blocked';
-            const canUnpair = p.trust_state === 'Paired';
+            const trustLabel = p.connection_state === 'connected_authorized' || p.trust_state === 'Paired' ? '已授权' :
+              p.connection_state === 'trusted' || p.trust_state === 'Trusted' ? '可信' :
+              p.connection_state === 'blocked' || p.trust_state === 'Blocked' ? '已屏蔽' :
+              p.connection_state === 'connected_unauthorized' ? '已连接未授权' : '已发现';
+            const trustColor = p.connection_state === 'connected_authorized' || p.trust_state === 'Paired' ? 'text-[#16A34A]' :
+              p.connection_state === 'trusted' || p.trust_state === 'Trusted' ? 'text-[#2563EB]' :
+              p.connection_state === 'connected_unauthorized' ? 'text-[#C75B3A]' : 'text-[#A8A29E]';
+            const isAuthorized = p.authorized === true || p.connection_state === 'connected_authorized' || p.connection_state === 'trusted' || p.trust_state === 'Paired' || p.trust_state === 'Trusted';
+            const isBlocked = p.connection_state === 'blocked' || p.trust_state === 'Blocked';
+            const canPair = p.online && !isAuthorized && !isBlocked;
+            const canUnpair = isAuthorized;
             const isPairing = pairingHostId === peerIdentity;
             const isUnpairing = unpairingHostId === peerIdentity;
             return (

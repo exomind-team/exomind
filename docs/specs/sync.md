@@ -12,6 +12,8 @@ ExoMind 的多设备同步当前统一基于：
 - `domain projector（领域投影器）`
 - `RT SQLite（本地真相源）`
 
+> 2026-05-25 迁移说明：上述 `signal SSE` 是当前实现中的传输方式，不再作为长期跨 RT 同步语义本身。后续路线是将跨 RT data-plane 迁移到 Reticulum / ENS（ExoNet Network Stack / 外心网络栈），并让 Reticulum identity + 外心授权状态决定 peer 是否可同步。详细计划见 [Reticulum 授权配对与业务同步迁移计划](../plans/2026-05-25-reticulum-authorized-sync-migration-plan.md)。
+
 业务域以 RT SQLite 为准：
 
 - EventLog
@@ -20,6 +22,16 @@ ExoMind 的多设备同步当前统一基于：
 - Reminder
 
 ## 2. 同步模型
+
+### 2.0 传输与同步语义分离
+
+同步语义由领域复制事件、cursor、projector、backfill 和 RT SQLite 落库决定；HTTP/SSE、Reticulum、未来蓝牙 / 局域网直连都只是 transport。跨 RT 同步不得再把“能打开 HTTP/SSE 流”作为“已确认 peer”的唯一判据。
+
+后续主路径要求：
+
+- 未授权 Reticulum 连接只能 health / pairing，不能同步业务域。
+- 已授权 Reticulum identity 才能进入 EventLog / Task / TimeBlock / Reminder / Proposal 的同步候选集。
+- 撤销授权后，相关 scope grant、interest 与 transport session 必须失效。
 
 ### 2.1 增量复制
 
