@@ -34,6 +34,7 @@ struct RetPeerStatePublic {
     app_version: String,
     port: u16,
     identity_hex: String,
+    destination_hex: Option<String>,
     peer_id: String,
     last_seen_ms: u64,
     online: bool,
@@ -481,6 +482,7 @@ fn ret_peer_state_public(
         app_version: peer.app_version,
         port: peer.port,
         identity_hex: peer.identity_hex,
+        destination_hex: peer.destination_hex,
         peer_id,
         last_seen_ms: peer.last_seen_ms,
         online: peer.online,
@@ -490,6 +492,11 @@ fn ret_peer_state_public(
         rtt_ms: peer.rtt_ms,
         mesh_peer: mesh_peer.as_ref().map(PeerInfoPublic::from),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct RetPairRequest {
+    pin: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -502,22 +509,27 @@ struct RetPairResponse {
 
 /// Pair with a peer discovered via Reticulum mesh.
 ///
-/// This is the UI-facing control-plane hook for the Reticulum path: it registers
-/// the peer as an enabled MeshState peer with a persisted inbound token and asks
-/// the background mesh task to open a TCP transport connection. A raw Reticulum
-/// connection alone is only discovery/reachability; Paired means this local RT
-/// now has an authorization record for the peer.
+/// This is the UI-facing Reticulum PIN pairing hook. The PIN is submitted to
+/// the local runtime only; the runtime forwards it to the selected peer over an
+/// encrypted Reticulum Link. Authorization is created only after the remote peer
+/// accepts the one-shot PIN session and announces the result.
 async fn pair_ret_peer(
     Path(peer_selector): Path<String>,
     State(state): State<AppState>,
+    payload: Option<Json<RetPairRequest>>,
 ) -> Result<Json<RetPairResponse>, StatusCode> {
     if state.ret_mesh_peers.is_none() {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let connect_tx = state
-        .ret_mesh_connect_tx
+    let pairing_tx = state
+        .ret_mesh_pairing_tx
         .clone()
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let req = payload.ok_or(StatusCode::BAD_REQUEST)?.0;
+    let pin = req.pin.trim().to_string();
+    if pin.len() != 6 || !pin.chars().all(|ch| ch.is_ascii_digit()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let peer = find_ret_peer_by_selector(&state, &peer_selector)
         .await
@@ -527,10 +539,29 @@ async fn pair_ret_peer(
         return Err(StatusCode::CONFLICT);
     }
 
-    let tcp_addr = format!("127.0.0.1:{}", peer.port + 5000);
-    connect_tx
-        .send((peer.host_id.clone(), tcp_addr))
+    let responder_inbound_token = uuid::Uuid::new_v4().to_string();
+    let responder_base_url = format!("http://127.0.0.1:{}", state.port);
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    pairing_tx
+        .send(crate::RetMeshPairingCommand::PairWithPeer {
+            peer: peer.clone(),
+            pin,
+            responder_inbound_token: responder_inbound_token.clone(),
+            responder_base_url,
+            reply: reply_tx,
+        })
+        .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let pairing_result = tokio::time::timeout(Duration::from_secs(35), reply_rx)
+        .await
+        .map_err(|_| StatusCode::GATEWAY_TIMEOUT)?
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .map_err(|failure| match failure {
+            crate::RetMeshPairingFailure::Rejected(_) => StatusCode::FORBIDDEN,
+            crate::RetMeshPairingFailure::Timeout => StatusCode::GATEWAY_TIMEOUT,
+            crate::RetMeshPairingFailure::Transport(_) => StatusCode::BAD_GATEWAY,
+        })?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let legacy_peer = (peer_id != peer.host_id)
@@ -540,10 +571,6 @@ async fn pair_ret_peer(
     if peer_id != peer.host_id {
         state.mesh.delete_peer(&peer.host_id);
     }
-    let inbound_secret = existing_peer
-        .as_ref()
-        .and_then(|peer| peer.inbound_secret.clone())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let mesh_peer = state.mesh.upsert_peer(PeerInfo {
         id: peer_id.clone(),
         base_url: format!("http://127.0.0.1:{}", peer.port),
@@ -565,10 +592,8 @@ async fn pair_ret_peer(
             .map(|peer| peer.created_at.clone())
             .unwrap_or_else(|| now.clone()),
         updated_at: now,
-        auth_token: existing_peer
-            .as_ref()
-            .and_then(|peer| peer.auth_token.clone()),
-        inbound_secret: Some(inbound_secret),
+        auth_token: Some(pairing_result.initiator_inbound_token),
+        inbound_secret: Some(responder_inbound_token),
     });
 
     if let Some(relay) = &state.mesh_relay {
@@ -580,9 +605,10 @@ async fn pair_ret_peer(
     let peer_state = ret_peer_state_public(&state, peer.clone());
 
     tracing::info!(
-        "Reticulum peer {} authorized as identity {} from UI pairing request",
-        peer.host_id,
-        mesh_peer.id
+        request_id = %pairing_result.request_id,
+        peer_host_id = %peer.host_id,
+        peer_id = %mesh_peer.id,
+        "Reticulum peer authorized after PIN-over-Link pairing"
     );
 
     Ok(Json(RetPairResponse {

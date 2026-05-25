@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::pairing::RetPairingResultAnnounce;
+
 /// Metadata carried in Reticulum Announce app_data for peer discovery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceMetadata {
@@ -7,6 +9,8 @@ pub struct DeviceMetadata {
     pub node_name: String,
     pub version: String,
     pub port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pairing_result: Option<RetPairingResultAnnounce>,
 }
 
 /// Trust state for a discovered peer.
@@ -31,6 +35,9 @@ pub struct DiscoveredPeer {
     pub port: u16,
     /// Stable public Reticulum identity address hash extracted from the signed Announce.
     pub identity_hex: String,
+    /// Announced Reticulum destination address used to establish encrypted Links.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination_hex: Option<String>,
     /// Timestamp of last received Announce (ms since epoch).
     pub last_seen_ms: u64,
     /// Whether the peer is currently considered online.
@@ -57,6 +64,7 @@ pub fn build_announce_data(host_id: &str, node_name: &str, version: &str, port: 
         node_name: node_name.to_string(),
         version: version.to_string(),
         port,
+        pairing_result: None,
     };
     serde_json::to_vec(&meta).unwrap_or_default()
 }

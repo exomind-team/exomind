@@ -6,21 +6,44 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use discovery::{DeviceMetadata, DiscoveredPeer};
-pub use pairing::{PairedPeer, PairingEvent, PairingResult};
+pub use pairing::{
+    PairedPeer, PairingEvent, PairingResult, RetPairingLinkFrame, RetPairingResultAnnounce,
+};
+pub use reticulum::destination::link::{LinkEvent, LinkEventData};
 pub use peer_store::PeerStore;
 use rand::Rng;
 use rand_core::OsRng;
 use reticulum::destination::DestinationName;
+use reticulum::destination::link::LinkStatus;
+use reticulum::hash::AddressHash;
 use reticulum::identity::PrivateIdentity;
 use reticulum::transport::{Transport, TransportConfig};
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
+use tokio::time::{Duration, sleep};
 
 /// Events emitted by the RetMeshNode.
 #[derive(Debug, Clone)]
 pub enum RetMeshEvent {
     Discovery(discovery::DiscoveryEvent),
     Pairing(PairingEvent),
+}
+
+
+#[derive(Debug, thiserror::Error)]
+pub enum RetMeshPairingTransportError {
+    #[error("peer has no Reticulum destination hash")]
+    MissingDestination,
+    #[error("invalid Reticulum destination hash")]
+    InvalidDestination,
+    #[error("Reticulum destination is not known locally")]
+    UnknownDestination,
+    #[error("Reticulum link did not become active before timeout")]
+    LinkTimeout,
+    #[error("failed to serialize Reticulum pairing frame")]
+    Serialize,
+    #[error("failed to create Reticulum link data packet")]
+    Packet,
 }
 
 /// Configuration for creating a RetMeshNode.
@@ -161,6 +184,14 @@ impl RetMeshNode {
 
     /// Announce this node's presence with device metadata.
     pub async fn announce(&mut self) {
+        self.announce_with_pairing_result(None).await;
+    }
+
+    /// Announce this node's presence and optionally include a public pairing result.
+    pub async fn announce_with_pairing_result(
+        &mut self,
+        pairing_result: Option<pairing::RetPairingResultAnnounce>,
+    ) {
         let dest_name = DestinationName::new("exomind", "discovery");
         let dest = self
             .transport
@@ -171,10 +202,49 @@ impl RetMeshNode {
             node_name: self.config.node_name.clone(),
             version: self.config.app_version.clone(),
             port: self.config.port,
+            pairing_result,
         };
         let data = serde_json::to_vec(&meta).unwrap_or_default();
         self.transport.send_announce(&dest, Some(&data)).await;
         // dest is kept alive by the transport
+    }
+
+    /// Send a pairing frame to a discovered peer over an encrypted Reticulum Link.
+    pub async fn send_pairing_frame(
+        &self,
+        peer: &DiscoveredPeer,
+        frame: &pairing::RetPairingLinkFrame,
+    ) -> Result<(), RetMeshPairingTransportError> {
+        let destination_hex = peer
+            .destination_hex
+            .as_deref()
+            .ok_or(RetMeshPairingTransportError::MissingDestination)?;
+        let destination_hash = AddressHash::new_from_hex_string(destination_hex)
+            .map_err(|_| RetMeshPairingTransportError::InvalidDestination)?;
+        let destination = self
+            .transport
+            .get_out_destination(&destination_hash)
+            .await
+            .ok_or(RetMeshPairingTransportError::UnknownDestination)?;
+        let destination_desc = destination.lock().await.desc;
+        let link = self.transport.link(destination_desc).await;
+
+        for _ in 0..50 {
+            if link.lock().await.status() == LinkStatus::Active {
+                let payload = serde_json::to_vec(frame)
+                    .map_err(|_| RetMeshPairingTransportError::Serialize)?;
+                let packet = link
+                    .lock()
+                    .await
+                    .data_packet(&payload)
+                    .map_err(|_| RetMeshPairingTransportError::Packet)?;
+                self.transport.send_packet(packet).await;
+                return Ok(());
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        Err(RetMeshPairingTransportError::LinkTimeout)
     }
 
     /// Generate a 6-digit PIN for pairing.

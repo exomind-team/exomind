@@ -737,13 +737,19 @@ pub async fn start_with_options(
                 let mdns_clone = state.mdns.clone();
                 let (connect_tx, connect_rx) =
                     tokio::sync::broadcast::channel::<(String, String)>(64);
+                let (pairing_tx, pairing_rx) =
+                    tokio::sync::mpsc::channel::<RetMeshPairingCommand>(64);
                 state.ret_mesh_connect_tx = Some(connect_tx);
+                state.ret_mesh_pairing_tx = Some(pairing_tx);
                 let announce_enabled = state.ret_mesh_announce_enabled.clone();
+                let ret_runtime_state = state.clone();
                 tokio::spawn(ret_mesh_background(
                     node,
                     mdns_clone,
                     connect_rx,
+                    pairing_rx,
                     announce_enabled,
+                    ret_runtime_state,
                 ));
                 Some(handle)
             }
@@ -1056,6 +1062,33 @@ pub fn app_with_state(state: AppState) -> Router {
         .with_state(state)
 }
 
+
+#[derive(Debug)]
+pub enum RetMeshPairingFailure {
+    Transport(String),
+    Rejected(String),
+    Timeout,
+}
+
+#[derive(Debug)]
+pub struct RetMeshPairingSuccess {
+    pub request_id: String,
+    pub initiator_inbound_token: String,
+}
+
+#[derive(Debug)]
+pub enum RetMeshPairingCommand {
+    PairWithPeer {
+        peer: exomind_net_pairing::DiscoveredPeer,
+        pin: String,
+        responder_inbound_token: String,
+        responder_base_url: String,
+        reply: tokio::sync::oneshot::Sender<
+            Result<RetMeshPairingSuccess, RetMeshPairingFailure>,
+        >,
+    },
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub port: u16,
@@ -1078,6 +1111,8 @@ pub struct AppState {
     /// Sender to trigger Reticulum TCP connection from the pairing/http layer.
     /// Value is (host_id, tcp_addr).
     pub ret_mesh_connect_tx: Option<tokio::sync::broadcast::Sender<(String, String)>>,
+    /// Sender for PIN-over-Reticulum pairing requests from the UI route.
+    pub ret_mesh_pairing_tx: Option<tokio::sync::mpsc::Sender<RetMeshPairingCommand>>,
     /// Controls whether Reticulum periodic Announce is enabled.
     pub ret_mesh_announce_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub pairing: Arc<pairing::PairingManager>,
@@ -1414,6 +1449,7 @@ impl AppState {
             mdns: None,
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
+            ret_mesh_pairing_tx: None,
             ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 true,
             )),
@@ -1575,22 +1611,175 @@ async fn try_start_ret_mesh(
 }
 
 /// Background loop for Reticulum mesh events.
+struct PendingRetPairing {
+    peer_id: String,
+    pin: String,
+    responder_inbound_token: String,
+    reply: tokio::sync::oneshot::Sender<Result<RetMeshPairingSuccess, RetMeshPairingFailure>>,
+    created_at: std::time::Instant,
+}
+
+fn ret_discovered_peer_id(peer: &exomind_net_pairing::DiscoveredPeer) -> String {
+    if peer.identity_hex.is_empty() {
+        peer.host_id.clone()
+    } else {
+        peer.identity_hex.clone()
+    }
+}
+
+async fn ret_mesh_authorize_pairing_response(
+    state: &AppState,
+    frame: exomind_net_pairing::RetPairingLinkFrame,
+) -> exomind_net_pairing::RetPairingResultAnnounce {
+    let exomind_net_pairing::RetPairingLinkFrame::PairingResponse {
+        request_id,
+        session_id,
+        pin,
+        initiator_peer_id,
+        responder_peer_id,
+        responder_host_id: _,
+        responder_node_name: _,
+        responder_port,
+        responder_base_url,
+        responder_inbound_token,
+    } = frame;
+
+    if initiator_peer_id != state.host_id {
+        return exomind_net_pairing::RetPairingResultAnnounce {
+            request_id,
+            accepted: false,
+            initiator_peer_id: state.host_id.clone(),
+            responder_peer_id,
+            error: Some("pairing frame targeted a different Reticulum identity".to_string()),
+        };
+    }
+
+    let pairing_result = if let Some(session_id) = session_id.as_deref().filter(|value| !value.is_empty()) {
+        state.pairing.respond(session_id, &pin, &responder_peer_id)
+    } else {
+        state
+            .pairing
+            .respond_by_initiator(&state.host_id, &pin, &responder_peer_id)
+    };
+
+    let Ok(result) = pairing_result else {
+        return exomind_net_pairing::RetPairingResultAnnounce {
+            request_id,
+            accepted: false,
+            initiator_peer_id: state.host_id.clone(),
+            responder_peer_id,
+            error: Some("PIN ????????????".to_string()),
+        };
+    };
+
+    let initiator_inbound_token =
+        exomind_net_pairing::pairing::derive_initiator_inbound_token(
+            &request_id,
+            &pin,
+            &state.host_id,
+            &responder_peer_id,
+            &responder_inbound_token,
+        );
+    let now = chrono::Utc::now().to_rfc3339();
+    let base_url = if responder_base_url.trim().is_empty() {
+        format!("http://127.0.0.1:{responder_port}")
+    } else {
+        responder_base_url
+    };
+
+    let mesh_peer = state.mesh.upsert_peer(mesh::PeerInfo {
+        id: responder_peer_id.clone(),
+        base_url,
+        enabled: true,
+        capabilities: vec![],
+        status: mesh::PeerStatus::Unknown,
+        last_seen: None,
+        last_error: None,
+        created_at: now.clone(),
+        updated_at: now,
+        auth_token: Some(responder_inbound_token),
+        inbound_secret: Some(initiator_inbound_token),
+    });
+
+    if let Some(relay) = &state.mesh_relay {
+        relay.reconcile_peer(&mesh_peer.id).await;
+        relay.sync_local_interests_to_peer(&mesh_peer.id).await.ok();
+    }
+
+    tracing::info!(
+        peer_id = %mesh_peer.id,
+        peer_token_len = result.peer_token.len(),
+        "Reticulum PIN pairing authorized responder peer"
+    );
+
+    exomind_net_pairing::RetPairingResultAnnounce {
+        request_id,
+        accepted: true,
+        initiator_peer_id: state.host_id.clone(),
+        responder_peer_id,
+        error: None,
+    }
+}
+
+fn ret_mesh_complete_pairing_result(
+    state: &AppState,
+    pending_pairings: &mut std::collections::HashMap<String, PendingRetPairing>,
+    result: exomind_net_pairing::RetPairingResultAnnounce,
+) {
+    let Some(pending) = pending_pairings.remove(&result.request_id) else {
+        return;
+    };
+
+    if result.responder_peer_id != state.host_id || result.initiator_peer_id != pending.peer_id {
+        let _ = pending.reply.send(Err(RetMeshPairingFailure::Rejected(
+            "pairing result identity mismatch".to_string(),
+        )));
+        return;
+    }
+
+    if !result.accepted {
+        let _ = pending.reply.send(Err(RetMeshPairingFailure::Rejected(
+            result.error.unwrap_or_else(|| "PIN ????".to_string()),
+        )));
+        return;
+    }
+
+    let initiator_inbound_token =
+        exomind_net_pairing::pairing::derive_initiator_inbound_token(
+            &result.request_id,
+            &pending.pin,
+            &pending.peer_id,
+            &state.host_id,
+            &pending.responder_inbound_token,
+        );
+
+    let _ = pending.reply.send(Ok(RetMeshPairingSuccess {
+        request_id: result.request_id,
+        initiator_inbound_token,
+    }));
+}
+
 async fn ret_mesh_background(
     mut node: exomind_net_pairing::RetMeshNode,
     mdns: Option<std::sync::Arc<discovery::MdnsDiscovery>>,
     mut connect_rx: tokio::sync::broadcast::Receiver<(String, String)>,
+    mut pairing_rx: tokio::sync::mpsc::Receiver<RetMeshPairingCommand>,
     announce_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    state: AppState,
 ) {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::time::{Duration, interval};
 
     let mut announce_rx = node.transport.recv_announces().await;
+    let mut link_in_rx = node.transport.in_link_events();
     let mut tick = interval(Duration::from_secs(10));
     let offline_timeout_ms: u64 = 30_000;
+    let pairing_timeout = Duration::from_secs(30);
     let discovered = node.discovered.clone();
     let local_identity_hex = node.local_identity_hex();
     let mut connected_mdns_peers: HashSet<String> = HashSet::new();
+    let mut pending_pairings: HashMap<String, PendingRetPairing> = HashMap::new();
     let mut last_local_announce_ms: u64 = 0;
 
     loop {
@@ -1599,12 +1788,76 @@ async fn ret_mesh_background(
                 tracing::info!("Reticulum connecting to peer {} at {}", host_id, addr);
                 exomind_net_pairing::RetMeshNode::add_tcp_client(&node.transport, &addr).await;
             }
+            Some(command) = pairing_rx.recv() => {
+                match command {
+                    RetMeshPairingCommand::PairWithPeer {
+                        peer,
+                        pin,
+                        responder_inbound_token,
+                        responder_base_url,
+                        reply,
+                    } => {
+                        let peer_id = ret_discovered_peer_id(&peer);
+                        let request_id = uuid::Uuid::new_v4().to_string();
+                        let tcp_addr = format!("127.0.0.1:{}", peer.port + 5000);
+                        exomind_net_pairing::RetMeshNode::add_tcp_client(&node.transport, &tcp_addr).await;
+                        let frame = exomind_net_pairing::RetPairingLinkFrame::PairingResponse {
+                            request_id: request_id.clone(),
+                            session_id: None,
+                            pin: pin.clone(),
+                            initiator_peer_id: peer_id.clone(),
+                            responder_peer_id: state.host_id.clone(),
+                            responder_host_id: state.host_id.clone(),
+                            responder_node_name: state.device_id.clone(),
+                            responder_port: state.port,
+                            responder_base_url,
+                            responder_inbound_token: responder_inbound_token.clone(),
+                        };
+
+                        pending_pairings.insert(request_id.clone(), PendingRetPairing {
+                            peer_id: peer_id.clone(),
+                            pin,
+                            responder_inbound_token,
+                            reply,
+                            created_at: std::time::Instant::now(),
+                        });
+
+                        if let Err(error) = node.send_pairing_frame(&peer, &frame).await {
+                            if let Some(pending) = pending_pairings.remove(&request_id) {
+                                let _ = pending.reply.send(Err(RetMeshPairingFailure::Transport(error.to_string())));
+                            }
+                        } else {
+                            tracing::info!(
+                                peer_id = %peer_id,
+                                request_id = %request_id,
+                                "Reticulum PIN pairing response sent over encrypted Link"
+                            );
+                        }
+                    }
+                }
+            }
+            Ok(link_event) = link_in_rx.recv() => {
+                if let exomind_net_pairing::LinkEvent::Data(payload) = link_event.event {
+                    match serde_json::from_slice::<exomind_net_pairing::RetPairingLinkFrame>(payload.as_slice()) {
+                        Ok(frame) => {
+                            let result = ret_mesh_authorize_pairing_response(&state, frame).await;
+                            node.announce_with_pairing_result(Some(result)).await;
+                        }
+                        Err(error) => {
+                            tracing::debug!(error = %error, "ignoring non-pairing Reticulum Link payload");
+                        }
+                    }
+                }
+            }
             Ok(announce) = announce_rx.recv() => {
                 let data: &[u8] = announce.app_data.as_slice();
                 if let Some(meta) = exomind_net_pairing::discovery::parse_announce_data(data) {
-                    let identity_hex = {
+                    let (identity_hex, destination_hex) = {
                         let destination = announce.destination.lock().await;
-                        destination.identity.address_hash.to_hex_string()
+                        (
+                            destination.identity.address_hash.to_hex_string(),
+                            destination.desc.address_hash.to_hex_string(),
+                        )
                     };
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -1617,6 +1870,7 @@ async fn ret_mesh_background(
                         app_version: meta.version,
                         port: meta.port,
                         identity_hex,
+                        destination_hex: Some(destination_hex),
                         last_seen_ms: now,
                         online: true,
                         trust_state: exomind_net_pairing::discovery::TrustState::Discovered,
@@ -1628,6 +1882,7 @@ async fn ret_mesh_background(
                         continue;
                     }
 
+                    let pairing_result = meta.pairing_result.clone();
                     let peer_host_id = peer.host_id.clone();
                     let peer_map_id = if peer.identity_hex.is_empty() {
                         peer_host_id.clone()
@@ -1663,6 +1918,10 @@ async fn ret_mesh_background(
                             }
                         }
                     }
+
+                    if let Some(result) = pairing_result {
+                        ret_mesh_complete_pairing_result(&state, &mut pending_pairings, result);
+                    }
                 }
             }
             _ = tick.tick() => {
@@ -1684,6 +1943,18 @@ async fn ret_mesh_background(
                         }
                     }
                 }
+
+                let expired: Vec<String> = pending_pairings
+                    .iter()
+                    .filter(|(_, pending)| pending.created_at.elapsed() > pairing_timeout)
+                    .map(|(request_id, _)| request_id.clone())
+                    .collect();
+                for request_id in expired {
+                    if let Some(pending) = pending_pairings.remove(&request_id) {
+                        let _ = pending.reply.send(Err(RetMeshPairingFailure::Timeout));
+                    }
+                }
+
                 // Check mDNS for new peers to connect to
                 if let Some(ref mdns) = mdns {
                     for peer in mdns.discovered_peers() {
@@ -1799,6 +2070,7 @@ mod tests {
             mdns: None,
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
+            ret_mesh_pairing_tx: None,
             ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 true,
             )),

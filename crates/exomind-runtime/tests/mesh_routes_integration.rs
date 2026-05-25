@@ -20,6 +20,7 @@ fn reticulum_test_peer() -> DiscoveredPeer {
         app_version: "0.3.0".to_string(),
         port: 47388,
         identity_hex: "ret-identity-0123456789abcdef".to_string(),
+        destination_hex: Some("0123456789abcdef0123456789abcdef".to_string()),
         last_seen_ms: 1_782_000_000_000,
         online: true,
         trust_state: TrustState::Discovered,
@@ -231,7 +232,7 @@ async fn mesh_peers_crud_roundtrip() {
 }
 
 #[tokio::test]
-async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection() {
+async fn reticulum_pair_route_authorizes_mesh_peer_after_pin_over_reticulum() {
     let tempdir = tempfile::tempdir().unwrap();
     let mesh_persist_path = tempdir.path().join("mesh-state.json");
     let mut state = AppState::new_runtime(
@@ -248,9 +249,9 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
         ret_peer.identity_hex.clone(),
         ret_peer,
     )])));
-    let (connect_tx, mut connect_rx) = tokio::sync::broadcast::channel::<(String, String)>(4);
+    let (pairing_tx, mut pairing_rx) = tokio::sync::mpsc::channel(4);
     state.ret_mesh_peers = Some(peers.clone());
-    state.ret_mesh_connect_tx = Some(connect_tx);
+    state.ret_mesh_pairing_tx = Some(pairing_tx);
     let app = exomind_runtime::app_with_state(state);
 
     let discovered_before = app
@@ -304,18 +305,41 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
     );
     assert_eq!(ret_peers_before_payload[0]["authorized"], json!(false));
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/mesh/ret/peers/ret-identity-0123456789abcdef/pair")
-                .header("authorization", "Bearer admin-secret")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let app_for_pairing = app.clone();
+    let response_task = tokio::spawn(async move {
+        app_for_pairing
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mesh/ret/peers/ret-identity-0123456789abcdef/pair")
+                    .header("authorization", "Bearer admin-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({ "pin": "123456" }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    });
+
+    let command = pairing_rx.recv().await.expect("route should enqueue Reticulum pairing command");
+    let exomind_runtime::RetMeshPairingCommand::PairWithPeer {
+        peer,
+        pin,
+        responder_inbound_token,
+        responder_base_url,
+        reply,
+    } = command;
+    assert_eq!(peer.identity_hex, "ret-identity-0123456789abcdef");
+    assert_eq!(pin, "123456");
+    assert_eq!(responder_base_url, "http://127.0.0.1:0");
+    assert!(!responder_inbound_token.is_empty());
+    let responder_inbound_token_for_assertion = responder_inbound_token.clone();
+    let _ = reply.send(Ok(exomind_runtime::RetMeshPairingSuccess {
+        request_id: "ret-pairing-request-1".to_string(),
+        initiator_inbound_token: "initiator-inbound-token-from-reticulum".to_string(),
+    }));
+
+    let response = response_task.await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
@@ -336,10 +360,6 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
     assert_eq!(payload["mesh_peer"]["id"], "ret-identity-0123456789abcdef");
     assert_eq!(payload["mesh_peer"]["base_url"], "http://127.0.0.1:47388");
     assert_eq!(payload["mesh_peer"]["enabled"], json!(true));
-
-    let (host_id, tcp_addr) = connect_rx.recv().await.unwrap();
-    assert_eq!(host_id, "ret-peer-host");
-    assert_eq!(tcp_addr, "127.0.0.1:52388");
 
     let map = peers.read().await;
     assert_eq!(
@@ -363,6 +383,11 @@ async fn reticulum_pair_route_authorizes_mesh_peer_and_requests_tcp_connection()
         "pairing should persist a local inbound token for peer authorization",
     );
     let inbound_secret = mesh_peer.inbound_secret.clone().unwrap();
+    assert_eq!(inbound_secret, responder_inbound_token_for_assertion);
+    assert_eq!(
+        mesh_peer.auth_token.as_deref(),
+        Some("initiator-inbound-token-from-reticulum")
+    );
 
     let peer_token_before_unpair = app
         .clone()
