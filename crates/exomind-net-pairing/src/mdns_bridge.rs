@@ -92,3 +92,93 @@ impl MdnsBridge {
         self.known.read().await.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reticulum::transport::TransportConfig;
+
+    /// Helper: create a minimal Reticulum Transport for unit testing.
+    ///
+    /// The UDP interface spawned by `on_peer_resolved` will bind to a random
+    /// OS-assigned port and sit idle. No actual Reticulum networking occurs.
+    fn make_transport() -> Transport {
+        Transport::new(TransportConfig::default())
+    }
+
+    #[tokio::test]
+    async fn test_peer_resolved_dedup() {
+        let bridge = MdnsBridge::new("0.0.0.0:0".to_string());
+        let transport = make_transport();
+
+        assert_eq!(bridge.peer_count().await, 0);
+
+        // First call should register the peer.
+        bridge
+            .on_peer_resolved(&transport, "peer1", "192.168.1.100", 9999)
+            .await;
+        assert_eq!(bridge.peer_count().await, 1);
+        assert!(bridge.is_known("peer1").await);
+
+        // Second call with the same host_id — dedup must skip it.
+        bridge
+            .on_peer_resolved(&transport, "peer1", "192.168.1.101", 8888)
+            .await;
+        assert_eq!(bridge.peer_count().await, 1);
+        assert!(bridge.is_known("peer1").await);
+    }
+
+    #[tokio::test]
+    async fn test_is_known() {
+        let bridge = MdnsBridge::new("0.0.0.0:0".to_string());
+        let transport = make_transport();
+
+        assert!(!bridge.is_known("peer1").await);
+        assert!(!bridge.is_known("peer2").await);
+
+        bridge
+            .on_peer_resolved(&transport, "peer1", "192.168.1.100", 9999)
+            .await;
+
+        assert!(bridge.is_known("peer1").await);
+        assert!(!bridge.is_known("peer2").await);
+    }
+
+    #[tokio::test]
+    async fn test_on_peer_removed() {
+        let bridge = MdnsBridge::new("0.0.0.0:0".to_string());
+        let transport = make_transport();
+
+        bridge
+            .on_peer_resolved(&transport, "peer1", "192.168.1.100", 9999)
+            .await;
+        assert!(bridge.is_known("peer1").await);
+        assert_eq!(bridge.peer_count().await, 1);
+
+        bridge.on_peer_removed("peer1").await;
+
+        assert!(!bridge.is_known("peer1").await);
+        assert_eq!(bridge.peer_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_peer_count() {
+        let bridge = MdnsBridge::new("0.0.0.0:0".to_string());
+        let transport = make_transport();
+
+        assert_eq!(bridge.peer_count().await, 0);
+
+        bridge
+            .on_peer_resolved(&transport, "peer1", "192.168.1.100", 9999)
+            .await;
+        assert_eq!(bridge.peer_count().await, 1);
+
+        bridge
+            .on_peer_resolved(&transport, "peer2", "192.168.1.101", 9999)
+            .await;
+        assert_eq!(bridge.peer_count().await, 2);
+
+        bridge.on_peer_removed("peer1").await;
+        assert_eq!(bridge.peer_count().await, 1);
+    }
+}

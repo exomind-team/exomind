@@ -3,10 +3,12 @@ use axum::http::{Request, StatusCode};
 use exomind_net_pairing::DiscoveredPeer;
 use exomind_net_pairing::discovery::TrustState;
 use exomind_runtime::AppState;
+use futures_util::StreamExt;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::time::{Duration, timeout};
 use tower::util::ServiceExt;
 
 fn test_app() -> axum::Router {
@@ -613,4 +615,47 @@ async fn signal_routes_accept_remote_target_type() {
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(payload["target_type"], "remote");
     assert_eq!(payload["target_ref"], "rt-b");
+}
+
+#[tokio::test]
+async fn reticulum_sse_events_endpoint_returns_stream() {
+    let (tx, _) = tokio::sync::broadcast::channel::<String>(16);
+    let mut state = AppState::new(0);
+    state.ret_mesh_event_tx = Some(tx.clone());
+    let app = exomind_runtime::app_with_state(state);
+
+    // Spawn a task that sends a message after the SSE stream handler has subscribed.
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let _ = tx.send(r#"{"source":"test","payload":"hello_sse"}"#.to_string());
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ret/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut data_stream = response.into_body().into_data_stream();
+    let chunk = timeout(Duration::from_secs(5), data_stream.next())
+        .await
+        .expect("SSE stream should produce a chunk within 5s timeout")
+        .expect("SSE data stream should yield a chunk")
+        .expect("SSE chunk should not be an error");
+
+    let body_str = String::from_utf8_lossy(&chunk);
+    assert!(
+        body_str.contains("event: ret_mesh_snapshot"),
+        "SSE event type should be 'ret_mesh_snapshot', got: {body_str}",
+    );
+    assert!(
+        body_str.contains(r#""source":"test""#),
+        "SSE data should contain the sent payload, got: {body_str}",
+    );
 }

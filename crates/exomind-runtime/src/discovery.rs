@@ -568,4 +568,28 @@ mod tests {
 
         assert_eq!(chosen.host, "192.168.101.5");
     }
+
+    #[test]
+    fn discovered_peer_ret_port_defaults_to_zero() {
+        let peer = DiscoveredPeer {
+            host_id: "rt-test".to_string(),
+            host: "10.0.0.1".to_string(),
+            port: 9124,
+            ret_port: 0,
+            full_name: "exomind-rt-test._exomind._tcp.local.".to_string(),
+        };
+        assert_eq!(peer.ret_port, 0);
+    }
+
+    #[test]
+    fn discovered_peer_ret_port_carries_value() {
+        let peer = DiscoveredPeer {
+            host_id: "rt-test".to_string(),
+            host: "10.0.0.1".to_string(),
+            port: 9124,
+            ret_port: 5590,
+            full_name: "exomind-rt-test._exomind._tcp.local.".to_string(),
+        };
+        assert_eq!(peer.ret_port, 5590);
+    }
 }
