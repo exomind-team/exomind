@@ -535,7 +535,7 @@ function mossOnly(ctx: SettingsContext): boolean {
 }
 
 function qwenOmniOnly(ctx: SettingsContext): boolean {
-  return ctx.voiceShortcutAsrProvider === 'qwen-omni';
+  return devOnly(ctx) && ctx.voiceShortcutAsrProvider === 'qwen-omni';
 }
 
 function voiceRuntimeDoubaoOnly(ctx: SettingsContext): boolean {
@@ -543,11 +543,11 @@ function voiceRuntimeDoubaoOnly(ctx: SettingsContext): boolean {
 }
 
 function voiceRuntimeOmniCompatibleOnly(ctx: SettingsContext): boolean {
-  return ctx.voiceRuntimeProvider === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER;
+  return devOnly(ctx) && ctx.voiceRuntimeProvider === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER;
 }
 
 function voiceRuntimeOmniRealtimeOnly(ctx: SettingsContext): boolean {
-  return ctx.voiceRuntimeProvider === VOICE_RUNTIME_OMNI_PROVIDER;
+  return devOnly(ctx) && ctx.voiceRuntimeProvider === VOICE_RUNTIME_OMNI_PROVIDER;
 }
 
 function desktopOperatingSystemOnly(): boolean {

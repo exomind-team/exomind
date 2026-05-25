@@ -86,6 +86,10 @@ const PROVIDER_OPTIONS: ChoiceOption<VoiceAssistantProviderId>[] = [
   },
 ];
 
+const SIMPLE_PROVIDER_OPTIONS: ChoiceOption<VoiceAssistantProviderId>[] = [
+  PROVIDER_OPTIONS[0],
+];
+
 function useSubscribedValue<T>(
   getValue: () => T,
   subscribe: (listener: (value: T) => void) => () => void,
@@ -177,6 +181,14 @@ export function VoiceAssistantProviderSettings({
   const unsupportedCombination = isUnsupportedCombination(currentValue);
   const developerMode = Boolean(ctx?.developerMode);
 
+  const visibleProviderOptions = developerMode ? PROVIDER_OPTIONS : SIMPLE_PROVIDER_OPTIONS;
+
+  useEffect(() => {
+    if (!developerMode && currentValue.provider !== 'doubao-o2-realtime') {
+      setVoiceRuntimeProvider('doubao-o2-realtime');
+    }
+  }, [developerMode, currentValue.provider]);
+
   const updateValue = (patch: Partial<VoiceAssistantProviderSettingsValue>) => {
     const nextValue = {
       ...currentValue,
@@ -261,7 +273,7 @@ export function VoiceAssistantProviderSettings({
           aria-label="常驻语音助手 Provider"
           className="mt-3 grid gap-2"
         >
-          {PROVIDER_OPTIONS.map((option) => (
+          {visibleProviderOptions.map((option) => (
             <ChoiceCard
               key={option.value}
               option={option}
