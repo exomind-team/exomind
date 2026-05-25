@@ -11,6 +11,7 @@ pub use pairing::{
     PairedPeer, PairingEvent, PairingResult, RetPairingLinkFrame, RetPairingResultAnnounce,
 };
 pub use reticulum::destination::link::{LinkEvent, LinkEventData};
+pub use reticulum::iface::InterfaceInfo;
 pub use peer_store::PeerStore;
 use rand::Rng;
 use rand_core::OsRng;
@@ -195,7 +196,12 @@ impl RetMeshNode {
         let iface_mgr = transport.iface_manager();
         let mut mgr_lock = iface_mgr.lock().await;
         let server = TcpServer::new(bind_addr.to_string(), iface_mgr.clone());
-        mgr_lock.spawn(server, |ctx| TcpServer::spawn(ctx));
+        mgr_lock.spawn(
+            server,
+            &format!("TCP Server {}", bind_addr),
+            "tcp_server",
+            |ctx| TcpServer::spawn(ctx),
+        );
     }
 
     /// Add a TCP client interface to connect to a remote TCP server.
@@ -204,7 +210,12 @@ impl RetMeshNode {
         let iface_mgr = transport.iface_manager();
         let mut mgr_lock = iface_mgr.lock().await;
         let client = TcpClient::new(remote_addr.to_string());
-        mgr_lock.spawn(client, |ctx| TcpClient::spawn(ctx));
+        mgr_lock.spawn(
+            client,
+            &format!("TCP Client → {}", remote_addr),
+            "tcp_client",
+            |ctx| TcpClient::spawn(ctx),
+        );
     }
 
     /// Add a UDP broadcast interface for LAN discovery.
@@ -212,12 +223,27 @@ impl RetMeshNode {
     /// `forward_addr` is the target for outgoing packets:
     /// - `127.0.0.1:PORT` for localhost multi-instance testing
     /// - `255.255.255.255:PORT` for LAN broadcast
-    pub async fn add_udp_interface(transport: &Transport, bind_addr: &str, forward_addr: &str) {
+    /// - `None` for RX-only (no outgoing)
+    ///
+    /// Returns the interface's `bound_port` so the caller can read the actual
+    /// OS-assigned port after binding (useful when bind_addr is `0.0.0.0:0`).
+    pub async fn add_udp_interface(
+        transport: &Transport,
+        bind_addr: &str,
+        forward_addr: Option<&str>,
+    ) -> Arc<std::sync::atomic::AtomicU16> {
         use reticulum::iface::udp::UdpInterface;
+        let iface = UdpInterface::new(bind_addr.to_string(), forward_addr.map(String::from));
+        let bound_port = iface.bound_port.clone();
         let iface_mgr = transport.iface_manager();
         let mut mgr_lock = iface_mgr.lock().await;
-        let iface = UdpInterface::new(bind_addr.to_string(), Some(forward_addr.to_string()));
-        mgr_lock.spawn(iface, |ctx| UdpInterface::spawn(ctx));
+        mgr_lock.spawn(
+            iface,
+            &format!("UDP {} → {}", bind_addr, forward_addr.unwrap_or("(rx-only)")),
+            "udp",
+            |ctx| UdpInterface::spawn(ctx),
+        );
+        bound_port
     }
 
     /// Create TransportConfig and Transport.

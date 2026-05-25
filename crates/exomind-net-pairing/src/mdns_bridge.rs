@@ -53,7 +53,7 @@ impl MdnsBridge {
         }
 
         let forward_addr = format!("{host}:{ret_port}");
-        RetMeshNode::add_udp_interface(transport, &self.bind_addr, &forward_addr).await;
+        RetMeshNode::add_udp_interface(transport, &self.bind_addr, Some(&forward_addr)).await;
 
         {
             let mut known = self.known.write().await;

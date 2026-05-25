@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
 use thiserror::Error;
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
@@ -692,31 +693,9 @@ pub async fn start_with_options(
     state.device_id = options.device_id.clone();
     state.allow_lan_without_auth = options.allow_lan_without_auth;
 
-    // mDNS discovery setup.
-    let mdns = if options.enable_mdns {
-        let ret_udp_port = default_ret_udp_port(local_addr.port());
-        match discovery::MdnsDiscovery::new(options.host_id.clone(), local_addr.port(), ret_udp_port) {
-            Ok(mdns) => {
-                if let Err(e) = mdns.register() {
-                    tracing::warn!("mDNS register failed: {e}");
-                }
-                if let Err(e) = mdns.start_browsing() {
-                    tracing::warn!("mDNS browsing failed: {e}");
-                }
-                let arc = Arc::new(mdns);
-                state.mdns = Some(Arc::clone(&arc));
-                Some(arc)
-            }
-            Err(e) => {
-                tracing::warn!("mDNS daemon creation failed: {e}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // Reticulum mesh networking (default enabled)
+    // Reticulum mesh networking (default enabled).
+    // Start ret_mesh first so we know the actual UDP port before mDNS registration.
+    let mut mdns: Option<Arc<discovery::MdnsDiscovery>> = None;
     let _ret_mesh = if options.enable_ret_mesh {
         tracing::info!("Reticulum mesh networking enabled (default)");
         match try_start_ret_mesh(
@@ -726,9 +705,39 @@ pub async fn start_with_options(
         )
         .await
         {
-            Ok(node) => {
+            Ok((node, actual_udp_port)) => {
                 let discovered = node.discovered.clone();
                 state.ret_mesh_peers = Some(discovered);
+                state.ret_udp_port.store(actual_udp_port, Ordering::Relaxed);
+
+                // mDNS registration — now that the actual UDP port is known.
+                mdns = if options.enable_mdns {
+                    let actual_port = actual_udp_port;
+                    match discovery::MdnsDiscovery::new(
+                        options.host_id.clone(),
+                        local_addr.port(),
+                        actual_port,
+                    ) {
+                        Ok(mdns) => {
+                            if let Err(e) = mdns.register() {
+                                tracing::warn!("mDNS register failed: {e}");
+                            }
+                            if let Err(e) = mdns.start_browsing() {
+                                tracing::warn!("mDNS browsing failed: {e}");
+                            }
+                            let arc = Arc::new(mdns);
+                            state.mdns = Some(Arc::clone(&arc));
+                            Some(arc)
+                        }
+                        Err(e) => {
+                            tracing::warn!("mDNS daemon creation failed: {e}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 let handle = node.event_tx.subscribe();
                 let mdns_clone = state.mdns.clone();
                 let (connect_tx, connect_rx) =
@@ -1114,6 +1123,8 @@ pub struct AppState {
     pub ret_mesh_pairing_tx: Option<tokio::sync::mpsc::Sender<RetMeshPairingCommand>>,
     /// Controls the Reticulum announce/connectivity mode (Off/Passive/Active).
     pub ret_mesh_mode: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Actual UDP port assigned by OS for Reticulum discovery (0 until bound).
+    pub ret_udp_port: std::sync::Arc<std::sync::atomic::AtomicU16>,
     /// SSE broadcast for Reticulum mesh state snapshots.
     pub ret_mesh_event_tx: Option<tokio::sync::broadcast::Sender<String>>,
     pub pairing: Arc<pairing::PairingManager>,
@@ -1454,6 +1465,7 @@ impl AppState {
             ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
                 exomind_net_pairing::RetMeshMode::Active as u8,
             )),
+            ret_udp_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
             ret_mesh_event_tx: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store,
@@ -1542,19 +1554,12 @@ async fn version() -> Json<VersionResponse> {
 /// Default Reticulum UDP broadcast port for LAN discovery.
 /// Unix: all instances share 5590 (SO_REUSEADDR).
 /// Windows: each instance gets HTTP_port + 6000 (no SO_REUSEADDR).
-fn default_ret_udp_port(http_port: u16) -> u16 {
-    #[cfg(unix)]
-    { 5590 }
-    #[cfg(windows)]
-    { http_port + 6000 }
-}
-
 /// Try to start a Reticulum mesh node for device discovery and pairing.
 async fn try_start_ret_mesh(
     options: &RuntimeStartOptions,
     port: u16,
     identity_seed: Option<&str>,
-) -> Result<exomind_net_pairing::RetMeshNode, Box<dyn std::error::Error>> {
+) -> Result<(exomind_net_pairing::RetMeshNode, u16), Box<dyn std::error::Error>> {
     let config = exomind_net_pairing::RetMeshConfig {
         host_id: options.host_id.clone(),
         node_name: options.device_id.clone(),
@@ -1575,15 +1580,29 @@ async fn try_start_ret_mesh(
         local_identity_hex
     );
 
-    // Add a UDP interface for LAN broadcast discovery.
-    let udp_port = default_ret_udp_port(port);
-    let udp_addr = format!("0.0.0.0:{}", udp_port);
-    let udp_fwd = format!("255.255.255.255:{}", udp_port);
-    exomind_net_pairing::RetMeshNode::add_udp_interface(&transport, &udp_addr, &udp_fwd).await;
+    // Add a UDP interface for discovery (dynamic port, OS-assigned).
+    // Broadcast to 255.255.255.255 does not work on Windows loopback;
+    // peer discovery is handled by mDNS + file registry which create
+    // directed interfaces to specific peer addresses.
+    let bound_port = exomind_net_pairing::RetMeshNode::add_udp_interface(
+        &transport,
+        "0.0.0.0:0",
+        None, // RX-only initially; directed peers create their own forward interfaces
+    )
+    .await;
+    // Wait for the OS to assign a port
+    let mut actual_udp_port: u16 = 0;
+    for _ in 0..50 {
+        use std::sync::atomic::Ordering;
+        actual_udp_port = bound_port.load(Ordering::Relaxed);
+        if actual_udp_port > 0 {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
     tracing::info!(
-        "Reticulum UDP discovery bound to {} (forward {})",
-        udp_addr,
-        udp_fwd
+        "Reticulum UDP discovery bound to 0.0.0.0:{} (dynamic, rx-only)",
+        actual_udp_port
     );
 
     // Also add a TCP server interface for remote/seed connections.
@@ -1610,7 +1629,7 @@ async fn try_start_ret_mesh(
     node.announce().await;
     tracing::info!("Reticulum presence announced");
 
-    Ok(node)
+    Ok((node, actual_udp_port))
 }
 
 /// Background loop for Reticulum mesh events.
@@ -1763,7 +1782,10 @@ fn ret_mesh_complete_pairing_result(
 }
 
 /// Build and push a Reticulum mesh state snapshot through the SSE channel.
-async fn try_push_ret_mesh_snapshot(state: &AppState) {
+async fn try_push_ret_mesh_snapshot(
+    state: &AppState,
+    interfaces: Vec<exomind_net_pairing::InterfaceInfo>,
+) {
     use std::sync::atomic::Ordering;
     let Some(tx) = &state.ret_mesh_event_tx else { return };
     let mode_raw = state.ret_mesh_mode.load(Ordering::Relaxed);
@@ -1775,6 +1797,7 @@ async fn try_push_ret_mesh_snapshot(state: &AppState) {
     } else {
         (0, 0)
     };
+
     let snapshot = serde_json::json!({
         "type": "ret_mesh_snapshot",
         "payload": {
@@ -1787,6 +1810,7 @@ async fn try_push_ret_mesh_snapshot(state: &AppState) {
                 "authorized_count": authorized_count,
                 "announce_period_ms": 10_000u64,
             },
+            "interfaces": interfaces,
         },
     });
     let _ = tx.send(snapshot.to_string());
@@ -1831,7 +1855,7 @@ async fn ret_mesh_background(
         let info = serde_json::json!({
             "host_id": state.host_id,
             "host": "127.0.0.1",
-            "ret_port": default_ret_udp_port(state.port),
+            "ret_port": state.ret_udp_port.load(Ordering::Relaxed),
             "pid": std::process::id(),
         });
         let peer_file = d.join(format!("{}.json", state.host_id));
@@ -1980,7 +2004,12 @@ async fn ret_mesh_background(
                     if let Some(result) = pairing_result {
                         ret_mesh_complete_pairing_result(&state, &mut pending_pairings, result);
                     }
-                    try_push_ret_mesh_snapshot(&state).await;
+                    let interfaces = {
+                        let mgr = node.transport.iface_manager();
+                        let mgr_lock = mgr.lock().await;
+                        mgr_lock.list_interfaces()
+                    };
+                    try_push_ret_mesh_snapshot(&state, interfaces).await;
                 }
             }
             _ = tick.tick() => {
@@ -2087,7 +2116,12 @@ async fn ret_mesh_background(
                     last_local_announce_ms = now;
                     tracing::debug!("Reticulum periodic announce sent");
                 }
-                try_push_ret_mesh_snapshot(&state).await;
+                let interfaces = {
+                    let mgr = node.transport.iface_manager();
+                    let mgr_lock = mgr.lock().await;
+                    mgr_lock.list_interfaces()
+                };
+                try_push_ret_mesh_snapshot(&state, interfaces).await;
             }
         }
     }
@@ -2176,6 +2210,7 @@ mod tests {
             ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
                 exomind_net_pairing::RetMeshMode::Active as u8,
             )),
+            ret_udp_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
             ret_mesh_event_tx: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),

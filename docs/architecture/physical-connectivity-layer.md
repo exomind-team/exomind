@@ -75,11 +75,13 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 **流程**：
 1. 发现源（mDNS TXT 或文件注册表）提供 peer 的 `ret_port`
 2. `UdpDiscoveryBridge::on_peer_resolved()` 收到发现事件
-3. 调用 `add_udp_interface(transport, bind_addr, forward_addr=peer_ip:ret_port)`
+3. 调用 `add_udp_interface(bind_addr, forward_addr=Some(peer_ip:ret_port))` 创建指向对端的 UDP 信道
 4. Reticulum 通过该 UDP Interface 互发 Announce
 5. 对端收到 Announce → 出现在 `/mesh/ret/peers`
 
 **特点**：发现源可插拔（mDNS、文件扫描、未来的其他来源），但产出总是 Reticulum UDP Interface。不同的物理联通方式有各自独立的 Bridge，互不统属。
+
+> **主 UDP 接口**（`try_start_ret_mesh` 中创建）不再使用固定端口偏移 `default_ret_udp_port(http_port)`。改为绑定 `0.0.0.0:0`（OS 自动分配），`forward_addr=None`（仅接收，不主动宣告）。主动宣告通过 mDNS/文件注册表发现后创建的*定向* UDP 接口进行。实际绑定端口在 `state.ret_udp_port`（`Arc<AtomicU16>`）中记录，并在 `try_push_ret_mesh_snapshot` 的 SSE `interfaces` 字段中暴露。
 
 ### 3.2 TCP 种子连接（RET_MESH_SEED）
 
@@ -100,7 +102,7 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 **文件**：`crates/exomind-runtime/src/lib.rs`（`ret_mesh_background`）
 
 **流程**：
-1. 启动时写入 `%TEMP%/exomind-ret-peers/{host_id}.json`，含 `host_id`、`host`、`ret_port`
+1. 启动时写入 `%TEMP%/exomind-ret-peers/{host_id}.json`，含 `host_id`、`host`、`ret_port`（来自 `state.ret_udp_port`，即 OS 动态分配的 UDP 端口）
 2. 每个后台 tick（10s）扫描该目录下的 JSON 文件
 3. 发现新的 peer → `UdpDiscoveryBridge::on_peer_resolved()` → `add_udp_interface(forward=127.0.0.1:ret_port)`
 4. Reticulum 通过该 UDP Interface 互发 Announce
@@ -255,3 +257,17 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 | 能耗追踪 | 📝 存档思路 | 远期 |
 
 当前物理联通层的主要缺口是 **RemotePeerManager**——它使 Reticulum 能覆盖互联网场景，而不仅限于局域网。它和 MdnsBridge 共享同一套代码模式（外层协调器 + Interface 生命周期管理），实现成本可控。
+
+---
+
+## 9. 已知问题
+
+### 9.1 mDNS 状态计数更新但节点列表不刷新（需页面重载）
+
+**现象**：mDNS 局域网发现节点时，状态栏「已发现 N」计数正确更新，但下方的节点列表不自动呈现新增节点。需手动刷新页面（F5）后列表才显示。
+
+**根因**：`GET /mesh/ret/events` SSE 流的 `ret_mesh_snapshot` 事件中 `peers` 字段为 `undefined`（后端未在 snapshot 中包含 peers 列表），因此前端的 `payload.peers` 条件判断（`if (payload.peers) setPeers(...)`）不会触发更新。状态栏的计数来自 `payload.status.discovered_count`，该字段正常推送——导致计数可见但列表为空。
+
+**影响范围**：前端 DeviceView `ReticulumPeerSection` SSE 处理逻辑。
+
+**解决方向**：在 `try_push_ret_mesh_snapshot` 或背景循环中，将 `state.ret_mesh_peers` 转换为 `RetPeerStatePublic` 列表并写入 `payload.peers`。当前 snapshot 仅包含 `status`，缺少 `peers` 和 `interfaces` 的完整副本。

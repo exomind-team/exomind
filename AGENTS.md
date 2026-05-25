@@ -110,13 +110,13 @@
 - **crate**：`crates/exomind-net-pairing/` — 负责 Reticulum Transport 集成、设备发现、配对
   - `mdns_bridge.rs` — UdpDiscoveryBridge：监听 mDNS 事件，动态创建 Reticulum UDP Interface 指向对端 ret_port
 - **启用**：默认启用（`EXOMIND_RET_MESH=0` 可关闭）
-- **mDNS 发现**：mDNS TXT 记录宣告 `ret_port`（Reticulum UDP 广播端口）。UdpDiscoveryBridge 收到 mDNS `ServiceResolved` → 调用 `add_udp_interface` 指向对端 IP:ret_port → Reticulum 通过 UDP 互发 Announce。`default_ret_udp_port()`: Unix 5590, Windows HTTP_port+6000
+- **mDNS 发现**：mDNS TXT 记录宣告 `ret_port`（Reticulum UDP 动态端口）。UdpDiscoveryBridge 收到 mDNS `ServiceResolved` → 调用 `add_udp_interface(bind_addr, forward_addr=Some(peer_ip:ret_port))` 创建指向对端的 UDP 信道 → Reticulum 通过 UDP 互发 Announce。主 UDP 接口绑定 `0.0.0.0:0`（OS 自动分配），不再使用固定 `default_ret_udp_port()`
 - **本机发现**：`%TEMP%/exomind-ret-peers/{host_id}.json` 文件注册表。绕过 Windows 回环不转发 255.255.255.255 广播的限制，后台 tick 扫描同名 JSON 文件触发 UdpDiscoveryBridge
 - **seed 连接**：`RET_MESH_SEED=127.0.0.1:PORT`（指向目标 RT 的 TCP 端口 = RT_port + 5000）
 - **状态视图**：`GET /mesh/ret/peers` — 统一返回 discovered / connected_unauthorized / connected_authorized / trusted / blocked
 - **兼容视图**：`GET /mesh/ret/discovered` — 旧发现列表（兼容）
 - **状态仪表盘**：`GET /mesh/ret/status` — 返回 mesh 启用状态、announce_mode（off/passive/active）、本地身份、节点统计
-- **状态推送**：`GET /mesh/ret/events` — SSE 流，推送 `ret_mesh_snapshot` 事件（含 status + peers + interfaces）
+- **状态推送**：`GET /mesh/ret/events` — SSE 流，推送 `ret_mesh_snapshot` 事件（含 status + interfaces）。注意：`peers` 字段当前在 snapshot 中为 `undefined`，节点列表需通过 `GET /mesh/ret/peers` 拉取；详见 [已知问题 §9.1](docs/architecture/physical-connectivity-layer.md#91-mdns-状态计数更新但节点列表不刷新需页面重载)
 - **配对授权**：`POST /mesh/ret/peers/:peer_id/pair {"pin":"123456"}` — PIN-over-Reticulum 配对
 - **撤销授权**：`DELETE /mesh/ret/peers/:peer_id/pair`
 - **连接模式开关**：`POST /mesh/ret/announce {"mode":"off|passive|active"}` — 三态控制，前端右上角分段按钮
