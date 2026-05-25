@@ -110,8 +110,12 @@
 - **crate**：`crates/exomind-net-pairing/` — 负责 Reticulum Transport 集成、设备发现、配对
 - **启用**：`EXOMIND_RET_MESH=1`（默认不启用）
 - **seed 连接**：`RET_MESH_SEED=127.0.0.1:PORT`（指向目标 RT 的 TCP 端口 = RT_port + 5000）
-- **调试路由**：`GET /mesh/ret/discovered` — 查看 Reticulum 发现的 peer
+- **状态视图**：`GET /mesh/ret/peers` — 统一返回 discovered / connected_unauthorized / connected_authorized / trusted / blocked
+- **兼容视图**：`GET /mesh/ret/discovered` — 旧发现列表（兼容）
+- **配对授权**：`POST /mesh/ret/peers/:peer_id/pair {"pin":"123456"}` — PIN-over-Reticulum 配对
+- **撤销授权**：`DELETE /mesh/ret/peers/:peer_id/pair`
 - **announce 开关**：`POST /mesh/ret/announce {"enabled": true/false}`
+- **三阶段路线**：详见 [2026-05-25 迁移计划](docs/plans/2026-05-25-reticulum-authorized-sync-migration-plan.md)
 - **关键日志**：grep `Reticulum` 查看 Transport 初始化状态
 
 ## 文档拓扑
