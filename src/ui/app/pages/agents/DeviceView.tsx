@@ -157,7 +157,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const [pinInput, setPinInput] = useState<string>('');
   const [status, setStatus] = useState<{
     mesh_enabled: boolean;
-    announce_enabled: boolean;
+    announce_mode: 'off' | 'passive' | 'active';
     local_host_id: string;
     local_port: number;
     discovered_count: number;
@@ -273,10 +273,22 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     }
   };
 
+  const handleAnnounceModeChange = async (newMode: 'off' | 'passive' | 'active') => {
+    if (!runtimeBaseUrl) return;
+    try {
+      await fetch(`${runtimeBaseUrl}/mesh/ret/announce`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: newMode }),
+      });
+    } catch { /* let SSE refresh correct the display */ }
+  };
+
   if (error && peers.length === 0) return null;
 
   const meshActive = status?.mesh_enabled ?? false;
   const announcePeriodSec = status ? Math.round(status.announce_period_ms / 1000) : 10;
+  const currentMode = status?.announce_mode ?? 'active';
   void tick; // trigger re-render every 1s for countdown
   const elapsedSec = Math.floor((Date.now() - lastAnnounceTsRef.current) / 1000);
   const nextAnnounceSec = Math.max(0, announcePeriodSec - (elapsedSec % announcePeriodSec));
@@ -284,8 +296,8 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   return (
     <article className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]">
       {/* ── Header — Status Dashboard ── */}
-      <div className="flex items-center gap-2">
-        <Wifi size={14} className={meshActive ? 'text-[#0D9488]' : 'text-[#A8A29E]'} />
+      <div className="flex items-start gap-2">
+        <Wifi size={14} className={`mt-0.5 shrink-0 ${meshActive ? 'text-[#0D9488]' : 'text-[#A8A29E]'}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
@@ -296,11 +308,14 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
             }`}>
               {meshActive ? '已启用' : '未启用'}
             </span>
-            {meshActive && (
+            {meshActive && status && (
               <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                status?.announce_enabled ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                status.announce_mode === 'active' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' :
+                status.announce_mode === 'passive' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
               }`}>
-                {status?.announce_enabled ? `宣告 ${announcePeriodSec}s` : '宣告已停'}
+                {status.announce_mode === 'active' ? `宣告 ${announcePeriodSec}s` :
+                 status.announce_mode === 'passive' ? '隐匿 (仅收)' : '已关闭'}
               </span>
             )}
           </div>
@@ -310,7 +325,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
               <span>RT:{status.local_port}</span>
               <span>已发现 {status.discovered_count}</span>
               <span>已授权 {status.authorized_count}</span>
-              {status.announce_enabled && (
+              {status.announce_mode === 'active' && (
                 <span>下次宣告 <span className="tabular-nums">{nextAnnounceSec}s</span></span>
               )}
             </div>
@@ -321,6 +336,28 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
             </p>
           )}
         </div>
+        {/* ── Connection Mode Selector — top-right ── */}
+        {meshActive && (
+          <div className="inline-flex rounded-lg border border-[#D6D3D1] bg-[#FAF7F5] dark:border-[#57534E] dark:bg-[#292524] overflow-hidden shrink-0">
+            {(['off', 'passive', 'active'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                disabled={!runtimeBaseUrl}
+                onClick={() => { void handleAnnounceModeChange(mode); }}
+                className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                  currentMode === mode
+                    ? mode === 'active' ? 'bg-[#0D9488] text-white' :
+                      mode === 'passive' ? 'bg-[#2563EB] text-white' :
+                      'bg-[#57534E] text-white'
+                    : 'text-[#78716C] dark:text-[#A8A29E] hover:bg-[#E7E5E4] dark:hover:bg-[#44403C]'
+                }`}
+              >
+                {mode === 'active' ? '活动' : mode === 'passive' ? '隐匿' : '关闭'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Interfaces ── */}

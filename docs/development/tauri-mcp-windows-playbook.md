@@ -2912,3 +2912,61 @@ Invoke-WebRequest http://127.0.0.1:<rt>/health -TimeoutSec 2 -UseBasicParsing
   - manager 视角为空
   - 但 socket / 协议仍活着
     才切回上一节的孤儿清理流程。
+
+### 阶段补记：三态开关 Tauri MCP 验证失败与替代方案（2026-05-26）
+
+#### 本轮阶段目标
+
+- 在真实 Tauri 桌面窗口中验证 Reticulum 三态连接模式（off / passive / active）的端到端行为：
+  - `GET /mesh/ret/status` 返回 `announce_mode`
+  - `POST /mesh/ret/announce {“mode”:”passive”}` 切换模式
+  - SSE `/mesh/ret/events` 推送含 `announce_mode` 的 snapshot
+  - 前端 UI 三态分段按钮正确反映当前状态
+
+#### 本轮现场真值
+
+- 受 `tauri:manager` 管理的实例：
+  - `ret-mesh-mcp`
+  - Web `1420`
+  - RT `47820`
+  - MCP bridge `9223`
+- `bun run tauri:manager list` 显示实例已启动
+- 但 RT `47820` 无监听：`curl http://127.0.0.1:47820/mesh/ret/status` → connection refused
+
+#### 本轮观察结果
+
+- `tauri:manager start` 报告”started”，但底层构建实际已失败：
+  - `rustc-LLVM ERROR: out of memory`
+  - `STATUS_STACK_OVERFLOW` (0xc00000fd)
+  - 崩溃 crate：`if-addrs`、`tungstenite`、`cookie`
+- 之前一次启动（`ret-mesh-test`）也因 `STATUS_STACK_BUFFER_OVERRUN` (0xc0000409) 崩溃
+- 第一次成功报告的 `ret-mesh-mcp` 实例实际仍停留在”started”外壳，native exe 未生成
+- 官方 MCP `driver_session start --port 9223` 同样不可用（user-cancel / Transport closed）
+
+#### 本轮结论
+
+1. **当前 Windows 宿主机无法完成 Tauri 桌面构建**：rustc 在 cargo 并行编译多个 crate 时频繁 OOM 或栈溢出。这不是代码问题，是系统资源（内存/栈空间）不足以支撑完整 Tauri 构建链路。
+2. **tauri:manager 的 “started” 状态不可信**：manager 进程退出码 0 不等于 native 二进制构建成功。必须额外验证 RT 端口是否真的在监听。
+3. **替代验证方案**：当 Tauri MCP 不可用时，三态开关的端到端验证退回到：
+   - `cargo test -p exomind-runtime --test mesh_routes_integration`（嵌入式 RT，覆盖 API 行为）
+   - `vitest run`（前端单元测试，覆盖 UI 状态渲染）
+   - curl 直接打开发中的 `bun run dev` Web-only RT（不依赖 Tauri 构建）
+4. **经验落盘**：纯 Tauri 构建是”重”操作，不应在每次 API 变更后都尝试。开发迭代期优先用集成测试 + Web-only 模式验证。Tauri 真窗验证应作为发布前检查项，在资源充足时单独执行。
+
+#### 可复用操作套路
+
+1. 接到”Tauri MCP 验证”任务时，先跑 `bun run tauri:manager list` 确认是否有已存活的实例可复用。
+2. 若需新建实例，启动后**必须**额外验证 RT 端口监听：
+   ```bash
+   curl -s -o /dev/null -w “%{http_code}” http://127.0.0.1:<rt_port>/mesh/ret/status
+   ```
+   如果返回 000（连接拒绝），说明 native 二进制未成功构建，不要继续尝试 MCP 连接。
+3. 若 RT 端口不可达，先查实例日志：
+   ```bash
+   cat .tmp/tauri-dev-instances/<name>.log | grep -E “error|ERROR|out of memory|STATUS_STACK”
+   ```
+4. 命中 rustc OOM/栈溢出时：
+   - 先关掉不必要的后台进程（浏览器、其他 cargo 实例）释放内存
+   - 或改用 `--watch` 模式先启动前端，再单独 `cargo build` 后端
+   - 若仍失败，转为 Web-only 模式验证：`bun run dev` 直接启动 RT，不经过 Tauri 壳
+5. 日常 API 迭代验证优先走集成测试 + curl，不依赖 Tauri 真窗。

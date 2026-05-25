@@ -698,7 +698,7 @@ async fn ret_mesh_events(
 #[derive(Serialize)]
 struct RetMeshStatus {
     mesh_enabled: bool,
-    announce_enabled: bool,
+    announce_mode: exomind_net_pairing::RetMeshMode,
     local_host_id: String,
     local_port: u16,
     discovered_count: usize,
@@ -709,9 +709,10 @@ struct RetMeshStatus {
 async fn get_ret_mesh_status(
     State(state): State<AppState>,
 ) -> Json<RetMeshStatus> {
-    let announce_enabled = state
-        .ret_mesh_announce_enabled
+    let mode_raw = state
+        .ret_mesh_mode
         .load(std::sync::atomic::Ordering::Relaxed);
+    let mode: exomind_net_pairing::RetMeshMode = mode_raw.into();
 
     let (discovered_count, authorized_count) = if let Some(peers) = &state.ret_mesh_peers {
         let map = peers.read().await;
@@ -729,7 +730,7 @@ async fn get_ret_mesh_status(
 
     Json(RetMeshStatus {
         mesh_enabled: state.ret_mesh_peers.is_some(),
-        announce_enabled,
+        announce_mode: mode,
         local_host_id: state.host_id.clone(),
         local_port: state.port,
         discovered_count,
@@ -739,20 +740,31 @@ async fn get_ret_mesh_status(
 }
 
 #[derive(Deserialize)]
-struct AnnounceToggleRequest {
-    enabled: bool,
+struct AnnounceModeRequest {
+    mode: String,
 }
 
-/// Toggle whether Reticulum sends periodic Announces.
+/// Set the Reticulum announce/connectivity mode (off / passive / active).
 async fn toggle_ret_announce(
     State(state): State<AppState>,
-    Json(req): Json<AnnounceToggleRequest>,
+    Json(req): Json<AnnounceModeRequest>,
 ) -> Json<serde_json::Value> {
+    let mode: exomind_net_pairing::RetMeshMode = match req.mode.as_str() {
+        "off" => exomind_net_pairing::RetMeshMode::Off,
+        "passive" => exomind_net_pairing::RetMeshMode::Passive,
+        "active" => exomind_net_pairing::RetMeshMode::Active,
+        other => {
+            return Json(serde_json::json!({
+                "error": "invalid_mode",
+                "message": format!("unknown mode '{}', expected off/passive/active", other),
+            }));
+        }
+    };
     state
-        .ret_mesh_announce_enabled
-        .store(req.enabled, std::sync::atomic::Ordering::Relaxed);
-    tracing::info!("Reticulum announce toggled: {}", req.enabled);
-    Json(serde_json::json!({"announce_enabled": req.enabled}))
+        .ret_mesh_mode
+        .store(mode as u8, std::sync::atomic::Ordering::Relaxed);
+    tracing::info!("Reticulum announce mode set to: {}", req.mode);
+    Json(serde_json::json!({"announce_mode": req.mode}))
 }
 
 /// Protected mesh routes (behind auth middleware).

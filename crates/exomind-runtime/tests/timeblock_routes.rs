@@ -36,9 +36,7 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         mdns: None,
         ret_mesh_peers: None,
         ret_mesh_connect_tx: None,
-        ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-            false,
-        )),
+        ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(exomind_net_pairing::RetMeshMode::Active as u8)),
         ret_mesh_pairing_tx: None,
         ret_mesh_event_tx: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),

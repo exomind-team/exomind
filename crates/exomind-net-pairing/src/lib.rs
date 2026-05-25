@@ -23,6 +23,59 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::{Duration, sleep};
 
+/// Three-state exposure mode for Reticulum announce and connectivity.
+///
+/// Each physical connectivity method (UDP, TCP, etc.) independently applies
+/// this mode, and the global mesh also has a master mode.  The effective mode
+/// at runtime is `min(global, per_method)`.
+///
+/// | State   | Value | Interface behaviour              |
+/// |---------|-------|----------------------------------|
+/// | Off     | 0     | No interface, no announce        |
+/// | Passive | 1     | Interface RX-only, no announce   |
+/// | Active  | 2     | Interface TX+RX, full announce   |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetMeshMode {
+    Off = 0,
+    Passive = 1,
+    Active = 2,
+}
+
+impl RetMeshMode {
+    /// Returns true when the mode allows creating interfaces at all.
+    pub fn is_enabled(self) -> bool {
+        matches!(self, Self::Passive | Self::Active)
+    }
+
+    /// Returns true when the mode allows sending announces.
+    pub fn can_announce(self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
+
+impl Default for RetMeshMode {
+    fn default() -> Self {
+        Self::Active
+    }
+}
+
+impl From<u8> for RetMeshMode {
+    fn from(v: u8) -> Self {
+        match v {
+            0 => Self::Off,
+            1 => Self::Passive,
+            _ => Self::Active,
+        }
+    }
+}
+
+impl From<RetMeshMode> for u8 {
+    fn from(m: RetMeshMode) -> u8 {
+        m as u8
+    }
+}
+
 /// Events emitted by the RetMeshNode.
 #[derive(Debug, Clone)]
 pub enum RetMeshEvent {

@@ -740,14 +740,14 @@ pub async fn start_with_options(
                 let (ret_mesh_event_tx, _ret_mesh_event_rx) =
                     tokio::sync::broadcast::channel::<String>(64);
                 state.ret_mesh_event_tx = Some(ret_mesh_event_tx.clone());
-                let announce_enabled = state.ret_mesh_announce_enabled.clone();
+                let ret_mesh_mode = state.ret_mesh_mode.clone();
                 let ret_runtime_state = state.clone();
                 tokio::spawn(ret_mesh_background(
                     node,
                     mdns_clone,
                     connect_rx,
                     pairing_rx,
-                    announce_enabled,
+                    ret_mesh_mode,
                     ret_runtime_state,
                 ));
                 Some(handle)
@@ -1112,8 +1112,8 @@ pub struct AppState {
     pub ret_mesh_connect_tx: Option<tokio::sync::broadcast::Sender<(String, String)>>,
     /// Sender for PIN-over-Reticulum pairing requests from the UI route.
     pub ret_mesh_pairing_tx: Option<tokio::sync::mpsc::Sender<RetMeshPairingCommand>>,
-    /// Controls whether Reticulum periodic Announce is enabled.
-    pub ret_mesh_announce_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Controls the Reticulum announce/connectivity mode (Off/Passive/Active).
+    pub ret_mesh_mode: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// SSE broadcast for Reticulum mesh state snapshots.
     pub ret_mesh_event_tx: Option<tokio::sync::broadcast::Sender<String>>,
     pub pairing: Arc<pairing::PairingManager>,
@@ -1451,8 +1451,8 @@ impl AppState {
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
             ret_mesh_pairing_tx: None,
-            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-                true,
+            ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                exomind_net_pairing::RetMeshMode::Active as u8,
             )),
             ret_mesh_event_tx: None,
             pairing: Arc::new(pairing::PairingManager::new()),
@@ -1766,7 +1766,8 @@ fn ret_mesh_complete_pairing_result(
 async fn try_push_ret_mesh_snapshot(state: &AppState) {
     use std::sync::atomic::Ordering;
     let Some(tx) = &state.ret_mesh_event_tx else { return };
-    let announce_enabled = state.ret_mesh_announce_enabled.load(Ordering::Relaxed);
+    let mode_raw = state.ret_mesh_mode.load(Ordering::Relaxed);
+    let mode: exomind_net_pairing::RetMeshMode = mode_raw.into();
     let (discovered_count, authorized_count) = if let Some(peers) = &state.ret_mesh_peers {
         let map = peers.read().await;
         let auth = map.values().filter(|p| matches!(p.trust_state, exomind_net_pairing::discovery::TrustState::Paired | exomind_net_pairing::discovery::TrustState::Trusted)).count();
@@ -1779,7 +1780,7 @@ async fn try_push_ret_mesh_snapshot(state: &AppState) {
         "payload": {
             "status": {
                 "mesh_enabled": state.ret_mesh_peers.is_some(),
-                "announce_enabled": announce_enabled,
+                "announce_mode": mode,
                 "local_host_id": state.host_id,
                 "local_port": state.port,
                 "discovered_count": discovered_count,
@@ -1796,7 +1797,7 @@ async fn ret_mesh_background(
     mdns: Option<std::sync::Arc<discovery::MdnsDiscovery>>,
     mut connect_rx: tokio::sync::broadcast::Receiver<(String, String)>,
     mut pairing_rx: tokio::sync::mpsc::Receiver<RetMeshPairingCommand>,
-    announce_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ret_mesh_mode: std::sync::Arc<std::sync::atomic::AtomicU8>,
     state: AppState,
 ) {
     use std::collections::{HashMap, HashSet};
@@ -2076,7 +2077,8 @@ async fn ret_mesh_background(
                     }
                 }
 
-                if announce_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                let mode: exomind_net_pairing::RetMeshMode = ret_mesh_mode.load(std::sync::atomic::Ordering::Relaxed).into();
+                if mode.can_announce() {
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
@@ -2171,8 +2173,8 @@ mod tests {
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
             ret_mesh_pairing_tx: None,
-            ret_mesh_announce_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-                true,
+            ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                exomind_net_pairing::RetMeshMode::Active as u8,
             )),
             ret_mesh_event_tx: None,
             pairing: Arc::new(pairing::PairingManager::new()),
