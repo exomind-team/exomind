@@ -94,6 +94,23 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 
 ---
 
+### 3.3 本机文件注册表（Local Peer Registry）
+
+**文件**：`crates/exomind-runtime/src/lib.rs`（`ret_mesh_background`）
+
+**流程**：
+1. 启动时写入 `%TEMP%/exomind-ret-peers/{host_id}.json`，含 `host_id`、`host`、`ret_port`
+2. 每个后台 tick（10s）扫描该目录下的 JSON 文件
+3. 发现新的 peer → `MdnsBridge::on_peer_resolved()` → `add_udp_interface(forward=127.0.0.1:ret_port)`
+4. Reticulum 通过该 UDP Interface 互发 Announce
+
+**特点**：零配置，纯本机自动发现。绕过 Windows 回环接口不转发 UDP 广播的限制。
+
+**踩坑记录**：
+- Windows 回环接口**不转发** `255.255.255.255` 的 UDP 广播到本地其他 socket，即使开启了 `SO_REUSEADDR`。这是纯 UDP 广播不能单独做本机发现的原因。`mDNS` 依赖组播（`224.0.0.251:5353`），Windows 回环同样不支持组播加组，因此 mDNS+MdnsBridge 在本机场景下也无法工作。
+- `SO_REUSEADDR` 用 `socket2` crate 替代 `std::net::UdpSocket` 在 Windows 上生效，允许多个实例绑定同一 UDP 端口。但它是 UDP 通道的**必要条件**而非充分条件——没有发现源对端的地址，UDP 广播收了也没人解析。
+- `RET_MESH_SEED` 是在本文件注册表上线前唯一能跑通本机双实例的方式，但它依赖用户手动配置 TCP 地址，本质是 TCP 点对点连接而非广播发现。
+
 ## 4. 待实现的联通方式
 
 ### 4.1 RemotePeerManager（远程地址表）
@@ -179,6 +196,7 @@ MdnsBridge 和未来的 RemotePeerManager 都是“接线员”——它们创�
 | 联通方式 | 状态 | 优先级 |
 |---------|------|--------|
 | mDNS+UDP 自动发现 | ✅ 已实现（MdnsBridge） | 已交付 |
+| 本机文件注册表 | ✅ 已实现 | 已交付 |
 | TCP 种子连接 | ✅ 已实现（RET_MESH_SEED） | 已交付 |
 | RemotePeerManager | 🔲 待实现 | 中 |
 | Interface 流量计量 | 🔲 待实现 | 低 |
