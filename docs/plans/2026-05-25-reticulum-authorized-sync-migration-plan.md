@@ -1,7 +1,7 @@
 ﻿# Reticulum 授权配对与业务同步迁移计划
 
-> 日期：2026-05-25
-> 状态：调查规划版，后续开发以本文为任务入口
+> 日期：2026-05-25（checkpoint 更新 2026-05-26）
+> 状态：活跃开发版 — 3 次迭代已将物理联通层基础能力落地，详情见 §11 Checkpoint
 > 分支：`feat/ret-mesh-prototype`
 > 关联文档：
 > - [Reticulum 组网配对模型设计](2026-05-24-ret-mesh-pairing-model-design.md)
@@ -507,4 +507,85 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 - 撤销授权后，业务同步立即停止且持久化状态被清理。
 - HTTP/SSE 不再是跨 RT 同步的唯一主路径。
 - 业务同步仍落在现有 RT SQLite / domain projector / reconciliation 架构中。
+
+---
+## 11. Session Checkpoint — 2026-05-26
+
+> 无上下文 Agent 从本 checkpoint 开始即可独立恢复工作。
+
+### 当前分支与提交
+
+| 仓库 | 分支 | 最新提交 | 变更概要 |
+|------|------|---------|---------|
+| `exomind-team/exomind` | `feat/ret-mesh-prototype` | `7179e004` | docs: 三态开关附着点修正 + 联通方式×Interface 理论研究课题 |
+| `ARCJ137442/Reticulum-research` | `main` | `c210cc5` | ara: O14 — 联通方式×Reticulum Interface 理论区分 |
+
+`feat/ret-mesh-prototype` 增量 5 commits 相对基线 `dev`：
+
+| SHA | 摘要 |
+|-----|------|
+| `8357f3a7` | feat(ret-mesh): 三态连接模式 — AtomicBool → RetMeshMode |
+| `12442bf7` | docs: neat-freak — 三态开关 API 文档同步 + 状态表更新 |
+| `28d5250a` | feat(ret-mesh): InterfaceManager 接口枚举 API + 动态 UDP 端口 |
+| `5323cdc6` | docs: neat-freak — 追加 PIN 配对 UI 缺口已知问题 |
+| `7179e004` | docs: 三态开关附着点修正 + 联通方式×Interface 理论研究课题 |
+
+### 已完成的工作
+
+1. **三态连接模式全局开关** — `RetMeshMode` 枚举（Off/Passive/Active）替代 `AtomicBool`。AppState `ret_mesh_mode: Arc<AtomicU8>`。API：`POST /mesh/ret/announce {"mode":"off|passive|active"}`。SSE：`announce_mode` 字段。前端：三段式按钮（"连接模式"），右上角。19 files changed, +208/-72。
+2. **InterfaceManager 接口枚举 API** — `LocalInterface` 增加 name/iface_type；`spawn()` 接受 name+type 参数；`list_interfaces()` 公开枚举；`InterfaceInfo` 结构体。SSE snapshot `interfaces` 字段。
+3. **动态 UDP 端口** — 主 UDP 接口从固定 `HTTP_port+6000` 改为 `0.0.0.0:0`（OS 分配）；`UdpInterface.bound_port: Arc<AtomicU16>`；`add_udp_interface` 返回 `Arc<AtomicU16>`，forward_addr 改为 `Option<&str>`；mDNS 注册移至 ret_mesh 创建之后（使用实际端口）；`default_ret_udp_port()` 已删除。
+4. **文档同步** — AGENTS.md + physical-connectivity-layer.md（§3.1/§3.3/§9/§10）+ Reticulum-research AGENTS.md Rust API 示例。
+5. **ARA 理论沉淀** — N12（三态决策）、N13（物理联通层决策）、N14（Tauri 构建死胡同）；H01 结晶；O11-O14 暂存。
+6. **Release 构建** — ExoMind_0.4.15_x64-setup.exe（NSIS）+ MSI + 单程序 exe。Release 模式构建不受 dev 栈溢出影响。
+
+### 设计中已确认的决策
+
+| 决策 | 出处 |
+|------|------|
+| 三态开关附着点 = Reticulum Interface，而非"联通方式" | `physical-connectivity-layer.md §4` |
+| 联通方式也需要独立的 UI 表示和开关（待研究） | `physical-connectivity-layer.md §10` |
+| Interface 元数据唯一真相源 = InterfaceManager，不在 RetMeshNode 自追踪 | 2026-05-26 拍板 |
+| 主 UDP 接口使用动态端口 + RX-only，mDNS/文件注册表产出的定向接口负责宣告 | `physical-connectivity-layer.md §3.1` |
+| Tauri 构建不可用于日常 API 验证（rustc STATUS_STACK_BUFFER_OVERRUN） | `tauri-mcp-windows-playbook.md` 追加补记 |
+
+### 已知问题（待处理）
+
+| # | 问题 | 严重度 | 文档位置 |
+|---|------|--------|---------|
+| 1 | PIN 配对流程缺少发起方「显示配对码」UI — 后端有 `generate_pin()` 但没有路由把它返回给前端展示 | 中 | `physical-connectivity-layer.md §9.1` |
+| 2 | mDNS 状态计数更新但节点列表不刷新 — SSE snapshot 不含 `peers` 字段 | 中 | `physical-connectivity-layer.md §9.2` |
+| 3 | mesh_relay + discovery_pairing_relay 测试 5/5 fail — `enable_ret_mesh` 覆写 host_id 导致 relay 匹配失败 | 中 | 根因已分析待修复 |
+| 4 | 按 Interface 三态开关未实现 — `InterfaceManager.set_interface_mode()` + 前端每接口按钮 | 低 | `physical-connectivity-layer.md §4` |
+| 5 | 联通方式×Reticulum Interface 的理论区分需研究 — 5 个具体问题 | 低 | `physical-connectivity-layer.md §10` |
+
+### 恢复工作入口
+
+**Next steps 优先级建议（由高到低）：**
+
+1. **修复 PIN 配对 UI 缺口（#1）** — 新建 `/mesh/ret/peers/:peer_id/initiate-pair` 路由或复用 `POST /mesh/pairing/initiate`，返回生成的 PIN 和 session_id。前端「授权」按钮先调此端点展示 PIN，再在另一设备上输入。`PairingManager::generate_pin()` 已有实现。
+2. **修复 mDNS 列表不刷新（#2）** — 在 `try_push_ret_mesh_snapshot` 或 `ret_mesh_background` tick 中将 `state.ret_mesh_peers` 转换为 `RetPeerStatePublic` 列表写入 `payload.peers`。
+3. **修复 relay 测试失败（#3）** — 测试中运行时需 `enable_ret_mesh=false` 或修复 host_id 覆写逻辑（identity hex 取代 host_id 时应保留旧 host_id 为兼容 alias）。
+4. **按 Interface 三态开关（#4）** — `InterfaceManager` 添加 `set_interface_mode(address, mode)`；`LocalInterface` 增加 `mode` 字段；`InterfaceManager::send()` 中检查 mode 跳过 Passive TX；`InterfaceInfo` 增加 `mode` 字段；前端「下层接口」每行增加三段式按钮。
+5. **研究任务（#5）** — 读 Reticulum 手册 Interface 设计哲学章节，对照 `InterfaceManager`/`UdpDiscoveryBridge`/文件注册表代码，形成理论对照表。
+
+### 验证命令速查
+
+```bash
+# 编译
+cargo check -p exomind-net-pairing -p exomind-runtime
+
+# Rust 测试
+cargo test -p exomind-net-pairing
+cargo test -p exomind-runtime --test mesh_routes_integration
+
+# 前端测试
+npx vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
+npx vitest run tests/unit/services/runtime-mesh-sync.service.test.ts
+npx vitest run tests/unit/services/runtime-mesh-host-sync.service.test.ts
+npx vitest run tests/unit/sync/device-id.test.ts
+
+# Release 构建
+cd src-tauri && cargo tauri build
+```
 
