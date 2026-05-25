@@ -1668,7 +1668,7 @@ async fn ret_mesh_authorize_pairing_response(
             accepted: false,
             initiator_peer_id: state.host_id.clone(),
             responder_peer_id,
-            error: Some("PIN ????????????".to_string()),
+            error: Some("PIN 验证失败或会话已过期".to_string()),
         };
     };
 
@@ -1739,7 +1739,7 @@ fn ret_mesh_complete_pairing_result(
 
     if !result.accepted {
         let _ = pending.reply.send(Err(RetMeshPairingFailure::Rejected(
-            result.error.unwrap_or_else(|| "PIN ????".to_string()),
+            result.error.unwrap_or_else(|| "配对被远端拒绝".to_string()),
         )));
         return;
     }

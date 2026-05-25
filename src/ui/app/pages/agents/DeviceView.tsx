@@ -153,6 +153,8 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const [pairingHostId, setPairingHostId] = useState<string | null>(null);
   const [unpairingHostId, setUnpairingHostId] = useState<string | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
+  const [pinDialogPeerId, setPinDialogPeerId] = useState<string | null>(null);
+  const [pinInput, setPinInput] = useState<string>('');
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -179,13 +181,15 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     }));
   };
 
-  const handlePairPeer = async (hostId: string) => {
+  const handlePairPeer = async (hostId: string, pin: string) => {
     if (!runtimeBaseUrl || pairingHostId || unpairingHostId) return;
     setPairingHostId(hostId);
     setPairingError(null);
     try {
       const res = await fetch(`${runtimeBaseUrl}/mesh/ret/peers/${encodeURIComponent(hostId)}/pair`, {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pin }),
       });
       if (!res.ok) {
         throw new Error(`Reticulum pairing failed (${res.status})`);
@@ -304,7 +308,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                     <button
                       type="button"
                       data-testid={`reticulum-peer-pair-${peerIdentity}`}
-                      onClick={() => void handlePairPeer(peerIdentity)}
+                      onClick={() => setPinDialogPeerId(peerIdentity)}
                       disabled={isPairing || pairingHostId !== null || unpairingHostId !== null}
                       className="rounded-lg bg-[#0D9488] px-2.5 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -326,6 +330,72 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {pinDialogPeerId != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-80 rounded-2xl bg-white p-6 shadow-xl dark:bg-[#1C1917]">
+            <h4 className="mb-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+              输入 Reticulum PIN
+            </h4>
+            <p className="mb-4 text-xs text-[#A8A29E]">
+              请在对方设备上查看 PIN 码，然后输入到此处
+            </p>
+            <div className="mb-4 flex justify-center gap-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <input
+                  key={i}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={1}
+                  value={pinInput[i] ?? ''}
+                  onChange={(e) => {
+                    const digit = e.target.value.replace(/[^0-9]/g, '').slice(-1);
+                    const chars = pinInput.split('');
+                    while (chars.length < 6) chars.push('');
+                    chars[i] = digit;
+                    setPinInput(chars.join('').slice(0, 6));
+                    if (digit && i < 5) {
+                      const inputs = document.querySelectorAll<HTMLInputElement>('[data-pin-index]');
+                      inputs[i + 1]?.focus();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Backspace' && !pinInput[i] && i > 0) {
+                      const inputs = document.querySelectorAll<HTMLInputElement>('[data-pin-index]');
+                      inputs[i - 1]?.focus();
+                    }
+                  }}
+                  data-pin-index={i}
+                  className="h-12 w-10 rounded-xl border border-[#F0ECE8] bg-white text-center text-xl font-bold tabular-nums text-[#1C1917] outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+                />
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setPinDialogPeerId(null); setPinInput(''); }}
+                className="rounded-xl border border-[#F0ECE8] px-4 py-2 text-xs font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={pinInput.length !== 6}
+                onClick={() => {
+                  const hostId = pinDialogPeerId;
+                  const pin = pinInput;
+                  setPinDialogPeerId(null);
+                  setPinInput('');
+                  void handlePairPeer(hostId, pin);
+                }}
+                className="rounded-xl bg-[#0D9488] px-4 py-2 text-xs font-medium text-white hover:bg-[#0F7666] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                确认配对
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </article>

@@ -265,10 +265,24 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
 
     fireEvent.click(screen.getByTestId('reticulum-peer-pair-ret-identity-0123456789abcdef'));
 
+    // PIN dialog should appear
+    expect(screen.getByText('输入 Reticulum PIN')).toBeInTheDocument();
+
+    // Enter PIN digits
+    const pinInputs = screen.getAllByDisplayValue('');
+    expect(pinInputs.length).toBeGreaterThanOrEqual(6);
+    const testPin = '123456';
+    for (let i = 0; i < 6; i++) {
+      fireEvent.change(pinInputs[i], { target: { value: testPin[i] } });
+    }
+
+    // Click confirm button
+    fireEvent.click(screen.getByText('确认配对'));
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         'http://127.0.0.1:1949/mesh/ret/peers/ret-identity-0123456789abcdef/pair',
-        { method: 'POST' },
+        expect.objectContaining({ method: 'POST' }),
       );
     });
     expect(await screen.findByText('已授权')).toBeInTheDocument();
