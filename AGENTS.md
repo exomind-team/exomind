@@ -121,6 +121,7 @@
 - **announce 开关**：`POST /mesh/ret/announce {"enabled": true/false}`
 - **三阶段路线**：详见 [2026-05-25 迁移计划](docs/plans/2026-05-25-reticulum-authorized-sync-migration-plan.md)
 - **关键日志**：grep `Reticulum` 查看 Transport 初始化状态
+- **物理联通层**：详见 [docs/architecture/physical-connectivity-layer.md](docs/architecture/physical-connectivity-layer.md)
 
 ## 文档拓扑
 

@@ -1,0 +1,187 @@
+# 物理联通层 — Physical Connectivity Layer
+
+> 日期：2026-05-25
+> 状态：概念锁定版，设计进行中
+> 关联：
+> - [Reticulum 组网配对模型设计](../plans/2026-05-24-ret-mesh-pairing-model-design.md)
+> - [Reticulum 授权配对与业务同步迁移计划](../plans/2026-05-25-reticulum-authorized-sync-migration-plan.md)
+> - [ECS 通信栈](ECS-communication-stack.md)
+
+---
+
+## 1. 背景与动机
+
+ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层能连接后，怎样连得上并传输数据”的问题——它把物理介质（TCP、UDP、LoRa、蓝牙）一视同仁，统称为 Interface。但 **“用什么物理介质连接” 是一个独立的、可配置的、需要管理的层**，Reticulum 不负责、也不应该负责这一层的策略。
+
+当前项目中已经出现了两个“打通物理层”的实践：
+
+1. **mDNS+UDP（MdnsBridge）**：mDNS 作为局域网发现源 → 创建 UDP Interface → Reticulum 通过 UDP 互发 Announce
+2. **RET_MESH_SEED（TcpClient）**：环境变量配置远程地址 → 创建 TcpClient Interface → Reticulum 通过 TCP 互连
+
+两者本质上是同一种模式的不同“发现源”。需要一个新的概念来统摄它们：**物理联通层**。
+
+---
+
+## 2. 三层架构
+
+```
+┌──────────────────────────────────────────┐
+│ 验证 / 授权 / 同步（应用层）              │ ← 不因联通方式变化
+│ MeshState, PeerInfo, scope grants, relay │
+├──────────────────────────────────────────┤
+│ Reticulum（发现、传输、数据类型）          │ ← 把下层当物理层，一视同仁
+│ Announce, Link, Packet, PathTable        │
+│ identity_hex, destination                │
+├──────────────────────────────────────────┤
+│ 物理联通层（Physical Connectivity Layer） │ ← 新概念
+│  发现源          │  连接管理             │
+│  mDNS+UDP(局域网) │  远程地址表(互联网)    │
+│  AutoInterface   │  RemotePeerManager   │
+│  (动态发现)       │  (定点配置)           │
+│                  │                      │
+│  ←—— 打通物理链路，不验证，不传输业务数据 ——→ │
+└──────────────────────────────────────────┘
+```
+
+### 2.1 职责边界
+
+| 职责 | 属于物理联通层？ | 说明 |
+|------|----------------|------|
+| 发现局域网设备 | ✅ | mDNS 浏览 / UDP 广播 |
+| 创建 Reticulum Interface | ✅ | `add_udp_interface`, `add_tcp_client` |
+| 管理远程地址配置 | ✅ | 持久化、自动重连、健康检查 |
+| 管理 Interface 生命周期 | ✅ | 创建/销毁/重建 |
+| 流量计量（字节计数） | ✅ | 每个 Interface 的 tx/rx 统计 |
+| 设备验证、配对 | ❌ | 属于 Reticulum 层（Link/PIN） |
+| 授权、scope grant | ❌ | 属于应用层 |
+| 业务数据同步 | ❌ | 属于应用层 |
+
+### 2.2 设计原则
+
+1. **发现源与连接机制分离**：mDNS、UDP 广播、远程地址表都是发现源，它们都产出同一件事——“有一个 peer 可连了”。至于连上后怎么交互，那是 Reticulum 的事。
+2. **物理联通层不持久的密钥状态**：它只跟踪“连了什么地址”，不跟踪“这个地址是否被授权”。授权是 Reticulum/PIN 的事。
+3. **不通则告警，不断重试**：远程地址连接断开时，物理联通层负责重试和状态上报，但不做降级授权（不能因为连不上就降低安全要求）。
+4. **可配置、可扩展**：新的连接方式（蓝牙、I2P、中继）只要实现“发现源 → 创建 Interface”的模式，就能接入物理联通层。
+
+---
+
+## 3. 已实现的联通方式
+
+### 3.1 mDNS + UDP（MdnsBridge）
+
+**文件**：`crates/exomind-net-pairing/src/mdns_bridge.rs`
+
+**流程**：
+1. mDNS TXT 记录宣告 `ret_port`（Reticulum UDP 端口）
+2. `MdnsBridge::on_peer_resolved()` 收到 mDNS 事件
+3. 调用 `add_udp_interface(transport, bind_addr, forward_addr=peer_ip:ret_port)`
+4. Reticulum 通过该 UDP Interface 互发 Announce
+5. 对端收到 Announce → 出现在 `/mesh/ret/peers`
+
+**特点**：零配置，纯自动发现，同一局域网即时可见。
+
+### 3.2 TCP 种子连接（RET_MESH_SEED）
+
+**文件**：`crates/exomind-runtime/src/lib.rs`（`try_start_ret_mesh`）
+
+**流程**：
+1. 环境变量 `RET_MESH_SEED=ip:port` 传入远程地址
+2. `add_tcp_client(&transport, &seed)` 创建 TcpClient Interface
+3. 500ms 后 `node.announce()` 通过所有 Interface 传播
+4. 远程 seed 收到 Announce → 双向发现
+
+**特点**：需要手动配置，适合互联网定点连接。
+
+---
+
+## 4. 待实现的联通方式
+
+### 4.1 RemotePeerManager（远程地址表）
+
+类似 MdnsBridge 的模式，但发现源是**用户持久化配置的远程地址列表**。
+
+```rust
+pub struct RemotePeerManager {
+    transport: Transport,
+    known: Arc<RwLock<HashMap<String, RemotePeerEntry>>>,
+}
+
+struct RemotePeerEntry {
+    host_id: String,
+    address: String,      // "192.168.1.100:5590" 或 "example.com:5590"
+    transport_type: TransportType,  // Tcp | Udp
+    added_at: Instant,
+    last_seen: Option<Instant>,
+    status: PeerReachability,
+}
+```
+
+**功能**：
+- 启动时加载持久化的远程地址列表
+- 对每个地址调用 `add_tcp_client` 建立连接
+- 周期性检查可达性（通过 Reticulum Announce 超时判断）
+- UI 上可增删远程地址
+- 类似 Minecraft 多人联机的“直接连接”
+
+**不对称性处理**：远程连接通常由本端主动发起（`add_tcp_client`），对端作为 TCP Server 被动接受。UI 上需区分“本端主动连接”和“接受对端连接”。
+
+### 4.2 Interface 流量计量
+
+在每个 Interface 的 tx/rx 循环中添加 `AtomicU64` 计数器：
+
+```rust
+// 在 InterfaceManager 或每个 Interface 实例中
+pub struct InterfaceStats {
+    pub rx_bytes: AtomicU64,
+    pub tx_bytes: AtomicU64,
+    pub rx_packets: AtomicU64,
+    pub tx_packets: AtomicU64,
+}
+```
+
+当前未实现。预留点：`InterfaceManager::send()`（`iface.rs:182-200`）是增加 tx 计数的自然位置；每个 Interface 的接收循环是增加 rx 计数的位置。
+
+**优先级**：低。作为未来与生命理论结合的潜在方向（网络连接作为一种资源消耗的计量与追踪），当前不急于实现。
+
+---
+
+## 5. 与 Reticulum Interface 的关系
+
+物理联通层**不是** Reticulum Interface 的一种——它是 Interface 的管理者。类比：
+
+```
+物理联通层 = 接线员（决定谁跟谁连）
+Reticulum Interface = 电话线（负责传输字节）
+Reticulum Transport = 电话交换机（路由和转发）
+```
+
+MdnsBridge 和未来的 RemotePeerManager 都是“接线员”——它们创建、管理、销毁 Interface 实例，但它们本身不参与字节传输。这就是为什么 MdnsBridge 没有实现 `Interface` trait。
+
+> 这也是 Python RNS 中 `AutoInterface` 在做的事——但 Python 版本把自动发现和接口管理混在了一个类里。我们用 Rust 做，把“发现源”和“接口管理”拆开，每个发现源独立实现，共享同一个接口管理层。
+
+---
+
+## 6. 能耗与性能追踪（远期）
+
+在移动端（Android / iOS），网络连接的电量消耗是核心关切的。当前没有任何感知手段。远期可在物理联通层中：
+
+1. 每个 Interface 记录收发字节数（`InterfaceStats`）
+2. 按 Interface 类型（UDP/TCP）统计连接时长和休眠比例
+3. 在 UI 上展示预估能耗（基于每字节功耗系数）
+4. 在电量低时主动断开非关键远程连接
+
+这与生命理论高度相关——网络连接作为一种资源消耗，与生物体的能量代谢有类比价值。但当前阶段仅作为潜在思路存档，不纳入实施路线。
+
+---
+
+## 7. 当前阶段判断
+
+| 联通方式 | 状态 | 优先级 |
+|---------|------|--------|
+| mDNS+UDP 自动发现 | ✅ 已实现（MdnsBridge） | 已交付 |
+| TCP 种子连接 | ✅ 已实现（RET_MESH_SEED） | 已交付 |
+| RemotePeerManager | 🔲 待实现 | 中 |
+| Interface 流量计量 | 🔲 待实现 | 低 |
+| 能耗追踪 | 📝 存档思路 | 远期 |
+
+当前物理联通层的主要缺口是 **RemotePeerManager**——它使 Reticulum 能覆盖互联网场景，而不仅限于局域网。它和 MdnsBridge 共享同一套代码模式（外层协调器 + Interface 生命周期管理），实现成本可控。
