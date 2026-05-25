@@ -118,20 +118,25 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 
 ## 4. 开关控制：三态暴露策略
 
-每个物理联通方式统一使用一个**三态开关**控制其行为。全局也有一个总闸，二者取 min 为最终行为。
+> **2026-05-26 修正**：三态开关的附着点是**每个 Reticulum Interface**，而非抽象的「联通方式」概念。原因：
+> 1. 联通方式没有 UI 呈现，开关无处放置；Interface 已在「下层接口」面板中展示，有实体的附着位置
+> 2. Interface 是运行时真实的连接实体，开关可直接控制其行为（暂停/关闭/启用），不经过间接映射
+> 3. 更细粒度 = 更灵活：可对特定 TCP seed 独立配置，不影响其他连接
+
+每个 Reticulum Interface 使用一个**三态开关**控制其行为。全局也有一个总闸，二者取 min 为最终行为。
 
 ### 4.1 三态定义
 
 | 状态 | 语义 | Interface 行为 |
 |------|------|---------------|
-| `Off` | 不使用该联通方式 | 不创建发现源、不创建 Interface |
-| `Passive` | 只收不发（隐匿） | 创建 Interface 但 RX-only，不发送 announce |
-| `Active` | 完整宣告（默认） | 创建 Interface + TX+RX，主动 announce |
+| `Off` | 关闭该接口 | 从 `InterfaceManager` 中移除/停用 |
+| `Passive` | 只收不发（隐匿） | Interface 保留但 TX 通道静默（不发送 announce/数据包） |
+| `Active` | 完整宣告（默认） | Interface TX+RX 正常工作 |
 
 ### 4.2 控制模型
 
 ```
-最终行为 = min(全局总闸, 该联通方式的开关)
+最终行为 = min(全局总闸, 该 Interface 的开关)
 ```
 
 全局总闸也是三态：
@@ -141,11 +146,19 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 
 **不是独立的两层开关**——`enable=0` 且 `announce=1` 这种状态浪费不存在。三态是最少状态数表达完整语义的方案。
 
-**实现要点：** `ret_mesh_announce_enabled` 从 `AtomicBool` 改为三态枚举。各联通方式在初始化时读取自己的开关状态。不侵入 Reticulum Interface 层：Passive 模式下 `UdpInterface::new(bind_addr, None)`（无 forward_addr = 只收不发）。
+**实现要点（已落地的全局总闸）：** `ret_mesh_mode: Arc<AtomicU8>` 三态枚举已替换 `AtomicBool`，API、SSE snapshot、前端 UI 均已就绪。
+
+**待实现（按 Interface 的开关）：**
+- `InterfaceManager` 新增 `set_interface_mode(address, mode)` 方法，在 `LocalInterface` 中存储 `mode` 字段
+- `InterfaceManager::send(TxMessage)` 中检查每个 iface 的 mode → Passive 模式下跳过 TX
+- Off 模式下从 `ifaces` 中移除该接口并调用 `stop.cancel()`
+- `InterfaceInfo` 新增 `mode` 字段
+- 前端「下层接口」面板每行增加三段式按钮
+- 接口的动态创建/销毁仍需保持：新发现 peer → 创建接口、metadata 变化 → 更新接口
 
 ### 4.3 后续：按 peer 的开关
 
-当前按联通方式粒度的开关已够用。按 peer 粒度的开关（对特定对端是否发 announce）需要变动 `InterfaceManager::send()`，工作量较大，暂存档不实现。
+按 Interface 粒度之后，进一步的方向是按 peer 粒度（对特定对端的 announce/数据流做单独控制）。这需要变动 `InterfaceManager::send()` 内部逻辑，工作量较大，暂存档不实现。
 
 ## 5. 待实现的联通方式
 
@@ -250,13 +263,48 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 | 本机文件注册表 | ✅ 已实现 | 已交付 |
 | TCP 种子连接 | ✅ 已实现（RET_MESH_SEED） | 已交付 |
 | 全局三态开关（Off/Passive/Active） | ✅ 已实现 — `RetMeshMode` 枚举 + API + UI | 已交付 |
-| 各联通方式独立三态开关 | 🔲 待实现 — `min(全局, 该方式)` 逻辑未落地 | 中 |
+| 按 Interface 三态开关 | 🔲 待实现 — `InterfaceManager.set_interface_mode()` + UX（每接口三段式按钮） | 中 |
 | RemotePeerManager | 🔲 待实现 | 中 |
 | 本地文件直接通信 | 📝 待探索 | 远期 |
 | Interface 流量计量 | 🔲 待实现 | 低 |
 | 能耗追踪 | 📝 存档思路 | 远期 |
 
 当前物理联通层的主要缺口是 **RemotePeerManager**——它使 Reticulum 能覆盖互联网场景，而不仅限于局域网。它和 MdnsBridge 共享同一套代码模式（外层协调器 + Interface 生命周期管理），实现成本可控。
+
+---
+
+## 10. 待研究：联通方式 × Reticulum Interface 的理论区分
+
+### 10.1 背景
+
+工程实践中发现「联通方式」（物理联通层的发现/连接策略）和「Reticulum Interface」（运行时链路实体）是两个不同层级的概念，但当前设计文档和实现中对二者的边界不清晰：
+
+| 概念 | 层级 | 角色 |
+|------|------|------|
+| 联通方式（Connectivity Method） | 配置层 | 发现源/连接策略，决定"用什么介质找对端" |
+| Reticulum Interface | 运行时层 | 实际链路，决定"数据走哪条通道" |
+
+### 10.2 需要研究的问题
+
+1. **Reticulum 协议在 Interface 层面的理论假设是什么？** 手册中 Interface 被设计为"对物理介质的一视同仁抽象"——但这个抽象背后隐含的假设（如所有链路带宽等同、默认 MTU 单一、TX/RX 对称）在 ExoNet 的局域网/互联网场景下是否成立？
+
+2. **联通方式和 Interface 之间是否存在理论上的"多对多"映射？** 当前工程实现中一个联通方式（如 mDNS 浏览）可以产出多个 Interface，但反过来一个 Interface 是否能属于多个联通方式？这种映射关系在 CCC（连接可组合）理论框架下如何表达？
+
+3. **三层架构（物理联通层 → Reticulum Transport → 应用层）中的每一层，其三态开关语义是什么？**
+   - 联通方式三态：Off=不启动该发现源 / Passive=仅接收已有链路但不主动发现 / Active=完整发现
+   - Interface 三态：Off=断开该链路 / Passive=仅接收（RX-only）/ Active=完整 TX+RX
+   - 这两层开关的 `min()` 组合如何计算？
+
+4. **UI 呈现上，联通方式和 Interface 应该如何分区？**
+   - 联通方式 → 设置面板（配置层，控制开启哪些发现通道）
+   - Interface → 网络状态卡片（运行时层，查看/控制每条实际链路）
+   - 二者的视觉区分和交互边界在哪里？
+
+5. **如果联通方式也需要三态开关，它的 UI 位置在哪里？** 当前联通方式（mDNS 浏览、文件注册表扫描、RET_MESH_SEED 配置）都没有 UI 表示——是先要有"联通方式列表"的 UI，还是等具体需求再设计？
+
+### 10.3 建议方法
+
+建议在 Reticulum-research 仓库的 ARA 中以研究课题形式展开，先读 Reticulum 手册中 Interface 设计哲学章节，再对照当前工程的 `InterfaceManager`/`UdpDiscoveryBridge`/文件注册表代码，形成理论对照表。产出可以是「联通方式与 Reticulum Interface 的理论区分」章节，补充到 `physical-connectivity-layer.md`。
 
 ---
 
