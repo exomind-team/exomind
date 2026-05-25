@@ -1818,6 +1818,27 @@ async fn ret_mesh_background(
         exomind_net_pairing::mdns_bridge::MdnsBridge::new("0.0.0.0:0".to_string());
     let mut connected_mdns_ids: HashSet<String> = HashSet::new();
 
+    // Local peer registry: file-based discovery for same-machine instances.
+    // Windows loopback does not forward 255.255.255.255 broadcasts between local sockets,
+    // so same-machine instances need a separate discovery channel. This file registry
+    // writes the instance's Reticulum address info to %TEMP%\exomind-ret-peers\ and
+    // scans for other instances on each background tick.
+    let local_registry_dir = {
+        let mut d = std::env::temp_dir();
+        d.push("exomind-ret-peers");
+        let _ = std::fs::create_dir_all(&d);
+        let info = serde_json::json!({
+            "host_id": state.host_id,
+            "host": "127.0.0.1",
+            "ret_port": default_ret_udp_port(state.port),
+            "pid": std::process::id(),
+        });
+        let peer_file = d.join(format!("{}.json", state.host_id));
+        let _ = std::fs::write(&peer_file, info.to_string());
+        tracing::info!(file = %peer_file.display(), "local peer registry entry written");
+        d
+    };
+
     loop {
         tokio::select! {
             Ok((host_id, addr)) = connect_rx.recv() => {
@@ -2006,6 +2027,50 @@ async fn ret_mesh_background(
                             };
                             mdns_bridge
                                 .on_peer_resolved(&node.transport, &peer.host_id, &peer.host, ret_port)
+                                .await;
+                        }
+                    }
+                }
+
+                // Scan local peer registry (same-machine discovery)
+                if let Ok(entries) = std::fs::read_dir(&local_registry_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                            continue;
+                        }
+                        let raw = match std::fs::read_to_string(&path) {
+                            Ok(s) => s,
+                            _ => continue,
+                        };
+                        let info: std::collections::HashMap<String, serde_json::Value> =
+                            match serde_json::from_str(&raw) {
+                                Ok(v) => v,
+                                _ => continue,
+                            };
+                        let peer_host_id = match info.get("host_id").and_then(|v| v.as_str()) {
+                            Some(h) => h,
+                            _ => continue,
+                        };
+                        if peer_host_id == state.host_id {
+                            continue;
+                        }
+                        let host = info
+                            .get("host")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("127.0.0.1");
+                        let ret_port = info
+                            .get("ret_port")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u16;
+                        if ret_port > 0 && connected_mdns_ids.insert(peer_host_id.to_string()) {
+                            mdns_bridge
+                                .on_peer_resolved(
+                                    &node.transport,
+                                    peer_host_id,
+                                    host,
+                                    ret_port,
+                                )
                                 .await;
                         }
                     }
