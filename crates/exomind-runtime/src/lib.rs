@@ -1578,10 +1578,7 @@ async fn try_start_ret_mesh(
     // Add a UDP interface for LAN broadcast discovery.
     let udp_port = default_ret_udp_port(port);
     let udp_addr = format!("0.0.0.0:{}", udp_port);
-    #[cfg(unix)]
     let udp_fwd = format!("255.255.255.255:{}", udp_port);
-    #[cfg(windows)]
-    let udp_fwd = format!("127.0.0.1:{}", udp_port);
     exomind_net_pairing::RetMeshNode::add_udp_interface(&transport, &udp_addr, &udp_fwd).await;
     tracing::info!(
         "Reticulum UDP discovery bound to {} (forward {})",
