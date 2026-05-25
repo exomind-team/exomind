@@ -149,15 +149,22 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 
 ### 5.1 RemotePeerManager（远程地址表）
 
-> **⚠️ 方向待探索**：远程连接有两种对立的架构方向，尚未决策：
+> **✅ 方向已决策 — 方向 B**：每配置一个远程地址，注册一个独立的 Reticulum Interface（`add_tcp_client` / 未来 `add_udp_interface`）。每个 Interface 独立应用三态开关。
 >
-> **方向 A — 单一接口 + 地址表**：一个 Reticulum Interface 管理一个远程地址表，遍历地址通信。接口只有一个，地址可增删，接口生命周期与 RT 一致。
+> **不经过 UdpDiscoveryBridge**：远程连接是完全独立的物理联通路径，有自己的发现源（用户手动配置的地址表），不依赖、也不经过 UdpDiscoveryBridge 的 mDNS/文件发现逻辑。
 >
-> **方向 B — 每地址一个 Interface**：每个远程地址注册为独立的 Reticulum Interface（`add_tcp_client`）。各 Interface 可独立应用三态开关管理（Off/Passive/Active），粒度最细但 Interface 数量与远程地址数线性增长。
+> **客户端与服务端角色区分**：
 >
-> **关键差异**：三态开关的粒度。方向 A 是「整个远程连接方式」一个开关；方向 B 是「每个远程地址」一个开关。
+> | 角色 | 含义 | 最大开关状态 | 原因 |
+> |------|------|------------|------|
+> | **Client** | 主动连接到已知对端地址 | **Active**（三态全可用） | 知道对端地址，可以发 announce |
+> | **Server** | 被动接受远程连接的 TCP/UDP 服务端 | **Passive**（Off / Passive 二选一） | 不知道客户端地址，无法主动 announce；只有客户端连接后才知道，届时 Reticulum 层的 announce 才能到对端 |
+>
+> 后续 UI 上配置远程连接时需区分角色：
+> - "连接到远程地址" → Client 角色，可设为 Active（完整宣告）
+> - "开放连接端口" → Server 角色，最多设为 Passive（只收不发）
 
-类似 UdpDiscoveryBridge 的模式（外层协调器 + Interface 生命周期管理），但发现源是**用户持久化配置的远程地址列表**，产出 TCP/UDP Interface。
+**命名**：`RemotePeerManager`，但管理的是**每地址独立 Interface**（方向 B），不是集中式地址表（方向 A）。
 
 ```rust
 pub struct RemotePeerManager {
