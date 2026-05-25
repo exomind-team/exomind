@@ -242,11 +242,13 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 
 ## 8. 当前阶段判断
 
-| 联通方式 | 状态 | 优先级 |
+| 联通方式 / 控制维度 | 状态 | 优先级 |
 |---------|------|--------|
 | mDNS+UDP 自动发现 | ✅ 已实现（UdpDiscoveryBridge） | 已交付 |
 | 本机文件注册表 | ✅ 已实现 | 已交付 |
 | TCP 种子连接 | ✅ 已实现（RET_MESH_SEED） | 已交付 |
+| 全局三态开关（Off/Passive/Active） | ✅ 已实现 — `RetMeshMode` 枚举 + API + UI | 已交付 |
+| 各联通方式独立三态开关 | 🔲 待实现 — `min(全局, 该方式)` 逻辑未落地 | 中 |
 | RemotePeerManager | 🔲 待实现 | 中 |
 | 本地文件直接通信 | 📝 待探索 | 远期 |
 | Interface 流量计量 | 🔲 待实现 | 低 |

@@ -115,11 +115,11 @@
 - **seed 连接**：`RET_MESH_SEED=127.0.0.1:PORT`（指向目标 RT 的 TCP 端口 = RT_port + 5000）
 - **状态视图**：`GET /mesh/ret/peers` — 统一返回 discovered / connected_unauthorized / connected_authorized / trusted / blocked
 - **兼容视图**：`GET /mesh/ret/discovered` — 旧发现列表（兼容）
-- **状态仪表盘**：`GET /mesh/ret/status` — 返回 mesh 启用状态、announce 信息、本地身份、节点统计
+- **状态仪表盘**：`GET /mesh/ret/status` — 返回 mesh 启用状态、announce_mode（off/passive/active）、本地身份、节点统计
 - **状态推送**：`GET /mesh/ret/events` — SSE 流，推送 `ret_mesh_snapshot` 事件（含 status + peers + interfaces）
 - **配对授权**：`POST /mesh/ret/peers/:peer_id/pair {"pin":"123456"}` — PIN-over-Reticulum 配对
 - **撤销授权**：`DELETE /mesh/ret/peers/:peer_id/pair`
-- **announce 开关**：`POST /mesh/ret/announce {"enabled": true/false}`
+- **连接模式开关**：`POST /mesh/ret/announce {"mode":"off|passive|active"}` — 三态控制，前端右上角分段按钮
 - **三阶段路线**：详见 [2026-05-25 迁移计划](docs/plans/2026-05-25-reticulum-authorized-sync-migration-plan.md)
 - **关键日志**：grep `Reticulum` 查看 Transport 初始化状态
 - **物理联通层**：详见 [docs/architecture/physical-connectivity-layer.md](docs/architecture/physical-connectivity-layer.md)
