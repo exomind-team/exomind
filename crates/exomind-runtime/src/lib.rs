@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 use thiserror::Error;
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
@@ -1137,7 +1137,7 @@ pub struct AppState {
     /// Sender for PIN-over-Reticulum pairing requests from the UI route.
     pub ret_mesh_pairing_tx: Option<tokio::sync::mpsc::Sender<RetMeshPairingCommand>>,
     /// Controls the Reticulum announce/connectivity mode (Off/Passive/Active).
-    pub ret_mesh_mode: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub ret_mesh_mode: std::sync::Arc<std::sync::Mutex<exomind_net_pairing::RetMeshMode>>,
     /// Actual UDP port assigned by OS for Reticulum discovery (0 until bound).
     pub ret_udp_port: std::sync::Arc<std::sync::atomic::AtomicU16>,
     /// SSE broadcast for Reticulum mesh state snapshots.
@@ -1477,8 +1477,8 @@ impl AppState {
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
             ret_mesh_pairing_tx: None,
-            ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
-                exomind_net_pairing::RetMeshMode::Active as u8,
+            ret_mesh_mode: std::sync::Arc::new(std::sync::Mutex::new(
+                exomind_net_pairing::RetMeshMode::Active,
             )),
             ret_udp_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
             ret_mesh_event_tx: None,
@@ -1821,8 +1821,7 @@ async fn try_push_ret_mesh_snapshot_with_offer(
 ) {
     use std::sync::atomic::Ordering;
     let Some(tx) = &state.ret_mesh_event_tx else { return };
-    let mode_raw = state.ret_mesh_mode.load(Ordering::Relaxed);
-    let mode: exomind_net_pairing::RetMeshMode = mode_raw.into();
+    let mode = *state.ret_mesh_mode.lock().unwrap();
     let (discovered_count, authorized_count, peers_list) =
         if let Some(peers) = &state.ret_mesh_peers {
             let map = peers.read().await;
@@ -1910,7 +1909,7 @@ async fn ret_mesh_background(
     mdns: Option<std::sync::Arc<discovery::MdnsDiscovery>>,
     mut connect_rx: tokio::sync::broadcast::Receiver<(String, String)>,
     mut pairing_rx: tokio::sync::mpsc::Receiver<RetMeshPairingCommand>,
-    ret_mesh_mode: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    ret_mesh_mode: std::sync::Arc<std::sync::Mutex<exomind_net_pairing::RetMeshMode>>,
     state: AppState,
 ) {
     use std::collections::{HashMap, HashSet};
@@ -2315,10 +2314,9 @@ async fn ret_mesh_background(
                     }
                 }
 
-                let mode_raw = ret_mesh_mode.load(std::sync::atomic::Ordering::Relaxed);
+                let mode = *ret_mesh_mode.lock().unwrap();
                 // Sync global mode to InterfaceManager so send() can filter by it.
-                node.set_global_mode(mode_raw.into()).await;
-                let mode: exomind_net_pairing::RetMeshMode = mode_raw.into();
+                node.set_global_mode(mode).await;
                 if mode.can_announce() {
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -2419,8 +2417,8 @@ mod tests {
             ret_mesh_peers: None,
             ret_mesh_connect_tx: None,
             ret_mesh_pairing_tx: None,
-            ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
-                exomind_net_pairing::RetMeshMode::Active as u8,
+            ret_mesh_mode: std::sync::Arc::new(std::sync::Mutex::new(
+                exomind_net_pairing::RetMeshMode::Active,
             )),
             ret_udp_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
             ret_mesh_event_tx: None,

@@ -778,10 +778,7 @@ struct RetMeshStatus {
 async fn get_ret_mesh_status(
     State(state): State<AppState>,
 ) -> Json<RetMeshStatus> {
-    let mode_raw = state
-        .ret_mesh_mode
-        .load(std::sync::atomic::Ordering::Relaxed);
-    let mode: exomind_net_pairing::RetMeshMode = mode_raw.into();
+    let mode = *state.ret_mesh_mode.lock().unwrap();
 
     let (discovered_count, authorized_count) = if let Some(peers) = &state.ret_mesh_peers {
         let map = peers.read().await;
@@ -829,9 +826,7 @@ async fn toggle_ret_announce(
             }));
         }
     };
-    state
-        .ret_mesh_mode
-        .store(mode as u8, std::sync::atomic::Ordering::Relaxed);
+    *state.ret_mesh_mode.lock().unwrap() = mode;
     tracing::info!("Reticulum announce mode set to: {}", req.mode);
 
     // Push an immediate SSE snapshot so the UI reflects the change without waiting for the 10s tick.
