@@ -1105,6 +1105,10 @@ pub enum RetMeshPairingCommand {
         initiator_host_id: String,
         initiator_node_name: String,
     },
+    /// Cancel a pending pairing (send PairingCancel to the peer).
+    CancelPairing {
+        peer: exomind_net_pairing::DiscoveredPeer,
+    },
     /// Set per-interface mode (0=Off, 1=Passive, 2=Active).
     SetInterfaceMode {
         name: String,
@@ -2112,6 +2116,16 @@ async fn ret_mesh_background(
                             tracing::info!(peer_id = %peer_id, "Reticulum PairingOffer sent over encrypted Link");
                         }
                     }
+                    RetMeshPairingCommand::CancelPairing { peer } => {
+                        let frame = exomind_net_pairing::RetPairingLinkFrame::PairingCancel {
+                            initiator_peer_id: state.host_id.clone(),
+                        };
+                        if let Err(error) = node.send_pairing_frame(&peer, &frame).await {
+                            tracing::error!(error = %error, "Reticulum send PairingCancel failed");
+                        } else {
+                            tracing::info!("Reticulum PairingCancel sent");
+                        }
+                    }
                     RetMeshPairingCommand::SetInterfaceMode { name, mode } => {
                         let mgr = node.transport.iface_manager();
                         let mut mgr_lock = mgr.lock().await;
@@ -2146,6 +2160,18 @@ async fn ret_mesh_background(
                                 "received PairingOffer from remote peer"
                             );
                             pairing_pending_peer_id = Some(initiator_peer_id.clone());
+                            let interfaces = {
+                                let mgr = node.transport.iface_manager();
+                                let mgr_lock = mgr.lock().await;
+                                mgr_lock.list_interfaces()
+                            };
+                            try_push_ret_mesh_snapshot_with_offer(
+                                &state, interfaces, pairing_pending_peer_id.clone(),
+                            ).await;
+                        }
+                        Ok(exomind_net_pairing::RetPairingLinkFrame::PairingCancel { .. }) => {
+                            tracing::info!("received PairingCancel, clearing pairing_pending");
+                            pairing_pending_peer_id = None;
                             let interfaces = {
                                 let mgr = node.transport.iface_manager();
                                 let mgr_lock = mgr.lock().await;

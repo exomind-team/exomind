@@ -906,6 +906,9 @@ pub fn router() -> Router<AppState> {
         // This prevents remote attackers from calling initiate + respond to self-pair.
         .route("/mesh/pairing/initiate", post(pairing_initiate))
         .route("/mesh/ret/interfaces/:name/mode", post(set_ret_interface_mode))
+        // cancel-pair registered in a separate merge to avoid axum type
+        // inference issues with the chained handler chain.
+        .merge(Router::new().route("/mesh/ret/peers/:peer_id/cancel-pair", post(cancel_ret_pair)))
 }
 
 #[derive(Deserialize)]
@@ -933,6 +936,23 @@ async fn set_ret_interface_mode(
         return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "mesh busy"})));
     }
     (StatusCode::OK, Json(serde_json::json!({"mode": req.mode, "name": name})))
+}
+
+/// Cancel a pending pairing (user dismissed the PIN dialog).
+/// Sends a PairingCancel frame over the Reticulum Link so the
+/// responder can clear its pairing_pending state.
+async fn cancel_ret_pair(
+    Path(peer_selector): Path<String>,
+    State(state): State<AppState>,
+) -> StatusCode {
+    let Some(tx) = &state.ret_mesh_pairing_tx else { return StatusCode::SERVICE_UNAVAILABLE };
+    let peer = find_ret_peer_by_selector(&state, &peer_selector).await
+        .ok_or(StatusCode::NOT_FOUND);
+    let Ok(peer) = peer else { return StatusCode::NOT_FOUND };
+    if tx.send(crate::RetMeshPairingCommand::CancelPairing { peer }).await.is_err() {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
+    StatusCode::OK
 }
 
 /// Public mesh routes (no auth required).

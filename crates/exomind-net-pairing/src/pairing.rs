@@ -60,6 +60,11 @@ pub enum RetPairingLinkFrame {
         initiator_host_id: String,
         initiator_node_name: String,
     },
+    /// Cancel sent by the initiator when the user dismisses the PIN dialog.
+    /// The responder clears its pairing_pending state for this peer.
+    PairingCancel {
+        initiator_peer_id: String,
+    },
     /// Response sent by the responder back to the initiator over the
     /// encrypted Reticulum Link, carrying the PIN and responder's inbound
     /// token. This must never be embedded in public Announce app_data.

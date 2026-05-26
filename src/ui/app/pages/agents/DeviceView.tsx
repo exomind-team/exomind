@@ -194,17 +194,9 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
           if (payload.status) setStatus(payload.status);
           if (payload.peers) setPeers(payload.peers);
           if (payload.interfaces) setInterfaces(payload.interfaces);
-          // PairingOffer from remote peer: store for pairing decision.
-          const pendingFromSse = payload.pairing_pending as string | null ?? null;
-          setPairingPendingPeerId(pendingFromSse);
-          // Auto-open PIN input if no active dialog.
-          if (pendingFromSse && !hasActivePinDialogRef.current) {
-            const knownPeer = (payload.peers as Array<{peer_id?: string; host_id?: string; identity_hex?: string}>)
-              ?.find((p) => (p.peer_id || p.identity_hex || p.host_id) === pendingFromSse);
-            if (knownPeer) {
-              setPinDialogPeerId(pendingFromSse);
-            }
-          }
+          // PairingOffer from remote peer: expose so handleInitiatePair
+          // can check it when the user clicks "授权".
+          setPairingPendingPeerId(payload.pairing_pending as string | null ?? null);
         } catch { /* ignore malformed events */ }
       });
       evtSource.onerror = () => {
@@ -338,6 +330,13 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
         setPairingHostId(null);
       }
     }
+  };
+
+  const handleCancelPair = (peerId: string) => {
+    if (!runtimeBaseUrl) return;
+    fetch(`${runtimeBaseUrl}/mesh/ret/peers/${encodeURIComponent(peerId)}/cancel-pair`, {
+      method: 'POST',
+    }).catch(() => {});
   };
 
   const handleSetInterfaceMode = (ifaceName: string, mode: 'off' | 'passive' | 'active') => {
@@ -596,6 +595,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                 type="button"
                 onClick={() => {
                   const peerId = pinDisplay.peerId;
+                  handleCancelPair(peerId);
                   setPinDisplay(null);
                   setPinInput('');
                   setPinDialogPeerId(peerId);
@@ -607,7 +607,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
               <div className="flex justify-center">
                 <button
                   type="button"
-                  onClick={() => setPinDisplay(null)}
+                  onClick={() => { handleCancelPair(pinDisplay.peerId); setPinDisplay(null); }}
                   className="text-xs text-[#A8A29E] hover:text-[#78716C] dark:hover:text-[#D6D3D1]"
                 >
                   取消
