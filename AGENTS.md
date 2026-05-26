@@ -122,7 +122,9 @@
 - **撤销授权**：`DELETE /mesh/ret/peers/:peer_id/pair`
 - **连接模式开关**：`POST /mesh/ret/announce {"mode":"off|passive|active"}` — 三态控制，前端右上角分段按钮
 - **接口模式控制**：`POST /mesh/ret/interfaces/:name/mode {"mode":"off|passive|active"}` — 每接口独立三态，有效模式 = min(全局, 接口)。Off 不参与收发，Passive 不转发 announce
-- **PairingOffer 推送**：SSE `ret_mesh_snapshot` 增加 `pairing_pending` 字段（发起方 identity_hex）。前端收到后自动弹出 PIN 输入框，切换为响应方模式
+- **PairingOffer 推送**：SSE `ret_mesh_snapshot` 增加 `pairing_pending` 字段（发起方 identity_hex）。仅用于前端 `handleInitiatePair` 决策，不做自动弹窗
+- **取消配对**：`POST /mesh/ret/peers/:peer_id/cancel-pair` — 发起方取消时发送 PairingCancel 帧，对端清除 `pairing_pending` 状态
+- **配对失败错误**：`POST /mesh/ret/peers/:peer_id/pair` 返回 JSON body `{"error":"..."}` 而非裸 HTTP 状态码。前端显示具体错误原因（如"Reticulum Link not established within 35s"）
 - **多跳路由**：`create_transport` 开启 `set_retransmit(true)` + `set_reroute_eager(true)`。Announce 可跨节点转发，Link 可跨中间节点建立
 - **设计决策**：
   - [ADR-005: InterfaceMode 三态](docs/architecture/DECISIONS/ADR-005-interface-mode.md) — 三态 enum 在 reticulum-rs + mode 过滤

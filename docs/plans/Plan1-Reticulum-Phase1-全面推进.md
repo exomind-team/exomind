@@ -240,6 +240,16 @@ Reticulum 层 — 多跳自组织网络
 
 ### D5: 枚举优先于整数
 
+### D6: `pairing_pending` 跨层共享 — AppState 做真相源
+
+`pairing_pending`（当前是否有远端发来的 PairingOffer）存为 `AppState.ret_mesh_pairing_pending: Arc<Mutex<Option<String>>>`，背景循环和 HTTP handler 共享同一状态。
+
+**理由**：
+- SSE 有延迟，前端 `pairingPendingPeerId` 不可作为"是否已收到 Offer"的真相源
+- `initiate_ret_pair` handler 直接在请求路径上检查 `ret_mesh_pairing_pending`，无需等待 SSE
+- 匹配时返回 409 CONFLICT，前端 fallback 到 PIN 输入模式
+- 避免了"双方同时点授权 → 双方都展示 PIN"的竞态
+
 所有模式/状态值用 Rust enum 表达，非 `u8`/`i32`。
 
 **理由**：类型系统保证合法性——不存在"mode=3"这样的非法值。match 穷尽性检查确保所有分支被处理。
@@ -285,6 +295,32 @@ Reticulum 层 — 多跳自组织网络
 |---|------|--------|------|
 | 1 | transport.rs ABBA 死锁风险（handler × iface_manager 跨 await） — dispatch 重构待做 | 低（未观测到） | TODO 已标注 |
 | 2 | reticulum-rs 外部仓库（ARCJ137442/Reticulum-research）的 `iface.rs`/`transport.rs` 改动未提交 | 低 | 待提交 |
+| 3 | Reticulum Link 建立依赖 `send_pairing_frame` 的 5s 超时，大实例或高延迟下可能超时 | 中 | 需要调查 `handle_link_request` 状态机 |
+
+### 调试经验
+
+**1. 测试死锁根因 — `git checkout` 误回滚**
+
+`git checkout -- crates/exomind-runtime/src/routes/mesh.rs` 回滚了 S1 对 `initiate_ret_pair` 的 SendPairingOffer 代码，导致测试永久阻塞在 `pairing_rx.recv()`。
+**教训**：批量 revert 前先用 `git diff --stat` 确认改动范围。
+
+**2. 文件注册表残留 → Link 建立失败**
+
+实例重启后 OS 分配新 UDP 端口，但 `%TEMP%/exomind-ret-peers/{host_id}.json` 保留旧端口。
+`InterfaceManager::send()` 发 LinkProof 到所有 UDP 接口，包括指向死端口的僵尸接口 → LinkProof 丢失。
+**修复**：启动时自清理旧条目 + `connected_mdns_ids` 用 `host_id:port` 去重（`fc20a4b9`）。
+**验证**：清理注册表后重启，Link 恢复正常，配对完成。
+
+**3. 双向发现 ≠ Link 可达**
+
+Announce 通过 UDP 广播/单播可达，但 Reticulum Link 需要双向握手（LinkRequest → LinkResponse → Proof）。
+发现正常不代表 Link 可用。这是调试中最容易误判的地方。
+
+**4. `cargo clean` 后测试超时**
+
+`cargo clean -p exomind-runtime` 删除 45GiB 编译缓存，但测试二进制残留。
+旧测试二进制与新 lib 的 enum variant 布局不匹配 → ABI 错位 → 死锁/崩溃。
+**修复**：删除过期 `.exe` + `.d` 文件后重建。
 
 ### 测试结果
 
@@ -306,7 +342,9 @@ npx vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 cargo check -p exomind-net-pairing -p exomind-runtime
 ```
 
-### Todo 剩余
+### Todo 剩余（下阶段）
 
-- Batch 2 Tauri MCP 实测
-- Batch 3 Tauri MCP 实测
+- Reticulum Link 建立可靠性改进（`send_pairing_frame` 超时从 5s 延长或改用条件等待）
+- 两套配对状态机统一（旧 HTTP `/mesh/pairing/*` vs 新 Reticulum `/mesh/ret/peers/*`）
+- 业务同步迁移 Reticulum data-plane（Phase 3）
+- reticulum-rs 外部仓库（ARCJ137442/Reticulum-research）改提交
