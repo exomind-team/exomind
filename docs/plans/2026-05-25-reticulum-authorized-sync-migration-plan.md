@@ -488,6 +488,48 @@ Reticulum 层不只是"加密传输通道"——它是一个完整的多跳自�
 | `exomind-runtime/src/lib.rs` | `link_in_rx` handler 增加 `PairingOffer` 分支，存入 `pairing_pending` 状态 + 推 SSE |
 | `src/ui/app/pages/agents/DeviceView.tsx` | SSE 检测 `pairing_pending` 后自动切换到输入模式 |
 
+### 开启真正多跳路由 — set_retransmit(true)
+
+**现状**：`TransportConfig` 的 `retransmit` 默认为 `false`，exomind 创建 Transport 时从未调用 `set_retransmit(true)`。导致：
+
+```
+C 发出 announce → B 收到 → if retransmit { handler.send(message) } → 永不成立
+                                                            → announce 不转发
+                                                            → PathTable 只有直连条目
+                                                            → Link 无法跨节点建立
+                                                            → 每个 peer 必须直连接口
+```
+
+**开启后的变化**（`retransmit=true` + `reroute_eager=true`）：
+
+```
+节点 A ──(UDP/TCP)──→ 节点 B ──(UDP/TCP)──→ 节点 C
+   │                    │                     │
+   │  C 的 announce     │  B 转发 announce    │  原始 announce
+   │  ←────────────  ←─────────────────────── C 发出
+   │                     │
+   │  A 的 PathTable:    │  B 的 PathTable:
+   │  C → 下一跳 B      │  C → 直连
+   │  (无需到 C 的接口)   │
+```
+
+**改动**：
+
+| 文件 | 改动 |
+|------|------|
+| `exomind-net-pairing/src/lib.rs` | `create_transport` 中加 `config.set_retransmit(true); config.set_reroute_eager(true);` |
+
+**收益**：
+- 文件注册表/UDP 接口不再需要为每个 peer 创建——有 1 个邻居连接到转发节点即可到达整个 mesh
+- Link 可以在任意两个节点间建立，即使没有直连物理链路
+- 物理联通层更简单——只需要保证至少一个接口到网络
+
+**注意事项**：
+- 转发节点会增加 CPU/带宽开销（为他人转发 announce 和数据包）
+- 需确认 `announce_limits` 已生效（第 830 行），防止 announce 风暴
+- `PATHFINDER_M = 128` 最大跳数，小规模 mesh 下绰绰有余
+- `iface_tx_cap = 16` 原为 1（旧代码），需确认当前值足够应付转发积压
+
 **阶段 2：JSONL 文件通道**（若 TCP/UDP 配对不稳定则启用）
 - 复用文件注册表目录结构，每实例写自己的消息文件
 - `Reticulum Link` 加密保证载荷机密性，JSONL 只承载加密后的 Reticulum 包
