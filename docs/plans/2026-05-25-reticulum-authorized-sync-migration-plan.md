@@ -410,7 +410,16 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 6. **修复 relay 测试失败（#3）** — `enable_ret_mesh=false` 或修复 host_id 覆写逻辑
 7. **研究任务（#5）** — 联通方式×Interface 理论区分
 
-### 验证命令速查
+### 架构改进
+
+8. **🟡 iface_mgr.send() 并行化 — 消除单接口拖垮全局**（`iface.rs:223-241`）
+   - 当前：`for iface in &self.ifaces { ... tx_send.try_send(msg).await }` — 串行遍历，但 `try_send` 已非阻塞
+   - 问题：若某个接口完全死亡（TX task 挂起），虽不会阻塞但接口沦为僵尸，浪费资源
+   - 背景：设计继承自 Python RNS 的同步心智。Python 版本也逐接口串行 `send()`。Rust 移植版直接沿用了同样的循环结构。
+   - 修复：用 `futures::future::join_all` 并行发往所有接口，配合超时机制淘汰僵尸接口
+   - 文件：`reticulum-rs/src/iface.rs`
+   - 前置：`try_send` 已就绪（#1），确保无阻塞后再做并行化
+
 ### 验证命令速查
 ```bash
 # 编译

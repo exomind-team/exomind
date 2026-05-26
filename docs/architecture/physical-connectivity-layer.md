@@ -413,6 +413,16 @@ await → 持锁 → drop → await ✅ 安全
 2. **transport.rs handle_announce**：入口处提取所需配置字段，显式 `drop(handler)` 释放锁 A，锁外再发 announce_tx
 3. **transport.rs manage_transport RX 循环**：锁内只读报文头确定类型，`drop(handler)` 后分发到专用 handler
 
+#### 架构改进：接口发送并行化
+
+当前 `iface_mgr.send()` 串行遍历所有接口逐个 `try_send`。该设计继承自 Python RNS 的同步心智——Python 版本也逐接口串行 `send()`。Rust 移植版直接沿用了同样的循环结构。
+
+虽然 `try_send` 已解决阻塞问题，但串行遍历仍有两个弱点：
+1. **一个僵尸接口拖慢全局发送延迟**（虽不阻塞，但累积延迟）
+2. **缺乏接口健康度反馈**——无法识别哪些接口已死亡
+
+改进方向：用 `futures::future::join_all` 并行发往所有接口，配合超时机制淘汰僵尸接口。详见迁移计划 §11 架构改进项。
+
 详见迁移计划 §11 恢复入口/安全加固章节。
 
 ### 系统级缺失：Reticulum Transport 内部 tracing
