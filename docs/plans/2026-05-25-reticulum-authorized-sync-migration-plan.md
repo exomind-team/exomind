@@ -1,6 +1,6 @@
 ﻿# Reticulum 授权配对与业务同步迁移计划
-> 日期：2026-05-25（checkpoint 更新 2026-05-26 v3）
-> 状态：活跃开发版 — 3 次迭代已将物理联通层基础能力落地，详情见 §11 Checkpoint
+> 日期：2026-05-25（checkpoint 更新 2026-05-26 v4）
+> 状态：活跃开发版 — 4 次迭代已将物理联通层基础能力落地，死锁已修复，详情见 §11 Checkpoint
 > 分支：`feat/ret-mesh-prototype`
 > 关联文档：
 > - [Reticulum 组网配对模型设计](2026-05-24-ret-mesh-pairing-model-design.md)
@@ -345,7 +345,7 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 - HTTP/SSE 不再是跨 RT 同步的唯一主路径。
 - 业务同步仍落在现有 RT SQLite / domain projector / reconciliation 架构中。
 ---
-## 11. Session Checkpoint — 2026-05-26 v3
+## 11. Session Checkpoint — 2026-05-26 v4
 > 无上下文 Agent 从本 checkpoint 开始即可独立恢复工作。
 > v3 增补：SSE snapshot 含 peers 字段，#2 已解决。
 ### 当前分支与提交
