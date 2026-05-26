@@ -221,6 +221,18 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     }
   }, [peers, pinDisplay]);
 
+  // If we're showing a PIN but pairing_pending arrives for the same peer,
+  // the other side also initiated — switch to PIN input mode.
+  useEffect(() => {
+    if (!pinDisplay || !pairingPendingPeerId) return;
+    if (pairingPendingPeerId === pinDisplay.peerId) {
+      handleCancelPair(pinDisplay.peerId);
+      setPinDisplay(null);
+      setPinInput('');
+      setPinDialogPeerId(pairingPendingPeerId);
+    }
+  }, [pairingPendingPeerId, pinDisplay]);
+
   // Local 1s tick for smooth countdown (no extra polling).
   const [tick, setTick] = useState(0);
   useEffect(() => {
