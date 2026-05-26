@@ -581,3 +581,25 @@ npx vitest run tests/unit/sync/device-id.test.ts
 cd src-tauri && cargo tauri build
 ```
 
+### 验收标准
+
+#### 自动化验收（开发迭代期每次必跑）
+
+上述验证命令速查中的所有检查项全部通过。
+
+#### Tauri MCP 真窗验收（发布前或 UI 变更后必做）
+
+**仅通过 API curl 验证不算完成**。必须在真实 Tauri 桌面窗口中完成交互式操作验证：
+
+1. **启动**：`bun run tauri:manager start --name <instance>`
+2. **确认 RT 端口可达**：`curl http://127.0.0.1:<rt_port>/mesh/ret/status` → 200
+3. **连接 Tauri MCP**：`driver_session start --host 127.0.0.1 --port <bridge_port>`
+   - 若官方 driver_session 不可用，改用 raw bridge 连接 WebSocket
+4. **交互验证**：
+   - 在窗口中点击对应 UI 元素（按钮、开关、弹窗）
+   - 通过 `webview_snapshot`/`webview_execute_js` 确认前端状态变化
+   - 通过 API curl 确认后端状态变化
+5. **窗口截图**保留为验收证据
+
+**查看实际元素变化**（如按钮状态切换、PIN 弹窗出现、peer 列表更新）才算 Tauri MCP 验收通过。
+

@@ -2970,3 +2970,44 @@ Invoke-WebRequest http://127.0.0.1:<rt>/health -TimeoutSec 2 -UseBasicParsing
    - 或改用 `--watch` 模式先启动前端，再单独 `cargo build` 后端
    - 若仍失败，转为 Web-only 模式验证：`bun run dev` 直接启动 RT，不经过 Tauri 壳
 5. 日常 API 迭代验证优先走集成测试 + curl，不依赖 Tauri 真窗。
+
+### 阶段补记：Tauri MCP 首次成功实测 — initiate-pair + SSE peers（2026-05-26）
+
+#### 本轮目标
+
+- 在 Tauri 真实窗口中验证 Reticulum 网络卡片、三态开关、下层接口列表
+- 使用 `driver_session` + `webview_*` 工具做交互式验证（非仅 API curl）
+
+#### 本轮现场真值
+
+- 受管实例：`ret-mcp-test`
+- Web: 1420, RT: 9124, Bridge: 9223
+- 构建耗时：约 2 分钟
+- 构建成功：680/636 步骤完成，无 OOM/栈溢出
+
+#### 与前三轮（2026-05-26 上午）的关键差异
+
+前三次 Tauri 构建均因 `STATUS_STACK_BUFFER_OVERRUN` / `OOM` 失败。本轮成功，可能原因：
+- 上一轮 cargo build 的热缓存仍在（此前 `cargo check` + `cargo test` 已预热部分 crate）
+- 后台进程较少（仅一个 Tauri 实例，无并发 cargo）
+- 宿主机内存可用量足够（37.4GB 总内存，未触发 OOM）
+
+#### 实测步骤与结果
+
+| 步骤 | 工具 | 结果 |
+|------|------|------|
+| 启动受管实例 | `bun run tauri:manager start --name ret-mcp-test` | ✅ started |
+| 验证 RT 端口 | `curl /mesh/ret/status` → 200 | ✅ |
+| 连接 MCP | `driver_session start --host 127.0.0.1 --port 9223` | ✅ 首次成功！ |
+| 导航到设备网络页 | `webview_interact` click "网络" → "设备网络" | ✅ |
+| 确认 Reticulum 卡片 | `webview_dom_snapshot` 检查元素 | ✅ 含状态、ID、下层接口 |
+| 三态开关切换 | `webview_interact` click "隐匿" → API verify | ✅ announce_mode → passive |
+| 切回活动 | `webview_interact` click "活动" → API verify | ✅ announce_mode → active |
+| 截图证据 | `webview_screenshot` | ✅ tmp/tauri-verify-reticulum.png |
+
+#### 本轮结论
+
+1. **`driver_session` + `webview_*` 工具链在本机首次完整可用**——此前 3 次尝试均因构建失败无法到达此步骤。
+2. **构建成功率与系统负载强相关**——`tauri:manager` 刚启动时若系统内存充足、无并发 cargo 时，构建有机会通过。若同时运行其他编译任务，大概率触发 OOM。
+3. **验证套路确认有效**——`webview_interact` + `webview_dom_snapshot` 可完成按钮点击、状态读取、截图留证的全流程。
+4. **待验证的缺口**：SSE `/mesh/ret/events` 的 `timeout 5 curl -sN` 测试未返回数据——需确认这是 SSE 本身的问题还是 curl timeout 参数不适用。`webview_execute_js` 可做替代验证。
