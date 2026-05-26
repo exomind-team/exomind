@@ -1108,7 +1108,7 @@ pub enum RetMeshPairingCommand {
     /// Set per-interface mode (0=Off, 1=Passive, 2=Active).
     SetInterfaceMode {
         name: String,
-        mode: u8,
+        mode: exomind_net_pairing::RetMeshMode,
     },
 }
 
@@ -2317,7 +2317,7 @@ async fn ret_mesh_background(
 
                 let mode_raw = ret_mesh_mode.load(std::sync::atomic::Ordering::Relaxed);
                 // Sync global mode to InterfaceManager so send() can filter by it.
-                node.set_global_mode(mode_raw).await;
+                node.set_global_mode(mode_raw.into()).await;
                 let mode: exomind_net_pairing::RetMeshMode = mode_raw.into();
                 if mode.can_announce() {
                     let now = SystemTime::now()

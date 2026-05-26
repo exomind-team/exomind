@@ -914,10 +914,10 @@ async fn set_ret_interface_mode(
     State(state): State<AppState>,
     Json(req): Json<SetInterfaceModeRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let mode: u8 = match req.mode.as_str() {
-        "off" => 0,
-        "passive" => 1,
-        "active" => 2,
+    let mode = match req.mode.as_str() {
+        "off" => exomind_net_pairing::RetMeshMode::Off,
+        "passive" => exomind_net_pairing::RetMeshMode::Passive,
+        "active" => exomind_net_pairing::RetMeshMode::Active,
         _ => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "invalid mode, expected off/passive/active"}))),
     };
     let Some(tx) = state.ret_mesh_pairing_tx.clone() else {

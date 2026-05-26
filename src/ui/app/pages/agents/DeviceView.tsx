@@ -166,7 +166,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     announce_period_ms: number;
   } | null>(null);
   const lastAnnounceTsRef = useRef(Date.now());
-  const [interfaces, setInterfaces] = useState<{ name: string; active: boolean; mode?: number }[]>([]);
+  const [interfaces, setInterfaces] = useState<{ name: string; active: boolean; mode?: 'off' | 'passive' | 'active' }[]>([]);
   const mountedRef = useRef(true);
   const hasActivePinDialogRef = useRef(false);
   // Keep ref in sync so the SSE closure always reads the latest value.
@@ -333,7 +333,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
 
   const handleSetInterfaceMode = (ifaceName: string, mode: 'off' | 'passive' | 'active') => {
     if (!runtimeBaseUrl) return;
-    setInterfaces((prev) => prev.map((i) => i.name === ifaceName ? { ...i, mode: mode === 'off' ? 0 : mode === 'passive' ? 1 : 2 } : i));
+    setInterfaces((prev) => prev.map((i) => i.name === ifaceName ? { ...i, mode } : i));
     fetch(`${runtimeBaseUrl}/mesh/ret/interfaces/${encodeURIComponent(ifaceName)}/mode`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -440,18 +440,19 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
               <div className="text-[10px] text-[#A8A29E]">无接口信息</div>
             ) : (
               interfaces.map((iface) => {
-                const currentMode = iface.mode ?? 2;
-                const nextMode = currentMode === 2 ? 1 : currentMode === 1 ? 0 : 2;
-                const nextLabel = currentMode === 2 ? '隐匿' : currentMode === 1 ? '关闭' : '活动';
+                const currentMode = iface.mode ?? 'active';
+                const nextMode = currentMode === 'active' ? 'passive' : currentMode === 'passive' ? 'off' : 'active';
+                const modeLabel = { active: '活动', passive: '隐匿', off: '关闭' } as const;
+                const nextLabel = modeLabel[nextMode];
                 return (
                   <div key={iface.name} className="flex items-center gap-2">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${currentMode > 0 ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${currentMode !== 'off' ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
                     <span className="truncate max-w-[140px] text-[11px] text-[#44403C] dark:text-[#D6D3D1]" title={iface.name}>{iface.name}</span>
-                    <span className="text-[10px] text-[#A8A29E] whitespace-nowrap">{currentMode === 2 ? '活动' : currentMode === 1 ? '隐匿' : '关闭'}</span>
+                    <span className="text-[10px] text-[#A8A29E] whitespace-nowrap">{modeLabel[currentMode]}</span>
                     <button
                       type="button"
                       title={`切换为${nextLabel}`}
-                      onClick={() => handleSetInterfaceMode(iface.name, nextMode === 2 ? 'active' : nextMode === 1 ? 'passive' : 'off')}
+                      onClick={() => handleSetInterfaceMode(iface.name, nextMode)}
                       className="ml-auto text-[10px] px-1.5 py-0.5 rounded border border-[#D6D3D1] text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#57534E] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
                     >
                       {nextLabel} ▸

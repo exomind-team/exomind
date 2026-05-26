@@ -35,47 +35,8 @@ use tokio::time::{Duration, sleep};
 /// | Off     | 0     | No interface, no announce        |
 /// | Passive | 1     | Interface RX-only, no announce   |
 /// | Active  | 2     | Interface TX+RX, full announce   |
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RetMeshMode {
-    Off = 0,
-    Passive = 1,
-    Active = 2,
-}
-
-impl RetMeshMode {
-    /// Returns true when the mode allows creating interfaces at all.
-    pub fn is_enabled(self) -> bool {
-        matches!(self, Self::Passive | Self::Active)
-    }
-
-    /// Returns true when the mode allows sending announces.
-    pub fn can_announce(self) -> bool {
-        matches!(self, Self::Active)
-    }
-}
-
-impl Default for RetMeshMode {
-    fn default() -> Self {
-        Self::Active
-    }
-}
-
-impl From<u8> for RetMeshMode {
-    fn from(v: u8) -> Self {
-        match v {
-            0 => Self::Off,
-            1 => Self::Passive,
-            _ => Self::Active,
-        }
-    }
-}
-
-impl From<RetMeshMode> for u8 {
-    fn from(m: RetMeshMode) -> u8 {
-        m as u8
-    }
-}
+/// Legacy alias — RetMeshMode now lives in reticulum-rs as `InterfaceMode`.
+pub use reticulum::iface::InterfaceMode as RetMeshMode;
 
 /// Events emitted by the RetMeshNode.
 #[derive(Debug, Clone)]
@@ -262,7 +223,7 @@ impl RetMeshNode {
     /// Propagate the global RetMeshMode to the transport InterfaceManager.
     /// The InterfaceManager applies it as an upper bound on per-interface modes:
     /// effective = min(global, iface.mode).
-    pub async fn set_global_mode(&self, mode: u8) {
+    pub async fn set_global_mode(&self, mode: RetMeshMode) {
         let mgr = self.transport.iface_manager();
         let mut mgr_lock = mgr.lock().await;
         mgr_lock.set_global_mode(mode);
