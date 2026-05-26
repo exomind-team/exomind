@@ -1955,6 +1955,7 @@ async fn ret_mesh_background(
             "ret_port": state.ret_udp_port.load(Ordering::Relaxed),
             "pid": std::process::id(),
         });
+        // Write own entry (overwrites any stale entry for this host_id).
         let peer_file = d.join(format!("{}.json", state.host_id));
         let _ = std::fs::write(&peer_file, info.to_string());
         tracing::info!(file = %peer_file.display(), "local peer registry entry written");
@@ -2242,7 +2243,7 @@ async fn ret_mesh_background(
                         if peer.host_id == node.config.host_id {
                             continue;
                         }
-                        if connected_mdns_ids.insert(peer.host_id.clone()) {
+                        if connected_mdns_ids.insert(format!("{}:{}", peer.host_id, peer.ret_port)) {
                             let ret_port = if peer.ret_port > 0 {
                                 peer.ret_port
                             } else {
@@ -2295,7 +2296,7 @@ async fn ret_mesh_background(
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0) as u16;
                         if ret_port > 0 {
-                            let is_new = connected_mdns_ids.insert(peer_host_id.to_string());
+                            let is_new = connected_mdns_ids.insert(format!("{peer_host_id}:{ret_port}"));
                             tracing::info!(
                                 "[tick] registry peer host_id={} host={} ret_port={} is_new={}",
                                 peer_host_id, host, ret_port, is_new
