@@ -342,3 +342,80 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 **变更文件**：
 - `crates/exomind-runtime/src/lib.rs` — `try_push_ret_mesh_snapshot` 新增 peers 字段
 - `crates/exomind-runtime/src/lib.rs` — 新增 `#[cfg(test)]` 测试验证 snapshot 含 peers
+
+### 9.3 ~~🔴 双实例 Reticulum 发现层不通~~ ✅ 已解决 — Transport 死锁
+
+**现象**：同机双实例 Reticulum 互发现失败。API 返回 `mesh_enabled: true` 但 peer 列表始终为空。`ret_mesh_background` 的 tick 在 #16 后停止。
+
+**根因（2026-05-26，经 tracing + CodeGraph + Wireshark 三重验证定位）**：
+
+**死锁链**：
+```
+packet RX task (manage_transport)          ret_mesh_background (tick)
+  handler.lock() ✅                          |
+  → handle_announce()                        |  node.announce()
+    → handler.send()                         |  → send_announce()
+      → iface_mgr.lock() ✅                  |    → handler.lock() ❌ BLOCKED
+        → for each iface:                    |      (锁被 RX task 持有)
+            tx_send.send().await ⏳          |
+              → channel full (cap=1)          → 永远阻塞
+              → handler 锁 不释放              → tick 停止
+              → iface_mgr 锁 不释放            → 无 announce 发出
+```
+
+**触发条件**：
+1. 旧实例的 mDNS 条目 → 创建 10+ 定向 UDP 接口
+2. WSAECONNRESET 杀死所有定向接口的 RX task
+3. TX task 仍存活但 rx-only 接口无 TX task → tx_channel 满
+4. `iface_mgr.send()` 在满 channel 上 `send().await` 阻塞
+5. handler + iface_mgr 双重锁被持有 → background task 永远停在第 16 个 tick 附近
+
+**修复**（`reticulum-rs/src/iface.rs`）：
+```
+- tx_send.send(message).await     // 阻塞 → 死锁
++ tx_send.try_send(message)       // 非阻塞 → 满则丢，不阻塞
+```
+
+Announce 是 10s 间隔的幂等操作，丢一个不影响整体发现。
+
+**效果验证**：
+- ✅ tick 从 #16（死锁上限）提升到 **#46+**（持续运行）
+- ✅ 双向 Reticulum 互发现成功（`announce_rx` 双向命中）
+- ✅ 跨实例 PIN 配对端到端通过（Tauri MCP 实测）
+- ✅ `send_to` 正常发送 299 字节 announce 包
+- ✅ rx-only 接口 channel-full warning 正常（预期行为，无 TX task）
+
+### 系统级缺失：Reticulum Transport 内部 tracing
+
+本次排查暴露的最大瓶颈：Reticulum rust Transport 的 tracing 覆盖严重不足。以下是需要增补的关键 tracing 点：
+
+#### Transport 层（`Reticulum/experiment/rs/src/transport.rs`）
+
+| 追踪点 | 位置 | 用途 |
+|--------|------|------|
+| `announce_tx.send()` | announce handler | 确认 announce 是否被发送到广播通道 |
+| `announce_rx.recv()` 结果 | 调用方 | 确认接收方是否收到了 announce |
+| 接口数据接收（`RcMessage` / `RxMessage`） | iface 循环 → transport | 确认数据是否从 iface 进入 transport |
+| announce packet 解码 | `handle_announce` | 确认收到的 packet 是否能被识别为 announce |
+| TCP client/server 连接事件 | `tcp_client.rs` / `tcp_server.rs` | 确认连接建立和断开的完整生命周期 |
+| 路径表更新 | `path_table.rs` | 确认 announce 是否更新了路径表 |
+
+#### 应用层（`exomind-runtime/src/lib.rs`）
+
+| 追踪点 | 位置 | 用途 |
+|--------|------|------|
+| `tokio::select!` 分支命中计数 | `ret_mesh_background` 循环 | 确认哪个分支被频繁选中（tick 饥渴验证） |
+| `announce_rx.recv()` 返回值 | `ret_mesh_background` line 1995 | 确认是 `Ok` / `Lagged` / `Closed` |
+| `tick.tick()` 实际触发 | `ret_mesh_background` line 2076 | 确认 tick 是否真的被 select 调度 |
+
+#### 日志级别建议
+
+关键追踪点使用 `tracing::info!` 或 `tracing::debug!`（可在运行时通过环境变量 `RUST_LOG` 打开）。高频路径（如 per-packet 处理）使用 `tracing::trace!`。
+
+```bash
+# 运行时打开 debug 级别 Reticulum 日志
+RUST_LOG=reticulum=debug exomind
+
+# 或针对特定模块
+RUST_LOG=reticulum::transport=debug,reticulum::iface::udp=debug exomind
+```

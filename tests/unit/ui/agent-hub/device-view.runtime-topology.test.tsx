@@ -279,13 +279,12 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
 
     // PIN display dialog should appear (initiator flow — shows generated PIN)
     expect(await screen.findByText('配对码')).toBeInTheDocument();
-    expect(screen.getByText('请在对方设备上输入此配对码')).toBeInTheDocument();
     // Verify the PIN digits are rendered
     expect(screen.getByText('6')).toBeInTheDocument();
     expect(screen.getByText('5')).toBeInTheDocument();
 
-    // Click "改为输入配对码" to switch to responder (PIN input) dialog
-    fireEvent.click(screen.getByText('改为输入配对码'));
+    // Click switch-to-input button to enter responder (PIN input) mode
+    fireEvent.click(screen.getByText('我已在他方看到配对码 → 输入配对码'));
 
     // PIN input dialog should appear
     expect(await screen.findByText('输入 Reticulum PIN')).toBeInTheDocument();

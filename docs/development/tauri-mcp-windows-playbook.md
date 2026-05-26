@@ -3011,3 +3011,96 @@ Invoke-WebRequest http://127.0.0.1:<rt>/health -TimeoutSec 2 -UseBasicParsing
 2. **构建成功率与系统负载强相关**——`tauri:manager` 刚启动时若系统内存充足、无并发 cargo 时，构建有机会通过。若同时运行其他编译任务，大概率触发 OOM。
 3. **验证套路确认有效**——`webview_interact` + `webview_dom_snapshot` 可完成按钮点击、状态读取、截图留证的全流程。
 4. **待验证的缺口**：SSE `/mesh/ret/events` 的 `timeout 5 curl -sN` 测试未返回数据——需确认这是 SSE 本身的问题还是 curl timeout 参数不适用。`webview_execute_js` 可做替代验证。
+
+### 阶段补记：后端 panic 但 Tauri 窗口不报错的陷阱（2026-05-26）
+
+#### 现象
+
+- `tauri:manager list` 显示实例状态为 `running: ok`
+- `curl` 请求 RT API 返回 000（无响应），非 200 也非 4xx/5xx
+- Tauri 窗口正常显示，Vite 前端也正常加载
+- 但所有 RT API 都不响应，前端表现为"卡死"（数据显示不出来、按钮点了没反应）
+
+#### 根因
+
+Rust 后端线程 panic（如 `attempt to add with overflow`）后，tokio-rt-worker 线程终止，HTTP 服务停止。但：
+- `tauri:manager` 只检查 `rootPidAlive`，不检查 RT 线程是否健康
+- Tauri wrapper 进程因 `detached: true` 不会报告子线程 panic
+- WebSocket bridge 可能仍活着（`driver_session` 可连接）但 RPC 调用会超时
+
+#### 排查方法
+
+```bash
+# 1. 查 API — 如果 000，不是 "未就绪" 就是后端崩了
+curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:<rt_port>/mesh/ret/status
+
+# 2. 查实例日志 — 搜索 panic/ERROR/overflow
+grep -E "panic|overflow|ERROR" .tmp/tauri-dev-instances/<name>.log
+
+# 3. 如果日志里有 panic，修对应的 Rust 代码后重新构建
+```
+
+`curl 000` + `grep panic 无结果` = 构建尚未完成（继续等）。
+`curl 000` + `grep panic 有结果` = 后端已崩，Rust 代码有 bug。
+
+#### 验证缺口的全量检查清单
+
+| 检查项 | 命令 / 工具 | 通过标准 |
+|--------|------------|----------|
+| 构建日志无 panic | `grep -E "panic|overflow"` | 无匹配 |
+| RT API 可达 | `curl /mesh/ret/status` | 200 |
+| Tauri 窗口响应 | `driver_session` + `manage_window list` | 返回窗口列表 |
+| UI 元素可见 | `webview_dom_snapshot` | 关键元素存在 |
+| 交互正常 | `webview_interact click` | 元素被点击 |
+| API 状态反映交互 | `curl /mesh/ret/status` | 状态已变更 |
+
+---
+
+## MCP 连接排查标准流程
+
+### 核心原则
+
+**MCP 是验证工具，不是诊断工具。** 在连 MCP 之前，必须先用轻量级手段确认实例健康。
+
+### 三重预检（任一失败就不该连 MCP）
+
+| 预检 | 命令 | 通过标准 | 否则意味着 |
+|------|------|----------|-----------|
+| API 存活 | `curl /mesh/ret/status` | 200 | 后端未就绪或已崩 → 查日志，别连 MCP |
+| 后端健康 | `grep -E "panic\|overflow" .tmp/tauri-dev-instances/<name>.log` | 0 匹配 | Rust 代码 bug → 修代码，别连 MCP |
+| bridge 归属 | `netstat -ano \| findstr ":<bridge_port>"` | 端口 LISTENING，PID 匹配当前实例的 tauri.exe | 端口被残留进程占用 → taskkill 或换端口 |
+
+### 排查决策树
+
+```
+                    ┌─ 等构建完成
+    curl status       ├─ 000 ──→ grep panic search
+    ↓ 200                    ├─ 有 panic → 修 bug，不要连 MCP
+                    └─ 200      └─ 无 panic → 继续等（还在编译）
+                            ↓
+                    netstat bridge port
+                    ├─ 无 LISTENING → 等 bridge 初始化
+                    ├─ LISTENING 旧 PID → taskkill
+                    └─ LISTENING 正确 PID
+                            ↓
+                    连 MCP（此时 99% 不会卡）
+```
+
+### 肉眼可见的信号对照表
+
+| 现象 | 含义 |
+|------|------|
+| `curl status → 000` | 后端崩了或未就绪 |
+| 日志有 `panic` | Rust 代码 bug |
+| 日志无 panic + curl 000 | 构建未完成，继续等 |
+| `manager running: ok` + curl 000 | Manager 不可信，必须手动查 API |
+| `driver_session` 报 `user-cancel` | 通常是 bridge 端口不可达，不是真被取消 |
+| bridge 端口被旧 PID 占用 | 需 taskkill 清理或换端口重启 |
+
+### 典型卡住案例
+
+| 场景 | 根因 | 症状 | 修复 |
+|------|------|------|------|
+| 2026-05-26 ret-mcp-pin | RT 端口 63408+5000 u16 溢出 panic | curl 000，日志有 `attempt to add with overflow` | 改用 saturating/subtractive 端口映射 |
+| 2026-05-26 ret-mcp-clean | 旧实例 bridge 端口 9223 残留 TIME_WAIT | netstat 显示旧 PID 占着端口 | `taskkill /PID <old_pid>` 后换端口重启 |
+| 2026-05-26 ret-mcp-verify | 跳过了预检直接连 MCP | `driver_session` 超时报 `user-cancel` | 养成先 curl + grep + netstat 的习惯 |

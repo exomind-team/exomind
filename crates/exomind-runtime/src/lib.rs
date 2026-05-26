@@ -1551,10 +1551,9 @@ async fn version() -> Json<VersionResponse> {
 
 // ── Reticulum mesh networking ──────────────────────────────────────
 
-/// Default Reticulum UDP broadcast port for LAN discovery.
-/// Unix: all instances share 5590 (SO_REUSEADDR).
-/// Windows: each instance gets HTTP_port + 6000 (no SO_REUSEADDR).
 /// Try to start a Reticulum mesh node for device discovery and pairing.
+/// UDP discovery uses OS-assigned dynamic port (0.0.0.0:0); actual port is
+/// published via mDNS TXT `ret_port` and local file registry.
 async fn try_start_ret_mesh(
     options: &RuntimeStartOptions,
     port: u16,
@@ -1606,10 +1605,16 @@ async fn try_start_ret_mesh(
     );
 
     // Also add a TCP server interface for remote/seed connections.
-    let tcp_port = port + 5000;
+    // When RT port is in ephemeral range (> 60535), port+5000 exceeds u16::MAX.
+    // Use subtractive offset: port - 5000 instead, keeping result in valid range.
+    let (tcp_port, tcp_bias) = if port > 60535 {
+        (port - 5000, "low")
+    } else {
+        (port + 5000, "high")
+    };
     let tcp_addr = format!("127.0.0.1:{}", tcp_port);
     exomind_net_pairing::RetMeshNode::add_tcp_interface(&transport, &tcp_addr).await;
-    tracing::info!("Reticulum TCP interface listening on {}", tcp_addr);
+    tracing::info!("Reticulum TCP interface listening on {} (RT port {}, {} bias)", tcp_addr, port, tcp_bias);
 
     // Optionally connect to a seed peer via RET_MESH_SEED env var.
     if let Ok(seed) = std::env::var("RET_MESH_SEED") {
@@ -1892,6 +1897,14 @@ async fn ret_mesh_background(
     let local_identity_hex = node.local_identity_hex();
     let mut pending_pairings: HashMap<String, PendingRetPairing> = HashMap::new();
     let mut last_local_announce_ms: u64 = 0;
+    let mut tick_count: u64 = 0;
+    let mut select_hit_connect: u64 = 0;
+    let mut select_hit_pairing: u64 = 0;
+    let mut select_hit_link: u64 = 0;
+    let mut select_hit_announce: u64 = 0;
+    let mut select_hit_tick: u64 = 0;
+
+    tracing::info!("ret_mesh_background started (local_identity={})", local_identity_hex);
 
     // MdnsBridge: mDNS peer discovery → Reticulum UDP Interface
     let mdns_bridge =
@@ -1920,12 +1933,16 @@ async fn ret_mesh_background(
     };
 
     loop {
+        tracing::trace!("ret_mesh_background: select loop top");
         tokio::select! {
             Ok((host_id, addr)) = connect_rx.recv() => {
-                tracing::info!("Reticulum connecting to peer {} at {}", host_id, addr);
+                select_hit_connect += 1;
+                tracing::info!("[select] connect_rx(hit:{}) connect to peer {} at {}", select_hit_connect, host_id, addr);
                 exomind_net_pairing::RetMeshNode::add_tcp_client(&node.transport, &addr).await;
             }
             Some(command) = pairing_rx.recv() => {
+                select_hit_pairing += 1;
+                tracing::info!("[select] pairing_rx(hit:{}) PairWithPeer", select_hit_pairing);
                 match command {
                     RetMeshPairingCommand::PairWithPeer {
                         peer,
@@ -1936,8 +1953,22 @@ async fn ret_mesh_background(
                     } => {
                         let peer_id = ret_discovered_peer_id(&peer);
                         let request_id = uuid::Uuid::new_v4().to_string();
-                        let tcp_addr = format!("127.0.0.1:{}", peer.port + 5000);
-                        exomind_net_pairing::RetMeshNode::add_tcp_client(&node.transport, &tcp_addr).await;
+                        let tcp_port = if peer.port > 60535 { peer.port - 5000 } else { peer.port + 5000 };
+                        let tcp_addr = format!("127.0.0.1:{}", tcp_port);
+                        // Only create TCP client if not already connected (dedup).
+                        let tcp_already_connected = {
+                            let mgr = node.transport.iface_manager();
+                            let mgr_lock = mgr.lock().await;
+                            mgr_lock.list_interfaces().iter().any(|iface| {
+                                iface.iface_type == "tcp_client" && iface.name.contains(&tcp_addr)
+                            })
+                        };
+                        if !tcp_already_connected {
+                            tracing::info!("Reticulum connecting TCP to peer {} at {}", peer_id, tcp_addr);
+                            exomind_net_pairing::RetMeshNode::add_tcp_client(&node.transport, &tcp_addr).await;
+                        } else {
+                            tracing::debug!("Reticulum TCP already connected to peer {} at {}, skipping", peer_id, tcp_addr);
+                        }
                         let frame = exomind_net_pairing::RetPairingLinkFrame::PairingResponse {
                             request_id: request_id.clone(),
                             session_id: None,
@@ -1960,6 +1991,7 @@ async fn ret_mesh_background(
                         });
 
                         if let Err(error) = node.send_pairing_frame(&peer, &frame).await {
+                            tracing::error!(peer_id = %peer_id, request_id = %request_id, error = %error, "Reticulum send_pairing_frame failed");
                             if let Some(pending) = pending_pairings.remove(&request_id) {
                                 let _ = pending.reply.send(Err(RetMeshPairingFailure::Transport(error.to_string())));
                             }
@@ -1974,6 +2006,8 @@ async fn ret_mesh_background(
                 }
             }
             Ok(link_event) = link_in_rx.recv() => {
+                select_hit_link += 1;
+                tracing::info!("[select] link_in_rx(hit:{}) link event", select_hit_link);
                 if let exomind_net_pairing::LinkEvent::Data(payload) = link_event.event {
                     match serde_json::from_slice::<exomind_net_pairing::RetPairingLinkFrame>(payload.as_slice()) {
                         Ok(frame) => {
@@ -1987,6 +2021,8 @@ async fn ret_mesh_background(
                 }
             }
             Ok(announce) = announce_rx.recv() => {
+                select_hit_announce += 1;
+                tracing::info!("[select] announce_rx(hit:{}) announce arrived", select_hit_announce);
                 let data: &[u8] = announce.app_data.as_slice();
                 if let Some(meta) = exomind_net_pairing::discovery::parse_announce_data(data) {
                     let (identity_hex, destination_hex) = {
@@ -2068,6 +2104,14 @@ async fn ret_mesh_background(
                 }
             }
             _ = tick.tick() => {
+                tick_count += 1;
+                select_hit_tick += 1;
+                if tick_count % 10 == 0 {
+                    tracing::info!("[select] tick #{}  hits_tick:{} connect:{} pairing:{} link:{} announce:{}",
+                        tick_count, select_hit_tick, select_hit_connect, select_hit_pairing, select_hit_link, select_hit_announce);
+                } else {
+                    tracing::info!("[select] tick #{}  ticks:{}", tick_count, select_hit_tick);
+                }
                 // Evict stale peers and re-announce
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -2110,6 +2154,10 @@ async fn ret_mesh_background(
                             } else {
                                 peer.port + 6000
                             };
+                            tracing::info!(
+                                "[tick] mDNS new peer host_id={} host={} ret_port={}",
+                                peer.host_id, peer.host, ret_port
+                            );
                             mdns_bridge
                                 .on_peer_resolved(&node.transport, &peer.host_id, &peer.host, ret_port)
                                 .await;
@@ -2118,6 +2166,10 @@ async fn ret_mesh_background(
                 }
 
                 // Scan local peer registry (same-machine discovery)
+                if let Ok(entries) = std::fs::read_dir(&local_registry_dir) {
+                    let registry_count = entries.count();
+                    tracing::info!("[tick] file registry scan: {} entries found", registry_count);
+                }
                 if let Ok(entries) = std::fs::read_dir(&local_registry_dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
@@ -2148,15 +2200,22 @@ async fn ret_mesh_background(
                             .get("ret_port")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0) as u16;
-                        if ret_port > 0 && connected_mdns_ids.insert(peer_host_id.to_string()) {
-                            mdns_bridge
-                                .on_peer_resolved(
-                                    &node.transport,
-                                    peer_host_id,
-                                    host,
-                                    ret_port,
-                                )
-                                .await;
+                        if ret_port > 0 {
+                            let is_new = connected_mdns_ids.insert(peer_host_id.to_string());
+                            tracing::info!(
+                                "[tick] registry peer host_id={} host={} ret_port={} is_new={}",
+                                peer_host_id, host, ret_port, is_new
+                            );
+                            if is_new {
+                                mdns_bridge
+                                    .on_peer_resolved(
+                                        &node.transport,
+                                        peer_host_id,
+                                        host,
+                                        ret_port,
+                                    )
+                                    .await;
+                            }
                         }
                     }
                 }

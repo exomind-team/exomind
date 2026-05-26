@@ -202,6 +202,18 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     return () => { mountedRef.current = false; evtSource?.close(); };
   }, [runtimeBaseUrl]);
 
+  // Auto-close PIN display dialog when pairing completes (peer becomes authorized).
+  useEffect(() => {
+    if (!pinDisplay) return;
+    const matched = peers.find((p) => {
+      const pid = p.peer_id || p.identity_hex || p.host_id;
+      return pid === pinDisplay.peerId && (p.authorized === true || p.connection_state === 'connected_authorized' || p.connection_state === 'trusted');
+    });
+    if (matched) {
+      setPinDisplay(null);
+    }
+  }, [peers, pinDisplay]);
+
   // Local 1s tick for smooth countdown (no extra polling).
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -509,7 +521,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
               配对码
             </h4>
             <p className="mb-4 text-xs text-[#A8A29E]">
-              请在对方设备上输入此配对码
+              在另一台设备上点击「授权」，然后输入此配对码
             </p>
             <div className="mb-4 flex justify-center gap-2">
               {pinDisplay.pin.split('').map((digit, i) => (
@@ -528,7 +540,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
               </svg>
               等待对方输入配对码...
             </div>
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -537,17 +549,19 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                   setPinInput('');
                   setPinDialogPeerId(peerId);
                 }}
-                className="text-xs text-[#78716C] underline hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+                className="w-full rounded-lg border border-[#D6D3D1] bg-white px-3 py-2 text-xs font-semibold text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1] dark:hover:bg-[#44403C]"
               >
-                改为输入配对码
+                我已在他方看到配对码 → 输入配对码
               </button>
-              <button
-                type="button"
-                onClick={() => setPinDisplay(null)}
-                className="rounded-xl border border-[#F0ECE8] px-4 py-2 text-xs font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
-              >
-                取消
-              </button>
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setPinDisplay(null)}
+                  className="text-xs text-[#A8A29E] hover:text-[#78716C] dark:hover:text-[#D6D3D1]"
+                >
+                  取消
+                </button>
+              </div>
             </div>
           </div>
         </div>

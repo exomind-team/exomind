@@ -326,7 +326,8 @@ async fn pairing_respond(
         if let Some(port_str) = responder_base_url.rsplit(':').next() {
             if let Ok(rt_port) = port_str.parse::<u16>() {
                 let peer_host_id = req.responder_host_id.clone();
-                let tcp_addr = format!("127.0.0.1:{}", rt_port + 5000);
+                let tcp_port = if rt_port > 60535 { rt_port - 5000 } else { rt_port + 5000 };
+                let tcp_addr = format!("127.0.0.1:{}", tcp_port);
                 let _ = connect_tx.send((peer_host_id, tcp_addr));
             }
         }
