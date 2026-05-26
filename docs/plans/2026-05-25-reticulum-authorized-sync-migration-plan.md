@@ -420,6 +420,39 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
    - 文件：`reticulum-rs/src/iface.rs`
    - 前置：`try_send` 已就绪（#1），确保无阻塞后再做并行化
 
+### 配对协议状态机补齐 — PairingOffer 帧
+
+**背景**：当前 `initiate-pair` 仅在本机 `PairingManager` 创建 session，不通知对端。响应方需要手动点「授权」+「改为输入配对码」才能进入输入模式。
+
+**三层架构确认**：
+
+```
+配对授权层（PIN / session / token / MeshState）   ← PairingOffer 属于此层
+    ↑ 依赖
+Reticulum 层（Link / Announce / Packet / Identity）  ← 只提供加密传输通道
+    ↑ 依赖
+物理联通层（UDP / TCP / 文件 / mDNS）              ← 不关心上层载荷
+```
+
+`RetPairingLinkFrame` 定义在 `exomind-net-pairing/src/pairing.rs`，不在 `reticulum-rs`。发送接收都通过 reticulum-rs 的通用 API（`link.data_packet()` / `link_in_rx`），不需要为新增帧类型修改 reticulum-rs。
+
+**阶段 1：PairingOffer 帧**（当前最高优先级，不改 reticulum-rs）
+
+| 文件 | 改动 |
+|------|------|
+| `exomind-net-pairing/src/pairing.rs` | `RetPairingLinkFrame` 增加 `PairingOffer { session_id, initiator_peer_id }` variant |
+| `exomind-runtime/src/routes/mesh.rs` | `initiate_ret_pair` 末尾调用 `send_pairing_frame` 发送 Offer 帧 |
+| `exomind-runtime/src/lib.rs` | `link_in_rx` handler 增加 `PairingOffer` 分支，存入 `pairing_pending` 状态 + 推 SSE |
+| `src/ui/app/pages/agents/DeviceView.tsx` | SSE 检测 `pairing_pending` 后自动切换到输入模式 |
+
+**阶段 2：JSONL 文件通道**（若 TCP/UDP 配对不稳定则启用）
+- 复用文件注册表目录结构，每实例写自己的消息文件
+- `Reticulum Link` 加密保证载荷机密性，JSONL 只承载加密后的 Reticulum 包
+
+**阶段 3：撤销授权清理 TCP 接口**
+- `reticulum-rs/iface.rs` — `InterfaceManager` 增加 `remove_interface(name)` 方法
+- `exomind-runtime` — `unpair_ret_peer` 或 background task 中调用
+
 ### 验证命令速查
 ```bash
 # 编译
