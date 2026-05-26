@@ -655,7 +655,7 @@ async fn initiate_ret_pair(
 
     // Fire-and-forget: notify the target peer that a pairing session has started.
     if let Some(tx) = &state.ret_mesh_pairing_tx {
-        let initiator_peer_id = ret_peer_mesh_peer_id(&peer).to_string();
+        let initiator_peer_id = state.host_id.clone();
         let send_result = tx
             .send(crate::RetMeshPairingCommand::SendPairingOffer {
                 peer: peer.clone(),
@@ -715,6 +715,17 @@ async fn unpair_ret_peer(
 
     if let Some(relay) = &state.mesh_relay {
         relay.reconcile_peer(&mesh_peer.id).await;
+    }
+
+    // Reset the discovered peer's trust_state back to Discovered so the SSE
+    // snapshot no longer shows it as Paired/Trusted after unpair.
+    if let Some(ref peers) = state.ret_mesh_peers {
+        let mut map = peers.write().await;
+        if let Some(peer) = map.values_mut().find(|p| {
+            p.identity_hex == mesh_peer.id || p.host_id == mesh_peer.id
+        }) {
+            peer.trust_state = exomind_net_pairing::discovery::TrustState::Discovered;
+        }
     }
 
     let peer = discovered_peer.map(|peer| ret_peer_with_mesh_authorization_state(&state, peer));
