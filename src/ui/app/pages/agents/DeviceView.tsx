@@ -305,11 +305,12 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     }
   };
 
-  const handleInitiatePair = async (hostId: string) => {
+  const handleInitiatePair = async (hostId: string, force = false) => {
     if (!runtimeBaseUrl || pairingHostId || unpairingHostId) return;
     // If the target peer already sent a PairingOffer, go directly to
     // responder (PIN input) mode instead of initiating ourselves.
-    if (pairingPendingPeerId === hostId) {
+    // Use `force=true` to bypass (e.g. when PairingCancel didn't arrive).
+    if (!force && pairingPendingPeerId === hostId) {
       setPinDialogPeerId(hostId);
       return;
     }
@@ -684,6 +685,18 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                 className="rounded-xl border border-[#F0ECE8] px-4 py-2 text-xs font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
               >
                 取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const peerId = pinDialogPeerId;
+                  setPinDialogPeerId(null);
+                  setPinInput('');
+                  void handleInitiatePair(peerId, true);
+                }}
+                className="rounded-xl border border-[#D6D3D1] px-4 py-2 text-xs font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#57534E] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+              >
+                改为展示配对码
               </button>
               <button
                 type="button"
