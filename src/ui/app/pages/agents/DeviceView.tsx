@@ -441,25 +441,31 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
             ) : (
               interfaces.map((iface) => {
                 const currentMode = iface.mode ?? 'active';
-                const nextMode = currentMode === 'active' ? 'passive' : currentMode === 'passive' ? 'off' : 'active';
-                const modeLabel = { active: '活动', passive: '隐匿', off: '关闭' } as const;
-                const nextLabel = modeLabel[nextMode];
                 return (
                   <div key={iface.name} className="flex items-center gap-2">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${currentMode !== 'off' ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
                     <span className="truncate max-w-[140px] text-[11px] text-[#44403C] dark:text-[#D6D3D1]" title={iface.name}>{iface.name}</span>
-                    <span className="text-[10px] text-[#A8A29E] whitespace-nowrap">{modeLabel[currentMode]}</span>
-                    <button
-                      type="button"
-                      title={`切换为${nextLabel}`}
-                      onClick={() => handleSetInterfaceMode(iface.name, nextMode)}
-                      className="ml-auto text-[10px] px-1.5 py-0.5 rounded border border-[#D6D3D1] text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#57534E] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
-                    >
-                      {nextLabel} ▸
-                    </button>
+                    <div className="ml-auto inline-flex rounded-md border border-[#D6D3D1] bg-[#FAF7F5] dark:border-[#57534E] dark:bg-[#292524] overflow-hidden shrink-0">
+                      {(['off', 'passive', 'active'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => handleSetInterfaceMode(iface.name, mode)}
+                          className={`px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                            currentMode === mode
+                              ? mode === 'active' ? 'bg-[#0D9488] text-white' :
+                                mode === 'passive' ? 'bg-[#2563EB] text-white' :
+                                'bg-[#57534E] text-white'
+                              : 'text-[#78716C] dark:text-[#A8A29E] hover:bg-[#E7E5E4] dark:hover:bg-[#44403C]'
+                          }`}
+                        >
+                          {mode === 'active' ? '活动' : mode === 'passive' ? '隐匿' : '关闭'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 );
-              })}
+              })
             )}
           </div>
         </div>
