@@ -1146,6 +1146,10 @@ pub struct AppState {
     pub ret_udp_port: std::sync::Arc<std::sync::atomic::AtomicU16>,
     /// SSE broadcast for Reticulum mesh state snapshots.
     pub ret_mesh_event_tx: Option<tokio::sync::broadcast::Sender<String>>,
+    /// Shared with ret_mesh_background: when a PairingOffer is received,
+    /// this is set to the initiator's peer_id. Cleared on PairingResponse
+    /// or PairingCancel. HTTP handlers read this to avoid dual-initiation.
+    pub ret_mesh_pairing_pending: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     pub pairing: Arc<pairing::PairingManager>,
     pub config_store: Arc<config::ConfigStore>,
     pub reminder_store: Arc<reminder::ReminderStore>,
@@ -1486,6 +1490,7 @@ impl AppState {
             )),
             ret_udp_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
             ret_mesh_event_tx: None,
+            ret_mesh_pairing_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store,
             reminder_store: Arc::new(reminder_store),
@@ -2152,6 +2157,7 @@ async fn ret_mesh_background(
                                 node.announce_with_pairing_result(Some(result)).await;
                                 // Clear pairing_pending if this was a response to an offer.
                                 pairing_pending_peer_id = None;
+                                *state.ret_mesh_pairing_pending.lock().unwrap() = None;
                             }
                         }
                         Ok(exomind_net_pairing::RetPairingLinkFrame::PairingOffer { session_id: _, initiator_peer_id, initiator_host_id: _, initiator_node_name: _ }) => {
@@ -2160,6 +2166,7 @@ async fn ret_mesh_background(
                                 "received PairingOffer from remote peer"
                             );
                             pairing_pending_peer_id = Some(initiator_peer_id.clone());
+                            *state.ret_mesh_pairing_pending.lock().unwrap() = pairing_pending_peer_id.clone();
                             let interfaces = {
                                 let mgr = node.transport.iface_manager();
                                 let mgr_lock = mgr.lock().await;
@@ -2172,6 +2179,7 @@ async fn ret_mesh_background(
                         Ok(exomind_net_pairing::RetPairingLinkFrame::PairingCancel { .. }) => {
                             tracing::info!("received PairingCancel, clearing pairing_pending");
                             pairing_pending_peer_id = None;
+                            *state.ret_mesh_pairing_pending.lock().unwrap() = None;
                             let interfaces = {
                                 let mgr = node.transport.iface_manager();
                                 let mgr_lock = mgr.lock().await;
@@ -2495,6 +2503,7 @@ mod tests {
             )),
             ret_udp_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
             ret_mesh_event_tx: None,
+            ret_mesh_pairing_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),

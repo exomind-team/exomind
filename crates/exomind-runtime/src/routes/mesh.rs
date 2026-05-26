@@ -651,6 +651,12 @@ async fn initiate_ret_pair(
         return Err(StatusCode::CONFLICT);
     }
 
+    // If the target peer already sent us a PairingOffer, don't duplicate.
+    // Return a signal so the frontend enters PIN input mode instead.
+    if *state.ret_mesh_pairing_pending.lock().unwrap() == Some(peer_id.clone()) {
+        return Err(StatusCode::CONFLICT); // frontend falls back to PIN dialog
+    }
+
     let session = state.pairing.initiate(state.host_id.clone());
 
     // Fire-and-forget: notify the target peer that a pairing session has started.
