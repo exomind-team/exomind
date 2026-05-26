@@ -324,13 +324,17 @@ async fn reticulum_pair_route_authorizes_mesh_peer_after_pin_over_reticulum() {
     });
 
     let command = pairing_rx.recv().await.expect("route should enqueue Reticulum pairing command");
-    let exomind_runtime::RetMeshPairingCommand::PairWithPeer {
-        peer,
-        pin,
-        responder_inbound_token,
-        responder_base_url,
-        reply,
-    } = command;
+    let (peer, pin, responder_inbound_token, responder_base_url, reply) =
+        match command {
+            exomind_runtime::RetMeshPairingCommand::PairWithPeer {
+                peer,
+                pin,
+                responder_inbound_token,
+                responder_base_url,
+                reply,
+            } => (peer, pin, responder_inbound_token, responder_base_url, reply),
+            _ => panic!("expected PairWithPeer command"),
+        };
     assert_eq!(peer.identity_hex, "ret-identity-0123456789abcdef");
     assert_eq!(pin, "123456");
     assert_eq!(responder_base_url, "http://127.0.0.1:0");
@@ -688,6 +692,13 @@ async fn initiate_ret_pair_pin_used_in_subsequent_pair() {
     let pin = initiate_payload["pin"].as_str().unwrap().to_string();
     assert_eq!(pin.len(), 6);
 
+    // Drain the SendPairingOffer command that initiate-pair now sends.
+    let cmd = pairing_rx.recv().await.expect("should receive SendPairingOffer");
+    match cmd {
+        exomind_runtime::RetMeshPairingCommand::SendPairingOffer { .. } => {}
+        _ => panic!("expected SendPairingOffer from initiate-pair"),
+    }
+
     // 2. The same PIN should work with the pair endpoint (responder flow).
     let app_for_pairing = app.clone();
     let pin_for_request = pin.clone();
@@ -709,11 +720,10 @@ async fn initiate_ret_pair_pin_used_in_subsequent_pair() {
     });
 
     let command = pairing_rx.recv().await.expect("should receive pairing command");
-    let exomind_runtime::RetMeshPairingCommand::PairWithPeer {
-        pin: cmd_pin,
-        reply,
-        ..
-    } = command;
+    let (cmd_pin, reply) = match command {
+        exomind_runtime::RetMeshPairingCommand::PairWithPeer { pin, reply, .. } => (pin, reply),
+        _ => panic!("expected PairWithPeer command"),
+    };
     assert_eq!(cmd_pin, pin, "pair endpoint should forward the same PIN");
 
     let _ = reply.send(Ok(exomind_runtime::RetMeshPairingSuccess {

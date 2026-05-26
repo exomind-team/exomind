@@ -51,6 +51,18 @@ pub enum PairingMsgType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RetPairingLinkFrame {
+    /// Offer sent by the initiator to notify the responder that a pairing
+    /// session has been created. The responder should display a PIN input
+    /// dialog upon receiving this frame.
+    PairingOffer {
+        session_id: String,
+        initiator_peer_id: String,
+        initiator_host_id: String,
+        initiator_node_name: String,
+    },
+    /// Response sent by the responder back to the initiator over the
+    /// encrypted Reticulum Link, carrying the PIN and responder's inbound
+    /// token. This must never be embedded in public Announce app_data.
     PairingResponse {
         request_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

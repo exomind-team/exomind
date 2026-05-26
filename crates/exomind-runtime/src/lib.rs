@@ -1086,6 +1086,7 @@ pub struct RetMeshPairingSuccess {
 
 #[derive(Debug)]
 pub enum RetMeshPairingCommand {
+    /// Send a PIN pairing response (responder → initiator).
     PairWithPeer {
         peer: exomind_net_pairing::DiscoveredPeer,
         pin: String,
@@ -1094,6 +1095,19 @@ pub enum RetMeshPairingCommand {
         reply: tokio::sync::oneshot::Sender<
             Result<RetMeshPairingSuccess, RetMeshPairingFailure>,
         >,
+    },
+    /// Send a PairingOffer to notify the target peer that a pairing session
+    /// has been initiated. Fire-and-forget (no reply needed).
+    SendPairingOffer {
+        peer: exomind_net_pairing::DiscoveredPeer,
+        session_id: String,
+        initiator_peer_id: String,
+        initiator_host_id: String,
+        initiator_node_name: String,
+    },
+    /// Disable (remove) a Reticulum transport interface by name.
+    DisableInterface {
+        name: String,
     },
 }
 
@@ -1669,7 +1683,9 @@ async fn ret_mesh_authorize_pairing_response(
         responder_port,
         responder_base_url,
         responder_inbound_token,
-    } = frame;
+    } = frame else {
+        unreachable!("ret_mesh_authorize_pairing_response called with non-PairingResponse frame");
+    };
 
     if initiator_peer_id != state.host_id {
         return exomind_net_pairing::RetPairingResultAnnounce {
@@ -1791,6 +1807,17 @@ async fn try_push_ret_mesh_snapshot(
     state: &AppState,
     interfaces: Vec<exomind_net_pairing::InterfaceInfo>,
 ) {
+    try_push_ret_mesh_snapshot_with_offer(state, interfaces, None).await;
+}
+
+/// Build and push a Reticulum mesh state snapshot, optionally including
+/// a `pairing_pending` field (used to notify the frontend of an incoming
+/// PairingOffer from a remote peer).
+async fn try_push_ret_mesh_snapshot_with_offer(
+    state: &AppState,
+    interfaces: Vec<exomind_net_pairing::InterfaceInfo>,
+    pairing_pending: Option<String>,
+) {
     use std::sync::atomic::Ordering;
     let Some(tx) = &state.ret_mesh_event_tx else { return };
     let mode_raw = state.ret_mesh_mode.load(Ordering::Relaxed);
@@ -1871,6 +1898,7 @@ async fn try_push_ret_mesh_snapshot(
             },
             "interfaces": interfaces,
             "peers": peers_list,
+            "pairing_pending": pairing_pending,
         },
     });
     let _ = tx.send(snapshot.to_string());
@@ -1896,6 +1924,7 @@ async fn ret_mesh_background(
     let discovered = node.discovered.clone();
     let local_identity_hex = node.local_identity_hex();
     let mut pending_pairings: HashMap<String, PendingRetPairing> = HashMap::new();
+    let mut pairing_pending_peer_id: Option<String> = None;
     let mut last_local_announce_ms: u64 = 0;
     let mut tick_count: u64 = 0;
     let mut select_hit_connect: u64 = 0;
@@ -1942,7 +1971,7 @@ async fn ret_mesh_background(
             }
             Some(command) = pairing_rx.recv() => {
                 select_hit_pairing += 1;
-                tracing::info!("[select] pairing_rx(hit:{}) PairWithPeer", select_hit_pairing);
+                tracing::info!("[select] pairing_rx(hit:{}) command", select_hit_pairing);
                 match command {
                     RetMeshPairingCommand::PairWithPeer {
                         peer,
@@ -2003,6 +2032,51 @@ async fn ret_mesh_background(
                             );
                         }
                     }
+                    RetMeshPairingCommand::SendPairingOffer {
+                        peer,
+                        session_id,
+                        initiator_peer_id,
+                        initiator_host_id,
+                        initiator_node_name,
+                    } => {
+                        let peer_id = ret_discovered_peer_id(&peer);
+                        let tcp_port = if peer.port > 60535 { peer.port - 5000 } else { peer.port + 5000 };
+                        let tcp_addr = format!("127.0.0.1:{}", tcp_port);
+                        let tcp_already_connected = {
+                            let mgr = node.transport.iface_manager();
+                            let mgr_lock = mgr.lock().await;
+                            mgr_lock.list_interfaces().iter().any(|iface| {
+                                iface.iface_type == "tcp_client" && iface.name.contains(&tcp_addr)
+                            })
+                        };
+                        if !tcp_already_connected {
+                            tracing::info!("Reticulum connecting TCP to send PairingOffer to peer {} at {}", peer_id, tcp_addr);
+                            exomind_net_pairing::RetMeshNode::add_tcp_client(&node.transport, &tcp_addr).await;
+                        }
+                        let frame = exomind_net_pairing::RetPairingLinkFrame::PairingOffer {
+                            session_id,
+                            initiator_peer_id,
+                            initiator_host_id,
+                            initiator_node_name,
+                        };
+                        if let Err(error) = node.send_pairing_frame(&peer, &frame).await {
+                            tracing::error!(peer_id = %peer_id, error = %error, "Reticulum send PairingOffer failed");
+                        } else {
+                            tracing::info!(peer_id = %peer_id, "Reticulum PairingOffer sent over encrypted Link");
+                        }
+                    }
+                    RetMeshPairingCommand::DisableInterface { name } => {
+                        let mgr = node.transport.iface_manager();
+                        let mut mgr_lock = mgr.lock().await;
+                        if mgr_lock.remove_interface(&name) {
+                            tracing::info!(iface = %name, "Reticulum interface disabled");
+                        } else {
+                            tracing::warn!(iface = %name, "Reticulum interface not found for disable");
+                        }
+                        drop(mgr_lock);
+                        let interfaces = mgr.lock().await.list_interfaces();
+                        try_push_ret_mesh_snapshot_with_offer(&state, interfaces, pairing_pending_peer_id.clone()).await;
+                    }
                 }
             }
             Ok(link_event) = link_in_rx.recv() => {
@@ -2010,9 +2084,29 @@ async fn ret_mesh_background(
                 tracing::info!("[select] link_in_rx(hit:{}) link event", select_hit_link);
                 if let exomind_net_pairing::LinkEvent::Data(payload) = link_event.event {
                     match serde_json::from_slice::<exomind_net_pairing::RetPairingLinkFrame>(payload.as_slice()) {
-                        Ok(frame) => {
-                            let result = ret_mesh_authorize_pairing_response(&state, frame).await;
-                            node.announce_with_pairing_result(Some(result)).await;
+                        Ok(exomind_net_pairing::RetPairingLinkFrame::PairingResponse { .. }) => {
+                            // Re-parse to get full ownership for the existing authorize function.
+                            if let Ok(frame) = serde_json::from_slice::<exomind_net_pairing::RetPairingLinkFrame>(payload.as_slice()) {
+                                let result = ret_mesh_authorize_pairing_response(&state, frame).await;
+                                node.announce_with_pairing_result(Some(result)).await;
+                                // Clear pairing_pending if this was a response to an offer.
+                                pairing_pending_peer_id = None;
+                            }
+                        }
+                        Ok(exomind_net_pairing::RetPairingLinkFrame::PairingOffer { session_id: _, initiator_peer_id, initiator_host_id: _, initiator_node_name: _ }) => {
+                            tracing::info!(
+                                initiator_peer_id = %initiator_peer_id,
+                                "received PairingOffer from remote peer"
+                            );
+                            pairing_pending_peer_id = Some(initiator_peer_id.clone());
+                            let interfaces = {
+                                let mgr = node.transport.iface_manager();
+                                let mgr_lock = mgr.lock().await;
+                                mgr_lock.list_interfaces()
+                            };
+                            try_push_ret_mesh_snapshot_with_offer(
+                                &state, interfaces, pairing_pending_peer_id.clone(),
+                            ).await;
                         }
                         Err(error) => {
                             tracing::debug!(error = %error, "ignoring non-pairing Reticulum Link payload");
@@ -2100,7 +2194,7 @@ async fn ret_mesh_background(
                         let mgr_lock = mgr.lock().await;
                         mgr_lock.list_interfaces()
                     };
-                    try_push_ret_mesh_snapshot(&state, interfaces).await;
+                    try_push_ret_mesh_snapshot_with_offer(&state, interfaces, pairing_pending_peer_id.clone()).await;
                 }
             }
             _ = tick.tick() => {
@@ -2235,7 +2329,7 @@ async fn ret_mesh_background(
                     let mgr_lock = mgr.lock().await;
                     mgr_lock.list_interfaces()
                 };
-                try_push_ret_mesh_snapshot(&state, interfaces).await;
+                try_push_ret_mesh_snapshot_with_offer(&state, interfaces, pairing_pending_peer_id.clone()).await;
             }
         }
     }

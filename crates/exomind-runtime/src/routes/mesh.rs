@@ -653,6 +653,27 @@ async fn initiate_ret_pair(
 
     let session = state.pairing.initiate(state.host_id.clone());
 
+    // Fire-and-forget: notify the target peer that a pairing session has started.
+    if let Some(tx) = &state.ret_mesh_pairing_tx {
+        let initiator_peer_id = ret_peer_mesh_peer_id(&peer).to_string();
+        let send_result = tx
+            .send(crate::RetMeshPairingCommand::SendPairingOffer {
+                peer: peer.clone(),
+                session_id: session.session_id.clone(),
+                initiator_peer_id,
+                initiator_host_id: state.host_id.clone(),
+                initiator_node_name: state.device_id.clone(),
+            })
+            .await;
+        if let Err(error) = send_result {
+            tracing::warn!(
+                peer_id = %peer_id,
+                error = %error,
+                "failed to send PairingOffer to background task"
+            );
+        }
+    }
+
     tracing::info!(
         peer_id = %peer_id,
         session_id = %session.session_id,
@@ -878,6 +899,31 @@ pub fn router() -> Router<AppState> {
         // Initiate is protected: only the local admin can create pairing sessions.
         // This prevents remote attackers from calling initiate + respond to self-pair.
         .route("/mesh/pairing/initiate", post(pairing_initiate))
+        .route("/mesh/ret/interfaces/:name/mode", post(set_ret_interface_mode))
+}
+
+#[derive(Deserialize)]
+struct SetInterfaceModeRequest {
+    enabled: bool,
+}
+
+/// Enable or disable a Reticulum transport interface by name.
+/// Disabling removes the interface; re-enabling requires a RetMeshMode toggle.
+async fn set_ret_interface_mode(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<SetInterfaceModeRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if req.enabled {
+        return (StatusCode::OK, Json(serde_json::json!({"disabled": false, "name": name})));
+    }
+    let Some(tx) = state.ret_mesh_pairing_tx.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "mesh not available"})));
+    };
+    if tx.send(crate::RetMeshPairingCommand::DisableInterface { name: name.clone() }).await.is_err() {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "mesh busy"})));
+    }
+    (StatusCode::OK, Json(serde_json::json!({"disabled": true, "name": name})))
 }
 
 /// Public mesh routes (no auth required).

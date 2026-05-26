@@ -254,6 +254,8 @@ impl RetMeshNode {
     ) -> Transport {
         let mut config = TransportConfig::new(node_name, identity, true);
         config.set_broadcast_capacity(broadcast_capacity);
+        config.set_retransmit(true);
+        config.set_reroute_eager(true);
         Transport::new(config)
     }
 

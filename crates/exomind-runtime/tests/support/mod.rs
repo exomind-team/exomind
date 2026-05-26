@@ -25,6 +25,7 @@ pub async fn start_test_runtime(host_id: &str) -> RuntimeHandle {
         spawn_ts_agents: false,
         mesh_state_path: None,
         auth_secret: None,
+        enable_ret_mesh: false,
         ..Default::default()
     })
     .await
@@ -52,6 +53,7 @@ pub async fn start_test_runtime_with_secret_and_lan(
         mesh_state_path: None,
         auth_secret: secret,
         allow_lan_without_auth,
+        enable_ret_mesh: false,
         ..Default::default()
     })
     .await
@@ -68,6 +70,7 @@ pub async fn start_test_runtime_with_mdns(host_id: &str) -> RuntimeHandle {
         mesh_state_path: None,
         auth_secret: None,
         enable_mdns: true,
+        enable_ret_mesh: false,
         ..Default::default()
     })
     .await

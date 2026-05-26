@@ -168,6 +168,9 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const lastAnnounceTsRef = useRef(Date.now());
   const [interfaces, setInterfaces] = useState<{ name: string; active: boolean }[]>([]);
   const mountedRef = useRef(true);
+  const hasActivePinDialogRef = useRef(false);
+  // Keep ref in sync so the SSE closure always reads the latest value.
+  useEffect(() => { hasActivePinDialogRef.current = pinDialogPeerId !== null || pinDisplay !== null; }, [pinDialogPeerId, pinDisplay]);
 
   useEffect(() => {
     if (!runtimeBaseUrl) return;
@@ -190,6 +193,15 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
           if (payload.status) setStatus(payload.status);
           if (payload.peers) setPeers(payload.peers);
           if (payload.interfaces) setInterfaces(payload.interfaces);
+          // PairingOffer from remote peer: auto-open PIN input dialog.
+          if (payload.pairing_pending && !hasActivePinDialogRef.current) {
+            const pendingPeerId = payload.pairing_pending as string;
+            const knownPeer = (payload.peers as Array<{peer_id?: string; host_id?: string; identity_hex?: string}>)
+              ?.find((p) => (p.peer_id || p.identity_hex || p.host_id) === pendingPeerId);
+            if (knownPeer) {
+              setPinDialogPeerId(pendingPeerId);
+            }
+          }
         } catch { /* ignore malformed events */ }
       });
       evtSource.onerror = () => {
@@ -422,6 +434,23 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${iface.active ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
                   <span className="text-[#44403C] dark:text-[#D6D3D1]">{iface.name}</span>
                   <span className="ml-auto text-[10px] text-[#A8A29E]">{iface.active ? '运行中' : '未连接'}</span>
+                  {iface.active && (
+                    <button
+                      type="button"
+                      title="禁用此接口"
+                      onClick={() => {
+                        if (!runtimeBaseUrl) return;
+                        fetch(`${runtimeBaseUrl}/mesh/ret/interfaces/${encodeURIComponent(iface.name)}/mode`, {
+                          method: 'POST',
+                          headers: { 'content-type': 'application/json' },
+                          body: JSON.stringify({ enabled: false }),
+                        }).catch(() => {});
+                      }}
+                      className="text-[10px] text-[#A8A29E] hover:text-[#DC2626]"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               ))
             )}
