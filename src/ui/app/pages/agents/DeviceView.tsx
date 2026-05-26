@@ -155,6 +155,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [pinDialogPeerId, setPinDialogPeerId] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState<string>('');
+  const [pinDisplay, setPinDisplay] = useState<{ peerId: string; pin: string } | null>(null);
   const [status, setStatus] = useState<{
     mesh_enabled: boolean;
     announce_mode: 'off' | 'passive' | 'active';
@@ -269,6 +270,39 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     } finally {
       if (mountedRef.current) {
         setUnpairingHostId(null);
+      }
+    }
+  };
+
+  const handleInitiatePair = async (hostId: string) => {
+    if (!runtimeBaseUrl || pairingHostId || unpairingHostId) return;
+    setPairingHostId(hostId);
+    setPairingError(null);
+    try {
+      const res = await fetch(`${runtimeBaseUrl}/mesh/ret/peers/${encodeURIComponent(hostId)}/initiate-pair`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      });
+      if (!res.ok) {
+        // If initiate fails (peer offline, etc.), fall back to PIN input dialog
+        if (mountedRef.current) {
+          setPinDialogPeerId(hostId);
+        }
+        return;
+      }
+      const data = await res.json() as { pin: string; peer_id: string };
+      if (mountedRef.current && data.pin) {
+        setPinDisplay({ peerId: hostId, pin: data.pin });
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setPairingError(err instanceof Error ? err.message : 'Failed to initiate pairing');
+        // Fall back to PIN input dialog on network error
+        setPinDialogPeerId(hostId);
+      }
+    } finally {
+      if (mountedRef.current) {
+        setPairingHostId(null);
       }
     }
   };
@@ -442,7 +476,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                     <button
                       type="button"
                       data-testid={`reticulum-peer-pair-${peerIdentity}`}
-                      onClick={() => setPinDialogPeerId(peerIdentity)}
+                      onClick={() => { void handleInitiatePair(peerIdentity); }}
                       disabled={isPairing || pairingHostId !== null || unpairingHostId !== null}
                       className="rounded-lg bg-[#0D9488] px-2.5 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -467,6 +501,59 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
         </div>
       )}
 
+      {/* ── PIN Display Dialog (Initiator) ── */}
+      {pinDisplay != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-80 rounded-2xl bg-white p-6 shadow-xl dark:bg-[#1C1917]">
+            <h4 className="mb-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+              配对码
+            </h4>
+            <p className="mb-4 text-xs text-[#A8A29E]">
+              请在对方设备上输入此配对码
+            </p>
+            <div className="mb-4 flex justify-center gap-2">
+              {pinDisplay.pin.split('').map((digit, i) => (
+                <div
+                  key={i}
+                  className="flex h-14 w-11 items-center justify-center rounded-xl border-2 border-[#C75B3A] bg-[#FAF7F5] text-2xl font-bold tabular-nums text-[#1C1917] dark:bg-[#292524] dark:text-[#FAFAF9]"
+                >
+                  {digit}
+                </div>
+              ))}
+            </div>
+            <div className="mb-4 flex items-center justify-center gap-2 text-xs text-[#A8A29E]">
+              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              等待对方输入配对码...
+            </div>
+            <div className="flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => {
+                  const peerId = pinDisplay.peerId;
+                  setPinDisplay(null);
+                  setPinInput('');
+                  setPinDialogPeerId(peerId);
+                }}
+                className="text-xs text-[#78716C] underline hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+              >
+                改为输入配对码
+              </button>
+              <button
+                type="button"
+                onClick={() => setPinDisplay(null)}
+                className="rounded-xl border border-[#F0ECE8] px-4 py-2 text-xs font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PIN Input Dialog (Responder) ── */}
       {pinDialogPeerId != null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-80 rounded-2xl bg-white p-6 shadow-xl dark:bg-[#1C1917]">

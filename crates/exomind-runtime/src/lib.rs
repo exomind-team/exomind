@@ -1790,13 +1790,67 @@ async fn try_push_ret_mesh_snapshot(
     let Some(tx) = &state.ret_mesh_event_tx else { return };
     let mode_raw = state.ret_mesh_mode.load(Ordering::Relaxed);
     let mode: exomind_net_pairing::RetMeshMode = mode_raw.into();
-    let (discovered_count, authorized_count) = if let Some(peers) = &state.ret_mesh_peers {
-        let map = peers.read().await;
-        let auth = map.values().filter(|p| matches!(p.trust_state, exomind_net_pairing::discovery::TrustState::Paired | exomind_net_pairing::discovery::TrustState::Trusted)).count();
-        (map.len(), auth)
-    } else {
-        (0, 0)
-    };
+    let (discovered_count, authorized_count, peers_list) =
+        if let Some(peers) = &state.ret_mesh_peers {
+            let map = peers.read().await;
+            let auth_count = map
+                .values()
+                .filter(|p| {
+                    matches!(
+                        p.trust_state,
+                        exomind_net_pairing::discovery::TrustState::Paired
+                            | exomind_net_pairing::discovery::TrustState::Trusted
+                    )
+                })
+                .count();
+            let list: Vec<serde_json::Value> = map
+                .values()
+                .map(|peer| {
+                    let peer_id = if peer.identity_hex.is_empty() {
+                        peer.host_id.clone()
+                    } else {
+                        peer.identity_hex.clone()
+                    };
+                    let authorized = state
+                        .mesh
+                        .get_peer(&peer_id)
+                        .or_else(|| {
+                            (peer_id != peer.host_id)
+                                .then(|| state.mesh.get_peer(&peer.host_id))
+                                .flatten()
+                        })
+                        .filter(|mp| mp.enabled && mp.inbound_secret.is_some())
+                        .is_some();
+                    let connection_state = match peer.trust_state {
+                        exomind_net_pairing::discovery::TrustState::Blocked => "blocked",
+                        exomind_net_pairing::discovery::TrustState::Trusted if authorized => {
+                            "trusted"
+                        }
+                        _ if authorized => "connected_authorized",
+                        _ if peer.online => "connected_unauthorized",
+                        _ => "discovered",
+                    };
+                    serde_json::json!({
+                        "host_id": peer.host_id,
+                        "node_name": peer.node_name,
+                        "app_version": peer.app_version,
+                        "port": peer.port,
+                        "identity_hex": peer.identity_hex,
+                        "destination_hex": peer.destination_hex,
+                        "peer_id": peer_id,
+                        "last_seen_ms": peer.last_seen_ms,
+                        "online": peer.online,
+                        "trust_state": peer.trust_state,
+                        "connection_state": connection_state,
+                        "authorized": authorized,
+                        "rtt_ms": peer.rtt_ms,
+                    })
+                })
+                .collect();
+            (map.len(), auth_count, list)
+        } else {
+            (0, 0, vec![])
+        };
 
     let snapshot = serde_json::json!({
         "type": "ret_mesh_snapshot",
@@ -1811,6 +1865,7 @@ async fn try_push_ret_mesh_snapshot(
                 "announce_period_ms": 10_000u64,
             },
             "interfaces": interfaces,
+            "peers": peers_list,
         },
     });
     let _ = tx.send(snapshot.to_string());
@@ -3287,5 +3342,69 @@ mod tests {
             options.auth_secret.is_none(),
             "loopback bind host may keep secret optional for local-only dev mode"
         );
+    }
+
+    #[tokio::test]
+    async fn try_push_ret_mesh_snapshot_includes_peers() {
+        use exomind_net_pairing::discovery::TrustState;
+        use exomind_net_pairing::DiscoveredPeer;
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let (tx, mut rx) = tokio::sync::broadcast::channel::<String>(16);
+        let mut state = AppState::new(0);
+        state.ret_mesh_event_tx = Some(tx.clone());
+
+        let test_peer = DiscoveredPeer {
+            host_id: "snapshot-peer-host".to_string(),
+            node_name: "snapshot-node".to_string(),
+            app_version: "0.1.0".to_string(),
+            port: 9999,
+            identity_hex: "snapshot-identity-0123456789abcdef".to_string(),
+            destination_hex: Some("snapshot-dest-hex".to_string()),
+            last_seen_ms: 1_800_000_000_000,
+            online: true,
+            trust_state: TrustState::Discovered,
+            rtt_ms: Some(25),
+        };
+        let peers_map = std::sync::Arc::new(tokio::sync::RwLock::new(
+            std::collections::HashMap::from([(
+                test_peer.identity_hex.clone(),
+                test_peer,
+            )]),
+        ));
+        state.ret_mesh_peers = Some(peers_map);
+
+        let _ = try_push_ret_mesh_snapshot(&state, vec![]).await;
+
+        let event = timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("should receive snapshot event within 2s")
+            .expect("broadcast should yield a value");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&event).expect("snapshot should be valid JSON");
+
+        assert_eq!(
+            parsed["type"],
+            "ret_mesh_snapshot",
+            "event type should be ret_mesh_snapshot"
+        );
+        assert!(
+            parsed["payload"]["peers"].is_array(),
+            "payload.peers should be an array"
+        );
+        let peers = parsed["payload"]["peers"].as_array().unwrap();
+        assert_eq!(peers.len(), 1, "should have 1 peer in snapshot");
+
+        let peer = &peers[0];
+        assert_eq!(peer["host_id"], "snapshot-peer-host");
+        assert_eq!(peer["node_name"], "snapshot-node");
+        assert_eq!(peer["peer_id"], "snapshot-identity-0123456789abcdef");
+        assert_eq!(peer["connection_state"], "connected_unauthorized");
+        assert_eq!(peer["authorized"], false);
+        assert_eq!(peer["online"], true);
+        assert_eq!(peer["port"], 9999);
+        assert_eq!(peer["rtt_ms"], 25);
+        assert_eq!(peer["trust_state"], "Discovered");
     }
 }

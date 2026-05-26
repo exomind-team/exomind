@@ -588,6 +588,168 @@ async fn reticulum_pair_route_authorizes_mesh_peer_after_pin_over_reticulum() {
 }
 
 #[tokio::test]
+async fn initiate_ret_pair_generates_pin_and_session() {
+    let state = AppState::new(0);
+    let ret_peer = reticulum_test_peer();
+    let peers = Arc::new(tokio::sync::RwLock::new(HashMap::from([(
+        ret_peer.identity_hex.clone(),
+        ret_peer,
+    )])));
+    // No pairing_tx — the initiate endpoint only uses PairingManager, not ret_mesh_pairing_tx.
+    let mut test_state = state;
+    test_state.ret_mesh_peers = Some(peers.clone());
+    let app = exomind_runtime::app_with_state(test_state);
+
+    // 1. Initiate pairing — should return PIN + session_id
+    let initiate_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mesh/ret/peers/ret-identity-0123456789abcdef/initiate-pair")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(initiate_resp.status(), StatusCode::OK);
+    let initiate_body = initiate_resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let initiate_payload: Value = serde_json::from_slice(&initiate_body).unwrap();
+    let session_id = initiate_payload["session_id"]
+        .as_str()
+        .expect("session_id should be a non-empty string")
+        .to_string();
+    assert!(!session_id.is_empty(), "session_id should not be empty");
+    let pin = initiate_payload["pin"]
+        .as_str()
+        .expect("pin should be a non-empty string")
+        .to_string();
+    assert_eq!(pin.len(), 6, "PIN should be 6 digits");
+    assert!(
+        pin.chars().all(|c| c.is_ascii_digit()),
+        "PIN should contain only digits"
+    );
+    assert_eq!(
+        initiate_payload["peer_id"],
+        "ret-identity-0123456789abcdef"
+    );
+    assert_eq!(initiate_payload["peer_host_id"], "ret-peer-host");
+}
+
+#[tokio::test]
+async fn initiate_ret_pair_pin_used_in_subsequent_pair() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let mesh_persist_path = tempdir.path().join("mesh-state.json");
+    let mut state = AppState::new_runtime(
+        0,
+        "ret-local-host".to_string(),
+        Some(mesh_persist_path.clone()),
+        None,
+        false,
+        Some("admin-secret".to_string()),
+    );
+    let ret_peer = reticulum_test_peer();
+    let peers = Arc::new(tokio::sync::RwLock::new(HashMap::from([(
+        ret_peer.identity_hex.clone(),
+        ret_peer,
+    )])));
+    let (pairing_tx, mut pairing_rx) = tokio::sync::mpsc::channel(4);
+    state.ret_mesh_peers = Some(peers.clone());
+    state.ret_mesh_pairing_tx = Some(pairing_tx);
+    let app = exomind_runtime::app_with_state(state);
+
+    // 1. Initiate pairing — generates PIN via PairingManager
+    let initiate_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mesh/ret/peers/ret-identity-0123456789abcdef/initiate-pair")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(initiate_resp.status(), StatusCode::OK);
+    let initiate_body = initiate_resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
+    let initiate_payload: Value = serde_json::from_slice(&initiate_body).unwrap();
+    let pin = initiate_payload["pin"].as_str().unwrap().to_string();
+    assert_eq!(pin.len(), 6);
+
+    // 2. The same PIN should work with the pair endpoint (responder flow).
+    let app_for_pairing = app.clone();
+    let pin_for_request = pin.clone();
+    let response_task = tokio::spawn(async move {
+        app_for_pairing
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mesh/ret/peers/ret-identity-0123456789abcdef/pair")
+                    .header("authorization", "Bearer admin-secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "pin": pin_for_request }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    });
+
+    let command = pairing_rx.recv().await.expect("should receive pairing command");
+    let exomind_runtime::RetMeshPairingCommand::PairWithPeer {
+        pin: cmd_pin,
+        reply,
+        ..
+    } = command;
+    assert_eq!(cmd_pin, pin, "pair endpoint should forward the same PIN");
+
+    let _ = reply.send(Ok(exomind_runtime::RetMeshPairingSuccess {
+        request_id: "ret-initiate-pair-test".to_string(),
+        initiator_inbound_token: "initiator-token".to_string(),
+    }));
+
+    let response = response_task.await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = response.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&response_body).unwrap();
+    assert_eq!(payload["paired"], serde_json::json!(true));
+    assert_eq!(payload["peer_state"]["authorized"], serde_json::json!(true));
+
+    // 3. Call initiate-pair again — should create a fresh session with a new PIN
+    let pairing_result = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mesh/ret/peers/ret-identity-0123456789abcdef/initiate-pair")
+                .header("authorization", "Bearer admin-secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pairing_result.status(), StatusCode::OK);
+    let new_body = pairing_result.into_body().collect().await.unwrap().to_bytes();
+    let new_payload: Value = serde_json::from_slice(&new_body).unwrap();
+    let new_pin = new_payload["pin"].as_str().unwrap().to_string();
+    assert_eq!(new_pin.len(), 6);
+    assert_ne!(new_pin, pin, "new session should have a different PIN");
+}
+
+#[tokio::test]
 async fn signal_routes_accept_remote_target_type() {
     let app = test_app();
 

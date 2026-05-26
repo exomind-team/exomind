@@ -310,37 +310,35 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 
 ## 9. 已知问题
 
-### 9.1 PIN 配对流程缺少发起方「显示配对码」UI
+### 9.1 ~~PIN 配对流程缺少发起方「显示配对码」UI~~ ✅ 已解决
 
-**现象**：PIN 配对流程是单向非对称的——发起方生成 6 位 PIN，响应方输入该 PIN。但当前 UI 仅实现了输入 PIN（响应方视角，`DeviceView.tsx` 的 `pinDialog`），缺少发起方「屏幕显示 PIN」的展示步骤。
+**解决方案（2026-05-26）**：新增 `POST /mesh/ret/peers/:peer_id/initiate-pair` 端点，调用 `PairingManager::initiate()` 生成 6 位 PIN 与 session_id，返回 `{ session_id, pin, peer_id, peer_host_id }` 给前端。前端「授权」按钮点击后先调此端点，展示 PIN 数字弹窗（发起方视角），弹窗底部有「改为输入配对码」链接可切换至现有的 PIN 输入模式（响应方视角）。
 
-**流程缺口**：
+**完整闭环**：
 ```
-发起方（设备 A）                 响应方（设备 B）
-  生成 6 位 PIN                    ── 不生成 PIN
-  显示在屏幕上 ──── 人眼读取 ───→   输入 PIN
-  ←── 验证结果（Link）──          发送 PIN 至 Link
+发起方（设备 A）                            响应方（设备 B）
+  POST /initiate-pair → 生成PIN             (人眼读取 PIN)
+  展示 PIN: 123456  ──── 看屏幕 ───────→    点击「授权」
+                                            → 改为输入配对码
+                                            → 输入 123456
+                                            → POST /pair { pin }
+                                            → 发送至 Reticulum Link
+  ←── 验证 PIN ✓ ── PairingResult ──────→    ←── 已授权
+  SSE 更新 → 已授权
 ```
-当前 `POST /mesh/ret/peers/:peer_id/pair {"pin":"..."}` 端点的设计是「一端输入 PIN → 另一端验证」，但缺少了「PIN 生成 → 展示 → 另一方输入」的第一步。
 
-**根因**：后端 `PairingManager` 能生成 PIN（`RetMeshNode::generate_pin()`），但没有路由把它返回给前端在屏幕上展示。`POST /mesh/ret/peers/:peer_id/pair` 直接接受 PIN 作为输入，没有先返回一个 session_id 和展示 PIN 的中间状态。
+**变更文件**：
+- `crates/exomind-runtime/src/routes/mesh.rs` — 新增 `InitiateRetPairResponse` + `initiate_ret_pair` 处理器 + 路由
+- `crates/exomind-runtime/tests/mesh_routes_integration.rs` — 2 个新测试：PIN 生成验证 + 联动 pair 验证
+- `src/ui/app/pages/agents/DeviceView.tsx` — PIN 展示弹窗 + `handleInitiatePair` + 按钮逻辑
+- `tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx` — 测试适配新流程
 
-**影响范围**：
-- `crates/exomind-runtime/src/pairing.rs` — `PairingManager` 已有 PIN 生成逻辑
-- `crates/exomind-runtime/src/routes/mesh.rs` — `POST /mesh/ret/peers/:peer_id/pair` 路由
-- `crates/exomind-runtime/src/routes/mesh.rs` — `POST /mesh/pairing/initiate` 旧端点（可复用但需适配）
-- `src/ui/app/pages/agents/DeviceView.tsx` — PIN 输入弹窗（pinDialog）
+### 9.2 ~~mDNS 状态计数更新但节点列表不刷新（需页面重载）~~ ✅ 已解决
 
-**解决方向**：增加一个「发起配对」端点（可复用 `POST /mesh/pairing/initiate` 或新增），返回生成的 PIN 和 session_id。前端「授权」按钮点击时先调用该端点 → 展示 PIN → 响应方在另一设备的 UI 输入。确认后再调 `POST /mesh/ret/peers/:peer_id/pair`。
+**根因**：`try_push_ret_mesh_snapshot` 读取 `state.ret_mesh_peers` 仅用于统计计数，未将 peer 数据转换为 JSON 写入 `payload.peers`。
 
-**关联**：Phase 1 迁移计划第 3 条「Reticulum pairing message」——PIN 展示是配对协议的第一步。
+**解决方案（2026-05-26）**：在 `try_push_ret_mesh_snapshot` 中，读取 peers map 后将其转换为 `connection_state`、`authorized` 等字段的 JSON 数组，写入 `payload.peers`。转换逻辑与 `GET /mesh/ret/peers` 端点（`ret_peer_state_public`）保持一致，前端 SSE handler 中已有的 `if (payload.peers) setPeers(payload.peers)` 可直接使用。
 
-### 9.2 mDNS 状态计数更新但节点列表不刷新（需页面重载）
-
-**现象**：mDNS 局域网发现节点时，状态栏「已发现 N」计数正确更新，但下方的节点列表不自动呈现新增节点。需手动刷新页面（F5）后列表才显示。
-
-**根因**：`GET /mesh/ret/events` SSE 流的 `ret_mesh_snapshot` 事件中 `peers` 字段为 `undefined`（后端未在 snapshot 中包含 peers 列表），因此前端的 `payload.peers` 条件判断（`if (payload.peers) setPeers(...)`）不会触发更新。状态栏的计数来自 `payload.status.discovered_count`，该字段正常推送——导致计数可见但列表为空。
-
-**影响范围**：前端 DeviceView `ReticulumPeerSection` SSE 处理逻辑。
-
-**解决方向**：在 `try_push_ret_mesh_snapshot` 或背景循环中，将 `state.ret_mesh_peers` 转换为 `RetPeerStatePublic` 列表并写入 `payload.peers`。当前 snapshot 仅包含 `status`，缺少 `peers` 和 `interfaces` 的完整副本。
+**变更文件**：
+- `crates/exomind-runtime/src/lib.rs` — `try_push_ret_mesh_snapshot` 新增 peers 字段
+- `crates/exomind-runtime/src/lib.rs` — 新增 `#[cfg(test)]` 测试验证 snapshot 含 peers

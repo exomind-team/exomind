@@ -507,6 +507,14 @@ struct RetPairResponse {
     mesh_peer: PeerInfoPublic,
 }
 
+#[derive(Debug, Serialize)]
+struct InitiateRetPairResponse {
+    session_id: String,
+    pin: String,
+    peer_id: String,
+    peer_host_id: String,
+}
+
 /// Pair with a peer discovered via Reticulum mesh.
 ///
 /// This is the UI-facing Reticulum PIN pairing hook. The PIN is submitted to
@@ -616,6 +624,45 @@ async fn pair_ret_peer(
         peer,
         peer_state,
         mesh_peer: PeerInfoPublic::from(&mesh_peer),
+    }))
+}
+
+/// Initiate a Reticulum PIN pairing session.
+///
+/// Generates a 6-digit PIN and session on the initiator side, returns them
+/// to the frontend for display. The responder must enter this PIN via
+/// `POST /mesh/ret/peers/:peer_id/pair` to complete the pairing.
+async fn initiate_ret_pair(
+    Path(peer_selector): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<InitiateRetPairResponse>, StatusCode> {
+    if state.ret_mesh_peers.is_none() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    let peer = find_ret_peer_by_selector(&state, &peer_selector)
+        .await
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let peer_id = ret_peer_mesh_peer_id(&peer).to_string();
+    if peer_id.is_empty() {
+        return Err(StatusCode::CONFLICT);
+    }
+    if !peer.online {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let session = state.pairing.initiate(state.host_id.clone());
+
+    tracing::info!(
+        peer_id = %peer_id,
+        session_id = %session.session_id,
+        "Reticulum PIN pairing session initiated"
+    );
+
+    Ok(Json(InitiateRetPairResponse {
+        session_id: session.session_id,
+        pin: session.pin,
+        peer_id,
+        peer_host_id: peer.host_id.clone(),
     }))
 }
 
@@ -819,6 +866,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/mesh/ret/peers/:peer_id/pair",
             post(pair_ret_peer).delete(unpair_ret_peer),
+        )
+        .route(
+            "/mesh/ret/peers/:peer_id/initiate-pair",
+            post(initiate_ret_pair),
         )
         .route("/mesh/ret/status", get(get_ret_mesh_status))
         .route("/mesh/ret/events", get(ret_mesh_events))

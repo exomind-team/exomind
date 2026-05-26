@@ -36,6 +36,7 @@ fn test_app_state(port: u16, host_id: &str, signal_pool: Arc<SignalPool>) -> App
         ret_mesh_connect_tx: None,
         ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(exomind_net_pairing::RetMeshMode::Active as u8)),
         ret_mesh_pairing_tx: None,
+        ret_udp_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
         ret_mesh_event_tx: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),

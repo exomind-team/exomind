@@ -2405,6 +2405,7 @@ mod tests {
             ret_mesh_mode: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(exomind_net_pairing::RetMeshMode::Active as u8)),
             ret_mesh_pairing_tx: None,
             ret_mesh_event_tx: None,
+            ret_udp_port: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0)),
             pairing: Arc::new(pairing::PairingManager::new()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),

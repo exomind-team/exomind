@@ -185,6 +185,18 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
           headers: { 'Content-Type': 'application/json' },
         });
       }
+      if (url.includes('/initiate-pair')) {
+        // Return a generated PIN (mimicking PairingManager.initiate)
+        return new Response(JSON.stringify({
+          session_id: 'test-session-123',
+          pin: '654321',
+          peer_id: 'ret-identity-0123456789abcdef',
+          peer_host_id: 'ret-peer-host',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.endsWith('/mesh/ret/peers/ret-identity-0123456789abcdef/pair') && init?.method === 'POST') {
         return new Response(JSON.stringify({
           paired: true,
@@ -265,8 +277,18 @@ describe('DeviceView runtime topology selectors（设备页拓扑选择器）', 
 
     fireEvent.click(screen.getByTestId('reticulum-peer-pair-ret-identity-0123456789abcdef'));
 
-    // PIN dialog should appear
-    expect(screen.getByText('输入 Reticulum PIN')).toBeInTheDocument();
+    // PIN display dialog should appear (initiator flow — shows generated PIN)
+    expect(await screen.findByText('配对码')).toBeInTheDocument();
+    expect(screen.getByText('请在对方设备上输入此配对码')).toBeInTheDocument();
+    // Verify the PIN digits are rendered
+    expect(screen.getByText('6')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
+
+    // Click "改为输入配对码" to switch to responder (PIN input) dialog
+    fireEvent.click(screen.getByText('改为输入配对码'));
+
+    // PIN input dialog should appear
+    expect(await screen.findByText('输入 Reticulum PIN')).toBeInTheDocument();
 
     // Enter PIN digits
     const pinInputs = screen.getAllByDisplayValue('');

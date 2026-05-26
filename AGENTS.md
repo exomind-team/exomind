@@ -116,8 +116,9 @@
 - **状态视图**：`GET /mesh/ret/peers` — 统一返回 discovered / connected_unauthorized / connected_authorized / trusted / blocked
 - **兼容视图**：`GET /mesh/ret/discovered` — 旧发现列表（兼容）
 - **状态仪表盘**：`GET /mesh/ret/status` — 返回 mesh 启用状态、announce_mode（off/passive/active）、本地身份、节点统计
-- **状态推送**：`GET /mesh/ret/events` — SSE 流，推送 `ret_mesh_snapshot` 事件（含 status + interfaces）。注意：`peers` 字段当前在 snapshot 中为 `undefined`，节点列表需通过 `GET /mesh/ret/peers` 拉取；详见 [已知问题 §9.1](docs/architecture/physical-connectivity-layer.md#91-mdns-状态计数更新但节点列表不刷新需页面重载)
-- **配对授权**：`POST /mesh/ret/peers/:peer_id/pair {"pin":"123456"}` — PIN-over-Reticulum 配对
+- **状态推送**：`GET /mesh/ret/events` — SSE 流，推送 `ret_mesh_snapshot` 事件（含 status + interfaces + peers）
+- **发起配对**：`POST /mesh/ret/peers/:peer_id/initiate-pair` — 生成 PIN + session_id 返回给前端展示（发起方）
+- **配对授权**：`POST /mesh/ret/peers/:peer_id/pair {"pin":"123456"}` — PIN-over-Reticulum 配对（响应方）
 - **撤销授权**：`DELETE /mesh/ret/peers/:peer_id/pair`
 - **连接模式开关**：`POST /mesh/ret/announce {"mode":"off|passive|active"}` — 三态控制，前端右上角分段按钮
 - **三阶段路线**：详见 [2026-05-25 迁移计划](docs/plans/2026-05-25-reticulum-authorized-sync-migration-plan.md)
@@ -157,4 +158,4 @@ docs/development/repo-agent-workflow.md
 6. **`codegraph_node`** — 获取单个符号的详细信息 + 源码
 7. **`codegraph_explore`** — 一次查看多个相关符号的源码（替代多次 Read）
 
-**索引覆盖**：1467 文件、22309 符号、56369 边，覆盖 Rust/TSX/TS/Java。
+**索引覆盖**：1468 文件、22363 符号、55794 边，覆盖 Rust/TSX/TS/Java。
