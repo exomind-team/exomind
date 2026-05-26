@@ -1105,9 +1105,10 @@ pub enum RetMeshPairingCommand {
         initiator_host_id: String,
         initiator_node_name: String,
     },
-    /// Disable (remove) a Reticulum transport interface by name.
-    DisableInterface {
+    /// Set per-interface mode (0=Off, 1=Passive, 2=Active).
+    SetInterfaceMode {
         name: String,
+        mode: u8,
     },
 }
 
@@ -2065,13 +2066,13 @@ async fn ret_mesh_background(
                             tracing::info!(peer_id = %peer_id, "Reticulum PairingOffer sent over encrypted Link");
                         }
                     }
-                    RetMeshPairingCommand::DisableInterface { name } => {
+                    RetMeshPairingCommand::SetInterfaceMode { name, mode } => {
                         let mgr = node.transport.iface_manager();
                         let mut mgr_lock = mgr.lock().await;
-                        if mgr_lock.remove_interface(&name) {
-                            tracing::info!(iface = %name, "Reticulum interface disabled");
+                        if mgr_lock.set_interface_mode(&name, mode) {
+                            tracing::info!(iface = %name, mode = %mode, "Reticulum interface mode set");
                         } else {
-                            tracing::warn!(iface = %name, "Reticulum interface not found for disable");
+                            tracing::warn!(iface = %name, "Reticulum interface not found for set_mode");
                         }
                         drop(mgr_lock);
                         let interfaces = mgr.lock().await.list_interfaces();
@@ -2314,7 +2315,10 @@ async fn ret_mesh_background(
                     }
                 }
 
-                let mode: exomind_net_pairing::RetMeshMode = ret_mesh_mode.load(std::sync::atomic::Ordering::Relaxed).into();
+                let mode_raw = ret_mesh_mode.load(std::sync::atomic::Ordering::Relaxed);
+                // Sync global mode to InterfaceManager so send() can filter by it.
+                node.set_global_mode(mode_raw).await;
+                let mode: exomind_net_pairing::RetMeshMode = mode_raw.into();
                 if mode.can_announce() {
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)

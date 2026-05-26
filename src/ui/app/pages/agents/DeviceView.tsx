@@ -166,7 +166,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     announce_period_ms: number;
   } | null>(null);
   const lastAnnounceTsRef = useRef(Date.now());
-  const [interfaces, setInterfaces] = useState<{ name: string; active: boolean }[]>([]);
+  const [interfaces, setInterfaces] = useState<{ name: string; active: boolean; mode?: number }[]>([]);
   const mountedRef = useRef(true);
   const hasActivePinDialogRef = useRef(false);
   // Keep ref in sync so the SSE closure always reads the latest value.
@@ -331,6 +331,16 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
     }
   };
 
+  const handleSetInterfaceMode = (ifaceName: string, mode: 'off' | 'passive' | 'active') => {
+    if (!runtimeBaseUrl) return;
+    setInterfaces((prev) => prev.map((i) => i.name === ifaceName ? { ...i, mode: mode === 'off' ? 0 : mode === 'passive' ? 1 : 2 } : i));
+    fetch(`${runtimeBaseUrl}/mesh/ret/interfaces/${encodeURIComponent(ifaceName)}/mode`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    }).catch(() => {});
+  };
+
   const handleAnnounceModeChange = async (newMode: 'off' | 'passive' | 'active') => {
     if (!runtimeBaseUrl) return;
     try {
@@ -429,30 +439,26 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
             {interfaces.length === 0 ? (
               <div className="text-[10px] text-[#A8A29E]">无接口信息</div>
             ) : (
-              interfaces.map((iface) => (
-                <div key={iface.name} className="flex items-center gap-2">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${iface.active ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
-                  <span className="text-[#44403C] dark:text-[#D6D3D1]">{iface.name}</span>
-                  <span className="ml-auto text-[10px] text-[#A8A29E]">{iface.active ? '运行中' : '未连接'}</span>
-                  {iface.active && (
+              interfaces.map((iface) => {
+                const currentMode = iface.mode ?? 2;
+                const nextMode = currentMode === 2 ? 1 : currentMode === 1 ? 0 : 2;
+                const nextLabel = currentMode === 2 ? '隐匿' : currentMode === 1 ? '关闭' : '活动';
+                return (
+                  <div key={iface.name} className="flex items-center gap-2">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${currentMode > 0 ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                    <span className="truncate max-w-[140px] text-[11px] text-[#44403C] dark:text-[#D6D3D1]" title={iface.name}>{iface.name}</span>
+                    <span className="text-[10px] text-[#A8A29E] whitespace-nowrap">{currentMode === 2 ? '活动' : currentMode === 1 ? '隐匿' : '关闭'}</span>
                     <button
                       type="button"
-                      title="禁用此接口"
-                      onClick={() => {
-                        if (!runtimeBaseUrl) return;
-                        fetch(`${runtimeBaseUrl}/mesh/ret/interfaces/${encodeURIComponent(iface.name)}/mode`, {
-                          method: 'POST',
-                          headers: { 'content-type': 'application/json' },
-                          body: JSON.stringify({ enabled: false }),
-                        }).catch(() => {});
-                      }}
-                      className="text-[10px] text-[#A8A29E] hover:text-[#DC2626]"
+                      title={`切换为${nextLabel}`}
+                      onClick={() => handleSetInterfaceMode(iface.name, nextMode === 2 ? 'active' : nextMode === 1 ? 'passive' : 'off')}
+                      className="ml-auto text-[10px] px-1.5 py-0.5 rounded border border-[#D6D3D1] text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#57534E] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
                     >
-                      ✕
+                      {nextLabel} ▸
                     </button>
-                  )}
-                </div>
-              ))
+                  </div>
+                );
+              })}
             )}
           </div>
         </div>

@@ -259,6 +259,15 @@ impl RetMeshNode {
         Transport::new(config)
     }
 
+    /// Propagate the global RetMeshMode to the transport InterfaceManager.
+    /// The InterfaceManager applies it as an upper bound on per-interface modes:
+    /// effective = min(global, iface.mode).
+    pub async fn set_global_mode(&self, mode: u8) {
+        let mgr = self.transport.iface_manager();
+        let mut mgr_lock = mgr.lock().await;
+        mgr_lock.set_global_mode(mode);
+    }
+
     /// Subscribe to broadcasts from this node.
     pub fn subscribe(&self) -> broadcast::Receiver<RetMeshEvent> {
         self.event_tx.subscribe()

@@ -904,26 +904,29 @@ pub fn router() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct SetInterfaceModeRequest {
-    enabled: bool,
+    mode: String,
 }
 
-/// Enable or disable a Reticulum transport interface by name.
-/// Disabling removes the interface; re-enabling requires a RetMeshMode toggle.
+/// Set the mode of a Reticulum transport interface (off / passive / active).
+/// The effective behavior at send time = min(global_mode, iface_mode).
 async fn set_ret_interface_mode(
     Path(name): Path<String>,
     State(state): State<AppState>,
     Json(req): Json<SetInterfaceModeRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if req.enabled {
-        return (StatusCode::OK, Json(serde_json::json!({"disabled": false, "name": name})));
-    }
+    let mode: u8 = match req.mode.as_str() {
+        "off" => 0,
+        "passive" => 1,
+        "active" => 2,
+        _ => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "invalid mode, expected off/passive/active"}))),
+    };
     let Some(tx) = state.ret_mesh_pairing_tx.clone() else {
         return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "mesh not available"})));
     };
-    if tx.send(crate::RetMeshPairingCommand::DisableInterface { name: name.clone() }).await.is_err() {
+    if tx.send(crate::RetMeshPairingCommand::SetInterfaceMode { name: name.clone(), mode }).await.is_err() {
         return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "mesh busy"})));
     }
-    (StatusCode::OK, Json(serde_json::json!({"disabled": true, "name": name})))
+    (StatusCode::OK, Json(serde_json::json!({"mode": req.mode, "name": name})))
 }
 
 /// Public mesh routes (no auth required).

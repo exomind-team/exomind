@@ -149,14 +149,15 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 
 **实现要点（已落地的全局总闸）：** `ret_mesh_mode: Arc<AtomicU8>` 三态枚举已替换 `AtomicBool`，API、SSE snapshot、前端 UI 均已就绪。
 
-**待实现（按 Interface 的开关）：**
-- `InterfaceManager` 新增 `set_interface_mode(address, mode)` 方法，在 `LocalInterface` 中存储 `mode` 字段
-- `InterfaceManager::send(TxMessage)` 中检查每个 iface 的 mode → Passive 模式下跳过 TX
-- Off 模式下从 `ifaces` 中移除该接口并调用 `stop.cancel()`
-- `InterfaceInfo` 新增 `mode` 字段
-- 前端「下层接口」面板每行增加三段式按钮
-- 接口的动态创建/销毁仍需保持：新发现 peer → 创建接口、metadata 变化 → 更新接口
-- **接口删除**：`udp.rs` `spawn()` 需改用 `context.channel.stop` 而非本地 `CancellationToken::new()`，使外部 `remove_interface(name)` 能永久停止接口循环（详见迁移计划 §11 接口删除章节）
+**已实现（按 Interface 的开关，2026-05-26）：**
+- ✅ `LocalInterface` 新增 `mode: u8` 字段（0=Off, 1=Passive, 2=Active），默认 Active
+- ✅ `InterfaceInfo` 新增 `mode` 字段（public API / SSE snapshot）
+- ✅ `InterfaceManager::set_interface_mode(name, mode)` — 按名称设置接口模式
+- ✅ `InterfaceManager::set_global_mode(mode)` — 全局模式同步
+- ✅ `send(TxMessage)` 按 `min(global_mode, iface_mode)` 过滤：Off 跳过所有，Passive 跳过 announce 转发
+- ✅ `LocalInterface` **不删除**，只切换 mode。Off 仍保留在列表中但跳过所有收发
+- ✅ `POST /mesh/ret/interfaces/:name/mode {"mode":"off|passive|active"}` API
+- ✅ 前端「下层接口」面板每行三段式按钮（活动→隐匿→关闭循环）
 
 ### 4.3 后续：按 peer 的开关
 
@@ -265,7 +266,7 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 | 本机文件注册表 | ✅ 已实现 | 已交付 |
 | TCP 种子连接 | ✅ 已实现（RET_MESH_SEED） | 已交付 |
 | 全局三态开关（Off/Passive/Active） | ✅ 已实现 — `RetMeshMode` 枚举 + API + UI | 已交付 |
-| 按 Interface 三态开关 | 🔲 待实现 — `InterfaceManager.set_interface_mode()` + UX（每接口三段式按钮） | 中 |
+| 按 Interface 三态开关 | ✅ 已实现 — `LocalInterface.mode` + `send()` 按 mode 过滤 + API + 前端三段式按钮 | 中 |
 | RemotePeerManager | 🔲 待实现 | 中 |
 | 本地文件直接通信 | 📝 待探索 | 远期 |
 | Interface 流量计量 | 🔲 待实现 | 低 |
@@ -319,14 +320,20 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 **完整闭环**：
 ```
 发起方（设备 A）                            响应方（设备 B）
-  POST /initiate-pair → 生成PIN             (人眼读取 PIN)
-  展示 PIN: 123456  ──── 看屏幕 ───────→    点击「授权」
-                                            → 改为输入配对码
-                                            → 输入 123456
-                                            → POST /pair { pin }
-                                            → 发送至 Reticulum Link
-  ←── 验证 PIN ✓ ── PairingResult ──────→    ←── 已授权
+  POST /initiate-pair → 生成PIN
+  展示 PIN: 123456
+  ─── PairingOffer (via Reticulum Link) ──→  SSE pairing_pending 字段更新
+                                             前端自动弹出 PIN 输入框
+                                             输入 123456
+                                             POST /pair { pin }
+  ←── 验证 PIN ✓ ── PairingResponse ─────→    ←── 已授权
   SSE 更新 → 已授权
+
+v2 改进（2026-05-26）：
+- 发起方 POST /initiate-pair 后，自动通过加密 Reticulum Link 发送 PairingOffer 帧
+- 响应方 link_in_rx 解析 PairingOffer → 存入 pairing_pending_peer_id → 推 SSE
+- 前端 SSE handler 检测 pairing_pending → 自动弹出 PIN 输入框（无需手动点「授权」）
+- 配对完成后 pairing_pending 自动清空
 ```
 
 **变更文件**：
