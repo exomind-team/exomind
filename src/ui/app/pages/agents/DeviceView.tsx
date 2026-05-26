@@ -260,7 +260,9 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
         body: JSON.stringify({ pin }),
       });
       if (!res.ok) {
-        throw new Error(`Reticulum pairing failed (${res.status})`);
+        let detail = '';
+        try { const body = await res.json(); detail = body.error || ''; } catch { /* ignore */ }
+        throw new Error(detail ? `配对失败: ${detail}` : `配对失败 (HTTP ${res.status})`);
       }
       const data = await res.json() as { peer_state?: ReticulumPeer; peer?: ReticulumPeer };
       const updatedPeer = data.peer_state ?? data.peer;

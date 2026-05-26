@@ -526,26 +526,26 @@ async fn pair_ret_peer(
     Path(peer_selector): Path<String>,
     State(state): State<AppState>,
     payload: Option<Json<RetPairRequest>>,
-) -> Result<Json<RetPairResponse>, StatusCode> {
+) -> Result<Json<RetPairResponse>, (StatusCode, Json<serde_json::Value>)> {
     if state.ret_mesh_peers.is_none() {
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
+        return Err((StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error":"mesh disabled"}))));
     }
     let pairing_tx = state
         .ret_mesh_pairing_tx
         .clone()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let req = payload.ok_or(StatusCode::BAD_REQUEST)?.0;
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error":"mesh channel not ready"}))))?;
+    let req = payload.ok_or((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"missing body"}))))?.0;
     let pin = req.pin.trim().to_string();
     if pin.len() != 6 || !pin.chars().all(|ch| ch.is_ascii_digit()) {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"PIN must be 6 digits"}))));
     }
 
     let peer = find_ret_peer_by_selector(&state, &peer_selector)
         .await
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or((StatusCode::NOT_FOUND, Json(serde_json::json!({"error":"peer not found"}))))?;
     let peer_id = ret_peer_mesh_peer_id(&peer).to_string();
     if peer_id.is_empty() {
-        return Err(StatusCode::CONFLICT);
+        return Err((StatusCode::CONFLICT, Json(serde_json::json!({"error":"empty peer identity"}))));
     }
 
     let responder_inbound_token = uuid::Uuid::new_v4().to_string();
@@ -554,22 +554,30 @@ async fn pair_ret_peer(
     pairing_tx
         .send(crate::RetMeshPairingCommand::PairWithPeer {
             peer: peer.clone(),
-            pin,
+            pin: pin.clone(),
             responder_inbound_token: responder_inbound_token.clone(),
             responder_base_url,
             reply: reply_tx,
         })
         .await
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error":"mesh channel closed"}))))?;
 
     let pairing_result = tokio::time::timeout(Duration::from_secs(35), reply_rx)
         .await
-        .map_err(|_| StatusCode::GATEWAY_TIMEOUT)?
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
-        .map_err(|failure| match failure {
-            crate::RetMeshPairingFailure::Rejected(_) => StatusCode::FORBIDDEN,
-            crate::RetMeshPairingFailure::Timeout => StatusCode::GATEWAY_TIMEOUT,
-            crate::RetMeshPairingFailure::Transport(_) => StatusCode::BAD_GATEWAY,
+        .map_err(|_| (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({"error":"pairing timed out — Reticulum Link not established within 35s"}))))?
+        .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error":"pairing channel closed"}))))?
+        .map_err(|failure| {
+            let msg = match &failure {
+                crate::RetMeshPairingFailure::Rejected(r) => format!("pairing rejected: {r}"),
+                crate::RetMeshPairingFailure::Timeout => "pairing timed out on remote".to_string(),
+                crate::RetMeshPairingFailure::Transport(t) => format!("transport error: {t}"),
+            };
+            let code = match &failure {
+                crate::RetMeshPairingFailure::Rejected(_) => StatusCode::FORBIDDEN,
+                crate::RetMeshPairingFailure::Timeout => StatusCode::GATEWAY_TIMEOUT,
+                crate::RetMeshPairingFailure::Transport(_) => StatusCode::BAD_GATEWAY,
+            };
+            (code, Json(serde_json::json!({"error": msg})))
         })?;
 
     let now = chrono::Utc::now().to_rfc3339();
