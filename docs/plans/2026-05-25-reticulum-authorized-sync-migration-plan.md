@@ -492,9 +492,31 @@ Reticulum 层不只是"加密传输通道"——它是一个完整的多跳自�
 - 复用文件注册表目录结构，每实例写自己的消息文件
 - `Reticulum Link` 加密保证载荷机密性，JSONL 只承载加密后的 Reticulum 包
 
-**阶段 3：撤销授权清理 TCP 接口**
-- `reticulum-rs/iface.rs` — `InterfaceManager` 增加 `remove_interface(name)` 方法
-- `exomind-runtime` — `unpair_ret_peer` 或 background task 中调用
+### 接口删除 — remove_interface() 按名称清理
+
+**背景**：按名称删除最合理——名称在 UI 中已显示（下层接口列表），且 TCP Client 的名称包含地址（`TCP Client → 127.0.0.1:50848`），可精确匹配。当前接口删除方案受限于 udp.rs `spawn()` 使用本地 `CancellationToken`，而非 `context.channel.stop`：
+
+```rust
+// udp.rs 当前：
+let stop = CancellationToken::new();  // 本地 token，不受外部控制
+// RX/TX 任务使用这个本地 stop → 即使 LocalInterface.stop 被 cancel 也不影响
+
+// 修正后：
+let stop = context.channel.stop.clone();  // 与 LocalInterface.stop 共享同一 token
+// cancel LocalInterface.stop → udp.rs 循环检测到 → 不重建 → 接口永久停止
+```
+
+**改动清单**：
+
+| 文件 | 改动 | 影响范围 |
+|------|------|---------|
+| `reticulum-rs/src/iface.rs` | 新增 `pub fn remove_interface(name: &str) -> bool` | 仅 InterfaceManager |
+| `reticulum-rs/src/iface/udp.rs` | `CancellationToken::new()` → `context.channel.stop.clone()` | 1 行，UDP 接口生命周期 |
+| `reticulum-rs/src/iface/tcp_client.rs` | 同上（如果也用了本地 stop） | 可能 1 行 |
+| `reticulum-rs/src/iface/tcp_server.rs` | 同上 | 可能 1 行 |
+| `exomind-runtime/src/lib.rs` | 撤销授权后调用 `remove_iface` | 仅撤销授权路径 |
+
+**前置**：当前 TCP 去重已能防止重复连接积累，`remove_interface` 是更完整的清理，独立任务后续再做。
 
 ### 验证命令速查
 ```bash

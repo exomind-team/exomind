@@ -156,6 +156,7 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 - `InterfaceInfo` 新增 `mode` 字段
 - 前端「下层接口」面板每行增加三段式按钮
 - 接口的动态创建/销毁仍需保持：新发现 peer → 创建接口、metadata 变化 → 更新接口
+- **接口删除**：`udp.rs` `spawn()` 需改用 `context.channel.stop` 而非本地 `CancellationToken::new()`，使外部 `remove_interface(name)` 能永久停止接口循环（详见迁移计划 §11 接口删除章节）
 
 ### 4.3 后续：按 peer 的开关
 
