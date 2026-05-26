@@ -1962,6 +1962,52 @@ async fn ret_mesh_background(
         d
     };
 
+    // ── Immediate startup scan: fire first discovery + announce without waiting for first tick ──
+    {
+        use std::sync::atomic::Ordering;
+        let mode_val = *ret_mesh_mode.lock().unwrap();
+        node.set_global_mode(mode_val).await;
+        let mode: exomind_net_pairing::RetMeshMode = mode_val;
+
+        // Scan file registry for existing peers.
+        if let Ok(entries) = std::fs::read_dir(&local_registry_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
+                let raw = match std::fs::read_to_string(&path) { Ok(s) => s, _ => continue };
+                let info: std::collections::HashMap<String, serde_json::Value> =
+                    match serde_json::from_str(&raw) { Ok(v) => v, _ => continue };
+                let peer_host_id = match info.get("host_id").and_then(|v| v.as_str()) { Some(h) => h, _ => continue };
+                if peer_host_id == state.host_id { continue; }
+                let host = info.get("host").and_then(|v| v.as_str()).unwrap_or("127.0.0.1");
+                let ret_port = info.get("ret_port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                if ret_port > 0 {
+                    let is_new = connected_mdns_ids.insert(format!("{peer_host_id}:{ret_port}"));
+                    tracing::info!("[startup] registry peer host_id={} host={} ret_port={} is_new={}", peer_host_id, host, ret_port, is_new);
+                    if is_new {
+                        mdns_bridge.on_peer_resolved(&node.transport, peer_host_id, host, ret_port).await;
+                    }
+                }
+            }
+        }
+
+        // Announce immediately so peers discover us sooner.
+        if mode.can_announce() {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+            node.announce().await;
+            last_local_announce_ms = now;
+            tracing::info!("[startup] initial announce sent");
+        }
+
+        // Push the first SSE snapshot so the UI doesn't wait 10s.
+        let interfaces = {
+            let mgr = node.transport.iface_manager();
+            let mgr_lock = mgr.lock().await;
+            mgr_lock.list_interfaces()
+        };
+        try_push_ret_mesh_snapshot_with_offer(&state, interfaces, pairing_pending_peer_id.clone()).await;
+    }
+
     loop {
         tracing::trace!("ret_mesh_background: select loop top");
         tokio::select! {
