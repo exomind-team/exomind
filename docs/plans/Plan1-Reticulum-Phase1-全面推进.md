@@ -182,6 +182,70 @@ cd src-tauri && cargo tauri build
 
 ---
 
+## 设计决策
+
+### D1: 三态定义下沉到 reticulum-rs
+
+`InterfaceMode { Off, Passive, Active }` 定义在 `reticulum-rs/src/iface.rs` 而非 exomind 层。
+
+**理由**：三态（活动/隐匿/关闭）是连接本身的属性，不是应用层概念。Reticulum 作为 transport 层应当拥有这个定义，上层（exomind-net-pairing）通过 `pub use` 引用。
+
+**具体做法**：
+- `reticulum-rs`: `InterfaceMode` enum 带 `Display/From<u8>/serde/Ord` 等 trait
+- `LocalInterface.mode: InterfaceMode`，非 `u8`
+- `exomind-net-pairing`: `pub use reticulum::iface::InterfaceMode as RetMeshMode`
+- `AppState.ret_mesh_mode: Arc<Mutex<InterfaceMode>>`，非 `Arc<AtomicU8>`
+- 所有层共享同一类型，不做 `as u8` / `.into()` 转换
+
+### D2: 接口 mode 过滤替代增删
+
+三态开关不是删除/重建接口，而是在 `InterfaceManager::send()` 中按 `min(global_mode, iface_mode)` 过滤。
+
+**理由**：
+- 接口是物理联通层的事实，不应因三态开关被销毁再重建
+- `Off` → 跳过所有收发，接口仍保留在列表中
+- `Passive` → 不转发 announce，但响应已有连接
+- `Active` → 正常收发
+- 全局模式作为上限（`min(global, iface)`），不改变接口自己的 mode 值
+
+### D3: SSE-driven UI 同步
+
+所有 Reticulum 状态按钮（总闸和接口级）不做乐观更新。按钮呈现的状态 = 后端 Reticulum 实际状态。
+
+**链路**：
+```
+点击按钮 → fetch POST → 后端处理 → 推 SSE snapshot → 前端 setState
+```
+
+**理由**：
+- 避免"按钮点了但后端拒绝"的不一致窗口
+- SSE snapshot 是唯一的 truth source
+- 所有订阅者（多个窗口、多个 agent）看到同一状态
+- 总闸和接口开关遵循同一模式
+
+### D4: 三层架构分离
+
+```
+配对授权层（PIN / session / token / MeshState）
+    ↑
+Reticulum 层 — 多跳自组织网络
+   ├── Identity / 加密（端到端 Link 加密）
+   ├── 多跳路由（PathTable / PathRequest / 转发）
+   └── Announce 扩散 / 链路维护
+    ↑
+物理联通层（UDP / TCP / 文件 / mDNS）
+```
+
+**理由**：每层只关心自己的职责。物理联通层打通第一跳，Reticulum 层从第一跳到第 N 跳，授权层决定谁可以访问。
+
+### D5: 枚举优先于整数
+
+所有模式/状态值用 Rust enum 表达，非 `u8`/`i32`。
+
+**理由**：类型系统保证合法性——不存在"mode=3"这样的非法值。match 穷尽性检查确保所有分支被处理。
+
+---
+
 ## Session Checkpoint — 2026-05-26 v1
 
 > 无上下文 Agent 从此 Checkpoint 开始即可独立恢复工作。
@@ -206,8 +270,8 @@ cd src-tauri && cargo tauri build
 
 | S# | 任务 | 文件 | 状态 |
 |----|------|------|------|
-| S3 | Interface 三态开关 — `remove_interface` API + 路由 + 前端按钮 | `iface.rs` + `lib.rs` + `mesh.rs` + `DeviceView.tsx` | ✅ |
-| S5 | 死锁防护 — `iface.rs` 已修复, `transport.rs` 已标注风险 | `iface.rs` + `transport.rs` | ✅ |
+| S3 | Interface 三态开关 — `InterfaceMode` 枚举 + `send()` 按 `min(global,iface)` 模式过滤 + 三段式 UI | `iface.rs` + `ret-rs/iface.rs` + `lib.rs` + `mesh.rs` + `DeviceView.tsx` | ✅ |
+| S5 | 死锁防护 — `iface.rs` `try_send`+`drop` 已修复; `transport.rs` handle_announce/manage_transport 已标注 TODO | `iface.rs` + `transport.rs` | ✅ 1/3 实修, 2/3 标注 |
 
 **Batch 3：UI 精细化（附带完成）**
 
@@ -219,9 +283,8 @@ cd src-tauri && cargo tauri build
 
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
-| 1 | transport.rs ABBA 死锁风险（handler × iface_manager 跨 await） — 代码已标注 | 低（未观测到） | 已标注 |
-| 2 | Batch 2+3 未做 Tauri MCP 双实例窗口实测 | 中 | 待做 |
-| 3 | remove_interface 只支持禁用，不支持启用单个接口（需 RetMeshMode toggle 恢复） | 低 | 已知局限 |
+| 1 | transport.rs ABBA 死锁风险（handler × iface_manager 跨 await） — dispatch 重构待做 | 低（未观测到） | TODO 已标注 |
+| 2 | reticulum-rs 外部仓库（ARCJ137442/Reticulum-research）的 `iface.rs`/`transport.rs` 改动未提交 | 低 | 待提交 |
 
 ### 测试结果
 

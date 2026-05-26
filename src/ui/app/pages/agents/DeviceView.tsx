@@ -333,7 +333,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
 
   const handleSetInterfaceMode = (ifaceName: string, mode: 'off' | 'passive' | 'active') => {
     if (!runtimeBaseUrl) return;
-    setInterfaces((prev) => prev.map((i) => i.name === ifaceName ? { ...i, mode } : i));
+    // No optimistic update — the SSE snapshot will push the actual state.
     fetch(`${runtimeBaseUrl}/mesh/ret/interfaces/${encodeURIComponent(ifaceName)}/mode`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
