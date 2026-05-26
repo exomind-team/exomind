@@ -154,6 +154,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const [unpairingHostId, setUnpairingHostId] = useState<string | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [pinDialogPeerId, setPinDialogPeerId] = useState<string | null>(null);
+  const [pairingPendingPeerId, setPairingPendingPeerId] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState<string>('');
   const [pinDisplay, setPinDisplay] = useState<{ peerId: string; pin: string } | null>(null);
   const [status, setStatus] = useState<{
@@ -193,13 +194,15 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
           if (payload.status) setStatus(payload.status);
           if (payload.peers) setPeers(payload.peers);
           if (payload.interfaces) setInterfaces(payload.interfaces);
-          // PairingOffer from remote peer: auto-open PIN input dialog.
-          if (payload.pairing_pending && !hasActivePinDialogRef.current) {
-            const pendingPeerId = payload.pairing_pending as string;
+          // PairingOffer from remote peer: store for pairing decision.
+          const pendingFromSse = payload.pairing_pending as string | null ?? null;
+          setPairingPendingPeerId(pendingFromSse);
+          // Auto-open PIN input if no active dialog.
+          if (pendingFromSse && !hasActivePinDialogRef.current) {
             const knownPeer = (payload.peers as Array<{peer_id?: string; host_id?: string; identity_hex?: string}>)
-              ?.find((p) => (p.peer_id || p.identity_hex || p.host_id) === pendingPeerId);
+              ?.find((p) => (p.peer_id || p.identity_hex || p.host_id) === pendingFromSse);
             if (knownPeer) {
-              setPinDialogPeerId(pendingPeerId);
+              setPinDialogPeerId(pendingFromSse);
             }
           }
         } catch { /* ignore malformed events */ }
@@ -300,6 +303,12 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
 
   const handleInitiatePair = async (hostId: string) => {
     if (!runtimeBaseUrl || pairingHostId || unpairingHostId) return;
+    // If the target peer already sent a PairingOffer, go directly to
+    // responder (PIN input) mode instead of initiating ourselves.
+    if (pairingPendingPeerId === hostId) {
+      setPinDialogPeerId(hostId);
+      return;
+    }
     setPairingHostId(hostId);
     setPairingError(null);
     try {
