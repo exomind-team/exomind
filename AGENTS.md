@@ -124,9 +124,16 @@
 - **接口模式控制**：`POST /mesh/ret/interfaces/:name/mode {"mode":"off|passive|active"}` — 每接口独立三态，有效模式 = min(全局, 接口)。Off 不参与收发，Passive 不转发 announce
 - **PairingOffer 推送**：SSE `ret_mesh_snapshot` 增加 `pairing_pending` 字段（发起方 identity_hex）。前端收到后自动弹出 PIN 输入框，切换为响应方模式
 - **多跳路由**：`create_transport` 开启 `set_retransmit(true)` + `set_reroute_eager(true)`。Announce 可跨节点转发，Link 可跨中间节点建立
+- **设计决策**：
+  - [ADR-005: InterfaceMode 三态](docs/architecture/DECISIONS/ADR-005-interface-mode.md) — 三态 enum 在 reticulum-rs + mode 过滤
+  - [ADR-006: SSE-driven UI](docs/architecture/DECISIONS/ADR-006-sse-driven-ui.md) — 不做乐观更新
 - **三阶段路线**：详见 [2026-05-25 迁移计划](docs/plans/2026-05-25-reticulum-authorized-sync-migration-plan.md)
 - **关键日志**：grep `Reticulum` 查看 Transport 初始化状态
 - **物理联通层**：详见 [docs/architecture/physical-connectivity-layer.md](docs/architecture/physical-connectivity-layer.md)
+
+## 代码风格
+
+- **枚举优先于整数**：所有模式、状态值用 Rust enum 表达，非 `u8`/`i32`。类型系统保证合法性——match 穷尽性检查确保所有分支被处理。当 enum 需要跨 crate 边界（如 `reticulum-rs` 和 `exomind-net-pairing`），enum 定义在最底层 crate，上层 `pub use` 引用
 
 ## 文档拓扑
 
