@@ -643,6 +643,13 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                       const inputs = document.querySelectorAll<HTMLInputElement>('[data-pin-index]');
                       inputs[i - 1]?.focus();
                     }
+                    if (e.key === 'Enter' && pinInput.length === 6) {
+                      const hostId = pinDialogPeerId;
+                      const pin = pinInput;
+                      setPinDialogPeerId(null);
+                      setPinInput('');
+                      void handlePairPeer(hostId, pin);
+                    }
                   }}
                   data-pin-index={i}
                   className="h-12 w-10 rounded-xl border border-[#F0ECE8] bg-white text-center text-xl font-bold tabular-nums text-[#1C1917] outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
