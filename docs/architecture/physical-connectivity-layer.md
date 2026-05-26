@@ -30,8 +30,9 @@ ExoMind 的 Reticulum 组网实践中发现，Reticulum 自身只解决“底层
 │ 验证 / 授权 / 同步（应用层）              │ ← 不因联通方式变化
 │ MeshState, PeerInfo, scope grants, relay │
 ├──────────────────────────────────────────┤
-│ Reticulum（发现、传输、数据类型）          │ ← 把下层当物理层，一视同仁
-│ Announce, Link, Packet, PathTable        │
+│ Reticulum（多跳自组织网络）               │ ← 把下层当物理层，一视同仁
+│ 路由: PathTable/PathRequest, 跳数择优    │
+│ Announce 扩散, Link 跨节点建立, Packet 转发│
 │ identity_hex, destination                │
 ├──────────────────────────────────────────┤
 │ 物理联通层（Physical Connectivity Layer） │ ← 新概念

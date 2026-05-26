@@ -424,15 +424,58 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 
 **背景**：当前 `initiate-pair` 仅在本机 `PairingManager` 创建 session，不通知对端。响应方需要手动点「授权」+「改为输入配对码」才能进入输入模式。
 
-**三层架构确认**：
+**三层架构确认**（含多跳路由）：
 
 ```
-配对授权层（PIN / session / token / MeshState）   ← PairingOffer 属于此层
-    ↑ 依赖
-Reticulum 层（Link / Announce / Packet / Identity）  ← 只提供加密传输通道
-    ↑ 依赖
-物理联通层（UDP / TCP / 文件 / mDNS）              ← 不关心上层载荷
+配对授权层（PIN / session / token / MeshState）
+    ↑
+Reticulum 层
+   ├── Identity / 加密（端到端 Link 加密）
+   ├── 多跳路由：
+   │   ├── PathTable — 按目的地查下一跳 + 接口（path_table.rs）
+   │   ├── PathRequest — 未知目的地时广播探路（transport.rs:898）
+   │   ├── send_to_next_hop — 转发非本地包（transport.rs:691）
+   │   ├── Link 跨中间节点建立（handle_link_request_as_intermediate）
+   │   └── 跳数追踪：PATHFINDER_M=128, announce.header.hops+1
+   └── Announce 扩散 / 包路由 / 链路维护
+    ↑
+物理联通层（UDP / TCP / 文件 / mDNS）
 ```
+
+**代码证据** — `reticulum-rs/src/transport/path_table.rs`：
+
+```rust
+pub struct PathEntry {
+    pub hops: u8,                    // 到目的地的跳数
+    pub received_from: AddressHash,  // 下一跳 identity
+    pub iface: AddressHash,          // 从哪个接口可达
+}
+
+// Announce 到达时更新路径表（跳数择优）
+let hops = announce.header.hops + 1;
+if let Some(existing) = self.map.get(&announce.destination) {
+    if hops > existing.hops { return; }  // 不优的路径丢弃
+}
+self.map.insert(announce.destination, PathEntry { hops, .. });
+
+// 转发包时重写包头指向下一跳
+pub fn handle_inbound_packet(&self, packet, lookup)
+    -> (Packet, Option<AddressHash>) {
+    let entry = self.map.get(&lookup)?;
+    (Packet {
+        header: Header { hops: packet.header.hops + 1, .. },
+        transport: Some(entry.received_from),  // 下一跳
+        ..
+    }, Some(entry.iface))
+}
+```
+
+Reticulum 层不只是"加密传输通道"——它是一个完整的多跳自组织网络栈，包含路径发现、择优、转发和链路跨节点建立。
+
+**三层简化描述**：
+- 物理联通层：打通第一跳（UDP/TCP/文件）
+- Reticulum 层：多跳路由（从第一跳到第 N 跳）
+- 配对授权层：决定谁可以访问（PIN/token/MeshState）
 
 `RetPairingLinkFrame` 定义在 `exomind-net-pairing/src/pairing.rs`，不在 `reticulum-rs`。发送接收都通过 reticulum-rs 的通用 API（`link.data_packet()` / `link_in_rx`），不需要为新增帧类型修改 reticulum-rs。
 
