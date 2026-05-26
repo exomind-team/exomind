@@ -383,11 +383,34 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 | 7 | ⚠️ `tauri-plugin-log` logger 冲突 — 并行 `cargo build` 破坏增量状态后，Tauri log plugin 初始化失败 `PluginInitialization("log", "attempted to set a logger after the logging system was already initialized")` | 中 | 串行构建可避免 |
 | 8 | 🔧 `reticulum-rs` 编译警告清理 — 15 个 warnings（`CacheSet::insert`/`contains` 等未使用方法） | 低 | `Reticulum/experiment/rs` |
 **Next steps 优先级建议（由高到低）：**
-1. **🔴 排查双实例 Reticulum 发现不通（#7）** — `ret_mesh_background` 的 `tokio::select!` 中 `tick.tick()` 分支被饥渴，0 次周期性 announce/14+ 分钟。前置条件：先在 `reticulum-rs` Transport 层补全 tracing（详见 `physical-connectivity-layer.md §9.3` 系统级缺失章节），然后按以下路径排查：
-   - 添加 `RUST_LOG=reticulum=debug` 运行环境后重现双实例场景
-3. **按 Interface 三态开关（#4）** — `InterfaceManager` 添加 `set_interface_mode(address, mode)`；`LocalInterface` 增加 `mode` 字段；`InterfaceManager::send()` 中检查 mode 跳过 Passive TX；`InterfaceInfo` 增加 `mode` 字段；前端「下层接口」每行增加三段式按钮。
-4. **修复 Reticulum UI 状态不同步（#6）** — `try_start_ret_mesh` 中 spawn `ret_mesh_background` 后立即推送首条 SSE snapshot，或前端回退到 `GET /mesh/ret/status` 做初始加载。
-5. **研究任务（#5）** — 读 Reticulum 手册 Interface 设计哲学章节，对照 `InterfaceManager`/`UdpDiscoveryBridge`/文件注册表代码，形成理论对照表。
+
+### 安全加固：消除「跨 await 持锁」危险模式
+
+死锁排查发现 3 处 `MutexGuard` 跨 `.await` 的危险模式，按紧迫度排序：
+
+1. **🔴 iface.rs send() — 完全消除阻塞 fallback**（`iface.rs:246`）
+   - 当前：`try_send` 在 `Full` 时回退到 `send(msg).await` — 仍然阻塞
+   - 修复：`Full` 时直接 `drop(msg)`（UDP 不可靠，丢一个 announce 不影响）
+   - 文件：`reticulum-rs/src/iface.rs:237-248`
+
+2. **🔴 handle_announce — 缩短锁 A（handler）持有时间**（`transport.rs:811`）
+   - 当前：`MutexGuard<TransportHandler>` 贯穿异步路径 → `handler.send(message).await` 再取锁 B
+   - 修复：入口提取字段 → `drop(handler)` → 锁外再发 announce_tx
+   - 文件：`reticulum-rs/src/transport.rs`
+
+3. **🔴 manage_transport RX 循环 — 分阶段处理**（`transport.rs:1245`）
+   - 当前：`handler.lock().await` 后 match → handler 被移入 `handle_announce`
+   - 修复：锁内只读报文头 → `drop(handler)` → 分发到专用 handler
+   - 文件：`reticulum-rs/src/transport.rs`
+
+### 功能迭代
+
+4. **按 Interface 三态开关（#4）** — `InterfaceManager.set_interface_mode()` + 前端每接口三段式按钮
+5. **修复 Reticulum UI 状态不同步（#6）** — 立即推送首条 SSE snapshot
+6. **修复 relay 测试失败（#3）** — `enable_ret_mesh=false` 或修复 host_id 覆写逻辑
+7. **研究任务（#5）** — 联通方式×Interface 理论区分
+
+### 验证命令速查
 ### 验证命令速查
 ```bash
 # 编译

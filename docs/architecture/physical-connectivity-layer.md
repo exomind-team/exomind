@@ -385,6 +385,36 @@ Announce 是 10s 间隔的幂等操作，丢一个不影响整体发现。
 - ✅ `send_to` 正常发送 299 字节 announce 包
 - ✅ rx-only 接口 channel-full warning 正常（预期行为，无 TX task）
 
+### 9.4 🔴 危险模式：跨 await 持锁（MutexGuard 泄漏）
+
+死锁的深层根因不是某一行代码，而是一种结构性问题：**持有 `MutexGuard` 时跨 `.await` 执行异步操作**。`tokio::Mutex` 的 guard 在 `.await` 时不释放，锁被"带入睡梦"。
+
+#### 已确认的 3 处危险点
+
+| # | 位置 | 锁 | 跨 await 操作 | 风险 |
+|---|------|-----|-------------|------|
+| 1 | `iface.rs:238` | iface_mgr | `tx_send.send(msg).await` | channel 满时永久阻塞 |
+| 2 | `transport.rs:811` | handler | `handler.send(message).await` → 取 iface_mgr 锁 | 双层锁死锁 |
+| 3 | `transport.rs:1245` | handler | 贯穿 match → `handle_announce` | 锁 A 被子函数继续持有 |
+
+#### 判断标准
+
+```
+持锁 → await → 仍持锁    ❌ 危险
+await → 持锁 → drop → await ✅ 安全
+持锁 → drop → await       ✅ 安全
+```
+
+**核心认知**：`tokio::sync::MutexGuard` 不是一个普通的同步锁，它在 `.await` 时**不释放**。锁的不是代码区域，而是**持有 guard 的整个 async 栈帧**。只要 MutexGuard 在栈上，任何 `.await` 都可能成为死锁入口。
+
+#### 修复方向
+
+1. **iface.rs**：`try_send` 在 `Full` 时直接 `drop(msg)`，不走阻塞 fallback
+2. **transport.rs handle_announce**：入口处提取所需配置字段，显式 `drop(handler)` 释放锁 A，锁外再发 announce_tx
+3. **transport.rs manage_transport RX 循环**：锁内只读报文头确定类型，`drop(handler)` 后分发到专用 handler
+
+详见迁移计划 §11 恢复入口/安全加固章节。
+
 ### 系统级缺失：Reticulum Transport 内部 tracing
 
 本次排查暴露的最大瓶颈：Reticulum rust Transport 的 tracing 覆盖严重不足。以下是需要增补的关键 tracing 点：
