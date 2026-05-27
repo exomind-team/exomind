@@ -201,3 +201,44 @@ curl http://localhost:{A_RT}/mesh/ret/discovered
 
 # 发起配对（流程待定）
 ```
+
+---
+
+## 实现进展
+
+### Phase 1.1：InterfaceMode 三态下沉 + HasMode trait（2026-05-27 完成）
+
+**实现内容**：
+- 新增 `HasMode` trait（`mode()` / `set_mode()`），`Interface: HasMode`
+- 新增 `AtomicInterfaceMode` 封装 `AtomicU8`，消除裸 u8 转换
+- `InterfaceContext` 新增 `mode: Arc<AtomicInterfaceMode>` 共享字段
+- `LocalInterface` 从 `mode: InterfaceMode` 改为 `mode_flag: Arc<AtomicInterfaceMode>`
+- Manager `send()` 两层过滤：`min(global, iface)` + `InterfaceMode::Off` 跳过
+- 4 个接口（UDP/TCP Server/TCP Client/JSONL）全部实现 `HasMode`
+- JSONL 接口默认 Off，TX/RX tasks 读 `context.mode` 实现内部过滤
+- `exomind-net-pairing` 删除 spawn 后的 `set_interface_mode(Off)` 调用
+
+**测试结果**：cargo check 零 error，11 个集成测试全部通过
+
+**文件变更**：
+- `reticulum-rs/src/iface.rs` — HasMode trait + AtomicInterfaceMode + Manager 改造
+- `reticulum-rs/src/iface/{udp,tcp_server,tcp_client,jsonl}.rs` — HasMode impl + TX/RX 模式检查
+- `exomind/crates/exomind-net-pairing/src/lib.rs` — 删除冗余 set_interface_mode 调用
+
+### 架构调研：reticulum-rs Interface 设计评估（2026-05-27）
+
+**调研方法**：三路对比——上游 Rust 版（BeechatNetworkSystemsLtd）、Python 原版（markqvist）、我们的改造
+
+**核心发现**：
+1. **Interface trait 是空壳**：只有 `fn mtu() -> usize`，从未被 Manager 调用，不是真正的多态
+2. **Arc<Mutex<T>> 是配置搬运工**：每个接口 spawn 时 lock 一次读配置后废弃，从未再访问
+3. **闭包是手动分派**：`|ctx| XxxInterface::spawn(ctx)` 绕开了 trait object safety
+4. **LocalInterface vs InterfaceContext 字段大量重叠**：address、stop、mode 都是同一 Arc 的 clone
+5. **上游原版结构完全相同**：我们继承的设计问题，不是改造引入的
+6. **Python 原版有 20+ 方法的完整基类**：Rust 版丢失了大部分（限流、announce 统计、MTU 优化）
+
+**改进方向**：
+- **方向 A（务实）**：消除空壳 trait，Manager 只管 channel 注册（`register() → WorkerHandle`），接口是独立 async 函数。消除 Interface trait、HasMode trait、InterfaceContext、InterfaceChannel、Arc<Mutex<T>>。
+- **方向 B（完备）**：补全 trait 做真正多态（process_incoming/outgoing/start/stop），工作量大但长期可扩展。
+
+**当前状态**：N18 问题待定（方向 A vs B），用户倾向务实方案但尚未决策

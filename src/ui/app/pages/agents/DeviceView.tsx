@@ -169,15 +169,21 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const lastAnnounceTsRef = useRef(Date.now());
   const [interfaces, setInterfaces] = useState<{ name: string; active: boolean; mode?: 'off' | 'passive' | 'active' }[]>([]);
   const mountedRef = useRef(true);
+  const [sseConnecting, setSseConnecting] = useState(false);
   const hasActivePinDialogRef = useRef(false);
   // Keep ref in sync so the SSE closure always reads the latest value.
   useEffect(() => { hasActivePinDialogRef.current = pinDialogPeerId !== null || pinDisplay !== null; }, [pinDialogPeerId, pinDisplay]);
 
   useEffect(() => {
+    setSseConnecting(true);
     if (!runtimeBaseUrl) return;
     mountedRef.current = true;
 
-    // Initial fetch for peers list (one-shot)
+    // Initial fetch for status + peers (one-shot, fill state until SSE delivers)
+    fetch(`${runtimeBaseUrl}/mesh/ret/status`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (mountedRef.current && data) setStatus(data); })
+      .catch(() => {});
     fetch(`${runtimeBaseUrl}/mesh/ret/peers`)
       .then((r) => r.ok ? r.json() : [])
       .then((data) => { if (mountedRef.current) { setPeers(data); setError(null); } })
@@ -199,8 +205,10 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
           setPairingPendingPeerId(payload.pairing_pending as string | null ?? null);
         } catch { /* ignore malformed events */ }
       });
+      setSseConnecting(true);
+      evtSource.onopen = () => { if (mountedRef.current) setSseConnecting(false); };
       evtSource.onerror = () => {
-        if (mountedRef.current) setError('Reticulum SSE disconnected');
+        if (mountedRef.current) { setSseConnecting(false); setError('Reticulum SSE disconnected'); }
       };
     } catch {
       // EventSource not available (test environment, etc.)
@@ -378,26 +386,65 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   if (error && peers.length === 0) return null;
 
   const meshActive = status?.mesh_enabled ?? false;
+  const discoveredCount = status?.discovered_count ?? 0;
+  const authorizedCount = status?.authorized_count ?? 0;
   const announcePeriodSec = status ? Math.round(status.announce_period_ms / 1000) : 10;
   const currentMode = status?.announce_mode ?? 'active';
   void tick; // trigger re-render every 1s for countdown
   const elapsedSec = Math.floor((Date.now() - lastAnnounceTsRef.current) / 1000);
   const nextAnnounceSec = Math.max(0, announcePeriodSec - (elapsedSec % announcePeriodSec));
 
+  const hasInterfaces = interfaces.length > 0;
+
+  // ── 6-state machine ──
+  const rtState = !status && !sseConnecting ? 'disconnected'
+    : !status && sseConnecting ? 'connecting'
+    : !meshActive ? 'initializing'
+    : meshActive && discoveredCount === 0 && authorizedCount === 0 && !hasInterfaces ? 'warming'
+    : meshActive && discoveredCount === 0 && authorizedCount === 0 ? 'searching'
+    : meshActive && discoveredCount > 0 && authorizedCount === 0 ? 'discovered'
+    : 'paired';
+
+  const rtBadge: Record<string, { text: string; cls: string }> = {
+    disconnected: { text: '未连接', cls: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400' },
+    connecting:   { text: '连接中', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+    initializing: { text: '连接中', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+    warming:      { text: '就绪中', cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
+    searching:    { text: '寻找节点', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+    discovered:   { text: `已发现 ${discoveredCount} 个节点`, cls: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
+    paired:       { text: `已配对 ${authorizedCount}/${discoveredCount}`, cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+  };
+  const rtDesc: Record<string, string> = {
+    disconnected: '等待启动 Reticulum 组网',
+    connecting:   '正在连接 Reticulum 组网…',
+    initializing: '正在初始化 Reticulum 组网…',
+    warming:      '正在初始化传输接口…',
+    searching:    '正在寻找附近节点…',
+    discovered:   `已发现 ${discoveredCount} 个节点，等待配对`,
+    paired:       `${authorizedCount} 个节点已配对`,
+  };
+  const rtIconColor: Record<string, string> = {
+    disconnected: 'text-[#A8A29E]',
+    connecting:   'text-amber-500',
+    initializing: 'text-amber-500',
+    warming:      'text-yellow-500',
+    searching:    'text-blue-500',
+    discovered:   'text-cyan-500',
+    paired:       'text-[#0D9488]',
+  };
+
   return (
     <article className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]">
       {/* ── Header — Status Dashboard ── */}
       <div className="flex items-start gap-2">
-        <Wifi size={14} className={`mt-0.5 shrink-0 ${meshActive ? 'text-[#0D9488]' : 'text-[#A8A29E]'}`} />
+        <Wifi size={14} className={`mt-0.5 shrink-0 ${rtIconColor[rtState]}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
               Reticulum 网络
             </h3>
-            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-              meshActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-            }`}>
-              {meshActive ? '已启用' : '未启用'}
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${rtBadge[rtState].cls}`}>
+              {rtBadge[rtState].text}
             </span>
             {meshActive && status && (
               <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
@@ -414,8 +461,8 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
               <span>ID: {status.local_host_id.slice(0, 12)}</span>
               <span>RT:{status.local_port}</span>
-              <span>已发现 {status.discovered_count}</span>
-              <span>已授权 {status.authorized_count}</span>
+              <span>已发现 {discoveredCount}</span>
+              <span>已授权 {authorizedCount}</span>
               {status.announce_mode === 'active' && (
                 <span>下次宣告 <span className="tabular-nums">{nextAnnounceSec}s</span></span>
               )}
@@ -423,7 +470,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
           )}
           {!meshActive && (
             <p className="text-[10px] text-[#A8A29E]">
-              Reticulum 组网未启动
+              {rtDesc[rtState]}
             </p>
           )}
         </div>

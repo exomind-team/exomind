@@ -48,12 +48,16 @@ impl MdnsBridge {
         {
             let known = self.known.read().await;
             if known.contains_key(host_id) {
+                tracing::warn!("[on_peer_resolved] SKIP known peer {}", host_id);
                 return;
             }
         }
+        tracing::warn!("[on_peer_resolved] NEW peer {} host={} port={}", host_id, host, ret_port);
 
         let forward_addr = format!("{host}:{ret_port}");
+        tracing::warn!("[on_peer_resolved] BEFORE add_udp_interface");
         RetMeshNode::add_udp_interface(transport, &self.bind_addr, Some(&forward_addr)).await;
+        tracing::warn!("[on_peer_resolved] AFTER add_udp_interface");
 
         {
             let mut known = self.known.write().await;

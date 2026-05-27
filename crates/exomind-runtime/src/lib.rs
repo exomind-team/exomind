@@ -236,6 +236,17 @@ fn configured_mesh_state_path_from_env(data_dir: Option<&Path>) -> Option<PathBu
         })
 }
 
+/// Directory for Reticulum JSONL stream files (`%TEMP%/exomind/rns-jsonl-streams/`).
+///
+/// Each instance writes its own `{identity_hex}_stream.jsonl` file and reads
+/// peer files from this shared directory.
+pub fn rns_jsonl_stream_dir() -> PathBuf {
+    let mut dir = std::env::temp_dir();
+    dir.push("exomind");
+    dir.push("rns-jsonl-streams");
+    dir
+}
+
 fn ret_mesh_identity_path(options: &RuntimeStartOptions) -> PathBuf {
     env::var("EXOMIND_RET_MESH_IDENTITY_PATH")
         .ok()
@@ -793,12 +804,13 @@ pub async fn start_with_options(
                 &state.signal_pool,
             )),
         );
-        actor_tasks.push(
-            signal::actors::external_source_actor::spawn_external_source_actor(
-                Arc::clone(&state.signal_pool),
-                signal::actors::external_source_actor::ExternalSourceConfig::default(),
-            ),
-        );
+        // external_source_actor disabled — polling 502 chatrooms fills logs with noise
+        // actor_tasks.push(
+        //     signal::actors::external_source_actor::spawn_external_source_actor(
+        //         Arc::clone(&state.signal_pool),
+        //         signal::actors::external_source_actor::ExternalSourceConfig::default(),
+        //     ),
+        // );
         actor_tasks.push(signal::actors::task_classifier_actor::spawn_task_actor(
             Arc::clone(&state.signal_pool),
         ));
@@ -1649,6 +1661,31 @@ async fn try_start_ret_mesh(
         }
     }
 
+    // Create JSONL broadcast interface (mode defaults to Off — user enables via UI).
+    // Each instance writes its own outbound file and reads all peer files.
+    {
+        let jsonl_dir = rns_jsonl_stream_dir();
+        if let Err(e) = std::fs::create_dir_all(&jsonl_dir) {
+            tracing::warn!("Failed to create JSONL stream dir {}: {}", jsonl_dir.display(), e);
+        } else {
+            // Truncate own outbound file (messages don't persist across restarts).
+            let my_stream = jsonl_dir.join(format!("{}_stream.jsonl", local_identity_hex));
+            let _ = std::fs::File::create(&my_stream);
+
+            exomind_net_pairing::RetMeshNode::add_jsonl_interface(
+                &transport,
+                &local_identity_hex,
+                &format!("exomind-{}", options.host_id),
+                &jsonl_dir,
+            )
+            .await;
+            tracing::info!(
+                "Reticulum JSONL interface created (mode=Off) at {}",
+                jsonl_dir.display()
+            );
+        }
+    }
+
     let mut node = exomind_net_pairing::RetMeshNode::new(config, transport, identity).await;
 
     // Brief delay to allow seed TCP connections to be established,
@@ -1952,11 +1989,12 @@ async fn ret_mesh_background(
     // Local peer registry: file-based discovery for same-machine instances.
     // Windows loopback does not forward 255.255.255.255 broadcasts between local sockets,
     // so same-machine instances need a separate discovery channel. This file registry
-    // writes the instance's Reticulum address info to %TEMP%\exomind-ret-peers\ and
+    // writes the instance's Reticulum address info to %TEMP%\exomind\mdns-peers\ and
     // scans for other instances on each background tick.
     let local_registry_dir = {
         let mut d = std::env::temp_dir();
-        d.push("exomind-ret-peers");
+        d.push("exomind");
+        d.push("mdns-peers");
         let _ = std::fs::create_dir_all(&d);
         let info = serde_json::json!({
             "host_id": state.host_id,
@@ -2027,7 +2065,7 @@ async fn ret_mesh_background(
             }
             Some(command) = pairing_rx.recv() => {
                 select_hit_pairing += 1;
-                tracing::info!("[select] pairing_rx(hit:{}) command", select_hit_pairing);
+                tracing::warn!("[select] pairing_rx(hit:{}) command", select_hit_pairing);
                 match command {
                     RetMeshPairingCommand::PairWithPeer {
                         peer,
@@ -2147,7 +2185,7 @@ async fn ret_mesh_background(
             }
             Ok(link_event) = link_in_rx.recv() => {
                 select_hit_link += 1;
-                tracing::info!("[select] link_in_rx(hit:{}) link event", select_hit_link);
+                tracing::warn!("[select] link_in_rx(hit:{}) link event", select_hit_link);
                 if let exomind_net_pairing::LinkEvent::Data(payload) = link_event.event {
                     match serde_json::from_slice::<exomind_net_pairing::RetPairingLinkFrame>(payload.as_slice()) {
                         Ok(exomind_net_pairing::RetPairingLinkFrame::PairingResponse { .. }) => {
@@ -2197,7 +2235,7 @@ async fn ret_mesh_background(
             }
             Ok(announce) = announce_rx.recv() => {
                 select_hit_announce += 1;
-                tracing::info!("[select] announce_rx(hit:{}) announce arrived", select_hit_announce);
+                tracing::warn!("[select] announce_rx(hit:{}) announce arrived", select_hit_announce);
                 let data: &[u8] = announce.app_data.as_slice();
                 if let Some(meta) = exomind_net_pairing::discovery::parse_announce_data(data) {
                     let (identity_hex, destination_hex) = {
@@ -2282,18 +2320,20 @@ async fn ret_mesh_background(
                 tick_count += 1;
                 select_hit_tick += 1;
                 if tick_count % 10 == 0 {
-                    tracing::info!("[select] tick #{}  hits_tick:{} connect:{} pairing:{} link:{} announce:{}",
+                    tracing::warn!("[select] tick #{}  hits_tick:{} connect:{} pairing:{} link:{} announce:{}",
                         tick_count, select_hit_tick, select_hit_connect, select_hit_pairing, select_hit_link, select_hit_announce);
                 } else {
-                    tracing::info!("[select] tick #{}  ticks:{}", tick_count, select_hit_tick);
+                    tracing::warn!("[select] tick #{}  ticks:{}", tick_count, select_hit_tick);
                 }
                 // Evict stale peers and re-announce
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as u64;
+                tracing::warn!("[tick-debug] BEFORE discovered.write() tick#{}", tick_count);
                 {
                     let mut map = discovered.write().await;
+                    tracing::warn!("[tick-debug] AFTER discovered.write() tick#{}", tick_count);
                     let stale: Vec<String> = map.iter()
                         .filter(|(_, p)| now - p.last_seen_ms > offline_timeout_ms && p.online)
                         .map(|(id, _)| id.clone())
@@ -2329,13 +2369,14 @@ async fn ret_mesh_background(
                             } else {
                                 peer.port + 6000
                             };
-                            tracing::info!(
-                                "[tick] mDNS new peer host_id={} host={} ret_port={}",
-                                peer.host_id, peer.host, ret_port
+                            tracing::warn!(
+                                "[tick-debug] mDNS new peer host_id={} host={} ret_port={} tick#{}",
+                                peer.host_id, peer.host, ret_port, tick_count
                             );
                             mdns_bridge
                                 .on_peer_resolved(&node.transport, &peer.host_id, &peer.host, ret_port)
                                 .await;
+                            tracing::warn!("[tick-debug] mDNS on_peer_resolved done tick#{}", tick_count);
                         }
                     }
                 }
@@ -2382,6 +2423,7 @@ async fn ret_mesh_background(
                                 peer_host_id, host, ret_port, is_new
                             );
                             if is_new {
+                                tracing::warn!("[tick-debug] registry new peer {} tick#{}", peer_host_id, tick_count);
                                 mdns_bridge
                                     .on_peer_resolved(
                                         &node.transport,
@@ -2390,6 +2432,7 @@ async fn ret_mesh_background(
                                         ret_port,
                                     )
                                     .await;
+                                tracing::warn!("[tick-debug] registry on_peer_resolved done tick#{}", tick_count);
                             }
                         }
                     }
@@ -2409,10 +2452,14 @@ async fn ret_mesh_background(
                 }
                 let interfaces = {
                     let mgr = node.transport.iface_manager();
+                    tracing::warn!("[tick-debug] BEFORE iface_manager.lock() tick#{}", tick_count);
                     let mgr_lock = mgr.lock().await;
+                    tracing::warn!("[tick-debug] AFTER iface_manager.lock() tick#{}", tick_count);
                     mgr_lock.list_interfaces()
                 };
+                tracing::warn!("[tick-debug] BEFORE try_push_snapshot tick#{}", tick_count);
                 try_push_ret_mesh_snapshot_with_offer(&state, interfaces, pairing_pending_peer_id.clone()).await;
+                tracing::warn!("[tick-debug] AFTER try_push_snapshot tick#{}", tick_count);
             }
         }
     }

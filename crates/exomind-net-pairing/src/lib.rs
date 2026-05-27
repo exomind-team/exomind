@@ -188,6 +188,39 @@ impl RetMeshNode {
     ///
     /// Returns the interface's `bound_port` so the caller can read the actual
     /// OS-assigned port after binding (useful when bind_addr is `0.0.0.0:0`).
+    pub async fn add_jsonl_interface(
+        transport: &Transport,
+        identity_hex: &str,
+        node_name: &str,
+        stream_dir: &std::path::Path,
+    ) {
+        use reticulum::iface::jsonl::JsonlInterface;
+        let iface = JsonlInterface::new(
+            identity_hex.to_string(),
+            node_name.to_string(),
+            stream_dir.to_path_buf(),
+        );
+        // iface.mode() returns Off by default — spawn propagates to LocalInterface.
+        let iface_mgr = transport.iface_manager();
+        let mut mgr_lock = iface_mgr.lock().await;
+        let iface_name = format!("JSONL {}", &identity_hex[..identity_hex.len().min(8)]);
+        mgr_lock.spawn(
+            iface,
+            &iface_name,
+            "jsonl",
+            |ctx| JsonlInterface::spawn(ctx),
+        );
+    }
+
+    /// Add a UDP broadcast interface for LAN discovery.
+    ///
+    /// `forward_addr` is the target for outgoing packets:
+    /// - `127.0.0.1:PORT` for localhost multi-instance testing
+    /// - `255.255.255.255:PORT` for LAN broadcast
+    /// - `None` for RX-only (no outgoing)
+    ///
+    /// Returns the interface's `bound_port` so the caller can read the actual
+    /// OS-assigned port after binding (useful when bind_addr is `0.0.0.0:0`).
     pub async fn add_udp_interface(
         transport: &Transport,
         bind_addr: &str,
