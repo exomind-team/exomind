@@ -352,7 +352,7 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 | 仓库 | 分支 | 最新提交 | 变更概要 |
 |------|------|---------|---------|
 | `exomind-team/exomind` | `feat/ret-mesh-prototype` | `d59be8ce` | fix(ret-mesh): 三态开关点击后立即推送 SSE snapshot 刷新状态 |
-| `ARCJ137442/Reticulum-research` | `main` | `c210cc5` | ara: O14 — 联通方式×Reticulum Interface 理论区分 |
+| `ARCJ137442/ExoNet-Reticulum` | `main` | `54b19a7` | refactor: 三层分离重组（src/ + reference/ + .ara/） |
 `feat/ret-mesh-prototype` 增量 6 commits 相对基线 `dev`（v3 待提交）：
 | SHA | 摘要 |
 |-----|------|
@@ -366,7 +366,7 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 1. **三态连接模式全局开关** — `RetMeshMode` 枚举（Off/Passive/Active）替代 `AtomicBool`。AppState `ret_mesh_mode: Arc<AtomicU8>`。API：`POST /mesh/ret/announce {"mode":"off|passive|active"}`。SSE：`announce_mode` 字段。前端：三段式按钮（"连接模式"），右上角。19 files changed, +208/-72。
 2. **InterfaceManager 接口枚举 API** — `LocalInterface` 增加 name/iface_type；`spawn()` 接受 name+type 参数；`list_interfaces()` 公开枚举；`InterfaceInfo` 结构体。SSE snapshot `interfaces` 字段。
 3. **动态 UDP 端口** — 主 UDP 接口从固定 `HTTP_port+6000` 改为 `0.0.0.0:0`（OS 分配）；`UdpInterface.bound_port: Arc<AtomicU16>`；`add_udp_interface` 返回 `Arc<AtomicU16>`，forward_addr 改为 `Option<&str>`；mDNS 注册移至 ret_mesh 创建之后（使用实际端口）；`default_ret_udp_port()` 已删除。
-4. **文档同步** — AGENTS.md + physical-connectivity-layer.md（§3.1/§3.3/§9/§10）+ Reticulum-research AGENTS.md Rust API 示例。
+4. **文档同步** — AGENTS.md + physical-connectivity-layer.md（§3.1/§3.3/§9/§10）+ ExoNet-Reticulum AGENTS.md Rust API 示例。
 5. **ARA 理论沉淀** — N12（三态决策）、N13（物理联通层决策）、N14（Tauri 构建死胡同）；H01 结晶；O11-O14 暂存。
 6. **Release 构建** — ExoMind_0.4.15_x64-setup.exe（NSIS）+ MSI + 单程序 exe。Release 模式构建不受 dev 栈溢出影响。
 7. **✅ initiate-pair 端点 + PIN 展示弹窗** — 新增 `POST /mesh/ret/peers/:peer_id/initiate-pair`，调用 `PairingManager::initiate()` 生成 PIN+session，返回给前端展示。前端「授权」按钮改为先 initate → 展示 PIN 弹窗（发起方）→ 可切换至输入 PIN 弹窗（响应方）。4 files changed, ~176 行增量。
@@ -381,7 +381,7 @@ yarn vitest run tests/unit/ui/agent-hub/device-view.runtime-topology.test.tsx
 | 5 | 联通方式×Reticulum Interface 的理论区分需研究 — 5 个具体问题 | 低 | `physical-connectivity-layer.md §10` |
 | 6 | Reticulum 启动后首条 SSE snapshot 延迟 10s — 前端 status 由 SSE 驱动且无 `GET /mesh/ret/status` 退路，导致窗口期内 UI 显示「未启用」 | 低 | `lib.rs:ret_mesh_background` tick 间隔 |
 | 7 | ⚠️ `tauri-plugin-log` logger 冲突 — 并行 `cargo build` 破坏增量状态后，Tauri log plugin 初始化失败 `PluginInitialization("log", "attempted to set a logger after the logging system was already initialized")` | 中 | 串行构建可避免 |
-| 8 | 🔧 `reticulum-rs` 编译警告清理 — 15 个 warnings（`CacheSet::insert`/`contains` 等未使用方法） | 低 | `Reticulum/experiment/rs` |
+| 8 | 🔧 `reticulum-rs` 编译警告清理 — 15 个 warnings（`CacheSet::insert`/`contains` 等未使用方法） | 低 | `ExoNet-Reticulum/src/` |
 **Next steps 优先级建议（由高到低）：**
 
 ### 安全加固：消除「跨 await 持锁」危险模式

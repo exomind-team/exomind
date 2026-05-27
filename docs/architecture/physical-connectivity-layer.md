@@ -307,7 +307,7 @@ UdpDiscoveryBridge 和 RemotePeerManager 都是物理联通层的具体实现—
 
 ### 10.3 建议方法
 
-建议在 Reticulum-research 仓库的 ARA 中以研究课题形式展开，先读 Reticulum 手册中 Interface 设计哲学章节，再对照当前工程的 `InterfaceManager`/`UdpDiscoveryBridge`/文件注册表代码，形成理论对照表。产出可以是「联通方式与 Reticulum Interface 的理论区分」章节，补充到 `physical-connectivity-layer.md`。
+建议在 ExoNet-Reticulum 仓库的 .ara/ 中以研究课题形式展开，先读 Reticulum 手册中 Interface 设计哲学章节，再对照当前工程的 `InterfaceManager`/`UdpDiscoveryBridge`/文件注册表代码，形成理论对照表。产出可以是「联通方式与 Reticulum Interface 的理论区分」章节，补充到 `physical-connectivity-layer.md`。
 
 ---
 
@@ -438,7 +438,7 @@ await → 持锁 → drop → await ✅ 安全
 
 本次排查暴露的最大瓶颈：Reticulum rust Transport 的 tracing 覆盖严重不足。以下是需要增补的关键 tracing 点：
 
-#### Transport 层（`Reticulum/experiment/rs/src/transport.rs`）
+#### Transport 层（`ExoNet-Reticulum/src/src/transport.rs`）
 
 | 追踪点 | 位置 | 用途 |
 |--------|------|------|

@@ -294,7 +294,7 @@ Reticulum 层 — 多跳自组织网络
 | # | 问题 | 严重度 | 状态 |
 |---|------|--------|------|
 | 1 | transport.rs ABBA 死锁风险（handler × iface_manager 跨 await） — dispatch 重构待做 | 低（未观测到） | TODO 已标注 |
-| 2 | reticulum-rs 外部仓库（ARCJ137442/Reticulum-research）的 `iface.rs`/`transport.rs` 改动未提交 | 低 | 待提交 |
+| 2 | ExoNet-Reticulum 外部仓库（ARCJ137442/ExoNet-Reticulum）的 `iface.rs`/`transport.rs` 改动已提交（54b19a7） | ✅ 已解决 | 已提交推送 |
 | 3 | Reticulum Link 建立依赖 `send_pairing_frame` 的 5s 超时，大实例或高延迟下可能超时 | 中 | 需要调查 `handle_link_request` 状态机 |
 
 ### 调试经验
@@ -347,4 +347,4 @@ cargo check -p exomind-net-pairing -p exomind-runtime
 - Reticulum Link 建立可靠性改进（`send_pairing_frame` 超时从 5s 延长或改用条件等待）
 - 两套配对状态机统一（旧 HTTP `/mesh/pairing/*` vs 新 Reticulum `/mesh/ret/peers/*`）
 - 业务同步迁移 Reticulum data-plane（Phase 3）
-- reticulum-rs 外部仓库（ARCJ137442/Reticulum-research）改提交
+- ExoNet-Reticulum 外部仓库（ARCJ137442/ExoNet-Reticulum）已提交推送
