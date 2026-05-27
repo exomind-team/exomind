@@ -509,7 +509,11 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
                 const currentMode = iface.mode ?? 'active';
                 return (
                   <div key={iface.name} className="flex items-center gap-2">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${currentMode !== 'off' ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      currentMode === 'active' ? 'bg-green-500' :
+                      currentMode === 'passive' ? 'bg-blue-500' :
+                      'bg-gray-300 dark:bg-gray-600'
+                    }`} />
                     <span className="truncate max-w-[140px] text-[11px] text-[#44403C] dark:text-[#D6D3D1]" title={iface.name}>{iface.name}</span>
                     <div className="ml-auto inline-flex rounded-md border border-[#D6D3D1] bg-[#FAF7F5] dark:border-[#57534E] dark:bg-[#292524] overflow-hidden shrink-0">
                       {(['off', 'passive', 'active'] as const).map((mode) => (
