@@ -396,20 +396,18 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
 
   const hasInterfaces = interfaces.length > 0;
 
-  // ── 6-state machine ──
+  // ── 5-state machine ──
   const rtState = !status && !sseConnecting ? 'disconnected'
     : !status && sseConnecting ? 'connecting'
-    : !meshActive ? 'initializing'
-    : meshActive && discoveredCount === 0 && authorizedCount === 0 && !hasInterfaces ? 'warming'
-    : meshActive && discoveredCount === 0 && authorizedCount === 0 ? 'searching'
-    : meshActive && discoveredCount > 0 && authorizedCount === 0 ? 'discovered'
+    : !hasInterfaces ? 'warming'
+    : discoveredCount === 0 && authorizedCount === 0 ? 'searching'
+    : discoveredCount > 0 && authorizedCount === 0 ? 'discovered'
     : 'paired';
 
   const rtBadge: Record<string, { text: string; cls: string }> = {
     disconnected: { text: '未连接', cls: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400' },
     connecting:   { text: '连接中', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-    initializing: { text: '连接中', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-    warming:      { text: '就绪中', cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
+    warming:      { text: '接口发现中', cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
     searching:    { text: '寻找节点', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
     discovered:   { text: `已发现 ${discoveredCount} 个节点`, cls: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400' },
     paired:       { text: `已配对 ${authorizedCount}/${discoveredCount}`, cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
@@ -417,8 +415,7 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const rtDesc: Record<string, string> = {
     disconnected: '等待启动 Reticulum 组网',
     connecting:   '正在连接 Reticulum 组网…',
-    initializing: '正在初始化 Reticulum 组网…',
-    warming:      '正在初始化传输接口…',
+    warming:      '正在发现传输接口…',
     searching:    '正在寻找附近节点…',
     discovered:   `已发现 ${discoveredCount} 个节点，等待配对`,
     paired:       `${authorizedCount} 个节点已配对`,
@@ -426,7 +423,6 @@ function ReticulumPeerSection({ runtimeBaseUrl }: { runtimeBaseUrl?: string }) {
   const rtIconColor: Record<string, string> = {
     disconnected: 'text-[#A8A29E]',
     connecting:   'text-amber-500',
-    initializing: 'text-amber-500',
     warming:      'text-yellow-500',
     searching:    'text-blue-500',
     discovered:   'text-cyan-500',
