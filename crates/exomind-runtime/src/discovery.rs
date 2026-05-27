@@ -278,6 +278,9 @@ pub struct DiscoveredPeer {
 /// behind `Arc`. The daemon itself runs on dedicated std threads (not tokio).
 pub struct MdnsDiscovery {
     host_id: String,
+    /// Legacy host_id (e.g. "rt-xxx") kept for self-filtering stale mDNS
+    /// registrations from previous runs that used the old format.
+    legacy_host_ids: Vec<String>,
     port: u16,
     ret_port: u16,
     daemon: ServiceDaemon,
@@ -296,11 +299,31 @@ impl MdnsDiscovery {
     /// Does NOT register or start browsing yet — call `register()` and
     /// `start_browsing()` separately.
     pub fn new(host_id: String, port: u16, ret_port: u16) -> Result<Self, String> {
+        Self::with_legacy_ids(host_id, port, ret_port, vec![])
+    }
+
+    /// Create with additional legacy host_ids to filter from mDNS discovery.
+    pub fn with_legacy_host_ids(
+        host_id: String,
+        port: u16,
+        ret_port: u16,
+        legacy_host_ids: Vec<String>,
+    ) -> Result<Self, String> {
+        Self::with_legacy_ids(host_id, port, ret_port, legacy_host_ids)
+    }
+
+    fn with_legacy_ids(
+        host_id: String,
+        port: u16,
+        ret_port: u16,
+        legacy_host_ids: Vec<String>,
+    ) -> Result<Self, String> {
         let daemon =
             ServiceDaemon::new().map_err(|e| format!("failed to create mDNS daemon: {e}"))?;
 
         Ok(Self {
             host_id,
+            legacy_host_ids,
             port,
             ret_port,
             daemon,
@@ -357,6 +380,7 @@ impl MdnsDiscovery {
 
         let peers = Arc::clone(&self.peers);
         let own_host_id = self.host_id.clone();
+        let legacy_host_ids = self.legacy_host_ids.clone();
         let preferred_network = detect_preferred_local_network();
 
         let handle = thread::Builder::new()
@@ -372,8 +396,10 @@ impl MdnsDiscovery {
                                 .unwrap_or_default()
                                 .to_string();
 
-                            // Skip self.
-                            if remote_host_id == own_host_id {
+                            // Skip self (current + legacy host_ids).
+                            if remote_host_id == own_host_id
+                                || legacy_host_ids.contains(&remote_host_id)
+                            {
                                 continue;
                             }
 

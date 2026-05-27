@@ -69,6 +69,20 @@ ECS-1~3 的组网理论 / 路线暂名 **ExoNet / 外心网络**；工程实现�
 
 -> `docs/plans/` 中的所有文件均为进行中的计划。
 
+## 当前问题与未解之谜（2026-05-27）
+
+### ~~ret_mesh_background tick 卡死~~（已修复 2026-05-27）
+
+**根因**：`lib.rs:2370` 整数溢出 — mDNS 发现 `ret_port=0` 的旧版 peer，fallback `peer.port + 6000` 溢出 u16 → panic 杀死 ret_mesh_background task。**修复**：`ret_port=0` 时跳过该 peer。详见 `docs/plans/2026-05-27-ret-mesh-background-fix.md`。
+
+### HasMode 方案B — 接口存 Arc 但 trait 仍暴露 set_mode()
+
+`HasMode` trait 的 `set_mode()` 写入接口结构体内部的 `Arc<AtomicInterfaceMode>`，与 Manager 共享的 Arc 是同一个。但 spawn 后，直接通过 `context.inner.lock().unwrap().set_mode()` 调用仍然有效（因为写的是同一个 Arc）。Manager 的 `set_interface_mode()` 也写同一个 Arc。两条路径都正确，无需额外同步。
+
+### MCP driver_session 连接不稳定
+
+Tauri MCP WebSocket 连接频繁断开或超时。插件配置正确（v0.9），端口 9223 在监听，但 `driver_session` 连接失败。暂用 curl 替代验证后端 API。
+
 ## 源码结构
 
 ```text

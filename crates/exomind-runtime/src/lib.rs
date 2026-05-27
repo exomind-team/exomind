@@ -658,6 +658,9 @@ pub async fn start_with_options(
 ) -> Result<RuntimeHandle, RuntimeStartError> {
     let mut options = options;
     ensure_auth_secret_for_bind_host(&mut options);
+    // Save the pre-override host_id so mDNS can filter stale registrations
+    // from previous runs that used the legacy "rt-xxx" format.
+    let pre_override_host_id = options.host_id.clone();
     let ret_mesh_identity_seed = if options.enable_ret_mesh {
         let (identity_seed, public_identity_hex) = prepare_ret_mesh_identity(&options);
         if options.host_id != public_identity_hex {
@@ -724,10 +727,19 @@ pub async fn start_with_options(
                 // mDNS registration — now that the actual UDP port is known.
                 mdns = if options.enable_mdns {
                     let actual_port = actual_udp_port;
-                    match discovery::MdnsDiscovery::new(
+                    // If host_id was overridden from legacy "rt-xxx" to Reticulum
+                    // identity, pass the legacy ID so mDNS self-filtering rejects
+                    // stale registrations from previous runs.
+                    let legacy_ids: Vec<String> = if pre_override_host_id != options.host_id {
+                        vec![pre_override_host_id.clone()]
+                    } else {
+                        vec![]
+                    };
+                    match discovery::MdnsDiscovery::with_legacy_host_ids(
                         options.host_id.clone(),
                         local_addr.port(),
                         actual_port,
+                        legacy_ids,
                     ) {
                         Ok(mdns) => {
                             if let Err(e) = mdns.register() {
@@ -2363,12 +2375,15 @@ async fn ret_mesh_background(
                         if peer.host_id == node.config.host_id {
                             continue;
                         }
-                        if connected_mdns_ids.insert(format!("{}:{}", peer.host_id, peer.ret_port)) {
-                            let ret_port = if peer.ret_port > 0 {
-                                peer.ret_port
-                            } else {
-                                peer.port + 6000
-                            };
+                        // ret_port=0 means the peer didn't publish its Reticulum port
+                        // (e.g. legacy instance). Skip it — we can't connect without a
+                        // known Reticulum UDP port.  The old `peer.port + 6000` fallback
+                        // caused integer overflow for ports > 59535.
+                        let ret_port = peer.ret_port;
+                        if ret_port == 0 {
+                            continue;
+                        }
+                        if connected_mdns_ids.insert(format!("{}:{}", peer.host_id, ret_port)) {
                             tracing::warn!(
                                 "[tick-debug] mDNS new peer host_id={} host={} ret_port={} tick#{}",
                                 peer.host_id, peer.host, ret_port, tick_count
