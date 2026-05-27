@@ -58,8 +58,8 @@ jobs:
       - name: Build website for GitHub Pages (构建 GitHub Pages 静态站点)
         run: bun run website:build
         env:
-          EXOMIND_WEBSITE_BASE_PATH: /exomind/
-          PUBLIC_EXOMIND_WEBSITE_BASE_PATH: /exomind/
+          EXOMIND_WEBSITE_BASE_PATH: /
+          PUBLIC_EXOMIND_WEBSITE_BASE_PATH: /
 
       - name: Configure GitHub Pages (配置 GitHub Pages)
         uses: actions/configure-pages@v6
