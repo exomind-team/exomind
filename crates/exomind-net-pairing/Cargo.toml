@@ -5,7 +5,7 @@ edition = "2021"
 description = "Reticulum-based device discovery and pairing for ExoMind"
 
 [dependencies]
-reticulum = { path = "../../../Reticulum/experiment/rs" }
+reticulum = { path = "../../../ExoNet-Reticulum/src" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

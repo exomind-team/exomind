@@ -141,6 +141,7 @@ runtime-data/
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .exomind/
+.codegraph/
 
 # 临时截图和备份
 dark-mode-*.png
