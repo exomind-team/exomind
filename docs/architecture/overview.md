@@ -191,6 +191,7 @@ ECS（通信栈）管实时信号，EDS（数据栈）管持久数据。RT（运
 | **Claude Agent** | 进程内/外 | Claude CLI 流式对话 | **已实现** |
 | **分类 Agent** | 进程外 | `user.input.text` → `input.classified` | **已实现** |
 | **Review Agent** | 进程外 | `session.end` / `timeblock.completed` → `review.completed` | **已实现** |
+| **Timeblock Summary** | 进程内 | `timeblock.replication.completed` / `active_upserted` → `agent_feedback` | **已实现**（#555 Phase 1） |
 | **知识 Agent** | 进程外 | `input.classified` + `session.end` → `knowledge.*` | 计划中 |
 | **Growth Coach** | 进程外 | `session.end` → `growth.insight` | 计划中 |
 
