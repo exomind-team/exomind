@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ExoMind 开发日报</title>
+<link rel="icon" href="../favicon.ico">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <link rel="stylesheet" href="../assets/report-style.css">
@@ -37,6 +38,7 @@ const CONFIG = {
   dataFile: 'DATA_FILENAME.json',
   schema: 'exomind-devlog-report',
   engineUrl: '../assets/report-engine.js',
+  cacheKey: '2026-06-03-scorecard-mainline-v3',
   debug: new URLSearchParams(window.location.search).has('debug'),
 };
 
@@ -58,6 +60,12 @@ function updateStage(stage, status, detail = '') {
   stages[stage].status = status;
   stages[stage].detail = detail;
   log.info(`[${stage}] ${status}:`, detail);
+}
+
+function cacheBust(url) {
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}v=${encodeURIComponent(CONFIG.cacheKey || CONFIG.dataFile || Date.now())}`;
 }
 
 function showError(failedStage, error) {
@@ -114,11 +122,12 @@ async function fetchData() {
   for (const candidate of candidates) {
     try {
       log.info('尝试读取', candidate);
-      const response = await fetch(candidate.url, { signal: AbortSignal.timeout(10000) });
+      const requestUrl = candidate.source === 'url-param' ? candidate.url : cacheBust(candidate.url);
+      const response = await fetch(requestUrl, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       stages.fetch.source = candidate.source;
-      updateStage('fetch', 'success', `成功加载 ${candidate.url}`);
+      updateStage('fetch', 'success', `成功加载 ${requestUrl}`);
       return data;
     } catch (error) {
       log.warn(`${candidate.source} 读取失败`, error instanceof Error ? error.message : String(error));
@@ -140,16 +149,17 @@ function validateData(data) {
 
 function loadEngine() {
   return new Promise((resolve, reject) => {
-    updateStage('engine', 'running', `加载: ${CONFIG.engineUrl}`);
+    const engineUrl = cacheBust(CONFIG.engineUrl);
+    updateStage('engine', 'running', `加载: ${engineUrl}`);
     const script = document.createElement('script');
-    script.src = CONFIG.engineUrl;
+    script.src = engineUrl;
     script.onload = () => {
       updateStage('engine', 'success', '渲染引擎已加载');
       resolve();
     };
     script.onerror = () => {
       updateStage('engine', 'failed', '渲染引擎加载失败');
-      reject(new Error(`无法加载渲染引擎: ${CONFIG.engineUrl}`));
+      reject(new Error(`无法加载渲染引擎: ${engineUrl}`));
     };
     document.head.appendChild(script);
   });

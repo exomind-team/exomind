@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ExoMind 开发日报模板</title>
+<link rel="icon" href="../favicon.ico">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
@@ -403,7 +404,7 @@ function prLink(num) { return `<a class="gh-link" href="${GH_PR}${num}">#${num}<
 
 // Auto-linkify #xxx in plain text
 function autoLink(text) {
-  return text.replace(/#(\d+)/g, (_, n) => ghLink(n));
+  return String(text ?? '').replace(/#(\d+)/g, (_, n) => ghLink(n));
 }
 
 // Weather gradient map
@@ -569,16 +570,27 @@ function normalizeReportForRender(report) {
         }))
       : [],
     mainlines: Array.isArray(report?.mainlines)
-      ? report.mainlines.map(mainline => ({
-          ...mainline,
-          subtasks: Array.isArray(mainline?.subtasks)
-            ? mainline.subtasks.map(subtask => typeof subtask === 'string' ? { text: subtask, done: false } : subtask)
-            : [],
-        }))
+      ? report.mainlines.map(mainline => {
+          const progress = Number.isFinite(mainline?.progress)
+            ? mainline.progress
+            : Number.isFinite(mainline?.pct)
+              ? mainline.pct
+              : 0;
+          return {
+            ...mainline,
+            progress,
+            pct: progress,
+            subtasks: Array.isArray(mainline?.subtasks)
+              ? mainline.subtasks.map(subtask => typeof subtask === 'string' ? { text: subtask, done: false } : subtask)
+              : [],
+          };
+        })
       : [],
     scorecard: Array.isArray(report?.scorecard)
       ? report.scorecard.map(item => ({
           ...item,
+          text: typeof item?.text === 'string' ? item.text : (typeof item?.label === 'string' ? item.label : ''),
+          note: typeof item?.note === 'string' ? item.note : (typeof item?.detail === 'string' ? item.detail : ''),
           result: normalizeScoreResult(item?.result),
         }))
       : [],
@@ -658,11 +670,11 @@ function render() {
       <div class="mainline-header" onclick="toggleMainline(this)">
         <span class="mainline-name">${m.name} ${tag}</span>
         <span style="display:flex;align-items:center;gap:.6rem">
-          <span class="mainline-pct">${m.pct}%</span>
+          <span class="mainline-pct">${(Number.isFinite(m.pct) ? m.pct : Number.isFinite(m.progress) ? m.progress : 0)}%</span>
           <span class="mainline-chevron">▶</span>
         </span>
       </div>
-      <div class="mainline-bar"><div class="mainline-fill${m.stall?' stall':''}" style="width:${m.pct}%"></div></div>
+      <div class="mainline-bar"><div class="mainline-fill${m.stall?' stall':''}" style="width:${(Number.isFinite(m.pct) ? m.pct : Number.isFinite(m.progress) ? m.progress : 0)}%"></div></div>
       <div class="mainline-subtasks"><ul>${subs}</ul></div>
     </div>`;
   });

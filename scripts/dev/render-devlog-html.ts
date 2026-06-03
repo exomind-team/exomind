@@ -166,12 +166,21 @@ function normalizeReportData(data: Record<string, any>) {
     : [];
 
   copy.mainlines = Array.isArray(copy.mainlines)
-    ? copy.mainlines.map((mainline: Record<string, any>) => ({
-        ...mainline,
-        subtasks: Array.isArray(mainline?.subtasks)
-          ? mainline.subtasks.map((subtask: any) => typeof subtask === 'string' ? { text: subtask, done: false } : subtask)
-          : [],
-      }))
+    ? copy.mainlines.map((mainline: Record<string, any>) => {
+        const progress = Number.isFinite(mainline?.progress)
+          ? mainline.progress
+          : Number.isFinite(mainline?.pct)
+            ? mainline.pct
+            : 0;
+        return {
+          ...mainline,
+          progress,
+          pct: progress,
+          subtasks: Array.isArray(mainline?.subtasks)
+            ? mainline.subtasks.map((subtask: any) => typeof subtask === 'string' ? { text: subtask, done: false } : subtask)
+            : [],
+        };
+      })
     : [];
 
   copy.actions = Array.isArray(copy.actions)
@@ -183,6 +192,8 @@ function normalizeReportData(data: Record<string, any>) {
   copy.scorecard = Array.isArray(copy.scorecard)
     ? copy.scorecard.map((item: Record<string, any>) => ({
         ...item,
+        text: typeof item?.text === 'string' ? item.text : typeof item?.label === 'string' ? item.label : '',
+        note: typeof item?.note === 'string' ? item.note : typeof item?.detail === 'string' ? item.detail : '',
         result: normalizeScoreResult(item?.result),
       }))
     : [];
