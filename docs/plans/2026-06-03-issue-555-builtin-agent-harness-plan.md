@@ -548,36 +548,115 @@ MVP 使用 config store 做轻量持久化（刷新网页/重启不丢失），�
 - 模型调用只依赖 Runtime 的 HTTP/SSE 能力。
 - 桌面与移动端 Runtime 具备相同设计路径；若移动端暂不启用，需要明确配置与日志。
 
-## 12. 实施阶段建议
+## 12. 实施阶段
 
-### Phase 0：设计冻结与最小补查
+### Phase 0：设计冻结与最小补查 ✅（2026-06-03 完成）
 
-- 确认 `timeblock.replication.*` 信号 payload 是否足够直接驱动上下文收集。
-- 确认 AgentRegistry 注册 `timeblock_summary` 后 UI 节点详情最小改法。
-- 确认默认 LLM profile 解析路径与设置页配置落点。
-- 固化 `submit_timeblock_summary` schema。
+- ✅ 确认 `timeblock.replication.*` 信号 payload 足够驱动上下文收集
+- ✅ 确认 AgentRegistry 注册 `timeblock_summary` 后 UI 节点自动显示
+- ✅ 确认默认 LLM profile 解析路径（`resolve_provider_profile_from_runtime`）
+- ✅ 固化 `submit_timeblock_summary` schema（TypeScript notation）
 
-### Phase 1：信号驱动服务 MVP
+### Phase 1：信号驱动服务 MVP ✅（2026-06-03 完成）
 
-- 实现 `TimeblockSummaryAgentService`。
-- 读取 device-local enabled 开关。
-- 订阅 `SignalPool`，响应 `timeblock.replication.active_upserted` / `timeblock.replication.completed`。
-- 先实现程序模板或 fake model 路径。
-- 写回 `agent_feedback`。
-- 增加幂等状态与启动补发。
+- ✅ 实现 `TimeblockSummaryAgentService`（`agent/timeblock_summary/mod.rs`）
+- ✅ 实现上下文自动收集（`context.rs`）— eventlog 查询、相邻块、幂等状态
+- ✅ 实现出口工具 `submit_timeblock_summary`（`tools.rs`）
+- ✅ 实现 prompt 模板（`templates.rs`）
+- ✅ 订阅 `SignalPool`，响应 `active_upserted` / `completed`
+- ✅ 修复 config 热更新 bug（AtomicBool 先读 config 再检查）
+- ✅ 修复 ActiveBlockData → TimeBlockData 转换
+- ✅ 修复 blockId prompt 标注（LLM round=0 即成功）
+- ✅ 端到端验证通过，推送到 dev 分支
 
-### Phase 2：接入 broker 与工具循环
+### Phase 2：设置页与用户配置（待实施）
 
 - 复用默认 provider profile 与 `AgentTurnBroker`。
 - 新增只读上下文工具与 `submit_timeblock_summary` 工具。
 - 实现工具调用续跑与有限重试。
 - 记录 `AgentSessionRecord` 与工具调用轨迹。
 
-### Phase 3：设置页与信号网络可观测性
+### Phase 3：设置页与用户配置（待实施）
 
-- 设置页增加内置时间块总结配置组。
-- 信号网络展示 `timeblock_summary` agent 节点。
-- 节点详情展示状态、工具调用、最近输出与错误。
+**目标**：让普通用户无需 API 即可启用和配置时间块总结 Agent。
+
+#### 配置架构问题
+
+当前 Agent 读取旧版 config key（`exomind:agentApiProvider` 等），但设置页 UI 使用 AI Registry 系统。两者未打通，导致用户在设置页看到 AI Registry 但 Agent 读不到配置。
+
+**方案选择**：
+
+| 方案 | 描述 | 优点 | 缺点 |
+|------|------|------|------|
+| A. Agent 改读 AI Registry | 重构 Agent 的 provider 解析，从 AI Registry 读取 | 统一配置源 | 改动大，需重构 broker/provider 解析 |
+| B. 设置页写旧 config key | 设置页 UI 直接写 `exomind:agentApi*` config key | Agent 零改动，快速落地 | 两套配置系统并存，用户可能困惑 |
+| C. 桥接层 | 设置页写 AI Registry，Agent 通过桥接层读取 | 长期最优 | 实现复杂，Phase 3 不适合 |
+
+**建议**：Phase 3 采用**方案 B**（设置页写旧 config key），后续再考虑方案 A 或 C 的统一。
+
+#### 设置页 UI 设计
+
+新增「内置 Agent」设置组，包含：
+
+```
+┌─────────────────────────────────────────┐
+│  内置 Agent                              │
+├─────────────────────────────────────────┤
+│  ⏱ 时间块总结                            │
+│  ┌─────────────────────────────────────┐│
+│  │ 启用时间块总结    [开关]              ││
+│  │                                     ││
+│  │ 模型配置                            ││
+│  │ Provider    [下拉: openai/anthropic] ││
+│  │ Model       [输入: gpt-4o]          ││
+│  │ Base URL    [输入: https://...]     ││
+│  │ API Key     [输入: sk-...]  [👁]    ││
+│  │                                     ││
+│  │ 开始提示    [开关]  默认开启         ││
+│  │ 结束总结    [开关]  默认开启         ││
+│  │                                     ││
+│  │ 最近运行状态: idle                   ││
+│  │ 上次运行: 2026-06-03 20:23          ││
+│  │ 上次错误: 无                         ││
+│  │                                     ││
+│  │ [查看信号网络节点 →]                 ││
+│  └─────────────────────────────────────┘│
+└─────────────────────────────────────────┘
+```
+
+#### 首次启用体验
+
+用户首次打开设置页时：
+1. 看到「时间块总结」开关（默认关闭）
+2. 开启后，检查是否已配置 LLM provider
+3. 未配置 → 显示红色提示「请先配置模型 API」，高亮模型配置区域
+4. 已配置 → 显示绿色「已就绪」，Agent 开始监听信号
+5. 配置变更实时生效（Agent 的 config 热更新机制已实现）
+
+#### 错误处理
+
+| 错误场景 | 用户看到 | Agent 行为 |
+|----------|----------|------------|
+| 未配置 API Key | 设置页红色提示 | 记录 `missing_provider` 到 eventlog，不崩溃 |
+| API Key 无效 | 设置页显示最近错误 | 记录 `provider_error`，不崩溃 |
+| 模型超时 | 设置页显示超时 | 重试后记录 `timeout`，不崩溃 |
+| LLM 不调用工具 | 设置页显示 `max_rounds_exceeded` | 写入 `agent_error` 事件 |
+
+#### 实施任务
+
+- [ ] 在设置页组件中新增「内置 Agent」配置组
+- [ ] 实现 enabled 开关（写 `builtin.timeblock_summary.enabled` config key）
+- [ ] 实现模型配置表单（写 `exomind:agentApi*` config keys）
+- [ ] 实现状态展示（读取 `timeblock_summary.status` config）
+- [ ] 实现错误展示（读取 `timeblock_summary.last_error` config）
+- [ ] 添加「查看信号网络节点」跳转链接
+- [ ] 端到端测试：开启 → 配置 → 结束时间块 → 验证 agent_feedback 写入
+
+### Phase 4：可观测性与 AI Registry 统一（后续）
+
+- 信号网络节点详情展示状态、工具调用、最近输出与错误。
+- Agent session store 回看历史运行记录。
+- 考虑将 Agent 的 provider 解析统一到 AI Registry（方案 A）。
 - 增加端到端测试与失败路径测试。
 
 ## 13. 已对齐决策记录
@@ -591,11 +670,22 @@ MVP 使用 config store 做轻量持久化（刷新网页/重启不丢失），�
 | 3 | `/agents/:id/chat` 入口？ | 不做自由聊天入口，但必须可见状态 + 历史聊天记录 | 4.7, 11.2 |
 | 4 | 人与 Agent 反馈时序？ | 同步触发，无先后依赖；内置 Agent 不等待 `block_feedback` 或人的反馈 | 4.8, 5.1, 6.1, 6.3, 7.1 |
 | 5 | 计划通过后？ | 全文刊载到 #555 issue 正文，说明是原型 1.0 计划 | 14 |
+| 6 | 配置架构（Phase 3） | 方案 B：设置页写旧 config key，Agent 零改动，快速落地 | 12 Phase 3 |
 
 ## 14. 当前结论
 
-本计划将 #555 第一阶段收束为：
+本计划将 #555 收束为：
 
 > 在 ExoMind Runtime 内实现一个设备本地、信号驱动、工具受控的内置 `timeblock_summary` Agent Harness。它复用现有 `SignalPool`、信号网络、LLM broker/provider profile 与工具调用基础，在时间块开始/结束时生成 `agent_feedback`；旧外部 TS Agent CLI 保留且不迁移，Claude Code/Codex PTY 自动路由不进入第一阶段。
 
-本计划已通过审阅。下一步：全文刊载至 #555 issue 正文（标明原型 1.0 计划），然后进入 Phase 0 实施。
+### 进展状态
+
+| 阶段 | 状态 | 日期 |
+|------|------|------|
+| Phase 0：设计冻结 | ✅ 完成 | 2026-06-03 |
+| Phase 1：信号驱动服务 MVP | ✅ 完成 | 2026-06-03 |
+| Phase 2：接入 broker 与工具循环 | ✅ 合并到 Phase 1 | 2026-06-03 |
+| Phase 3：设置页与用户配置 | 待实施 | — |
+| Phase 4：可观测性与 AI Registry 统一 | 后续 | — |
+
+Phase 1 MVP 已推送到 dev 分支（commit `0afdcb5c`），端到端验证通过。下一步：Phase 3 设置页 UI，让普通用户可通过界面启用和配置时间块总结 Agent。

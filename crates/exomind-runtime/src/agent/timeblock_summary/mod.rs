@@ -24,7 +24,7 @@ use crate::timeblock::TimeBlockData;
 
 use context::collect_context;
 use templates::{build_end_prompt, build_start_prompt, system_prompt};
-use tools::{submit_timeblock_summary_tool, SUBMIT_TIMEBLOCK_SUMMARY_TOOL};
+use tools::{submit_timeblock_summary_tool, AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL};
 
 const CONFIG_KEY_ENABLED: &str = "builtin.timeblock_summary.enabled";
 const MAX_TOOL_ROUNDS: usize = 30;
@@ -222,6 +222,11 @@ impl TimeblockSummaryAgentService {
                         "agent": "timeblock_summary",
                         "block_id": block.start_id,
                         "status": "missing_provider",
+                        "source": {
+                            "deviceName": crate::routes::topology::read_hostname_export(),
+                            "platform": crate::routes::topology::read_os_export(),
+                            "app": "ExoMind",
+                        },
                     })),
                 });
                 return Err(format!("missing provider: {e}"));
@@ -229,8 +234,14 @@ impl TimeblockSummaryAgentService {
         };
 
         // 3. Build tools (only submit_timeblock_summary)
+        let source_meta = Arc::new(AgentSourceMetadata {
+            device_name: crate::routes::topology::read_hostname_export(),
+            platform: crate::routes::topology::read_os_export(),
+            provider: provider.provider.clone(),
+            model: provider.model.clone(),
+        });
         let (tool_def, tool_fn) =
-            submit_timeblock_summary_tool(block.clone(), kind.clone(), Arc::clone(&self.eventlog_store));
+            submit_timeblock_summary_tool(block.clone(), kind.clone(), Arc::clone(&self.eventlog_store), Arc::clone(&source_meta));
         let mut tool_registry = ToolRegistry::new();
         tool_registry.register(tool_def, tool_fn);
 
@@ -357,7 +368,14 @@ impl TimeblockSummaryAgentService {
                     "agent": "timeblock_summary",
                     "block_id": block.start_id,
                     "rounds": MAX_TOOL_ROUNDS,
-                    "status": "max_rounds_exceeded"
+                    "status": "max_rounds_exceeded",
+                    "source": {
+                        "deviceName": source_meta.device_name,
+                        "platform": source_meta.platform,
+                        "provider": source_meta.provider,
+                        "model": source_meta.model,
+                        "app": "ExoMind",
+                    },
                 })),
             });
         }

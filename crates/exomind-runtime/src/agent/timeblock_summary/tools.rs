@@ -8,6 +8,15 @@ use super::SummaryKind;
 
 pub const SUBMIT_TIMEBLOCK_SUMMARY_TOOL: &str = "submit_timeblock_summary";
 
+/// Source attribution metadata for agent_feedback events.
+#[derive(Debug, Clone)]
+pub struct AgentSourceMetadata {
+    pub device_name: String,
+    pub platform: String,
+    pub provider: String,
+    pub model: String,
+}
+
 /// Build the submit_timeblock_summary tool definition and handler.
 ///
 /// This is the ONLY tool the LLM sees. All read-only context is pre-filled in the prompt.
@@ -15,6 +24,7 @@ pub fn submit_timeblock_summary_tool(
     block: TimeBlockData,
     kind: SummaryKind,
     eventlog_store: Arc<EventLogStore>,
+    source: Arc<AgentSourceMetadata>,
 ) -> (ToolDef, ToolFn) {
     let def = ToolDef {
         name: SUBMIT_TIMEBLOCK_SUMMARY_TOOL.to_string(),
@@ -90,11 +100,13 @@ pub fn submit_timeblock_summary_tool(
 
     let expected_block_id = block.start_id.clone();
     let expected_kind = kind.clone();
+    let source_meta = Arc::clone(&source);
 
     let tool_fn: ToolFn = Box::new(move |input: Value| {
         let block_id_expected = expected_block_id.clone();
         let kind_expected = expected_kind.clone();
         let store = Arc::clone(&eventlog_store);
+        let src = Arc::clone(&source_meta);
         Box::pin(async move {
             // Validate blockId
             let block_id = input
@@ -236,6 +248,13 @@ pub fn submit_timeblock_summary_tool(
                     "agent": "timeblock_summary",
                     "block_id": block_id,
                     "summary_kind": summary_kind,
+                    "source": {
+                        "deviceName": src.device_name,
+                        "platform": src.platform,
+                        "provider": src.provider,
+                        "model": src.model,
+                        "app": "ExoMind",
+                    },
                 })),
             };
 
