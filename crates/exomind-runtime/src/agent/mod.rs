@@ -21,6 +21,7 @@ pub mod llm_cognition;
 pub mod proposal_tools;
 pub mod runtime_event;
 pub mod session;
+pub mod timeblock_summary;
 pub mod tools;
 pub mod workspace;
 

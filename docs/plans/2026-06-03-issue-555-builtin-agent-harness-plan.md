@@ -1,6 +1,6 @@
 ﻿# Issue #555 内置 Agent Harness 计划草案
 
-> 状态：Plan approved v1.0（已吸收两轮审阅意见，待全文刊载至 #555）  
+> 状态：Plan approved v1.0（已吸收两轮审阅意见，已刊载至 [#555](https://github.com/exomind-team/exomind/issues/555)）  
 > 日期：2026-06-03  
 > 关联 Issue：#555、#385  
 > 第一阶段功能命名：`时间块总结` / `timeblock_summary`  

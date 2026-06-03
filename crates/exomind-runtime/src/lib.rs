@@ -738,6 +738,37 @@ pub async fn start_with_options(
         }
     }
 
+    // Register timeblock_summary built-in agent service
+    {
+        agent::timeblock_summary::init_config_defaults(&state.config_store);
+        let session_runtime = agent::session::AgentSessionRuntime::from_state(&state);
+        let tb_summary = Arc::new(agent::timeblock_summary::TimeblockSummaryAgentService::new(
+            Arc::clone(&state.signal_pool),
+            Arc::clone(&state.config_store),
+            Arc::clone(&state.eventlog_store),
+            session_runtime,
+        ));
+        state.registry.register(tb_summary.clone() as Arc<dyn agent::Agent>);
+        tb_summary.spawn();
+
+        // Register signal routes for UI topology
+        let now = chrono::Utc::now().to_rfc3339();
+        for topic in &[
+            "timeblock.replication.active_upserted",
+            "timeblock.replication.completed",
+        ] {
+            let _ = state.signal_pool.routes().add(crate::signal::SignalRoute {
+                id: uuid::Uuid::new_v4().to_string(),
+                enabled: true,
+                topic: topic.to_string(),
+                target_type: crate::signal::TargetType::Agent,
+                target_ref: "timeblock_summary".to_string(),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            });
+        }
+    }
+
     // Start tick scheduler for all agents with tick_interval_secs > 0.
     // 启动所有启用 tick 的 agent 生命周期循环。
     let tick_manager = Arc::clone(&state.tick_manager);
