@@ -377,7 +377,7 @@ function ActionsTab({ agentId }: { agentId: string }) {
                         )}
                       </div>
                     </div>
-                    <p className="exomind-selectable mt-1 text-xs leading-5 text-secondary">{entry.description}</p>
+                    <p className="exomind-selectable mt-1 whitespace-pre-wrap text-xs leading-5 text-secondary">{entry.description}</p>
                   </div>
                 </div>
               </div>

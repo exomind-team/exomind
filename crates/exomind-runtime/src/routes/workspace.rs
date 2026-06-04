@@ -225,17 +225,14 @@ async fn get_actions(
             .iter()
             .enumerate()
             .map(|(idx, s)| {
-                let description = match (&s.trigger_source, &s.content) {
-                    (Some(trigger), Some(content)) => {
-                        let truncated = if content.len() > 120 {
-                            format!("{}…", &content[..120])
-                        } else {
-                            content.clone()
-                        };
-                        format!("{}: {}", trigger, truncated)
-                    }
-                    (Some(trigger), None) => trigger.clone(),
-                    _ => format!("session {}", s.session_id),
+                let description = {
+                    let trigger = s.trigger_source.as_deref().unwrap_or("unknown");
+                    let display_content = s.content.as_ref()
+                        .filter(|c| !c.is_empty())
+                        .or(s.prompt.as_ref())
+                        .cloned()
+                        .unwrap_or_else(|| format!("session {}", s.session_id));
+                    format!("{}: {}", trigger, display_content)
                 };
                 crate::agent::workspace::ActionEntry {
                     timestamp: s.created_at.clone(),
