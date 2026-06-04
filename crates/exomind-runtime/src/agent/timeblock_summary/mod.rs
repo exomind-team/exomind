@@ -11,7 +11,7 @@ use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::broadcast;
 
 use crate::agent::broker::{self, AgentTurnBroker, AgentTurnRequest, AgentTurnResult, TurnItem};
-use crate::agent::session::AgentSessionRuntime;
+use crate::agent::session::{AgentSessionRecord, AgentSessionRuntime};
 use crate::agent::tools::{ToolDef, ToolFn, ToolRegistry};
 use crate::agent::{Agent, ChatChunk, ChatRequest, SessionInfo};
 use crate::config::types::PutConfigEntryInput;
@@ -58,6 +58,7 @@ pub struct TimeblockSummaryAgentService {
     session_runtime: AgentSessionRuntime,
     energy_registry: Arc<EnergyRegistry>,
     processed: Arc<RwLock<HashMap<String, ProcessedRecord>>>,
+    sessions: Arc<RwLock<Vec<AgentSessionRecord>>>,
 }
 
 impl TimeblockSummaryAgentService {
@@ -84,6 +85,7 @@ impl TimeblockSummaryAgentService {
             session_runtime,
             energy_registry,
             processed: Arc::new(RwLock::new(HashMap::new())),
+            sessions: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -404,6 +406,70 @@ impl TimeblockSummaryAgentService {
         // Note: energy depleted event is written inside the loop when energy == 0
         // Error/broker failures also break out above
 
+        // 6. Record session for frontend display
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let trigger_source = format!("timeblock_summary-{:?}", kind);
+        let prompt_text = history.iter().find_map(|item| {
+            if let TurnItem::User { content } = item {
+                Some(content.clone())
+            } else {
+                None
+            }
+        });
+        let tool_call_records: Vec<crate::agent::session::ToolCallRecord> = history
+            .iter()
+            .filter_map(|item| {
+                if let TurnItem::Assistant { tool_calls, .. } = item {
+                    Some(tool_calls.iter().map(|tc| {
+                        crate::agent::session::ToolCallRecord {
+                            tool_name: tc.name.clone(),
+                            input: tc.input.clone(),
+                            output: None,
+                        }
+                    }))
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect();
+        let status = if submitted { "completed" } else { "failed" };
+        let error_message = if submitted {
+            None
+        } else {
+            Some("Agent did not submit summary".to_string())
+        };
+
+        let session_record = crate::agent::session::AgentSessionRecord {
+            session_id,
+            trigger_source,
+            provider: provider.provider.clone(),
+            model: provider.model.clone(),
+            prompt: prompt_text,
+            content: last_assistant_message.clone(),
+            assistant_turn: crate::agent::broker::AssistantTurn {
+                content: last_assistant_message.clone(),
+                tool_calls: Vec::new(),
+            },
+            tool_calls: tool_call_records,
+            status: status.to_string(),
+            error_message,
+            created_at,
+            completed_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let _ = self.session_runtime.agent_api_session_store.upsert(session_record.clone());
+        // Also store in memory for list_sessions()
+        {
+            let mut sessions = self.sessions.write().unwrap();
+            sessions.push(session_record);
+            // Keep only last 50 sessions
+            let len = sessions.len();
+            if len > 50 {
+                sessions.drain(0..len - 50);
+            }
+        }
+
         // 7. Record idempotency state
         if submitted {
             let key = match kind {
@@ -519,6 +585,36 @@ impl Agent for TimeblockSummaryAgentService {
 
     fn publications(&self) -> Vec<String> {
         vec!["agent_feedback.timeblock_summary".to_string()]
+    }
+
+    fn list_sessions(&self) -> Vec<crate::agent::SessionInfo> {
+        let sessions = self.sessions.read().unwrap();
+        sessions
+            .iter()
+            .rev()
+            .map(|s| crate::agent::SessionInfo {
+                session_id: s.session_id.clone(),
+                status: s.status.clone(),
+                created_at: s.created_at.clone(),
+                last_active: s.completed_at.clone(),
+                message_count: (s.tool_calls.len() as u64) + 1,
+                uptime_secs: 0,
+            })
+            .collect()
+    }
+
+    fn get_session(&self, session_id: &str) -> Option<crate::agent::SessionInfo> {
+        let sessions = self.sessions.read().unwrap();
+        sessions.iter().find(|s| s.session_id == session_id).map(|s| {
+            crate::agent::SessionInfo {
+                session_id: s.session_id.clone(),
+                status: s.status.clone(),
+                created_at: s.created_at.clone(),
+                last_active: s.completed_at.clone(),
+                message_count: (s.tool_calls.len() as u64) + 1,
+                uptime_secs: 0,
+            }
+        })
     }
 }
 
