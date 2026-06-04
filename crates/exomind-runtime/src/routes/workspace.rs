@@ -109,16 +109,30 @@ async fn get_soul(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<Json<ContentResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let agent = get_life_agent(&state, &agent_id)?;
-    let content = agent.workspace().load_soul().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("failed to load SOUL.md: {e}"),
-            }),
-        )
-    })?;
-    Ok(Json(ContentResponse { content }))
+    // Try life agent workspace first
+    if let Ok(life_agent) = get_life_agent(&state, &agent_id) {
+        let content = life_agent.workspace().load_soul().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("failed to load SOUL.md: {e}"),
+                }),
+            )
+        })?;
+        return Ok(Json(ContentResponse { content }));
+    }
+    // Fallback: use Agent trait's soul() for built-in agents
+    if let Some(agent) = state.registry.get(&agent_id) {
+        return Ok(Json(ContentResponse {
+            content: agent.soul(),
+        }));
+    }
+    Err((
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: "agent not found".to_string(),
+        }),
+    ))
 }
 
 async fn list_knowledge(
@@ -186,23 +200,51 @@ async fn get_actions(
     Path(agent_id): Path<String>,
     Query(query): Query<ActionsQuery>,
 ) -> Result<Json<ActionsListResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let agent = get_life_agent(&state, &agent_id)?;
-    let all = agent.workspace().action_log().read_all().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("failed to read actions: {e}"),
-            }),
-        )
-    })?;
-
-    let total = all.len() as u64;
-    // Return last N entries.
-    let start = all.len().saturating_sub(query.limit);
-    Ok(Json(ActionsListResponse {
-        actions: all[start..].to_vec(),
-        total,
-    }))
+    // Try life agent workspace first
+    if let Ok(life_agent) = get_life_agent(&state, &agent_id) {
+        let all = life_agent.workspace().action_log().read_all().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("failed to read actions: {e}"),
+                }),
+            )
+        })?;
+        let total = all.len() as u64;
+        let start = all.len().saturating_sub(query.limit);
+        return Ok(Json(ActionsListResponse {
+            actions: all[start..].to_vec(),
+            total,
+        }));
+    }
+    // Fallback: read from session store for built-in agents
+    if let Some(agent) = state.registry.get(&agent_id) {
+        let sessions = agent.list_sessions();
+        let total = sessions.len() as u64;
+        let actions: Vec<crate::agent::workspace::ActionEntry> = sessions
+            .iter()
+            .enumerate()
+            .map(|(idx, s)| crate::agent::workspace::ActionEntry {
+                timestamp: s.created_at.clone(),
+                tick: (idx as u64) + 1,
+                action_type: "signal".to_string(),
+                description: format!("session {} ({})", s.session_id, s.status),
+                energy_before: 100,
+                energy_after: 100,
+            })
+            .collect();
+        let start = actions.len().saturating_sub(query.limit as usize);
+        return Ok(Json(ActionsListResponse {
+            actions: actions[start..].to_vec(),
+            total,
+        }));
+    }
+    Err((
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: "agent not found".to_string(),
+        }),
+    ))
 }
 
 async fn get_state(
