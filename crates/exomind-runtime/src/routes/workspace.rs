@@ -224,13 +224,27 @@ async fn get_actions(
         let actions: Vec<crate::agent::workspace::ActionEntry> = sessions
             .iter()
             .enumerate()
-            .map(|(idx, s)| crate::agent::workspace::ActionEntry {
-                timestamp: s.created_at.clone(),
-                tick: (idx as u64) + 1,
-                action_type: "signal".to_string(),
-                description: format!("session {} ({})", s.session_id, s.status),
-                energy_before: 100,
-                energy_after: 100,
+            .map(|(idx, s)| {
+                let description = match (&s.trigger_source, &s.content) {
+                    (Some(trigger), Some(content)) => {
+                        let truncated = if content.len() > 120 {
+                            format!("{}…", &content[..120])
+                        } else {
+                            content.clone()
+                        };
+                        format!("{}: {}", trigger, truncated)
+                    }
+                    (Some(trigger), None) => trigger.clone(),
+                    _ => format!("session {}", s.session_id),
+                };
+                crate::agent::workspace::ActionEntry {
+                    timestamp: s.created_at.clone(),
+                    tick: (idx as u64) + 1,
+                    action_type: "signal".to_string(),
+                    description,
+                    energy_before: 100,
+                    energy_after: 100,
+                }
             })
             .collect();
         let start = actions.len().saturating_sub(query.limit as usize);

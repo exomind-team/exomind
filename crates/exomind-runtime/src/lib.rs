@@ -761,6 +761,9 @@ pub async fn start_with_options(
         for topic in &[
             "timeblock.replication.active_upserted",
             "timeblock.replication.completed",
+            "timeblock_summary.start",
+            "timeblock_summary.tick",
+            "timeblock_summary.end",
         ] {
             let _ = state.signal_pool.routes().add(crate::signal::SignalRoute {
                 id: uuid::Uuid::new_v4().to_string(),

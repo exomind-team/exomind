@@ -75,6 +75,34 @@ pub struct SessionInfo {
     pub last_active: String,
     pub message_count: u64,
     pub uptime_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+impl Default for SessionInfo {
+    fn default() -> Self {
+        Self {
+            session_id: String::new(),
+            status: String::new(),
+            created_at: String::new(),
+            last_active: String::new(),
+            message_count: 0,
+            uptime_secs: 0,
+            content: None,
+            trigger_source: None,
+            prompt: None,
+            provider: None,
+            model: None,
+        }
+    }
 }
 
 /// Agent behavior contract (Agent 行为契约).

@@ -267,6 +267,13 @@ impl TimeblockSummaryAgentService {
         let mut last_assistant_message = String::new();
         let mut tool_call_history: Vec<String> = Vec::new();
 
+        // Emit start signal
+        self.emit_lifecycle_signal("start", &block.start_id, 0, serde_json::json!({
+            "kind": format!("{:?}", kind),
+            "provider": provider.provider,
+            "model": provider.model,
+        }));
+
         // 5. Energy-driven broker loop
         loop {
             // Check energy
@@ -402,27 +409,18 @@ impl TimeblockSummaryAgentService {
                 }
             }
 
-            // Emit tick signal for each LLM round (visible in signal network)
-            let tick_payload = serde_json::json!({
-                "round": total_rounds,
-                "block_id": block.start_id,
-                "kind": format!("{:?}", kind),
-                "energy": self.energy_registry.get("timeblock_summary")
-                    .map(|e| e.snapshot("timeblock_summary").current)
-                    .unwrap_or(0),
-            });
-            self.signal_pool.publish(crate::signal::types::SignalEvent {
-                schema_version: 1,
-                id: uuid::Uuid::new_v4().to_string(),
-                topic: "timeblock_summary.tick".to_string(),
-                ts: chrono::Utc::now().timestamp_millis() as u64,
-                source: "timeblock_summary".to_string(),
-                origin_host_id: String::new(),
-                hop: 1,
-                trace_id: None,
-                payload: tick_payload,
-            });
+            // Emit tick signal for each LLM round
+            self.emit_lifecycle_signal("tick", &block.start_id, total_rounds, serde_json::json!({
+                "submitted": submitted,
+                "tool_calls": tool_call_history.len(),
+            }));
         }
+
+        // Emit end signal
+        self.emit_lifecycle_signal("end", &block.start_id, total_rounds, serde_json::json!({
+            "submitted": submitted,
+            "tool_calls": tool_call_history,
+        }));
 
         // Note: energy depleted event is written inside the loop when energy == 0
         // Error/broker failures also break out above
@@ -508,6 +506,30 @@ impl TimeblockSummaryAgentService {
         }
 
         Ok(())
+    }
+
+    /// Emit a lifecycle signal (start / tick / end) through the signal pool.
+    fn emit_lifecycle_signal(&self, phase: &str, block_id: &str, round: usize, extra: serde_json::Value) {
+        let payload = serde_json::json!({
+            "phase": phase,
+            "block_id": block_id,
+            "round": round,
+            "energy": self.energy_registry.get("timeblock_summary")
+                .map(|e| e.snapshot("timeblock_summary").current)
+                .unwrap_or(0),
+            "extra": extra,
+        });
+        self.signal_pool.publish(crate::signal::types::SignalEvent {
+            schema_version: 1,
+            id: uuid::Uuid::new_v4().to_string(),
+            topic: format!("timeblock_summary.{}", phase),
+            ts: chrono::Utc::now().timestamp_millis() as u64,
+            source: "timeblock_summary".to_string(),
+            origin_host_id: String::new(),
+            hop: 1,
+            trace_id: None,
+            payload,
+        });
     }
 
     /// Write a diagnostic summary event when the agent's energy is depleted.
@@ -624,6 +646,11 @@ impl Agent for TimeblockSummaryAgentService {
                 last_active: s.completed_at.clone(),
                 message_count: (s.tool_calls.len() as u64) + 1,
                 uptime_secs: 0,
+                content: Some(s.content.clone()),
+                trigger_source: Some(s.trigger_source.clone()),
+                prompt: s.prompt.clone(),
+                provider: Some(s.provider.clone()),
+                model: Some(s.model.clone()),
             })
             .collect()
     }
@@ -638,6 +665,11 @@ impl Agent for TimeblockSummaryAgentService {
                 last_active: s.completed_at.clone(),
                 message_count: (s.tool_calls.len() as u64) + 1,
                 uptime_secs: 0,
+                content: Some(s.content.clone()),
+                trigger_source: Some(s.trigger_source.clone()),
+                prompt: s.prompt.clone(),
+                provider: Some(s.provider.clone()),
+                model: Some(s.model.clone()),
             }
         })
     }

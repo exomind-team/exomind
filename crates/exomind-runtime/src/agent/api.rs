@@ -66,6 +66,7 @@ impl ApiSessionSnapshot {
             last_active: format_utc_iso8601(self.last_active_wall),
             message_count: self.message_count,
             uptime_secs: self.created_at.elapsed().as_secs(),
+            ..Default::default()
         }
     }
 }
