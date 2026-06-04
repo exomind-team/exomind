@@ -16,6 +16,8 @@ pub struct CollectedContext {
     pub recent_completed: Option<EventRecord>,
     pub already_has_start: bool,
     pub already_has_end: bool,
+    pub energy_current: u64,
+    pub energy_max: u64,
 }
 
 impl CollectedContext {
@@ -97,6 +99,12 @@ impl CollectedContext {
             ));
         }
 
+        // Energy status
+        sections.push(format!(
+            "### 系统状态\n- 当前能量：{}/{}\n- 能量耗尽时将自动停止",
+            self.energy_current, self.energy_max
+        ));
+
         sections.join("\n\n")
     }
 }
@@ -108,6 +116,8 @@ pub async fn collect_context(
     eventlog_store: &EventLogStore,
     block: &TimeBlockData,
     processed: &std::collections::HashMap<String, ProcessedRecord>,
+    energy_current: u64,
+    energy_max: u64,
 ) -> CollectedContext {
     // 1. Events in this timeblock range
     let events = eventlog_store
@@ -167,5 +177,7 @@ pub async fn collect_context(
         recent_completed,
         already_has_start,
         already_has_end,
+        energy_current,
+        energy_max,
     }
 }

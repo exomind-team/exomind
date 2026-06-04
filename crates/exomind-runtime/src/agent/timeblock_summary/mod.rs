@@ -206,7 +206,11 @@ impl TimeblockSummaryAgentService {
     ) -> Result<(), String> {
         // 1. Auto-collect context
         let processed = self.processed.read().unwrap().clone();
-        let ctx = collect_context(&self.eventlog_store, &block, &processed).await;
+        let energy_snapshot = self.energy_registry.get("timeblock_summary")
+            .map(|e| e.snapshot("timeblock_summary"));
+        let energy_current = energy_snapshot.as_ref().map(|s| s.current).unwrap_or(ENERGY_MAX);
+        let energy_max = energy_snapshot.as_ref().map(|s| s.max).unwrap_or(ENERGY_MAX);
+        let ctx = collect_context(&self.eventlog_store, &block, &processed, energy_current, energy_max).await;
 
         // 2. Load provider profile
         let provider = match crate::agent::session::resolve_provider_profile_from_runtime(
