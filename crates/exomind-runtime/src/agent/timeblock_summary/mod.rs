@@ -401,6 +401,27 @@ impl TimeblockSummaryAgentService {
                     break;
                 }
             }
+
+            // Emit tick signal for each LLM round (visible in signal network)
+            let tick_payload = serde_json::json!({
+                "round": total_rounds,
+                "block_id": block.start_id,
+                "kind": format!("{:?}", kind),
+                "energy": self.energy_registry.get("timeblock_summary")
+                    .map(|e| e.snapshot("timeblock_summary").current)
+                    .unwrap_or(0),
+            });
+            self.signal_pool.publish(crate::signal::types::SignalEvent {
+                schema_version: 1,
+                id: uuid::Uuid::new_v4().to_string(),
+                topic: "timeblock_summary.tick".to_string(),
+                ts: chrono::Utc::now().timestamp_millis() as u64,
+                source: "timeblock_summary".to_string(),
+                origin_host_id: String::new(),
+                hop: 1,
+                trace_id: None,
+                payload: tick_payload,
+            });
         }
 
         // Note: energy depleted event is written inside the loop when energy == 0
@@ -585,6 +606,10 @@ impl Agent for TimeblockSummaryAgentService {
 
     fn publications(&self) -> Vec<String> {
         vec!["agent_feedback.timeblock_summary".to_string()]
+    }
+
+    fn soul(&self) -> String {
+        system_prompt().to_string()
     }
 
     fn list_sessions(&self) -> Vec<crate::agent::SessionInfo> {

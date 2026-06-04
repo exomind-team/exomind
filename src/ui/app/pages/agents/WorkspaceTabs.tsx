@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { formatHostForUrl } from '@/config/runtime-target';
+import { buildDirectRuntimeCandidates } from './agents-utils';
 
 // ---------------------------------------------------------------------------
 // Types — camelCase (matches Tauri command serde output)
@@ -72,7 +73,10 @@ async function fetchWorkspaceKnowledgeFile(agentId: string, filename: string): P
 async function fetchWorkspaceActions(agentId: string, limit = 50): Promise<ActionsResponse | null> {
   try {
     if (isTauri()) {
-      return await invoke<ActionsResponse>('get_agent_workspace_actions', { agentId, limit });
+      const result = await invoke<ActionsResponse>('get_agent_workspace_actions', { agentId, limit });
+      if (result) return result;
+      // Fallback: built-in agents don't have workspace — try Runtime API
+      return await httpGet<ActionsResponse>(agentId, 'actions');
     }
     return await httpGet<ActionsResponse>(agentId, `actions?limit=${limit}`);
   } catch { return null; }
@@ -81,7 +85,10 @@ async function fetchWorkspaceActions(agentId: string, limit = 50): Promise<Actio
 async function fetchWorkspaceSoul(agentId: string): Promise<string | null> {
   try {
     if (isTauri()) {
-      return await invoke<string>('get_agent_workspace_soul', { agentId });
+      const result = await invoke<string>('get_agent_workspace_soul', { agentId });
+      if (result) return result;
+      // Fallback: built-in agents don't have workspace — try Runtime API
+      return await httpText(agentId, 'soul');
     }
     return await httpText(agentId, 'soul');
   } catch { return null; }
@@ -96,25 +103,35 @@ async function fetchWorkspaceStatus(agentId: string): Promise<WorkspaceStatus | 
   } catch { return null; }
 }
 
-// HTTP fallback for non-Tauri (web) environments
+// HTTP fallback for non-Tauri (web) environments or built-in agents
 async function httpGet<T>(agentId: string, path: string): Promise<T | null> {
   const hosts = await getRuntimeHostService().listHosts();
-  if (hosts.length === 0) return null;
-  const host = hosts[0];
-  const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
-  if (!resp.ok) return null;
-  return await resp.json() as T;
+  const candidates = hosts.length > 0
+    ? hosts
+    : buildDirectRuntimeCandidates([]);
+  for (const host of candidates) {
+    try {
+      const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (resp.ok) return await resp.json() as T;
+    } catch { /* try next candidate */ }
+  }
+  return null;
 }
 
 async function httpText(agentId: string, path: string): Promise<string | null> {
   const hosts = await getRuntimeHostService().listHosts();
-  if (hosts.length === 0) return null;
-  const host = hosts[0];
-  const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
-  if (!resp.ok) return null;
-  return await resp.text();
+  const candidates = hosts.length > 0
+    ? hosts
+    : buildDirectRuntimeCandidates([]);
+  for (const host of candidates) {
+    try {
+      const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (resp.ok) return await resp.text();
+    } catch { /* try next candidate */ }
+  }
+  return null;
 }
 
 const STRATEGY_LABELS: Record<string, string> = {

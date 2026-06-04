@@ -71,6 +71,8 @@ pub fn router() -> Router<AppState> {
             "/agents/:id/sessions/:sid",
             get(get_session).delete(close_session),
         )
+        .route("/agents/:id/actions", get(list_actions))
+        .route("/agents/:id/soul", get(get_soul))
 }
 
 async fn list_agents(State(state): State<AppState>) -> Json<Vec<crate::agent::AgentSummary>> {
@@ -500,4 +502,60 @@ async fn close_session(
         status: "closed".to_string(),
         session_id: sid,
     }))
+}
+
+#[derive(serde::Serialize)]
+struct ActionEntry {
+    timestamp: String,
+    tick: u64,
+    #[serde(rename = "actionType")]
+    action_type: String,
+    description: String,
+    #[serde(rename = "energyBefore")]
+    energy_before: u64,
+    #[serde(rename = "energyAfter")]
+    energy_after: u64,
+}
+
+#[derive(serde::Serialize)]
+struct ActionsResponse {
+    actions: Vec<ActionEntry>,
+    total: usize,
+}
+
+async fn list_actions(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<ActionsResponse>, StatusCode> {
+    let Some(agent) = state.registry.get(&id) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let sessions = agent.list_sessions();
+    let actions: Vec<ActionEntry> = sessions
+        .iter()
+        .enumerate()
+        .map(|(idx, s)| ActionEntry {
+            timestamp: s.created_at.clone(),
+            tick: (idx as u64) + 1,
+            action_type: "signal".to_string(),
+            description: format!("session {} ({})", s.session_id, s.status),
+            energy_before: 100,
+            energy_after: 100,
+        })
+        .collect();
+    let total = actions.len();
+    Ok(Json(ActionsResponse { actions, total }))
+}
+
+async fn get_soul(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<String>, StatusCode> {
+    let Some(agent) = state.registry.get(&id) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    // Return agent's soul (identity/system prompt/persona)
+    Ok(Json(agent.soul()))
 }

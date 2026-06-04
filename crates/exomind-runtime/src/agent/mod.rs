@@ -110,6 +110,11 @@ pub trait Agent: Send + Sync {
         false
     }
 
+    /// Return the agent's "soul" — its identity, system prompt, or persona description.
+    fn soul(&self) -> String {
+        self.description().to_string()
+    }
+
     fn stats(&self, _session_id: Option<String>) -> BoxFuture<'_, Option<Value>> {
         Box::pin(async { None })
     }

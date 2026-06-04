@@ -121,11 +121,11 @@ export class AgentHubServiceImpl implements AgentHubService {
       const existingHosts = await getRuntimeHostService().listHosts();
       const existingSnapshots = existingHosts.map((h) => ({
         host: h,
-        connectionState: 'connected' as const,
+        connectionState: 'connected',
         topology: null,
         agents: [],
       }));
-      const candidates = buildDirectRuntimeCandidates(existingSnapshots);
+      const candidates = buildDirectRuntimeCandidates(existingSnapshots as any[]);
       const allHosts = [...existingHosts, ...candidates];
       for (const host of allHosts) {
         try {
