@@ -12,6 +12,12 @@ import type {
   AgentMarketItem,
 } from '@/lib/types/agent-hub';
 import { getRuntimeAggregatorService } from './runtime-aggregator.service';
+import { getRuntimeHostService } from './runtime-host.service';
+import {
+  resolveRuntimeHostBaseUrl,
+  buildRuntimeAuthHeaders,
+} from '@/lib/utils/runtime-host-address';
+import { buildDirectRuntimeCandidates } from '@/ui/app/pages/agents/agents-utils';
 
 type AgentEnvironmentLike = {
   agent: IAgentPort;
@@ -105,7 +111,62 @@ export class AgentHubServiceImpl implements AgentHubService {
   }
 
   async getAgentDetail(agentId: string): Promise<AgentDetailData | null> {
-    return this.getAgentPort().getAgentDetail(agentId);
+    // Try localStorage first (agent hub registered agents)
+    const detail = await this.getAgentPort().getAgentDetail(agentId);
+    if (detail) return detail;
+
+    // Fallback: built-in agents not in localStorage — fetch from Runtime API
+    // Use direct runtime candidates (same mechanism as AgentsPage)
+    try {
+      const existingHosts = await getRuntimeHostService().listHosts();
+      const existingSnapshots = existingHosts.map((h) => ({
+        host: h,
+        connectionState: 'connected' as const,
+        topology: null,
+        agents: [],
+      }));
+      const candidates = buildDirectRuntimeCandidates(existingSnapshots);
+      const allHosts = [...existingHosts, ...candidates];
+      for (const host of allHosts) {
+        try {
+          const response = await fetch(
+            `${resolveRuntimeHostBaseUrl(host)}/agents`,
+            {
+              headers: buildRuntimeAuthHeaders(host.authToken),
+            },
+          );
+          if (!response.ok) continue;
+          const agents = await response.json();
+          if (!Array.isArray(agents)) continue;
+          const match = agents.find((a: any) => a.id === agentId);
+          if (match) {
+            return {
+              id: match.id,
+              type: 'agent',
+              title: match.name || match.id,
+              status: match.status === 'available' ? 'running' : 'offline',
+              description: match.description || '',
+              icon: 'brain',
+              tintColor: '#0D9488',
+              stats: [
+                { label: 'Status', value: match.status || 'unknown' },
+                ...(match.subscriptions?.length
+                  ? [{ label: 'Subscriptions', value: match.subscriptions.join(', ') }]
+                  : []),
+              ],
+              triggerRules: [],
+              targets: [],
+              recentLogs: [],
+            };
+          }
+        } catch {
+          // Host unreachable — try next candidate
+        }
+      }
+    } catch {
+      // Ignore errors — return null as before
+    }
+    return null;
   }
 
   async getActorDetail(actorId: string): Promise<AgentDetailData | null> {

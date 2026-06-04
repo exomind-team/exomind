@@ -66,7 +66,7 @@ impl TimeblockSummaryAgentService {
     ) -> Self {
         // Check initial enabled state from config
         let enabled = config_store
-            .get("device", CONFIG_KEY_ENABLED)
+            .get("user", CONFIG_KEY_ENABLED)
             .ok()
             .flatten()
             .and_then(|e| e.value.parse::<bool>().ok())
@@ -115,7 +115,7 @@ impl TimeblockSummaryAgentService {
 
     async fn handle_signal(&self, event: &SignalEvent) -> Result<(), String> {
         // Re-read config in case it changed at runtime (must be BEFORE AtomicBool check)
-        if let Ok(Some(entry)) = self.config_store.get("device", CONFIG_KEY_ENABLED) {
+        if let Ok(Some(entry)) = self.config_store.get("user", CONFIG_KEY_ENABLED) {
             let new_enabled = entry.value.parse::<bool>().unwrap_or(false);
             self.enabled
                 .store(new_enabled, std::sync::atomic::Ordering::Relaxed);
@@ -467,7 +467,7 @@ fn extract_active_block_from_signal(event: &SignalEvent) -> Option<TimeBlockData
 
 pub fn init_config_defaults(config_store: &ConfigStore) {
     let _ = config_store.put_if_absent(PutConfigEntryInput {
-        scope: "device".to_string(),
+        scope: "user".to_string(),
         key: CONFIG_KEY_ENABLED.to_string(),
         value: "false".to_string(),
         sensitive: false,
