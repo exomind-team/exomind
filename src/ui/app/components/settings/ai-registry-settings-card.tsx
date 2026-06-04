@@ -35,6 +35,7 @@ import {
   saveDefaultLLMRegistryDraft,
 } from "@/lib/ai-registry/compat";
 import { runActionOnPrimaryModifierEnter } from "@/ui/app/components/dialog-submit-shortcuts";
+import { inferVendorFromBaseUrl } from "@/lib/ai-registry/vendor";
 import { SettingRow } from "@/ui/app/components/settings-shared";
 import type { SettingsContext } from "@/ui/app/config/settings/settings-types";
 
@@ -81,20 +82,6 @@ function SecondaryValue({ value }: { value: string }) {
       <ChevronRight className="h-4 w-4" />
     </div>
   );
-}
-
-function inferVendorFromBaseUrl(baseUrl: string): string {
-  const normalized = baseUrl.toLowerCase();
-  if (normalized.includes("anthropic")) {
-    return "anthropic";
-  }
-  if (normalized.includes("openrouter")) {
-    return "openrouter";
-  }
-  if (normalized.includes("google")) {
-    return "google";
-  }
-  return "openai";
 }
 
 function buildRegistrySummary() {

@@ -15,6 +15,24 @@ import type {
 
 const DEFAULT_TIMESTAMP = '2026-03-18T00:00:00.000Z';
 
+// --- Registry change callback (bridge to Runtime flat keys) ---
+let onRegistryChangeCallback: (() => void) | null = null;
+
+export function setOnRegistryChangeCallback(cb: (() => void) | null): void {
+  onRegistryChangeCallback = cb;
+}
+
+function fireRegistryChangeCallback(): void {
+  if (onRegistryChangeCallback) {
+    try {
+      onRegistryChangeCallback();
+    } catch {
+      // Bridge errors must not break Registry operations
+    }
+  }
+}
+// --- End callback ---
+
 export interface AIRegistryOfferingDraft {
   offeringId?: string;
   capabilityKey: string;
@@ -522,6 +540,7 @@ export function saveAIRegistryOfferingDraft(draft: AIRegistryOfferingDraft): AIR
   if (!summary) {
     throw new Error('failed to materialize registry offering summary');
   }
+  fireRegistryChangeCallback();
   return summary;
 }
 
@@ -546,6 +565,7 @@ export function setAIRegistryDefaultOffering(offeringId: string): AIRegistryOffe
   snapshot.updatedAt = nowIso();
   saveAIRegistrySnapshot(snapshot);
 
+  fireRegistryChangeCallback();
   return listAIRegistryOfferings(getAIRegistrySnapshot()).find((item) => item.offeringId === offeringId) ?? null;
 }
 
@@ -566,4 +586,5 @@ export function deleteAIRegistryOffering(offeringId: string): void {
 
   snapshot.updatedAt = nowIso();
   saveAIRegistrySnapshot(snapshot);
+  fireRegistryChangeCallback();
 }

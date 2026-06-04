@@ -1,5 +1,6 @@
 import { resolveOfferingForCapability } from '@/lib/ai-registry/resolution';
 import { getAIRegistrySnapshot, subscribeAIRegistryChanges } from '@/lib/ai-registry/storage';
+import { inferVendorFromBaseUrl } from '@/lib/ai-registry/vendor';
 import {
   DEFAULT_LLM_BASE_URL,
   DEFAULT_LLM_CHANNEL_NAME,
@@ -7,6 +8,7 @@ import {
   getDefaultLLMRegistryDraft,
   saveDefaultLLMRegistryDraft,
 } from '@/lib/ai-registry/compat';
+import { setRuntimeConfigValue } from './runtime-config-cache';
 
 const LEGACY_LLM_API_KEY_STORAGE_KEY = 'exomind:llmApiKey';
 const LEGACY_LLM_BASE_URL_STORAGE_KEY = 'exomind:llmBaseUrl';
@@ -165,4 +167,20 @@ export function subscribeLLMSettingsChanges(listener: (settings: LLMSettings) =>
   return subscribeAIRegistryChanges(() => {
     listener(getLLMSettings());
   });
+}
+
+/**
+ * Bridge: sync the resolved AI Registry LLM settings to the 4 flat config keys
+ * that Runtime built-in agents read via `resolve_provider_profile_from_runtime()`.
+ *
+ * Called after every AI Registry write (save / set-default / delete) and during bootstrap.
+ */
+export function syncLLMSettingsToRuntimeFlatKeys(): void {
+  const settings = getLLMSettings();
+  const vendor = inferVendorFromBaseUrl(settings.baseUrl);
+
+  setRuntimeConfigValue('exomind:agentApiProvider', vendor);
+  setRuntimeConfigValue('exomind:agentApiModel', settings.model);
+  setRuntimeConfigValue('exomind:agentApiBaseUrl', settings.baseUrl);
+  setRuntimeConfigValue('exomind:agentApiApiKey', settings.apiKey, { sensitive: true });
 }

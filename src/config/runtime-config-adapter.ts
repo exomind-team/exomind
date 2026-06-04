@@ -114,6 +114,10 @@ export const RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS = [
   'exomind:voiceRuntimeOmniCompatibleModel',
   'exomind:voiceRuntimeOmniCompatibleBaseUrl',
   'exomind:voiceRuntimeOmniCompatibleAudioFormat',
+  'exomind:agentApiProvider',
+  'exomind:agentApiModel',
+  'exomind:agentApiBaseUrl',
+  'exomind:agentApiApiKey',
 ] as const;
 export const RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES = [
   'exomind:ai-registry:energy-secret:',
@@ -126,6 +130,7 @@ const SENSITIVE_EXACT_KEYS = new Set<string>([
   'exomind:voiceRuntimeDoubaoAccessToken',
   'exomind:voiceRuntimeDoubaoSecretKey',
   'exomind:voiceRuntimeOmniApiKey',
+  'exomind:agentApiApiKey',
 ]);
 const SENSITIVE_PREFIXES = [
   'exomind:ai-registry:energy-secret:',

@@ -7,6 +7,8 @@ import { hydratePersistedRuntimeTargetConfig } from "./config/runtime-target-mod
 import "./index.css";
 import { syncDevtoolsWithSettings } from "./lib/debug/devtools-runtime";
 import { ensureCryptoRandomUUID } from "./lib/utils/uuid";
+import { setOnRegistryChangeCallback } from "./lib/ai-registry/admin";
+import { syncLLMSettingsToRuntimeFlatKeys } from "./config/llm-settings";
 
 ensureCryptoRandomUUID();
 function renderApp(): void {
@@ -20,6 +22,11 @@ function renderApp(): void {
 async function bootstrapApp(): Promise<void> {
   await hydratePersistedRuntimeTargetConfig();
   await bootstrapRuntimeConfig();
+
+  // Bridge AI Registry → Runtime flat keys for built-in agents
+  setOnRegistryChangeCallback(() => syncLLMSettingsToRuntimeFlatKeys());
+  syncLLMSettingsToRuntimeFlatKeys();
+
   await syncDevtoolsWithSettings();
 }
 

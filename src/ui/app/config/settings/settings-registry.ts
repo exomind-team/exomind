@@ -384,6 +384,11 @@ import {
   subscribeEventlogMarkdownMirrorEnabledChanges,
 } from '@/config/eventlog-markdown-mirror-enabled';
 import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-window-shortcut-runtime';
+import {
+  getBuiltinTimeblockSummaryEnabled,
+  setBuiltinTimeblockSummaryEnabled,
+  subscribeBuiltinTimeblockSummaryEnabledChanges,
+} from '@/config/builtin-timeblock-summary-enabled';
 
 /*
  * AGENT GUIDE: ADDING SETTINGS
@@ -1869,6 +1874,19 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'ai',
     type: 'custom',
     component: AIRegistrySetting,
+  },
+  {
+    id: 'builtin-timeblock-summary-enabled',
+    label: '启用时间块自动总结',
+    icon: ScrollText,
+    category: 'ai',
+    description: '时间块结束时自动使用 AI 生成结构化总结，写入 agent_feedback 事件。',
+    rowTestId: 'new-settings-builtin-timeblock-summary-enabled-row',
+    controlTestId: 'new-settings-builtin-timeblock-summary-enabled-switch',
+    type: 'boolean',
+    get: () => getBuiltinTimeblockSummaryEnabled(),
+    set: setBuiltinTimeblockSummaryEnabled,
+    subscribe: subscribeBuiltinTimeblockSummaryEnabledChanges,
   },
   {
     id: 'runtime-target-mode',
