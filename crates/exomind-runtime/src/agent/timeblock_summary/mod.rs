@@ -16,7 +16,7 @@ use crate::agent::tools::{ToolDef, ToolFn, ToolRegistry};
 use crate::agent::{Agent, ChatChunk, ChatRequest, SessionInfo};
 use crate::config::types::PutConfigEntryInput;
 use crate::config::ConfigStore;
-use crate::energy::AgentEnergySnapshot;
+use crate::energy::{AgentEnergySnapshot, EnergyRegistry};
 use crate::eventlog::{EventLogStore, EventRecord};
 use crate::signal::types::SignalEvent;
 use crate::signal::SignalPool;
@@ -27,7 +27,9 @@ use templates::{build_end_prompt, build_start_prompt, system_prompt};
 use tools::{submit_timeblock_summary_tool, AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL};
 
 const CONFIG_KEY_ENABLED: &str = "builtin.timeblock_summary.enabled";
-const MAX_TOOL_ROUNDS: usize = 30;
+const ENERGY_MAX: u64 = 100;
+const ENERGY_COST_PER_ROUND: u64 = 1;
+const ENERGY_WARN_THRESHOLD: u64 = 10;
 
 /// Summary kind: start (timeblock created) or end (timeblock completed).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +56,7 @@ pub struct TimeblockSummaryAgentService {
     config_store: Arc<ConfigStore>,
     eventlog_store: Arc<EventLogStore>,
     session_runtime: AgentSessionRuntime,
+    energy_registry: Arc<EnergyRegistry>,
     processed: Arc<RwLock<HashMap<String, ProcessedRecord>>>,
 }
 
@@ -63,6 +66,7 @@ impl TimeblockSummaryAgentService {
         config_store: Arc<ConfigStore>,
         eventlog_store: Arc<EventLogStore>,
         session_runtime: AgentSessionRuntime,
+        energy_registry: Arc<EnergyRegistry>,
     ) -> Self {
         // Check initial enabled state from config
         let enabled = config_store
@@ -78,6 +82,7 @@ impl TimeblockSummaryAgentService {
             config_store,
             eventlog_store,
             session_runtime,
+            energy_registry,
             processed: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -255,9 +260,45 @@ impl TimeblockSummaryAgentService {
             content: initial_prompt,
         }];
         let mut submitted = false;
+        let mut total_rounds = 0usize;
+        let mut first_assistant_message = String::new();
+        let mut last_assistant_message = String::new();
+        let mut tool_call_history: Vec<String> = Vec::new();
 
-        // 5. Broker loop
-        for round in 0..MAX_TOOL_ROUNDS {
+        // 5. Energy-driven broker loop
+        loop {
+            // Check energy
+            let current_energy = self.energy_registry.get("timeblock_summary")
+                .map(|e| e.snapshot("timeblock_summary").current)
+                .unwrap_or(ENERGY_MAX);
+
+            if current_energy == 0 {
+                tracing::warn!(
+                    block_id = %block.start_id,
+                    total_rounds,
+                    "timeblock_summary: energy depleted"
+                );
+                self.write_energy_depleted_event(
+                    &block, total_rounds, &first_assistant_message,
+                    &last_assistant_message, &tool_call_history, &source_meta,
+                ).await;
+                break;
+            }
+
+            // Warn at threshold
+            if current_energy <= ENERGY_WARN_THRESHOLD && current_energy > 0 {
+                history.push(TurnItem::User {
+                    content: "你的能量即将耗尽，请尽快完成总结并调用 submit_timeblock_summary。".to_string(),
+                });
+            }
+
+            // Consume energy
+            if let Some(energy) = self.energy_registry.get("timeblock_summary") {
+                energy.consume(ENERGY_COST_PER_ROUND);
+            }
+
+            total_rounds += 1;
+
             let request = AgentTurnRequest {
                 provider: provider.clone(),
                 system_prompt: Some(system_prompt().to_string()),
@@ -275,11 +316,11 @@ impl TimeblockSummaryAgentService {
             };
 
             match AgentTurnBroker.run(request).await {
-                Ok(AgentTurnResult::Final { assistant_turn: _ }) => {
-                    // LLM returned text without calling tools
+                Ok(AgentTurnResult::Final { assistant_turn }) => {
+                    last_assistant_message = assistant_turn.content.clone();
                     tracing::debug!(
                         block_id = %block.start_id,
-                        round,
+                        total_rounds,
                         "timeblock_summary: LLM returned final without tool call"
                     );
                     break;
@@ -288,12 +329,19 @@ impl TimeblockSummaryAgentService {
                     assistant_turn,
                     tool_calls,
                 }) => {
+                    if first_assistant_message.is_empty() {
+                        first_assistant_message = assistant_turn.content.clone();
+                    }
+                    last_assistant_message = assistant_turn.content.clone();
+
                     history.push(TurnItem::Assistant {
                         content: assistant_turn.content,
                         tool_calls: tool_calls.clone(),
                     });
 
                     for tc in &tool_calls {
+                        tool_call_history.push(format!("round {}: {}", total_rounds, tc.name));
+
                         if tc.name == SUBMIT_TIMEBLOCK_SUMMARY_TOOL {
                             let tool_use = crate::agent::tools::ToolUse {
                                 id: tc.id.clone(),
@@ -303,15 +351,20 @@ impl TimeblockSummaryAgentService {
                             let result = tool_registry.dispatch(&tool_use).await;
                             if result.content.starts_with("已写入") {
                                 submitted = true;
+                                // Replenish energy on success
+                                if let Some(energy) = self.energy_registry.get("timeblock_summary") {
+                                    energy.refill(10);
+                                }
                                 tracing::info!(
                                     block_id = %block.start_id,
-                                    round,
+                                    total_rounds,
                                     event_result = %result.content,
                                     "timeblock_summary: summary submitted successfully"
                                 );
                             } else {
                                 tracing::warn!(
                                     block_id = %block.start_id,
+                                    total_rounds,
                                     result = %result.content,
                                     "timeblock_summary: submit failed"
                                 );
@@ -339,7 +392,7 @@ impl TimeblockSummaryAgentService {
                 Err(e) => {
                     tracing::error!(
                         block_id = %block.start_id,
-                        round,
+                        total_rounds,
                         error = %e,
                         "timeblock_summary: broker error"
                     );
@@ -348,37 +401,8 @@ impl TimeblockSummaryAgentService {
             }
         }
 
-        // 6. Safety fallback
-        if !submitted {
-            tracing::warn!(
-                block_id = %block.start_id,
-                "timeblock_summary: LLM did not call submit after {MAX_TOOL_ROUNDS} rounds"
-            );
-
-            let _ = self.eventlog_store.append_event(None, EventRecord {
-                id: uuid::Uuid::new_v4().to_string(),
-                timestamp: chrono::Utc::now().timestamp_millis(),
-                content: format!(
-                    "⚠️ 时间块总结 Agent 运行异常：{} 轮未调用 submit_timeblock_summary，块ID={}",
-                    MAX_TOOL_ROUNDS, block.start_id
-                ),
-                tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
-                refs: vec![],
-                metadata: Some(serde_json::json!({
-                    "agent": "timeblock_summary",
-                    "block_id": block.start_id,
-                    "rounds": MAX_TOOL_ROUNDS,
-                    "status": "max_rounds_exceeded",
-                    "source": {
-                        "deviceName": source_meta.device_name,
-                        "platform": source_meta.platform,
-                        "provider": source_meta.provider,
-                        "model": source_meta.model,
-                        "app": "ExoMind",
-                    },
-                })),
-            });
-        }
+        // Note: energy depleted event is written inside the loop when energy == 0
+        // Error/broker failures also break out above
 
         // 7. Record idempotency state
         if submitted {
@@ -397,6 +421,72 @@ impl TimeblockSummaryAgentService {
         }
 
         Ok(())
+    }
+
+    /// Write a diagnostic summary event when the agent's energy is depleted.
+    async fn write_energy_depleted_event(
+        &self,
+        block: &TimeBlockData,
+        total_rounds: usize,
+        first_message: &str,
+        last_message: &str,
+        tool_call_history: &[String],
+        source_meta: &AgentSourceMetadata,
+    ) {
+        fn truncate(s: &str, max_chars: usize) -> String {
+            if s.len() <= max_chars {
+                s.to_string()
+            } else {
+                format!("{}…", &s[..max_chars])
+            }
+        }
+
+        let tool_history_text = if tool_call_history.is_empty() {
+            "无".to_string()
+        } else {
+            tool_call_history
+                .iter()
+                .map(|line| format!("- {}", line))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let content = format!(
+            "## ⚠️ 时间块总结 Agent 能量耗尽\n\n\
+             **块 ID**: {}\n\
+             **能量消耗**: {ENERGY_MAX}/{}（每轮 -{ENERGY_COST_PER_ROUND}）\n\
+             **对话轮数**: {}\n\n\
+             **工具调用历史**:\n{}\n\n\
+             **首条消息**: {}\n\
+             **末条消息**: {}",
+            block.start_id,
+            ENERGY_MAX,
+            total_rounds,
+            tool_history_text,
+            truncate(first_message, 100),
+            truncate(last_message, 100),
+        );
+
+        let _ = self.eventlog_store.append_event(None, EventRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: chrono::Utc::now().timestamp_millis(),
+            content,
+            tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
+            refs: vec![],
+            metadata: Some(serde_json::json!({
+                "agent": "timeblock_summary",
+                "block_id": block.start_id,
+                "total_rounds": total_rounds,
+                "status": "energy_depleted",
+                "source": {
+                    "deviceName": source_meta.device_name,
+                    "platform": source_meta.platform,
+                    "provider": source_meta.provider,
+                    "model": source_meta.model,
+                    "app": "ExoMind",
+                },
+            })),
+        });
     }
 }
 

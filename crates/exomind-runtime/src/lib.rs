@@ -747,8 +747,13 @@ pub async fn start_with_options(
             Arc::clone(&state.config_store),
             Arc::clone(&state.eventlog_store),
             session_runtime,
+            Arc::new(state.energy_registry.clone()),
         ));
         state.registry.register(tb_summary.clone() as Arc<dyn agent::Agent>);
+        state.energy_registry.register(
+            "timeblock_summary",
+            crate::energy::AgentEnergy::new(100, 1),
+        );
         tb_summary.spawn();
 
         // Register signal routes for UI topology
