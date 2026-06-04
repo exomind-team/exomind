@@ -54,7 +54,7 @@ interface WorkspaceStatus {
 
 async function fetchWorkspaceKnowledgeList(agentId: string): Promise<KnowledgeListResponse | null> {
   try {
-    if (isTauri()) {
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
       return await invoke<KnowledgeListResponse>('get_agent_workspace_knowledge_list', { agentId });
     }
     return await httpGet<KnowledgeListResponse>(agentId, 'knowledge');
@@ -63,7 +63,7 @@ async function fetchWorkspaceKnowledgeList(agentId: string): Promise<KnowledgeLi
 
 async function fetchWorkspaceKnowledgeFile(agentId: string, filename: string): Promise<string | null> {
   try {
-    if (isTauri()) {
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
       return await invoke<string>('get_agent_workspace_knowledge', { agentId, filename });
     }
     return await httpText(agentId, `knowledge/${filename}`);
@@ -72,7 +72,7 @@ async function fetchWorkspaceKnowledgeFile(agentId: string, filename: string): P
 
 async function fetchWorkspaceActions(agentId: string, limit = 50): Promise<ActionsResponse | null> {
   try {
-    if (isTauri()) {
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
       const result = await invoke<ActionsResponse>('get_agent_workspace_actions', { agentId, limit });
       if (result) return result;
       // Fallback: built-in agents don't have workspace — try Runtime API
@@ -84,7 +84,7 @@ async function fetchWorkspaceActions(agentId: string, limit = 50): Promise<Actio
 
 async function fetchWorkspaceSoul(agentId: string): Promise<string | null> {
   try {
-    if (isTauri()) {
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
       const result = await invoke<string>('get_agent_workspace_soul', { agentId });
       if (result) return result;
       // Fallback: built-in agents don't have workspace — try Runtime API
@@ -96,7 +96,7 @@ async function fetchWorkspaceSoul(agentId: string): Promise<string | null> {
 
 async function fetchWorkspaceStatus(agentId: string): Promise<WorkspaceStatus | null> {
   try {
-    if (isTauri()) {
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
       return await invoke<WorkspaceStatus>('get_agent_workspace_status', { agentId });
     }
     return await httpGet<WorkspaceStatus>(agentId, 'status');
