@@ -670,7 +670,8 @@ MVP 使用 config store 做轻量持久化（刷新网页/重启不丢失），�
 | 3 | `/agents/:id/chat` 入口？ | 不做自由聊天入口，但必须可见状态 + 历史聊天记录 | 4.7, 11.2 |
 | 4 | 人与 Agent 反馈时序？ | 同步触发，无先后依赖；内置 Agent 不等待 `block_feedback` 或人的反馈 | 4.8, 5.1, 6.1, 6.3, 7.1 |
 | 5 | 计划通过后？ | 全文刊载到 #555 issue 正文，说明是原型 1.0 计划 | 14 |
-| 6 | 配置架构（Phase 3） | 方案 B：设置页写旧 config key，Agent 零改动，快速落地 | 12 Phase 3 |
+| 6 | 配置架构（Phase 3） | 前端桥接：AI Registry 保存时自动同步 4 个 flat key 到 Runtime config store，零 Rust 改动 | 12 Phase 3 |
+| 7 | Provider 推断方式 | 不从 URL 推断，直接读 AI Registry 渠道的 channel.vendor 字段 | 12 Phase 3 |
 
 ## 14. 当前结论
 
@@ -685,7 +686,7 @@ MVP 使用 config store 做轻量持久化（刷新网页/重启不丢失），�
 | Phase 0：设计冻结 | ✅ 完成 | 2026-06-03 |
 | Phase 1：信号驱动服务 MVP | ✅ 完成 | 2026-06-03 |
 | Phase 2：接入 broker 与工具循环 | ✅ 合并到 Phase 1 | 2026-06-03 |
-| Phase 3：设置页与用户配置 | 待实施 | — |
+| Phase 3：AI Registry 桥接 + 设置页开关 | ✅ 完成 | 2026-06-04 |
 | Phase 4：可观测性与 AI Registry 统一 | 后续 | — |
 
-Phase 1 MVP 已推送到 dev 分支（commit `0afdcb5c`），端到端验证通过。下一步：Phase 3 设置页 UI，让普通用户可通过界面启用和配置时间块总结 Agent。
+Phase 1 MVP 已推送到 dev 分支（commit `0afdcb5c`），端到端验证通过。Phase 3 桥接层（commit `578ba28c`）打通 AI Registry → Runtime flat keys，设置页新增「启用时间块自动总结」开关，mimo-v2.5 端到端验证通过。
