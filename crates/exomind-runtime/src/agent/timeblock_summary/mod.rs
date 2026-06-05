@@ -573,7 +573,15 @@ impl TimeblockSummaryAgentService {
         let initial_prompt = match kind {
             SummaryKind::Start => build_start_prompt(&ctx, gap_context.as_ref()),
             SummaryKind::End => build_end_prompt(&ctx),
-            SummaryKind::FeedbackReview => build_feedback_review_prompt(&ctx),
+            SummaryKind::FeedbackReview => {
+                let feedback_content = ctx.block_feedback.as_ref()
+                    .map(|bf| bf.content.clone())
+                    .unwrap_or_default();
+                let events: Vec<String> = ctx.events.iter()
+                    .map(|e| format!("[{}] {}", e.timestamp, e.content))
+                    .collect();
+                build_feedback_review_prompt(&feedback_content, &events)
+            }
         };
 
         let mut history = vec![TurnItem::User {

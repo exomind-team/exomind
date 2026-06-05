@@ -203,59 +203,26 @@ pub fn build_end_prompt(ctx: &CollectedContext) -> String {
     )
 }
 
-/// Build the prompt for a feedback review summary (user feedback arrived).
-///
-/// Scenario C: block_completed is also in the queue — this prompt focuses on
-/// verifying the feedback against the block data and generating insights.
-/// Scenario B: only block_feedback — acts as a full end summary fallback.
-pub fn build_feedback_review_prompt(ctx: &CollectedContext) -> String {
-    let context_section = ctx.to_prompt_section();
-
+/// Build the prompt for a feedback review (user submitted feedback).
+pub fn build_feedback_review_prompt(
+    feedback_content: &str,
+    events: &[String],
+) -> String {
     format!(
-        r#"当前 Runtime 发来了用户反馈信号（block_feedback），你需要基于反馈内容和时间块数据生成核验总结。
+        r#"用户已提交时间块反馈。请核验用户反馈与实际事件的差异，并提供下一步启发。
 
-## 预填上下文
+## 用户反馈
+{feedback_content}
 
-{context_section}
+## 实际事件
+{}
 
-## 你的分析步骤
-
-在提交之前，先完成以下分析：
-
-1. **理解反馈**：用户的反馈说了什么？是正向肯定、纠正性反馈，还是补充信息？
-2. **对照数据**：反馈内容与 block_feedback 中的精确数据是否一致？有无矛盾？
-3. **提取启发**：从反馈中可以学到什么？对未来类似场景有什么建议？
-4. **评估信息充分度**：事件是否足够支撑叙事？不足时在 confidence 标注 low
+## 核验要点
+1. 用户反馈中提到的事项是否在事件中有对应记录？
+2. 事件中有哪些重要事项用户没有提到？
+3. 基于核验结果，提供 1-3 条下一步建议。
 
 ## 提交要求
-
-通过 submit_timeblock_summary 工具提交 summaryKind=end 的反馈核验总结。
-
-### 内容梗概（narrative 字段）
-> 目的：核验用户反馈并提取叙事洞察
-> 写法：2-3 句话，讲清「用户反馈了什么→与数据是否一致→有什么启发」
-> 引用：从反馈或事件 content 中选取 1-2 条最有代表性的原始 note（「」包裹）
-> 感受：写一句「我注意到…」的主观洞察
-> 禁止：不要复制 block_feedback 的精确统计数字
-
-### 成果表（outcomes 字段）
-> 从反馈和事件中推断：用户确认了什么（done）、纠正了什么、补充了什么
-
-### 关联事项（relations 字段）
-> 反馈与近期已完成块有什么联系？
-
-### 下一步建议（suggestions 字段）
-> 基于反馈提出 1-3 条改进建议
-
-### 信息充分度（confidence 字段）
-> high：反馈丰富，能清晰关联
-> medium：反馈适量，部分推断
-> low：反馈极少，大量推断
-
-## 禁止
-- 不要复制 block_feedback 的精确统计
-- 不要列出时间戳
-- 不要编造未出现的任务、仓库状态或用户意图
-- 不要跳过分析步骤直接调用工具"#
-    )
+通过 submit_timeblock_summary 工具提交，summaryKind 使用 "feedback_review"。"#
+    , events.join("\n"))
 }
