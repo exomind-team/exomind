@@ -135,16 +135,11 @@ pub fn submit_timeblock_summary_tool(
         description: "提交时间块总结的结构化字段。Runtime 会校验入参并生成最终 agent_feedback 事件。".to_string(),
         input_schema: json!({
             "type": "object",
-            "required": ["blockId", "summaryKind", "narrative"],
+            "required": ["blockId", "narrative"],
             "properties": {
                 "blockId": {
                     "type": "string",
                     "description": "时间块 ID，必须与当前处理的块一致"
-                },
-                "summaryKind": {
-                    "type": "string",
-                    "enum": ["start", "end"],
-                    "description": "总结类型：start=开始提示，end=结束总结"
                 },
                 "narrative": {
                     "type": "string",
@@ -225,22 +220,14 @@ pub fn submit_timeblock_summary_tool(
             }
 
             // Validate summaryKind
-            let summary_kind = input
-                .get("summaryKind")
-                .and_then(Value::as_str)
-                .ok_or_else(|| ToolError::InvalidInput("missing summaryKind".to_string()))?;
-            let expected_kind_str = match kind_expected {
+            // summaryKind is auto-determined by the agent, not by LLM
+            // LLM's input is ignored for this field
+            let summary_kind = match kind_expected {
                 SummaryKind::Start => "start",
                 SummaryKind::Stop => "stop",
                 SummaryKind::End => "end",
                 SummaryKind::FeedbackReview => "feedback_review",
             };
-            if summary_kind != expected_kind_str {
-                return Err(ToolError::InvalidInput(format!(
-                    "summaryKind mismatch: expected {}, got {}",
-                    expected_kind_str, summary_kind
-                )));
-            }
 
             // Validate narrative
             let narrative = input
