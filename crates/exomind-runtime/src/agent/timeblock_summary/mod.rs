@@ -3,8 +3,8 @@ pub mod templates;
 pub mod tools;
 
 use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::{broadcast, Mutex};
@@ -24,7 +24,9 @@ use crate::signal::SignalPool;
 use crate::timeblock::TimeBlockData;
 
 use context::collect_context;
-use templates::{build_end_prompt, build_feedback_review_prompt, build_start_prompt, system_prompt};
+use templates::{
+    build_end_prompt, build_feedback_review_prompt, build_start_prompt, system_prompt,
+};
 use tools::{submit_timeblock_summary_tool, AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL};
 
 const CONFIG_KEY_ENABLED: &str = "builtin.timeblock_summary.enabled";
@@ -85,7 +87,8 @@ fn calculate_initial_energy(block: &TimeBlockData) -> u64 {
 
     // end_time and start_time are in milliseconds
     let duration_ms = block.end_time.saturating_sub(block.start_time);
-    if duration_ms > 3_600_000 { // > 1 hour in milliseconds
+    if duration_ms > 3_600_000 {
+        // > 1 hour in milliseconds
         return 80;
     }
 
@@ -133,7 +136,8 @@ fn has_existing_summary(
     summary_kind: &SummaryKind,
 ) -> bool {
     let now = chrono::Utc::now().timestamp_millis() as i64;
-    let block_tags = crate::agent::timeblock_summary::tools::build_summary_tags(summary_kind, &block.start_id);
+    let block_tags =
+        crate::agent::timeblock_summary::tools::build_summary_tags(summary_kind, &block.start_id);
     let filter = crate::eventlog::EventListFilter {
         since_timestamp: Some(block.start_time as i64),
         until_timestamp: Some(now),
@@ -237,7 +241,9 @@ impl TimeblockSummaryAgentService {
                         );
                     }
                     Err(broadcast::error::RecvError::Closed) => {
-                        tracing::info!("timeblock_summary: broadcast channel closed, shutting down");
+                        tracing::info!(
+                            "timeblock_summary: broadcast channel closed, shutting down"
+                        );
                         break;
                     }
                 }
@@ -270,8 +276,7 @@ impl TimeblockSummaryAgentService {
         // Re-read config in case it changed at runtime (must be BEFORE AtomicBool check)
         if let Ok(Some(entry)) = self.config_store.get("user", CONFIG_KEY_ENABLED) {
             let new_enabled = entry.value.parse::<bool>().unwrap_or(false);
-            self.enabled
-                .store(new_enabled, Ordering::Relaxed);
+            self.enabled.store(new_enabled, Ordering::Relaxed);
         }
 
         // Check enabled (after config re-read)
@@ -416,7 +421,10 @@ impl TimeblockSummaryAgentService {
             limit: Some(1000),
             ..Default::default()
         };
-        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &events_filter) {
+        if let Ok(events) = self
+            .eventlog_store
+            .list_events_filtered(None, &events_filter)
+        {
             let energy_gain = calculate_event_energy_gain(&events);
             if energy_gain > 0 {
                 if let Some(energy) = self.energy_registry.get("timeblock_summary") {
@@ -458,11 +466,17 @@ impl TimeblockSummaryAgentService {
         // Determine summary kind based on phase and transition type FIRST
         let summary_kind = match event.payload.get("active") {
             Some(active_value) => {
-                match serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
+                match serde_json::from_value::<crate::timeblock::ActiveBlockData>(
+                    active_value.clone(),
+                ) {
                     Ok(active) => {
                         // Check last transition to distinguish start vs resume
-                        let is_resume = active.transitions.last()
-                            .map(|t| t.transition_type == crate::timeblock::BlockTransitionType::Resume)
+                        let is_resume = active
+                            .transitions
+                            .last()
+                            .map(|t| {
+                                t.transition_type == crate::timeblock::BlockTransitionType::Resume
+                            })
                             .unwrap_or(false);
 
                         match active.phase.as_ref() {
@@ -517,7 +531,9 @@ impl TimeblockSummaryAgentService {
         }
         tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing active block signal");
         if let Some(active_value) = event.payload.get("active") {
-            if let Ok(active) = serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
+            if let Ok(active) =
+                serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone())
+            {
                 if active.mode == "countdown" {
                     if let Some(target_minutes) = active.target_minutes {
                         let energy_gain = target_minutes;
@@ -550,7 +566,10 @@ impl TimeblockSummaryAgentService {
             "timeblock_summary: determined summary kind from active signal"
         );
 
-        if let Err(e) = self.run_summary_loop(block, summary_kind, gap_context).await {
+        if let Err(e) = self
+            .run_summary_loop(block, summary_kind, gap_context)
+            .await
+        {
             tracing::error!("timeblock_summary: summary loop failed: {e}");
         }
     }
@@ -585,7 +604,9 @@ impl TimeblockSummaryAgentService {
             .unwrap_or("");
 
         // Idempotency check: query eventlog for any summary in this time block
-        if has_existing_summary(&self.eventlog_store, &block, &SummaryKind::FeedbackReview) {
+        if has_existing_summary(&self.eventlog_store, &block, &SummaryKind::FeedbackReview)
+            || has_existing_summary(&self.eventlog_store, &block, &SummaryKind::End)
+        {
             tracing::debug!(
                 block_id = %block.start_id,
                 "timeblock_summary: already has summary, skipping"
@@ -594,11 +615,13 @@ impl TimeblockSummaryAgentService {
         }
 
         // Check if a block_completed signal was already processed for the same block
-        // Method 1: Check if there's a completed session for this block
-        let has_block_completed = self.sessions.read().unwrap().iter().any(|s| {
-            s.trigger_source.contains("End")
-                && s.content.contains(block_start_id)
-        });
+        // Method 1: Check if there's a completed session with End trigger
+        let has_block_completed = self
+            .sessions
+            .read()
+            .unwrap()
+            .iter()
+            .any(|s| s.trigger_source.contains("End"));
 
         // Determine summary kind based on scenario
         let summary_kind = if has_block_completed {
@@ -649,10 +672,18 @@ impl TimeblockSummaryAgentService {
             energy.set_current(new_energy);
         }
 
-        let energy_snapshot = self.energy_registry.get("timeblock_summary")
+        let energy_snapshot = self
+            .energy_registry
+            .get("timeblock_summary")
             .map(|e| e.snapshot("timeblock_summary"));
-        let energy_current = energy_snapshot.as_ref().map(|s| s.current).unwrap_or(ENERGY_MAX);
-        let energy_max = energy_snapshot.as_ref().map(|s| s.max).unwrap_or(ENERGY_MAX);
+        let energy_current = energy_snapshot
+            .as_ref()
+            .map(|s| s.current)
+            .unwrap_or(ENERGY_MAX);
+        let energy_max = energy_snapshot
+            .as_ref()
+            .map(|s| s.max)
+            .unwrap_or(ENERGY_MAX);
         let ctx = collect_context(&self.eventlog_store, &block, energy_current, energy_max).await;
 
         // 2. Load provider profile
@@ -663,26 +694,29 @@ impl TimeblockSummaryAgentService {
             Err(e) => {
                 tracing::warn!("timeblock_summary: cannot resolve provider profile: {e}");
                 // Write error to eventlog
-                let _ = self.eventlog_store.append_event(None, EventRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: chrono::Utc::now().timestamp_millis(),
-                    content: format!(
-                        "⚠️ 时间块总结 Agent 无法启动：未配置 LLM provider。块ID={}",
-                        block.start_id
-                    ),
-                    tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
-                    refs: vec![],
-                    metadata: Some(serde_json::json!({
-                        "agent": "timeblock_summary",
-                        "block_id": block.start_id,
-                        "status": "missing_provider",
-                        "source": {
-                            "deviceName": crate::routes::topology::read_hostname_export(),
-                            "platform": crate::routes::topology::read_os_export(),
-                            "app": "ExoMind",
-                        },
-                    })),
-                });
+                let _ = self.eventlog_store.append_event(
+                    None,
+                    EventRecord {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        timestamp: chrono::Utc::now().timestamp_millis(),
+                        content: format!(
+                            "⚠️ 时间块总结 Agent 无法启动：未配置 LLM provider。块ID={}",
+                            block.start_id
+                        ),
+                        tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
+                        refs: vec![],
+                        metadata: Some(serde_json::json!({
+                            "agent": "timeblock_summary",
+                            "block_id": block.start_id,
+                            "status": "missing_provider",
+                            "source": {
+                                "deviceName": crate::routes::topology::read_hostname_export(),
+                                "platform": crate::routes::topology::read_os_export(),
+                                "app": "ExoMind",
+                            },
+                        })),
+                    },
+                );
                 return Err(format!("missing provider: {e}"));
             }
         };
@@ -694,13 +728,19 @@ impl TimeblockSummaryAgentService {
             provider: provider.provider.clone(),
             model: provider.model.clone(),
         });
-        let (tool_def, tool_fn) =
-            submit_timeblock_summary_tool(block.clone(), kind.clone(), Arc::clone(&self.eventlog_store), Arc::clone(&source_meta));
+        let (tool_def, tool_fn) = submit_timeblock_summary_tool(
+            block.clone(),
+            kind.clone(),
+            Arc::clone(&self.eventlog_store),
+            Arc::clone(&source_meta),
+        );
         let mut tool_registry = ToolRegistry::new();
         tool_registry.register(tool_def, tool_fn);
 
         // Register exploration tools
-        for (explorer_def, explorer_fn) in tools::exploration_tools(block.clone(), Arc::clone(&self.eventlog_store)) {
+        for (explorer_def, explorer_fn) in
+            tools::exploration_tools(block.clone(), Arc::clone(&self.eventlog_store))
+        {
             tool_registry.register(explorer_def, explorer_fn);
         }
 
@@ -710,10 +750,14 @@ impl TimeblockSummaryAgentService {
             SummaryKind::Stop => build_end_prompt(&ctx, "stop"),
             SummaryKind::End => build_end_prompt(&ctx, "end"),
             SummaryKind::FeedbackReview => {
-                let feedback_content = ctx.block_feedback.as_ref()
+                let feedback_content = ctx
+                    .block_feedback
+                    .as_ref()
                     .map(|bf| bf.content.clone())
                     .unwrap_or_default();
-                let events: Vec<String> = ctx.events.iter()
+                let events: Vec<String> = ctx
+                    .events
+                    .iter()
                     .map(|e| format!("[{}] {}", e.timestamp, e.content))
                     .collect();
                 build_feedback_review_prompt(&feedback_content, &events)
@@ -737,19 +781,25 @@ impl TimeblockSummaryAgentService {
         let mut action_log: Vec<crate::agent::session::ActionLogEntry> = Vec::new();
 
         // Record signal reception in action_log
-        let initial_energy = self.energy_registry.get("timeblock_summary")
+        let initial_energy = self
+            .energy_registry
+            .get("timeblock_summary")
             .map(|e| e.snapshot("timeblock_summary").current)
             .unwrap_or(ENERGY_MAX);
         action_log.push(crate::agent::session::ActionLogEntry {
             timestamp: chrono::Utc::now().to_rfc3339(),
             tick: 0,
             action_type: "signal".to_string(),
-            description: format!("收到{}：{}", match kind {
-                SummaryKind::Start => "时间块开始信号",
-                SummaryKind::Stop => "时间块停止信号",
-                SummaryKind::End => "时间块结束信号",
-                SummaryKind::FeedbackReview => "用户反馈",
-            }, block.name),
+            description: format!(
+                "收到{}：{}",
+                match kind {
+                    SummaryKind::Start => "时间块开始信号",
+                    SummaryKind::Stop => "时间块停止信号",
+                    SummaryKind::End => "时间块结束信号",
+                    SummaryKind::FeedbackReview => "用户反馈",
+                },
+                block.name
+            ),
             energy_before: initial_energy,
             energy_after: initial_energy,
         });
@@ -789,7 +839,10 @@ impl TimeblockSummaryAgentService {
             created_at,
             completed_at: String::new(),
         };
-        let _ = self.session_runtime.agent_api_session_store.upsert(initial_session_record.clone());
+        let _ = self
+            .session_runtime
+            .agent_api_session_store
+            .upsert(initial_session_record.clone());
         {
             let mut sessions = self.sessions.write().unwrap();
             sessions.push(initial_session_record.clone());
@@ -806,16 +859,23 @@ impl TimeblockSummaryAgentService {
         }
 
         // Emit start signal
-        self.emit_lifecycle_signal("start", &block.start_id, 0, serde_json::json!({
-            "kind": format!("{:?}", kind),
-            "provider": provider.provider,
-            "model": provider.model,
-        }));
+        self.emit_lifecycle_signal(
+            "start",
+            &block.start_id,
+            0,
+            serde_json::json!({
+                "kind": format!("{:?}", kind),
+                "provider": provider.provider,
+                "model": provider.model,
+            }),
+        );
 
         // 5. Energy-driven broker loop
         loop {
             // Check energy
-            let current_energy = self.energy_registry.get("timeblock_summary")
+            let current_energy = self
+                .energy_registry
+                .get("timeblock_summary")
                 .map(|e| e.snapshot("timeblock_summary").current)
                 .unwrap_or(ENERGY_MAX);
 
@@ -826,16 +886,22 @@ impl TimeblockSummaryAgentService {
                     "timeblock_summary: energy depleted"
                 );
                 self.write_energy_depleted_event(
-                    &block, total_rounds, &first_assistant_message,
-                    &last_assistant_message, &tool_call_history, &source_meta,
-                ).await;
+                    &block,
+                    total_rounds,
+                    &first_assistant_message,
+                    &last_assistant_message,
+                    &tool_call_history,
+                    &source_meta,
+                )
+                .await;
                 break;
             }
 
             // Warn at threshold
             if current_energy <= ENERGY_WARN_THRESHOLD && current_energy > 0 {
                 history.push(TurnItem::User {
-                    content: "你的能量即将耗尽，请尽快完成总结并调用 submit_timeblock_summary。".to_string(),
+                    content: "你的能量即将耗尽，请尽快完成总结并调用 submit_timeblock_summary。"
+                        .to_string(),
                 });
             }
 
@@ -865,7 +931,9 @@ impl TimeblockSummaryAgentService {
                     if let Some(energy) = self.energy_registry.get("timeblock_summary") {
                         energy.consume(turn_cost);
                     }
-                    let energy_after = self.energy_registry.get("timeblock_summary")
+                    let energy_after = self
+                        .energy_registry
+                        .get("timeblock_summary")
                         .map(|e| e.snapshot("timeblock_summary").current)
                         .unwrap_or(energy_before);
 
@@ -903,7 +971,9 @@ impl TimeblockSummaryAgentService {
                     if let Some(energy) = self.energy_registry.get("timeblock_summary") {
                         energy.consume(turn_cost);
                     }
-                    let energy_after = self.energy_registry.get("timeblock_summary")
+                    let energy_after = self
+                        .energy_registry
+                        .get("timeblock_summary")
                         .map(|e| e.snapshot("timeblock_summary").current)
                         .unwrap_or(energy_before);
 
@@ -1005,17 +1075,27 @@ impl TimeblockSummaryAgentService {
             }
 
             // Emit tick signal for each LLM round
-            self.emit_lifecycle_signal("tick", &block.start_id, total_rounds, serde_json::json!({
-                "submitted": submitted,
-                "tool_calls": tool_call_history.len(),
-            }));
+            self.emit_lifecycle_signal(
+                "tick",
+                &block.start_id,
+                total_rounds,
+                serde_json::json!({
+                    "submitted": submitted,
+                    "tool_calls": tool_call_history.len(),
+                }),
+            );
         }
 
         // Emit end signal
-        self.emit_lifecycle_signal("end", &block.start_id, total_rounds, serde_json::json!({
-            "submitted": submitted,
-            "tool_calls": tool_call_history,
-        }));
+        self.emit_lifecycle_signal(
+            "end",
+            &block.start_id,
+            total_rounds,
+            serde_json::json!({
+                "submitted": submitted,
+                "tool_calls": tool_call_history,
+            }),
+        );
 
         // Note: energy depleted event is written inside the loop when energy == 0
         // Error/broker failures also break out above
@@ -1023,11 +1103,12 @@ impl TimeblockSummaryAgentService {
         // 6. Update session record with final state
         // Use tool_result_content as fallback when LLM returned only tool calls (no text)
         let assistant_content_for_session = last_assistant_message.clone();
-        let session_content = if last_assistant_message.is_empty() && !tool_result_content.is_empty() {
-            tool_result_content
-        } else {
-            last_assistant_message
-        };
+        let session_content =
+            if last_assistant_message.is_empty() && !tool_result_content.is_empty() {
+                tool_result_content
+            } else {
+                last_assistant_message
+            };
         let status = if submitted { "completed" } else { "failed" };
         let error_message = if submitted {
             None
@@ -1036,53 +1117,67 @@ impl TimeblockSummaryAgentService {
         };
 
         // Update the session record in store and memory
-        let final_record = crate::agent::session::AgentSessionRecord {
-            session_id: session_id.clone(),
-            trigger_source: format!("timeblock_summary-{:?}", kind),
-            provider: provider.provider.clone(),
-            model: provider.model.clone(),
-            prompt: history.iter().find_map(|item| {
-                if let TurnItem::User { content } = item {
-                    Some(content.clone())
-                } else {
-                    None
-                }
-            }),
-            content: session_content,
-            assistant_turn: crate::agent::broker::AssistantTurn {
-                content: assistant_content_for_session,
-                tool_calls: history.iter().filter_map(|item| {
-                    if let TurnItem::Assistant { tool_calls, .. } = item {
-                        Some(tool_calls.iter().cloned())
+        let final_record =
+            crate::agent::session::AgentSessionRecord {
+                session_id: session_id.clone(),
+                trigger_source: format!("timeblock_summary-{:?}", kind),
+                provider: provider.provider.clone(),
+                model: provider.model.clone(),
+                prompt: history.iter().find_map(|item| {
+                    if let TurnItem::User { content } = item {
+                        Some(content.clone())
                     } else {
                         None
                     }
-                }).flatten().collect(),
-                content_blocks: last_content_blocks,
-            },
-            tool_calls: history.iter().filter_map(|item| {
-                if let TurnItem::Assistant { tool_calls, .. } = item {
-                    Some(tool_calls.iter().map(|tc| crate::agent::session::ToolCallRecord {
-                        tool_name: tc.name.clone(),
-                        input: tc.input.clone(),
-                        output: None,
-                    }))
-                } else {
+                }),
+                content: session_content,
+                assistant_turn: crate::agent::broker::AssistantTurn {
+                    content: assistant_content_for_session,
+                    tool_calls: history
+                        .iter()
+                        .filter_map(|item| {
+                            if let TurnItem::Assistant { tool_calls, .. } = item {
+                                Some(tool_calls.iter().cloned())
+                            } else {
+                                None
+                            }
+                        })
+                        .flatten()
+                        .collect(),
+                    content_blocks: last_content_blocks,
+                },
+                tool_calls: history
+                    .iter()
+                    .filter_map(|item| {
+                        if let TurnItem::Assistant { tool_calls, .. } = item {
+                            Some(tool_calls.iter().map(|tc| {
+                                crate::agent::session::ToolCallRecord {
+                                    tool_name: tc.name.clone(),
+                                    input: tc.input.clone(),
+                                    output: None,
+                                }
+                            }))
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten()
+                    .collect(),
+                content_blocks: if all_content_blocks.is_empty() {
                     None
-                }
-            }).flatten().collect(),
-            content_blocks: if all_content_blocks.is_empty() {
-                None
-            } else {
-                Some(all_content_blocks)
-            },
-            action_log,
-            status: status.to_string(),
-            error_message,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            completed_at: chrono::Utc::now().to_rfc3339(),
-        };
-        let _ = self.session_runtime.agent_api_session_store.upsert(final_record.clone());
+                } else {
+                    Some(all_content_blocks)
+                },
+                action_log,
+                status: status.to_string(),
+                error_message,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                completed_at: chrono::Utc::now().to_rfc3339(),
+            };
+        let _ = self
+            .session_runtime
+            .agent_api_session_store
+            .upsert(final_record.clone());
         // Update in-memory session
         {
             let mut sessions = self.sessions.write().unwrap();
@@ -1096,7 +1191,12 @@ impl TimeblockSummaryAgentService {
 
     /// Emit a lifecycle signal (start / tick / end) through the signal pool.
     /// Emit a per-block tick signal describing what the agent did in this content block.
-    fn emit_block_action(&self, block_id: &str, round: usize, block: &crate::agent::api::ContentBlock) {
+    fn emit_block_action(
+        &self,
+        block_id: &str,
+        round: usize,
+        block: &crate::agent::api::ContentBlock,
+    ) {
         let (action_type, description) = match block.block_type.as_str() {
             "thinking" => {
                 let text = block.text.as_deref().unwrap_or("").to_string();
@@ -1107,11 +1207,20 @@ impl TimeblockSummaryAgentService {
                 ("text".to_string(), format!("Agent 回复：{}", text))
             }
             "tool_use" => {
-                let tool_name = block.tool_use.as_ref().map(|t| t.name.as_str()).unwrap_or("unknown");
-                let tool_input = block.tool_use.as_ref()
+                let tool_name = block
+                    .tool_use
+                    .as_ref()
+                    .map(|t| t.name.as_str())
+                    .unwrap_or("unknown");
+                let tool_input = block
+                    .tool_use
+                    .as_ref()
                     .map(|t| serde_json::to_string(&t.input).unwrap_or_default())
                     .unwrap_or_default();
-                ("tool_call".to_string(), format!("Agent 调用工具：{}({})", tool_name, tool_input))
+                (
+                    "tool_call".to_string(),
+                    format!("Agent 调用工具：{}({})", tool_name, tool_input),
+                )
             }
             other => {
                 let text = block.text.as_deref().unwrap_or("").to_string();
@@ -1119,25 +1228,43 @@ impl TimeblockSummaryAgentService {
             }
         };
 
-        self.emit_lifecycle_signal("tick", block_id, round, serde_json::json!({
-            "action_type": action_type,
-            "description": description,
-            "block_type": block.block_type,
-        }));
+        self.emit_lifecycle_signal(
+            "tick",
+            block_id,
+            round,
+            serde_json::json!({
+                "action_type": action_type,
+                "description": description,
+                "block_type": block.block_type,
+            }),
+        );
     }
 
     /// Update session record in real-time for frontend display.
-    fn update_session_action_log(&self, session_id: &str, action_log: &[crate::agent::session::ActionLogEntry]) {
+    fn update_session_action_log(
+        &self,
+        session_id: &str,
+        action_log: &[crate::agent::session::ActionLogEntry],
+    ) {
         // Update in-memory session
         let mut sessions = self.sessions.write().unwrap();
         if let Some(existing) = sessions.iter_mut().find(|s| s.session_id == session_id) {
             existing.action_log = action_log.to_vec();
             // Also persist to store
-            let _ = self.session_runtime.agent_api_session_store.upsert(existing.clone());
+            let _ = self
+                .session_runtime
+                .agent_api_session_store
+                .upsert(existing.clone());
         }
     }
 
-    fn emit_lifecycle_signal(&self, phase: &str, block_id: &str, round: usize, extra: serde_json::Value) {
+    fn emit_lifecycle_signal(
+        &self,
+        phase: &str,
+        block_id: &str,
+        round: usize,
+        extra: serde_json::Value,
+    ) {
         let payload = serde_json::json!({
             "phase": phase,
             "block_id": block_id,
@@ -1203,26 +1330,29 @@ impl TimeblockSummaryAgentService {
             truncate(last_message, 100),
         );
 
-        let _ = self.eventlog_store.append_event(None, EventRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-            content,
-            tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
-            refs: vec![],
-            metadata: Some(serde_json::json!({
-                "agent": "timeblock_summary",
-                "block_id": block.start_id,
-                "total_rounds": total_rounds,
-                "status": "energy_depleted",
-                "source": {
-                    "deviceName": source_meta.device_name,
-                    "platform": source_meta.platform,
-                    "provider": source_meta.provider,
-                    "model": source_meta.model,
-                    "app": "ExoMind",
-                },
-            })),
-        });
+        let _ = self.eventlog_store.append_event(
+            None,
+            EventRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                timestamp: chrono::Utc::now().timestamp_millis(),
+                content,
+                tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
+                refs: vec![],
+                metadata: Some(serde_json::json!({
+                    "agent": "timeblock_summary",
+                    "block_id": block.start_id,
+                    "total_rounds": total_rounds,
+                    "status": "energy_depleted",
+                    "source": {
+                        "deviceName": source_meta.device_name,
+                        "platform": source_meta.platform,
+                        "provider": source_meta.provider,
+                        "model": source_meta.model,
+                        "app": "ExoMind",
+                    },
+                })),
+            },
+        );
     }
 }
 
@@ -1253,7 +1383,8 @@ fn count_effective_chars(text: &str) -> usize {
 /// Calculate energy gain from time block events.
 fn calculate_event_energy_gain(events: &[crate::eventlog::EventRecord]) -> u64 {
     let event_count = events.len() as u64;
-    let user_char_count: usize = events.iter()
+    let user_char_count: usize = events
+        .iter()
         .filter(|e| is_user_input(e))
         .map(|e| count_effective_chars(&e.content))
         .sum();
@@ -1334,35 +1465,38 @@ impl Agent for TimeblockSummaryAgentService {
 
     fn get_session(&self, session_id: &str) -> Option<crate::agent::SessionInfo> {
         let sessions = self.sessions.read().unwrap();
-        sessions.iter().find(|s| s.session_id == session_id).map(|s| {
-            let tool_calls = if s.tool_calls.is_empty() {
-                None
-            } else {
-                Some(s.tool_calls.clone())
-            };
-            let content_blocks = s.content_blocks.clone();
-            let action_log = if s.action_log.is_empty() {
-                None
-            } else {
-                Some(s.action_log.clone())
-            };
-            crate::agent::SessionInfo {
-                session_id: s.session_id.clone(),
-                status: s.status.clone(),
-                created_at: s.created_at.clone(),
-                last_active: s.completed_at.clone(),
-                message_count: (s.tool_calls.len() as u64) + 1,
-                uptime_secs: 0,
-                content: Some(s.content.clone()),
-                trigger_source: Some(s.trigger_source.clone()),
-                prompt: s.prompt.clone(),
-                provider: Some(s.provider.clone()),
-                model: Some(s.model.clone()),
-                tool_calls,
-                content_blocks,
-                action_log,
-            }
-        })
+        sessions
+            .iter()
+            .find(|s| s.session_id == session_id)
+            .map(|s| {
+                let tool_calls = if s.tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(s.tool_calls.clone())
+                };
+                let content_blocks = s.content_blocks.clone();
+                let action_log = if s.action_log.is_empty() {
+                    None
+                } else {
+                    Some(s.action_log.clone())
+                };
+                crate::agent::SessionInfo {
+                    session_id: s.session_id.clone(),
+                    status: s.status.clone(),
+                    created_at: s.created_at.clone(),
+                    last_active: s.completed_at.clone(),
+                    message_count: (s.tool_calls.len() as u64) + 1,
+                    uptime_secs: 0,
+                    content: Some(s.content.clone()),
+                    trigger_source: Some(s.trigger_source.clone()),
+                    prompt: s.prompt.clone(),
+                    provider: Some(s.provider.clone()),
+                    model: Some(s.model.clone()),
+                    tool_calls,
+                    content_blocks,
+                    action_log,
+                }
+            })
     }
 }
 
@@ -1383,11 +1517,20 @@ fn build_action_log_entry(
             ("text".to_string(), format!("Agent 回复：{}", text))
         }
         "tool_use" => {
-            let tool_name = block.tool_use.as_ref().map(|t| t.name.as_str()).unwrap_or("unknown");
-            let tool_input = block.tool_use.as_ref()
+            let tool_name = block
+                .tool_use
+                .as_ref()
+                .map(|t| t.name.as_str())
+                .unwrap_or("unknown");
+            let tool_input = block
+                .tool_use
+                .as_ref()
                 .map(|t| serde_json::to_string(&t.input).unwrap_or_default())
                 .unwrap_or_default();
-            ("tool_call".to_string(), format!("Agent 调用工具：{}({})", tool_name, tool_input))
+            (
+                "tool_call".to_string(),
+                format!("Agent 调用工具：{}({})", tool_name, tool_input),
+            )
         }
         other => {
             let text = block.text.as_deref().unwrap_or("").to_string();
@@ -1415,7 +1558,8 @@ fn extract_block_from_signal(event: &SignalEvent) -> Option<TimeBlockData> {
 fn extract_active_block_from_signal(event: &SignalEvent) -> Option<TimeBlockData> {
     // active_upserted payload has "active" field with ActiveBlockData structure
     let active_value = event.payload.get("active")?;
-    let active: crate::timeblock::ActiveBlockData = serde_json::from_value(active_value.clone()).ok()?;
+    let active: crate::timeblock::ActiveBlockData =
+        serde_json::from_value(active_value.clone()).ok()?;
 
     // Convert ActiveBlockData to TimeBlockData
     Some(TimeBlockData {
@@ -1470,13 +1614,15 @@ fn build_session_record(
         .iter()
         .filter_map(|item| {
             if let TurnItem::Assistant { tool_calls, .. } = item {
-                Some(tool_calls.iter().map(|tc| {
-                    crate::agent::session::ToolCallRecord {
-                        tool_name: tc.name.clone(),
-                        input: tc.input.clone(),
-                        output: None,
-                    }
-                }))
+                Some(
+                    tool_calls
+                        .iter()
+                        .map(|tc| crate::agent::session::ToolCallRecord {
+                            tool_name: tc.name.clone(),
+                            input: tc.input.clone(),
+                            output: None,
+                        }),
+                )
             } else {
                 None
             }
@@ -1611,7 +1757,7 @@ mod tests {
 
         let record = build_session_record(
             &history,
-            "",  // last_assistant_message is empty (LLM only returned tool calls)
+            "", // last_assistant_message is empty (LLM only returned tool calls)
             &[],
             vec![],
             vec![],
@@ -1629,7 +1775,10 @@ mod tests {
 
         // assistant_turn.tool_calls must also be populated
         assert_eq!(record.assistant_turn.tool_calls.len(), 1);
-        assert_eq!(record.assistant_turn.tool_calls[0].name, "submit_timeblock_summary");
+        assert_eq!(
+            record.assistant_turn.tool_calls[0].name,
+            "submit_timeblock_summary"
+        );
 
         // prompt should be captured
         assert_eq!(record.prompt.as_deref(), Some("请总结时间块"));
@@ -1726,11 +1875,9 @@ mod tests {
 
     #[test]
     fn build_session_record_failed_status() {
-        let history = vec![
-            TurnItem::User {
-                content: "test".to_string(),
-            },
-        ];
+        let history = vec![TurnItem::User {
+            content: "test".to_string(),
+        }];
 
         let record = build_session_record(
             &history,
@@ -2058,19 +2205,19 @@ mod tests {
     fn build_session_record_includes_action_log() {
         use crate::agent::session::ActionLogEntry;
 
-        let action_log = vec![
-            ActionLogEntry {
-                timestamp: "2026-06-06T00:00:00Z".to_string(),
-                tick: 0,
-                action_type: "signal".to_string(),
-                description: "收到时间块开始信号：test".to_string(),
-                energy_before: 100,
-                energy_after: 100,
-            },
-        ];
+        let action_log = vec![ActionLogEntry {
+            timestamp: "2026-06-06T00:00:00Z".to_string(),
+            tick: 0,
+            action_type: "signal".to_string(),
+            description: "收到时间块开始信号：test".to_string(),
+            energy_before: 100,
+            energy_after: 100,
+        }];
 
         let record = build_session_record(
-            &[TurnItem::User { content: "test".to_string() }],
+            &[TurnItem::User {
+                content: "test".to_string(),
+            }],
             "",
             &[],
             vec![],
