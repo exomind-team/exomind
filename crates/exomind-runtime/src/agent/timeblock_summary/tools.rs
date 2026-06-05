@@ -344,12 +344,18 @@ pub fn submit_timeblock_summary_tool(
                 content.push_str(&format!("\n\n### 下一步建议\n{}", suggestions));
             }
 
-            // Write to eventlog
+            // Write to eventlog with appropriate tags based on summary_kind
+            let tags = match summary_kind {
+                "start" => vec!["agent_feedback".to_string(), "agent_feedback_start".to_string()],
+                "end" => vec!["agent_feedback".to_string(), "agent_feedback_end".to_string()],
+                "feedback_review" => vec!["agent_feedback".to_string(), "agent_feedback_review".to_string()],
+                _ => vec!["agent_feedback".to_string()],
+            };
             let event = crate::eventlog::EventRecord {
                 id: uuid::Uuid::new_v4().to_string(),
                 timestamp: chrono::Utc::now().timestamp_millis(),
                 content,
-                tags: vec!["agent_feedback".to_string()],
+                tags,
                 refs: vec![],
                 metadata: Some(json!({
                     "agent": "timeblock_summary",

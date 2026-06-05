@@ -373,7 +373,23 @@ impl TimeblockSummaryAgentService {
             return;
         }
 
-        // Active blocks: process completed signal (no idempotency check — always proceed)
+        // Idempotency check: query eventlog for existing agent_feedback_end in this time block
+        let end_filter = crate::eventlog::EventListFilter {
+            since_timestamp: Some(block.start_time as i64),
+            until_timestamp: Some(block.end_time as i64),
+            tags: vec!["agent_feedback_end".to_string()],
+            limit: Some(1),
+            ..Default::default()
+        };
+        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &end_filter) {
+            if !events.is_empty() {
+                tracing::debug!(
+                    block_id = %block.start_id,
+                    "timeblock_summary: already has end summary, skipping"
+                );
+                return;
+            }
+        }
         tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing completed active block");
 
         // Energy replenishment: calculate from events in this time block
@@ -422,7 +438,7 @@ impl TimeblockSummaryAgentService {
             return;
         }
 
-        // Idempotency check: query eventlog for existing agent_feedback in this time block
+        // Idempotency check: query eventlog for existing agent_feedback_start in this time block
         let end_time = if block.end_time > 0 {
             block.end_time as i64
         } else {
@@ -431,11 +447,19 @@ impl TimeblockSummaryAgentService {
         let filter = crate::eventlog::EventListFilter {
             since_timestamp: Some(block.start_time as i64),
             until_timestamp: Some(end_time),
-            tags: vec!["agent_feedback".to_string()],
+            tags: vec!["agent_feedback_start".to_string()],
             limit: Some(1),
             ..Default::default()
         };
-        // Note: We no longer skip if agent_feedback exists — "stop" also triggers summary
+        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &filter) {
+            if !events.is_empty() {
+                tracing::debug!(
+                    block_id = %block.start_id,
+                    "timeblock_summary: already has start summary, skipping"
+                );
+                return;
+            }
+        }
         tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing active block signal");
 
         // Energy replenishment: countdown mode → supplement by target_minutes
@@ -547,6 +571,24 @@ impl TimeblockSummaryAgentService {
             .and_then(|b| b.get("startId"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
+
+        // Idempotency check: query eventlog for existing agent_feedback_review in this time block
+        let review_filter = crate::eventlog::EventListFilter {
+            since_timestamp: Some(block.start_time as i64),
+            until_timestamp: Some(block.end_time as i64),
+            tags: vec!["agent_feedback_review".to_string()],
+            limit: Some(1),
+            ..Default::default()
+        };
+        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &review_filter) {
+            if !events.is_empty() {
+                tracing::debug!(
+                    block_id = %block.start_id,
+                    "timeblock_summary: already has feedback review, skipping"
+                );
+                return;
+            }
+        }
 
         // Check if a block_completed signal was already processed for the same block
         // Method 1: Check if there's a completed session for this block
