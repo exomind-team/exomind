@@ -2096,6 +2096,7 @@ async fn write_timeblock_feedback_eventlog(
         })
         .collect::<std::collections::HashMap<_, _>>();
     let content = build_timeblock_feedback_report(current, completed, &task_titles);
+    let content_for_signal = content.clone();
     let event = crate::eventlog::EventRecord {
         id: uuid::Uuid::new_v4().to_string(),
         timestamp: submitted_at as i64,
@@ -2133,6 +2134,27 @@ async fn write_timeblock_feedback_eventlog(
     }
 
     crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
+
+    // Publish block_feedback.created signal so downstream agents (e.g. timeblock_summary)
+    // can react to user feedback submission without waiting for replication.completed.
+    state.signal_pool.publish(SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "timeblock.block_feedback.created".to_string(),
+        ts: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock error")
+            .as_millis() as u64,
+        source: "timeblock_summary".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 1,
+        trace_id: None,
+        payload: serde_json::json!({
+            "scopeKey": normalize_scope_key(scope_key),
+            "block": completed,
+            "feedback": content_for_signal,
+        }),
+    });
 }
 
 fn build_timeblocks_sqlite_snapshot_bytes(
