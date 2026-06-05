@@ -256,6 +256,31 @@ impl TimeblockSummaryAgentService {
 
         tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing completed active block");
 
+        // Energy replenishment: calculate from events in this time block
+        let events_filter = crate::eventlog::EventListFilter {
+            since_timestamp: Some(block.start_time as i64),
+            until_timestamp: Some(block.end_time as i64),
+            limit: Some(1000),
+            ..Default::default()
+        };
+        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &events_filter) {
+            let energy_gain = calculate_event_energy_gain(&events);
+            if energy_gain > 0 {
+                if let Some(energy) = self.energy_registry.get("timeblock_summary") {
+                    let current = energy.snapshot("timeblock_summary").current;
+                    let new_energy = (current + energy_gain).min(ENERGY_MAX);
+                    energy.set_current(new_energy);
+                    tracing::info!(
+                        block_id = %block.start_id,
+                        event_count = events.len(),
+                        energy_gain,
+                        new_energy,
+                        "timeblock_summary: energy replenished from events"
+                    );
+                }
+            }
+        }
+
         if let Err(e) = self.run_summary_loop(block, SummaryKind::End, None).await {
             tracing::error!("timeblock_summary: summary loop failed: {e}");
         }
@@ -301,6 +326,31 @@ impl TimeblockSummaryAgentService {
         }
 
         tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing new active block");
+
+        // Energy replenishment: countdown mode → supplement by target_minutes
+        if let Some(active_value) = event.payload.get("active") {
+            if let Ok(active) = serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
+                if active.mode == "countdown" {
+                    if let Some(target_minutes) = active.target_minutes {
+                        let energy_gain = target_minutes;
+                        if energy_gain > 0 {
+                            if let Some(energy) = self.energy_registry.get("timeblock_summary") {
+                                let current = energy.snapshot("timeblock_summary").current;
+                                let new_energy = (current + energy_gain).min(ENERGY_MAX);
+                                energy.set_current(new_energy);
+                                tracing::info!(
+                                    block_id = %block.start_id,
+                                    target_minutes,
+                                    energy_gain,
+                                    new_energy,
+                                    "timeblock_summary: energy replenished from countdown"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Check for recent gap completion to inject as context
         let gap_context = self.last_completed_gap.write().unwrap().take();
@@ -869,6 +919,40 @@ impl TimeblockSummaryAgentService {
     }
 }
 
+/// Check if an event is user-input (not system-generated).
+fn is_user_input(event: &crate::eventlog::EventRecord) -> bool {
+    // Check tags for user_input
+    if event.tags.iter().any(|t| t == "user_input") {
+        return true;
+    }
+    // Check metadata.source.app — system events are from exomind-runtime
+    if let Some(metadata) = &event.metadata {
+        if let Some(source) = metadata.get("source") {
+            if let Some(app) = source.get("app") {
+                return app.as_str() != Some("exomind-runtime");
+            }
+        }
+    }
+    false
+}
+
+/// Count effective text characters (exclude whitespace and ASCII punctuation).
+fn count_effective_chars(text: &str) -> usize {
+    text.chars()
+        .filter(|c| !c.is_whitespace() && !c.is_ascii_punctuation())
+        .count()
+}
+
+/// Calculate energy gain from time block events.
+fn calculate_event_energy_gain(events: &[crate::eventlog::EventRecord]) -> u64 {
+    let event_count = events.len() as u64;
+    let user_char_count: usize = events.iter()
+        .filter(|e| is_user_input(e))
+        .map(|e| count_effective_chars(&e.content))
+        .sum();
+    ((event_count as f64 + user_char_count as f64 / 100.0).ceil()) as u64
+}
+
 impl Agent for TimeblockSummaryAgentService {
     fn id(&self) -> &str {
         "timeblock_summary"
@@ -1392,8 +1476,8 @@ mod tests {
             end_id: "gap-1-end".to_string(),
             note: None,
             tags: vec![],
-            start_time: 500,
-            end_time: 980, // 480 seconds = 8 minutes
+            start_time: 500_000, // 500 seconds in milliseconds
+            end_time: 980_000,   // 980 seconds in milliseconds = 480 seconds = 8 minutes
             block_type: Some("gap".to_string()),
             task_ids: vec![],
             task_status_outcomes: None,
@@ -1518,5 +1602,88 @@ mod tests {
         assert_eq!(entry.action_type, "tool_call");
         assert!(entry.description.contains("submit_timeblock_summary"));
         assert_eq!(entry.tick, 2);
+    }
+
+    #[test]
+    fn count_effective_chars_excludes_whitespace_and_punctuation() {
+        assert_eq!(super::count_effective_chars("Hello World!"), 10); // "HelloWorld" = 10
+        assert_eq!(super::count_effective_chars("你好世界"), 4); // "你好世界" = 4
+        assert_eq!(super::count_effective_chars("abc 123 !@#"), 6); // "abc123" = 6
+        assert_eq!(super::count_effective_chars(""), 0);
+        assert_eq!(super::count_effective_chars("   "), 0);
+    }
+
+    #[test]
+    fn is_user_input_checks_metadata_source() {
+        use crate::eventlog::EventRecord;
+        use serde_json::json;
+
+        // System event (exomind-runtime)
+        let system_event = EventRecord {
+            id: "1".to_string(),
+            timestamp: 1000,
+            content: "test".to_string(),
+            tags: vec![],
+            refs: vec![],
+            metadata: Some(json!({
+                "source": { "app": "exomind-runtime" }
+            })),
+        };
+        assert!(!super::is_user_input(&system_event));
+
+        // User event (other app)
+        let user_event = EventRecord {
+            id: "2".to_string(),
+            timestamp: 1000,
+            content: "test".to_string(),
+            tags: vec![],
+            refs: vec![],
+            metadata: Some(json!({
+                "source": { "app": "ExoMind" }
+            })),
+        };
+        assert!(super::is_user_input(&user_event));
+
+        // Event with user_input tag
+        let tagged_event = EventRecord {
+            id: "3".to_string(),
+            timestamp: 1000,
+            content: "test".to_string(),
+            tags: vec!["user_input".to_string()],
+            refs: vec![],
+            metadata: None,
+        };
+        assert!(super::is_user_input(&tagged_event));
+    }
+
+    #[test]
+    fn calculate_event_energy_gain_formula() {
+        use crate::eventlog::EventRecord;
+        use serde_json::json;
+
+        let events = vec![
+            EventRecord {
+                id: "1".to_string(),
+                timestamp: 1000,
+                content: "系统事件".to_string(),
+                tags: vec!["block_start".to_string()],
+                refs: vec![],
+                metadata: Some(json!({ "source": { "app": "exomind-runtime" } })),
+            },
+            EventRecord {
+                id: "2".to_string(),
+                timestamp: 2000,
+                content: "用户输入了100个有效字符".to_string(),
+                tags: vec![],
+                refs: vec![],
+                metadata: Some(json!({ "source": { "app": "ExoMind" } })),
+            },
+        ];
+
+        // event_count = 2
+        // user_char_count = count_effective_chars("用户输入了100个有效字符") = 12
+        // energy_gain = ceil(2 + 12/100) = ceil(2.12) = 3
+        let gain = super::calculate_event_energy_gain(&events);
+        assert_eq!(gain, 3);
     }
 }
