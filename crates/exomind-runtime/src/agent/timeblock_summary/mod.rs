@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::{broadcast, Mutex};
 
+use crate::timeblock::BlockPhase;
+
 use crate::agent::broker::{self, AgentTurnBroker, AgentTurnRequest, AgentTurnResult, TurnItem};
 use crate::agent::session::{AgentSessionRecord, AgentSessionRuntime};
 use crate::agent::tools::ToolRegistry;
@@ -466,20 +468,21 @@ impl TimeblockSummaryAgentService {
         let gap_context = self.last_completed_gap.write().unwrap().take();
 
         // Determine summary kind based on phase
-        // "feedback_in_progress" means stop (entering feedback phase)
-        // Otherwise means start (new active block)
-        let summary_kind = if let Some(active_value) = event.payload.get("active") {
-            if let Ok(active) = serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
-                if active.phase.as_deref() == Some("feedback_in_progress") {
-                    SummaryKind::End
-                } else {
-                    SummaryKind::Start
+        let summary_kind = match event.payload.get("active") {
+            Some(active_value) => {
+                match serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
+                    Ok(active) => match active.phase.as_ref() {
+                        Some(BlockPhase::FeedbackInProgress) => SummaryKind::End,
+                        Some(BlockPhase::Paused) => {
+                            tracing::debug!(block_id = %block.start_id, "timeblock_summary: block is paused, skipping");
+                            return;
+                        }
+                        _ => SummaryKind::Start,
+                    },
+                    Err(_) => SummaryKind::Start,
                 }
-            } else {
-                SummaryKind::Start
             }
-        } else {
-            SummaryKind::Start
+            None => SummaryKind::Start,
         };
 
         tracing::info!(

@@ -8,6 +8,7 @@ use tracing::warn;
 use crate::eventlog::{EventLogStore, EventRecord};
 use crate::proposal::{Proposal, ProposalStore};
 use crate::signal::{SignalEvent, SignalPool};
+use crate::timeblock::BlockPhase;
 use crate::task::store::{
     compare_task_replication_preference, merge_task_snapshot, merge_task_status_history,
     normalize_task_status_history, validate_partial_task_status_history,
@@ -651,7 +652,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(1_710_000_000_000),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(1),
             actor_id: Some("actor-a".to_string()),
             last_transition_at: Some(1_710_000_000_000),

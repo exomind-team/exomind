@@ -8,6 +8,8 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Instant, interval_at};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use crate::timeblock::BlockPhase;
+
 use crate::AppState;
 use crate::eventlog::{EventListFilter, EventRecord, sanitize_user_id};
 use crate::proposal::{Comment, Proposal, ProposalStatus};
@@ -2956,7 +2958,7 @@ mod tests {
             target_minutes: None,
             elapsed: 0,
             updated_at: Some(base),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(1),
             actor_id: Some("actor-a".to_string()),
             last_transition_at: Some(base),
@@ -3191,7 +3193,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(10),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(1),
             actor_id: None,
             last_transition_at: Some(10),
@@ -3229,7 +3231,7 @@ mod tests {
         .unwrap();
 
         let mut stopped = active;
-        stopped.phase = Some("feedback_in_progress".to_string());
+        stopped.phase = Some(BlockPhase::FeedbackInProgress);
         stopped.feedback_started_at = Some(20);
         state
             .timeblock_store

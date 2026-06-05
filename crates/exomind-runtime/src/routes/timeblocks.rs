@@ -8,6 +8,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+use crate::timeblock::BlockPhase;
+
 use super::tasks::transition_task_in_scope_with_context;
 use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
@@ -603,7 +605,7 @@ fn do_new_block_at(
         phase: if is_gap {
             None
         } else {
-            Some("running".to_string())
+            Some(BlockPhase::Running)
         },
         version: Some(1),
         actor_id: Some("rt:newblock".to_string()),
@@ -951,7 +953,7 @@ async fn stop_block(
     let mut updated = current;
     updated.action_ended_at = Some(now);
     updated.feedback_started_at = Some(now);
-    updated.phase = Some("feedback_in_progress".to_string());
+    updated.phase = Some(BlockPhase::FeedbackInProgress);
     updated.paused = false;
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
@@ -1061,7 +1063,7 @@ async fn pause_block(
     updated.paused = true;
     updated.paused_at = Some(now);
     updated.accumulated_run_ms = Some(accumulated);
-    updated.phase = Some("paused".to_string());
+    updated.phase = Some(BlockPhase::Paused);
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
     updated.updated_at = Some(now);
@@ -1207,7 +1209,7 @@ async fn resume_block(
     updated.paused_at = None;
     updated.last_resumed_at = Some(now);
     updated.pause_accumulated_ms = Some(pause_accumulated);
-    updated.phase = Some("running".to_string());
+    updated.phase = Some(BlockPhase::Running);
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
     updated.updated_at = Some(now);
@@ -2671,7 +2673,7 @@ mod tests {
                     target_minutes: None,
                     elapsed: 0,
                     updated_at: Some(2100),
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(2100),
@@ -2927,7 +2929,7 @@ mod tests {
                     target_minutes: Some(25),
                     elapsed: 30_000,
                     updated_at: Some(1_700_000_101_000),
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(1_700_000_101_000),
@@ -3067,7 +3069,7 @@ mod tests {
                     target_minutes: Some(25),
                     elapsed: 30_000,
                     updated_at: Some(1_700_000_101_000),
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(1_700_000_101_000),
@@ -3595,7 +3597,7 @@ mod tests {
                     target_minutes: Some(25),
                     elapsed: 0,
                     updated_at: Some(1_700_000_101_000),
-                    phase: Some("feedback_in_progress".to_string()),
+                    phase: Some(BlockPhase::FeedbackInProgress),
                     version: Some(2),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(1_700_000_130_000),
@@ -3972,7 +3974,7 @@ mod tests {
                     block_type: Some("active".to_string()),
                     elapsed: 0,
                     updated_at: Some(100),
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(100),
@@ -4171,7 +4173,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(3_000),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(3),
             actor_id: Some("actor-b".to_string()),
             last_transition_at: Some(3_000),
@@ -4202,7 +4204,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(2_000),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(2),
             actor_id: Some("actor-a".to_string()),
             last_transition_at: Some(2_000),
@@ -4255,7 +4257,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(3_000),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(3),
             actor_id: Some("actor-a".to_string()),
             last_transition_at: Some(3_000),
@@ -4286,7 +4288,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(3_000),
-            phase: Some("feedback_in_progress".to_string()),
+            phase: Some(BlockPhase::FeedbackInProgress),
             version: Some(3),
             actor_id: Some("actor-b".to_string()),
             last_transition_at: Some(3_500),
