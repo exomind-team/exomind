@@ -659,6 +659,9 @@ impl TimeblockSummaryAgentService {
             }
         };
 
+        // Clone prompt before moving to history
+        let prompt_for_log = initial_prompt.clone();
+
         let mut history = vec![TurnItem::User {
             content: initial_prompt,
         }];
@@ -685,6 +688,17 @@ impl TimeblockSummaryAgentService {
                 SummaryKind::End => "时间块停止信号",
                 SummaryKind::FeedbackReview => "用户反馈",
             }, block.name),
+            energy_before: initial_energy,
+            energy_after: initial_energy,
+        });
+
+        // Record prompt in action_log (truncated to 500 chars for display)
+        let prompt_preview = prompt_for_log.chars().take(500).collect::<String>();
+        action_log.push(crate::agent::session::ActionLogEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            tick: 0,
+            action_type: "prompt".to_string(),
+            description: format!("发给 Agent 的提示词：{}", prompt_preview),
             energy_before: initial_energy,
             energy_after: initial_energy,
         });
