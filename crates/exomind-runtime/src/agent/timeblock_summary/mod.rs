@@ -616,10 +616,10 @@ impl TimeblockSummaryAgentService {
             timestamp: chrono::Utc::now().to_rfc3339(),
             tick: 0,
             action_type: "signal".to_string(),
-            description: format!("收到{}信号：{}", match kind {
-                SummaryKind::Start => "时间块开始",
-                SummaryKind::End => "时间块结束",
-                SummaryKind::FeedbackReview => "用户反馈核验",
+            description: format!("收到{}：{}", match kind {
+                SummaryKind::Start => "时间块开始信号",
+                SummaryKind::End => "时间块结束信号",
+                SummaryKind::FeedbackReview => "用户反馈",
             }, block.name),
             energy_before: initial_energy,
             energy_after: initial_energy,
