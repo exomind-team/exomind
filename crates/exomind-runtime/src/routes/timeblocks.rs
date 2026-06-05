@@ -2,7 +2,7 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::TimeZone;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use crate::timeblock::BlockPhase;
 
 use super::tasks::transition_task_in_scope_with_context;
-use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
 use crate::config::types::USER_CONFIG_SCOPE;
 use crate::eventlog::PERF_LOGGING_ENABLED_CONFIG_KEY;
@@ -21,6 +20,7 @@ use crate::timeblock::{
     ActiveBlockData, BlockTaskAssociationEvent, BlockTransition, BlockTransitionType,
     TimeBlockData, TimeBlockStore,
 };
+use crate::AppState;
 
 const TIMEBLOCK_SCOPE_GRANT_DOMAIN: &str = "timeblocks";
 
@@ -1818,7 +1818,7 @@ async fn write_timeblock_eventlog(
 ) {
     let content = match event_type {
         "block_start" => format!("时间块开始: {block_name}"),
-        "block_end" => format!("时间块结束: {block_name}"),
+        "block_end" => format!("时间块停止: {block_name}"),
         "block_pause" => format!("时间块暂停: {block_name}"),
         "block_resume" => format!("时间块恢复: {block_name}"),
         _ => format!("时间块事件: {block_name}"),
@@ -3412,16 +3412,12 @@ mod tests {
 
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 3);
-        assert!(
-            events
-                .iter()
-                .any(|event| event.tags == vec!["block_pause".to_string()])
-        );
-        assert!(
-            events
-                .iter()
-                .any(|event| event.tags == vec!["task_suspended".to_string()])
-        );
+        assert!(events
+            .iter()
+            .any(|event| event.tags == vec!["block_pause".to_string()]));
+        assert!(events
+            .iter()
+            .any(|event| event.tags == vec!["task_suspended".to_string()]));
         let paused_task = state
             .task_store
             .get(&task.id)

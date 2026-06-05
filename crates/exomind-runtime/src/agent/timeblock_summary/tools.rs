@@ -1,7 +1,7 @@
 use crate::agent::tools::{ToolDef, ToolError, ToolFn};
 use crate::eventlog::{EventListFilter, EventLogStore};
 use crate::timeblock::TimeBlockData;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 use super::SummaryKind;
@@ -17,10 +17,26 @@ pub fn build_block_tag(block_id: &str) -> String {
 pub fn build_summary_tags(kind: &SummaryKind, block_id: &str) -> Vec<String> {
     let block_tag = build_block_tag(block_id);
     match kind {
-        SummaryKind::Start => vec!["agent_feedback".to_string(), "agent_feedback_start".to_string(), block_tag],
-        SummaryKind::Stop => vec!["agent_feedback".to_string(), "agent_feedback_stop".to_string(), block_tag],
-        SummaryKind::End => vec!["agent_feedback".to_string(), "agent_feedback_end".to_string(), block_tag],
-        SummaryKind::FeedbackReview => vec!["agent_feedback".to_string(), "agent_feedback_review".to_string(), block_tag],
+        SummaryKind::Start => vec![
+            "agent_feedback".to_string(),
+            "agent_feedback_start".to_string(),
+            block_tag,
+        ],
+        SummaryKind::Stop => vec![
+            "agent_feedback".to_string(),
+            "agent_feedback_stop".to_string(),
+            block_tag,
+        ],
+        SummaryKind::End => vec![
+            "agent_feedback".to_string(),
+            "agent_feedback_end".to_string(),
+            block_tag,
+        ],
+        SummaryKind::FeedbackReview => vec![
+            "agent_feedback".to_string(),
+            "agent_feedback_review".to_string(),
+            block_tag,
+        ],
     }
 }
 pub const GET_RECENT_EVENTS_TOOL: &str = "get_recent_events";
@@ -57,7 +73,11 @@ pub fn exploration_tools(
         let fn_impl: ToolFn = Box::new(move |input: Value| {
             let store = Arc::clone(&store);
             Box::pin(async move {
-                let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(10).min(50) as usize;
+                let limit = input
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(10)
+                    .min(50) as usize;
                 let tag = input.get("tag").and_then(Value::as_str).map(String::from);
 
                 let mut filter = EventListFilter {
@@ -68,20 +88,26 @@ pub fn exploration_tools(
                     filter.tags = vec![t];
                 }
 
-                let events = store.list_events_filtered(None, &filter).unwrap_or_default();
-                let result: Vec<Value> = events.iter().map(|e| {
-                    json!({
-                        "id": e.id,
-                        "timestamp": e.timestamp,
-                        "content": e.content,
-                        "tags": e.tags,
+                let events = store
+                    .list_events_filtered(None, &filter)
+                    .unwrap_or_default();
+                let result: Vec<Value> = events
+                    .iter()
+                    .map(|e| {
+                        json!({
+                            "id": e.id,
+                            "timestamp": e.timestamp,
+                            "content": e.content,
+                            "tags": e.tags,
+                        })
                     })
-                }).collect();
+                    .collect();
 
                 Ok(json!({
                     "events": result,
                     "total": result.len(),
-                }).to_string())
+                })
+                .to_string())
             })
         });
         tools.push((def, fn_impl));
@@ -91,7 +117,11 @@ pub fn exploration_tools(
     {
         let store = Arc::clone(&eventlog_store);
         let block_start = block.start_time;
-        let block_end = if block.end_time > 0 { block.end_time } else { chrono::Utc::now().timestamp_millis() as u64 };
+        let block_end = if block.end_time > 0 {
+            block.end_time
+        } else {
+            chrono::Utc::now().timestamp_millis() as u64
+        };
         let def = ToolDef {
             name: GET_BLOCK_FEEDBACK_TOOL.to_string(),
             description: "获取当前时间块的 block_feedback（精确数据日志）。可用于了解时间统计、专注度等客观数据。".to_string(),
@@ -112,12 +142,15 @@ pub fn exploration_tools(
                     limit: Some(1),
                     ..Default::default()
                 };
-                let events = store.list_events_filtered(None, &filter).unwrap_or_default();
+                let events = store
+                    .list_events_filtered(None, &filter)
+                    .unwrap_or_default();
                 match events.first() {
                     Some(e) => Ok(json!({
                         "content": e.content,
                         "timestamp": e.timestamp,
-                    }).to_string()),
+                    })
+                    .to_string()),
                     None => Ok("当前时间块暂无 block_feedback".to_string()),
                 }
             })
@@ -148,7 +181,9 @@ pub fn submit_timeblock_summary_tool(
 ) -> (ToolDef, ToolFn) {
     let def = ToolDef {
         name: SUBMIT_TIMEBLOCK_SUMMARY_TOOL.to_string(),
-        description: "提交时间块总结的结构化字段。Runtime 会校验入参并生成最终 agent_feedback 事件。".to_string(),
+        description:
+            "提交时间块总结的结构化字段。Runtime 会校验入参并生成最终 agent_feedback 事件。"
+                .to_string(),
         input_schema: json!({
             "type": "object",
             "required": ["blockId", "narrative"],
@@ -323,7 +358,9 @@ pub fn submit_timeblock_summary_tool(
                 SummaryKind::Start => format!("## 时间块开始\n\n**{}** 已启动。", block_id),
                 SummaryKind::Stop => format!("## 时间块停止\n\n**{}** 已停止。", block_id),
                 SummaryKind::End => format!("## 时间块总结\n\n**{}** 已结束。", block_id),
-                SummaryKind::FeedbackReview => format!("## 用户反馈核验\n\n**{}** 反馈已提交。", block_id),
+                SummaryKind::FeedbackReview => {
+                    format!("## 用户反馈核验\n\n**{}** 反馈已提交。", block_id)
+                }
             };
 
             let mut content = format!("{}\n\n{}", title, narrative);
@@ -370,10 +407,7 @@ pub fn submit_timeblock_summary_tool(
             };
 
             match store.append_event(None, event.clone()) {
-                Ok(_) => Ok(format!(
-                    "已写入 agent_feedback 事件，event_id={}",
-                    event.id
-                )),
+                Ok(_) => Ok(format!("已写入 agent_feedback 事件，event_id={}", event.id)),
                 Err(e) => Err(ToolError::ExecutionFailed(format!(
                     "failed to write eventlog: {e}"
                 ))),

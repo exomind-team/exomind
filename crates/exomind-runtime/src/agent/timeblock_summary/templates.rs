@@ -34,26 +34,24 @@ pub fn system_prompt() -> &'static str {
 
 | 工具 | 用途 |
 |------|------|
-| `get_recent_events` | 查询近期事件列表，了解用户活动模式 |
+| `get_recent_events` | 查询近期事件列表，了解用户活动模式（可使用 tag="note" 提取用户亲自发的事件） |
 | `get_block_feedback` | 获取当前时间块的 block_feedback（精确数据日志） |
 | `submit_timeblock_summary` | 提交时间块总结的结构化字段（**唯一输出工具**） |
 
 **工作流程**（必须按顺序执行）：
 1. **分析预填上下文**：梳理事件时间线、识别模式、关联近期已完成块
-2. **按需探索**：如果预填上下文中的事件信息不足（如事件太少、需要更多上下文），调用 `get_recent_events` 获取更多近期事件
+2. **主动探索**：必须调用 `get_recent_events` 获取更多近期事件，验证和补充预填信息
 3. **提交总结**：完成分析后，调用 `submit_timeblock_summary` 提交结构化字段
 
 **重要**：
-- 预填上下文已包含该时间块的事件信息，通常不需要额外调用 `get_recent_events`
-- 只有当预填上下文中的事件信息不足时，才调用 `get_recent_events` 补充
-- 不要每次都调用 `get_recent_events`，这会造成不必要的重复
+- 预填上下文只是参考，不是完整真相。你必须通过探索工具验证和补充。
+- 不要跳过探索步骤。即使预填上下文看似充分，也要调用 `get_recent_events` 验证。
 
 **submit_timeblock_summary 字段**：你必须理解每个字段需要什么信息：
 
 | 字段 | 必填 | 从上下文中提取什么 |
 |------|------|-------------------|
 | blockId | ✅ | 预填上下文中已给出，**直接复制** |
-| summaryKind | ✅ | start 或 end，由任务指令指定 |
 | narrative | ✅ | 2-3 句话串联事件（**不列统计**），从事件列表中提炼 |
 | quotedNotes | | 1-2 条原始 note 引用，从事件 content 中选取最有代表性的 |
 | outcomes | | 从事件中推断：完成了什么（done）、进行中什么（ongoing）、未完成什么（not_done） |
@@ -101,7 +99,10 @@ pub fn system_prompt() -> &'static str {
 }
 
 /// Build the prompt for a start summary (timeblock created).
-pub fn build_start_prompt(ctx: &CollectedContext, gap_context: Option<&crate::timeblock::TimeBlockData>) -> String {
+pub fn build_start_prompt(
+    ctx: &CollectedContext,
+    gap_context: Option<&crate::timeblock::TimeBlockData>,
+) -> String {
     let context_section = ctx.to_prompt_section();
 
     let gap_section = match gap_context {
@@ -135,7 +136,7 @@ pub fn build_start_prompt(ctx: &CollectedContext, gap_context: Option<&crate::ti
 
 ## 提交要求
 
-通过 submit_timeblock_summary 工具提交 summaryKind=start 的开始提示。
+通过 submit_timeblock_summary 工具提交开始提示。
 
 开始提示应包含：
 - 块名称与启动事实
@@ -175,7 +176,7 @@ pub fn build_end_prompt(ctx: &CollectedContext, signal_type: &str) -> String {
 
 ## 提交要求
 
-通过 submit_timeblock_summary 工具提交 summaryKind=end 的结束总结。
+通过 submit_timeblock_summary 工具提交结束总结。
 
 ### 内容梗概（narrative 字段）
 > 目的：用连贯语言串联事件，让读者理解「用户做了什么、事件之间有什么联系」
@@ -210,10 +211,7 @@ pub fn build_end_prompt(ctx: &CollectedContext, signal_type: &str) -> String {
 }
 
 /// Build the prompt for a feedback review (user submitted feedback).
-pub fn build_feedback_review_prompt(
-    feedback_content: &str,
-    events: &[String],
-) -> String {
+pub fn build_feedback_review_prompt(feedback_content: &str, events: &[String]) -> String {
     format!(
         r#"用户已提交时间块反馈。请核验用户反馈与实际事件的差异，并提供下一步启发。
 
@@ -229,6 +227,7 @@ pub fn build_feedback_review_prompt(
 3. 基于核验结果，提供 1-3 条下一步建议。
 
 ## 提交要求
-通过 submit_timeblock_summary 工具提交，summaryKind 使用 "feedback_review"。"#
-    , events.join("\n"))
+通过 submit_timeblock_summary 工具提交。"#,
+        events.join("\n")
+    )
 }

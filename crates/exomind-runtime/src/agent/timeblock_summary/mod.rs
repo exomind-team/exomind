@@ -603,6 +603,9 @@ impl TimeblockSummaryAgentService {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
+        // 📌【2026-06-06 06:51:42】人写：如果已有「时间块停止」那就不需要独立的「时间块结束」
+        let has_stopped = has_existing_summary(&self.eventlog_store, &block, &SummaryKind::Stop);
+
         // Idempotency check: query eventlog for any summary in this time block
         if has_existing_summary(&self.eventlog_store, &block, &SummaryKind::FeedbackReview)
             || has_existing_summary(&self.eventlog_store, &block, &SummaryKind::End)
@@ -614,21 +617,12 @@ impl TimeblockSummaryAgentService {
             return;
         }
 
-        // Check if a block_completed signal was already processed for the same block
-        // Method 1: Check if there's a completed session with End trigger
-        let has_block_completed = self
-            .sessions
-            .read()
-            .unwrap()
-            .iter()
-            .any(|s| s.trigger_source.contains("End"));
-
         // Determine summary kind based on scenario
-        let summary_kind = if has_block_completed {
-            // Scenario C: block_completed already processed — feedback review only
+        let summary_kind = if has_stopped {
+            // 人写：前边已有「时间块停止」，就不赘述整个时间块
             SummaryKind::FeedbackReview
         } else {
-            // Scenario B: only block_feedback — assume full end responsibility
+            // 人写：前边没有「时间块停止」那就直接结合反馈内容总结整个时间块，承担「全时间块总结」的作用
             SummaryKind::End
         };
 
@@ -1920,8 +1914,6 @@ mod tests {
             events: vec![],
             block_feedback: None,
             recent_completed: None,
-            already_has_start: false,
-            already_has_end: false,
             energy_current: 100,
             energy_max: 120,
         };

@@ -4,11 +4,11 @@ use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use crate::AppState;
 use crate::timeblock::{
     ActiveBlockData, BreakWindowKind, PlannedSegmentData, PlannedSegmentKind, RhythmPresetData,
     SchedulingWindowData,
 };
+use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 struct ScopeQuery {
@@ -628,7 +628,7 @@ async fn write_timeblock_eventlog(
 ) {
     let content = match event_type {
         "block_start" => format!("时间块开始: {block_name}"),
-        "block_end" => format!("时间块结束: {block_name}"),
+        "block_end" => format!("时间块停止: {block_name}"),
         "block_pause" => format!("时间块暂停: {block_name}"),
         "block_resume" => format!("时间块恢复: {block_name}"),
         _ => format!("时间块事件: {block_name}"),

@@ -10,7 +10,11 @@ fn format_timestamp(millis: u64) -> String {
     }
     let secs = millis / 1000;
     chrono::DateTime::from_timestamp(secs as i64, 0)
-        .map(|dt| dt.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_else(|| "invalid".to_string())
 }
 
@@ -24,8 +28,6 @@ pub struct CollectedContext {
     pub events: Vec<EventRecord>,
     pub block_feedback: Option<EventRecord>,
     pub recent_completed: Option<EventRecord>,
-    pub already_has_start: bool,
-    pub already_has_end: bool,
     pub energy_current: u64,
     pub energy_max: u64,
 }
@@ -61,15 +63,17 @@ impl CollectedContext {
                     let tags = if e.tags.is_empty() {
                         String::new()
                     } else {
-                        format!(" (tags: {})", e.tags.join(", "))
+                        format!(" tags=\"{}\"", e.tags.join(","))
                     };
-                    format!("[{}] {}{}", format_timestamp(e.timestamp as u64), e.content, tags)
+                    format!(
+                        // 📌【2026-06-06 07:07: 45】人写：用HTML标签来区分，兼容多行换行的事件
+                        "<event timestamp=\"{}\"{tags}>\n{}\n</event>",
+                        format_timestamp(e.timestamp as u64),
+                        e.content
+                    )
                 })
                 .collect();
-            sections.push(format!(
-                "### 该时间块内的事件\n{}",
-                event_lines.join("\n")
-            ));
+            sections.push(format!("### 该时间块内的事件\n{}", event_lines.join("\n")));
         }
 
         // block_feedback
@@ -90,23 +94,6 @@ impl CollectedContext {
             None => {
                 sections.push("### 近期已完成时间块\n（无）".to_string());
             }
-        }
-
-        // Already-processed status
-        let mut status_lines = Vec::new();
-        if self.already_has_start {
-            status_lines.push("已有开始提示");
-        }
-        if self.already_has_end {
-            status_lines.push("已有结束总结");
-        }
-        if status_lines.is_empty() {
-            sections.push("### 已处理状态\n（首次处理）".to_string());
-        } else {
-            sections.push(format!(
-                "### 已处理状态\n{}",
-                status_lines.join("、")
-            ));
         }
 
         // Energy status
@@ -186,28 +173,12 @@ pub async fn collect_context(
     let feedback_events = eventlog_store
         .list_events_filtered(None, &feedback_filter)
         .unwrap_or_default();
-    let already_has_start = feedback_events.iter().any(|e| {
-        e.metadata
-            .as_ref()
-            .and_then(|m| m.get("summaryKind"))
-            .and_then(|v| v.as_str())
-            == Some("start")
-    });
-    let already_has_end = feedback_events.iter().any(|e| {
-        e.metadata
-            .as_ref()
-            .and_then(|m| m.get("summaryKind"))
-            .and_then(|v| v.as_str())
-            == Some("end")
-    });
 
     CollectedContext {
         block: block.clone(),
         events,
         block_feedback,
         recent_completed,
-        already_has_start,
-        already_has_end,
         energy_current,
         energy_max,
     }
