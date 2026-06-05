@@ -2,6 +2,18 @@ use crate::eventlog::{EventListFilter, EventLogStore, EventRecord};
 use crate::timeblock::TimeBlockData;
 use std::sync::Arc;
 
+/// Format a Unix millisecond timestamp to a human-readable local time string.
+/// Returns "N/A" for zero timestamps (e.g., active block without end_time).
+fn format_timestamp(millis: u64) -> String {
+    if millis == 0 {
+        return "N/A".to_string();
+    }
+    let secs = millis / 1000;
+    chrono::DateTime::from_timestamp(secs as i64, 0)
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
+        .unwrap_or_else(|| "invalid".to_string())
+}
+
 /// Collected context for a timeblock summary run.
 ///
 /// All read-only data is pre-fetched by Runtime code before the LLM is called.
@@ -28,8 +40,8 @@ impl CollectedContext {
             "### 时间块信息\n- **blockId（必须使用此值）：{}**\n- 名称：{}\n- 开始时间：{}\n- 结束时间：{}\n- 类型：{}\n- 关联任务：{}",
             self.block.start_id,
             self.block.name,
-            self.block.start_time,
-            self.block.end_time,
+            format_timestamp(self.block.start_time),
+            format_timestamp(self.block.end_time),
             self.block.block_type.as_deref().unwrap_or("active"),
             if self.block.task_ids.is_empty() {
                 "无".to_string()
@@ -51,7 +63,7 @@ impl CollectedContext {
                     } else {
                         format!(" (tags: {})", e.tags.join(", "))
                     };
-                    format!("[{}] {}{}", e.timestamp, e.content, tags)
+                    format!("[{}] {}{}", format_timestamp(e.timestamp as u64), e.content, tags)
                 })
                 .collect();
             sections.push(format!(

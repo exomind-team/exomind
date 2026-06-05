@@ -224,6 +224,12 @@ impl TimeblockSummaryAgentService {
 
         // Check subscription config — only enqueue signals the agent is subscribed to
         let subscriptions = self.get_subscriptions();
+        tracing::info!(
+            topic = %event.topic,
+            block_completed = subscriptions.block_completed,
+            block_feedback = subscriptions.block_feedback,
+            "timeblock_summary: received signal, checking subscriptions"
+        );
         let should_process = match event.topic.as_str() {
             "timeblock.replication.completed" => subscriptions.block_completed,
             "timeblock.block_feedback.created" => subscriptions.block_feedback,
@@ -433,6 +439,11 @@ impl TimeblockSummaryAgentService {
     }
 
     async fn handle_block_feedback(&self, event: &SignalEvent) {
+        tracing::info!(
+            topic = %event.topic,
+            "timeblock_summary: handle_block_feedback called"
+        );
+
         let block = match extract_block_from_signal(event) {
             Some(b) => b,
             None => {
