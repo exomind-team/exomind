@@ -17,6 +17,9 @@ struct EnergyState {
 }
 
 impl AgentEnergy {
+    /// Default maximum energy for agents
+    pub const DEFAULT_MAX: u64 = 100;
+
     pub fn new(max: u64, tick_cost: u64) -> Self {
         Self {
             state: RwLock::new(EnergyState { current: max }),

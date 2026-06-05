@@ -752,7 +752,7 @@ pub async fn start_with_options(
         state.registry.register(tb_summary.clone() as Arc<dyn agent::Agent>);
         state.energy_registry.register(
             "timeblock_summary",
-            crate::energy::AgentEnergy::new(120, 1),
+            crate::energy::AgentEnergy::new(crate::energy::AgentEnergy::DEFAULT_MAX, 1),
         );
         tb_summary.spawn();
 

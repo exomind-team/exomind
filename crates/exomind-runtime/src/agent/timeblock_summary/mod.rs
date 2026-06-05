@@ -28,7 +28,19 @@ use tools::{submit_timeblock_summary_tool, AgentSourceMetadata, SUBMIT_TIMEBLOCK
 const CONFIG_KEY_ENABLED: &str = "builtin.timeblock_summary.enabled";
 const CONFIG_KEY_SUBSCRIPTIONS: &str = "builtin.timeblock_summary.subscriptions";
 const CONFIG_KEY_ACTIVE_SCOPE: &str = "exomind:activeScopeKey";
-const ENERGY_MAX: u64 = 100;
+pub const ENERGY_MAX: u64 = 100;
+
+impl TimeblockSummaryAgentService {
+    /// Get the maximum energy for this agent type.
+    pub fn energy_max() -> u64 {
+        ENERGY_MAX
+    }
+}
+
+/// Get the maximum energy for this agent type.
+pub fn get_energy_max() -> u64 {
+    ENERGY_MAX
+}
 const ENERGY_WARN_THRESHOLD: u64 = 10;
 
 /// Calculate energy cost from content blocks.
@@ -433,7 +445,8 @@ impl TimeblockSummaryAgentService {
                         if energy_gain > 0 {
                             if let Some(energy) = self.energy_registry.get("timeblock_summary") {
                                 let current = energy.snapshot("timeblock_summary").current;
-                                let new_energy = (current + energy_gain).min(ENERGY_MAX);
+                                // Use max(current, calculated) to avoid reducing energy if already higher
+                                let new_energy = current.max(energy_gain);
                                 energy.set_current(new_energy);
                                 tracing::info!(
                                     block_id = %block.start_id,
@@ -1977,5 +1990,47 @@ mod tests {
         // Verify action_log is included
         assert_eq!(record.action_log.len(), 1);
         assert_eq!(record.action_log[0].action_type, "signal");
+    }
+
+    #[test]
+    fn energy_max_is_consistent() {
+        // Verify ENERGY_MAX constant is consistent
+        assert_eq!(ENERGY_MAX, 100);
+        assert_eq!(super::get_energy_max(), 100);
+    }
+
+    #[test]
+    fn calculate_initial_energy_returns_correct_values() {
+        use crate::timeblock::{BlockTransition, BlockTransitionType, TimeBlockData};
+
+        // Normal block → 100
+        let normal_block = TimeBlockData {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            start_id: "test".to_string(),
+            end_id: String::new(),
+            note: None,
+            tags: vec![],
+            start_time: 0,
+            end_time: 0,
+            block_type: Some("active".to_string()),
+            task_ids: vec![],
+            task_status_outcomes: None,
+            task_association_log: vec![],
+            source_planned_block_id: None,
+            transitions: vec![],
+        };
+        assert_eq!(calculate_initial_energy(&normal_block), 100);
+
+        // Block with pause → 120
+        let pause_block = TimeBlockData {
+            transitions: vec![BlockTransition {
+                transition_type: BlockTransitionType::Pause,
+                at: 0,
+                actor_id: None,
+            }],
+            ..normal_block.clone()
+        };
+        assert_eq!(calculate_initial_energy(&pause_block), 120);
     }
 }
