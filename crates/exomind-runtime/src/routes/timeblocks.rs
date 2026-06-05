@@ -976,7 +976,26 @@ async fn stop_block(
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
     {
-        publish_active_timeblock_replication_signal(&state, scope_key, &active);
+        // Convert ActiveBlockData to TimeBlockData for completed signal
+        let completed_block = TimeBlockData {
+            id: active.start_id.clone(),
+            name: active.name.clone(),
+            start_id: active.start_id.clone(),
+            end_id: format!("end-{}", uuid::Uuid::new_v4()),
+            note: None,
+            tags: vec![],
+            start_time: active.start_time,
+            end_time: now,
+            block_type: active.block_type.clone(),
+            task_ids: active.task_ids.clone(),
+            task_status_outcomes: None,
+            task_association_log: active.task_association_log.clone(),
+            source_planned_block_id: active.source_planned_block_id.clone(),
+            transitions: active.transitions.clone(),
+        };
+        // Publish completed signal (not active) — stop means block is ending
+        let completed_signal = build_completed_timeblock_replication_signal(&state, scope_key, &completed_block);
+        state.signal_pool.publish(completed_signal);
     }
     write_timeblock_eventlog(&state, scope_key, "block_end", &name, &start_id, &task_ids).await;
 
