@@ -425,7 +425,30 @@ impl TimeblockSummaryAgentService {
         // Check for recent gap completion to inject as context
         let gap_context = self.last_completed_gap.write().unwrap().take();
 
-        if let Err(e) = self.run_summary_loop(block, SummaryKind::Start, gap_context).await {
+        // Determine summary kind based on phase
+        // "feedback_in_progress" means stop (entering feedback phase)
+        // Otherwise means start (new active block)
+        let summary_kind = if let Some(active_value) = event.payload.get("active") {
+            if let Ok(active) = serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
+                if active.phase.as_deref() == Some("feedback_in_progress") {
+                    SummaryKind::End
+                } else {
+                    SummaryKind::Start
+                }
+            } else {
+                SummaryKind::Start
+            }
+        } else {
+            SummaryKind::Start
+        };
+
+        tracing::info!(
+            block_id = %block.start_id,
+            summary_kind = ?summary_kind,
+            "timeblock_summary: determined summary kind from active signal"
+        );
+
+        if let Err(e) = self.run_summary_loop(block, summary_kind, gap_context).await {
             tracing::error!("timeblock_summary: summary loop failed: {e}");
         }
     }
