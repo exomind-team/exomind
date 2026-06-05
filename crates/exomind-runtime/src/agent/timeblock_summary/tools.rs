@@ -303,10 +303,11 @@ pub fn submit_timeblock_summary_tool(
                 })
                 .unwrap_or_default();
 
-            let title = match summary_kind {
-                "start" => format!("## 时间块开始\n\n**{}** 已启动。", block_id),
-                "end" => format!("## 时间块总结\n\n**{}** 已停止。", block_id),
-                _ => unreachable!(),
+            let title = match kind_expected {
+                SummaryKind::Start => format!("## 时间块开始\n\n**{}** 已启动。", block_id),
+                SummaryKind::Stop => format!("## 时间块停止\n\n**{}** 已停止。", block_id),
+                SummaryKind::End => format!("## 时间块总结\n\n**{}** 已结束。", block_id),
+                SummaryKind::FeedbackReview => format!("## 用户反馈核验\n\n**{}** 反馈已提交。", block_id),
             };
 
             let mut content = format!("{}\n\n{}", title, narrative);
