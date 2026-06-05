@@ -17,9 +17,12 @@
   - `GET /agents/:id/sessions`
   - `GET /agents/:id/sessions/:sid`
   - `DELETE /agents/:id/sessions/:sid`
+  - `GET /agents/:id/actions`
+  - `GET /agents/:id/soul`
 - 当前内置 Agent（Built-in Agents，内置 Agent）:
   - `claude`
   - `echo`
+  - `timeblock_summary`
 - CORS（跨域）: 允许任意来源（`*`）、`GET/POST/DELETE/OPTIONS`
 
 ---
@@ -192,6 +195,72 @@ data: [DONE]
 
 - `200 OK`: 会话已关闭
 - `404 Not Found`: Agent 或 Session 不存在
+
+---
+
+## 8. `GET /agents/:id/actions`
+
+### 8.1 作用（Purpose，用途）
+
+返回指定 Agent 的行动日志（action_log），记录 Agent 在每个时间块中的详细行为（信号接收、思考、工具调用等）。
+
+### 8.2 响应示例（Response Example，响应示例）
+
+```json
+{
+  "actions": [
+    {
+      "timestamp": "2026-06-05T13:34:28.972735900+00:00",
+      "tick": 0,
+      "actionType": "signal",
+      "description": "收到时间块开始信号：再测试",
+      "energyBefore": 100,
+      "energyAfter": 100
+    },
+    {
+      "timestamp": "2026-06-05T13:34:55.725479900+00:00",
+      "tick": 1,
+      "actionType": "thinking",
+      "description": "Agent 思考：Let me analyze the context...",
+      "energyBefore": 100,
+      "energyAfter": 94
+    },
+    {
+      "timestamp": "2026-06-05T13:34:55.804522+00:00",
+      "tick": 1,
+      "actionType": "tool_call",
+      "description": "Agent 调用工具：submit_timeblock_summary",
+      "energyBefore": 100,
+      "energyAfter": 94
+    },
+    {
+      "timestamp": "2026-06-05T13:34:55.815625900+00:00",
+      "tick": 1,
+      "actionType": "tool_result",
+      "description": "工具返回：已写入 agent_feedback 事件",
+      "energyBefore": 94,
+      "energyAfter": 94
+    }
+  ],
+  "total": 4
+}
+```
+
+### 8.3 字段说明（Field Description，字段说明）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `timestamp` | string | 事件发生时间（RFC 3339） |
+| `tick` | number | LLM 轮次编号（0 = 信号接收） |
+| `actionType` | string | 行为类型：`signal` / `thinking` / `text` / `tool_call` / `tool_result` |
+| `description` | string | 行为描述（完整文本，无截断） |
+| `energyBefore` | number | 行为发生前的能量值 |
+| `energyAfter` | number | 行为发生后的能量值 |
+
+### 8.4 状态码（Status Codes，状态码）
+
+- `200 OK`: 返回 JSON 对象
+- `404 Not Found`: Agent 不存在
 
 ---
 

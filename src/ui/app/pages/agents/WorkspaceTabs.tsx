@@ -142,8 +142,11 @@ const STRATEGY_LABELS: Record<string, string> = {
 };
 
 const ACTION_TYPE_LABELS: Record<string, string> = {
-  think: '思考',
   signal: '信号',
+  thinking: '思考',
+  text: '回复',
+  tool_call: '工具调用',
+  tool_result: '工具返回',
   knowledge_write: '记忆写入',
   knowledge_delete: '记忆删除',
 };
@@ -292,6 +295,19 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
 function ActionsTab({ agentId }: { agentId: string }) {
   const [actions, setActions] = useState<ActionEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const toggleExpand = useCallback((idx: number) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -377,7 +393,37 @@ function ActionsTab({ agentId }: { agentId: string }) {
                         )}
                       </div>
                     </div>
-                    <p className="exomind-selectable mt-1 whitespace-pre-wrap text-xs leading-5 text-secondary">{entry.description}</p>
+                    <div className="mt-1">
+                      {entry.description.length > 120 && !expanded.has(idx) ? (
+                        <>
+                          <p className="exomind-selectable whitespace-pre-wrap text-xs leading-5 text-secondary">
+                            {entry.description.slice(0, 120)}...
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => toggleExpand(idx)}
+                            className="text-[10px] text-brand-accent hover:underline"
+                          >
+                            展开全文
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="exomind-selectable whitespace-pre-wrap text-xs leading-5 text-secondary">
+                            {entry.description}
+                          </p>
+                          {entry.description.length > 120 && (
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(idx)}
+                              className="text-[10px] text-brand-accent hover:underline"
+                            >
+                              收起
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

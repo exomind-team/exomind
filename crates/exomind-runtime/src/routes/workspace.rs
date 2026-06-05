@@ -220,30 +220,47 @@ async fn get_actions(
     // Fallback: read from session store for built-in agents
     if let Some(agent) = state.registry.get(&agent_id) {
         let sessions = agent.list_sessions();
-        let total = sessions.len() as u64;
-        let actions: Vec<crate::agent::workspace::ActionEntry> = sessions
-            .iter()
-            .enumerate()
-            .map(|(idx, s)| {
+        let mut actions: Vec<crate::agent::workspace::ActionEntry> = Vec::new();
+
+        // Build actions from per-block action_log entries
+        for session in &sessions {
+            if let Some(ref action_log) = session.action_log {
+                for entry in action_log {
+                    actions.push(crate::agent::workspace::ActionEntry {
+                        timestamp: entry.timestamp.clone(),
+                        tick: entry.tick,
+                        action_type: entry.action_type.clone(),
+                        description: entry.description.clone(),
+                        energy_before: entry.energy_before,
+                        energy_after: entry.energy_after,
+                    });
+                }
+            } else {
+                // Fallback: create a single entry from session metadata
                 let description = {
-                    let trigger = s.trigger_source.as_deref().unwrap_or("unknown");
-                    let display_content = s.content.as_ref()
+                    let trigger = session.trigger_source.as_deref().unwrap_or("unknown");
+                    let display_content = session.content.as_ref()
                         .filter(|c| !c.is_empty())
-                        .or(s.prompt.as_ref())
+                        .or(session.prompt.as_ref())
                         .cloned()
-                        .unwrap_or_else(|| format!("session {}", s.session_id));
+                        .unwrap_or_else(|| format!("session {}", session.session_id));
                     format!("{}: {}", trigger, display_content)
                 };
-                crate::agent::workspace::ActionEntry {
-                    timestamp: s.created_at.clone(),
-                    tick: (idx as u64) + 1,
+                actions.push(crate::agent::workspace::ActionEntry {
+                    timestamp: session.created_at.clone(),
+                    tick: 1,
                     action_type: "signal".to_string(),
                     description,
-                    energy_before: 100,
-                    energy_after: 100,
-                }
-            })
-            .collect();
+                    energy_before: 0,
+                    energy_after: 0,
+                });
+            }
+        }
+
+        // Sort by timestamp descending (newest first)
+        actions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        let total = actions.len() as u64;
         let start = actions.len().saturating_sub(query.limit as usize);
         return Ok(Json(ActionsListResponse {
             actions: actions[start..].to_vec(),

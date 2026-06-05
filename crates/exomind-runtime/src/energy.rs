@@ -66,6 +66,13 @@ impl AgentEnergy {
         state.current
     }
 
+    /// Directly set the current energy level, capping at `max`.
+    /// Used for per-block dynamic initial energy.
+    pub fn set_current(&self, value: u64) {
+        let mut state = self.state.write().unwrap();
+        state.current = value.min(self.max);
+    }
+
     /// Compute the tick interval (seconds) adjusted for the current energy ratio.
     ///
     /// | ratio        | multiplier |

@@ -94,9 +94,27 @@ pub enum ProviderConversationTurn {
     },
 }
 
+/// Universal content block — preserves ALL content from API responses.
+/// The broker is a data pipeline, not a filter. Callers decide what to use.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContentBlock {
+    /// Block type: "text", "thinking", "tool_use", "redacted_thinking", "refusal", etc.
+    pub block_type: String,
+    /// Text content for text/thinking/redacted_thinking/refusal blocks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Tool use info for tool_use blocks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use: Option<ToolUse>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderCompletion {
+    /// All content blocks from the API response — broker does not filter.
+    pub content_blocks: Vec<ContentBlock>,
+    /// Backward-compatible: concatenated text from all text-type blocks.
     pub text: String,
+    /// Backward-compatible: all tool_use blocks.
     pub tool_uses: Vec<ToolUse>,
     pub stop_reason: Option<String>,
 }
@@ -706,9 +724,58 @@ fn parse_openai_completion(parsed: &Value) -> Result<ProviderCompletion, String>
     let message = choice
         .get("message")
         .ok_or_else(|| "OpenAI 响应缺少 message".to_string())?;
+
+    let mut content_blocks = Vec::new();
+
+    // Process message.content (can be string or array)
+    match message.get("content") {
+        Some(Value::String(text)) => {
+            content_blocks.push(ContentBlock {
+                block_type: "text".to_string(),
+                text: Some(text.clone()),
+                tool_use: None,
+            });
+        }
+        Some(Value::Array(blocks)) => {
+            for block in blocks {
+                let block_type = block
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string();
+                content_blocks.push(ContentBlock {
+                    block_type,
+                    text: block.get("text").and_then(Value::as_str).map(String::from),
+                    tool_use: None,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    // Process message.refusal (OpenAI new field)
+    if let Some(refusal) = message.get("refusal").and_then(Value::as_str) {
+        content_blocks.push(ContentBlock {
+            block_type: "refusal".to_string(),
+            text: Some(refusal.to_string()),
+            tool_use: None,
+        });
+    }
+
+    // Process tool_calls
+    let tool_uses = parse_openai_tool_calls(message)?;
+    for tu in &tool_uses {
+        content_blocks.push(ContentBlock {
+            block_type: "tool_use".to_string(),
+            text: None,
+            tool_use: Some(tu.clone()),
+        });
+    }
+
     Ok(ProviderCompletion {
+        content_blocks,
         text: extract_openai_message_text(message),
-        tool_uses: parse_openai_tool_calls(message)?,
+        tool_uses,
         stop_reason: choice
             .get("finish_reason")
             .and_then(Value::as_str)
@@ -837,7 +904,25 @@ fn parse_openai_sse_completion(body: &str) -> Result<ProviderCompletion, String>
         parsed_tool_uses.push(ToolUse { id, name, input });
     }
 
+    // Build content_blocks for SSE fallback path
+    let mut content_blocks = Vec::new();
+    if !text.is_empty() {
+        content_blocks.push(ContentBlock {
+            block_type: "text".to_string(),
+            text: Some(text.clone()),
+            tool_use: None,
+        });
+    }
+    for tu in &parsed_tool_uses {
+        content_blocks.push(ContentBlock {
+            block_type: "tool_use".to_string(),
+            text: None,
+            tool_use: Some(tu.clone()),
+        });
+    }
+
     Ok(ProviderCompletion {
+        content_blocks,
         text,
         tool_uses: parsed_tool_uses,
         stop_reason,
@@ -849,17 +934,30 @@ fn parse_anthropic_completion(parsed: &Value) -> Result<ProviderCompletion, Stri
         .get("content")
         .and_then(Value::as_array)
         .ok_or_else(|| "Anthropic 响应缺少 content[]".to_string())?;
+    let mut content_blocks = Vec::new();
     let mut text_parts = Vec::new();
     let mut tool_uses = Vec::new();
 
     for block in content {
-        match block.get("type").and_then(Value::as_str) {
-            Some("text") => {
-                if let Some(text) = block.get("text").and_then(Value::as_str) {
-                    text_parts.push(text.to_string());
+        let block_type = block
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+
+        match block_type.as_str() {
+            "text" => {
+                let text = block.get("text").and_then(Value::as_str).map(String::from);
+                if let Some(ref t) = text {
+                    text_parts.push(t.clone());
                 }
+                content_blocks.push(ContentBlock {
+                    block_type,
+                    text,
+                    tool_use: None,
+                });
             }
-            Some("tool_use") => {
+            "tool_use" => {
                 let id = block
                     .get("id")
                     .and_then(Value::as_str)
@@ -869,17 +967,37 @@ fn parse_anthropic_completion(parsed: &Value) -> Result<ProviderCompletion, Stri
                     .and_then(Value::as_str)
                     .ok_or_else(|| "Anthropic tool_use 缺少 name".to_string())?;
                 let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
-                tool_uses.push(ToolUse {
+                let tu = ToolUse {
                     id: id.to_string(),
                     name: name.to_string(),
                     input,
+                };
+                tool_uses.push(tu.clone());
+                content_blocks.push(ContentBlock {
+                    block_type,
+                    text: None,
+                    tool_use: Some(tu),
                 });
             }
-            _ => {}
+            // thinking, redacted_thinking, and all future block types — preserve all
+            _ => {
+                let text = block
+                    .get("thinking")
+                    .or_else(|| block.get("redacted_thinking"))
+                    .or_else(|| block.get("text"))
+                    .and_then(Value::as_str)
+                    .map(String::from);
+                content_blocks.push(ContentBlock {
+                    block_type,
+                    text,
+                    tool_use: None,
+                });
+            }
         }
     }
 
     Ok(ProviderCompletion {
+        content_blocks,
         text: text_parts.join(""),
         tool_uses,
         stop_reason: parsed
@@ -1044,6 +1162,15 @@ mod tests {
         assert_eq!(completion.tool_uses.len(), 1);
         assert_eq!(completion.tool_uses[0].name, "get_recent_events");
         assert_eq!(completion.tool_uses[0].input["limit"], 2);
+        // content_blocks preserves all blocks
+        assert_eq!(completion.content_blocks.len(), 2);
+        assert_eq!(completion.content_blocks[0].block_type, "text");
+        assert_eq!(
+            completion.content_blocks[0].text.as_deref(),
+            Some("先看一下近期事件。")
+        );
+        assert_eq!(completion.content_blocks[1].block_type, "tool_use");
+        assert!(completion.content_blocks[1].tool_use.is_some());
     }
 
     #[test]
@@ -1194,5 +1321,71 @@ data: [DONE]\n\n";
         assert_eq!(messages[1]["content"][1]["type"], "tool_use");
         assert_eq!(messages[2]["role"], "user");
         assert_eq!(messages[2]["content"][0]["type"], "tool_result");
+    }
+
+    #[test]
+    fn parse_anthropic_completion_preserves_thinking_blocks() {
+        let parsed = json!({
+            "content": [
+                { "type": "thinking", "thinking": "让我分析一下这些事件..." },
+                { "type": "text", "text": "根据事件分析..." },
+                { "type": "tool_use", "id": "tu-1", "name": "submit_summary", "input": {"narrative": "test"} }
+            ],
+            "stop_reason": "tool_use"
+        });
+
+        let completion = parse_anthropic_completion(&parsed).unwrap();
+        assert_eq!(completion.text, "根据事件分析...");
+        assert_eq!(completion.tool_uses.len(), 1);
+        // All 3 blocks preserved
+        assert_eq!(completion.content_blocks.len(), 3);
+        assert_eq!(completion.content_blocks[0].block_type, "thinking");
+        assert_eq!(
+            completion.content_blocks[0].text.as_deref(),
+            Some("让我分析一下这些事件...")
+        );
+        assert_eq!(completion.content_blocks[1].block_type, "text");
+        assert_eq!(completion.content_blocks[2].block_type, "tool_use");
+        assert!(completion.content_blocks[2].tool_use.is_some());
+    }
+
+    #[test]
+    fn parse_anthropic_completion_preserves_redacted_thinking() {
+        let parsed = json!({
+            "content": [
+                { "type": "redacted_thinking", "data": "encrypted-content" },
+                { "type": "text", "text": "最终回复" }
+            ],
+            "stop_reason": "end_turn"
+        });
+
+        let completion = parse_anthropic_completion(&parsed).unwrap();
+        assert_eq!(completion.text, "最终回复");
+        assert_eq!(completion.content_blocks.len(), 2);
+        assert_eq!(completion.content_blocks[0].block_type, "redacted_thinking");
+        // redacted_thinking has no "thinking" or "text" field, so text is None
+        assert!(completion.content_blocks[0].text.is_none());
+    }
+
+    #[test]
+    fn parse_openai_completion_preserves_refusal_block() {
+        let parsed = json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "content": null,
+                    "refusal": "I cannot help with that request."
+                }
+            }]
+        });
+
+        let completion = parse_openai_completion(&parsed).unwrap();
+        assert!(completion.text.is_empty());
+        assert_eq!(completion.content_blocks.len(), 1);
+        assert_eq!(completion.content_blocks[0].block_type, "refusal");
+        assert_eq!(
+            completion.content_blocks[0].text.as_deref(),
+            Some("I cannot help with that request.")
+        );
     }
 }

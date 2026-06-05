@@ -752,7 +752,7 @@ pub async fn start_with_options(
         state.registry.register(tb_summary.clone() as Arc<dyn agent::Agent>);
         state.energy_registry.register(
             "timeblock_summary",
-            crate::energy::AgentEnergy::new(100, 1),
+            crate::energy::AgentEnergy::new(120, 1),
         );
         tb_summary.spawn();
 
@@ -1530,6 +1530,7 @@ mod tests {
                 last_active: "2026-02-28T10:35:00Z".to_string(),
                 message_count: 3,
                 uptime_secs: 300,
+                ..Default::default()
             };
 
             let mut sessions = HashMap::new();

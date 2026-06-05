@@ -59,13 +59,26 @@ impl AgentSessionRuntime {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCallRecord {
     pub tool_name: String,
     pub input: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+}
+
+/// A single entry in the agent's action log, recording what the agent did at each step.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionLogEntry {
+    pub timestamp: String,
+    pub tick: u64,
+    /// "thinking" | "text" | "tool_call" | "tool_result" | "signal"
+    pub action_type: String,
+    pub description: String,
+    pub energy_before: u64,
+    pub energy_after: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -80,6 +93,12 @@ pub struct AgentSessionRecord {
     pub content: String,
     pub assistant_turn: AssistantTurn,
     pub tool_calls: Vec<ToolCallRecord>,
+    /// All content blocks from the API response (including thinking, etc.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_blocks: Option<Vec<crate::agent::api::ContentBlock>>,
+    /// Per-block action log recording each step the agent took.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub action_log: Vec<ActionLogEntry>,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
@@ -202,6 +221,8 @@ impl SqliteAgentSessionStore {
                 content         TEXT NOT NULL,
                 assistant_turn_json TEXT NOT NULL DEFAULT '{\"content\":\"\",\"toolCalls\":[]}',
                 tool_calls_json TEXT NOT NULL DEFAULT '[]',
+                content_blocks_json TEXT,
+                action_log_json TEXT NOT NULL DEFAULT '[]',
                 status          TEXT NOT NULL DEFAULT 'completed',
                 error_message   TEXT,
                 created_at      TEXT NOT NULL,
@@ -217,16 +238,36 @@ impl SqliteAgentSessionStore {
             "assistant_turn_json",
             "TEXT NOT NULL DEFAULT '{\"content\":\"\",\"toolCalls\":[]}'",
         )?;
+        ensure_column(
+            &conn,
+            "agent_api_sessions",
+            "content_blocks_json",
+            "TEXT",
+        )?;
+        ensure_column(
+            &conn,
+            "agent_api_sessions",
+            "action_log_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
         Ok(())
     }
 
     fn upsert(&self, record: &AgentSessionRecord) -> Result<(), AgentSessionStoreError> {
         let conn = self.connection();
+        let content_blocks_json = record
+            .content_blocks
+            .as_ref()
+            .map(|blocks| serde_json::to_string(blocks))
+            .transpose()?;
+        let action_log_json = serde_json::to_string(&record.action_log)?;
         conn.execute(
             "INSERT INTO agent_api_sessions (
                 session_id, trigger_source, provider, model, prompt, content,
-                assistant_turn_json, tool_calls_json, status, error_message, created_at, completed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                assistant_turn_json, tool_calls_json, content_blocks_json,
+                action_log_json,
+                status, error_message, created_at, completed_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             ON CONFLICT(session_id) DO UPDATE SET
                 trigger_source = excluded.trigger_source,
                 provider = excluded.provider,
@@ -235,6 +276,8 @@ impl SqliteAgentSessionStore {
                 content = excluded.content,
                 assistant_turn_json = excluded.assistant_turn_json,
                 tool_calls_json = excluded.tool_calls_json,
+                content_blocks_json = excluded.content_blocks_json,
+                action_log_json = excluded.action_log_json,
                 status = excluded.status,
                 error_message = excluded.error_message,
                 created_at = excluded.created_at,
@@ -248,6 +291,8 @@ impl SqliteAgentSessionStore {
                 record.content,
                 serde_json::to_string(&record.assistant_turn)?,
                 serde_json::to_string(&record.tool_calls)?,
+                content_blocks_json,
+                action_log_json,
                 record.status,
                 record.error_message,
                 record.created_at,
@@ -262,7 +307,9 @@ impl SqliteAgentSessionStore {
         let mut stmt = conn.prepare(
             "SELECT
                 session_id, trigger_source, provider, model, prompt, content,
-                assistant_turn_json, tool_calls_json, status, error_message, created_at, completed_at
+                assistant_turn_json, tool_calls_json, content_blocks_json,
+                action_log_json,
+                status, error_message, created_at, completed_at
              FROM agent_api_sessions
              WHERE session_id = ?1",
         )?;
@@ -296,6 +343,14 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSessionReco
                 Box::new(error),
             )
         })?;
+    let content_blocks_json: Option<String> = row.get(8)?;
+    let content_blocks = content_blocks_json
+        .and_then(|json| {
+            serde_json::from_str::<Vec<crate::agent::api::ContentBlock>>(&json).ok()
+        });
+    let action_log_json: String = row.get(9)?;
+    let action_log = serde_json::from_str::<Vec<ActionLogEntry>>(&action_log_json)
+        .unwrap_or_default();
     let prompt: String = row.get(4)?;
     let prompt = normalize_optional_text(&prompt);
     Ok(AgentSessionRecord {
@@ -307,10 +362,12 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSessionReco
         content: row.get(5)?,
         assistant_turn,
         tool_calls,
-        status: row.get(8)?,
-        error_message: row.get(9)?,
-        created_at: row.get(10)?,
-        completed_at: row.get(11)?,
+        content_blocks,
+        action_log,
+        status: row.get(10)?,
+        error_message: row.get(11)?,
+        created_at: row.get(12)?,
+        completed_at: row.get(13)?,
     })
 }
 
@@ -590,6 +647,7 @@ fn empty_assistant_turn() -> AssistantTurn {
     AssistantTurn {
         content: String::new(),
         tool_calls: Vec::new(),
+        content_blocks: Vec::new(),
     }
 }
 
@@ -610,37 +668,55 @@ fn record_from_broker_result(
     result: AgentTurnResult,
 ) -> AgentSessionRecord {
     match result {
-        AgentTurnResult::Final { assistant_turn } => AgentSessionRecord {
-            session_id,
-            trigger_source: trigger.as_str(),
-            provider: profile.provider.clone(),
-            model: profile.model.clone(),
-            prompt,
-            content: assistant_turn.content.clone(),
-            assistant_turn,
-            tool_calls: Vec::new(),
-            status: "completed".to_string(),
-            error_message: None,
-            created_at,
-            completed_at: chrono::Utc::now().to_rfc3339(),
-        },
+        AgentTurnResult::Final { assistant_turn } => {
+            let content_blocks = if assistant_turn.content_blocks.is_empty() {
+                None
+            } else {
+                Some(assistant_turn.content_blocks.clone())
+            };
+            AgentSessionRecord {
+                session_id,
+                trigger_source: trigger.as_str(),
+                provider: profile.provider.clone(),
+                model: profile.model.clone(),
+                prompt,
+                content: assistant_turn.content.clone(),
+                assistant_turn,
+                tool_calls: Vec::new(),
+                content_blocks,
+                action_log: Vec::new(),
+                status: "completed".to_string(),
+                error_message: None,
+                created_at,
+                completed_at: chrono::Utc::now().to_rfc3339(),
+            }
+        }
         AgentTurnResult::NeedsToolCalls {
             assistant_turn,
             tool_calls,
-        } => AgentSessionRecord {
-            session_id,
-            trigger_source: trigger.as_str(),
-            provider: profile.provider.clone(),
-            model: profile.model.clone(),
-            prompt,
-            content: assistant_turn.content.clone(),
-            assistant_turn,
-            tool_calls: tool_calls.iter().map(map_broker_tool_call).collect(),
-            status: "needs_tool_calls".to_string(),
-            error_message: None,
-            created_at,
-            completed_at: chrono::Utc::now().to_rfc3339(),
-        },
+        } => {
+            let content_blocks = if assistant_turn.content_blocks.is_empty() {
+                None
+            } else {
+                Some(assistant_turn.content_blocks.clone())
+            };
+            AgentSessionRecord {
+                session_id,
+                trigger_source: trigger.as_str(),
+                provider: profile.provider.clone(),
+                model: profile.model.clone(),
+                prompt,
+                content: assistant_turn.content.clone(),
+                assistant_turn,
+                tool_calls: tool_calls.iter().map(map_broker_tool_call).collect(),
+                content_blocks,
+                action_log: Vec::new(),
+                status: "needs_tool_calls".to_string(),
+                error_message: None,
+                created_at,
+                completed_at: chrono::Utc::now().to_rfc3339(),
+            }
+        }
     }
 }
 
@@ -661,6 +737,8 @@ fn failed_record(
         content: String::new(),
         assistant_turn: empty_assistant_turn(),
         tool_calls: Vec::new(),
+        content_blocks: None,
+        action_log: Vec::new(),
         status: "failed".to_string(),
         error_message: Some(error_message),
         created_at,

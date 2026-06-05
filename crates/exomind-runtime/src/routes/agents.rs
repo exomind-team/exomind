@@ -532,18 +532,37 @@ async fn list_actions(
     };
 
     let sessions = agent.list_sessions();
-    let actions: Vec<ActionEntry> = sessions
-        .iter()
-        .enumerate()
-        .map(|(idx, s)| ActionEntry {
-            timestamp: s.created_at.clone(),
-            tick: (idx as u64) + 1,
-            action_type: "signal".to_string(),
-            description: format!("session {} ({})", s.session_id, s.status),
-            energy_before: 100,
-            energy_after: 100,
-        })
-        .collect();
+    let mut actions: Vec<ActionEntry> = Vec::new();
+
+    // Build actions from per-block action_log entries
+    for session in &sessions {
+        if let Some(ref action_log) = session.action_log {
+            for entry in action_log {
+                actions.push(ActionEntry {
+                    timestamp: entry.timestamp.clone(),
+                    tick: entry.tick,
+                    action_type: entry.action_type.clone(),
+                    description: entry.description.clone(),
+                    energy_before: entry.energy_before,
+                    energy_after: entry.energy_after,
+                });
+            }
+        } else {
+            // Fallback: create a single entry from session metadata
+            actions.push(ActionEntry {
+                timestamp: session.created_at.clone(),
+                tick: 1,
+                action_type: "signal".to_string(),
+                description: format!("session {} ({})", session.session_id, session.status),
+                energy_before: 0,
+                energy_after: 0,
+            });
+        }
+    }
+
+    // Sort by timestamp descending (newest first)
+    actions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
     let total = actions.len();
     Ok(Json(ActionsResponse { actions, total }))
 }

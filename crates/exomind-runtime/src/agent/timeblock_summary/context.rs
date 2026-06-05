@@ -2,8 +2,6 @@ use crate::eventlog::{EventListFilter, EventLogStore, EventRecord};
 use crate::timeblock::TimeBlockData;
 use std::sync::Arc;
 
-use super::ProcessedRecord;
-
 /// Collected context for a timeblock summary run.
 ///
 /// All read-only data is pre-fetched by Runtime code before the LLM is called.
@@ -115,7 +113,6 @@ impl CollectedContext {
 pub async fn collect_context(
     eventlog_store: &EventLogStore,
     block: &TimeBlockData,
-    processed: &std::collections::HashMap<String, ProcessedRecord>,
     energy_current: u64,
     energy_max: u64,
 ) -> CollectedContext {
@@ -161,14 +158,36 @@ pub async fn collect_context(
         .ok()
         .and_then(|mut v| v.pop());
 
-    // 4. Already-processed status
-    let block_key = block.start_id.clone();
-    let already_has_start = processed
-        .get(&format!("{block_key}.start"))
-        .is_some();
-    let already_has_end = processed
-        .get(&format!("{block_key}.end"))
-        .is_some();
+    // 4. Already-processed status: query eventlog for existing agent_feedback
+    let end_time = if block.end_time > 0 {
+        block.end_time as i64
+    } else {
+        chrono::Utc::now().timestamp_millis()
+    };
+    let feedback_filter = EventListFilter {
+        since_timestamp: Some(block.start_time as i64),
+        until_timestamp: Some(end_time),
+        tags: vec!["agent_feedback".to_string()],
+        limit: Some(10),
+        ..Default::default()
+    };
+    let feedback_events = eventlog_store
+        .list_events_filtered(None, &feedback_filter)
+        .unwrap_or_default();
+    let already_has_start = feedback_events.iter().any(|e| {
+        e.metadata
+            .as_ref()
+            .and_then(|m| m.get("summaryKind"))
+            .and_then(|v| v.as_str())
+            == Some("start")
+    });
+    let already_has_end = feedback_events.iter().any(|e| {
+        e.metadata
+            .as_ref()
+            .and_then(|m| m.get("summaryKind"))
+            .and_then(|v| v.as_str())
+            == Some("end")
+    });
 
     CollectedContext {
         block: block.clone(),

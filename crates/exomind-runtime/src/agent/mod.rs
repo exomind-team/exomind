@@ -67,7 +67,7 @@ pub struct ChatRequest {
 }
 
 /// Session metadata（会话元信息）.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SessionInfo {
     pub session_id: String,
     pub status: String,
@@ -85,6 +85,12 @@ pub struct SessionInfo {
     pub provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<session::ToolCallRecord>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_blocks: Option<Vec<api::ContentBlock>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_log: Option<Vec<session::ActionLogEntry>>,
 }
 
 impl Default for SessionInfo {
@@ -101,6 +107,9 @@ impl Default for SessionInfo {
             prompt: None,
             provider: None,
             model: None,
+            tool_calls: None,
+            content_blocks: None,
+            action_log: None,
         }
     }
 }

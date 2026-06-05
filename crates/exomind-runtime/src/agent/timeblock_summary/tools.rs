@@ -1,5 +1,5 @@
 use crate::agent::tools::{ToolDef, ToolError, ToolFn};
-use crate::eventlog::EventLogStore;
+use crate::eventlog::{EventListFilter, EventLogStore};
 use crate::timeblock::TimeBlockData;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -7,6 +7,110 @@ use std::sync::Arc;
 use super::SummaryKind;
 
 pub const SUBMIT_TIMEBLOCK_SUMMARY_TOOL: &str = "submit_timeblock_summary";
+pub const GET_RECENT_EVENTS_TOOL: &str = "get_recent_events";
+pub const GET_BLOCK_FEEDBACK_TOOL: &str = "get_block_feedback";
+
+/// Build read-only tools for the Agent to explore context beyond pre-filled data.
+pub fn exploration_tools(
+    block: TimeBlockData,
+    eventlog_store: Arc<EventLogStore>,
+) -> Vec<(ToolDef, ToolFn)> {
+    let mut tools = Vec::new();
+
+    // Tool 1: get_recent_events - Query recent events across time blocks
+    {
+        let store = Arc::clone(&eventlog_store);
+        let def = ToolDef {
+            name: GET_RECENT_EVENTS_TOOL.to_string(),
+            description: "查询近期事件列表。可用于了解用户最近的活动模式、任务进展等。".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回条数，默认 10，最大 50",
+                        "default": 10
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "按标签过滤，可选"
+                    }
+                }
+            }),
+        };
+        let fn_impl: ToolFn = Box::new(move |input: Value| {
+            let store = Arc::clone(&store);
+            Box::pin(async move {
+                let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(10).min(50) as usize;
+                let tag = input.get("tag").and_then(Value::as_str).map(String::from);
+
+                let mut filter = EventListFilter {
+                    limit: Some(limit),
+                    ..Default::default()
+                };
+                if let Some(t) = tag {
+                    filter.tags = vec![t];
+                }
+
+                let events = store.list_events_filtered(None, &filter).unwrap_or_default();
+                let result: Vec<Value> = events.iter().map(|e| {
+                    json!({
+                        "id": e.id,
+                        "timestamp": e.timestamp,
+                        "content": e.content,
+                        "tags": e.tags,
+                    })
+                }).collect();
+
+                Ok(json!({
+                    "events": result,
+                    "total": result.len(),
+                }).to_string())
+            })
+        });
+        tools.push((def, fn_impl));
+    }
+
+    // Tool 2: get_block_feedback - Get block feedback if available
+    {
+        let store = Arc::clone(&eventlog_store);
+        let block_start = block.start_time;
+        let block_end = if block.end_time > 0 { block.end_time } else { chrono::Utc::now().timestamp_millis() as u64 };
+        let def = ToolDef {
+            name: GET_BLOCK_FEEDBACK_TOOL.to_string(),
+            description: "获取当前时间块的 block_feedback（精确数据日志）。可用于了解时间统计、专注度等客观数据。".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        };
+        let fn_impl: ToolFn = Box::new(move |_input: Value| {
+            let store = Arc::clone(&store);
+            let start = block_start;
+            let end = block_end;
+            Box::pin(async move {
+                let filter = EventListFilter {
+                    tags: vec!["block_feedback".to_string()],
+                    since_timestamp: Some(start as i64),
+                    until_timestamp: Some(end as i64),
+                    limit: Some(1),
+                    ..Default::default()
+                };
+                let events = store.list_events_filtered(None, &filter).unwrap_or_default();
+                match events.first() {
+                    Some(e) => Ok(json!({
+                        "content": e.content,
+                        "timestamp": e.timestamp,
+                    }).to_string()),
+                    None => Ok("当前时间块暂无 block_feedback".to_string()),
+                }
+            })
+        });
+        tools.push((def, fn_impl));
+    }
+
+    tools
+}
 
 /// Source attribution metadata for agent_feedback events.
 #[derive(Debug, Clone)]
@@ -166,9 +270,9 @@ pub fn submit_timeblock_summary_tool(
                     arr.iter()
                         .filter_map(|item| {
                             let item_name = item.get("item")?.as_str()?;
-                            let status = item.get("status")?.as_str()?;
+                            let _status = item.get("status")?.as_str()?;
                             let note = item.get("note").and_then(Value::as_str).unwrap_or("");
-                            let icon = match status {
+                            let icon = match _status {
                                 "done" => "✅",
                                 "ongoing" => "🔄",
                                 "not_done" => "❌",
@@ -188,7 +292,7 @@ pub fn submit_timeblock_summary_tool(
                     arr.iter()
                         .filter_map(|item| {
                             let item_name = item.get("item")?.as_str()?;
-                            let status = item.get("status")?.as_str()?;
+                            let _status = item.get("status")?.as_str()?;
                             let note = item.get("note").and_then(Value::as_str).unwrap_or("");
                             Some(format!("| {} | {} |", item_name, note))
                         })
