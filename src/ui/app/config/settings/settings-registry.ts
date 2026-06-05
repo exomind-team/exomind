@@ -20,6 +20,7 @@ import {
   Moon,
   MoonStar,
   Orbit,
+  Radio,
   Search,
   RefreshCw,
   ScrollText,
@@ -389,6 +390,11 @@ import {
   setBuiltinTimeblockSummaryEnabled,
   subscribeBuiltinTimeblockSummaryEnabledChanges,
 } from '@/config/builtin-timeblock-summary-enabled';
+import {
+  getBuiltinTimeblockSummarySubscriptions,
+  setBuiltinTimeblockSummarySubscriptions,
+  subscribeBuiltinTimeblockSummarySubscriptionsChanges,
+} from '@/config/builtin-timeblock-summary-subscriptions';
 
 /*
  * AGENT GUIDE: ADDING SETTINGS
@@ -1887,6 +1893,41 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getBuiltinTimeblockSummaryEnabled(),
     set: setBuiltinTimeblockSummaryEnabled,
     subscribe: subscribeBuiltinTimeblockSummaryEnabledChanges,
+  },
+  {
+    id: 'builtin-timeblock-summary-subscriptions',
+    label: '订阅信号',
+    icon: Radio,
+    category: 'ai',
+    description: '选择时间块总结 Agent 要订阅哪些信号。',
+    rowTestId: 'new-settings-builtin-timeblock-summary-subscriptions-row',
+    type: 'enum',
+    multiSelect: true,
+    options: [
+      { label: '时间块结束', value: 'block_completed' },
+      { label: '用户提交反馈', value: 'block_feedback' },
+    ],
+    get: () => {
+      const config = getBuiltinTimeblockSummarySubscriptions();
+      const values: string[] = [];
+      if (config.block_completed) values.push('block_completed');
+      if (config.block_feedback) values.push('block_feedback');
+      return values;
+    },
+    set: (values: string[]) => {
+      setBuiltinTimeblockSummarySubscriptions({
+        block_completed: values.includes('block_completed'),
+        block_feedback: values.includes('block_feedback'),
+      });
+    },
+    subscribe: (listener) => {
+      return subscribeBuiltinTimeblockSummarySubscriptionsChanges((config) => {
+        const values: string[] = [];
+        if (config.block_completed) values.push('block_completed');
+        if (config.block_feedback) values.push('block_feedback');
+        listener(values);
+      });
+    },
   },
   {
     id: 'runtime-target-mode',
