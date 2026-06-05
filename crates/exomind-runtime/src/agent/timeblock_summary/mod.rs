@@ -439,61 +439,7 @@ impl TimeblockSummaryAgentService {
             return;
         }
 
-        // Idempotency check: query eventlog for existing agent_feedback_start in this time block
-        let end_time = if block.end_time > 0 {
-            block.end_time as i64
-        } else {
-            chrono::Utc::now().timestamp_millis()
-        };
-        let filter = crate::eventlog::EventListFilter {
-            since_timestamp: Some(block.start_time as i64),
-            until_timestamp: Some(end_time),
-            tags: vec!["agent_feedback_start".to_string()],
-            limit: Some(1),
-            ..Default::default()
-        };
-        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &filter) {
-            if !events.is_empty() {
-                tracing::info!(
-                    block_id = %block.start_id,
-                    event_count = events.len(),
-                    "timeblock_summary: already has start summary, skipping"
-                );
-                return;
-            }
-        }
-        tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing active block signal");
-
-        // Energy replenishment: countdown mode → supplement by target_minutes
-        if let Some(active_value) = event.payload.get("active") {
-            if let Ok(active) = serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
-                if active.mode == "countdown" {
-                    if let Some(target_minutes) = active.target_minutes {
-                        let energy_gain = target_minutes;
-                        if energy_gain > 0 {
-                            if let Some(energy) = self.energy_registry.get("timeblock_summary") {
-                                let current = energy.snapshot("timeblock_summary").current;
-                                // Use max(current, calculated) to avoid reducing energy if already higher
-                                let new_energy = current.max(energy_gain);
-                                energy.set_current(new_energy);
-                                tracing::info!(
-                                    block_id = %block.start_id,
-                                    target_minutes,
-                                    energy_gain,
-                                    new_energy,
-                                    "timeblock_summary: energy replenished from countdown"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check for recent gap completion to inject as context
-        let gap_context = self.last_completed_gap.write().unwrap().take();
-
-        // Determine summary kind based on phase and transition type
+        // Determine summary kind based on phase and transition type FIRST
         let summary_kind = match event.payload.get("active") {
             Some(active_value) => {
                 match serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
@@ -526,6 +472,64 @@ impl TimeblockSummaryAgentService {
             }
             None => SummaryKind::Start,
         };
+
+        // Idempotency check: query eventlog for existing summary based on summary_kind
+        let end_time = if block.end_time > 0 {
+            block.end_time as i64
+        } else {
+            chrono::Utc::now().timestamp_millis()
+        };
+        let tag_to_check = match summary_kind {
+            SummaryKind::Start => "agent_feedback_start",
+            SummaryKind::Stop => "agent_feedback_stop",
+            SummaryKind::End => "agent_feedback_end",
+            SummaryKind::FeedbackReview => "agent_feedback_review",
+        };
+        let filter = crate::eventlog::EventListFilter {
+            since_timestamp: Some(block.start_time as i64),
+            until_timestamp: Some(end_time),
+            tags: vec![tag_to_check.to_string()],
+            limit: Some(1),
+            ..Default::default()
+        };
+        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &filter) {
+            if !events.is_empty() {
+                tracing::info!(
+                    block_id = %block.start_id,
+                    event_count = events.len(),
+                    "timeblock_summary: already has summary, skipping"
+                );
+                return;
+            }
+        }
+        tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing active block signal");
+        if let Some(active_value) = event.payload.get("active") {
+            if let Ok(active) = serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
+                if active.mode == "countdown" {
+                    if let Some(target_minutes) = active.target_minutes {
+                        let energy_gain = target_minutes;
+                        if energy_gain > 0 {
+                            if let Some(energy) = self.energy_registry.get("timeblock_summary") {
+                                let current = energy.snapshot("timeblock_summary").current;
+                                // Use max(current, calculated) to avoid reducing energy if already higher
+                                let new_energy = current.max(energy_gain);
+                                energy.set_current(new_energy);
+                                tracing::info!(
+                                    block_id = %block.start_id,
+                                    target_minutes,
+                                    energy_gain,
+                                    new_energy,
+                                    "timeblock_summary: energy replenished from countdown"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check for recent gap completion to inject as context
+        let gap_context = self.last_completed_gap.write().unwrap().take();
 
         tracing::info!(
             block_id = %block.start_id,
