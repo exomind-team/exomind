@@ -467,26 +467,34 @@ impl TimeblockSummaryAgentService {
         // Check for recent gap completion to inject as context
         let gap_context = self.last_completed_gap.write().unwrap().take();
 
-        // Determine summary kind based on phase
+        // Determine summary kind based on phase and transition type
         let summary_kind = match event.payload.get("active") {
             Some(active_value) => {
                 match serde_json::from_value::<crate::timeblock::ActiveBlockData>(active_value.clone()) {
-                    Ok(active) => match active.phase.as_ref() {
-                        Some(BlockPhase::FeedbackInProgress) => SummaryKind::End,
-                        Some(BlockPhase::Paused) => {
-                            tracing::debug!(block_id = %block.start_id, "timeblock_summary: block is paused, skipping");
-                            return;
+                    Ok(active) => {
+                        // Check last transition to distinguish start vs resume
+                        let is_resume = active.transitions.last()
+                            .map(|t| t.transition_type == crate::timeblock::BlockTransitionType::Resume)
+                            .unwrap_or(false);
+
+                        match active.phase.as_ref() {
+                            Some(BlockPhase::FeedbackInProgress) => SummaryKind::End,
+                            Some(BlockPhase::Paused) => {
+                                tracing::debug!(block_id = %block.start_id, "timeblock_summary: block is paused, skipping");
+                                return;
+                            }
+                            Some(BlockPhase::Running) if is_resume => {
+                                tracing::debug!(block_id = %block.start_id, "timeblock_summary: block is resumed, skipping");
+                                return;
+                            }
+                            Some(BlockPhase::Running) => SummaryKind::Start,
+                            Some(BlockPhase::FeedbackSubmitted) => {
+                                tracing::debug!(block_id = %block.start_id, "timeblock_summary: feedback already submitted, skipping");
+                                return;
+                            }
+                            None => SummaryKind::Start,
                         }
-                        Some(BlockPhase::Running) => {
-                            tracing::debug!(block_id = %block.start_id, "timeblock_summary: block is running (resume), skipping");
-                            return;
-                        }
-                        Some(BlockPhase::FeedbackSubmitted) => {
-                            tracing::debug!(block_id = %block.start_id, "timeblock_summary: feedback already submitted, skipping");
-                            return;
-                        }
-                        None => SummaryKind::Start,
-                    },
+                    }
                     Err(_) => SummaryKind::Start,
                 }
             }
