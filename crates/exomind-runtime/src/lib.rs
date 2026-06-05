@@ -756,15 +756,38 @@ pub async fn start_with_options(
         );
         tb_summary.spawn();
 
-        // Register signal routes for UI topology
+        // Register signal routes for UI topology (clean duplicates first)
         let now = chrono::Utc::now().to_rfc3339();
-        for topic in &[
+        let target_topics = [
             "timeblock.replication.active_upserted",
             "timeblock.replication.completed",
             "timeblock_summary.start",
             "timeblock_summary.tick",
             "timeblock_summary.end",
-        ] {
+        ];
+
+        // Remove duplicate routes for target topics
+        {
+            let mut existing_routes = state.signal_pool.routes().get_all();
+            for topic in &target_topics {
+                let duplicates: Vec<_> = existing_routes
+                    .iter()
+                    .filter(|r| r.topic == *topic)
+                    .skip(1) // Keep first, remove rest
+                    .map(|r| r.id.clone())
+                    .collect();
+                for id in duplicates {
+                    let _ = state.signal_pool.routes().delete(&id);
+                }
+            }
+        }
+
+        // Add routes if not already registered
+        let existing_routes = state.signal_pool.routes().get_all();
+        for topic in &target_topics {
+            if existing_routes.iter().any(|r| r.topic == *topic) {
+                continue;
+            }
             let _ = state.signal_pool.routes().add(crate::signal::SignalRoute {
                 id: uuid::Uuid::new_v4().to_string(),
                 enabled: true,
