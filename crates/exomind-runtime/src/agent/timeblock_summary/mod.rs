@@ -234,6 +234,7 @@ impl TimeblockSummaryAgentService {
             "timeblock.replication.completed" => subscriptions.block_completed,
             "timeblock.block_feedback.created" => subscriptions.block_feedback,
             // active_upserted is always processed (not gated by subscriptions)
+            // This handles the "stop" action (markEnding) which only publishes active_signal
             "timeblock.replication.active_upserted" => true,
             _ => false,
         };
@@ -652,8 +653,14 @@ impl TimeblockSummaryAgentService {
         let _ = self.session_runtime.agent_api_session_store.upsert(initial_session_record.clone());
         {
             let mut sessions = self.sessions.write().unwrap();
-            sessions.push(initial_session_record);
+            sessions.push(initial_session_record.clone());
             let len = sessions.len();
+            tracing::info!(
+                session_id = %initial_session_record.session_id,
+                trigger_source = %initial_session_record.trigger_source,
+                total_sessions = len,
+                "timeblock_summary: session created and added to memory"
+            );
             if len > 50 {
                 sessions.drain(0..len - 50);
             }
@@ -1867,5 +1874,69 @@ mod tests {
     fn summary_kind_has_feedback_review() {
         let kind = super::SummaryKind::FeedbackReview;
         assert_eq!(kind, super::SummaryKind::FeedbackReview);
+    }
+
+    /// Test that build_session_record creates a valid session with correct fields
+    #[test]
+    fn build_session_record_creates_valid_session() {
+        let history = vec![
+            TurnItem::User {
+                content: "test prompt".to_string(),
+            },
+            TurnItem::Assistant {
+                content: "test response".to_string(),
+                tool_calls: vec![],
+            },
+        ];
+
+        let record = build_session_record(
+            &history,
+            "test response",
+            &[],
+            vec![],
+            vec![],
+            true,
+            &test_provider(),
+            &SummaryKind::Start,
+        );
+
+        // Verify session fields
+        assert!(!record.session_id.is_empty());
+        assert_eq!(record.trigger_source, "timeblock_summary-Start");
+        assert_eq!(record.status, "completed");
+        assert_eq!(record.content, "test response");
+        assert_eq!(record.prompt, Some("test prompt".to_string()));
+    }
+
+    /// Test that action_log entries are correctly included in session
+    #[test]
+    fn build_session_record_includes_action_log() {
+        use crate::agent::session::ActionLogEntry;
+
+        let action_log = vec![
+            ActionLogEntry {
+                timestamp: "2026-06-06T00:00:00Z".to_string(),
+                tick: 0,
+                action_type: "signal".to_string(),
+                description: "收到时间块开始信号：test".to_string(),
+                energy_before: 100,
+                energy_after: 100,
+            },
+        ];
+
+        let record = build_session_record(
+            &[TurnItem::User { content: "test".to_string() }],
+            "",
+            &[],
+            vec![],
+            action_log.clone(),
+            true,
+            &test_provider(),
+            &SummaryKind::Start,
+        );
+
+        // Verify action_log is included
+        assert_eq!(record.action_log.len(), 1);
+        assert_eq!(record.action_log[0].action_type, "signal");
     }
 }
