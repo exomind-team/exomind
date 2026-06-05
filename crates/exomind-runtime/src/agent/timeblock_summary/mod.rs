@@ -92,11 +92,12 @@ fn calculate_initial_energy(block: &TimeBlockData) -> u64 {
     100
 }
 
-/// Summary kind: start (timeblock created), end (timeblock completed),
-/// or feedback_review (user feedback arrived, needs narrative verification).
+/// Summary kind: start (timeblock created), stop (timeblock stopped),
+/// end (timeblock completed), or feedback_review (user feedback arrived).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SummaryKind {
     Start,
+    Stop,
     End,
     FeedbackReview,
 }
@@ -453,8 +454,9 @@ impl TimeblockSummaryAgentService {
         };
         if let Ok(events) = self.eventlog_store.list_events_filtered(None, &filter) {
             if !events.is_empty() {
-                tracing::debug!(
+                tracing::info!(
                     block_id = %block.start_id,
+                    event_count = events.len(),
                     "timeblock_summary: already has start summary, skipping"
                 );
                 return;
@@ -502,7 +504,7 @@ impl TimeblockSummaryAgentService {
                             .unwrap_or(false);
 
                         match active.phase.as_ref() {
-                            Some(BlockPhase::FeedbackInProgress) => SummaryKind::End,
+                            Some(BlockPhase::FeedbackInProgress) => SummaryKind::Stop,
                             Some(BlockPhase::Paused) => {
                                 tracing::debug!(block_id = %block.start_id, "timeblock_summary: block is paused, skipping");
                                 return;
@@ -534,7 +536,8 @@ impl TimeblockSummaryAgentService {
         // Determine signal type based on summary_kind
         let signal_type = match summary_kind {
             SummaryKind::Start => "start",
-            SummaryKind::End => "stop",  // FeedbackInProgress = stop
+            SummaryKind::Stop => "stop",
+            SummaryKind::End => "end",
             SummaryKind::FeedbackReview => "feedback",
         };
 
@@ -710,7 +713,8 @@ impl TimeblockSummaryAgentService {
         // 4. Build prompts
         let initial_prompt = match kind {
             SummaryKind::Start => build_start_prompt(&ctx, gap_context.as_ref()),
-            SummaryKind::End => build_end_prompt(&ctx),
+            SummaryKind::Stop => build_end_prompt(&ctx, "stop"),
+            SummaryKind::End => build_end_prompt(&ctx, "end"),
             SummaryKind::FeedbackReview => {
                 let feedback_content = ctx.block_feedback.as_ref()
                     .map(|bf| bf.content.clone())

@@ -231,10 +231,9 @@ pub fn submit_timeblock_summary_tool(
                 .ok_or_else(|| ToolError::InvalidInput("missing summaryKind".to_string()))?;
             let expected_kind_str = match kind_expected {
                 SummaryKind::Start => "start",
+                SummaryKind::Stop => "stop",
                 SummaryKind::End => "end",
-                // FeedbackReview uses "end" as the LLM-facing kind —
-                // the prompt distinguishes the behaviour, not the tool schema.
-                SummaryKind::FeedbackReview => "end",
+                SummaryKind::FeedbackReview => "feedback_review",
             };
             if summary_kind != expected_kind_str {
                 return Err(ToolError::InvalidInput(format!(
@@ -345,11 +344,11 @@ pub fn submit_timeblock_summary_tool(
             }
 
             // Write to eventlog with appropriate tags based on summary_kind
-            let tags = match summary_kind {
-                "start" => vec!["agent_feedback".to_string(), "agent_feedback_start".to_string()],
-                "end" => vec!["agent_feedback".to_string(), "agent_feedback_end".to_string()],
-                "feedback_review" => vec!["agent_feedback".to_string(), "agent_feedback_review".to_string()],
-                _ => vec!["agent_feedback".to_string()],
+            let tags = match kind_expected {
+                SummaryKind::Start => vec!["agent_feedback".to_string(), "agent_feedback_start".to_string()],
+                SummaryKind::Stop => vec!["agent_feedback".to_string(), "agent_feedback_stop".to_string()],
+                SummaryKind::End => vec!["agent_feedback".to_string(), "agent_feedback_end".to_string()],
+                SummaryKind::FeedbackReview => vec!["agent_feedback".to_string(), "agent_feedback_review".to_string()],
             };
             let event = crate::eventlog::EventRecord {
                 id: uuid::Uuid::new_v4().to_string(),
