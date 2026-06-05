@@ -1069,7 +1069,10 @@ impl TimeblockSummaryAgentService {
             }
             "tool_use" => {
                 let tool_name = block.tool_use.as_ref().map(|t| t.name.as_str()).unwrap_or("unknown");
-                ("tool_call".to_string(), format!("Agent 调用工具：{}", tool_name))
+                let tool_input = block.tool_use.as_ref()
+                    .map(|t| serde_json::to_string(&t.input).unwrap_or_default())
+                    .unwrap_or_default();
+                ("tool_call".to_string(), format!("Agent 调用工具：{}({})", tool_name, tool_input))
             }
             other => {
                 let text = block.text.as_deref().unwrap_or("").to_string();
@@ -1342,7 +1345,10 @@ fn build_action_log_entry(
         }
         "tool_use" => {
             let tool_name = block.tool_use.as_ref().map(|t| t.name.as_str()).unwrap_or("unknown");
-            ("tool_call".to_string(), format!("Agent 调用工具：{}", tool_name))
+            let tool_input = block.tool_use.as_ref()
+                .map(|t| serde_json::to_string(&t.input).unwrap_or_default())
+                .unwrap_or_default();
+            ("tool_call".to_string(), format!("Agent 调用工具：{}({})", tool_name, tool_input))
         }
         other => {
             let text = block.text.as_deref().unwrap_or("").to_string();
