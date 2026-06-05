@@ -460,26 +460,24 @@ impl TimeblockSummaryAgentService {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // Check if a block_completed signal is already queued for the same block
-        let has_block_completed = self
-            .signal_queue
-            .lock()
-            .await
-            .iter()
-            .any(|e| {
-                e.topic == "timeblock.replication.completed"
-                    && e.payload
-                        .get("block")
-                        .and_then(|b| b.get("startId"))
-                        == event
-                            .payload
-                            .get("block")
-                            .and_then(|b| b.get("startId"))
-            });
+        // Extract block start_id for matching
+        let block_start_id = event
+            .payload
+            .get("block")
+            .and_then(|b| b.get("startId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        // Check if a block_completed signal was already processed for the same block
+        // Method 1: Check if there's a completed session for this block
+        let has_block_completed = self.sessions.read().unwrap().iter().any(|s| {
+            s.trigger_source.contains("End")
+                && s.content.contains(block_start_id)
+        });
 
         // Determine summary kind based on scenario
         let summary_kind = if has_block_completed {
-            // Scenario C: block_completed already queued — feedback review only
+            // Scenario C: block_completed already processed — feedback review only
             SummaryKind::FeedbackReview
         } else {
             // Scenario B: only block_feedback — assume full end responsibility
