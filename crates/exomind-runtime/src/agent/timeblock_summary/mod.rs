@@ -477,7 +477,15 @@ impl TimeblockSummaryAgentService {
                             tracing::debug!(block_id = %block.start_id, "timeblock_summary: block is paused, skipping");
                             return;
                         }
-                        _ => SummaryKind::Start,
+                        Some(BlockPhase::Running) => {
+                            tracing::debug!(block_id = %block.start_id, "timeblock_summary: block is running (resume), skipping");
+                            return;
+                        }
+                        Some(BlockPhase::FeedbackSubmitted) => {
+                            tracing::debug!(block_id = %block.start_id, "timeblock_summary: feedback already submitted, skipping");
+                            return;
+                        }
+                        None => SummaryKind::Start,
                     },
                     Err(_) => SummaryKind::Start,
                 }
