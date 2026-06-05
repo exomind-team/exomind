@@ -2,11 +2,12 @@ pub mod context;
 pub mod templates;
 pub mod tools;
 
+use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::stream::{self, BoxStream, StreamExt};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 
 use crate::agent::broker::{self, AgentTurnBroker, AgentTurnRequest, AgentTurnResult, TurnItem};
 use crate::agent::session::{AgentSessionRecord, AgentSessionRuntime};
@@ -119,6 +120,10 @@ pub struct TimeblockSummaryAgentService {
     sessions: Arc<RwLock<Vec<AgentSessionRecord>>>,
     /// Most recently completed gap block, used as context for the next active block.
     last_completed_gap: Arc<RwLock<Option<TimeBlockData>>>,
+    /// FIFO queue for incoming signal events awaiting processing.
+    signal_queue: Arc<Mutex<VecDeque<SignalEvent>>>,
+    /// Whether the queue processor loop is currently running.
+    processing: Arc<AtomicBool>,
 }
 
 impl TimeblockSummaryAgentService {
@@ -146,6 +151,8 @@ impl TimeblockSummaryAgentService {
             energy_registry,
             sessions: Arc::new(RwLock::new(Vec::new())),
             last_completed_gap: Arc::new(RwLock::new(None)),
+            signal_queue: Arc::new(Mutex::new(VecDeque::new())),
+            processing: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -196,11 +203,11 @@ impl TimeblockSummaryAgentService {
         if let Ok(Some(entry)) = self.config_store.get("user", CONFIG_KEY_ENABLED) {
             let new_enabled = entry.value.parse::<bool>().unwrap_or(false);
             self.enabled
-                .store(new_enabled, std::sync::atomic::Ordering::Relaxed);
+                .store(new_enabled, Ordering::Relaxed);
         }
 
         // Check enabled (after config re-read)
-        if !self.enabled.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self.enabled.load(Ordering::Relaxed) {
             return Ok(());
         }
 
@@ -213,6 +220,54 @@ impl TimeblockSummaryAgentService {
             return Ok(());
         }
 
+        // Check subscription config — only enqueue signals the agent is subscribed to
+        let subscriptions = self.get_subscriptions();
+        let should_process = match event.topic.as_str() {
+            "timeblock.replication.completed" => subscriptions.block_completed,
+            "timeblock.block_feedback.created" => subscriptions.block_feedback,
+            // active_upserted is always processed (not gated by subscriptions)
+            "timeblock.replication.active_upserted" => true,
+            _ => false,
+        };
+
+        if !should_process {
+            tracing::debug!(
+                topic = %event.topic,
+                "timeblock_summary: signal not in subscriptions, skipping"
+            );
+            return Ok(());
+        }
+
+        // Enqueue the signal
+        self.signal_queue.lock().await.push_back(event.clone());
+
+        // If no processing loop is running, start one
+        if !self.processing.load(Ordering::Relaxed) {
+            self.process_queue().await;
+        }
+
+        Ok(())
+    }
+
+    /// Drain the FIFO queue and process each signal sequentially.
+    async fn process_queue(&self) {
+        self.processing.store(true, Ordering::Relaxed);
+
+        while let Some(event) = self.signal_queue.lock().await.pop_front() {
+            if let Err(e) = self.process_signal(&event).await {
+                tracing::error!(
+                    event_id = %event.id,
+                    topic = %event.topic,
+                    "timeblock_summary: signal processing error: {e}"
+                );
+            }
+        }
+
+        self.processing.store(false, Ordering::Relaxed);
+    }
+
+    /// Dispatch a single dequeued signal to the appropriate handler.
+    async fn process_signal(&self, event: &SignalEvent) -> Result<(), String> {
         match event.topic.as_str() {
             "timeblock.replication.completed" => {
                 self.handle_completed(event).await;
@@ -220,9 +275,15 @@ impl TimeblockSummaryAgentService {
             "timeblock.replication.active_upserted" => {
                 self.handle_active_upserted(event).await;
             }
+            "timeblock.block_feedback.created" => {
+                // TODO: Task 4 implementation
+                tracing::info!(
+                    event_id = %event.id,
+                    "timeblock_summary: block_feedback signal received"
+                );
+            }
             _ => {}
         }
-
         Ok(())
     }
 
