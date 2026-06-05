@@ -1009,8 +1009,8 @@ export const FocusTimerWidget = forwardRef<
   const isEndActionDisabled = feedbackInProgress && feedbackOpen;
   const endActionAriaLabel = feedbackInProgress
     ? "反馈中（Feedback in progress）"
-    : "结束（End）";
-  const endActionTitle = feedbackInProgress ? "反馈中" : "结束";
+    : "停止（Stop）";
+  const endActionTitle = feedbackInProgress ? "反馈中" : "停止";
   const endActionButtonClass = feedbackInProgress
     ? "h-11 w-11 rounded-[12px] bg-brand p-0 text-white hover:bg-brand/90 hover:text-white"
     : "h-11 w-11 rounded-[12px] bg-[#C75B3A] p-0 text-white hover:bg-[#B24D2F] hover:text-white";
@@ -1024,7 +1024,7 @@ export const FocusTimerWidget = forwardRef<
     isSubmitting: feedbackSubmitting,
     skipConfirmState: skipFeedbackConfirmState,
     skipConfirmCountdownSec: skipFeedbackCountdownSec,
-    defaultLabel: "确认结束",
+    defaultLabel: "确认停止",
   });
 
   useImperativeHandle(
@@ -1575,7 +1575,7 @@ export const FocusTimerWidget = forwardRef<
       <TimeBlockFeedbackDialog
         open={feedbackOpen}
         onOpenChange={handleFeedbackDialogOpenChange}
-        title="结束专注并记录反馈"
+        title="停止专注并记录反馈"
         description="记录本次专注反馈后将结束当前时间块"
         feedback={feedback}
         onFeedbackChange={(value) => {
