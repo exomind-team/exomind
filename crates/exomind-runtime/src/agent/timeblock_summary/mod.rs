@@ -715,8 +715,8 @@ impl TimeblockSummaryAgentService {
             energy_after: initial_energy,
         });
 
-        // Record prompt in action_log (truncated to 500 chars for display)
-        let prompt_preview = prompt_for_log.chars().take(500).collect::<String>();
+        // Record full prompt in action_log (no truncation)
+        let prompt_preview = prompt_for_log;
         action_log.push(crate::agent::session::ActionLogEntry {
             timestamp: chrono::Utc::now().to_rfc3339(),
             tick: 0,
