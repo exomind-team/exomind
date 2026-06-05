@@ -401,7 +401,7 @@ impl TimeblockSummaryAgentService {
             }
         }
 
-        if let Err(e) = self.run_summary_loop(block, SummaryKind::End, None).await {
+        if let Err(e) = self.run_summary_loop(block, SummaryKind::End, None, "end").await {
             tracing::error!("timeblock_summary: summary loop failed: {e}");
         }
     }
@@ -499,7 +499,14 @@ impl TimeblockSummaryAgentService {
             "timeblock_summary: determined summary kind from active signal"
         );
 
-        if let Err(e) = self.run_summary_loop(block, summary_kind, gap_context).await {
+        // Determine signal type based on summary_kind
+        let signal_type = match summary_kind {
+            SummaryKind::Start => "start",
+            SummaryKind::End => "stop",  // FeedbackInProgress = stop
+            SummaryKind::FeedbackReview => "feedback",
+        };
+
+        if let Err(e) = self.run_summary_loop(block, summary_kind, gap_context, signal_type).await {
             tracing::error!("timeblock_summary: summary loop failed: {e}");
         }
     }
@@ -567,7 +574,12 @@ impl TimeblockSummaryAgentService {
         }
 
         // Run the summary loop with the determined kind
-        if let Err(e) = self.run_summary_loop(block, summary_kind, None).await {
+        let signal_type = match summary_kind {
+            SummaryKind::End => "end",
+            SummaryKind::FeedbackReview => "feedback",
+            _ => "unknown",
+        };
+        if let Err(e) = self.run_summary_loop(block, summary_kind, None, signal_type).await {
             tracing::error!("timeblock_summary: block_feedback summary failed: {e}");
         }
     }
@@ -577,6 +589,7 @@ impl TimeblockSummaryAgentService {
         block: TimeBlockData,
         kind: SummaryKind,
         gap_context: Option<TimeBlockData>,
+        signal_type: &str,  // "start", "stop", "end", "feedback"
     ) -> Result<(), String> {
         // 1. Auto-collect context
 
@@ -683,10 +696,12 @@ impl TimeblockSummaryAgentService {
             timestamp: chrono::Utc::now().to_rfc3339(),
             tick: 0,
             action_type: "signal".to_string(),
-            description: format!("收到{}：{}", match kind {
-                SummaryKind::Start => "时间块开始信号",
-                SummaryKind::End => "时间块停止信号",
-                SummaryKind::FeedbackReview => "用户反馈",
+            description: format!("收到{}：{}", match signal_type {
+                "start" => "时间块开始信号",
+                "stop" => "时间块停止信号",
+                "end" => "时间块结束信号",
+                "feedback" => "用户反馈",
+                _ => "未知信号",
             }, block.name),
             energy_before: initial_energy,
             energy_after: initial_energy,
