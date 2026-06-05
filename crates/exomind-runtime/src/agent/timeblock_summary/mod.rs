@@ -25,6 +25,7 @@ use templates::{build_end_prompt, build_start_prompt, system_prompt};
 use tools::{submit_timeblock_summary_tool, AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL};
 
 const CONFIG_KEY_ENABLED: &str = "builtin.timeblock_summary.enabled";
+const CONFIG_KEY_SUBSCRIPTIONS: &str = "builtin.timeblock_summary.subscriptions";
 const CONFIG_KEY_ACTIVE_SCOPE: &str = "exomind:activeScopeKey";
 const ENERGY_MAX: u64 = 100;
 const ENERGY_WARN_THRESHOLD: u64 = 10;
@@ -83,6 +84,27 @@ pub enum SummaryKind {
     End,
 }
 
+/// Configurable subscription flags for the timeblock_summary agent.
+///
+/// Controls which signal topics the agent responds to. Defaults preserve
+/// backward-compatible behaviour (only `block_completed` enabled).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SubscriptionsConfig {
+    /// Listen for `timeblock.replication.completed` signals.
+    pub block_completed: bool,
+    /// Listen for `timeblock.replication.feedback` signals.
+    pub block_feedback: bool,
+}
+
+impl Default for SubscriptionsConfig {
+    fn default() -> Self {
+        Self {
+            block_completed: true,
+            block_feedback: false, // backward-compatible: off by default
+        }
+    }
+}
+
 /// Built-in timeblock summary agent service.
 ///
 /// Subscribes to `timeblock.replication.completed` and `timeblock.replication.active_upserted`
@@ -125,6 +147,17 @@ impl TimeblockSummaryAgentService {
             sessions: Arc::new(RwLock::new(Vec::new())),
             last_completed_gap: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Read the subscription configuration from the config store, falling
+    /// back to `SubscriptionsConfig::default()` when absent or invalid.
+    fn get_subscriptions(&self) -> SubscriptionsConfig {
+        self.config_store
+            .get("user", CONFIG_KEY_SUBSCRIPTIONS)
+            .ok()
+            .flatten()
+            .and_then(|e| serde_json::from_str(&e.value).ok())
+            .unwrap_or_default()
     }
 
     /// Spawn the signal listener as a background tokio task.
