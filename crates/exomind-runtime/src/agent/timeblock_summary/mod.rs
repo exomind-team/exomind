@@ -22,7 +22,7 @@ use crate::signal::SignalPool;
 use crate::timeblock::TimeBlockData;
 
 use context::collect_context;
-use templates::{build_end_prompt, build_start_prompt, system_prompt};
+use templates::{build_end_prompt, build_feedback_review_prompt, build_start_prompt, system_prompt};
 use tools::{submit_timeblock_summary_tool, AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL};
 
 const CONFIG_KEY_ENABLED: &str = "builtin.timeblock_summary.enabled";
@@ -78,11 +78,13 @@ fn calculate_initial_energy(block: &TimeBlockData) -> u64 {
     100
 }
 
-/// Summary kind: start (timeblock created) or end (timeblock completed).
+/// Summary kind: start (timeblock created), end (timeblock completed),
+/// or feedback_review (user feedback arrived, needs narrative verification).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SummaryKind {
     Start,
     End,
+    FeedbackReview,
 }
 
 /// Configurable subscription flags for the timeblock_summary agent.
@@ -276,11 +278,7 @@ impl TimeblockSummaryAgentService {
                 self.handle_active_upserted(event).await;
             }
             "timeblock.block_feedback.created" => {
-                // TODO: Task 4 implementation
-                tracing::info!(
-                    event_id = %event.id,
-                    "timeblock_summary: block_feedback signal received"
-                );
+                self.handle_block_feedback(event).await;
             }
             _ => {}
         }
@@ -460,6 +458,71 @@ impl TimeblockSummaryAgentService {
         }
     }
 
+    async fn handle_block_feedback(&self, event: &SignalEvent) {
+        let block = match extract_block_from_signal(event) {
+            Some(b) => b,
+            None => {
+                tracing::warn!("timeblock_summary: block_feedback signal missing block data");
+                return;
+            }
+        };
+
+        // Extract feedback content for energy calculation
+        let feedback_content = event
+            .payload
+            .get("feedback")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        // Check if a block_completed signal is already queued for the same block
+        let has_block_completed = self
+            .signal_queue
+            .lock()
+            .await
+            .iter()
+            .any(|e| {
+                e.topic == "timeblock.replication.completed"
+                    && e.payload
+                        .get("block")
+                        .and_then(|b| b.get("startId"))
+                        == event
+                            .payload
+                            .get("block")
+                            .and_then(|b| b.get("startId"))
+            });
+
+        // Determine summary kind based on scenario
+        let summary_kind = if has_block_completed {
+            // Scenario C: block_completed already queued — feedback review only
+            SummaryKind::FeedbackReview
+        } else {
+            // Scenario B: only block_feedback — assume full end responsibility
+            SummaryKind::End
+        };
+
+        // Energy replenishment based on feedback content length
+        let energy_gain = (count_effective_chars(feedback_content) as f64 / 5.0).ceil() as u64;
+        if energy_gain > 0 {
+            if let Some(energy) = self.energy_registry.get("timeblock_summary") {
+                let current = energy.snapshot("timeblock_summary").current;
+                let new_energy = (current + energy_gain).min(ENERGY_MAX);
+                energy.set_current(new_energy);
+                tracing::info!(
+                    block_id = %block.start_id,
+                    feedback_len = feedback_content.len(),
+                    energy_gain,
+                    new_energy,
+                    "timeblock_summary: energy replenished from block_feedback"
+                );
+            }
+        }
+
+        // Run the summary loop with the determined kind
+        if let Err(e) = self.run_summary_loop(block, summary_kind, None).await {
+            tracing::error!("timeblock_summary: block_feedback summary failed: {e}");
+        }
+    }
+
     async fn run_summary_loop(
         &self,
         block: TimeBlockData,
@@ -536,6 +599,7 @@ impl TimeblockSummaryAgentService {
         let initial_prompt = match kind {
             SummaryKind::Start => build_start_prompt(&ctx, gap_context.as_ref()),
             SummaryKind::End => build_end_prompt(&ctx),
+            SummaryKind::FeedbackReview => build_feedback_review_prompt(&ctx),
         };
 
         let mut history = vec![TurnItem::User {
@@ -562,6 +626,7 @@ impl TimeblockSummaryAgentService {
             description: format!("收到{}信号：{}", match kind {
                 SummaryKind::Start => "时间块开始",
                 SummaryKind::End => "时间块结束",
+                SummaryKind::FeedbackReview => "用户反馈核验",
             }, block.name),
             energy_before: initial_energy,
             energy_after: initial_energy,

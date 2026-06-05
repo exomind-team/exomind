@@ -232,6 +232,9 @@ pub fn submit_timeblock_summary_tool(
             let expected_kind_str = match kind_expected {
                 SummaryKind::Start => "start",
                 SummaryKind::End => "end",
+                // FeedbackReview uses "end" as the LLM-facing kind —
+                // the prompt distinguishes the behaviour, not the tool schema.
+                SummaryKind::FeedbackReview => "end",
             };
             if summary_kind != expected_kind_str {
                 return Err(ToolError::InvalidInput(format!(
