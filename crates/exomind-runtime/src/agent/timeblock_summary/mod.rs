@@ -325,33 +325,7 @@ impl TimeblockSummaryAgentService {
             return;
         }
 
-        // Active blocks: clear any stale gap context (this is an active end, not preceded by gap)
-        // Idempotency check: query eventlog for existing END-type agent_feedback in this time block
-        let filter = crate::eventlog::EventListFilter {
-            since_timestamp: Some(block.start_time as i64),
-            until_timestamp: Some(block.end_time as i64),
-            tags: vec!["agent_feedback".to_string()],
-            limit: Some(10),
-            ..Default::default()
-        };
-        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &filter) {
-            // Only skip if there's an END-type agent_feedback (not start-type)
-            let has_end_feedback = events.iter().any(|e| {
-                e.metadata
-                    .as_ref()
-                    .and_then(|m| m.get("summary_kind"))
-                    .and_then(|v| v.as_str())
-                    == Some("end")
-            });
-            if has_end_feedback {
-                tracing::debug!(
-                    block_id = %block.start_id,
-                    "timeblock_summary: already has end-type agent_feedback for this block, skipping"
-                );
-                return;
-            }
-        }
-
+        // Active blocks: process completed signal (no idempotency check — always proceed)
         tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing completed active block");
 
         // Energy replenishment: calculate from events in this time block
