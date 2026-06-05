@@ -394,17 +394,8 @@ impl TimeblockSummaryAgentService {
             limit: Some(1),
             ..Default::default()
         };
-        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &filter) {
-            if !events.is_empty() {
-                tracing::debug!(
-                    block_id = %block.start_id,
-                    "timeblock_summary: already has agent_feedback for this block, skipping"
-                );
-                return;
-            }
-        }
-
-        tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing new active block");
+        // Note: We no longer skip if agent_feedback exists — "stop" also triggers summary
+        tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing active block signal");
 
         // Energy replenishment: countdown mode → supplement by target_minutes
         if let Some(active_value) = event.payload.get("active") {
