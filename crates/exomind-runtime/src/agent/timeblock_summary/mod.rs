@@ -91,7 +91,7 @@ pub enum SummaryKind {
 ///
 /// Controls which signal topics the agent responds to. Defaults preserve
 /// backward-compatible behaviour (only `block_completed` enabled).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SubscriptionsConfig {
     /// Listen for `timeblock.replication.completed` signals.
     pub block_completed: bool,
@@ -1832,5 +1832,29 @@ mod tests {
         // energy_gain = ceil(2 + 12/100) = ceil(2.12) = 3
         let gain = super::calculate_event_energy_gain(&events);
         assert_eq!(gain, 3);
+    }
+
+    #[test]
+    fn subscriptions_config_default() {
+        let config = super::SubscriptionsConfig::default();
+        assert!(config.block_completed);
+        assert!(!config.block_feedback);
+    }
+
+    #[test]
+    fn subscriptions_config_roundtrip() {
+        let config = super::SubscriptionsConfig {
+            block_completed: true,
+            block_feedback: true,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: super::SubscriptionsConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(config, deserialized);
+    }
+
+    #[test]
+    fn summary_kind_has_feedback_review() {
+        let kind = super::SummaryKind::FeedbackReview;
+        assert_eq!(kind, super::SummaryKind::FeedbackReview);
     }
 }
