@@ -123,6 +123,30 @@ impl Default for SubscriptionsConfig {
     }
 }
 
+/// Check if a summary already exists for a given time block.
+///
+/// Returns true if any summary event (agent_feedback_*) exists in the time range
+/// from block.start_time to now, with the timeblock:<block_id> tag.
+fn has_existing_summary(
+    eventlog_store: &EventLogStore,
+    block: &TimeBlockData,
+    summary_kind: &SummaryKind,
+) -> bool {
+    let now = chrono::Utc::now().timestamp_millis() as i64;
+    let block_tags = crate::agent::timeblock_summary::tools::build_summary_tags(summary_kind, &block.start_id);
+    let filter = crate::eventlog::EventListFilter {
+        since_timestamp: Some(block.start_time as i64),
+        until_timestamp: Some(now),
+        tags: block_tags,
+        limit: Some(1),
+        ..Default::default()
+    };
+    eventlog_store
+        .list_events_filtered(None, &filter)
+        .map(|events| !events.is_empty())
+        .unwrap_or(false)
+}
+
 /// Built-in timeblock summary agent service.
 ///
 /// Subscribes to `timeblock.replication.completed` and `timeblock.replication.active_upserted`
@@ -343,6 +367,7 @@ impl TimeblockSummaryAgentService {
             }
         };
 
+        let summary_kind = SummaryKind::End;
         let block_type = block.block_type.as_deref().unwrap_or("active");
 
         // Gap blocks: capture data as context for next active block, don't generate summary
@@ -374,22 +399,13 @@ impl TimeblockSummaryAgentService {
             return;
         }
 
-        // Idempotency check: query eventlog for existing agent_feedback_end in this time block
-        let end_filter = crate::eventlog::EventListFilter {
-            since_timestamp: Some(block.start_time as i64),
-            until_timestamp: Some(block.end_time as i64),
-            tags: vec!["agent_feedback_end".to_string()],
-            limit: Some(1),
-            ..Default::default()
-        };
-        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &end_filter) {
-            if !events.is_empty() {
-                tracing::debug!(
-                    block_id = %block.start_id,
-                    "timeblock_summary: already has end summary, skipping"
-                );
-                return;
-            }
+        // Idempotency check: query eventlog for any summary in this time block
+        if has_existing_summary(&self.eventlog_store, &block, &summary_kind) {
+            tracing::debug!(
+                block_id = %block.start_id,
+                "timeblock_summary: already has summary, skipping"
+            );
+            return;
         }
         tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing completed active block");
 
@@ -474,21 +490,18 @@ impl TimeblockSummaryAgentService {
         };
 
         // Idempotency check: query eventlog for existing summary based on summary_kind
-        let end_time = if block.end_time > 0 {
-            block.end_time as i64
-        } else {
-            chrono::Utc::now().timestamp_millis()
-        };
+        let now = chrono::Utc::now().timestamp_millis() as i64;
         let tag_to_check = match summary_kind {
             SummaryKind::Start => "agent_feedback_start",
             SummaryKind::Stop => "agent_feedback_stop",
             SummaryKind::End => "agent_feedback_end",
             SummaryKind::FeedbackReview => "agent_feedback_review",
         };
+        let block_tag = format!("timeblock:{}", block.start_id);
         let filter = crate::eventlog::EventListFilter {
             since_timestamp: Some(block.start_time as i64),
-            until_timestamp: Some(end_time),
-            tags: vec![tag_to_check.to_string()],
+            until_timestamp: Some(now),
+            tags: vec![tag_to_check.to_string(), block_tag],
             limit: Some(1),
             ..Default::default()
         };
@@ -571,22 +584,13 @@ impl TimeblockSummaryAgentService {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // Idempotency check: query eventlog for existing agent_feedback_review in this time block
-        let review_filter = crate::eventlog::EventListFilter {
-            since_timestamp: Some(block.start_time as i64),
-            until_timestamp: Some(block.end_time as i64),
-            tags: vec!["agent_feedback_review".to_string()],
-            limit: Some(1),
-            ..Default::default()
-        };
-        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &review_filter) {
-            if !events.is_empty() {
-                tracing::debug!(
-                    block_id = %block.start_id,
-                    "timeblock_summary: already has feedback review, skipping"
-                );
-                return;
-            }
+        // Idempotency check: query eventlog for any summary in this time block
+        if has_existing_summary(&self.eventlog_store, &block, &SummaryKind::FeedbackReview) {
+            tracing::debug!(
+                block_id = %block.start_id,
+                "timeblock_summary: already has summary, skipping"
+            );
+            return;
         }
 
         // Check if a block_completed signal was already processed for the same block

@@ -7,6 +7,22 @@ use std::sync::Arc;
 use super::SummaryKind;
 
 pub const SUBMIT_TIMEBLOCK_SUMMARY_TOOL: &str = "submit_timeblock_summary";
+
+/// Build the timeblock tag for a given block_id.
+pub fn build_block_tag(block_id: &str) -> String {
+    format!("timeblock:{}", block_id)
+}
+
+/// Build tags for summary events based on summary_kind and block_id.
+pub fn build_summary_tags(kind: &SummaryKind, block_id: &str) -> Vec<String> {
+    let block_tag = build_block_tag(block_id);
+    match kind {
+        SummaryKind::Start => vec!["agent_feedback".to_string(), "agent_feedback_start".to_string(), block_tag],
+        SummaryKind::Stop => vec!["agent_feedback".to_string(), "agent_feedback_stop".to_string(), block_tag],
+        SummaryKind::End => vec!["agent_feedback".to_string(), "agent_feedback_end".to_string(), block_tag],
+        SummaryKind::FeedbackReview => vec!["agent_feedback".to_string(), "agent_feedback_review".to_string(), block_tag],
+    }
+}
 pub const GET_RECENT_EVENTS_TOOL: &str = "get_recent_events";
 pub const GET_BLOCK_FEEDBACK_TOOL: &str = "get_block_feedback";
 
@@ -332,12 +348,7 @@ pub fn submit_timeblock_summary_tool(
             }
 
             // Write to eventlog with appropriate tags based on summary_kind
-            let tags = match kind_expected {
-                SummaryKind::Start => vec!["agent_feedback".to_string(), "agent_feedback_start".to_string()],
-                SummaryKind::Stop => vec!["agent_feedback".to_string(), "agent_feedback_stop".to_string()],
-                SummaryKind::End => vec!["agent_feedback".to_string(), "agent_feedback_end".to_string()],
-                SummaryKind::FeedbackReview => vec!["agent_feedback".to_string(), "agent_feedback_review".to_string()],
-            };
+            let tags = build_summary_tags(&kind_expected, &block_id);
             let event = crate::eventlog::EventRecord {
                 id: uuid::Uuid::new_v4().to_string(),
                 timestamp: chrono::Utc::now().timestamp_millis(),
