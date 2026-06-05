@@ -319,7 +319,7 @@ pub fn submit_timeblock_summary_tool(
 
             let title = match summary_kind {
                 "start" => format!("## 时间块开始\n\n**{}** 已启动。", block_id),
-                "end" => format!("## 时间块结束总结\n\n**{}** 已结束。", block_id),
+                "end" => format!("## 时间块总结\n\n**{}** 已停止。", block_id),
                 _ => unreachable!(),
             };
 

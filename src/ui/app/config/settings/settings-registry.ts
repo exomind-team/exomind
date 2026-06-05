@@ -1886,7 +1886,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: '启用时间块自动总结',
     icon: ScrollText,
     category: 'ai',
-    description: '时间块结束时自动使用 AI 生成结构化总结，写入 agent_feedback 事件。',
+    description: '时间块停止或提交反馈时自动使用 AI 生成结构化总结，写入 agent_feedback 事件。',
     rowTestId: 'new-settings-builtin-timeblock-summary-enabled-row',
     controlTestId: 'new-settings-builtin-timeblock-summary-enabled-switch',
     type: 'boolean',
@@ -1904,8 +1904,8 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     type: 'enum',
     multiSelect: true,
     options: [
-      { label: '时间块结束', value: 'block_completed' },
-      { label: '用户提交反馈', value: 'block_feedback' },
+      { label: '停止时间块', value: 'block_completed' },
+      { label: '提交反馈', value: 'block_feedback' },
     ],
     get: () => {
       const config = getBuiltinTimeblockSummarySubscriptions();

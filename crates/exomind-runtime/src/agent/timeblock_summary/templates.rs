@@ -147,12 +147,12 @@ pub fn build_start_prompt(ctx: &CollectedContext, gap_context: Option<&crate::ti
     )
 }
 
-/// Build the prompt for an end summary (timeblock completed).
+/// Build the prompt for an end summary (timeblock stopped or feedback submitted).
 pub fn build_end_prompt(ctx: &CollectedContext) -> String {
     let context_section = ctx.to_prompt_section();
 
     format!(
-        r#"当前 Runtime 发来了 completed 时间块结束信号。
+        r#"当前 Runtime 发来了时间块停止信号（用户点击「停止时间块」或「提交反馈」）。
 
 ## 预填上下文
 

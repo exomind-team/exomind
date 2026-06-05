@@ -617,7 +617,7 @@ impl TimeblockSummaryAgentService {
             action_type: "signal".to_string(),
             description: format!("收到{}：{}", match kind {
                 SummaryKind::Start => "时间块开始信号",
-                SummaryKind::End => "时间块结束信号",
+                SummaryKind::End => "时间块停止信号",
                 SummaryKind::FeedbackReview => "用户反馈",
             }, block.name),
             energy_before: initial_energy,
