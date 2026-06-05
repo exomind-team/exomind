@@ -1212,14 +1212,19 @@ type Workspace = {
 
 ## 13. 典型场景映射
 
-### 13.1 时间块结束后的认知处理
+### 13.1 时间块停止/结束后的认知处理
 
 推荐链路：
 
-1. `TimeBlockActor` 发布 `timeblock.completed`
-2. 通过 `Connection` 路由到专门的 `Agent`
-3. 该 `Agent` 读取相关 `Workspace / EventLog / Context / Memory`
-4. 生成总结、建议、后续动作
+1. 用户点击「停止时间块」→ `TimeBlockActor` 发布 `timeblock.replication.completed`
+2. `timeblock_summary` Agent 收到信号，生成结束总结
+3. 用户填写反馈 → 点击「提交」→ `TimeBlockActor` 发布 `timeblock.block_feedback.created`
+4. `timeblock_summary` Agent 收到信号，生成用户反馈核验
+
+**时间块生命周期**：
+- 时间块开始 → 时间块暂停 → 时间块继续/恢复 → 时间块停止 → 用户发反馈 → 时间块结束
+- **时间块停止**：专注过程结束，进入复盘总结反馈环节
+- **时间块结束**：用户反馈结束，正式标记时间块范围终止
 
 这里的认知处理对象应明确建模为 `Agent`，不与 `Actor` 混名。
 

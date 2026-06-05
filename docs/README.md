@@ -66,7 +66,7 @@
 - [Playwright E2E](development/playwright-e2e-runtime.md) -- Playwright E2E 测试运行指南
 - [端口环境配置](development/port-env-configuration.md) -- 多 Worktree 端口配置指南
 - [PR 审核证据模板](development/pr-review-evidence-template.md) -- 每轮提交后 PR 评论模板
-- [信号池时间块反馈](development/signal-pool-timeblock-feedback.md) -- 时间块结束 Agent 自动反馈
+- [信号池时间块反馈](development/signal-pool-timeblock-feedback.md) -- 时间块停止/结束 Agent 自动反馈
 - [团队协作规范](development/team-collaboration.md) -- 多角色团队协作流程
 - [团队调度经验](development/team-scheduling.md) -- 多 Agent 团队调度实践
 - [Termux 环境](development/termux-environment.md) -- Android Termux 环境编译运行指南
