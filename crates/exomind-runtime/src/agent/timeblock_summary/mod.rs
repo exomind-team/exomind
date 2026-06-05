@@ -2033,4 +2033,23 @@ mod tests {
         };
         assert_eq!(calculate_initial_energy(&pause_block), 120);
     }
+
+    #[test]
+    fn different_agents_have_different_max_energy() {
+        use crate::energy::AgentEnergy;
+
+        // timeblock_summary uses DEFAULT_MAX (100)
+        assert_eq!(ENERGY_MAX, 100);
+
+        // life-alpha uses 200
+        let life_alpha_energy = AgentEnergy::new(200, 5);
+        assert_eq!(life_alpha_energy.max(), 200);
+
+        // heartbeat uses 100
+        let heartbeat_energy = AgentEnergy::new(100, 10);
+        assert_eq!(heartbeat_energy.max(), 100);
+
+        // Verify they don't interfere with each other
+        assert_ne!(life_alpha_energy.max(), heartbeat_energy.max());
+    }
 }
