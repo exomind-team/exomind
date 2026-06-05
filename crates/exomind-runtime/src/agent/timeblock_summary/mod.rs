@@ -1064,6 +1064,13 @@ impl TimeblockSummaryAgentService {
                         error = %e,
                         "timeblock_summary: broker error"
                     );
+                    // Write broker error to eventlog for UI visibility
+                    self.write_broker_error_event(
+                        &block,
+                        total_rounds,
+                        &e.to_string(),
+                        &source_meta,
+                    ).await;
                     break;
                 }
             }
@@ -1337,6 +1344,49 @@ impl TimeblockSummaryAgentService {
                     "block_id": block.start_id,
                     "total_rounds": total_rounds,
                     "status": "energy_depleted",
+                    "source": {
+                        "deviceName": source_meta.device_name,
+                        "platform": source_meta.platform,
+                        "provider": source_meta.provider,
+                        "model": source_meta.model,
+                        "app": "ExoMind",
+                    },
+                })),
+            },
+        );
+    }
+
+    async fn write_broker_error_event(
+        &self,
+        block: &TimeBlockData,
+        total_rounds: usize,
+        error: &str,
+        source_meta: &AgentSourceMetadata,
+    ) {
+        let content = format!(
+            "## ⚠️ 时间块总结 Agent Broker 错误\n\n\
+             **块 ID**: {}\n\
+             **对话轮数**: {}\n\
+             **错误信息**: {}",
+            block.start_id,
+            total_rounds,
+            error,
+        );
+
+        let _ = self.eventlog_store.append_event(
+            None,
+            EventRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                timestamp: chrono::Utc::now().timestamp_millis(),
+                content,
+                tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
+                refs: vec![],
+                metadata: Some(serde_json::json!({
+                    "agent": "timeblock_summary",
+                    "block_id": block.start_id,
+                    "total_rounds": total_rounds,
+                    "status": "broker_error",
+                    "error": error,
                     "source": {
                         "deviceName": source_meta.device_name,
                         "platform": source_meta.platform,
