@@ -1865,7 +1865,7 @@ fn format_feedback_clock(ts: u64) -> String {
     chrono::Local
         .timestamp_millis_opt(ts as i64)
         .single()
-        .map(|dt| dt.format("%H:%M:%S").to_string())
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
         .unwrap_or_else(|| "--:--:--".to_string())
 }
 
