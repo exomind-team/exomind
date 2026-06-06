@@ -9,6 +9,7 @@ export function RoutesTabView({
   onDelete,
   onEdit,
   onAdd,
+  isConnecting = false,
 }: {
   routes: SignalRoute[];
   hostLabel?: string;
@@ -16,6 +17,7 @@ export function RoutesTabView({
   onDelete: (routeId: string) => Promise<void>;
   onEdit: (routeId: string) => void;
   onAdd: () => void;
+  isConnecting?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -45,9 +47,18 @@ export function RoutesTabView({
       {/* Table */}
       {routes.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-12 text-center">
-          <Waypoints size={32} className="text-[#A8A29E]" />
-          <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">暂无信号路由</p>
-          <p className="text-xs text-[#A8A29E]">点击「添加路由」创建第一条路由</p>
+          {isConnecting ? (
+            <>
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#C75B3A] border-t-transparent" />
+              <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">连接建立中…</p>
+            </>
+          ) : (
+            <>
+              <Waypoints size={32} className="text-[#A8A29E]" />
+              <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">暂无信号路由</p>
+              <p className="text-xs text-[#A8A29E]">点击「添加路由」创建第一条路由</p>
+            </>
+          )}
         </div>
       ) : (
         <div className="overflow-hidden rounded-[10px] border border-[#E7E3E0] dark:border-[#292524]">

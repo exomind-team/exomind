@@ -8997,6 +8997,7 @@ export function AgentsPage() {
       );
     }
     if (viewMode === "list") {
+      const isConnecting = !runtimeServiceStatus?.running;
       return (
         <ListTabView
           sections={listSections}
@@ -9009,6 +9010,7 @@ export function AgentsPage() {
           }}
           signalRouteRows={signalRouteRows}
           onOpenRoute={openRouteEdit}
+          isConnecting={isConnecting}
         />
       );
     }
@@ -9022,6 +9024,7 @@ export function AgentsPage() {
       );
     }
     if (viewMode === "routes") {
+      const isConnecting = !runtimeServiceStatus?.running;
       return (
         <RoutesTabView
           routes={signalRoutes}
@@ -9030,6 +9033,7 @@ export function AgentsPage() {
           onDelete={handleRouteDelete}
           onEdit={(routeId) => openRouteEdit(routeId)}
           onAdd={() => openRouteEdit(null)}
+          isConnecting={isConnecting}
         />
       );
     }
