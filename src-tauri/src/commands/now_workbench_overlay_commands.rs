@@ -42,14 +42,8 @@ pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
 
-    let builder = if let Some(data_dir) =
-        resolve_overlay_webview_data_dir(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL)
-    {
-        builder.data_directory(data_dir)
-    } else {
-        builder
-    };
-
+    // 不设置独立 data_directory，让 overlay 共享主窗口的 localStorage，
+    // 确保 profile session 等状态一致。
     let window = builder.build().map_err(|error| error.to_string())?;
     position_now_workbench_overlay_default(app, &window)
 }

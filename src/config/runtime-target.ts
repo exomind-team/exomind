@@ -239,16 +239,19 @@ export async function fetchEmbeddedPortFromIpc(): Promise<void> {
 
 function resolveEmbeddedPort(): number {
   // 使用 IPC 获取的真实端口（由 fetchEmbeddedPortFromIpc / updateEmbeddedPortFromTransport 设置）。
-  // Tauri 环境中不应 fallback 到默认端口——如果 IPC 端口未设置，说明初始化流程有问题。
-  if (_ipcPort !== null) return _ipcPort;
+  if (_ipcPort !== null) {
+    console.log('[runtime-target] resolveEmbeddedPort: using IPC port', _ipcPort);
+    return _ipcPort;
+  }
 
   // 非 Tauri 环境（Web 开发模式）允许 fallback 到默认端口。
   if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
+    console.log('[runtime-target] resolveEmbeddedPort: non-Tauri, using default', DEFAULT_EMBEDDED_RUNTIME_PORT);
     return DEFAULT_EMBEDDED_RUNTIME_PORT;
   }
 
-  // Tauri 环境中 IPC 端口未设置——返回默认端口，但后续调用应由 IPC 更新。
-  // 这是初始化时序问题的防御性 fallback，不应成为常态。
+  // Tauri 环境中 IPC 端口未设置——返回默认端口。
+  console.warn('[runtime-target] resolveEmbeddedPort: Tauri but _ipcPort is null, using default', DEFAULT_EMBEDDED_RUNTIME_PORT);
   return DEFAULT_EMBEDDED_RUNTIME_PORT;
 }
 

@@ -4,6 +4,7 @@ import { NowWorkbenchOverlayPage } from './pages/NowWorkbenchOverlayPage';
 import { bootstrapBeforeRender } from './bootstrap-before-render';
 import { fetchEmbeddedPortFromIpc } from './config/runtime-target';
 import { hydratePersistedRuntimeTargetConfig } from './config/runtime-target-mode';
+import { ensureProfileStorageMigrated } from '@/lib/profile/profile-storage';
 import './index.css';
 
 document.documentElement.style.background = 'transparent';
@@ -21,6 +22,7 @@ function renderApp(): void {
 async function bootstrapApp(): Promise<void> {
   await fetchEmbeddedPortFromIpc();
   await hydratePersistedRuntimeTargetConfig();
+  ensureProfileStorageMigrated();
 }
 
 void bootstrapBeforeRender(bootstrapApp, renderApp);

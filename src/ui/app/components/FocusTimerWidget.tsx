@@ -227,6 +227,7 @@ export const FocusTimerWidget = forwardRef<
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const selectableTasks = usePrestartSelectableTasks();
+  console.log(`[FocusTimer] selectableTasks: ${selectableTasks.length} tasks, first: ${selectableTasks[0]?.title ?? 'none'}`);
   const [internalSelectedTaskIds, setInternalSelectedTaskIds] = useState<
     string[]
   >([]);
