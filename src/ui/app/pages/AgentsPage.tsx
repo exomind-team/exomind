@@ -6306,27 +6306,29 @@ export function AgentsPage() {
     history: SignalEvent[];
   } | null> => {
     try {
-      const routeService = new SignalRouteService({ host });
       const runtimeClient = new RuntimeClient();
       const runtimeBaseUrl = resolveRuntimeHostBaseUrl(host);
       const runtimeHeaders = buildRuntimeAuthHeaders(host.authToken);
       const [
         routes,
         agentsResult,
-        businessHistoryResponse,
-        proofHistoryResponse,
+        businessHistory,
+        proofHistory,
         energyResult,
       ] = await Promise.all([
-        routeService.listRoutes(),
+        fetchRuntimeJsonWithTimeout<SignalRoute[]>(
+          `${runtimeBaseUrl}/signal-routes`,
+          { headers: runtimeHeaders },
+        ),
         runtimeClient.getAgents(host),
-        fetch(
+        fetchRuntimeJsonWithTimeout<SignalEvent[]>(
           `${runtimeBaseUrl}/signals/history?limit=120&exclude_topic_prefix=${encodeURIComponent(LINK_PROOF_TOPIC_PREFIX)}`,
           { headers: runtimeHeaders },
-        ).catch(() => null),
-        fetch(
+        ).catch(() => []),
+        fetchRuntimeJsonWithTimeout<SignalEvent[]>(
           `${runtimeBaseUrl}/signals/history?limit=120&topic_prefix=${encodeURIComponent(LINK_PROOF_TOPIC_PREFIX)}`,
           { headers: runtimeHeaders },
-        ).catch(() => null),
+        ).catch(() => []),
         runtimeClient
           .getAllEnergy(host)
           .catch(() => ({
@@ -6348,12 +6350,6 @@ export function AgentsPage() {
             ...agent,
             energy: energyMap.get(agent.id),
           }))
-        : [];
-      const businessHistory = businessHistoryResponse?.ok
-        ? ((await businessHistoryResponse.json()) as SignalEvent[])
-        : [];
-      const proofHistory = proofHistoryResponse?.ok
-        ? ((await proofHistoryResponse.json()) as SignalEvent[])
         : [];
       const history = mergeSignalHistoryEvents(businessHistory, proofHistory);
       return {

@@ -9,6 +9,7 @@
 use crate::commands::runtime_commands::RuntimeProcessState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
 
 // ─── response types (mirrors route structs) ──────────────────────────────────
@@ -60,6 +61,8 @@ pub struct BodyStatus {
 
 // ─── helper ──────────────────────────────────────────────────────────────────
 
+const WORKSPACE_PROXY_TIMEOUT: Duration = Duration::from_millis(3500);
+
 fn base_url(state: &State<'_, Arc<RuntimeProcessState>>) -> Result<String, String> {
     state.inner().runtime_base_url()
 }
@@ -68,6 +71,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, String
     let client = reqwest::Client::new();
     let resp = client
         .get(url)
+        .timeout(WORKSPACE_PROXY_TIMEOUT)
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {e}"))?;
@@ -142,7 +146,7 @@ pub async fn get_agent_workspace_actions(
     limit: Option<u32>,
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<ActionsResponse, String> {
-    let mut url = format!("{}/agents/{agent_id}/actions", base_url(&state)?);
+    let mut url = format!("{}/agents/{agent_id}/workspace/actions", base_url(&state)?);
     if let Some(n) = limit {
         url.push_str(&format!("?limit={n}"));
     }

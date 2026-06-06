@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { invoke } from '@tauri-apps/api/core';
 import { WorkspaceTabs } from '@/ui/app/pages/agents/WorkspaceTabs';
 
 const runtimeHostServiceMocks = vi.hoisted(() => ({
@@ -91,6 +92,8 @@ vi.mock('@/lib/services/runtime-host.service', () => ({
 
 describe('workspace tabs ui（工作区标签页样式）', () => {
   beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    delete (window as Window & { __TAURI__?: unknown }).__TAURI__;
     runtimeHostServiceMocks.listHosts.mockResolvedValue([
       { host: '127.0.0.1', port: 1949 },
     ]);
@@ -176,6 +179,12 @@ describe('workspace tabs ui（工作区标签页样式）', () => {
     vi.stubGlobal('fetch', fetchMock);
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    delete (window as Window & { __TAURI__?: unknown }).__TAURI__;
+  });
+
   it('uses card-aligned tabs chrome and semantic energy colors（标签容器与能量增减应使用设计系统 token）', async () => {
     render(<WorkspaceTabs agentId="life-alpha" />);
 
@@ -192,5 +201,25 @@ describe('workspace tabs ui（工作区标签页样式）', () => {
 
     expect(screen.getByText('+4').className).toContain('text-success');
     expect(screen.getByText('-6').className).toContain('text-destructive');
+  });
+
+  it('falls back to HTTP workspace actions when Tauri invoke fails（Tauri IPC 失败后应回退到 workspace actions）', async () => {
+    Object.defineProperty(window, '__TAURI__', {
+      value: {},
+      configurable: true,
+    });
+    vi.mocked(invoke).mockRejectedValue(new Error('ipc failed'));
+
+    render(<WorkspaceTabs agentId="life-alpha" />);
+
+    fireEvent.click(screen.getByRole('tab', { name: '行动日志' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('最近 2 条记录')).toBeInTheDocument();
+    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/agents/life-alpha/workspace/actions?limit=50'),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 });

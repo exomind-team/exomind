@@ -52,10 +52,30 @@ interface WorkspaceStatus {
 // Helpers — Tauri invoke (desktop) with HTTP fallback (web)
 // ---------------------------------------------------------------------------
 
+const WORKSPACE_REQUEST_TIMEOUT_MS = 3500;
+
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timeout（请求超时）`));
+    }, WORKSPACE_REQUEST_TIMEOUT_MS);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  });
+}
+
 async function fetchWorkspaceKnowledgeList(agentId: string): Promise<KnowledgeListResponse | null> {
   try {
     if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
-      return await invoke<KnowledgeListResponse>('get_agent_workspace_knowledge_list', { agentId });
+      return await withTimeout(
+        invoke<KnowledgeListResponse>('get_agent_workspace_knowledge_list', { agentId }),
+        'get_agent_workspace_knowledge_list',
+      );
     }
     return await httpGet<KnowledgeListResponse>(agentId, 'knowledge');
   } catch { return null; }
@@ -64,28 +84,42 @@ async function fetchWorkspaceKnowledgeList(agentId: string): Promise<KnowledgeLi
 async function fetchWorkspaceKnowledgeFile(agentId: string, filename: string): Promise<string | null> {
   try {
     if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
-      return await invoke<string>('get_agent_workspace_knowledge', { agentId, filename });
+      return await withTimeout(
+        invoke<string>('get_agent_workspace_knowledge', { agentId, filename }),
+        'get_agent_workspace_knowledge',
+      );
     }
     return await httpText(agentId, `knowledge/${filename}`);
   } catch { return null; }
 }
 
 async function fetchWorkspaceActions(agentId: string, limit = 50): Promise<ActionsResponse | null> {
-  try {
-    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
-      const result = await invoke<ActionsResponse>('get_agent_workspace_actions', { agentId, limit });
+  if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
+    try {
+      const result = await withTimeout(
+        invoke<ActionsResponse>('get_agent_workspace_actions', { agentId, limit }),
+        'get_agent_workspace_actions',
+      );
       if (result) return result;
-      // Fallback: built-in agents don't have workspace — try Runtime API
-      return await httpGet<ActionsResponse>(agentId, 'actions');
+    } catch {
+      // Fall through to HTTP; release IPC must never keep the tab loading forever.
     }
+  }
+
+  try {
     return await httpGet<ActionsResponse>(agentId, `actions?limit=${limit}`);
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function fetchWorkspaceSoul(agentId: string): Promise<string | null> {
   try {
     if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
-      const result = await invoke<string>('get_agent_workspace_soul', { agentId });
+      const result = await withTimeout(
+        invoke<string>('get_agent_workspace_soul', { agentId }),
+        'get_agent_workspace_soul',
+      );
       if (result) return result;
       // Fallback: built-in agents don't have workspace — try Runtime API
       return await httpText(agentId, 'soul');
@@ -97,7 +131,10 @@ async function fetchWorkspaceSoul(agentId: string): Promise<string | null> {
 async function fetchWorkspaceStatus(agentId: string): Promise<WorkspaceStatus | null> {
   try {
     if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
-      return await invoke<WorkspaceStatus>('get_agent_workspace_status', { agentId });
+      return await withTimeout(
+        invoke<WorkspaceStatus>('get_agent_workspace_status', { agentId }),
+        'get_agent_workspace_status',
+      );
     }
     return await httpGet<WorkspaceStatus>(agentId, 'status');
   } catch { return null; }
@@ -112,7 +149,7 @@ async function httpGet<T>(agentId: string, path: string): Promise<T | null> {
   for (const host of candidates) {
     try {
       const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      const resp = await fetch(url, { signal: AbortSignal.timeout(WORKSPACE_REQUEST_TIMEOUT_MS) });
       if (resp.ok) return await resp.json() as T;
     } catch { /* try next candidate */ }
   }
@@ -127,7 +164,7 @@ async function httpText(agentId: string, path: string): Promise<string | null> {
   for (const host of candidates) {
     try {
       const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      const resp = await fetch(url, { signal: AbortSignal.timeout(WORKSPACE_REQUEST_TIMEOUT_MS) });
       if (resp.ok) return await resp.text();
     } catch { /* try next candidate */ }
   }
