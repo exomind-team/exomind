@@ -1,7 +1,7 @@
 # Now Workbench Overlay release/debug 行为不一致诊断
 
-> 日期：2026-06-07  
-> 状态：诊断结论、修复边界与分阶段实施计划  
+> 日期：2026-06-07
+> 状态：Phase 0 止血已落地；Phase 1+ 待根治
 > 范围：0.4.16 版本悬浮工作台（`now-workbench-overlay`）在 debug 构建中可用、release 构建中失效的问题。
 
 ## 一句话结论
@@ -9,6 +9,17 @@
 release/debug 行为不一致不是 release 单独坏了，而是 debug 偶然满足了错误假设：UI 在 RT 真实端口与运行状态稳定之前就开始工作，并用默认端口、localStorage 镜像或一次性事件作为临时真相源。
 
 正确方向是建立 **RT readiness gate**：UI 在 RT 明确进入可用状态前只能显示「启动中 / 连接中」，不得发起任务、时间块、事件流、配置等业务读写，也不得自行裁决当前端口或当前档案。
+
+## 当前代码状态
+
+Phase 0 止血修复已落地到 `dev`：
+
+- 提交：`c6a8fac9 fix(overlay): gate workbench on runtime readiness`
+- 原子端口发布：`rememberEmbeddedRuntimeStatus()` 先更新 `_ipcPort`，再持久化 runtime status 并广播 target changed。
+- 调用顺序收敛：`runtime-config-adapter`、`useSignalStream`、`tauri-runtime-adapter` 不再手写“先广播、后更新端口”的顺序。
+- overlay 启动门禁：`NowWorkbenchOverlayPage` 在 Tauri embedded RT `running && port > 0` 前只显示 `now-overlay-runtime-starting`，不挂载 controller / SSE。
+- release 可观测性：`now-workbench-overlay` capability 增加 `log:default`，release 日志能进入 Tauri log。
+- 文档定位：本文件记录 release/debug 不一致根因、已落地止血、后续根治边界；不是普通变更日志。
 
 ## 用户侧架构判断
 
@@ -136,19 +147,41 @@ overlay 侧只主动请求一次 profile：
 
 如果主窗口监听尚未就绪，或者 profile 当时尚未进入 `useSyncStore`，overlay 可能长期停在 profile 未就绪状态。
 
-## 已复现的测试证据
+## 回归测试证据
 
-定向运行：
+原始复现用例：
 
 ```powershell
 npx vitest run tests/unit/ui/use-signal-stream.m4.test.tsx -t "waits for embedded runtime" --reporter=verbose
 ```
 
-结果：失败。
+修复前结果：失败。
 
 失败含义：测试准备了第二次 `runtime_service_status` 返回真实端口 `48202`，但 `SignalStreamService` 实际仍以 `9124` 创建连接。这个失败与 release 版 overlay SSE 连错端口的问题一致。
 
 这说明问题不是现场日志混乱导致的错觉，而是当前代码路径可稳定复现的时序 bug。
+
+修复后最小回归：
+
+```powershell
+npx vitest run tests/unit/config/runtime-target.test.ts tests/unit/pages/NowWorkbenchOverlayPage.runtime-readiness.test.tsx tests/unit/tauri/now-workbench-overlay-capability.test.ts --reporter=verbose
+```
+
+结果：`3` 个测试文件、`13` 个测试通过。
+
+覆盖点：
+
+- runtime target changed 广播前已更新 IPC 端口缓存。
+- overlay 在 RT 未 running 前不挂载业务 hook。
+- overlay release capability 包含 `log:default`。
+
+补充定向回归：
+
+```powershell
+npx vitest run tests/unit/ui/use-signal-stream.m4.test.tsx -t "waits for embedded runtime" --reporter=verbose
+```
+
+结果：通过；`SignalStreamService` 使用第二次 status 返回的随机端口 `48202`，不再使用默认 `9124`。
 
 ## 为什么 debug 看起来正常
 
@@ -172,6 +205,48 @@ release 构建更接近真实环境：
 - overlay 缺少 log capability，失败后观察困难。
 
 因此 release 不是制造了新问题，而是把 debug 掩盖的系统竞态暴露出来。
+
+## Release smoke 证据
+
+验证方式必须模拟普通用户路径：正常构建 release exe、直接打开构建后的 exe，不注入固定 RT 端口。
+
+构建前显式清空端口环境变量：
+
+```powershell
+Remove-Item Env:\EXOMIND_RT_PORT -ErrorAction SilentlyContinue
+Remove-Item Env:\EXOMIND_RT_BIND -ErrorAction SilentlyContinue
+Remove-Item Env:\VITE_EXOMIND_RT_PORT -ErrorAction SilentlyContinue
+Remove-Item Env:\VITE_EXOMIND_RT_BIND -ErrorAction SilentlyContinue
+bun run tauri build --no-bundle
+```
+
+本次验证现场：
+
+| 实例 | PID | exe | RT 监听端口 | 结论 |
+|------|-----|-----|-------------|------|
+| 旧版正在使用实例 | `66184` | `H:\A137442\Program\Tool\ExoMind\exomind.exe` | `62417` | 保留运行，不触碰 |
+| 新 release 构建产物 | `142120` | `G:\exomind-cargo-target\release\exomind.exe` | `47072` | 自动避开冲突并启动成功 |
+
+`47072` 是本次运行自动选择的空闲端口，不是固定配置。验收重点是“release 版能在 `62417` 被占用时自动选择新端口，并且 UI / SSE 使用同一个新端口”。
+
+HTTP 验证：
+
+- `http://127.0.0.1:47072/health` -> `200`
+- `http://127.0.0.1:47072/topology` -> `200`
+- `http://127.0.0.1:47072/config?scope=user` -> `200`
+- `http://127.0.0.1:47072/timeblocks/active` -> `200`
+- `http://127.0.0.1:47072/tasks?include_cancelled=true` -> `200`
+
+Tauri log 验证：
+
+```text
+[SignalStream] connect:start target=http://127.0.0.1:47072 agentId=ui heartbeat=30s resume=no
+[SignalTransport] openStream:start url=http://127.0.0.1:47072/signals/stream?agent_id=ui&heartbeat_interval=30 lastEventId=none auth=none
+[SignalStream] SSE connection started (embedded:127.0.0.1:47072)
+[SignalTransport] openStream:response url=http://127.0.0.1:47072/signals/stream?agent_id=ui&heartbeat_interval=30 status=200 contentType=text/event-stream body=present
+```
+
+结论：Phase 0 止血标准已满足。release 构建在端口冲突场景下不再落回默认 `9124`，也没有误用旧实例端口 `62417`。
 
 ## 根除方向
 
@@ -301,22 +376,23 @@ profile 不应依赖一次性事件碰巧送达。
 
 ## 分阶段实施计划
 
-### Phase 0：止血修复
+### Phase 0：止血修复（已完成）
 
 目标：让 release overlay 不再在端口未知时连错 `9124`，并恢复可观测性。
 
-改动：
+已完成改动：
 
-1. 在 `src/config/runtime-target.ts` 增加原子状态发布函数。
-2. 修正所有 `persistEmbeddedRuntimeStatus()` 与 `updateEmbeddedPortFromTransport()` 的调用顺序。
+1. 在 `src/config/runtime-target.ts` 增加 `rememberEmbeddedRuntimeStatus()` 原子状态发布函数。
+2. 修正 `persistEmbeddedRuntimeStatus()` 与 `updateEmbeddedPortFromTransport()` 的调用顺序。
 3. 在 overlay 根部加入 RT readiness gate，ready 前不挂载业务层。
 4. 给 `src-tauri/capabilities/now-workbench-overlay.json` 增加 `log:default`。
 
 验收：
 
 - `useSignalStream` 在 RT 第二次返回随机端口时连接随机端口，而不是 `9124`。
-- overlay 在 RT 未 running 前不发起 `/tasks`、`/timeblocks/active`、SSE 请求。
+- overlay 在 RT 未 running 前不挂载 controller / SSE。
 - release overlay 日志可以通过 Tauri log 观察。
+- release exe 在已有 `62417` 旧实例占用时自动选择新端口，并让 HTTP / SSE 使用同一端口。
 
 ### Phase 1：启动协议对齐
 
@@ -392,6 +468,15 @@ profile 不应依赖一次性事件碰巧送达。
 - Tauri embedded 模式下，“端口未知”不能被表达成“默认端口 `9124`”。
 - 主窗口、overlay 和后续其他 WebView 使用同一套 readiness 状态机。
 - RT 生命周期真相由 Tauri 控制面裁决，业务真相由 RT 数据面裁决，UI 不自行裁决。
+
+## 已知未根治边界
+
+Phase 0 只解决 release 发版阻塞级问题，不等于 runtime target 架构根治完成：
+
+- `resolveEmbeddedPort()` 在 Tauri `_ipcPort` 为空时仍会 fallback 到 `9124`，但 overlay 已通过 readiness gate 避免业务层抢跑。
+- overlay 入口仍未完全补齐主窗口 `bootstrapRuntimeConfig()` 等价链路；后续应统一到 readiness bootstrap。
+- profile 握手仍依赖 Tauri event 与 overlay 主动请求，尚未升级为可重试 / 可订阅协议。
+- `useSignalStream` 完整测试文件存在与本次端口修复无关的既有 fixture 失败，应单独整理，不应混入本轮止血。
 
 ## 建议验证
 

@@ -62,7 +62,7 @@
 - [RT curl / Agent 接入 Skill](../skills/exomind-rt-agent-access/SKILL.md) -- raw RT curl/HTTP 联调唯一真源
 - [Git 规范](development/git-spec.md) -- Git 工作流规范（权威版）
 - [Runtime Agent API](development/exomind-runtime-agents-api.md) -- Runtime Agent HTTP/SSE 接口说明
-- [悬浮工作台 release/debug 诊断](development/now-workbench-overlay-release-debug-diagnosis.md) -- 0.4.16 overlay 端口、RT readiness、日志与 profile 分叉问题诊断和分阶段修复计划
+- [悬浮工作台 release/debug 诊断](development/now-workbench-overlay-release-debug-diagnosis.md) -- 0.4.16 overlay 端口、RT readiness、release smoke 证据、已止血边界与后续根治计划
 - [Issue 追踪罗盘](development/issue-tracking-compass.md) -- Issue 去重/决策/新建/追加流程
 - [Playwright E2E](development/playwright-e2e-runtime.md) -- Playwright E2E 测试运行指南
 - [端口环境配置](development/port-env-configuration.md) -- 多 Worktree 端口配置指南
