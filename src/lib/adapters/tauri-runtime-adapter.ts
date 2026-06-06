@@ -8,8 +8,7 @@ import type {
 import type { RuntimeServiceStatus } from '@/lib/types/agent-hub';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
-  persistEmbeddedRuntimeStatus,
-  updateEmbeddedPortFromTransport,
+  rememberEmbeddedRuntimeStatus,
 } from '@/config/runtime-target';
 
 const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
@@ -19,14 +18,13 @@ const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
   error: 'tauri runtime control only',
 };
 
-function rememberEmbeddedRuntimeStatus(status: RuntimeServiceStatus): RuntimeServiceStatus {
+function rememberRunningEmbeddedRuntimeStatus(status: RuntimeServiceStatus): RuntimeServiceStatus {
   if (status.running) {
-    persistEmbeddedRuntimeStatus({
+    rememberEmbeddedRuntimeStatus({
       host: status.host,
       port: status.port,
       hostId: status.hostId,
     });
-    updateEmbeddedPortFromTransport(status.port);
   }
   return status;
 }
@@ -40,7 +38,7 @@ export class TauriRuntimeAdapter implements IRuntimePort {
       host: input.host,
       port: input.port,
     });
-    return rememberEmbeddedRuntimeStatus(status);
+    return rememberRunningEmbeddedRuntimeStatus(status);
   }
 
   async stopRuntime(): Promise<RuntimeServiceStatus> {
@@ -48,7 +46,7 @@ export class TauriRuntimeAdapter implements IRuntimePort {
       return DEFAULT_RUNTIME_STATUS;
     }
     const status = await invoke<RuntimeServiceStatus>('runtime_service_stop');
-    return rememberEmbeddedRuntimeStatus(status);
+    return rememberRunningEmbeddedRuntimeStatus(status);
   }
 
   async getStatus(): Promise<RuntimeServiceStatus> {
@@ -56,7 +54,7 @@ export class TauriRuntimeAdapter implements IRuntimePort {
       return DEFAULT_RUNTIME_STATUS;
     }
     const status = await invoke<RuntimeServiceStatus>('runtime_service_status');
-    return rememberEmbeddedRuntimeStatus(status);
+    return rememberRunningEmbeddedRuntimeStatus(status);
   }
 
   async getReachableAddress(remoteHost: string, remotePort: number): Promise<RuntimeReachableAddress> {

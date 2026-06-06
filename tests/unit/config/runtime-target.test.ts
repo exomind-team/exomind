@@ -8,6 +8,7 @@ import {
   getEmbeddedRuntimeNetworkMode,
   getRuntimeTargetMode,
   getSelectedRuntimeTarget,
+  rememberEmbeddedRuntimeStatus,
   resolveEmbeddedRuntimeBindHost,
   setEmbeddedRuntimeNetworkMode,
   setRuntimeExternalAuthToken,
@@ -54,7 +55,7 @@ describe('runtime target config（Runtime 目标配置）', () => {
     });
   });
 
-  it('prefers cached embedded runtime status without exposing auth token（优先使用缓存的内嵌 runtime 状态且不暴露鉴权 token）', () => {
+  it('sanitizes cached embedded runtime status without selecting its stale port（清理缓存的内嵌 runtime 状态但不采用旧端口）', () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
@@ -72,7 +73,7 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
       host: '127.0.0.1',
-      port: 4077,
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
     expect(getSelectedRuntimeTarget().authToken).toBeUndefined();
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).not.toContain('"authSecret"');
@@ -163,5 +164,29 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(() => setRuntimeExternalAddress('http://bad:1949/path')).toThrow();
     expect(() => setRuntimeExternalAddress('no-port')).toThrow();
     expect(() => setRuntimeExternalAddress('127.0.0.1:70000')).toThrow();
+  });
+
+  it('emits the remembered embedded runtime port after updating IPC cache（更新 IPC 缓存后再广播内嵌 Runtime 端口）', () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeRuntimeTargetChanges(listener);
+
+    rememberEmbeddedRuntimeStatus({
+      host: '127.0.0.1',
+      port: 48202,
+      hostId: 'desktop-host',
+    });
+
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'embedded',
+      host: '127.0.0.1',
+      port: 48202,
+    }));
+    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"port":48202');
+
+    unsubscribe();
   });
 });

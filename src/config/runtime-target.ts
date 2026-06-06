@@ -225,9 +225,17 @@ export async function fetchEmbeddedPortFromIpc(): Promise<void> {
   _ipcPortReady = (async () => {
     try {
       // 直接调用 invoke，不依赖 isTauri() 检查。
-      const status = await invoke<{ running: boolean; port: number }>('runtime_service_status');
+      const status = await invoke<{ running: boolean; host?: string; port: number; hostId?: string }>('runtime_service_status');
       if (status.running && status.port > 0) {
-        _ipcPort = status.port;
+        if (status.host) {
+          rememberEmbeddedRuntimeStatus({
+            host: status.host,
+            port: status.port,
+            hostId: status.hostId,
+          });
+          return;
+        }
+        updateEmbeddedPortFromTransport(status.port);
       }
     } catch (error) {
       // IPC 不可用时静默失败
@@ -263,6 +271,11 @@ export function updateEmbeddedPortFromTransport(port: number): void {
   if (port > 0) {
     _ipcPort = port;
   }
+}
+
+export function rememberEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnapshot): void {
+  updateEmbeddedPortFromTransport(status.port);
+  persistEmbeddedRuntimeStatus(status);
 }
 
 export function getPreferredEmbeddedRuntimePort(): number {

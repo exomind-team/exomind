@@ -8,7 +8,6 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { updateEmbeddedPortFromTransport } from '@/config/runtime-target';
 import { isTauri } from '@tauri-apps/api/core';
 import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import { toProposal } from '@/lib/adapters/proposal-rt-payload';
@@ -36,8 +35,8 @@ import { projectReminderReplicationUpsert } from '@/lib/services/ecs-reminder-re
 import { projectTimeBlockCompletedReplication } from '@/lib/services/ecs-timeblock-completed-replication.service';
 import {
   getSelectedRuntimeTarget,
-  persistEmbeddedRuntimeStatus,
   readEmbeddedRuntimeStatus,
+  rememberEmbeddedRuntimeStatus,
   subscribeRuntimeTargetChanges,
   type RuntimeTarget,
 } from '@/config/runtime-target';
@@ -143,13 +142,11 @@ export function useSignalStream(): void {
           try {
             const status = await getRuntimeControlService().getStatus();
             if (status.running) {
-              persistEmbeddedRuntimeStatus({
+              rememberEmbeddedRuntimeStatus({
                 host: status.host,
                 port: status.port,
                 hostId: status.hostId,
               });
-              // 同步更新 IPC 端口缓存，确保后续 resolveEmbeddedPort() 返回正确端口
-              updateEmbeddedPortFromTransport(status.port);
               if (!cancelled) {
                 setRuntimeTargetHydrated(true);
               }
