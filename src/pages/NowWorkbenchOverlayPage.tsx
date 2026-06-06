@@ -3,6 +3,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ArrowUpRight, Expand, Shrink } from 'lucide-react';
+import { useSignalStream } from '@/ui/hooks/useSignalStream';
 import { Button } from '@/components/ui/button';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { FocusTimerWidget, type FocusTimerWidgetHandle } from '@/ui/app/components/FocusTimerWidget';
@@ -285,6 +286,8 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
   }
 
   const controller = useNowWorkbenchOverlayController();
+  // 订阅 RT SSE 信号流，接收时间块暂停等实时更新
+  useSignalStream();
   const onHide = props.onHide ?? (() => {
     void controller.handleHide();
   });

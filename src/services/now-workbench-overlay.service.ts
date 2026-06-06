@@ -24,7 +24,7 @@ class NowWorkbenchOverlayServiceImpl implements NowWorkbenchOverlayService {
   private enabled = getNowWorkbenchOverlayEnabled();
   private sessionHidden = false;
   private unlistenEnabled: (() => void) | null = null;
-  private unlistenOverlayRequest: (() => void) | null = null;
+  private unlistenOverlayRequest: Promise<() => void> | null = null;
 
   async init(): Promise<void> {
     if (this.initialized || !isTauri()) {
@@ -72,6 +72,8 @@ class NowWorkbenchOverlayServiceImpl implements NowWorkbenchOverlayService {
   destroy(): void {
     this.unlistenEnabled?.();
     this.unlistenEnabled = null;
+    this.unlistenOverlayRequest?.then((fn) => fn());
+    this.unlistenOverlayRequest = null;
     this.initialized = false;
     this.sessionHidden = false;
     this.enabled = getNowWorkbenchOverlayEnabled();
