@@ -208,7 +208,7 @@ curl -sS -X POST "http://127.0.0.1:9124/timeblocks/end?user_id=profile-argon" \
   - 含义：专注结束
   - 真相：active block 已进入 `feedback_in_progress`
 - raw `block_end`
-  - 含义：EventLog 文案“时间块结束: ...”
+  - 含义：EventLog 文案“时间块停止: ...”
   - 角色：`POST /timeblocks/stop` 写出的痕迹
   - 关键点：它只表示 stop / 进入反馈阶段，不表示 feedback 已提交
 - `timeblock_ended`

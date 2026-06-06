@@ -8,6 +8,7 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 > **核心约束**：Agent 接入外心的目标是**辅助人类、引导人类成长**，不是替代人类做决策。
 >
 > **定位**：
+>
 > - 本 skill 是 ExoMind Runtime HTTP/curl 接入的唯一真源。
 > - Agent 默认优先使用 `/act/*` feature API；只有 `/act/*` 暂无对应动作，才回退 raw RT 资源路由。
 > - raw RT 资源路由主要用于真相回读、低层排障、联调和兼容期补能力。
@@ -16,11 +17,13 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 > - 若任务是维护本 skill，或刚执行完一次 curl 实测需要回写经验，先读 `references/maintenance.md`，不要只盯主文档。
 >
 > **渐进披露规则**：
+>
 > - 不要默认一次性把全部 references 读入上下文。
 > - 先用本文件确定任务类型，再按需加载 1-2 份最相关的 reference。
 > - 如果任务只涉及 `eventlog`，不要顺手加载 `tasks` 或 `timeblocks` 细节。
 >
 > **同步维护约束**：
+>
 > - 若在实际使用 curl 时发现经验与本 skill 内容冲突，不得直接凭印象修改，必须先结合当前 RT live 版本信息、当前工作区代码、GitHub 对应 issue / PR / 文档信息核验该差异是否已证实为“本文过时”。
 > - 一旦证实过时，则在完成本次 curl 使用后，必须持续回写本 skill 的对应章节或 reference，不能只把经验留在对话、issue 评论或临时笔记里。
 > - 进入维护环节时，必须先反思“本次执行过程相对参考章节出现了哪些新变化或差异”，再定位需要维护的 skill 文档，而不是直接修改主 `SKILL.md`。
@@ -30,7 +33,7 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 
 - 最后更新日期：`2026-05-18`
 - 更新者：`Claude Code`
-- 更新内容概要：`去硬编码：将所有 `http://127.0.0.1:9124` 和 `profile-argon` 替换为 `<RT>` 和 `<PROFILE>` 占位符；新增"设备配置优先"规则，指向 `exomind-monitor` skill 的 `config.json`；禁止凭名字猜测档案`
+- 更新内容概要：`去硬编码：将所有`<http://127.0.0.1:9124`> 和 `profile-argon` 替换为 `<RT>` 和 `<PROFILE>` 占位符；新增"设备配置优先"规则，指向 `exomind-monitor` skill 的 `config.json`；禁止凭名字猜测档案`
 - 核验依据：
   - `GET /version` 等 live 版本信息
   - 当前工作区代码与相关路由实现
@@ -266,7 +269,7 @@ curl.exe -N -X POST "http://<RT>/act/await?user_id=<PROFILE>" \
   - 真相：当前 active block 进入 `feedback_in_progress`
   - 典型场景：用户刚点了 `stop`，准备填写反馈
 - `block_end`
-  - 含义：raw EventLog 中的“时间块结束: ...”文案
+  - 含义：raw EventLog 中的“时间块停止: ...”文案
   - 角色：只是 `POST /timeblocks/stop` 写出的痕迹
   - 关键点：它不是 feedback 完成，不应替代 `timeblock_ended`
 - `timeblock_ended`

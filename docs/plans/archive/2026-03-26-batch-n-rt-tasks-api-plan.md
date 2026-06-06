@@ -13,17 +13,20 @@
 ### 当前代码状态
 
 **任务状态机**（`crates/exomind-runtime/src/task/types.rs`）：
+
 - 5 状态：`Pending → InProgress ⇌ Suspended → Completed / Cancelled`
 - `valid_transitions()` 严格：Pending 只能到 InProgress，InProgress 可到 Suspended/Completed/Cancelled
 - `is_terminal()` 识别 Completed/Cancelled
 
 **任务存储**（`crates/exomind-runtime/src/task/store.rs` + `sqlite_store.rs`）：
+
 - 双后端：Memory + SQLite
 - `validate_terminal_task_update()` 仅冻结 `depends_on` 和 `estimated_minutes`，不冻结 `title`
 - `transition_scoped()` 返回 `(old_status, Task)`
 - SQLite schema：`tasks` 表含 `scope_key, id, title, status, priority, tags_json, parent_id, ...`
 
 **任务路由**（`crates/exomind-runtime/src/routes/tasks.rs`）：
+
 - `PUT /tasks/:id` → `update_task` handler，调用 `task_store.update_scoped()`
 - `POST /tasks/:id/transition` → `transition_task` handler
 - `GET /tasks?status=X` → 已支持单 status 过滤，不支持 tag/parent_id
@@ -31,6 +34,7 @@
 - transition 时发布 `task.transitioned` SignalEvent
 
 **EventLog**（`crates/exomind-runtime/src/routes/eventlog.rs` + `src/eventlog.rs`）：
+
 - HTTP 端点已完整：GET/POST/DELETE /eventlog, watch, mirror, backup/import
 - `EventRecord { id, timestamp, content, tags, metadata }`
 - `append_event(user_id, event)` 写入 + markdown 镜像同步
@@ -38,6 +42,7 @@
 - 当前**不存在**时间块生命周期事件自动写入 eventlog 的逻辑
 
 **时间块**（`crates/exomind-runtime/src/routes/timeblocks.rs` + `src/timeblock.rs`）：
+
 - `PUT /timeblocks/active` 写入活跃时间块
 - `DELETE /timeblocks/active` 删除活跃时间块
 - 无事件日志联动
@@ -47,6 +52,7 @@
 ### 本批次范围
 
 8 个 issue，全部在 Rust RT crate 内完成，涉及：
+
 1. 字段冻结策略扩展（title 终态冻结）
 2. 批量迁移端点
 3. 服务端过滤查询
@@ -436,6 +442,7 @@ async fn list_tasks(
 ```
 
 **设计决策**：tag 和 parent_id 过滤在应用层实现（Rust 内存过滤），不新增 SQL 查询方法。理由：
+
 1. 任务量级通常 < 1000，内存过滤足够快
 2. 避免为每种组合新增 SQL variant
 3. status 已有 SQL 层过滤（现有实现），tag/parent_id 在其结果上二次过滤
@@ -1027,7 +1034,7 @@ fn write_timeblock_eventlog(
 ) {
     let content = match event_type {
         "block_start" => format!("时间块开始: {}", block_name),
-        "block_end" => format!("时间块结束: {}", block_name),
+        "block_end" => format!("时间块停止: {}", block_name),
         "block_pause" => format!("时间块暂停: {}", block_name),
         "block_resume" => format!("时间块恢复: {}", block_name),
         _ => format!("时间块事件: {}", block_name),

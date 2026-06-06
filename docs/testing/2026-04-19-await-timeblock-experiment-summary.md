@@ -44,7 +44,7 @@ timeblock_stopped
 
 ### 2. 时间块结束
 
-当前仓库里这个词如果指的是 raw eventlog 文案“时间块结束: ...”，它对应的是：
+当前仓库里这个词如果指的是 raw eventlog 文案“时间块停止: ...”，它对应的是：
 
 ```text
 block_end
@@ -156,7 +156,7 @@ suspended
 
 - `f5928017-30ab-49bc-a02b-5defb8aa19c7`
   - `block_end`
-  - 内容：`时间块结束: TMCP Task From Proposal 0419`
+  - 内容：`时间块停止: TMCP Task From Proposal 0419`
   - 注意：这里只表示 stop / 进入反馈阶段
 
 - `5b9e4cc3-6b87-416d-bd22-96247a471f81`
@@ -212,7 +212,7 @@ suspended
 
 - `89a0eebb-3c11-4e7b-a632-0c5f3864f40f`
   - `block_end`
-  - 内容：`时间块结束: TMCP Task From Proposal 0419`
+  - 内容：`时间块停止: TMCP Task From Proposal 0419`
   - 仍然只表示 stop / 进入反馈阶段
 
 - `d8aae499-0047-46ee-8940-09da11d08f8f`
