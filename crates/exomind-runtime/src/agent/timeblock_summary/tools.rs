@@ -46,12 +46,14 @@ pub const GET_BLOCK_FEEDBACK_TOOL: &str = "get_block_feedback";
 pub fn exploration_tools(
     block: TimeBlockData,
     eventlog_store: Arc<EventLogStore>,
+    user_id: String,
 ) -> Vec<(ToolDef, ToolFn)> {
     let mut tools = Vec::new();
 
     // Tool 1: get_recent_events - Query recent events across time blocks
     {
         let store = Arc::clone(&eventlog_store);
+        let uid = user_id.clone();
         let def = ToolDef {
             name: GET_RECENT_EVENTS_TOOL.to_string(),
             description: "查询近期事件列表。可用于了解用户最近的活动模式、任务进展等。".to_string(),
@@ -72,6 +74,7 @@ pub fn exploration_tools(
         };
         let fn_impl: ToolFn = Box::new(move |input: Value| {
             let store = Arc::clone(&store);
+            let uid = uid.clone();
             Box::pin(async move {
                 let limit = input
                     .get("limit")
@@ -88,8 +91,9 @@ pub fn exploration_tools(
                     filter.tags = vec![t];
                 }
 
+                let opt_uid = if uid.is_empty() { None } else { Some(uid.as_str()) };
                 let events = store
-                    .list_events_filtered(None, &filter)
+                    .list_events_filtered(opt_uid, &filter)
                     .unwrap_or_default();
                 let result: Vec<Value> = events
                     .iter()
@@ -116,6 +120,7 @@ pub fn exploration_tools(
     // Tool 2: get_block_feedback - Get block feedback if available
     {
         let store = Arc::clone(&eventlog_store);
+        let uid = user_id.clone();
         let block_start = block.start_time;
         let block_end = if block.end_time > 0 {
             block.end_time
@@ -132,6 +137,7 @@ pub fn exploration_tools(
         };
         let fn_impl: ToolFn = Box::new(move |_input: Value| {
             let store = Arc::clone(&store);
+            let uid = uid.clone();
             let start = block_start;
             let end = block_end;
             Box::pin(async move {
@@ -142,8 +148,9 @@ pub fn exploration_tools(
                     limit: Some(1),
                     ..Default::default()
                 };
+                let opt_uid = if uid.is_empty() { None } else { Some(uid.as_str()) };
                 let events = store
-                    .list_events_filtered(None, &filter)
+                    .list_events_filtered(opt_uid, &filter)
                     .unwrap_or_default();
                 match events.first() {
                     Some(e) => Ok(json!({
@@ -178,6 +185,7 @@ pub fn submit_timeblock_summary_tool(
     kind: SummaryKind,
     eventlog_store: Arc<EventLogStore>,
     source: Arc<AgentSourceMetadata>,
+    user_id: String,
 ) -> (ToolDef, ToolFn) {
     let def = ToolDef {
         name: SUBMIT_TIMEBLOCK_SUMMARY_TOOL.to_string(),
@@ -251,12 +259,14 @@ pub fn submit_timeblock_summary_tool(
     let expected_block_id = block.start_id.clone();
     let expected_kind = kind.clone();
     let source_meta = Arc::clone(&source);
+    let captured_user_id = user_id.clone();
 
     let tool_fn: ToolFn = Box::new(move |input: Value| {
         let block_id_expected = expected_block_id.clone();
         let kind_expected = expected_kind.clone();
         let store = Arc::clone(&eventlog_store);
         let src = Arc::clone(&source_meta);
+        let uid = captured_user_id.clone();
         Box::pin(async move {
             // Validate blockId
             let block_id = input
@@ -406,7 +416,8 @@ pub fn submit_timeblock_summary_tool(
                 })),
             };
 
-            match store.append_event(None, event.clone()) {
+            let opt_uid = if uid.is_empty() { None } else { Some(uid.as_str()) };
+            match store.append_event(opt_uid, event.clone()) {
                 Ok(_) => Ok(format!("已写入 agent_feedback 事件，event_id={}", event.id)),
                 Err(e) => Err(ToolError::ExecutionFailed(format!(
                     "failed to write eventlog: {e}"

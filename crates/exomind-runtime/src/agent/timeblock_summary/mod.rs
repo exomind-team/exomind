@@ -134,6 +134,7 @@ fn has_existing_summary(
     eventlog_store: &EventLogStore,
     block: &TimeBlockData,
     summary_kind: &SummaryKind,
+    user_id: &str,
 ) -> bool {
     let now = chrono::Utc::now().timestamp_millis() as i64;
     let block_tags =
@@ -146,7 +147,7 @@ fn has_existing_summary(
         ..Default::default()
     };
     eventlog_store
-        .list_events_filtered(None, &filter)
+        .list_events_filtered(if user_id.is_empty() { None } else { Some(user_id) }, &filter)
         .map(|events| !events.is_empty())
         .unwrap_or(false)
 }
@@ -372,6 +373,12 @@ impl TimeblockSummaryAgentService {
             }
         };
 
+        // Extract user_id (profile) from signal scopeKey, fallback to active scope
+        let user_id = extract_scope_key(event)
+            .or_else(|| get_active_scope(&self.config_store))
+            .unwrap_or_default();
+        let user_id_ref = user_id.as_str();
+
         let summary_kind = SummaryKind::End;
         let block_type = block.block_type.as_deref().unwrap_or("active");
 
@@ -391,6 +398,7 @@ impl TimeblockSummaryAgentService {
                     block_id = %block.start_id,
                     name = %block.name,
                     age_secs = gap_age_secs,
+                    user_id = %user_id_ref,
                     "timeblock_summary: gap block completed, storing as context for next active block"
                 );
                 *self.last_completed_gap.write().unwrap() = Some(block);
@@ -405,14 +413,15 @@ impl TimeblockSummaryAgentService {
         }
 
         // Idempotency check: query eventlog for any summary in this time block
-        if has_existing_summary(&self.eventlog_store, &block, &summary_kind) {
+        if has_existing_summary(&self.eventlog_store, &block, &summary_kind, user_id_ref) {
             tracing::debug!(
                 block_id = %block.start_id,
+                user_id = %user_id_ref,
                 "timeblock_summary: already has summary, skipping"
             );
             return;
         }
-        tracing::info!(block_id = %block.start_id, name = %block.name, "timeblock_summary: processing completed active block");
+        tracing::info!(block_id = %block.start_id, name = %block.name, user_id = %user_id_ref, "timeblock_summary: processing completed active block");
 
         // Energy replenishment: calculate from events in this time block
         let events_filter = crate::eventlog::EventListFilter {
@@ -423,7 +432,7 @@ impl TimeblockSummaryAgentService {
         };
         if let Ok(events) = self
             .eventlog_store
-            .list_events_filtered(None, &events_filter)
+            .list_events_filtered(if user_id_ref.is_empty() { None } else { Some(user_id_ref) }, &events_filter)
         {
             let energy_gain = calculate_event_energy_gain(&events);
             if energy_gain > 0 {
@@ -442,7 +451,7 @@ impl TimeblockSummaryAgentService {
             }
         }
 
-        if let Err(e) = self.run_summary_loop(block, SummaryKind::End, None).await {
+        if let Err(e) = self.run_summary_loop(block, SummaryKind::End, None, user_id_ref).await {
             tracing::error!("timeblock_summary: summary loop failed: {e}");
         }
     }
@@ -455,6 +464,12 @@ impl TimeblockSummaryAgentService {
                 return;
             }
         };
+
+        // Extract user_id (profile) from signal scopeKey, fallback to active scope
+        let user_id = extract_scope_key(event)
+            .or_else(|| get_active_scope(&self.config_store))
+            .unwrap_or_default();
+        let user_id_ref = user_id.as_str();
 
         // Only process "active" blocks, skip "gap"
         let block_type = block.block_type.as_deref().unwrap_or("active");
@@ -519,7 +534,7 @@ impl TimeblockSummaryAgentService {
             limit: Some(1),
             ..Default::default()
         };
-        if let Ok(events) = self.eventlog_store.list_events_filtered(None, &filter) {
+        if let Ok(events) = self.eventlog_store.list_events_filtered(if user_id_ref.is_empty() { None } else { Some(user_id_ref) }, &filter) {
             if !events.is_empty() {
                 tracing::info!(
                     block_id = %block.start_id,
@@ -567,7 +582,7 @@ impl TimeblockSummaryAgentService {
         );
 
         if let Err(e) = self
-            .run_summary_loop(block, summary_kind, gap_context)
+            .run_summary_loop(block, summary_kind, gap_context, user_id_ref)
             .await
         {
             tracing::error!("timeblock_summary: summary loop failed: {e}");
@@ -588,6 +603,12 @@ impl TimeblockSummaryAgentService {
             }
         };
 
+        // Extract user_id (profile) from signal scopeKey, fallback to active scope
+        let user_id = extract_scope_key(event)
+            .or_else(|| get_active_scope(&self.config_store))
+            .unwrap_or_default();
+        let user_id_ref = user_id.as_str();
+
         // Extract feedback content for energy calculation
         let feedback_content = event
             .payload
@@ -604,14 +625,15 @@ impl TimeblockSummaryAgentService {
             .unwrap_or("");
 
         // 📌【2026-06-06 06:51:42】人写：如果已有「时间块停止」那就不需要独立的「时间块结束」
-        let has_stopped = has_existing_summary(&self.eventlog_store, &block, &SummaryKind::Stop);
+        let has_stopped = has_existing_summary(&self.eventlog_store, &block, &SummaryKind::Stop, user_id_ref);
 
         // Idempotency check: query eventlog for any summary in this time block
-        if has_existing_summary(&self.eventlog_store, &block, &SummaryKind::FeedbackReview)
-            || has_existing_summary(&self.eventlog_store, &block, &SummaryKind::End)
+        if has_existing_summary(&self.eventlog_store, &block, &SummaryKind::FeedbackReview, user_id_ref)
+            || has_existing_summary(&self.eventlog_store, &block, &SummaryKind::End, user_id_ref)
         {
             tracing::debug!(
                 block_id = %block.start_id,
+                user_id = %user_id_ref,
                 "timeblock_summary: already has summary, skipping"
             );
             return;
@@ -644,7 +666,7 @@ impl TimeblockSummaryAgentService {
         }
 
         // Run the summary loop with the determined kind
-        if let Err(e) = self.run_summary_loop(block, summary_kind, None).await {
+        if let Err(e) = self.run_summary_loop(block, summary_kind, None, user_id_ref).await {
             tracing::error!("timeblock_summary: block_feedback summary failed: {e}");
         }
     }
@@ -654,6 +676,7 @@ impl TimeblockSummaryAgentService {
         block: TimeBlockData,
         kind: SummaryKind,
         gap_context: Option<TimeBlockData>,
+        user_id: &str,
     ) -> Result<(), String> {
         // 1. Auto-collect context
 
@@ -678,7 +701,7 @@ impl TimeblockSummaryAgentService {
             .as_ref()
             .map(|s| s.max)
             .unwrap_or(ENERGY_MAX);
-        let ctx = collect_context(&self.eventlog_store, &block, energy_current, energy_max).await;
+        let ctx = collect_context(&self.eventlog_store, &block, energy_current, energy_max, user_id).await;
 
         // 2. Load provider profile
         let provider = match crate::agent::session::resolve_provider_profile_from_runtime(
@@ -688,8 +711,9 @@ impl TimeblockSummaryAgentService {
             Err(e) => {
                 tracing::warn!("timeblock_summary: cannot resolve provider profile: {e}");
                 // Write error to eventlog
+                let opt_uid = if user_id.is_empty() { None } else { Some(user_id) };
                 let _ = self.eventlog_store.append_event(
-                    None,
+                    opt_uid,
                     EventRecord {
                         id: uuid::Uuid::new_v4().to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis(),
@@ -727,13 +751,14 @@ impl TimeblockSummaryAgentService {
             kind.clone(),
             Arc::clone(&self.eventlog_store),
             Arc::clone(&source_meta),
+            user_id.to_string(),
         );
         let mut tool_registry = ToolRegistry::new();
         tool_registry.register(tool_def, tool_fn);
 
         // Register exploration tools
         for (explorer_def, explorer_fn) in
-            tools::exploration_tools(block.clone(), Arc::clone(&self.eventlog_store))
+            tools::exploration_tools(block.clone(), Arc::clone(&self.eventlog_store), user_id.to_string())
         {
             tool_registry.register(explorer_def, explorer_fn);
         }
@@ -886,6 +911,7 @@ impl TimeblockSummaryAgentService {
                     &last_assistant_message,
                     &tool_call_history,
                     &source_meta,
+                    user_id,
                 )
                 .await;
                 break;
@@ -1070,6 +1096,7 @@ impl TimeblockSummaryAgentService {
                         total_rounds,
                         &e.to_string(),
                         &source_meta,
+                        user_id,
                     ).await;
                     break;
                 }
@@ -1297,6 +1324,7 @@ impl TimeblockSummaryAgentService {
         last_message: &str,
         tool_call_history: &[String],
         source_meta: &AgentSourceMetadata,
+        user_id: &str,
     ) {
         fn truncate(s: &str, max_chars: usize) -> String {
             if s.len() <= max_chars {
@@ -1331,8 +1359,9 @@ impl TimeblockSummaryAgentService {
             truncate(last_message, 100),
         );
 
+        let opt_uid = if user_id.is_empty() { None } else { Some(user_id) };
         let _ = self.eventlog_store.append_event(
-            None,
+            opt_uid,
             EventRecord {
                 id: uuid::Uuid::new_v4().to_string(),
                 timestamp: chrono::Utc::now().timestamp_millis(),
@@ -1362,6 +1391,7 @@ impl TimeblockSummaryAgentService {
         total_rounds: usize,
         error: &str,
         source_meta: &AgentSourceMetadata,
+        user_id: &str,
     ) {
         let content = format!(
             "## ⚠️ 时间块总结 Agent Broker 错误\n\n\
@@ -1373,8 +1403,9 @@ impl TimeblockSummaryAgentService {
             error,
         );
 
+        let opt_uid = if user_id.is_empty() { None } else { Some(user_id) };
         let _ = self.eventlog_store.append_event(
-            None,
+            opt_uid,
             EventRecord {
                 id: uuid::Uuid::new_v4().to_string(),
                 timestamp: chrono::Utc::now().timestamp_millis(),
@@ -1752,6 +1783,27 @@ fn signal_matches_active_scope(config_store: &ConfigStore, event: &SignalEvent) 
         (Some(active), Some(signal)) => active == signal,
         _ => true, // No active scope configured or no scopeKey in signal — allow
     }
+}
+
+/// Extract scopeKey (user_id / profile) from a signal event payload.
+fn extract_scope_key(event: &SignalEvent) -> Option<String> {
+    event
+        .payload
+        .get("scopeKey")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Get the active scope from config store.
+fn get_active_scope(config_store: &ConfigStore) -> Option<String> {
+    config_store
+        .get("user", CONFIG_KEY_ACTIVE_SCOPE)
+        .ok()
+        .flatten()
+        .map(|e| e.value.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 // ── Config default initialization ──

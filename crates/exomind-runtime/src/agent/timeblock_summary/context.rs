@@ -30,6 +30,7 @@ pub struct CollectedContext {
     pub recent_completed: Option<EventRecord>,
     pub energy_current: u64,
     pub energy_max: u64,
+    pub user_id: String,
 }
 
 impl CollectedContext {
@@ -39,7 +40,7 @@ impl CollectedContext {
 
         // Block info — blockId is critical for submit_timeblock_summary tool
         sections.push(format!(
-            "### 时间块信息\n- **blockId（必须使用此值）：{}**\n- 名称：{}\n- 开始时间：{}\n- 结束时间：{}\n- 类型：{}\n- 关联任务：{}",
+            "### 时间块信息\n- **blockId（必须使用此值）：{}**\n- 名称：{}\n- 开始时间：{}\n- 结束时间：{}\n- 类型：{}\n- 关联任务：{}\n- **当前档案（user_id）：{}**",
             self.block.start_id,
             self.block.name,
             format_timestamp(self.block.start_time),
@@ -50,6 +51,7 @@ impl CollectedContext {
             } else {
                 self.block.task_ids.join(", ")
             },
+            self.user_id,
         ));
 
         // Events in this timeblock
@@ -114,11 +116,13 @@ pub async fn collect_context(
     block: &TimeBlockData,
     energy_current: u64,
     energy_max: u64,
+    user_id: &str,
 ) -> CollectedContext {
     // 1. Events in this timeblock range
+    let uid = if user_id.is_empty() { None } else { Some(user_id) };
     let events = eventlog_store
         .list_events_filtered(
-            None,
+            uid,
             &EventListFilter {
                 since_timestamp: Some(block.start_time as i64),
                 until_timestamp: Some(block.end_time as i64),
@@ -131,7 +135,7 @@ pub async fn collect_context(
     // 2. block_feedback (if any)
     let block_feedback = eventlog_store
         .list_events_filtered(
-            None,
+            uid,
             &EventListFilter {
                 tags: vec!["block_feedback".to_string()],
                 since_timestamp: Some(block.start_time as i64),
@@ -146,7 +150,7 @@ pub async fn collect_context(
     // 3. Recent completed block (before this one)
     let recent_completed = eventlog_store
         .list_events_filtered(
-            None,
+            uid,
             &EventListFilter {
                 tags: vec!["block_feedback".to_string()],
                 until_timestamp: Some(block.start_time as i64 - 1),
@@ -171,7 +175,7 @@ pub async fn collect_context(
         ..Default::default()
     };
     let feedback_events = eventlog_store
-        .list_events_filtered(None, &feedback_filter)
+        .list_events_filtered(uid, &feedback_filter)
         .unwrap_or_default();
 
     CollectedContext {
@@ -181,5 +185,6 @@ pub async fn collect_context(
         recent_completed,
         energy_current,
         energy_max,
+        user_id: user_id.to_string(),
     }
 }
