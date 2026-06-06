@@ -1,4 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { emit, listen } from '@tauri-apps/api/event';
+import { useSyncStore } from '@/ui/stores/sync-store';
 import {
   getNowWorkbenchOverlayEnabled,
   getNowWorkbenchOverlayPosition,
@@ -22,6 +24,7 @@ class NowWorkbenchOverlayServiceImpl implements NowWorkbenchOverlayService {
   private enabled = getNowWorkbenchOverlayEnabled();
   private sessionHidden = false;
   private unlistenEnabled: (() => void) | null = null;
+  private unlistenOverlayRequest: (() => void) | null = null;
 
   async init(): Promise<void> {
     if (this.initialized || !isTauri()) {
@@ -30,6 +33,13 @@ class NowWorkbenchOverlayServiceImpl implements NowWorkbenchOverlayService {
 
     this.initialized = true;
     await invoke('now_workbench_overlay_ensure');
+
+    // 向 overlay 发送当前档案，确保与主窗口一致
+    const syncState = useSyncStore.getState();
+    const profileId = syncState.activeProfileId;
+    if (profileId) {
+      await emit('main-window-profile-sync', { profileId }).catch(() => {});
+    }
 
     const savedPosition = getNowWorkbenchOverlayPosition();
     if (savedPosition) {
@@ -45,6 +55,15 @@ class NowWorkbenchOverlayServiceImpl implements NowWorkbenchOverlayService {
         this.sessionHidden = false;
       }
       void this.syncVisibility();
+    });
+
+    // 监听 overlay 的档案请求，立即响应当前档案
+    this.unlistenOverlayRequest = listen("overlay-request-profile", () => {
+      const syncState = useSyncStore.getState();
+      const profileId = syncState.activeProfileId;
+      if (profileId) {
+        void emit("main-window-profile-sync", { profileId }).catch(() => {});
+      }
     });
 
     await this.syncVisibility();

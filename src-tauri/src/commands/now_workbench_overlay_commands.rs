@@ -1,7 +1,7 @@
 use tauri::AppHandle;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::dev_instance_paths::resolve_overlay_webview_data_dir;
+use crate::dev_instance_paths::resolve_main_webview_data_dir;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::{Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
@@ -42,8 +42,13 @@ pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
 
-    // 不设置独立 data_directory，让 overlay 共享主窗口的 localStorage，
-    // 确保 profile session 等状态一致。
+    // 使用主窗口的数据目录，确保 overlay 共享主窗口的 localStorage（profile session 等）。
+    let builder = if let Some(data_dir) = resolve_main_webview_data_dir() {
+        builder.data_directory(data_dir)
+    } else {
+        builder
+    };
+
     let window = builder.build().map_err(|error| error.to_string())?;
     position_now_workbench_overlay_default(app, &window)
 }

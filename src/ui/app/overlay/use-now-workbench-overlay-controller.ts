@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getCurrentUserId,
   getEventStorage,
   type Event as StoredEvent,
 } from "@/lib/storage/event-storage";
+import { setProfileSession } from "@/lib/profile/profile-storage";
+
 import {
   getEventLogService,
   getTaskService,
@@ -129,9 +132,10 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   const [taskStatusChoices, setTaskStatusChoices] = useState<
     Record<string, TaskStatusChoice>
   >({});
+  const [profileReady, setProfileReady] = useState(false);
   const [debugInfo, setDebugInfo] = useState<NowWorkbenchOverlayDebugInfo>(
     () => ({
-      userId: getCurrentUserId(),
+      userId: (() => { try { return getCurrentUserId(); } catch { return ''; } })(),
       mode: EMPTY_MODEL.mode,
       taskCount: 0,
       eventCount: 0,
@@ -206,13 +210,33 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   }, [timeBlockService]);
 
   const reloadAll = useCallback(async () => {
+    if (!profileReady) return; // 等 profile 到达后再加载
     await Promise.all([loadActiveBlock(), loadTasks(), loadEvents()]);
-  }, [loadActiveBlock, loadTasks, loadEvents]);
+  }, [profileReady, loadActiveBlock, loadTasks, loadEvents]);
 
   useEffect(() => {
     let disposed = false;
 
-    void reloadAll();
+    // 监听主窗口发来的档案同步事件（唯一可靠的档案来源）
+    const unlistenProfile = listen<{ profileId: string }>(
+      "main-window-profile-sync",
+      (event) => {
+        if (disposed) return;
+        const { profileId } = event.payload;
+        if (profileId) {
+          setProfileSession({
+            version: 1,
+            activeProfileId: profileId,
+            unlockedProfileIds: [profileId],
+          });
+          setProfileReady(true);
+          void reloadAll();
+        }
+      },
+    );
+
+    // listener 设置完毕后，主动向主窗口请求档案
+    void emit("overlay-request-profile").catch(() => {});
 
     const unsubscribeBlock = timeBlockService.onBlockChange((block) => {
       if (disposed) return;
@@ -224,6 +248,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
 
     return () => {
       disposed = true;
+      unlistenProfile.then((fn) => fn());
       unsubscribeBlock();
     };
   }, [loadTasks, reloadAll, timeBlockService]);
@@ -307,7 +332,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
 
   useEffect(() => {
     updateDebugInfo({
-      userId: getCurrentUserId(),
+      userId: (() => { try { return getCurrentUserId(); } catch { return ''; } })(),
       mode: model.mode,
       taskCount: model.visibleTasks.length,
       eventCount: model.recentEvents.length,
