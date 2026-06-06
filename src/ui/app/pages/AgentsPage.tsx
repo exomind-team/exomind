@@ -6387,9 +6387,21 @@ export function AgentsPage() {
     }
 
     const snapshotAgents = snapshot.hosts.flatMap((item) => item.agents);
-    const configuredHosts = sortRouteHostsByPriority(snapshot.hosts).map(
+    const snapshotHosts = sortRouteHostsByPriority(snapshot.hosts).map(
       (item) => item.host,
     );
+
+    // 优先使用从 IPC / getStatus() 获取的正确端口构造 host，
+    // 避免 snapshot 中缓存的旧端口导致请求失败。
+    const ipcTarget = getSelectedRuntimeTarget();
+    const ipcHost = createDirectRuntimeHost(
+      resolveLocalServiceHost(ipcTarget.host),
+      ipcTarget.port,
+    );
+    const configuredHosts = [ipcHost, ...snapshotHosts.filter(
+      (h) => !(h.host === ipcHost.host && h.port === ipcHost.port),
+    )];
+
     for (const host of configuredHosts) {
       const result = await tryLoadRoutesFromHost(host);
       if (!result) continue;

@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { updateEmbeddedPortFromTransport } from '@/config/runtime-target';
 import { isTauri } from '@tauri-apps/api/core';
 import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import { toProposal } from '@/lib/adapters/proposal-rt-payload';
@@ -147,6 +148,8 @@ export function useSignalStream(): void {
                 port: status.port,
                 hostId: status.hostId,
               });
+              // 同步更新 IPC 端口缓存，确保后续 resolveEmbeddedPort() 返回正确端口
+              updateEmbeddedPortFromTransport(status.port);
               if (!cancelled) {
                 setRuntimeTargetHydrated(true);
               }

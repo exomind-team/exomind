@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import {
   persistEmbeddedRuntimeStatus,
   toRuntimeBaseUrl,
+  updateEmbeddedPortFromTransport,
 } from '@/config/runtime-target';
 import type { RuntimeServiceStatus } from '@/lib/types/agent-hub-runtime';
 import type {
@@ -250,6 +251,8 @@ async function resolveRuntimeTransport(): Promise<RuntimeConfigTransport | null>
         port: status.port,
         hostId: status.hostId,
       });
+      // 同步更新 IPC 端口缓存，确保 resolveEmbeddedPort() 返回正确端口
+      updateEmbeddedPortFromTransport(status.port);
       return {
         baseUrl: toRuntimeBaseUrl({ host: status.host, port: status.port }),
       };

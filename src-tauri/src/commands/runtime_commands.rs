@@ -466,6 +466,10 @@ fn should_restart_running_runtime(
     current_host != requested_host || (requested_port != 0 && current_port != requested_port)
 }
 
+fn host_changed(current_host: &str, requested_host: &str) -> bool {
+    current_host != requested_host
+}
+
 fn should_fallback_to_random_port(
     requested_port: u16,
     healthy_runtime_on_requested_port: bool,
@@ -779,14 +783,15 @@ pub async fn ensure_runtime_started(
     let mut should_restart_embedded_runtime = false;
 
     // Fast path: already running（快速路径：已在运行）
-    {
+    // 先在锁内提取 running snapshot，释放锁后再做 async 健康检查。
+    let running_snapshot = {
         let mut inner = lock_or_error(&state)?;
-        let running_snapshot = inner
+        let snapshot = inner
             .handle
             .as_ref()
             .and_then(|handle| handle.is_running().then(|| (handle.host(), handle.port())));
-        if let Some((host, port)) = running_snapshot {
-            inner.host = host;
+        if let Some((ref host, port)) = snapshot {
+            inner.host = host.clone();
             inner.port = port;
             inner.host_id = inner
                 .handle
@@ -795,16 +800,28 @@ pub async fn ensure_runtime_started(
             inner.auth_secret = requested_auth_secret.clone();
             inner.last_error = None;
             inner.external_runtime = false;
-            if !should_restart_running_runtime(
-                &inner.host,
-                inner.port,
-                &requested_host,
-                requested_port,
-            ) {
-                return Ok(compose_status(&inner, true, None));
-            }
-            should_restart_embedded_runtime = true;
         }
+        snapshot
+    };
+    if let Some((ref host, port)) = running_snapshot {
+        // 如果 runtime 正在运行，先检查它是否健康。
+        // 健康则直接复用，不再因为端口不匹配而重启。
+        // 只有不健康或 host 真正变化时才重启。
+        let is_healthy = probe_runtime_health(host, port).await;
+        let host_mismatch = host_changed(host, &requested_host);
+        log::info!(
+            "ensure_runtime_started: fast path — running at {}:{}, healthy={}, host_mismatch={}, requested={}:{}",
+            host, port, is_healthy, host_mismatch, requested_host, requested_port,
+        );
+        if is_healthy && !host_mismatch {
+            let inner = lock_or_error(&state)?;
+            return Ok(compose_status(&inner, true, None));
+        }
+        log::warn!(
+            "ensure_runtime_started: deciding to restart — healthy={}, host_mismatch={}",
+            is_healthy, host_mismatch,
+        );
+        should_restart_embedded_runtime = true;
     }
 
     if should_restart_embedded_runtime {
@@ -840,6 +857,12 @@ pub async fn ensure_runtime_started(
                 requested_host
             );
             options.port = 0;
+        } else {
+            log::info!(
+                "ensure_runtime_started: requested port {} on {} is available, will bind directly",
+                requested_port,
+                requested_host,
+            );
         }
     }
 
@@ -894,6 +917,10 @@ pub async fn ensure_runtime_started(
     };
     let started_host = handle.host();
     let started_port = handle.port();
+    log::info!(
+        "ensure_runtime_started: runtime started on {}:{} (requested was {}:{})",
+        started_host, started_port, requested_host, requested_port,
+    );
 
     if requested_port == 0 {
         log::info!(

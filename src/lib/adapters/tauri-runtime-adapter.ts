@@ -9,6 +9,7 @@ import type { RuntimeServiceStatus } from '@/lib/types/agent-hub';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   persistEmbeddedRuntimeStatus,
+  updateEmbeddedPortFromTransport,
 } from '@/config/runtime-target';
 
 const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
@@ -25,6 +26,7 @@ function rememberEmbeddedRuntimeStatus(status: RuntimeServiceStatus): RuntimeSer
       port: status.port,
       hostId: status.hostId,
     });
+    updateEmbeddedPortFromTransport(status.port);
   }
   return status;
 }
