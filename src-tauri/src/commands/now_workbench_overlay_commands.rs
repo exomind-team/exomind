@@ -42,13 +42,8 @@ pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
 
-    // 使用主窗口的数据目录，确保 overlay 共享主窗口的 localStorage（profile session 等）。
-    let builder = if let Some(data_dir) = resolve_main_webview_data_dir() {
-        builder.data_directory(data_dir)
-    } else {
-        builder
-    };
-
+    // overlay 不使用独立 data_directory，也不共享主窗口的 localStorage。
+    // overlay 只能通过 Tauri IPC/event 从主窗口获取数据。
     let window = builder.build().map_err(|error| error.to_string())?;
     position_now_workbench_overlay_default(app, &window)
 }
