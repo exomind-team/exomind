@@ -142,6 +142,7 @@ exomind/
 > 文档以中文为主，部分内容提供英文版本。
 
 - [文档索引](docs/README.md) — 全部文档导航
+- [开发日志](https://exomind-team.github.io/exomind-devlog/)（中文 · AI 生成 · 实验性）
 - [架构概览](docs/architecture/overview.md) — 系统架构设计
 - [产品需求](docs/product/PRD.md) — 产品需求文档
 - [产品路线图](docs/product/roadmap.md) — 版本规划

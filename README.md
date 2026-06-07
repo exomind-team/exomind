@@ -152,6 +152,7 @@ ExoMind is part of a larger ecosystem of open-source projects:
 > Documentation is primarily written in Chinese. English translations are provided where available.
 
 - [Docs index](docs/README.md)
+- [Development log](https://exomind-team.github.io/exomind-devlog/) (Chinese · AI-generated · experimental)
 - [Architecture overview](docs/architecture/overview.md)
 - [Product requirements](docs/product/PRD.md)
 - [Product roadmap](docs/product/roadmap.md)
