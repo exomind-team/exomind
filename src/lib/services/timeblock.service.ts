@@ -1033,7 +1033,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         });
       }
 
-      // #759: 创建 gap 块代替 notifyChange(null)
+      // #759: 持久化 gap 块截断空档；UI 订阅仍暴露为无活跃块。
       const gapStartId = createUuidV4();
       const gapBlock: ActiveBlockData = this.normalizeActiveBlock(
         {
@@ -1061,7 +1061,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       );
       await this.saveActiveBlock(gapBlock);
       this.rememberAcceptedBlock(gapBlock);
-      this.notifyChange(gapBlock);
+      this.notifyChange(null);
       trace.step("save-gap-and-notify", {
         gapStartId: gapBlock.startId,
       });
@@ -1102,6 +1102,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   async applyReplicatedActiveBlock(block: ActiveBlockData): Promise<void> {
     const normalized = this.normalizeActiveBlock(block);
     if (this.backendMode === "rt-sqlite") {
+      const decision = this.decidePreferredBlock(
+        this.lastAcceptedBlock,
+        normalized,
+      );
+      const preferred = decision.preferred;
+      if (!this.isSameBlock(preferred, normalized)) {
+        this.rememberAcceptedBlock(preferred);
+        this.logRejectedSyncPacket(normalized, preferred, decision);
+        return;
+      }
+
       this.rememberAcceptedBlock(normalized);
       if (this.isCompletedBlock(normalized)) {
         this.notifyChange(null);
@@ -1219,19 +1230,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   notifyChange(block: ActiveBlockData | null): void {
-    console.log(
-      "[TB-SVC] notifyChange",
-      block
-        ? {
-            startId: block.startId,
-            phase: block.phase,
-            paused: block.paused,
-            feedbackSubmittedAt: block.feedbackSubmittedAt,
-          }
-        : "NULL",
-      new Error().stack?.split("\n").slice(1, 4).join(" <- "),
-    );
-    this.listeners.forEach((cb) => cb(block));
+    const visibleBlock =
+      block && !this.isCompletedBlock(block) ? block : null;
+    this.listeners.forEach((cb) => cb(visibleBlock));
   }
 
   /**
@@ -1356,6 +1357,13 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         }
 
         if (!block) {
+          const preferred = this.getPreferredAcceptedActiveBlock();
+          if (preferred) {
+            void this.persistCanonicalWriteBack(preferred, {
+              trigger: "reject_null_sync",
+            });
+            return;
+          }
           this.notifyChange(null);
           return;
         }
@@ -2066,6 +2074,16 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       this.lastAcceptedBlock,
       block,
     );
+  }
+
+  private getPreferredAcceptedActiveBlock(): ActiveBlockData | null {
+    if (
+      !this.lastAcceptedBlock ||
+      this.isCompletedBlock(this.lastAcceptedBlock)
+    ) {
+      return null;
+    }
+    return this.lastAcceptedBlock;
   }
 
   private formatDuration(ms: number): string {

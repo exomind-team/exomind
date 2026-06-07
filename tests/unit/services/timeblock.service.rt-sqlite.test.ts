@@ -314,6 +314,68 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     expect(rtAdapter.rtPatchActiveBlockTasks).not.toHaveBeenCalled();
   });
 
+  it('rejects stale RT replicated active snapshot after local completed baseline', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter();
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+    const listener = vi.fn();
+    service.onBlockChange(listener);
+
+    const completedSnapshot: ActiveBlockData = {
+      startId: 'synced-block-1',
+      name: 'Already submitted',
+      mode: 'countdown',
+      targetMinutes: 25,
+      elapsed: 0,
+      paused: false,
+      startTime: 1_700_000_000_000,
+      blockType: 'active',
+      phase: 'feedback_submitted',
+      version: 3,
+      lastTransitionAt: 1_700_000_030_000,
+      actionEndedAt: 1_700_000_020_000,
+      feedbackStartedAt: 1_700_000_020_000,
+      feedbackSubmittedAt: 1_700_000_030_000,
+      taskIds: [],
+      taskAssociationLog: [],
+      transitions: [
+        { type: 'start', at: 1_700_000_000_000, actorId: 'local' },
+        { type: 'feedback_start', at: 1_700_000_020_000, actorId: 'local' },
+        { type: 'end', at: 1_700_000_030_000, actorId: 'local' },
+      ],
+    };
+    const staleRunningSnapshot: ActiveBlockData = {
+      startId: 'synced-block-1',
+      name: 'Stale running',
+      mode: 'countdown',
+      targetMinutes: 25,
+      elapsed: 1_500_000,
+      paused: false,
+      startTime: 1_700_000_000_000,
+      blockType: 'active',
+      phase: 'running',
+      version: 1,
+      lastTransitionAt: 1_700_000_000_000,
+      lastResumedAt: 1_700_000_000_000,
+      taskIds: [],
+      taskAssociationLog: [],
+      transitions: [
+        { type: 'start', at: 1_700_000_000_000, actorId: 'remote' },
+      ],
+    };
+
+    await service.applyReplicatedActiveBlock(completedSnapshot);
+    expect(listener).toHaveBeenLastCalledWith(null);
+    listener.mockClear();
+
+    await service.applyReplicatedActiveBlock(staleRunningSnapshot);
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it('allows starting a new block when current RT active block is transition-completed', async () => {
     const env = createMemoryEnv();
     const rtAdapter = createRtAdapter({
